@@ -353,6 +353,28 @@ namespace
             << "the swallowed event error was left in HIP's last-error state";
     }
 
+    // The other half of not leaving an error behind: an error the caller
+    // already had, and has not read yet, is the caller's. Swallowing a failed
+    // record must not clear it along with the record's own.
+    TEST_F(HipSolutionAdapterEventTest_multi_gpu, BestEffortEventsLeaveTheCallersErrorInPlace)
+    {
+        TensileLite::hip::SolutionAdapter adapter;
+
+        ASSERT_NE(hipSetDevice(m_devices), hipSuccess) << "an out-of-range device was accepted";
+        ASSERT_NE(hipPeekAtLastError(), hipSuccess) << "the caller's error did not stick";
+
+        EXPECT_EQ(adapter.launchKernels(kernels(),
+                                        m_streamOnDeviceOne,
+                                        m_onDeviceZero,
+                                        m_onDeviceZero,
+                                        /*isKernelLoaded=*/false,
+                                        /*bestEffortEvents=*/true),
+                  hipSuccess);
+
+        EXPECT_NE(hipGetLastError(), hipSuccess)
+            << "a swallowed event error cleared an error the caller had not read";
+    }
+
     // A swallowed start record must not leave a recorded stop behind it.
     //
     // Online tuning reads a pair back on a later visit and keeps it only if the

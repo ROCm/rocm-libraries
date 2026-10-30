@@ -124,6 +124,7 @@ namespace rocblaslt
                 retireEvents(pending.m_start, pending.m_stop, pending.m_device);
 
         m_problems.clear();
+        m_holders.clear();
         m_capReported.clear();
         m_resolutionPool.clear();
         m_winnerPool.clear();
@@ -520,11 +521,13 @@ namespace rocblaslt
      *
      * Called only from acquireEvents(), and only when the device is at the cap
      * with nothing pooled, so below the cap it costs nothing. A pass walks
-     * every problem the tuner holds, resolved ones included, and its cost is
-     * spread over the pairs it hands back: a pass that pools many pairs is
-     * followed by as many acquisitions that need no pass. It repeats on every
-     * acquisition only while all of the device's pairs are in flight, which
-     * takes a host running a long way ahead of its GPU.
+     * m_holders rather than every problem the tuner has seen, and drops the
+     * problems it finds holding nothing, so what it walks is bounded by the
+     * live pairs plus the problems handed a pair since the previous pass. Its
+     * cost is spread over the pairs it hands back: a pass that pools many
+     * pairs is followed by as many acquisitions that need no pass. It repeats
+     * on every acquisition only while all of the device's pairs are in flight,
+     * which takes a host running a long way ahead of its GPU.
      *
      * Each sample a pass reads back is credited to the problem that took it,
      * exactly as that problem's own harvest would have done: the sample is
@@ -549,9 +552,26 @@ namespace rocblaslt
      */
     void OnlineTuner::reclaimFinishedPairs(int device, size_t requester)
     {
-        for(auto& [key, state] : m_problems)
+        size_t listed = 0;
+
+        for(size_t h = 0; h < m_holders.size(); ++h)
         {
-            if(key == requester || state.m_pending.empty())
+            const size_t key   = m_holders[h];
+            const auto   found = m_problems.find(key);
+            if(found == m_problems.end())
+                continue;
+
+            ProblemState& state = found->second;
+
+            if(state.m_pending.empty())
+            {
+                state.m_listed = false;
+                continue;
+            }
+
+            m_holders[listed++] = key;
+
+            if(key == requester)
                 continue;
 
             size_t kept = 0;
@@ -582,7 +602,15 @@ namespace rocblaslt
             }
 
             state.m_pending.resize(kept);
+
+            if(kept == 0)
+            {
+                state.m_listed = false;
+                --listed;
+            }
         }
+
+        m_holders.resize(listed);
     }
 
     bool OnlineTuner::beginMeasurementImpl(size_t      problemKey,
@@ -672,6 +700,12 @@ namespace rocblaslt
 
         state.m_pending.push_back({start, stop, candidate, device});
         ++state.m_issued[candidate];
+
+        if(!state.m_listed)
+        {
+            state.m_listed = true;
+            m_holders.push_back(problemKey);
+        }
 
         return true;
     }

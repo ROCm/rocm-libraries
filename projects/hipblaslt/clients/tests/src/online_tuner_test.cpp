@@ -103,6 +103,12 @@ struct OnlineTunerTestAccess
         const auto found = tuner.m_livePairs.find(device);
         return found == tuner.m_livePairs.end() ? 0 : found->second;
     }
+
+    // The problems a reclaim pass would walk.
+    static std::vector<size_t> holders(const OnlineTuner& tuner)
+    {
+        return tuner.m_holders;
+    }
 };
 
 namespace
@@ -1392,6 +1398,54 @@ namespace
         EXPECT_GT(resolved->winnerTimeUs(), 0.0f) << "a winner with no measured time";
     }
 
+    // An offer names one registration of a problem, not just its key. A
+    // thread still holding an offer made before reloadForTest() must not be
+    // able to claim it against the candidate list the same key registers
+    // afterwards, even where the candidate it names is the same.
+    TEST(OnlineTuner, AnOfferFromAnEarlierRegistrationOfTheKeyIsNotClaimed)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        const Device device(0);
+
+        constexpr size_t       key     = 0x1027A;
+        const size_t           problem = identityOf(key);
+        const std::vector<int> ranked{241, 242, 243};
+
+        Worker stale;
+        stale.run([&] {
+            ASSERT_EQ(hipSetDevice(device.id()), hipSuccess);
+            ASSERT_EQ(tuner().selectCandidate(key, problem, ranked), 0);
+        });
+
+        tuner().reloadForTest();
+
+        // The same key and ranking registered again, from this thread, which
+        // is offered the same candidate the stale thread holds.
+        ASSERT_EQ(tuner().selectCandidate(key, problem, ranked), 0);
+
+        stale.run([&] {
+            hipEvent_t start = nullptr;
+            hipEvent_t stop  = nullptr;
+            const bool taken
+                = tuner().beginMeasurement(key, ranked[0], device.stream(), start, stop);
+            EXPECT_FALSE(taken) << "an offer made before the key was registered again was claimed";
+            if(taken)
+                tuner().endMeasurement(key, start);
+        });
+
+        // The current registration's own offer is still good.
+        hipEvent_t start = nullptr;
+        hipEvent_t stop  = nullptr;
+        ASSERT_TRUE(tuner().beginMeasurement(key, ranked[0], device.stream(), start, stop));
+        device.bracket(key, start, stop);
+        tuner().harvestPending(key);
+        EXPECT_EQ(OnlineTunerTestAccess::samples(tuner(), key), 1u);
+
+        tuner().reloadForTest();
+    }
+
     // ----------------------------------------------------------------------
     // The harvest's sign test.
     //
@@ -1507,6 +1561,8 @@ namespace
         size_t drain = 0x1100;
         while(OnlineTunerTestAccess::pooledPairs(tuner(), id).size() > 1)
         {
+            ASSERT_LT(drain, 0x1100 + static_cast<size_t>(kLivePairCap))
+                << "the pool held more pairs than the cap, or none was taken";
             ASSERT_EQ(tuner().selectCandidate(drain, identityOf(drain), ranked), 0);
             hipEvent_t start = nullptr;
             hipEvent_t stop  = nullptr;
@@ -1674,6 +1730,55 @@ namespace
                 << "shape " << shape << ": the sample its launch bought was not kept";
 
         EXPECT_LE(OnlineTunerTestAccess::livePairs(tuner(), id), cap);
+
+        tuner().reloadForTest();
+    }
+
+    // A reclaim pass walks the problems that may hold a pair, not every problem
+    // the tuner has seen: the shapes already resolved are dropped from what it
+    // walks, and so are the ones whose pairs it took back.
+    TEST(OnlineTuner, AReclaimPassWalksOnlyTheProblemsHoldingPairs)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        const Device device(0);
+        const int    id = device.id();
+
+        tuner().reloadForTest();
+
+        const int              cap = tuner().livePairCap();
+        const std::vector<int> ranked{201, 202, 203};
+
+        constexpr size_t resolvedBase = 0x7B000;
+        constexpr int    resolvedKeys = 64;
+        for(int shape = 0; shape < resolvedKeys; ++shape)
+        {
+            const size_t key = resolvedBase + static_cast<size_t>(shape);
+            for(int visit = 0; visit < kCallCeiling && !tuner().resolution(key); ++visit)
+                sampleOneVisit(key, identityOf(key), ranked, device);
+            ASSERT_NE(tuner().resolution(key), nullptr) << shape;
+        }
+
+        // The device at the cap, every pair held by a finished one-shot launch.
+        size_t key = 0x7C000;
+        for(int shape = 0; !OnlineTunerTestAccess::pooledPairs(tuner(), id).empty()
+                           || OnlineTunerTestAccess::livePairs(tuner(), id) < cap;
+            ++shape, ++key)
+        {
+            ASSERT_LT(shape, 2 * cap) << "the device never reached the cap";
+            ASSERT_TRUE(dispatchOnce(key, identityOf(key), ranked, device));
+        }
+
+        // One more shape: its pair comes from a reclaim pass.
+        ASSERT_TRUE(dispatchOnce(key, identityOf(key), ranked, device))
+            << "the reclaim pass found nothing to take back";
+
+        const std::vector<size_t> walked = OnlineTunerTestAccess::holders(tuner());
+        EXPECT_LE(walked.size(), static_cast<size_t>(cap));
+        for(size_t holder : walked)
+            EXPECT_TRUE(holder < resolvedBase || holder >= resolvedBase + resolvedKeys)
+                << "resolved key " << holder << " is still walked";
 
         tuner().reloadForTest();
     }
@@ -1977,8 +2082,9 @@ namespace
         // returns without recording it reads negative, and its own harvest
         // retires it.
         size_t key = 0x78000;
-        while(!OnlineTunerTestAccess::pooledPairs(tuner(), id).empty())
+        for(int taken = 0; !OnlineTunerTestAccess::pooledPairs(tuner(), id).empty(); ++taken)
         {
+            ASSERT_LT(taken, cap) << "the pool held more pairs than the cap, or none was taken";
             ASSERT_EQ(tuner().selectCandidate(key, identityOf(key), ranked), 0);
             hipEvent_t start = nullptr;
             hipEvent_t stop  = nullptr;

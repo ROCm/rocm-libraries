@@ -726,9 +726,10 @@ namespace rocblaslt
         // the winner those dispatches measure.
         //
         // m_registration is a process-wide serial taken at registerProblem(),
-        // so an offer names one registration and not merely one key. Without it
-        // an offer outstanding across reloadForTest(), or across a problem that
-        // resolved and was re-registered, could be matched against a candidate
+        // so an offer names one registration and not merely one key. A problem
+        // registers once and is never erased, so the only way a key gets a
+        // second candidate list is reloadForTest(); without the serial, an
+        // offer a thread still held from before it could be matched against a
         // list it was never made from.
         //
         // m_dispatchesSinceSelection is how a problem the library is never
@@ -791,6 +792,7 @@ namespace rocblaslt
             float                           m_winnerUs     = 0.0f;
             bool                            m_gaveUp       = false;
             bool                            m_resolved     = false;
+            bool                            m_listed       = false;
             std::atomic<int>                m_dispatchesSinceSelection{0};
         };
 
@@ -885,6 +887,16 @@ namespace rocblaslt
         std::unordered_map<size_t, ProblemState>        m_problems;
         std::unordered_map<int, std::vector<EventPair>> m_pairs;
         std::shared_timed_mutex                         m_mutex;
+
+        // The problems that may hold a pending pair, which are all
+        // reclaimFinishedPairs() has to look at. A problem is listed, and its
+        // m_listed set, the first time it is handed a pair, and stays listed
+        // until a pass finds it holding none. So outside a pass this costs a
+        // flag test per measured launch and one append per problem, and a pass
+        // walks the problems holding pairs -- no more than the live pairs --
+        // plus those listed since the previous pass, not every problem the
+        // tuner has seen. Same lock as m_problems.
+        std::vector<size_t> m_holders;
 
         // Pairs created on each device and not yet retired, whether pooled or
         // outstanding; what livePairCap() bounds. Same lock as m_pairs.

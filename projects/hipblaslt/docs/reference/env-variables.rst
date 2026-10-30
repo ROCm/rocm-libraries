@@ -97,12 +97,15 @@ running in a secure execution context (set-user-ID, set-group-ID, or another cre
 such as file capabilities) ignores every variable in this section, so tuning stays off. For more
 information, see :doc:`Use hipBLASLt offline tuning <../how-to/how-to-use-hipblaslt-offline-tuning>`.
 
-``online`` mode never blocks a call. It spends its measurements on the caller's own dispatches:
+``online`` mode never waits on the GPU. It spends its measurements on the caller's own dispatches:
 for the first ``HIPBLASLT_TUNING_COLD_ITERS`` visits of a problem it launches the ranked first
 choice untouched, then dispatches each of the top ``HIPBLASLT_TUNING_MAX_CANDIDATES`` in turn
 ``HIPBLASLT_TUNING_HOT_ITERS`` times, timing each with a HIP event pair that is read back on a
 later visit to the same problem, and pins the fastest for every call after that. A shape the cache
-file already serves is replayed from the cache, not explored.
+file already serves is replayed from the cache, not explored. While a shape is being explored, its
+calls take a lock shared by the whole process, so calls from several threads that are exploring at
+the same time run that part one at a time. The call that pins a winner also appends it to the cache
+file before it returns.
 
 ``online`` mode tunes only ``hipblasLtMatmul`` calls that pass no algorithm (``algo`` is
 ``nullptr``), where the library chooses the kernel and launches it in the same call. Nothing else
@@ -177,7 +180,7 @@ closing summary. Replaying a cache adds no output per call. Where the notices go
     * - | ``HIPBLASLT_TUNING_MAX_CANDIDATES``
         | Limits the ranked prefix when exhaustive enumeration is disabled.
       - | Positive integer (``tune`` default: 128, ``online`` default: 5)
-        | Below 2 switches ``online`` mode off
+        | Below 2 switches ``online`` mode off, and a notice says so
 
     * - | ``HIPBLASLT_TUNING_COLD_ITERS``
         | Sets untimed warm-up launches per candidate in ``tune`` mode, and untimed first visits
@@ -211,7 +214,7 @@ closing summary. Replaying a cache adds no output per call. Where the notices go
 
     * - | ``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE``
         | Sets a soft wall-clock limit on one shape's search, checked between candidates.
-        | Not read in ``online`` mode, which never blocks a call and so has no stall to bound.
+        | Not read in ``online`` mode, which runs no search of its own and so has no stall to bound.
       - | Milliseconds (default: 300000, five minutes; 0 is unlimited)
         | A truncated search records its best candidate as incomplete
         | A single candidate can overrun the limit

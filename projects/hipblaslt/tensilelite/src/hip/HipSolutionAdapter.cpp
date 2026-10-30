@@ -580,14 +580,19 @@ namespace TensileLite
                 if(event == nullptr)
                     return hipSuccess;
 
+                const hipError_t before = bestEffortEvents ? hipPeekAtLastError() : hipSuccess;
+
                 const hipError_t status = hipEventRecord(event, stream);
                 if(status == hipSuccess || !bestEffortEvents)
                     return status;
 
                 // Swallowed here, so it must not be left behind for the
                 // caller's own next hipGetLastError() to find and attribute to
-                // their work instead of ours.
-                static_cast<void>(hipGetLastError());
+                // their work instead of ours. Cleared only when the thread had
+                // no error before the record: one that was already there is
+                // the caller's, and is left for the caller to read.
+                if(before == hipSuccess)
+                    static_cast<void>(hipGetLastError());
                 swallowed = true;
                 return hipSuccess;
             }

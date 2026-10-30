@@ -3998,10 +3998,10 @@ namespace
          * on everything but a shape seen thousands of times.
          *
          * Nor is a smaller gate cheap against what it gates. Exploration
-         * finishes in 3K+1 visits -- sixteen at the default K -- so a gate of
-         * 32 would make a shape wait 48 visits to resolve rather than 16 and
-         * would never resolve one seen fewer than 48 times. Short-lived shapes
-         * are most of a real trace.
+         * finishes in K*R+1 visits for K candidates of R repeats each --
+         * sixteen at the defaults -- so a gate of 32 would make a shape wait
+         * 48 visits to resolve rather than 16 and would never resolve one seen
+         * fewer than 48 times. Short-lived shapes are most of a real trace.
          *
          * There is no per-candidate warm-up left for it to cover either:
          * candidates are issued round-robin and scored on their smallest
@@ -5606,6 +5606,15 @@ namespace rocblaslt
 
         config.livePairCapReached = TensileLite::noteOnlineEventPairCap;
 
+        // One candidate is nothing to choose between, so the tuner stays off
+        // however the mode is set. Said on the channel the startup line uses,
+        // because that line still names online as the mode.
+        if(config.enabled && config.topK < 2)
+            log_tuning_lifecycle(__func__,
+                                 "online-off max-candidates=" + std::to_string(config.topK)
+                                     + "; HIPBLASLT_TUNING_MAX_CANDIDATES below 2 leaves nothing "
+                                       "to choose between, so online tuning does nothing");
+
         return config;
     }
 } // namespace rocblaslt
@@ -5827,10 +5836,12 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // refuses to key is one online leaves entirely alone, so nothing it
         // dispatched is ever sampled.
         //
-        // Nothing below this point waits on the GPU or takes a lock the caller
-        // can be queued behind. harvestPending() reads back the event pairs of
-        // launches that have already retired and leaves the rest outstanding;
-        // beginMeasurement() hands out a pair for this launch and reads nothing.
+        // Nothing below this point waits on the GPU. harvestPending() reads back
+        // the event pairs of launches that have already retired and leaves the
+        // rest outstanding; beginMeasurement() hands out a pair for this launch
+        // and reads nothing. While the problem is still being explored both
+        // take the tuner's process-wide lock exclusively, so concurrent calls
+        // exploring at the same time are serialised on it for that long.
         auto&        onlineTuner  = rocblaslt::OnlineTuner::getInstance();
         const bool   onlineTuning
             = onlineTuner.enabled() && !callerSuppliedAlgo && tuningCacheKeyable(prob);
@@ -7350,8 +7361,8 @@ inline bool isCustomKernelForPointerArray(TensileLite::ContractionProblemGemm co
 // Written here, where the winner is pinned, and not deferred to a later visit
 // or to process exit. Three things decided that.
 //
-//   The cost is one small append, once per resolved shape, after the three-K-
-//   plus-one visits exploration takes. It is not the thing online exists to
+//   The cost is one small append, once per resolved shape, after the K*R+1
+//   visits exploration takes. It is not the thing online exists to
 //   avoid: tune stalls a caller for a benchmark run of every candidate under a
 //   lock held for the whole search, which is seconds to minutes. This is a
 //   file open, a kilobyte and a flush.
@@ -7509,7 +7520,7 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&         
         // around it. This is online's equivalent of tuning-done: the one line
         // that says a shape was settled and what it cost. Tune emits one per
         // shape too, but a tune line is paid for by a search the caller waited
-        // seconds for, while online settles a shape every 3K+1 visits, so an
+        // seconds for, while online settles a shape every K*R+1 visits, so an
         // ungated line here is the same notice at a rate nothing limits.
         // Routing it through shouldLogTuningTerminal puts both modes under one
         // policy -- per key, and unconditional once info logging is on -- so a

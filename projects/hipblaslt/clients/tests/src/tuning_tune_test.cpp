@@ -2924,8 +2924,9 @@ namespace
     constexpr size_t kOnlineWorkspace = 32u * 1024u * 1024u;
 
     // Candidates online rotates through, and the repeats it takes of each.
-    // Exploration ends after 3 * K + 1 visits, so these decide how many
-    // dispatches a case needs to reach a winner.
+    // Exploration ends after K * R + 1 visits, so these decide how many
+    // dispatches a case needs to reach a winner. kOnlineVisits is that with
+    // room to spare.
     constexpr int kOnlineTopK    = 5;
     constexpr int kOnlineRepeats = 3;
     constexpr int kOnlineVisits  = 3 * kOnlineTopK * kOnlineRepeats;
@@ -4108,6 +4109,43 @@ namespace
                 setenv(name.c_str(), value->c_str(), 1);
             else
                 unsetenv(name.c_str());
+        }
+    }
+
+    // HIPBLASLT_TUNING_MAX_CANDIDATES below 2 leaves online nothing to choose
+    // between, so it is off, while the startup line still names online as the
+    // mode. That is said once, with no logging variable set, and a usable
+    // depth says nothing of the kind.
+    TEST_F(TuningOnline_pre_checkin, ACandidateCapBelowTwoSaysOnlineIsOff)
+    {
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "a logging variable is set, so the notices do not reach std::cerr";
+
+        OnlineProblem problem(/*pointerArray=*/false);
+        ASSERT_TRUE(problem.create());
+
+        for(const int cap : {1, kOnlineTopK})
+        {
+            SCOPED_TRACE("HIPBLASLT_TUNING_MAX_CANDIDATES=" + std::to_string(cap));
+
+            std::remove(m_path.c_str());
+
+            std::string output;
+            bool        dispatched = true;
+            {
+                CerrCapture capture;
+                enterOnline(m_path);
+                setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", std::to_string(cap).c_str(), 1);
+                hipblaslt_tuning_reset_for_test();
+
+                for(int visit = 0; visit < 3; visit++)
+                    dispatched = dispatched && problem.dispatch(nullptr);
+                output = capture.str();
+            }
+
+            ASSERT_TRUE(dispatched);
+            EXPECT_EQ(countOccurrences(output, "online-off max-candidates="), cap < 2 ? 1u : 0u)
+                << output;
         }
     }
 
