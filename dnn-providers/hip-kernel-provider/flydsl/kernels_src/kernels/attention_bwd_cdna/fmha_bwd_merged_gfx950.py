@@ -248,6 +248,12 @@ class _MergedRowsMixin:
                 vec_width=8,
                 dtype=ctx.elem_dtype,
             )
+            if const_expr(self.reader.PADDED_HEAD) and ks in self.reader.masked_steps:
+                # O's columns at or past hdim_vo are not zero (the dO read above is masked, O is not): zero O itself, so a
+                # non-finite pad column cannot reach Delta as `0 * NaN`. Steps wholly below the floor read real columns.
+                o = fmha.MaskedAxis(
+                    fx.Index(self.hdim_vo), elem_dtype=ctx.elem_dtype
+                ).discard(o, self._a_col(ks), 8)
             acc = _dot8(ctx, d, o, acc)
         acc = self._reduce(acc)
         _scratch_store(ctx, row_in_tile, acc)

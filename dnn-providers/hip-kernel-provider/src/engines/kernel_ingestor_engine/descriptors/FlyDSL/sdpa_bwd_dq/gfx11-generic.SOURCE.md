@@ -27,7 +27,7 @@ instance list is untouched.
 | flydsl_kernels_describe | `v0.3.4.1-19-g89ad52f` |
 | rocm_version | `10.2.0` |
 | generic_target_shim | `chipset=gfx1100` |
-| inputs_sha256 | `16ade80e7057fc5a28537cfe87dd70b7c5221b2b6ba25273a422bddfedd36e7f` |
+| inputs_sha256 | `678939eb86143bd3e8385eac48d1754d1aa4e8fc0142e4d3851164aad8e8ea66` |
 
 ## Instances
 
