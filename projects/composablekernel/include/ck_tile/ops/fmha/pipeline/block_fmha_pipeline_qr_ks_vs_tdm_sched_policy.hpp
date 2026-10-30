@@ -53,8 +53,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     // Named geometry knobs. Values frozen to the current D128/D192 formulas.
     static constexpr bool kEarlyOutputRescale = Geometry::kHeadDimQK == 128;
     static constexpr bool kLeadFirstLoad      = Geometry::kHeadDimQK == 128;
-    static constexpr bool kUseUnsignedCausalMask =
-        Geometry::kHeadDimQK == 64 || Geometry::kHeadDimQK == 128 || Geometry::kHeadDimQK == 192;
     static constexpr index_t kKPrefetchTensorCount = Tuning::kKWait;
     static constexpr index_t kVPrefetchTensorCount = Tuning::kVWait;
     static constexpr bool kPrefetchTailDrain       = Tuning::kTailDrain;

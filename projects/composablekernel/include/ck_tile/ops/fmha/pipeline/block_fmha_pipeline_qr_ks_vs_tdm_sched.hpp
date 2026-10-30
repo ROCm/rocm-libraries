@@ -167,8 +167,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
 
     // Per-pixel mask with the bounds of each score row formed once (see ApplyRowRangeMask). Sink
     // tokens and the generic mask keep the per-element predicate. The row ranges follow
-    // IsOutOfBoundUnsigned for every head dim, so this pipeline does not read
-    // Policy::kUseUnsignedCausalMask.
+    // IsOutOfBoundUnsigned for every head dim.
     static constexpr bool kRowRangeMask =
         !kHasSink && std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<true>>;
 
