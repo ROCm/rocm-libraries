@@ -142,7 +142,7 @@ std::vector<KernelArgument> gfx950AttentionDenseSignature(bool withHeads)
 // module load when its signature is the one that contract launches.
 IngestorPlanPayload gfx950AttentionDensePayload(std::string_view dispatchSymbol, bool withHeads)
 {
-    AttentionDenseBinding binding{1, 2, 3, 4, 1, 0, 0.125F};
+    const AttentionDenseBinding binding{1, 2, 3, 4, 1, 0, 0.125F};
     AttentionDenseProblem problem;
     problem.batch = 2;
     problem.seqLenQ = 512;
