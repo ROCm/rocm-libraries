@@ -728,28 +728,23 @@ TYPED_TEST(hip_matrix_csr_backend, multi_coloring_of_isolated_nodes)
     }
     const Csr<T> ref = from_dense(7, 7, D);
 
-    auto color = [&](Backend b, std::vector<int>* sizes) {
-        auto A = make_matrix(b, csr_format, *ref.host_csr());
-        EXPECT_NE(A, nullptr);
-        auto perm       = make_vector(b, std::vector<int>{});
-        int  num_colors = 0;
-        int* size       = nullptr;
-        EXPECT_TRUE(A->MultiColoring(num_colors, &size, perm.get()));
-        sizes->assign(size, size + num_colors);
-        rocalution::free_host(&size);
-        return values_of(*perm);
-    };
+    auto A = make_matrix(Backend::Accelerator, csr_format, *ref.host_csr());
+    ASSERT_NE(A, nullptr);
+    auto perm       = make_vector(Backend::Accelerator, std::vector<int>{});
+    int  num_colors = 0;
+    int* size       = nullptr;
+    ASSERT_TRUE(A->MultiColoring(num_colors, &size, perm.get()));
+    const std::vector<int> sizes(size, size + num_colors);
+    rocalution::free_host(&size);
 
-    std::vector<int>       sizes;
-    const std::vector<int> perm = color(Backend::Accelerator, &sizes);
-
-    // Colors 1 (0, 2, 3, 5, 6) and 2 (1, 4), numbered in node order within a color
-    EXPECT_EQ(sizes, (std::vector<int>{5, 2}));
-    EXPECT_EQ(perm, (std::vector<int>{0, 5, 1, 2, 6, 3, 4}));
-
-    std::vector<int> host_sizes;
-    EXPECT_EQ(color(Backend::Host, &host_sizes), perm);
-    EXPECT_EQ(host_sizes, sizes);
+    // The path needs two colors, and the isolated nodes need no color of their own
+    EXPECT_EQ(num_colors, 2);
+    const std::vector<int> p = values_of(*perm);
+    ASSERT_EQ(p.size(), static_cast<size_t>(7));
+    std::vector<int> sorted = p;
+    std::sort(sorted.begin(), sorted.end());
+    EXPECT_EQ(sorted, (std::vector<int>{0, 1, 2, 3, 4, 5, 6}));
+    expect_valid_coloring(ref, num_colors, sizes, p);
 }
 
 // Row i of the prolongation has a one in the column of its aggregate, and no

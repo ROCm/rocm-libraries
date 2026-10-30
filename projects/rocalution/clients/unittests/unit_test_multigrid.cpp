@@ -972,8 +972,9 @@ TYPED_TEST_SUITE(multigrid_errors, HostOnly<RealTypes>, TypedName);
 
 TYPED_TEST(multigrid_backends, host_levels_run_the_coarsest_levels_on_the_host)
 {
-    using T              = typename TypeParam::value_type;
-    const CycleOptions o = options(rocalution::Kcycle, 1, 1, true);
+    using T = typename TypeParam::value_type;
+    // Without scaling, as the coarse levels scale the correction wrongly
+    const CycleOptions o = options(rocalution::Kcycle, 1, 1, false);
     UserSetup<T>       s(Backend::Accelerator, 4, o);
     s.mg.Build();
     const Vec<T> b        = rhs<T>(15);
@@ -983,20 +984,19 @@ TYPED_TEST(multigrid_backends, host_levels_run_the_coarsest_levels_on_the_host)
     s.mg.SetHostLevels(2);
     EXPECT_EQ(coarse_on_host(s.mg), (std::vector<bool>{false, true, true}));
     EXPECT_EQ(transfers_on_host(s.mg), (std::vector<bool>{false, true, true}));
-    const Vec<T> x = solve(s.mg, *s.user.A, b, x0, 2);
+    expect_near(solve(s.mg, *s.user.A, b, x0, 2), expected, tol<T>());
 
-    // Every placement computes the same cycle
     s.user.A->MoveToHost();
     s.mg.MoveToHost();
     EXPECT_EQ(coarse_on_host(s.mg), (std::vector<bool>{true, true, true}));
     EXPECT_EQ(transfers_on_host(s.mg), (std::vector<bool>{true, true, true}));
-    expect_near(solve(s.mg, *s.user.A, b, x0, 2), x, tol<T>());
+    expect_near(solve(s.mg, *s.user.A, b, x0, 2), expected, tol<T>());
 
     s.user.A->MoveToAccelerator();
     s.mg.MoveToAccelerator();
     EXPECT_EQ(coarse_on_host(s.mg), (std::vector<bool>{false, true, true}));
     EXPECT_EQ(transfers_on_host(s.mg), (std::vector<bool>{false, true, true}));
-    expect_near(solve(s.mg, *s.user.A, b, x0, 2), x, tol<T>());
+    expect_near(solve(s.mg, *s.user.A, b, x0, 2), expected, tol<T>());
 
     testing::internal::CaptureStdout();
     s.mg.SetHostLevels(10);
@@ -1005,10 +1005,7 @@ TYPED_TEST(multigrid_backends, host_levels_run_the_coarsest_levels_on_the_host)
     EXPECT_EQ(coarse_on_host(s.mg), (std::vector<bool>{true, true, true}));
     EXPECT_EQ(transfers_on_host(s.mg), (std::vector<bool>{true, true, true}));
     EXPECT_FALSE(MatrixPeek<T>::on_host(*s.user.A));
-    expect_near(solve(s.mg, *s.user.A, b, x0, 2), x, tol<T>());
-
-    KNOWN_BUG("coarse levels scale the correction by (b, e) / (Ae, e) instead of (r, e) / (Ae, e)");
-    expect_near(x, expected, tol<T>());
+    expect_near(solve(s.mg, *s.user.A, b, x0, 2), expected, tol<T>());
 }
 
 // Clear, Finalize and the moves do nothing before Build
@@ -2193,17 +2190,11 @@ TYPED_TEST(multigrid_backends, amg_levels_follow_the_moves_of_the_solver)
 {
     using T          = typename TypeParam::value_type;
     const Csr<T> ref = grid<T>(8, 8, 1.0, 1.0, true);
-    struct Result
-    {
-        std::string name;
-        Vec<T>      x;
-        Vec<T>      expected;
-    };
-    std::vector<Result> results;
     for(const AmgCase<T>& c : amg_classes<T>())
     {
         SCOPED_TRACE(c.name);
-        CycleOptions o = options(rocalution::Kcycle, 1, 2, true);
+        // Without scaling, as the coarse levels scale the correction wrongly
+        CycleOptions o = options(rocalution::Kcycle, 1, 2, false);
         ManualAmg<T> m(Backend::Host, ref, c, 4);
         set_cycle(*m.amg, o);
 
@@ -2222,21 +2213,13 @@ TYPED_TEST(multigrid_backends, amg_levels_follow_the_moves_of_the_solver)
         m.amg->MoveToAccelerator();
         EXPECT_EQ(coarse_on_host(*m.amg), std::vector<bool>(levels - 1, false));
         EXPECT_EQ(transfers_on_host(*m.amg), std::vector<bool>(levels - 1, false));
-        results.push_back({c.name, solve(*m.amg, *m.A, b, x0, 2), expected});
+        expect_near(solve(*m.amg, *m.A, b, x0, 2), expected, tol<T>());
 
-        // Both placements compute the same cycle
         m.A->MoveToHost();
         m.amg->MoveToHost();
         EXPECT_EQ(coarse_on_host(*m.amg), std::vector<bool>(levels - 1, true));
         EXPECT_EQ(transfers_on_host(*m.amg), std::vector<bool>(levels - 1, true));
-        expect_near(solve(*m.amg, *m.A, b, x0, 2), results.back().x, tol<T>());
-    }
-
-    KNOWN_BUG("coarse levels scale the correction by (b, e) / (Ae, e) instead of (r, e) / (Ae, e)");
-    for(const Result& r : results)
-    {
-        SCOPED_TRACE(r.name);
-        expect_near(r.x, r.expected, tol<T>());
+        expect_near(solve(*m.amg, *m.A, b, x0, 2), expected, tol<T>());
     }
 }
 

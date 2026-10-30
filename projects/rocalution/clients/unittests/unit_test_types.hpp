@@ -224,6 +224,38 @@ namespace rocalution_unit
         expect_all_near(actual, ref, tolerance);
     }
 
+    // The permutation groups the rows by color; no two coupled rows share a color
+    template <typename T>
+    void expect_valid_coloring(const Csr<T>&           A,
+                               int                     num_colors,
+                               const std::vector<int>& sizes,
+                               const std::vector<int>& p)
+    {
+        ASSERT_EQ(sizes.size(), static_cast<size_t>(num_colors));
+        std::vector<int> first(num_colors + 1, 0);
+        for(int c = 0; c < num_colors; ++c)
+        {
+            first[c + 1] = first[c] + sizes[c];
+        }
+        ASSERT_EQ(first[num_colors], A.n);
+
+        auto color = [&](int i) {
+            return static_cast<int>(std::upper_bound(first.begin(), first.end(), p[i])
+                                    - first.begin())
+                   - 1;
+        };
+        for(int i = 0; i < A.n; ++i)
+        {
+            for(PtrType j = A.row_offset[i]; j < A.row_offset[i + 1]; ++j)
+            {
+                if(A.col[j] != i)
+                {
+                    EXPECT_NE(color(i), color(A.col[j])) << "rows " << i << " and " << A.col[j];
+                }
+            }
+        }
+    }
+
     // The make_vector and values_of of unit_test_common.hpp for bool, whose
     // std::vector has no data()
     inline std::unique_ptr<BaseVector<bool>> make_vector(Backend b, const std::vector<bool>& values)

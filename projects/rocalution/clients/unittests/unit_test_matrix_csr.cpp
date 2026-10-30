@@ -182,38 +182,6 @@ namespace
                         [](int i, int j, T) { return j <= i; });
     }
 
-    // The permutation groups the rows by color; no two coupled rows share a color
-    template <typename T>
-    void expect_valid_coloring(const Csr<T>&           A,
-                               int                     num_colors,
-                               const std::vector<int>& sizes,
-                               const std::vector<int>& p)
-    {
-        ASSERT_EQ(sizes.size(), static_cast<size_t>(num_colors));
-        std::vector<int> first(num_colors + 1, 0);
-        for(int c = 0; c < num_colors; ++c)
-        {
-            first[c + 1] = first[c] + sizes[c];
-        }
-        ASSERT_EQ(first[num_colors], A.n);
-
-        auto color = [&](int i) {
-            return static_cast<int>(std::upper_bound(first.begin(), first.end(), p[i])
-                                    - first.begin())
-                   - 1;
-        };
-        for(int i = 0; i < A.n; ++i)
-        {
-            for(PtrType j = A.row_offset[i]; j < A.row_offset[i + 1]; ++j)
-            {
-                if(A.col[j] != i)
-                {
-                    EXPECT_NE(color(i), color(A.col[j])) << "rows " << i << " and " << A.col[j];
-                }
-            }
-        }
-    }
-
     bool is_permutation(const std::vector<int>& perm)
     {
         std::vector<int> sorted = perm;
