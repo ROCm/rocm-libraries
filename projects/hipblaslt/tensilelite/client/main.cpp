@@ -63,6 +63,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #if defined(__linux__)
 // Used by getMinKernelSizeToGwEnd() to parse .co ELF symbol tables. <elf.h>
 // is glibc-only, so the whole ELF code path is Linux-gated.
@@ -75,6 +76,10 @@
 #include <map>
 #include <memory>
 #include <sstream>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace TensileLite
 {
@@ -789,6 +794,19 @@ namespace TensileLite
         }
 #endif // defined(__linux__)
 
+        // Make idle OpenMP workers sleep as soon as a parallel region ends, unless the user set
+        // KMP_BLOCKTIME. With libomp's default (200 ms) the workers left over from the CPU
+        // reference and data initialization spin on the cores the main thread needs for the
+        // per-solution loop. kmp_set_blocktime is a libomp extension: other OpenMP runtimes and
+        // Windows builds keep their default.
+        void disableOpenMPIdleSpin()
+        {
+#if defined(_OPENMP) && defined(KMP_VERSION_MAJOR) && !defined(_WIN32)
+            if(std::getenv("KMP_BLOCKTIME") == nullptr)
+                kmp_set_blocktime(0);
+#endif
+        }
+
     } // namespace Client
 } // namespace TensileLite
 
@@ -796,6 +814,11 @@ int main(int argc, const char* argv[])
 {
     using namespace TensileLite;
     using namespace TensileLite::Client;
+
+    // Called before mainStart: when it calls kmp_set_blocktime, that first libomp call runs
+    // libomp's serial initialization (~0.5 ms), which belongs to process startup rather than
+    // main_parse_args.
+    disableOpenMPIdleSpin();
 
     auto const mainStart     = TimingClock::now();
     auto const mainStartWall = std::chrono::system_clock::now();
