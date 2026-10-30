@@ -13,6 +13,8 @@ Row epilogues (LSE output) go through ``AttnFwdExt.epilogue_hook``, covered by
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from kernels.common import fmha_mfma
@@ -22,8 +24,11 @@ from rocke.core.lower_llvm import lower_kernel_to_llvm
 
 # One target per attention body: MFMA (gfx950, gfx942) and WMMA (gfx1151).
 # The test builds and lowers IR on the host and needs no device, HIP or clang,
-# so it covers every body instead of only the selected device's.
-ARCHES = ["gfx950", "gfx942", "gfx1151"]
+# so the default covers every body instead of only the selected device's.
+# ROCKE_SDPA_SEAM_ARCHES overrides this (comma-separated) to pin the test
+# environment to one target, the same convention as portable_ir's
+# parity_matrix.py.
+ARCHES = os.environ.get("ROCKE_SDPA_SEAM_ARCHES", "gfx950,gfx942,gfx1151").split(",")
 
 
 def _spec(mask_mode: str) -> fmha_mfma.FmhaMfmaSpec:
