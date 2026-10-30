@@ -508,11 +508,14 @@ void testing_preconditioner_repeated_move(const std::string& name, TriSolverAlg 
     }
 
     // The iterative triangular solves start from the previous solution, so they
-    // have to converge for the solutions to agree
+    // have to converge for the solutions to agree. They run a fixed number of
+    // iterations, more than the 49 rows: with a tolerance, the host ItLUSolve gives
+    // the U solve only the iterations that the L solve needed, which is a known bug
+    // in unit_test_local_matrix.cpp.
     SolverDescr descr;
     descr.SetTriSolverAlg(alg);
     descr.SetIterativeSolverMaxIteration(200);
-    descr.SetIterativeSolverTolerance(1e-14);
+    descr.DisableIterativeSolverTolerance();
 
     s->SetSolverDescriptor(descr);
     s->SetOperator(matrix);
