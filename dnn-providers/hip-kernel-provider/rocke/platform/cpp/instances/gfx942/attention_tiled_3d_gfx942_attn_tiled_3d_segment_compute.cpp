@@ -225,6 +225,13 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
         ok_a = rocke_b_cmp_lt(b, ctx->row_qp, ctx->cur_batch_q_len);
         ok_b = rocke_b_cmp_lt(b, ctx->row_qh, rocke_b_const_i32(b, cfg->NUM_QH));
         ctx->row_ok = rocke_b_land(b, ok_a, ok_b);
+        /* Padding rows past BLOCK_Q*NQK alias the next q-block: no store. */
+        if(cfg->BLOCK_Q * cfg->NQK < cfg->BLOCK_M)
+        {
+            rocke_value_t* vr = rocke_b_const_i32(b, cfg->BLOCK_Q * cfg->NQK);
+            rocke_value_t* row_vr = rocke_b_cmp_lt(b, ctx->lane_col, vr);
+            ctx->row_ok = rocke_b_land(b, ctx->row_ok, row_vr);
+        }
         ctx->row_causal_lim = rocke_b_add(b, ctx->context_len, ctx->row_qp);
         ctx->row_alibi = NULL;
         if(cfg->USE_ALIBI)
@@ -249,10 +256,21 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
         rocke_value_t* q_col_c = rocke_b_const_i32(b, k * 16);
         rocke_value_t* q_col_m = rocke_b_mul(b, ctx->lane_rg, rocke_b_const_i32(b, 4));
         rocke_value_t* q_col_off = rocke_b_add(b, q_col_c, q_col_m);
-        rocke_value_t* idx[2];
-        idx[0] = ctx->lane_col;
-        idx[1] = q_col_off;
-        Q_kits[k] = rocke_b_smem_load_vN(b, ctx->Q_lds, idx, 2, dtype, 4);
+        if(cfg->Q_IN_V_SLOT)
+        {
+            rocke_value_t* idx3[3];
+            idx3[0] = rocke_b_const_i32(b, 0);
+            idx3[1] = ctx->lane_col;
+            idx3[2] = q_col_off;
+            Q_kits[k] = rocke_b_smem_load_vN(b, ctx->V_lds, idx3, 3, dtype, 4);
+        }
+        else
+        {
+            rocke_value_t* idx[2];
+            idx[0] = ctx->lane_col;
+            idx[1] = q_col_off;
+            Q_kits[k] = rocke_b_smem_load_vN(b, ctx->Q_lds, idx, 2, dtype, 4);
+        }
     }
 
     rocke_for_t kvloop = rocke_b_scf_for_iter(b,
@@ -286,6 +304,7 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
         rocke_value_t* nxt_page_id_window = NULL;
         rocke_value_t** S_n;
         rocke_value_t* m_new;
+        rocke_value_t* m_safe;
         rocke_value_t* l_local;
         rocke_value_t* alpha;
         rocke_value_t* new_l_val;
@@ -430,10 +449,16 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
 
         /* ---------------- online (m,l) update ----------------
          * Row max and sum: this lane's 4 * QK_N_TILES tokens, then the row's
-         * other 3 lanes. */
+         * other 3 lanes. m_new is the running max (m_val included), so
+         * alpha = exp2(m_val - m_safe) is at most 1, as exp2_fast requires; a
+         * tile-local max would overflow alpha once a tile scores ~128 log2 units
+         * below an earlier one. Until the row has an unmasked key (or, in
+         * segment 0, a sink), m_new is -inf and the exponents subtract m_safe = 0
+         * instead, so P and alpha are 0, not NaN. A row with neither in the
+         * segment stores m = -inf, which the reduce kernel weights by 0. */
         {
             rocke_value_t* local_max = ctx->neg_inf;
-            rocke_value_t* full_max_raw;
+            rocke_value_t* tile_max;
             rocke_value_t* ok;
             rocke_value_t* sum_p = ctx->zero_f;
             for(reg = 0; reg < 4; reg++)
@@ -443,22 +468,23 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
                     local_max = rocke_b_fmax(b, local_max, masked[n * 4 + reg]);
                 }
             }
-            full_max_raw = rocke__row_reduce(b, local_max, true);
-            ok = rocke_b_fcmp(b, "ogt", full_max_raw, ctx->neg_inf);
-            m_new = rocke_b_select(b, ok, full_max_raw, ctx->zero_f);
+            tile_max = rocke__row_reduce(b, local_max, true);
+            m_new = rocke_b_fmax(b, m_val, tile_max);
+            ok = rocke_b_fcmp(b, "ogt", m_new, ctx->neg_inf);
+            m_safe = rocke_b_select(b, ok, m_new, ctx->zero_f);
             for(reg = 0; reg < 4; reg++)
             {
                 for(n = 0; n < cfg->QK_N_TILES; n++)
                 {
                     rocke_value_t* p
-                        = rocke_b_exp2_fast(b, rocke_b_fsub(b, masked[n * 4 + reg], m_new));
+                        = rocke_b_exp2_fast(b, rocke_b_fsub(b, masked[n * 4 + reg], m_safe));
                     p_regs[n * 4 + reg] = p;
                     sum_p = rocke_b_fadd(b, sum_p, p);
                 }
             }
             l_local = rocke__row_reduce(b, sum_p, false);
         }
-        alpha = rocke_b_exp2_fast(b, rocke_b_fsub(b, m_val, m_new));
+        alpha = rocke_b_exp2_fast(b, rocke_b_fsub(b, m_val, m_safe));
         new_l_val = rocke_b_fadd(b, rocke_b_fmul(b, l_val, alpha), l_local);
         if(cfg->KV_FP8)
         {

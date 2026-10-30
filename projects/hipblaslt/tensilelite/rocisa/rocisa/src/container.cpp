@@ -506,6 +506,32 @@ void init_containers(nb::module_ m)
                                                   std::get<6>(t));
              });
 
+    nb::class_<rocisa::TENSORModifiers, rocisa::Container>(m_con, "TENSORModifiers")
+        .def(nb::init<rocisa::CacheScope, rocisa::TemporalHint, rocisa::NonVolatile, bool>(),
+             nb::arg("scope")   = rocisa::CacheScope::SCOPE_NONE,
+             nb::arg("th")      = rocisa::TemporalHint::TH_NONE,
+             nb::arg("nv")      = rocisa::NonVolatile::NV_NONE,
+             nb::arg("isStore") = false)
+        .def_rw("scope", &rocisa::TENSORModifiers::scope)
+        .def_rw("th", &rocisa::TENSORModifiers::th)
+        .def_rw("nv", &rocisa::TENSORModifiers::nv)
+        .def_rw("isStore", &rocisa::TENSORModifiers::isStore)
+        .def("__str__", &rocisa::TENSORModifiers::toString)
+        .def("__deepcopy__",
+             [](const rocisa::TENSORModifiers& self, nb::dict&) {
+                 return rocisa::TENSORModifiers(self);
+             })
+        .def("__getstate__",
+             [](const rocisa::TENSORModifiers& self) {
+                 return std::make_tuple(self.scope, self.th, self.nv, self.isStore);
+             })
+        .def("__setstate__",
+             [](rocisa::TENSORModifiers&                                                         self,
+                std::tuple<rocisa::CacheScope, rocisa::TemporalHint, rocisa::NonVolatile, bool> t) {
+                 new(&self) rocisa::TENSORModifiers(
+                     std::get<0>(t), std::get<1>(t), std::get<2>(t), std::get<3>(t));
+             });
+
     nb::class_<rocisa::SDWAModifiers, rocisa::Container>(m_con, "SDWAModifiers")
         .def(nb::init<rocisa::SelectBit, rocisa::UnusedBit, rocisa::SelectBit, rocisa::SelectBit>(),
              nb::arg("dst_sel")    = 0,
