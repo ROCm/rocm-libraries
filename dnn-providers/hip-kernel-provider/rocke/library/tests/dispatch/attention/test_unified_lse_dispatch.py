@@ -202,19 +202,39 @@ def _paged_tensors(problem):
 
 @pytest.mark.parametrize("arch", _ARCHES)
 def test_binding_forwards_the_lse_buffer(arch, monkeypatch):
-    """The bound launch hands the caller's lse tensor to the runtime, after the
-    real paged-tensor validation (only the GPU runner is replaced)."""
+    """Repeated LSE launches use the public runner and forward live overrides."""
+    from dispatch.attention import bindings
     from dispatch.attention.common import _tuning_problem
     from kernels.common import attention_unified as au
 
-    seen = {}
-    monkeypatch.setattr(au, "run_unified_attention_torch", lambda **kw: seen.update(kw))
+    seen = []
+    result = object()
+
+    def run(**kw):
+        seen.append(kw)
+        return result
+
+    def reject_preparation(*args, **kwargs):
+        pytest.fail("LSE bindings must use the public runner on every launch")
+
+    monkeypatch.setattr(au, "run_unified_attention_torch", run)
+    monkeypatch.setattr(bindings, "_bind_paged_decode_launch", reject_preparation)
     request = _pinned(_decode_request(arch, emit_lse=True), _SPLIT_KV_SPEC[arch])
     lse = object()
+    override = object()
     tensors = {**_paged_tensors(_tuning_problem(request)), "lse": lse}
-    dispatch_attention(request).bind_torch(tensors).launch()
-    assert seen["lse"] is lse
-    assert seen["problem"].emit_lse is True
+    binding = dispatch_attention(request).bind_torch(tensors)
+    assert binding.launch() is result
+    assert binding.launch(lse=override, stream=29) is result
+    assert binding.launch() is result
+    assert len(seen) == 3
+    for call, expected_lse, expected_stream in zip(
+        seen, (lse, override, lse), (0, 29, 0)
+    ):
+        assert call["lse"] is expected_lse
+        assert call["stream"] == expected_stream
+        assert call["problem"].emit_lse is True
+        assert "execution" not in call
 
 
 @pytest.mark.parametrize("emit_lse", [True, False], ids=["missing", "stray"])

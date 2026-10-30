@@ -959,3 +959,5 @@ scenario (paths relative to `library/`):
 Measured conditions and numbers are intentionally omitted from this repository
 (per `platform/AGENTS.md` §Compliance); they are recorded only in the internal
 perf record.
+
+See the [saved paged decode binding case study](../../../../docs/decode_host_overhead_case_study.md) for private scratch, prepared launch context and host validation.
