@@ -91,3 +91,7 @@ directory, with `summary.json` for totals and `cases.md` for individual results.
 The runner saves partial totals during execution. If the job is interrupted,
 `summary.json` retains those totals with `complete` set to `false`; completed
 cases also retain their individual results and logs.
+
+The runner's unit tests use a stand-in benchmark and emulator, so they need no
+build or GPU. No CI job runs them; run them after changing the sampler or runner
+with `python3 -m unittest discover -s .github/scripts/tests -p test_random_hipblaslt_gemms.py`.
