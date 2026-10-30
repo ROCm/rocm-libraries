@@ -37,7 +37,6 @@
 #include <omp.h>
 #include <type_traits>
 
-#define MAX_OMP_THREADS 64
 #if defined(_MSC_VER)
 #define TENSILELITE_CPU_REF_FORCE_INLINE __forceinline
 #else
@@ -927,7 +926,6 @@ namespace TensileLite
             // For 2D bias reduction, d batch = 1
             if((tensor.dimensions() == 3 && tensor.sizes()[2] == 1) || tensor.dimensions() == 2)
             {
-                omp_set_num_threads(MAX_OMP_THREADS);
 #pragma omp parallel for
                 for(size_t bNum = 0; bNum < biasTensor.totalLogicalElements();
                     bNum += validationStride)
@@ -1904,9 +1902,11 @@ namespace TensileLite
                                            && !std::is_same<Accumulator, std::complex<float>>();
 
             // gemm
-            omp_set_num_threads(MAX_OMP_THREADS);
 #pragma omp parallel
             {
+                // Per-thread AMAX-D, combined into amaxD once per thread after the loop.
+                Accumulator threadAmaxD(0);
+
                 // Allocate coordinate buffers per-thread.
                 std::vector<int64_t> aCoord(a.dimensions());
                 std::vector<int64_t> bCoord(b.dimensions());
@@ -2195,13 +2195,9 @@ namespace TensileLite
                 {
                     if(problem.outputAmaxD())
                     {
-#pragma omp critical
-                        {
-                            Accumulator absResultD
-                                = (resultD > zero) ? resultD : resultD * negOne;
-                            if(absResultD > amaxD)
-                                amaxD = absResultD;
-                        }
+                        Accumulator absResultD = (resultD > zero) ? resultD : resultD * negOne;
+                        if(absResultD > threadAmaxD)
+                            threadAmaxD = absResultD;
                     }
                 }
 
@@ -2230,6 +2226,18 @@ namespace TensileLite
                 }
 
                 dPtr[dIndex] = SaturateCast<typename Inputs::DType>(resultD);
+            }
+
+            if constexpr(notCmplxAmaxD)
+            {
+                if(problem.outputAmaxD())
+                {
+#pragma omp critical
+                    {
+                        if(threadAmaxD > amaxD)
+                            amaxD = threadAmaxD;
+                    }
+                }
             }
             } // end #pragma omp parallel
 

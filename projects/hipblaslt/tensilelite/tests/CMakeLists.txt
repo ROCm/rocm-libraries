@@ -663,3 +663,50 @@ if(NOT WIN32)
     )
     set_tests_properties("CPUGemm.slow_f32_MX32_Rejected" PROPERTIES WILL_FAIL TRUE)
 endif()
+
+#################################################
+#     AMAX-D output tests                       #
+#################################################
+# --outputAmaxD makes the reference also write AMAX-D (max |D| over every
+# batch); the driver checks it against max |D| of the golden GEMM, so the
+# check does not depend on which CPU path ran. The fast path does not support
+# AMAX-D (isFastPathEligible rejects "amaxD"), so these run without
+# --tryFastPath, on the slow path.
+foreach(TYPE f32 f16 bf16)
+    get_test_sizes(${TYPE} SIZES)
+    add_cpu_gemm_test(slow_${TYPE}_AmaxD
+        ARGS ${SIZES} --type ${TYPE} --validate --outputAmaxD
+    )
+    add_cpu_gemm_test(slow_${TYPE}_AmaxD_AllFeatures
+        ARGS ${SIZES} --transA --type ${TYPE} --beta 0.5 --validate --bias --activation relu --scaleAlphaVec --useScaleAB Vector --outputAmaxD
+    )
+endforeach()
+add_cpu_gemm_test(slow_f64_AmaxD
+    ARGS ${F64_SIZES} --type f64 --validate --outputAmaxD
+)
+add_cpu_gemm_test(slow_tf32_AmaxD
+    ARGS ${F32_SIZES} --type tf32 --validate --outputAmaxD
+)
+# Max over every batch, not only the first.
+add_cpu_gemm_test(slow_f32_AmaxD_Batched
+    ARGS ${F32_SIZES} --type f32 --validate --batchCount 3 --outputAmaxD
+)
+# All-zero D: AMAX-D must be written as 0 (the driver starts it at -1).
+add_cpu_gemm_test(slow_f32_AmaxD_Alpha0
+    ARGS ${F32_SIZES} --type f32 --alpha 0 --validate --outputAmaxD
+)
+# Fewer output elements than threads. The single D element is negative with
+# the driver's fixed seed, so this also checks that AMAX-D is |D|, not D.
+add_cpu_gemm_test(slow_f32_AmaxD_1x1
+    ARGS -M 1 -N 1 -K 165 --type f32 --validate --outputAmaxD
+)
+if(NOT WIN32)
+    foreach(TYPE f8 bf8)
+        add_cpu_gemm_test(slow_${TYPE}_AmaxD
+            ARGS ${F16_SIZES} --type ${TYPE} --validate --outputAmaxD
+        )
+    endforeach()
+    add_cpu_gemm_test(slow_f4_MX32_AmaxD
+        ARGS -M 133 -N 147 -K 160 --type f4 --mxBlockA 32 --mxBlockB 32 --validate --outputAmaxD
+    )
+endif()
