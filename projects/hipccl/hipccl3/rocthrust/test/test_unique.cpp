@@ -24,6 +24,9 @@
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/unique.h>
 
+#include _THRUST_STD_INCLUDE(functional)
+#include _THRUST_STD_INCLUDE(utility)
+
 #include <cstdint>
 
 #include "test_param_fixtures.hpp"
@@ -555,4 +558,27 @@ TEST(UniqueTests, TestUniqueWithCustomEqualityOp)
   ASSERT_EQ(error_counter[0], std::uint32_t{0});
   bool all_results_correct = thrust::equal(unique_out.cbegin(), unique_out.cend(), data);
   ASSERT_TRUE(all_results_correct);
+}
+
+template <typename F>
+struct NonConstAdapter
+{
+  F f;
+  NonConstAdapter(const F& func)
+      : f(func)
+  {}
+
+  template <typename... Args>
+  THRUST_DEVICE auto operator()(Args&&... args) -> decltype(f(_THRUST_STD::forward<Args>(args)...))
+  {
+    return f(_THRUST_STD::forward<Args>(args)...);
+  }
+};
+
+TEST(UniqueTests, TestUniqueWithCustomEqualityOpMutable)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> in = {1, 1, 2, 3, 4, 4, 5};
+  thrust::unique(thrust::hip::par, in.begin(), in.end(), NonConstAdapter(_THRUST_STD::equal_to<>{}));
 }
