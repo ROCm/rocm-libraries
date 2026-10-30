@@ -5,7 +5,7 @@
 """Run AOTriton's SDPA suite against hipDNN and record one CSV row per case.
 
     run_aotriton.py [--suite default|forward] [--release N] [--shard I/N] [--fake always-decline]
-                    [--fwd-no-stats] [--all-engines] [--packed-gpu] [--out DIR | --arch ARCH --run NAME]
+                    [--layout-mode MODE] [--fwd-no-stats] [--all-engines] [--packed-gpu] [--out DIR | --arch ARCH --run NAME]
                     [--workers N] [--resume] [--nodeids-file PATH] [--hang-timeout S] [--lock-dir DIR]
                     [--hipdnn-prefix DIR] [-- PYTEST...]
 
@@ -21,6 +21,12 @@ collection. ``--packed-gpu`` adds a second pass over the ``gpu``-marked cases of
 ``./sdpa_conformance_results/<arch>/<run>/shard-<I>of<N>/`` under the working directory.
 ``--nodeids-file`` limits the first pass to the listed node ids (the pinned passes keep their own
 listings).
+
+``--layout-mode`` picks the memory layout every SDPA tensor is allocated in (default ``pytorch``):
+``pytorch`` stores O, dO and the gradients like Q (and dQ/dK/dV/dB like their inputs), ``efficient``
+stores O, dO, dQ, dK and dV BSHD (dB like the bias), ``aotriton`` keeps the vendored suite's own
+layouts. It is exported as ``HIPDNN_SDPA_CONFORMANCE_LAYOUT_MODE`` to every pytest process,
+``--all-engines`` pass 2 included.
 
 ``--fwd-no-stats`` runs the forward without Stats (``HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS=1`` in
 the pytest workers), for engines that decline when Stats are requested. The backward tests
@@ -101,6 +107,13 @@ def parse_args(argv):
     parser.add_argument("--shard", metavar="I/N")
     parser.add_argument("--fake", choices=("always-decline",))
     parser.add_argument("--packed-gpu", action="store_true")
+    parser.add_argument(
+        "--layout-mode",
+        choices=layout.LAYOUT_MODES,
+        default=layout.DEFAULT_LAYOUT_MODE,
+        help="memory layout of every SDPA tensor: pytorch (Q's layout), efficient (BSHD) "
+        "or aotriton (the vendored suite's own)",
+    )
     parser.add_argument(
         "--fwd-no-stats",
         action="store_true",
@@ -520,6 +533,8 @@ def main(argv=None):
         )
     env = layout.clean_env(release=args.release)
     env.pop(FWD_NO_STATS_ENV, None)
+    env[layout.LAYOUT_MODE_ENV] = args.layout_mode
+    print(f"layout mode: {args.layout_mode}", flush=True)
     if args.fwd_no_stats:
         env[FWD_NO_STATS_ENV] = "1"
         print("forward mode: no Stats", flush=True)

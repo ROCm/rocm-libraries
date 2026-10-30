@@ -16,6 +16,8 @@ Load it with ``-p hipdnn_aotriton_plugin`` (``aotriton/`` on PYTHONPATH). It
 * writes one CSV row per case, in the controller process only, flushed per row; ``fwd_engines`` /
   ``bwd_engines`` hold the applicable engines (``;``-joined, heuristic rank order) of a direction
   hipDNN planned unpinned, empty otherwise;
+* allocates every SDPA tensor of the vendored suite in the layout ``HIPDNN_SDPA_CONFORMANCE_LAYOUT_MODE``
+  names (see ``_install_layout_wrappers``);
 * fills ``fwd_kernel`` / ``bwd_kernel`` (the kernel id ``hipdnn_sdpa.last_call`` reports; kind
   ``kernel`` entries, ignored by the fold), ``fail_side`` and ``stage`` of a ``fail`` row, and
   ``repro`` once ``hipdnn_sdpa.save_repro`` wrote the case's repro directory (``--repro-dir``,
@@ -27,9 +29,11 @@ Load it with ``-p hipdnn_aotriton_plugin`` (``aotriton/`` on PYTHONPATH). It
 * supports ``--shard i/N`` (1-based), ``--hipdnn-nodeids-file`` and ``--fake always-decline``.
 """
 
+import dataclasses
 import json
 import os
 import re
+import sys
 import threading
 from pathlib import Path
 
@@ -503,6 +507,146 @@ def _install_wrappers(fake):
         setattr(hipdnn_sdpa, name, make(direction, inner))
 
 
+# ---------------------------------------------------------------------------- layout modes
+
+_WRAPPED = "_sdpa_conformance_inner"
+_FLIP_ARG = 9  # position of `storage_flip` in `_do_test_op_bwd`'s `args`
+
+
+def layout_mode():
+    """The layout mode the environment names; ``pytorch`` when unset."""
+    mode = os.environ.get(layout.LAYOUT_MODE_ENV) or layout.DEFAULT_LAYOUT_MODE
+    if mode not in layout.LAYOUT_MODES:
+        raise pytest.UsageError(
+            f"{layout.LAYOUT_MODE_ENV}={mode!r}: expected one of {', '.join(layout.LAYOUT_MODES)}"
+        )
+    return mode
+
+
+def output_layouts(mode, q, k, v, b):
+    """``{tname: perm}`` for O and the gradients that ``mode`` asks of a call on these inputs.
+
+    ``pytorch``: O in Q's layout, dQ/dK/dV/dB in their inputs' layouts. ``efficient``: O, dQ, dK
+    and dV BSHD, dB in the bias's layout. The inputs' layouts are read off their strides.
+    """
+    from _common_test import BSHD, layout_of
+
+    like = {"dq": layout_of(q), "dk": layout_of(k), "dv": layout_of(v)}
+    if b is not None:
+        like["db"] = layout_of(b)
+    if mode == "efficient":
+        like.update(dq=BSHD, dk=BSHD, dv=BSHD)
+        return {"o": BSHD, **like}
+    return {"o": layout_of(q), **like}
+
+
+def make_attention(inner, mode, extra_args_type):
+    """``attention`` that fills ``output_layouts`` per ``mode`` unless the caller set it."""
+
+    def attention(q, k, v, b, causal, sm_scale, dropout_p, attn_extra_args=None):
+        ext = attn_extra_args if attn_extra_args is not None else extra_args_type()
+        if ext.output_layouts is None:
+            ext = dataclasses.replace(
+                ext, output_layouts=output_layouts(mode, q, k, v, b)
+            )
+        return inner(q, k, v, b, causal, sm_scale, dropout_p, ext)
+
+    setattr(attention, _WRAPPED, inner)
+    return attention
+
+
+def storage_layout_for(mode, storage_flip):
+    """The ``StorageLayout`` that lays q/k/v/b out as ``storage_flip`` always did, and dO, O and
+    the gradients as ``mode`` asks (``output_layouts`` gives the same dQ/dK/dV/dB the
+    forward wrapper would)."""
+    from _common_test import BSHD, StorageLayout
+
+    if isinstance(storage_flip, tuple):
+        base = StorageLayout.from_storage_flip(storage_flip)
+    elif storage_flip:
+        base = StorageLayout.from_storage_flip((1, 2))
+    else:
+        base = StorageLayout({})
+    perms = {t: base[t] for t in ("q", "k", "v", "b")}
+    if mode == "efficient":
+        perms.update(o=BSHD, dq=BSHD, dk=BSHD, dv=BSHD, dout=BSHD, db=perms["b"])
+    else:
+        perms.update(
+            o=perms["q"],
+            dq=perms["q"],
+            dk=perms["k"],
+            dv=perms["v"],
+            db=perms["b"],
+            dout=perms["q"],
+        )
+    return StorageLayout(perms)
+
+
+def make_do_test_op_bwd(inner, mode):
+    """``_do_test_op_bwd`` that turns a bool/tuple ``storage_flip`` into ``storage_layout_for``;
+    a ``StorageLayout`` already in ``args`` is left alone."""
+    from _common_test import StorageLayout
+
+    def _do_test_op_bwd(request, args, device_str="cuda"):
+        flip = args[_FLIP_ARG]
+        if not isinstance(flip, StorageLayout):
+            args = (
+                *args[:_FLIP_ARG],
+                storage_layout_for(mode, flip),
+                *args[_FLIP_ARG + 1 :],
+            )
+        return inner(request, args, device_str)
+
+    setattr(_do_test_op_bwd, _WRAPPED, inner)
+    return _do_test_op_bwd
+
+
+def _rebind(name, current, new):
+    """Point every loaded module's ``name`` that holds ``current`` (or a wrapper of it) at ``new``."""
+    for module in list(sys.modules.values()):
+        held = getattr(module, "__dict__", {}).get(name)
+        if held is not None and (
+            held is current or getattr(held, _WRAPPED, None) is current
+        ):
+            setattr(module, name, new)
+
+
+def _install_layout_wrappers(mode):
+    """Allocate every tensor of the vendored backward/forward tests in ``mode``'s layouts.
+
+    Wraps ``attn_torch_function.attention`` and ``_core_test_backward._do_test_op_bwd`` and
+    rebinds the names every loaded module imported them under, so it must run before the test
+    modules import them (``pytest_pycollect_makemodule`` does). Re-installing starts from the
+    unwrapped originals; ``aotriton`` mode installs nothing and removes earlier wrappers.
+    """
+    if mode == "aotriton" and "attn_torch_function" not in sys.modules:
+        return
+    if str(layout.FLASH_TESTS) not in sys.path:
+        sys.path.append(str(layout.FLASH_TESTS))
+    import _core_test_backward as core
+    import attn_torch_function as atf
+
+    for module, name, make in (
+        (
+            atf,
+            "attention",
+            lambda inner: make_attention(inner, mode, atf.AttentionExtraArgs),
+        ),
+        (core, "_do_test_op_bwd", lambda inner: make_do_test_op_bwd(inner, mode)),
+    ):
+        current = getattr(module, name)
+        original = getattr(current, _WRAPPED, current)
+        _rebind(name, current, original if mode == "aotriton" else make(original))
+
+
+def pytest_pycollect_makemodule(module_path, parent):
+    if module_path.parent == layout.FLASH_TESTS:
+        mode = layout_mode()
+        if getattr(parent.config, "_sdpa_layout_mode", None) != mode:
+            _install_layout_wrappers(mode)
+            parent.config._sdpa_layout_mode = mode
+
+
 def _crash_row(report):
     """The row of a case whose worker died: the engine, direction and stage come from the marker
     ``<in-flight dir>/<pass>/<gateway id>.json`` when it was written for this case; it is deleted
@@ -590,6 +734,7 @@ def pytest_configure(config):
     if config.getoption("shard"):
         _parse_shard(config.getoption("shard"))
     config._sdpa_backend = _bind_backend_first(config.getoption("hipdnn_prefix"))
+    layout_mode()
     fake = config.getoption("fake") == "always-decline"
     _install_wrappers(fake)
     runs_cases = (
@@ -616,7 +761,7 @@ def pytest_report_header(config):
     return (
         "sdpa-conformance: "
         + (", ".join(forwarded) or "no forwarded knobs")
-        + f"; hipDNN backend: {backend}"
+        + f"; layout mode: {layout_mode()}; hipDNN backend: {backend}"
     )
 
 
