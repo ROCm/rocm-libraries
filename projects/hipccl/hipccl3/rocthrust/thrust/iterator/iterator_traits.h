@@ -261,6 +261,17 @@ template <class Iter>
 struct iterator_traversal<_THRUST_STD::reverse_iterator<Iter>> : iterator_traversal<Iter>
 {};
 
+template <class IndexType, class Bijection>
+struct iterator_system<_THRUST_LIBCXX::shuffle_iterator<IndexType, Bijection>>
+{
+  using type = any_system_tag;
+};
+template <class IndexType, class Bijection>
+struct iterator_traversal<_THRUST_LIBCXX::shuffle_iterator<IndexType, Bijection>>
+{
+  using type = random_access_traversal_tag;
+};
+
 template <class Iter, class Stride>
 struct iterator_system<_THRUST_LIBCXX::strided_iterator<Iter, Stride>> : iterator_system<Iter>
 {};
