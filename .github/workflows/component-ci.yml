@@ -26,7 +26,7 @@ jobs:
       miopen: ${{ steps.configure.outputs.miopen }}
       tensilelite-coverage: ${{ steps.configure.outputs.tensilelite_coverage }}
       library-uniqueness: ${{ steps.configure.outputs.hipblaslt_library_uniqueness }}
-      random-gemm-runner: ${{ steps.configure.outputs.random_gemm_runner }}
+      hipblaslt-rocjitsu-scripts: ${{ steps.configure.outputs.hipblaslt_rocjitsu_scripts }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
       windows-runner: ${{ steps.env.outputs.windows-runner }}
@@ -99,11 +99,11 @@ jobs:
     if: needs.changes.outputs.library-uniqueness == 'true'
     uses: ./.github/workflows/component-ci-library-uniqueness.yml
 
-  random-gemm-runner:
-    name: "Random GEMM runner"
+  hipblaslt-rocjitsu-scripts:
+    name: "hipBLASLt rocjitsu scripts"
     needs: changes
-    if: needs.changes.outputs.random-gemm-runner == 'true'
-    uses: ./.github/workflows/component-ci-random-gemm-runner.yml
+    if: needs.changes.outputs.hipblaslt-rocjitsu-scripts == 'true'
+    uses: ./.github/workflows/component-ci-hipblaslt-rocjitsu-scripts.yml
 
   component-ci-summary:
     name: "Component CI Summary"
@@ -115,7 +115,7 @@ jobs:
       - miopen
       - tensilelite-coverage
       - library-uniqueness
-      - random-gemm-runner
+      - hipblaslt-rocjitsu-scripts
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository

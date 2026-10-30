@@ -133,8 +133,8 @@ jobs:
       contents: read
       id-token: write
 
-  rocjitsu_random_gemms_gfx950:
-    name: rocjitsu GEMM race checks (gfx950, 100 cases)
+  rocjitsu_gemm_race_checks_gfx950:
+    name: rocjitsu GEMM race checks (gfx950)
     needs: [setup, linux_build_and_test]
     if: >-
       ${{
@@ -148,9 +148,10 @@ jobs:
       build_runs_on: ${{ fromJSON(needs.setup.outputs.linux_build_config).build_runs_on_medium }}
       amdgpu_families: gfx950-dcgpu
       amdgpu_targets: gfx950
+      workload: random-gemms
+      workers: 8
       random_gemm_count: 100
       random_gemm_seed: 0
-      random_gemm_threads: 8
 
   multi_arch_ci_summary:
     name: Multi-Arch CI Summary

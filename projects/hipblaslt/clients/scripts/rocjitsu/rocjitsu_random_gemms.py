@@ -21,7 +21,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from sample_hipblaslt_gemms import SAMPLER_VERSION, sample_gemm
+from rocjitsu_gemm_sampler import SAMPLER_VERSION, sample_gemm
 
 
 def bench_input(problem):
@@ -90,9 +90,10 @@ def write_summary_report(directory, summary, records):
         f"{summary['passed']} passed, {summary['failed']} failed, "
         f"{summary['unsupported']} without a solution"
         + ("" if summary["complete"] else " (incomplete run)"),
-        f"- Elapsed: {summary['elapsed_seconds']:.1f} s with {summary['threads']} "
-        f"concurrent cases; timeout {summary['timeout_seconds']} s per command",
+        f"- Elapsed: {summary['elapsed_seconds']:.1f} s with {summary['workers']} "
+        f"workers; timeout {summary['timeout_seconds']} s per command",
         f"- Distinct kernels: {summary['distinct_kernels']}",
+        f"- rocjitsu revision: {summary['rocjitsu_revision'] or 'not recorded'}",
     ]
     if summary["case_seconds"]:
         seconds = summary["case_seconds"]
@@ -120,7 +121,7 @@ def write_summary_report(directory, summary, records):
     (directory / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def run_command(command, directory, timeout, log_name):
+def run_command(command, directory, timeout, log_name, env=None):
     """Return (exit status, elapsed seconds, timed out).
 
     Terminate the entire case process group on timeout, including bench, and
@@ -135,6 +136,7 @@ def run_command(command, directory, timeout, log_name):
             start_new_session=True,
             env={
                 **os.environ,
+                **(env or {}),
                 "OMP_NUM_THREADS": "1",
                 "OPENBLAS_NUM_THREADS": "1",
                 "MKL_NUM_THREADS": "1",
@@ -203,7 +205,7 @@ def check_result(problem, text, race_log):
 
 def run_case(args, directory, problem, config):
     # Use this interpreter for YAML conversion instead of bench's build-time Python.
-    bench_dir = Path(args.bench).parent
+    bench_dir = Path(args.client).parent
     convert = [
         sys.executable,
         str(bench_dir / "hipblaslt_gentest.py"),
@@ -218,7 +220,7 @@ def run_case(args, directory, problem, config):
         "--config",
         str(directory / "rocjitsu.json"),
         "--",
-        args.bench,
+        args.client,
         "--data",
         str(directory / "input.data"),
     ]
@@ -235,9 +237,14 @@ def run_case(args, directory, problem, config):
     )
     case_config["sinks"] = {"types": ["stderr", "file"], "dir": str(directory)}
     write_json(directory / "rocjitsu.json", case_config)
+    env = (
+        {"HIPBLASLT_TENSILE_LIBPATH": str(args.library_dir)}
+        if args.library_dir
+        else None
+    )
     seconds = {}
     status, seconds["conversion"], timed_out = run_command(
-        convert, directory, args.timeout, "conversion.log"
+        convert, directory, args.timeout, "conversion.log", env
     )
     if status:
         return {
@@ -251,7 +258,7 @@ def run_case(args, directory, problem, config):
             "seconds": seconds,
         }
     status, seconds["bench"], timed_out = run_command(
-        command, directory, args.timeout, "bench.log"
+        command, directory, args.timeout, "bench.log", env
     )
     text = (directory / "bench.log").read_text(encoding="utf-8", errors="replace")
     race_path = directory / "race.log"
@@ -292,30 +299,44 @@ def positive_int(value):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    # Options shared with rocjitsu_race_sweep.py use the same names.
+    parser.add_argument("--rocjitsu", default="rocjitsu")
+    parser.add_argument(
+        "--client", default="hipblaslt-bench", help="hipblaslt-bench executable"
+    )
+    parser.add_argument(
+        "--library-dir",
+        type=Path,
+        help="hipBLASLt library directory (sets HIPBLASLT_TENSILE_LIBPATH)",
+    )
+    parser.add_argument("--reports", type=Path, required=True)
+    parser.add_argument(
+        "--config", type=Path, help="CPU-emulation rocjitsu JSON config"
+    )
+    parser.add_argument("--target", choices=("gfx950",), default="gfx950")
+    parser.add_argument(
+        "--workers", type=positive_int, default=1, help="number of concurrent GEMMs"
+    )
+    parser.add_argument(
+        "--continue-on-failure",
+        action="store_true",
+        help="keep starting new cases after a failure; still exit unsuccessfully",
+    )
+    parser.add_argument(
+        "--timeout", type=positive_int, default=180, help="seconds per command"
+    )
+    parser.add_argument(
+        "--rocjitsu-revision",
+        help="source revision of the rocjitsu build, recorded in summary.json",
+    )
+    # Options specific to random sampling.
     parser.add_argument(
         "--count", type=positive_int, default=100, help="number of random GEMMs"
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
-        "--threads", type=positive_int, default=1, help="number of concurrent GEMMs"
-    )
-    parser.add_argument(
-        "--stop-on-failure",
-        action="store_true",
-        help="stop starting new cases after a failure",
-    )
-    parser.add_argument(
         "--case", type=positive_int, help="run just this 1-based iteration"
     )
-    parser.add_argument("--bench", default="hipblaslt-bench")
-    parser.add_argument("--rocjitsu", default="rocjitsu")
-    parser.add_argument(
-        "--config", type=Path, help="CPU-emulation rocjitsu JSON config"
-    )
-    parser.add_argument(
-        "--timeout", type=positive_int, default=180, help="seconds per command"
-    )
-    parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -339,17 +360,22 @@ def main(argv=None):
             != 90500
         ):
             parser.error("--config must emulate gfx950")
-        for name in ("bench", "rocjitsu"):
+        for name in ("client", "rocjitsu"):
             executable = shutil.which(getattr(args, name))
             if not executable:
                 parser.error(f"{name} executable not found")
             setattr(args, name, str(Path(executable).resolve()))
+        if args.library_dir:
+            if not args.library_dir.is_dir():
+                parser.error("--library-dir must be a directory")
+            args.library_dir = args.library_dir.resolve()
     # A new directory prevents stale detector files from affecting a rerun.
-    args.output = args.output.resolve()
-    args.output.mkdir(parents=True, exist_ok=False)
+    args.reports = args.reports.resolve()
+    args.reports.mkdir(parents=True, exist_ok=False)
     summary = {
         "sampler": SAMPLER_VERSION,
-        "architecture": "gfx950",
+        "architecture": args.target,
+        "rocjitsu_revision": args.rocjitsu_revision,
         "seed": args.seed,
         "requested": 1 if args.case else args.count,
         "sampled": 0,
@@ -357,7 +383,7 @@ def main(argv=None):
         "failed": 0,
         "unsupported": 0,
         "coverage": {key: {} for key in ("family", "transpose", "epilogue")},
-        "threads": args.threads,
+        "workers": args.workers,
         "timeout_seconds": args.timeout,
         "dry_run": args.dry_run,
         "complete": False,
@@ -397,9 +423,9 @@ def main(argv=None):
         ]
         summary["distinct_kernels"] = len(kernel_cases)
         # Replace the file so an interrupted write leaves the previous totals intact.
-        temporary = args.output / "summary.json.tmp"
+        temporary = args.reports / "summary.json.tmp"
         write_json(temporary, summary)
-        temporary.replace(args.output / "summary.json")
+        temporary.replace(args.reports / "summary.json")
 
     save_summary()
 
@@ -427,7 +453,7 @@ def main(argv=None):
                     counts = summary["coverage"][key]
                     counts[category] = counts.get(category, 0) + 1
                 save_summary()
-            directory = args.output / name
+            directory = args.reports / name
             directory.mkdir()
             write_input(directory / "input.yaml", problem)
             write_json(directory / "problem.json", problem)
@@ -454,7 +480,7 @@ def main(argv=None):
                     case_seconds[name] = result["seconds"]["total"]
                     for kernel in result.get("kernels", []):
                         kernel_cases.setdefault(kernel, []).append(name)
-                    if args.stop_on_failure and result["outcome"] != "passed":
+                    if not args.continue_on_failure and result["outcome"] != "passed":
                         stop.set()
                     save_summary()
                 timings = ", ".join(
@@ -479,8 +505,8 @@ def main(argv=None):
                 )
 
     try:
-        with ThreadPoolExecutor(max_workers=args.threads) as pool:
-            futures = [pool.submit(worker) for _ in range(args.threads)]
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            futures = [pool.submit(worker) for _ in range(args.workers)]
             for future in as_completed(futures):
                 try:
                     future.result()
@@ -490,17 +516,17 @@ def main(argv=None):
         summary["complete"] = summary["sampled"] == summary["requested"]
     finally:
         save_summary()
-        write_case_report(args.output, records)
-        write_summary_report(args.output, summary, records)
+        write_case_report(args.reports, records)
+        write_summary_report(args.reports, summary, records)
         write_json(
-            args.output / "kernels.json",
+            args.reports / "kernels.json",
             {kernel: sorted(cases) for kernel, cases in sorted(kernel_cases.items())},
         )
         if summary["case_seconds"]:
             slowest = summary["slowest_cases"][0]
             print(
                 f"{len(case_seconds)} cases in {summary['elapsed_seconds']:.1f} s "
-                f"with {args.threads} concurrent; per case median "
+                f"with {args.workers} workers; per case median "
                 f"{summary['case_seconds']['median']:.1f} s, max "
                 f"{slowest['seconds']:.1f} s ({slowest['case']}), "
                 f"timeout {args.timeout} s; "
