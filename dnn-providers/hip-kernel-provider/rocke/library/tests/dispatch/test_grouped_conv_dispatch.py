@@ -383,9 +383,9 @@ class _HelperCache:
     def __init__(self):
         self.looked_up: list[KernelIdentity] = []
 
-    def get(self, identity):
+    def entry_meta(self, identity):
         self.looked_up.append(identity)
-        return b"", {"kernel_name": "helper"}
+        return {"kernel_name": "helper"}
 
     def hsaco_path(self, identity):
         return Path("unused.hsaco")
