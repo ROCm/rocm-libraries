@@ -273,6 +273,19 @@ class TestPatchIdentity(unittest.TestCase):
         for name in ("ws_replicas", "prefetch_addr", "patch"):
             if not fields[name]:
                 del fields[name]
+        # Opt-in conv knobs, all off here: stable_hash leaves them out at their defaults.
+        for name in (
+            "a_direct", "b_kpack", "cshuffle_m_chunks", "defer_mfma", "defer_mfma_per_write", "dy_halo",
+            "dy_halo_kouter_pad", "dy_halo_setprio", "halo_max_wo", "kp_line", "lds_ahead", "lds_bswz",
+            "lds_kpack", "lds_kpack_read", "lds_xor", "lds_xor_rowkey", "pfr_sched", "pp_b_double",
+            "pp_pre_mfma", "prefetch_regs", "reg_prefetch", "rpf_fetch_late", "rpf_lds_barrier",
+            "rpf_pingpong", "rpf_setprio", "sep_addr", "split_addr_k_decode", "split_tail", "tap_outer_k",
+            "tapk_ilv", "tapk_lds_ahead", "tapk_lds_barrier", "tapk_pingpong", "tapk_pp_epi", "tapk_pp_sched",
+            "tapk_prefetch", "tapk_setprio", "tapk_xhalo", "uk_chunk_group", "uk_nopad", "uk_tap_fast",
+            "uk_xhalo", "vmem_interleave", "xcd_remap", "xh_a_k4", "xh_b_kpad", "xh_b_wide",
+            "xh_defer", "xh_dpp", "xh_order", "xh_wait_smem", "xhalo_exact", "xwin", "xwin_rows",
+        ):
+            del fields[name]
         if fields["streamk"] == "off" and not fields["streamk_reduction"]:
             del fields["streamk"], fields["streamk_reduction"]
         payload = json.dumps(fields, sort_keys=True, separators=(",", ":"))
