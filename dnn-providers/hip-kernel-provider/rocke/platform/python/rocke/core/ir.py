@@ -791,6 +791,25 @@ def _loop_carried_descriptor_message(index: int) -> str:
     )
 
 
+def _reused_loop_name_message(name: str) -> str:
+    """The refusal for an ``scf.for`` induction variable or carried value named
+    ``name`` when that name is already taken.
+
+    A loop names its induction variable and carried values itself (they are not
+    builder-numbered), and the serialized IR refers to a value by its name. If a
+    nested loop reuses the name of a value of a loop it sits in, or one loop
+    gives two of its values the same name, a read of that name inside the inner
+    body is ambiguous: the C++ engine, which lowers the serialized IR, reads one
+    value where the Python engine reads the other, and the two engines emit
+    different kernels without an error.
+    """
+    return (
+        f"scf.for: the name '{name}' is already taken by an induction variable or "
+        "carried value of this loop or of a loop it is nested in; give it a name "
+        "of its own"
+    )
+
+
 def _scf_for_carried_descriptor_error(op: "Op") -> Optional[str]:
     """The refusal for the ``scf.for`` ``op`` when it carries a buffer
     descriptor, or None when it does not.
@@ -6208,6 +6227,7 @@ class IRBuilder:
     # ----- control flow -----
 
     def scf_for(self, lower: Value, upper: Value, step: Value, iv_name: str = "k0"):
+        self._refuse_taken_loop_names([f"%{iv_name}"])
         body = Region("body")
         iv = Value(name=f"%{iv_name}", type=lower.type)
         op = Op(
@@ -6246,11 +6266,16 @@ class IRBuilder:
         - False: preserve all barriers (for manually optimized kernels)
 
         No init may be a buffer descriptor (see
-        :func:`_loop_carried_descriptor_message`).
+        :func:`_loop_carried_descriptor_message`), and no name may be taken by
+        another value of this loop or of a loop it is nested in (see
+        :func:`_reused_loop_name_message`).
         """
         for index, (_, init) in enumerate(iter_args):
             if _is_buffer_descriptor(init):
                 raise ValueError(_loop_carried_descriptor_message(index))
+        self._refuse_taken_loop_names(
+            [f"%{iv_name}"] + [f"%{arg_name}" for arg_name, _ in iter_args]
+        )
         body = Region("body")
         iv = Value(name=f"%{iv_name}", type=lower.type)
         iter_vars: List[Value] = []
@@ -6296,6 +6321,36 @@ class IRBuilder:
                 if _is_buffer_descriptor(value):
                     raise ValueError(_loop_carried_descriptor_message(index))
         self._op("scf.yield", list(values), [], attrs={"num": len(values)})
+
+    def _refuse_taken_loop_names(self, names: Sequence[str]) -> None:
+        """Refuse the names a new ``scf.for`` gives its induction variable and
+        carried values (``names``, in that order) when one is already taken by
+        a value of a loop the builder is emitting inside, or by an earlier name
+        in ``names`` (see :func:`_reused_loop_name_message`)."""
+        taken = set(self._enclosing_loop_value_names())
+        for name in names:
+            if name in taken:
+                raise ValueError(_reused_loop_name_message(name))
+            taken.add(name)
+
+    def _enclosing_loop_value_names(self) -> List[str]:
+        """The names of the induction variables and carried values of every
+        ``scf.for`` the builder is emitting inside, at any depth.
+
+        Each region on the stack below the top is entered from the last op of
+        the region under it (see :meth:`_current_region_is_loop_body`); when
+        that op is an ``scf.for`` and the region is its body, the loop's values
+        are visible from here.
+        """
+        names: List[str] = []
+        for outer, inner in zip(self._region_stack, self._region_stack[1:]):
+            if not outer.ops:
+                continue
+            owner = outer.ops[-1]
+            if owner.name == "scf.for" and owner.regions and owner.regions[0] is inner:
+                names.append(owner.attrs["iv"])
+                names.extend(meta["name"] for meta in owner.attrs.get("iter_args", []))
+        return names
 
     def _current_region_is_loop_body(self) -> bool:
         """True while the builder is emitting into an ``scf.for`` body.
