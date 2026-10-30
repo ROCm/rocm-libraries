@@ -93,7 +93,7 @@ protected:
         std::shared_ptr<TensorAttributes> glob;
     };
 
-    Built makeGraph(const std::string& data, int64_t globWords)
+    static Built makeGraph(const std::string& data, int64_t globWords)
     {
         Built built{std::make_shared<Graph>(), nullptr, nullptr};
         built.graph->set_name("megakernel_standin")

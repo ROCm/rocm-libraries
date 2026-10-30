@@ -85,14 +85,14 @@ struct Graph
     DeviceProperties properties;
 
     explicit Graph(const std::string& data,
-                   std::string opId = "megakernel." + std::string(MODEL),
+                   const std::string& opId = "megakernel." + std::string(MODEL),
                    int multiProcessorCount = static_cast<int>(CUS))
     {
         const std::vector<int64_t> inputs{1, 2};
         const std::vector<uint8_t> bytes(data.begin(), data.end());
         const auto attributes = data_objects::CreateCustomOpAttributesDirect(
             builder, opId.c_str(), &inputs, nullptr, &bytes);
-        std::vector<flatbuffers::Offset<data_objects::Node>> nodes{
+        const std::vector<flatbuffers::Offset<data_objects::Node>> nodes{
             data_objects::CreateNodeDirect(builder,
                                            "megakernel",
                                            data_objects::DataType::FLOAT,
