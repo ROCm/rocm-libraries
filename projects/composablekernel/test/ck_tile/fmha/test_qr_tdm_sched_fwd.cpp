@@ -40,7 +40,17 @@ enum class SequencePointers
     PerSequence,
     Cumulative,
     AboveCuGrid,
+    BatchCumulative,
+    BatchCumulativeQ,
+    BatchCumulativeK,
 };
+
+constexpr bool IsBatchCumulative(SequencePointers pointers)
+{
+    return pointers == SequencePointers::BatchCumulative ||
+           pointers == SequencePointers::BatchCumulativeQ ||
+           pointers == SequencePointers::BatchCumulativeK;
+}
 
 struct ForwardCase
 {
@@ -61,6 +71,7 @@ struct ForwardCase
     int second_key_length   = 513;
     bool square_causal      = false;
     bool virtual_sink       = false;
+    int layout_padding      = 0; // bit0: row pitch; bit1: head gap; bit2: batch gap
 };
 
 // Sixteen bounded inputs, each checked with and without LSE in both dtype binaries.
@@ -76,7 +87,7 @@ constexpr std::array<ForwardCase, 16> kCases{{
      2,
      1,
      SequencePointers::Batch,
-     64},
+     128},
     {"D64BottomRightK513",
      64,
      128,
@@ -313,7 +324,7 @@ constexpr std::array<ForwardCase, 14> kAdditionalCases{{
      2,
      1,
      SequencePointers::Batch,
-     64,
+     128,
      true,
      -1,
      0,
@@ -475,7 +486,7 @@ constexpr std::array<ForwardCase, 12> kPartialQueryCases{{
      2,
      1,
      SequencePointers::Batch,
-     64},
+     128},
     {"D64BatchPartialQTopLeftBhsd",
      64,
      200,
@@ -495,7 +506,7 @@ constexpr std::array<ForwardCase, 12> kPartialQueryCases{{
      2,
      1,
      SequencePointers::Batch,
-     64},
+     128},
     {"D128BatchPartialQTopLeftBhsd",
      128,
      200,
@@ -655,9 +666,192 @@ constexpr std::array<ForwardCase, 4> kD64WideTileCases{{
      kD64WideTileN},
 }};
 
-constexpr int kCaseCount =
-    static_cast<int>(kCases.size() + kAdditionalCases.size() + kVirtualSinkCases.size() +
-                     kSelectorCases.size() + kPartialQueryCases.size() + kD64WideTileCases.size());
+// Preserve all earlier case indices. These cases separate physical batch strides from
+// heterogeneous logical lengths and check every output component/gap with the FP32 oracle.
+constexpr std::array<ForwardCase, 16> kD64ExpandedCases = [] {
+    std::array<ForwardCase, 16> cases{{
+        {"D64DenseRectangularBshd",
+         64,
+         384,
+         512,
+         mask_enum::no_mask,
+         false,
+         4,
+         2,
+         SequencePointers::Batch,
+         128},
+        {"D64DenseRectangularBhsd",
+         64,
+         512,
+         384,
+         mask_enum::no_mask,
+         true,
+         4,
+         2,
+         SequencePointers::Batch,
+         128},
+        {"D64DensePartialQueryBhsd",
+         64,
+         129,
+         256,
+         mask_enum::no_mask,
+         true,
+         4,
+         2,
+         SequencePointers::Batch,
+         128},
+        {"D64DenseStridePaddingBshd",
+         64,
+         512,
+         512,
+         mask_enum::no_mask,
+         false,
+         4,
+         2,
+         SequencePointers::Batch,
+         128},
+        {"D64CausalStridePaddingBhsd",
+         64,
+         512,
+         512,
+         mask_enum::mask_top_left,
+         true,
+         4,
+         2,
+         SequencePointers::Batch,
+         128},
+        {"D64GroupWidePerSequenceDense",
+         64,
+         1024,
+         2048,
+         mask_enum::no_mask,
+         false,
+         4,
+         2,
+         SequencePointers::PerSequence,
+         128},
+        {"D64GroupWideCumulativeCausal",
+         64,
+         1024,
+         2048,
+         mask_enum::mask_bottom_right,
+         true,
+         4,
+         2,
+         SequencePointers::Cumulative,
+         128},
+        {"D64BatchWideCumulativeDense",
+         64,
+         384,
+         512,
+         mask_enum::no_mask,
+         false,
+         4,
+         2,
+         SequencePointers::BatchCumulative,
+         128},
+        {"D64BatchWideCumulativeQOnlyCausal",
+         64,
+         384,
+         512,
+         mask_enum::mask_bottom_right,
+         true,
+         4,
+         2,
+         SequencePointers::BatchCumulativeQ,
+         64},
+        {"D64BatchWideCumulativeKOnlyDense",
+         64,
+         384,
+         512,
+         mask_enum::no_mask,
+         false,
+         4,
+         2,
+         SequencePointers::BatchCumulativeK,
+         128},
+        {"D64DenseKeyTailRetainsN64",
+         64,
+         256,
+         257,
+         mask_enum::no_mask,
+         true,
+         4,
+         2,
+         SequencePointers::Batch,
+         64},
+        {"D64FiniteLeft127WideBhsd",
+         64,
+         1024,
+         1024,
+         mask_enum::mask_top_left,
+         true,
+         4,
+         2,
+         SequencePointers::Batch,
+         128},
+        {"D64FiniteLeft31RetainsN64",
+         64,
+         1024,
+         1024,
+         mask_enum::mask_top_left,
+         true,
+         4,
+         2,
+         SequencePointers::Batch,
+         64},
+        {"D64RectangularRightWindowRetainsN64",
+         64,
+         300,
+         700,
+         mask_enum::mask_bottom_right,
+         false,
+         4,
+         2,
+         SequencePointers::Batch,
+         64},
+        {"D64CausalKeyTailRetainsN64",
+         64,
+         256,
+         257,
+         mask_enum::mask_top_left,
+         true,
+         4,
+         2,
+         SequencePointers::Batch,
+         64},
+        {"D64BatchLargeCumulativeQOnlyCausal",
+         64,
+         1024,
+         2048,
+         mask_enum::mask_bottom_right,
+         true,
+         4,
+         2,
+         SequencePointers::BatchCumulativeQ,
+         128},
+    }};
+    cases[3].layout_padding = cases[4].layout_padding = 7;
+    for(int index : {5, 6})
+    {
+        cases[index].second_query_length = 200;
+        cases[index].second_key_length   = 1577;
+    }
+    for(int index : {7, 8, 9, 15})
+    {
+        cases[index].second_query_length = 200;
+        cases[index].second_key_length   = 311;
+    }
+    cases[11].window_size_left  = 127;
+    cases[12].window_size_left  = 31;
+    cases[13].window_size_left  = 127;
+    cases[13].window_size_right = 7;
+    return cases;
+}();
+
+constexpr int kCaseCount = static_cast<int>(
+    kCases.size() + kAdditionalCases.size() + kVirtualSinkCases.size() + kSelectorCases.size() +
+    kPartialQueryCases.size() + kD64WideTileCases.size() + kD64ExpandedCases.size());
 
 const ForwardCase& GetCase(int index)
 {
@@ -675,7 +869,10 @@ const ForwardCase& GetCase(int index)
     index -= static_cast<int>(kSelectorCases.size());
     if(index < static_cast<int>(kPartialQueryCases.size()))
         return kPartialQueryCases[index];
-    return kD64WideTileCases[index - kPartialQueryCases.size()];
+    index -= static_cast<int>(kPartialQueryCases.size());
+    if(index < static_cast<int>(kD64WideTileCases.size()))
+        return kD64WideTileCases[index];
+    return kD64ExpandedCases[index - kD64WideTileCases.size()];
 }
 
 enum class ValuePattern
@@ -702,7 +899,7 @@ struct Sequences
 Sequences MakeSequences(const ForwardCase& c, int num_cus)
 {
     Sequences sequences;
-    sequences.group = c.pointers != SequencePointers::Batch;
+    sequences.group = c.pointers != SequencePointers::Batch && !IsBatchCumulative(c.pointers);
     const int batch = c.pointers == SequencePointers::AboveCuGrid ? num_cus + 1
                       : sequences.group || c.scheduled            ? 2
                                                                   : 1;
@@ -719,8 +916,17 @@ Sequences MakeSequences(const ForwardCase& c, int num_cus)
         sequences.q_lengths[1] = c.second_query_length;
         sequences.k_lengths[1] = c.second_key_length;
     }
-    auto physical_q = sequences.q_lengths;
-    auto physical_k = sequences.k_lengths;
+    else if(IsBatchCumulative(c.pointers))
+    {
+        if(c.pointers != SequencePointers::BatchCumulativeK)
+            sequences.q_lengths[1] = c.second_query_length;
+        if(c.pointers != SequencePointers::BatchCumulativeQ)
+            sequences.k_lengths[1] = c.second_key_length;
+    }
+    auto physical_q =
+        sequences.group ? sequences.q_lengths : std::vector<int32_t>(batch, c.query_length);
+    auto physical_k =
+        sequences.group ? sequences.k_lengths : std::vector<int32_t>(batch, c.key_length);
     if(c.pointers == SequencePointers::PerSequence || c.pointers == SequencePointers::Cumulative)
     {
         // Real gaps separate the physical starts from either logical-length API.
@@ -742,12 +948,31 @@ struct Layout
 {
     std::size_t head_stride, row_stride, batch_stride, elements;
 
-    Layout(int batch, int heads, int physical_rows, int dimension, bool bhsd, bool group)
-        : head_stride(bhsd ? static_cast<std::size_t>(physical_rows) * dimension : dimension),
-          row_stride(bhsd ? dimension : static_cast<std::size_t>(heads) * dimension),
-          batch_stride(static_cast<std::size_t>(heads) * physical_rows * dimension),
-          elements(batch_stride * (group ? 1 : batch))
+    Layout(int batch,
+           int heads,
+           int physical_rows,
+           int dimension,
+           bool bhsd,
+           bool group,
+           int padding = 0)
     {
+        const bool row_pad = padding & 1, head_pad = padding & 2, batch_pad = padding & 4;
+        if(bhsd)
+        {
+            row_stride  = dimension + (row_pad ? 8 : 0);
+            head_stride = static_cast<std::size_t>(physical_rows - 1) * row_stride + dimension +
+                          (head_pad ? 16 : 0);
+        }
+        else
+        {
+            head_stride = dimension + (head_pad ? 8 : 0);
+            row_stride =
+                static_cast<std::size_t>(heads - 1) * head_stride + dimension + (row_pad ? 16 : 0);
+        }
+        batch_stride = static_cast<std::size_t>(heads - 1) * head_stride +
+                       static_cast<std::size_t>(physical_rows - 1) * row_stride + dimension +
+                       (batch_pad ? 32 : 0);
+        elements = batch_stride * (group ? 1 : batch);
     }
 
     std::size_t SequenceOffset(int batch, int32_t physical_start, bool group) const
@@ -823,7 +1048,13 @@ std::string ExpectedKernel(const ForwardCase& c, bool lse, bool group)
         const int occupancy = c.dimension == 64 ? 3 : c.expected_n == 64 ? 2 : 1;
         name += "_o" + std::to_string(occupancy) + "_qr_tdm_sched_vr_";
         if(c.dimension == 64)
-            name += group || c.key_length % 64 != 0 ? "pssk" : "npad";
+        {
+            const bool cumulative_k = c.pointers == SequencePointers::BatchCumulative ||
+                                      c.pointers == SequencePointers::BatchCumulativeK;
+            const bool cumulative_q = n == 128 && IsBatchCumulative(c.pointers);
+            name +=
+                group || c.key_length % n != 0 || cumulative_k || cumulative_q ? "pssk" : "npad";
+        }
         else
             name += group || c.dimension == 128 ? "psskddv" : "pddv";
     }
@@ -872,14 +1103,34 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     const auto sequences      = MakeSequences(c, properties.multiProcessorCount);
     const int batch           = sequences.q_lengths.size();
     const int value_dimension = c.dimension == 64 ? 64 : 128;
-    const Layout q_layout(
-        batch, c.query_heads, sequences.physical_q_rows, c.dimension, c.bhsd, sequences.group);
-    const Layout k_layout(
-        batch, c.kv_heads, sequences.physical_k_rows, c.dimension, c.bhsd, sequences.group);
-    const Layout v_layout(
-        batch, c.kv_heads, sequences.physical_k_rows, value_dimension, c.bhsd, sequences.group);
-    const Layout o_layout(
-        batch, c.query_heads, sequences.physical_q_rows, value_dimension, c.bhsd, sequences.group);
+    const Layout q_layout(batch,
+                          c.query_heads,
+                          sequences.physical_q_rows,
+                          c.dimension,
+                          c.bhsd,
+                          sequences.group,
+                          c.layout_padding);
+    const Layout k_layout(batch,
+                          c.kv_heads,
+                          sequences.physical_k_rows,
+                          c.dimension,
+                          c.bhsd,
+                          sequences.group,
+                          c.layout_padding);
+    const Layout v_layout(batch,
+                          c.kv_heads,
+                          sequences.physical_k_rows,
+                          value_dimension,
+                          c.bhsd,
+                          sequences.group,
+                          c.layout_padding);
+    const Layout o_layout(batch,
+                          c.query_heads,
+                          sequences.physical_q_rows,
+                          value_dimension,
+                          c.bhsd,
+                          sequences.group,
+                          c.layout_padding);
     const Layout lse_layout(
         batch, c.query_heads, sequences.physical_q_rows, 1, true, sequences.group);
     const auto q       = MakeInput(q_layout,
@@ -987,11 +1238,16 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
         args.seqlen_q_ptr = q_lengths_device.GetDeviceBuffer();
         args.seqlen_k_ptr = k_lengths_device.GetDeviceBuffer();
     }
-    if(c.pointers == SequencePointers::Cumulative)
+    if(c.pointers == SequencePointers::Cumulative ||
+       c.pointers == SequencePointers::BatchCumulative)
     {
         args.cu_seqlen_q_ptr = q_cumulative_device.GetDeviceBuffer();
         args.cu_seqlen_k_ptr = k_cumulative_device.GetDeviceBuffer();
     }
+    if(c.pointers == SequencePointers::BatchCumulativeQ)
+        args.cu_seqlen_q_ptr = q_cumulative_device.GetDeviceBuffer();
+    if(c.pointers == SequencePointers::BatchCumulativeK)
+        args.cu_seqlen_k_ptr = k_cumulative_device.GetDeviceBuffer();
     const auto grid_blocks =
         static_cast<std::size_t>(batch) * c.query_heads * ((args.max_seqlen_q + 127) / 128);
     const int selector_begin =
@@ -1033,15 +1289,25 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     }
     if(c.window_size_left >= 0)
     {
-        ASSERT_EQ(c.mask, mask_enum::mask_bottom_right);
+        ASSERT_TRUE(c.mask == mask_enum::mask_top_left || c.mask == mask_enum::mask_bottom_right);
         ASSERT_GT(c.query_length, 128);
         for(int sequence = 0; sequence < batch; ++sequence)
         {
-            // At Q origin zero, the first window tile already has a nonzero K origin.
             const int first_key = std::max(sequences.k_lengths[sequence] -
                                                sequences.q_lengths[sequence] - c.window_size_left,
                                            0);
-            ASSERT_GT((first_key / c.expected_n) * c.expected_n, 0);
+            if(sequences.q_lengths[sequence] == sequences.k_lengths[sequence])
+            {
+                // A square causal window starts at K origin zero for the first Q tile.
+                ASSERT_EQ(c.window_size_right, 0);
+                ASSERT_EQ(first_key, 0);
+            }
+            else
+            {
+                // Rectangular coverage requires a nonzero first K tile at Q origin zero.
+                ASSERT_EQ(c.mask, mask_enum::mask_bottom_right);
+                ASSERT_GT((first_key / c.expected_n) * c.expected_n, 0);
+            }
         }
         if(sequences.group)
         {
