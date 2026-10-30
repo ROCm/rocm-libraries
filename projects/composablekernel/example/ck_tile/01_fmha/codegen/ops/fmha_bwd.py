@@ -347,7 +347,6 @@ class FmhaBwdDQDKDVTileSize:
     dispatch_min_grid: int = 0
     allow_mask: bool = False
     tdm_kr_ktr: bool = False
-    mask_only: bool = False
     qdo_slots: int = 0
     # Decode tile whose global->LDS traffic goes through TDM. gfx12 only; the
     # gfx950 decode tiles leave this off and keep the original pipeline.
@@ -1173,8 +1172,6 @@ def get_bwd_blobs(
             if (mode == "group") and (spad1d == "f"):
                 continue
             if ("no" not in mask) and tile.seq_q_limit != 0 and not tile.allow_mask:
-                continue
-            if ("no" in mask) and tile.mask_only:
                 continue
             if (bias == "no" or bias == "alibi") and dbias == "t":
                 continue

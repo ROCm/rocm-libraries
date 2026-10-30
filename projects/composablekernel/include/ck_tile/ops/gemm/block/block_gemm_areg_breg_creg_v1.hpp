@@ -340,12 +340,18 @@ struct BlockGemmARegBRegCRegV1
         });
     }
 
-    // C += A * B
+    // C += A[:, KSlice] * B[:, KSlice]
+    //
+    // Accumulates only the KSlice-th warp-gemm K iteration of the sub-tile held
+    // in A/B; the other KPerSubTile - 1 iterations are left out. Calling it for
+    // every KSlice in [0, KPerSubTile) is equivalent to one operator()(C, A, B).
     template <index_t KSlice, typename CBlockTensor, typename ABlockTensor, typename BBlockTensor>
     CK_TILE_DEVICE void RunKSlice(CBlockTensor& c_block_tensor,
                                   const ABlockTensor& a_block_tensor,
                                   const BBlockTensor& b_block_tensor) const
     {
+        static_assert(KSlice >= 0 && KSlice < KPerSubTile,
+                      "RunKSlice: KSlice must be in [0, KPerSubTile)");
         static_assert(std::is_same_v<ADataType, remove_cv_t<typename ABlockTensor::DataType>> &&
                           std::is_same_v<BDataType, remove_cv_t<typename BBlockTensor::DataType>> &&
                           std::is_same_v<CDataType, remove_cv_t<typename CBlockTensor::DataType>>,
