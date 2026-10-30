@@ -1908,6 +1908,7 @@ TEST_CASE("Origami: ranking entry points rank empty problems as all rejected", "
         REQUIRE(top2.size() == 2);
         REQUIRE(same_tile(top2[0].config, configs[0]));
         REQUIRE(same_tile(top2[1].config, configs[1]));
+        REQUIRE(top2[0].latency == rejected);
         REQUIRE(top2[1].latency == rejected);
 
         auto selected = origami::select_config(problem, hardware, configs);

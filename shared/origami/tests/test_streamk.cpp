@@ -513,8 +513,9 @@ TEST_CASE("Origami streamk: select_grid_size handles empty and K = 0 problems",
 TEST_CASE("Origami streamk: k_split_aware parallel reduction with too few K iterations",
           "[origami][streamk][empty]") {
   // Fewer tiles than CUs and a parallel reduction: the split factor is capped
-  // by iters_per_tile / 8, which is 0 when K < 8 * MT_K (K = 0 included). The
-  // grid must then stay at one workgroup per tile rather than collapse to 0.
+  // by iters_per_tile / 8, which is 0 with fewer than 8 K iterations per tile
+  // (K <= 7 * MT_K, K = 0 included). The grid must then stay at one workgroup
+  // per tile rather than collapse to 0.
   const auto hardware       = make_hardware(950);
   auto config               = make_config(256, 256, 64, 16, 16, 32);
   config.reduction_strategy = origami::reduction_t::parallel;

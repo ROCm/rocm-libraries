@@ -94,7 +94,9 @@ ORIGAMI_EXPORT staggerU_t select_staggerU(const problem_t& problem,
  * (best first). If every candidate is rejected, returns a ranking of the rejected configs
  * (max latency) instead of throwing. For an empty problem (M, N or batch is 0) there is
  * nothing to model: returns every config in input order, each with max latency.
- * K = 0 is not empty and is ranked normally.
+ * K = 0 is not empty and the analytical model ranks it normally. A config with
+ * prediction_mode == simulation throws std::runtime_error("Problem size is invalid")
+ * for K = 0 instead.
  *
  * Non-temporal availability is read from each config
  * (config_t::non_temporal_a_available / non_temporal_b_available). Call
