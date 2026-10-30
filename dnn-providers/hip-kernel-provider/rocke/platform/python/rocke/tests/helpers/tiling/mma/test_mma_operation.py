@@ -8,7 +8,6 @@ from __future__ import annotations
 import pytest
 
 from rocke.helpers.tiling.mma import TileMma, Tiling
-from rocke.tests.arch_marks import arch_specific
 
 
 def test_mma_resolves_gfx90a_16x16x16_f16() -> None:
@@ -118,19 +117,16 @@ def test_atom_name_unknown_fails_fast() -> None:
     assert "mfma_f32_16x16x16_does_not_exist" in str(excinfo.value)
 
 
-@arch_specific(
-    ("gfx950",),
-    reason="names mfma_f32_16x16x32_f16, an atom that exists on gfx950 only",
-)
-def test_atom_name_wrong_target_fails_fast() -> None:
-    # A real gfx950-only wide atom named while bound to gfx90a must fail fast.
+@pytest.mark.parametrize("target", ["gfx90a", "gfx942"])
+def test_atom_name_wrong_target_fails_fast(target: str) -> None:
+    # A real gfx950-only wide atom named while bound to another target must fail fast.
     with pytest.raises(ValueError) as excinfo:
         TileMma(
             (16, 16, 32),
             a="f16",
             b="f16",
             c="f32",
-            target="gfx90a",
+            target=target,
             tiling=Tiling(atom_shape="mfma_f32_16x16x32_f16"),
         )
     assert "mfma_f32_16x16x32_f16" in str(excinfo.value)

@@ -108,7 +108,7 @@ class TestParseNotes(unittest.TestCase):
             with self.subTest(arch=arch):
                 res = occupancy.resources(b"fake", arch)  # deliberately wrong flag
                 self.assertEqual(res["target_arch"], "gfx1201")
-        self.assertEqual(res["occupancy"], 12)  # RDNA model, not the CDNA 4
+                self.assertEqual(res["occupancy"], 12)  # RDNA model, not the CDNA 4
 
 
 class TestOccupancyEstimate(unittest.TestCase):

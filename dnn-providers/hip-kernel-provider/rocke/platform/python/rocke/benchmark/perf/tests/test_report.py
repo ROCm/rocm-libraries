@@ -205,7 +205,7 @@ class TestFormatting(unittest.TestCase):
                 self.assertIn(arch, txt)
                 self.assertIn("busy_cycles", txt)
                 self.assertIn("n=5", txt)
-        self.assertIn("panel", txt)
+                self.assertIn("panel", txt)
 
     def test_format_diff_smoke(self):
         txt = report.format_diff(
