@@ -1,0 +1,27 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+name: "Component CI: Random GEMM runner"
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      # The tests use a stand-in benchmark and emulator, so the race-check
+      # sampler and runner need no build, artifacts or GPU here.
+      - name: Run sampler and runner unit tests
+        run: python3 -B -m unittest discover -v -s .github/scripts/tests -p test_random_hipblaslt_gemms.py

@@ -3,10 +3,9 @@
 
 # This reusable workflow is a narrow post-build instrumentation job for
 # hipBLASLt. It fetches BLAS artifacts from a TheRock build (the calling run, or
-# a completed run when dispatched manually), runs the random GEMM runner's unit
-# tests, and then runs smoke workloads or sampled GEMMs under rocjitsu's race
-# detector. CPU emulation uses the build runner pool without requiring GPU
-# hardware.
+# a completed run when dispatched manually) and runs smoke workloads or sampled
+# GEMMs under rocjitsu's race detector. CPU emulation uses the build runner pool
+# without requiring GPU hardware.
 
 name: TheRock rocjitsu race check Linux
 
@@ -194,12 +193,6 @@ jobs:
       - name: Install bench input conversion dependency
         if: inputs.random_gemm_count > 0
         run: uv pip install PyYAML
-
-      # The runner's unit tests use a stand-in benchmark and emulator and need
-      # only the Python set up above. Run them in every mode, before building
-      # rocjitsu, so each caller of this workflow also tests the runner.
-      - name: Test random GEMM runner
-        run: python -B -m unittest discover -s rocm-libraries/.github/scripts/tests -p test_random_hipblaslt_gemms.py
 
       - name: Run rocjitsu race check
         timeout-minutes: 75
