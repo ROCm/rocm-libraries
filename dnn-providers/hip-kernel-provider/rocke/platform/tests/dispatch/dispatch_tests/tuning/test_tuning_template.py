@@ -530,6 +530,47 @@ class TestRouteAuto(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("opt-in", why)
 
+    def _auto_knobs_candidate(self, tile, knobs):
+        return _candidate(
+            tile,
+            route_auto=lambda req: (True, "ok"),
+            auto_knobs=lambda req: knobs,
+        )
+
+    def test_auto_knobs_run_on_auto_only(self):
+        for knobs, want in (({"unroll": 2}, {"unroll": 2}), ({}, {})):
+            with self.subTest(knobs=knobs):
+                candidate = self._auto_knobs_candidate(64, knobs)
+                auto = candidate.select_spec(ToyRequest(m=1024))
+                self.assertEqual(dict(auto.knobs), want)
+                pinned = ToyRequest(m=1024, spec_id=candidate.spec_id)
+                self.assertEqual(candidate.select_spec(pinned).knobs, ())
+
+    def test_auto_knobs_that_do_not_resolve_raise_with_the_reason(self):
+        # tile128 x unroll 4 exceeds the toy register budget, while tile128's
+        # default builds: auto must not quietly run the default instead.
+        candidate = self._auto_knobs_candidate(128, {"unroll": 4})
+        with self.assertRaisesRegex(RuntimeError, "register budget"):
+            candidate.admits(ToyRequest(m=1024))
+        # A request the space cannot build at all is refused, not raised.
+        ok, why = candidate.admits(ToyRequest(m=0))
+        self.assertFalse(ok)
+        self.assertIn("m must be positive", why)
+
+    def test_auto_knobs_need_route_auto(self):
+        with self.assertRaisesRegex(ValueError, "auto_knobs needs route_auto"):
+            _candidate(64, auto_knobs=lambda req: {"unroll": 2})
+
+    def test_auto_knobs_never_replace_the_callers_tuning_pin(self):
+        # A family whose request check lets an auto request carry its own
+        # knobs: the hook's stack must not silently replace them.
+        candidate = self._auto_knobs_candidate(64, {"unroll": 2})
+        mine = candidate.select_spec(ToyRequest(m=1024, tuning_knobs={"unroll": 4}))
+        self.assertEqual(dict(mine.knobs), {"unroll": 4})
+        # A stored tuning_id alone is a pin too.
+        by_id = candidate.select_spec(ToyRequest(m=1024, tuning_id=mine.tuning_id))
+        self.assertEqual(by_id, mine)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,11 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Verifies that the CPU reference plan builders reject any graph containing a
-// ragged tensor. The check lives in every plan builder's isApplicable (see
-// CHECK_NO_RAGGED_TENSORS in PlanUtils.hpp); here we exercise it end-to-end
+// Verifies that the CPU reference plan builders reject graphs containing a ragged
+// tensor they do not support. The check lives in each plan builder's isApplicable
+// (see CHECK_NO_RAGGED_TENSORS in PlanUtils.hpp); here we exercise it end-to-end
 // through CpuReferenceGraphExecutor::isApplicable, which dispatches to the
-// correct builder for each node.
+// correct builder for each node. For SDPA forward the helper makes one primary ragged and leaves
+// the others dense, which neither the dense nor the ragged SDPA plan accepts.
 
 #include <cstdint>
 #include <memory>
@@ -39,6 +40,7 @@
 #include "SdpaTensorBundles.hpp"
 #endif
 
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
@@ -245,10 +247,12 @@ TEST(TestCpuReferenceRaggedRejection, BlockScaleDequantize)
 }
 
 #ifdef HIPDNN_ENABLE_SDPA
-TEST(TestCpuReferenceRaggedRejection, SdpaFwd)
+TEST(TestCpuReferenceRaggedRejection, SdpaFwdPartlyRaggedNodeDeclined)
 {
-    SdpaFwdTensorBundle<float> bundle({1, 2, 4, 8}, {1, 2, 4, 8}, {1, 2, 4, 8});
-    auto [graph, variantPack] = buildSdpaFwdGraph(bundle, DataType::FLOAT);
+    // The helper makes Q ragged and leaves K, V and O dense. The executor must decline the node.
+    SdpaFwdTensorBundle<hipdnn_data_sdk::types::bfloat16> bundle(
+        {1, 2, 4, 8}, {1, 2, 4, 8}, {1, 2, 4, 8});
+    auto [graph, variantPack] = buildSdpaFwdGraph(bundle, DataType::BFLOAT16);
     expectRaggedTensorRejected(serialize(graph));
 }
 #endif
