@@ -56,6 +56,7 @@ from rocke.core.ir import (
     Value,
     VectorType,
     cache_policy_from_name,
+    type_bits,
 )
 from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
@@ -1748,7 +1749,6 @@ def build_unified_attention_2d_tiled(
     K_LDS_DTYPE = FP8E4M3 if FP8_MFMA_QK else dtype
     V_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
     P_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
-    Q_BYTES = BLOCK_M * HD * 2
     # Head-dim width of one K slice (spec.k_slice_hd), so k_groups = HD // this.
     # It sets the K_lds row stride and therefore the QK read's LDS bank spread;
     # see the spec field docstring. Validated against head_size and the QK k-step
@@ -1763,34 +1763,51 @@ def build_unified_attention_2d_tiled(
     RING_DEPTH = spec.ring_depth
     K_SLICE_SLOTS = RING_DEPTH
     K_SLICED_ACTIVE = K_SLICED_RING and USE_MFMA_32X32X8 and TRANSPOSED_QK_32X32
-    # K_BUF_BYTES depends on the K_LDS_DTYPE (1 byte for fp8, 2 for bf16).
-    K_LDS_ELEM_BYTES = 1 if K_LDS_DTYPE == FP8E4M3 else 2
-    K_BUF_BYTES = (T * K_SLICE_HD if K_SLICED_ACTIVE else T * HD) * K_LDS_ELEM_BYTES
     # Number of K_lds double-buffer slots. Default 2 (next-tile prefetch overlaps
     # softmax+PV). The OCCUPANCY lever single-buffers K (1 slot) to cut loop LDS
     # from 48KB -> 32KB and reach 2 wg/CU; the next-K issue is then ordered after
     # a post-QK LDS-read drain to close the shared-slot DMA race.
     K_BUFS = K_SLICE_SLOTS if K_SLICED_ACTIVE else (1 if K_SINGLE_BUF else 2)
-    K_TOTAL_BYTES = K_BUFS * K_BUF_BYTES
-    # Q can alias K_lds when (a) the dtypes match and (b) it fits in the
-    # full K_lds region (both slots). When ``BLOCK_M <= T`` Q fits in one
-    # slot (rows 0..BLOCK_M of K_lds[0]); when ``BLOCK_M > T`` Q spills
-    # into K_lds[1] (rows T..2T map to K_lds[1, row-T, :]). The gather +
-    # store use ``(buf, row, col)`` indexing in both cases.
+    K_HBM_DIRECT = spec.use_k_hbm_direct
+    # The shape K_lds is allocated with. It is the one source for the slot byte
+    # stride and for where Q is staged, so both follow the buffer that actually
+    # exists rather than the logical K tile: the sliced-K ring holds only a
+    # head-dim slice per row, and use_k_hbm_direct allocates a one-element stub
+    # per buffer.
+    if K_SLICED_ACTIVE:
+        K_LDS_SHAPE, K_LDS_NAME = (K_BUFS, T, K_SLICE_HD), "KldsS"
+    elif K_HBM_DIRECT:
+        K_LDS_SHAPE, K_LDS_NAME = (K_BUFS, 1, 1), "KldsStub"
+    else:
+        K_LDS_SHAPE, K_LDS_NAME = (K_BUFS, T, HD), "Klds"
+    _, K_LDS_ROWS, K_LDS_ROW_ELEMS = K_LDS_SHAPE
+    # Bytes of one K_lds slot.
+    K_BUF_BYTES = K_LDS_ROWS * K_LDS_ROW_ELEMS * (type_bits(K_LDS_DTYPE) // 8)
+    # Q is staged through K_lds only when every slot holds full ``[T, HD]`` K
+    # rows. A K_lds without them (the sliced-K ring, the K stub) reads Q
+    # straight from global memory rather than falling back to a Q_lds slab.
+    K_LDS_HAS_FULL_ROWS = K_LDS_ROWS == T and K_LDS_ROW_ELEMS == HD
+    Q_DIRECT_GLOBAL = spec.use_q_direct_global or not K_LDS_HAS_FULL_ROWS
+    # Q can alias K_lds when (a) the dtypes match and (b) the K_lds rows of all
+    # slots hold the ``BLOCK_M`` Q rows. When ``BLOCK_M <= T`` Q fits in one
+    # slot (rows 0..BLOCK_M of K_lds[0]); when ``BLOCK_M > T`` Q spills into
+    # K_lds[1] (rows T..2T map to K_lds[1, row-T, :]). The gather + store use
+    # ``(buf, row, col)`` indexing in both cases.
     # Aliasing requires same dtype because the Q_lds writes use bf16 stores;
     # for the fp8-MFMA path K_lds is fp8 so a dedicated Q_lds slab is needed.
-    Q_DIRECT_GLOBAL = K_SLICED_ACTIVE or spec.use_q_direct_global
     Q_ALIAS_K = (
-        (not Q_DIRECT_GLOBAL) and (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
+        (not Q_DIRECT_GLOBAL)
+        and (K_LDS_DTYPE == dtype)
+        and BLOCK_M <= K_BUFS * K_LDS_ROWS
     )
     Q_USES_DUAL_SLOT = Q_ALIAS_K and BLOCK_M > T
-    K_HBM_DIRECT = spec.use_k_hbm_direct
-    if K_SLICED_ACTIVE:
-        K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, K_SLICE_HD], name_hint="KldsS")
-    elif K_HBM_DIRECT:
-        K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, 1, 1], name_hint="KldsStub")
-    else:
-        K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, HD], name_hint="Klds")
+    K_lds = b.smem_alloc(K_LDS_DTYPE, list(K_LDS_SHAPE), name_hint=K_LDS_NAME)
+    # The Q store indexes an aliased K_lds as ``[buf, row % T, col]``, which is
+    # only right for the full ``[K_BUFS, T, HD]`` layout.
+    assert not Q_ALIAS_K or tuple(K_lds.type.shape) == (K_BUFS, T, HD), (
+        f"Q aliases K_lds of shape {tuple(K_lds.type.shape)}, "
+        f"expected {(K_BUFS, T, HD)}"
+    )
     V_BUFS = 1  # single-buffer V (race-free: see comment above)
     # ---- V_lds bank-deconflict swizzle (HIPDNN_GFX942_SWIZZLE_VLDS) ----
     # The plain-atom PV B-operand is read with 4 strided ``ds_read_u16`` loads
@@ -2131,8 +2148,8 @@ def build_unified_attention_2d_tiled(
         K_fp8_lds = b.smem_alloc(FP8E4M3, [2, T, HD], name_hint="Kfp8lds")
         V_fp8_lds = b.smem_alloc(FP8E4M3, [1, T, HD], name_hint="Vfp8lds")
     if Q_DIRECT_GLOBAL:
-        # Sliced-K ring is intentionally smaller than a full Q tile; Q is
-        # gathered directly from global into Q32_reg below and never uses LDS.
+        # Q is gathered directly from global into Q32_reg below and never uses
+        # LDS (the sliced-K ring and the K stub have no full K rows to alias).
         Q_lds = K_lds
     elif Q_ALIAS_K:
         # Reuse K_lds[0] (and K_lds[1] if BLOCK_M > T) as Q-load scratch.

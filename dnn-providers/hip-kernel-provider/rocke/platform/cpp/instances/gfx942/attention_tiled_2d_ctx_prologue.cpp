@@ -37,6 +37,7 @@
 
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* rocke_binary_search_seq_idx */
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
+#include "rocke/ir_internal.h" /* rocke_i_type_bits */
 
 /* ---------------------------------------------------------------- helpers */
 
@@ -480,7 +481,6 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->V_LDS_DTYPE = V_LDS_DTYPE;
     ctx->P_LDS_DTYPE = P_LDS_DTYPE;
 
-    const int Q_BYTES = BLOCK_M * HD * 2;
     /* Ring geometry comes from the spec (Python: K_SLICE_HD = spec.k_slice_hd,
      * K_SLICE_SLOTS = RING_DEPTH = spec.ring_depth). Both used to be pinned here
      * at the shipped values, which silently ignored a spec that asked for any
@@ -488,38 +488,39 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     const int K_SLICE_HD = spec->k_slice_hd;
     const int K_SLICE_SLOTS = spec->ring_depth;
     const bool K_SLICED_ACTIVE = K_SLICED_RING && USE_MFMA_32X32X8 && ctx->TRANSPOSED_QK_32X32;
-    const int K_LDS_ELEM_BYTES = rocke_type_eq(K_LDS_DTYPE, rocke_fp8e4m3()) ? 1 : 2;
-    const int K_BUF_BYTES = (K_SLICED_ACTIVE ? (T * K_SLICE_HD) : (T * HD)) * K_LDS_ELEM_BYTES;
     const int K_BUFS = K_SLICED_ACTIVE ? K_SLICE_SLOTS : (ctx->K_SINGLE_BUF ? 1 : 2);
-    const int K_TOTAL_BYTES = K_BUFS * K_BUF_BYTES;
-    ctx->Q_BYTES = Q_BYTES;
+
+    /* The shape K_lds is allocated with. It is the one source for the slot byte
+     * stride and for where Q is staged, so both follow the buffer that actually
+     * exists rather than the logical K tile: the sliced-K ring holds only a
+     * head-dim slice per row. (The Python builder's use_k_hbm_direct K stub has
+     * no counterpart here: this engine does not build that knob.) */
+    const int K_LDS_SHAPE[3] = {K_BUFS, T, K_SLICED_ACTIVE ? K_SLICE_HD : HD};
+    const char* K_LDS_NAME = K_SLICED_ACTIVE ? "KldsS" : "Klds";
+    const int K_LDS_ROWS = K_LDS_SHAPE[1];
+    const int K_LDS_ROW_ELEMS = K_LDS_SHAPE[2];
+    /* Bytes of one K_lds slot. */
+    const int K_BUF_BYTES = K_LDS_ROWS * K_LDS_ROW_ELEMS * (rocke_i_type_bits(K_LDS_DTYPE) / 8);
     ctx->K_SLICE_HD = K_SLICE_HD;
     ctx->K_SLICE_SLOTS = K_SLICE_SLOTS;
     ctx->K_SLICED_ACTIVE = K_SLICED_ACTIVE;
-    ctx->K_LDS_ELEM_BYTES = K_LDS_ELEM_BYTES;
     ctx->K_BUF_BYTES = K_BUF_BYTES;
-    ctx->K_BUFS = K_BUFS;
-    ctx->K_TOTAL_BYTES = K_TOTAL_BYTES;
 
-    const bool Q_DIRECT_GLOBAL = K_SLICED_ACTIVE || spec->use_q_direct_global;
-    const bool Q_ALIAS_K
-        = (!Q_DIRECT_GLOBAL) && rocke_type_eq(K_LDS_DTYPE, dtype) && (Q_BYTES <= K_TOTAL_BYTES);
+    /* Q is staged through K_lds only when every slot holds full [T, HD] K rows.
+     * A K_lds without them (the sliced-K ring) reads Q straight from global
+     * memory rather than falling back to a Q_lds slab. Q can alias K_lds when
+     * the dtypes match and the K_lds rows of all slots hold the BLOCK_M Q rows. */
+    const bool K_LDS_HAS_FULL_ROWS = (K_LDS_ROWS == T) && (K_LDS_ROW_ELEMS == HD);
+    const bool Q_DIRECT_GLOBAL = spec->use_q_direct_global || !K_LDS_HAS_FULL_ROWS;
+    const bool Q_ALIAS_K = (!Q_DIRECT_GLOBAL) && rocke_type_eq(K_LDS_DTYPE, dtype)
+                           && (BLOCK_M <= K_BUFS * K_LDS_ROWS);
     const bool Q_USES_DUAL_SLOT = Q_ALIAS_K && (BLOCK_M > T);
     ctx->Q_DIRECT_GLOBAL = Q_DIRECT_GLOBAL;
     ctx->Q_ALIAS_K = Q_ALIAS_K;
     ctx->Q_USES_DUAL_SLOT = Q_USES_DUAL_SLOT;
 
-    /* ---- K_lds smem_alloc (lines 1531-1534) ---- */
-    if(K_SLICED_ACTIVE)
-    {
-        int shp[3] = {K_BUFS, T, K_SLICE_HD};
-        ctx->K_lds = rocke_b_smem_alloc(b, K_LDS_DTYPE, shp, 3, "KldsS");
-    }
-    else
-    {
-        int shp[3] = {K_BUFS, T, HD};
-        ctx->K_lds = rocke_b_smem_alloc(b, K_LDS_DTYPE, shp, 3, "Klds");
-    }
+    /* ---- K_lds smem_alloc (Python: K_LDS_SHAPE / b.smem_alloc) ---- */
+    ctx->K_lds = rocke_b_smem_alloc(b, K_LDS_DTYPE, K_LDS_SHAPE, 3, K_LDS_NAME);
 
     const int V_BUFS = 1;
     ctx->V_BUFS = V_BUFS;
