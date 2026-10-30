@@ -64,7 +64,8 @@ from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, g
                                                get_fp16_valid_blocks, get_fp32_valid_blocks, \
                                                MXS_LDS_BLOCK_BYTES, MXS_LDS_PAD_BYTES
 from ..Common.GlobalParameters import defaultSolution, \
-                                            defaultInternalSupportParams
+                                            defaultInternalSupportParams, \
+                                            globalParameters
 from ..Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
@@ -75,8 +76,11 @@ from ..Common.ValidParameters import validParameters, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
 from .Naming import getSolutionNameFull
 from .Problem import ProblemType
+from .lds_layout import format_lds_layout
 from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget, \
-  b_rotate_reason as segBRotateReason
+  b_rotate_reason as segBRotateReason, \
+  paired_buffer_reason as segPairedReason, paired_buffer_offsets as segPairedOffsets, \
+  paired_buffer_layout_reason as segPairedLayoutReason
 from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
@@ -86,6 +90,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
+from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -288,6 +293,20 @@ def _supportStreamKPerTileExtraIters(state):
   key from defaultSolution; indexing it here KeyErrors on ordinary GFA states.
   """
   return isStreamK(state) and not hasDynamicAssignment(state) and not isCustomKernelConfig(state)
+
+
+def _supportOccupancyProbe(state):
+  """Whether this solution's asm takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args.
+
+  Opt-in at build time (EmitOccupancyProbe); generated non-grouped StreamK kernels
+  with hybrid work assignment on gfx95x only, the arch the slot layout (SH == 0,
+  SE < 4, XCC < 8) is verified on.
+  """
+  return bool(globalParameters.get("EmitOccupancyProbe", False)) \
+      and tuple(state["ISA"])[:2] == (9, 5) \
+      and hasHybridAssignment(state) \
+      and not state["ProblemType"]["GroupedGemm"] \
+      and not isCustomKernelConfig(state)
 
 
 def _validateStreamKForceDPOnly(state, printRejectionReason):
@@ -845,6 +864,10 @@ class Solution(collections.abc.Mapping):
     if not pre_records:
       mergeMismatchRecords(validateParameterTypes(self._state, srcFile=srcName))
 
+    if (globalParameters["PrintLDSLayout"] and self["Valid"]
+        and not isHandwrittenCustomKernel and "LdsNumBytes" in self._state):
+      print(format_lds_layout(self._state, str(self)), flush=True)
+
   # these keys are copied from ProblemType to internal that may be overridden
   InternalKeys = ["UseSgprForGRO","VectorStore"]
 
@@ -1028,6 +1051,17 @@ class Solution(collections.abc.Mapping):
       if not "MIInputPerThreadA" in state:
         state["MIInputPerThreadA"] = state["MIInputPerThread"]
         state["MIInputPerThreadB"] = state["MIInputPerThread"]
+      # The MXF4 subtile scale path reads one scale per thread per MFMA. Pinning
+      # this for every MX kernel instead collapses LocalReadVectorWidthMXS to 1,
+      # which leaves gfx1250 MX-fp8 below one tile per scale read and makes those
+      # kernels fail to generate at all, so keep it on the path that wants it.
+      # UseSubtileImpl is still the requested value here (the ISA restriction runs
+      # further down), hence the explicit gfx950 check.
+      if isMxf4SubtilePath(state) and tuple(state["ISA"])[:2] == (9, 5):
+        if state["ProblemType"]["MXBlockA"]:
+          state['MIInputPerThreadMXSA'] = 1
+        if state["ProblemType"]["MXBlockB"]:
+          state['MIInputPerThreadMXSB'] = 1
 
       # SS1 non-square: SourceSwap feeds B into wide src0 / A into narrow src1, so swap
       # per-thread input counts (A sized for N-side, B for M-side) to match mfmaIter;
@@ -2059,6 +2093,96 @@ class Solution(collections.abc.Mapping):
     state["StoreVectorWidth"] = 1
 
   ########################################
+  # Separate from assignDerivedParameters so it can run even when that returns
+  # early, which it does for solutions loaded from pre-tuned logic files
+  # carrying AssignedDerivedParameters=True. Those predate PLSIN and lack the
+  # key, so an inline gate never ran for them and the fused store never reached
+  # the shipped library. Called from both paths, PLSIN eligibility becomes a
+  # function of the solution alone rather than of how it was loaded.
+  @staticmethod
+  def assignPostLoopStoreInNll(state):
+    # Absent on solutions tuned before PLSIN existed. Defaulting True is safe
+    # because the gate only ever auto-disables: anything ineligible is turned
+    # back off below.
+    if "PostLoopStoreInNll" not in state:
+      state["PostLoopStoreInNll"] = True
+
+    isa = tuple(state["ISA"])
+
+    if state["PostLoopStoreInNll"]:
+      isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or \
+                 state["ProblemType"]["DataTypeB"].isFloat4()
+      isgfx950 = isa[:2] == (9, 5)
+      # _emit16bitSubtilePairedStore needs HPA on wave64 and cannot run on the
+      # StreamK workspace accumulation paths. The dest type goes through
+      # plsinDataTypes rather than being spelled out, so this cannot drift from
+      # the gate that decides whether the emit side builds anything: a half dest
+      # satisfies the paired store but not the gate, and resolving True for it
+      # would allocate sgprPostLoopFusedStore -- renumbering every later SGPR --
+      # for a store that is then never built.
+      pairedStoreAvailable = (
+        plsinDataTypes(state) and
+        state["ProblemType"]["HighPrecisionAccumulate"] and
+        state["WavefrontSize"] != 32 and
+        state["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
+      )
+      # Barrier-free-store precondition: only StoreRemapVectorWidth>0 puts an
+      # s_barrier *inside* the ds_bpermute paired store (LDS remap + barriers) and
+      # uses an entirely different store mechanism, so it stays excluded.
+      barrierFreeStore = (
+        state["StoreRemapVectorWidth"] == 0
+      )
+      # StreamK support: only the non-atomic reduction (SK3/4/5) is eligible.
+      streamKAtomicFree = not (isStreamK(state) and state["StreamKAtomic"])
+      # Spill tiles: MIWaveTile product > 64 parks extra accumulators in arch
+      # VGPRs. Full Weave-without-lend cannot coexist with those spills (live
+      # A/B tiles + store temps + spilled accs exceed the occ-1 256 arch-VGPR
+      # budget). Large-MT Weave instead lends K=0 A/B after the last K=0 MFMA
+      # and weaves last-K MFMAs into the store using those holes. Lend keeps
+      # every terminal MFMA in-loop. Enable PLSIN Weave for macrotiles larger
+      # than 256x256 (MT256x320 / MIWT [8,10] and MT320x256 / MIWT [10,8]).
+      # MIWaveTile is only present for EnableMatrixInstruction solutions.
+      miwt = state.get("MIWaveTile")
+      largeTileLend = (int(state.get("MacroTile0", 0)) > 256
+                       or int(state.get("MacroTile1", 0)) > 256)
+      spillFree = bool(miwt) and len(miwt) == 2 and (
+          (miwt[0] * miwt[1] <= 64) or largeTileLend)
+      # Store-footprint fit: large asymmetric tiles (min>=4 and max>=14) overflow
+      # the arch-VGPR budget and emit out-of-range v>=256.
+      storeFitsVgpr = not (bool(miwt) and len(miwt) == 2 and
+                           min(miwt[0], miwt[1]) >= 4 and max(miwt[0], miwt[1]) >= 14)
+      # MX-block-scaled fp4 extreme skews ([2,16]/[16,2]) overflow the 102-SGPR
+      # gfx9 ceiling; auto-disable just those.
+      mxBlockScaled = bool(state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
+      mxBlockScaleSgprFits = not (mxBlockScaled and bool(miwt) and len(miwt) == 2 and
+                                  min(miwt[0], miwt[1]) <= 2 and max(miwt[0], miwt[1]) >= 16)
+      # Hard structural: the fused store literally cannot be emitted. ALWAYS enforced.
+      structuralFail = ((not isFloat4)
+                        or (not state["UseSubtileImpl"])
+                        or (not isgfx950)
+                        or (not state["EnableMatrixInstruction"])
+                        or (state["PrefetchGlobalRead"] < 1)
+                        or (not state["BufferStore"])
+                        or (not pairedStoreAvailable)
+                        or (not streamKAtomicFree)
+                        or (not barrierFreeStore))
+      # Register / spill budget: the fused store would overflow the arch-VGPR / 102-SGPR
+      # ceiling for this tile.
+      registerFail = ((not spillFree)
+                      or (not storeFitsVgpr)
+                      or (not mxBlockScaleSgprFits))
+      # Schedule feasibility is not decided here: LogicalScheduler works from exact
+      # producer/consumer ranges, and a schedule with no safe group falls back
+      # without extracting terminal MFMAs.
+      if structuralFail or registerFail:
+        state["PostLoopStoreInNll"] = False
+
+    # PLSIN fuses the D store into the No-Load Loop, so it needs a structural NLL
+    # (PGR >= 1). Defensive re-check.
+    if state["PostLoopStoreInNll"] and state["PrefetchGlobalRead"] < 1:
+      state["PostLoopStoreInNll"] = False
+
+  ########################################
   # assign all derived parameters
   @staticmethod
   def assignDerivedParameters(
@@ -2172,6 +2296,11 @@ class Solution(collections.abc.Mapping):
 
     if "AssignedDerivedParameters" in state:
       if state["AssignedDerivedParameters"]:
+        # Pre-tuned solutions loaded from logic files short-circuit here before
+        # the PLSIN gate would normally run. Evaluate it explicitly so the fused
+        # store is enabled for eligible fp4 subtile kernels even though the rest
+        # of the derivation is (correctly) skipped for already-derived solutions.
+        Solution.assignPostLoopStoreInNll(state)
         return
     state["AssignedDerivedParameters"] = False
 
@@ -2336,6 +2465,7 @@ class Solution(collections.abc.Mapping):
          and (not isStreamKSpatialCluster(state)
               or (hasStaticAssignment(state) and not state["ProblemType"]["Gradient"]
                   and not state["ProblemType"]["Sparse"] and not state.get("UseSubtileImpl", False))))
+    state["InternalSupportParams"]["SupportOccupancyProbe"] = _supportOccupancyProbe(state)
 
     if isPersistent(state):
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
@@ -2735,6 +2865,14 @@ class Solution(collections.abc.Mapping):
       state["DirectToLdsMetadata"] = 0
       state["MIWaveTileMetadata"] = 0
 
+    # An unsuffixed NonTemporal sets A, B, C, D, Gate and Metadata only; MXSA, MXSB, E and WS need
+    # their own NonTemporal<tensor> key. (An unsuffixed TemporalHint or NonVolatile, above, is
+    # expanded over every tensor.)
+    # Under TDMFuse=1/2/3 a data tensor (A or B) and its scale tensor(s) share one tensor_load_to_lds
+    # whose th/scope/nv bits are instruction-wide. The data tensor decides: its TemporalHint,
+    # NonTemporal and NonVolatile are emitted and the scale tensors' are ignored for that
+    # instruction (see tdmHintDeciders), so the generated asm follows A/B. Under TDMFuse=0 a field
+    # is emitted only when the members of each set ({A,B}, {MXSA,MXSB}) agree.
     if state["NonTemporal"] != -1:
       state["NonTemporalA"] = state["NonTemporal"]
       state["NonTemporalB"] = state["NonTemporal"]
@@ -4892,26 +5030,44 @@ class Solution(collections.abc.Mapping):
             state["GlobalReadVectorWidthMXSB"] = min(state["GlobalReadVectorWidthMXSB"], state["_DepthUMXSB"])
           state["GlobalReadVectorWidthMXSB"] = min(state["GlobalReadVectorWidthMXSB"], 16)
 
+      # The DepthU ceiling belongs to the subtile pre-shuffled global read, whose K
+      # step rides in the MUBUF immediate. The classic swizzle path builds its step
+      # differently and ships above the ceiling -- gfx942 F8 swizzle-A logic carries
+      # DepthU 1024 -- so only ask on the subtile path.
+      subtileSwizzled = isSubtileSwizzledTensor(state)
+
       # One lane reads exactly one swizzle row per load, so GRVW is pinned to the lane size.
       for tc in ("A", "B",):
         if state["ProblemType"][f"SwizzleTensor{tc}"]:
           if not state["EnableMatrixInstruction"]:
             reject(state, printRejectionReason, f"Tensor {tc} swizzling supports MI only")
             continue
+          if subtileSwizzled:
+            rowsPerBlock = state["MatrixInstM"] if tc == "A" else state["MatrixInstN"]
+            maxDepthU = swizzleTensorMaxDepthU(rowsPerBlock, state["ProblemType"][f"DataType{tc}"].numBytes())
+            if state["DepthU"] > maxDepthU:
+              reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support DepthU {state['DepthU']} > {maxDepthU}")
+              continue
           laneSize = swizzleGeometry(state, tc)["laneSize"]
           GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
           if GRVW_TC != laneSize:
             reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != swizzle lane size ({laneSize})")
 
       if state["ProblemType"]["SwizzleTensorA"]:
-        if not state["DirectToVgprA"]:
-          reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
+        # The subtile global-read emitter walks the swizzled A layout itself, so it
+        # does not need A staged through DirectToVgpr the way the classic path does.
+        if not state["UseSubtileImpl"]:
+          if not state["DirectToVgprA"]:
+            reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
         if not state["ProblemType"]["TransposeA"]:
           reject(state, printRejectionReason, f"Tensor A swizzling supports TN or TT only")
 
       if state["ProblemType"]["SwizzleTensorB"]:
-        if not state["DirectToVgprB"]:
-          reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
+        # The subtile global-read emitter walks the swizzled B layout itself, so it
+        # does not need B staged through DirectToVgpr the way the classic path does.
+        if not state["UseSubtileImpl"]:
+          if not state["DirectToVgprB"]:
+            reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
         if state["ProblemType"]["TransposeB"]:
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN or NN only")
 
@@ -5491,6 +5647,11 @@ class Solution(collections.abc.Mapping):
 
     _disableUnsupportedRuntimeStaggerU(state)
 
+    # PostLoopStoreInNll (PLSIN) eligibility. Delegated to a standalone helper so
+    # the exact same gate also runs for already-derived solutions on the
+    # early-return path above (pre-tuned logic-file kernels that predate PLSIN).
+    Solution.assignPostLoopStoreInNll(state)
+
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved
     if state["DirectToVgprA"]:
@@ -5531,6 +5692,7 @@ class Solution(collections.abc.Mapping):
       tcmx = "MXS%s"%tc
       if state["UseSubtileImpl"] and state["ProblemType"]["MXBlock%s"%tc]:
         state["DirectToLds%s"%tcmx] = False
+        state["LocalWriteUseSgpr%s"%tcmx] = False
       if state["DirectToLds%s"%tc]:
         isDtlDoable = Solution.isDirectToLdsDoable(state, tc, isaInfoMap, printRejectionReason)
         if (not state["DirectToVgpr%s"%tc]) and isDtlDoable:
@@ -5540,6 +5702,7 @@ class Solution(collections.abc.Mapping):
           if state["ProblemType"]["MXBlock%s"%tc]:
             isDtlMxDoable = Solution.isDirectToLdsDoable(state, tcmx, isaInfoMap, printRejectionReason)
             state["DirectToLds%s"%tcmx] = isDtlMxDoable
+            state["LocalWriteUseSgpr%s"%tcmx] = isDtlMxDoable
         else:
           state["DirectToLds%s"%tc] = False
           state["LocalWriteUseSgpr%s"%tc] = False
@@ -6151,12 +6314,13 @@ class Solution(collections.abc.Mapping):
     state["LdsOffsetMetadata_Blk"] = 0
 
     # todo, can the alignment be a power of 2?
-    state["LdsOffsetA"] = 0
     state["LdsNumElementsAlignedA"] = int(ldsNumBytesAlignedA)
     state["LdsNumElementsAlignedMXSA"] = int(ldsNumBytesAlignedMXSA)
     state["LdsNumElementsAlignedB"] = int(ldsNumBytesAlignedB)
     state["LdsNumElementsAlignedMXSB"] = int(ldsNumBytesAlignedMXSB)
     state["LdsNumElementsAlignedMetadata"] = int(ldsNumBytesAlignedMetadata)
+
+    state["LdsOffsetA"] = 0
 
     # Per-tensor PrefetchGlobalRead ("Decouple PGR").
     decouplePGR, pgrA, pgrB = pgrLevelsForTensors(state)
@@ -6490,9 +6654,9 @@ class Solution(collections.abc.Mapping):
         state["1LDSBuffer"] = 1
 
     if _segDeferForBuf:
-      # 1LDSBuffer resolved now; re-run the oracle. A newly-eligible tight interleave is safe (pure
-      # reorder, no LDS growth); an aligned one needs LDS not reserved above, so a forced request is
-      # rejected rather than run as baseline.
+      # Re-evaluate after 1LDSBuffer resolves. Non-TDMSplit tight layouts still need the paired
+      # eligibility and capacity checks below. An aligned result needs LDS not reserved above,
+      # so a forced request is rejected rather than run as baseline.
       _segRes2 = segIntEval(state)
       if _segRes2["applicable"] and not _segRes2["aligned"]:
         state["LDSSegInterleaveOffsets"] = _segRes2["offsets"]
@@ -6517,6 +6681,41 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetMetadata"] = state["LdsOffsetMXSB"] + state["LdsNumElementsAlignedMXSB"]
       ldsNumBytesAB = state["LdsOffsetMetadata"] + ldsNumBytesMetadata
       state["StoreSwapAddr"] = False
+
+    # HalfPLR disables pointer expansion; resolve this before choosing the paired
+    # layout so rotation on/off uses the same buffering policy.
+    if state["HalfPLR"]:
+      state["ExpandPointerSwap"] = False
+
+    # Resolve paired placement before LDS occupancy, epilogue reuse and MaxLDS checks.
+    if state["LDSSegmentBRotate"]:
+      _bRotReason = segBRotateReason(state, isPersistent(state))
+      if _bRotReason is not None:
+        reject(state, printRejectionReason, "LDSSegmentBRotate: %s" % _bRotReason)
+        return
+    # Persistent kernels retain their existing interleave offsets and buffer swaps.
+    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned and not isPersistent(state):
+      _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state, isPersistent(state))
+      if _pairedReason is None:
+        _pairedOffsets = segPairedOffsets(state)
+        _pairedReason = "layout exceeds MaxLDS" if _pairedOffsets is None else segPairedLayoutReason(state, _pairedOffsets)
+      if _pairedReason is None and _segRequested == -1 and _pairedOffsets["pairedUsedBytes"] > ldsNumBytesAB:
+        _pairedReason = "paired layout needs more LDS than the ordinary layout"
+      if _pairedReason is None:
+        state["LDSSegInterleaveOffsets"] = _pairedOffsets
+        state["StoreSwapAddr"] = True
+        ldsNumBytesAB = _pairedOffsets["pairedUsedBytes"]
+      elif state["LDSSegmentBRotate"] or _segRequested == 1:
+        # Explicit tight interleave and tight B rotation require a valid paired layout.
+        _parameter = "LDSSegmentBRotate" if state["LDSSegmentBRotate"] else "LDSSegmentInterleave=1"
+        reject(state, printRejectionReason, "%s requires paired LDS placement: %s" % (_parameter, _pairedReason))
+        return
+      else:
+        # Pairing failed in auto mode. Keep the ordinary LDS offsets, buffer
+        # swap policy and byte count calculated above.
+        state["LDSSegmentInterleave"] = 0
+    if state["LDSSegmentInterleave"] == 0 and not state["TDMSplit"]:
+      state["LDSSegInterleaveOffsets"] = {}
 
     # lds size is the greater of the two
     ldsNumBytes = max(ldsNumBytesAB, ldsNumBytesReduction, ldsNumBytesOccupancy)
@@ -7036,7 +7235,6 @@ class Solution(collections.abc.Mapping):
     if state["HalfPLR"]:
       state["ClusterLocalRead"] = 0
       state["SuppressNoLoadLoop"] = True
-      state["ExpandPointerSwap"] = False
       if state.get("PrefetchAcrossPersistent", 0):
         if not isPersistentDataParallel(state):
           reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent requires DataParallel/StaticGrid")
@@ -7297,6 +7495,19 @@ class Solution(collections.abc.Mapping):
       # TODO: support ONLL if necessary
       state["OptNoLoadLoop"] = 0
 
+    # PostLoopStoreInNll fuses the final D store INTO the No-Load Loop, so it is
+    # meaningless (and codegen-fatal) without an NLL. The subtile emit path builds
+    # a structural NLL whenever PrefetchGlobalRead >= 1 (see build_nll) and never
+    # reads OptNoLoadLoop -- that flag only controls the classic (non-subtile) NLL
+    # and is force-disabled by UseScaleAB above (5602). So gate PLSIN on the actual
+    # structural-NLL condition (PGR >= 1) rather than OptNoLoadLoop; this keeps PLSIN
+    # eligible for UseScaleAB subtile kernels (their scaleA*scaleB is applied via the
+    # fused store's alpha fold, see buildSubtileFusedStore) while still opting out any
+    # kernel that genuinely has no NLL. The main gate above already enforces PGR >= 1,
+    # so this is a defensive re-check.
+    if state["PostLoopStoreInNll"] and state["PrefetchGlobalRead"] < 1:
+      state["PostLoopStoreInNll"] = False
+
     # if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
     #   if state["ProblemType"]["SupportUserArgs"] and state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel':
     #     reject(state, printRejectionReason, "Currently SupportUserArgs does not support GSU > 1.")
@@ -7404,12 +7615,6 @@ class Solution(collections.abc.Mapping):
       kMax = Solution.rapMaxResidentKTiles(
           state, problemType, isa, isaInfoMap, packedC0, packedC1)
       state["_RAPNumResidentKTiles"] = max(state["PrefetchGlobalRead"] + 1, kMax or 0)
-
-    if state["LDSSegmentBRotate"]:
-      _bRotReason = segBRotateReason(state, isPersistent(state))
-      if _bRotReason is not None:
-        reject(state, printRejectionReason, "LDSSegmentBRotate: %s" % _bRotReason)
-        return
 
   ########################################
   @ staticmethod
