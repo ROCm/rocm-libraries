@@ -710,3 +710,79 @@ if(NOT WIN32)
         ARGS -M 133 -N 147 -K 160 --type f4 --mxBlockA 32 --mxBlockB 32 --validate --outputAmaxD
     )
 endif()
+
+#################################################
+#     Int8 input tests (slow path)              #
+#################################################
+# A/B are Int8 drawn from [-128, 127]. Each combination is one of the
+# reference's TypedGemm_I8_* ids: C/D type (--typeCD) x alpha/beta type
+# (--typeAlpha), which is also the reference's epilogue type. The golden GEMM
+# accumulates exactly in integers, applies the epilogue in that type and casts
+# to C/D with the reference's SaturateCast rules, so D must match exactly.
+# The fast path does not support Int8 inputs yet (isFastPathEligible rejects
+# them), so these run on the slow path only.
+#
+# The slow path accumulates the float-alpha types (I8_*_S) in float per K
+# element, which is exact only while |sum| < 2^24. Keep K small enough:
+# F16_SIZES has K = 151, so |sum| <= 151 * 128^2 ~= 2.5M.
+#
+# Each entry: NAME;typeCD;typeAlpha;alpha;beta;alpha for ScaleAB. Alphas keep D
+# in range: Half output below 65504, no int32 overflow (the golden throws on
+# int32 overflow), and a mix of saturated and in-range Int8 values with
+# round-half-to-even ties (I8_I8_S); 2^-16 for ScaleAB, whose scales go up to
+# 100 x 100.
+foreach(COMBO
+        "I8_I8_I32;i8;i32;1;2;1"
+        "I8_I32_I32;i32;i32;1;2;1"
+        "I8_I32_S;i32;f32;0.5;0.5;0.0000152587890625"
+        "I8_I8_S;i8;f32;0.001953125;0.5;0.0000152587890625"
+        "I8_H_S;f16;f32;0.015625;0.5;0.0000152587890625"
+        "I8_B_S;bf16;f32;1;0.5;0.0000152587890625")
+    list(GET COMBO 0 NAME)
+    list(GET COMBO 1 TYPE_CD)
+    list(GET COMBO 2 TYPE_ALPHA)
+    list(GET COMBO 3 ALPHA)
+    list(GET COMBO 4 BETA)
+    list(GET COMBO 5 SCALEAB_ALPHA)
+    set(I8_ARGS ${F16_SIZES} --type i8 --typeCD ${TYPE_CD} --typeAlpha ${TYPE_ALPHA} --validate)
+
+    foreach(TRANS NN TN NT TT)
+        get_trans_flags(${TRANS} TFLAGS)
+        add_cpu_gemm_test(slow_${NAME}_${TRANS}
+            ARGS ${I8_ARGS} ${TFLAGS} --alpha ${ALPHA}
+        )
+    endforeach()
+    add_cpu_gemm_test(slow_${NAME}_Beta
+        ARGS ${I8_ARGS} --alpha ${ALPHA} --beta ${BETA}
+    )
+    add_cpu_gemm_test(slow_${NAME}_Bias
+        ARGS ${I8_ARGS} --alpha ${ALPHA} --bias
+    )
+    add_cpu_gemm_test(slow_${NAME}_TN_AllFeatures
+        ARGS ${I8_ARGS} --transA --alpha ${ALPHA} --beta ${BETA} --bias --activation relu --scaleAlphaVec
+    )
+    foreach(MODE Scalar Vector)
+        add_cpu_gemm_test(slow_${NAME}_ScaleAB_${MODE}
+            ARGS ${I8_ARGS} --alpha ${SCALEAB_ALPHA} --useScaleAB ${MODE}
+        )
+    endforeach()
+    add_cpu_gemm_test(slow_${NAME}_Batched
+        ARGS ${I8_ARGS} --alpha ${ALPHA} --batchCount 3
+    )
+endforeach()
+
+# Option checks: these must be rejected.
+foreach(CASE
+        "I8_MixedA;--typeA i8 --typeB f32"
+        "I8_UnsupportedCD;--type i8 --typeCD f32"
+        "I8_NonIntegerAlpha;--type i8 --typeCD i32 --typeAlpha i32 --alpha 0.5"
+        "F32_TypeCD;--type f32 --typeCD f16")
+    list(GET CASE 0 NAME)
+    list(GET CASE 1 FLAGS)
+    separate_arguments(FLAGS)
+    add_test(
+        NAME "CPUGemm.${NAME}_Rejected"
+        COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 ${FLAGS} --validate
+    )
+    set_tests_properties("CPUGemm.${NAME}_Rejected" PROPERTIES WILL_FAIL TRUE)
+endforeach()
