@@ -127,9 +127,10 @@ Activation node
 - Compute data type: ``FP32``
 - Activation mode: RELU_FORWARD
 - Supports
-    - No clipping
-    - ``relu_lower_clip`` set
-    - ``relu_lower_clip`` and ``relu_upper_clip`` set
+    - Standard ReLU: no clips set, or ``relu_lower_clip`` = 0
+    - Clipped ReLU: ``relu_upper_clip`` set
+    - CLAMP: ``relu_lower_clip`` and ``relu_upper_clip`` set
+- ``relu_lower_clip_slope`` must be unset or 0 (leaky ReLU is not supported when fused)
 
 .. _operations:
 
@@ -147,8 +148,9 @@ Operation notes
 - ⁴ **Batchnorm Training Running Statistics**: Batchnorm training only supports computing batch statistics (mean and inverse variance) without updating running statistics.
 - ⁶ **Convolution Backward Output Dimensions**: Convolution Dgrad requires explicit ``dx`` dimensions matching the original forward input tensor. Convolution Wgrad requires explicit ``dw`` dimensions matching the original forward weights tensor. These dimensions aren't inferred from ``dy`` and the other convolution tensors because floor division in the forward spatial formula can make multiple input or kernel shapes map to the same output-gradient shape. Output strides may still be inferred once explicit dimensions are present.
 
-- **Activation Functions (fused)**: Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU, Sigmoid and Tanh are not supported when fused onto a producer op; use a standalone activation node for those.
+- **Activation Functions (fused)**: Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU (non-zero ``relu_lower_clip_slope``), Sigmoid and Tanh are not supported when fused onto a producer op; use a standalone activation node for those.
 - **Standalone Activation**: A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh.
+- **ReLU Parameters**: An unset ``relu_lower_clip`` is treated as 0, an unset ``relu_upper_clip`` as no upper bound, and an unset ``relu_lower_clip_slope`` or a slope of exactly 0 as no leaky slope, so equivalent encodings select the same MIOpen activation. A non-zero ``relu_lower_clip`` without an upper clip is not supported.
 - ⁷ **Standalone Binary Elementwise**: A single-node pointwise graph supports ADD, SUB, MUL, MAX and MIN across ranks 3-5, with packed channels-first strides and ``FP16``/``FP32`` datatypes only. ``in_0`` must be the full-shape operand; only ``in_1`` may broadcast per-axis at matching rank, and all three tensors must share one datatype. In-place execution (``out_0`` aliasing an input) isn't supported.
 - ⁸ **Standalone Reduction**: A single-node reduction graph supports ADD, MUL, MIN, MAX, AMAX, AVG, NORM1 and NORM2 with an ``FP32`` compute type. Input and output share one datatype and one rank (1-6), and each output dimension is either 1 (reduced) or equal to the input dimension, with at least one dimension reduced. MUL_NO_ZEROS, ``BFP16``, deterministic reduction (``is_deterministic``) and in-place execution aren't supported; reduction is only available through the default (non-deterministic) engine.
 - **Sparse Support**: All operations only work with dense tensors.

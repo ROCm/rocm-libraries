@@ -65,12 +65,12 @@ class GdnDecodeRequest(OperatorRequest):
     ``batch`` is the number of *active* sequences this step. It always
     contributes to the launch grid.
 
-    For ``gate_kind="gdn"``, ``auto`` uses the static ``DEFAULT_TILE`` whenever
-    it is legal; otherwise dispatch chooses a validator-admitted fallback.
-    Neither ``batch`` nor ``num_v_heads`` chooses GDN's auto tile.
-
-    For ``gate_kind="kda"``, ``auto`` is keyed on ``batch * num_v_heads`` -- the
-    "work" -- so tensor parallelism selects the tile for heads local to a rank.
+    ``auto`` runs one static configuration per case -- gate kind x fused
+    (either flag) x state width, a tile plus a knob stack
+    (``dispatch.gdn.axes.AUTO_DEFAULTS``; an f16 state uses the bf16 row).
+    Neither ``batch`` nor the head counts choose it. When the case's tile is
+    illegal for the request, dispatch falls back to the first legal tile in
+    the gate kind's priority order, at its base configuration (every knob off).
 
     ``state_dtype`` may be ``"f32"`` as well as a 16-bit dtype, for both gate
     kinds; only the recurrent state widens, so ``dtype`` stays 16-bit.
@@ -78,8 +78,8 @@ class GdnDecodeRequest(OperatorRequest):
     ``fuse_conv`` / ``fuse_out_norm`` select the optional fused modes: a
     causal conv1d + SiLU on the packed q/k/v row (in-place conv-state shift)
     and a gated RMSNorm on the output. Fused requests run one workgroup per
-    head, so only ``blocks_per_v_dim == 1`` tiles are legal, and ``auto`` uses
-    the static ``FUSED_DEFAULT_TILE`` for both gate kinds whenever it is legal.
+    head, so only ``blocks_per_v_dim == 1`` tiles are legal; every fused case's
+    ``auto`` tile has ``blocks_per_v_dim == 1``.
     ``fuse_conv`` also requires ``num_k_heads == num_v_heads``. Both flags
     change the kernel ABI, so they (and ``use_qk_l2norm``) must be real bools,
     and ``batch`` and the head counts and dims must be real ints: a request is
@@ -105,10 +105,11 @@ class GdnDecodeRequest(OperatorRequest):
       configuration of that tile: ``tuning_knobs`` is the knob dict a sweep
       recorded next to the id (``{"dpp_reduce": True, ...}``). ``tuning_id``
       ``"auto"`` with no knobs is the tile's base configuration (every knob
-      off), which is what ``auto`` runs. As for ``spec_id`` (the shared
-      dispatch convention), an empty or whitespace ``tuning_id`` means
-      ``"auto"``. A pin that does not resolve raises ``PinRefused``; it is
-      never mapped to another configuration.
+      off); ``auto``'s own configuration replays from the ``spec_id``,
+      ``tuning_id`` and ``tuning_knobs`` its result's request carries. As for
+      ``spec_id`` (the shared dispatch convention), an empty or whitespace
+      ``tuning_id`` means ``"auto"``. A pin that does not resolve raises
+      ``PinRefused``; it is never mapped to another configuration.
     """
 
     batch: int

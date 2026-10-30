@@ -166,7 +166,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  * on the data. The data and the working space are encapsulated in the variantPack.
  *
  * The plan may run on any handle whose stream is on the device the plan was finalized or
- * deserialized for; a handle on another device is rejected with HIPDNN_STATUS_BAD_PARAM.
+ * deserialized for; a handle on another device is rejected with HIPDNN_STATUS_BAD_PARAM, even
+ * when both devices have the same properties. To run the plan on another device, serialize it
+ * and deserialize it with a handle on that device (see
+ * hipdnnBackendCreateAndDeserializeExecutionPlan_ext()).
  *
  * @param  [in]  handle              An instance of hipdnnHandle_t
  * @param  [in]  executionPlan       Descriptor of the finalized executionPlan
@@ -457,6 +460,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  * HIPDNN_STATUS_BAD_PARAM. A bare execution-plan blob (as produced by
  * hipdnnBackendGetSerializedExecutionPlan_ext()) is deserialized directly. The returned execution
  * plan descriptor is finalized in both cases.
+ *
+ * The returned plan is bound to the device of @p handle's stream and executes only on handles
+ * whose stream is on that device (see hipdnnBackendExecute()). To move a plan to another device,
+ * deserialize the same bytes with a handle on that device.
  *
  * @param [in]  handle         A hipDNN handle used to access loaded engine plugins.
  * @param [out] descriptor     Pointer to the created execution plan descriptor.
