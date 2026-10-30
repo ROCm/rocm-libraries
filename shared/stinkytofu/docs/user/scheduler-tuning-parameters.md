@@ -29,8 +29,10 @@ set.
 Each parameter resolves independently, first match wins:
 
 1. An explicit value you set.
-2. For `ClusterBarrierRule3SignalLeadCycles`: the knob heuristic, computed from the
-   main loop (`loopWithPrefetch`) when it has both WMMAs and ds_loads.
+2. For `ClusterBarrierRule3SignalLeadCycles` and `ReduceClusterBarrierPerLoop`: the knob
+   heuristic, computed from the main loop (`loopWithPrefetch`) when it has both WMMAs
+   and ds_loads. `ReduceClusterBarrierPerLoop` turns on when the WMMA latency sum is
+   greater than 2500 and that sum covers at least 5 cycles per ds_load.
 3. The per-arch scheduling default (`CDNA5Config`).
 4. The hardware fact (`HWModel`).
 
@@ -95,7 +97,7 @@ the region's WMMAs. This replaces the old cap / throttle / slot-first / hide-bud
 
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
-| `DsSpread` | true | `--ds-spread` / `--no-ds-spread` | Pace the region's ds_loads by WMMA batch (`DsBatchWmmas` WMMAs). Each batch takes the region's even share `ceil(ds_loads / usable batches)`, where the last `ceil(LDS return time / WMMA window) + kDrainSlackWmmas` WMMAs of the region are kept free for the last load to return. A sparse region therefore spreads its loads, a dense one gets a share above what the LDS rate fits (the credits throttle it), and a batch that began behind the even line takes `DsCatchUpPace` more. Nothing is held once the region's last WMMA has issued; a held ds_load never holds a WMMA. false = a ds_load issues as soon as it is ready and a credit is free (the credit queue is the only pacing). |
+| `DsSpread` | true | `--ds-spread` / `--no-ds-spread` | Pace the region's ds_loads by WMMA batch (`DsBatchWmmas` WMMAs). Each batch takes the region's even share `ceil(ds_loads / usable batches)`, where the WMMAs before a barrier that the barrier planned for its drain (its threshold is `N = last ds + drain`) are kept free for the last load to return; a barrier with no planned drain keeps `ceil(LDS credit lifetime / WMMA window)`. A sparse region therefore spreads its loads, a dense one gets a share above what the LDS rate fits (the credits throttle it), and a batch that began behind the even line takes `DsCatchUpPace` more. Nothing is held once the region's last WMMA has issued; a held ds_load never holds a WMMA. false = a ds_load issues as soon as it is ready and a credit is free (the credit queue is the only pacing). |
 | `DsBatchWmmas` | 4 | `--ds-batch-wmmas=N` | WMMAs per ds_load pacing batch (independent of the queue refill batch `WmmaBatchSize`). |
 | `DsReadCyclesPerLoad` | 6 (`stinkytofu-opt`: 0 = off) | `--ds-read-cycles-per-load=N` | LDS return rate: cycles per ds_load. Capped at the region's even spread (`WMMAs x WMMA latency / ds_loads`). Decides how long the stage's ds_loads take to issue: `ceil(ds_loads x N / WMMA window)` WMMA windows from the region start. The barrier is placed after the last of them; the gap from the last ds_load to the barrier is the drain, set by the barrier cover. Replaces the old throttle latency T (one ds_load per `T / DsReadQueueDepth` cycles). Used only with `DsSpread`. |
 | `WmmaBarrierCoverCycles` | -1 (automatic) | `--wmma-barrier-cover-cycles=N` | Queued WMMA cover a ready barrier waits for before it issues. -1 = a tail of 4 WMMAs (needs `DsSpread`); 0 = off; always capped at a full queue. Needs the queue model on. |
@@ -156,6 +158,7 @@ Per WMMA window, at most `globalReadPerWmma` (arch default 1) tensor_loads issue
 |---|---|---|---|
 | `WarGateWmmas` | -1 → derived `L / I` | `--war-gate-wmmas=N` | WMMAs a ds_load waits before overwriting a vgpr a WMMA read. Active only with `EnableESM2` + `EnableESM2TrackValuVsrc`. |
 | `ClusterBarrierRule3SignalLeadCycles` | -1 → heuristic | – | Cluster-barrier Rule 3 signal lead: 200 if the main loop's WMMA latency sum > 500, else 100. See [Insert cluster barrier pass](../developer/cluster-barrier.md). |
+| `ReduceClusterBarrierPerLoop` | -1 → heuristic | – | `1`: first Rule 3 handshake of each enclosing loop, then another after each 2000 estimated cycles. Nearby HalfPLR / ExpandPointerSwap copies still share one handshake. `0`: every loop trigger handshakes. Unset turns on when the main loop's WMMA latency sum > 2500 and that sum / ds_load count >= 5. See [Insert cluster barrier pass](../developer/cluster-barrier.md). |
 | *CLI only* `mergeBarrierThreshold` | 0 → 11 | `--merge-barrier-threshold=N` | Max cycle distance for `StinkyMergeBarrierPass` to merge adjacent barrier groups. |
 
 ## Arch defaults and hardware facts

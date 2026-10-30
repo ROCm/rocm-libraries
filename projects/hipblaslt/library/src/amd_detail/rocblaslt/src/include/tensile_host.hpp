@@ -256,12 +256,25 @@ bool topUpWithSizeIndependentSolutions(rocblaslt_handle                  handle,
 namespace TensileLite
 {
     class ProblemOverride;
+    struct TunedEntry;
 }
 
 TensileLite::ProblemOverride
     RocblasltContractionProblem2ProblemOverride(const RocblasltContractionProblem&);
 
 TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<void>);
+
+/**
+ * Whether one row still names the kernel its index resolves to and supports
+ * this problem within the workspace, the checks replay makes. Leaves gemmData's
+ * problem as updateTensileProblem makes it from problem.
+ */
+bool tuning_cache_entry_is_usable(rocblaslt_handle                    handle,
+                                  const TensileLite::ProblemOverride& key,
+                                  const TensileLite::TunedEntry&      entry,
+                                  const RocblasltContractionProblem&  problem,
+                                  std::shared_ptr<void>               gemmData,
+                                  size_t                              max_workspace_bytes);
 
 /**
  * The solution index of the first entry for this key that still resolves to its
@@ -341,6 +354,9 @@ size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
                                int*                               indexes,
                                size_t                             count);
 
+// Memoised adaptive re-selections held by a TensileDataGemm.
+size_t adaptiveReselectionCount(std::shared_ptr<void> gemmData);
+
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 
 // Push the GemmPreference-supplied StreamK tile scheduling mode onto every
@@ -356,4 +372,4 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 // desc- or handle-level enable.
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
-                                bool                   value);
+                                int32_t                value);

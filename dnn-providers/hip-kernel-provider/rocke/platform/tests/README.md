@@ -61,6 +61,54 @@ for what is actually exercised vs. manual/diagnostic/demo.
 > 81 matched `*_emit.c`/`*_emit.py` pairs), and the binding itself by the
 > consistency proof documented in `cpp/bindings/README.md`.
 
+### CMake registration ownership
+
+Build-tree C++ registration is intentionally split by concern so unrelated PRs
+do not all edit one central file:
+
+| File | Ownership |
+|---|---|
+| `tests/CMakeLists.txt` | Stable orchestration only; includes the files below in dependency order |
+| `tests/cmake/CoreTests.cmake` | Core native targets and the build-tree arch-domain reproduction CTest |
+| `tests/cmake/PortableIrTests.cmake` | Portable-IR native tests and the replay CLI |
+| `tests/cmake/InstanceTests.cmake` | Instance-layer native tests |
+| `tests/cmake/TestCategoryLabels.cmake` | Provider YAML category application after every test is registered |
+| `platform/CMakeLists.txt` | Installed Python and library CTest entries; not build-tree C++ ownership |
+
+Add a native target to its concern-owned fragment. Do not put registration back
+in the orchestrator, and do not create a generic catch-all fragment. Keep unusual
+link libraries, include paths, installation rules, and artifact contracts explicit.
+The source contract test
+[`tools/test_cmake_test_registration.py`](tools/test_cmake_test_registration.py)
+pins the include order and keeps registration out of the orchestrator.
+
+The fragments use `include()`, not `add_subdirectory()`, deliberately. An include
+executes in the caller's CMake directory scope. That preserves the directory that
+called `add_test()`, which is required because the project's CMake minimum predates
+3.28 and `set_property(TEST ...)` / `set_tests_properties()` cannot modify those
+tests from a parent directory. `TestCategoryLabels.cmake` therefore remains the
+last include.
+
+For a registration-only refactor, prove that behavior did not change:
+
+1. Configure clean before and after build trees with identical options.
+2. Capture each inventory with
+   `ctest --test-dir <build> --show-only=json-v1`.
+3. Compare test names, commands, labels, timeouts, environments, skip properties,
+   and working directories after normalizing build-root paths. Ignore
+   `backtraceGraph` and each test's `backtrace`: extraction into includes changes
+   source locations by design.
+4. Compare target names from `cmake --build <build> --target help`.
+5. Compare generated install statements or clean install manifests after
+   normalizing build roots.
+6. Build and run the complete configured CTest suite. Exercise a provider-style
+   category-label configuration as well as standalone configuration whenever the
+   full provider checkout is available.
+
+A matching count alone is insufficient: a test can keep its name while silently
+losing a label, timeout, environment, skip code, command argument, or installed
+artifact path.
+
 ## Execution categories
 
 Four distinct things run here; don't conflate them:
@@ -102,6 +150,22 @@ source tool and committed source column, while the installed entry invokes a
 packaged test-only copy of the tool and the column in the relocated `rocke`
 package. This matches the library-side CI model: CMake stages every input, CTest
 owns execution, and no test reconstructs or reaches back into the source tree.
+
+Reproduction uses the committed column only to schedule work, never as its
+verdict. Declaration recognition is batched through `opt` and recursively split
+on failure. Each compiler/architecture pair receives an intrinsic-free target
+preflight. Calls for expected-positive cells are combined per architecture; a
+failed module is recursively split until ordinary single-cell probes identify
+every changed result. Expected-negative cells remain individual, and every
+positive call still passes through compile, link, and target assembly. Special
+integer and `immarg` operands come from explicit `ProbeSpec` witnesses rather
+than speculative value sweeps. Target preflights, positive batches, and
+negative singletons share a quota-aware worker pool capped at 32 by default;
+`--jobs` is the explicit override for constrained or dedicated hosts. An
+expected crash or timeout whose normalized evidence still matches is not rerun
+serially; changed evidence, changed verdicts, unclassified results, and otherwise
+transient-looking results are.
+
 The migration preserves the former pytest item's result mapping:
 
 | Condition | CTest result |
