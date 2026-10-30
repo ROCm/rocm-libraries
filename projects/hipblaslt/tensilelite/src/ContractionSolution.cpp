@@ -7154,7 +7154,7 @@ namespace TensileLite
             return detail;
         };
 
-        if(handwrittenCustomKernel())
+        if(handwrittenCustomKernel() && !customKernel.uniformSummationOrder)
             return refuse("CustomKernel",
                           "custom kernel " + customKernel.name
                               + " is not supported under uniform summation order");
@@ -7327,12 +7327,9 @@ namespace TensileLite
         // see handwrittenCustomKernel(). Those are frozen assembly and may bake
         // a literal stagger into the loop, which no host-side clamp can undo.
         //
-        // Defense in depth rather than a live path: the CustomKernel clause at
-        // the top of this function already refuses every handwritten custom
-        // kernel outright, so this cannot fire today. It is kept, like the
-        // ResolvedStaggerU check above, so that relaxing that clause to admit
-        // individually vetted custom kernels cannot silently admit one whose
-        // stagger is compiled in.
+        // The CustomKernel clause at the top of this function admits only the
+        // handwritten kernels that declare customKernel.uniformSummationOrder;
+        // this still refuses one of those whose stagger is compiled in.
         if(handwrittenCustomKernel() && sizeMapping.staggerU != 0)
             return refuse("CompiledInStaggerU",
                           "this kernel has a compiled-in StaggerU="
