@@ -44,6 +44,7 @@
 #  include <thrust/system/hip/detail/util.h>
 #  include <thrust/type_traits/is_trivially_relocatable.h>
 
+#  include _THRUST_STD_INCLUDE(__new/device_new.h)
 #  include _THRUST_STD_INCLUDE(iterator)
 #  include _THRUST_STD_INCLUDE(type_traits)
 

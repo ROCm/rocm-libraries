@@ -43,6 +43,8 @@
 #  include <thrust/system/cuda/detail/parallel_for.h>
 #  include <thrust/system/cuda/detail/util.h>
 
+#  include <cuda/std/__new/device_new.h>
+
 #  include <iterator>
 
 THRUST_NAMESPACE_BEGIN
@@ -63,13 +65,7 @@ struct functor
   void _CCCL_DEVICE_API _CCCL_FORCEINLINE operator()(Size idx)
   {
     value_type& out = raw_reference_cast(items[idx]);
-
-#  if _CCCL_CUDA_COMPILER(CLANG)
-    // XXX unsafe. cuda-clang is seemingly unable to call ::new in device code
-    out = value;
-#  else
     ::new (static_cast<void*>(&out)) value_type(value);
-#  endif
   }
 };
 } // namespace __uninitialized_fill
