@@ -67,7 +67,7 @@ THRUST_HOST_DEVICE THRUST_FORCEINLINE Integer log2(Integer x)
   Integer num_bits           = 8 * sizeof(Integer);
   Integer num_bits_minus_one = num_bits - 1;
 
-  return num_bits_minus_one - _THRUST_STD::countl_zero(::cuda::std::__to_unsigned_like(x));
+  return num_bits_minus_one - _THRUST_STD::countl_zero(_THRUST_STD::__to_unsigned_like(x));
 }
 
 template <typename Integer>
