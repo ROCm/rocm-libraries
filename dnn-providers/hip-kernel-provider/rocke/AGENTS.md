@@ -29,8 +29,10 @@ Prove it — GREEN for every family at every LLVM flavor:
 
 ```bash
 cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
-python tools/check_byte_identity.py                            # llvm20
+ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # llvm20
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22
+ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23
+ROCKE_LLVM_FLAVOR=llvm24 python tools/check_byte_identity.py   # llvm24
 python tools/check_byte_identity.py --only gemm                # scope to a family
 ```
 
@@ -81,6 +83,9 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
 ## Hard rules (digest)
 
 - **Byte-identity** — mirror every emission change in both engines; re-run the gate.
+- **Helpers** — reuse them, write the missing ones, fix the broken ones, each
+  with a test, in the kernel's PR. New families too; the C++ mirror is not a
+  reason to inline. Rule: [`platform/AGENTS.md`](platform/AGENTS.md#helpers-placement).
 - **Relative paths only** — no file under `platform/` may hardcode an absolute repo
   path or escape the tree; `tests/run_all.py` enforces this. Anchor on `__file__` /
   `CMAKE_CURRENT_SOURCE_DIR` / `rocke.assets`.

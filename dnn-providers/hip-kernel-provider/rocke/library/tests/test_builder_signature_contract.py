@@ -157,7 +157,6 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     ),
     "kernels.common.lightning_indexer.IndexerTileSpec": (),
     "kernels.gfx1151.wmma_fmha_decode.WmmaFmhaDecodeSpec": ("head_size",),
-    "kernels.gfx1151.wmma_fmha_fwd.WmmaFmhaFwdSpec": ("head_size",),
     "kernels.gfx1151.wmma_fmha_fwd_v2.WmmaFmhaFwdV2Spec": (),
     "kernels.gfx1250.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
         "block_size",
@@ -341,17 +340,36 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_direct_grouped.DirectMfmaDgradSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectConvWgradSpec": ("problem",),
     "kernels.common.conv_direct_nongrouped.DirectNongroupedConvSpec": ("problem",),
+    "kernels.common.conv_dgrad_patch_wmma.DgradPatchWmmaSpec": ("problem",),
+    "kernels.common.conv_dgrad_smallc_wmma.DgradSmallcWmmaSpec": ("problem",),
+    "kernels.common.conv_direct_dgrad_wmma.DirectDgradWmmaSpec": ("problem",),
+    "kernels.common.conv_direct_fwd_wmma.DirectFwdWmmaSpec": ("problem",),
+    "kernels.common.conv_fwd_small_wmma.FwdSmallcWmmaSpec": ("problem",),
+    "kernels.common.conv_fwd_small_wmma.FwdSmallkWmmaSpec": ("problem",),
     "kernels.common.conv_direct_wgrad_tiled.DirectWgradTiledSpec": ("problem",),
     "kernels.common.conv_direct_dw_wgrad.DwWgradLdsSpec": ("problem",),
+    "kernels.common.conv_direct_dw_wgrad_mfma.DwWgradMfmaSpec": ("problem",),
     "kernels.common.conv_direct_dw_wgrad.DwWgradColsSpec": ("problem",),
     # The dW extent per output channel the fold sums partial slots over.
     "kernels.common.conv_direct_dw_wgrad.DwWgradFoldSpec": ("taps",),
     "kernels.common.conv_direct_wgrad_gather.WgradGatherSpec": ("problem",),
     "kernels.common.conv_direct_nongrouped.DirectSplitReduceSpec": (),
+    "kernels.common.conv_direct_grouped_wgrad_mfma.GroupedWgradMfmaSpec": ("problem",),
     "kernels.common.deep_fused_conv_pool.FusedConvPoolProblem": ("conv",),
     "kernels.common.deep_fused_conv_pool.DeepFusedConvPoolSpec": ("problem",),
     "kernels.common.img2col.Img2ColSpec": ("problem",),
     "kernels.gfx1151.deep_fused_conv_pool.Gfx1151DeepFusedConvPoolSpec": ("problem",),
+    # Winograd forward (gfx1250)
+    "kernels.common.conv_winograd_fwd.WinogradFwdSpec": ("problem",),
+    "kernels.common.conv_winograd_gemm_wmma.WinogradGemmReduceSpec": (),
+    "kernels.common.conv_winograd_gemm_wmma.WinogradGemmWmmaSpec": (),
+    # Winograd forward: merged transform launch
+    "kernels.common.conv_winograd_fwd.WinogradMergedSpec": ("fwd",),
+    # Generalized Winograd forward
+    "kernels.common.conv_winograd_gen.WinoAxis": ("m", "r"),
+    "kernels.common.conv_winograd_gen.WinogradGenSpec": ("ax_x", "ax_y", "problem"),
+    # Fused 1-D Winograd forward
+    "kernels.common.conv_winograd_fused_1d_wmma.FusedWino1DSpec": ("ax", "problem"),
 }
 
 

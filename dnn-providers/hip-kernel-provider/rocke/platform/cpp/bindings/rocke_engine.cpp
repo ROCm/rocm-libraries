@@ -34,20 +34,28 @@
 #include <deque>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "family_glue.hpp"
 
 extern "C" {
+#include "rocke/arch_domain.h"
 #include "rocke/arena.h"
 #include "rocke/instance_batched_gemm.h"
 #include "rocke/instance_block_scale_gemm.h"
+#include "rocke/instance_conv_dgrad_patch_wmma.h"
+#include "rocke/instance_conv_dgrad_smallc_wmma.h"
+#include "rocke/instance_conv_direct_dgrad_wmma.h"
+#include "rocke/instance_conv_direct_fwd_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_nongrouped.h"
+#include "rocke/instance_conv_fwd_small_wmma.h"
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm_wgrad.h"
 #include "rocke/instance_conv_wgrad_workspace_reduce.h"
 #include "rocke/instance_deep_fused_conv_pool.h"
+#include "rocke/instance_f64_mma_probe.h"
 #include "rocke/instance_flatmm.h"
 #include "rocke/instance_gemm_multi_abd.h"
 #include "rocke/instance_gemm_multi_d.h"
@@ -91,7 +99,6 @@ extern "C" {
  * (rocke_engine_moe_gemm_fused.cpp) and registered via register_moe_gemm_fused(). */
 /* ---- RDNA WMMA families ---- */
 #include "rocke/instance_gfx1151_wmma_fmha_decode.h"
-#include "rocke/instance_gfx1151_wmma_fmha_fwd.h"
 #include "rocke/instance_gfx1151_wmma_fmha_fwd_v2.h"
 #include "rocke/instance_gfx1151_wmma_gemm.h"
 #include "rocke/instance_gfx1151_wmma_gemm_int8.h"
@@ -135,6 +142,13 @@ void register_fused_moe_e2e(py::module_& m);
 /* Defined in rocke_engine_moe_gemm_fused.cpp (separate TU; see the tensor_view /
  * transforms rocke_tensor_descriptor tag clash note above). */
 void register_moe_gemm_fused(py::module_& m);
+
+/* Defined in rocke_engine_winograd_{fwd,gemm,gen,fused1d}.cpp: the Winograd
+ * forward families, one translation unit each (see winograd_glue.hpp). */
+void register_winograd_fwd(py::module_& m);
+void register_winograd_gemm(py::module_& m);
+void register_winograd_gen(py::module_& m);
+void register_winograd_fused1d(py::module_& m);
 
 namespace
 {
@@ -523,6 +537,7 @@ std::string gemm_lower_llvm(const py::dict& spec_dict, const std::string& arch)
     {
         if(llvm_text)
             free(llvm_text);
+        throw_if_arch_domain(st, err);
         std::string msg = "rocke_engine.gemm_lower_llvm failed (status=" + std::to_string((int)st)
                           + "): " + (err[0] ? err : "unknown error");
         throw std::runtime_error(msg);
@@ -625,15 +640,26 @@ std::string gemm_kernel_name(const py::dict& spec_dict)
  * verifier run generically on the returned rocke_kernel_def_t*.
  * ------------------------------------------------------------------------ */
 
-/* Wrap a `*_lower_to_llvm` result: raise on failure, else return the .ll. */
-std::string take_lowered(rocke_status_t st, char* llvm_text, const char* err, const char* fn)
+/* Wrap a `*_lower_to_llvm` result: raise on failure, else return the .ll.
+ *
+ * `err` is the buffer the lowering filled, taken by reference rather than as a
+ * pointer so that no call site can pass nullptr. It used to be able to, and an
+ * arch-domain refusal lowered through the err-less rocke_lower_kernel_to_llvm
+ * then reached Python as an ArchDomainError with an empty message -- the
+ * intrinsic, target and flavor that explain the refusal gone, and nothing for
+ * backend.py to rebuild the Python error from. Lower through the _ex entry. */
+std::string take_lowered(rocke_status_t st,
+                         char* llvm_text,
+                         const char (&err)[ROCKE_ERR_MSG_CAP],
+                         const char* fn)
 {
     if(st != ROCKE_OK || !llvm_text)
     {
         if(llvm_text)
             free(llvm_text);
+        throw_if_arch_domain(st, err);
         std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st)
-                          + "): " + (err && err[0] ? err : "unknown error");
+                          + "): " + (err[0] ? err : "unknown error");
         throw std::runtime_error(msg);
     }
     std::string out(llvm_text);
@@ -1899,6 +1925,620 @@ std::vector<std::string> conv_direct_grouped_verify(const py::dict& d, const std
     return out;
 }
 
+/* ===================== conv_direct_fwd_small{c,k}_wmma ===================== */
+
+/* Wave32 WMMA forward of tiny channel counts (gfx1250). The dicts mirror
+ * FwdSmallcWmmaSpec / FwdSmallkWmmaSpec with the problem nested; `sched` may
+ * be None. */
+template <typename Spec>
+void fsw_fill_problem(Spec* s, const py::dict& d, std::deque<std::string>& store, const char* who)
+{
+    /* The problem's shape fields are required, as in DirectConvProblem: a
+     * missing one would silently read as the zero default. */
+    if(!d.contains("problem") || !py::isinstance<py::dict>(d["problem"]))
+        throw py::value_error(std::string(who) + " requires a problem dictionary");
+    py::dict pd = d["problem"].cast<py::dict>();
+    const char* required[] = {"N", "H", "W", "groups", "cpg", "kpg"};
+    for(const char* key : required)
+    {
+        if(!pd.contains(key))
+            throw py::value_error(std::string(who) + ".problem requires " + key);
+    }
+    /* An explicit dtype=None is invalid (Python rejects it); only an omitted
+     * key keeps the fp16 default. */
+    if(pd.contains("dtype") && pd["dtype"].is_none())
+        throw py::value_error(std::string(who)
+                              + ".problem.dtype must be 'fp16' or 'bf16', not None");
+    std::string v;
+    fill_direct_conv_problem(&s->problem, pd);
+    if(dict_str(pd, "dtype", v))
+    {
+        store.push_back(v);
+        s->problem.dtype = store.back().c_str();
+    }
+    if(dict_str(d, "name", v))
+    {
+        store.push_back(v);
+        s->name = store.back().c_str();
+    }
+    if(d.contains("sched") && !d["sched"].is_none())
+    {
+        store.push_back(d["sched"].cast<std::string>());
+        s->sched = store.back().c_str();
+    }
+}
+
+rocke_fwd_smallc_wmma_spec_t fscw_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    rocke_fwd_smallc_wmma_spec_t s = rocke_fwd_smallc_wmma_spec_default();
+    fsw_fill_problem(&s, d, store, "FwdSmallcWmmaSpec");
+    s.waves_k = dict_int(d, "waves_k", s.waves_k);
+    s.waves_p = dict_int(d, "waves_p", s.waves_p);
+    s.tiles_k = dict_int(d, "tiles_k", s.tiles_k);
+    s.tiles_p = dict_int(d, "tiles_p", s.tiles_p);
+    s.out_h = dict_int(d, "out_h", s.out_h);
+    s.out_w = dict_int(d, "out_w", s.out_w);
+    s.tiles_per_block = dict_int(d, "tiles_per_block", s.tiles_per_block);
+    s.tdm_store = dict_bool(d, "tdm_store", s.tdm_store);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    return s;
+}
+
+rocke_fwd_smallk_wmma_spec_t fskw_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    rocke_fwd_smallk_wmma_spec_t s = rocke_fwd_smallk_wmma_spec_default();
+    fsw_fill_problem(&s, d, store, "FwdSmallkWmmaSpec");
+    s.waves_c = dict_int(d, "waves_c", s.waves_c);
+    s.waves_p = dict_int(d, "waves_p", s.waves_p);
+    s.tiles_c = dict_int(d, "tiles_c", s.tiles_c);
+    s.tiles_p = dict_int(d, "tiles_p", s.tiles_p);
+    s.out_h = dict_int(d, "out_h", s.out_h);
+    s.out_w = dict_int(d, "out_w", s.out_w);
+    s.ck = dict_int(d, "ck", s.ck);
+    s.stages = dict_int(d, "stages", s.stages);
+    s.prefetch = dict_bool(d, "prefetch", s.prefetch);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    return s;
+}
+
+std::string conv_direct_fwd_smallc_wmma_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_fwd_smallc_wmma_spec_t s = fscw_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_fwd_smallc_wmma_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_engine.conv_direct_fwd_smallc_wmma_lower_llvm");
+}
+
+std::string conv_direct_fwd_smallc_wmma_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.conv_direct_fwd_smallc_wmma_serialize_ir",
+                                rocke_fwd_smallc_wmma_spec_t,
+                                fscw_build_spec,
+                                rocke_build_fwd_smallc_wmma_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_direct_fwd_smallc_wmma_verify(const py::dict& d,
+                                                            const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_direct_fwd_smallc_wmma_verify",
+                             rocke_fwd_smallc_wmma_spec_t,
+                             fscw_build_spec,
+                             rocke_build_fwd_smallc_wmma_new(&b, &s, arch.c_str()));
+}
+
+/* is_valid_fwd_smallc_spec + kernel_name / grid / lds_bytes in one call:
+ * -> (ok, reason, kernel_name, (gx, gy, gz), lds_bytes). */
+py::tuple conv_direct_fwd_smallc_wmma_describe(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_fwd_smallc_wmma_spec_t s = fscw_build_spec(d, store);
+    char reason[512];
+    char name[512];
+    int grid[3] = {0, 0, 0};
+    bool ok = rocke_fwd_smallc_wmma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
+    if(rocke_fwd_smallc_wmma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+        name[0] = '\0';
+    if(ok) /* a rejected spec may have zero tile extents */
+        rocke_fwd_smallc_wmma_grid(&s, grid);
+    return py::make_tuple(ok,
+                          std::string(reason),
+                          std::string(name),
+                          py::make_tuple(grid[0], grid[1], grid[2]),
+                          rocke_fwd_smallc_wmma_lds_bytes(&s));
+}
+
+std::string conv_direct_fwd_smallk_wmma_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_fwd_smallk_wmma_spec_t s = fskw_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_fwd_smallk_wmma_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_engine.conv_direct_fwd_smallk_wmma_lower_llvm");
+}
+
+std::string conv_direct_fwd_smallk_wmma_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.conv_direct_fwd_smallk_wmma_serialize_ir",
+                                rocke_fwd_smallk_wmma_spec_t,
+                                fskw_build_spec,
+                                rocke_build_fwd_smallk_wmma_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_direct_fwd_smallk_wmma_verify(const py::dict& d,
+                                                            const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_direct_fwd_smallk_wmma_verify",
+                             rocke_fwd_smallk_wmma_spec_t,
+                             fskw_build_spec,
+                             rocke_build_fwd_smallk_wmma_new(&b, &s, arch.c_str()));
+}
+
+py::tuple conv_direct_fwd_smallk_wmma_describe(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_fwd_smallk_wmma_spec_t s = fskw_build_spec(d, store);
+    char reason[512];
+    char name[512];
+    int grid[3] = {0, 0, 0};
+    bool ok = rocke_fwd_smallk_wmma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
+    if(rocke_fwd_smallk_wmma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+        name[0] = '\0';
+    if(ok)
+        rocke_fwd_smallk_wmma_grid(&s, grid);
+    return py::make_tuple(ok,
+                          std::string(reason),
+                          std::string(name),
+                          py::make_tuple(grid[0], grid[1], grid[2]),
+                          rocke_fwd_smallk_wmma_lds_bytes(&s));
+}
+
+/* ======================== conv_dgrad_patch_wmma ========================== */
+
+/* Wave32 WMMA patch-embedding dgrad (gfx1250). The dict mirrors DgradPatchWmmaSpec
+ * with the problem nested; `sched` may be None. */
+rocke_dgrad_patch_wmma_spec_t dpw_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_dgrad_patch_wmma_spec_t s = rocke_dgrad_patch_wmma_spec_default();
+    /* The problem's shape fields are required, as in DirectConvProblem: a
+     * missing one would silently read as the zero default. */
+    if(!d.contains("problem") || !py::isinstance<py::dict>(d["problem"]))
+        throw py::value_error("DgradPatchWmmaSpec requires a problem dictionary");
+    {
+        py::dict pd = d["problem"].cast<py::dict>();
+        const char* required[] = {"N", "H", "W", "groups", "cpg", "kpg"};
+        for(const char* key : required)
+        {
+            if(!pd.contains(key))
+                throw py::value_error(std::string("DgradPatchWmmaSpec.problem requires ") + key);
+        }
+        std::string v;
+        fill_direct_conv_problem(&s.problem, pd);
+        /* dict_str reads None as absent. An explicit None dtype is rejected
+         * (Python's validator refuses it) rather than read as the fp16
+         * default; only an omitted dtype takes the default. */
+        if(pd.contains("dtype") && pd["dtype"].is_none())
+            throw py::value_error("DgradPatchWmmaSpec.problem.dtype must be a string, not None");
+        if(dict_str(pd, "dtype", v))
+            s.problem.dtype = keep(v);
+    }
+    {
+        std::string v;
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+    }
+    s.waves_c = dict_int(d, "waves_c", s.waves_c);
+    s.waves_p = dict_int(d, "waves_p", s.waves_p);
+    s.tiles_c = dict_int(d, "tiles_c", s.tiles_c);
+    s.tiles_p = dict_int(d, "tiles_p", s.tiles_p);
+    s.tile_w = dict_int(d, "tile_w", s.tile_w);
+    s.r_blk = dict_int(d, "r_blk", s.r_blk);
+    s.ck = dict_int(d, "ck", s.ck);
+    s.stages = dict_int(d, "stages", s.stages);
+    s.prefetch = dict_bool(d, "prefetch", s.prefetch);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    if(d.contains("sched") && !d["sched"].is_none())
+        s.sched = keep(d["sched"].cast<std::string>());
+    return s;
+}
+
+std::string conv_dgrad_patch_wmma_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_dgrad_patch_wmma_spec_t s = dpw_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_dgrad_patch_wmma_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_engine.conv_dgrad_patch_wmma_lower_llvm");
+}
+
+std::string conv_dgrad_patch_wmma_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.conv_dgrad_patch_wmma_serialize_ir",
+                                rocke_dgrad_patch_wmma_spec_t,
+                                dpw_build_spec,
+                                rocke_build_dgrad_patch_wmma_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_dgrad_patch_wmma_verify(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_dgrad_patch_wmma_verify",
+                             rocke_dgrad_patch_wmma_spec_t,
+                             dpw_build_spec,
+                             rocke_build_dgrad_patch_wmma_new(&b, &s, arch.c_str()));
+}
+
+/* is_valid + kernel_name / grid / lds_bytes in one call:
+ * -> (ok, reason, kernel_name, (gx, gy, gz), lds_bytes). */
+py::tuple conv_dgrad_patch_wmma_describe(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_dgrad_patch_wmma_spec_t s = dpw_build_spec(d, store);
+    char reason[512];
+    char name[512];
+    int grid[3] = {0, 0, 0};
+    bool ok = rocke_dgrad_patch_wmma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
+    if(rocke_dgrad_patch_wmma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+        name[0] = '\0';
+    if(ok) /* a rejected spec may have zero tile extents */
+        rocke_dgrad_patch_wmma_grid(&s, grid);
+    return py::make_tuple(ok,
+                          std::string(reason),
+                          std::string(name),
+                          py::make_tuple(grid[0], grid[1], grid[2]),
+                          rocke_dgrad_patch_wmma_lds_bytes(&s));
+}
+
+/* ======================== conv_dgrad_smallc_wmma ========================== */
+
+/* Wave32 WMMA small-C stem dgrad (gfx1250). The dict mirrors DgradSmallcWmmaSpec
+ * with the problem nested; `sched` may be None. */
+rocke_dgrad_smallc_wmma_spec_t dsw_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_dgrad_smallc_wmma_spec_t s = rocke_dgrad_smallc_wmma_spec_default();
+    /* The problem's shape fields are required, as in DirectConvProblem: a
+     * missing one would silently read as the zero default. */
+    if(!d.contains("problem") || !py::isinstance<py::dict>(d["problem"]))
+        throw py::value_error("DgradSmallcWmmaSpec requires a problem dictionary");
+    {
+        py::dict pd = d["problem"].cast<py::dict>();
+        const char* required[] = {"N", "H", "W", "groups", "cpg", "kpg"};
+        for(const char* key : required)
+        {
+            if(!pd.contains(key))
+                throw py::value_error(std::string("DgradSmallcWmmaSpec.problem requires ") + key);
+        }
+        std::string v;
+        fill_direct_conv_problem(&s.problem, pd);
+        /* dict_str reads None as absent. An explicit None dtype is rejected
+         * (Python's validator refuses it) rather than read as the fp16
+         * default; only an omitted dtype takes the default. */
+        if(pd.contains("dtype") && pd["dtype"].is_none())
+            throw py::value_error("DgradSmallcWmmaSpec.problem.dtype must be a string, not None");
+        if(dict_str(pd, "dtype", v))
+            s.problem.dtype = keep(v);
+    }
+    {
+        std::string v;
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+    }
+    s.waves_c = dict_int(d, "waves_c", s.waves_c);
+    s.waves_p = dict_int(d, "waves_p", s.waves_p);
+    s.tiles_c = dict_int(d, "tiles_c", s.tiles_c);
+    s.tiles_p = dict_int(d, "tiles_p", s.tiles_p);
+    s.out_h = dict_int(d, "out_h", s.out_h);
+    s.out_w = dict_int(d, "out_w", s.out_w);
+    s.ck = dict_int(d, "ck", s.ck);
+    s.stages = dict_int(d, "stages", s.stages);
+    s.prefetch = dict_bool(d, "prefetch", s.prefetch);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    if(d.contains("sched") && !d["sched"].is_none())
+        s.sched = keep(d["sched"].cast<std::string>());
+    return s;
+}
+
+std::string conv_dgrad_smallc_wmma_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_dgrad_smallc_wmma_spec_t s = dsw_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_dgrad_smallc_wmma_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_engine.conv_dgrad_smallc_wmma_lower_llvm");
+}
+
+std::string conv_dgrad_smallc_wmma_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.conv_dgrad_smallc_wmma_serialize_ir",
+                                rocke_dgrad_smallc_wmma_spec_t,
+                                dsw_build_spec,
+                                rocke_build_dgrad_smallc_wmma_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_dgrad_smallc_wmma_verify(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_dgrad_smallc_wmma_verify",
+                             rocke_dgrad_smallc_wmma_spec_t,
+                             dsw_build_spec,
+                             rocke_build_dgrad_smallc_wmma_new(&b, &s, arch.c_str()));
+}
+
+/* is_valid + kernel_name / grid / lds_bytes in one call:
+ * -> (ok, reason, kernel_name, (gx, gy, gz), lds_bytes). */
+py::tuple conv_dgrad_smallc_wmma_describe(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_dgrad_smallc_wmma_spec_t s = dsw_build_spec(d, store);
+    char reason[512];
+    char name[512];
+    int grid[3] = {0, 0, 0};
+    bool ok = rocke_dgrad_smallc_wmma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
+    if(rocke_dgrad_smallc_wmma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+        name[0] = '\0';
+    if(ok) /* a rejected spec may have zero tile extents */
+        rocke_dgrad_smallc_wmma_grid(&s, grid);
+    return py::make_tuple(ok,
+                          std::string(reason),
+                          std::string(name),
+                          py::make_tuple(grid[0], grid[1], grid[2]),
+                          rocke_dgrad_smallc_wmma_lds_bytes(&s));
+}
+
+/* ======================== conv_direct_dgrad_wmma ========================== */
+
+/* Wave32 WMMA direct dgrad (gfx1250). The dict mirrors DirectDgradWmmaSpec
+ * with the problem nested; `sched` may be None. */
+rocke_direct_dgrad_wmma_spec_t ddgw_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_direct_dgrad_wmma_spec_t s = rocke_direct_dgrad_wmma_spec_default();
+    /* The problem's shape fields are required, as in DirectConvProblem: a
+     * missing one would silently read as the zero default. */
+    if(!d.contains("problem") || !py::isinstance<py::dict>(d["problem"]))
+        throw py::value_error("DirectDgradWmmaSpec requires a problem dictionary");
+    {
+        py::dict pd = d["problem"].cast<py::dict>();
+        const char* required[] = {"N", "H", "W", "groups", "cpg", "kpg"};
+        for(const char* key : required)
+        {
+            if(!pd.contains(key))
+                throw py::value_error(std::string("DirectDgradWmmaSpec.problem requires ") + key);
+        }
+        std::string v;
+        fill_direct_conv_problem(&s.problem, pd);
+        if(dict_str(pd, "dtype", v))
+            s.problem.dtype = keep(v);
+    }
+    {
+        std::string v;
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+    }
+    s.waves_c = dict_int(d, "waves_c", s.waves_c);
+    s.waves_p = dict_int(d, "waves_p", s.waves_p);
+    s.tiles_c = dict_int(d, "tiles_c", s.tiles_c);
+    s.tiles_p = dict_int(d, "tiles_p", s.tiles_p);
+    s.tile_w = dict_int(d, "tile_w", s.tile_w);
+    s.tile_n = dict_int(d, "tile_n", s.tile_n);
+    s.ck = dict_int(d, "ck", s.ck);
+    s.stages = dict_int(d, "stages", s.stages);
+    s.prefetch = dict_bool(d, "prefetch", s.prefetch);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    if(d.contains("sched") && !d["sched"].is_none())
+        s.sched = keep(d["sched"].cast<std::string>());
+    s.pack_groups = dict_int(d, "pack_groups", s.pack_groups);
+    s.split_barrier = dict_bool(d, "split_barrier", s.split_barrier);
+    s.wave_epilogue = dict_bool(d, "wave_epilogue", s.wave_epilogue);
+    return s;
+}
+
+std::string conv_direct_dgrad_wmma_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_direct_dgrad_wmma_spec_t s = ddgw_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_direct_dgrad_wmma_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_engine.conv_direct_dgrad_wmma_lower_llvm");
+}
+
+std::string conv_direct_dgrad_wmma_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.conv_direct_dgrad_wmma_serialize_ir",
+                                rocke_direct_dgrad_wmma_spec_t,
+                                ddgw_build_spec,
+                                rocke_build_direct_dgrad_wmma_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_direct_dgrad_wmma_verify(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_direct_dgrad_wmma_verify",
+                             rocke_direct_dgrad_wmma_spec_t,
+                             ddgw_build_spec,
+                             rocke_build_direct_dgrad_wmma_new(&b, &s, arch.c_str()));
+}
+
+/* is_valid_dgrad_wmma_spec + kernel_name / grid / lds_bytes in one call:
+ * -> (ok, reason, kernel_name, (gx, gy, gz), lds_bytes). */
+py::tuple conv_direct_dgrad_wmma_describe(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_direct_dgrad_wmma_spec_t s = ddgw_build_spec(d, store);
+    char reason[512];
+    char name[512];
+    int grid[3] = {0, 0, 0};
+    bool ok = rocke_direct_dgrad_wmma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
+    if(rocke_direct_dgrad_wmma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+        name[0] = '\0';
+    if(ok) /* a rejected spec may have zero tile extents */
+        rocke_direct_dgrad_wmma_grid(&s, grid);
+    return py::make_tuple(ok,
+                          std::string(reason),
+                          std::string(name),
+                          py::make_tuple(grid[0], grid[1], grid[2]),
+                          rocke_direct_dgrad_wmma_lds_bytes(&s));
+}
+
+/* ======================== conv_direct_fwd_wmma ============================ */
+
+/* Wave32 WMMA direct forward (gfx1250). The dict mirrors DirectFwdWmmaSpec
+ * with the problem nested; `sched` may be None. */
+rocke_direct_fwd_wmma_spec_t dfww_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_direct_fwd_wmma_spec_t s = rocke_direct_fwd_wmma_spec_default();
+    /* The problem's shape fields are required, as in DirectConvProblem: a
+     * missing one would silently read as the zero default. */
+    if(!d.contains("problem") || !py::isinstance<py::dict>(d["problem"]))
+        throw py::value_error("DirectFwdWmmaSpec requires a problem dictionary");
+    {
+        py::dict pd = d["problem"].cast<py::dict>();
+        const char* required[] = {"N", "H", "W", "groups", "cpg", "kpg"};
+        for(const char* key : required)
+        {
+            if(!pd.contains(key))
+                throw py::value_error(std::string("DirectFwdWmmaSpec.problem requires ") + key);
+        }
+        /* An explicit dtype=None is invalid (Python rejects it); only an
+         * omitted key keeps the fp16 default. */
+        if(pd.contains("dtype") && pd["dtype"].is_none())
+            throw py::value_error(
+                "DirectFwdWmmaSpec.problem.dtype must be 'fp16' or 'bf16', not None");
+        std::string v;
+        fill_direct_conv_problem(&s.problem, pd);
+        if(dict_str(pd, "dtype", v))
+            s.problem.dtype = keep(v);
+    }
+    {
+        std::string v;
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+    }
+    s.waves_k = dict_int(d, "waves_k", s.waves_k);
+    s.waves_p = dict_int(d, "waves_p", s.waves_p);
+    s.tiles_k = dict_int(d, "tiles_k", s.tiles_k);
+    s.tiles_p = dict_int(d, "tiles_p", s.tiles_p);
+    s.tile_w = dict_int(d, "tile_w", s.tile_w);
+    s.tile_n = dict_int(d, "tile_n", s.tile_n);
+    s.ck = dict_int(d, "ck", s.ck);
+    s.stages = dict_int(d, "stages", s.stages);
+    s.prefetch = dict_bool(d, "prefetch", s.prefetch);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.pack_groups = dict_int(d, "pack_groups", s.pack_groups);
+    s.split_barrier = dict_bool(d, "split_barrier", s.split_barrier);
+    s.wave_epilogue = dict_bool(d, "wave_epilogue", s.wave_epilogue);
+    s.phase_split = dict_bool(d, "phase_split", s.phase_split);
+    s.row_ring = dict_bool(d, "row_ring", s.row_ring);
+    s.tap_ring = dict_bool(d, "tap_ring", s.tap_ring);
+    s.pingpong = dict_bool(d, "pingpong", s.pingpong);
+    s.pp_group = dict_int(d, "pp_group", s.pp_group);
+    s.tap_reuse = dict_bool(d, "tap_reuse", s.tap_reuse);
+    s.tap_shift = dict_bool(d, "tap_shift", s.tap_shift);
+    if(d.contains("sched") && !d["sched"].is_none())
+        s.sched = keep(d["sched"].cast<std::string>());
+    return s;
+}
+
+std::string conv_direct_fwd_wmma_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_direct_fwd_wmma_spec_t s = dfww_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_direct_fwd_wmma_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_engine.conv_direct_fwd_wmma_lower_llvm");
+}
+
+std::string conv_direct_fwd_wmma_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_engine.conv_direct_fwd_wmma_serialize_ir",
+                                rocke_direct_fwd_wmma_spec_t,
+                                dfww_build_spec,
+                                rocke_build_direct_fwd_wmma_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_direct_fwd_wmma_verify(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_direct_fwd_wmma_verify",
+                             rocke_direct_fwd_wmma_spec_t,
+                             dfww_build_spec,
+                             rocke_build_direct_fwd_wmma_new(&b, &s, arch.c_str()));
+}
+
+/* is_valid_fwd_wmma_spec + kernel_name / grid / lds_bytes in one call:
+ * -> (ok, reason, kernel_name, (gx, gy, gz), lds_bytes). */
+py::tuple conv_direct_fwd_wmma_describe(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_direct_fwd_wmma_spec_t s = dfww_build_spec(d, store);
+    char reason[512];
+    char name[512];
+    int grid[3] = {0, 0, 0};
+    bool ok = rocke_direct_fwd_wmma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
+    if(rocke_direct_fwd_wmma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+        name[0] = '\0';
+    if(ok) /* a rejected spec may have zero tile extents */
+        rocke_direct_fwd_wmma_grid(&s, grid);
+    /* The phase-split halo divides by the stride; a zero stride (rejected
+     * above) reports no LDS rather than dividing by zero. */
+    long lds = (s.phase_split && s.problem.stride == 0) ? 0 : rocke_direct_fwd_wmma_lds_bytes(&s);
+    return py::make_tuple(
+        ok, std::string(reason), std::string(name), py::make_tuple(grid[0], grid[1], grid[2]), lds);
+}
+
 /* ======================== conv_direct_nongrouped ========================== */
 
 /* Non-grouped (groups == 1, or grouped=True) direct conv. The dict mirrors
@@ -2119,10 +2759,12 @@ std::string layernorm2d_lower_llvm(const py::dict& d, const std::string& arch)
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch.c_str(), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.layernorm2d_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.layernorm2d_lower_llvm");
 }
 
 std::string layernorm2d_serialize_ir(const py::dict& d, const std::string& arch)
@@ -2304,10 +2946,12 @@ std::string add_rmsnorm2d_rdquant_lower_llvm(const py::dict& d, const std::strin
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch.c_str(), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.add_rmsnorm2d_rdquant_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.add_rmsnorm2d_rdquant_lower_llvm");
 }
 
 std::string add_rmsnorm2d_rdquant_serialize_ir(const py::dict& d, const std::string& arch)
@@ -2421,10 +3065,12 @@ std::string reduce_lower_llvm(const py::dict& d, const std::string& arch)
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch.c_str(), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.reduce_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.reduce_lower_llvm");
 }
 
 std::string reduce_serialize_ir(const py::dict& d, const std::string& arch)
@@ -2532,10 +3178,12 @@ std::string conv_wgrad_lower_llvm(const py::dict& d, const std::string& arch)
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch.c_str(), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.conv_wgrad_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.conv_wgrad_lower_llvm");
 }
 
 std::string conv_wgrad_serialize_ir(const py::dict& d, const std::string& arch)
@@ -2604,10 +3252,12 @@ std::string conv_wgrad_reduce_lower_llvm(const py::dict& d, const std::string& a
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch.c_str(), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.conv_wgrad_reduce_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.conv_wgrad_reduce_lower_llvm");
 }
 
 std::string conv_wgrad_reduce_serialize_ir(const py::dict& d, const std::string& arch)
@@ -2682,10 +3332,12 @@ std::string pooling_lower_llvm(const py::dict& d, const std::string& arch)
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch.c_str(), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.pooling_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.pooling_lower_llvm");
 }
 
 std::string pooling_serialize_ir(const py::dict& d, const std::string& arch)
@@ -2746,10 +3398,12 @@ std::string transpose_lower_llvm(const py::dict& d, const std::string& arch)
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch.c_str(), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.transpose_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.transpose_lower_llvm");
 }
 
 std::string transpose_serialize_ir(const py::dict& d, const std::string& arch)
@@ -2826,10 +3480,12 @@ std::string permute_nd_lower_llvm(const py::dict& d, const std::string& arch)
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch.c_str(), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.permute_nd_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.permute_nd_lower_llvm");
 }
 
 std::string permute_nd_serialize_ir(const py::dict& d, const std::string& arch)
@@ -2959,10 +3615,12 @@ std::string topk_softmax_lower_llvm(const py::dict& d, const std::string& arch)
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch.c_str(), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.topk_softmax_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.topk_softmax_lower_llvm");
 }
 
 std::string topk_softmax_serialize_ir(const py::dict& d, const std::string& arch)
@@ -3094,10 +3752,12 @@ std::string moe_fused_mega_lower_llvm(const py::dict& d, const std::string& arch
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch.c_str(), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.moe_fused_mega_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.moe_fused_mega_lower_llvm");
 }
 
 std::string moe_fused_mega_serialize_ir(const py::dict& d, const std::string& arch)
@@ -3168,10 +3828,12 @@ std::string moe_fused_mega_fp8_lower_llvm(const py::dict& d, const std::string& 
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch.c_str(), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.moe_fused_mega_fp8_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.moe_fused_mega_fp8_lower_llvm");
 }
 
 std::string moe_fused_mega_fp8_serialize_ir(const py::dict& d, const std::string& arch)
@@ -3277,10 +3939,12 @@ std::string fused_moe_lower_llvm(const py::dict& d, const std::string& arch)
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch.c_str(), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.fused_moe_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.fused_moe_lower_llvm");
 }
 
 std::string fused_moe_serialize_ir(const py::dict& d, const std::string& arch)
@@ -3353,10 +4017,12 @@ std::string moe_sorting_lower_llvm(const py::dict& d, const std::string& arch)
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch.c_str(), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.moe_sorting_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.moe_sorting_lower_llvm");
 }
 
 std::string moe_sorting_serialize_ir(const py::dict& d, const std::string& arch)
@@ -3418,9 +4084,12 @@ std::string gfx1151_wmma_gemm_lower_llvm(const py::dict& d, const std::string& a
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st
+        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_gemm_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.gfx1151_wmma_gemm_lower_llvm");
 }
 
 std::string gfx1151_wmma_gemm_serialize_ir(const py::dict& d, const std::string& arch)
@@ -3477,9 +4146,12 @@ std::string gfx1151_wmma_gemm_int8_lower_llvm(const py::dict& d, const std::stri
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st
+        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_gemm_int8_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.gfx1151_wmma_gemm_int8_lower_llvm");
 }
 
 std::string gfx1151_wmma_gemm_int8_serialize_ir(const py::dict& d, const std::string& arch)
@@ -3534,9 +4206,12 @@ std::string gfx1151_wmma_gemm_iu8_lower_llvm(const py::dict& d, const std::strin
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st
+        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_gemm_iu8_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.gfx1151_wmma_gemm_iu8_lower_llvm");
 }
 
 std::string gfx1151_wmma_gemm_iu8_serialize_ir(const py::dict& d, const std::string& arch)
@@ -3592,9 +4267,12 @@ std::string gfx1151_wmma_gemm_iu8_dequant_lower_llvm(const py::dict& d, const st
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st
+        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_gemm_iu8_dequant_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.gfx1151_wmma_gemm_iu8_dequant_lower_llvm");
 }
 
 std::string gfx1151_wmma_gemm_iu8_dequant_serialize_ir(const py::dict& d, const std::string& arch)
@@ -3614,140 +4292,6 @@ std::vector<std::string> gfx1151_wmma_gemm_iu8_dequant_verify(const py::dict& d,
                              rocke_wmma_gemm_iu8_dequant_spec_t,
                              w1151iu8dq_build_spec,
                              rocke_build_wmma_gemm_iu8_dequant_new(&b, &s, a));
-}
-
-/* ---- gfx1151_wmma_fmha_fwd ---- */
-rocke_fmha_mask_mode_t parse_fmha_mask(const std::string& s)
-{
-    if(s == "causal")
-        return ROCKE_FMHA_MASK_CAUSAL;
-    if(s == "window" || s == "sliding_window")
-        return ROCKE_FMHA_MASK_SLIDING_WINDOW;
-    if(s == "alibi")
-        return ROCKE_FMHA_MASK_ALIBI;
-    if(s == "custom")
-        return ROCKE_FMHA_MASK_CUSTOM;
-    return ROCKE_FMHA_MASK_NONE;
-}
-
-rocke_wmma_fmha_fwd_spec_t w1151fmha_build_spec(const py::dict& d, std::deque<std::string>& store)
-{
-    auto keep = [&](const std::string& s) -> const char* {
-        store.push_back(s);
-        return store.back().c_str();
-    };
-    rocke_wmma_fmha_fwd_spec_t s = rocke_wmma_fmha_fwd_spec_default();
-    s.head_size = dict_int(d, "head_size", s.head_size);
-    s.v_lds_stage = dict_bool(d, "v_lds_stage", s.v_lds_stage);
-    s.query_tail = dict_bool(d, "query_tail", s.query_tail);
-    s.kv_tail = dict_bool(d, "kv_tail", s.kv_tail);
-    s.use_softcap = dict_bool(d, "use_softcap", s.use_softcap);
-    s.use_sinks = dict_bool(d, "use_sinks", s.use_sinks);
-    s.use_alibi = dict_bool(d, "use_alibi", s.use_alibi);
-    s.use_qq_bias = dict_bool(d, "use_qq_bias", s.use_qq_bias);
-    s.page_block_size = dict_int(d, "page_block_size", s.page_block_size);
-    s.transposed_qk = dict_bool(d, "transposed_qk", s.transposed_qk);
-    s.block_n = dict_int(d, "block_n", s.block_n);
-    s.num_waves = dict_int(d, "num_waves", s.num_waves);
-    s.value_tile_size = dict_int(d, "value_tile_size", s.value_tile_size);
-    s.causal_tile_skip = dict_bool(d, "causal_tile_skip", s.causal_tile_skip);
-    s.v_head_size = dict_int(d, "v_head_size", s.v_head_size);
-    s.use_attn_bias = dict_bool(d, "use_attn_bias", s.use_attn_bias);
-    s.runtime_head_dims = dict_bool(d, "runtime_head_dims", s.runtime_head_dims);
-    {
-        std::string v;
-        if(dict_str(d, "mask_mode", v))
-            s.mask_mode = parse_fmha_mask(v);
-        if(dict_str(d, "dtype", v))
-            s.dtype = keep(v);
-        if(dict_str(d, "layout", v))
-            s.layout = keep(v);
-        if(dict_str(d, "kv_dtype", v))
-            s.kv_dtype = keep(v);
-        if(dict_str(d, "bias_dtype", v))
-            s.bias_dtype = keep(v);
-        if(dict_str(d, "name", v))
-            s.name = keep(v);
-        if(dict_str(d, "scheduler_strategy", v))
-            s.scheduler_strategy = keep(v);
-    }
-    return s;
-}
-
-std::string gfx1151_wmma_fmha_fwd_lower_llvm(const py::dict& d, const std::string& arch)
-{
-    require_arch(arch);
-    std::deque<std::string> store;
-    rocke_wmma_fmha_fwd_spec_t s = w1151fmha_build_spec(d, store);
-    rocke_ir_builder_t b;
-    const char* a = arch.c_str();
-    char kname[512];
-    kname[0] = '\0';
-    rocke_wmma_fmha_fwd_kernel_name(&s, kname, sizeof kname);
-    rocke_ir_builder_init(&b, kname);
-    rocke_kernel_def_t* k = rocke_build_wmma_fmha_fwd(&b, &s, a);
-    if(!k || !rocke_ir_builder_ok(&b))
-    {
-        std::string msg
-            = std::string("rocke_engine.gfx1151_wmma_fmha_fwd_lower_llvm build failed: ")
-              + rocke_ir_builder_error(&b);
-        rocke_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
-    char* ll = nullptr;
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
-    guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_fmha_fwd_lower_llvm");
-}
-
-std::string gfx1151_wmma_fmha_fwd_serialize_ir(const py::dict& d, const std::string& arch)
-{
-    require_arch(arch);
-    std::deque<std::string> store;
-    rocke_wmma_fmha_fwd_spec_t s = w1151fmha_build_spec(d, store);
-    rocke_ir_builder_t b;
-    const char* a = arch.c_str();
-    char kname[512];
-    kname[0] = '\0';
-    rocke_wmma_fmha_fwd_kernel_name(&s, kname, sizeof kname);
-    rocke_ir_builder_init(&b, kname);
-    rocke_kernel_def_t* k = rocke_build_wmma_fmha_fwd(&b, &s, a);
-    if(!k || !rocke_ir_builder_ok(&b))
-    {
-        std::string msg
-            = std::string("rocke_engine.gfx1151_wmma_fmha_fwd_serialize_ir build failed: ")
-              + rocke_ir_builder_error(&b);
-        rocke_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "rocke_engine.gfx1151_wmma_fmha_fwd_serialize_ir");
-    rocke_ir_builder_free(&b);
-    return out;
-}
-
-std::vector<std::string> gfx1151_wmma_fmha_fwd_verify(const py::dict& d, const std::string& arch)
-{
-    require_arch(arch);
-    std::deque<std::string> store;
-    rocke_wmma_fmha_fwd_spec_t s = w1151fmha_build_spec(d, store);
-    rocke_ir_builder_t b;
-    const char* a = arch.c_str();
-    char kname[512];
-    kname[0] = '\0';
-    rocke_wmma_fmha_fwd_kernel_name(&s, kname, sizeof kname);
-    rocke_ir_builder_init(&b, kname);
-    rocke_kernel_def_t* k = rocke_build_wmma_fmha_fwd(&b, &s, a);
-    if(!k || !rocke_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("rocke_engine.gfx1151_wmma_fmha_fwd_verify build failed: ")
-                          + rocke_ir_builder_error(&b);
-        rocke_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    rocke_ir_builder_free(&b);
-    return out;
 }
 
 /* ---- gfx1151_wmma_fmha_fwd_v2 (RDNA gfx11/gfx12 prefill) ---- */
@@ -3827,10 +4371,12 @@ std::string gfx1151_wmma_fmha_fwd_v2_lower_llvm(const py::dict& d, const std::st
         = w1151fmha_v2_build(&b, d, arch, "rocke_engine.gfx1151_wmma_fmha_fwd_v2_lower_llvm");
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    const char* a = arch.c_str();
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_fmha_fwd_v2_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.gfx1151_wmma_fmha_fwd_v2_lower_llvm");
 }
 
 std::string gfx1151_wmma_fmha_fwd_v2_serialize_ir(const py::dict& d, const std::string& arch)
@@ -3946,10 +4492,12 @@ std::string gfx1151_wmma_fmha_decode_lower_llvm(const py::dict& d, const std::st
         = w1151dec_build(&b, d, arch, "rocke_engine.gfx1151_wmma_fmha_decode_lower_llvm");
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    const char* a = arch.c_str();
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_fmha_decode_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.gfx1151_wmma_fmha_decode_lower_llvm");
 }
 
 std::string gfx1151_wmma_fmha_decode_serialize_ir(const py::dict& d, const std::string& arch)
@@ -4007,9 +4555,12 @@ std::string gfx1201_wmma_gemm_lower_llvm(const py::dict& d, const std::string& a
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st
+        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
     guard.reset();
-    return take_lowered(st, ll, nullptr, "rocke_engine.gfx1201_wmma_gemm_lower_llvm");
+    return take_lowered(st, ll, err, "rocke_engine.gfx1201_wmma_gemm_lower_llvm");
 }
 
 std::string gfx1201_wmma_gemm_serialize_ir(const py::dict& d, const std::string& arch)
@@ -4043,7 +4594,7 @@ std::vector<std::string> gfx1201_wmma_gemm_verify(const py::dict& d, const std::
  * the engine's extern "C" boundary never aborts/terminates.
  * ------------------------------------------------------------------------ */
 
-/* "'llvm20', 'llvm22', 'llvm23'" -- built from the engine's flavor ladder so
+/* Canonical concrete flavor names -- built from the engine's ladder so
  * the message cannot drift from what from_name() actually accepts. */
 static std::string rocke_engine_flavor_list()
 {
@@ -4111,7 +4662,7 @@ std::string lower_serialized_ir(const std::string& ir_text,
         fl = rocke_llvm_flavor_from_name(flavor.c_str());
         if(fl == ROCKE_LLVM_FLAVOR_AUTO)
         {
-            throw std::runtime_error(
+            throw pybind11::value_error(
                 std::string("rocke_engine.lower_serialized_ir: unknown LLVM flavor '") + flavor
                 + "' (expected one of " + rocke_engine_flavor_list() + ")");
         }
@@ -4131,6 +4682,12 @@ std::string lower_serialized_ir(const std::string& ir_text,
     const rocke_status_t st
         = rocke_lower_kernel_to_llvm_ex(kernel, fl, a, &out_ll, err, sizeof(err));
     std::unique_ptr<char, decltype(&std::free)> text(out_ll, std::free);
+    /* The builder and `text` are owned, so the refusal can unwind without
+     * freeing by hand (a manual free here would run twice). */
+    if(st == ROCKE_ERR_ARCH_DOMAIN)
+    {
+        throw_if_arch_domain(st, err);
+    }
     if(st != ROCKE_OK || !out_ll)
     {
         std::string msg = std::string("rocke_engine.lower_serialized_ir: lower failed for arch '")
@@ -4189,6 +4746,10 @@ PYBIND11_MODULE(rocke_engine, m)
     m.doc() = "pybind11 binding for the C++ rocke engine (universal GEMM "
               "family). Foundation of the ROCKE_BACKEND=cpp dual-backend path.";
 
+    /* Raised when the arch-domain lane refuses a lowering; see
+     * ArchDomainRefusal in family_glue.hpp. */
+    py::register_exception<ArchDomainRefusal>(m, "ArchDomainError", PyExc_NotImplementedError);
+
     /* ---- portable-IR bundle freshness / provenance stamp ----
      * build_id() is a content hash of the native bundle inputs this .so was
      * built from; engine_version() is the human-readable version. Harnesses and
@@ -4206,6 +4767,25 @@ PYBIND11_MODULE(rocke_engine, m)
         "engine_version",
         []() { return std::string(rocke_engine_version()); },
         "Human-readable engine version of this module.");
+
+    m.def(
+        "f64_mma_probe_serialize_ir",
+        [](int m, int k) {
+            rocke_ir_builder_t b;
+            rocke_kernel_def_t* kernel = rocke_build_f64_mma_probe(&b, m, k);
+            char* text = nullptr;
+            rocke_status_t status
+                = kernel ? rocke_ir_serialize(kernel, &text) : rocke_ir_builder_status(&b);
+            std::string error = rocke_ir_builder_error(&b);
+            std::string result = text ? text : "";
+            free(text);
+            rocke_ir_builder_free(&b);
+            if(status != ROCKE_OK)
+                throw std::runtime_error(error);
+            return result;
+        },
+        py::arg("m") = 16,
+        py::arg("k") = 4);
 
     m.def(
         "tf32_mma_probe_serialize_ir",
@@ -4265,6 +4845,34 @@ PYBIND11_MODULE(rocke_engine, m)
         },
         "The LLVM flavors this engine accepts, oldest first. Must equal "
         "rocke.core.lower_llvm.LLVM_FLAVORS.");
+
+    /* The engine's compiled-in arch-domain table, so a test can hold it to the
+     * Python reader cell for cell. It is generated from the same committed
+     * columns at build time; this is how a stale or mis-generated copy shows. */
+    m.def(
+        "arch_domain_column",
+        [](const std::string& flavor) {
+            std::vector<std::tuple<std::string, std::string, std::string, std::string, bool>> out;
+            size_t n = 0;
+            const rocke_arch_domain_cell_t* cells = rocke_arch_domain_column(flavor.c_str(), &n);
+            out.reserve(n);
+            for(size_t i = 0; i < n; ++i)
+                out.emplace_back(cells[i].key,
+                                 cells[i].arch,
+                                 cells[i].status,
+                                 cells[i].evidence,
+                                 cells[i].waived != 0);
+            return out;
+        },
+        py::arg("flavor"),
+        "Every negative (key, arch, status, evidence, waived) cell compiled into this "
+        "engine for one LLVM flavor, sorted by (key, arch); empty for a flavor "
+        "with no committed column.");
+    m.def(
+        "arch_domain_default_mode",
+        []() { return std::string(rocke_arch_domain_default_mode()); },
+        "What an unset ROCKE_ARCH_DOMAIN means to this engine. Generated from "
+        "rocke.core.arch.domain.DEFAULT_MODE, so the two must be equal.");
 
     m.def("gemm_lower_llvm",
           &gemm_lower_llvm,
@@ -4351,7 +4959,59 @@ PYBIND11_MODULE(rocke_engine, m)
          &conv_direct_nongrouped_lower_llvm,
          &conv_direct_nongrouped_serialize_ir,
          &conv_direct_nongrouped_verify);
+    reg3("conv_dgrad_patch_wmma",
+         &conv_dgrad_patch_wmma_lower_llvm,
+         &conv_dgrad_patch_wmma_serialize_ir,
+         &conv_dgrad_patch_wmma_verify);
+    m.def("conv_dgrad_patch_wmma_describe",
+          &conv_dgrad_patch_wmma_describe,
+          py::arg("spec"),
+          py::arg("arch"));
+    reg3("conv_dgrad_smallc_wmma",
+         &conv_dgrad_smallc_wmma_lower_llvm,
+         &conv_dgrad_smallc_wmma_serialize_ir,
+         &conv_dgrad_smallc_wmma_verify);
+    m.def("conv_dgrad_smallc_wmma_describe",
+          &conv_dgrad_smallc_wmma_describe,
+          py::arg("spec"),
+          py::arg("arch"));
+    reg3("conv_direct_fwd_smallc_wmma",
+         &conv_direct_fwd_smallc_wmma_lower_llvm,
+         &conv_direct_fwd_smallc_wmma_serialize_ir,
+         &conv_direct_fwd_smallc_wmma_verify);
+    m.def("conv_direct_fwd_smallc_wmma_describe",
+          &conv_direct_fwd_smallc_wmma_describe,
+          py::arg("spec"),
+          py::arg("arch"));
+    reg3("conv_direct_fwd_smallk_wmma",
+         &conv_direct_fwd_smallk_wmma_lower_llvm,
+         &conv_direct_fwd_smallk_wmma_serialize_ir,
+         &conv_direct_fwd_smallk_wmma_verify);
+    m.def("conv_direct_fwd_smallk_wmma_describe",
+          &conv_direct_fwd_smallk_wmma_describe,
+          py::arg("spec"),
+          py::arg("arch"));
+    reg3("conv_direct_dgrad_wmma",
+         &conv_direct_dgrad_wmma_lower_llvm,
+         &conv_direct_dgrad_wmma_serialize_ir,
+         &conv_direct_dgrad_wmma_verify);
+    m.def("conv_direct_dgrad_wmma_describe",
+          &conv_direct_dgrad_wmma_describe,
+          py::arg("spec"),
+          py::arg("arch"));
+    reg3("conv_direct_fwd_wmma",
+         &conv_direct_fwd_wmma_lower_llvm,
+         &conv_direct_fwd_wmma_serialize_ir,
+         &conv_direct_fwd_wmma_verify);
+    m.def("conv_direct_fwd_wmma_describe",
+          &conv_direct_fwd_wmma_describe,
+          py::arg("spec"),
+          py::arg("arch"));
     register_img2col(m); /* separate TU; see note at top of file */
+    register_winograd_fwd(m); /* separate TUs; see winograd_glue.hpp */
+    register_winograd_gemm(m);
+    register_winograd_gen(m);
+    register_winograd_fused1d(m);
     reg3("deep_fused_conv_pool",
          &deep_fused_conv_pool_lower_llvm,
          &deep_fused_conv_pool_serialize_ir,
@@ -4417,10 +5077,6 @@ PYBIND11_MODULE(rocke_engine, m)
          &gfx1151_wmma_gemm_iu8_dequant_lower_llvm,
          &gfx1151_wmma_gemm_iu8_dequant_serialize_ir,
          &gfx1151_wmma_gemm_iu8_dequant_verify);
-    reg3("gfx1151_wmma_fmha_fwd",
-         &gfx1151_wmma_fmha_fwd_lower_llvm,
-         &gfx1151_wmma_fmha_fwd_serialize_ir,
-         &gfx1151_wmma_fmha_fwd_verify);
     reg3("gfx1151_wmma_fmha_fwd_v2",
          &gfx1151_wmma_fmha_fwd_v2_lower_llvm,
          &gfx1151_wmma_fmha_fwd_v2_serialize_ir,

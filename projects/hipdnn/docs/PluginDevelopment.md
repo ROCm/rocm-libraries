@@ -15,6 +15,7 @@
     - [Plugin SDK Knob Utilities](#plugin-sdk-knob-utilities)
     - [Registering Knobs with the Plugin SDK](#registering-knobs-with-the-plugin-sdk)
     - [Accessing Knob Settings in Your Plugin](#accessing-knob-settings-in-your-plugin)
+  - [Saving Execution Plans from Ingestor Engines](#saving-execution-plans-from-ingestor-engines)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
 - [How to Test Plugins](#how-to-test-plugins)
@@ -90,6 +91,7 @@ The plugin API defines how kernel engine plugins interact with hipDNN:
 - **Data SDK Objects**: Plugins use Data SDK objects to deserialize and process graphs
 - **Capability Reporting**: Plugins analyze graphs and report whether they can execute them
 - **Execution Interface**: Plugins provide execution methods for supported operations
+- **Execution Plan Serialization (optional)**: A plugin that lets users save and load built execution plans exports three hooks: `hipdnnEnginePluginSerializeExecutionContext`, `hipdnnEnginePluginDestroySerializedExecutionContext` and `hipdnnEnginePluginCreateExecutionContextFromSerialized` (declared in `hipdnn_plugin_sdk/EnginePluginApi.h`). hipDNN uses them only when all three are exported. See [RFC 0009](./rfcs/0009_CompiledPlanSerialization.md#plugin-api).
 
 ## Engine IDs
 
@@ -414,7 +416,7 @@ public:
 
 #### Implementing `global.benchmarking`
 
-The generic kernel ingestor engine (`hipdnn_plugin_sdk::ingestor`) implements the global benchmarking knob: setting `global.benchmarking=1` makes it build one candidate plan per knob-filtered catalog entry, time each on the device on first `execute()`, and memoize the ranking per (graph content, device). The ranking survives the plan that measured it, and persists across processes when disk caching is enabled. Per-field knobs plus `add_engine_sweep()` remain the way to sweep one metadata dimension and reach every kernel a declared field distinguishes; the two mechanisms are complementary. A provider adopting the ingestor needs no benchmarking code of its own: carry one `hipdnn_plugin_sdk::ingestor::IngestorSettings ingestorSettings` member on its `TSettings` type and a handle exposing `hipStream_t getStream() const`, and `GenericPlanBuilder` handles advertisement, knob reading, the `HIPDNN_FORCE_BENCHMARKING` override, and the composite plan.
+The generic kernel ingestor engine (`hipdnn_plugin_sdk::ingestor`) implements the global benchmarking knob: setting `global.benchmarking=1` makes it build one candidate plan per catalog entry left after the knob filter and `global.workspace_size_limit` at plan build, time each on the device on the first `execute()`, and memoize the ranking per (graph content, device). The ranking survives the plan that measured it, and persists across processes when disk caching is enabled; a record is served only when it covers every kernel applicable to the graph, so a run whose filters remove a kernel benchmarks again each time. Per-field knobs plus `add_engine_sweep()` remain the way to sweep one metadata dimension and reach every kernel a declared field distinguishes; the two mechanisms are complementary. On a cold benchmarked build a kernel's preparation cost is paid once per candidate, and preparation errors surface at plan build; [Environment Configuration](./Environment.md#hipdnn_force_benchmarking) covers when a benchmarked record skips this. A provider adopting the ingestor needs no benchmarking code of its own: carry one `hipdnn_plugin_sdk::ingestor::IngestorSettings ingestorSettings` member on its `TSettings` type and a handle exposing `hipStream_t getStream() const`, and `GenericPlanBuilder` handles advertisement, knob reading, the `HIPDNN_FORCE_BENCHMARKING` override, and the composite plan.
 
 A handle used with the ingestor **must** expose `hipStream_t getStream() const`: benchmarking's default timer brackets each candidate with HIP events on that stream. Both `GenericPlanBuilder` and `BenchmarkPlan` `static_assert` the requirement, so a handle without it fails to compile with a message naming it rather than failing at plan-build time. The requirement sits on the ingestor templates, not on `validateHandleType()`, so a provider that never instantiates them is unaffected. `BenchmarkPlan` accepts an optional `Timer` in place of that default; it exists so tests can prove candidate selection without a device, and is not part of any stability promise.
 
@@ -431,6 +433,23 @@ When a knob is no longer needed, mark it as deprecated rather than removing it. 
 2. **Update documentation** to indicate the deprecation and recommend alternatives.
 
 3. **Remove only during major version updates** to maintain backward compatibility.
+
+### Saving Execution Plans from Ingestor Engines
+
+A provider that builds plans with the generic kernel ingestor can let users save and load them. The plugin SDK supplies the pieces each dispatch handler needs; the provider supplies the payload format and the three plugin hooks. To support saving:
+
+- **Opt in per dispatch handler.** Override `saveLaunchInputs` and `restoreLaunch` in `hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler`. The defaults return no value, which means the handler does not support saving or restoring. In the same handler, override `supportsSaving` to return true.
+- **Save launch inputs under a versioned name.** `saveLaunchInputs` returns the handler's named, typed launch inputs (never computed grid or argument values) with a versioned dispatch name. Register the handler under that versioned name as well as under the dispatch symbol its descriptors use, so a loaded plan finds the handler whose contract gives the values their meaning.
+- **Change the version when the contract changes.** The version identifies the contract between the saved values and the launch. It is not the format version of the saved file. A saved plan can pair an older code object with the current launch. Use a new version when one of these items changes:
+  - The names, types, or meanings of the values.
+  - The kernel arguments that the launch passes: their order, count, kinds, sizes, or meanings.
+  - How the launch calculates the grid, the block, or the dynamic LDS from the values.
+
+  Keep the handler of the old version registered while plans saved with that version must load.
+- **Save the chosen plan.** `IPlan::saveablePlan()` gives the single-kernel plan to save. A `BenchmarkPlan` returns one only after its first execute has chosen a kernel.
+- **Export the hooks.** Export the three hooks listed under [Plugin API](#plugin-api). Tell your own plans apart from the plans of your other engines in the save hook, for example by the plan type.
+- **Report the note.** Report `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION` only for an engine that can save every plan. Every kernel must be a single-launch kernel with a source kind that the save hook accepts. Every dispatch handler must return true from `supportsSaving`.
+- **Keep the note and the hooks in agreement.** The frontend's `to_binary()` includes the plan for every engine that reports the note, and fails if that save fails, with no fallback to the graph only.
 
 ## Plugin Architecture
 

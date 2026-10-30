@@ -119,13 +119,21 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
     )
 
-    # The kpack kernel source adapter. Listed here rather than beside Kernel.cpp above
-    # because it does not compile without the ingestor: KpackArchive.cpp is the only
-    # translation unit in the provider that includes <rocm_kpack/kpack.h>.
+    # The kpack kernel source adapter, and the loader for saved code objects. Listed here
+    # rather than beside Kernel.cpp above because they do not compile without the
+    # ingestor: KpackArchive.cpp is the only translation unit in the provider that
+    # includes <rocm_kpack/kpack.h>.
     target_sources(hip_kernel_provider_impl PRIVATE
+        compilation/CodeObjectLoad.cpp
         compilation/KpackArchive.cpp
         compilation/KpackKernelLoader.cpp
         compilation/KpackProgram.cpp
+    )
+
+    # The plan serialization hooks. They save and load only ingestor plans, so a build
+    # without the ingestor exports none of them.
+    target_sources(hip_kernel_provider_impl PRIVATE
+        core/PluginSerialization.cpp
     )
 endif()
 

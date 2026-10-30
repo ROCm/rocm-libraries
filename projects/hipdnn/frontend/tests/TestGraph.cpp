@@ -159,13 +159,33 @@ public:
         // used to make the descriptors test as "valid" past the validity check.
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         auto engineConfigHandle = reinterpret_cast<hipdnnBackendDescriptor_t>(0xE0 + engineId);
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        auto executionPlanHandle = reinterpret_cast<hipdnnBackendDescriptor_t>(0xF0 + engineId);
+        auto executionPlanHandle = executionPlanHandleFor(engineId);
         plan.engineConfigDesc
             = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(engineConfigHandle);
         plan.executionPlanDesc
             = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(executionPlanHandle);
         _compiledPlans.push_back(std::move(plan));
+    }
+
+    /// Execution plan descriptor handle injectValidCompiledPlan() assigns to `engineId`.
+    static hipdnnBackendDescriptor_t executionPlanHandleFor(int64_t engineId)
+    {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        return reinterpret_cast<hipdnnBackendDescriptor_t>(0xF0 + engineId);
+    }
+
+    /// Make the plan at `index` the active, not yet finalized plan, as
+    /// create_execution_plans() does (it selects the preferred engine's plan).
+    void setActivePlanForTest(size_t index)
+    {
+        setActivePlanState(index, detail::ActivePlanFinalization::UNFINALIZED);
+    }
+
+    /// Make the plan at `index` the active plan and mark it finalized, as a successful
+    /// build_plans() leaves it.
+    void setActivePlanFinalizedForTest(size_t index)
+    {
+        setActivePlanState(index, detail::ActivePlanFinalization::FINALIZED);
     }
 
     /// Get the engine IDs from all plan specs (for assertions).
@@ -425,6 +445,51 @@ protected:
     {
         detail::IHipdnnBackend::resetInstance();
         _mockBackend.reset();
+    }
+
+    // Backend error string the mocked getLastErrorString() reports; set by mockPlanFinalize().
+    std::string _lastBackendError;
+
+    // Drive the execution-plan finalize sequence of the plan that
+    // GraphTestUtils::injectValidCompiledPlan() installed for `engineId`: backendFinalize
+    // returns `status` (setting `lastError` as the backend error string) at most as often
+    // as `finalizeCalls` allows, and the workspace query reports `workspaceSize`.
+    void mockPlanFinalize(int64_t engineId,
+                          hipdnnStatus_t status,
+                          const ::testing::Cardinality& finalizeCalls,
+                          const std::string& lastError = {},
+                          int64_t workspaceSize = 0)
+    {
+        ON_CALL(*_mockBackend, getLastErrorString(_, _))
+            .WillByDefault([this](char* message, size_t maxSize) {
+                const auto count = std::min(_lastBackendError.size(), maxSize - 1);
+                std::memcpy(message, _lastBackendError.data(), count);
+                message[count] = '\0';
+            });
+
+        const auto execPlanDesc = GraphTestUtils::executionPlanHandleFor(engineId);
+        EXPECT_CALL(*_mockBackend, backendFinalize(execPlanDesc))
+            .Times(finalizeCalls)
+            .WillRepeatedly([this, status, lastError](hipdnnBackendDescriptor_t) {
+                _lastBackendError = lastError;
+                return status;
+            });
+        EXPECT_CALL(*_mockBackend,
+                    backendGetAttribute(execPlanDesc,
+                                        HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
+                                        HIPDNN_TYPE_INT64,
+                                        1,
+                                        _,
+                                        _))
+            .WillRepeatedly([workspaceSize](hipdnnBackendDescriptor_t,
+                                            hipdnnBackendAttributeName_t,
+                                            hipdnnBackendAttributeType_t,
+                                            int64_t,
+                                            int64_t*,
+                                            void* ptr) {
+                *static_cast<int64_t*>(ptr) = workspaceSize;
+                return HIPDNN_STATUS_SUCCESS;
+            });
     }
 };
 
@@ -8572,9 +8637,21 @@ TEST_F(TestGraph, TimedExecuteLeavesTimingInvalidOnBackendExecuteFailure)
     GraphTestUtils graph;
     graph.injectValidCompiledPlan(1, 0, false);
 
-    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
-        .Times(1)
-        .WillOnce(Return(HIPDNN_STATUS_EXECUTION_FAILED));
+    bool executeFailed = false;
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(1).WillOnce([&](auto, auto, auto) {
+        executeFailed = true;
+        return HIPDNN_STATUS_EXECUTION_FAILED;
+    });
+
+    // The failure path must reset the profiling context after the failed step: the reset
+    // releases the gate and drains the stream before another measurement can run.
+    int resetsAfterFailure = 0;
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, HIPDNN_ATTR_PROFILING_RESET_EXT, _, _, _))
+        .WillRepeatedly([&](auto, auto, auto, auto, auto) {
+            resetsAfterFailure += executeFailed ? 1 : 0;
+            return HIPDNN_STATUS_SUCCESS;
+        });
 
     const std::unordered_map<int64_t, void*> variantPack;
     ExecutionTiming timing;
@@ -8583,6 +8660,7 @@ TEST_F(TestGraph, TimedExecuteLeavesTimingInvalidOnBackendExecuteFailure)
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(timing.quality, TimingQuality::INVALID);
     EXPECT_FALSE(timing.elapsedMs.has_value());
+    EXPECT_EQ(resetsAfterFailure, 1);
 }
 
 TEST_F(TestGraph, TimedExecuteRejectsNoActivePlanAndResetsTiming)
@@ -10437,6 +10515,458 @@ TEST_F(TestGraph, BuildPlansAllRejectsEmptyCompiledPlans)
     hipdnn_frontend::GraphTestUtils graph;
     auto result = graph.build_plans(BuildPlanPolicy::ALL);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+}
+
+// ============================================================================
+// build_plans(HEURISTICS_CHOICE) falls back on any finalize failure
+//
+// Any failure of the active plan's finalize sequence (engine config attribute,
+// backend finalize, workspace query), whatever the status, makes the build walk
+// the other plans in ranked order from the top of the list. The first plan that
+// finalizes becomes active. When none does, the build fails with
+// GRAPH_EXECUTION_PLAN_CREATION_FAILED listing every attempted plan.
+// ============================================================================
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceActivePlanFailureFallsBackToNextPlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/128);
+    mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceCandidateFailureContinuesToLaterPlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_NOT_SUPPORTED, Exactly(1), "engine 10 rejected the graph");
+    mockPlanFinalize(20, HIPDNN_STATUS_ALLOC_FAILED, Exactly(1), "out of device memory");
+    mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/64);
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 2u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 30);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceAllPlansFailReturnsAggregatedError)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_NOT_SUPPORTED, Exactly(1), "no kernel for engine 10");
+    mockPlanFinalize(20, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost 20");
+    mockPlanFinalize(30, HIPDNN_STATUS_ALLOC_FAILED, Exactly(1), "out of device memory 30");
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_EQ(result.err_msg.rfind("Failed to finalize any execution plan "
+                                   "(policy=HEURISTICS_CHOICE): ",
+                                   0),
+              0u)
+        << result.err_msg;
+
+    // Every attempted plan and its failure, in attempt order (the active plan first).
+    const auto pos10 = result.err_msg.find("engine 10: ");
+    const auto pos20 = result.err_msg.find("engine 20: ");
+    const auto pos30 = result.err_msg.find("engine 30: ");
+    ASSERT_NE(pos10, std::string::npos) << result.err_msg;
+    ASSERT_NE(pos20, std::string::npos) << result.err_msg;
+    ASSERT_NE(pos30, std::string::npos) << result.err_msg;
+    EXPECT_LT(pos10, pos20);
+    EXPECT_LT(pos20, pos30);
+    EXPECT_NE(result.err_msg.find("no kernel for engine 10"), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("execution context lost 20"), std::string::npos)
+        << result.err_msg;
+    EXPECT_NE(result.err_msg.find("out of device memory 30"), std::string::npos) << result.err_msg;
+    // Failures are joined by "; " and each one carries its engine id.
+    EXPECT_NE(result.err_msg.find("; engine 20: "), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("; engine 30: "), std::string::npos) << result.err_msg;
+
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 10);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceRepeatedCallOnFinalizedPlanReturnsItsError)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/16, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanFinalizedForTest(0);
+
+    // The backend refuses to finalize the already finalized plan again. That is not an engine
+    // failure: the error is returned and no other plan is activated.
+    mockPlanFinalize(10, HIPDNN_STATUS_BAD_PARAM, Exactly(1), "already finalized");
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_NE(result.err_msg.find("already finalized"), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 10);
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceAllPlansFailMessageOmitsSkippedCandidates)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/true);
+    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "failure of engine 10");
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(30, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "failure of engine 30");
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("engine 10: "), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("failure of engine 10"), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("engine 30: "), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("failure of engine 30"), std::string::npos) << result.err_msg;
+    EXPECT_EQ(result.err_msg.find("engine 20"), std::string::npos) << result.err_msg;
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceSinglePlanFailureReturnsPlanCreationFailed)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("engine 10: "), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("Failed to finalize execution plan descriptor"),
+              std::string::npos)
+        << result.err_msg;
+    EXPECT_NE(result.err_msg.find("execution context lost"), std::string::npos) << result.err_msg;
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 10);
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackSkipsDeselectedEngine)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    // Deselected before the plans exist, so only build_plans() can bar the plan.
+    graph.deselect_engines(std::vector<int64_t>{20});
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/64);
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 2u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 30);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackSkipsCandidateOverWorkspaceLimit)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.deselect_workspace_greater_than(100);
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+    mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/50);
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 2u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 30);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackAcceptsCandidateAtWorkspaceLimit)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.deselect_workspace_greater_than(100);
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
+    // The limit bars only workspaces strictly greater than it, so equal is accepted.
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/100);
+    mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackSkipsAlreadyBarredCandidate)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/true);
+    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/64);
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 2u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 30);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceActivePlanOverWorkspaceLimitDoesNotFallBack)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.deselect_workspace_greater_than(100);
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    // The active plan finalizes, so no fallback applies even though its workspace is over
+    // the limit.
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(result.err_msg.find("exceeds deselect limit"), std::string::npos) << result.err_msg;
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoicePreferredEngineFailureFallsBackFromTopOfList)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/-1, /*barred=*/false);
+    // The preferred engine's plan is the active plan, as create_execution_plans() arranges it.
+    graph.set_preferred_engine_id_ext(int64_t{30});
+    graph.setActivePlanForTest(2);
+
+    // The walk starts at index 0, not after the active plan, so the top-ranked engine serves.
+    mockPlanFinalize(30, HIPDNN_STATUS_ALLOC_FAILED, Exactly(1), "out of device memory");
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/32);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 10);
+    ASSERT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(*graph.get_preferred_engine_id_ext(), 30);
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoicePreferredEngineFallbackWalkSkipsFailingCandidates)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/-1, /*barred=*/false);
+    // The preferred engine sits at index 2 and is the active plan.
+    graph.set_preferred_engine_id_ext(int64_t{30});
+    graph.setActivePlanForTest(2);
+
+    // The walk starts at index 0 even though the active plan is at index 2, so
+    // the top-ranked engine is tried (and fails as well) before engine 20.
+    mockPlanFinalize(30, HIPDNN_STATUS_NOT_SUPPORTED, Exactly(1), "engine 30 failed");
+    mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "engine 10 failed");
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/32);
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
+    ASSERT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(*graph.get_preferred_engine_id_ext(), 30);
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceSetAttributeFailureFallsBackToNextPlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    // The engine config of the active plan is rejected before its finalize step is reached.
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(GraphTestUtils::executionPlanHandleFor(10),
+                                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                    _,
+                                    _,
+                                    _))
+        .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(GraphTestUtils::executionPlanHandleFor(20),
+                                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                    _,
+                                    _,
+                                    _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceSetAttributeFailureOnEveryPlanNamesTheStep)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG, _, _, _))
+        .Times(2)
+        .WillRepeatedly(Return(HIPDNN_STATUS_BAD_PARAM));
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("engine 10: Failed to set the engine config on execution plan"),
+              std::string::npos)
+        << result.err_msg;
+    EXPECT_NE(result.err_msg.find("engine 20: Failed to set the engine config on execution plan"),
+              std::string::npos)
+        << result.err_msg;
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceWorkspaceQueryFailureFallsBackToNextPlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+    // The workspace query of the active plan fails; the later (more specific)
+    // expectation takes precedence over the one installed by mockPlanFinalize().
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(GraphTestUtils::executionPlanHandleFor(10),
+                                    HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
+                                    HIPDNN_TYPE_INT64,
+                                    1,
+                                    _,
+                                    _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
+}
+
+TEST_F(TestGraph, BuildPlansAllSkipsPlanWithOtherFailure)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
 }
 
 // ============================================================================
@@ -12958,6 +13488,150 @@ TEST_F(TestGraph, AutotuneRestartsUnstalledOnceThenLaterCallCanStallAgain)
     {
         ASSERT_TRUE(r.succeeded) << r.engineName << ": " << r.errorMessage;
         EXPECT_EQ(r.timingQuality, TimingQuality::DEVICE_ONLY) << r.engineName;
+    }
+}
+
+namespace
+{
+// Drives autotune's real executeWithPlanTimed() path with a backend whose stalled
+// measurements read a finite negative elapsed time, the shape observed on Windows for
+// short work. The first `negativeStalledReadings` stalled measurements read -0.01 ms;
+// every other measurement reads 1.0 ms. STALL_USED follows the last arm, as the
+// descriptor does.
+struct NegativeStalledBackend
+{
+    int negativeStalledReadings = 0;
+    int stallArmCount = 0;
+    bool armed = false;
+
+    void install(::testing::NiceMock<Mock_hipdnn_backend>& backend)
+    {
+        ON_CALL(backend, backendSetAttribute(_, _, _, _, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t attribute,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  const void*) {
+                if(attribute == HIPDNN_ATTR_PROFILING_RESET_EXT)
+                {
+                    armed = false;
+                }
+                else if(attribute == HIPDNN_ATTR_PROFILING_STALL_ARM_EXT)
+                {
+                    armed = true;
+                    ++stallArmCount;
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            });
+        ON_CALL(backend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, _, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* out) {
+                const bool negative = armed && negativeStalledReadings > 0;
+                negativeStalledReadings -= negative ? 1 : 0;
+                *static_cast<float*>(out) = negative ? -0.01f : 1.0f;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+        ON_CALL(backend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, _, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* out) {
+                *static_cast<bool*>(out) = armed;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    }
+};
+
+std::vector<AutotuneResult> autotuneTwoCompiledPlans(GraphTestUtils& graph,
+                                                     hipdnnHandle_t handle,
+                                                     const AutotuneConfig& config)
+{
+    std::vector<AutotuneResult> results;
+    const std::unordered_map<int64_t, void*> variantPack = {{1, reinterpret_cast<void*>(0x1)},
+                                                            {2, reinterpret_cast<void*>(0x2)},
+                                                            {3, reinterpret_cast<void*>(0x3)},
+                                                            {4, reinterpret_cast<void*>(0x4)},
+                                                            {5, reinterpret_cast<void*>(0x5)}};
+    auto result = graph.autotune(handle, variantPack, nullptr, config, {}, &results);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    return results;
+}
+} // namespace
+
+// One negative stalled reading is replaced in place: the pass stays stalled and every
+// candidate still ranks on DEVICE_ONLY samples.
+TEST_F(TestGraph, AutotuneReplacesOneNegativeStalledReadingWithoutRestart)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectValidCompiledPlan(/*engineId=*/-2, /*workspaceSize=*/0, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/-3, /*workspaceSize=*/0, /*barred=*/false);
+
+    NegativeStalledBackend backend;
+    backend.negativeStalledReadings = 1;
+    backend.install(*_mockBackend);
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 2;
+    config.warmupIterations = 0;
+
+    const auto results = autotuneTwoCompiledPlans(graph, _handle, config);
+    ASSERT_EQ(results.size(), 2u);
+    // Four recorded samples plus the one replaced negative reading, all stalled.
+    EXPECT_EQ(backend.stallArmCount, 2 * config.timedIterations + 1);
+    for(const auto& r : results)
+    {
+        ASSERT_TRUE(r.succeeded) << r.engineName << ": " << r.errorMessage;
+        EXPECT_EQ(r.timingQuality, TimingQuality::DEVICE_ONLY) << r.engineName;
+        EXPECT_FLOAT_EQ(r.minTimeMs, 1.0f) << r.engineName;
+    }
+}
+
+// Stalled readings that stay negative exhaust the candidate's retry budget. That must not
+// drop the candidate: the comparison restarts unstalled once and every candidate ranks.
+TEST_F(TestGraph, AutotuneRestartsUnstalledAfterThreeNegativeStalledReadings)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectValidCompiledPlan(/*engineId=*/-2, /*workspaceSize=*/0, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/-3, /*workspaceSize=*/0, /*barred=*/false);
+
+    NegativeStalledBackend backend;
+    backend.negativeStalledReadings = std::numeric_limits<int>::max();
+    backend.install(*_mockBackend);
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::RUN_UNTIL_STABLE;
+    config.maxIterations = 5;
+    config.windowSize = 3;
+    config.warmupIterations = 0;
+
+    const auto results = autotuneTwoCompiledPlans(graph, _handle, config);
+    ASSERT_EQ(results.size(), 2u);
+    // Only the first candidate is measured stalled: its first sample and both retries.
+    EXPECT_EQ(backend.stallArmCount, 3);
+    for(const auto& r : results)
+    {
+        ASSERT_TRUE(r.succeeded) << r.engineName << ": " << r.errorMessage;
+        EXPECT_EQ(r.timingQuality, TimingQuality::UNSTALLED) << r.engineName;
+        EXPECT_FLOAT_EQ(r.minTimeMs, 1.0f) << r.engineName;
     }
 }
 

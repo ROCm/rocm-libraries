@@ -28,6 +28,7 @@
 #include "elementwise_solution.hpp"
 #include "elementwise_solution_instances.hpp"
 #include "elementwise_solution_registry.hpp"
+#include "elementwise_type_support.hpp"
 #include "logger.hpp"
 
 #include "hiptensor_options.hpp"
@@ -88,17 +89,7 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
         return checkResult;
     }
 
-    constexpr std::array<std::array<hiptensorDataType_t, 2>, 4> validDataTypes
-        = {{// typeA, typeC, typeScalar
-            {HIPTENSOR_R_16F, HIPTENSOR_R_16F},
-            {HIPTENSOR_R_16F, HIPTENSOR_R_32F},
-            {HIPTENSOR_R_32F, HIPTENSOR_R_32F},
-            {HIPTENSOR_R_64F, HIPTENSOR_R_64F}}};
-
-    std::array<hiptensorDataType_t, 2> inputTensorTypes = {descA->mType, typeScalar};
-    if(std::none_of(validDataTypes.cbegin(),
-                    validDataTypes.cend(),
-                    [&inputTensorTypes](auto&& types) { return types == inputTensorTypes; }))
+    if(!hiptensor::isSupportedElementwiseTypeCombination({descA->mType, descB->mType}, typeScalar))
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
         snprintf(msg,
@@ -106,7 +97,7 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
                  "Unsupported Data Type Error : The combination of data types for input tensors A, "
                  "and B is not supported. "
                  "See the link for details "
-                 "https://rocm.docs.amd.com/projects/hipTensor/en/docs-6.5.0/api-reference/"
+                 "https://rocm.docs.amd.com/projects/hipTensor/en/latest/api-reference/"
                  "api-reference.html "
                  "(%s)",
                  hiptensorGetErrorString(errorCode));

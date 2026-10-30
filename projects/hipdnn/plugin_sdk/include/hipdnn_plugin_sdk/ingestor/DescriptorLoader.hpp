@@ -128,10 +128,10 @@ template <typename T>
 struct CatalogEntry
 {
     T descriptor;
-    /// First file that defined this id. A second file claiming the id is compared against
-    /// this one by re-parsing it: parsed JSON ignores key order/whitespace, unlike adding
-    /// operator== to all seven struct types, and keeping every file's DOM alive until the
-    /// catalog dies cost more than every parse put together.
+    /// First file that defined this id. Kept for diagnostics (a collision names both
+    /// files) and for KernelMatch, which resolves a kernel's relative paths against it.
+    /// Collisions are settled by comparing the parsed descriptors, not by reading this
+    /// file again.
     std::filesystem::path path;
     /// The root this file was found under. Stamped by settleCatalog when the root's pass
     /// finishes, since that is the one place that already knows both the root and which
@@ -368,7 +368,7 @@ inline void requireSha256Shape(const std::string& text, const std::string& where
 }
 
 /// RFC 0017 §4's accept rule, run for every descriptor before its body is parsed and
-/// ahead of the catalog insert: RFC 0020 §10.2.1 requires an unsupported-version UED to
+/// ahead of the catalog insert: RFC 0020 §13.2.1 requires an unsupported-version UED to
 /// drop for its version alone and leave the descriptors it would have collided with
 /// standing.
 ///
@@ -705,6 +705,7 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
     heuristic.score = {config.scoreMetric, config.scoreCalibrated, config.scoreTransform};
     heuristic.nativeSymbol = config.nativeSymbol;
     heuristic.modelArtifactPath = config.modelArtifactPath;
+    heuristic.authoredArtifactPath = config.authoredArtifactPath;
     heuristic.modelHash = config.modelHash;
     heuristic.customLibrarySymbol = config.customLibrarySymbol;
     heuristic.trainedAgainstJson = config.trainedAgainst;
@@ -1230,7 +1231,7 @@ inline bool isLaunchName(std::string_view name)
 /// mapped to a complete `kpack` kernel source. One entry says what `kernel_source` says, so
 /// it is refused rather than accepted as a second spelling of one fact. Entries may share a
 /// library and toc_key (one module, several kernels) and may even name the same symbol: a
-/// kernel launched twice, for example under two grid shapes, is one entry per launch.
+/// kernel run twice with different arguments is one entry per launch.
 ///
 /// A repeated key is not detected here: the DOM keeps the last value, as it does for every
 /// other descriptor object, and the packer never emits one.
@@ -1694,63 +1695,11 @@ inline std::string keyDescription(const ArchKey& key)
     return text + "]";
 }
 
-/// @p path parsed whole, read the way the walk reads it, or nullopt if it no longer opens
-/// or parses. The failure is logged here, naming its cause, so the caller's verdict about
-/// the collision is never mistaken for a statement about the file's contents.
-inline std::optional<nlohmann::json> reparseDescriptorFile(const std::filesystem::path& path)
-{
-    try
-    {
-        const auto filename = path.filename().string();
-        if(filename.size() > SUFFIX_UHD.size()
-           && filename.compare(filename.size() - SUFFIX_UHD.size(), SUFFIX_UHD.size(), SUFFIX_UHD)
-                  == 0)
-        {
-            return uhd::readUhdDocument(path);
-        }
-        std::ifstream file(path, std::ios::binary);
-        if(!file.is_open())
-        {
-            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: failed to re-open "
-                                    << path << " to compare it with a file sharing its id");
-            return std::nullopt;
-        }
-        return nlohmann::json::parse(file,
-                                     nullptr,
-                                     /*allow_exceptions=*/true,
-                                     /*ignore_comments=*/true);
-    }
-    catch(const std::exception& error)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: failed to re-read "
-                                << path
-                                << " to compare it with a file sharing its id: " << error.what());
-        return std::nullopt;
-    }
-}
-
-/// Whether two descriptor files parse to the same document, or nullopt when either could
-/// not be re-read.
-inline std::optional<bool> filesParseEqual(const std::filesystem::path& first,
-                                           const std::filesystem::path& second)
-{
-    const auto lhs = reparseDescriptorFile(first);
-    if(!lhs)
-    {
-        return std::nullopt;
-    }
-    const auto rhs = reparseDescriptorFile(second);
-    if(!rhs)
-    {
-        return std::nullopt;
-    }
-    return *lhs == *rhs;
-}
-
 /// Inserts a freshly parsed descriptor, resolving a repeated key against what is already
 /// held: identical content is a duplicate shard and is dropped, differing content from a
 /// later root is refused, and differing content from the same root poisons the entry so
-/// neither definition is used.
+/// neither definition is used. "Identical" is operator== on the parsed descriptors; no
+/// file is read again.
 template <typename Map, typename T>
 inline void insertCatalogEntry(Map& map, T descriptor, const std::filesystem::path& path)
 {
@@ -1758,27 +1707,30 @@ inline void insertCatalogEntry(Map& map, T descriptor, const std::filesystem::pa
     const auto description = keyDescription(key);
     const std::string name = descriptor.name;
 
-    auto [it, inserted] = map.try_emplace(
-        std::move(key), CatalogEntry<T>{std::move(descriptor), path, {}, false, false});
-    if(inserted)
+    // Looked up before inserting so the newcomer is still whole when it is compared.
+    const auto it = map.find(key);
+    if(it == map.end())
     {
+        map.emplace(std::move(key), CatalogEntry<T>{std::move(descriptor), path, {}, false, false});
         HIPDNN_PLUGIN_LOG_INFO("descriptor loader: loaded " << path << " " << description
                                                             << " name='" << name << "'");
         return;
     }
-    // Parsed-JSON equality, not byte equality: whitespace, key order, or int-vs-float
-    // spelling never survive into the parsed descriptor either, so treating them as a
-    // real collision would fail a duplicate shard over a formatting choice -- e.g. a
-    // per-arch layout shipping one shared UED. RFC 0020 §10.2.1's drop-all rule exists
-    // because keep-the-first leaves which definition won up to load order; with
-    // identical content there is no second definition to choose between. Both files are
-    // re-read rather than any DOM being retained -- a pack's is never whole in memory.
-    // The per-arch layout repeats every generic descriptor (UED, KMD, UMD, UDD, UHD) in
-    // each arch shard, so this runs once per generic per shard after the first; those
-    // are small files. A file that can no longer be re-read cannot prove the two equal,
-    // so it is treated as a disagreement, under a diagnostic that says so.
-    const auto same = filesParseEqual(it->second.path, path);
-    if(same.value_or(false))
+    // Equality of the parsed descriptors, not of bytes: whitespace, comments and key
+    // order never survive into the parsed descriptor, and neither does int-vs-float
+    // spelling of kernel metadata (numerically equal values compare equal), so treating
+    // them as a real collision would fail a duplicate shard over a formatting choice --
+    // e.g. a per-arch layout shipping one shared UED. Unknown `x-`/`_` keys and
+    // `provenance` are not part of the parsed descriptor and so not of the comparison.
+    // Fields stamped from where a file was found (directories, the tree root, a UHD's
+    // resolved artifact path) are left out too, so per-arch shard copies of one file still
+    // collapse; a UHD's authored artifact path and model digest are compared instead.
+    // RFC 0020 §13.2.1's drop-all rule exists because keep-the-first leaves which
+    // definition won up to load order; with identical content there is no second
+    // definition to choose between. Nothing is re-read or retained for this: the
+    // incumbent already holds its parsed descriptor.
+    const bool same = it->second.descriptor == descriptor;
+    if(same)
     {
         HIPDNN_PLUGIN_LOG_INFO("descriptor loader: duplicate identical descriptor "
                                << path << " " << description << " name='" << name
@@ -1796,16 +1748,13 @@ inline void insertCatalogEntry(Map& map, T descriptor, const std::filesystem::pa
         HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
                                 << path << " redefines " << description << " name='" << name
                                 << "' already loaded from " << it->second.path
-                                << " under an earlier root"
-                                << (same ? "" : ", and the two could not be compared")
-                                << "; ignoring the redefinition");
+                                << " under an earlier root; ignoring the redefinition");
         return;
     }
-    HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
-                            << path << " and " << it->second.path << " both define " << description
-                            << " name='" << name << "'"
-                            << (same ? " with different contents" : ", and could not be compared")
-                            << "; ignoring both");
+    HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: " << path << " and " << it->second.path
+                                                  << " both define " << description << " name='"
+                                                  << name << "' with different contents"
+                                                  << "; ignoring both");
     // Never cleared by a later file: once two files disagree about what an id means,
     // no third file can decide which of them was right. A later root does not repair it
     // either -- the refusal above keeps the poisoned entry, since the disagreement is
@@ -2262,8 +2211,8 @@ inline void
             // `//` and `/* */` before validation, narrower than what "JSONC" commonly
             // implies (VS Code, tsconfig) -- a trailing comma is still a hard nlohmann
             // parse_error.101. Only the parser ever sees the comments --
-            // `insertCatalogEntry` compares the parsed documents, so a comment cannot
-            // make two copies of one descriptor look like a collision.
+            // `insertCatalogEntry` compares the parsed descriptors (RFC 0020 §13.2.1), so
+            // a comment cannot make two copies of one descriptor look like a collision.
             if(fileType->suffix == SUFFIX_UHD)
             {
                 // Size-bounded, and a repeated key is refused rather than resolved to its
@@ -2316,7 +2265,7 @@ inline void
             requireObject(document, "the document root");
             // Version before the insert: a file from a newer toolchain is rejected for the
             // version it names rather than for whatever its body does with keys this build
-            // has never heard of, and RFC 0020 §10.2.1's version-before-duplicate ordering
+            // has never heard of, and RFC 0020 §13.2.1's version-before-duplicate ordering
             // is unaffected.
             if(!versionIsSupported(document, fileType->major, fileType->minor, path.string()))
             {
@@ -2670,7 +2619,7 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
                                        }),
                         engineEntries.end());
 
-    // RFC 0020 §10.2.1: every UED in a name collision is dropped, not just the ones after
+    // RFC 0020 §13.2.1: every UED in a name collision is dropped, not just the ones after
     // the first. Load order is filesystem order, so keep-the-first would leave which
     // definition won up to the directory walk. Keyed by hash rather than by the name
     // itself because the hash is what the engine-id space collides in.
@@ -3393,7 +3342,7 @@ inline std::vector<ValidatedSet<THandle>> loadValidatedDescriptorSets(Descriptor
         detail::refreshDefaultRanker(set);
 
         // A name hashing onto an engine someone else already registered is dropped and the
-        // incumbent stands (RFC 0020 §10.2.1's drop-all applies to UEDs in a collision, not
+        // incumbent stands (RFC 0020 §13.2.1's drop-all applies to UEDs in a collision, not
         // to a hand-written engine); skipped for a name this loader itself registered, so
         // reloading a directory is idempotent. Rarely reachable by design -- §4.2 requires
         // a scoped `namespace:local` name and every built-in is unscoped, so this needs an
@@ -3446,11 +3395,8 @@ inline std::vector<ValidatedSet<THandle>> loadValidatedDescriptorSets(Descriptor
             continue;
         }
 
-        // Best-effort; a throw here is logged and ignored. Registration only improves
-        // plugin-side diagnostics (the registry is process-local, hidden visibility, so
-        // hipdnn_list_engines still renders these as hex -- AICK-1901); real name
-        // collisions are already rejected above, so a throw here just means an earlier
-        // call already registered this name.
+        // Best-effort: the checks above reject real name collisions, so a throw here means an
+        // earlier call already registered this name.
         auto& registeredNames = detail::registeredEngineNames();
         try
         {
