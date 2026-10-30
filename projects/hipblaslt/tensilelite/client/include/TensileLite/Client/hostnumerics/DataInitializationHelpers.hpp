@@ -14,10 +14,12 @@
 #include <roc/hostnumerics/mx.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -259,6 +261,95 @@ namespace TensileLite
                                                   seed,
                                                   generated);
                 return generated;
+            }
+
+            // E8M0 scale bytes order their values, with 0xFF (NaN) above every finite scale.
+            inline bool isUnsignedExponentScale(roc::hostnumerics::ScalarType type)
+            {
+                return type == roc::hostnumerics::ScalarType::E8M0
+                       || type == roc::hostnumerics::ScalarType::E8M0Zero;
+            }
+
+            // A 2D MX scaling tile shares one scale across freeBlock consecutive free-dimension
+            // elements, while generation emits one scale per free element. Keeps one scale per
+            // tile of the rank-two `scales`, whose free dimension is `freeAxis`. E8M0 tiles keep
+            // their largest scale: the data was quantized against the dropped scales, so a
+            // larger scale can only shrink a product, never overflow it. Other encodings keep
+            // the tile's first scale. Kernel and reference read the same tiled scales.
+            inline roc::hostnumerics::Tensor tileMxScalesAlongFreeDimension(
+                const roc::hostnumerics::Tensor& scales, size_t freeAxis, size_t freeBlock)
+            {
+                const auto& shape = scales.shape();
+                if(shape.rank() != 2 || freeAxis > 1 || freeBlock == 0)
+                    throw std::invalid_argument(
+                        "MX scale tiling requires a rank-two tensor, a valid free axis and a "
+                        "nonzero tile extent.");
+                const size_t free  = shape[freeAxis];
+                const size_t tiles = free / freeBlock + static_cast<size_t>(free % freeBlock != 0);
+                std::vector<size_t> tiledExtents{shape[0], shape[1]};
+                tiledExtents[freeAxis] = tiles;
+                const roc::hostnumerics::Shape tiledShape(tiledExtents);
+
+                const std::array<size_t, 2> order{0, 1};
+                std::vector<size_t>         all(scales.elementCount());
+                std::iota(all.begin(), all.end(), size_t{0});
+                const auto flat  = scales.copySelectedElements(all, order);
+                const auto bytes = flat.rawEncodedBackingStorage();
+                const bool useMaximum
+                    = isUnsignedExponentScale(scales.type()) && bytes.size() == all.size();
+
+                std::vector<size_t> selected;
+                selected.reserve(tiledShape[0] * tiledShape[1]);
+                for(size_t row = 0; row < tiledShape[0]; ++row)
+                    for(size_t column = 0; column < tiledShape[1]; ++column)
+                    {
+                        const size_t tile   = freeAxis == 0 ? row : column;
+                        const size_t end    = std::min(free, (tile + 1) * freeBlock);
+                        auto         linear = [&](size_t freeIndex) {
+                            return freeAxis == 0 ? freeIndex * shape[1] + column
+                                                         : row * shape[1] + freeIndex;
+                        };
+                        size_t best = linear(tile * freeBlock);
+                        for(size_t f = tile * freeBlock + 1; useMaximum && f < end; ++f)
+                            if(bytes[linear(f)] > bytes[best])
+                                best = linear(f);
+                        selected.push_back(best);
+                    }
+                return scales.copySelectedElements(selected, order)
+                    .reshapeSharingStorage(tiledShape);
+            }
+
+            // Random-like data with a matching scale initialization quantizes every block
+            // against the same exponent, so all tiled E8M0 scales are equal and a kernel that
+            // reads the wrong scale row would still validate. Offsets each tiled scale by an
+            // exponent of -2..2 that differs between neighbouring tiles and K blocks; kernel
+            // and reference read the same scales, so products only move by powers of two.
+            // Zero (0x00) and NaN (0xFF) scales are kept, and results stay within 0x01..0xFE.
+            inline roc::hostnumerics::Tensor
+                varyMxScaleTiles(const roc::hostnumerics::Tensor& scales, size_t freeAxis)
+            {
+                const auto& shape = scales.shape();
+                if(shape.rank() != 2 || freeAxis > 1 || !isUnsignedExponentScale(scales.type()))
+                    throw std::invalid_argument(
+                        "MX scale variation requires rank-two E8M0 scales and a valid free axis.");
+                const std::array<size_t, 2> order{0, 1};
+                std::vector<size_t>         all(scales.elementCount());
+                std::iota(all.begin(), all.end(), size_t{0});
+                auto       varied = scales.copySelectedElements(all, order);
+                const auto bytes  = varied.rawEncodedBackingStorage();
+                for(size_t row = 0; row < shape[0]; ++row)
+                    for(size_t column = 0; column < shape[1]; ++column)
+                    {
+                        auto&     byte  = bytes[row * shape[1] + column];
+                        const int value = std::to_integer<int>(byte);
+                        if(value == 0x00 || value == 0xFF)
+                            continue;
+                        const size_t tile  = freeAxis == 0 ? row : column;
+                        const size_t block = freeAxis == 0 ? column : row;
+                        const int    delta = static_cast<int>((tile + 2 * block) % 5) - 2;
+                        byte = static_cast<std::byte>(std::clamp(value + delta, 1, 254));
+                    }
+                return varied.reshapeSharingStorage(shape);
             }
         } // namespace hostnumerics::detail
     } // namespace Client

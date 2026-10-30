@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <hipblaslt/hostnumerics/MatmulValidation.hpp>
+#include <hipblaslt/hostnumerics/norm.hpp>
 
 #include "utility.hpp"
 #include <gtest/gtest.h>
@@ -48,6 +49,47 @@ namespace
             = validateMatmulOutputs({.searchAllClose = true}, cases);
         return {summary.absoluteTolerance, summary.relativeTolerance};
     }
+
+    // M x N x batch outputs whose expected values repeat 1, 2, 3; scale changes one batch.
+    struct BatchedOutputs
+    {
+        roc::hostnumerics::Tensor expected;
+        roc::hostnumerics::Tensor observed;
+
+        BatchedOutputs(roc::hostnumerics::ScalarType type, size_t m, size_t n, size_t batches)
+            : expected(type, roc::hostnumerics::Shape{m, n, batches})
+            , observed(type, roc::hostnumerics::Shape{m, n, batches})
+        {
+            for(size_t b = 0; b < batches; ++b)
+                for(size_t i = 0; i < m; ++i)
+                    for(size_t j = 0; j < n; ++j)
+                    {
+                        const double value = 1.0 + double((i + j * m + b) % 3);
+                        expected.storeFrom({i, j, b}, value);
+                        observed.storeFrom({i, j, b}, value);
+                    }
+        }
+
+        void scaleBatch(size_t batch, double factor) const
+        {
+            for(size_t i = 0; i < observed.shape()[0]; ++i)
+                for(size_t j = 0; j < observed.shape()[1]; ++j)
+                    observed.storeFrom({i, j, batch},
+                                       observed.loadAs<double>({i, j, batch}) * factor);
+        }
+
+        hipblaslt::hostnumerics::MatmulValidationSummary
+            validate(roc::hostnumerics::ScalarType inputType) const
+        {
+            hipblaslt::hostnumerics::MatmulValidationCase testCase;
+            testCase.outputs.emplace_back(expected, observed);
+            return hipblaslt::hostnumerics::validateMatmulOutputs({.compareNorm    = true,
+                                                                   .searchAllClose = true,
+                                                                   .inputTypeA     = inputType,
+                                                                   .inputTypeB     = inputType},
+                                                                  std::span(&testCase, 1));
+        }
+    };
 }
 
 TEST(HostNumericsMatmulValidation, PointerArrayNormCountsEachBatchOnce)
@@ -142,6 +184,113 @@ TEST(HostNumericsMatmulValidation, NormOnlyPreservesNonFiniteConsistencyCheck)
     mismatching.outputs.push_back(scalarComparison(infinity, 1.0f));
 
     EXPECT_FALSE(validateMatmulOutputs({.compareNorm = true}, std::span(&mismatching, 1)).passed);
+}
+
+// Norm and all-close failures are recorded without assertNorm, so a benchmark can count them.
+TEST(HostNumericsMatmulValidation, WrongLaterBatchRecordsNormAndAllCloseFailures)
+{
+    using Kind = hipblaslt::hostnumerics::MatmulOutputCheckFailure::Kind;
+    using roc::hostnumerics::ScalarType;
+
+    BatchedOutputs outputs(ScalarType::Float32, 8, 4, 3);
+    outputs.observed.storeFrom({5, 0, 2}, 7.0);
+    const auto summary = outputs.validate(ScalarType::Float32);
+    EXPECT_TRUE(summary.passed);
+    EXPECT_GT(summary.relativeFrobeniusError, 0.1);
+    EXPECT_EQ(summary.absoluteTolerance, 1.0);
+    ASSERT_EQ(summary.outputCheckFailures.size(), 2u);
+    EXPECT_EQ(summary.outputCheckFailures[0].kind, Kind::Norm);
+    EXPECT_EQ(summary.outputCheckFailures[0].batch, 2u);
+    EXPECT_DOUBLE_EQ(summary.outputCheckFailures[0].limit, 1e-5);
+    EXPECT_EQ(summary.outputCheckFailures[1].kind, Kind::AllClose);
+}
+
+TEST(HostNumericsMatmulValidation, MatchingPointerArrayRecordsNoFailure)
+{
+    using namespace hipblaslt::hostnumerics;
+
+    MatmulValidationCase testCase;
+    for(size_t batch = 0; batch < 3; ++batch)
+        testCase.outputs.push_back(scalarComparison(1.0f + batch, 1.0f + batch));
+    const auto summary = validateMatmulOutputs({.compareNorm = true, .searchAllClose = true},
+                                               std::span(&testCase, 1));
+    EXPECT_TRUE(summary.outputCheckFailures.empty());
+    EXPECT_EQ(summary.relativeFrobeniusError, 0.0);
+    EXPECT_EQ(summary.absoluteTolerance, 1e-6);
+}
+
+// Each batch is off by about 4e-6 relative, under the f32 limit of 1e-5. The reported
+// error sums the eight batches past the limit, but each batch passes on its own.
+TEST(HostNumericsMatmulValidation, AccurateBatchesDoNotAddUpToNormFailure)
+{
+    using roc::hostnumerics::ScalarType;
+
+    BatchedOutputs outputs(ScalarType::Float32, 8, 4, 8);
+    for(size_t batch = 0; batch < 8; ++batch)
+        outputs.scaleBatch(batch, 1.000004);
+    const auto summary = outputs.validate(ScalarType::Float32);
+    EXPECT_TRUE(summary.outputCheckFailures.empty());
+    EXPECT_GT(summary.relativeFrobeniusError, 1e-5);
+}
+
+TEST(HostNumericsMatmulValidation, PointerArrayNormFailureNamesItsBatch)
+{
+    using namespace hipblaslt::hostnumerics;
+
+    MatmulValidationCase testCase;
+    testCase.outputs.push_back(scalarComparison(1.0f, 1.0f));
+    testCase.outputs.push_back(scalarComparison(1.0f, 1.5f));
+    testCase.outputs.push_back(scalarComparison(1.0f, 1.0f));
+    const auto summary = validateMatmulOutputs({.compareNorm = true}, std::span(&testCase, 1));
+    ASSERT_EQ(summary.outputCheckFailures.size(), 1u);
+    EXPECT_EQ(summary.outputCheckFailures[0].batch, 1u);
+    EXPECT_DOUBLE_EQ(summary.outputCheckFailures[0].error, 0.5);
+}
+
+TEST(HostNumericsMatmulValidation, MixedPrecisionNormUsesGemmTolerance)
+{
+    using roc::hostnumerics::ScalarType;
+
+    BatchedOutputs outputs(ScalarType::Float32, 8, 4, 1);
+    outputs.scaleBatch(0, 1.001);
+    const auto summary = outputs.validate(ScalarType::Float16);
+    EXPECT_TRUE(summary.outputCheckFailures.empty());
+    EXPECT_GT(summary.relativeFrobeniusError, norm_tolerance(ScalarType::Float32));
+    EXPECT_DOUBLE_EQ(
+        norm_tolerance(
+            ScalarType::Float32, HIPBLAS_COMPUTE_32F, ScalarType::Float16, ScalarType::Float16),
+        0.01);
+    EXPECT_DOUBLE_EQ(
+        norm_tolerance(
+            ScalarType::Float16, HIPBLAS_COMPUTE_32F, ScalarType::BFloat16, ScalarType::BFloat16),
+        0.1);
+    EXPECT_DOUBLE_EQ(norm_tolerance(ScalarType::Float32,
+                                    HIPBLAS_COMPUTE_32F_FAST_16BF,
+                                    ScalarType::Float32,
+                                    ScalarType::Float32),
+                     0.5);
+}
+
+// F16 output uses the f16 limit of 0.01: a 0.4% error passes, which the f32 limit would
+// fail, and a 2% error fails, which the bf16 limit would pass. All-close passes both.
+TEST(HostNumericsMatmulValidation, HalfOutputNormUsesHalfTolerance)
+{
+    using Kind = hipblaslt::hostnumerics::MatmulOutputCheckFailure::Kind;
+    using roc::hostnumerics::ScalarType;
+
+    BatchedOutputs withinLimit(ScalarType::Float16, 8, 4, 2);
+    BatchedOutputs beyondLimit(ScalarType::Float16, 8, 4, 2);
+    for(size_t batch = 0; batch < 2; ++batch)
+    {
+        withinLimit.scaleBatch(batch, 1.004);
+        beyondLimit.scaleBatch(batch, 1.02);
+    }
+    const auto within = withinLimit.validate(ScalarType::Float16);
+    EXPECT_TRUE(within.outputCheckFailures.empty());
+    EXPECT_GT(within.relativeFrobeniusError, norm_tolerance(ScalarType::Float32));
+    const auto beyond = beyondLimit.validate(ScalarType::Float16);
+    ASSERT_EQ(beyond.outputCheckFailures.size(), 1u);
+    EXPECT_EQ(beyond.outputCheckFailures[0].kind, Kind::Norm);
 }
 
 TEST(MatmulAlgoIndex, MixedValidityContract)

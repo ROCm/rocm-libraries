@@ -34,7 +34,9 @@ namespace hipblaslt::hostnumerics
         {
             ComparisonReport                     comparison;
             ComparisonReport                     unitsInLastPlace;
-            double                               relativeFrobeniusError = 0.0;
+            double                               relativeFrobeniusError   = 0.0;
+            double                               worstBatchFrobeniusError = 0.0;
+            size_t                               worstBatch               = 0;
             std::optional<ComparisonTolerance>   allCloseTolerance;
             std::optional<MatmulAllCloseFailure> allCloseFailure;
         };
@@ -220,7 +222,13 @@ namespace hipblaslt::hostnumerics
                                   options,
                                   roc::hostnumerics::IndexRange::all(batchExpected.elementCount()),
                                   batchOrder);
+                    const double batchError = std::abs(batchReport.relativeFrobeniusError);
                     result.relativeFrobeniusError += batchReport.relativeFrobeniusError;
+                    if(worseError(batchError, result.worstBatchFrobeniusError))
+                    {
+                        result.worstBatchFrobeniusError = batchError;
+                        result.worstBatch               = batch;
+                    }
                 }
             }
 
@@ -300,8 +308,11 @@ namespace hipblaslt::hostnumerics
 
             if(options.compareNorm)
             {
-                for(const auto& report : outputReports)
+                double worstError = 0.0;
+                size_t worstBatch = 0;
+                for(size_t outputIndex = 0; outputIndex < outputReports.size(); ++outputIndex)
                 {
+                    const auto&  report    = outputReports[outputIndex];
                     const double normError = std::abs(report.relativeFrobeniusError);
                     summary.relativeFrobeniusError += normError;
                     if(options.assertNorm)
@@ -310,11 +321,41 @@ namespace hipblaslt::hostnumerics
                                           options.computeType,
                                           options.inputTypeA,
                                           options.inputTypeB));
+                    if(worseError(report.worstBatchFrobeniusError, worstError))
+                    {
+                        worstError = report.worstBatchFrobeniusError;
+                        // Separate outputs are the batches of a pointer-array case.
+                        worstBatch = validationCase.outputs[outputIndex].first.shape().rank() == 3
+                                         ? report.worstBatch
+                                         : outputIndex;
+                    }
                 }
+                double limit = 0.0;
+                try
+                {
+                    limit = norm_tolerance(validationCase.outputs.front().first.type(),
+                                           options.computeType,
+                                           options.inputTypeA,
+                                           options.inputTypeB);
+                }
+                catch(const std::runtime_error&)
+                {
+                }
+                using Kind = MatmulOutputCheckFailure::Kind;
+                if(!(limit > 0.0))
+                    summary.outputCheckFailures.push_back(
+                        {.kind = Kind::NormUnavailable, .gemm = caseIndex});
+                else if(!(worstError < limit))
+                    summary.outputCheckFailures.push_back({.kind  = Kind::Norm,
+                                                           .gemm  = caseIndex,
+                                                           .batch = worstBatch,
+                                                           .error = worstError,
+                                                           .limit = limit});
             }
 
             if(options.searchAllClose)
             {
+                bool caseFailed = false;
                 for(size_t outputIndex = 0; outputIndex < outputReports.size(); ++outputIndex)
                 {
                     const auto& expected = validationCase.outputs[outputIndex].first;
@@ -339,6 +380,7 @@ namespace hipblaslt::hostnumerics
                     else
                     {
                         allCloseFailed = true;
+                        caseFailed     = true;
                         auto failure   = *report.allCloseFailure;
                         failure.gemm   = caseIndex;
                         if(expected.shape().rank() != 3)
@@ -355,6 +397,9 @@ namespace hipblaslt::hostnumerics
                         }
                     }
                 }
+                if(caseFailed)
+                    summary.outputCheckFailures.push_back(
+                        {.kind = MatmulOutputCheckFailure::Kind::AllClose, .gemm = caseIndex});
             }
 
             if(options.computeUlp)

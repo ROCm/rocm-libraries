@@ -59,15 +59,34 @@ namespace hipblaslt::hostnumerics
 
     [[nodiscard]] std::string formatAllCloseFailure(const MatmulAllCloseFailure& failure);
 
+    // A failed norm or all-close check of a case's primary outputs. These are
+    // recorded whether or not assertNorm is set, so a benchmark can count them.
+    struct MatmulOutputCheckFailure
+    {
+        enum class Kind
+        {
+            Norm, // The worst batch reaches the norm limit.
+            NormUnavailable, // No norm limit exists for the output type.
+            AllClose, // No candidate all-close tolerance accepts the output.
+        };
+        Kind   kind  = Kind::Norm;
+        size_t gemm  = 0;
+        size_t batch = 0; // Norm: the worst batch.
+        double error = 0.0; // Norm: that batch's relative Frobenius error.
+        double limit = 0.0; // Norm: the limit for the case's types.
+    };
+
     struct MatmulValidationSummary
     {
-        bool                                 passed                 = true;
-        double                               relativeFrobeniusError = 0.0;
-        double                               absoluteTolerance      = 0.0;
-        double                               relativeTolerance      = 0.0;
-        double                               maximumUlp             = 0.0;
-        double                               averageUlp             = 0.0;
-        std::optional<MatmulAllCloseFailure> allCloseFailure;
+        bool passed = true;
+        // Sum over outputs and batches; the norm limit applies to each batch.
+        double                                relativeFrobeniusError = 0.0;
+        double                                absoluteTolerance      = 0.0;
+        double                                relativeTolerance      = 0.0;
+        double                                maximumUlp             = 0.0;
+        double                                averageUlp             = 0.0;
+        std::optional<MatmulAllCloseFailure>  allCloseFailure;
+        std::vector<MatmulOutputCheckFailure> outputCheckFailures;
     };
 
     [[nodiscard]] MatmulValidationSummary
