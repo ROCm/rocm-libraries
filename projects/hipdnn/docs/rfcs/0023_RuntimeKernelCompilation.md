@@ -11,9 +11,9 @@
 hipDNN needs a runtime compiler: a native library, shipped in TheRock, that compiles a
 kernel while hipDNN builds an execution plan. It has three uses:
 
-1. **Specialize** an authored kernel for the exact problem (shape, dtype, architecture)
-   instead of shipping every variant prebuilt. The variants it can produce still form a
-   bounded space that hipDNN can rank.
+1. **Specialize** an authored kernel, such as a GEMM, convolution or attention kernel, for
+   the exact problem (shape, dtype, architecture) instead of shipping every variant
+   prebuilt. The variants it can produce still form a bounded space that hipDNN can rank.
 2. **Generate** fused kernels from the operation graph, starting with pointwise operations
    before or after a convolution.
 3. **Precompile** plans ahead of time for chosen GPU targets, including on a machine with no
@@ -26,6 +26,11 @@ existing engines, and expose a variant space that hipDNN can rank.
 This RFC does not choose a compiler. hipDNN project leads make that choice with the owners
 of the selected component, after the remaining measurements and the fusion proof of concept
 in [Next steps](#next-steps).
+
+This RFC covers the runtime compiler and how the options are evaluated. Specific fusion
+features, and the hipDNN features that use the compiler, are specified separately; the
+hipDNN work these requirements depend on is listed in
+[hipDNN work planned separately](#hipdnn-work-planned-separately).
 
 Reviewers are asked to:
 
@@ -124,12 +129,13 @@ selection. **Should** distinguishes between options that meet every Must.
 | ID | Level | Requirement | Checked by |
 |---|---|---|---|
 | A1 | Must | Follows ROCm versioning: no breaking API or ABI change outside a ROCm major release. The same applies to the hipDNN API that exposes the JIT (RFC 0005). | Older same-major client runs against a newer library. |
-| A2 | Must | A stable, documented interface that returns a code object and what is needed to launch it: entry symbol, argument layout, resource usage (registers, LDS, scratch) and launch constraints such as workgroup size. The interface language and input level are open (D2). | Interface review; hipDNN uses only this interface. |
-| A3 | Must | Failures return an error with a diagnostic. No silent fallback to another compiler, path or architecture. | Fault-injection tests. |
+| A2 | Must | A stable, documented interface that returns a code object and what is needed to launch it: entry symbol, argument layout including hidden arguments, resource usage (registers, LDS, scratch) and launch constraints such as workgroup size. The interface language and input level are open (D2). | Interface review; hipDNN uses only this interface. |
+| A3 | Must | Failures return an error with a diagnostic, and the compiler never aborts or terminates the host process, on any input. No silent fallback to another compiler, path or architecture. | Fault-injection tests; fuzzing of compiler input. |
 | A4 | Must | Safe to call concurrently from parallel plan builds. | Parallel plan-build stress test. |
-| A5 | Must | Deterministic: identical inputs give identical code objects, and the compiler reports a version usable in a cache key. | Repeat-compile comparison. |
+| A5 | Must | Deterministic: identical inputs give identical code objects across processes and machines, and the compiler reports a version usable in a cache key. | Compare code objects compiled in separate processes on separate machines. |
 | A6 | Must | A named owning team and a release cadence aligned with ROCm. | Recorded support agreement. |
 | A7 | Should | After compiling, hipDNN can confirm from the code object alone, without loading it or using a GPU, that the kernel is valid for the plan's target. See [Kernel validity](#kernel-validity). | A kernel built for the wrong target or over the LDS limit is rejected at plan build on a CPU-only machine. |
+| A8 | Must | Production quality inside the user's process: fixed, documented floating-point options; no signal handlers, no threads left running after a compile, no temporary files or subprocesses; no symbol conflicts with amd-comgr's LLVM; a bounded worst-case compile time, not only a bounded median; Linux and Windows supported. | Review with the owning team; tests on Linux and Windows. |
 
 #### Kernel validity
 
@@ -138,12 +144,12 @@ for a plan when every check below passes:
 
 | Check | Code-object metadata field |
 |---|---|
-| Built for the plan's target | `amdhsa.target` |
+| Built for a target the plan's device runs: the same processor, or a generic target that covers it, with compatible feature flags; generic targets need code object v6 or later | `amdhsa.target`, code-object version |
 | Entry symbol is present | `.name`, `.symbol` |
 | Static LDS plus any dynamic LDS the plan requests fits the target's limit | `.group_segment_fixed_size` |
 | The plan's workgroup size is within the kernel's maximum, and the wavefront size matches | `.max_flat_workgroup_size`, `.wavefront_size` |
 | The arguments hipDNN passes match the kernel's argument size | `.kernarg_segment_size` |
-| Scratch memory per work-item is within the plan's budget | `.private_segment_fixed_size`, `.uses_dynamic_stack` |
+| Scratch memory per work-item is within the plan's budget; a kernel that uses a dynamic stack has no static bound and is rejected | `.private_segment_fixed_size`, `.uses_dynamic_stack` |
 
 These are readable on the CPU with amd-comgr (`amd_comgr_get_data_metadata`). A code object
 compiled by hipRTC for gfx950, without using a GPU, carries all of them, so the requirement is
@@ -163,7 +169,8 @@ bound that cost.
 
 Reference set: one GEMM, one implicit-GEMM convolution, one pointwise kernel, one dense
 attention forward, and the two fusion kernels (F3). Each in fp16 and bf16, on gfx942, gfx950
-and one RDNA architecture.
+and one RDNA architecture. Attention is included because specialized attention kernels are
+part of use 1. L1 applies to the reference set; P4 requires correct code for every target.
 
 ### Kernel performance
 
@@ -222,8 +229,8 @@ prebuilt kernels (I2).
 |---|---|---|---|
 | I1 | Must | The JIT compiler runs only during plan build, never during applicability checks, heuristics or execution (RFC 0013). Existing provider compile paths are outside this RFC. | Instrumented test. |
 | I2 | Must | Compiled kernels are matched, autotuned, selected and launched like prebuilt kernels, with no JIT-specific launch or selection path. | Code review; existing tests. |
-| I3 | Must | Specialized and generated kernels are matched as strictly as prebuilt ones: dtype, layout, architecture and every baked value (RFC 0017 §5). | Mutation tests. |
-| I4 | Must | hipDNN provides one persistent cache for compiled code objects, shared by every compiler it uses, in a location the user controls (today `HIPDNN_CACHE_DIR`). The compiler does not need its own cache; it must provide deterministic output and a version for the cache key (A5). | A second process reuses the cached code object; a corrupted entry is recompiled. |
+| I3 | Must | Specialized and generated kernels are matched as strictly as prebuilt ones: dtype, layout, architecture and every baked value (RFC 0017 §5). A compiled code object is reused only when every baked value matches the request. | Mutation tests. |
+| I4 | Must | hipDNN provides one persistent cache for compiled code objects, shared by every compiler it uses, in a location the user controls (today `HIPDNN_CACHE_DIR`). The compiler does not need its own cache; it provides deterministic output and a version for the cache key (A5), and any cache of its own can be turned off. The cache design is hipDNN work. | A second process reuses the cached code object; a corrupted entry is recompiled. |
 
 ### Targets and deployment
 
@@ -252,12 +259,44 @@ of concept, before it is selected.
 | ID | Level | Requirement | Checked by |
 |---|---|---|---|
 | F1 | Must (POC) | Pointwise operations attach as a prologue on an input or an epilogue on the output of a convolution or GEMM, without writing a new kernel per chain. | Both POC kernels come from one convolution template. |
-| F2 | Must (POC) | A prologue applies before padding, so padded positions stay zero rather than `f(0)`. | Test with padding and an operation where `f(0) ≠ 0`. |
+| F2 | Must (POC) | A prologue applies before padding and only inside the tensor, so padded positions and the out-of-bounds part of partial tiles at tensor edges stay zero rather than `f(0)`. | Test with padding, a shape that leaves partial tiles, and an operation where `f(0) ≠ 0`. |
 | F3 | Must (POC) | Two reference patterns, fp16 and bf16, NHWC (hipDNN's primary convolution layout): `conv → MUL` with a per-channel scale, and `MUL → conv` with a per-channel scale on the input. | Matches the CPU reference; meets L1, E2 and E3. |
 | F4 | Should | Intermediate values keep the graph's compute precision between fused operations. | Comparison with an fp32 reference. |
 
 hipDNN normalizes the graph into a fusion request before calling the compiler. The compiler
 does not interpret hipDNN's graph schema.
+
+## hipDNN work planned separately
+
+The requirements above depend on the following hipDNN work. It is planned separately and is
+not part of this RFC.
+
+- **Deviceless plans (T1–T4).** Plan build for a named target with no GPU present: a public
+  API that names the target, a device-property model per target for heuristics (which read
+  the live device today), serialization of JIT kernels in RFC 0009 payloads, and hipGraph
+  capture of JIT plans.
+- **Selection (V1, V2, D9).** The heuristic that picks a candidate, its latency budget, and
+  the tuning budget for autotuning.
+- **Code-object cache (I4).** A content-addressed key (full target ID with feature flags,
+  compile options, compiler and amd-comgr versions, a hash of the input), a size limit with
+  eviction, atomic publish, one compile per key, corruption detection, fail-soft behavior
+  when the cache cannot be read or written, a policy for failed compiles, and release of
+  loaded modules.
+- **Runtime controls.** A JIT policy setting, for example off, cache-only and on. Autotuning
+  times execution only, never compilation.
+- **Plan-build failures.** hipDNN can move to the next plan when a plan build fails, but that
+  is a safety net, not the expected path. A JIT engine claims only graphs it can compile
+  (RFC 0015).
+- **Numerical behavior.** Behavior notes for JIT engines whose results can differ bitwise
+  from prebuilt kernels (RFC 0010).
+- **Observability.** Logs of compiles and cache hits, an offline reproducer for compiler
+  issues, IR dumps, and kernel names that identify the specialization.
+- **Pre-warm.** Filling the cache offline from a list of graphs and targets, and shipping a
+  filled cache in the per-architecture packages (P3).
+- **Security.** The trust model for code loaded implicitly from the cache, permissions on
+  shared cache directories, and keeping user-supplied strings out of generated source.
+- **Testing generated kernels.** Coverage of the fusion generator and of specialized kernels
+  beyond the proof-of-concept patterns, for example differential and random-shape tests.
 
 ## Options reviewed so far
 
@@ -293,22 +332,28 @@ last two columns give the setup costs excluded from the compile times.
 | Option | Pointwise | GEMM | Convolution | Attention fwd, D128 | Initialization | Python import |
 |---|---|---|---|---|---|---|
 | hipRTC | 374–405 (trivial kernels); 416–446 (RMSNorm) | 1,091–1,110 (tiled); 9,118–9,158 (CK template) | 398–430 (direct) | Not measured | 20–30 | None |
-| rocKE | 18–20 | 62–81 | 78–87 (implicit GEMM) | 218 (gfx942 tiled); 1,430 (gfx950 dense) | About 20 | 155–274 (Python kernel builders) |
+| rocKE (a) | 18–20 | 62–81 | 78–87 (implicit GEMM) | 218 (gfx942 tiled); 1,430 (gfx950 dense) | About 20 | 155–274 (Python kernel builders) |
 | Loom | 0.7–0.8 | 8.5–8.8 (bf16 GEMV) | No example kernel | Not measured (needs optional C++ importer) | About 0.4 | None |
-| FlyDSL 0.3.4 | 45 | 440–518 | 1,692 (gfx950 only, bf16) | 1,280–1,686; 5,184 (gfx950 dual-wave) | About 35 | About 1,000 (includes PyTorch) |
-| Triton 3.8.0 | 45–52 | 229–346 | 488–729 (implicit GEMM) | 733–740 | About 390 | About 105 |
+| FlyDSL 0.3.4 (a) | 45 | 440–518 | 1,692 (gfx950 only, bf16) | 1,280–1,686; 5,184 (gfx950 dual-wave) | About 35 | About 1,000 (includes PyTorch) |
+| Triton 3.8.0 (a) | 45–52 | 229–346 | 488–729 (implicit GEMM) | 733–740 | About 390 | About 105 |
 
 Measured on a development machine for framing purposes: compile only, no GPU used, fp16
-unless noted.
+unless noted. Host: AMD EPYC 7573X, one compile at a time. Each cell is the median of 5 to 20
+compiles in one process after a warm-up compile of an unrelated kernel (FlyDSL 5; hipRTC,
+rocKE and Triton 7; Loom 20). Caches were off: `AMD_COMGR_CACHE=0` for hipRTC and rocKE,
+`FLYDSL_RUNTIME_ENABLE_CACHE=0` for FlyDSL, and a fresh cache directory per compile for
+Triton; Loom has no cache. Versions: ROCm 10.2.0 with amd-comgr 3.5.0 (hipRTC, and rocKE's
+code-object step); rocKE at rocm-libraries `0cf5fa6e674`; Loom at ROCm/hrx-system
+`a3f3c7eb3d3`; FlyDSL 0.3.4; Triton 3.8.0. The harnesses are available from the author.
 
 - Each option compiled different kernels, so rows compare order of magnitude only. Compile
   time does not show how fast the compiled kernel runs; that is judged by E1–E3.
 - The hipRTC tiled GEMM and the Triton convolution were written for this measurement, and the
   hipRTC convolution is HKP's direct (non-GEMM) kernel; none is a production kernel.
 - Loom generates code without LLVM. Its GEMM entry is a GEMV, not a tiled matrix-core GEMM.
-- rocKE kernels were built by its Python builders and lowered by its native library; the
-  compile times include kernel construction. A native rocKE path would not import Python.
-- FlyDSL and Triton compile times include their Python front ends (tracing or IR building).
+- (a) These times include front-end work that a shipped native path would replace. rocKE
+  times include Python kernel construction as well as native lowering and amd-comgr. FlyDSL
+  and Triton times include their Python front ends (tracing or IR building).
 
 ### Assessment
 
@@ -319,7 +364,10 @@ kernel-ingestor embedded-source kernels, targeting the GPU present. It ships in
 about 350–380 ms, even for a trivial kernel, so cold compiles start near 0.4 s; a tiled GEMM
 takes about 1.1 s and a Composable Kernel template GEMM about 9 s. hipDNN has no fused
 hipRTC kernels today; fusion would come from convolution and GEMM source templates with
-pointwise insertion points, as Composable Kernel's hipRTC code-generation tests do. Work
+pointwise insertion points, as Composable Kernel's hipRTC code-generation tests do. These
+costs are for HIP source input. A path that compiles templates to LLVM bitcode at library
+build, then links, specializes and runs only the backend through amd-comgr at plan build
+(the LLVM IR input level in D2), avoids the front end; it has not been measured. Work
 needed: lower per-compile cost to meet L1 for GEMM-class kernels, confirmed generic-target
 output, and the fusion templates.
 
@@ -338,13 +386,14 @@ attention, dense attention on gfx942 and gfx950) and for dispatch selection, and
 kernel-ingestor source adapter (RFC 0017).
 
 **Loom.** Loom (`loomc`, in ROCm/hrx-system) is a native compiler with a C API and its own
-AMDGPU code generator. It compiles source held in memory for a GPU profile read from the
-device and emits a code object plus a separate launch-configuration artifact; its target
-list includes gfx942, gfx950 and the gfx11 and gfx12 generic targets. hipDNN does not use
-Loom today. It is not part of TheRock: the C library is version 0.1.0 with a versioned
-shared library, and the project describes itself as early-access and not an official
-component of the ROCm stack. Measured compiles are under 10 ms for its elementwise and GEMV
-examples. Its examples include matmul kernels with fused residual and SwiGLU epilogues.
+AMDGPU code generator. It compiles source held in memory for a target profile supplied by
+the caller, which may be read from a device, and emits a code object plus a separate
+launch-configuration artifact; its target list includes gfx942, gfx950 and the gfx11 and
+gfx12 generic targets. hipDNN does not use Loom today. It is not part of TheRock: the C
+library is version 0.1.0 with a versioned shared library, and the project describes itself
+as early-access and not an official component of the ROCm stack. Measured compiles are
+under 10 ms for its elementwise and GEMV examples. Its examples include matmul kernels with
+fused residual and SwiGLU epilogues.
 Work needed: a stability and support agreement, a TheRock component with cleared dependency
 licenses, convolution and tiled matrix-core GEMM kernels (its attention example needs the
 optional C++ importer), and performance data for the code it generates.
@@ -375,6 +424,13 @@ compiler library without Python, shipped at the `rocm-sdk-libraries` layer and f
 Triton IR captured at build time (that IR is not versioned across Triton releases), plus a
 hipDNN fusion generator and a solution for generic targets.
 
+## Risks
+
+- Of the options reviewed, only hipRTC meets P1 today, and its GEMM-class compiles miss L1.
+  No option has yet shown P1 and L1 together for GEMM-class kernels.
+- Options that bundle their own LLVM put a second LLVM into processes that already load
+  amd-comgr's (A8).
+
 ## Decisions
 
 | ID | Decision | Status |
@@ -392,7 +448,7 @@ hipDNN fusion generator and a solution for generic targets.
 ## Next steps
 
 1. Extend the compile-time measurements to the full reference set: fp16 and bf16, one RDNA
-   architecture, and the fusion kernels.
+   architecture, and the fusion kernels. Measure a bitcode-input compile through amd-comgr.
 2. Define the variant space (V1) for each reference-set input, then measure kernel performance
    as described in [Kernel performance](#kernel-performance).
 3. Build the fusion proof of concept on the option the measurements support. It must meet
@@ -401,8 +457,8 @@ hipDNN fusion generator and a solution for generic targets.
    the installed tree.
 5. Update this RFC with the results and close D2–D4.
 
-hipDNN-side support for T1–T4 (precompiling and serializing plans for another target,
-hipGraph capture), the selection heuristic and the tuning budget (D9) are planned separately.
+The hipDNN work these steps depend on is listed in
+[hipDNN work planned separately](#hipdnn-work-planned-separately).
 
 ## References
 
@@ -418,7 +474,7 @@ hipGraph capture), the selection heuristic and the tuning budget (D9) are planne
 - [MIOpen kernel cache](../../../../projects/miopen/docs/conceptual/cache.rst)
 - [Composable Kernel hipRTC code generation tests](../../../../projects/composablekernel/codegen/test/rtc/)
 - [HIP RTC guide](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_rtc.html)
-- [AMDGPU code object metadata](https://llvm.org/docs/AMDGPUUsage.html#code-object-v5-metadata)
+- [AMDGPU code object metadata](https://llvm.org/docs/AMDGPUUsage.html#code-object-v6-metadata)
 - TheRock: [Python packaging](https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md),
   [Dependencies](https://github.com/ROCm/TheRock/blob/main/docs/development/dependencies.md),
   [Versioning](https://github.com/ROCm/TheRock/blob/main/docs/packaging/versioning.md),
