@@ -516,7 +516,7 @@ class UnifiedAttention2DTiledSpec:
                 f"Other counts would need new MFMA distribution logic. "
                 f"num_warps=8 (BLOCK_M=128, THREADS=512) matches the BLOCK_M "
                 f"the production Triton 2D kernel uses for high-q prefill "
-                f"shapes; both are well within MI355X's 1024-thread CTA cap."
+                f"shapes; both are well within the 1024-thread CTA cap."
             )
         if self.block_m_per_warp not in (16, 32):
             raise ValueError(

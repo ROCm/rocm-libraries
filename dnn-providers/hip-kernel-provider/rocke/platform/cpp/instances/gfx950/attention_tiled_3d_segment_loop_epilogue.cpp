@@ -418,10 +418,22 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
                 rocke_value_t* ca_16 = rocke_b_const_i32(b, 16);
                 rocke_value_t* col_abs = rocke_b_add(
                     b, rocke_b_add(b, tile_off, rocke_b_mul(b, ca_n, ca_16)), tok_in_blk);
-                rocke_value_t* causal_ok = rocke_b_cmp_le(b, col_abs, ctx->row_causal_lim);
-                rocke_value_t* in_prefix = rocke_b_cmp_lt(b, col_abs, ctx->max_seq_prefix_len);
-                rocke_value_t* m_ok
-                    = rocke_b_land(b, rocke_b_land(b, ctx->row_ok, causal_ok), in_prefix);
+                rocke_value_t* causal_ok = NULL;
+                rocke_value_t* in_prefix;
+                rocke_value_t* m_ok;
+                if(cfg->RIGHT >= 0)
+                {
+                    rocke_value_t* lim = cfg->RIGHT == 0
+                                             ? ctx->row_causal_lim
+                                             : rocke_b_add(b,
+                                                           ctx->row_causal_lim,
+                                                           rocke_b_const_i32(b, cfg->RIGHT));
+                    causal_ok = rocke_b_cmp_le(b, col_abs, lim);
+                }
+                in_prefix = rocke_b_cmp_lt(b, col_abs, ctx->max_seq_prefix_len);
+                m_ok = causal_ok == NULL
+                           ? rocke_b_land(b, ctx->row_ok, in_prefix)
+                           : rocke_b_land(b, rocke_b_land(b, ctx->row_ok, causal_ok), in_prefix);
                 rocke_value_t* s_raw;
                 rocke_value_t* s_scaled;
                 if(cfg->SLIDING_WINDOW > 0)

@@ -244,43 +244,6 @@ mirrors; until then, keep emission changes gated by the two tests above.
 
 ---
 
-## 7. Unified split-KV reduce LSE output (`emit_lse`) — Python only
-
-**Subsystem:** `instances/gfx942/attention_tiled_3d_gfx942_attn_tiled_3d_reduce.cpp`,
-`instances/gfx950/attention_tiled_3d_reduce.cpp`,
-`include/rocke/instance_gfx9{42,50}_attention_tiled_3d.h`,
-`instances/common/attention_unified_selectors.cpp` (and its header)
-
-`UnifiedAttentionReduceTiledSpec.emit_lse` (both arches,
-`library/kernels/gfx9{42,50}/attention_tiled_3d.py`) makes the split-KV reduce
-kernel take a trailing `lse_ptr` and write one FP32 natural-log LSE per
-(query token, query head) from lane 0 via `kernels/common/_lse_store.py`. The C
-engine does not mirror it. With `emit_lse=False` (the default) the reduce gets
-no `lse_ptr` and no store, so this gap adds nothing to an LSE-off kernel; and no
-C entry point can request LSE, so no C-built kernel reaches the missing path.
-This entry covers `emit_lse` only, not other changes to the reduce kernel.
-
-| What's missing | Where |
-|---|---|
-| `emit_lse` field (default 0) and the `lse` kernel-name suffix | `rocke_unified_attention_reduce_tiled_spec_t` and `*_reduce_tiled_spec_kernel_name()`, both arches |
-| Trailing `lse_ptr` param and the `tid == 0` LSE store | both C reduce builders |
-| A C twin of `_lse_store.py` | `helpers/`; none exists (its dense-attention users have no C twin either) |
-| Gate coverage of an LSE-on reduce | `library/tests/parity/gfx9{42,50}_attention_tiled_3d_emit.{py,c}` emit the LSE-off reduce only; neither takes `emit_lse` |
-| `emit_lse` on the unified problem and the `_reject_lse` support gate (`library/kernels/common/attention_unified.py`) | `rocke_unified_attn_problem_t`; the C selectors carry no support gates to mirror it into. No codegen selector reads `emit_lse`: the selected split-KV spec differs only in `reduce_spec.emit_lse` between LSE on and off, so C selector output is unaffected |
-
-**Why deferred:** owner decision for ROCm/rocm-libraries#13955 (time-sensitive;
-the C engine is expected to be deprecated). Python is the only engine that
-builds the LSE-on reduce until then.
-
-**What closes it:** retiring the C engine, or mirroring the rows above and
-adding an `emit_lse=True` config per arch to the emitters. Done only when
-`tools/check_byte_identity.py` is GREEN for every family at llvm20, llvm22 and
-llvm23.
-
-**Sign-off:** avirgoel (owner), 2026-10-20.
-
----
-
 ## Structural debt (not per-family gaps)
 
 These are codebase-level risks worth tracking independently of any single

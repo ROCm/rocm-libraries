@@ -3,7 +3,7 @@
  *
  * rocke/instance_attention_unified.h -- C99 port of the SCALAR-correct reference
  * kernel builders of the AITER unified-attention dispatcher
- * (rocke/instances/common/attention_unified.py, 3270 LOC).
+ * (library/kernels/common/attention_unified.py).
  *
  * SCOPE. This header is the PUBLIC entry/glue surface for the three scalar
  * reference kernel builders that the Python module exposes as a fallback path
@@ -37,7 +37,10 @@
  *   *.kernel_name()                              rocke_unified_attention_*_kernel_name
  *   (block_id grid extents)                      rocke_unified_attention_*_grid
  *   _attn_signature(include_bt_stride=True)      rocke_unified_attention_2d_scalar_signature
- *   supports_native_unified_attention(problem)   rocke_unified_attention_supports_scalar
+ *   supports_native_unified_attention(p, arch)   rocke_unified_attention_supports_scalar
+ *   supports_native_unified_attention_tiled      rocke_unified_attention_supports_tiled_2d
+ *   supports_native_unified_attention_3d_tiled   rocke_unified_attention_supports_tiled_3d
+ *   _canonical_arch_for_selection(arch)          rocke_unified_attention_canonical_arch
  *   (build -> lower .ll convenience, NEW)        rocke_unified_attention_*_lower_to_llvm
  *
  * The scalar kernels are deliberately CORRECTNESS kernels: one workgroup of 64
@@ -87,15 +90,40 @@ extern "C" {
 #define ROCKE_UNIFIED_ATTN_RCP_LN2 1.4426950408889634
 
 /* ============================================================ *
- * Coverage gate -- supports_native_unified_attention(problem)
+ * Coverage gates
  * ============================================================ *
  *
- * Returns whether the SCALAR 2D backend can run this problem (head_size in
- * {64,128,256}, block_size in {16,32,64}, dtype in {fp16,bf16}, no fp8/alibi/
- * qq_bias). On false, *out_reason (if non-NULL) points to a static string
- * mirroring the Python reason. */
+ * Each runs the Python gate's checks in Python's order and, when Python
+ * rejects, writes the identical reason. Where Python admits a problem the C++
+ * builders cannot build yet, the gate rejects it with a "... not ported to C++
+ * yet" reason instead. The reason (pass/fail) is written into ``reason``
+ * (capacity ``reason_cap``, truncated) when non-NULL. ``arch`` may be a
+ * decorated target ID; NULL or "" means the resolved arch. */
+
+/* _canonical_arch_for_selection(arch): strip, lowercase, drop features and
+ * profiles. NULL/"" yields rocke_unified_attn_resolve_arch(). Returns ``out``,
+ * or NULL on a NULL/zero-capacity ``out``. */
+const char* rocke_unified_attention_canonical_arch(const char* arch, char* out, size_t out_cap);
+
+/* supports_native_unified_attention(problem, arch) -- the scalar backend. */
 bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_problem_t* p,
-                                             const char** out_reason);
+                                             const char* arch,
+                                             char* reason,
+                                             size_t reason_cap);
+
+/* supports_native_unified_attention_tiled(problem, arch) -- the tiled 2D path.
+ * Not ported yet, so rejected after Python's checks: gfx1250; off gfx942,
+ * additive bias and non-default masks. */
+bool rocke_unified_attention_supports_tiled_2d(const rocke_unified_attention_problem_t* p,
+                                               const char* arch,
+                                               char* reason,
+                                               size_t reason_cap);
+
+/* supports_native_unified_attention_3d_tiled(problem, arch). */
+bool rocke_unified_attention_supports_tiled_3d(const rocke_unified_attention_problem_t* p,
+                                               const char* arch,
+                                               char* reason,
+                                               size_t reason_cap);
 
 /* ============================================================ *
  * Spec value types (Python @dataclass(frozen=True))

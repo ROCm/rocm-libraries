@@ -3,7 +3,7 @@
  *
  * rocke/instance_gfx950_attention_tiled_3d_internal.h -- PRIVATE shared state +
  * phase-function contract for the C99 port of the gfx950 WIDE-K tiled split-KV
- * 3D attention kernels (rocke/instances/gfx950/attention_tiled_3d.py):
+ * 3D attention kernels (library/kernels/gfx950/attention_tiled_3d.py):
  *
  *   build_unified_attention_3d_tiled       lines 253-950   (segment kernel)
  *   build_unified_attention_reduce_tiled   lines 985-1164  (reduce kernel)
@@ -143,6 +143,8 @@ typedef struct rocke_gfx950_attn_tiled_3d_config
     int KV_CACHE_BITS; /* cache_policy_from_name(spec.kv_cache_policy): the K/V copies */
     bool KV_SWZ; /* spec.use_kv_lds_swizzle                              */
     bool WAVE_PAGE_ID_LOAD; /* spec.use_wave_page_id_load (64-page id window) */
+    bool TOP_LEFT; /* spec.causal_top_left (context_len = 0)              */
+    int RIGHT; /* spec.right_bound (0 causal, R > 0 lookahead, -1 unbounded) */
     int KV_CHUNKS_PER_ROW; /* HD // 8: 16-byte chunks per K/V LDS row        */
     int KV_BYTES; /* 1 if KV_FP8 else 2                                   */
 
@@ -361,6 +363,7 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
     rocke_value_t* seg_max; /* F32* readonly                             */
     rocke_value_t* seg_l; /* F32* readonly (segm_expsum)               */
     rocke_value_t* red_seq_lens; /* I32* readonly (_seq_lens, unused body)    */
+    rocke_value_t* red_lse; /* F32* writeonly; NULL unless spec.emit_lse    */
 
     /* ---------- grid ids (lines 1029-1031) ---------- */
     rocke_value_t* q_token; /* block_id_x()                              */

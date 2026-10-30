@@ -15,6 +15,10 @@
  *   - rocke_wave_reduce_stages    (wave_reduce_stages -- pure host-side selector)
  *   - rocke_warp_xor_reduce_sum   (warp_xor_reduce_sum)
  *   - rocke_dequant_fp8x8_to_dtype (dequant_fp8x8_to_dtype)
+ *   - rocke_attention_next_power_of_2 (next_power_of_2)
+ *   - rocke_attention_select_2d_config (select_2d_config, Attention2DConfig)
+ *   - rocke_attention_use_2d_kernel   (use_2d_kernel)
+ *   - rocke_attention_select_3d_config (select_3d_config, Attention3DConfig)
  *
  * Each IR-emitting helper reproduces its Python counterpart's rocke_b_* builder-
  * call sequence byte-faithfully (same ops, same order, same operands), binding
@@ -144,6 +148,66 @@ rocke_value_t* rocke_dequant_fp8x8_to_dtype(rocke_ir_builder_t* b,
                                             rocke_value_t* fp8_vec,
                                             rocke_value_t* scale,
                                             const rocke_type_t* dtype);
+
+/* ------------------------------------------------- 2D / 3D launch routing *
+ * Host-only ports of the AITER-mirror routing helpers. Emit no IR. */
+
+/* @dataclass Attention2DConfig (waves_per_eu defaults to 2). */
+typedef struct rocke_attention_2d_config
+{
+    int block_m;
+    int block_q;
+    int tile_size;
+    int num_warps;
+    int num_stages;
+    int waves_per_eu;
+} rocke_attention_2d_config_t;
+
+/* @dataclass Attention3DConfig (waves_per_eu defaults to 2). */
+typedef struct rocke_attention_3d_config
+{
+    int tile_size;
+    int num_segments_per_seq;
+    int num_warps;
+    int num_stages;
+    int waves_per_eu;
+} rocke_attention_3d_config_t;
+
+/* next_power_of_2(x): 1 for x <= 1, else the smallest power of two >= x. */
+int rocke_attention_next_power_of_2(int x);
+
+/* select_2d_config(...). Returns false (``out`` untouched) when
+ * num_queries_per_kv <= 0, where the Python divides by zero. */
+bool rocke_attention_select_2d_config(int block_size,
+                                      int head_size,
+                                      int sliding_window,
+                                      bool all_decode,
+                                      int max_seqlen_q,
+                                      int max_seqlen_k,
+                                      int num_queries_per_kv,
+                                      int num_2d_prgms,
+                                      rocke_attention_2d_config_t* out);
+
+/* use_2d_kernel(...). */
+bool rocke_attention_use_2d_kernel(int head_size,
+                                   int sliding_window,
+                                   bool all_decode,
+                                   int max_seqlen_q,
+                                   int max_seqlen_k,
+                                   int target_num_prgms,
+                                   int num_2d_prgms);
+
+/* select_3d_config(...) -> (attention config, reduce config). Returns false
+ * (outputs untouched) when num_2d_prgms <= 0, where the Python divides by
+ * zero. */
+bool rocke_attention_select_3d_config(int head_size,
+                                      int block_size,
+                                      int element_size,
+                                      int max_seqlen_k,
+                                      int target_num_prgms,
+                                      int num_2d_prgms,
+                                      rocke_attention_3d_config_t* attn,
+                                      rocke_attention_3d_config_t* reduce);
 
 #ifdef __cplusplus
 } /* extern "C" */

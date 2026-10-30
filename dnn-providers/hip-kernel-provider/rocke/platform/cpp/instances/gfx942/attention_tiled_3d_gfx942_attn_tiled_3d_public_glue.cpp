@@ -29,16 +29,6 @@
  * issuers) are PEERS implemented in sibling TUs (the segment + reduce body
  * buckets) and declared in rocke/instance_gfx942_attention_tiled_3d_internal.h.
  * This TU calls them through that header but does not implement them.
- *
- * ARCH GATE NOTE (validate_tiled_attention_arch). The Python validator
- * (instances/common/attention_arch.py) admits two families: the gfx950 wide-K +
- * ds_read_tr path and the gfx942 narrow 16x16x16 strided-V path. The C arch
- * surface (rocke/helper_rocke.core.arch.h) exposes op_for_shape but not the
- * memory.has_ds_read_tr predicate, so the wide-K admission is reproduced via the
- * catalogued 16x16x32 f16 atom only (the canonical wide-K marker). On gfx942 the
- * relevant branch is the narrow path (gfx942 in {_NARROW_TILED_2D_ARCHES} AND
- * the 16x16x16 f16+bf16 atoms present), which IS fully reproducible here. The
- * fallback reason strings mirror the Python text byte-for-byte.
  */
 #include <math.h>
 #include <stdio.h>
@@ -51,6 +41,7 @@
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom, make_c_warp_dstr_encoding */
 #include "rocke/helper_rocke.helpers.distribution.h" /* make_static_tile_distribution */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.instances.common.attention_arch.h" /* rocke_validate_tiled_attention_arch */
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/instance_gfx942_attention_tiled_3d_internal.h"
 #include "rocke/ir.h"
@@ -74,6 +65,11 @@ static bool rocke_attn3d_streq(const char* a, const char* b)
     return strcmp(a, b) == 0;
 }
 
+static bool rocke_attn3d_strided_kv(const rocke_unified_attention_3d_tiled_spec_t* s)
+{
+    return s->kv_layout != NULL && rocke_attn3d_streq(s->kv_layout, "strided");
+}
+
 /* Copy `msg` into (err, err_cap), NUL-terminated and truncated. No-op if err is
  * NULL / err_cap is 0. */
 static void rocke_attn3d_set_err_buf(char* err, size_t err_cap, const char* msg)
@@ -94,26 +90,6 @@ static void rocke_attn3d_set_err_buf(char* err, size_t err_cap, const char* msg)
     }
     memcpy(err, msg, n);
     err[n] = '\0';
-}
-
-/* True iff the target catalog has the narrow 16x16x16 f16 AND bf16 (a,a,fp32)
- * atom (_narrow_k_mfma_available). */
-static bool rocke_attn3d_narrow_k_available(const rocke_archtarget_t* t)
-{
-    const rocke_mmaop_t* f16
-        = rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 16, nullptr);
-    const rocke_mmaop_t* bf16
-        = rocke_archtarget_op_for_shape(t, "mma", "bf16", "bf16", "fp32", 16, 16, 16, nullptr);
-    return f16 != NULL && bf16 != NULL;
-}
-
-/* True iff the target catalog has the wide-K 16x16x32 f16 atom
- * (_wide_k_mfma_available, the queryable half; the ds_read_tr cross-check is not
- * exposed by the C arch surface -- see the ARCH GATE NOTE above). */
-static bool rocke_attn3d_wide_k_available(const rocke_archtarget_t* t)
-{
-    return rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 32, nullptr)
-           != NULL;
 }
 
 /* ===================================================================== *
@@ -139,6 +115,9 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     s.kv_cache_policy = "all";
     s.use_kv_lds_swizzle = false;
     s.use_wave_page_id_load = false;
+    s.kv_layout = "paged";
+    s.causal_top_left = false;
+    s.right_bound = 0;
     return s;
 }
 
@@ -153,6 +132,54 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
     if(s == NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "attention_tiled_3d spec is NULL");
+        return false;
+    }
+    /* The Python gfx942 spec has no band fields; only a hand-built C spec can
+     * carry one, so this message has no Python counterpart. */
+    if(s->causal_top_left || s->right_bound != 0)
+    {
+        const char* align = s->causal_top_left ? "top-left" : "bottom-right";
+        char upper[32];
+        if(s->right_bound == -1)
+            snprintf(upper, sizeof(upper), "unbounded");
+        else if(s->right_bound == 0)
+            snprintf(upper, sizeof(upper), "causal");
+        else
+            snprintf(upper, sizeof(upper), "right_bound=%d", s->right_bound);
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "gfx942 tiled attention does not implement %s/%s masks",
+                        align,
+                        upper);
+        return false;
+    }
+    if(s->num_segments < 1)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "num_segments must be >= 1");
+        return false;
+    }
+    if(s->kv_layout != NULL && !rocke_attn3d_streq(s->kv_layout, "paged")
+       && !rocke_attn3d_streq(s->kv_layout, "strided"))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "kv_layout must be 'paged' or 'strided'");
+        return false;
+    }
+    if(rocke_attn3d_strided_kv(s)
+       && (s->kv_storage_dtype != NULL || s->use_i64_kv_addr || s->use_wide_kv_load))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "strided KV requires fp16/bf16 async loads without paged i64 addressing");
+        return false;
+    }
+    /* The segment loaders never read this flag, so accepting it would build a
+     * kernel with 32-bit KV addressing for a cache that needs 64-bit. */
+    if(s->use_i64_kv_addr)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_NOTIMPL,
+                        "gfx942 tiled 3D kernel does not support use_i64_kv_addr "
+                        "(paged KV cache > 2 GiB) yet");
         return false;
     }
     if(s->kv_storage_dtype != NULL && !rocke_attn3d_streq(s->kv_storage_dtype, "fp8e4m3"))
@@ -189,7 +216,7 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs fp16/bf16 KV");
         return false;
     }
-    if(s->use_wave_page_id_load && s->kv_storage_dtype != NULL)
+    if(s->use_wave_page_id_load && (rocke_attn3d_strided_kv(s) || s->kv_storage_dtype != NULL))
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
         return false;
@@ -274,7 +301,8 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
      *   "dg" if use_decode_grid else "",
      *   "kvcp<policy>" if kv_cache_policy != "all" else "",
      *   "kvswz" if use_kv_lds_swizzle else "",
-     *   "wpid" if use_wave_page_id_load else "")
+     *   "wpid" if use_wave_page_id_load else "",
+     *   "stridedkv" if kv_layout == "strided" else "")
      *
      * The whole thing is a positional parts list (NOT flags=...): empty parts
      * are skipped by kernel_name_join. We materialise each part string and feed
@@ -357,6 +385,10 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     {
         parts[np++] = "wpid";
     }
+    if(rocke_attn3d_strided_kv(s))
+    {
+        parts[np++] = "stridedkv";
+    }
 
     /* kernel_name_join takes prefix + parts; we pass everything as parts with a
      * "" prefix so the join is identical (empty prefix is skipped). */
@@ -395,7 +427,7 @@ int rocke_unified_attention_reduce_tiled_spec_kernel_name(
     const rocke_unified_attention_reduce_tiled_spec_t* s, char* buf, size_t cap)
 {
     /* kernel_name_join("rocke_uattn_reduce_tiled_gfx942", d<HD>, h<NUM_QH>,
-     *   seg<NUM_SEG>, dtype) */
+     *   seg<NUM_SEG>, dtype[, "lse"]) */
     char d_part[32];
     char h_part[32];
     char seg_part[32];
@@ -418,6 +450,10 @@ int rocke_unified_attention_reduce_tiled_spec_kernel_name(
     parts[np++] = h_part;
     parts[np++] = seg_part;
     parts[np++] = (s->dtype != NULL) ? s->dtype : "";
+    if(s->emit_lse)
+    {
+        parts[np++] = "lse";
+    }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
     if(st != ROCKE_OK)
@@ -448,8 +484,6 @@ bool rocke_gfx942_attention_tiled_3d_supports(int head_size,
 {
     static char reason_buf[ROCKE_ERR_MSG_CAP];
     const char* eff_arch = (arch != NULL) ? arch : "gfx942";
-    const rocke_archtarget_t* target;
-    bool arch_ok;
 
     (void)use_alibi;
     (void)use_qq_bias;
@@ -464,34 +498,8 @@ bool rocke_gfx942_attention_tiled_3d_supports(int head_size,
     } while(0)
 
     /* arch_ok, arch_reason = validate_tiled_attention_arch(arch) */
-    target = rocke_archtarget_from_gfx(eff_arch);
-    if(target == NULL)
+    if(!rocke_validate_tiled_attention_arch(eff_arch, reason_buf, sizeof(reason_buf)))
     {
-        /* KeyError str() wrapping (matches _build_target / ArchTarget.from_gfx). */
-        snprintf(reason_buf, sizeof(reason_buf), "\"unknown gfx target '%s'\"", eff_arch);
-        ATTN3D_REASON(reason_buf);
-        return false;
-    }
-    arch_ok = false;
-    if(rocke_attn3d_wide_k_available(target))
-    {
-        /* gfx950 wide-K + ds_read_tr path (ds_read_tr not queryable in C; the
-         * wide-K marker is taken as admission, see ARCH GATE NOTE). */
-        arch_ok = true;
-    }
-    else if(rocke_attn3d_streq(eff_arch, "gfx942") && rocke_attn3d_narrow_k_available(target))
-    {
-        arch_ok = true;
-    }
-    if(!arch_ok)
-    {
-        snprintf(reason_buf,
-                 sizeof(reason_buf),
-                 "tiled attention requires either the wide-K MFMA atoms "
-                 "(mfma_f32_16x16x32 / mfma_f32_32x32x16, gfx950) or, on a narrow "
-                 "variant arch (gfx942), the 16x16x16 f16/bf16 atom; neither path "
-                 "is available on %s",
-                 eff_arch);
         ATTN3D_REASON(reason_buf);
         return false;
     }
@@ -583,8 +591,6 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
     rocke_gfx942_attn_tiled_3d_config_t* out)
 {
     const char* eff_arch = (arch != NULL) ? arch : "gfx942";
-    const rocke_archtarget_t* target;
-    bool arch_ok;
     int nqk;
 
     if(b == NULL || !rocke_ir_builder_ok(b))
@@ -603,28 +609,8 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
         return false;
     }
 
-    /* require_tiled_attention_arch(arch): NotImplementedError on reject. */
-    target = rocke_archtarget_from_gfx(eff_arch);
-    arch_ok = false;
-    if(target != NULL)
+    if(!rocke_require_tiled_attention_arch(b, eff_arch))
     {
-        if(rocke_attn3d_wide_k_available(target))
-        {
-            arch_ok = true;
-        }
-        else if(rocke_attn3d_streq(eff_arch, "gfx942") && rocke_attn3d_narrow_k_available(target))
-        {
-            arch_ok = true;
-        }
-    }
-    if(!arch_ok)
-    {
-        rocke_i_set_err(b,
-                        ROCKE_ERR_NOTIMPL,
-                        "tiled attention requires either the wide-K MFMA atoms "
-                        "(gfx950) or, on a narrow variant arch (gfx942), the "
-                        "16x16x16 f16/bf16 atom; neither path is available on %s",
-                        eff_arch);
         return false;
     }
 
@@ -915,10 +901,8 @@ bool rocke_gfx942_attention_tiled_3d_ctx_init(
  *  waves_per_eu kernel attrs are set here (Python lines 276-278) before the
  *  param declarations.
  * ===================================================================== */
-static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
-                                                const rocke_unified_attention_3d_tiled_spec_t* spec,
-                                                const char* arch,
-                                                bool strided_kv)
+rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx942(
+    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         rocke_gfx942_attention_tiled_3d_build_ctx_t ctx;
@@ -938,21 +922,6 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
             return NULL;
         }
 
-        if(strided_kv
-           && (spec->kv_storage_dtype != NULL || spec->use_i64_kv_addr || spec->use_wide_kv_load))
-        {
-            rocke_i_set_err(
-                b,
-                ROCKE_ERR_VALUE,
-                "strided KV requires fp16/bf16 async loads without paged i64 addressing");
-            return NULL;
-        }
-        if(strided_kv && spec->use_wave_page_id_load)
-        {
-            rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
-            return NULL;
-        }
-
         /* Name the kernel from spec.kernel_name() (Python b = IRBuilder(
          * spec.kernel_name())). The C entry reuses a caller-supplied builder. */
         if(b->kernel != NULL)
@@ -965,16 +934,6 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
                     ROCKE_ERR_VALUE,
                     "build_unified_attention_3d_tiled_gfx942: kernel_name encode failed");
                 return NULL;
-            }
-            if(strided_kv)
-            {
-                const size_t len = strlen(name);
-                if(len + sizeof("_stridedkv") > sizeof(name))
-                {
-                    rocke_i_set_err(b, ROCKE_ERR_VALUE, "strided KV kernel name too long");
-                    return NULL;
-                }
-                memcpy(name + len, "_stridedkv", sizeof("_stridedkv"));
             }
             b->kernel->name = rocke_arena_strdup(&b->arena, name);
             if(b->kernel->name == NULL)
@@ -990,7 +949,7 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
             return NULL;
         }
 
-        ctx.strided_kv = strided_kv;
+        ctx.strided_kv = rocke_attn3d_strided_kv(spec);
 
         /* b.kernel.attrs["max_workgroup_size"] = THREADS (line 276). */
         if(b->kernel != NULL)
@@ -1024,18 +983,6 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
         }
         return b->kernel; /* return b.kernel (line 969) */
     });
-}
-
-rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx942(
-    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
-{
-    return build_segment_gfx942(b, spec, arch, false);
-}
-
-rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_strided_gfx942(
-    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
-{
-    return build_segment_gfx942(b, spec, arch, true);
 }
 
 /* ===================================================================== *

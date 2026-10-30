@@ -793,14 +793,8 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_mfma32_skip_legacy_qreg = true;
         s->use_transposed_half_local_pv = true;
         break;
-    /* idx52 REMOVED: it exercised the deep K prefetch ring (kv_ring_depth=3), a
-     * Python-only experimental lever the production selector never sets and the
-     * gfx950 C twin rejects by design. A config one engine cannot emit is
-     * intrinsically asymmetric and does not belong in the byte-identity (emit-
-     * comparison) gate. The C reject guard remains in the public entry glue;
-     * ring-3 was superseded by use_softmax_mfma_interleave (not production). */
-    /* idx52 (renumbered from 53 after the ring-3 config was removed; kept
-     * contiguous so the gate does not stop early on a hole): #69 K single-buffer
+    /* idx52 (renumbered from 53; kept contiguous so the gate does not stop
+     * early on a hole; the ring-3 config is idx72): #69 K single-buffer
      * at T=64 -- the d128 long-context 2-WG/CU win. tile_size=64 +
      * use_k_single_buffer (K_lds 2->1 slot, next-K deferred to after the PV-wait
      * barrier). Ported to the gfx950 C twin -> must be C/Python byte-identical. */
@@ -914,6 +908,594 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 64;
         break;
 
+    /* ALiBi on the transposed 32x32 path without mask-once: the slope is
+     * loaded inline per lane. Case 56 is the multi-batch fp16 D128 spec
+     * _tiled_spec_from_problem selects, case 57 the bf16 combo spec (scalar
+     * state, still no mask-once). Case 58 takes the hoisted slope. */
+    case 56:
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        s->num_seqs = 4;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_half_local_pv = true;
+        break;
+
+    case 57:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        s->num_seqs = 4;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 4;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_fast_paged_kv_desc = true;
+        break;
+
+    case 58:
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        s->num_seqs = 4;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_transposed_invariant_hoist = true;
+        s->use_transposed_mask_once = true;
+        break;
+
+    case 59:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_v_double_buffer = true;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_mask_limit = true;
+        s->use_fast_paged_kv_desc = true;
+        break;
+
+    case 60:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "fp16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_v_double_buffer = true;
+        s->use_staggered_iter_wait = true;
+        s->has_tile_size = true;
+        s->tile_size = 128;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_mask_limit = true;
+        break;
+
+    case 61:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 2;
+        s->use_v_double_buffer = true;
+        break;
+
+    case 62:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 2;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_v_double_buffer = true;
+        s->use_staggered_iter_wait = true;
+        break;
+
+    case 63:
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 1;
+        s->use_v_double_buffer = true;
+        s->use_early_v_schedule = true;
+        s->use_sched_barrier = true;
+        break;
+
+    case 64:
+        s->head_size = 256;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->num_warps = 2;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_kq_lds_pad = true;
+        s->kq_lds_pad_halves = 16;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_transposed_mask_limit = true;
+        s->use_k_single_buffer = true;
+        s->use_q_direct_reg = true;
+        s->use_softmax_mfma_interleave = true;
+        s->softmax_interleave_mode = 2;
+        s->use_mask_phase_split = true;
+        break;
+
+    case 65:
+        s->head_size = 256;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->num_warps = 2;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_kq_lds_pad = true;
+        s->kq_lds_pad_halves = 16;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_transposed_mask_limit = true;
+        s->use_k_single_buffer = true;
+        s->use_q_direct_reg = true;
+        s->use_softmax_mfma_interleave = true;
+        s->softmax_interleave_mode = 2;
+        s->use_mask_phase_split = true;
+        s->use_transposed_invariant_hoist = true;
+        break;
+
+    case 66:
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->num_warps = 4;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_transposed_mask_limit = true;
+        s->use_q_direct_reg = true;
+        break;
+
+    case 67:
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 2;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_transposed_mask_limit = true;
+        s->use_k_single_buffer = true;
+        s->use_kq_lds_pad = true;
+        s->use_mask_phase_split = true;
+        s->use_softmax_mfma_interleave = true;
+        s->softmax_interleave_mode = 2;
+        s->softmax_interleave_groups = 2;
+        break;
+
+    case 68:
+        s->head_size = 256;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 2;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_kq_lds_pad = true;
+        s->kq_lds_pad_halves = 16;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_transposed_mask_limit = true;
+        s->use_k_single_buffer = true;
+        s->use_q_direct_reg = true;
+        s->use_softmax_mfma_interleave = true;
+        s->softmax_interleave_mode = 2;
+        s->use_mask_phase_split = true;
+        break;
+
+    case 69:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->num_warps = 4;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_half_local_pv = true;
+        s->kv_storage_dtype = "fp8e4m3";
+        s->use_fp8_mfma_qk = true;
+        break;
+
+    /* Q re-read and the depth-3 deep K prefetch ring. idx70 re-reads Q on the
+     * transposed 32x32 combo, idx71 adds the grouped-KV2 second score tile,
+     * idx72 is the d128 small-tile ring with the two-phase mask peel, idx73
+     * combines both. */
+    case 70:
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->num_warps = 4;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_transposed_mask_limit = true;
+        s->use_q_reread = true;
+        break;
+    case 71:
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_invariant_hoist = true;
+        s->use_transposed_mask_once = true;
+        s->use_grouped_kv2_softmax = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_q_reread = true;
+        break;
+    case 72:
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_transposed_mask_limit = true;
+        s->use_mask_phase_split = true;
+        s->kv_ring_depth = 3;
+        break;
+    case 73:
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 16;
+        s->dtype = "fp16";
+        s->use_sinks = true;
+        s->sliding_window = 128;
+        s->has_softcap = true;
+        s->num_seqs = 2;
+        s->num_warps = 2;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_half_local_pv = true;
+        s->kv_ring_depth = 3;
+        s->use_q_reread = true;
+        break;
+
+    case 74: /* selector spec: single-batch fp16 D128 SW prefill combo. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->use_sinks = false;
+        s->sliding_window = 256;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_softmax_mfma_interleave = true;
+        break;
+    case 75: /* config 50 with sched_barrier mask 8 (MFMA may cross). */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 1;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_invariant_hoist = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_mask_limit = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_sched_barrier = true;
+        s->sched_barrier_mask = 8;
+        break;
+    case 76: /* top-left mask on the 16x16 body. */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 2;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->causal_top_left = true;
+        break;
+    case 77: /* right_bound=5 + sliding window, MFMA 32x32. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 4;
+        s->dtype = "fp16";
+        s->use_sinks = false;
+        s->sliding_window = 64;
+        s->has_softcap = false;
+        s->num_warps = 2;
+        s->use_mfma_32x32 = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->right_bound = 5;
+        break;
+    case 78: /* unbounded band, transposed 32x32 without mask-limit. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->num_warps = 4;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_half_local_pv = true;
+        s->right_bound = -1;
+        break;
+    case 79: /* top-left + right_bound=3 + sliding window, transposed hoist. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 128;
+        s->has_softcap = true;
+        s->num_seqs = 1;
+        s->num_warps = 1;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_invariant_hoist = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->causal_top_left = true;
+        s->right_bound = 3;
+        break;
+    case 80: /* fp8 K/V cache with a top-left mask. */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = "fp8e4m3";
+        s->use_fp8_mfma_pv = true;
+        s->causal_top_left = true;
+        break;
+    /* --- idx81-85: the band on the transposed mask-limit path. --- */
+    case 81: /* config 44 (hoisted causal limit) with right_bound=4. */
+        make_spec(44, s);
+        s->right_bound = 4;
+        break;
+    case 82: /* config 46 unbounded. */
+        make_spec(46, s);
+        s->right_bound = -1;
+        break;
+    case 83: /* D256 fast path (config 64, mask phase split) unbounded. */
+        make_spec(64, s);
+        s->right_bound = -1;
+        break;
+    case 84: /* D256 fast path with top-left + right_bound=7. */
+        make_spec(64, s);
+        s->causal_top_left = true;
+        s->right_bound = 7;
+        break;
+    case 85: /* config 46, per-iteration causal limit, top-left + right_bound=2. */
+        make_spec(46, s);
+        s->use_transposed_invariant_hoist = false;
+        s->causal_top_left = true;
+        s->right_bound = 2;
+        break;
     default:
         return -1;
     }

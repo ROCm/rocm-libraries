@@ -25,9 +25,10 @@
 #include "rocke/verify.h"
 
 /* Fill `s` for config index `idx`. Returns 0 on success, -1 on unknown idx. */
-static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
+static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s, bool* emit_lse)
 {
     *s = rocke_unified_attention_3d_tiled_spec_default();
+    *emit_lse = false;
     switch(idx)
     {
     case 0:
@@ -301,6 +302,67 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->tile_size_override = 16;
         s->use_wave_page_id_load = true;
         break;
+    case 18:
+        /* Decode K/V streamed by the async copies from strided (non-paged) K/V. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->num_seqs = 4;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        s->kv_layout = "strided";
+        break;
+    case 19:
+        /* Decode K/V with globally cached copies through the 1-DWORD async loader. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 16;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "global";
+        break;
+    case 20:
+        /* Reduce with the LSE output, decode grid. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        *emit_lse = true;
+        break;
+    case 21:
+        /* Reduce with the LSE output. */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        *emit_lse = true;
+        break;
     default:
         return -1;
     }
@@ -308,11 +370,14 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
 }
 
 /* Derive the reduce spec from the segment spec, exactly as the Python emitter
- * (head_size / num_query_heads / num_kv_heads / dtype / num_segments). */
+ * (head_size / num_query_heads / num_kv_heads / dtype / num_segments, plus the
+ * config's emit_lse). */
 static void make_reduce_spec(const rocke_unified_attention_3d_tiled_spec_t* s,
+                             bool emit_lse,
                              rocke_unified_attention_reduce_tiled_spec_t* r)
 {
     *r = rocke_unified_attention_reduce_tiled_spec_default();
+    r->emit_lse = emit_lse;
     r->head_size = s->head_size;
     r->num_query_heads = s->num_query_heads;
     r->num_kv_heads = s->num_kv_heads;
@@ -397,13 +462,14 @@ int main(int argc, char** argv)
     const char* mode = (argc > 2) ? argv[2] : "ll";
 
     rocke_unified_attention_3d_tiled_spec_t s;
-    if(make_spec(idx, &s) != 0)
+    bool emit_lse = false;
+    if(make_spec(idx, &s, &emit_lse) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 1;
     }
     rocke_unified_attention_reduce_tiled_spec_t r;
-    make_reduce_spec(&s, &r);
+    make_reduce_spec(&s, emit_lse, &r);
 
     if(strcmp(mode, "ll") == 0)
     {

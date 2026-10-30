@@ -30,12 +30,10 @@
  * exactly as the Python prologue computes them.
  *
  * NOTE (max_seq_prefix_len). Both vehicles bound their HBM read by this CTA's
- * valid KV length, ``max_seq_prefix_len`` (Python local, line 1984). The shared
- * ctx does not carry it as a field, so it is reconstructed here from the ctx
- * locals it derives from (context_len + qb_start_pos + (BLOCK_M-1)//NQK + 1,
- * clamped to seq_len) -- the identical builder-call chain. A header revision that
- * promotes max_seq_prefix_len to a ctx field would let both this bucket and the
- * KV-loop-bounds bucket share the single SSA value.
+ * valid KV length, ``max_seq_prefix_len`` (Python local, line 1984). Both reuse
+ * the prologue's cached ctx->max_seq_prefix_len_v; only when it is unset is the
+ * value reconstructed from the ctx locals it derives from (context_len +
+ * qb_start_pos + (BLOCK_M-1)//NQK + 1, clamped to seq_len).
  *
  * Lifetime: every emitted node + the payload list is arena-owned
  * (rocke_ir_builder_t.arena). Nothing is freed individually.
@@ -69,9 +67,12 @@ static rocke_value_t* rocke__paged_kv_offset(rocke_gfx942_attn2d_build_ctx_t* ct
 
 /* max_seq_prefix_len = select(msp_raw < seq_len, msp_raw, seq_len)  (line 1984)
  *   msp_raw = context_len + qb_start_pos + ((BLOCK_M-1)//NQK + 1)    (line 1983)
- * Reconstructed from ctx locals (see file header NOTE). */
+ * Python keeps one prologue local, so reuse the cached value; otherwise it is
+ * reconstructed from ctx locals (see file header NOTE). */
 static rocke_value_t* rocke__max_seq_prefix_len(rocke_gfx942_attn2d_build_ctx_t* ctx)
 {
+    if(ctx->max_seq_prefix_len_v != NULL)
+        return ctx->max_seq_prefix_len_v;
     rocke_ir_builder_t* b = ctx->b;
     int bm1_div_nqk = (ctx->BLOCK_M - 1) / ctx->NQK;
     rocke_value_t* msp_raw = b ? rocke_b_add(b,
@@ -203,22 +204,30 @@ typedef struct rocke__cfvst_payload
     int count;
 } rocke__cfvst_payload_t;
 
+/* Per-call invariants _cfvst_load_v_regs computes once and every
+ * _load_token_row_pair reuses (Python closure captures). */
+typedef struct rocke__cfvst_load_env
+{
+    rocke_value_t* kv_tile_idx;
+    rocke_value_t* zero_h;
+    rocke_value_t* zero_i32;
+    rocke_value_t* tile_tok_base;
+    rocke_value_t* max_seq_prefix_len;
+} rocke__cfvst_load_env_t;
+
 /* _load_token_row_pair(t_row, d0) -> i32 = (V[t_row,d0], V[t_row,d0+1]), bounded
- * (lines 2773-2832). kv_tile_idx + max_seq_prefix_len are passed via ctx-private
- * statics threaded through _cfvst_load_v_regs (see below); to keep this a free
- * function with the header-declared signature, it recomputes them from ctx. */
-rocke_value_t* rocke_gfx942_attn2d_load_token_row_pair(rocke_gfx942_attn2d_build_ctx_t* ctx,
-                                                       rocke_value_t* t_row,
-                                                       rocke_value_t* d0)
+ * (lines 2773-2832). */
+static rocke_value_t* rocke__load_token_row_pair(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                                 const rocke__cfvst_load_env_t* env,
+                                                 rocke_value_t* t_row,
+                                                 rocke_value_t* d0)
 {
     rocke_ir_builder_t* b = ctx->b;
     const rocke_type_t* dtype = ctx->dtype;
     const rocke_type_t* I32 = rocke_i32();
-    rocke_value_t* kv_tile_idx = ctx->kv_tile_iv; /* current tile (set by caller) */
-    rocke_value_t* zero_h = rocke_b_cast_f32_to(b, rocke_b_const_f32(b, 0.0), dtype);
-    rocke_value_t* zero_i32 = rocke_b_const_i32(b, 0);
-    rocke_value_t* max_seq_prefix_len = rocke__max_seq_prefix_len(ctx);
-    rocke_value_t* tile_tok_base = rocke_b_mul(b, kv_tile_idx, rocke_b_const_i32(b, ctx->T));
+    rocke_value_t* kv_tile_idx = env->kv_tile_idx;
+    rocke_value_t* zero_h = env->zero_h;
+    rocke_value_t* zero_i32 = env->zero_i32;
 
     /* linear = t_row * HD + d0 */
     rocke_value_t* linear
@@ -227,7 +236,7 @@ rocke_value_t* rocke_gfx942_attn2d_load_token_row_pair(rocke_gfx942_attn2d_build
     rocke_value_t* voff
         = rocke__paged_kv_offset(ctx, kv_tile_idx, linear, ctx->kv_head_idx, &valid);
     rocke_value_t* in_range
-        = rocke_b_cmp_lt(b, rocke_b_add(b, tile_tok_base, t_row), max_seq_prefix_len);
+        = rocke_b_cmp_lt(b, rocke_b_add(b, env->tile_tok_base, t_row), env->max_seq_prefix_len);
     if(valid != NULL)
         in_range = rocke_b_land(b, in_range, valid);
     rocke_value_t* safe_voff = rocke_b_select(b, in_range, voff, zero_i32);
@@ -279,16 +288,36 @@ rocke_value_t* rocke_gfx942_attn2d_load_token_row_pair(rocke_gfx942_attn2d_build
     return rocke_b_bitcast(b, v2, I32);
 }
 
-/* _cfvst_block_coords(blk) -> (d0, d1, t0, t1)  (lines 2834-2844).
- * out_a[0..1] = (d0, d1); out_b[0..1] = (t0, t1). */
-void rocke_gfx942_attn2d_cfvst_block_coords(rocke_gfx942_attn2d_build_ctx_t* ctx,
-                                            rocke_value_t* blk,
-                                            rocke_value_t** out_a,
-                                            rocke_value_t** out_b)
+static void rocke__cfvst_load_env_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                       rocke_value_t* kv_tile_idx,
+                                       rocke__cfvst_load_env_t* env)
 {
     rocke_ir_builder_t* b = ctx->b;
-    int dim_pairs = ctx->HD / 2;
-    rocke_value_t* dp = rocke_b_const_i32(b, dim_pairs);
+    env->kv_tile_idx = kv_tile_idx;
+    env->zero_h = rocke_b_cast_f32_to(b, rocke_b_const_f32(b, 0.0), ctx->dtype);
+    env->zero_i32 = rocke_b_const_i32(b, 0);
+    env->tile_tok_base = rocke_b_mul(b, kv_tile_idx, rocke_b_const_i32(b, ctx->T));
+    env->max_seq_prefix_len = rocke__max_seq_prefix_len(ctx);
+}
+
+rocke_value_t* rocke_gfx942_attn2d_load_token_row_pair(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                                       rocke_value_t* t_row,
+                                                       rocke_value_t* d0)
+{
+    rocke__cfvst_load_env_t env;
+    rocke__cfvst_load_env_init(ctx, ctx->kv_tile_iv, &env);
+    return rocke__load_token_row_pair(ctx, &env, t_row, d0);
+}
+
+/* _cfvst_block_coords(blk) -> (d0, d1, t0, t1)  (lines 2834-2844).
+ * out_a[0..1] = (d0, d1); out_b[0..1] = (t0, t1). */
+static void rocke__cfvst_block_coords(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                      rocke_value_t* blk,
+                                      rocke_value_t* dp,
+                                      rocke_value_t** out_a,
+                                      rocke_value_t** out_b)
+{
+    rocke_ir_builder_t* b = ctx->b;
     /* tg = blk // _dp ; dg = blk % _dp */
     rocke_value_t* tg = rocke_b_div(b, blk, dp);
     rocke_value_t* dg = rocke_b_mod(b, blk, dp);
@@ -308,6 +337,14 @@ void rocke_gfx942_attn2d_cfvst_block_coords(rocke_gfx942_attn2d_build_ctx_t* ctx
     }
 }
 
+void rocke_gfx942_attn2d_cfvst_block_coords(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                            rocke_value_t* blk,
+                                            rocke_value_t** out_a,
+                                            rocke_value_t** out_b)
+{
+    rocke__cfvst_block_coords(ctx, blk, rocke_b_const_i32(ctx->b, ctx->HD / 2), out_a, out_b);
+}
+
 /* _cfvst_load_v_regs(kv_tile_idx)  (lines 2766-2859).
  * Issues the cfvst VMEM loads and keeps each thread's V tile in VGPRs. Returns
  * the arena-owned payload (the per-call (d0, d1, t0, x0, x1) tuples). */
@@ -325,53 +362,43 @@ void* rocke_gfx942_attn2d_cfvst_load_v_regs(rocke_gfx942_attn2d_build_ctx_t* ctx
     int total_blocks = tok_pairs * dim_pairs;
     int call;
 
-    /* _load_token_row_pair reads the *current* tile from ctx->kv_tile_iv; pin it
-     * to kv_tile_idx for the duration of this load (the Python closure captures
-     * the argument directly). */
-    rocke_value_t* saved_iv = ctx->kv_tile_iv;
-    ctx->kv_tile_iv = kv_tile_idx;
-
     rocke__cfvst_payload_t* payload
         = (rocke__cfvst_payload_t*)rocke_arena_alloc(&b->arena, sizeof(rocke__cfvst_payload_t));
     if(payload == NULL)
-    {
-        ctx->kv_tile_iv = saved_iv;
         return NULL;
-    }
     payload->blocks = (rocke__cfvst_blk_t*)rocke_arena_alloc(
         &b->arena,
         sizeof(rocke__cfvst_blk_t) * (size_t)(V_T_ITEMS_PER_THREAD > 0 ? V_T_ITEMS_PER_THREAD : 1));
     payload->count = 0;
     if(payload->blocks == NULL)
-    {
-        ctx->kv_tile_iv = saved_iv;
         return NULL;
-    }
+
+    /* Emitted once per call, before the per-item loads, in Python order. */
+    rocke__cfvst_load_env_t env;
+    rocke__cfvst_load_env_init(ctx, kv_tile_idx, &env);
+    rocke_value_t* dp = rocke_b_const_i32(b, dim_pairs);
 
     for(call = 0; call < V_T_ITEMS_PER_THREAD; ++call)
     {
-        /* blk = call*THREADS + tid */
-        rocke_value_t* blk = rocke_b_add(
-            b,
-            rocke_b_mul(b, rocke_b_const_i32(b, call), rocke_b_const_i32(b, ctx->THREADS)),
-            ctx->tid);
+        /* blk = call*THREADS + tid (operands bound in Python's left-to-right order) */
+        rocke_value_t* blk_call = rocke_b_const_i32(b, call);
+        rocke_value_t* blk_thr = rocke_b_const_i32(b, ctx->THREADS);
+        rocke_value_t* blk = rocke_b_add(b, rocke_b_mul(b, blk_call, blk_thr), ctx->tid);
         if(need_item_guard)
         {
-            blk = rocke_b_select(b,
-                                 rocke_b_cmp_lt(b, blk, rocke_b_const_i32(b, total_blocks)),
-                                 blk,
-                                 rocke_b_const_i32(b, 0));
+            rocke_value_t* blk_ok = rocke_b_cmp_lt(b, blk, rocke_b_const_i32(b, total_blocks));
+            blk = rocke_b_select(b, blk_ok, blk, rocke_b_const_i32(b, 0));
         }
         rocke_value_t* dd[2];
         rocke_value_t* tt[2];
-        rocke_gfx942_attn2d_cfvst_block_coords(ctx, blk, dd, tt);
+        rocke__cfvst_block_coords(ctx, blk, dp, dd, tt);
         rocke_value_t* d0 = dd[0];
         rocke_value_t* d1 = dd[1];
         rocke_value_t* t0 = tt[0];
         rocke_value_t* t1 = tt[1];
         /* x0 = (V[t0,d0], V[t0,d1]) ; x1 = (V[t1,d0], V[t1,d1]) */
-        rocke_value_t* x0 = rocke_gfx942_attn2d_load_token_row_pair(ctx, t0, d0);
-        rocke_value_t* x1 = rocke_gfx942_attn2d_load_token_row_pair(ctx, t1, d0);
+        rocke_value_t* x0 = rocke__load_token_row_pair(ctx, &env, t0, d0);
+        rocke_value_t* x1 = rocke__load_token_row_pair(ctx, &env, t1, d0);
         payload->blocks[payload->count].d0 = d0;
         payload->blocks[payload->count].d1 = d1;
         payload->blocks[payload->count].t0 = t0;
@@ -379,8 +406,6 @@ void* rocke_gfx942_attn2d_cfvst_load_v_regs(rocke_gfx942_attn2d_build_ctx_t* ctx
         payload->blocks[payload->count].x1 = x1;
         payload->count += 1;
     }
-
-    ctx->kv_tile_iv = saved_iv;
     return payload;
 }
 

@@ -259,3 +259,117 @@ rocke_value_t* rocke_dequant_fp8x8_to_dtype(rocke_ir_builder_t* b,
     /* return b.vec_pack(deq, dtype) */
     return rocke_b_vec_pack(b, deq, 8, dtype);
 }
+
+/* ------------------------------------------------- 2D / 3D launch routing */
+
+int rocke_attention_next_power_of_2(int x)
+{
+    int p = 1;
+    while(p < x)
+        p <<= 1;
+    return p;
+}
+
+bool rocke_attention_select_2d_config(int block_size,
+                                      int head_size,
+                                      int sliding_window,
+                                      bool all_decode,
+                                      int max_seqlen_q,
+                                      int max_seqlen_k,
+                                      int num_queries_per_kv,
+                                      int num_2d_prgms,
+                                      rocke_attention_2d_config_t* out)
+{
+    (void)sliding_window;
+    (void)max_seqlen_k;
+    (void)num_2d_prgms;
+    if(out == NULL || num_queries_per_kv <= 0)
+        return false;
+    int block_m
+        = (num_queries_per_kv <= 16) ? 16 : rocke_attention_next_power_of_2(num_queries_per_kv);
+    int tile_size = 64;
+    int max_num_stages_2d = (head_size > 128) ? 2 : 4;
+    int num_stages_2d;
+    int num_warps;
+    if(!all_decode)
+    {
+        num_stages_2d = 1;
+        num_warps = 2;
+    }
+    else
+    {
+        num_stages_2d = 3;
+        num_warps = 2;
+        tile_size = block_size;
+    }
+    if(max_seqlen_q >= 256)
+    {
+        block_m = 128;
+        num_stages_2d = 1;
+        num_warps = 4;
+    }
+    out->block_m = block_m;
+    out->block_q = block_m / num_queries_per_kv;
+    out->tile_size = tile_size;
+    out->num_warps = num_warps;
+    out->num_stages = (max_num_stages_2d < num_stages_2d) ? max_num_stages_2d : num_stages_2d;
+    out->waves_per_eu = 2;
+    return true;
+}
+
+bool rocke_attention_use_2d_kernel(int head_size,
+                                   int sliding_window,
+                                   bool all_decode,
+                                   int max_seqlen_q,
+                                   int max_seqlen_k,
+                                   int target_num_prgms,
+                                   int num_2d_prgms)
+{
+    (void)head_size;
+    (void)all_decode;
+    (void)max_seqlen_q;
+    return sliding_window > 0 || max_seqlen_k <= 512 || num_2d_prgms > target_num_prgms;
+}
+
+bool rocke_attention_select_3d_config(int head_size,
+                                      int block_size,
+                                      int element_size,
+                                      int max_seqlen_k,
+                                      int target_num_prgms,
+                                      int num_2d_prgms,
+                                      rocke_attention_3d_config_t* attn,
+                                      rocke_attention_3d_config_t* reduce)
+{
+    (void)head_size;
+    (void)element_size;
+    (void)max_seqlen_k;
+    if(attn == NULL || reduce == NULL || num_2d_prgms <= 0)
+        return false;
+    int reduce_num_warps = 2;
+    int attn_warps = 2;
+    int tile_size = block_size;
+    /* math.ceil(target / num_2d): C division truncates toward zero, which is
+     * already the ceiling for a negative quotient. */
+    int num_segments = target_num_prgms / num_2d_prgms;
+    if(target_num_prgms > 0 && target_num_prgms % num_2d_prgms != 0)
+        num_segments += 1;
+    num_segments = rocke_attention_next_power_of_2(num_segments);
+    if(num_segments > 128)
+        num_segments = 128;
+    int min_segments = (tile_size <= 16) ? 16 : 8;
+    if(num_segments < min_segments)
+        num_segments = min_segments;
+    if(num_segments == min_segments)
+        reduce_num_warps = 1;
+    attn->tile_size = tile_size;
+    attn->num_segments_per_seq = num_segments;
+    attn->num_warps = attn_warps;
+    attn->num_stages = 1;
+    attn->waves_per_eu = 2;
+    reduce->tile_size = tile_size;
+    reduce->num_segments_per_seq = num_segments;
+    reduce->num_warps = reduce_num_warps;
+    reduce->num_stages = 1;
+    reduce->waves_per_eu = 2;
+    return true;
+}

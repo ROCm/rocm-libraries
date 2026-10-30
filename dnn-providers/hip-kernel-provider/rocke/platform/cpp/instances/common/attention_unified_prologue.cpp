@@ -30,6 +30,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "rocke/helper_helper_rocke.helpers.attention.h"
 #include "rocke/instance_attention_unified_internal.h"
 
 /* ===================================================================== *
@@ -42,10 +43,9 @@
  *  plus deriving num_queries_per_kv (= p.num_query_heads // num_kv_heads, which
  *  raises on a non-divisible ratio).
  *
- *  Zero-inits the ctx, copies the problem/spec slice into it, mirrors `p` into
- *  the selector-helper problem shape (ctx->sel_p) so the ported emit/descriptor
- *  helpers can be called, then validates. On a non-divisible head ratio or an
- *  unsupported dtype, sets b's sticky error and returns false.
+ *  Zero-inits the ctx, copies the problem/spec slice into it, then validates.
+ *  On a non-divisible head ratio or an unsupported dtype, sets b's sticky
+ *  error and returns false.
  * ===================================================================== */
 bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
                                  rocke_ir_builder_t* b,
@@ -66,33 +66,6 @@ bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
     ctx->dtype = dtype;
     ctx->num_segments = num_segments;
     ctx->kernel = rocke_ir_builder_kernel(b);
-
-    /* Mirror `p` into the selector-helper problem shape so the ported emit /
-     * physical-block-and-token / descriptor helpers (which take a
-     * rocke_unified_attn_problem_t*) can be called without re-deriving it. Only
-     * the fields those helpers read are semantically required, but we carry the
-     * full overlap for parity. */
-    {
-        rocke_unified_attn_problem_t* sp = &ctx->sel_p;
-        sp->total_q = p->total_q;
-        sp->num_seqs = p->num_seqs;
-        sp->num_query_heads = p->num_query_heads;
-        sp->num_kv_heads = p->num_kv_heads;
-        sp->head_size = p->head_size;
-        sp->block_size = p->block_size;
-        sp->max_seqlen_q = p->max_seqlen_q;
-        sp->max_seqlen_k = p->max_seqlen_k;
-        sp->dtype = p->dtype;
-        sp->q_dtype = p->q_dtype;
-        sp->sliding_window = p->sliding_window;
-        sp->softcap = p->softcap;
-        sp->use_sinks = p->use_sinks;
-        sp->use_alibi = p->use_alibi;
-        sp->use_qq_bias = p->use_qq_bias;
-        sp->use_fp8 = p->use_fp8;
-        sp->num_cus = p->num_cus;
-        sp->num_kv_blocks = p->num_kv_blocks;
-    }
 
     /* Python (2D only): if p.dtype not in ("fp16", "bf16"): raise ValueError.
      * The 3D/reduce builders take dtype = spec.dtype_ir directly (F16/BF16) and
@@ -115,7 +88,7 @@ bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
     /* num_queries_per_kv = num_query_heads // num_kv_heads (Python @property
      * raises ValueError on a non-divisible ratio). The selector helper sets the
      * builder's sticky error and returns 0 in that case. */
-    ctx->num_queries_per_kv = rocke_unified_attn_num_queries_per_kv(b, &ctx->sel_p);
+    ctx->num_queries_per_kv = rocke_unified_attn_num_queries_per_kv(b, ctx->p);
     if(!rocke_ir_builder_ok(b))
     {
         return false;
@@ -141,6 +114,10 @@ void rocke_attn_unified_declare_scalar_params(rocke_attn_unified_build_ctx_t* ct
     rocke_ir_builder_t* b = ctx->b;
     const rocke_type_t* dt = ctx->dtype;
     const rocke_type_t* dtp = rocke_ptr_type(b, dt, "global");
+    /* Only the 2D builder passes kv_dtype (fp8 K/V); 3D types K/V as dtype. */
+    const rocke_type_t* kvp = (ctx->kind == ROCKE_ATTN_UNIFIED_2D && ctx->p->use_fp8)
+                                  ? rocke_ptr_type(b, rocke_fp8e4m3(), "global")
+                                  : dtp;
     const rocke_type_t* i32p = rocke_ptr_type(b, rocke_i32(), "global");
     const rocke_type_t* f32p = rocke_ptr_type(b, rocke_f32(), "global");
 
@@ -157,11 +134,12 @@ void rocke_attn_unified_declare_scalar_params(rocke_attn_unified_build_ctx_t* ct
     o.align_set = true;
     ctx->abi_query = rocke_b_param(b, "query_ptr", dtp, &o);
 
-    /* key = b.param("key_cache_ptr", ..., noalias=True, readonly=True, align=16) */
-    ctx->abi_key = rocke_b_param(b, "key_cache_ptr", dtp, &o);
+    /* key = b.param("key_cache_ptr", PtrType(kv_dtype,"global"), noalias=True,
+     *               readonly=True, align=16) */
+    ctx->abi_key = rocke_b_param(b, "key_cache_ptr", kvp, &o);
 
-    /* value = b.param("value_cache_ptr", ..., noalias=True, readonly=True, align=16) */
-    ctx->abi_value = rocke_b_param(b, "value_cache_ptr", dtp, &o);
+    /* value = b.param("value_cache_ptr", PtrType(kv_dtype,"global"), ...) */
+    ctx->abi_value = rocke_b_param(b, "value_cache_ptr", kvp, &o);
 
     /* sink = b.param("sink_ptr", PtrType(dtype,"global"), readonly=True, align=16) */
     memset(&o, 0, sizeof(o));
@@ -215,21 +193,27 @@ void rocke_attn_unified_declare_scalar_params(rocke_attn_unified_build_ctx_t* ct
  *          b.scf_yield(next_seq)
  *      seq_idx = scan.results[0]
  *
- *  Python (3D): _emit_find_seq_idx_scan(b, cu_q, q_tok, num_seqs) delegates to
- *  binary_search_seq_idx (per_token, 32 iterations). That helper is not yet
- *  exported to the C layer; per the helper-header note the 3D scan falls back to
- *  the SAME inline linear cu_q scan (numerically identical seq_idx) until
- *  rocke_binary_search_seq_idx lands. So both kinds emit the inline linear scan.
+ *  Python (3D): _emit_find_seq_idx_scan(b, cu_q, q_tok, num_seqs) ->
+ *      binary_search_seq_idx(b, cu_q, q_tok, num_seqs, block_q=1, iterations=32,
+ *                            per_token=True)
  *
  *  Fills ctx->seq_idx.
  * ===================================================================== */
 void rocke_attn_unified_emit_find_seq_idx(rocke_attn_unified_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    rocke_value_t* seq_init = rocke_b_const_i32(b, 0);
+    rocke_value_t* seq_init;
     rocke_iter_arg_t iter[1];
     rocke_for_t scan;
 
+    if(ctx->kind == ROCKE_ATTN_UNIFIED_3D)
+    {
+        ctx->seq_idx = rocke_binary_search_seq_idx(
+            b, ctx->abi_cu_q, ctx->q_tok, ctx->num_seqs, /*block_q=*/1, /*iterations=*/32, true);
+        return;
+    }
+
+    seq_init = rocke_b_const_i32(b, 0);
     iter[0].name = "seq_idx";
     iter[0].init = seq_init;
 
@@ -320,8 +304,10 @@ void rocke_attn_unified_emit_prologue(rocke_attn_unified_build_ctx_t* ctx)
     ctx->query_pos = rocke_b_sub(b, ctx->q_tok, ctx->cu_start);
     /* kv_len = b.global_load_i32(seq_lens, seq_idx) */
     ctx->kv_len = rocke_b_global_load_i32(b, ctx->abi_seq_lens, ctx->seq_idx, 4);
-    /* context_len = b.sub(kv_len, q_len) */
-    ctx->context_len = rocke_b_sub(b, ctx->kv_len, ctx->q_len);
+    /* context_len = _scalar_context_len(b, p, kv_len, q_len): the diagonal
+     * offset, 0 for a top-left mask. */
+    ctx->context_len = ctx->p->causal_top_left ? rocke_b_const_i32(b, 0)
+                                               : rocke_b_sub(b, ctx->kv_len, ctx->q_len);
     /* kv_head = _magic_div(b, q_head, num_queries_per_kv) */
     ctx->kv_head = rocke_unified_attn_magic_div(b, ctx->q_head, ctx->num_queries_per_kv);
 
@@ -348,10 +334,14 @@ void rocke_attn_unified_emit_prologue(rocke_attn_unified_build_ctx_t* ctx)
 
         /* seg_stop_i = b.mul(b.add(segm_idx, 1),
          *                    b.mul(tiles_per_segment, const_i32(block_size))) */
-        seg_stop_raw = rocke_b_mul(
-            b,
-            rocke_b_add(b, ctx->segm_idx, rocke_b_const_i32(b, 1)),
-            rocke_b_mul(b, ctx->tiles_per_segment, rocke_b_const_i32(b, ctx->p->block_size)));
+        {
+            /* Sequenced: Python emits segm_idx + 1 before the inner mul. */
+            rocke_value_t* next_seg = rocke_b_add(b, ctx->segm_idx, rocke_b_const_i32(b, 1));
+            seg_stop_raw = rocke_b_mul(
+                b,
+                next_seg,
+                rocke_b_mul(b, ctx->tiles_per_segment, rocke_b_const_i32(b, ctx->p->block_size)));
+        }
 
         /* seg_stop_i = b.select(b.cmp_lt(seg_stop_i, kv_len), seg_stop_i, kv_len) */
         lt = rocke_b_cmp_lt(b, seg_stop_raw, ctx->kv_len);
@@ -405,12 +395,12 @@ void rocke_attn_unified_emit_prologue(rocke_attn_unified_build_ctx_t* ctx)
      * The 2D body builds q_desc + kv_desc here and the 3D body its segm
      * descriptors, so phase functions only read ctx fields. Reduce never runs
      * this prologue; its builder fills ml_desc, out_desc and q_desc itself. */
-    ctx->q_desc = rocke_unified_attn_q_descriptor(b, &ctx->sel_p);
-    ctx->kv_desc = rocke_unified_attn_paged_kv_descriptor(&ctx->sel_p);
+    ctx->q_desc = rocke_unified_attn_q_descriptor(b, ctx->p);
+    ctx->kv_desc = rocke_unified_attn_paged_kv_descriptor(ctx->p);
     if(ctx->kind == ROCKE_ATTN_UNIFIED_3D)
     {
         if(!rocke_unified_attn_segm_descriptors(
-               b, &ctx->sel_p, ctx->num_segments, &ctx->ml_desc, &ctx->out_desc))
+               b, ctx->p, ctx->num_segments, &ctx->ml_desc, &ctx->out_desc))
         {
             return;
         }

@@ -3,7 +3,7 @@
  *
  * rocke/instance_attention_unified_internal.h -- PRIVATE shared state + phase-
  * function contract for the C99 port of the SCALAR unified-attention kernel
- * builders (rocke/instances/common/attention_unified.py:
+ * builders (library/kernels/common/attention_unified.py:
  *   build_unified_attention_2d        lines 2589-2774
  *   build_unified_attention_3d        lines 2798-2914
  *   build_unified_attention_reduce    lines 2941-3009
@@ -100,11 +100,6 @@ typedef struct rocke_attn_unified_build_ctx
     rocke_ir_builder_t* b; /* the IRBuilder (Python `b`)   */
     rocke_attn_unified_kind_t kind; /* which build_* is running      */
     const rocke_unified_attention_problem_t* p; /* Python `p = spec.problem`     */
-    /* Mirror of `p` in the selector-helper struct shape, so the ported
-     * emit / physical-block-and-token / descriptor helpers (which take
-     * rocke_unified_attn_problem_t*) can be called without re-deriving it. The
-     * glue driver fills this from `p` once. */
-    rocke_unified_attn_problem_t sel_p;
     const rocke_type_t* dtype; /* spec.dtype_ir (F16 / BF16)    */
     int num_segments; /* 3D/reduce; 0 for 2D           */
     int num_queries_per_kv; /* p->num_query_heads / kv       */
@@ -161,7 +156,7 @@ typedef struct rocke_attn_unified_build_ctx
     rocke_value_t* q_len; /* cu_stop - cu_start                           */
     rocke_value_t* query_pos; /* q_tok - cu_start                             */
     rocke_value_t* kv_len; /* seq_lens[seq_idx]                            */
-    rocke_value_t* context_len; /* kv_len - q_len                               */
+    rocke_value_t* context_len; /* kv_len - q_len; 0 for a top-left mask         */
     rocke_value_t* kv_head; /* magic_div(q_head, num_queries_per_kv)        */
 
     /* ---------- 3D segment span (prologue) ---------- */
@@ -208,9 +203,9 @@ typedef struct rocke_attn_unified_build_ctx
  * Shared prologue + ABI phase functions (used by all 3 builders)
  * ============================================================ */
 
-/* Zero-init the ctx and copy in the problem/spec slice (b, kind, p, sel_p,
- * dtype, num_segments) + derive num_queries_per_kv. On a non-divisible head
- * ratio or unsupported dtype, sets b's sticky error and returns false. */
+/* Zero-init the ctx and copy in the problem/spec slice (b, kind, p, dtype,
+ * num_segments) + derive num_queries_per_kv. On a non-divisible head ratio or
+ * unsupported dtype, sets b's sticky error and returns false. */
 bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
                                  rocke_ir_builder_t* b,
                                  rocke_attn_unified_kind_t kind,
@@ -223,10 +218,9 @@ bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
  * narrower declaration -- see rocke_attn_unified_declare_reduce_params.) */
 void rocke_attn_unified_declare_scalar_params(rocke_attn_unified_build_ctx_t* ctx);
 
-/* Python: _emit_find_seq_idx_scan(b, cu_q, q_tok, num_seqs) -> seq_idx (3D), and
- * the inline linear cu_q scan (2D). Emits the scan and fills ctx->seq_idx.
- * (2D uses the inline linear scf.for scan; 3D delegates to the bounded binary
- * search -- numerically identical seq_idx.) */
+/* Python: _emit_find_seq_idx_scan(b, cu_q, q_tok, num_seqs) -> seq_idx (3D: the
+ * per-token binary search), and the inline linear cu_q scan (2D). Emits the scan
+ * and fills ctx->seq_idx. */
 void rocke_attn_unified_emit_find_seq_idx(rocke_attn_unified_build_ctx_t* ctx);
 
 /* Common prologue after the ABI prefix + seq-idx scan: grid ids, the cu_q
@@ -246,9 +240,18 @@ void rocke_attn_unified_emit_prologue(rocke_attn_unified_build_ctx_t* ctx);
  * V element fold. Reads ctx prologue/desc fields; writes ctx->loop_m/l/acc. */
 void rocke_attn_unified_emit_2d_softmax_loop(rocke_attn_unified_build_ctx_t* ctx);
 
-/* The 2D guarded epilogue: out_val = acc * rcp(l); cast to dtype; store at
+/* The 2D guarded epilogue: out_val = acc * rcp(l) (0 where l == 0 off the default
+ * mask); cast to dtype; store at
  * q_desc.offset(q_tok,q_head,dim) under (active && dim < head_size). */
 void rocke_attn_unified_emit_2d_epilogue(rocke_attn_unified_build_ctx_t* ctx);
+
+/* Python: _scalar_band_ok(b, p, context_len, query_pos, kpos, window=window).
+ * Visibility of key ``kpos``: the right bound k <= context_len + query_pos + R
+ * (R >= 0) and, when ``window``, the sliding-window left bound. Returns NULL
+ * when neither bounds anything. Shared by the 2D and 3D bodies. */
+rocke_value_t* rocke_attn_unified_scalar_band_ok(rocke_attn_unified_build_ctx_t* ctx,
+                                                 rocke_value_t* kpos,
+                                                 bool window);
 
 /* ============================================================ *
  * 3D scalar segment kernel phases (build_unified_attention_3d)
@@ -284,6 +287,30 @@ void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t*
 /* The reduce guarded epilogue: result = acc * rcp(den); cast to dtype; store at
  * q_desc.offset(q_tok,q_head,dim) under active. */
 void rocke_attn_unified_emit_reduce_epilogue(rocke_attn_unified_build_ctx_t* ctx);
+
+/* ============================================================ *
+ * Coverage-gate reject helpers (attention_unified_gates.cpp)
+ * ============================================================ *
+ *
+ * Each returns true when the problem is rejected and writes the Python reason
+ * into ``reason`` (capacity ``reason_cap``); false leaves ``reason`` untouched.
+ * ``arch`` must already be canonical. */
+
+/* _mask_label(problem), e.g. "top-left/right_bound=5". */
+void rocke_attn_unified_mask_label(const rocke_unified_attention_problem_t* p,
+                                   char* out,
+                                   size_t out_cap);
+
+/* _reject_mask_semantics(problem). */
+bool rocke_attn_unified_reject_mask_semantics(const rocke_unified_attention_problem_t* p,
+                                              char* reason,
+                                              size_t reason_cap);
+
+/* _reject_fp8_format_arch_mismatch(problem, arch). */
+bool rocke_attn_unified_reject_fp8_format_arch_mismatch(const rocke_unified_attention_problem_t* p,
+                                                        const char* arch,
+                                                        char* reason,
+                                                        size_t reason_cap);
 
 #ifdef __cplusplus
 } /* extern "C" */

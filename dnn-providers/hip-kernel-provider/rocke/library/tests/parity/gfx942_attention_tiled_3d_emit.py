@@ -12,7 +12,8 @@
 #   2. the REDUCE kernel via
 #      build_unified_attention_reduce_tiled(reduce_spec, arch="gfx942")
 # whose UnifiedAttentionReduceTiledSpec is derived from the same config
-# (head_size / num_query_heads / num_kv_heads / dtype / num_segments).
+# (head_size / num_query_heads / num_kv_heads / dtype / num_segments, plus the
+# config's reduce-only emit_lse).
 #
 # Each kernel is lowered with _native_lower(kernel, arch="gfx942") and the two
 # .ll texts are concatenated (segment first, then reduce) to stdout so they can
@@ -32,7 +33,6 @@ except ImportError:  # pragma: no cover - older reference tree
     from rocke import lower_kernel_to_llvm as _native_lower
 from rocke.core.ir_serialize import serialize
 from rocke.core.verify import verify
-
 
 _CONFIGS = {
     0: dict(
@@ -303,13 +303,75 @@ _CONFIGS = {
         tile_size_override=16,
         use_wave_page_id_load=True,
     ),
+    18: dict(
+        # Decode K/V streamed by the async copies from strided (non-paged) K/V.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=True,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        num_seqs=4,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+        kv_layout="strided",
+    ),
+    19: dict(
+        # Decode K/V with globally cached copies through the 1-DWORD async loader.
+        head_size=128,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="fp16",
+        num_segments=16,
+        use_sinks=True,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        kv_cache_policy="global",
+    ),
+    20: dict(
+        # Reduce with the LSE output, decode grid.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        emit_lse=True,
+    ),
+    21: dict(
+        # Reduce with the LSE output.
+        head_size=64,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=8,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        emit_lse=True,
+    ),
 }
 
 
 def _kernels(idx: int):
     if idx not in _CONFIGS:
         raise SystemExit(f"unknown config index {idx}")
-    cfg = _CONFIGS[idx]
+    cfg = dict(_CONFIGS[idx])
+    emit_lse = cfg.pop("emit_lse", False)
     seg_kernel = build_unified_attention_3d_tiled(
         UnifiedAttention3DTiledSpec(**cfg), arch="gfx942"
     )
@@ -319,6 +381,7 @@ def _kernels(idx: int):
         num_kv_heads=cfg["num_kv_heads"],
         dtype=cfg["dtype"],
         num_segments=cfg["num_segments"],
+        emit_lse=emit_lse,
     )
     red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx942")
     return seg_kernel, red_kernel

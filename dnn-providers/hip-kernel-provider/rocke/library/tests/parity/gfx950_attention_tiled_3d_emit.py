@@ -12,7 +12,8 @@
 #   2. the arch-neutral REDUCE kernel via
 #      build_unified_attention_reduce_tiled(reduce_spec, arch="gfx950")
 # whose UnifiedAttentionReduceTiledSpec is derived from the same config
-# (head_size / num_query_heads / num_kv_heads / dtype / num_segments).
+# (head_size / num_query_heads / num_kv_heads / dtype / num_segments, plus the
+# config's reduce-only emit_lse).
 #
 # Each kernel is lowered with _native_lower(kernel, arch="gfx950") and
 # the two .ll texts are concatenated (segment first, then reduce) to stdout so
@@ -32,7 +33,6 @@ except ImportError:  # pragma: no cover - older reference tree
     from rocke import lower_kernel_to_llvm as _native_lower
 from rocke.core.ir_serialize import serialize
 from rocke.core.verify import verify
-
 
 _CONFIGS = {
     0: dict(
@@ -269,29 +269,150 @@ _CONFIGS = {
         use_kv_lds_swizzle=True,
         use_wave_page_id_load=True,
     ),
+    16: dict(
+        # Two-page tiles from strided (non-paged) K/V into swizzled LDS, with
+        # softcap.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=32,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=True,
+        kv_storage_dtype=None,
+        num_seqs=4,
+        tile_size_override=32,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+        use_kv_lds_swizzle=True,
+        kv_layout="strided",
+    ),
+    17: dict(
+        # Decode grid with SC0 + NT K/V copies.
+        head_size=128,
+        block_size=16,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        kv_cache_policy="nt",
+    ),
+    18: dict(
+        # Decode grid with globally cached K/V copies.
+        head_size=128,
+        block_size=16,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        kv_cache_policy="global",
+    ),
+    19: dict(
+        # Reduce with the LSE output, decode grid.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        emit_lse=True,
+    ),
+    20: dict(
+        # Reduce with the LSE output.
+        head_size=64,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=8,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        emit_lse=True,
+    ),
+    21: dict(
+        # Top-left causal mask (context_len pinned to 0).
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        causal_top_left=True,
+    ),
+    22: dict(
+        # Right bound of 8 keys with a sliding window and sinks.
+        head_size=64,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=8,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=True,
+        sliding_window=128,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        right_bound=8,
+    ),
+    23: dict(
+        # Top-left unbounded band, fp8 K/V, decode grid.
+        head_size=128,
+        block_size=16,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype="fp8e4m3",
+        use_decode_grid=True,
+        causal_top_left=True,
+        right_bound=-1,
+    ),
 }
 
 
-def _emit(idx: int) -> str:
+def _kernels(idx: int):
     if idx not in _CONFIGS:
         raise SystemExit(f"unknown config index {idx}")
-    cfg = _CONFIGS[idx]
-
-    seg_spec = UnifiedAttention3DTiledSpec(**cfg)
-    seg_kernel = build_unified_attention_3d_tiled(seg_spec, arch="gfx950")
-    seg_ll = _native_lower(seg_kernel, arch="gfx950")
-
+    cfg = dict(_CONFIGS[idx])
+    emit_lse = cfg.pop("emit_lse", False)
+    seg_kernel = build_unified_attention_3d_tiled(
+        UnifiedAttention3DTiledSpec(**cfg), arch="gfx950"
+    )
     red_spec = UnifiedAttentionReduceTiledSpec(
         head_size=cfg["head_size"],
         num_query_heads=cfg["num_query_heads"],
         num_kv_heads=cfg["num_kv_heads"],
         dtype=cfg["dtype"],
         num_segments=cfg["num_segments"],
+        emit_lse=emit_lse,
     )
     red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx950")
-    red_ll = _native_lower(red_kernel, arch="gfx950")
-
-    return seg_ll + red_ll
+    return seg_kernel, red_kernel
 
 
 def main() -> int:
@@ -300,43 +421,16 @@ def main() -> int:
         return 2
     idx = int(sys.argv[1])
     mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
-    if mode == "ll":
-        sys.stdout.write(_emit(idx))
-    elif mode == "ir":
-        cfg = _CONFIGS[idx] if idx in _CONFIGS else None
-        if cfg is None:
-            raise SystemExit(f"unknown config index {idx}")
-        seg_spec = UnifiedAttention3DTiledSpec(**cfg)
-        seg_kernel = build_unified_attention_3d_tiled(seg_spec, arch="gfx950")
-        red_spec = UnifiedAttentionReduceTiledSpec(
-            head_size=cfg["head_size"],
-            num_query_heads=cfg["num_query_heads"],
-            num_kv_heads=cfg["num_kv_heads"],
-            dtype=cfg["dtype"],
-            num_segments=cfg["num_segments"],
-        )
-        red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx950")
-        sys.stdout.write(serialize(seg_kernel))
-        sys.stdout.write(serialize(red_kernel))
-    elif mode == "verify":
-        cfg = _CONFIGS[idx] if idx in _CONFIGS else None
-        if cfg is None:
-            raise SystemExit(f"unknown config index {idx}")
-        seg_spec = UnifiedAttention3DTiledSpec(**cfg)
-        seg_kernel = build_unified_attention_3d_tiled(seg_spec, arch="gfx950")
-        red_spec = UnifiedAttentionReduceTiledSpec(
-            head_size=cfg["head_size"],
-            num_query_heads=cfg["num_query_heads"],
-            num_kv_heads=cfg["num_kv_heads"],
-            dtype=cfg["dtype"],
-            num_segments=cfg["num_segments"],
-        )
-        red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx950")
-        sys.stdout.write("".join(str(d) + "\n" for d in verify(seg_kernel)))
-        sys.stdout.write("".join(str(d) + "\n" for d in verify(red_kernel)))
-    else:
+    if mode not in ("ll", "ir", "verify"):
         sys.stderr.write(f"unknown mode {mode}\n")
         return 2
+    for kernel in _kernels(idx):
+        if mode == "ll":
+            sys.stdout.write(_native_lower(kernel, arch="gfx950"))
+        elif mode == "ir":
+            sys.stdout.write(serialize(kernel))
+        else:
+            sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
     return 0
 
 

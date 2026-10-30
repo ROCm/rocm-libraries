@@ -3,7 +3,7 @@
  *
  * rocke/instance_gfx942_attention_tiled_3d.h -- PUBLIC C99 port surface for the
  * gfx942 (CDNA3) narrow-atom tiled split-KV 3D attention kernels
- * (rocke/instances/gfx942/attention_tiled_3d.py, 1133 LOC).
+ * (library/kernels/gfx942/attention_tiled_3d.py).
  *
  * SCOPE. This header is the PUBLIC entry/glue surface for the TWO kernel
  * builders the Python module exposes:
@@ -174,6 +174,14 @@ typedef struct rocke_unified_attention_3d_tiled_spec
      * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16, which
      * can be extended. */
     bool use_wave_page_id_load; /* False */
+    /* K/V addressing: "paged" (block table) or "strided" (direct [B,H,S,D]
+     * with runtime byte strides; fp16/bf16 async loads only). NULL == "paged". */
+    const char* kv_layout; /* "paged" */
+    /* gfx950-only mask band (gfx942 rejects a non-default band). causal_top_left
+     * pins context_len = 0; right_bound is the lookahead past the diagonal
+     * (0 = causal, R > 0 = R keys ahead, -1 = unbounded). */
+    bool causal_top_left; /* False */
+    int right_bound; /* 0 */
 } rocke_unified_attention_3d_tiled_spec_t;
 
 /* Materialise every defaulted field. Required fields are zero/NULL-init; the
@@ -224,6 +232,8 @@ typedef struct rocke_unified_attention_reduce_tiled_spec
 
     bool has_waves_per_eu; /* Optional[int] None */
     int waves_per_eu;
+    /* Trailing FP32 lse_ptr param and a natural-log LSE store per row. */
+    bool emit_lse; /* False */
 } rocke_unified_attention_reduce_tiled_spec_t;
 
 rocke_unified_attention_reduce_tiled_spec_t rocke_unified_attention_reduce_tiled_spec_default(void);
@@ -247,11 +257,6 @@ int rocke_unified_attention_reduce_tiled_spec_kernel_name(
 
 /* Segment kernel (narrow 16x16x16 MFMA). Call with a spec validated by
  * rocke_unified_attention_3d_tiled_spec_validate. */
-/* Direct [B,H,S,D] KV input with runtime byte strides. Keeps the existing
- * caller-owned spec layout and paged entry point ABI unchanged. */
-rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_strided_gfx942(
-    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch);
-
 rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx942(
     rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch);
 
