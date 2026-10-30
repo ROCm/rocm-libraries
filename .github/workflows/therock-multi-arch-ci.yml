@@ -119,15 +119,6 @@ jobs:
       test_type: ${{ steps.configure.outputs.test_type }}
       # TEMPORARY: hipBLASLt gfx950 presubmit trial. Remove once TheRock#8985
       # lands the formal mechanism for per-family presubmit test selection.
-      #
-      # Per-family CI overrides forwarded to TheRock through external_repo.
-      # gfx950 has no presubmit test slot by default, so only a PR touching the
-      # projects/hipblaslt path attaches the test:hipblaslt label to that
-      # family and opts it into a quick presubmit run. The substring match
-      # covers nested subtrees (projects/hipblaslt/tensilelite) while excluding
-      # dnn-providers/hipblaslt-provider. Every other PR, plus all push and
-      # workflow_dispatch runs, send {} so gfx950 keeps TheRock's default
-      # schedule and unrelated PRs do not consume gfx950 test hardware.
       family_overrides: >-
         ${{
           (
