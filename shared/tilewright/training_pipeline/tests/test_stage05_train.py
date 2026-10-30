@@ -1407,6 +1407,26 @@ def test_the_alignment_veto_key_changes_no_bit_of_training(tmp_path, monkeypatch
     _same_tree(plain[0], veto[0])
     assert plain[1] == veto[1] and plain[2] == veto[2]
     assert "alignment_veto" not in (veto[0].get("serving") or {})
+    # the report-only readings of the validation GEMMs, with the veto beside
+    if not have_engine():
+        return
+    from lib import run_readings as rr
+
+    for name, with_veto in (("plain", False), ("veto", True)):
+        out = tmp_path / name
+        met = json.loads((out / "metrics.json").read_text())["readings"]
+        doc = json.loads((out / rr.READINGS_FILE).read_text())
+        assert met == {k: v for k, v in doc.items() if k != "rows"}
+        assert met["status"] == rr.STATUS and "error" not in met
+        n = met["without_veto"]["n_gemms"]
+        assert n == len(doc["rows"]) > 0
+        assert (met["with_veto"] is not None) is with_veto
+        assert (met["veto"] == {"k_min": 512, "align_bits": 1024}) is with_veto
+        if with_veto:
+            assert met["with_veto"]["n_gemms"] == n
+            assert met["without_veto"] == plain_readings
+        else:
+            plain_readings = met["without_veto"]
 
 
 @pytest.mark.parametrize("kind", ["origami", "bank"])

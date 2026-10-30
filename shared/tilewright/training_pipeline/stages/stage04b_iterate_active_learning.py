@@ -101,6 +101,13 @@ reported (`cells_split_blocked`), and so is a per-leaf shape budget
 (--per-leaf-budget or round_R/stage01/per_cell_plan.json) that can never
 supply the evaluated GEMMs.
 
+Readings (report only, after every decision): the bundle's held-out GEMMs
+read without and, with the run's deploy.alignment_veto, with the alignment
+veto (lib/run_readings.py: rw, long-decile geomean, picks below 0.8 and 0.5
+with skip-screened picks apart, and the per-GEMM rows) into readings.json;
+nothing reads them back, and a reading that cannot be made is recorded,
+never fatal.
+
 The stage fails (exit 1, no outputs) when the engine serves any GEMM from
 another cell than lib/subcells routes it to.
 """
@@ -143,6 +150,7 @@ from lib import hardware as hwlib  # noqa: E402
 from lib import miss_rebench as mr  # noqa: E402
 from lib import mlrec  # noqa: E402
 from lib import repeats  # noqa: E402
+from lib import run_readings  # noqa: E402
 from lib import subcells as sc  # noqa: E402
 from lib import ui  # noqa: E402
 from lib.correctness import config_blocklist  # noqa: E402
@@ -367,6 +375,24 @@ def _evaluate(
     )
     by_id = {id(g): r for g, r in zip(gemms, measured.evaluation.results)}
     return by_id, (measured if bench is not None else None)
+
+
+def held_out_readings(
+    bundle: Mapping[str, Any],
+    gemms: List[dict],
+    results: List[Optional[ev.GemmResult]],
+    cfg: Mapping[str, Any],
+    evaluate: Any,
+) -> Dict[str, Any]:
+    """The report-only readings of the bundle on its held-out GEMMs
+    (lib/run_readings.py `bundle_readings`; `results`: the decisions'
+    deployed results without re-benched misses), or why they could not be
+    made: never fatal, and no decision reads them."""
+    try:
+        return run_readings.bundle_readings(bundle, gemms, cfg, evaluate, results)
+    except Exception as e:  # noqa: BLE001
+        ui.warn("readings", f"the held-out readings could not be made: {e}")
+        return run_readings.failed(f"{type(e).__name__}: {e}")
 
 
 def tail_gemms(
@@ -1549,6 +1575,26 @@ def main() -> int:
             source=str(models_pt),
             quiet=args.quiet,
         )
+    if held_list:
+        base = pre_results or results
+        readings = held_out_readings(
+            bundle,
+            held_list,
+            [base.get(id(g)) for g in held_list],
+            cfg,
+            lambda b: ev.evaluate_bundle(
+                b,
+                held_list,
+                arch=args.arch,
+                constants=constants,
+                hardware=hardware,
+                weight_dtype=args.weight_dtype,
+                pools=pools,
+                tw=tw,
+                pick_measurement=args.pick_measurement,
+            ).results,
+        )
+        write_json(args.out_dir / run_readings.READINGS_FILE, readings)
 
     if not args.quiet:
         ui.banner("Done", ui.C.GREEN)

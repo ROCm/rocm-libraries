@@ -35,6 +35,12 @@ Output: <out>/models.pt         per-cell student weights, feature statistics,
                                 they were chosen on, per execution context
                                 where its GEMMs run in several
                                 (lib/whitelist_tier.py)
+        <out>/readings.json     report-only readings of the bundle on the
+                                validation GEMMs of the cells it trained,
+                                without and with the config's alignment
+                                veto (lib/run_readings.py; metrics.json
+                                `readings` without the per-GEMM rows); no
+                                choice of the stage reads them
         <out>/training_log.csv  loss and selection efficiency per measured
                                 checkpoint
 
@@ -203,6 +209,7 @@ from lib import procs  # noqa: E402
 from lib import provenance as prov  # noqa: E402
 from lib import repeats  # noqa: E402
 from lib import run_analysis as ra  # noqa: E402
+from lib import run_readings  # noqa: E402
 from lib import subcells as sc  # noqa: E402
 from lib import ui  # noqa: E402
 from lib import whitelist_tier as wt  # noqa: E402
@@ -4425,6 +4432,23 @@ def serving_options(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
+def held_out_readings(
+    bundle: Mapping[str, Any],
+    gemms: List[dict],
+    cfg: Optional[Mapping[str, Any]],
+    evaluate: Any,
+) -> Dict[str, Any]:
+    """The report-only readings of the written bundle on the validation
+    GEMMs of the cells it trained (lib/run_readings.py `bundle_readings`,
+    without and with the run's alignment veto), or why they could not be
+    made: never fatal, and nothing the stage trains or chooses reads them."""
+    try:
+        return run_readings.bundle_readings(bundle, gemms, cfg, evaluate)
+    except Exception as e:  # noqa: BLE001
+        ui.warn("readings", f"the validation readings could not be made: {e}")
+        return run_readings.failed(f"{type(e).__name__}: {e}")
+
+
 def deployed_eval_cell(
     label: str,
     r: Mapping[str, Any],
@@ -6111,6 +6135,7 @@ def main() -> int:
     cells_failed: List[str] = []
     failures: Dict[str, str] = {}
     val_results: List[ev.GemmResult] = []
+    val_gemms: List[dict] = []
     with open(log_path, "w", newline="") as logf:
         log_writer = csv.DictWriter(logf, fieldnames=list(TRAINING_LOG_FIELDS))
         log_writer.writeheader()
@@ -6288,6 +6313,8 @@ def main() -> int:
                                 f"{fmt_pct(dep_se)} vs model {fmt_pct(model_se)})",
                             )
                 val_results.extend(cell_val)
+                if cell_val:
+                    val_gemms.extend(val_g)
                 all_results.append(r)
                 if not args.quiet:
                     dep = r.get("deployed") or {}
@@ -6548,6 +6575,29 @@ def main() -> int:
     with open(os.path.join(args.output_dir, "cells.json"), "w") as f:
         json.dump(jsonable(cells_json), f, indent=2)
     torch.save(bundle, os.path.join(args.output_dir, "models.pt"))
+    readings: Optional[Dict[str, Any]] = None
+    readings_path = Path(args.output_dir) / run_readings.READINGS_FILE
+    if tw is not None and val_gemms:
+        readings = held_out_readings(
+            bundle,
+            val_gemms,
+            cfg,
+            lambda b: ev.evaluate_bundle(
+                b,
+                val_gemms,
+                arch=args.arch,
+                constants=constants,
+                hardware=hardware,
+                weight_dtype=args.weight_dtype,
+                pools=pools,
+                tw=tw,
+                pick_measurement=args.pick_measurement,
+                off_list_sel_eff=off_list,
+            ).results,
+        )
+        write_json(readings_path, jsonable(readings))
+    else:
+        readings_path.unlink(missing_ok=True)
     tier_path = Path(args.output_dir) / wt.TIER_FILE
     if tier is not None:
         wt.write_doc(tier_path, tier)
@@ -6581,6 +6631,7 @@ def main() -> int:
         "fallback_parents": fallback_parents,
         "n_gemms_trained": sum(r["n_gemms"] for r in all_results),
         "validation": validation_summary,
+        "readings": run_readings.brief(readings),
         "load_stats": load_stats,
         "off_list_charge": off_list_report,
         "args": jsonable(vars(args)),

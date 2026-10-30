@@ -885,12 +885,14 @@ def test_tail_gemms_are_listed_and_a_passing_collapse_is_retrained(run):
 def test_stage04b_ranks_round_bundles_without_the_alignment_veto(tmp_path, monkeypatch):
     """deploy.alignment_veto is a deploy key: with it in the run's config,
     stage04b ranks the round's MLREC_v3 bundle as stage05 wrote it, without
-    the veto, and decides exactly as without the key."""
+    the veto, and decides exactly as without the key; once every decision is
+    written, its report-only readings rank the bundle with the veto too."""
     import yaml
 
     import stage04b_iterate_active_learning as s4b
     from lib import evaluate as ev
     from lib import mlrec
+    from lib import run_readings
     from test_stage05_train import kernel_pool, write_attributes
 
     r0, r1 = tmp_path / "round_0", tmp_path / "round_1"
@@ -906,24 +908,52 @@ def test_stage04b_ranks_round_bundles_without_the_alignment_veto(tmp_path, monke
     vetoed.write_text(yaml.safe_dump(doc))
     seen = []
     real = ev.evaluate_model
+    out = None
 
     def capture(data, *a, **kw):
-        seen.append(bytes(data))
+        # whether stage04b had written its decisions when it ranked `data`
+        seen.append((bytes(data), (out / "decisions.json").is_file()))
         return real(data, *a, **kw)
 
     monkeypatch.setattr(ev, "evaluate_model", capture)
-    decided = {}
+    decided, read = {}, {}
     for cfg in (plain, vetoed):
         out = tmp_path / cfg.stem
         argv = ["stage04b", "--models-dir", r0 / "stage05", "--enriched-csv-dir", new]
         argv += ["--out-dir", out, "--arch", "gfx950", "--config-yaml", cfg]
         argv += ["--round-idx", 1, "--quiet"]
         monkeypatch.setattr(sys, "argv", [str(a) for a in argv])
+        n = len(seen)
         assert s4b.main() == 0
         decided[cfg.stem] = (
             json.loads((out / "decisions.json").read_text())["per_cell"],
             (out / "retrain_cells.txt").read_text(),
         )
-    assert seen and all(d[:8] == mlrec.MAGIC_V3 for d in seen)
-    assert all("alignment_veto" not in mlrec.read_header(d)["serving"] for d in seen)
+        read[cfg.stem] = (
+            json.loads((out / run_readings.READINGS_FILE).read_text()),
+            seen[n:],
+        )
+    deciding = [d for d, written in seen if not written]
+    assert deciding and all(d[:8] == mlrec.MAGIC_V3 for d in deciding)
+    assert not any(
+        "alignment_veto" in mlrec.read_header(d)["serving"] for d in deciding
+    )
     assert decided["plain"] == decided["vetoed"]
+    # the readings: without the key, the decisions' own results alone
+    readings, calls = read["plain"]
+    assert [written for _, written in calls if written] == []
+    assert readings["status"] == run_readings.STATUS and readings["veto"] is None
+    assert readings["with_veto"] is None
+    assert readings["without_veto"]["n_gemms"] == len(readings["rows"]) > 0
+    # with it, one more ranking of the bundle, with the veto, after the decisions
+    readings, calls = read["vetoed"]
+    after = [d for d, written in calls if written]
+    assert len(after) == 1
+    assert mlrec.read_header(after[0])["serving"]["alignment_veto"] == {
+        "k_min": 512,
+        "align_bits": 1024,
+    }
+    assert readings["veto"] == {"k_min": 512, "align_bits": 1024}
+    assert readings["without_veto"] == read["plain"][0]["without_veto"]
+    assert readings["with_veto"]["n_gemms"] == readings["without_veto"]["n_gemms"]
+    assert all("veto_pick_sol_idx" in r for r in readings["rows"])

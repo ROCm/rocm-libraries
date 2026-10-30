@@ -2941,6 +2941,19 @@ every held-out GEMM on its own:
   retrain trains on the GEMMs it collapsed on, and its new tier's tail
   guard sees them among the cell's own GEMMs.
 
+Once every decision is made, stage04b reads the bundle's held-out GEMMs
+once more for the report (`stage04b/readings.json`, lib/run_readings.py):
+the runtime-weighted efficiency (summed winner over summed pick latency),
+the geomean over the tenth of the GEMMs with the longest winners, and the
+picks below 0.8 and 0.5 of their winner, skip-screened picks apart, with
+every GEMM's row; with `deploy.alignment_veto` the same readings of the
+bundle with the veto beside them, and the GEMMs whose pick it changes.
+stage05 writes the same readings of its bundle on the validation GEMMs of
+the cells it trained (`stage05/readings.json`, `metrics.json` `readings`),
+the final retrain's included. They are reported as measured and validated
+against no other record; nothing reads them back, and one that cannot be
+made is recorded, never fatal.
+
 ### Targeted shapes (stage01)
 
 An active round's stage01 draws, besides `seed.shapes_per_cell` new
