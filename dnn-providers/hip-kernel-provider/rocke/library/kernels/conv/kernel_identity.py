@@ -216,6 +216,12 @@ class KernelIdentity:
     xh_b_wide: bool = False
     # dgrad only (DgradConvSpec.xh_b_kpad). Left out of the hash at 0.
     xh_b_kpad: int = 0
+    # dgrad only (DgradConvSpec.tapk_pingpong). Left out of the hash at 0.
+    tapk_pingpong: int = 0
+    # dgrad only (DgradConvSpec.tapk_pp_sched). Left out of the hash at 0.
+    tapk_pp_sched: int = 0
+    # dgrad only (DgradConvSpec.tapk_pp_epi). Left out of the hash at 0.
+    tapk_pp_epi: int = 0
     # fwd only (ImplicitGemmConvSpec.split_addr_k_decode): the per-tile
     # reduction decode of the 3-D split-addressing path. Serves only problems
     # whose cpg is a multiple of tile_k (see identity_supports_problem). Left
@@ -397,6 +403,12 @@ class KernelIdentity:
             del fields["xh_b_wide"]
         if not fields["xh_b_kpad"]:
             del fields["xh_b_kpad"]
+        if not fields["tapk_pingpong"]:
+            del fields["tapk_pingpong"]
+        if not fields["tapk_pp_sched"]:
+            del fields["tapk_pp_sched"]
+        if not fields["tapk_pp_epi"]:
+            del fields["tapk_pp_epi"]
         if not fields["split_addr_k_decode"]:
             del fields["split_addr_k_decode"]
         for name in (
@@ -852,6 +864,11 @@ def identity_supports_problem(
                     f"tap_outer_k needs kpg % tile_k == 0; kpg={kpg}, "
                     f"tile_k={identity.tile_k}"
                 )
+        # tapk_pingpong 4 keeps one bit per filter tap in a 32-bit row mask.
+        if identity.tapk_pingpong >= 4 and any(
+            int(getattr(problem, a, 1) or 1) > 3 for a in ("Y", "X", "Z")
+        ):
+            return False, "tapk_pingpong 4/5 serves filters of up to 3 per axis"
         # The x-halo stage holds tap x = 0 of every pixel; a pixel with
         # wi < x reads zero, which is right only without a W pad. The
         # filter width it unrolls is baked (filter_w, matched above).
@@ -860,7 +877,7 @@ def identity_supports_problem(
         # x-halo split-K accumulates through a packed-atomic store that
         # treats dX as one dense (M, C) matrix: ungrouped problems only.
         if (
-            identity.tapk_xhalo
+            (identity.tapk_xhalo or identity.tapk_pingpong)
             and identity.split_k > 1
             and int(getattr(problem, "groups", 1)) != 1
         ):

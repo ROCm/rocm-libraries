@@ -367,6 +367,74 @@ def _dgrad_xh_knob_cfg(knobs, *, tpf: int, grouped: bool, epilogue: str):
     return cfg
 
 
+# Knob sets of the plain (not x-halo) tapk_prefetch=1 dgrad binaries:
+# ROCKE_AOT_DGRAD_PPK, same syntax as ROCKE_AOT_DGRAD_XHK, keys bpp
+# (DgradConvSpec.tapk_pingpong), pps (tapk_pp_sched), xcd, kpad, lxor, mch, wpe; every set needs
+# an "@<regex>" scope on the plain binary's label (unscoped sets are
+# ignored, so the plain grid never grows by accident). Unset = none.
+def _parse_dgrad_pp_knobs(text: str):
+    keys = {"bpp", "pps", "ppe", "xcd", "kpad", "lxor", "mch", "wpe", "sk"}
+    out = []
+    for part in text.split(";"):
+        kv = []
+        for item in part.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            if item.startswith("@"):
+                kv.append(("@", item[1:]))
+                continue
+            k, _, v = item.partition("=")
+            if k not in keys:
+                raise ValueError(f"ROCKE_AOT_DGRAD_PPK: unknown knob {k!r}")
+            kv.append((k, int(v)))
+        if kv and dict(kv).get("@"):
+            out.append(tuple(sorted(kv)))
+    return tuple(dict.fromkeys([(), *out]))
+
+
+CACHE_DGRAD_PLAIN_KNOBS = _parse_dgrad_pp_knobs(
+    _os.environ.get("ROCKE_AOT_DGRAD_PPK", "")
+)
+# Extra dgrad tile extents (e.g. "512") built ONLY as ROCKE_AOT_DGRAD_PPK
+# variants of the plain tpf1 tap-outer binary (no base binary, no other loop):
+# ROCKE_AOT_DGRAD_PP_TILE_MN. Unset = none.
+CACHE_DGRAD_PP_EXTRA_TILE_MN: Tuple[int, ...] = tuple(
+    int(v) for v in _os.environ.get("ROCKE_AOT_DGRAD_PP_TILE_MN", "").split(",") if v.strip()
+)
+
+
+def _dgrad_pp_knob_cfg(knobs, *, epilogue: str):
+    """The spec kwargs of one CACHE_DGRAD_PLAIN_KNOBS set, or None."""
+    d = dict(knobs)
+    d.pop("@", None)
+    cfg = {}
+    if d.get("bpp"):
+        cfg["tapk_pingpong"] = d["bpp"]
+    if d.get("pps"):
+        cfg["tapk_pp_sched"] = d["pps"]
+    if d.get("ppe"):
+        cfg["tapk_pp_epi"] = d["ppe"]
+    if d.get("lxor"):
+        cfg["lds_xor"] = True
+        cfg["lds_k_pad"] = 0
+    if d.get("kpad"):
+        cfg["lds_k_pad"] = d["kpad"]
+    if d.get("xcd"):
+        cfg["xcd_remap"] = d["xcd"]
+    if d.get("wpe"):
+        cfg["waves_per_eu"] = d["wpe"]
+    if d.get("mch", 1) > 1:
+        if epilogue != "cshuffle":
+            return None
+        cfg["cshuffle_m_chunks"] = d["mch"]
+    if d.get("sk", 1) > 1:
+        if epilogue != "cshuffle" or not d.get("bpp"):
+            return None
+        cfg["split_k"] = d["sk"]
+    return cfg
+
+
 # Whether the stride-1 dgrad binaries are built next to the tilde ones.
 CACHE_DGRAD_STRIDE1: tuple[bool, ...] = (False, True)
 # dY halo binaries (DgradConvSpec.dy_halo): a capped sub-grid, not the
@@ -627,6 +695,8 @@ def _grid_axes(direction: Optional[str]) -> Tuple[Tuple[int, ...], Tuple[int, ..
     ``None`` means the base grid, which is what a caller that walks an
     explicit geometry list already holds.
     """
+    if direction == "dgrad" and CACHE_DGRAD_PP_EXTRA_TILE_MN:
+        return tuple(sorted(set(_TILE_MN) | set(CACHE_DGRAD_PP_EXTRA_TILE_MN))), _WARP_MN
     if direction != "wgrad":
         return _TILE_MN, _WARP_MN
     return (
@@ -2069,6 +2139,11 @@ def _dgrad_jobs(
                 )
                 for k in (CACHE_DGRAD_B_KPACK if t else (0,))
             ):
+                # Extra (ping-pong only) tile extents: the PPK sets of the
+                # plain tpf1 binary alone.
+                pp_only = tile_m not in _TILE_MN or tile_n not in _TILE_MN
+                if pp_only and not (tapk and tpf == 1):
+                    continue
                 filt = {}
                 job_caps = caps
                 if tapk:
@@ -2107,6 +2182,19 @@ def _dgrad_jobs(
                     )
                     if kc is not None
                 ]
+                if pp_only:
+                    knob_cfgs = []
+                if tapk and tpf == 1:
+                    # The plain loop's knob sets (ROCKE_AOT_DGRAD_PPK).
+                    knob_cfgs += [
+                        (kc, dict(k)["@"])
+                        for kc, k in (
+                            (_dgrad_pp_knob_cfg(k, epilogue=epilogue), k)
+                            for k in CACHE_DGRAD_PLAIN_KNOBS
+                            if k
+                        )
+                        if kc is not None
+                    ]
                 for kcfg, kscope in knob_cfgs:
                     jcfg = {**cfg, **kcfg}
                     ident = KernelIdentity(
