@@ -1888,6 +1888,33 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
         kTensor->upload();
         vTensor->upload();
     }
+    // P3 (PyTorch's seqused_k): NaN in every slot's keys past its length, which the packed K
+    // and V below then hold; no output may see them.
+    if(spec.slotTailNan)
+    {
+        ASSERT_TRUE(packed && padded && !spec.packedQkv);
+        const T nan(std::numeric_limits<float>::quiet_NaN());
+        for(int64_t b = 0; b < spec.batch; ++b)
+        {
+            for(int64_t j = lengthKv(b); j < slotKv(b); ++j)
+            {
+                for(int64_t h = 0; h < spec.kvHeads; ++h)
+                {
+                    for(int64_t e = 0; e < d; ++e)
+                    {
+                        kTensor->set(b, h, j, e, nan);
+                    }
+                }
+                for(int64_t h = 0; h < valueHeads; ++h)
+                {
+                    for(int64_t e = 0; e < dv; ++e)
+                    {
+                        vTensor->set(b, h, j, e, nan);
+                    }
+                }
+            }
+        }
+    }
     const auto third = static_cast<size_t>(spec.heads * d) * sizeof(T);
     void* qPtr = spec.packedQkv ? qkv->device() : qTensor->device();
     void* kPtr = spec.packedQkv ? static_cast<void*>(static_cast<char*>(qkv->device()) + third)
@@ -2479,7 +2506,9 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                 for(int64_t e = 0; e < dv; ++e)
                 {
                     double expected = 0.0;
-                    for(int64_t j = 0; j < spec.seqLenKv; ++j)
+                    // Keys past the batch's length are never read (hipDNN's reference), so
+                    // whatever a packed slot holds there stays out of O.
+                    for(int64_t j = 0; j < lengthKv(b); ++j)
                     {
                         if(keeps(b, h, s, j))
                         {
@@ -2519,10 +2548,27 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     EXPECT_LE(worstLse, 1e-3) << whereLse;
 
     // A sink, or a scale that needs scaled scores, against hipDNN's CPU reference as well
-    // (FLOAT [1, Hq, 1, 1], SEM-022): with the bias, the band and padding the graph has. Not
-    // packed, dropped or NaN: the reference's packed form, dropout and NaN rows are checked
-    // above.
-    if((spec.withSink || sdpaSpecNeedsScaledScores(spec)) && !packed && !drops && !expectsNan)
+    // (FLOAT [1, Hq, 1, 1], SEM-022): with the bias, the band and padding the graph has. And
+    // packed slots with every length inside its slot (P3, PyTorch's seqused_k), which hipDNN's
+    // executors run as the dense padded graph (RaggedSdpaDensify.hpp: the slots unpacked, the
+    // lengths the graph's own, a length past its slot an error): the reference then sees the
+    // dense tensors this harness packed from, slot tails included. Not other packed graphs,
+    // dropped or NaN: their forms are checked above.
+    const auto withinSlots = [&](const std::vector<int32_t>& lengths, const auto& slot) {
+        for(int64_t b = 0; b < spec.batch; ++b)
+        {
+            const auto length = static_cast<int64_t>(lengths[static_cast<size_t>(b)]);
+            if(length < 0 || length > slot(b))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+    const bool densifiable = packed && padded && withinSlots(spec.seqLensQ, slotQ)
+                             && withinSlots(spec.seqLensKv, slotKv);
+    if((spec.withSink || sdpaSpecNeedsScaledScores(spec) || densifiable) && (!packed || densifiable)
+       && !drops && !expectsNan)
     {
         SdpaCpuReferenceProblem reference;
         reference.batch = spec.batch;
@@ -2557,8 +2603,15 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
             kAt,
             vAt,
             biasAt,
-            [&o](int64_t b, int64_t h, int64_t s, int64_t e) { return o.at(b, h, s, e); },
-            [&stats](int64_t b, int64_t h, int64_t s) { return stats.at(b, h, s, 0); },
+            // A packed graph's rows past a slot are no outputs (the dense rewrite packs back
+            // only slot rows): they read as the reference's padded rows.
+            [&](int64_t b, int64_t h, int64_t s, int64_t e) {
+                return s >= slotQ(b) ? 0.0 : o.at(b, h, s, e);
+            },
+            [&](int64_t b, int64_t h, int64_t s) {
+                return s >= slotQ(b) ? -std::numeric_limits<double>::infinity()
+                                     : stats.at(b, h, s, 0);
+            },
             absoluteTolerance,
             1e-3);
     }
@@ -6834,6 +6887,42 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, PacksSequencesWithTrailingPaddingPerBatch)
     spec.withSink = true;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
         spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, MirrorsSequsedKOnPackedKeySlots)
+{
+    // PyTorch's varlen seqused_k as a hipDNN graph (P3): Q packed through cu_seqlens_q with
+    // seq_len_q its own token counts, K and V packed through cu_seqlens_k slots with
+    // seq_len_kv = seqused_k <= the slot. Each slot's keys past seqused_k hold NaN, so a read
+    // of one turns rows NaN; a bottom-right diagonal sits at seqused_k - Sq_b; seqused_k = 0
+    // leaves every row keyless (O = 0, LSE = -inf); GQA. Checked against the per-sequence
+    // oracle and hipDNN's CPU reference (the dense rewrite its executors run).
+    SKIP_IF_NO_DEVICES();
+    SdpaGraphSpec spec;
+    spec.batch = 4;
+    spec.headDim = 64;
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 64;
+    spec.seqLenKv = 128;
+    spec.stats = SdpaStats::LSE;
+    // Fewer queries than used keys, one query (decode), more (leading keyless rows
+    // bottom-right), and no used key at all.
+    setPacked(spec, {48, 1, 64, 17}, {128, 96, 64, 80});
+    setPadding(spec, {48, 1, 64, 17}, {100, 33, 20, 0});
+    spec.slotTailNan = true;
+    for(const auto mask :
+        {SdpaMask::NONE, SdpaMask::TOP_LEFT_CAUSAL, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        SCOPED_TRACE(static_cast<int>(mask));
+        spec.mask = mask;
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+            spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+    }
+    spec.dataType = DataType::HALF;
+    spec.stats = SdpaStats::NONE;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(
+        spec, F16_TOLERANCE, RdnaFamily::PREFILL);
 }
 
 // Dropout on device: the mask read off O bit for bit against the oracle (Q zero, V the

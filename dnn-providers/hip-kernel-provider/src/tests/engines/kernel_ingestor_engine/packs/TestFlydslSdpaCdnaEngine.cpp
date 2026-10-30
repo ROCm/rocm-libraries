@@ -3073,6 +3073,129 @@ bool cdnaReadsZeroBias(const SdpaGraphSpec& spec, const KernelDefinition& kernel
     return !spec.withBias && hasBias != nullptr && *hasBias == 1;
 }
 
+/// Whether @p spec is packed with both lengths, every one inside its slot (P3, PyTorch's
+/// seqused_k): the form hipDNN's executors run as the dense padded graph
+/// (RaggedSdpaDensify.hpp, a length past its slot an error), so hipDNN's CPU reference checks it.
+bool cdnaDensifiable(const SdpaGraphSpec& spec)
+{
+    if(!spec.packed() || spec.seqLensQ.empty() || spec.seqLensKv.empty())
+    {
+        return false;
+    }
+    for(size_t bi = 0; bi < static_cast<size_t>(spec.batch); ++bi)
+    {
+        if(spec.seqLensQ[bi] < 0 || spec.seqLensQ[bi] > spec.packedSeqLensQ[bi]
+           || spec.seqLensKv[bi] < 0 || spec.seqLensKv[bi] > spec.packedSeqLensKv[bi])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// The NaN device values a spec asks for, in the dense @p q, @p k and @p v (K and V laid out
+/// by @p kStrides and @p vStrides):
+///  - NaN in Q's first column at one query position (every batch and head), or in K's at one
+///    key (every batch and KV head): every row that sees it must come out NaN, O and LSE, as
+///    PyTorch's does. Separate Q and K buffers only.
+///  - P3 (PyTorch's seqused_k): NaN in every K and V element of a slot past its length, which
+///    the packed K and V then hold, so a kernel that reads one turns its rows NaN.
+template <typename T>
+void writeCdnaNans(const SdpaGraphSpec& spec,
+                   const std::vector<int64_t>& kStrides,
+                   const std::vector<int64_t>& vStrides,
+                   std::vector<T>& q,
+                   std::vector<T>& k,
+                   std::vector<T>& v)
+{
+    const T nan(std::numeric_limits<float>::quiet_NaN());
+    if(!spec.packedQkv && (spec.queryNanPosition || spec.keyNanPosition))
+    {
+        const auto qNanStrides = sdpaStrides(spec.layout, spec.heads, spec.seqLenQ, spec.headDim);
+        const auto kNanStrides
+            = sdpaStrides(spec.layout, spec.kvHeads, spec.seqLenKv, spec.headDim);
+        for(int64_t bi = 0; bi < spec.batch; ++bi)
+        {
+            for(int64_t hi = 0; spec.queryNanPosition && hi < spec.heads; ++hi)
+            {
+                q[static_cast<size_t>(bi * qNanStrides[0] + hi * qNanStrides[1]
+                                      + *spec.queryNanPosition * qNanStrides[2])]
+                    = nan;
+            }
+            for(int64_t hi = 0; spec.keyNanPosition && hi < spec.kvHeads; ++hi)
+            {
+                k[static_cast<size_t>(bi * kNanStrides[0] + hi * kNanStrides[1]
+                                      + *spec.keyNanPosition * kNanStrides[2])]
+                    = nan;
+            }
+        }
+    }
+    if(!spec.slotTailNan)
+    {
+        return;
+    }
+    ASSERT_TRUE(spec.packed() && !spec.seqLensKv.empty() && !spec.packedQkv);
+    const int64_t dv = spec.valueHeadDim.value_or(spec.headDim);
+    for(int64_t bi = 0; bi < spec.batch; ++bi)
+    {
+        const int64_t slot = spec.packedSeqLensKv[static_cast<size_t>(bi)];
+        const int64_t length
+            = std::clamp<int64_t>(spec.seqLensKv[static_cast<size_t>(bi)], 0, slot);
+        for(int64_t j = length; j < slot; ++j)
+        {
+            for(int64_t hi = 0; hi < spec.kvHeads; ++hi)
+            {
+                for(int64_t e = 0; e < spec.headDim; ++e)
+                {
+                    k[static_cast<size_t>(bi * kStrides[0] + hi * kStrides[1] + j * kStrides[2]
+                                          + e * kStrides[3])]
+                        = nan;
+                }
+                for(int64_t e = 0; e < dv; ++e)
+                {
+                    v[static_cast<size_t>(bi * vStrides[0] + hi * vStrides[1] + j * vStrides[2]
+                                          + e * vStrides[3])]
+                        = nan;
+                }
+            }
+        }
+    }
+}
+
+/// @p o and @p stats with a packed graph's rows past each Q slot set as hipDNN's reference
+/// writes padded rows (O = 0, LSE = -inf): they are no outputs, and the dense rewrite packs back
+/// only slot rows.
+template <typename T>
+std::pair<std::vector<T>, std::vector<float>>
+    cdnaAbsentRowsAsPadded(const SdpaGraphSpec& spec,
+                           const std::vector<int64_t>& oStrides,
+                           std::vector<T> o,
+                           std::vector<float> stats)
+{
+    const int64_t h = spec.heads;
+    const int64_t s = spec.seqLenQ;
+    const int64_t dv = spec.valueHeadDim.value_or(spec.headDim);
+    for(int64_t bi = 0; spec.packed() && bi < spec.batch; ++bi)
+    {
+        for(int64_t hi = 0; hi < h; ++hi)
+        {
+            for(int64_t si = spec.packedSeqLensQ[static_cast<size_t>(bi)]; si < s; ++si)
+            {
+                for(int64_t e = 0; e < dv; ++e)
+                {
+                    o[static_cast<size_t>(bi * oStrides[0] + hi * oStrides[1] + si * oStrides[2]
+                                          + e * oStrides[3])]
+                        = T(0.0F);
+                }
+                const auto statsIndex
+                    = spec.statsSequenceMajor ? (bi * s + si) * h + hi : (bi * h + hi) * s + si;
+                stats[static_cast<size_t>(statsIndex)] = -std::numeric_limits<float>::infinity();
+            }
+        }
+    }
+    return {std::move(o), std::move(stats)};
+}
+
 template <typename T>
 void expectCandidatesMatchReference(const MatchContext& context,
                                     const BoundTokens& bound,
@@ -3150,30 +3273,8 @@ void expectCandidatesMatchReference(const MatchContext& context,
             }
         }
     }
-    // NaN in Q's first column at one query position (every batch and head), or in K's at one
-    // key (every batch and KV head): every row that sees it must come out NaN, O and LSE, as
-    // PyTorch's does. Separate Q and K buffers only.
-    if(!spec.packedQkv && (spec.queryNanPosition || spec.keyNanPosition))
-    {
-        const T nan(std::numeric_limits<float>::quiet_NaN());
-        const auto qNanStrides = sdpaStrides(spec.layout, h, s, d);
-        const auto kNanStrides = sdpaStrides(spec.layout, hk, skv, d);
-        for(int64_t bi = 0; bi < b; ++bi)
-        {
-            for(int64_t hi = 0; spec.queryNanPosition && hi < h; ++hi)
-            {
-                q[static_cast<size_t>(bi * qNanStrides[0] + hi * qNanStrides[1]
-                                      + *spec.queryNanPosition * qNanStrides[2])]
-                    = nan;
-            }
-            for(int64_t hi = 0; spec.keyNanPosition && hi < hk; ++hi)
-            {
-                k[static_cast<size_t>(bi * kNanStrides[0] + hi * kNanStrides[1]
-                                      + *spec.keyNanPosition * kNanStrides[2])]
-                    = nan;
-            }
-        }
-    }
+    // NaN where the spec asks: one query position or key, or every slot's keys past its length.
+    ASSERT_NO_FATAL_FAILURE(writeCdnaNans(spec, kvStrides, vStrides, q, k, v));
     std::vector<T> o(oCount, T(0.0F));
     // Freed on every exit, including a failed ASSERT part-way through a kernel.
     std::vector<void*> allocations;
@@ -3578,6 +3679,9 @@ void expectCandidatesMatchReference(const MatchContext& context,
         return padded ? clampedLength(spec.seqLensKv[static_cast<size_t>(bi)], slotKv(bi))
                       : slotKv(bi);
     };
+    // Packed slots with every length inside its slot (P3): hipDNN's CPU reference checks it too
+    // (below).
+    const bool densifiable = cdnaDensifiable(spec);
     // The reference's rule: query row i sees key j <= i + align + right, align 0 top-left
     // and Skv - Sq bottom-right (per batch under padding).
     const auto alignOf
@@ -3920,10 +4024,15 @@ void expectCandidatesMatchReference(const MatchContext& context,
 
         // A sink, against hipDNN's CPU reference as well (FLOAT [1, Hq, 1, 1], SEM-022): with
         // the bias, the band and padding the graph has; a bias under padding (vendored-kernel
-        // modification 37), sink or not; and a scale that needs scaled scores. Not packed,
-        // dropped or NaN: the reference's packed form, dropout and NaN rows are checked above.
-        if((spec.withSink || (padded && spec.withBias) || sdpaSpecNeedsScaledScores(spec))
-           && !packed && !drops && !spec.queryNanPosition && !spec.keyNanPosition
+        // modification 37), sink or not; and a scale that needs scaled scores. And packed slots
+        // with every length inside its slot (P3, PyTorch's seqused_k), which hipDNN's executors
+        // run as the dense padded graph (RaggedSdpaDensify.hpp: the slots unpacked, the lengths
+        // the graph's own, a length past its slot an error): the reference then sees the dense
+        // values this harness packed from, slot tails included. Not other packed graphs,
+        // dropped or NaN: their forms are checked above.
+        if((spec.withSink || (padded && spec.withBias) || sdpaSpecNeedsScaledScores(spec)
+            || densifiable)
+           && (!packed || densifiable) && !drops && !spec.queryNanPosition && !spec.keyNanPosition
            && !spec.biasNanRows)
         {
             SdpaCpuReferenceProblem reference{b,
@@ -3948,12 +4057,15 @@ void expectCandidatesMatchReference(const MatchContext& context,
                 reference.seqLensQ.push_back(static_cast<int32_t>(lengthQ(bi)));
                 reference.seqLensKv.push_back(static_cast<int32_t>(lengthKv(bi)));
             }
+            // A packed graph's rows past a slot are no outputs (the dense rewrite packs back
+            // only slot rows): they read as the reference's padded rows.
+            const auto [oDense, statsDense] = cdnaAbsentRowsAsPadded(spec, oStrides, o, stats);
             expectCdnaSinkIsTheCpuReference(
                 reference,
                 CdnaHostOperands<T>{
-                    q, k, v, o, qStrides, kvStrides, vStrides, oStrides, kStart, vStart},
+                    q, k, v, oDense, qStrides, kvStrides, vStrides, oStrides, kStart, vStart},
                 biasAt,
-                stats,
+                statsDense,
                 spec.statsSequenceMajor,
                 absoluteTolerance,
                 LSE_TOLERANCE);
@@ -6638,6 +6750,35 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, PacksPaddedSequencesInTheirSlots)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
     spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
     spec.withSink = true;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, MirrorsSequsedKOnPackedKeySlots)
+{
+    // PyTorch's varlen seqused_k as a hipDNN graph (P3): Q packed through cu_seqlens_q with
+    // seq_len_q its own token counts, K and V packed through cu_seqlens_k slots with
+    // seq_len_kv = seqused_k <= the slot. Each slot's keys past seqused_k hold NaN, so a read
+    // of one turns rows NaN; a bottom-right diagonal sits at seqused_k - Sq_b; seqused_k = 0
+    // leaves every row keyless (O = 0, LSE = -inf); GQA. Checked against the per-sequence
+    // oracle and hipDNN's CPU reference (the dense rewrite its executors run).
+    auto spec = packedGpuSpec();
+    spec.batch = 4;
+    spec.seqLenQ = 64;
+    spec.seqLenKv = 128;
+    // Fewer queries than used keys, one query (decode), more (leading keyless rows
+    // bottom-right), and no used key at all.
+    setPacked(spec, {48, 1, 64, 17}, {128, 96, 64, 80});
+    setPadding(spec, {48, 1, 64, 17}, {100, 33, 20, 0});
+    spec.slotTailNan = true;
+    for(const auto mask :
+        {SdpaMask::NONE, SdpaMask::TOP_LEFT_CAUSAL, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        SCOPED_TRACE(static_cast<int>(mask));
+        spec.mask = mask;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    spec.dataType = DataType::HALF;
+    spec.stats = SdpaStats::NONE;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 

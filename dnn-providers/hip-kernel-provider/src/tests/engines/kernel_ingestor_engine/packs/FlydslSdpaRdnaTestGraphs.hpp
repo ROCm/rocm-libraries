@@ -384,6 +384,10 @@ struct SdpaGraphSpec
     std::optional<int64_t> queryNanPosition;
     /// K's first column NaN at this key, every batch and KV head.
     std::optional<int64_t> keyNanPosition;
+    /// Packed with per-batch lengths (P3): every K and V element of a slot past its key length
+    /// NaN, every head and column, so a kernel that reads a key past seq_len_kv (PyTorch's
+    /// `seqused_k`) turns its rows NaN (both device harnesses).
+    bool slotTailNan = false;
     /// Every sink logit this value (the device values; the graph is unchanged), e.g. one far
     /// above the scores (both device harnesses).
     std::optional<float> sinkValue;
