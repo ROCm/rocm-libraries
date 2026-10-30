@@ -10,6 +10,7 @@ and skip without it.
 """
 
 import json
+import re
 
 import pytest
 import torch
@@ -117,34 +118,56 @@ torch.ops.hipdnn_vllm.rms_norm(x, w, 1e-6)
 torch.ops.hipdnn_vllm.layer_norm(x, w, w, 1e-6, True)
 _, linear_engine = _C.linear_probe(x, torch.randn(64, 256, dtype=torch.bfloat16, device="cuda"))
 tab = torch.zeros(8, dtype=torch.int64, device="cuda")
-prep = torch.ops.hipdnn_vllm.custom_op_prepare("megakernel.qwen38-27b-mxfp4-gfx942", "{}", [tab, tab])
+prep = torch.ops.hipdnn_vllm.custom_op_prepare("megakernel.qwen38-27b-mxfp4-gfx942", '{"schema": 1}', [tab, tab])
 torch.cuda.synchronize()
 print("H6", json.dumps({"mk": mk, "linear_engine": linear_engine, "prepare": prep}), flush=True)
 """
 
+# Every megakernel matcher decision logs at INFO: a decline as
+# "hipkernel:Megakernel declined ...", a match as the ingestor's selection line.
+_MK_DECISION = re.compile(r"hipkernel:Megakernel declined|'hipkernel:Megakernel'.*selected")
 
-def test_engine_untouched_unless_opted_in_h6(tmp_path):
-    """H6: with the megakernel engine built in and custom_op not opted in (the
-    default HIPDNN_VLLM_OPS), the default ops keep their engines and the
-    megakernel engine logs no decision (its every match/decline logs at INFO
-    as hipkernel:Megakernel)."""
+
+def _run_h6(tmp_path, name, ops):
     import os
     import subprocess
     import sys
 
-    log = tmp_path / "hipdnn.log"
+    log = tmp_path / f"{name}.log"
     env = {k: v for k, v in os.environ.items() if k != "HIPDNN_VLLM_OPS"}
+    if ops is not None:
+        env["HIPDNN_VLLM_OPS"] = ops
     env.update(HIPDNN_LOG_LEVEL="info", HIPDNN_LOG_FILE=str(log))
     out = subprocess.run([sys.executable, "-c", _H6_SCRIPT], env=env, capture_output=True, text=True, timeout=600)
     assert out.returncode == 0, out.stderr[-4000:]
     res = json.loads(next(l for l in out.stdout.splitlines() if l.startswith("H6 "))[3:])
+    lines = ((log.read_text() if log.exists() else "") + out.stderr).splitlines()
+    custom_nodes = [l for l in lines if "CustomOpOperationDescriptor" in l]
+    return res, [l for l in lines if _MK_DECISION.search(l)], custom_nodes
+
+
+def test_engine_untouched_unless_opted_in_h6(tmp_path):
+    """H6: with the megakernel engine built in and custom_op not opted in (the
+    default HIPDNN_VLLM_OPS), the default ops keep their engines, no CUSTOM_OP
+    node reaches hipDNN and the megakernel matcher makes no decision. The
+    opted-in run is the control that the same log shows both."""
+    res, hits, nodes = _run_h6(tmp_path, "default", None)
     if not res["mk"]:
         pytest.skip("megakernel engine not in this build")
     assert res["prepare"] == "DISABLED", res
     assert "megakernel" not in res["linear_engine"].lower(), res
-    text = (log.read_text() if log.exists() else "") + out.stderr
-    assert text, "no hipDNN log captured"
-    assert "hipkernel:Megakernel" not in text, [l for l in text.splitlines() if "hipkernel:Megakernel" in l][:5]
+    assert nodes == [], nodes[:3]
+    assert hits == [], hits[:5]
+
+    from hipdnn_vllm.config import DEFAULT_OPS
+
+    res, hits, nodes = _run_h6(tmp_path, "opted_in", ",".join(DEFAULT_OPS + ("custom_op",)))
+    assert res["prepare"] not in ("", "DISABLED"), res
+    assert "megakernel" not in res["linear_engine"].lower(), res
+    assert nodes, "the opted-in control built no CUSTOM_OP node"
+    # The catalog is gfx942-only; elsewhere the matcher never runs.
+    if torch.cuda.get_device_properties(0).gcnArchName.startswith("gfx942"):
+        assert hits, "the opted-in control logged no megakernel decision"
 
 
 # The engine's stand-in kernel (test content, not in the wheel): with

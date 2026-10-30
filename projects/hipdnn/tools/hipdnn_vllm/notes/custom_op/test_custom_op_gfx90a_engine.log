@@ -1,0 +1,12 @@
+arch gfx90a
+tests/gpu/test_custom_op.py::test_prepare_returns_reason_for_unknown_op_id PASSED [ 12%]
+tests/gpu/test_custom_op.py::test_exec_strict_raises_and_non_strict_counts_fallback PASSED [ 25%]
+tests/gpu/test_custom_op.py::test_plan_cache_keyed_by_shape_and_payload_not_address PASSED [ 37%]
+tests/gpu/test_custom_op.py::test_disabled_declines_without_building PASSED [ 50%]
+tests/gpu/test_custom_op.py::test_capture_miss_strict_raises_non_strict_records PASSED [ 62%]
+tests/gpu/test_custom_op.py::test_engine_untouched_unless_opted_in_h6 PASSED [ 75%]
+tests/gpu/test_custom_op.py::test_megakernel_capture_replays SKIPPED     [ 87%]
+tests/gpu/test_custom_op.py::test_megakernel_key_mismatch_declines SKIPPED [100%]
+SKIPPED [1] tests/gpu/test_custom_op.py:209: megakernel stand-in not loaded (set HIPDNN_DESCRIPTOR_DIR to the integration set)
+SKIPPED [1] tests/gpu/test_custom_op.py:249: megakernel stand-in not loaded (set HIPDNN_DESCRIPTOR_DIR to the integration set)
+=================== 6 passed, 2 skipped, 2 warnings in 4.98s ===================

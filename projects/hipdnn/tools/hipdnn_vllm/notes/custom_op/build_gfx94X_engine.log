@@ -1,0 +1,226 @@
+start 2026-10-30T08:50:50+00:00 eda82ecef66d src 9fdb4197af7 test(hipdnn_vllm): custom_op capture/replay and key-mismatch tests on the megakernel stand-in
+torch 2.13.0+rocm10.0.0 vllm 0.32.1rc1.dev117+gdf3bd094a
+host=eda82ecef66d nproc=128 family=gfx94X src=/home/sareeder/ROCm-workspace/worktrees/rocm-libraries/hipdnn-vllm-custom-op date=2026-10-30T08:50:54+00:00
+gpu targets: gfx942
+provider flags: -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DHIPDNN_ENABLE_SDPA=ON -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON -DHIPKERNELPROVIDER_ENABLE_TESTS=OFF -DHIPDNN_SKIP_TESTS=ON -DROCKE_INSTALL_TESTS=OFF -DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON -DENABLE_MEGAKERNEL_ENGINE=ON
+WARNING: The directory '/tmp/hvco/home/.cache/pip' or its parent directory is not owned or is not writable by the current user. The cache has been disabled. Check the permissions and owner of that directory. If executing pip with sudo, you should use sudo's -H flag.
+Everything is up to date.
+CMake Warning at cmake/toolchains/rocm-clang.cmake:28 (message):
+
+
+  ROCM_PATH is set in the environment and may interfere with toolchain
+  detection.
+
+  Remove ROCM_PATH from the environment and use the following instead:
+
+    cmake -DROCM_PATH=/tmp/hvco/venv/lib/python3.12/site-packages/_rocm_sdk_devel
+
+Call Stack (most recent call first):
+  /tmp/hvco/work/hipdnn-gfx94X/build/CMakeFiles/4.4.4/CMakeSystem.cmake:6 (include)
+  CMakeLists.txt:5 (project)
+
+
+-- Enabling components:
+--   hipdnn (supported)
+--   hip-kernel-provider (supported)
+--   miopen-provider (supported)
+--   hipblaslt-provider (supported)
+-- Using the multi-header code from /tmp/hvco/work/hipdnn-gfx94X/build/_deps/nlohmann_json-src/include/
+-- [hipdnn] hipDNN: JSON serialization enabled in SDK public headers (requires nlohmann_json)
+-- [hipdnn] hipDNN: SDPA support enabled
+-- [hipdnn] hipDNN: kernel ingestor enabled
+-- [hipdnn] hipDNN: cuDNN compatibility shim enabled
+CMake Warning at projects/hipdnn/cmake/CheckPreCommit.cmake:32 (message):
+
+
+  Pre-commit hooks are NOT installed at
+  /home/sareeder/ROCm-workspace/repos/rocm-libraries/.git/hooks/pre-commit
+
+  Please run:
+
+    cd /home/sareeder/ROCm-workspace/worktrees/rocm-libraries/hipdnn-vllm-custom-op
+    pre-commit install
+
+Call Stack (most recent call first):
+  projects/hipdnn/CMakeLists.txt:102 (include)
+
+
+-- [hipdnn] The CMake generator is Ninja.
+-- [hipdnn] CMAKE_INSTALL_PREFIX set to default: /tmp/hvco/work/hipdnn-gfx94X/stage
+CMake Warning at projects/hipdnn/CMakeLists.txt:251 (message):
+  Clang-Tidy is disabled - some build issues may be missed.
+
+
+-- [hipdnn] ✓ Confirmed AMD/ROCm type C++ compiler
+-- [hipdnn] Found clang-tidy version 20 at /usr/bin/clang-tidy-20 -- Ubuntu LLVM version 20.1.2
+[hipdnn]   Optimized build.
+-- [hipdnn] Found run-clang-tidy at /usr/bin/run-clang-tidy-20
+-- [hipdnn] hipdnn_data_sdk version: 0.2.0.9fdb4197af7
+-- [hipdnn] Skipping Data SDK tests
+-- [hipdnn] hipdnn_flatbuffers_sdk version: 0.2.0.9fdb4197af7
+-- [hipdnn] Found flatbuffers: /tmp/hvco/venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib/cmake/flatbuffers (found version "25.9.23")
+-- [hipdnn] Skipping Flatbuffers SDK tests
+-- [hipdnn] hipdnn_backend version: 0.4.0.9fdb4197af7
+-- [hipdnn] HIP: Using hipcc from relative path: /tmp/hvco/venv/lib/python3.12/site-packages/_rocm_sdk_devel/bin/hipcc
+-- [hipdnn] Found spdlog: /usr/local/lib/cmake/spdlog (found version "1.15.3")
+-- [hipdnn] hipdnn_enable_spdlog: Enabled spdlog for target hipdnn_backend_private
+-- [hipdnn] Skipping HIP-DNN Backend Unit tests
+-- [hipdnn] hipdnn_frontend version: 0.4.0.9fdb4197af7
+-- [hipdnn] HIP: Using hipcc from relative path: /tmp/hvco/venv/lib/python3.12/site-packages/_rocm_sdk_devel/bin/hipcc
+-- [hipdnn] Skipping HIP-DNN Frontend Unit tests
+-- [hipdnn] hipdnn_test_sdk version: 0.2.0.9fdb4197af7
+-- [hipdnn] HIP: Using hipcc from relative path: /tmp/hvco/venv/lib/python3.12/site-packages/_rocm_sdk_devel/bin/hipcc
+-- [hipdnn] Skipping Test SDK tests
+-- [hipdnn] hipdnn_plugin_sdk version: 1.1.0.9fdb4197af7
+-- [hipdnn] Skipping Plugin SDK tests
+-- [hipdnn] Skipping HIP-DNN Integration tests
+-- [hipdnn] HIP: Using hipcc from relative path: /tmp/hvco/venv/lib/python3.12/site-packages/_rocm_sdk_devel/bin/hipcc
+-- [hipdnn] HIP: Using hipcc from relative path: /tmp/hvco/venv/lib/python3.12/site-packages/_rocm_sdk_devel/bin/hipcc
+-- [miopen-provider] Building miopen provider plugin standalone
+-- [miopen-provider] miopen_provider version: 0.2.0.9fdb4197af7
+-- [miopen-provider] Setting CMAKE_INSTALL_PREFIX to /tmp/hvco/work/hipdnn-gfx94X/stage
+CMake Warning at dnn-providers/miopen-provider/cmake/CheckPreCommit.cmake:32 (message):
+
+
+  Pre-commit hooks are NOT installed at
+  /home/sareeder/ROCm-workspace/repos/rocm-libraries/.git/hooks/pre-commit
+
+  Please run:
+
+    cd /home/sareeder/ROCm-workspace/worktrees/rocm-libraries/hipdnn-vllm-custom-op
+    pre-commit install
+
+Call Stack (most recent call first):
+  dnn-providers/miopen-provider/CMakeLists.txt:31 (include)
+
+
+CMake Warning at dnn-providers/miopen-provider/CMakeLists.txt:69 (message):
+  Clang-Format checks are disabled.  CI requires passing clang-format checks.
+
+
+CMake Warning at dnn-providers/miopen-provider/CMakeLists.txt:79 (message):
+  Clang-Tidy checks are disabled.  CI requires passing clang-tidy checks.
+
+
+-- [miopen-provider] HIP: Using hipcc from relative path: /tmp/hvco/venv/lib/python3.12/site-packages/_rocm_sdk_devel/bin/hipcc
+-- [miopen-provider] ✓ Confirmed AMD/ROCm type C++ compiler
+-- [miopen-provider] Found clang-tidy version 20 at /usr/bin/clang-tidy-20 -- Ubuntu LLVM version 20.1.2
+[miopen-provider]   Optimized build.
+-- [miopen-provider] Found run-clang-tidy at /usr/bin/run-clang-tidy-20
+-- [miopen-provider] Found system GTest
+-- [miopen-provider] Found llvm-symbolizer version 20 at /usr/bin/llvm-symbolizer-20 -- llvm-symbolizer
+[miopen-provider] Ubuntu LLVM version 20.1.2
+[miopen-provider]   Optimized build.
+-- [miopen-provider] Plugin build directory: /tmp/hvco/work/hipdnn-gfx94X/build/lib/hipdnn_plugins/engines
+-- [miopen-provider] Plugin install directory: 
+-- [miopen-provider] HIP: Using hipcc from relative path: /tmp/hvco/venv/lib/python3.12/site-packages/_rocm_sdk_devel/bin/hipcc
+-- [miopen-provider] miopen-provider: linking MIOpen library target 'MIOpen'
+-- [miopen-provider] miopen-provider: YAML-based CTest categorization enabled
+-- [miopen-provider] HIP: Using hipcc from relative path: /tmp/hvco/venv/lib/python3.12/site-packages/_rocm_sdk_devel/bin/hipcc
+-- [miopen-provider] Registering unit_test test target: miopen_plugin_tests -> miopen_plugin_tests in working directory: /tmp/hvco/work/hipdnn-gfx94X/build/dnn-providers/miopen-provider/tests
+-- [miopen-provider] Registering integration_test test target: miopen_plugin_integration_tests -> miopen_plugin_integration_tests in working directory: /tmp/hvco/work/hipdnn-gfx94X/build/dnn-providers/miopen-provider/integration_tests
+-- [miopen-provider] Generated test category configuration: /tmp/hvco/work/hipdnn-gfx94X/build/dnn-providers/miopen-provider/test_categories.cmake
+-- [miopen-provider] Generated test category configuration: /tmp/hvco/work/hipdnn-gfx94X/build/dnn-providers/miopen-provider/test_categories.cmake
+-- [miopen-provider] Generated test category configuration: /tmp/hvco/work/hipdnn-gfx94X/build/dnn-providers/miopen-provider/test_categories.cmake
+-- [miopen-provider] hipdnn_integration_tests not found - skipping external-integration-check
+-- [hipblaslt-provider] hipblaslt_provider version: 0.2.0.9fdb4197af7
+-- [hipblaslt-provider] hipblaslt-provider: MX GEMM support disabled
+-- [hipblaslt-provider] Setting CMAKE_INSTALL_PREFIX to /tmp/hvco/work/hipdnn-gfx94X/stage
+CMake Warning at dnn-providers/hipblaslt-provider/CMakeLists.txt:73 (message):
+  Clang-Format checks are disabled.  CI requires passing clang-format checks.
+
+
+-- [hipblaslt-provider] HIP: Using hipcc from relative path: /tmp/hvco/venv/lib/python3.12/site-packages/_rocm_sdk_devel/bin/hipcc
+-- [hipblaslt-provider] Found clang-tidy version 20 at /usr/bin/clang-tidy-20 -- Ubuntu LLVM version 20.1.2
+[hipblaslt-provider]   Optimized build.
+-- [hipblaslt-provider] Found run-clang-tidy at /usr/bin/run-clang-tidy-20
+-- [hipblaslt-provider] Plugin build directory: /tmp/hvco/work/hipdnn-gfx94X/build/lib/hipdnn_plugins/engines
+-- [hipblaslt-provider] Plugin install directory: 
+-- [hip-kernel-provider] hip_kernel_provider version: 0.2.0.9fdb4197af7
+-- [hip-kernel-provider] Setting CMAKE_INSTALL_PREFIX to /tmp/hvco/work/hipdnn-gfx94X/stage
+-- [hip-kernel-provider] ASM SDPA engine enabled
+-- [hip-kernel-provider] HIP Flash2 SDPA engine disabled
+-- [hip-kernel-provider] HIP kernel engine enabled
+-- [hip-kernel-provider] HIP: Using hipcc from relative path: /tmp/hvco/venv/lib/python3.12/site-packages/_rocm_sdk_devel/bin/hipcc
+-- [hip-kernel-provider] ✓ Confirmed AMD/ROCm type C++ compiler
+-- [hip-kernel-provider] Found clang-tidy version 20 at /usr/bin/clang-tidy-20 -- Ubuntu LLVM version 20.1.2
+[hip-kernel-provider]   Optimized build.
+-- [hip-kernel-provider] Found run-clang-tidy at /usr/bin/run-clang-tidy-20
+-- [hip-kernel-provider] Found llvm-symbolizer version 20 at /usr/bin/llvm-symbolizer-20 -- llvm-symbolizer
+[hip-kernel-provider] Ubuntu LLVM version 20.1.2
+[hip-kernel-provider]   Optimized build.
+-- [hip-kernel-provider] Plugin build directory: /tmp/hvco/work/hipdnn-gfx94X/build/lib/hipdnn_plugins/engines
+-- [hip-kernel-provider] Plugin install directory (relative): lib/hipdnn_plugins/engines
+-- [hip-kernel-provider] Kernel ingestor enabled. Descriptors build into:
+-- [hip-kernel-provider]   production: /tmp/hvco/work/hipdnn-gfx94X/build/lib/hipdnn_plugins/engines/arch_content/hip-kernel-provider
+-- [hip-kernel-provider]   test:       /tmp/hvco/work/hipdnn-gfx94X/build/lib/hipdnn_plugins/engines/test_arch_content/hip-kernel-provider
+-- [hip-kernel-provider] rocKE features enabled
+-- [hip-kernel-provider] portable-IR build-id: 3acaa9e4fa453454  version: 1.0.0+20261030
+-- [hip-kernel-provider] kpack: using rocm_kpack from /tmp/hvco/kp/shared/kpack/python
+-- [hip-kernel-provider] kpack: using rocm_kpack from /tmp/hvco/kp/shared/kpack/python
+-- Configuring done (3.7s)
+-- Generating done (0.2s)
+-- Build files have been written to: /tmp/hvco/work/hipdnn-gfx94X/build
+hipdnn build start 2026-10-30T08:51:07+00:00
+building rocke-pyenv rocke-wheels under /home/sareeder/ROCm-workspace/repos/rocm-libraries/.git/worktrees/hipdnn-vllm-custom-op/hipdnn_vllm-build.lock
+ninja: no work to do.
+hkp_wheel_digest: unchanged (30eb937f58d8)
+hipdnn build done 2026-10-30T08:51:37+00:00
+deps ok: libhipdnn_backend.so
+deps ok: libhip_kernel_provider.so
+deps ok: libhipblaslt_plugin.so
+deps ok: libmiopen_plugin.so
+	libMIOpen.so.1 => /tmp/hvco/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib/libMIOpen.so.1 (0x00007f2e3ddc5000)
+	libhipblaslt.so.1 => /tmp/hvco/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib/libhipblaslt.so.1 (0x00007fbf89f2a000)
+bundled backend version: 0.4.0.9fdb4197af7
+{
+  "family": "gfx94X",
+  "gfx_targets": [
+    "gfx942"
+  ],
+  "hipdnn_commit": "9fdb4197af72c18404c52648c3c71c84c9e28cfd",
+  "hipdnn_tree_dirty_files": 0,
+  "plugin_commit": "9fdb4197af72c18404c52648c3c71c84c9e28cfd",
+  "plugin_tree_dirty_files": 0,
+  "backend_version": "0.4.0.9fdb4197af7",
+  "provider_cmake_flags": [
+    "-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON",
+    "-DHIPDNN_ENABLE_SDPA=ON",
+    "-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON",
+    "-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON",
+    "-DHIPKERNELPROVIDER_ENABLE_TESTS=OFF",
+    "-DHIPDNN_SKIP_TESTS=ON",
+    "-DROCKE_INSTALL_TESTS=OFF",
+    "-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON",
+    "-DENABLE_MEGAKERNEL_ENGINE=ON"
+  ],
+  "pins": {
+    "python": "3.12",
+    "vllm": "0.32.1rc1.dev117+gdf3bd094a.rocm100",
+    "vllm_commit": "df3bd094aeea829f27baa0a5282830464f601d9f",
+    "vllm_index": "https://wheels.vllm.ai/rocm/df3bd094aeea829f27baa0a5282830464f601d9f/rocm100",
+    "torch": "2.13.0+rocm10.0.0",
+    "rocm": "10.0.0"
+  },
+  "built_utc": "2026-10-30T08:51:37.690097+00:00"
+}
+WARNING: The directory '/tmp/hvco/home/.cache/pip' or its parent directory is not owned or is not writable by the current user. The cache has been disabled. Check the permissions and owner of that directory. If executing pip with sudo, you should use sudo's -H flag.
+Processing ./.
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: hipdnn-vllm
+  Building wheel for hipdnn-vllm (pyproject.toml): started
+  Building wheel for hipdnn-vllm (pyproject.toml): finished with status 'done'
+  Created wheel for hipdnn-vllm: filename=hipdnn_vllm-0.1.0+rocm10.0.0.gfx94x-cp312-cp312-linux_x86_64.whl size=15131317 sha256=d88b87a671c2126ecbcdf0ea5fed79fb50dc0e34d17465e55bb4c11c27a765e3
+  Stored in directory: /tmp/pip-ephem-wheel-cache-7ucw7eke/wheels/f5/ba/9e/bef4fe965f5ebe83ad09266d81ded272de2e44ab3beaedd7a7
+Successfully built hipdnn-vllm
+total 14788
+drwxr-xr-x 2 root root     4096 Oct 30 08:52 .
+drwxrwxr-x 8 1038 1037     4096 Oct 30 08:51 ..
+-rw-r--r-- 1 root root 15131317 Oct 30 08:52 hipdnn_vllm-0.1.0+rocm10.0.0.gfx94x-cp312-cp312-linux_x86_64.whl
+WHEEL_OK gfx94X 2026-10-30T08:52:14+00:00
+build rc=0 2026-10-30T08:52:14+00:00
+total 14788
+drwxr-xr-x 2 root root     4096 Oct 30 08:52 .
+drwxrwxr-x 8 1038 1037     4096 Oct 30 08:51 ..
+-rw-r--r-- 1 root root 15131317 Oct 30 08:52 hipdnn_vllm-0.1.0+rocm10.0.0.gfx94x-cp312-cp312-linux_x86_64.whl
