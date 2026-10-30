@@ -7,6 +7,7 @@ Documentation for rocWMMA is available at
 
 ### Changed
 
+* int8 WMMA on gfx11, gfx1170, gfx1171, gfx1200 and gfx1201 now wraps on int32 overflow instead of saturating. This matches gfx1250, uint8 inputs, MFMA targets and the reference implementations. Results differ only when an int32 result overflows.
 * Applications using OpenMP must now discover and link it explicitly instead of relying on `roc::rocwmma` to supply OpenMP flags and libraries. Use `find_package(OpenMP REQUIRED COMPONENTS CXX)` and link the application to `OpenMP::OpenMP_CXX`. Without this change, OpenMP loops may execute serially and calls to `omp_*` functions may fail to link.
 
 ### Resolved issues
