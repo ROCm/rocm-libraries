@@ -5898,11 +5898,19 @@ def _build_gfx942_4warp_gqa_lean(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
 
+    # The last KV tile can run past klen into block-table entries the sequence
+    # does not own (past the table's end for the last sequence), and K/V at
+    # whatever page id is there. Clamp to the sequence's last block: those keys
+    # are masked, and its data is finite, so they still contribute 0.
+    last_blk = b.sub(
+        b.div(b.add(klen, b.const_i32(BS - 1)), b.const_i32(BS)), b.const_i32(1)
+    )
+    last_blk = b.select(b.cmp_lt(last_blk, b.const_i32(0)), b.const_i32(0), last_blk)
+
     def phys_key(kv, keytile):
-        lblk = b.add(
-            b.mul(sid, bt_stride_p),
-            b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS))),
-        )
+        blk = b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS)))
+        blk = b.select(b.cmp_lt(last_blk, blk), last_blk, blk)
+        lblk = b.add(b.mul(sid, bt_stride_p), blk)
         pb = b.global_load_i32(BT, lblk)
         return b.add(b.mul(pb, b.const_i32(BS)), b.mod(keytile, b.const_i32(BS)))
 
@@ -5950,7 +5958,12 @@ def _build_gfx942_4warp_gqa_lean(
             koff = b.add(
                 b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
             )
+            # The q-block is 128 rows; past the sequence's last row, read the
+            # last row instead (never stored) so the load stays inside Q.
             q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
+            q_tok = b.select(
+                b.cmp_lt(q_tok, cu_q_stop), q_tok, b.sub(cu_q_stop, b.const_i32(1))
+            )
             q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
@@ -6040,7 +6053,11 @@ def _build_gfx942_4warp_gqa_lean(
             dim = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), r)
             q_inseq = b.add(qbase, b.add(wq, c))
             oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), b.const_i32(H)), qhead)
-            val = b.cast_f32_to(b.fmul(b.vec_extract(accs_f[nt], i), recip), dtype)
+            # A row whose diagonal is left of key 0 (qlen > klen) sees no key:
+            # every score was masked, so m/l/acc hold no softmax. Its O is 0.
+            no_key = b.cmp_lt(b.add(context_off, q_inseq), b.const_i32(0))
+            o = b.select(no_key, zf, b.fmul(b.vec_extract(accs_f[nt], i), recip))
+            val = b.cast_f32_to(o, dtype)
             with b.scf_if(b.cmp_lt(q_inseq, qlen)):
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
     b.ret()
@@ -6225,11 +6242,19 @@ def build_gfx942_4warp_gqa(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
 
+    # The last KV tile can run past klen into block-table entries the sequence
+    # does not own (past the table's end for the last sequence), and K/V at
+    # whatever page id is there. Clamp to the sequence's last block: those keys
+    # are masked, and its data is finite, so they still contribute 0.
+    last_blk = b.sub(
+        b.div(b.add(klen, b.const_i32(BS - 1)), b.const_i32(BS)), b.const_i32(1)
+    )
+    last_blk = b.select(b.cmp_lt(last_blk, b.const_i32(0)), b.const_i32(0), last_blk)
+
     def phys_key(kv, keytile):
-        lblk = b.add(
-            b.mul(sid, bt_stride_p),
-            b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS))),
-        )
+        blk = b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS)))
+        blk = b.select(b.cmp_lt(last_blk, blk), last_blk, blk)
+        lblk = b.add(b.mul(sid, bt_stride_p), blk)
         pb = b.global_load_i32(BT, lblk)
         return b.add(b.mul(pb, b.const_i32(BS)), b.mod(keytile, b.const_i32(BS)))
 
@@ -6240,6 +6265,11 @@ def build_gfx942_4warp_gqa(
     def bperm(v):
         partner = b.mul(b.xor(lane, b.const_i32(32)), b.const_i32(4))
         return b.bitcast(b.ds_bpermute(partner, b.bitcast(v, I32)), F32)
+
+    def q_row(tok):
+        # The q-block is TOKBLK rows; past the sequence's last row, read the
+        # last row instead (never stored) so the load stays inside Q.
+        return b.select(b.cmp_lt(tok, cu_q_stop), tok, b.sub(cu_q_stop, b.const_i32(1)))
 
     iters = [("m", ninf), ("l", zf)] + [
         (f"a{nt}", at.zero_acc(b)) for nt in range(NDdim)
@@ -6417,13 +6447,13 @@ def build_gfx942_4warp_gqa(
                 # head=m%FOLD_HEADS), head-fastest. Split by FOLD_HEADS (tile
                 # geometry); head BASE strides by GQAG (the GQA group).
                 _m = b.add(wq, ld.n_in_atom)
-                _tok = b.add(qstart, b.div(_m, b.const_i32(FOLD_HEADS)))
+                _tok = q_row(b.add(qstart, b.div(_m, b.const_i32(FOLD_HEADS))))
                 _hd = b.add(
                     b.mul(kvh, b.const_i32(GQAG)), b.mod(_m, b.const_i32(FOLD_HEADS))
                 )
                 q_off, _ = q_desc.offset(b, token=_tok, head=_hd, dim=koff)
             else:
-                q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
+                q_tok = q_row(b.add(b.add(qstart, wq), ld.n_in_atom))
                 q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
             q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
             for kt in range(NKEYT):
@@ -6595,7 +6625,11 @@ def build_gfx942_4warp_gqa(
             else:
                 q_inseq = b.add(qbase, b.add(wq, c))
                 oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), b.const_i32(H)), qhead)
-            val = b.cast_f32_to(b.fmul(b.vec_extract(accs_f[nt], i), recip), dtype)
+            # A row whose diagonal is left of key 0 (qlen > klen) sees no key:
+            # every score was masked, so m/l/acc hold no softmax. Its O is 0.
+            no_key = b.cmp_lt(b.add(context_off, q_inseq), b.const_i32(0))
+            o = b.select(no_key, zf, b.fmul(b.vec_extract(accs_f[nt], i), recip))
+            val = b.cast_f32_to(o, dtype)
             with b.scf_if(b.cmp_lt(q_inseq, qlen)):
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
     b.ret()
