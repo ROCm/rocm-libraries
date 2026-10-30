@@ -2605,23 +2605,21 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         }
     }
 
-    // Phase C+D — NonWmmaFill: fill with non-WMMA work (inside then outside the
-    // window).
+    // Phase C+D — NonWmmaFill: fill with non-WMMA work, inside or outside a WMMA window.
     if (isPromote(PromotePhase::NonWmmaFill)) {
         if (promotedPhase_ == PromotePhase::NonWmmaFill && promotedNode_)
             return rememberPick(popNonWmma(promotedNode_, promotedKind_));
 
-        // Phase C — inside WMMA latency window.
-        if (coIssueCyclePos_ < activeWmmaLatency_) {
+        // Inside a window with nothing pickable, time moves on and the pick is tried once more.
+        for (bool inWindow = coIssueCyclePos_ < activeWmmaLatency_;; inWindow = false) {
             DAGNode* smallestPickable = nullptr;
             int pickKind = -1;
             int pickWait = 0;
             if (findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind, &pickWait)) {
-                PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase C picked non-WMMA dagId="
+                PASS_DEBUG(std::cerr << "[CDNA5 pickOne] NonWmmaFill picked dagId="
                                      << smallestPickable->id << " kind=" << pickKind
-                                     << " wait=" << pickWait << "\n");
-                // A ds credit wait consumes only its independent scheduling
-                // budget. RAW/hazard waits remain genuine elapsed stalls.
+                                     << " wait=" << pickWait << " inWindow=" << inWindow << "\n");
+                // A ds credit wait is pacing-only; RAW/hazard waits are genuine elapsed stalls.
                 if (pickWait > 0) {
                     if (pickKind == kLocalRead) {
                         chargeDsCreditWait(pickWait);
@@ -2631,27 +2629,10 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                 }
                 return rememberPick(popNonWmma(smallestPickable, pickKind));
             }
-
+            if (!inWindow) break;
             // Only to the oldest queued WMMA's end: the queue is not drained (depth 1: window end).
             advanceTime(std::min(activeWmmaLatency_ - coIssueCyclePos_, soonestQueueEnd()),
                         TimeKind::Elapsed);
-        }
-
-        // Phase D — outside WMMA latency.
-        DAGNode* smallestPickable = nullptr;
-        int pickKind = -1;
-        int pickWait = 0;
-        if (findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind, &pickWait)) {
-            // Same split as Phase C: a ds credit wait is pacing-only; RAW/hazard
-            // waits are genuine elapsed stalls.
-            if (pickWait > 0) {
-                if (pickKind == kLocalRead) {
-                    chargeDsCreditWait(pickWait);
-                } else {
-                    advanceTime(pickWait, TimeKind::Elapsed);
-                }
-            }
-            return rememberPick(popNonWmma(smallestPickable, pickKind));
         }
     }
 
