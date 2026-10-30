@@ -3,66 +3,74 @@
 
 """MX (microscaling) GEMM kernel (CK Tile ``42_mx_gemm`` parity).
 
-DSL counterpart of CK Tile's ``example/ck_tile/42_mx_gemm``. The MX
-GEMM uses the OCP MX-spec shared-exponent format: each 32-element
-mantissa block carries one 8-bit biased E8M0 scale (bias 127), so the per-
-element math is::
+The OCP MX format: every 32 consecutive K elements of a row of A (a column of
+B) share one 8-bit E8M0 scale, an unsigned exponent biased by 127::
 
- A_mantissa[i] = fp8_or_fp6_or_fp4 value
- A_scale[i // 32] = 8-bit unsigned biased exponent (E8M0)
- A_real[i] = A_mantissa[i] * 2^(A_scale[i // 32] - 127)
+ A_real[m, k] = A[m, k] * 2^(AScale[k // 32, m] - 127)
+ B_real[k, n] = B[k, n] * 2^(BScale[k // 32, n] - 127)
+ C[m, n] = sum_k A_real[m, k] * B_real[k, n] (f32)
 
-Same for B. The kernel does an A * B^T contraction in f32 (the MX
-intrinsic family ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``
-applies the scale in-instruction; v1 applies it explicitly after each
-group's MFMA with :func:`rocke.helpers.mx_scale.fma_with_mx_scale_pair`
-so the inner GEMM stays interpretable). Each group's update of an output is
-the exact value rounded once to f32, bit for bit; the MX GEMM section of
-``dsl_docs/instances/gemm.md`` says why.
+Scale code 255 is NaN. Both scale tensors are K-major: ``AScale`` is
+``(K / 32, M)`` and ``BScale`` ``(K / 32, N)``, so the codes of one scale group
+for consecutive rows (columns) are consecutive bytes. The mantissas are fp8
+(E4M3) or bf8 (E5M2) in the encoding the target's matrix cores read (FNUZ on
+gfx942, OCP on gfx950).
 
-What v1 ships:
+Numerics: every output is within the runbook GEMM tolerance of the exact
+result, with IEEE special values (a NaN scale code or a NaN input element gives
+NaN). An output is finite as long as every scaled group term and every running
+sum of them, in K order, stays within the f32 range: the scale factors never
+overflow on their own. Once one of those overflows, the output may be Inf or
+NaN, as in any GEMM that accumulates in f32. ``dsl_docs/instances/gemm.md``
+(MX GEMM) states the contract and why each step keeps it.
 
-* **fp8 mantissa** for both A and B (``mantissa_dtype="fp8e4m3"``);
- the fp6 and fp4 mantissa families are reachable through the same
- spec surface once the matching unpack helpers land in
- :mod:`rocke.helpers.i4_dequant` (the fp4 / fp6 unpackers are a
- natural extension of the i4 nibble-extract pattern).
-* **Block size 32 for the shared exponent** (the MX-spec default);
- ``group_k`` is the only knob (default 32).
-* **f32 output**; the caller can post-convert to bf16/f16 via
- :func:`rocke.helpers.io.store_scalar_from_f32` or a follow-on
- finalize kernel.
+Work split: one wave computes a 32x32 output tile; a workgroup is
+``block_tile_m / 32 x block_tile_n / 32`` waves side by side: the waves of one
+tile row read the same A rows, and those of one tile column the same B rows, at
+about the same time, so that they can share those reads in the vector L1 cache.
+Operands are buffer loads: each lane's offset stays in a
+register for the whole K loop and the K step is a scalar offset.
 
-Scalar inner v1 (per output ``(m, n)``):
+How the scales are applied depends on the target:
 
- acc = 0
- for k in 0..K:
- a_mantissa = load A[m, k]; b_mantissa = load B[k, n]
- a_scale = decode(A_scale[m, k // 32])
- b_scale = decode(B_scale[k // 32, n]) # transposed for column-major B
- a = cvt_<mantissa_dtype>_to_f32(a_mantissa) * a_scale
- b = cvt_<mantissa_dtype>_to_f32(b_mantissa) * b_scale
- acc += a * b
- C[m, n] = acc
-
-The MFMA-based body ( follow-on) replaces the per-element loop
-with one ``mfma_f32_16x16x32_fp8(...)`` call per MX block plus the
-block-scale multiply post-MFMA, against the same spec + helper
-surface.
+* A target with the E8M0-scaled MFMA (gfx950) applies them in the
+  instruction: one ``32x32x64`` scaled MFMA per two scale groups, each lane
+  passing the scale byte of the row (column) and group it loads. That
+  instruction scales every product before it sums them, so with very large
+  scale codes a product can overflow although the sum would not. Each lane
+  tracks the largest code it passed; if any lane of the wave saw one above
+  :func:`rocke.helpers.mx_scale.largest_safe_mx_scale_code`, the wave computes
+  its tile again the second way and stores that instead. A K that is not a
+  multiple of 64 leaves one group, which is added the second way.
+* Any target (gfx942): per scale group two ``32x32x16`` fp8 / bf8 MFMAs give
+  the group's unscaled dot product, and
+  :func:`rocke.helpers.mx_scale.add_mx_scaled_dot` adds it to the accumulator
+  times ``2^(ea + eb)`` with the A scale of each output's row and the B scale
+  of its column. The group is added one group late, so the scale arithmetic
+  never waits on a load issued in the same group.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Tuple
+from typing import Literal, NamedTuple, Tuple
 
-from ...core.ir import F32, I8, I32, IRBuilder, KernelDef, PtrType
+from ...core.arch import ArchTarget, MmaOp
+from ...core.arch.mfma_scale import matrix_layout
+from ...core.ir import (
+    F32,
+    I8,
+    I32,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+    Type,
+    Value,
+    VectorType,
+)
 from ...helpers.atoms import MfmaAtom
 from ...helpers.mfma_gemm_inner import (
     decode_mfma_lanes,
-    load_a_row_major_contiguous,
-    load_b_col_strided_scalars,
-    store_acc_to_global,
     validate_arch_and_block_size,
     validate_mfma_atom_in_catalog,
 )
@@ -72,8 +80,8 @@ from ...helpers.mx_scale import (
     FP8_E4M3_FNUZ,
     FP8_E4M3_OCP,
     MxElementFormat,
-    exact_mx_scale_split,
-    fma_with_mx_scale_pair,
+    add_mx_scaled_dot,
+    largest_safe_mx_scale_code,
 )
 from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, kernel_name_join
@@ -81,9 +89,14 @@ from ...helpers.spec import SignatureBuilder, kernel_name_join
 # sched_barrier mask: every instruction class may be scheduled across the
 # barrier except VMEM (0x10) and VMEM read (0x20).
 _SCALE_LOADS_FIRST = 0x7CF
-# The E8M0 scale code of 2^0 (the code is the exponent biased by 127).
-_E8M0_CODE_FOR_ONE = 127
-
+# The output tile of one wave, and of its MFMAs.
+_WAVE_TILE = 32
+_WAVE_SIZE = 64
+# K elements per scaled MFMA (two scale groups).
+_SCALED_MFMA_K = 64
+# A scale codes per load: four consecutive rows of one group (one dword).
+_A_SCALE_ROWS_PER_LOAD = 4
+_I32_MAX = 0x7FFFFFFF
 
 MxMantissaDType = Literal["fp8e4m3", "bf8e5m2"]
 
@@ -96,13 +109,9 @@ _MFMA_ELEMENT_FORMATS = {
 
 
 def mx_gemm_element_format(mantissa_dtype: str, arch: str) -> MxElementFormat:
-    """The element format ``arch``'s MFMA reads for ``mantissa_dtype``.
-
-    The MX GEMM derives its scale split from it
-    (:func:`rocke.helpers.mx_scale.exact_mx_scale_split`), so the split
-    depends on the target: gfx942 reads the FNUZ encodings, gfx950 the OCP
-    ones.
-    """
+    """The element format ``arch``'s MFMA reads for ``mantissa_dtype``: the
+    FNUZ encodings on gfx942, the OCP ones on gfx950. Its largest value bounds
+    the products the scaled MFMA sums (:func:`largest_safe_mx_scale_code`)."""
     formats = _MFMA_ELEMENT_FORMATS.get(arch, {})
     if mantissa_dtype not in formats:
         raise ValueError(
@@ -112,51 +121,48 @@ def mx_gemm_element_format(mantissa_dtype: str, arch: str) -> MxElementFormat:
     return formats[mantissa_dtype]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class MxGemmSpec:
-    """One concrete MX GEMM kernel configuration."""
+    """One concrete MX GEMM kernel configuration.
+
+    ``block_tile_m`` x ``block_tile_n`` is the output tile of one workgroup,
+    both multiples of 32: one wave per 32x32 tile inside it, at most the
+    target's workgroup size in threads. It has no default: which tile is
+    fastest depends on the shape and the target, so the caller chooses it
+    (a tuning knob). M and N need not be multiples of the tile; waves past the
+    edge of C do nothing and stores past it are dropped. M must be a multiple
+    of 4 (the A scale codes of four consecutive rows are read as one dword).
+    Every field is keyword-only, so a positional argument cannot land in the
+    workgroup tile.
+    """
 
     M: int
     N: int
     K: int
+    block_tile_m: int
+    block_tile_n: int
     mantissa_dtype: MxMantissaDType = "fp8e4m3"
     group_k: int = 32  # MX spec: shared-exponent block size
-    block_tile_m: int = 16
-    block_tile_n: int = 16
     name: str = "rocke_mx_gemm"
-    # P77: row-aware scale correctness mode. The historical
-    # ``per_input_row=True`` (default) loads ``AScale[m_in_atom +
-    # m_tile_base, kg]`` per lane and applies it to the lane's
-    # ``c_per_lane=4`` *output* cells. For ``k_blk > 0`` lanes
-    # (16-63), ``m_in_atom`` does not equal the output-row index so
-    # the scale doesn't correspond to any output cell — masked by
-    # parity tests using uniform per-row scales but mathematically
-    # wrong on real workloads. ``per_input_row=False`` switches to
-    # per-output-row scale broadcast: lane-broadcast via
-    # :func:`rocke.helpers.mx_scale.load_and_decode_mx_scales_wave`
-    # so each lane sees the scale matching its actual output row.
-    # Defaults to True for backwards compatibility; flip to False
-    # on real per-row varying-scale workloads.
-    per_input_row: bool = True
 
     @property
-    def atom(self) -> MfmaAtom:
-        """fp8 / bf8 MFMA atom selected from ``mantissa_dtype``."""
-        if (self.block_tile_m, self.block_tile_n) != (16, 16):
-            raise ValueError(
-                f"mx_gemm MFMA path supports 16x16 tiles only "
-                f"(got {self.block_tile_m}x{self.block_tile_n})"
-            )
+    def group_atom(self) -> MfmaAtom:
+        """The fp8 / bf8 ``32x32x16`` MFMA that sums a scale group's unscaled
+        products, two per group."""
         return (
-            MfmaAtom.fp8_16x16x32()
+            MfmaAtom.fp8_32x32x16()
             if self.mantissa_dtype == "fp8e4m3"
-            else MfmaAtom.bf8_16x16x32()
+            else MfmaAtom.bf8_32x32x16()
         )
 
     @property
+    def waves(self) -> int:
+        """Waves per workgroup, one per 32x32 tile of the block tile."""
+        return (self.block_tile_m // _WAVE_TILE) * (self.block_tile_n // _WAVE_TILE)
+
+    @property
     def block_size(self) -> int:
-        # MFMA path: one wave64 warp per CTA.
-        return 64
+        return _WAVE_SIZE * self.waves
 
     def kernel_name(self) -> str:
         return kernel_name_join(
@@ -168,237 +174,443 @@ class MxGemmSpec:
         )
 
 
+def _scaled_mfma(spec: MxGemmSpec, arch: str) -> MmaOp | None:
+    """The target's E8M0-scaled ``32x32x64`` MFMA for the spec's mantissas
+    (a catalog :class:`MmaOp`), or None when the target has none (gfx942)."""
+    return ArchTarget.from_gfx(arch).mma.op_for_shape(
+        family="mfma_scaled",
+        a_dtype=spec.mantissa_dtype,
+        b_dtype=spec.mantissa_dtype,
+        c_dtype="fp32",
+        scales=("e8m0", "e8m0", spec.group_k),
+        m=_WAVE_TILE,
+        n=_WAVE_TILE,
+        k=_SCALED_MFMA_K,
+    )
+
+
 def is_valid_spec(spec: MxGemmSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for an MX-GEMM spec on ``arch``.
 
-    Architecture facts (LDS capacity, max threads/block) are sourced from
-    :class:`rocke.core.arch.ArchTarget` so the resource caps track the
-    target instead of being hardcoded. The MX v1 body uses the fp8/bf8
-    ``16x16x32`` MFMA atom, which is available on every CDNA gfx9 target
-    that ships the fp8 MFMA family (gfx942 / gfx950); we reject the fp4 /
-    fp6 mantissa families that genuinely require the gfx950-only MX MFMA
-    intrinsics.
+    The fp8 / bf8 ``32x32x16`` MFMA ships on every CDNA target with the fp8
+    MFMA family (gfx942 / gfx950); the fp4 / fp6 mantissa families are not
+    supported yet.
     """
+    for name in ("block_tile_m", "block_tile_n"):
+        tile = getattr(spec, name)
+        if tile <= 0 or tile % _WAVE_TILE:
+            return (
+                False,
+                f"{name} must be a positive multiple of {_WAVE_TILE}, got {tile}",
+            )
     ok, reason, _target = validate_arch_and_block_size(arch, spec.block_size)
     if not ok:
         return False, reason
-
     if spec.mantissa_dtype not in ("fp8e4m3", "bf8e5m2"):
         return False, (
             f"unsupported mantissa_dtype {spec.mantissa_dtype!r}; "
-            "v1 ships fp8e4m3 / bf8e5m2 only (fp4 / fp6 are v2)"
+            "the MX GEMM reads fp8e4m3 / bf8e5m2 (fp4 / fp6 are not supported yet)"
         )
     if spec.group_k != 32:
         return False, (
             f"MX spec requires group_k = 32 (shared exponent per 32 "
             f"mantissa elements); got group_k={spec.group_k}"
         )
+    if spec.M <= 0 or spec.N <= 0 or spec.K <= 0:
+        return False, f"M, N and K must be positive, got {spec.M}, {spec.N}, {spec.K}"
     if spec.K % spec.group_k:
         return False, f"K ({spec.K}) must be divisible by group_k ({spec.group_k})"
-    if spec.M % spec.block_tile_m or spec.N % spec.block_tile_n:
-        return False, "M / N must divide their tile sizes (v1 no partial tiles)"
-    if (spec.block_tile_m, spec.block_tile_n) != (16, 16):
+    if spec.M % _A_SCALE_ROWS_PER_LOAD:
         return False, (
-            f"mx_gemm MFMA path supports 16x16 tiles only "
-            f"(got {spec.block_tile_m}x{spec.block_tile_n})"
+            f"M ({spec.M}) must be a multiple of {_A_SCALE_ROWS_PER_LOAD}: a lane reads "
+            f"the A scale codes of {_A_SCALE_ROWS_PER_LOAD} consecutive rows as one dword"
         )
+    for tensor, offset in _largest_byte_offsets(spec).items():
+        if offset > _I32_MAX:
+            return False, (
+                f"the largest byte offset into {tensor} is {offset}, expected at most "
+                f"{_I32_MAX}: the kernel computes every buffer offset in i32"
+            )
     return True, "ok"
 
 
-def build_mx_gemm(spec: MxGemmSpec, arch: str = "gfx950") -> KernelDef:
-    """Build the IR for one MX GEMM instance (v1 scalar inner).
+def _largest_byte_offsets(spec: MxGemmSpec) -> dict[str, int]:
+    """The largest byte offset the kernel computes into each tensor.
 
-    ``arch`` (``"gfx942"`` / ``"gfx950"``) selects the target GPU and is
-    validated via :func:`is_valid_spec`. The fp8 / bf8 ``16x16x32`` MFMA
-    atom this kernel uses ships on both targets; the scale split's cap
-    depends on the element encoding the target's MFMA reads
-    (:func:`mx_gemm_element_format`). The fp4 / fp6 mantissa families that
-    genuinely require the gfx950-only MX MFMA intrinsics are rejected by
-    :func:`is_valid_spec` (and the catalog guard) before any IR is built.
+    A wave whose tile starts inside C computes the offsets of its whole 32x32
+    tile, so the rows and columns past the edge count too, up to the next
+    multiple of 32 (their loads and stores land past the end of the buffer and
+    are dropped). The AScale bound covers the last dword of A codes a lane
+    reads.
+    """
+    groups = spec.K // spec.group_k
+    padded_rows = -(-spec.M // _WAVE_TILE) * _WAVE_TILE
+    padded_cols = -(-spec.N // _WAVE_TILE) * _WAVE_TILE
+    return {
+        "A": padded_rows * spec.K - 1,
+        "B": (spec.K - 1) * spec.N + padded_cols - 1,
+        "AScale": (groups - 1) * spec.M + padded_rows - 1,
+        "BScale": (groups - 1) * spec.N + padded_cols - 1,
+        "C": 4 * ((padded_rows - 1) * spec.N + padded_cols) - 1,
+    }
+
+
+class _WaveOrigin(NamedTuple):
+    """A lane's index in its wave and the first row and column of the wave's
+    32x32 output tile."""
+
+    lane: Value
+    row_origin: Value
+    col_origin: Value
+
+
+@dataclass(frozen=True)
+class _WaveTile:
+    """What every part of the kernel reads to compute one wave's output tile:
+    its origin (:class:`_WaveOrigin`), the IR type of the mantissas and the
+    buffer descriptors of the five tensors."""
+
+    lane: Value
+    row_origin: Value
+    col_origin: Value
+    mantissa_type: Type
+    a_rsrc: Value
+    b_rsrc: Value
+    a_scale_rsrc: Value
+    b_scale_rsrc: Value
+    c_rsrc: Value
+
+
+def _wave_origin(b: IRBuilder, spec: MxGemmSpec) -> _WaveOrigin:
+    """The wave's 32x32 output tile origin and its lane.
+
+    Waves are numbered row-major inside the workgroup. The wave index is the
+    same in every lane, so it is read once (readfirstlane) and the tile origin
+    is a scalar.
+    """
+    waves_n = spec.block_tile_n // _WAVE_TILE
+    tid = b.thread_id_x()
+    lane = b.mod(tid, b.const_i32(_WAVE_SIZE))
+    wave = b.readfirstlane(b.div(tid, b.const_i32(_WAVE_SIZE)))
+    row_origin = b.add(
+        b.mul(b.block_id_y(), b.const_i32(spec.block_tile_m)),
+        b.mul(b.div(wave, b.const_i32(waves_n)), b.const_i32(_WAVE_TILE)),
+    )
+    col_origin = b.add(
+        b.mul(b.block_id_x(), b.const_i32(spec.block_tile_n)),
+        b.mul(b.mod(wave, b.const_i32(waves_n)), b.const_i32(_WAVE_TILE)),
+    )
+    return _WaveOrigin(lane, row_origin, col_origin)
+
+
+def _byte(
+    b: IRBuilder, rsrc: Value, voffset: Value, soffset: Value, dtype: Type
+) -> Value:
+    """One 1-byte element through a buffer descriptor."""
+    return b.vec_extract(b.buffer_load_vN(rsrc, voffset, soffset, dtype, 1), 0)
+
+
+def _sum_scaled_groups(
+    b: IRBuilder,
+    spec: MxGemmSpec,
+    tile: _WaveTile,
+    acc: Value,
+    first_group: int,
+    end_group: int,
+    tag: str,
+) -> Value:
+    """``acc`` plus the scaled dot products of scale groups
+    ``first_group .. end_group - 1``. ``tag`` names the loop's values (one
+    kernel can hold this loop twice).
+
+    Per group: two ``32x32x16`` MFMAs give the unscaled dot product of each of
+    the lane's 16 outputs, and :func:`add_mx_scaled_dot` adds it times
+    ``2^(ea + eb)``, ``ea`` from the A scale of the output's row and ``eb`` from
+    the B scale of the lane's column. A group is added one iteration late: the
+    first iteration adds a zero dot product with scale codes 0, a term of +0
+    (``ldexp(+0, -254)``), and the last group is added after the loop.
+    """
+    atom = spec.group_atom
+    lanes = decode_mfma_lanes(b, atom, tile.lane)
+    a_row = b.add(tile.row_origin, lanes.m_in_atom)
+    b_col = b.add(tile.col_origin, lanes.n_in_atom)
+    k_lane = b.mul(lanes.k_blk, b.const_i32(atom.a_per_lane))
+    a_offset = b.add(b.mul(a_row, b.const_i32(spec.K)), k_lane)
+    b_offsets = [
+        b.add(b.mul(b.add(k_lane, b.const_i32(j)), b.const_i32(spec.N)), b_col)
+        for j in range(atom.b_per_lane)
+    ]
+    # The A scale codes of the lane's outputs, one 4-byte load per 4 outputs:
+    # in the 32x32 accumulator, slots 4q .. 4q + 3 of a lane are four
+    # consecutive rows of one column (MfmaAtom.lane_to_output, the rows the
+    # store uses), and AScale holds a group's codes for consecutive rows in
+    # consecutive bytes.
+    a_scale_offsets = [
+        b.add(tile.row_origin, atom.lane_to_output(b, tile.lane, q)[0])
+        for q in range(0, atom.c_per_lane, _A_SCALE_ROWS_PER_LOAD)
+    ]
+    atoms_per_group = spec.group_k // atom.k
+    zero_code = b.trunc(b.const_i32(0), I8)
+
+    loop = b.scf_for_iter(
+        b.const_i32(first_group),
+        b.const_i32(end_group),
+        b.const_i32(1),
+        [
+            (f"{tag}_acc", acc),
+            (f"{tag}_prev_dot", atom.zero_acc(b)),
+            *((f"{tag}_prev_a_code{i}", zero_code) for i in range(atom.c_per_lane)),
+            (f"{tag}_prev_b_code", zero_code),
+        ],
+        iv_name=f"{tag}_group",
+    )
+    with loop as (group, (acc_in, prev_dot, *prev_codes)):
+        group_codes = b.mul(group, b.const_i32(spec.M))
+        a_codes = []
+        for offset in a_scale_offsets:
+            rows = b.buffer_load_vN(
+                tile.a_scale_rsrc, offset, group_codes, I8, _A_SCALE_ROWS_PER_LOAD
+            )
+            a_codes += [b.vec_extract(rows, r) for r in range(_A_SCALE_ROWS_PER_LOAD)]
+        b_code = _byte(
+            b, tile.b_scale_rsrc, b_col, b.mul(group, b.const_i32(spec.N)), I8
+        )
+        # Issue the scale-byte loads before the operand loads: no global load
+        # may be scheduled across this point (every other instruction may).
+        b.sched_barrier(_SCALE_LOADS_FIRST)
+        operands = []
+        for atom_in_group in range(atoms_per_group):
+            k_tile = b.add(
+                b.mul(group, b.const_i32(spec.group_k)),
+                b.const_i32(atom_in_group * atom.k),
+            )
+            a_operand = b.buffer_load_vN(
+                tile.a_rsrc, a_offset, k_tile, tile.mantissa_type, atom.a_per_lane
+            )
+            row_step = b.mul(k_tile, b.const_i32(spec.N))
+            b_operand = b.vec_pack(
+                [
+                    _byte(b, tile.b_rsrc, offset, row_step, tile.mantissa_type)
+                    for offset in b_offsets
+                ],
+                tile.mantissa_type,
+            )
+            operands.append((a_operand, b_operand))
+        acc_out = add_mx_scaled_dot(
+            b, acc_in, prev_dot, prev_codes[:-1], [prev_codes[-1]] * atom.c_per_lane
+        )
+        dot = atom.zero_acc(b)
+        for a_operand, b_operand in operands:
+            dot = atom.emit(b, a_operand, b_operand, dot)
+        b.scf_yield(acc_out, dot, *a_codes, b_code)
+    acc_last, last_dot, *last_codes = loop.results
+    return add_mx_scaled_dot(
+        b, acc_last, last_dot, last_codes[:-1], [last_codes[-1]] * atom.c_per_lane
+    )
+
+
+def _scaled_mfma_steps(
+    b: IRBuilder, spec: MxGemmSpec, tile: _WaveTile, mma: MmaOp
+) -> tuple[Value, Value]:
+    """The accumulator after ``K // 64`` scaled MFMAs, and the largest scale
+    code each lane passed to them.
+
+    The scaled MFMA reads, per lane, the A row ``lane % 32`` and the B column
+    ``lane % 32``, K chunks interleaved between the two lane halves
+    (:func:`rocke.core.arch.mfma_scale.matrix_layout`), and one scale byte
+    each: the A scale of its row and the B scale of its column for group
+    ``lane // 32`` of the step.
+    """
+    layout = matrix_layout(spec.mantissa_dtype)
+    chunk = layout.chunk_elements
+    chunk_stride = chunk * layout.lane_groups  # K distance between a lane's chunks
+    row = b.mod(tile.lane, b.const_i32(layout.lanes_per_group))
+    lane_group = b.div(tile.lane, b.const_i32(layout.lanes_per_group))
+    a_row = b.add(tile.row_origin, row)
+    b_col = b.add(tile.col_origin, row)
+    k_lane = b.mul(lane_group, b.const_i32(chunk))
+    a_offset = b.add(b.mul(a_row, b.const_i32(spec.K)), k_lane)
+    b_offsets = [
+        b.add(b.mul(b.add(k_lane, b.const_i32(j)), b.const_i32(spec.N)), b_col)
+        for j in range(chunk)
+    ]
+    a_scale_offset = b.add(b.mul(lane_group, b.const_i32(spec.M)), a_row)
+    b_scale_offset = b.add(b.mul(lane_group, b.const_i32(spec.N)), b_col)
+    groups_per_step = _SCALED_MFMA_K // spec.group_k
+    words = VectorType(I32, 8)
+    zero = b.const_i32(0)
+    loop = b.scf_for_iter(
+        zero,
+        b.const_i32(spec.K // _SCALED_MFMA_K),
+        b.const_i32(1),
+        [("scaled_acc", b.zero_vec_f32(mma.c_frag_len)), ("largest_code", zero)],
+        iv_name="step",
+    )
+    with loop as (step, (acc, largest_code)):
+        k_step = b.mul(step, b.const_i32(_SCALED_MFMA_K))
+        group_step = b.mul(step, b.const_i32(groups_per_step))
+        a_scale = b.zext(
+            _byte(
+                b,
+                tile.a_scale_rsrc,
+                a_scale_offset,
+                b.mul(group_step, b.const_i32(spec.M)),
+                I8,
+            ),
+            I32,
+        )
+        b_scale = b.zext(
+            _byte(
+                b,
+                tile.b_scale_rsrc,
+                b_scale_offset,
+                b.mul(group_step, b.const_i32(spec.N)),
+                I8,
+            ),
+            I32,
+        )
+        a_chunks, b_elements = [], []
+        for c in range(layout.chunks_per_lane):
+            k_chunk = b.add(k_step, b.const_i32(c * chunk_stride))
+            a_chunks.append(
+                b.buffer_load_vN(
+                    tile.a_rsrc, a_offset, k_chunk, tile.mantissa_type, chunk
+                )
+            )
+            row_step = b.mul(k_chunk, b.const_i32(spec.N))
+            b_elements += [
+                _byte(b, tile.b_rsrc, offset, row_step, tile.mantissa_type)
+                for offset in b_offsets
+            ]
+        a_operand = b.bitcast(b.vec_concat(*a_chunks), words)
+        b_operand = b.bitcast(b.vec_pack(b_elements, tile.mantissa_type), words)
+        largest_code = b.smax(largest_code, b.smax(a_scale, b_scale))
+        b.scf_yield(
+            b.mma(mma, a_operand, b_operand, acc, a_scale, b_scale), largest_code
+        )
+    return loop.results
+
+
+def _store_tile(b: IRBuilder, spec: MxGemmSpec, tile: _WaveTile, acc: Value) -> None:
+    """Store the lane's 16 outputs (the rows and column of
+    :meth:`MfmaAtom.lane_to_output`) through a buffer descriptor over C: a row
+    past M lands past the end of C and is dropped; when N is not a multiple of
+    32, a column past N is moved past the end too."""
+    atom = spec.group_atom
+    past_end = b.const_i32(4 * spec.M * spec.N) if spec.N % _WAVE_TILE else None
+    zero = b.const_i32(0)
+    for i in range(atom.c_per_lane):
+        row_in_tile, col_in_tile = atom.lane_to_output(b, tile.lane, i)
+        col = b.add(tile.col_origin, col_in_tile)
+        element = b.add(
+            b.mul(b.add(tile.row_origin, row_in_tile), b.const_i32(spec.N)), col
+        )
+        offset = b.mul(element, b.const_i32(4))
+        if spec.N % _WAVE_TILE:
+            offset = b.select(b.cmp_lt(col, b.const_i32(spec.N)), offset, past_end)
+        b.buffer_store_vN(
+            tile.c_rsrc, offset, zero, b.vec_pack([b.vec_extract(acc, i)], F32)
+        )
+
+
+def build_mx_gemm(spec: MxGemmSpec, arch: str = "gfx950") -> KernelDef:
+    """Build the IR for one MX GEMM instance.
 
     Kernel signature::
 
-    (A: ptr<fp8 | bf8>, # (M, K) mantissa
-    AScale: ptr<i8>, # (M, K / 32) E8M0 shared exponent
-    B: ptr<fp8 | bf8>, # (K, N) mantissa
-    BScale: ptr<i8>, # (K / 32, N) E8M0 shared exponent
-    C: ptr<f32>, # (M, N) f32 output
+    (A: ptr<fp8 | bf8>, # (M, K) row-major mantissas
+    AScale: ptr<i8>, # (K / 32, M) row-major E8M0 codes
+    B: ptr<fp8 | bf8>, # (K, N) row-major mantissas
+    BScale: ptr<i8>, # (K / 32, N) row-major E8M0 codes
+    C: ptr<f32>, # (M, N) row-major f32 output
     M: i32, N: i32, K: i32)
 
-    Grid: ``(ceil(N / block_tile_n), ceil(M / block_tile_m), 1)``.
+    Grid: :func:`mx_gemm_grid`; block: ``spec.block_size`` threads.
     """
     ok, why = is_valid_spec(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid mx_gemm spec for {arch}: {why}")
-    validate_mfma_atom_in_catalog(spec.atom, arch, where="mx_gemm")
+    validate_mfma_atom_in_catalog(spec.group_atom, arch, where="mx_gemm")
+    mma = _scaled_mfma(spec, arch)
 
-    mantissa_ty = quant_ir_type(spec.mantissa_dtype)
-    BS = spec.block_size
-    # The split that makes each group's scale update exact, derived from the
-    # bounds of a group's dot product in the elements the MFMA reads.
-    element_format = mx_gemm_element_format(spec.mantissa_dtype, arch)
-    scale_split = exact_mx_scale_split(element_format, element_format, spec.group_k)
-
+    mantissa_type = quant_ir_type(spec.mantissa_dtype)
+    group_count = spec.K // spec.group_k
     b = IRBuilder(spec.kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = BS
+    b.kernel.attrs["max_workgroup_size"] = spec.block_size
 
-    A = b.param("A", PtrType(mantissa_ty, "global"), readonly=True, align=16)
-    AScale = b.param("AScale", PtrType(I8, "global"), readonly=True, align=1)
-    Bp = b.param("B", PtrType(mantissa_ty, "global"), readonly=True, align=16)
-    BScale = b.param("BScale", PtrType(I8, "global"), readonly=True, align=1)
-    C = b.param("C", PtrType(F32, "global"), writeonly=True, align=4)
-    _M = b.param("M", I32)  # noqa: F841 -- ABI
-    _N = b.param("N", I32)  # noqa: F841 -- ABI
-    _K = b.param("K", I32)  # noqa: F841 -- ABI
+    a_param = b.param("A", PtrType(mantissa_type, "global"), readonly=True, align=16)
+    a_scale_param = b.param("AScale", PtrType(I8, "global"), readonly=True, align=1)
+    b_param = b.param("B", PtrType(mantissa_type, "global"), readonly=True, align=16)
+    b_scale_param = b.param("BScale", PtrType(I8, "global"), readonly=True, align=1)
+    c_param = b.param("C", PtrType(F32, "global"), writeonly=True, align=4)
+    b.param("M", I32)
+    b.param("N", I32)
+    b.param("K", I32)
 
-    lane = b.thread_id_x()
-    bid_n = b.block_id_x()
-    bid_m = b.block_id_y()
-    atom = spec.atom
-    m_tile_base = b.mul(bid_m, b.const_i32(spec.block_tile_m))
-    n_tile_base = b.mul(bid_n, b.const_i32(spec.block_tile_n))
+    origin = _wave_origin(b, spec)
 
-    lane_decode = decode_mfma_lanes(b, atom, lane)
-    if spec.group_k % atom.k != 0:
-        raise ValueError(
-            f"MX group_k ({spec.group_k}) must be a multiple of atom.k "
-            f"({atom.k}) so the per-group scale apply aligns with whole "
-            f"MFMA invocations"
+    def tile_body() -> None:
+        tile = _WaveTile(
+            *origin,
+            mantissa_type=mantissa_type,
+            a_rsrc=b.buffer_rsrc(a_param, b.const_i32(spec.M * spec.K)),
+            b_rsrc=b.buffer_rsrc(b_param, b.const_i32(spec.K * spec.N)),
+            a_scale_rsrc=b.buffer_rsrc(
+                a_scale_param, b.const_i32(group_count * spec.M)
+            ),
+            b_scale_rsrc=b.buffer_rsrc(
+                b_scale_param, b.const_i32(group_count * spec.N)
+            ),
+            c_rsrc=b.buffer_rsrc(c_param, b.const_i32(4 * spec.M * spec.N)),
         )
-    k_scale_count = spec.K // spec.group_k
-    # ``atoms_per_group`` MFMA invocations cover one MX shared-exponent
-    # group. With the MX-spec default (group_k=32, atom.k=32) this is
-    # exactly 1, so the per-group MFMA work is a *single* atom -- emitting
-    # it with a runtime ``scf.for`` of trip-count 1 (the prior structure)
-    # paid a loop preamble, an iter-arg phi, and a yield per group for no
-    # iteration count. We Python-unroll the group's atoms instead: the
-    # count is a compile-time constant, the MFMA chain is fully visible to
-    # the scheduler, and the trip-1 loop disappears.
-    atoms_per_group = spec.group_k // atom.k
-
-    # Loop-invariant scale-address bases. The DSL pass pipeline does not
-    # run LICM (it never moves loads and only constant-folds/CSEs pure
-    # ops), so the per-lane (m_row, n_col) coordinates and the A-scale row
-    # stride must be hoisted out of the K-group loop by hand -- otherwise
-    # they are recomputed every group. Inside the loop only the
-    # ``kg``-dependent term is added.
-    m_global_row = b.add(m_tile_base, lane_decode.m_in_atom)
-    n_global_col = b.add(n_tile_base, lane_decode.n_in_atom)
-    a_scale_row_base = b.mul(m_global_row, b.const_i32(k_scale_count))
-
-    # Single-level K iteration over MX shared-exponent groups (one E8M0
-    # byte per group). Each group's ``atoms_per_group`` MFMA invocations
-    # are Python-unrolled into a fresh per-group acc, which is then scaled
-    # by ``2^(ea + eb)`` and folded into the outer accumulator with one
-    # fused ``v_pk_fma_f32`` per lane element. The MX
-    # ``mfma_f32_16x16x128_f8f6f4`` intrinsic does the scale
-    # in-instruction; the v1 chain replicates it explicitly so parity
-    # isn't blocked on the in-instruction intrinsic.
-    #
-    # The fold runs one group late: group ``kg`` issues its scale, A and B
-    # loads, folds group ``kg - 1`` (carried in ``prev_group`` with its two
-    # scale codes) while those loads are in flight, then runs its own MFMA.
-    # The scale math thus never waits on a load issued in the same group.
-    # The first iteration folds a zero group with scale code 127 (2^0) into
-    # the +0 accumulator, which leaves it +0, and the last group is folded
-    # after the loop: the same updates in the same order as folding each
-    # group straight after its MFMA, so the output is bit for bit the same.
-    unit_scale_code = b.trunc(b.const_i32(_E8M0_CODE_FOR_ONE), I8)
-    outer = b.scf_for_iter(
-        b.const_i32(0),
-        b.const_i32(k_scale_count),
-        b.const_i32(1),
-        [
-            ("oacc", atom.zero_acc(b)),
-            ("prev_group", atom.zero_acc(b)),
-            ("prev_a_code", unit_scale_code),
-            ("prev_b_code", unit_scale_code),
-        ],
-        iv_name="kg",
-    )
-    with outer as (kg, (outer_acc, prev_group, prev_a_code, prev_b_code)):
-        # Per-group E8M0 scale byte loads. Only the ``kg``-dependent
-        # term is added here; the per-lane (row, col) bases are hoisted.
-        a_scale_off = b.add(a_scale_row_base, kg)
-        b_scale_off = b.add(
-            b.mul(kg, b.const_i32(spec.N)),
-            n_global_col,
-        )
-        a_scale_code = b.global_load_i8(AScale, a_scale_off)
-        b_scale_code = b.global_load_i8(BScale, b_scale_off)
-        # Issue the two scale-byte loads before the A and B loads: no global
-        # load may be scheduled across this point (every other instruction
-        # may).
-        b.sched_barrier(_SCALE_LOADS_FIRST)
-
-        k_group_base = b.mul(kg, b.const_i32(spec.group_k))
-
-        # The group's A and B operands, one pair per MFMA atom. The loads
-        # stay in the shared helpers (row-major-contiguous A, col-strided B).
-        operands = []
-        for kt_local in range(atoms_per_group):
-            k_tile_base = b.add(
-                k_group_base,
-                b.const_i32(kt_local * atom.k),
-            )
-            a_vec = load_a_row_major_contiguous(
+        zero_acc = spec.group_atom.zero_acc(b)
+        if mma is None:
+            _store_tile(
                 b,
-                A=A,
-                atom=atom,
-                lane_decode=lane_decode,
-                m_tile_base=m_tile_base,
-                k_tile_base=k_tile_base,
-                K=spec.K,
+                spec,
+                tile,
+                _sum_scaled_groups(b, spec, tile, zero_acc, 0, group_count, "all"),
             )
-            b_vec = load_b_col_strided_scalars(
-                b,
-                B=Bp,
-                atom=atom,
-                lane_decode=lane_decode,
-                n_tile_base=n_tile_base,
-                k_tile_base=k_tile_base,
-                N=spec.N,
+            return
+        acc, largest_code = _scaled_mfma_steps(b, spec, tile, mma)
+        scaled_groups = (spec.K // _SCALED_MFMA_K) * (_SCALED_MFMA_K // spec.group_k)
+        if scaled_groups < group_count:
+            acc = _sum_scaled_groups(
+                b, spec, tile, acc, scaled_groups, group_count, "tail"
             )
-            operands.append((a_vec, b_vec))
-
-        # Fold the previous group while this group's loads are in flight.
-        # The helper adds the two scale exponents as integers: the product
-        # of the two decoded scales can overflow or flush to zero in f32
-        # even when the result is an ordinary f32.
-        new_outer = fma_with_mx_scale_pair(
-            b, prev_group, prev_a_code, prev_b_code, outer_acc, split=scale_split
+        _store_tile(b, spec, tile, acc)
+        # Codes above the safe bound: compute the tile again, scaling each
+        # group's dot product, and store that instead. This path is rare (a
+        # wave saw a code above the bound), so the common path keeps one store
+        # and no select; a lane's two stores to one address land in program
+        # order.
+        element = mx_gemm_element_format(spec.mantissa_dtype, arch)
+        safe_code = largest_safe_mx_scale_code(element, element, _SCALED_MFMA_K)
+        unsafe = b.wave_any(
+            b.select(
+                b.cmp_gt(largest_code, b.const_i32(safe_code)),
+                b.const_i32(1),
+                b.const_i32(0),
+            )
         )
+        with b.scf_if(b.cmp_ne(unsafe, b.const_i32(0))):
+            _store_tile(
+                b,
+                spec,
+                tile,
+                _sum_scaled_groups(b, spec, tile, zero_acc, 0, group_count, "again"),
+            )
 
-        # Python-unrolled per-group MFMA chain on a fresh f32 acc: the
-        # count is a compile-time constant, so no trip-1 ``scf.for``.
-        group_acc = atom.zero_acc(b)
-        for a_vec, b_vec in operands:
-            group_acc = atom.emit(b, a_vec, b_vec, group_acc)
-        b.scf_yield(new_outer, group_acc, a_scale_code, b_scale_code)
-
-    # Fold the last group.
-    outer_acc, last_group, last_a_code, last_b_code = outer.results
-    acc_final = fma_with_mx_scale_pair(
-        b, last_group, last_a_code, last_b_code, outer_acc, split=scale_split
-    )
-
-    # Output store via the shared MFMA epilogue helper: each lane
-    # writes its ``c_per_lane`` cells to global via the atom's
-    # ``lane_to_output`` mapping. f32 out (no cast), no atomic add.
-    # The per-cell stores stay scalar because the 16x16 atom places a
-    # lane's 4 outputs at the same column across 4 consecutive rows
-    # (stride = N), which is not vectorisable without an LDS shuffle.
-    store_acc_to_global(
-        b,
-        C=C,
-        atom=atom,
-        lane_decode=lane_decode,
-        m_tile_base=m_tile_base,
-        n_tile_base=n_tile_base,
-        acc=acc_final,
-        N=spec.N,
-        out_dtype="f32",
-    )
+    # A wave whose tile starts past the edge of C does nothing.
+    if spec.M % spec.block_tile_m or spec.N % spec.block_tile_n:
+        inside = b.land(
+            b.cmp_lt(origin.row_origin, b.const_i32(spec.M)),
+            b.cmp_lt(origin.col_origin, b.const_i32(spec.N)),
+        )
+        with b.scf_if(inside):
+            tile_body()
+    else:
+        tile_body()
     b.ret()
     return b.kernel
 

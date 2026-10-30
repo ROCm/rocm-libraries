@@ -432,53 +432,88 @@ and a dynamic K loop remain separate work.
 
 ## MX GEMM `instances/mx_gemm.py::MxGemmSpec` matches CK Tile ``42_mx_gemm``. Uses
 the OCP MX-spec shared-exponent format: each 32-element mantissa
-block carries one 8-bit biased E8M0 scale (bias 127). v1 supports fp8 and bf8
-mantissa with ``group_k=32``; fp4 / fp6 mantissa land with the
-matching unpack helpers as v2.
+block carries one 8-bit biased E8M0 scale (bias 127). It reads fp8 and bf8
+mantissas with ``group_k=32``; fp4 / fp6 mantissas are not supported yet.
 
 The scales follow the OCP MX spec: the E8M0 byte is an unsigned
 biased exponent, codes 0..254 mean exactly ``2^(code - 127)`` (code 0
-is the f32 subnormal ``2^-127``) and code 255 means NaN. Each group's
-MFMA result is scaled by :func:`rocke.helpers.fma_with_mx_scale_pair`,
-which adds the A and B scale exponents as integers instead of
-multiplying two decoded f32 scales: that product spans
-``2^-254..2^254`` and would overflow or flush to zero in f32 even when
-the output is an ordinary f32.
+is the f32 subnormal ``2^-127``) and code 255 means NaN.
 
-### MX GEMM outputs: exact
+Operands: ``A`` is ``(M, K)`` and ``B`` ``(K, N)``, row-major. Both scale
+tensors are K-major: ``AScale`` is ``(K / 32, M)`` and ``BScale``
+``(K / 32, N)``, so one group's codes for consecutive rows (columns) are
+consecutive bytes. ``C`` is ``(M, N)`` f32. ``M`` must be a multiple of 4.
+
+### MX GEMM numerics: within the GEMM tolerance, with IEEE special values
 
 Write ``ea``, ``eb`` for the unbiased exponents of a group's A and B scale
-codes (``code - 127``) and ``dot`` for the group's f32 MFMA result. Each output
-starts at +0 and adds every group's ``dot * 2^(ea + eb)``, one group at a time,
-rounding each addition once to f32. That is what IEEE f32 arithmetic gives for
-the same steps, bit for bit, including infinities, NaN and the sign of zero,
-for the supported fp8 and bf8 formats on gfx942 and gfx950. A scale code 255
-makes its block NaN.
+codes and ``exact`` for the exact result. Every output is within
 
-How: ``2^(ea + eb)`` spans ``2^-254..2^254``, so it is never formed as one
-f32. The update is ``fma(dot * 2^pre, 2^fused, acc)`` with ``pre + fused =
-ea + eb``: ``fused`` is ``ea + eb`` clamped to the f32 powers of two
-(``-149..127``) and ``pre`` the rest. The fma rounds once, so the update is
-exact whenever ``dot * 2^pre`` is exact.
+```
+|C - exact| <= 1e-3 * sum_k |a_k b_k| 2^(ea + eb) + (K / 32) * 2^-126
+```
 
-Why that is exact: ``dot`` is bounded. A group is 32 products of two fp8 or
-bf8 values, so ``dot`` is a multiple of the product of the two smallest
-subnormals and at most ``32 * largest^2`` in magnitude, and an f32 rounding of
-it keeps both properties. ``dot * 2^pre`` is therefore an exact f32 for every
-``pre`` that neither pushes the largest ``dot`` past the f32 range nor pushes
-the smallest below ``2^-149``, and that range of ``pre`` together with
-``fused`` covers every ``ea + eb`` from -254 up to a saturation point. Above
-that point ``fused`` is 127 and ``pre`` is saturated, so the update uses
-``2^(saturation point)`` in place of ``2^(ea + eb)``: there
-``|dot| * 2^(ea + eb)`` is at least
-``2^129`` for every nonzero ``dot``, so the exact update is the infinity of
-the product's sign for a finite accumulator and the accumulator itself for an
-infinite one, and a zero ``dot`` adds a zero either way: the saturated update
-gives the same. :func:`rocke.helpers.exact_mx_scale_split` derives the
-saturation point and the split from the bounds of the element format the
-target's MFMA reads (the OCP encodings on gfx950, the FNUZ encodings on
-gfx942), and refuses a format whose bounds admit no exact split. The
-derivation is in its docstring.
+(the runbook GEMM tolerance, section 1.4, relative to the size of the terms)
+and IEEE special values hold: a NaN scale code or a NaN input element gives
+NaN, also on a block of zeros.
+
+Whether an output is finite depends on the scaled group terms
+``T_g = 2^(ea + eb) * sum_{k in group g} a_k b_k`` and their running sums
+``T_0 + ... + T_g`` in K order, the values an f32 accumulator holds:
+
+* **Finite while they stay in range.** As long as every ``T_g`` and every
+  running sum stays within the f32 range, the output is finite (and within the
+  tolerance), even when single scaled products are far beyond it: the scaling
+  never overflows on its own.
+* **Inf or NaN once one overflows.** Once a term or a running sum is beyond the
+  f32 range, the output may be Inf or NaN, even if later groups bring the exact
+  result back into range (``+Inf`` then ``-Inf`` gives NaN). Any GEMM that
+  accumulates in f32 behaves this way.
+
+The outputs are not bit-exact: the matrix cores sum a group's products with
+their own rounding, which differs between targets.
+
+Why the scaled product is never formed as one float: ``2^(ea + eb)`` spans
+``2^-254..2^254``, far wider than f32. Multiplying two decoded scales overflows
+to Inf (and ``0 * Inf`` to NaN) or flushes to zero even when the output is an
+ordinary f32.
+
+### MX GEMM structure
+
+One wave computes a 32x32 output tile; a workgroup holds
+``block_tile_m / 32 x block_tile_n / 32`` waves side by side. The workgroup
+tile has no default: the caller chooses it per shape and target (a tuning
+knob), any pair of multiples of 32 up to the target's workgroup size (1024
+threads, 16 waves, on gfx942 and gfx950). The waves of one tile row read the
+same A rows, and those of one tile column the same B rows, at about the same
+time, so that they can share those reads in the vector L1 cache.
+Operands come through buffer descriptors: each lane's offsets stay in
+registers for the whole K loop and the K step is a scalar offset. Waves past
+the edge of C do nothing; stores past it are dropped.
+
+How the scales are applied depends on the target:
+
+* **Targets with the E8M0-scaled MFMA (gfx950).** One ``32x32x64`` scaled MFMA
+  per two groups; each lane passes the scale byte of the A row and of the B
+  column (and group) it loads, so every output gets its own row's and column's
+  scales. The instruction scales each product before it sums them, so a large
+  enough code pair could overflow a product whose sum is finite.
+  :func:`rocke.helpers.mx_scale.largest_safe_mx_scale_code` gives the largest
+  code both sides may have before a sum of 64 scaled products can come within
+  a binade of the f32 overflow threshold. Each lane tracks the largest code it
+  passed; if any lane of the wave saw a larger one (the NaN code included), the
+  wave computes its tile again the second way and stores that. Real MX data
+  sits far below the bound, so the second pass is the rare path. A K that is
+  not a multiple of 64 leaves one group, added the second way.
+* **Every target (gfx942 always).** Per group, two ``32x32x16`` fp8 / bf8
+  MFMAs give each output's unscaled dot product, at most
+  ``32 * largest^2`` in magnitude, and
+  :func:`rocke.helpers.mx_scale.add_mx_scaled_dot` adds it as
+  ``ldexp(dot, ea + eb)``: one rounding, correct for every pair of codes
+  (beyond the f32 range it is the infinity or zero of its sign), with the A
+  scale of each output's row and the B scale of its column. A NaN code makes
+  the term NaN. The group is added one iteration late so the scale arithmetic
+  never waits on a load issued in the same group.
 
 ## FP8 / BF8 MFMA atoms `helpers/atoms.py` adds four FP8 / BF8 MFMA atoms paired with the
 existing fp16 catalog:
