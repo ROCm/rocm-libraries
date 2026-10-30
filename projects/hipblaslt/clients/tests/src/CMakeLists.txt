@@ -61,26 +61,12 @@ endif()
 #
 # Where hipblaslt-test links the library's own objects instead, the two copies
 # would be duplicate definitions, and one process can hold only one tuner.
-# Coverage builds do that, and leave these cases out; the coverage job's filter
-# does not select them either. A static libhipblaslt does it too, so a static
-# build runs them in a binary of their own, which is not registered with ctest
-# for the reason hipblaslt-test-tuning-store is not.
+# Coverage builds and static builds do that, and leave these cases out; the
+# coverage job's filter does not select them either.
 if(HIPBLASLT_BUILD_SHARED_LIBS AND NOT HIPBLASLT_ENABLE_COVERAGE)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/online_tuner_test.cpp
         ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/OnlineTuner.cpp
-    )
-elseif(NOT HIPBLASLT_BUILD_SHARED_LIBS)
-    add_executable(hipblaslt-test-online-tuner
-        ${CMAKE_CURRENT_SOURCE_DIR}/online_tuner_test.cpp
-        ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/OnlineTuner.cpp
-    )
-    target_link_libraries(hipblaslt-test-online-tuner
-        PRIVATE
-            hipblaslt-tuning-store
-            hip::host
-            GTest::gtest
-            GTest::gtest_main
     )
 endif()
 

@@ -6,9 +6,8 @@
 //
 // They run against a private copy of the tuner: OnlineTuner.cpp is compiled into the
 // test binary with the onlineTunerConfig() defined at the bottom of this file. A shared
-// libhipblaslt exports neither, so the library's tuner is a separate object; a static
-// build runs these cases in hipblaslt-test-online-tuner instead. See
-// clients/tests/src/CMakeLists.txt.
+// libhipblaslt exports neither, so the library's tuner is a separate object. Coverage
+// and static builds leave these cases out. See clients/tests/src/CMakeLists.txt.
 //
 // The cases at the end of the file need a device and skip without one. The one case
 // that needs two devices is in the OnlineTuner_multi_gpu suite.
