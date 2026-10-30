@@ -393,6 +393,23 @@ if __name__ == "__main__":
 
 Add a new `mfma_f32_<m>x<n>x<k>_<dt>` method to `IRBuilder` and the corresponding op name. Wire it through `core/lower_llvm.py::_op_tile_mfma_f32_...` and `_INTRINSIC_DECLS`.
 
+An instruction whose call is plain data -- the A, B and C operands in fixed
+register types plus literal immediates -- needs no handler. Describe it as a
+`MatrixCall` in `MATRIX_CALLS` (`core/isa/matrix_calls.py`) and as the same row
+in the C++ table (`cpp/core/isa/matrix_calls.cpp`). Each operand and the result
+take one form (`core/isa/matrix_operand_forms.py`):
+
+| Form | The operand the kernel holds | What reaches the instruction |
+|---|---|---|
+| `AsIs(t)` | `t`, or the same bits in another shape | unchanged, or one `bitcast` |
+| `ZeroPadded(<m x i32>)` | packed `<n x i32>` words, n <= m | the words, then m - n zero words |
+| `EvenHalves(<2n x h>)` | n 16-bit values | the values in the even half-slots |
+
+A register type that changed at a newer LLVM flavor is a `FlavorType`. The
+`declare` line is derived from the forms and added to every flavor's
+declaration table, so no `_INTRINSIC_DECLS` entry is written; a `decl_key` that
+names an existing entry must derive exactly its text.
+
 ### 5.2 `helpers/atoms.py`
 
 Add a new `MfmaAtom` class method and register it in `MFMA_F16_ATOMS` (or a new `MFMA_BF16_ATOMS`, etc.). Critically, fill in `lane_to_output(b, lane, i)` — this is the per-atom mapping that the epilogue depends on. Bad lane mapping is the single most common atom-extension bug.

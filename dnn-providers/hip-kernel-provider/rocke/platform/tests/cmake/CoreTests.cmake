@@ -416,6 +416,23 @@ if(BUILD_TESTING)
                  rocke_flavor_decl_chain)
   endif()
 
+  # Matrix intrinsic calls described as data: forms, schema and declarations.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/matrix_call_lowering.cpp")
+    add_executable(rocke_matrix_call_lowering core/matrix_call_lowering.cpp)
+    target_link_libraries(rocke_matrix_call_lowering PRIVATE rocke_core)
+    add_test(NAME rocke_matrix_call_lowering
+             COMMAND rocke_matrix_call_lowering)
+    set_tests_properties(rocke_matrix_call_lowering
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_matrix_call_lowering)
+    set_target_properties(rocke_matrix_call_lowering
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_matrix_call_lowering
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_matrix_call_lowering)
+  endif()
+
   # Host unit test for the IR-layer MMA frag-length / accumulator-dtype tables
   # that rocke_b_mma consults to size a tile.mma result vector.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/mma_frag_ssot.cpp")

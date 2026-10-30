@@ -1022,10 +1022,12 @@ def _decls_for_flavor(flavor: str) -> Dict[str, str]:
     The rule, in one place: the base table, then the overrides of every
     declaration ABI generation up to and including the one ``flavor``'s
     emission profile selects, oldest first in :class:`_LlvmDeclarationAbi`
-    order. A newer generation's entry replaces an older one's text; a key keeps
-    the position it first appeared at. Compiler lanes that share a profile
-    (llvm23 and llvm24) therefore share one table. An unknown flavor is refused
-    by :func:`_emission_profile`.
+    order, then the declaration of every
+    :data:`~rocke.core.isa.matrix_calls.MATRIX_CALLS` entry whose key is not
+    already present (``MatrixCall.declaration`` derives it for ``flavor``). A
+    newer generation's entry replaces an older one's text; a key keeps the
+    position it first appeared at. An unknown flavor is refused by
+    :func:`_emission_profile`.
 
     Insertion order of ``_INTRINSIC_DECLS`` is preserved: it drives the emit
     order in ``finalize``, so the result is byte-significant.
@@ -1035,11 +1037,15 @@ def _decls_for_flavor(flavor: str) -> Dict[str, str]:
     lowerer to ask. The C++ engine resolves the same chain in
     ``rocke_ll_decl_text`` / ``rocke_ll_decl_at`` (``cpp/core/lower_llvm/data.cpp``).
     """
+    from .isa.matrix_calls import MATRIX_CALLS
+
     abi = _emission_profile(flavor).declaration_abi
     generations = list(_LlvmDeclarationAbi)
     decls = dict(_INTRINSIC_DECLS)
     for inherited in generations[: generations.index(abi) + 1]:
         decls.update(_INTRINSIC_DECL_OVERRIDES_BY_ABI[inherited])
+    for call in MATRIX_CALLS.values():
+        decls.setdefault(call.key, call.declaration(flavor))
     return decls
 
 
