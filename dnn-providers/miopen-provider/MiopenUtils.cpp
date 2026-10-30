@@ -3,6 +3,8 @@
 
 #include "MiopenUtils.hpp"
 
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+
 namespace miopen_plugin::miopen_utils
 {
 
@@ -195,6 +197,37 @@ ActivationParams mapPointwiseModeToMiopenActivation(
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                        "Unsupported activation operation");
+    }
+}
+
+void setBenchmarkingFindMode(miopenConvolutionDescriptor_t convDescriptor, bool benchmarkingEnabled)
+{
+    if(benchmarkingEnabled)
+    {
+        THROW_ON_MIOPEN_FAILURE(
+            miopenSetConvolutionFindMode(convDescriptor, miopenConvolutionFindModeNormal));
+    }
+}
+
+bool envFindEnforceIsSet()
+{
+    const std::string value = hipdnn_data_sdk::utilities::toLower(
+        hipdnn_data_sdk::utilities::getEnv("MIOPEN_FIND_ENFORCE"));
+    if(value == "db_update" || value == "search" || value == "search_db_update"
+       || value == "db_clean")
+    {
+        return true;
+    }
+    // MIOpen falls back to std::stoul, which skips leading whitespace and ignores trailing
+    // characters. A value it cannot parse makes MIOpen throw; here it counts as unset.
+    try
+    {
+        const unsigned long action = std::stoul(value);
+        return action >= 2 && action <= 5;
+    }
+    catch(const std::exception&)
+    {
+        return false;
     }
 }
 }

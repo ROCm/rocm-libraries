@@ -386,14 +386,18 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         # Route the installed entry and its TOML into the gfx950 shard, so pruning to
         # another architecture removes them along with the engine they name. Reserved
         # here rather than earlier so the shard is claimed exactly when something is
-        # registered into it.
+        # registered into it. The TOML goes to the reservation as well as TEST_CONFIG;
+        # hkp_reserve_census_shard() says why.
         #
         # Both YAML modes. Each gets a common entrypoint further down -- the categorized
         # file, or the one install_provider_ctest_files() writes -- and the discovery
         # stub is appended to whichever it is, so a sharded entry is reachable either
         # way. Both keywords move together: the staging key alone would divert the
         # uncategorized fallback out of the drain that serves that path.
-        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+        set(_gfx950_attention_dense_config
+            "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950AttentionDense.toml")
+        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950
+            FILES "${_gfx950_attention_dense_config}")
         set(_gfx950_shard_args
             INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_gfx950)
@@ -410,7 +414,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             ENGINE_NAME    "hipkernel:Gfx950AttentionDense"
             INSTALL_SUBDIR hip_kernel_provider
             ${_gfx950_shard_args}
-            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950AttentionDense.toml
+            TEST_CONFIG    ${_gfx950_attention_dense_config}
             GTEST_FILTER   "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
             ENVIRONMENT    ${TEST_ENVIRONMENT}
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
