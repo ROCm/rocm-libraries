@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "30ab4117-3fdd-57b3-83d9-bb19ea28bad5",
+  "name": "kernel dtype matches the graph's dtype",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.fixture_launch_mismatch.kernel_match"
+}

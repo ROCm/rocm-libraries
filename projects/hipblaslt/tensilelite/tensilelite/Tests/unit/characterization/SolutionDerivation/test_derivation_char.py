@@ -516,3 +516,55 @@ def test_direct_to_lds_rejects_unsupported_shapes(real_state, isa_info_map, over
     state["Valid"] = True
 
     assert Solution.isDirectToLdsDoable(state, "A", isa_info_map, False) is False
+
+# ===========================================================================
+# MXBlockFree{A,B} -> AssertFree{0,1}ElementMultiple
+#
+# A 2D MX scaling tile shares one scale across MXBlockFree free-dimension
+# elements, so a partial last tile would need a scale covering fewer rows than
+# the tile. Rather than support that, derivation raises the free-dimension
+# alignment assertion to the tile extent, the same way it already raises
+# AssertSummationElementMultiple to MXBlock{A,B}. Free0 is M (A's free index)
+# and Free1 is N (B's free index).
+#
+# `max` and not assignment: a config asking for more alignment than the tile
+# keeps it. Both keys default to 1, so this is a no-op for every configuration
+# that predates MXBlockFree*.
+# ===========================================================================
+
+@pytest.mark.parametrize(
+    "mxBlockFreeA,mxBlockFreeB,af0em,af1em,expected0,expected1",
+    [
+        # Defaults: derivation must not touch either assertion.
+        (1, 1, 1, 1, 1, 1),
+        (1, 1, 8, 4, 8, 4),
+        # The tile extent raises each assertion independently.
+        (128, 1, 1, 1, 128, 1),
+        (1, 128, 1, 1, 1, 128),
+        (128, 128, 1, 1, 128, 128),
+        (32, 16, 1, 1, 32, 16),
+        # A stricter config value survives; a weaker one is raised.
+        (32, 32, 128, 128, 128, 128),
+        (128, 128, 16, 16, 128, 128),
+    ],
+)
+def test_mx_block_free_raises_free_element_multiple(
+    real_state, isa_info_map, assembler,
+    mxBlockFreeA, mxBlockFreeB, af0em, af1em, expected0, expected1
+):
+    real_state["AssignedDerivedParameters"] = False
+    real_state["AssignedProblemIndependentDerivedParameters"] = False
+    real_state["ProblemType"]["MXBlockFreeA"] = mxBlockFreeA
+    real_state["ProblemType"]["MXBlockFreeB"] = mxBlockFreeB
+    real_state["AssertFree0ElementMultiple"] = af0em
+    real_state["AssertFree1ElementMultiple"] = af1em
+
+    Solution.assignDerivedParameters(
+        real_state, False, False, False, isa_info_map, assembler.rocm_version
+    )
+
+    # The fixture is a gfx942 HSS solution, so raising the assertions can make
+    # the solution invalid downstream; what is pinned here is the assertion
+    # values themselves, which are set before any of those checks.
+    assert real_state["AssertFree0ElementMultiple"] == expected0
+    assert real_state["AssertFree1ElementMultiple"] == expected1

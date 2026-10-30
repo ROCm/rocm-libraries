@@ -38,6 +38,7 @@ function(rocke_build_id_inputs out_var root_dir)
           "tests/portable_ir/replay_cli.cpp"
           "CMakeLists.txt"
           "tests/CMakeLists.txt"
+          "tests/cmake/PortableIrTests.cmake"
           "cmake/rocke_build_id.cmake"
           "cmake/generate_rocke_build_id.cmake")
     if(EXISTS "${root_dir}/${_rocke_input}")

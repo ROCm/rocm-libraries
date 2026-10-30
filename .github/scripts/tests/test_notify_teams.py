@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -29,25 +30,43 @@ def job(job_id, name, conclusion="failure"):
 
 
 class FakeGitHub:
-    """Serves `gh api` endpoints from in-memory jobs pages and logs."""
+    """Serves `gh api` endpoints from in-memory jobs pages and logs.
 
-    def __init__(self, job_pages, logs, failing_endpoints=()):
+    Mirrors gh's escape-sequence handling: gh >= 2.97.0 refuses responses
+    with terminal escape sequences unless --allow-escape-sequences is passed;
+    older gh rejects that flag as unknown.
+    """
+
+    def __init__(self, job_pages, logs, failing_endpoints=(), gh_before_2_97=False):
         self.job_pages = job_pages
         self.logs = logs
         self.failing_endpoints = failing_endpoints
+        self.gh_before_2_97 = gh_before_2_97
 
-    def __call__(self, endpoint):
-        if any(part in endpoint for part in self.failing_endpoints):
+    def __call__(self, endpoint, *flags):
+        argv = ["gh", "api", *flags, endpoint]
+        allow_escapes = notify_teams.GH_ALLOW_ESCAPES_FLAG in flags
+        if allow_escapes and self.gh_before_2_97:
             raise subprocess.CalledProcessError(
-                1, ["gh", "api", endpoint], stderr="HTTP 404: Not Found\n"
+                1, argv, stderr="unknown flag: --allow-escape-sequences\n"
             )
+        if any(part in endpoint for part in self.failing_endpoints):
+            raise subprocess.CalledProcessError(1, argv, stderr="HTTP 404: Not Found\n")
         if "/jobs?" in endpoint:
             page = int(endpoint.rsplit("page=", 1)[1])
             total = sum(len(p) for p in self.job_pages)
             jobs = self.job_pages[page - 1] if page <= len(self.job_pages) else []
             return json.dumps({"total_count": total, "jobs": jobs})
         job_id = int(endpoint.split("/jobs/")[1].split("/")[0])
-        return self.logs[job_id]
+        body = self.logs[job_id]
+        if "\x1b" in body and not allow_escapes and not self.gh_before_2_97:
+            raise subprocess.CalledProcessError(
+                1,
+                argv,
+                stderr="the response contains terminal escape sequences; "
+                "pass --allow-escape-sequences to output it anyway\n",
+            )
+        return body
 
 
 class SelectFailedJobsTest(unittest.TestCase):
@@ -104,6 +123,57 @@ class TruncateAtFirstErrorTest(unittest.TestCase):
         log = "step output\nPost job cleanup.\n"
 
         self.assertEqual(notify_teams.truncate_at_first_error(log), log)
+
+
+# Shape of a real GitHub Actions job log: timestamped lines, a runner step
+# header group echoing the step's script and env, and a script-made group.
+TIMESTAMPED_JOB_LOG = (
+    "\ufeff2026-10-27T04:20:34.0000001Z Complete job name: Test miopen\n"
+    "2026-10-27T04:20:34.4300000Z ##[group]Run printf '%s\\n' \"${MESSAGE}\"\n"
+    "2026-10-27T04:20:34.4310000Z printf '%s\\n' \"${MESSAGE}\"\n"
+    "2026-10-27T04:20:34.4321032Z shell: /usr/bin/bash -e {0}\n"
+    "2026-10-27T04:20:34.4322444Z env:\n"
+    "2026-10-27T04:20:34.4323585Z   MESSAGE: [  FAILED  ] Suite.Case\n"
+    "2026-10-27T04:20:34.4326203Z ##[endgroup]\n"
+    "2026-10-27T04:20:34.4400000Z ##[group]ctest output\n"
+    "2026-10-27T04:20:34.4500000Z [  FAILED  ] Suite.Case\n"
+    "2026-10-27T04:20:34.4600000Z ##[endgroup]\n"
+    "2026-10-27T04:20:34.4700000Z 50% tests passed, 1 tests failed out of 2\n"
+    "2026-10-27T04:20:34.4800000Z \n"
+    "2026-10-27T04:20:34.4900000Z ##[error]Process completed with exit code 1.\n"
+)
+
+CLEAN_JOB_LOG = (
+    "Complete job name: Test miopen\n"
+    "[  FAILED  ] Suite.Case\n"
+    "50% tests passed, 1 tests failed out of 2\n"
+    "\n"
+    "Error: Process completed with exit code 1.\n"
+)
+
+
+class CleanJobLogTest(unittest.TestCase):
+    def test_drops_timestamps_step_headers_and_group_markers(self):
+        self.assertEqual(notify_teams.clean_job_log(TIMESTAMPED_JOB_LOG), CLEAN_JOB_LOG)
+
+
+class ErrorExtractorTest(unittest.TestCase):
+    def test_overlapping_context_windows_do_not_repeat_lines(self):
+        with tempfile.TemporaryDirectory() as log_dir:
+            log_path = Path(log_dir) / "job.log"
+            log_path.write_text(
+                "setup\nRunning tests\n[  FAILED  ] Suite.Case\n"
+                "1 tests failed out of 2\nError: exit code 1\n",
+                encoding="utf-8",
+            )
+
+            context, _ = notify_teams.ErrorExtractor(str(log_path), "test").extract()
+
+        self.assertEqual(
+            context,
+            "setup\nRunning tests\n[  FAILED  ] Suite.Case\n"
+            "1 tests failed out of 2\nError: exit code 1\n",
+        )
 
 
 class NotifyFailedJobsFromRunTest(unittest.TestCase):
@@ -164,6 +234,38 @@ class NotifyFailedJobsFromRunTest(unittest.TestCase):
         self.assertIn("undefined reference to foo", sent[0]["error_context"])
         self.assertIn("[  FAILED  ] Suite.Case", sent[1]["error_context"])
         self.assertNotIn("unrelated cleanup failure", sent[1]["error_context"])
+
+    def test_colored_job_log_is_reported_without_escape_sequences(self):
+        colored_log = (
+            "\x1b[36;1mctest --output-on-failure\x1b[0m\n"
+            "\x1b[38;2;255;61;61m[  FAILED  ] Suite.Case\x1b[0m\n"
+            "##[error]Process completed with exit code 8.\n"
+        )
+        for gh_before_2_97 in (False, True):
+            with self.subTest(gh_before_2_97=gh_before_2_97):
+                fake_github = FakeGitHub(
+                    job_pages=[[job(3, LINUX_TEST_HIPDNN)]],
+                    logs={3: colored_log},
+                    gh_before_2_97=gh_before_2_97,
+                )
+
+                _, sent = self.run_notifier(fake_github)
+
+                context = sent[0]["error_context"]
+                self.assertIn("[  FAILED  ] Suite.Case", context)
+                self.assertNotIn("\x1b", context)
+
+    def test_error_context_is_clean_job_output(self):
+        fake_github = FakeGitHub(
+            job_pages=[[job(3, LINUX_TEST_HIPDNN)]],
+            logs={
+                3: TIMESTAMPED_JOB_LOG + "2026-10-27T04:20:35.0Z Post job cleanup.\n"
+            },
+        )
+
+        _, sent = self.run_notifier(fake_github)
+
+        self.assertEqual(sent[0]["error_context"], CLEAN_JOB_LOG)
 
     def test_pr_title_tag_overrides_job_component(self):
         fake_github = FakeGitHub(

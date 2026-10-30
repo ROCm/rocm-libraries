@@ -1821,6 +1821,53 @@ class TestVCndMaskB16True16Emission(AdaptorTestCase, _ThreePathEqualityCase):
     """)
 
 
+# ===========================================================================
+# TensorLoadToLds cache policy (TENSORModifiers: th / scope / nv)
+# ===========================================================================
+
+
+class TestTensorLoadToLdsNoCachePolicy(unittest.TestCase, _ThreePathEqualityCase):
+    """``tensor_load_to_lds`` without hints -- the baseline the hinted cases extend."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.container import sgpr
+        from rocisa.instruction import TensorLoadToLds
+        module = Module("k")
+        module.add(TensorLoadToLds(sgpr(0, 4), sgpr(4, 8), None, None))
+    """)
+
+
+class TestTensorLoadToLdsCachePolicy(unittest.TestCase, _ThreePathEqualityCase):
+    """th, scope and nv together, printed in the LLVM order th, scope, nv."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.container import TENSORModifiers, sgpr
+        from rocisa.enum import CacheScope, NonVolatile, TemporalHint
+        from rocisa.instruction import TensorLoadToLds
+        module = Module("k")
+        module.add(TensorLoadToLds(sgpr(0, 4), sgpr(4, 8), None, None,
+                                   tensor=TENSORModifiers(scope=CacheScope.SCOPE_SE,
+                                                          th=TemporalHint.TH_NT_HT,
+                                                          nv=NonVolatile.NV)))
+    """)
+
+
+class TestTensorLoadToLdsCachePolicyFourGroups(unittest.TestCase, _ThreePathEqualityCase):
+    """Iterate-mode four-group form with a temporal hint only."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.container import TENSORModifiers, sgpr
+        from rocisa.enum import TemporalHint
+        from rocisa.instruction import TensorLoadToLds
+        module = Module("k")
+        module.add(TensorLoadToLds(sgpr(0, 4), sgpr(4, 8), sgpr(12, 4), sgpr(16, 4),
+                                   tensor=TENSORModifiers(th=TemporalHint.TH_HT)))
+    """)
+
+
 ## DSBPermuteB32 emission consistency is skipped: native rocisa path-1 toString()
 ## and path-2 toStinkyTofuModule produce different asm for this instruction
 ## (mismatch unrelated to our adaptor), so three-path equality is not achievable.

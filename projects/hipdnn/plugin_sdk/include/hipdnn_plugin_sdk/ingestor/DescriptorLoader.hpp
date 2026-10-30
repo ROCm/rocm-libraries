@@ -1231,7 +1231,7 @@ inline bool isLaunchName(std::string_view name)
 /// mapped to a complete `kpack` kernel source. One entry says what `kernel_source` says, so
 /// it is refused rather than accepted as a second spelling of one fact. Entries may share a
 /// library and toc_key (one module, several kernels) and may even name the same symbol: a
-/// kernel launched twice, for example under two grid shapes, is one entry per launch.
+/// kernel run twice with different arguments is one entry per launch.
 ///
 /// A repeated key is not detected here: the DOM keeps the last value, as it does for every
 /// other descriptor object, and the packer never emits one.

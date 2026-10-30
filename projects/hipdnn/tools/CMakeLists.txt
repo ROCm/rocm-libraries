@@ -456,7 +456,8 @@ endforeach()
         # The multi-launch bundle: kernels carrying a `sources` map, one pair naming two
         # kernels and one naming a kernel under both launch names. It has its own engine,
         # and the same driver script. A validator that stopped declaring the pack's launch
-        # names drops this engine and fails here, which the single-launch root cannot show.
+        # names has its kernels dropped with an ERROR and exits non-zero here, which the
+        # single-launch root cannot show.
         set(HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ROOT
             "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/multi_launch"
         )

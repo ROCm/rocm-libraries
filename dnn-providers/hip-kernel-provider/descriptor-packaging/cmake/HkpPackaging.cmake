@@ -1766,6 +1766,19 @@ function(hkp_add_packaging)
         PACK_JOBS 1
         ${_root_args})
 
+    # Not under the unit or the integration root: no Container loads this set, so its engine
+    # reaches no engine list. The unit binary reads the packed archive and builds its own
+    # descriptor tree from it at run time.
+    _hkp_wire_root(
+        NAME multi_launch
+        SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH}"
+        ARCHES "${_arches}"
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH}"
+        PACK_JOBS 1
+        ${_root_args})
+
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
     if(HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES)
         include("${HKP_PKG_DIR}/cmake/HkpPackagingProbes.cmake")

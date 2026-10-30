@@ -487,6 +487,20 @@ TEST(TestKernelIngestorEngine, SupportsSerializationOnlyWhenEveryKernelPassesThe
     EXPECT_FALSE(supportsExecutionPlanSerialization(setWithKernels({{}, {}}, CONV_FWD.dispatch)));
 }
 
+// As captureIngestorPlan(), a kernel with several launches cannot be saved, even when each
+// launch is kpack. `source` stays kpack too, so a gate that read it instead of the launches
+// would accept the set.
+TEST(TestKernelIngestorEngine, NoNoteForAMultiLaunchKernel)
+{
+    DescriptorSet set = setWithKernels({{KernelSourceKind::KPACK}}, CONV_FWD.dispatch);
+    ASSERT_TRUE(supportsExecutionPlanSerialization(set));
+
+    auto& kernel = set.packs.front().kernels.front();
+    kernel.sources["decode"].kind = KernelSourceKind::KPACK;
+    kernel.sources["merge"].kind = KernelSourceKind::KPACK;
+    EXPECT_FALSE(supportsExecutionPlanSerialization(set));
+}
+
 TEST(TestKernelIngestorEngine, NoNoteWhenAHandlerCannotSave)
 {
     using hipdnn_plugin_sdk::ingestor::DispatchRegistry;

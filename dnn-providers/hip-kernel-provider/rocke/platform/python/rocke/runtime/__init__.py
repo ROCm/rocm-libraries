@@ -69,6 +69,10 @@ edge:
                           create HIP events; the launchers themselves
                           are event-free so production calls stay
                           overhead-free.
+                        * :func:`time_launches_staged` -- one stalled
+                          event pair per call (:class:`StallGate`), the
+                          way hipDNN's benchmark times a call; for
+                          numbers compared against hipDNN or MIOpen.
 
 The previous monolithic ``launch_torch_kernel`` is now a thin
 back-compat shim over :class:`KernelLauncher` + :func:`time_launches`;
@@ -103,6 +107,7 @@ from .launcher import (
     wait_stream_and_release,
 )
 from .packing import pack_args
+from .stall_gate import StallGate, StallTimeout, time_launches_staged
 from .torch_interop import (
     TorchLaunchSummary,
     empty_workspace,
@@ -121,6 +126,8 @@ __all__ = [
     "LaunchSummary",
     "PipelineLauncher",
     "Runtime",
+    "StallGate",
+    "StallTimeout",
     "TorchLaunchSummary",
     "WorkspacePool",
     "build_hsaco_from_llvm_ir",
@@ -133,5 +140,6 @@ __all__ = [
     "resolve_stream",
     "synchronize_and_release",
     "time_launches",
+    "time_launches_staged",
     "wait_stream_and_release",
 ]

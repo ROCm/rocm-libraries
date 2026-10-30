@@ -64,6 +64,7 @@ from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     RegisterContainer,
     VCC,
     SMEMModifiers,
+    TENSORModifiers,
     sgpr,
     vgpr,
 )
@@ -2840,6 +2841,18 @@ class TestTensorLoadToLds(AdaptorTestCase):
         c = copy.deepcopy(inst)
         self.assertIsInstance(c, TensorLoadToLds)
         self.assertEqual(str(c), str(inst))
+
+    def test_tostring_omits_absent_groups(self):
+        inst = TensorLoadToLds(group0=sgpr(0, 4), group1=sgpr(4, 8))
+        self.assertEqual(str(inst), "tensor_load_to_lds s[0:3], s[4:11]\n")
+
+    def test_deepcopy_keeps_cache_policy(self):
+        mods = TENSORModifiers(scope=CacheScope.SCOPE_SE, th=TemporalHint.TH_NT)
+        inst = TensorLoadToLds(group0=sgpr(0, 4), group1=sgpr(4, 8), tensor=mods)
+        c = copy.deepcopy(inst)
+        self.assertIsNot(c.tensor, inst.tensor)
+        self.assertEqual((c.tensor.scope, c.tensor.th), (CacheScope.SCOPE_SE, TemporalHint.TH_NT))
+        self.assertEqual(c.tensor.__getstate__(), inst.tensor.__getstate__())
 
     def test_has_to_stinky_logical(self):
         inst = TensorLoadToLds(group0=vgpr(0), group1=vgpr(1))

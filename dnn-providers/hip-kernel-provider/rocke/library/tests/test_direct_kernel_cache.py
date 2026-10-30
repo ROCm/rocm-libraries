@@ -22,6 +22,8 @@ from kernels.conv.direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS, _knob_grid
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.conv.direct_aot_jobs import _knob_grid
 from kernels.conv.direct_variants import (
+    DIRECT_DGRAD_PATCH_WMMA,
+    DIRECT_DGRAD_SMALLC_WMMA,
     DIRECT_DGRAD_WMMA,
     DIRECT_FWD_SMALLC_WMMA,
     DIRECT_FWD_SMALLK_WMMA,
@@ -36,7 +38,11 @@ from rocke.runtime.packing import compile_packer
 _ARCH = "gfx950"
 # Variants the grid builds only for wave32 targets.
 _WAVE32_ONLY_FWD = {DIRECT_FWD_WMMA, DIRECT_FWD_SMALLC_WMMA, DIRECT_FWD_SMALLK_WMMA}
-_WAVE32_ONLY = {DIRECT_DGRAD_WMMA} | _WAVE32_ONLY_FWD
+_WAVE32_ONLY = {
+    DIRECT_DGRAD_WMMA,
+    DIRECT_DGRAD_PATCH_WMMA,
+    DIRECT_DGRAD_SMALLC_WMMA,
+} | _WAVE32_ONLY_FWD
 
 
 @pytest.fixture(scope="module")

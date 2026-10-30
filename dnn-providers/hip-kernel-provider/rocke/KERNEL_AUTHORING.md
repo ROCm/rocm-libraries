@@ -125,6 +125,9 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 
 - [ ] Spec-driven `build_*()` builder (no one-off scripts); reuse existing
       helpers/atoms first.
+- [ ] **Helpers: write the missing ones, fix the broken ones, each with a
+      test, in this change.** A new family is not a reason to stay in raw
+      `IRBuilder` code. Rule: [platform/AGENTS.md](platform/AGENTS.md#helpers-placement).
 - [ ] **C engine mirror** in the same change (byte-identity).
 - [ ] `.py`/`.c` parity pair added under `tests/parity/` (auto-picked up by the
       runner).
@@ -253,9 +256,13 @@ scoped to library.
 1. **Decide the home.** SDPA/MHA product kernel → `library/`. Generic kernel →
    `platform/instances/`. If in doubt, it is a library kernel only if it is part
    of the attention product.
-2. **Research and reuse first.** Grep [library/kernels/common/](library/kernels/common/) and
+2. **Reuse first, then write what is missing.** Grep [library/kernels/common/](library/kernels/common/) and
    [platform/python/rocke/helpers/](platform/python/rocke/helpers/) for an existing emitter,
    epilogue, atom, or loader before writing new SSA. Extend, don't duplicate.
+   What nothing covers becomes a new helper in
+   `library/kernels/common/_<family>_*.py`, with a test; a broken helper is
+   fixed where it lives, with a regression test. Rule:
+   [platform/AGENTS.md](platform/AGENTS.md#helpers-placement).
 3. **Author the spec + `build_*()` emitter** under [library/kernels/](library/kernels/) as a
    spec-driven builder (a dataclass `Spec` with a `__post_init__` validator +
    `build_<family>()` returning a `KernelDef`). No one-off scripts —
@@ -458,7 +465,7 @@ Python emitter and the compiled C emitter for each config index and diffs the
 
 ### G. Promote a common optimization to platform
 
-When an optimization proves reusable beyond attention, push it *down* into
+When a family helper or an optimization is needed beyond attention, push it *down* into
 [platform/](platform/) — respecting the one-way `library → platform`
 dependency. Use the `helpers/` placement rule from
 [AGENTS.md](platform/AGENTS.md).
@@ -471,13 +478,14 @@ dependency. Use the `helpers/` placement rule from
    loader, a transpose-LDS layout); a CK-Tile-parity primitive; or it prevents a
    class of silent bugs if duplicated (lane maps, barriers, pipelining).
 
-**Keep it in `library/` when ANY of:** it is single-family, or it is
-descriptor/addressing logic specific to attention's layout.
+**Keep it in a `library/` family module when ANY of:** it is single-family, or
+it is descriptor/addressing logic specific to attention's layout. It is still a
+helper there, not code inlined in the kernel.
 
 Promotion steps:
 
 1. **Move the reusable SSA emitter into `platform/helpers/`** (Python) and mirror
-   it in the **C++ engine** `platform/Cpp/` — a promoted SSA helper requires the
+   it in the **C++ engine** `platform/cpp/` — a promoted SSA helper requires the
    Python + C++ mirror + byte-identity in the **same** change.
 2. **Refactor the library caller** to import the platform helper (never the
    reverse). Library keeps only its attention-specific glue.

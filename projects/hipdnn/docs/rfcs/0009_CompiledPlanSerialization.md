@@ -3,7 +3,7 @@
 - Contributors: hipDNN maintainers
 - **Status**: Implemented
 - **Status notes**: Plan-only serialization shipped in #6970. The envelope later gained `is_override_shape_enabled` (#7279) and `tensor_alignments` (#8728), and #7975 added a graph-and-plan container. The hip-kernel-provider exports the plugin hooks for its kernel ingestor engines (#13315), and the hipDNN test plugins also implement them.
-- **Last verified**: 2026-10-22 against `develop` (0bb1c36e8f7) with #13315 applied
+- **Last verified**: 2026-10-29 against `develop` (49a6d20f102)
 - Scope: frontend, backend, engine plugin API, test plugin implementation, hip-kernel-provider
   ingestor implementation
 
@@ -48,6 +48,12 @@ restored.execute(handle, variantPack, workspace);
 The restored `Graph` contains only an execution plan descriptor. APIs that depend on source graph
 nodes, engine configs, or graph mutation should not be assumed to work after compiled-plan
 deserialization.
+
+A deserialized plan is bound to the device of the handle passed to
+`deserialize_compiled_plan()` and executes only on handles whose stream is on that device
+(`hipdnnBackendExecute()` returns `HIPDNN_STATUS_BAD_PARAM` otherwise). Serialization is the
+supported way to move a plan to another device: deserialize the same bytes once per target
+device, each with a handle on that device.
 
 ## Frontend API
 
@@ -205,11 +211,17 @@ are in `dnn-providers/hip-kernel-provider/src/core/PluginSerialization.cpp`.
 
 ### Supported Engines
 
-An ingestor engine supports serialization when each kernel in its descriptor set is a kpack code
-object. Each dispatch handler of the set must also report `supportsSaving()`. The provider
+An ingestor engine supports serialization when each kernel in its descriptor set is a single-launch
+kpack code object. Each dispatch handler of the set must also report `supportsSaving()`. The provider
 calculates this from the descriptor set and its dispatch handlers. A supported engine reports the
 behavior note `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION`. The other engines of the
 provider do not report this note.
+
+A multi-launch kernel (RFC 0017 §15.1) cannot be saved. The payload holds one kernel image: one
+symbol, one signature and one code object. A multi-launch kernel has a symbol and a signature for
+each launch, and its launches can use more than one code object. An engine with a multi-launch
+kernel does not report the note. Saving these plans needs a payload that holds an image for each
+launch, and a dispatch handler contract that saves and restores every launch.
 
 The save hook refuses a plan that no ingestor engine built. Such a plan has no single-kernel ingestor
 plan to save.
@@ -335,8 +347,11 @@ The load hook then does these checks in this order. The first check that fails s
 16. The driver loads the code object on the device of the handle and finds the kernel symbol
     (`NOT_APPLICABLE`).
 
-The load hook loads the code object. As a result, a code object that the driver refuses fails the
-load, not the first execute. Another device loads its own module from the stored bytes at its first use.
+The load hook loads the code object on the device of the handle, so a code object that the driver
+refuses fails the load, not the first execute. The restored plan keeps the code object bytes and can
+load a separate module for another compatible device at its first use there. hipDNN does not use
+this today: the backend binds the plan to the load handle's device and rejects execution on any
+other device.
 
 ### Statuses and Messages
 
@@ -363,8 +378,9 @@ this order:
 2. A plan that the provider loaded from a payload.
 3. A benchmarking plan that has not selected a kernel.
 4. A plan that no ingestor engine built.
-5. A kernel with a source kind other than kpack.
-6. A plan whose dispatch handler does not support save.
+5. A kernel with more than one launch.
+6. A kernel with a source kind other than kpack.
+7. A plan whose dispatch handler does not support save.
 
 Rule 2 has a result for the frontend: `to_binary()` of a graph that `from_binary()` loaded fails.
 `to_compiled_plan_binary()` of a loaded plan also fails. Keep the original bytes of the payload.

@@ -168,6 +168,21 @@ typedef struct rocke_implicit_gemm_conv_spec
      * default path stays byte-identical. */
     int group_merge; /* default 1     */
 
+    /* Split-K forward (WMMA only). split_k > 1 builds the split-K binary, not a
+     * fixed degree: the degree and the slice width arrive as the ks_count / ks
+     * kernargs (as in wgrad), after a ws_ptr / ws_bytes fp32 workspace pair.
+     * Every CTA reduces one slice of the [Z*]Y*X*cpg reduction and stores its
+     * fp32 partial tile into slab `slice` of the [ks_count][M][K] workspace;
+     * Stage 2 (instance_conv_fwd_split_k_reduce.h) folds the slabs into D.
+     * Default 1 emits none of this. Mirrors Python ImplicitGemmConvSpec.split_k. */
+    int split_k; /* default 1     */
+    /* Single-launch split-K through a gfx1250 workgroup cluster (0 = off). The
+     * split_k_cluster slices of one output tile form one (1, 1, S) cluster;
+     * after a cluster barrier each slice folds 1/S of the tile's rows across
+     * the S slabs into D. Requires split_k > 1. Mirrors
+     * ImplicitGemmConvSpec.split_k_cluster. */
+    int split_k_cluster; /* default 0     */
+
     /* #8624 vector-sizes-as-args: per-operand load/store vector widths
      * (elements). has_* false => Python None => auto-select (choose_load_vec /
      * CShuffleEpilogue.from_grid default). When set they override the per-A/B
@@ -251,6 +266,25 @@ bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t*
                                           const char* arch,
                                           char* reason,
                                           size_t reason_cap);
+
+/* Admission gate for spec.split_k != 1 / spec.split_k_cluster, called from
+ * rocke_implicit_gemm_conv_is_valid_spec after the WMMA gates. `family` is the
+ * MMA family ("wmma" / "mma"); `arch` (NULL = unchecked, Python target=None)
+ * gates the cluster form on workgroup-cluster launch. Returns true when the
+ * split-K forward can be built; on false writes the reason. Mirrors Python
+ * fwd_split_k_reason. */
+bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
+                                      const char* family,
+                                      const char* arch,
+                                      char* reason,
+                                      size_t reason_cap);
+
+/* The cluster split-K forward's problem rule (K and kpg multiples of 4), on
+ * the build problem and on every launched one. Mirrors Python
+ * fwd_split_k_cluster_problem_reason; returns true when `p` can run. */
+bool rocke_conv_fwd_split_k_cluster_problem_ok(const rocke_conv_problem_t* p,
+                                               char* reason,
+                                               size_t reason_cap);
 
 /* spec.kernel_name() -> NUL-terminated into out (capacity out_cap). Returns
  * ROCKE_OK or ROCKE_ERR_VALUE (buffer too small). */

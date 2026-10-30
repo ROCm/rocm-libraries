@@ -140,6 +140,8 @@ def build_conv(
     groups=1,
     vector_size_c=None,
     group_merge=1,
+    split_k=1,
+    split_k_cluster=0,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm import (
@@ -166,6 +168,8 @@ def build_conv(
             groups=groups,
             vector_size_c=vector_size_c,
             group_merge=group_merge,
+            split_k=split_k,
+            split_k_cluster=split_k_cluster,
         )
         return build_implicit_gemm_conv(spec, arch=arch)
 
@@ -307,6 +311,20 @@ def build_conv_wgrad_reduce(
             name=name,
         )
         return build_conv_wgrad_workspace_reduce(spec, arch=arch)
+
+    return _build
+
+
+def build_conv_fwd_split_k_reduce(arch, **spec_kw):
+    """Build the split-K forward Stage 2 (folds the fp32 slabs into D)."""
+
+    def _build():
+        from kernels.common.conv_fwd_split_k_reduce import (
+            FwdSplitKReduceSpec,
+            build_conv_fwd_split_k_reduce,
+        )
+
+        return build_conv_fwd_split_k_reduce(FwdSplitKReduceSpec(**spec_kw), arch=arch)
 
     return _build
 
@@ -2258,6 +2276,49 @@ def cases():
                 vector_size_c=vec_c,
                 group_merge=gm,
             ),
+        )
+
+    # gfx1250 split-K forward (WMMA): the two-stage binary (fp32 workspace
+    # slabs, degree as a kernarg) on mem/cshuffle and mem/default, and the
+    # single-launch cluster form (S=4) that folds the slabs through a cluster
+    # barrier. Small M, deep K: 9*256 reduction.
+    conv_small_m = (1, 7, 7, 256, 64, 3, 3, 1, 1, 1, 1, 1, 1)
+    for tag, epi, vec_c, skc in (
+        ("splitk_cshuffle", "cshuffle", None, 0),
+        ("splitk_default", "default", 1, 0),
+        ("splitk_cluster4", "cshuffle", None, 4),
+    ):
+        add(
+            "conv",
+            f"conv/gfx1250/n1h7c256k64r3/{tag}",
+            "gfx1250",
+            build_conv(
+                "irhash_conv_1250_" + tag,
+                "gfx1250",
+                conv_small_m,
+                wave_size=32,
+                wtm=16,
+                wtn=16,
+                wtk=32,
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                epilogue=epi,
+                vector_size_c=vec_c,
+                split_k=2,
+                split_k_cluster=skc,
+            ),
+        )
+    # Its Stage 2: the runtime slab loop and the degree-unrolled fold.
+    for tag, kw in (
+        ("bf16_v4", dict(dtype_d="bf16", vec=4)),
+        ("fp16_v2_s4", dict(dtype_d="fp16", vec=2, degree=4)),
+    ):
+        add(
+            "conv_fwd_split_k_reduce",
+            f"conv_fwd_split_k_reduce/gfx1250/{tag}",
+            "gfx1250",
+            build_conv_fwd_split_k_reduce("gfx1250", **kw),
         )
 
     # Conv wgrad: implicit-GEMM backward-weight direction (NHWK x NHWC -> KYXC).
@@ -4801,6 +4862,100 @@ def cases():
                 **_shape,
                 **{**_nongrouped_base, **_over},
             ),
+        )
+
+    # --- conv_dgrad_{patch,smallc}_wmma: wave32 WMMA stem dgrad (gfx1250) ---
+    # Patch embeddings as one GEMM with a pixel-shuffle TDM store, and small-C
+    # stems as a GEMM over the flattened filter plus an LDS overlap-add. Every
+    # case needs llvm23 (TDM), so the other flavors record them as expected
+    # failures. The C++ twins are gated by
+    # library/tests/parity/conv_dgrad_{patch,smallc}_wmma_emit.*.
+    def build_dgrad_stem_wmma_case(kind, dtype, K, S, PAD, C, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            if kind == "patch":
+                from kernels.common.conv_dgrad_patch_wmma import (
+                    DgradPatchWmmaSpec as Spec,
+                    build_dgrad_patch_wmma as build,
+                )
+            else:
+                from kernels.common.conv_dgrad_smallc_wmma import (
+                    DgradSmallcWmmaSpec as Spec,
+                    build_dgrad_smallc_wmma as build,
+                )
+            p = DirectConvProblem(
+                N=2,
+                H=64,
+                W=64,
+                groups=1,
+                cpg=C,
+                kpg=64,
+                KH=K,
+                KW=K,
+                PAD=PAD,
+                stride=S,
+                dtype=dtype,
+            )
+            return build(Spec(problem=p, **spec_kw), arch="gfx1250")
+
+        return _build
+
+    for _kind, _case_id, _dtype, _conv, _over in (
+        (
+            "patch",
+            "bf16_p16_rb8",
+            "bf16",
+            (16, 16, 0, 3),
+            dict(waves_c=4, waves_p=2, tiles_c=6, tiles_p=4, tile_w=16, r_blk=8),
+        ),
+        (
+            "patch",
+            "fp16_p4_pf",
+            "fp16",
+            (4, 4, 0, 3),
+            dict(
+                waves_c=3,
+                waves_p=1,
+                tiles_c=1,
+                tiles_p=8,
+                tile_w=16,
+                r_blk=4,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+        ),
+        (
+            "smallc",
+            "bf16_3x3s1_c4_pf",
+            "bf16",
+            (3, 1, 1, 4),
+            dict(
+                waves_c=1,
+                waves_p=3,
+                tiles_c=3,
+                tiles_p=8,
+                out_h=8,
+                out_w=32,
+                ck=64,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+        ),
+        (
+            "smallc",
+            "fp16_7x7s2_c3",
+            "fp16",
+            (7, 2, 3, 3),
+            dict(waves_c=2, waves_p=4, tiles_c=5, tiles_p=6, out_h=32, out_w=32),
+        ),
+    ):
+        _fam = f"conv_dgrad_{_kind}_wmma"
+        add(
+            _fam,
+            f"{_fam}/gfx1250/{_case_id}",
+            "gfx1250",
+            build_dgrad_stem_wmma_case(_kind, _dtype, *_conv, **_over),
         )
 
     # --- conv_direct_fwd_small{c,k}_wmma: wave32 WMMA forward of tiny channel

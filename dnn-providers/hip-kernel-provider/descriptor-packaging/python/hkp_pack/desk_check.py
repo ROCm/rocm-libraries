@@ -523,31 +523,50 @@ def duplicate_matcher_tuples(
     return {t: c for t, c in counts.items() if c > 1}
 
 
-def _identity(kernel: dict, field: str) -> tuple:
-    """A kernel's `field` as one comparable identity: the value of its
-    kernel_source, or the distinct values across the launches of a `sources`
-    kernel (launches on one module legitimately share a toc_key)."""
-    values = {ks.get(field) for ks in _launch_sources(kernel).values()}
-    return tuple(sorted(values, key=str))
+def _distinct_kernels(kernels: list[dict], field: str) -> int:
+    """How many kernels remain distinct by `field`, counting kernels as one when
+    any launch of one carries a value any launch of the other does. A kernel's own
+    launches may share a value (launches on one module share a toc_key); a value
+    shared across kernels merges them, however many other values they carry."""
+    parent = list(range(len(kernels)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    owner: dict = {}
+    for index, kernel in enumerate(kernels):
+        for ks in _launch_sources(kernel).values():
+            first = owner.setdefault(ks.get(field), index)
+            parent[find(index)] = find(first)
+    return len({find(i) for i in range(len(kernels))})
 
 
 def toc_key_uniqueness(kernels: list[dict]) -> tuple[int, int]:
     """Invariant 3: every variant individually addressable in the archive.
-    Returns (distinct toc_key count, kernel count); equal means OK.
+    Returns (distinct kernel count, kernel count); equal means OK. Kernels sharing
+    a toc_key through any launch are not distinct.
 
     Only meaningful once ``toc_key`` exists, i.e. post-pack. `_field_applicable`
     covers the pre-pack case, which the report distinguishes from a collision."""
-    toc = [_identity(k, "toc_key") for k in kernels]
-    return len(set(toc)), len(kernels)
+    return _distinct_kernels(kernels, "toc_key"), len(kernels)
+
+
+def _symbol_identity(kernel: dict) -> tuple:
+    """The distinct symbols across a kernel's launches, as one comparable value."""
+    values = {ks.get("symbol") for ks in _launch_sources(kernel).values()}
+    return tuple(sorted(values, key=str))
 
 
 def symbol_distinctness(kernels: list[dict]) -> tuple[int, int]:
     """Invariant 4 (informational, NOT a failure condition): symbol names are not
     guaranteed unique -- rocKE's ``kernel_name()`` may omit a field it still bakes
-    in. Uniqueness comes from (toc_key, symbol). Returns (distinct symbol count,
-    kernel count); fewer is legal."""
-    sym = [_identity(k, "symbol") for k in kernels]
-    return len(set(sym)), len(kernels)
+    in. Uniqueness comes from (toc_key, symbol). Returns (distinct
+    per-kernel symbol sets, kernel count); fewer is legal. A symbol shared through
+    one launch is not a collision here."""
+    return len({_symbol_identity(k) for k in kernels}), len(kernels)
 
 
 def _field_applicable(kernels: list[dict], field: str) -> bool:

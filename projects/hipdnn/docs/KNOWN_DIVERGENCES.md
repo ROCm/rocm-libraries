@@ -101,6 +101,7 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 - `get_behavior_notes_for_plan_at_index` resolves the plan's engine from its name: built-in engines by name hash, others (including plugin engines) by the `0x`-prefixed hexadecimal ID hipDNN reports for them.
 - `print()` on a graph whose operation graph is not built prints an empty object.
 - `deserialize` ignores `enforce_precompiled`.
+- A built or deserialized plan executes only on handles whose stream is on the device it was built or deserialized for; `execute` with a handle on another device fails, even when the devices have the same properties. cuDNN allows the same finalized plan on another GPU. To use a plan on another device, `serialize` it and `deserialize` it with a handle on that device. See [backend architecture](./user-guides/conceptual/backend-architecture.rst).
 
 ## hipDNN extensions
 

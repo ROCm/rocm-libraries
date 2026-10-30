@@ -118,6 +118,7 @@ def source_build_id(platform_root: str | Path | None = None) -> str | None:
         "tests/portable_ir/replay_cli.cpp",
         "CMakeLists.txt",
         "tests/CMakeLists.txt",
+        "tests/cmake/PortableIrTests.cmake",
         "cmake/rocke_build_id.cmake",
         "cmake/generate_rocke_build_id.cmake",
     ):

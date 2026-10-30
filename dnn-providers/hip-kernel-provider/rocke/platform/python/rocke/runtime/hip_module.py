@@ -164,6 +164,27 @@ _hipMemcpy = _b(
     "hipMemcpy", ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int
 )
 _hipMemset = _b("hipMemset", ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t)
+_hipMemsetAsync = _b(
+    "hipMemsetAsync",
+    ctypes.c_void_p,
+    ctypes.c_int,
+    ctypes.c_size_t,
+    ctypes.c_void_p,
+)
+_hipExtMallocWithFlags = _b(
+    "hipExtMallocWithFlags",
+    ctypes.POINTER(ctypes.c_void_p),
+    ctypes.c_size_t,
+    ctypes.c_uint,
+)
+_hipStreamWaitValue32 = _b(
+    "hipStreamWaitValue32",
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_uint32,
+    ctypes.c_uint,
+    ctypes.c_uint32,
+)
 _hipDeviceSynchronize = _b("hipDeviceSynchronize")
 _hipStreamSynchronize = _b("hipStreamSynchronize", ctypes.c_void_p)
 _hipEventCreate = _b("hipEventCreate", ctypes.POINTER(_HipEventHandle))
@@ -521,6 +542,28 @@ class Runtime:
     def memset(self, ptr: int, value: int, nbytes: int) -> None:
         _check(_hipMemset(ctypes.c_void_p(ptr), value, nbytes), "hipMemset")
 
+    def memset_async(self, ptr: int, value: int, nbytes: int, stream: int = 0) -> None:
+        """Queue a fill on ``stream`` instead of draining the device for it.
+
+        :meth:`memset` is ``hipMemset``, which is synchronous with respect to
+        the host and the device: it waits for everything already queued. That
+        is the right primitive for setting a buffer up between measurements,
+        and the wrong one *inside* one -- a kernel whose contract is "zero
+        this, then launch" (a split-K epilogue accumulating into its output,
+        a stream-K flag table) would drain the device once per launch, which
+        serialises a batch that was queued precisely so it would not.
+
+        Queued on one stream, the fill is ordered against that stream's
+        launches by FIFO alone, so it is also what makes a batch of such
+        kernels safe to queue back to back on shared buffers.
+        """
+        _check(
+            _hipMemsetAsync(
+                ctypes.c_void_p(ptr), value, nbytes, ctypes.c_void_p(stream)
+            ),
+            "hipMemsetAsync",
+        )
+
     def _reap_completed(self, stream: int) -> None:
         """Drop bucket entries whose completion events have fired.
 
@@ -687,6 +730,43 @@ class Runtime:
             )
             return ()
 
+        cfg, attr = Runtime._cluster_launch_config(
+            grid, block, shared_bytes, stream, cluster, where
+        )
+        Runtime._launch_cluster(ctypes.byref(cfg), fn, params, extra, where)
+        return (cfg, attr)
+
+    @staticmethod
+    def _launch_cluster(
+        cfg_ref: Any, fn: _HipFunctionHandle, params: Any, extra: Any, where: str
+    ) -> None:
+        """Issue a cluster launch built by :meth:`_cluster_launch_config`.
+
+        The one ``hipDrvLaunchKernelEx`` call site: :meth:`_enqueue` and the
+        callables of :meth:`prepare_launch` both go through it, so the two
+        paths cannot drift apart.
+        """
+        _check(
+            _hipDrvLaunchKernelEx(cfg_ref, fn, params, extra),
+            f"hipDrvLaunchKernelEx({where})",
+        )
+
+    @staticmethod
+    def _cluster_launch_config(
+        grid: Tuple[int, int, int],
+        block: Tuple[int, int, int],
+        shared_bytes: int,
+        stream: int,
+        cluster: Tuple[int, int, int],
+        where: str,
+    ) -> Tuple[Any, Any]:
+        """Validate ``cluster`` and build the ``hipDrvLaunchKernelEx`` config.
+
+        Returns ``(cfg, attr)``: the launch config and the cluster-dimension
+        attribute it points at, which must stay alive together. Raises before
+        HIP sees anything for a bad shape (see :func:`check_launch_cluster`)
+        or a device that reports no cluster launch support.
+        """
         shape = check_launch_cluster(grid, cluster)
         device = current_device()
         if device_supports_cluster_launch(device) is False:
@@ -709,11 +789,7 @@ class Runtime:
             attrs=ctypes.pointer(attr),
             numAttrs=1,
         )
-        _check(
-            _hipDrvLaunchKernelEx(ctypes.byref(cfg), fn, params, extra),
-            f"hipDrvLaunchKernelEx({where})",
-        )
-        return (cfg, attr)
+        return cfg, attr
 
     def launch(
         self,
@@ -806,9 +882,13 @@ class Runtime:
         *,
         shared_bytes: int = 0,
         stream: int = 0,
+        cluster: Optional[Tuple[int, int, int]] = None,
     ) -> "Callable[[], None]":
         """Build every ctypes argument of one launch once; return a
         zero-argument callable that only enqueues it.
+
+        ``cluster`` launches workgroup clusters of that shape, as in
+        :meth:`launch` (``hipDrvLaunchKernelEx`` with a cluster attribute).
 
         For loops that launch the same kernel with the same arguments
         over and over -- the timed loop of a benchmark. :meth:`launch`
@@ -844,6 +924,20 @@ class Runtime:
             extra,
         )
         keep = (args_buf, size_buf, extra)
+
+        if cluster is not None:
+            # Validated, device-checked and built once, like the plain path's
+            # ctypes arguments: the callable only enqueues, through the same
+            # launch helper as :meth:`_enqueue`.
+            cfg, attr = self._cluster_launch_config(
+                grid, block, shared_bytes, int(stream), cluster, "prepare_launch"
+            )
+            cfg_ref = ctypes.byref(cfg)
+
+            def enqueue_cluster(_keep=keep + (cfg, attr)) -> None:
+                Runtime._launch_cluster(cfg_ref, fn, None, extra, "prepare_launch")
+
+            return enqueue_cluster
 
         def enqueue(_keep=keep) -> None:
             _check(_hipModuleLaunchKernel(*call_args), "hipModuleLaunchKernel")

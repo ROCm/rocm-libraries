@@ -1384,14 +1384,38 @@ def test_parse_tensile_yaml_skips_non_dict_and_nameless_entries(tmp_path):
     assert "CustomKernel" in config
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "wvSpltK_bf16_tn_m1",
-        "wvSpltK_bf16_tn_m2",
-        "wvSpltK_bf16_tn_m4",
-    ],
-)
+# The vLLM wvSplitK kernels, (type, n, tile) with tile = YTILE x UNRL.
+_VLLM_WVSPLITK = [
+    *[("bf16", n, tile) for n in (1, 3, 4) for tile in ("y1u4", "y1u2", "y3u2")],
+    ("bf16", 2, "y1u4"),
+    ("bf16", 2, "y1u2"),
+    ("bf16", 5, "y1u2"),
+    *[("f16", n, tile) for n in (1, 2, 3, 4, 5) for tile in ("y1u4", "y1u2", "y3u2")],
+]
+_VLLM_WVSPLITK_NAMES = [f"wvSplitK_vllm_{dt}_tn_n{n}_{tile}" for dt, n, tile in _VLLM_WVSPLITK]
+
+_SKINNY_TN_ARGS = [
+    "SizeSum",
+    "SizeFree0",
+    "AddressA",
+    "AddressB",
+    "ComputeUnits",
+    "SizeFree1",
+    "StrideA0",
+    "StrideB0",
+    "AddressC",
+    "AddressD",
+    "Alpha",
+    "Beta",
+    "StrideC0",
+    "StrideD0",
+]
+
+
+_WVSPLTK_NAMES = ["wvSpltK_bf16_tn_m1", "wvSpltK_bf16_tn_m2", "wvSpltK_bf16_tn_m4"]
+
+
+@pytest.mark.parametrize("name", [*_WVSPLTK_NAMES, *_VLLM_WVSPLITK_NAMES])
 def test_wvspltk_code_object_version_matches_library_build(name):
     """Library logic references these kernels, so TensileCreateLibrary links each
     into one code object with Tensile's kernels, which hipBLASLt assembles at its
@@ -1409,11 +1433,37 @@ _UNIT_STRIDE_KEYS = (
 )
 
 
+def _check_skinny_tn_config(name, dataType, sizeEqual, sizeLessThan=None, sizeGreaterThan=None):
+    ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
+    valid, msg = validateCustomKernelMetadata(name, ck_root)
+    assert valid, msg
+
+    config = getCustomKernelConfig(name, {}, ck_root)
+    pt = config["ProblemType"]
+    assert (pt["DataType"], pt["DestDataType"], pt["ComputeDataType"]) == (dataType, dataType, "s")
+    assert (pt["TransposeA"], pt["TransposeB"]) == (True, False)
+    assert config["AssertSizeEqual"] == sizeEqual
+    if sizeLessThan is None:
+        assert "AssertSizeLessThan" not in config
+    else:
+        assert config["AssertSizeLessThan"] == sizeLessThan
+    # m > 8; the tail fixup underflows below one wave tile.
+    assert config["AssertSizeGreaterThan"] == (sizeGreaterThan or {0: 8})
+    assert config["AssertSummationElementMultiple"] == 8
+    assert config["StaggerU"] == 0
+    for key in _UNIT_STRIDE_KEYS:
+        assert config[key] == {0: 1}, key
+    ck = config["CustomKernel"]
+    assert ck["grid"] == ["ComputeUnits", "One", "One"]
+    assert ck["threads"] == [64, 16, 1]
+    assert [a["semantic"] for a in ck["args"]] == _SKINNY_TN_ARGS
+
+
 @pytest.mark.parametrize(
     "name,sizeEqual,sizeLessThan,sizeGreaterThan",
     [
-        ("wvSpltK_bf16_tn_m1", {1: 1, 2: 1}, None, {0: 8}),
-        ("wvSpltK_bf16_tn_m2", {1: 2, 2: 1}, None, {0: 8}),
+        ("wvSpltK_bf16_tn_m1", {1: 1, 2: 1}, None, None),
+        ("wvSpltK_bf16_tn_m2", {1: 2, 2: 1}, None, None),
         ("wvSpltK_bf16_tn_m4", {2: 1}, {1: 5}, {0: 8, 1: 0}),
     ],
 )
@@ -1422,44 +1472,14 @@ def test_wvspltk_bf16_tn_shipped_config(name, sizeEqual, sizeLessThan, sizeGreat
     m1 and m2 pin n; m4 reads it as a kernarg and serves every 0 < n <= 4 (the
     host does not quick-return n == 0). The leading dimensions are kernargs, and
     tokens past the LDS stage are read from global memory, so K has no bound."""
-    ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
-    valid, msg = validateCustomKernelMetadata(name, ck_root)
-    assert valid, msg
+    _check_skinny_tn_config(name, "b", sizeEqual, sizeLessThan, sizeGreaterThan)
 
-    config = getCustomKernelConfig(name, {}, ck_root)
-    pt = config["ProblemType"]
-    assert (pt["DataType"], pt["DestDataType"], pt["ComputeDataType"]) == ("b", "b", "s")
-    assert (pt["TransposeA"], pt["TransposeB"]) == (True, False)
-    assert config["AssertSizeEqual"] == sizeEqual
-    if sizeLessThan is None:
-        assert "AssertSizeLessThan" not in config
-    else:
-        assert config["AssertSizeLessThan"] == sizeLessThan
-    # m > 8; the tail fixup underflows below one wave tile.
-    assert config["AssertSizeGreaterThan"] == sizeGreaterThan
-    assert config["AssertSummationElementMultiple"] == 8
-    assert config["StaggerU"] == 0
-    for key in _UNIT_STRIDE_KEYS:
-        assert config[key] == {0: 1}, key
-    ck = config["CustomKernel"]
-    assert ck["grid"] == ["ComputeUnits", "One", "One"]
-    assert ck["threads"] == [64, 16, 1]
-    assert [a["semantic"] for a in ck["args"]] == [
-        "SizeSum",
-        "SizeFree0",
-        "AddressA",
-        "AddressB",
-        "ComputeUnits",
-        "SizeFree1",
-        "StrideA0",
-        "StrideB0",
-        "AddressC",
-        "AddressD",
-        "Alpha",
-        "Beta",
-        "StrideC0",
-        "StrideD0",
-    ]
+
+@pytest.mark.parametrize("dt,n,tile", _VLLM_WVSPLITK)
+def test_vllm_wvsplitk_shipped_config(dt, n, tile):
+    """Same layout and arguments as wvSpltK, with n fixed per kernel. Tokens that
+    fit LDS are staged once, otherwise K is staged in chunks, so K has no bound."""
+    _check_skinny_tn_config(f"wvSplitK_vllm_{dt}_tn_n{n}_{tile}", {"bf16": "b", "f16": "h"}[dt], {1: n, 2: 1})
 
 
 _LOGIC_ROOT = os.path.normpath(
@@ -1477,29 +1497,44 @@ _LOGIC_ROOT = os.path.normpath(
     )
 )
 
+_PLAIN_BF16_LOGIC = "gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml"
+_HALF = 4
+
+
+def _boxes_overlap(a, b):
+    """Range keys [m_min, m_max, n_min, n_max, batch_min, batch_max, K_min, K_max]."""
+    for dim in range(4):
+        loA, hiA, loB, hiB = a[2 * dim], a[2 * dim + 1], b[2 * dim], b[2 * dim + 1]
+        if (hiA != -1 and hiA < loB) or (hiB != -1 and hiB < loA):
+            return False
+    return True
+
 
 @pytest.mark.parametrize(
-    "rel,plainRel,ranges",
+    "rel,dataType,kernels",
     [
         (
             "gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml",
-            "gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml",
-            {
-                "wvSpltK_bf16_tn_m1": [9, -1, 1, 1, 1, 1, 8, 4096],
-                "wvSpltK_bf16_tn_m2": [9, -1, 2, 2, 1, 1, 8, 4096],
-                "wvSpltK_bf16_tn_m4": [9, -1, 3, 4, 1, 1, 8, 4096],
-            },
+            7,
+            set(_WVSPLTK_NAMES) | {name for name in _VLLM_WVSPLITK_NAMES if "_bf16_" in name},
+        ),
+        (
+            "gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_HHS_BH_UserArgs.yaml",
+            _HALF,
+            {name for name in _VLLM_WVSPLITK_NAMES if "_f16_" in name},
         ),
     ],
 )
-def test_wvspltk_range_logic(rel, plainRel, ranges):
-    """hipBLASLt reaches the wvSpltK kernels through these Range files. A custom
+def test_skinny_tn_range_logic(rel, dataType, kernels):
+    """hipBLASLt reaches the skinny TN kernels through these Range files. A custom
     kernel takes the logic file's problem type, and these kernels support no bias,
-    activation or scale vector, so the type must be plain GEMM. The file must
-    match the header and type of the shipped plain-GEMM logic to share its
-    placeholder. Keys are [m_min, m_max, n_min, n_max, batch_min, batch_max,
-    K_min, K_max], -1 unbounded, and each must sit inside its kernel's
-    predicates."""
+    activation or scale vector, so the type must be plain GEMM. The BF16 file
+    must match the header and type of the shipped plain-GEMM logic to share its
+    placeholder; gfx950 ships no plain-GEMM FP16 TN logic, so the FP16 file
+    differs from it only in the data types. Keys are [m_min, m_max, n_min, n_max,
+    batch_min, batch_max, K_min, K_max], -1 unbounded. hipBLASLt takes the first
+    row containing the problem, so the rows must not overlap, and each must sit
+    inside its kernel's predicates."""
     path = os.path.join(_LOGIC_ROOT, rel)
     if not os.path.exists(path):
         pytest.skip(f"tuning logic tree not present: {rel}")
@@ -1512,17 +1547,22 @@ def test_wvspltk_range_logic(rel, plainRel, ranges):
     for key in ("UseBias", "UseE", "UseScaleAlphaVec", "UseScaleCD", "GroupedGemm", "Gradient"):
         assert not pt.get(key), key
 
-    with open(os.path.join(_LOGIC_ROOT, plainRel)) as f:
+    with open(os.path.join(_LOGIC_ROOT, _PLAIN_BF16_LOGIC)) as f:
         plain = yaml.safe_load(f)
     plainHeader = {k: plain[k] for k in ("ScheduleName", "ArchitectureName", "CUCount", "DeviceNames")}
     assert {k: doc[k] for k in plainHeader} == plainHeader
-    assert pt == plain["ProblemType"]
+    typeFields = ("DataType", "DataTypeA", "DataTypeB", "DataTypeE", "DestDataType")
+    assert pt == {**plain["ProblemType"], **{k: dataType for k in typeFields}}
 
     names = {s["SolutionIndex"]: s["CustomKernel"]["name"] for s in doc["Solutions"]}
-    assert {names[index]: key for key, (index, _) in doc["ExactLogic"]} == ranges
+    rows = [(key, names[index]) for key, (index, _) in doc["ExactLogic"]]
+    assert {name for _, name in rows} == set(names.values()) == kernels
+    for i, (a, nameA) in enumerate(rows):
+        for b, nameB in rows[i + 1 :]:
+            assert not _boxes_overlap(a, b), (a, nameA, b, nameB)
 
     ck_root = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels")
-    for name, key in ranges.items():
+    for key, name in rows:
         config = getCustomKernelConfig(name, {}, ck_root)
         for dim in range(4):
             lo, hi = key[2 * dim], key[2 * dim + 1]

@@ -1,0 +1,290 @@
+################################################################################
+#
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+################################################################################
+"""MX scale free-dim share (MXBlockFree) vs K-axis share (MXBlock).
+
+MXBlock compresses K. MXBlockFreeA/B compresses M (A) or N (B): 1 keeps one
+scale per row (the 1xK layout); 128 means 128 consecutive rows share one e8.
+A yaml list ``MXBlockA: [free, k]`` is split into this pair by ProblemType.
+"""
+
+from math import gcd, log2
+from typing import Mapping
+
+from rocisa.code import Module
+from rocisa.instruction import SAddU32, SLShiftRightB32, SMulI32
+
+# 2D MXS buffers are a few e8s. MacDataType F8's ldsAlign is 256 B
+# (64 / 0.25 regs), which would round a 2-byte buffer back to the 1D size.
+MXS_LDS_ALIGN_2D = 64
+
+
+def mxFreeTile(kernel: Mapping, tc: str) -> int:
+    """Free-dim MX share in scale rows. Non-MXS tensors return 1.
+
+    Reads ``ProblemType.MXBlockFree{A,B}``. Missing or 0 is the 1xK layout.
+    """
+    if "MXS" not in tc:
+        return 1
+    pt = kernel.get("ProblemType")
+    if not isinstance(pt, Mapping):
+        return 1
+    return max(1, int(pt.get(f"MXBlockFree{tc[-1]}", 1) or 1))
+
+
+def mxTdmTileM(mt: int, mxTile: int) -> int:
+    """How many scale-rows one MacroTile can intersect.
+
+    Tile wg starts at wg*MT, (wg*MT) % MXBlockFree into a scale row (the
+    phase). Phases are multiples of gcd(MT, MXBlockFree), so the largest is
+    MXBlockFree - gcd and the worst tile spans ceil((maxPhase + MT) / free)
+    rows: MT=224, MXBlockFree=128 starts WG1 at phase 96 and needs 3, not
+    ceil(224/128) = 2. MT a multiple of MXBlockFree has phase 0 and gives
+    MT/MXBlockFree; MT dividing MXBlockFree never crosses a row and gives 1.
+    """
+    mt = int(mt)
+    mxTile = max(1, int(mxTile))
+    maxPhase = mxTile - gcd(mt, mxTile)
+    return (maxPhase + mt + mxTile - 1) // mxTile
+
+
+def mxFreePhase(kernel: Mapping, tc: str) -> bool:
+    """True when a 2D MXS tile's scale-row split depends on its workgroup.
+
+    The local scale row of free offset m is (phase + m) // MXBlockFree with
+    phase = (wg*MT) % MXBlockFree. That only reduces to the static m //
+    MXBlockFree when MT is a multiple of MXBlockFree (phase 0) or divides it
+    (the tile never crosses a row). Otherwise LRA adds the phase per tile and
+    every WaveTile vector gets its own LocalReadAddr (mxPhaseLraFixup).
+    """
+    mxTile = mxFreeTile(kernel, tc)
+    if mxTile <= 1:
+        return False
+    mt = int(kernel["MacroTile%s" % tc])
+    return mt % mxTile != 0 and mxTile % mt != 0
+
+
+def mxTdmMSplitStride(mt: int, mxTile: int, numComp: int) -> int:
+    """Scale-rows one TDM component advances when M-splitting.
+
+    0 means the tile has fewer scale-rows than components: do not M-split
+    (extra comps idle / share the same address). Never used for K-split.
+    """
+    return mxTdmTileM(mt, mxTile) // max(1, int(numComp))
+
+
+def mxTdmTile0(sizeTile1: int, mxUnit: int, mxTile: int, numComp: int, kSplit: bool) -> int:
+    """MXS TDM tile0: M/N extent of one issue, in scale e8s.
+
+    1D (mxTile==1): MT * mxUnit, or MT * mxUnit / numComp when M-splitting.
+    2D: those quantities divided by MXBlockFree. If that divide is 0
+    (fewer scale-rows than TDM components), keep the full small tile so
+    the issue is not 0-wide. Extra comps share the same address / LDS dest.
+    """
+    tileM = mxTdmTileM(sizeTile1, mxTile)
+    if kSplit:
+        return tileM * mxUnit
+    per = tileM * mxUnit // max(1, int(numComp))
+    return per if per > 0 else tileM * mxUnit
+
+
+def mxTdmKRowPitch(size: int, mxTile: int) -> int:
+    """2D TDM stride0: K-row pitch in scale e8s.
+
+    1D sets stride0 = Size (elements along M or N in one K-block). 2D
+    compresses that axis by MXBlockFree, so the same field is
+    Size/MXBlockFree. Tile0 e8s in a K-block are packed with implicit
+    stride 1; stride0 is the dim1 pitch, not the in-tile M step.
+    A constant-1 stride0 makes dim1*stride0 a 12-byte window and the
+    K-split MXSB pointer (Size/MXBlockFree) lands outside it.
+    """
+    mxTile = max(1, int(mxTile))
+    if mxTile <= 1:
+        raise ValueError("mxTdmKRowPitch is the 2D K-row pitch; 1D uses Size")
+    return max(1, int(size) // mxTile)
+
+
+def wmmaReadsViaSplat(kernel: Mapping, tensorChar: str) -> bool:
+    """True when WMMA reads ``tensorChar`` through a splat v_perm.
+
+    Only an MX scale side with mxUnit (MatrixInstK / MXBlock) == 1 is splat
+    (KernelWriterAssembly._mxSplatInPlace / _mx2dSplatInPlace). A, B and
+    metadata feed WMMA directly.
+    """
+    if tensorChar not in ("MXSA", "MXSB"):
+        return False
+    block = (kernel.get("ProblemType") or {}).get("MXBlock%s" % tensorChar[3]) or 0
+    if isinstance(block, (list, tuple)):
+        block = block[-1] if block else 0
+    try:
+        block = int(block)
+        mi_k = int(kernel.get("MatrixInstK") or 0)
+    except (TypeError, ValueError):
+        return False
+    return block > 0 and mi_k > 0 and mi_k // block == 1
+
+
+def splatFirst(kernel: Mapping, items, key=lambda x: x):
+    """Stable reorder: tensors WMMA reads through a splat v_perm come first.
+
+    ``items`` comes in the site's order for kernels without any splat, which
+    both groups keep: A → MXSA → MXSB → B for global reads and TDM loads (the
+    selected 1st/2nd tensor order where A/B are swapped), A → B → MXSA → MXSB
+    for GL2 prefetch and subtile preloop / PAP reads. ``key`` maps an item to
+    its tensorChar. StinkyDAGSchedulerPass orders ds_loads by the same rule.
+    """
+    items = list(items)
+    splat = [it for it in items if wmmaReadsViaSplat(kernel, key(it))]
+    return splat + [it for it in items if not wmmaReadsViaSplat(kernel, key(it))]
+
+
+def mxIssueTpList(kernel: Mapping, tPA: Mapping, tPB: Mapping, *, includeMetadata: bool = False):
+    """Tensor-parameter list for GL2 prefetch issue, in splatFirst order.
+
+    Metadata stays last when requested.
+    """
+    pt = kernel.get("ProblemType") or {}
+    tps = [tPA, tPB]
+    if pt.get("MXBlockA") and "MX" in tPA:
+        tps.append(tPA["MX"])
+    if pt.get("MXBlockB") and "MX" in tPB:
+        tps.append(tPB["MX"])
+    tps = splatFirst(kernel, tps, key=lambda tp: tp["tensorChar"])
+    if includeMetadata and kernel.get("enableTDMMetadata"):
+        tps.append(tPA["tpsMetadata"] if tPA.get("is_sparse") else tPB["tpsMetadata"])
+    return tps
+
+
+def mxGl2CoalescedDim(mt: int, numTileWGs: int, mxUnit: int, mxTile: int = 1) -> int:
+    """Return the MX GL2 coalesced size in e8s for all tile workgroups.
+
+    The cluster free-dimension extent is converted to scale-row units.
+    """
+    clusterM = int(mt) * max(1, int(numTileWGs))
+    return mxTdmTileM(clusterM, mxTile) * max(1, int(mxUnit))
+
+
+def mxGl2TileOffset(tileIdx: int, mt: int, mxUnit: int, mxTile: int = 1) -> int:
+    """Return the MXS GL2 free-dimension offset in e8s.
+
+    The macro-tile index is converted to the M/N coordinate and then to the
+    scale-row coordinate.
+    """
+    mxTile = max(1, int(mxTile))
+    return ((int(tileIdx) * int(mt)) // mxTile) * max(1, int(mxUnit))
+
+
+def mxLdsAlign(mxTile: int, macLdsAlign: int) -> int:
+    """LDS alignment for an MXS buffer.
+
+    1D keeps MacDataType's align (F8 is 256 B). 2D is a few e8s; that 256 B
+    round-up would restore the 1D size, so use ``MXS_LDS_ALIGN_2D``.
+    """
+    return MXS_LDS_ALIGN_2D if max(1, int(mxTile)) > 1 else int(macLdsAlign)
+
+
+def mxLdsNumBytes(mt: int, depthU: int, mxBlock: int, mxTile: int = 1,
+                  ldsPad: int = 0, unrollMajor: bool = True,
+                  padInterval: int = 0) -> int:
+    """MXS LDS bytes for one WG buffer (before alignment).
+
+    1D: MT × (DepthU/MXBlock). 2D: mxTdmTileM(MT, MXBlockFree) × (DepthU/MXBlock),
+    the scale rows of the worst workgroup phase.
+    ``padInterval`` matches ``calcLdsNumBytesAB``: every block of that many
+    bytes grows by ``ldsPad``. A 2D buffer smaller than one interval cannot
+    use that formula (integer divide would be 0) and stays compact.
+    """
+    scaleRows = mxTdmTileM(mt, mxTile)
+    mxDU = depthU // mxBlock
+    if padInterval:
+        raw = mxDU * scaleRows
+        if raw >= padInterval:
+            return int(raw / padInterval * (padInterval + ldsPad))
+        ldsPad = 0
+    if unrollMajor:
+        return (mxDU + ldsPad) * scaleRows
+    return mxDU * (scaleRows + ldsPad)
+
+
+def mxLdsLsuStride(mt: int, mxTile: int, mxDU: int, lsu: int) -> int:
+    """Bytes one LSU wave steps in MXS LDS.
+
+    1D: MT × (mxDU/LSU). 2D: scale-rows × (mxDU/LSU), matching TDM K-split
+    packing so LSU 1 lands on the second k-group, not MT bytes past the buffer.
+    """
+    lsu = max(1, int(lsu))
+    return mxTdmTileM(mt, mxTile) * (int(mxDU) // lsu)
+
+
+def mxLdsKStride(mt: int, mxTile: int, mxUnit: int, *, swizzled: bool,
+                 unrollMajor: bool = True, ldsPad: int = 0) -> int:
+    """LDS step between consecutive MX K-groups of the same scale-row.
+
+    1D (mxTile==1) matches today's localReadInc: swizzled ``MT*mxUnit``,
+    K-major ``mxUnit``, M-major ``(MT+pad)*mxUnit``. 2D replaces MT with
+    scale-rows (``mxTdmTileM(MT, MXBlockFree)``), matching TDM k-split packing.
+    """
+    scaleRows = mxTdmTileM(mt, mxTile)
+    if swizzled:
+        return int(scaleRows * mxUnit)
+    if unrollMajor:
+        return int(mxUnit)
+    return int((scaleRows + ldsPad) * mxUnit)
+
+
+def mxLraFreeShift(mxTile: int) -> int:
+    """log2(MXBlockFree) to turn a wave M-offset into a 2D scale-row index."""
+    mxTile = max(1, int(mxTile))
+    if mxTile <= 1:
+        return 0
+    if mxTile & (mxTile - 1):
+        raise ValueError(f"MXBlockFree {mxTile} must be a power of 2")
+    return int(log2(mxTile))
+
+
+def mxLraScaleRow(waveId0: int, strideWave: int, mxTile: int) -> int:
+    """LRA scale-row for a wave along M/N. Lanes of that wave share this index."""
+    mxTile = max(1, int(mxTile))
+    return (int(waveId0) * int(strideWave)) // mxTile
+
+
+def mxTileSpanPartnerDelta(kernel: Mapping, tc: str, tile01: int) -> int:
+    """Free-dim distance in M/N elements between TileSpan half-waves.
+
+    Non-split (MIWaveGroup==1): MatrixInstT * VW (nIdx = wtid).
+    Wave-split (MIWaveGroup>1): MatrixInstT * BM/BN * numWaves * VW
+    (same product as LRA hiOffset without strideTile). After / MXBlockFree a
+    non-multiple partnerΔ maps both half-waves onto the same scale row.
+    """
+    matrixInstT = kernel["MatrixInstM"] if tile01 == 0 else kernel["MatrixInstN"]
+    vw = int(kernel.get(f"VectorWidth{tc}", 1) or 1)
+    numWaves = int(kernel["MIWaveGroup"][tile01])
+    if numWaves > 1:
+        blockKey = "MatrixInstBM" if tile01 == 0 else "MatrixInstBN"
+        blocks = int(kernel.get(blockKey, 1) or 1)
+        return int(matrixInstT) * blocks * numWaves * vw
+    return int(matrixInstT) * vw
+
+
+def mulScaleRows(dst, factor, size, mxTile: int, rowsSgpr=None, comment: str = "") -> Module:
+    """dst = factor * K-row pitch of an MX scale tensor.
+
+    The pitch is Size for 1D scales and ceil(Size / MXBlockFree) for 2D, the
+    row count the host allocates (CeilDivide). factor is an int or a
+    register; rowsSgpr holds the 2D row count and defaults to dst, so
+    it is required when factor is dst.
+    """
+    mod = Module()
+    rows = size
+    if mxTile > 1:
+        rows = rowsSgpr if rowsSgpr is not None else dst
+        mod.add(SAddU32(rows, size, mxTile - 1, f"ceil(Size/MXBlockFree({mxTile}))"))
+        mod.add(SLShiftRightB32(rows, hex(int(log2(mxTile))), rows, "MXS 2D: scale rows"))
+    if isinstance(factor, int):
+        mod.add(SMulI32(dst, rows, factor, comment))
+    else:
+        mod.add(SMulI32(dst, factor, rows, comment))
+    return mod

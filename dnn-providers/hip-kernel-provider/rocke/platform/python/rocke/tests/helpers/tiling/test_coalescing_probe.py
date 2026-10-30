@@ -28,6 +28,7 @@ from rocke.helpers.tiling.coalescing_probe import (
 )
 from rocke.helpers.tiling.tiling_recorder import PipelineTransaction, record_build
 from rocke.helpers.tiling.transforms import interleave_idx
+from rocke.tests.arch_marks import arch_specific
 
 
 def _native_c():
@@ -174,6 +175,10 @@ def _load_transaction(dtype_name):
     )
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="ARCH_LINE_BYTES has no gfx950 entry; the probe forbids assuming another arch's line size",
+)
 @pytest.mark.parametrize(
     "dtype_name,bits",
     [("f16", 16), ("f32", 32), ("fp8e4m3", 8), ("fp6e3m2", 6), ("fp4e2m1", 4)],

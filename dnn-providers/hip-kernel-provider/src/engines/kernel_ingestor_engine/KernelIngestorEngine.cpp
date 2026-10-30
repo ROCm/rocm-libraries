@@ -263,7 +263,9 @@ bool supportsExecutionPlanSerialization(const hipdnn_plugin_sdk::ingestor::Descr
     {
         for(const auto& kernel : pack.kernels)
         {
-            if(!serialization::isSerializableSourceKind(kernel.source.kind))
+            // As captureIngestorPlan(): a multi-launch kernel cannot be saved.
+            const auto* source = hipdnn_plugin_sdk::ingestor::singleLaunchSource(kernel);
+            if(source == nullptr || !serialization::isSerializableSourceKind(source->kind))
             {
                 return false;
             }

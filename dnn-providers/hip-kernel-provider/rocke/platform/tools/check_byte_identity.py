@@ -40,6 +40,8 @@ GFX1250_FAMILY = "gfx1250_lowering"
 # are compared in the llvm23 lane only.
 TARGET_OP_PROFILE_FAMILIES = (
     "conv_winograd_fused_1d_wmma",
+    "conv_dgrad_patch_wmma",
+    "conv_dgrad_smallc_wmma",
     "conv_direct_dgrad_wmma",
     "conv_direct_fwd_wmma",
     "conv_fwd_small_wmma",

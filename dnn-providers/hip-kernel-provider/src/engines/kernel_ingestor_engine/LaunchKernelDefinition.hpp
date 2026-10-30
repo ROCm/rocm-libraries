@@ -66,10 +66,19 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition
                                                            + "'; available launches: " + available);
     }
 
-    hipdnn_plugin_sdk::ingestor::KernelDefinition definition = kernel;
-    definition.source = found->second;
-    definition.sources.clear();
-    return definition;
+    // Positional, as KernelDefinition is elsewhere (its field count is pinned by a
+    // static_assert), so the launches map is never copied just to be cleared.
+    return hipdnn_plugin_sdk::ingestor::KernelDefinition{kernel.kernelId,
+                                                         kernel.packId,
+                                                         kernel.dispatchId,
+                                                         found->second,
+                                                         kernel.metadata,
+                                                         kernel.priority,
+                                                         kernel.arch,
+                                                         kernel.originDirectory,
+                                                         kernel.name,
+                                                         kernel.treeRoot,
+                                                         {}};
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
