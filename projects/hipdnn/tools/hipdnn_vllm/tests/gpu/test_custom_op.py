@@ -64,7 +64,7 @@ def test_plan_cache_keyed_by_shape_and_payload_not_address(enabled):
     # New tensors, same shapes: no build.
     torch.ops.hipdnn_vllm.custom_op_exec(UNKNOWN, payload, _inputs(), False)
     rt1 = C.stats_snapshot()["runtime"]
-    assert rt1["plan_builds"] + rt1["plan_build_declines"] == rt0["plan_builds"] + rt0["plan_build_declines"]
+    assert rt1["plan_builds"] == rt0["plan_builds"]  # counts every build attempt, declined or not
     assert rt1["plan_cache_hits"] == rt0["plan_cache_hits"] + 1
     # Another payload or another shape is another plan.
     torch.ops.hipdnn_vllm.custom_op_prepare(UNKNOWN, '{"k":3}', _inputs())
@@ -72,7 +72,7 @@ def test_plan_cache_keyed_by_shape_and_payload_not_address(enabled):
         UNKNOWN, payload, [torch.zeros(9, dtype=torch.int64, device="cuda"), _inputs()[1]]
     )
     rt2 = C.stats_snapshot()["runtime"]
-    assert rt2["plan_builds"] + rt2["plan_build_declines"] == rt1["plan_builds"] + rt1["plan_build_declines"] + 2
+    assert rt2["plan_builds"] == rt1["plan_builds"] + 2
 
 
 def test_disabled_declines_without_building(C):
@@ -83,7 +83,7 @@ def test_disabled_declines_without_building(C):
         torch.ops.hipdnn_vllm.custom_op_exec(UNKNOWN, "{}", _inputs(), True)
     assert parse_op_error(ei.value)[1].reason == "DISABLED"
     rt1 = C.stats_snapshot()["runtime"]
-    assert rt1["plan_builds"] + rt1["plan_build_declines"] == rt0["plan_builds"] + rt0["plan_build_declines"]
+    assert rt1["plan_builds"] == rt0["plan_builds"]
 
 
 def test_capture_miss_strict_raises_non_strict_records(enabled):

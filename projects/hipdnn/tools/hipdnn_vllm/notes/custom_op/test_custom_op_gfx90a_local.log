@@ -1,0 +1,13 @@
+tests/gpu/test_custom_op.py::test_prepare_returns_reason_for_unknown_op_id PASSED [ 14%]
+tests/gpu/test_custom_op.py::test_exec_strict_raises_and_non_strict_counts_fallback PASSED [ 28%]
+tests/gpu/test_custom_op.py::test_plan_cache_keyed_by_shape_and_payload_not_address PASSED [ 42%]
+tests/gpu/test_custom_op.py::test_disabled_declines_without_building PASSED [ 57%]
+tests/gpu/test_custom_op.py::test_capture_miss_strict_raises_non_strict_records PASSED [ 71%]
+tests/gpu/test_custom_op.py::test_engine_untouched_unless_opted_in_h6 SKIPPED [ 85%]
+tests/gpu/test_custom_op.py::test_megakernel_capture_replays SKIPPED     [100%]
+SKIPPED [1] tests/gpu/test_custom_op.py:142: megakernel engine not in this build
+SKIPPED [1] tests/gpu/test_custom_op.py:171: megakernel engine not in this build
+=================== 5 passed, 2 skipped, 2 warnings in 2.69s ===================
+prepare: 'NO_ENGINE'
+strict: hipdnn_vllm decline [custom_op]: NO_ENGINE :: No engine configurations available for the graph.
+['ASM_SDPA_ENGINE', 'HIPBLASLT_ENGINE', 'HIP_MLOPS_ENGINE']
