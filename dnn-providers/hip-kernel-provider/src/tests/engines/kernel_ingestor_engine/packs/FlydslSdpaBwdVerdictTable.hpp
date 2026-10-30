@@ -187,23 +187,23 @@ inline std::vector<VerdictRow>
 /// missing here is itself a finding.
 inline const std::map<std::string, std::string>& ruleCauses()
 {
-    static const std::map<std::string, std::string> causes{{"SH-1", "shape"},
-                                                           {"DT-4", "head_size"},
-                                                           {"DT-6", "gqa"},
-                                                           {"DT-8", "layout"},
-                                                           {"DT-9", "layout"},
-                                                           {"LY-3", "layout"},
-                                                           {"LY-6", "layout"},
-                                                           {"MW-3", "mask"},
-                                                           {"MW-9b", "mask"},
-                                                           {"MW-9c", "mask"},
-                                                           {"MW-10", "mask"},
-                                                           {"MW-13", "mask"},
-                                                           {"PV-3", "varlen"},
-                                                           {"PV-10", "varlen"},
-                                                           {"BI-4", "dbias"},
-                                                           {"BI-6", "dbias"}};
-    return causes;
+    static const std::map<std::string, std::string> s_causes{{"SH-1", "shape"},
+                                                             {"DT-4", "head_size"},
+                                                             {"DT-6", "gqa"},
+                                                             {"DT-8", "layout"},
+                                                             {"DT-9", "layout"},
+                                                             {"LY-3", "layout"},
+                                                             {"LY-6", "layout"},
+                                                             {"MW-3", "mask"},
+                                                             {"MW-9b", "mask"},
+                                                             {"MW-9c", "mask"},
+                                                             {"MW-10", "mask"},
+                                                             {"MW-13", "mask"},
+                                                             {"PV-3", "varlen"},
+                                                             {"PV-10", "varlen"},
+                                                             {"BI-4", "dbias"},
+                                                             {"BI-6", "dbias"}};
+    return s_causes;
 }
 
 /// The `rule` token of a row the matcher accepts and no gfx11 object serves.
@@ -336,9 +336,9 @@ inline const char* slotName(FlydslSdpaBwdSplitSlot slot)
 /// The native symbols of @p slot of the split engine.
 inline PackSymbols splitSymbols(FlydslSdpaBwdSplitSlot slot)
 {
-    static const std::string graphMatch = "hipkernel.flydsl_sdpa_bwd_split.graph_match";
-    static const std::string engine = "hipkernel:flydsl_sdpa_bwd_split";
-    static const std::map<std::string, std::pair<std::string, std::string>> symbols{
+    static const std::string s_graphMatch = "hipkernel.flydsl_sdpa_bwd_split.graph_match";
+    static const std::string s_engine = "hipkernel:flydsl_sdpa_bwd_split";
+    static const std::map<std::string, std::pair<std::string, std::string>> s_symbols{
         {"prep",
          {"hipkernel.flydsl_sdpa_bwd_split.prep.kernel_match",
           "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch"}},
@@ -348,8 +348,8 @@ inline PackSymbols splitSymbols(FlydslSdpaBwdSplitSlot slot)
         {"dq",
          {"hipkernel.flydsl_sdpa_bwd_split.dq.kernel_match",
           "hipkernel.flydsl_sdpa_bwd_split.dq.dispatch"}}};
-    const auto& [kernelMatch, dispatch] = symbols.at(slotName(slot));
-    return {engine, graphMatch, "", kernelMatch, "", dispatch, "", "", ""};
+    const auto& [kernelMatch, dispatch] = s_symbols.at(slotName(slot));
+    return {s_engine, s_graphMatch, "", kernelMatch, "", dispatch, "", "", ""};
 }
 
 /// The knobs each slot's UED enrolls (descriptors/FlyDSL/sdpa_bwd_split/*.ued.json). The

@@ -676,7 +676,7 @@ struct TableMatches
 
 const TableMatches& tableMatches(const std::string& arch, const char* content)
 {
-    static const TableMatches table = [&] {
+    static const TableMatches s_table = [&] {
         TableMatches built;
         built.rows = loadVerdictRows();
         built.hashes = loadManifestHashes(content);
@@ -688,7 +688,7 @@ const TableMatches& tableMatches(const std::string& arch, const char* content)
         }
         return built;
     }();
-    return table;
+    return s_table;
 }
 
 std::string namesOf(const std::vector<const KernelDefinition*>& kernels, size_t limit = 4)
@@ -821,7 +821,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryVerdictRowIsServedOrDeclinedAsTheTableS
 
     std::cout << "verdict rows " << table.rows.size() << " on " << arch() << ": served " << served
               << ", declined " << declined << ", no_row " << noRow << ", skipped 0, disagreeing "
-              << failures.size() << std::endl;
+              << failures.size() << '\n';
     std::ostringstream report;
     for(const auto& failure : failures)
     {
@@ -874,7 +874,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryServedRowsSlotCatalogsHaveUniqueEnrolle
         }
     }
     std::cout << "enrolled-tuple check over " << checked << " served rows on " << arch() << ": "
-              << failures.size() << " ambiguous" << std::endl;
+              << failures.size() << " ambiguous" << '\n';
     std::ostringstream report;
     for(const auto& failure : failures)
     {

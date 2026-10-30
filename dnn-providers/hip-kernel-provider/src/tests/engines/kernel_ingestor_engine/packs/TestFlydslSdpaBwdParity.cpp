@@ -91,12 +91,13 @@ ParityCase served(std::string name, BwdCase c)
 
 /// A graph declined for @p rule. A rule the verdict table names has the cause the table's
 /// mapping gives it; @p cause names the cause of one it does not.
-ParityCase declined(std::string name, SdpaBwdSpec spec, std::string rule, std::string cause = {})
+ParityCase
+    declined(std::string name, SdpaBwdSpec spec, std::string rule, const std::string& cause = {})
 {
     ParityCase parity;
     parity.name = std::move(name);
     parity.spec = std::move(spec);
-    parity.cause = cause.empty() ? ruleCauses().at(rule) : std::move(cause);
+    parity.cause = cause.empty() ? ruleCauses().at(rule) : cause;
     parity.rule = std::move(rule);
     return parity;
 }
@@ -153,7 +154,7 @@ SdpaBwdSpec biasOfTypeSpec(DataType queryType, DataType biasType)
 /// A graph whose V and dV have @p valueHeads heads beside K's.
 SdpaBwdSpec valueHeadsSpec(int64_t valueHeads)
 {
-    SdpaBwdSpec spec;
+    const SdpaBwdSpec spec;
     return spec.withEdit([=](SdpaBwdGraph& g) {
         g.tensor("v").dims[1] = valueHeads;
         g.tensor("dv").dims[1] = valueHeads;
@@ -165,7 +166,7 @@ const std::vector<ParityCase>& parityCases()
     constexpr auto HALF = DataType::HALF;
     constexpr auto BF16 = DataType::BFLOAT16;
     constexpr auto FP32 = DataType::FLOAT;
-    static const std::vector<ParityCase> cases = [] {
+    static const std::vector<ParityCase> s_cases = [] {
         std::vector<ParityCase> list;
 
         // 1. Bottom-right causal cross-attention, in both length orders.
@@ -282,7 +283,7 @@ const std::vector<ParityCase>& parityCases()
         list.push_back(served("AppliesTheDefaultScaleWhenTheGraphGivesNone", defaultScale));
         return list;
     }();
-    return cases;
+    return s_cases;
 }
 
 std::string parityName(const ::testing::TestParamInfo<size_t>& info)

@@ -254,13 +254,22 @@ bool objectAdmits(ObjectSlot slot,
     return bound.has_value() && matchesKernel(symbols, fixture.context(), kernel, *bound);
 }
 
+/// The bias part of describe(): none, a bias, or a bias with its gradient.
+const char* biasLabel(const BwdCase& c)
+{
+    if(!c.bias)
+    {
+        return "";
+    }
+    return c.dbias ? " bias+dbias" : " bias";
+}
+
 std::string describe(const BwdCase& c)
 {
     return "B=" + std::to_string(c.batch) + " Hq=" + std::to_string(c.heads)
            + " Hk=" + std::to_string(c.kvHeads) + " Sq=" + std::to_string(c.seqQ)
            + " Skv=" + std::to_string(c.seqKv) + " D=" + std::to_string(c.headDim)
-           + (c.mask == BwdMask::BOTTOM_RIGHT ? " bottom-right causal" : "")
-           + (c.bias ? (c.dbias ? " bias+dbias" : " bias") : "")
+           + (c.mask == BwdMask::BOTTOM_RIGHT ? " bottom-right causal" : "") + biasLabel(c)
            + (c.biasOverBatch && c.biasOverHead ? " broadcast" : "")
            + (c.dropout > 0.0F ? " dropout" : "");
 }
@@ -268,18 +277,18 @@ std::string describe(const BwdCase& c)
 /// The fields whose values change the code an object runs beyond its head dim.
 const std::vector<const char*>& formFields()
 {
-    static const std::vector<const char*> fields{"dtype",
-                                                 "causal",
-                                                 "has_bias",
-                                                 "dropout",
-                                                 "padded",
-                                                 "hints",
-                                                 "dform",
-                                                 "gqa_pack",
-                                                 "store_db",
-                                                 "bias_stage",
-                                                 "sink"};
-    return fields;
+    static const std::vector<const char*> s_fields{"dtype",
+                                                   "causal",
+                                                   "has_bias",
+                                                   "dropout",
+                                                   "padded",
+                                                   "hints",
+                                                   "dform",
+                                                   "gqa_pack",
+                                                   "store_db",
+                                                   "bias_stage",
+                                                   "sink"};
+    return s_fields;
 }
 
 /// What an object's form is: its values of formFields(), and for a multi-launch object the
@@ -369,7 +378,9 @@ ObjectPin pinOf(ObjectSlot slot, const DescriptorSet& set, const KernelDefinitio
         {
             if(const auto* value = metadataValue<int64_t>(kernel, knob.c_str()))
             {
-                pin.narrowing.emplace_back(engineSlot + "." + knob, *value);
+                std::string name = engineSlot;
+                name.append(".").append(knob);
+                pin.narrowing.emplace_back(std::move(name), *value);
             }
         }
     }

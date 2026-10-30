@@ -114,6 +114,13 @@ protected:
     }
 };
 
+// One suite per dtype: the datatype token ends the suite name.
+using TestGpuFlydslSdpaBwdMergedLowestFiniteBiasBfp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedLowestFiniteBiasFp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasBfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp32 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+
 // ---------------------------------------------------------------------------
 // Cases
 // ---------------------------------------------------------------------------
@@ -357,27 +364,27 @@ TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, DeclinesBiasBesideAPaddingMask)
     expectDeclined(SPLIT_ENGINE, biasWithPaddingSpec());
 }
 
-TEST_F(TestGpuFlydslSdpaBwdMergedLowestFiniteBias, MatchesTheReferenceInBf16)
+TEST_F(TestGpuFlydslSdpaBwdMergedLowestFiniteBiasBfp16, MatchesTheReference)
 {
     expectCase(MERGED_ENGINE, lowestFiniteBiasCase(DataType::BFLOAT16));
 }
 
-TEST_F(TestGpuFlydslSdpaBwdMergedLowestFiniteBias, MatchesTheReferenceInF16)
+TEST_F(TestGpuFlydslSdpaBwdMergedLowestFiniteBiasFp16, MatchesTheReference)
 {
     expectCase(MERGED_ENGINE, lowestFiniteBiasCase(DataType::HALF));
 }
 
-TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBias, MatchesTheReferenceInBf16)
+TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBiasBfp16, MatchesTheReference)
 {
     expectCase(SPLIT_ENGINE, lowestFiniteBiasCase(DataType::BFLOAT16));
 }
 
-TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBias, MatchesTheReferenceInF16)
+TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp16, MatchesTheReference)
 {
     expectCase(SPLIT_ENGINE, lowestFiniteBiasCase(DataType::HALF));
 }
 
-TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBias, MatchesTheReferenceInFp32)
+TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp32, MatchesTheReference)
 {
     expectCase(SPLIT_ENGINE, lowestFiniteBiasCase(DataType::FLOAT));
 }

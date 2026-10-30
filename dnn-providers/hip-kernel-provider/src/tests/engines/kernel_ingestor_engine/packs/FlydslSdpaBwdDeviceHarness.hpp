@@ -1217,10 +1217,15 @@ void expectEngineMatchesReference(std::string_view engine,
     in.dO = widened(roundedTo<T>(fillValues(oCount, 4U)));
     if(c.bias)
     {
-        const double lowest = c.dtype == DataType::HALF ? -65504.0
-                              : c.dtype == DataType::BFLOAT16
-                                  ? -3.3895313892515355e38
-                                  : static_cast<double>(std::numeric_limits<float>::lowest());
+        auto lowest = static_cast<double>(std::numeric_limits<float>::lowest());
+        if(c.dtype == DataType::HALF)
+        {
+            lowest = -65504.0;
+        }
+        else if(c.dtype == DataType::BFLOAT16)
+        {
+            lowest = -3.3895313892515355e38;
+        }
         in.bias = widened(roundedTo<T>(biasValues(c, lowest)));
     }
     // A padded graph's rows past its lengths carry no data: the gradient's input is zero
