@@ -21,6 +21,7 @@ from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModel  # noqa: E40
 from sklearn.ensemble import HistGradientBoostingRegressor  # noqa: E402
 from uhd_gen.__main__ import main  # noqa: E402
 from uhd_gen.artifact import verify_tree_artifact  # noqa: E402
+from uhd_gen.conftest import importorskip_optional  # noqa: E402
 from uhd_gen.lgbm_to_flatbuffer import GBDT_MODEL_FILE_IDENTIFIER  # noqa: E402
 from uhd_gen.model_families import (  # noqa: E402
     build_family_model,
@@ -87,6 +88,15 @@ def test_early_stopping_keeps_the_best_round_as_lightgbm_does():
     assert early_stopped_rounds(np.array([5.0, 4.0, 4.5, 3.0, 3.1]), 2) == 4
     # A tie is not an improvement.
     assert early_stopped_rounds(np.array([2.0, 2.0, 2.0]), 5) == 1
+
+
+@pytest.mark.parametrize("patience", [0, -1])
+def test_a_non_positive_patience_disables_early_stopping_as_it_does_for_lightgbm(
+    patience,
+):
+    # The curve dips after a worse round; stopping at the first non-improvement would keep 1.
+    assert early_stopped_rounds(np.array([5.0, 6.0, 4.0, 3.0]), patience) == 4
+    assert early_stopped_rounds(np.array([5.0, 6.0, 4.0, 3.0]), 1) == 1
 
 
 def _training_data(rows: int = 2000, seed: int = 3):
@@ -166,7 +176,7 @@ def test_histgradientboosting_trees_route_and_score_as_scikit_learn(tmp_path):
 
 
 def test_xgboost_trees_route_and_score_as_xgboost(tmp_path):
-    xgb = pytest.importorskip("xgboost")
+    xgb = importorskip_optional("xgboost")
     X, y = _training_data()
     model = xgb.train(
         {"objective": "reg:squarederror", "max_leaves": 31, "grow_policy": "lossguide"},
@@ -191,14 +201,38 @@ def test_xgboost_trees_route_and_score_as_xgboost(tmp_path):
     assert result["max_abs_diff"] < 1e-4
 
 
-def test_unexportable_models_are_refused():
+def test_unexportable_histgradientboosting_models_are_refused():
     X, y = _training_data(rows=300)
     categorical = HistGradientBoostingRegressor(
         max_iter=3, categorical_features=[1], random_state=0
     ).fit(X, y)
     with pytest.raises(ValueError, match="categorical"):
         build_family_model(categorical, "sha256:test")
-    xgb = pytest.importorskip("xgboost")
+
+
+@pytest.mark.parametrize("loss", ["poisson", "gamma"])
+def test_a_histgradientboosting_loss_with_an_inverse_link_is_refused(loss):
+    """Their predict is exp(baseline + leaves); the runtime would return the log margin."""
+    X, y = _training_data(rows=300)
+    model = HistGradientBoostingRegressor(loss=loss, max_iter=3, random_state=0).fit(
+        X, np.exp(y)
+    )
+    with pytest.raises(ValueError, match="inverse link"):
+        build_family_model(model, "sha256:test")
+
+
+def test_an_identity_link_histgradientboosting_loss_still_exports(tmp_path):
+    X, y = _training_data(rows=300)
+    model = HistGradientBoostingRegressor(
+        loss="absolute_error", max_iter=5, random_state=0
+    ).fit(X, y)
+    artifact = _check_export(model, tmp_path, b"sklearn")
+    assert tree_equivalence(model, artifact, X)["max_abs_diff"] < 1e-12
+
+
+def test_unexportable_xgboost_models_are_refused():
+    xgb = importorskip_optional("xgboost")
+    X, y = _training_data(rows=300)
     labels = (y > np.median(y)).astype(float)
     logistic = xgb.train(
         {"objective": "binary:logistic"}, xgb.DMatrix(X, label=labels), 2
@@ -282,7 +316,7 @@ def test_a_trained_family_is_a_tree_data_model_evaluate_scores(
     tmp_path, evaluator, family
 ):
     if family == "xgboost":
-        pytest.importorskip("xgboost")
+        importorskip_optional("xgboost")
     corpus = _catalog_corpus(tmp_path / "corpus.csv")
     model_dir = tmp_path / "model"
     assert main(_train_arguments(corpus, model_dir, evaluator, family)) == 0
@@ -360,7 +394,7 @@ def _engine_corpus(path):
 def test_an_engine_estimate_trains_with_every_family(tmp_path, evaluator, family):
     """`predict_engine` (layer 1) takes the same family switch as the catalog ranker."""
     if family == "xgboost":
-        pytest.importorskip("xgboost")
+        importorskip_optional("xgboost")
     model_dir = tmp_path / "model"
     arguments = [
         "train",

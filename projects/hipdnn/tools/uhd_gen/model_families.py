@@ -114,8 +114,11 @@ def early_stopped_rounds(curve: np.ndarray, patience: int) -> int:
     """Rounds lgb.early_stopping keeps for a validation curve (lower is better).
 
     Training stops once `patience` rounds pass without a new best, and the model keeps the
-    best round.
+    best round. A patience of 0 or less disables early stopping, as it does for LightGBM
+    and XGBoost, and keeps every round.
     """
+    if patience <= 0:
+        return len(curve)
     best = 0
     for index in range(1, len(curve)):
         if curve[index] < curve[best]:
@@ -283,11 +286,21 @@ def _tree(
 
 def hgb_trees(model) -> tuple[list[GbdtTreeT], float, int]:
     """(trees, base score, feature count) of a fitted HistGradientBoostingRegressor."""
+    from sklearn._loss.link import IdentityLink
+
     if model._baseline_prediction.size != 1 or any(
         len(iteration) != 1 for iteration in model._predictors
     ):
         raise ValueError(
             "only single-output HistGradientBoostingRegressor models export"
+        )
+    if not isinstance(model._loss.link, IdentityLink):
+        # poisson and gamma predict through an exp link the runtime does not apply, so the
+        # raw baseline plus leaves would be the log-margin.
+        raise ValueError(
+            f"HistGradientBoostingRegressor(loss={model.loss!r}) applies an inverse link "
+            "to its raw sum; only identity-link losses (squared_error, absolute_error, "
+            "quantile) export"
         )
     trees = []
     for (predictor,) in model._predictors:

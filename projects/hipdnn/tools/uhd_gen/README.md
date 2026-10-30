@@ -1244,8 +1244,9 @@ Leaves are stored already scaled by the learning rate, so `learningRate` is 1.0.
 log-time score); scikit-learn's by the order of the addition only.
 
 Refused, with the reason: `--group-by-feature` and `--keep-lgbm` (LightGBM only), XGBoost
-`dart` with dropout (its trees are rescaled at prediction time), multi-output models and
-categorical splits (`tree_data` has neither).
+`dart` with dropout (its trees are rescaled at prediction time), XGBoost objectives and
+scikit-learn losses with an inverse link (the runtime sums leaves and applies none),
+multi-output models and categorical splits (`tree_data` has neither).
 
 `xgboost` is optional: `pip install -e ".[xgboost]"`.
 
