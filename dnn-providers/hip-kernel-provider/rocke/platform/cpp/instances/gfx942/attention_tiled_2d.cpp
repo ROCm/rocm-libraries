@@ -7,7 +7,8 @@
  * Ported: UnifiedAttention2DTiledSpec (-> rocke_attention_tiled_2d_spec_t +
  * default/validate/derived-property helpers), the build-head config derivation
  * (-> rocke_unified_attention_2d_tiled_config_from_spec), _mfma_32x32_c_row /
- * _mfma_32x32_c_col, and the kernel build entry (stub-to-link).
+ * _mfma_32x32_c_col. The kernel build entry lives in the attention_tiled_2d_*
+ * part-files.
  *
  * The two 32x32 C helpers reproduce the Python builder-call sequence
  * byte-faithfully: same div/mod constants, same calculate_x ys/ps wiring, same
@@ -410,8 +411,10 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
     {
         if(!(s->use_mfma_32x32x8 && s->use_transposed_qk_32x32))
         {
-            rocke_attn2d_set_err(
-                b, ROCKE_ERR_VALUE, "use_k_single_buffer requires the transposed-x8 path");
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "use_k_single_buffer requires the transposed-x8 PV orientation "
+                                 "(use_mfma_32x32x8 + use_transposed_qk_32x32)");
             return false;
         }
         if(!(rocke_streq(s->dtype, "fp16") || rocke_streq(s->dtype, "bf16")))
@@ -422,8 +425,12 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         block_m = rocke_attention_tiled_2d_spec_block_m(s);
         if(block_m > t_eff)
         {
-            rocke_attn2d_set_err(
-                b, ROCKE_ERR_VALUE, "use_k_single_buffer requires BLOCK_M <= tile_size_eff");
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "use_k_single_buffer requires BLOCK_M <= tile_size so Q still "
+                                 "aliases the single K slot (BLOCK_M=%d, tile_size=%d)",
+                                 block_m,
+                                 t_eff);
             return false;
         }
     }
@@ -932,13 +939,8 @@ rocke_value_t* rocke__mfma_32x32_c_col(rocke_ir_builder_t* b, rocke_value_t* lan
     return rocke_b_add(b, rocke_b_const_i32(b, (int64_t)(n_tile32 * 32)), col);
 }
 
-/* ------------------------------------------------- kernel build (stub) */
-
 /* NOTE: the kernel build entry ``rocke_build_unified_attention_2d_tiled_scalar``
- * formerly lived here as a STUB-TO-LINK placeholder. The faithful, full
- * IR-emitting port now lives in the chunked instance part-files
- * (instance_gfx942_attention_tiled_2d_*_public_entry_glue.c drives the phase
- * functions). This TU keeps only the host-side spec/config/derivation helpers
- * and the two 32x32 C-row/C-col helpers that the part-files consume
- * (rocke__mfma_32x32_c_row / rocke__mfma_32x32_c_col); the build entry is defined
- * once, by the part-file, to avoid a duplicate-symbol link error. */
+ * lives in the chunked instance part-files (attention_tiled_2d_public_entry_glue.cpp
+ * drives the phase functions). This TU keeps only the host-side
+ * spec/config/derivation helpers and the two 32x32 C-row/C-col helpers that the
+ * part-files consume (rocke__mfma_32x32_c_row / rocke__mfma_32x32_c_col). */

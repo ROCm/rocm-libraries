@@ -462,6 +462,29 @@ void rocke_gfx950_attn2d_reset_softmax_scratch(void)
     memset(p_regs_f32_buf, 0, sizeof(p_regs_f32_buf));
 }
 
+/* (x + c) mod 3 for x in [0, 3), as a single conditional subtract. */
+static rocke_value_t* mod3_add(rocke_ir_builder_t* b, rocke_value_t* x, int c)
+{
+    rocke_value_t* sum = rocke_b_add(b, x, rocke_b_const_i32(b, c));
+    rocke_value_t* wraps = rocke_b_cmp_ge(b, sum, rocke_b_const_i32(b, 3));
+    rocke_value_t* wrapped = rocke_b_sub(b, sum, rocke_b_const_i32(b, 3));
+    return rocke_b_select(b, wraps, wrapped, sum);
+}
+
+/* The 32x32 QK Q operand for k-step ``k``: held in q32_regs, or re-read from
+ * the dedicated Q_lds under Q_REREAD. */
+static rocke_value_t* q32_operand(rocke_gfx950_attn2d_build_ctx_t* ctx, int k)
+{
+    if(!ctx->Q_REREAD)
+        return ctx->q32_regs[k];
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* col_base = rocke_b_const_i32(b, k * 16);
+    rocke_value_t* col
+        = rocke_b_add(b, col_base, rocke_b_mul(b, ctx->lane_half_qg_v, rocke_b_const_i32(b, 8)));
+    rocke_value_t* idx[2] = {ctx->q32_row_v, col};
+    return rocke_b_smem_load_vN(b, ctx->Q_lds, idx, 2, ctx->dtype, 8);
+}
+
 /* Post-QK prefetch issue: once QK no longer reads VMEM, start the loads the
  * rest of the iteration (or the next one) needs. The branch order mirrors the
  * Python builder; the PV wait counts depend on which stream is older. */
@@ -469,7 +492,14 @@ static void emit_post_qk_issue(rocke_gfx950_attn2d_build_ctx_t* ctx, rocke_value
 {
     rocke_value_t* cur_buf = ctx->cur_buf;
     rocke_value_t* nxt_buf = ctx->nxt_buf_v;
-    if(ctx->GROUPED_KV2)
+    if(ctx->RING3)
+    {
+        /* V[i] first so the PV partial wait can drain it while K[i+2] streams
+         * into the slot QK[i-1] freed. */
+        rocke_gfx950_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
+        rocke_gfx950_attn2d_issue_k(ctx, ctx->ring_pf_tile_v, nxt_buf);
+    }
+    else if(ctx->GROUPED_KV2)
     {
         rocke_gfx950_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
         rocke_gfx950_attn2d_issue_k(ctx, safe_next_tile, cur_buf);
@@ -536,9 +566,20 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
     const int M_ATOMS_PER_WARP = ctx->M_ATOMS_PER_WARP;
     const int SOFTMAX_STATE_SLOTS = ctx->SOFTMAX_STATE_SLOTS;
 
-    /* nxt_buf = 1 - cur_buf (double-buffer); K single-buffer single slot -> const 0. */
-    ctx->nxt_buf_v = ctx->K_SINGLE_BUFFER ? rocke_b_const_i32(b, 0)
-                                          : rocke_b_sub(b, rocke_b_const_i32(b, 1), ctx->cur_buf);
+    /* nxt_buf = 1 - cur_buf (double-buffer); K single-buffer single slot -> const 0.
+     * Depth-3 ring: nxt_buf is the K[i+2] slot (cur_buf+2)%3 and the next
+     * iteration reads (cur_buf+1)%3. */
+    if(ctx->RING3)
+    {
+        ctx->nxt_buf_v = mod3_add(b, ctx->cur_buf, 2);
+        ctx->ring_next_cur_v = mod3_add(b, ctx->cur_buf, 1);
+    }
+    else
+    {
+        ctx->nxt_buf_v = ctx->K_SINGLE_BUFFER
+                             ? rocke_b_const_i32(b, 0)
+                             : rocke_b_sub(b, rocke_b_const_i32(b, 1), ctx->cur_buf);
+    }
 
     rocke_value_t* tile_off = rocke_b_mul(b, ctx->kv_tile_iv, rocke_b_const_i32(b, ctx->T));
 
@@ -600,6 +641,12 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
     rocke_value_t* in_range_next = rocke_b_cmp_lt(b, next_tile_iv_raw, ctx->tile_end);
     rocke_value_t* safe_next_tile
         = rocke_b_select(b, in_range_next, next_tile_iv_raw, ctx->kv_tile_iv);
+    if(ctx->RING3)
+    {
+        rocke_value_t* pf_raw = rocke_b_add(b, ctx->kv_tile_iv, rocke_b_const_i32(b, 2));
+        rocke_value_t* pf_in_range = rocke_b_cmp_lt(b, pf_raw, ctx->tile_end);
+        ctx->ring_pf_tile_v = rocke_b_select(b, pf_in_range, pf_raw, ctx->kv_tile_iv);
+    }
 
     /* softmax-derived state forwarded to the PV bucket. */
     rocke_value_t* alpha_regs[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
@@ -624,8 +671,10 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
 
     /* ---- wait for current K + LDS barrier ---- *
      * Staggered: the previous iter issued K[i] then V[i] into cur_buf, so drain
-     * only the older K[i] stream and leave V[i] in flight until the PV wait. */
-    if(ctx->STAGGER_ITER_WAIT)
+     * only the older K[i] stream and leave V[i] in flight until the PV wait.
+     * Depth-3 ring: only the K[i+1] and K[i+2] prefetches are pending; drain
+     * the older one and leave the newest streaming. */
+    if(ctx->RING3 || ctx->STAGGER_ITER_WAIT)
     {
         const int kv_calls_per_tile = (ctx->T * ctx->HD) / (ctx->THREADS * 8);
         rocke_b_s_waitcnt(b, kv_calls_per_tile, kv_calls_per_tile, /*expcnt=*/-1);
@@ -679,7 +728,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 rocke_value_t* k_off_t = rocke_b_add(
                     b, k_off_base, rocke_b_mul(b, lane_half, rocke_b_const_i32(b, 8)));
                 rocke_value_t* A_k_t = fh_read_k8_mfma_operand(ctx, ctx->cur_buf, k_row_t, k_off_t);
-                rocke_value_t* B_q_t = ctx->q32_regs[k];
+                rocke_value_t* B_q_t = q32_operand(ctx, k);
                 acc32 = fh_mfma_32x32x16(ctx, A_k_t, B_q_t, acc32);
             }
             ST32_n[n] = acc32;
@@ -717,7 +766,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                         b, k_off_base, rocke_b_mul(b, lane_half, rocke_b_const_i32(b, 8)));
                     rocke_value_t* A_k_t
                         = fh_read_k8_mfma_operand(ctx, ctx->nxt_buf_v, k_row_t, k_off_t);
-                    rocke_value_t* B_q_t = ctx->q32_regs[k];
+                    rocke_value_t* B_q_t = q32_operand(ctx, k);
                     acc32 = fh_mfma_32x32x16(ctx, A_k_t, B_q_t, acc32);
                 }
                 ST32_n_g1[n] = acc32;
@@ -1017,7 +1066,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 idx[1] = k_row32;
                 idx[2] = kc_off32;
                 B32_v = rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, 8);
-                acc32 = fh_mfma_32x32x16(ctx, ctx->q32_regs[k], B32_v, acc32);
+                acc32 = fh_mfma_32x32x16(ctx, q32_operand(ctx, k), B32_v, acc32);
             }
             S32_n[n] = acc32;
         }

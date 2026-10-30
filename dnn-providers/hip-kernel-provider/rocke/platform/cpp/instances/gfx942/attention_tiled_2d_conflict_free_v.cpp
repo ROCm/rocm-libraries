@@ -30,12 +30,10 @@
  * exactly as the Python prologue computes them.
  *
  * NOTE (max_seq_prefix_len). Both vehicles bound their HBM read by this CTA's
- * valid KV length, ``max_seq_prefix_len`` (Python local, line 1984). The shared
- * ctx does not carry it as a field, so it is reconstructed here from the ctx
- * locals it derives from (context_len + qb_start_pos + (BLOCK_M-1)//NQK + 1,
- * clamped to seq_len) -- the identical builder-call chain. A header revision that
- * promotes max_seq_prefix_len to a ctx field would let both this bucket and the
- * KV-loop-bounds bucket share the single SSA value.
+ * valid KV length, ``max_seq_prefix_len`` (Python local, line 1984). Both reuse
+ * the prologue's cached ctx->max_seq_prefix_len_v; only when it is unset is the
+ * value reconstructed from the ctx locals it derives from (context_len +
+ * qb_start_pos + (BLOCK_M-1)//NQK + 1, clamped to seq_len).
  *
  * Lifetime: every emitted node + the payload list is arena-owned
  * (rocke_ir_builder_t.arena). Nothing is freed individually.
@@ -69,9 +67,12 @@ static rocke_value_t* rocke__paged_kv_offset(rocke_gfx942_attn2d_build_ctx_t* ct
 
 /* max_seq_prefix_len = select(msp_raw < seq_len, msp_raw, seq_len)  (line 1984)
  *   msp_raw = context_len + qb_start_pos + ((BLOCK_M-1)//NQK + 1)    (line 1983)
- * Reconstructed from ctx locals (see file header NOTE). */
+ * Python keeps one prologue local, so reuse the cached value; otherwise it is
+ * reconstructed from ctx locals (see file header NOTE). */
 static rocke_value_t* rocke__max_seq_prefix_len(rocke_gfx942_attn2d_build_ctx_t* ctx)
 {
+    if(ctx->max_seq_prefix_len_v != NULL)
+        return ctx->max_seq_prefix_len_v;
     rocke_ir_builder_t* b = ctx->b;
     int bm1_div_nqk = (ctx->BLOCK_M - 1) / ctx->NQK;
     rocke_value_t* msp_raw = b ? rocke_b_add(b,
@@ -296,8 +297,7 @@ static void rocke__cfvst_load_env_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     env->zero_h = rocke_b_cast_f32_to(b, rocke_b_const_f32(b, 0.0), ctx->dtype);
     env->zero_i32 = rocke_b_const_i32(b, 0);
     env->tile_tok_base = rocke_b_mul(b, kv_tile_idx, rocke_b_const_i32(b, ctx->T));
-    env->max_seq_prefix_len = (ctx->max_seq_prefix_len_v != NULL) ? ctx->max_seq_prefix_len_v
-                                                                  : rocke__max_seq_prefix_len(ctx);
+    env->max_seq_prefix_len = rocke__max_seq_prefix_len(ctx);
 }
 
 rocke_value_t* rocke_gfx942_attn2d_load_token_row_pair(rocke_gfx942_attn2d_build_ctx_t* ctx,

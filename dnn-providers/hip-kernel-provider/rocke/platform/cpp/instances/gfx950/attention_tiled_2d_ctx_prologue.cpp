@@ -40,6 +40,7 @@
 #include <string.h>
 
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* rocke_binary_search_seq_idx */
+#include "rocke/helper_rocke.instances.common.attention_arch.h" /* rocke_require_tiled_attention_arch */
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 
 /* ---------------------------------------------------------------- helpers */
@@ -51,47 +52,6 @@ static bool rocke_g950a2d_streq(const char* a, const char* c)
     if(!a || !c)
         return false;
     return strcmp(a, c) == 0;
-}
-
-/* require_tiled_attention_arch(arch) for the gfx950 WIDE-K path. Faithful inline
- * port of instances/common/attention_arch.require_tiled_attention_arch: a target
- * is admitted when it carries the wide-K 16x16x32 f16 atom (or ds_read_tr) AND
- * the LDS transpose reads (ds_read_b64_tr_b16). Returns true on accept; on reject
- * latches a NotImplementedError on b. */
-static bool rocke_g950a2d_require_tiled_attention_arch(rocke_ir_builder_t* b, const char* arch)
-{
-    const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
-    if(target == NULL)
-    {
-        if(b)
-        {
-            b->status = ROCKE_ERR_NOTIMPL;
-            snprintf(b->err, ROCKE_ERR_MSG_CAP, "unknown gfx target: %s", arch ? arch : "(null)");
-        }
-        return false;
-    }
-    const rocke_arch_mma_catalog_t* mma = rocke_archtarget_mma(target);
-    bool wide_k = rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 32)
-                  || target->memory.has_ds_read_tr;
-    if(wide_k && target->memory.has_ds_read_tr)
-        return true;
-    if(b)
-    {
-        b->status = ROCKE_ERR_NOTIMPL;
-        if(!wide_k)
-            snprintf(b->err,
-                     ROCKE_ERR_MSG_CAP,
-                     "tiled attention requires the wide-K MFMA atoms "
-                     "(mfma_f32_16x16x32 / mfma_f32_32x32x16, gfx950); absent on %s",
-                     arch ? arch : "(null)");
-        else
-            snprintf(b->err,
-                     ROCKE_ERR_MSG_CAP,
-                     "tiled attention requires LDS transpose reads (ds_read_b64_tr_b16) "
-                     "for the wide-K path, absent on %s",
-                     arch ? arch : "(null)");
-    }
-    return false;
 }
 
 /* ===================================================================== *
@@ -114,7 +74,7 @@ bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* ctx,
     ctx->arch = arch;
 
     /* ---- require_tiled_attention_arch(arch) (line 748) ---- */
-    if(!rocke_g950a2d_require_tiled_attention_arch(b, arch))
+    if(!rocke_require_tiled_attention_arch(b, arch))
         return false;
 
     /* ---- dtype gate (lines 750-751) ---- */

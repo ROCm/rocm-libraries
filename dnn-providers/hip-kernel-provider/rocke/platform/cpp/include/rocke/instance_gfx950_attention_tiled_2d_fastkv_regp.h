@@ -3,7 +3,7 @@
  *
  * rocke/instance_gfx950_attention_tiled_2d_fastkv_regp.h -- canonical public
  * surface for the C99 port of
- * rocke/instances/gfx950/attention_tiled_2d_fastkv_regp.py: the experimental
+ * library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py: the experimental
  * gfx950 "fast paged-KV descriptor + register-P" 2D-attention wrapper that
  * forces the production tiled R4 builder down the register-P residency path
  * (removing the otherwise-unused P_lds slab for the transposed 32x32 R4

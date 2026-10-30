@@ -3,7 +3,7 @@
  *
  * rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h -- C99 port of
  * the symbols named by the porting task from
- * rocke/instances/gfx942/attention_tiled_2d.py (the gfx942/CDNA3 narrow-atom
+ * library/kernels/gfx942/attention_tiled_2d.py (the gfx942/CDNA3 narrow-atom
  * tiled-2D unified-attention kernel).
  *
  * Ported symbols (task list):
@@ -36,12 +36,9 @@
  * the "config constants derived from spec" block at the head of
  * build_unified_attention_2d_tiled.
  *
- * ``rocke_build_unified_attention_2d_tiled_scalar`` is the kernel emitter. Its
- * Python body is ~4000 lines of IR emission; per the porting task it is a
- * stub-to-link entry point here (it validates the spec + arch and computes the
- * config, then records ROCKE_ERR_UNIMPLEMENTED on the builder and returns NULL).
- * The faithful kernel-body port is a follow-on; this surface lets a C driver
- * link, construct/validate the spec, and read the derived config today.
+ * ``rocke_build_unified_attention_2d_tiled_scalar`` is the kernel emitter. It
+ * is declared and documented in rocke/instance_gfx942_attention_tiled_2d.h; its
+ * full IR-emitting body lives in instances/gfx942/attention_tiled_2d_*.cpp.
  *
  * Error model mirrors the rest of the C port: pure helpers return a sentinel
  * (NULL / false); the rocke_b_* / builder variants route the same failure through
@@ -106,10 +103,8 @@ typedef struct rocke_attention_tiled_2d_spec
     bool use_fp8_mfma_pv; /* False */
     bool use_register_pv; /* False */
 
-    /* Deep K+V prefetch / V-double-buffer schedule controls (Python mirror).
-     * The gfx950 C emitter builds the V double-buffer and the staggered
-     * iter-start wait; it rejects kv_ring_depth!=2 and use_q_reread rather than
-     * silently emit the depth-2 schedule. */
+    /* Deep K prefetch ring / V-double-buffer / Q re-read schedule controls
+     * (Python mirror; gfx950 only). */
     bool use_v_double_buffer; /* False */
     int kv_ring_depth; /* 2 */
     bool use_staggered_iter_wait; /* False */
@@ -275,15 +270,11 @@ bool rocke_unified_attention_2d_tiled_config_from_spec(
     const rocke_attention_tiled_2d_spec_t* spec,
     rocke_unified_attention_2d_tiled_config_t* out);
 
-/* ---------------------------------------------------- kernel build (stub) *
+/* --------------------------------------------------------- kernel build *
  *
- * build_unified_attention_2d_tiled(spec, arch="gfx942") analogue.
- *
- * STUB-TO-LINK: the Python kernel body is ~4000 lines of IR emission and is not
- * yet ported. This entry validates the arch and spec, derives the config, then
- * records ROCKE_ERR_UNIMPLEMENTED on ``b`` and returns NULL. ``arch`` NULL == the
- * Python default "gfx942". Defined so a C driver can link against the gfx942
- * tiled-2D surface today; the faithful body port is a follow-on. */
+ * build_unified_attention_2d_tiled(spec, arch="gfx942") analogue: the full
+ * kernel emitter (see rocke/instance_gfx942_attention_tiled_2d.h). ``arch``
+ * NULL == the Python default "gfx942". */
 rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar(
     rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec, const char* arch);
 

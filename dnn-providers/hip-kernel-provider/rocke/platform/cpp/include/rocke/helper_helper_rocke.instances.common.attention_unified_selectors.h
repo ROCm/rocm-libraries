@@ -3,7 +3,7 @@
  *
  * helper_helper_rocke.instances.common.attention_unified_selectors.h --
  *   C99 port of selected SELECTOR + descriptor + emit symbols from
- *   rocke/instances/common/attention_unified.py.
+ *   library/kernels/common/attention_unified.py.
  *
  * PORTED SYMBOLS (this phase), mapped from their Python private names:
  *   rocke_unified_attn_select_2d_tile_size       (_select_2d_tile_size)
@@ -116,7 +116,7 @@ bool rocke_unified_attn_select_2d_waves_per_eu(const rocke_unified_attention_pro
 /* ------------------------------------------------------- LDS-budget resolver *
  * Selection-layer LDS accounting shared by the gfx942 admission gate and the
  * gfx950 register-PV budget resolver (mirrors the Python helpers in
- * rocke/instances/common/attention_unified.py). */
+ * library/kernels/common/attention_unified.py). */
 
 /* Python: _tiled_2d_lds_bytes -- static LDS footprint (bytes) of a tiled-2D
  * geometry. Single source of truth for the per-buffer tile arithmetic; callers
@@ -132,13 +132,15 @@ int rocke_unified_attn_tiled_2d_lds_bytes(int tile_size,
                                           bool include_p_lds,
                                           int v_pad);
 
-/* Python: _resolve_lds_budget -- deterministically shrink an over-budget gfx950
- * register-PV 2D spec (single-buffer K, then T=64) in place until it fits the
- * arch LDS cap, using only compile-validated reductions. A strict no-op for
- * already-fitting / non-register-PV / non-gfx950 specs (returns true, spec
- * unchanged). Returns false when no validated reduction fits, filling ``reason``
- * (up to ``reason_cap`` bytes) with a diagnostic. The provider's spec-assembly
- * path calls this right after building a spec from the selectors above. */
+/* Python: _resolve_lds_budget -- deterministically shrink an over-budget
+ * register-PV 2D spec (single-buffer K, then T=64, then both) in place until it
+ * fits the arch LDS cap. Each lever candidate is validated as Python's
+ * dataclasses.replace() re-runs the spec class __post_init__ (the gfx942 spec
+ * validator on gfx942, the gfx950 spec checks elsewhere); a rejected candidate
+ * is skipped. A strict no-op for already-fitting / non-register-PV specs
+ * (returns true, spec unchanged). Returns false when nothing fits, filling
+ * ``reason`` (up to ``reason_cap`` bytes) with Python's RuntimeError text,
+ * per-lever diagnostics included. */
 bool rocke_unified_attn_resolve_lds_budget(rocke_attention_tiled_2d_spec_t* spec,
                                            const char* arch,
                                            char* reason,

@@ -31,8 +31,8 @@
  * cheap, idempotent SSA recomputations) -- the emitted IR is unchanged.
  *
  * Paths reachable only through symbols not yet ported to the C transforms
- * surface (the non-fast paged-KV descriptor's TensorDescriptor.indirect /
- * .offset_i64_split, and the fp8 dequant_fp8x8_to_dtype) are stubbed-to-link:
+ * surface (the non-fast paged-KV descriptor's TensorDescriptor.indirect, and
+ * the fp8 dequant_fp8x8_to_dtype) are stubbed-to-link:
  * fp8 K/V is rejected on gfx942 (so K_FP8_MFMA / KV_FP8 / TRANSPOSED_V* are
  * always false on this arch's buildable space), and FAST_PAGED_KV_DESC is the
  * gfx942 production descriptor path.
@@ -406,19 +406,13 @@ void rocke_gfx942_attn2d_emit_preloop(rocke_gfx942_attn2d_build_ctx_t* ctx)
      * standalone descriptor object -- the per-call byte offsets are built
      * directly by _fast_paged_kv_blocks / _fast_paged_kv_voff (2352-2398). */
     /* seq_base + block_table_max_idx: per-sequence base index into block_tables
-     * and the global footprint bound; both wave-uniform SGPRs. The gfx950 builder
-     * emits BOTH unconditionally in the preloop (Python 1525, 1538), BEFORE the
-     * FAST_PAGED_KV_DESC branch and the Q gather, so the SSA stream matches; the
-     * gfx942 narrow builder only needs them for the full byte descriptor. Emit
-     * them here on the gfx950 (wide ds_read_tr) path even when fast paged-KV is
-     * on so the value numbering aligns. */
+     * and the global footprint bound; both wave-uniform SGPRs. Both builders emit
+     * them before the FAST_PAGED_KV_DESC branch, so emit them here even when fast
+     * paged-KV is on to keep the value numbering aligned. */
     if(ctx->FAST_PAGED_KV_DESC)
     {
-        if(ctx->target != NULL && ctx->target->memory.has_ds_read_tr)
-        {
-            (void)rocke__seq_base(ctx);
-            (void)rocke__block_table_max_idx(ctx);
-        }
+        (void)rocke__seq_base(ctx);
+        (void)rocke__block_table_max_idx(ctx);
         ctx->kv_desc = NULL;
         return;
     }
@@ -808,31 +802,44 @@ void rocke_gfx942_attn2d_issue_k_slice_load_runtime(rocke_gfx942_attn2d_build_ct
             = rocke_b_add(b, rocke_b_const_i32(b, slice_idx * ctx->K_SLICE_HD), dim_local);
         rocke_value_t* linear_half
             = rocke_b_add(b, rocke_b_mul(b, token, rocke_b_const_i32(b, ctx->HD)), dim);
-        /* i32 voffset only: the i64 split-offset path is not ported (see the
-         * full-tile K loader). */
         const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
         rocke_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
+        rocke_value_t* k_rsrc = ctx->k_rsrc;
+        rocke_value_t* k_ptr = ctx->key;
         rocke_value_t* voff = NULL;
         rocke_value_t* valid = NULL;
-        if(!rocke_transforms_descriptor_offset(
-               b, ctx->kv_desc, in_names, in_values, 3, &voff, &valid))
+        if(ctx->I64_KV_ADDR)
+        {
+            /* The physical_block term goes into a 64-bit per-block base, so the
+             * voffset stays within one block. */
+            rocke_value_t* base_i64 = NULL;
+            if(!rocke_transforms_descriptor_offset_i64_split(b,
+                                                             ctx->kv_desc,
+                                                             "physical_block",
+                                                             in_names,
+                                                             in_values,
+                                                             3,
+                                                             &base_i64,
+                                                             &voff,
+                                                             &valid))
+                return;
+            k_ptr = rocke_b_global_ptr_add(b, ctx->key, base_i64);
+            k_rsrc = rocke_b_buffer_rsrc(b, k_ptr, rocke__kv_block_bytes_c(ctx));
+        }
+        else if(!rocke_transforms_descriptor_offset(
+                    b, ctx->kv_desc, in_names, in_values, 3, &voff, &valid))
             return;
         rocke_value_t* k_dst = rocke_b_smem_ptr_add(
             b, K_wave_base, rocke_b_const_i64(b, (int64_t)call * bytes_per_call));
         if(ctx->USE_GLOBAL_LOAD_LDS_K)
         {
             rocke_b_global_load_lds(
-                b, ctx->key, voff, k_dst, ctx->ASYNC_LDS_MAX_BYTES_PER_LANE, ctx->kv_cache_aux);
+                b, k_ptr, voff, k_dst, ctx->ASYNC_LDS_MAX_BYTES_PER_LANE, ctx->kv_cache_aux);
         }
         else
         {
-            rocke_b_async_buffer_load_lds_addr(b,
-                                               ctx->k_rsrc,
-                                               k_dst,
-                                               voff,
-                                               zero_soff,
-                                               ctx->ASYNC_LDS_MAX_DWORDS,
-                                               ctx->kv_cache_aux);
+            rocke_b_async_buffer_load_lds_addr(
+                b, k_rsrc, k_dst, voff, zero_soff, ctx->ASYNC_LDS_MAX_DWORDS, ctx->kv_cache_aux);
         }
     }
 }

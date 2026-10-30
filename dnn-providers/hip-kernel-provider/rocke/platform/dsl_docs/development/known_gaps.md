@@ -18,9 +18,9 @@ versus the Python engine across every kernel family (see
   0 mismatch**.
 
 None of the gaps below are on the *valid-config emission path*, which is why the
-gate is fully green, with two exceptions: §5 (additive bias) and §7 (gfx950
-tiled-2D schedules) cover Python-engine-only features that *are* reachable
-from a valid config — see those sections for why the gate stays green anyway. They fall into three kinds:
+gate is fully green, with one exception: §5 (additive bias) covers a
+Python-engine-only feature that *is* reachable from a valid config — see that
+section for why the gate stays green anyway. They fall into three kinds:
 
 1. **Faithful rejection mirrors** — a `ROCKE_ERR_NOTIMPL` (or a reject-message)
    that translates a Python `raise NotImplementedError` / `ValueError` /
@@ -278,50 +278,6 @@ adding an `emit_lse=True` config per arch to the emitters. Done only when
 llvm23.
 
 **Sign-off:** avirgoel (owner), 2026-10-20.
-
----
-
-## 8. gfx950 tiled 2D — deep-prefetch ring and Q-reread schedules
-
-**Subsystem:** `instances/gfx950/attention_tiled_2d_public_entry_glue.cpp`
-
-The Python gfx950 tiled-2D builder emits these schedules. The C++ builder
-rejects each of these spec fields with `ROCKE_ERR_NOTIMPL`. These rejects are
-not faithful mirrors of Python behavior. They are deliberate rejects that stop
-C++ from silently building a different schedule. The C++ selector never sets
-either field, and Python marks both experimental.
-
-The V double-buffer (`use_v_double_buffer`) and the staggered iter-start wait
-(`use_staggered_iter_wait`) are ported and pinned by the gfx950 tiled-2D parity
-emitter.
-
-| Spec field | Selected by the shared selector? | What unblocks it |
-|---|---|---|
-| `kv_ring_depth != 2` | No | Port the 3-slot deep K prefetch ring. |
-| `use_q_reread` | No | Port the Q-reread path. |
-
----
-
-## 9. gfx942 tiled 2D — 64-bit KV addressing in the sliced-K ring
-
-**Subsystem:** `instances/gfx942/attention_tiled_2d_ctx_prologue.cpp`, `instances/common/attention_unified_gates.cpp`
-
-When the paged KV cache is larger than the 2 GiB i32 voffset range, the Python
-selector sets `use_i64_kv_addr`. The C++ builder mirrors the 64-bit K/V offsets
-of the fast paged descriptor and of the per-page K/V loads, but not those of the
-sliced-K ring's K slice loader, which still builds a single i32 voffset. That
-output would differ from Python, and it would overflow at run time. (The fp8
-K/V loaders also have 64-bit paths in Python, but gfx942 tiled 2D rejects the
-fp8 K/V cache in both engines.)
-
-The C++ builder therefore rejects `use_i64_kv_addr` together with an active
-sliced-K ring with `ROCKE_ERR_NOTIMPL`, and the C++ 2D gate rejects problems
-that select both with "not ported to C++ yet", even though the Python gate
-admits them. The C++ selector still sets both fields exactly as Python does.
-
-| Spec fields | Selected by the shared selector? | What unblocks it |
-|---|---|---|
-| `use_i64_kv_addr` with `use_k_sliced_ring` | Yes, for flash prefill on caches past the i32 voffset range | Port the i64 split offset of the K slice loader, then drop both rejects. |
 
 ---
 

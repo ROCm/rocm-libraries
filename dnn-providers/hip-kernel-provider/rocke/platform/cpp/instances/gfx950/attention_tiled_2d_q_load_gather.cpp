@@ -595,6 +595,7 @@ void rocke_gfx950_attn2d_emit_q_gather(rocke_gfx950_attn2d_build_ctx_t* ctx)
         ctx->lane_col32_v = lane_col32;
         ctx->lane_half_qg_v = lane_half;
         q32_row = rocke_b_add(b, ctx->wave_row_base, lane_col32);
+        ctx->q32_row_v = q32_row;
 
         if(ctx->Q_ALIAS_K)
         {
@@ -620,7 +621,7 @@ void rocke_gfx950_attn2d_emit_q_gather(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 ctx->q32_regs[k] = q_read_q32_global(ctx, q32_row, lane_half, k);
         }
 
-        for(k = 0; k < (ctx->Q_DIRECT_REG ? 0 : ctx->QK_K_ITERS); ++k)
+        for(k = 0; k < ((ctx->Q_REREAD || ctx->Q_DIRECT_REG) ? 0 : ctx->QK_K_ITERS); ++k)
         {
             rocke_value_t* q32_col;
             rocke_value_t* q32;
@@ -675,6 +676,15 @@ void rocke_gfx950_attn2d_emit_preloop_prefetch(rocke_gfx950_attn2d_build_ctx_t* 
 
     /* Prefetch tile_start's K into buffer 0 BEFORE the loop (2384). */
     rocke_gfx950_attn2d_issue_k(ctx, ctx->tile_start, rocke_b_const_i32(B, 0));
+    /* Depth-3 ring: also prime slot 1 with K[start+1] (clamped to the last
+     * tile when the loop has a single tile; that duplicate is never consumed). */
+    if(ctx->RING3)
+    {
+        rocke_value_t* tile_start1_raw = rocke_b_add(B, ctx->tile_start, rocke_b_const_i32(B, 1));
+        rocke_value_t* in_range = rocke_b_cmp_lt(B, tile_start1_raw, ctx->tile_end);
+        rocke_value_t* tile_start1 = rocke_b_select(B, in_range, tile_start1_raw, ctx->tile_start);
+        rocke_gfx950_attn2d_issue_k(ctx, tile_start1, rocke_b_const_i32(B, 1));
+    }
     /* V double-buffer: V[tile_start] goes into slot 0 too, so iter 0 finds it
      * ready; each iter then prefetches V[i+1] into the alternate slot. */
     if(ctx->V_DOUBLE_BUF)

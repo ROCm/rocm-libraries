@@ -46,6 +46,7 @@
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* binary_search_seq_idx */
 #include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h" /* rocke__mfma_32x32_c_* */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join  */
+#include "rocke/helper_rocke.instances.common.attention_arch.h" /* rocke_require_tiled_attention_arch */
 
 #include <math.h>
 #include <stdio.h>
@@ -119,91 +120,6 @@ rocke_value_t* rocke_gfx950_attention_tiled_2d_mfma_32x32_c_col(rocke_ir_builder
 }
 
 /* ===================================================================== *
- *  validate_tiled_attention_arch (instances/common/attention_arch.py).
- *
- *  Catalog-driven faithful port of _wide_k_mfma_available /
- *  _narrow_k_mfma_available / _NARROW_TILED_2D_ARCHES ({"gfx942"}) /
- *  validate_tiled_attention_arch. Returns true/false + writes the reason.
- * ===================================================================== */
-
-static bool rocke_g950_wide_k_available(const rocke_arch_target_t* target)
-{
-    if(rocke_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 32))
-        return true;
-    return target->memory.has_ds_read_tr;
-}
-
-static bool rocke_g950_narrow_k_available(const rocke_arch_target_t* target)
-{
-    return rocke_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 16)
-           && rocke_mma_catalog_has_shape(&target->mma, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
-}
-
-static bool rocke_g950_arch_in_narrow_set(const char* arch)
-{
-    return rocke_g950_streq(arch, "gfx942");
-}
-
-/* (ok, reason) form (writes into a caller buffer); reason may be NULL. */
-static bool
-    rocke_g950_validate_tiled_attention_arch(const char* arch, char* reason, size_t reason_cap)
-{
-    const rocke_arch_target_t* target = rocke_arch_target_from_gfx(arch);
-    if(target == NULL)
-    {
-        /* Python: except KeyError as e: return False, str(e). */
-        char buf[128];
-        snprintf(buf, sizeof(buf), "%s", arch ? arch : "None");
-        rocke_g950_reason(reason, reason_cap, buf);
-        return false;
-    }
-    if(rocke_g950_wide_k_available(target) && target->memory.has_ds_read_tr)
-    {
-        rocke_g950_reason(reason, reason_cap, "ok");
-        return true;
-    }
-    if(rocke_g950_arch_in_narrow_set(arch) && rocke_g950_narrow_k_available(target))
-    {
-        rocke_g950_reason(reason, reason_cap, "ok");
-        return true;
-    }
-    if(!rocke_g950_wide_k_available(target))
-    {
-        char buf[320];
-        snprintf(buf,
-                 sizeof(buf),
-                 "tiled attention requires either the wide-K MFMA atoms "
-                 "(mfma_f32_16x16x32 / mfma_f32_32x32x16, gfx950) or, on a narrow "
-                 "variant arch (gfx942), the 16x16x16 f16/bf16 atom; neither path is "
-                 "available on %s",
-                 arch ? arch : "None");
-        rocke_g950_reason(reason, reason_cap, buf);
-        return false;
-    }
-    {
-        char buf[256];
-        snprintf(buf,
-                 sizeof(buf),
-                 "tiled attention requires LDS transpose reads (ds_read_b64_tr_b16) "
-                 "for the wide-K path, absent on %s",
-                 arch ? arch : "None");
-        rocke_g950_reason(reason, reason_cap, buf);
-        return false;
-    }
-}
-
-/* require_tiled_attention_arch: latches a NotImplementedError on the builder
- * (Python raise) on reject; true on accept. */
-static bool rocke_g950_require_tiled_attention_arch(rocke_ir_builder_t* b, const char* arch)
-{
-    char reason[320];
-    if(rocke_g950_validate_tiled_attention_arch(arch, reason, sizeof(reason)))
-        return true;
-    /* raise NotImplementedError(reason) -- caught at the public entry boundary. */
-    rocke_g950_fail(b, ROCKE_ERR_NOTIMPL, reason);
-}
-
-/* ===================================================================== *
  *  supports_tiled_2d(..., arch="gfx950")   (Python lines 588-703)
  * ===================================================================== */
 
@@ -234,7 +150,7 @@ bool rocke_gfx950_attention_tiled_2d_supports(
     arch = args->arch ? args->arch : "gfx950";
 
     /* arch_ok, arch_reason = validate_tiled_attention_arch(arch) (Py622). */
-    if(!rocke_g950_validate_tiled_attention_arch(arch, reason, reason_cap))
+    if(!rocke_validate_tiled_attention_arch(arch, reason, reason_cap))
         return false;
 
     /* dtype gate (Py625). */
@@ -393,7 +309,7 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
     ctx->arch = arch;
 
     /* ---- require_tiled_attention_arch(arch) (Py748) ---- */
-    if(!rocke_g950_require_tiled_attention_arch(b, arch))
+    if(!rocke_require_tiled_attention_arch(b, arch))
         return false;
 
     /* ---- dtype gate (Py750) ---- */
@@ -470,25 +386,12 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
                 b, ROCKE_ERR_VALUE, "use_staggered_iter_wait v1 does not support FP8 KV");
     }
 
-    /* ---- deep ring / q-reread: the Python builder emits these schedules but
-     * the gfx950 C twin does not port them yet. Reject rather than silently
-     * emit the depth-2 schedule. */
-    if(spec->kv_ring_depth != 2)
-    {
-        /* the Python builder wires a depth-3 deep K prefetch ring on the
-         * d128 small-tile combo, but the gfx950 C twin shares the depth-2
-         * single/early-V emitter and does not port the 3-slot ring + staggered
-         * waits. Reject cleanly rather than silently emit a depth-2 schedule. */
-        rocke_g950_fail(b,
-                        ROCKE_ERR_NOTIMPL,
-                        "kv_ring_depth!=2 (deep prefetch ring) not yet ported to "
-                        "the gfx950 C twin");
-    }
     if(spec->use_q_reread)
     {
-        rocke_g950_fail(b,
-                        ROCKE_ERR_NOTIMPL,
-                        "use_q_reread: gfx950 C twin does not yet port the Q-reread path");
+        if(!(spec->use_mfma_32x32 && spec->use_transposed_qk_32x32))
+            rocke_g950_fail(b, ROCKE_ERR_VALUE, "use_q_reread requires the transposed-32x32 path");
+        if(spec->kv_storage_dtype != NULL)
+            rocke_g950_fail(b, ROCKE_ERR_VALUE, "use_q_reread v1 does not support FP8 KV");
     }
     /* ---- direct-to-register Q gather / mask phase split (Python __post_init__). */
     if(spec->use_q_direct_reg)
@@ -524,6 +427,36 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
                             ROCKE_ERR_VALUE,
                             "use_mask_phase_split requires no sliding window "
                             "(the peel assumes a monotone causal bound)");
+    }
+    if(spec->kv_ring_depth != 2 && spec->kv_ring_depth != 3)
+    {
+        char msg[96];
+        snprintf(
+            msg, sizeof(msg), "kv_ring_depth must be 2 or 3 (got %d)", (int)spec->kv_ring_depth);
+        rocke_g950_fail(b, ROCKE_ERR_NOTIMPL, msg);
+    }
+    if(spec->kv_ring_depth == 3)
+    {
+        if(spec->kv_storage_dtype != NULL)
+            rocke_g950_fail(b, ROCKE_ERR_VALUE, "kv_ring_depth=3 does not support FP8 KV");
+        if(spec->use_grouped_kv2_softmax)
+            rocke_g950_fail(b, ROCKE_ERR_VALUE, "kv_ring_depth=3 does not support grouped_kv2");
+        if(spec->use_v_double_buffer)
+            rocke_g950_fail(b,
+                            ROCKE_ERR_VALUE,
+                            "kv_ring_depth=3 requires V single-buffer (keeps LDS <= 32 KB "
+                            "for 2 WG/CU); V prefetch is the depth-2 use_v_double_buffer path");
+        if(spec->use_early_v_schedule)
+            rocke_g950_fail(
+                b, ROCKE_ERR_VALUE, "kv_ring_depth=3 does not support early_v_schedule");
+        if(spec->use_staggered_iter_wait)
+            rocke_g950_fail(b,
+                            ROCKE_ERR_VALUE,
+                            "kv_ring_depth=3 has its own staggered wait; "
+                            "do not combine with use_staggered_iter_wait");
+        if(!(spec->use_mfma_32x32 && spec->use_transposed_qk_32x32))
+            rocke_g950_fail(
+                b, ROCKE_ERR_VALUE, "kv_ring_depth=3 requires the transposed-32x32 combo path");
     }
     if(spec->use_softmax_mfma_interleave && spec->use_sched_barrier)
     {
@@ -612,6 +545,8 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
     ctx->K_SINGLE_BUFFER = spec->use_k_single_buffer; /* K single-buffer */
     ctx->V_DOUBLE_BUF = spec->use_v_double_buffer;
     ctx->STAGGER_ITER_WAIT = spec->use_staggered_iter_wait;
+    ctx->RING3 = spec->kv_ring_depth == 3;
+    ctx->Q_REREAD = spec->use_q_reread;
     ctx->USE_SCHED_BARRIER = spec->use_sched_barrier;
     ctx->SCHED_BARRIER_MASK = spec->sched_barrier_mask;
     ctx->USE_SOFTMAX_INTERLEAVE = spec->use_softmax_mfma_interleave;
@@ -827,7 +762,7 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
     ctx->K_LDS_ELEM_BYTES = K_LDS_ELEM_BYTES;
     ctx->K_BUF_BYTES = K_BUF_BYTES;
     /* K single-buffer -> 1 slot (halves K_lds so T=64 fits 2 WG/CU). */
-    ctx->K_BUFS = ctx->K_SINGLE_BUFFER ? 1 : 2;
+    ctx->K_BUFS = ctx->K_SINGLE_BUFFER ? 1 : (ctx->RING3 ? 3 : 2);
     ctx->K_TOTAL_BYTES = K_TOTAL_BYTES;
 
     /* K_lds slab pad: one wave's async-DMA slab (1024 B) fills KQ_SLAB_ROWS
@@ -854,6 +789,8 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
     }
 
     bool Q_ALIAS_K = rocke_type_eq(K_LDS_DTYPE, dtype) && (Q_BYTES <= K_TOTAL_BYTES);
+    if(ctx->Q_REREAD)
+        Q_ALIAS_K = false; /* the K prefetch would overwrite an aliased Q */
     ctx->Q_DIRECT_REG = spec->use_q_direct_reg;
     if(ctx->Q_DIRECT_REG)
         Q_ALIAS_K = false; /* Q never touches LDS */
@@ -1077,7 +1014,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
                                                     size_t out_cap)
 {
     char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], kv_buf[64];
-    char sw_buf[32], w_buf[32], mw_buf[32], schedb_buf[32], smxil_buf[32];
+    char sw_buf[32], w_buf[32], mw_buf[32], schedb_buf[32], smxil_buf[32], ring_buf[32];
     int nqh, nkv;
 
     if(s == NULL || out == NULL)
@@ -1113,6 +1050,10 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
         snprintf(schedb_buf, sizeof(schedb_buf), "schedb%d", s->sched_barrier_mask);
     else
         schedb_buf[0] = '\0';
+    if(s->kv_ring_depth != 2)
+        snprintf(ring_buf, sizeof(ring_buf), "ring%d", (int)s->kv_ring_depth);
+    else
+        ring_buf[0] = '\0';
     /* smxil<mode>[g<groups> for mode 2] -- mirrors Python kernel_name(). */
     if(s->use_softmax_mfma_interleave)
     {
@@ -1157,6 +1098,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
             s->use_v_double_buffer ? "vdbuf" : "",
             s->use_k_single_buffer ? "ksb" : "", /* K single-buffer */
             s->use_mask_phase_split ? "mphsplit" : "",
+            ring_buf,
             s->use_staggered_iter_wait ? "stgw" : "",
             schedb_buf,
             smxil_buf,

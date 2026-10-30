@@ -26,6 +26,7 @@
 #include "rocke/helper_rocke.helpers.atoms.h"
 #include "rocke/helper_rocke.helpers.mfma_gemm_inner.h" /* rocke_decode_mfma_lanes */
 #include "rocke/helper_rocke.helpers.transforms.h"
+#include "rocke/helper_rocke.instances.common.attention_arch.h" /* rocke_require_tiled_attention_arch */
 #include "rocke/instance_gfx942_attention_tiled_2d.h"
 
 #define FWG_LOG2E 1.4426950408889634
@@ -64,45 +65,6 @@ static void fwg_fail(rocke_ir_builder_t* b, rocke_status_t st, const char* m)
         return;
     b->status = st;
     snprintf(b->err, ROCKE_ERR_MSG_CAP, "%s", m);
-}
-
-/* require_tiled_attention_arch(arch), as the gfx942 tiled-2D prologue ports it. */
-static bool fwg_require_tiled_attention_arch(rocke_ir_builder_t* b, const char* arch)
-{
-    const rocke_arch_target_t* target = rocke_arch_target_from_gfx(arch);
-    if(target == NULL)
-    {
-        char m[ROCKE_ERR_MSG_CAP];
-        snprintf(m, sizeof(m), "unknown gfx target: %s", arch ? arch : "(null)");
-        fwg_fail(b, ROCKE_ERR_NOTIMPL, m);
-        return false;
-    }
-    bool wide_k = rocke_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 32)
-                  || target->memory.has_ds_read_tr;
-    if(wide_k && target->memory.has_ds_read_tr)
-        return true;
-    bool narrow_k
-        = rocke_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 16)
-          && rocke_mma_catalog_has_shape(&target->mma, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
-    if(fwg_streq(arch, "gfx942") && narrow_k)
-        return true;
-    char m[ROCKE_ERR_MSG_CAP];
-    if(!wide_k)
-        snprintf(m,
-                 sizeof(m),
-                 "tiled attention requires either the wide-K MFMA atoms "
-                 "(mfma_f32_16x16x32 / mfma_f32_32x32x16, gfx950) or, on a narrow "
-                 "variant arch (gfx942), the 16x16x16 f16/bf16 atom; neither path is "
-                 "available on %s",
-                 arch);
-    else
-        snprintf(m,
-                 sizeof(m),
-                 "tiled attention requires LDS transpose reads (ds_read_b64_tr_b16) "
-                 "for the wide-K path, absent on %s",
-                 arch);
-    fwg_fail(b, ROCKE_ERR_NOTIMPL, m);
-    return false;
 }
 
 /* ===================================================================== *
@@ -1322,7 +1284,7 @@ static rocke_kernel_def_t*
     /* Python validates the spec when it is constructed, before the builder. */
     if(!rocke_attention_tiled_2d_spec_validate(b, spec))
         return NULL;
-    if(!fwg_require_tiled_attention_arch(b, arch))
+    if(!rocke_require_tiled_attention_arch(b, arch))
         return NULL;
     if(spec->use_i64_kv_addr)
     {

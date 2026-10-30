@@ -1222,7 +1222,7 @@ std::vector<std::string> fkv_verify(const py::dict& d, const std::string& arch)
 /* ===================== gfx942 / gfx950 tiled-3d ======================== */
 
 /* gfx950 UnifiedAttention3DTiledSpec fields the shared C struct has no slot
- * for (kv_layout is read by t3d_strided). */
+ * for. */
 const unported_field k_t3d_unported[] = {
     {"use_additive_bias", false, 0},
     {"causal_top_left", false, 0},
@@ -1270,16 +1270,9 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
         s.kv_storage_dtype = st.keep(v);
     if(a_str(d, "kv_cache_policy", v))
         s.kv_cache_policy = st.keep(v);
+    if(a_str(d, "kv_layout", v))
+        s.kv_layout = st.keep(v);
     return s;
-}
-
-bool t3d_strided(const py::dict& d)
-{
-    std::string layout = "paged";
-    a_str(d, "kv_layout", layout);
-    if(layout != "paged" && layout != "strided")
-        throw py::value_error("kv_layout must be 'paged' or 'strided'");
-    return layout == "strided";
 }
 
 /* gfx942 3d: emitter lowers only the segment via the family convenience. */
@@ -1291,26 +1284,8 @@ std::string t3d942_lower(const py::dict& d, const std::string& arch)
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    const char* target = arch.c_str();
-    if(!t3d_strided(d))
-    {
-        rocke_status_t status = rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
-            &s, target, resolve_python_llvm_flavor(), &ll, err, sizeof err);
-        return take_ll(status, ll, err, "rocke_engine.gfx942_attention_tiled_3d_lower_llvm");
-    }
-    rocke_ir_builder_t b;
-    rocke_ir_builder_init(&b, "attention_tiled_3d_segment");
-    rocke_kernel_def_t* k = rocke_build_unified_attention_3d_tiled_strided_gfx942(&b, &s, target);
-    if(!k || !rocke_ir_builder_ok(&b))
-    {
-        std::string message = rocke_ir_builder_error(&b);
-        rocke_ir_builder_free(&b);
-        throw std::runtime_error(message);
-    }
-    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
-    rocke_status_t status = rocke_lower_kernel_to_llvm_ex(
-        k, resolve_python_llvm_flavor(), target, &ll, err, sizeof err);
-    guard.reset();
+    rocke_status_t status = rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
     return take_ll(status, ll, err, "rocke_engine.gfx942_attention_tiled_3d_lower_llvm");
 }
 std::string t3d942_serialize(const py::dict& d, const std::string& arch)
@@ -1323,9 +1298,7 @@ std::string t3d942_serialize(const py::dict& d, const std::string& arch)
     kname[0] = '\0';
     rocke_unified_attention_3d_tiled_spec_kernel_name(&s, kname, sizeof kname);
     rocke_ir_builder_init(&b, kname);
-    rocke_kernel_def_t* k
-        = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx942
-                          : rocke_build_unified_attention_3d_tiled_gfx942)(&b, &s, arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_unified_attention_3d_tiled_gfx942(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -1347,9 +1320,7 @@ std::vector<std::string> t3d942_verify(const py::dict& d, const std::string& arc
     kname[0] = '\0';
     rocke_unified_attention_3d_tiled_spec_kernel_name(&s, kname, sizeof kname);
     rocke_ir_builder_init(&b, kname);
-    rocke_kernel_def_t* k
-        = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx942
-                          : rocke_build_unified_attention_3d_tiled_gfx942)(&b, &s, arch.c_str());
+    rocke_kernel_def_t* k = rocke_build_unified_attention_3d_tiled_gfx942(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -1374,9 +1345,7 @@ std::string t3d950_lower(const py::dict& d, const std::string& arch)
     {
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "attention_tiled_3d_segment");
-        rocke_kernel_def_t* k
-            = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx950
-                              : rocke_build_unified_attention_3d_tiled_gfx950)(&b, &s, a);
+        rocke_kernel_def_t* k = rocke_build_unified_attention_3d_tiled_gfx950(&b, &s, a);
         if(!k || !rocke_ir_builder_ok(&b))
         {
             std::string m = std::string("gfx950_attention_tiled_3d segment build failed: ")
@@ -1433,9 +1402,7 @@ std::string t3d950_serialize(const py::dict& d, const std::string& arch)
     const char* a = arch.c_str();
     rocke_ir_builder_t b;
     rocke_ir_builder_init(&b, "attention_tiled_3d_segment");
-    rocke_kernel_def_t* k
-        = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx950
-                          : rocke_build_unified_attention_3d_tiled_gfx950)(&b, &s, a);
+    rocke_kernel_def_t* k = rocke_build_unified_attention_3d_tiled_gfx950(&b, &s, a);
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -1455,9 +1422,7 @@ std::vector<std::string> t3d950_verify(const py::dict& d, const std::string& arc
     const char* a = arch.c_str();
     rocke_ir_builder_t b;
     rocke_ir_builder_init(&b, "attention_tiled_3d_segment");
-    rocke_kernel_def_t* k
-        = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx950
-                          : rocke_build_unified_attention_3d_tiled_gfx950)(&b, &s, a);
+    rocke_kernel_def_t* k = rocke_build_unified_attention_3d_tiled_gfx950(&b, &s, a);
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -1684,7 +1649,7 @@ py::dict attn_tiled_spec_from_problem(const py::dict& d,
         raise_if_spec_invalid("attn_tiled_spec_from_problem", [&](rocke_ir_builder_t* b) {
             return rocke_attention_tiled_2d_spec_validate(b, &spec);
         });
-    char reason[512] = {};
+    char reason[2048] = {};
     if(!rocke_unified_attn_resolve_lds_budget(&spec, a, reason, sizeof(reason)))
         throw std::runtime_error(reason);
     return spec_to_dict(spec);
@@ -1780,6 +1745,7 @@ static py::dict spec_3d_to_dict(const rocke_unified_attention_3d_tiled_spec_t& s
         = s.kv_cache_policy ? py::cast(std::string(s.kv_cache_policy)) : py::none();
     d["use_kv_lds_swizzle"] = s.use_kv_lds_swizzle;
     d["use_wave_page_id_load"] = s.use_wave_page_id_load;
+    d["kv_layout"] = std::string(s.kv_layout ? s.kv_layout : "paged");
     return d;
 }
 
@@ -1883,6 +1849,21 @@ void register_attention(py::module_& m)
         "and return the assembled spec as a dict (mirrors "
         "attention_unified._tiled_spec_from_problem: raises ValueError where the "
         "spec fails validation, RuntimeError where its LDS budget cannot be met).");
+    m.def(
+        "unified_attention_resolve_lds_budget",
+        [](const py::dict& d, const std::string& arch) {
+            require_arch(arch);
+            Store st;
+            rocke_attention_tiled_2d_spec_t spec = t2d_build(d, st);
+            char reason[2048] = {};
+            if(!rocke_unified_attn_resolve_lds_budget(&spec, arch.c_str(), reason, sizeof(reason)))
+                throw std::runtime_error(reason);
+            return spec_to_dict(spec);
+        },
+        py::arg("spec"),
+        py::arg("arch"),
+        "attention_unified._resolve_lds_budget(spec, arch) on a tiled-2D spec dict: the "
+        "resolved spec as a dict, or RuntimeError when no lever fits.");
     m.def("unified_attention_tiled_2d_selectors",
           &tiled_2d_selectors,
           py::arg("problem"),
