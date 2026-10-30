@@ -324,9 +324,13 @@ add_library( rocfft-rtc-cache OBJECT
 target_link_libraries( rocfft-rtc-cache PUBLIC ${ROCFFT_SQLITE_LIB} )
 target_link_std_experimental_filesystem( rocfft-rtc-cache )
 
+# data layout descriptions, used for plan building and kernel launching
+add_library( rocfft-data-layout OBJECT
+  data_layout.cpp
+)
+
 # generating kernels from TreeNodes and launching them
 add_library( rocfft-rtc-launch OBJECT
-  data_layout.cpp
   rtc_kernel.cpp
   rtc_bluestein_kernel.cpp
   rtc_realcomplex_kernel.cpp
@@ -356,6 +360,7 @@ foreach( target
   rocfft-rtc-subprocess
   rocfft-rtc-gen
   rocfft-rtc-cache
+  rocfft-data-layout
   rocfft-rtc-launch
   rocfft-solution-map
   rocfft-tuning-helper
@@ -509,6 +514,7 @@ endforeach()
 
 rocfft_link_internal_lib( rocfft generator )
 rocfft_link_internal_lib( rocfft rocfft-function-pool )
+rocfft_link_internal_lib( rocfft rocfft-data-layout )
 rocfft_link_internal_lib( rocfft rocfft-rtc-launch )
 rocfft_link_internal_lib( rocfft rocfft-solution-map )
 rocfft_link_internal_lib( rocfft rocfft-tuning-helper )
@@ -517,6 +523,7 @@ target_link_std_experimental_filesystem( rocfft )
 target_link_libraries( rocfft_kernel_config_search PRIVATE
   ${ROCFFT_HOST_LINK_LIBS}
   generator
+  rocfft-data-layout
   rocfft-rtc-launch
   rocfft-function-pool
   )
@@ -537,6 +544,7 @@ if( ROCFFT_BUILD_OFFLINE_TUNER )
     rocfft
     generator
     rocfft-function-pool
+    rocfft-data-layout
     rocfft-rtc-launch
     rocfft-solution-map
     rocfft-tuning-helper
@@ -545,6 +553,7 @@ if( ROCFFT_BUILD_OFFLINE_TUNER )
     rocfft
     generator
     rocfft-function-pool
+    rocfft-data-layout
     rocfft-rtc-launch
     rocfft-solution-map
     rocfft-tuning-helper
