@@ -2259,6 +2259,67 @@ void rocke_b_sched_group_barrier(rocke_ir_builder_t* b, int mask, int count, int
 
 /* ============================ scf / cf control flow ===================== */
 
+/* Python IRBuilder._enclosing_loop_value_names: true when `name` is the name of
+ * the induction variable or of a carried value of an scf.for the builder is
+ * emitting inside, at any depth. Each region on the stack below the top is
+ * entered from the last op of the region under it; when that op is an scf.for
+ * and the region is its body, the loop's values are visible from here. */
+static bool flow_enclosing_loop_value_named(const rocke_ir_builder_t* b, const char* name)
+{
+    for(int d = 1; d < b->region_depth; ++d)
+    {
+        const rocke_region_t* outer = b->region_stack[d - 1];
+        if(outer->num_ops == 0)
+            continue;
+        const rocke_op_t* owner = outer->ops[outer->num_ops - 1];
+        if(owner->opcode != ROCKE_OP_SCF_FOR || owner->num_regions < 1
+           || owner->regions[0] != b->region_stack[d])
+            continue;
+        const char* iv = rocke_attr_get_str(&owner->attrs, "iv");
+        if(iv && strcmp(iv, name) == 0)
+            return true;
+        const rocke_attr_value_t* meta = rocke_attr_get(&owner->attrs, "iter_args");
+        if(!meta || meta->kind != ROCKE_ATTR_LIST)
+            continue;
+        for(int i = 0; i < meta->u.list.count; ++i)
+        {
+            const char* carried
+                = meta->u.list.items[i] ? rocke_attr_get_str(meta->u.list.items[i], "name") : NULL;
+            if(carried && strcmp(carried, name) == 0)
+                return true;
+        }
+    }
+    return false;
+}
+
+/* Python IRBuilder._refuse_taken_loop_names: refuse the names a new scf.for
+ * gives its induction variable and carried values (`names`, in that order) when
+ * one is taken by a value of a loop the builder is emitting inside, or by an
+ * earlier name in `names`. The serialized IR refers to a value by its name, so
+ * a reused name inside a nested body is ambiguous and the two engines would
+ * read different values. Same text as Python _reused_loop_name_message.
+ * Returns false (builder failed) on a refusal. */
+static bool flow_refuse_taken_loop_names(rocke_ir_builder_t* b, const char* const* names, int count)
+{
+    for(int i = 0; i < count; ++i)
+    {
+        bool taken = flow_enclosing_loop_value_named(b, names[i]);
+        for(int j = 0; j < i && !taken; ++j)
+            taken = strcmp(names[j], names[i]) == 0;
+        if(taken)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "scf.for: the name '%s' is already taken by an induction variable or "
+                            "carried value of this loop or of a loop it is nested in; give it a "
+                            "name of its own",
+                            names[i]);
+            return false;
+        }
+    }
+    return true;
+}
+
 /* scf.for: build the op directly (with a "body" region) and a fresh induction
  * variable Value named "%<iv_name>" whose .op points at the for op. Mirrors
  * IRBuilder.scf_for: it does NOT funnel through _op because the iv Value is
@@ -2291,11 +2352,16 @@ rocke_for_t rocke_b_scf_for(rocke_ir_builder_t* b,
         return out;
     }
 
+    snprintf(iv_full, sizeof(iv_full), "%%%s", nm);
+    {
+        const char* names[1] = {iv_full};
+        if(!flow_refuse_taken_loop_names(b, names, 1))
+            return out;
+    }
+
     body = rocke_i_new_region(b, "body");
     if(!body)
         return out;
-
-    snprintf(iv_full, sizeof(iv_full), "%%%s", nm);
 
     attrs = rocke_i_attrs(b);
     rocke_attr_set_str(b, &attrs, "iv", iv_full);
@@ -2370,11 +2436,35 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
         }
     }
 
+    snprintf(iv_full, sizeof(iv_full), "%%%s", nm);
+    {
+        /* names = [iv, *carried], each "%<name>" as the op records it. */
+        const char** names = (const char**)rocke_arena_alloc(
+            &b->arena, sizeof(const char*) * (size_t)(1 + num_iter_args));
+        if(!names)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_OOM, "scf_for_iter: OOM");
+            return out;
+        }
+        names[0] = iv_full;
+        for(i = 0; i < num_iter_args; ++i)
+        {
+            char vn[128];
+            snprintf(vn, sizeof(vn), "%%%s", iter_args[i].name ? iter_args[i].name : "");
+            names[1 + i] = rocke_arena_strdup(&b->arena, vn);
+            if(!names[1 + i])
+            {
+                rocke_i_set_err(b, ROCKE_ERR_OOM, "scf_for_iter: OOM");
+                return out;
+            }
+        }
+        if(!flow_refuse_taken_loop_names(b, names, 1 + num_iter_args))
+            return out;
+    }
+
     body = rocke_i_new_region(b, "body");
     if(!body)
         return out;
-
-    snprintf(iv_full, sizeof(iv_full), "%%%s", nm);
 
     /* operands = [lo, hi, step, *iter_inits] */
     ops = (rocke_value_t**)rocke_arena_alloc(&b->arena,
