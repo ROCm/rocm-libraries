@@ -33,7 +33,9 @@ The gfx950 golden is untouched either way: this is a separate kernel module emit
 its own symbol against its own fixture, not an arch branch in the gfx950 file.
 
 Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged.
-Sliding-window and attention sinks are supported, alone or combined. Sinks seed the
+Sliding-window and attention sinks are supported, alone or combined. Paged K/V runs on
+the default grid for the shared spec's paged cohort, with the same per-wave block-table
+lookup as gfx950; paged V always takes the async-DMA path, never conflict-free V. Sinks seed the
 online-softmax state once per work item (`m = sink * log2(e)`, `l = 1`) before the KV
 loop and add a trailing `sink_ptr` ([Hq], q dtype) kernel argument. The
 deferred-findings backlog lives in the optimization plan for this port, which is kept

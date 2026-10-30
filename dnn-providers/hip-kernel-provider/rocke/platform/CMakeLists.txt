@@ -652,6 +652,13 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py")
+    # gfx942 dense prefill host tests and their IR golden. Not on Windows: its
+    # shard runs close to the time limit and tests no gfx942.
+    if(NOT WIN32)
+      list(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
+           "tests/library/tests/test_attention_dense_gfx942.py"
+           "tests/library/tests/test_attention_dense_gfx942_golden.py")
+    endif()
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS

@@ -274,7 +274,9 @@ def validate_tuning_attention_tensors(
 # Declared runner contracts. Inferring them with inspect.signature drops
 # arguments the runner does not list and launches a different kernel.
 _DENSE_OPTIONAL_INPUTS = {
-    "gfx942": frozenset({"cu_seqlens_q", "cu_seqlens_kv", "sinks", "lse"}),
+    "gfx942": frozenset(
+        {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks", "lse"}
+    ),
     "gfx950": frozenset(
         {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks", "lse"}
     ),
@@ -298,14 +300,26 @@ def bind_dense_attention_torch(
 
     Grid and block come from the spec, the same values the candidate reports.
     An ``emit_lse`` spec also needs ``tensors["lse"]``: a caller-owned FP32
-    buffer the kernel fills in place (the runner validates it).
+    buffer the kernel fills in place (the runner validates it). For a paged spec,
+    ``unsafe_skip_paged_value_validation=True`` skips the runner's synchronized
+    block-table/kv_lens value checks (graph capture, hot paths), as for the
+    unified binding; the structural checks stay. Only for callers that guarantee
+    ``kv_lens[i] == seqlen_kv`` and in-range block ids: the kernel trusts both.
     """
     run = _dense_runner(str(getattr(request, "arch", "")))
+    if tuning_spec.kernel_spec.paged:
+        tuning_spec = tuning_spec.with_num_kv_blocks(int(tensors["k"].shape[0]))
     spec = tuning_spec.kernel_spec
     scale = kwargs.get("scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(getattr(request, "hdim_q", spec.head_size)))
     stream = kwargs.get("stream", 0)
+    unsafe_skip = kwargs.get("unsafe_skip_paged_value_validation", False)
+    if type(unsafe_skip) is not bool:
+        raise ValueError(
+            "unsafe_skip_paged_value_validation must be a bool, got "
+            f"{type(unsafe_skip).__name__}"
+        )
 
     def launch(**_kw):
         call = {
@@ -335,6 +349,8 @@ def bind_dense_attention_torch(
                     f"{request.arch} dense runner does not accept {name!r}"
                 )
             call[name] = value
+        if spec.paged:
+            call["validate_paged"] = not unsafe_skip
         return run(**call)
 
     return TorchBinding(
@@ -404,7 +420,12 @@ def bind_tuning_attention_torch(
     if problem.use_additive_bias:
         raise ValueError("explicit tuning bindings do not support additive bias")
     _reject_additive_bias_inputs(tensors, "tensors")
-    unsafe_skip = bool(kwargs.pop("unsafe_skip_paged_value_validation", False))
+    unsafe_skip = kwargs.pop("unsafe_skip_paged_value_validation", False)
+    if type(unsafe_skip) is not bool:
+        raise ValueError(
+            "unsafe_skip_paged_value_validation must be a bool, got "
+            f"{type(unsafe_skip).__name__}"
+        )
     num_blocks = validate_tuning_attention_tensors(
         problem,
         tensors,

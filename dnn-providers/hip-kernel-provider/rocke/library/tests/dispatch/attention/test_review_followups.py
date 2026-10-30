@@ -134,7 +134,7 @@ class TestReviewFollowups(unittest.TestCase):
         self.assertEqual((spec.block_m, spec.block_n), (256, 64))
         self.assertFalse(spec.persistent)
 
-    def test_gfx942_dense_binding_rejects_paged_block_tables(self):
+    def test_gfx942_dense_binding_rejects_block_tables_on_a_contiguous_spec(self):
         req = _req(
             nhead_q=16,
             nhead_k=4,
@@ -147,7 +147,7 @@ class TestReviewFollowups(unittest.TestCase):
         binding = bind_dense_attention_torch(
             req, spec, {"q": None, "k": None, "v": None, "out": None}
         )
-        with self.assertRaisesRegex(NotImplementedError, "block_tables"):
+        with self.assertRaisesRegex(ValueError, "spec.paged is False"):
             binding.launch(block_tables=object())
 
     def test_opt_in_candidates_stay_out_of_auto_and_remain_pinnable(self):

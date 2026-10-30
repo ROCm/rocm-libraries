@@ -143,6 +143,18 @@ ragged path, so where the 256×64 tile would be ragged its default starts at
 128×64; it records `block_m` in every id so one id names one tile on every
 problem.
 
+A `layout="paged"` request reaches the non-persistent dense body on both arches
+(`layout_paged`: the gfx950 grid variants and the gfx942 candidate, which then
+starts on the default grid). The paged kernel bakes the cache extent, so binding
+retargets `num_kv_blocks` from `k.shape[0]`; `block_tables` and `kv_lens` come
+in with the tensors. The request carries no cache size, so a cache past the 2 GiB
+i32 limit is refused at binding, not at selection. As for the unified path, the
+structural checks always run, and `unsafe_skip_paged_value_validation=True` skips
+only the runner's synchronized value checks. It is only for trusted callers that
+guarantee the dense kernel's contract themselves: `kv_lens[i] == seqlen_kv` and
+every used block id in `[0, num_kv_blocks)`; the kernel does not mask keys past
+`kv_lens`. The cohort is the kernel's own `supports_attention_dense`.
+
 Unified variant names are `attention_{arch}_u{path}_{variant_id}`, for example
 `attention_gfx950_u2d_narrow_nw1_mw16_t1xb_llvm` (the `spec_id` drops the
 `attention_` prefix). A codepath also fixes base knobs through
