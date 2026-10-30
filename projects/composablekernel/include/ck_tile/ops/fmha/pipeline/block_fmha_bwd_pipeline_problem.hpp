@@ -105,7 +105,8 @@ template <typename AccDataType_,
           index_t kQKHeaddim_,
           bool kIsGroupMode_,
           bool kIsDeterministic_,
-          typename Traits_>
+          typename Traits_,
+          bool kDetTileSplit_ = false>
 struct BlockFmhaBwdConvertQGradPipelineProblem
 {
     using AccDataType   = remove_cvref_t<AccDataType_>;
@@ -120,6 +121,7 @@ struct BlockFmhaBwdConvertQGradPipelineProblem
     static constexpr index_t kQKHeaddim    = kQKHeaddim_;
     static constexpr bool kIsGroupMode     = kIsGroupMode_;
     static constexpr bool kIsDeterministic = kIsDeterministic_;
+    static constexpr bool kDetTileSplit    = kDetTileSplit_;
 
     // attributes from traits
     static constexpr bool kPadSeqLenQ    = Traits::kPadSeqLenQ;

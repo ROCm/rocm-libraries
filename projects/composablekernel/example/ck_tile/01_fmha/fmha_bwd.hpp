@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
-#include <string>
-#include <cstdlib>
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/device_prop.hpp"
@@ -243,16 +241,8 @@ struct fmha_bwd_args
     float p_undrop;
     std::variant<std::pair<uint64_t, uint64_t>, std::pair<const void*, const void*>>
         drop_seed_offset;
-#if CK_TILE_FMHA_BWD_DET_FAST
-    // Head chunking. Appended at the end so existing positional aggregate
-    // initialisers keep working; both defaults mean "not chunked":
-    //   nhead_q_offset    global index of this call's first q head
-    //   nhead_ratio_qk_in global nhead_q/nhead_k; 0 = derive it from nhead_q/nhead_k
-    // The ratio has to be passed explicitly because a chunk's own nhead_q/nhead_k no
-    // longer carries it once chunks are allowed to start mid kv-group.
     ck_tile::index_t nhead_q_offset    = 0;
     ck_tile::index_t nhead_ratio_qk_in = 0;
-#endif
 };
 
 template <typename FmhaBwdDQDKDVKernel>
@@ -263,140 +253,122 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
         // create group mode kernel arguments
         if constexpr(FmhaBwdDQDKDVKernel::kIsGroupMode)
         {
-            return FmhaBwdDQDKDVKernel::MakeKargsImpl(args.q_ptr,
-                                                      args.k_ptr,
-                                                      args.v_ptr,
-                                                      args.bias_ptr,
-                                                      args.lse_ptr,
-                                                      args.do_ptr,
-                                                      args.d_ptr,
-                                                      args.rand_val_ptr,
-                                                      args.dq_ptr,
-                                                      args.dk_ptr,
-                                                      args.dv_ptr,
-                                                      args.dbias_ptr,
-                                                      args.workspace_ptr,
-                                                      args.seqstart_q_ptr,
-                                                      args.seqstart_k_ptr,
-                                                      args.seqlen_q_ptr,
-                                                      args.seqlen_k_ptr,
-                                                      args.cu_seqlen_q_ptr,
-                                                      args.cu_seqlen_k_ptr,
-                                                      args.batch,
-                                                      args.hdim_q,
-                                                      args.hdim_v,
-                                                      args.nhead_q,
-#if CK_TILE_FMHA_BWD_DET_FAST
-                                                      args.nhead_ratio_qk_in > 0
-                                                          ? args.nhead_ratio_qk_in
-                                                          : (args.nhead_q / args.nhead_k),
-#else
-                                                      args.nhead_q / args.nhead_k,
-#endif
-                                                      args.scale,
-                                                      args.stride_q,
-                                                      args.stride_k,
-                                                      args.stride_v,
-                                                      args.stride_bias,
-                                                      args.stride_randval,
-                                                      args.stride_do,
-                                                      args.stride_dq,
-                                                      args.stride_dk,
-                                                      args.stride_dv,
-                                                      args.stride_dbias,
-                                                      args.nhead_stride_q,
-                                                      args.nhead_stride_k,
-                                                      args.nhead_stride_v,
-                                                      args.nhead_stride_bias,
-                                                      args.nhead_stride_randval,
-                                                      args.nhead_stride_do,
-                                                      args.nhead_stride_lsed,
-                                                      args.nhead_stride_dq,
-                                                      args.nhead_stride_dk,
-                                                      args.nhead_stride_dv,
-                                                      args.nhead_stride_dbias,
-                                                      args.window_size_left,
-                                                      args.window_size_right,
-                                                      args.mask_type,
-                                                      args.p_drop,
-                                                      args.drop_seed_offset
-#if CK_TILE_FMHA_BWD_DET_FAST
-                                                      ,
-                                                      args.nhead_q_offset
-#endif
-    );
+            return FmhaBwdDQDKDVKernel::MakeKargsImpl(
+                args.q_ptr,
+                args.k_ptr,
+                args.v_ptr,
+                args.bias_ptr,
+                args.lse_ptr,
+                args.do_ptr,
+                args.d_ptr,
+                args.rand_val_ptr,
+                args.dq_ptr,
+                args.dk_ptr,
+                args.dv_ptr,
+                args.dbias_ptr,
+                args.workspace_ptr,
+                args.seqstart_q_ptr,
+                args.seqstart_k_ptr,
+                args.seqlen_q_ptr,
+                args.seqlen_k_ptr,
+                args.cu_seqlen_q_ptr,
+                args.cu_seqlen_k_ptr,
+                args.batch,
+                args.hdim_q,
+                args.hdim_v,
+                args.nhead_q,
+                args.nhead_ratio_qk_in > 0 ? args.nhead_ratio_qk_in : (args.nhead_q / args.nhead_k),
+                args.scale,
+                args.stride_q,
+                args.stride_k,
+                args.stride_v,
+                args.stride_bias,
+                args.stride_randval,
+                args.stride_do,
+                args.stride_dq,
+                args.stride_dk,
+                args.stride_dv,
+                args.stride_dbias,
+                args.nhead_stride_q,
+                args.nhead_stride_k,
+                args.nhead_stride_v,
+                args.nhead_stride_bias,
+                args.nhead_stride_randval,
+                args.nhead_stride_do,
+                args.nhead_stride_lsed,
+                args.nhead_stride_dq,
+                args.nhead_stride_dk,
+                args.nhead_stride_dv,
+                args.nhead_stride_dbias,
+                args.window_size_left,
+                args.window_size_right,
+                args.mask_type,
+                args.p_drop,
+                args.drop_seed_offset,
+                args.nhead_q_offset);
         }
         else
         { // create batch mode kernel arguments
-            return FmhaBwdDQDKDVKernel::MakeKargsImpl(args.q_ptr,
-                                                      args.k_ptr,
-                                                      args.v_ptr,
-                                                      args.bias_ptr,
-                                                      args.lse_ptr,
-                                                      args.do_ptr,
-                                                      args.d_ptr,
-                                                      args.rand_val_ptr,
-                                                      args.dq_ptr,
-                                                      args.dk_ptr,
-                                                      args.dv_ptr,
-                                                      args.dbias_ptr,
-                                                      args.workspace_ptr,
-                                                      args.seqlen_q,
-                                                      args.seqlen_k,
-                                                      args.batch,
-                                                      args.hdim_q,
-                                                      args.hdim_v,
-                                                      args.nhead_q,
-#if CK_TILE_FMHA_BWD_DET_FAST
-                                                      args.nhead_ratio_qk_in > 0
-                                                          ? args.nhead_ratio_qk_in
-                                                          : (args.nhead_q / args.nhead_k),
-#else
-                                                      args.nhead_q / args.nhead_k,
-#endif
-                                                      args.scale,
-                                                      args.stride_q,
-                                                      args.stride_k,
-                                                      args.stride_v,
-                                                      args.stride_bias,
-                                                      args.stride_randval,
-                                                      args.stride_do,
-                                                      args.stride_dq,
-                                                      args.stride_dk,
-                                                      args.stride_dv,
-                                                      args.stride_dbias,
-                                                      args.nhead_stride_q,
-                                                      args.nhead_stride_k,
-                                                      args.nhead_stride_v,
-                                                      args.nhead_stride_bias,
-                                                      args.nhead_stride_randval,
-                                                      args.nhead_stride_do,
-                                                      args.nhead_stride_lsed,
-                                                      args.nhead_stride_dq,
-                                                      args.nhead_stride_dk,
-                                                      args.nhead_stride_dv,
-                                                      args.nhead_stride_dbias,
-                                                      args.batch_stride_q,
-                                                      args.batch_stride_k,
-                                                      args.batch_stride_v,
-                                                      args.batch_stride_bias,
-                                                      args.batch_stride_randval,
-                                                      args.batch_stride_do,
-                                                      args.batch_stride_lsed,
-                                                      args.batch_stride_dq,
-                                                      args.batch_stride_dk,
-                                                      args.batch_stride_dv,
-                                                      args.batch_stride_dbias,
-                                                      args.window_size_left,
-                                                      args.window_size_right,
-                                                      args.mask_type,
-                                                      args.p_drop,
-                                                      args.drop_seed_offset
-#if CK_TILE_FMHA_BWD_DET_FAST
-                                                      ,
-                                                      args.nhead_q_offset
-#endif
-    );
+            return FmhaBwdDQDKDVKernel::MakeKargsImpl(
+                args.q_ptr,
+                args.k_ptr,
+                args.v_ptr,
+                args.bias_ptr,
+                args.lse_ptr,
+                args.do_ptr,
+                args.d_ptr,
+                args.rand_val_ptr,
+                args.dq_ptr,
+                args.dk_ptr,
+                args.dv_ptr,
+                args.dbias_ptr,
+                args.workspace_ptr,
+                args.seqlen_q,
+                args.seqlen_k,
+                args.batch,
+                args.hdim_q,
+                args.hdim_v,
+                args.nhead_q,
+                args.nhead_ratio_qk_in > 0 ? args.nhead_ratio_qk_in : (args.nhead_q / args.nhead_k),
+                args.scale,
+                args.stride_q,
+                args.stride_k,
+                args.stride_v,
+                args.stride_bias,
+                args.stride_randval,
+                args.stride_do,
+                args.stride_dq,
+                args.stride_dk,
+                args.stride_dv,
+                args.stride_dbias,
+                args.nhead_stride_q,
+                args.nhead_stride_k,
+                args.nhead_stride_v,
+                args.nhead_stride_bias,
+                args.nhead_stride_randval,
+                args.nhead_stride_do,
+                args.nhead_stride_lsed,
+                args.nhead_stride_dq,
+                args.nhead_stride_dk,
+                args.nhead_stride_dv,
+                args.nhead_stride_dbias,
+                args.batch_stride_q,
+                args.batch_stride_k,
+                args.batch_stride_v,
+                args.batch_stride_bias,
+                args.batch_stride_randval,
+                args.batch_stride_do,
+                args.batch_stride_lsed,
+                args.batch_stride_dq,
+                args.batch_stride_dk,
+                args.batch_stride_dv,
+                args.batch_stride_dbias,
+                args.window_size_left,
+                args.window_size_right,
+                args.mask_type,
+                args.p_drop,
+                args.drop_seed_offset,
+                args.nhead_q_offset);
         }
     }();
 
@@ -481,18 +453,14 @@ auto fmha_bwd_convert_dq_create_kargs_and_grids(fmha_bwd_args args)
         }
         else
         { // create batch mode kernel arguments
-#if CK_TILE_FMHA_BWD_DET_FAST
-            // Right reach of the mask, as k_max(i) = min(seqlen_k - 1, i + off).
-            // convert_dq uses it to stop the split reduction early; seqlen_k disables it.
             const ck_tile::index_t mask_k_end_off = [&]() -> ck_tile::index_t {
                 if(args.mask_type == 0 || args.window_size_right < 0)
                     return args.seqlen_k; // no right limit
                 ck_tile::index_t off = args.window_size_right;
-                if(args.mask_type == 2) // bottom-right aligned
+                if(args.mask_type != 1) // every type but top-left is bottom-right aligned
                     off += args.seqlen_k - args.seqlen_q;
                 return off;
             }();
-#endif
             return FmhaBwdConvertQGradKernel::MakeKargs(args.workspace_ptr,
                                                         args.dq_ptr,
                                                         args.batch,
@@ -502,12 +470,8 @@ auto fmha_bwd_convert_dq_create_kargs_and_grids(fmha_bwd_args args)
                                                         args.hdim_q,
                                                         args.stride_dq,
                                                         args.nhead_stride_dq,
-                                                        args.batch_stride_dq
-#if CK_TILE_FMHA_BWD_DET_FAST
-                                                        ,
-                                                        mask_k_end_off
-#endif
-            );
+                                                        args.batch_stride_dq,
+                                                        mask_k_end_off);
         }
     }();
 
@@ -528,9 +492,11 @@ template <ck_tile::index_t HDim_,
           bool kIsDeterministic_,
           bool kUseTrLoad_,
           ck_tile::index_t MaxSeqLenQ_,
-          ck_tile::index_t kN0>
+          ck_tile::index_t kN0,
+          bool kDetTileSplit_ = false>
 struct fmha_bwd_dq_dk_dv_traits_
 {
+    static constexpr bool kDetTileSplit = kDetTileSplit_;
 };
 
 template <typename Traits_, typename Arch = void>
@@ -604,7 +570,8 @@ template <ck_tile::index_t HDim_,
           bool kIsGroupMode_,
           bool kPadS_,
           bool kPadD_,
-          bool kIsDeterministic_>
+          bool kIsDeterministic_,
+          bool kDetTileSplit_ = false>
 struct fmha_bwd_convert_dq_traits_
 {
 };
@@ -678,11 +645,6 @@ float fmha_bwd(const fmha_bwd_traits&, fmha_bwd_args, const ck_tile::stream_conf
 
 struct fmha_bwd_launcher
 {
-    std::function<float(fmha_bwd_args, const ck_tile::stream_config&)> run{
-        [](fmha_bwd_args, const ck_tile::stream_config&) {
-            std::cerr << "fmha_bwd: no kernel found for given traits, skipping run\n";
-            return -1.0f;
-        }};
     // Layout: [host_ws_size_ bytes (host-prepared metadata)][dq_acc region]
     size_t workspace_size = 0;
 
@@ -756,21 +718,23 @@ struct fmha_bwd_launcher
     }
 
     private:
+    // Runs the selected instance once on exactly the batch/heads in `args`. Private because
+    // the workspace is sized for one chunk; callers must go through operator(), which splits
+    // the problem into chunks when the tile-split workspace would otherwise be too large.
+    std::function<float(fmha_bwd_args, const ck_tile::stream_config&)> run{
+        [](fmha_bwd_args, const ck_tile::stream_config&) {
+            std::cerr << "fmha_bwd: no kernel found for given traits, skipping run\n";
+            return -1.0f;
+        }};
     fmha_bwd_traits traits_{};
     ck_tile::index_t selected_max_seqlen_q_ = 0;
     size_t host_ws_size_                    = 0;
     bool needs_zero_dq_acc_                 = false;
 
-#if CK_TILE_FMHA_BWD_DET_FAST
-    // Head chunking. The non-persistent deterministic path gives every kv tile its own
-    // dq_acc slot, so the workspace is nsplits x larger than the persistent path's. A
-    // chunk owns *every* kv tile of its heads, so it computes those heads' dq completely
-    // and needs no cross-chunk accumulator -- the chunks are independent, and the result
-    // is bit-identical to running them in one go. The persistent path's dq_acc is already
-    // small, so none of this is compiled into that build.
-    int head_chunk_  = 0; // 0 = all heads in one launch
-    int batch_chunk_ = 0; // 0 = all batches in one launch
-    int elem_bytes_  = 0; // q/k/v/o/do/dq/dk/dv element size; lse and d are float
+    bool det_tile_split_ = false; // the selected instance is a tile-split one
+    int head_chunk_      = 0;     // 0 = all heads in one launch
+    int batch_chunk_     = 0;     // 0 = all batches in one launch
+    int elem_bytes_      = 0;     // q/k/v/o/do/dq/dk/dv element size; lse and d are float
 
     static int fmha_bwd_elem_bytes_(const std::string& dt)
     {
@@ -780,7 +744,6 @@ struct fmha_bwd_launcher
             return 4;
         return 0; // unknown: leave chunking off rather than guess a stride
     }
-#endif
 
     // Function pointer (points to code segment, survives launcher destruction)
     PrepareWorkspaceDeviceFunc prepare_ws_dev_func_ = nullptr;
@@ -830,68 +793,33 @@ struct fmha_bwd_launcher
         }
         workspace_size     = host_ws_size_ + device_ws_size;
         needs_zero_dq_acc_ = fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<T1, Arch>();
+        det_tile_split_    = T1::kDetTileSplit;
 
-#if CK_TILE_FMHA_BWD_DET_FAST
         elem_bytes_ = fmha_bwd_elem_bytes_(t.data_type);
         head_chunk_ = pick_chunks_(t, device_ws_size, batch_chunk_);
         if(head_chunk_ > 0 || batch_chunk_ > 0)
         {
-            // device_ws_size is sizeof(float) * nhead_q * nsplits * (batch * seqlen_q) *
-            // hdim_q, and both chunk sizes divide their dimension, so this is exact.
             const size_t hc = (head_chunk_ > 0) ? head_chunk_ : t.nhead_q;
             const size_t bc = (batch_chunk_ > 0) ? batch_chunk_ : t.batch;
-            workspace_size  = host_ws_size_ + device_ws_size /
-                                                 static_cast<size_t>(t.nhead_q) /
+            workspace_size  = host_ws_size_ + device_ws_size / static_cast<size_t>(t.nhead_q) /
                                                  static_cast<size_t>(t.batch) * hc * bc;
         }
-#endif
     }
 
-#if CK_TILE_FMHA_BWD_DET_FAST
-    // Pick the (batch, head) chunk that minimises workspace without paying for it in
-    // time. Everything is counted in "rounds", one round being a full sweep of cus
-    // workgroups, so no throughput or FLOP calibration is needed:
-    //
-    //   cost = nchunks * ceil(grid/cus) + kChunkTail * (nchunks - 1)
-    //
-    // The first term is exact integer arithmetic and catches the trap of a grid that
-    // merely reaches the CU count -- 320 workgroups on 256 CUs still costs two full
-    // rounds, i.e. 62% efficiency. The second is the per-chunk cost, dominated by the
-    // exposed prologue and drain of a chunk's last round and therefore proportional to
-    // a round, not to wall-clock: 0.18-0.63 rounds over twelve configurations across
-    // four shapes, median 0.3. In absolute microseconds the same data spreads 75-447,
-    // which is why the first attempt at this constant was unusable.
-    //
-    // Both dimensions are chunked. Heads alone leave a floor of
-    // batch * ceil(seqlen_k/kN0) * seqlen_q * hdim * 4 -- nhead cancels out -- so a
-    // long-sequence shape can sit far above the budget however finely its heads are
-    // split. Batch chunks are even simpler than head chunks: separate batches share
-    // nothing at all.
     int pick_chunks_(const fmha_bwd_traits& t, size_t device_ws_size, int& batch_chunk)
     {
-        constexpr double kChunkTail = 0.3;
-        // Budget baseline, in MiB, for a 128-wide head. One dq_acc split costs
-        // batch * nhead * seqlen_q * hdim_q * 4 bytes, so the bytes a given split count
-        // needs scale with hdim_q: a flat budget buys only half as many splits at d=256
-        // as at d=128 and forces twice the chunking for the same work. Measured on the
-        // d=256 shape (-b=2 -h=16 -h_k=8 -s=8192 -d=256 -mask=1): -2.0% at 4 GiB vs
-        // -7.6% at 8 GiB vs -11.6% at 16 GiB, against the persistent path.
-        // Scale the default up with hdim_q so the budget buys a consistent amount of
-        // work. Never scale it down: a narrow head does not make VRAM any less scarce,
-        // and d<=128 then keeps exactly the 4 GiB behaviour this was validated with.
+        constexpr double kChunkTail       = 0.3;
         constexpr size_t kBudgetMiBPer128 = 4096;
+        batch_chunk                       = 0;
 
-        batch_chunk = 0;
-
-        if(!t.is_deterministic || t.is_group_mode || device_ws_size == 0 || elem_bytes_ == 0)
+        if(!t.is_deterministic || !det_tile_split_ || t.is_group_mode || device_ws_size == 0 ||
+           elem_bytes_ == 0)
             return 0;
-        if(t.has_dbias || t.has_dropout || t.is_store_randval ||
-           t.bias_type != bias_enum::no_bias)
+        if(t.has_dbias || t.has_dropout || t.is_store_randval || t.bias_type != bias_enum::no_bias)
             return 0;
         if(t.nhead_q <= 0 || t.nhead_k <= 0 || t.nhead_q % t.nhead_k != 0 || t.batch <= 0)
             return 0;
 
-        // CK_DET_HEAD_CHUNK: "auto"/unset = cost model, 0 = never chunk, N = force N heads.
         int forced = -1;
         if(const char* e = std::getenv("CK_DET_HEAD_CHUNK"))
         {
@@ -908,8 +836,7 @@ struct fmha_bwd_launcher
         const long long denom = 4LL * t.batch * t.nhead_q * t.seqlen_q * t.hdim_q;
         if(denom <= 0)
             return 0;
-        // jobs_per_head == ceil(seqlen_k / kN0), recovered from the unchunked workspace:
-        // that is nhead_q * jph * batch * seqlen_q * hdim_q * sizeof(float).
+
         const int jph = static_cast<int>(device_ws_size / denom);
         const int cus = static_cast<int>(ck_tile::get_num_cus());
         if(jph <= 0 || cus <= 0)
@@ -928,8 +855,9 @@ struct fmha_bwd_launcher
 
         const size_t ws_unit = device_ws_size / static_cast<size_t>(t.batch) /
                                static_cast<size_t>(t.nhead_q); // one batch, one head
-        auto ws_of   = [&](int bc, int hc) { return ws_unit * static_cast<size_t>(bc) *
-                                                    static_cast<size_t>(hc); };
+        auto ws_of = [&](int bc, int hc) {
+            return ws_unit * static_cast<size_t>(bc) * static_cast<size_t>(hc);
+        };
         auto cost_of = [&](int bc, int hc) {
             const long long nch = static_cast<long long>(t.batch / bc) * (t.nhead_q / hc);
             const long long g   = static_cast<long long>(xdim) * hc * bc;
@@ -952,38 +880,31 @@ struct fmha_bwd_launcher
                 const double c = cost_of(bc, hc);
                 if(small_b == 0 || w < small_ws)
                 {
-                    small_b = bc; small_h = hc; small_ws = w;
+                    small_b  = bc;
+                    small_h  = hc;
+                    small_ws = w;
                 }
                 if(budget_bytes > 0 && w > budget_bytes)
                     continue;
                 if(best_cost < 0.0 || c < best_cost)
                 {
-                    best_b = bc; best_h = hc; best_cost = c;
+                    best_b    = bc;
+                    best_h    = hc;
+                    best_cost = c;
                 }
             }
         }
 
         if(best_b == 0)
         {
-            // Nothing fits. A budget is a VRAM limit, so honour it as closely as we can
-            // rather than falling back to the largest workspace of all -- overshooting by
-            // nhead*batch can OOM the caller outright.
             best_b = small_b;
             best_h = small_h;
         }
         batch_chunk = (best_b == t.batch) ? 0 : best_b;
         return (best_h == t.nhead_q) ? 0 : best_h;
     }
-#endif // CK_TILE_FMHA_BWD_DET_FAST
 
     public:
-#if !CK_TILE_FMHA_BWD_DET_FAST
-    template <typename... Args>
-    float operator()(Args&&... args) const
-    {
-        return run(std::forward<Args>(args)...);
-    }
-#else
     float operator()(fmha_bwd_args a, const ck_tile::stream_config& s) const
     {
         if(head_chunk_ <= 0 && batch_chunk_ <= 0)
@@ -995,7 +916,7 @@ struct fmha_bwd_launcher
         const int eb    = elem_bytes_;
         float total     = 0.f;
 
-        auto adv  = [](const void* p, long long n, ck_tile::index_t st, int by) {
+        auto adv = [](const void* p, long long n, ck_tile::index_t st, int by) {
             return static_cast<const void*>(static_cast<const char*>(p) + n * st * by);
         };
         auto advw = [](void* p, long long n, ck_tile::index_t st, int by) {
@@ -1006,29 +927,26 @@ struct fmha_bwd_launcher
         {
             for(int h0 = 0; h0 < traits_.nhead_q; h0 += hc)
             {
-                const int hk0 = h0 / ratio; // first kv head this chunk touches
-                fmha_bwd_args c = a;
-                c.batch   = bc;
-                c.nhead_q = hc;
-                // nhead_k only feeds the derived ratio and an assert; the kernel takes
-                // the real ratio from nhead_ratio_qk_in, so keep the global value.
+                const int hk0       = h0 / ratio; // first kv head this chunk touches
+                fmha_bwd_args c     = a;
+                c.batch             = bc;
+                c.nhead_q           = hc;
                 c.nhead_k           = traits_.nhead_k;
                 c.nhead_ratio_qk_in = ratio;
                 c.nhead_q_offset    = h0;
-
-                c.q_ptr   = adv(a.q_ptr, h0, a.nhead_stride_q, eb);
-                c.k_ptr   = adv(a.k_ptr, hk0, a.nhead_stride_k, eb);
-                c.v_ptr   = adv(a.v_ptr, hk0, a.nhead_stride_v, eb);
-                c.o_ptr   = adv(a.o_ptr, h0, a.nhead_stride_o, eb);
-                c.do_ptr  = adv(a.do_ptr, h0, a.nhead_stride_do, eb);
-                c.lse_ptr = adv(a.lse_ptr, h0, a.nhead_stride_lsed, 4); // LSE is float
-                c.d_ptr   = advw(a.d_ptr, h0, a.nhead_stride_lsed, 4);  // D is float
-                c.dq_ptr  = advw(a.dq_ptr, h0, a.nhead_stride_dq, eb);
-                // dk/dv are the expanded per-q-head outputs: the kernel addresses them
-                // with i_nhead, not i_nhead_k, so they advance by h0. With MHA the two
-                // coincide; only GQA tells them apart.
-                c.dk_ptr = advw(a.dk_ptr, h0, a.nhead_stride_dk, eb);
-                c.dv_ptr = advw(a.dv_ptr, h0, a.nhead_stride_dv, eb);
+                c.q_ptr             = adv(a.q_ptr, h0, a.nhead_stride_q, eb);
+                c.k_ptr             = adv(a.k_ptr, hk0, a.nhead_stride_k, eb);
+                c.v_ptr             = adv(a.v_ptr, hk0, a.nhead_stride_v, eb);
+                c.o_ptr             = adv(a.o_ptr, h0, a.nhead_stride_o, eb);
+                c.do_ptr            = adv(a.do_ptr, h0, a.nhead_stride_do, eb);
+                c.lse_ptr           = adv(a.lse_ptr, h0, a.nhead_stride_lsed, 4); // LSE is float
+                c.d_ptr             = advw(a.d_ptr, h0, a.nhead_stride_lsed, 4);  // D is float
+                c.dq_ptr            = advw(a.dq_ptr, h0, a.nhead_stride_dq, eb);
+                c.dk_ptr            = advw(a.dk_ptr, h0, a.nhead_stride_dk, eb);
+                c.dv_ptr            = advw(a.dv_ptr, h0, a.nhead_stride_dv, eb);
+                // sink is [nhead] and indexed by the chunk-local head, so it follows h0
+                c.sink_ptr   = a.sink_ptr ? adv(a.sink_ptr, h0, 1, 4) : nullptr;
+                c.d_sink_ptr = a.d_sink_ptr ? advw(a.d_sink_ptr, h0, 1, 4) : nullptr;
 
                 if(b0 != 0)
                 {
@@ -1039,13 +957,14 @@ struct fmha_bwd_launcher
                     c.do_ptr  = adv(c.do_ptr, b0, a.batch_stride_do, eb);
                     c.lse_ptr = adv(c.lse_ptr, b0, a.batch_stride_lsed, 4);
                     c.d_ptr   = advw(const_cast<void*>(static_cast<const void*>(c.d_ptr)),
-                                     b0, a.batch_stride_lsed, 4);
+                                   b0,
+                                   a.batch_stride_lsed,
+                                   4);
                     c.dq_ptr  = advw(c.dq_ptr, b0, a.batch_stride_dq, eb);
                     c.dk_ptr  = advw(c.dk_ptr, b0, a.batch_stride_dk, eb);
                     c.dv_ptr  = advw(c.dv_ptr, b0, a.batch_stride_dv, eb);
                 }
 
-                // dq_acc is reused by every chunk, so re-prepare before each one.
                 const_cast<fmha_bwd_launcher*>(this)->prepare_workspace_async(
                     a.workspace_ptr, nullptr, nullptr, s);
                 const float t = run(c, s);
@@ -1056,5 +975,4 @@ struct fmha_bwd_launcher
         }
         return total;
     }
-#endif // CK_TILE_FMHA_BWD_DET_FAST
 };
