@@ -395,6 +395,20 @@ _GFX1250_WMMA_FP8 = {
 }
 
 
+# gfx1250 dense K=128 WMMA through the f8f6f4 opcode. A/B are 64 low-bit bytes
+# per lane as <16 x i32>; the 6-operand form is (i32 fmtA, A, i32 fmtB, B,
+# i16 modC, C) -- a format immediate per matrix and NO trailing reuse flags,
+# unlike the K=64 form above. ``fmt`` selects the operand encoding the opcode
+# reads: 0 = FP8 (E4M3). op.name -> (decl key, fully-mangled intrinsic, fmt).
+_GFX1250_WMMA_F8F6F4 = {
+    "tile.wmma_gfx1250_f32_16x16x128_f8f6f4": (
+        "wmma.gfx1250.f32.16x16x128.f8f6f4",
+        "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+        0,
+    ),
+}
+
+
 class Gfx11RdnaBackend(ISABackend):
     """RDNA3 / RDNA3.5 (gfx11, e.g. gfx1151 Strix Halo). **wave32**, **WMMA**
     (no MFMA), and a distinct ``s_waitcnt`` layout from gfx9/10. Datalayout +
@@ -632,6 +646,10 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         if fp8_spec is not None:
             self._emit_wmma_fp8(lowerer, op, fp8_spec)
             return
+        f8f6f4_spec = _GFX1250_WMMA_F8F6F4.get(op.name)
+        if f8f6f4_spec is not None:
+            self._emit_wmma_f8f6f4(lowerer, op, f8f6f4_spec)
+            return
         spec = _GFX1250_WMMA.get(op.name)
         if spec is None:
             scaled_ops = [
@@ -639,9 +657,15 @@ class Gfx1250Backend(Gfx12RdnaBackend):
                 for atom in self.arch.mma.ops
                 if gfx1250_scaled_wmma(atom.op_id) is not None
             ]
+            known = (
+                sorted(_GFX1250_WMMA)
+                + sorted(_GFX1250_WMMA_FP8)
+                + sorted(_GFX1250_WMMA_F8F6F4)
+                + sorted(scaled_ops)
+            )
             raise NotImplementedError(
                 f"WMMA op {op.name!r} not yet wired for {self.arch.gfx}; "
-                f"known: {sorted(_GFX1250_WMMA) + sorted(_GFX1250_WMMA_FP8) + sorted(scaled_ops)}"
+                f"known: {known}"
             )
         decl_key, intrinsic, elt = spec
         a, b, c = op.operands
@@ -677,6 +701,24 @@ class Gfx1250Backend(Gfx12RdnaBackend):
             f"<8 x i32> {b_arg}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
             f"i1 false, i1 false)"
+        )
+
+    def _emit_wmma_f8f6f4(self, lowerer, op, spec) -> None:
+        """Emit a gfx1250 dense K=128 ``f8f6f4`` WMMA call.
+
+        The A/B fragments arrive in SSA as ``<16 x i32>`` (64 low-bit bytes per
+        lane). The 6-operand form is ``(i32 fmtA, A, i32 fmtB, B, i16 modC, C)``:
+        a format immediate per matrix, and no trailing reuse flags. ``fmt`` is
+        pinned per atom (0 = FP8/E4M3); ``modC`` stays 0.
+        """
+        decl_key, intrinsic, fmt = spec
+        a, b, c = op.operands
+        lowerer._need(decl_key)
+        lowerer._current().emit(
+            f"  {op.result.name} = call <8 x float> @{intrinsic}("
+            f"i32 {fmt}, <16 x i32> {lowerer._operand(a)}, "
+            f"i32 {fmt}, <16 x i32> {lowerer._operand(b)}, "
+            f"i16 0, <8 x float> {lowerer._operand(c)})"
         )
 
 

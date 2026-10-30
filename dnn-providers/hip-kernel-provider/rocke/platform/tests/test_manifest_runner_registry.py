@@ -14,9 +14,11 @@ import unittest
 
 from rocke.run_manifest import register_manifest_runner, registered_manifest_kinds
 
-# Every kind the pre-registry branch chain handled. Losing one of these is a
-# silent loss of the ability to run an already-emitted manifest, so the list is
-# spelled out rather than derived.
+# Every kind the pre-registry branch chain handled, plus the ones added since.
+# Losing one of these is a silent loss of the ability to run an already-emitted
+# manifest, so the list is spelled out rather than derived. Equality rather than
+# a subset check: a kind appearing here unannounced means two families are now
+# both claiming to own one buffer layout, which is as much a bug as a loss.
 _CHAIN_KINDS = frozenset(
     {
         "batched_gemm_fp16",
@@ -27,6 +29,7 @@ _CHAIN_KINDS = frozenset(
         "deep_fused_conv_pool_i8i4",
         "elementwise_fp16",
         "gemm_fp16",
+        "gemm_fp8",
         "gemm_iu8",
         "layernorm_fp16",
         "matmul_nbits_fp16",
@@ -74,9 +77,10 @@ class TestRunnerRegistry(unittest.TestCase):
         self.assertIn("gemm_fp16", registered_manifest_kinds())
 
     def test_running_a_manifest_does_not_require_the_dispatcher(self):
-        # Most manifest workflows never touch dispatch: ten of the fourteen
-        # registered kinds have no candidate at all (gemm_iu8, matmul_nbits,
-        # the deep-fused conv pools, the simple ops...), and the examples that
+        # Most manifest workflows never touch dispatch: eleven of the fifteen
+        # registered kinds have no candidate at all (gemm_fp8, gemm_iu8,
+        # matmul_nbits, the deep-fused conv pools, the simple ops...), and the
+        # examples that
         # emit them build a spec, compile, and shell out to this module. If
         # `bind` ever became a precondition rather than one more registerable
         # adapter, those all break. Importing dispatch here is the first step

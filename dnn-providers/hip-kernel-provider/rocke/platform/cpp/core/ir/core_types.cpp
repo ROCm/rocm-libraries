@@ -1151,7 +1151,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.global_ptr_offset",
 
     /* tile.* kernel abort */
-    "tile.trap"};
+    "tile.trap",
+
+    /* tile.global_addr_of */
+    "tile.global_addr_of"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1445,7 +1448,9 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* global_ptr_offset          */ true,
 
     /* tile.* kernel abort (effectful) */
-    /* trap                       */ false};
+    /* trap                       */ false,
+
+    /* tile.global_addr_of        */ true};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

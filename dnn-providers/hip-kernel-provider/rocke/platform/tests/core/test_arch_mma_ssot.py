@@ -37,11 +37,12 @@ from rocke.core.arch.target import (
 def test_filtered_catalog_preserves_supported_order_and_fields():
     # Independent snapshot of the supported rows at 72c28a69, filtered with
     # the LLVM legality table. Preserve all remaining fields and relative order.
+    # The dense 16x16x128 f8f6f4 atom is one row on top of that snapshot.
     rows = _load_specs()["gfx1250"]["mma"]
-    assert len(rows) == 93
+    assert len(rows) == 94
     encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
     assert hashlib.sha256(encoded).hexdigest() == (
-        "d31fe60f6172c7c2172a420cc4558591fa1389d41cc2829eafc99bceb66e858a"
+        "49aa427fc941e61132274d5dec75a735960f24164f549228a7f13dd6a422e08e"
     )
 
 

@@ -24,6 +24,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 from rocke.core.arch import ArchTarget
 from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
@@ -52,11 +53,33 @@ def _pick_atom(target: ArchTarget, dtype: str, want):
         family=family, a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=16, n=16
     )
     if op is None:
-        raise SystemExit(f"no f16/bf16 16x16 {family} atom for {dtype} on {target.gfx}")
+        raise SystemExit(f"no 16x16 {family} atom for {dtype} on {target.gfx}")
     return (op.m, op.n, op.k)
 
 
-def build_manifest(artifact, *, tile, spec, dtype, shape, wave_size, atom):
+# The 8-bit operand dtypes: A/B are fp8/bf8 but C is a 16-bit float (bf16 by
+# default, or fp16), so these need a distinct C type through the whole manifest
+# and a distinct runner kind.
+_F8_DTYPES = ("fp8e4m3", "bf8e5m2")
+_F8_C_DTYPES = ("bf16", "fp16")
+
+
+def _c_dtype_for(dtype: str, c_dtype: Optional[str] = None) -> str:
+    """C dtype for A/B ``dtype``: the 8-bit operands write ``c_dtype`` (bf16 when
+    not given); every other dtype is homogeneous and takes no override."""
+    if dtype in _F8_DTYPES:
+        c = c_dtype or "bf16"
+        if c not in _F8_C_DTYPES:
+            raise ValueError(f"{dtype} A/B needs a bf16 or fp16 C, got {c!r}")
+        return c
+    if c_dtype not in (None, dtype):
+        raise ValueError(f"{dtype} GEMMs are homogeneous; C must be {dtype}")
+    return dtype
+
+
+def build_manifest(
+    artifact, *, tile, spec, dtype, shape, wave_size, atom, c_dtype=None
+):
     """Assemble the GEMM manifest for a compiled universal-GEMM artifact.
 
     Split out of ``main`` so the dtype propagation is testable without a GPU.
@@ -65,9 +88,18 @@ def build_manifest(artifact, *, tile, spec, dtype, shape, wave_size, atom):
     runner reads the ``A`` pointer type back out to choose its reference dtype
     (``manifest_runner.gemm._gemm_is_bf16``). Dropping the kwarg below would
     therefore not fail loudly; it would decode a bf16 kernel's output as fp16.
+
+    The 8-bit arm additionally overrides ``kind``, which ``make_gemm_manifest``
+    hardcodes to ``gemm_fp16``; ``extra`` is applied last, so no change to the
+    helper is needed. Without it the fp16 runner would feed the kernel 2-byte
+    operands.
     """
     wtm, wtn, wtk = atom
     atom_family = "wmma" if wave_size == 32 else "mfma"
+    c_dtype = _c_dtype_for(dtype, c_dtype)
+    # The 8-bit atoms name both operand dtypes (they may be mixed fp8/bf8).
+    suffix = f"{dtype}_{dtype}" if dtype in _F8_DTYPES else dtype
+    extra = {"kind": "gemm_fp8"} if dtype in _F8_DTYPES else None
     return make_gemm_manifest(
         artifact=artifact,
         block_m=tile.tile_m,
@@ -75,8 +107,9 @@ def build_manifest(artifact, *, tile, spec, dtype, shape, wave_size, atom):
         block_k=tile.tile_k,
         threads_per_block=spec.block_size,
         default_shape=shape,
-        atoms=[f"{atom_family}_f32_{wtm}x{wtn}x{wtk}_{dtype}"],
-        args_signature=gemm_args_signature(dtype=dtype),
+        atoms=[f"{atom_family}_f32_{wtm}x{wtn}x{wtk}_{suffix}"],
+        args_signature=gemm_args_signature(dtype=dtype, c_dtype=c_dtype),
+        extra=extra,
     )
 
 
@@ -86,7 +119,18 @@ def main() -> int:
     p.add_argument("--m", type=int, default=512)
     p.add_argument("--n", type=int, default=512)
     p.add_argument("--k", type=int, default=512)
-    p.add_argument("--dtype", default="fp16", choices=["fp16", "bf16"])
+    p.add_argument(
+        "--dtype",
+        default="fp16",
+        choices=["fp16", "bf16", "fp8e4m3", "bf8e5m2"],
+        help="A/B operand dtype; the 8-bit choices emit a 16-bit C (see --c-dtype).",
+    )
+    p.add_argument(
+        "--c-dtype",
+        default=None,
+        choices=list(_F8_C_DTYPES),
+        help="C dtype for the 8-bit operand dtypes (default bf16).",
+    )
     p.add_argument(
         "--warp-tile",
         default=None,
@@ -94,6 +138,28 @@ def main() -> int:
     )
     p.add_argument("--pipeline", default="mem")
     p.add_argument("--epilogue", default="default")
+    p.add_argument(
+        "--tdm",
+        action="store_true",
+        help="stage A/B with the gfx1250 tensor data mover instead of "
+        "direct-to-LDS (one descriptor per operand per K tile)",
+    )
+    p.add_argument(
+        "--tdm-depth",
+        type=int,
+        default=1,
+        choices=(1, 2, 3, 4),
+        help="TDM LDS buffers: 1 issues and waits per tile, 2 ping-pongs so "
+        "the next tile's transfer overlaps the current tile's WMMAs, and 3+ "
+        "runs a deeper ring with a partial wait",
+    )
+    p.add_argument(
+        "--lds-k-pad",
+        type=int,
+        default=0,
+        help="pad each A/B LDS row by this many elements (0 = unpadded). "
+        "Ignored by direct-to-LDS off gfx1250.",
+    )
     p.add_argument(
         "--cshuffle-no-alias",
         action="store_true",
@@ -141,11 +207,14 @@ def main() -> int:
         pad_n=True,
         pad_k=True,
         cshuffle_no_alias=args.cshuffle_no_alias,
+        tdm=args.tdm,
+        tdm_depth=args.tdm_depth,
+        lds_k_pad=args.lds_k_pad,
     )
     data = DataSpec(
         dtype_a=args.dtype,
         dtype_b=args.dtype,
-        dtype_c=args.dtype,
+        dtype_c=_c_dtype_for(args.dtype, args.c_dtype),
         dtype_acc="fp32",
         layout="RCR",
     )
@@ -185,6 +254,7 @@ def main() -> int:
         shape=(args.m, args.n, args.k),
         wave_size=target.wave_size,
         atom=(wtm, wtn, wtk),
+        c_dtype=spec.data.dtype_c,
     )
     write_artifact(art, out, manifest)
 
@@ -211,9 +281,14 @@ def main() -> int:
     # different order, so a handful of elements drift by ~1 fp16 ULP; we judge
     # the WMMA result against the reported ``max_abs_diff`` and a tolerance
     # instead of the exact bad count (matching the standalone wmma_gemm_verify).
-    tol = (
-        args.tol if args.tol is not None else (1e-2 if target.wave_size == 32 else 0.0)
-    )
+    # The 8-bit runner's inputs keep every fp32 partial sum under 2^24, so its
+    # accumulation is exact whatever order the hardware picks and the only
+    # rounding left is the final RNE to the 16-bit C, which the reference
+    # reproduces.
+    # Order-independence is the reason WMMA needs a tolerance at 16 bits; it
+    # does not apply here, so do not inherit the wave32 default.
+    default_tol = 0.0 if args.dtype in _F8_DTYPES or target.wave_size == 64 else 1e-2
+    tol = args.tol if args.tol is not None else default_tol
     m = re.search(r"max_abs_diff=([0-9.eE+-]+)", r.stdout)
     if m is None:
         # No verify line -> a real launch/runtime failure, not a tolerance miss.

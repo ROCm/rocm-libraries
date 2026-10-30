@@ -108,21 +108,10 @@ static const char* h_mma_operand(rocke_h_lowerer_t* lw,
  * op.result (and the WMMA gate keys off the op_id *string* it is passed, not
  * op.attrs), so a synthetic op aliasing the same operands/results/regions and
  * reusing the original attrs map reproduces the Python emission exactly. */
-static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+/* Python _require_wmma_arch: a WMMA atom is admitted on any target whose MMA
+ * catalog lists it, never by the target's name. */
+static rocke_status_t h_require_wmma_arch(rocke_h_lowerer_t* lw, const char* op_id)
 {
-    const rocke_mma_op_t* atom = rocke_gfx1250_scaled_wmma_from_op(op);
-    if(!atom)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_NOTIMPL, "unsupported scaled WMMA op '%s'", op->name);
-    }
-    const rocke_scaled_wmma_op_t contract = rocke_scaled_wmma_contract(atom);
-    const rocke_scaled_wmma_op_t* spec = &contract;
-    const char* op_id = spec->op_id;
-    const bool scale16 = spec->scales.block_k == 16;
-    const char* builtin = scale16 ? "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
-                                  : "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4";
-    /* Admitted on any target whose MMA catalog lists the atom, never by the
-     * target's name; the rule and message of Python _require_wmma_arch. */
     const rocke_arch_target_t* target
         = lw->arch.gfx ? rocke_arch_target_from_gfx(lw->arch.gfx) : NULL;
     if(!target || !rocke_mma_catalog_by_op_id(&target->mma, op_id))
@@ -143,6 +132,51 @@ static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const ro
                             op_id,
                             lw->arch.gfx ? lw->arch.gfx : "(unknown)",
                             family);
+    }
+    return ROCKE_OK;
+}
+
+/* Python _op_tile_wmma_gfx1250_f32_16x16x128_f8f6f4: the dense K=128 builtin.
+ * A/B are <16 x i32> (64 low-bit bytes per lane), 6-operand form
+ * (fmtA, A, fmtB, B, modC, C) -- a format immediate per matrix (0 = FP8/E4M3)
+ * and no reuse flags. */
+static rocke_status_t
+    h_emit_gfx1250_dense_f8f6f4(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* op_id)
+{
+    if(h_require_wmma_arch(lw, op_id) != ROCKE_OK)
+    {
+        return lw->status;
+    }
+    if(op->num_operands != 3 || op->num_results != 1)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s expects 3 operands and 1 result", op_id);
+    }
+    rocke_h_emitf(lw,
+                  "f32x8 %s = __builtin_amdgcn_wmma_f32_16x16x128_f8f6f4("
+                  "0, %s, 0, %s, (int16_t)0, %s);",
+                  rocke_h_name(lw, op->results[0]),
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]),
+                  rocke_h_name(lw, op->operands[2]));
+    return lw->status;
+}
+
+static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const rocke_mma_op_t* atom = rocke_gfx1250_scaled_wmma_from_op(op);
+    if(!atom)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_NOTIMPL, "unsupported scaled WMMA op '%s'", op->name);
+    }
+    const rocke_scaled_wmma_op_t contract = rocke_scaled_wmma_contract(atom);
+    const rocke_scaled_wmma_op_t* spec = &contract;
+    const char* op_id = spec->op_id;
+    const bool scale16 = spec->scales.block_k == 16;
+    const char* builtin = scale16 ? "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
+                                  : "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4";
+    if(h_require_wmma_arch(lw, op_id) != ROCKE_OK)
+    {
+        return lw->status;
     }
     if(op->num_operands != 5 || op->num_results != 1)
     {
@@ -293,6 +327,10 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
                       b_arg,
                       rocke_h_name(lw, op->operands[2]));
         return ROCKE_OK;
+    }
+    if(strcmp(op_id, "wmma_gfx1250_f32_16x16x128_f8f6f4") == 0)
+    {
+        return h_emit_gfx1250_dense_f8f6f4(lw, op, op_id);
     }
     if(rocke_gfx1250_scaled_wmma(op_id))
     {
