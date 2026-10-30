@@ -13,7 +13,9 @@
 // builds with hidden visibility and exports neither the class nor
 // onlineTunerConfig(), so the two copies never meet, and nothing here changes
 // what the library's tuner does in the cases that drive it through the API.
-// See clients/tests/src/CMakeLists.txt.
+// A static libhipblaslt does carry both into hipblaslt-test, so a static build
+// runs these cases in hipblaslt-test-online-tuner instead. See
+// clients/tests/src/CMakeLists.txt.
 //
 // Most need no device either, because they are decided before any HIP call.
 // The ones gathered at the end of the file do: advancing the rotation means
