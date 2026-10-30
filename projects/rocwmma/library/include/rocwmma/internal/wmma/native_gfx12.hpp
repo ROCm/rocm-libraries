@@ -250,6 +250,146 @@ namespace rocwmma
             }
         };
 
+        struct wmma_f32_16x16x16_fp8_fp8_gfx12
+        {
+            using Key       = wmma_key<float8_t, float8_t, float32_t, 16u, 16u, 16u>;
+            using PaddableK = wmma_k_list<8u>;
+
+            using ARegsT = VRegF32x2;
+            using BRegsT = VRegF32x2;
+            using CRegsT = AccRegF32x8;
+            using DRegsT = AccRegF32x8;
+
+            template <typename Dummy = void>
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+#if ROCWMMA_HAS_AMDGCN_BUILTIN(wmma_f32_16x16x16_fp8_fp8_w32_gfx12)
+                // The builtin takes the packed fp8 data as ints
+                using I32x2 = wmma_native_vec_t<int, 2>;
+                using F32x8 = wmma_native_vec_t<float32_t, 8>;
+
+                DRegsT result;
+                wmma_abi::as<F32x8>(result) = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(
+                    wmma_abi::as<I32x2>(regsA),
+                    wmma_abi::as<I32x2>(regsB),
+                    wmma_abi::as<F32x8>(regsC));
+                return result;
+#else
+                static_assert(
+                    !ROCWMMA_DEVICE_COMPILE || wmma_dependent_false_v<Dummy>,
+                    "rocWMMA: the compiler does not provide "
+                    "__builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12 for this target");
+                return DRegsT{};
+#endif
+            }
+        };
+
+        struct wmma_f32_16x16x16_bf8_bf8_gfx12
+        {
+            using Key       = wmma_key<bfloat8_t, bfloat8_t, float32_t, 16u, 16u, 16u>;
+            using PaddableK = wmma_k_list<8u>;
+
+            using ARegsT = VRegF32x2;
+            using BRegsT = VRegF32x2;
+            using CRegsT = AccRegF32x8;
+            using DRegsT = AccRegF32x8;
+
+            template <typename Dummy = void>
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+#if ROCWMMA_HAS_AMDGCN_BUILTIN(wmma_f32_16x16x16_bf8_bf8_w32_gfx12)
+                // The builtin takes the packed fp8 data as ints
+                using I32x2 = wmma_native_vec_t<int, 2>;
+                using F32x8 = wmma_native_vec_t<float32_t, 8>;
+
+                DRegsT result;
+                wmma_abi::as<F32x8>(result) = __builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12(
+                    wmma_abi::as<I32x2>(regsA),
+                    wmma_abi::as<I32x2>(regsB),
+                    wmma_abi::as<F32x8>(regsC));
+                return result;
+#else
+                static_assert(
+                    !ROCWMMA_DEVICE_COMPILE || wmma_dependent_false_v<Dummy>,
+                    "rocWMMA: the compiler does not provide "
+                    "__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12 for this target");
+                return DRegsT{};
+#endif
+            }
+        };
+
+        struct wmma_f32_16x16x16_fp8_bf8_gfx12
+        {
+            using Key       = wmma_key<float8_t, bfloat8_t, float32_t, 16u, 16u, 16u>;
+            using PaddableK = wmma_k_list<>;
+
+            using ARegsT = VRegF32x2;
+            using BRegsT = VRegF32x2;
+            using CRegsT = AccRegF32x8;
+            using DRegsT = AccRegF32x8;
+
+            template <typename Dummy = void>
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+#if ROCWMMA_HAS_AMDGCN_BUILTIN(wmma_f32_16x16x16_fp8_bf8_w32_gfx12)
+                // The builtin takes the packed fp8 data as ints
+                using I32x2 = wmma_native_vec_t<int, 2>;
+                using F32x8 = wmma_native_vec_t<float32_t, 8>;
+
+                DRegsT result;
+                wmma_abi::as<F32x8>(result) = __builtin_amdgcn_wmma_f32_16x16x16_fp8_bf8_w32_gfx12(
+                    wmma_abi::as<I32x2>(regsA),
+                    wmma_abi::as<I32x2>(regsB),
+                    wmma_abi::as<F32x8>(regsC));
+                return result;
+#else
+                static_assert(
+                    !ROCWMMA_DEVICE_COMPILE || wmma_dependent_false_v<Dummy>,
+                    "rocWMMA: the compiler does not provide "
+                    "__builtin_amdgcn_wmma_f32_16x16x16_fp8_bf8_w32_gfx12 for this target");
+                return DRegsT{};
+#endif
+            }
+        };
+
+        struct wmma_f32_16x16x16_bf8_fp8_gfx12
+        {
+            using Key       = wmma_key<bfloat8_t, float8_t, float32_t, 16u, 16u, 16u>;
+            using PaddableK = wmma_k_list<>;
+
+            using ARegsT = VRegF32x2;
+            using BRegsT = VRegF32x2;
+            using CRegsT = AccRegF32x8;
+            using DRegsT = AccRegF32x8;
+
+            template <typename Dummy = void>
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+#if ROCWMMA_HAS_AMDGCN_BUILTIN(wmma_f32_16x16x16_bf8_fp8_w32_gfx12)
+                // The builtin takes the packed fp8 data as ints
+                using I32x2 = wmma_native_vec_t<int, 2>;
+                using F32x8 = wmma_native_vec_t<float32_t, 8>;
+
+                DRegsT result;
+                wmma_abi::as<F32x8>(result) = __builtin_amdgcn_wmma_f32_16x16x16_bf8_fp8_w32_gfx12(
+                    wmma_abi::as<I32x2>(regsA),
+                    wmma_abi::as<I32x2>(regsB),
+                    wmma_abi::as<F32x8>(regsC));
+                return result;
+#else
+                static_assert(
+                    !ROCWMMA_DEVICE_COMPILE || wmma_dependent_false_v<Dummy>,
+                    "rocWMMA: the compiler does not provide "
+                    "__builtin_amdgcn_wmma_f32_16x16x16_bf8_fp8_w32_gfx12 for this target");
+                return DRegsT{};
+#endif
+            }
+        };
+
     } // namespace detail
 
 } // namespace rocwmma
