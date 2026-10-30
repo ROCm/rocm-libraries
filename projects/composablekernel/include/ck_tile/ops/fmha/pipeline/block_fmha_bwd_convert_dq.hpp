@@ -24,6 +24,7 @@ struct BlockFmhaBwdConvertQGrad
     static constexpr bool kPadSeqLenQ      = Problem::kPadSeqLenQ;
     static constexpr bool kPadHeadDimQ     = Problem::kPadHeadDimQ;
     static constexpr bool kIsDeterministic = Problem::kIsDeterministic;
+    static constexpr bool kDetTileSplit    = Problem::kDetTileSplit;
 
     static constexpr index_t kAlignmentQGradAcc =
         kPadHeadDimQ ? 1 : Policy::template GetAlignmentPostQGradAcc<Problem>();
@@ -97,49 +98,45 @@ struct BlockFmhaBwdConvertQGrad
             });
         };
 
-#if CK_TILE_FMHA_BWD_DET_FAST
-        // Two independent accumulators, so two split loads are in flight instead of one.
-        // The single-outstanding-load loop below runs this kernel at ~3.1 TB/s while a
-        // one-split pass reaches ~4.3 TB/s: it is latency-bound, not bandwidth-bound.
-        //
-        // NOTE: this sums slots as (s0+s2+..) + (s1+s3+..) rather than strictly left to
-        // right. The order is still fixed and schedule-independent, so the kernel stays
-        // deterministic -- but the low bits differ from the single-accumulator version.
-        auto acc1       = dq_acc; // both already cleared
-        index_t i_split = 0;
-        for(; i_split + 2 <= nsplits; i_split += 2)
+        if constexpr(kDetTileSplit)
         {
-            auto b0 = load_tile(dq_acc_dram_window);
-            move_tile_window(dq_acc_dram_window, {1, 0, 0});
-            auto b1 = load_tile(dq_acc_dram_window);
-            move_tile_window(dq_acc_dram_window, {1, 0, 0});
-            add_into(dq_acc, b0);
-            add_into(acc1, b1);
+            auto acc1       = dq_acc; // both already cleared
+            index_t i_split = 0;
+            for(; i_split + 2 <= nsplits; i_split += 2)
+            {
+                auto b0 = load_tile(dq_acc_dram_window);
+                move_tile_window(dq_acc_dram_window, {1, 0, 0});
+                auto b1 = load_tile(dq_acc_dram_window);
+                move_tile_window(dq_acc_dram_window, {1, 0, 0});
+                add_into(dq_acc, b0);
+                add_into(acc1, b1);
+            }
+            if(i_split < nsplits) // odd tail
+            {
+                auto b = load_tile(dq_acc_dram_window);
+                move_tile_window(dq_acc_dram_window, {1, 0, 0});
+                add_into(dq_acc, b);
+            }
+            add_into(dq_acc, acc1);
         }
-        if(i_split < nsplits) // odd tail
+        else
         {
-            auto b = load_tile(dq_acc_dram_window);
+            index_t i_total_loops = 0;
+            auto dq_acc_buf       = load_tile(dq_acc_dram_window);
             move_tile_window(dq_acc_dram_window, {1, 0, 0});
-            add_into(dq_acc, b);
-        }
-        add_into(dq_acc, acc1);
-#else
-        index_t i_total_loops = 0;
-        auto dq_acc_buf       = load_tile(dq_acc_dram_window);
-        move_tile_window(dq_acc_dram_window, {1, 0, 0});
 
-        do
-        {
+            do
+            {
+                add_into(dq_acc, dq_acc_buf);
+
+                dq_acc_buf = load_tile(dq_acc_dram_window);
+                move_tile_window(dq_acc_dram_window, {1, 0, 0});
+
+                i_total_loops += 1;
+            } while(i_total_loops < (nsplits - 1));
+
             add_into(dq_acc, dq_acc_buf);
-
-            dq_acc_buf = load_tile(dq_acc_dram_window);
-            move_tile_window(dq_acc_dram_window, {1, 0, 0});
-
-            i_total_loops += 1;
-        } while(i_total_loops < (nsplits - 1));
-
-        add_into(dq_acc, dq_acc_buf);
-#endif
+        }
 
         // declare dq
         constexpr auto dq_converted_dstr =

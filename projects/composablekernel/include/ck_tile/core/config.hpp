@@ -237,30 +237,6 @@
 #endif
 #endif // CK_TILE_ENABLE_CLUSTER_LAUNCH
 
-// Fast path for the deterministic FMHA backward kernel. Replaces the persistent
-// dispatch with a non-persistent one that gives every kv tile its own dq_acc split
-// slot, extends mask tile pairing to the deterministic path, and unrolls the
-// convert_dq split reduction into two accumulators. The reduction order stays fixed,
-// so the result is still bit-identical run to run; it differs in the low bits from
-// the persistent path, which sums the same values in a different (also fixed) order.
-// Measured -27.7% over 20 shapes on gfx1250, which is the only arch it was tuned on.
-//
-// Set to 1 by CMakeLists.txt when gfx1250 is the sole GPU target; off otherwise,
-// including for any other arch and for fat builds that merely include gfx1250.
-//
-// This must be a whole-translation-unit macro, not a device-pass-only __gfx1250__
-// guard: it changes the host-side workspace sizing (nsplits goes from
-// workers-per-head to ceil(seqlen_k/kN0)) as well as the device code, so the two
-// passes have to agree. See the compile-target tier note in
-// ck_tile/core/arch/arch.hpp.
-//
-// Projects that consume these headers without CK's CMake get 0 (the stock persistent
-// path) and can opt in with -DCK_TILE_FMHA_BWD_DET_FAST=1 -- but it must be passed to
-// EVERY translation unit, or host and device will size the workspace differently.
-#ifndef CK_TILE_FMHA_BWD_DET_FAST
-#define CK_TILE_FMHA_BWD_DET_FAST 0
-#endif
-
 // workaround for ROCm 6.2 and later
 #ifndef CK_TILE_WORKAROUND_ROCM_6_2_SCRATCH_MEMORY_ISSUE
 #if(HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR == 2 && HIP_VERSION_PATCH >= 41133) ||  \

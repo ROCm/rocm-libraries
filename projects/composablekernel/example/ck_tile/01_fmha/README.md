@@ -173,7 +173,7 @@ args:
                 'b:l,r', bottom-r sliding window attn(swa) with FA style left right size
                 'xt:window_size', xformer style masking from top-left, window_size negative is causal, positive is swa
                 'xb:window_size', xformer style masking from bottom-r, window_size negative is causal, positive is swa
-                'g:y,x', generic attention mask coordinate with y/x size (only debug purpose for now)
+                'g:l,r', generic window with FA style left right size, bottom-r aligned like 'b:l,r' (only debug purpose for now)
     -vlayout    r for row-major(seqlen*hdim), c for col-major(hdim*seqlen) (default:r)
         -lse    0 not store lse, 1 store lse (default:0)
       -kname    if set to 1 will print kernel name (default:0)
@@ -324,7 +324,7 @@ arguments match `tile_example_fmha_fwd`, with these differences:
 | `-scale` | named `-scale_s` in the forward example |
 | `-dbias` | `1` also produces the bias gradient (requires elementwise bias) |
 | `-p_drop` | dropout probability; the forward example has no dropout argument |
-| `-deterministic` | `1` reduces `dQ` through per-block buffers instead of atomics, making the result bit-reproducible |
+| `-deterministic` | `1` reduces `dQ` through per-block buffers instead of atomics, making the result bit-reproducible. The algorithm depends on the arch: gfx1250 uses tile split (one buffer per kv tile, a larger workspace that the launcher keeps within a budget by chunking batch and heads), every other arch uses the persistent kernel (one buffer per worker). Group mode and decode shapes always use the persistent algorithm. The two sum in a different order, so their results differ in the low bits |
 | `-sink_grad` | `1` computes and validates the attention-sink gradient (see below) |
 | absent | `-vlayout`, `-lse`, `-qscale`, `-num_splits`, `-q_eff_lens`, `-kv_eff_lens` |
 
