@@ -6367,7 +6367,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             if(onlineTuning && launchIndex < 0 && !replayed
                && !onlineTuner.resolution(onlineKey) && !streamIsCapturing(prob.stream))
                 static_cast<void>(onlineTuner.beginMeasurement(
-                    onlineKey, solution->index, measureStart, measureStop));
+                    onlineKey, solution->index, prob.stream, measureStart, measureStop));
 
             // The pair is passed best effort, which is the difference between
             // a tuner that stops measuring and one that breaks the call it was

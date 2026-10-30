@@ -441,23 +441,41 @@ namespace rocblaslt
     // A pair the caller never recorded still queries as complete, so the
     // elapsed time is the only evidence that the launch happened. Every way of
     // missing one reads as non-positive, which is why the sign test is
-    // load-bearing and not defensive: a fresh pair fails with
-    // hipErrorInvalidHandle, a pooled pair is inverted so it reads the
-    // negative of its last duration, and a launch that recorded start and then
-    // failed reads an older stop against a newer start. A launch whose start
-    // record failed records no stop either -- SolutionAdapter::launchKernel
-    // skips it -- so that case is one of the first two and never a fresh stop
-    // against a stale start.
+    // load-bearing and not defensive: a fresh pair still holds the inverted
+    // records acquireEvents() made when it created it, a pooled pair is
+    // inverted so it reads the negative of its last duration, and a launch
+    // that recorded start and then failed reads an older stop against a newer
+    // start. A launch whose start record failed records no stop either --
+    // SolutionAdapter::launchKernel skips it -- so that case is one of the
+    // first two and never a fresh stop against a stale start.
+    //
+    // Runs inside the caller's hipblasLtMatmul, on the caller's thread, so it
+    // must not leave an error in that thread's HIP state for the caller's own
+    // hipGetLastError() to find and blame on its work. Every pair this reads
+    // has been recorded, which is what keeps hipEventElapsedTime from failing
+    // here at all: on a pair never recorded it fails with
+    // hipErrorInvalidHandle, and that error outlives every later successful
+    // call until the caller reads it. hipErrorNotReady, from a start the GPU
+    // has not reached, does not stick. Anything else it might still return is
+    // this library's to clear -- but only when the thread had no error before
+    // the call, since one that was already there is the caller's.
     OnlineTuner::PairReading OnlineTuner::readPair(const PendingMeasurement& pending,
                                                    float&                    milliseconds) const
     {
         if(hipEventQuery(pending.m_stop) != hipSuccess)
             return PairReading::Outstanding;
 
+        const hipError_t before = hipPeekAtLastError();
+
         milliseconds = 0.0f;
+        const hipError_t elapsed
+            = hipEventElapsedTime(&milliseconds, pending.m_start, pending.m_stop);
+
+        if(elapsed != hipSuccess && elapsed != hipErrorNotReady && before == hipSuccess)
+            static_cast<void>(hipGetLastError());
+
         const bool timed
-            = hipEventElapsedTime(&milliseconds, pending.m_start, pending.m_stop) == hipSuccess
-              && std::isfinite(milliseconds) && milliseconds > 0.0f;
+            = elapsed == hipSuccess && std::isfinite(milliseconds) && milliseconds > 0.0f;
 
         return timed ? PairReading::Sample : PairReading::Rejected;
     }
@@ -546,6 +564,7 @@ namespace rocblaslt
 
     bool OnlineTuner::beginMeasurementImpl(size_t      problemKey,
                                            int         solutionIndex,
+                                           hipStream_t stream,
                                            hipEvent_t& start,
                                            hipEvent_t& stop)
     {
@@ -601,7 +620,7 @@ namespace rocblaslt
         // untimed, and the offer is left for the next launch this thread's
         // visit makes.
         int            device   = 0;
-        const Acquired acquired = acquireEvents(start, stop, device, problemKey);
+        const Acquired acquired = acquireEvents(stream, start, stop, device, problemKey);
         if(acquired != Acquired::Pair)
         {
             ++state.m_declined;
@@ -952,10 +971,23 @@ namespace rocblaslt
     // livePairCap() live ones. Past that, a measurement can still start on a
     // pair some harvest handed back, or one reclaimFinishedPairs() reads back
     // from another problem's finished launch, and otherwise it does not start.
-    OnlineTuner::Acquired OnlineTuner::acquireEvents(hipEvent_t& start,
-                                                     hipEvent_t& stop,
-                                                     int&        device,
-                                                     size_t      requester)
+    //
+    // A new pair is recorded once before it is handed out, stop first and then
+    // start, on the stream the launch is about to use. That puts it in the
+    // state every pooled pair is already in -- recorded, and reading
+    // non-positive until a launch records it again -- so the sign test needs
+    // no case for a pair HIP has never seen recorded. Reading such a pair is
+    // the one way hipEventElapsedTime fails with an error that stays in the
+    // caller's thread (see readPair()), and a launch can leave one: its start
+    // record swallowed, or the launch failing before it records anything. The
+    // two records cost a pair's creation, which happens at most livePairCap()
+    // times per device, and nothing on any later use.
+    //
+    // A stream on another device than the current one could not take the
+    // records, and neither could the launch; such a call is declined before
+    // anything is created rather than left to fail.
+    OnlineTuner::Acquired OnlineTuner::acquireEvents(
+        hipStream_t stream, hipEvent_t& start, hipEvent_t& stop, int& device, size_t requester)
     {
         if(hipGetDevice(&device) != hipSuccess)
             return Acquired::Failed;
@@ -980,6 +1012,10 @@ namespace rocblaslt
         if(live >= livePairCap())
             return Acquired::AtCap;
 
+        int streamDevice = -1;
+        if(hipStreamGetDevice(stream, &streamDevice) != hipSuccess || streamDevice != device)
+            return Acquired::Failed;
+
         EventPair pair;
         if(hipEventCreateWithFlags(&pair.m_start, hipEventDefault) != hipSuccess)
             return Acquired::Failed;
@@ -990,6 +1026,20 @@ namespace rocblaslt
             // unrelated measurement, whose timestamps say nothing about either.
             // Never counted as live, so destroyed rather than retired.
             static_cast<void>(hipEventDestroy(pair.m_start));
+            return Acquired::Failed;
+        }
+
+        const hipError_t before = hipPeekAtLastError();
+        if(hipEventRecord(pair.m_stop, stream) != hipSuccess
+           || hipEventRecord(pair.m_start, stream) != hipSuccess)
+        {
+            static_cast<void>(hipEventDestroy(pair.m_start));
+            static_cast<void>(hipEventDestroy(pair.m_stop));
+
+            // This library's error, not the caller's, unless the caller's was
+            // there first; see readPair().
+            if(before == hipSuccess)
+                static_cast<void>(hipGetLastError());
             return Acquired::Failed;
         }
 

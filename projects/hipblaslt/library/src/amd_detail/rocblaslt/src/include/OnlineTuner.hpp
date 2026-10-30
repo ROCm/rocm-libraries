@@ -574,9 +574,15 @@ namespace rocblaslt
          * rather than on the problem, because one problem can have as many offers
          * outstanding as there are threads in the library; see the offer paragraph
          * on ProblemState for what that does and does not close.
+         *
+         * stream is the one the launch will record the pair on. A pair created
+         * for this call is first recorded there once, inverted, so that no pair
+         * the tuner ever reads back is one HIP has never seen recorded; see
+         * acquireEvents().
          */
         bool beginMeasurement(size_t      problemKey,
                               int         solutionIndex,
+                              hipStream_t stream,
                               hipEvent_t& start,
                               hipEvent_t& stop)
         {
@@ -590,7 +596,7 @@ namespace rocblaslt
             if(resolution(problemKey))
                 return false;
 
-            return beginMeasurementImpl(problemKey, solutionIndex, start, stop);
+            return beginMeasurementImpl(problemKey, solutionIndex, stream, start, stop);
         }
 
     private:
@@ -773,6 +779,7 @@ namespace rocblaslt
         void harvestPendingImpl(size_t problemKey);
         bool beginMeasurementImpl(size_t      problemKey,
                                   int         solutionIndex,
+                                  hipStream_t stream,
                                   hipEvent_t& start,
                                   hipEvent_t& stop);
 
@@ -815,7 +822,8 @@ namespace rocblaslt
             Failed,
         };
 
-        Acquired acquireEvents(hipEvent_t& start, hipEvent_t& stop, int& device, size_t requester);
+        Acquired acquireEvents(
+            hipStream_t stream, hipEvent_t& start, hipEvent_t& stop, int& device, size_t requester);
         void  recycleEvents(hipEvent_t start, hipEvent_t stop, int device);
         void  retireEvents(hipEvent_t start, hipEvent_t stop, int device);
 
