@@ -503,12 +503,15 @@ importable → CTest). **CI does not run
 `run_all.py`** — it runs
 **ctest** against the installed artifact, after the component script installs
 the packaged wheels. Its registered pytest entries include the platform suite
-and selected library host/GPU suites. Test registration is authoritative in
-[`platform/tests/CMakeLists.txt`](platform/tests/CMakeLists.txt) and
-[`platform/CMakeLists.txt`](platform/CMakeLists.txt); the provider's external
-test-category YAML and TheRock's tier selection determine which registered
-tests actually execute. Check the selected list in the job log or with CTest's
-verbose listing. Registration alone does not establish CI coverage.
+and selected library host/GPU suites. Build-tree C++ test registration is
+orchestrated by
+[`platform/tests/CMakeLists.txt`](platform/tests/CMakeLists.txt) and owned by its
+[concern-specific fragments](platform/tests/README.md#cmake-registration-ownership)
+under `platform/tests/cmake/`. Installed Python and library CTest registration
+remains in [`platform/CMakeLists.txt`](platform/CMakeLists.txt). The provider's
+external test-category YAML and TheRock's tier selection determine which
+registered tests actually execute. Check the selected list in the job log or
+with CTest's verbose listing. Registration alone does not establish CI coverage.
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform
@@ -704,6 +707,28 @@ and present artifacts, a broken executable, and unrelated suites' skips.
 Repeat the native lane in a clean
 relocated install without source directories or native caches available; a
 source-only pass cannot establish installed-artifact support.
+
+### 5.2 Single-arch tests: `arch_specific`
+
+A test that names one gfx target can hide a gap. The code under test may support more targets.
+Run such a test for each supported target. Use `subTest` or `pytest.mark.parametrize`.
+
+If the feature exists on a subset of targets only, mark the test with `arch_specific`.
+The decorator records the target list and the reason. It does not skip the test.
+
+```python
+from rocke.tests.arch_marks import arch_specific
+
+@arch_specific(("gfx950",), reason="mxfp6 A-scale layout exists on gfx950 only")
+def test_mxfp6_scale_thread_broadcast_across_k_blocks() -> None: ...
+```
+
+- **`archs`**: a non-empty list of names that `ArchTarget.from_gfx` accepts. A string raises `TypeError`.
+- **`reason`**: a non-empty sentence. A blank reason raises `ValueError`.
+- **Scope**: the decorator works on a function, a method, and a class. It works with `unittest` and `pytest`.
+- **Dependencies**: the helper imports no `torch`.
+
+The helper lives in `platform/python/rocke/tests/arch_marks.py`. Both `platform/tests` and `library/tests` import it as `rocke.tests.arch_marks`.
 
 ## 6. Invariants & contracts
 

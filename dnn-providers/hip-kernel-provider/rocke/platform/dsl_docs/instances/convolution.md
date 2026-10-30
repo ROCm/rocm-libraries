@@ -285,6 +285,25 @@ for each thread's coalesced output chunk:
   buffer_store_vN_f16(d_rsrc, d_off*2, 0, v, dwords=4)
 ```
 
+### Split-K Forward (gfx1250)
+
+`ImplicitGemmConvSpec.split_k > 1` builds the split-K forward binary (WMMA only; `mem` or `wavelet` pipeline, 2-D, not pointwise, no `async_dma` / `unroll_k` / `chiplet_swizzle` / `group_merge`, identity `acc_epilogue` since the reduction only adds the raw partials; checked by `fwd_split_k_reason`). It is one binary for every degree: the ABI (`conv_arg_names("fwd", two_stage=True)`) appends `ws_ptr`, `ws_bytes`, `ks` and `ks_count`, and the kernel name gains a `splitk` tag.
+
+- The group and the K slice share `blockIdx.z = group * ks_count + slice`. Slice `s` reduces `[s*ks, (s+1)*ks)` of the `[Z*]Y*X*cpg` reduction; the host rounds `ks` to whole K tiles (`ConvArgs`), and the tail past `K_gemm` reads zero through the descriptor bounds.
+- The epilogue stores the fp32 partial tile into slab `slice` of a `[ks_count][M][K]` fp32 workspace, addressed by the D descriptor plus the slab base. Every slab element is written by exactly one workgroup, so the workspace needs no clearing. A cshuffle C tile is staged in fp32.
+- Stage 2, `conv_fwd_split_k_reduce` (`FwdSplitKReduceSpec(dtype_d, vec, block_size, degree)`), sums the slabs element-wise in a fixed order and casts into D, so the result is deterministic. `degree > 0` unrolls the fold for exactly that many slabs; `0` loops over `ks_count`.
+- `split_k_cluster = S` (2..15, `mem` pipeline, `tile_n % 4 == 0`, K and kpg multiples of 4, a target with workgroup-cluster launch, llvm23) is the single-launch form: the S slices of one output tile form a `(1, 1, S)` workgroup cluster (`cluster_dims` attribute; the launch passes the same shape), store their slabs, meet at a cluster barrier, and each slice folds `ceil(tile_m / S)` rows of the tile across the S slabs into D in 4-channel quads. The degree is baked (`skc<S>` tag, `ks_count == S` at launch) and there is no Stage 2.
+
+`split_k = -1` (auto) is resolved before validation by the conv split-K resolver (`resolve_conv_split_k("fwd", ...)`), as for wgrad and dgrad. Its degree comes from `rocke.helpers.split_k.select_split_k_fwd`:
+- It splits only when the unsplit grid is under half of 8 workgroups per CU and the reduction is at least 512 deep.
+- The degree is a power of two toward that target grid, at most 32, and keeps at least 2 K tiles per slice.
+- It is then held to the gridDim.z budget and the i32 workspace.
+- It resolves to 1 (the plain kernel) elsewhere, including on targets other than gfx1250 and on pointwise or 3-D problems.
+
+The partials meet in fp32 slabs, so the degree has no accuracy limit. The C++ engine takes explicit degrees only; `rocke.core.backend.lower_conv_implicit_gemm` resolves `-1` first.
+
+Both forms are in the gfx1250 AOT kernel cache (`kernels/conv/aot_jobs.py`; the cluster form only at llvm23) and in `benchmark_implicit_gemm_conv --run-from-cache`, where `--split-k -1` (the default) launches a cached split-K binary at the resolved degree and `0` adds `--split-k-degrees`. The grouped-convolution dispatcher does not select them. `split_k = 1` emits exactly the plain kernel.
+
 ### Step-By-Step Trace (one workgroup)
 
 ```text
@@ -1046,6 +1065,54 @@ C++ engine twin: `rocke_build_direct_conv_nongrouped` in
 (`tools/check_byte_identity.py --only conv_direct_grouped`), Python IR golden
 `conv_direct_nongrouped/*` in `tests/instances/rocke_ir_parity_harness.py`, binding
 `rocke_engine.conv_direct_nongrouped_*` / `rocke.core.backend.lower_conv_direct_nongrouped`.
+
+## Stem Dgrad on WMMA (gfx1250)
+
+Two wave32 WMMA dgrad kernels for stem convolutions (ungrouped, `C <= 4` dX
+channels), where the dX-channel GEMM of the direct WMMA dgrad below would
+leave almost every MMA tile empty. Both fold the filter taps into the GEMM
+column dimension instead, and stage their operands like the direct WMMA dgrad
+with a 1x1 filter: per dY channel chunk of `ck`, one 3-D TDM transfer of the dY
+pixels and one of the weights into an LDS ring of `stages` slots, the KRSC
+weights read transposed (`ds_read_tr16_b128`) as the `[K][R*S*C]` A operand.
+
+`library/kernels/common/conv_dgrad_patch_wmma.py`, spec `DgradPatchWmmaSpec`,
+builder `build_dgrad_patch_wmma` (C++ twin `instance_conv_dgrad_patch_wmma.h`).
+A patch embedding (stride == square filter `P`, no padding) has no tap
+reduction, so its dgrad is one GEMM:
+
+    dX[n, i*P + r, j*P + s, c] = sum_k dY[n, i, j, k] * W[k, r, s, c]
+
+A workgroup owns `tile_h x tile_w` dY pixels (`waves_p * tiles_p * 16`) and
+`r_blk` patch rows (`r_blk*P*C` GEMM columns, padded to `waves_c * tiles_c * 16`
+with at most an eighth of padding). The epilogue pixel-shuffles the tile in
+LDS as `[i][r][j][s, c]` and stores it with one rank-3 TDM transfer, clipped to
+the image. When `P` does not divide the image, `N` extra workgroups at the end
+of the grid zero the dX border no patch covers.
+
+`library/kernels/common/conv_dgrad_smallc_wmma.py`, spec `DgradSmallcWmmaSpec`,
+builder `build_dgrad_smallc_wmma` (C++ twin `instance_conv_dgrad_smallc_wmma.h`).
+An overlapping stem computes `Z[q, (r, s, c)] = sum_k dY[q, k] * W[k, r, s, c]`
+for every dY pixel `q` that reaches the block's `out_h x out_w` dX tile (both
+multiples of the stride), stages `Z` in LDS as fp32 and overlap-adds it phase
+by phase (output row / column mod S, a compile-time tap list per phase) into a
+dX tile that one TDM transfer stores.
+
+Runtime (kernargs): batch, extents and the dY channel count. Build-time: the
+filter, stride, padding, the dX channel count, dtype and the tile geometry.
+Constraints: `kpg` a multiple of 8, every tensor below 2 GiB (i32 byte
+offsets), the ring and the staged tiles within the 320 KB LDS. The AOT grids
+are `DGRAD_PATCH_KNOBS` over `DGRAD_PATCH_SIZES` and `DGRAD_SMALLC_KNOBS` over
+`DGRAD_SMALLC_STEMS` (`kernels/conv/direct_aot_jobs.py`, variants
+`direct_dgrad_patch_wmma` / `direct_dgrad_smallc_wmma`).
+
+C++ engine twins: `cpp/instances/common/conv_dgrad_{patch,smallc}_wmma.cpp`
+(shared staging in `instance_conv_dgrad_stem_wmma_internal.hpp`); byte-identity
+gated by `library/tests/parity/conv_dgrad_{patch,smallc}_wmma_emit.{c,py}`
+(llvm23 lane), Python IR golden `conv_dgrad_{patch,smallc}_wmma/*` in
+`tests/instances/rocke_ir_parity_harness.py`, bindings
+`rocke_engine.conv_dgrad_{patch,smallc}_wmma_*` /
+`rocke.core.backend.lower_conv_dgrad_{patch,smallc}_wmma`.
 
 ## Direct Dgrad on WMMA (gfx1250)
 
