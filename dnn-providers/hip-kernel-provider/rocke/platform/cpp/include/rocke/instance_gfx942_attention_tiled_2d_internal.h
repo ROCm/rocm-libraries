@@ -3,10 +3,10 @@
  *
  * rocke/instance_gfx942_attention_tiled_2d_internal.h -- PRIVATE shared state +
  * phase-function contract for the C99 port of build_unified_attention_2d_tiled
- * (rocke/instances/gfx942/attention_tiled_2d.py, build body lines 1104-5287).
+ * (library/kernels/gfx942/attention_tiled_2d.py).
  *
  * WHY THIS HEADER EXISTS.
- *   build_unified_attention_2d_tiled() in Python is a single ~4000-line function
+ *   build_unified_attention_2d_tiled() in Python is a single long function
  *   whose body is a deep stack of NESTED CLOSURES: the V-LDS slot/store/load
  *   helpers (_v_t_slot, _v_t_store, _v_t_load, _v_load1), the per-lane row map
  *   (_in_warp_row, _state_row, _bit2, _select_lane_rg), the P permute/pack

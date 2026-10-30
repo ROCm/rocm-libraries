@@ -301,6 +301,38 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->tile_size_override = 16;
         s->use_wave_page_id_load = true;
         break;
+    case 18:
+        /* Decode K/V streamed by the async copies from strided (non-paged) K/V. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->num_seqs = 4;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        s->kv_layout = "strided";
+        break;
+    case 19:
+        /* Decode K/V with globally cached copies through the 1-DWORD async loader. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 16;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "global";
+        break;
     default:
         return -1;
     }

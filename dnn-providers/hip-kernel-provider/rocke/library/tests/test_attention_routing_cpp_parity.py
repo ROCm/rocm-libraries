@@ -19,8 +19,6 @@ import pytest
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     _canonical_arch_for_selection,
-    _enable_gfx942_flash_k_sliced_ring,
-    _enable_i64_kv_addr,
     _gfx942_4warp_fast,
     _mask_label,
     _reject_mask_on_arch,
@@ -244,14 +242,7 @@ _GFX942_ENVS = (
 def _tiled_2d_not_ported(p: UnifiedAttentionProblem, arch: str):
     """The "not ported" reason C++ must give for a problem Python admits."""
     if arch == "gfx942":
-        if _gfx942_4warp_fast(p, arch):
-            # Built by the 4-warp GQA builder; the cohort excludes i64 caches.
-            return None
-        if _enable_i64_kv_addr(p) and _enable_gfx942_flash_k_sliced_ring(p, arch):
-            return (
-                "gfx942 tiled 2D i64 KV addressing with the sliced-K ring is not "
-                "ported to C++ yet"
-            )
+        # The tiled-2D and 4-warp GQA builders build every admitted spec.
         return None
     if p.use_additive_bias:
         return "tiled 2D additive bias is not ported to C++ yet"

@@ -36,6 +36,7 @@
 #include <string.h>
 
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* rocke_binary_search_seq_idx */
+#include "rocke/helper_rocke.instances.common.attention_arch.h" /* rocke_require_tiled_attention_arch */
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 
 /* ---------------------------------------------------------------- helpers */
@@ -47,56 +48,6 @@ static bool rocke_a2d_streq(const char* a, const char* c)
     if(!a || !c)
         return false;
     return strcmp(a, c) == 0;
-}
-
-/* The narrow-atom arch gate. Faithful inline port of
- * instances/common/attention_arch.validate_tiled_attention_arch +
- * require_tiled_attention_arch for the gfx942 narrow path: a target is admitted
- * when it has the wide-K + ds_read_tr path (gfx950) OR, restricted to the
- * narrow-tiled-2d arch set ({"gfx942"}), the narrow 16x16x16 f16 AND bf16 atom.
- * Returns true on accept; on reject latches a NotImplementedError on b. */
-static bool rocke_a2d_require_tiled_attention_arch(rocke_ir_builder_t* b, const char* arch)
-{
-    const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
-    if(target == NULL)
-    {
-        /* Python: KeyError from ArchTarget.from_gfx -> str(e) reason. */
-        if(b)
-        {
-            b->status = ROCKE_ERR_NOTIMPL;
-            snprintf(b->err, ROCKE_ERR_MSG_CAP, "unknown gfx target: %s", arch ? arch : "(null)");
-        }
-        return false;
-    }
-    const rocke_arch_mma_catalog_t* mma = rocke_archtarget_mma(target);
-    bool wide_k = rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 32)
-                  || target->memory.has_ds_read_tr;
-    if(wide_k && target->memory.has_ds_read_tr)
-        return true;
-    bool narrow_arch = rocke_a2d_streq(arch, "gfx942");
-    bool narrow_k = rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 16)
-                    && rocke_mma_catalog_has_shape(mma, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
-    if(narrow_arch && narrow_k)
-        return true;
-    if(b)
-    {
-        b->status = ROCKE_ERR_NOTIMPL;
-        if(!wide_k)
-            snprintf(b->err,
-                     ROCKE_ERR_MSG_CAP,
-                     "tiled attention requires either the wide-K MFMA atoms "
-                     "(mfma_f32_16x16x32 / mfma_f32_32x32x16, gfx950) or, on a narrow "
-                     "variant arch (gfx942), the 16x16x16 f16/bf16 atom; neither path is "
-                     "available on %s",
-                     arch ? arch : "(null)");
-        else
-            snprintf(b->err,
-                     ROCKE_ERR_MSG_CAP,
-                     "tiled attention requires LDS transpose reads (ds_read_b64_tr_b16) "
-                     "for the wide-K path, absent on %s",
-                     arch ? arch : "(null)");
-    }
-    return false;
 }
 
 /* ===================================================================== *
@@ -119,7 +70,7 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->arch = arch;
 
     /* ---- require_tiled_attention_arch(arch) (lines 1139-1141) ---- */
-    if(!rocke_a2d_require_tiled_attention_arch(b, arch))
+    if(!rocke_require_tiled_attention_arch(b, arch))
         return false;
 
     /* ---- dtype gate (lines 1143-1145) ---- */
@@ -471,18 +422,6 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->K_SLICED_ACTIVE = K_SLICED_ACTIVE;
     if(K_SLICED_ACTIVE)
     {
-        /* The K slice loader still builds a single i32 voffset, which would
-         * differ from Python and overflow on a cache past the 2 GiB voffset
-         * range. */
-        if(ctx->I64_KV_ADDR)
-        {
-            b->status = ROCKE_ERR_NOTIMPL;
-            snprintf(b->err,
-                     ROCKE_ERR_MSG_CAP,
-                     "use_i64_kv_addr: the gfx942 tiled 2D C++ builder does not yet port the "
-                     "64-bit KV-offset path of the sliced-K ring");
-            return false;
-        }
         /* The ring's partial vmcnt fence counts one slice's DMA calls: the slice
          * must split into whole calls, and the count must fit the 6-bit vmcnt
          * field. */

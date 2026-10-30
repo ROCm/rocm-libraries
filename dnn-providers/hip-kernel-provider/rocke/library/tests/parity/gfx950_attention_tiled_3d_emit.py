@@ -33,7 +33,6 @@ except ImportError:  # pragma: no cover - older reference tree
 from rocke.core.ir_serialize import serialize
 from rocke.core.verify import verify
 
-
 _CONFIGS = {
     0: dict(
         head_size=64,
@@ -268,6 +267,56 @@ _CONFIGS = {
         kv_cache_policy="stream",
         use_kv_lds_swizzle=True,
         use_wave_page_id_load=True,
+    ),
+    16: dict(
+        # Two-page tiles from strided (non-paged) K/V into swizzled LDS, with
+        # softcap.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=32,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=True,
+        kv_storage_dtype=None,
+        num_seqs=4,
+        tile_size_override=32,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+        use_kv_lds_swizzle=True,
+        kv_layout="strided",
+    ),
+    17: dict(
+        # Decode grid with SC0 + NT K/V copies.
+        head_size=128,
+        block_size=16,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        kv_cache_policy="nt",
+    ),
+    18: dict(
+        # Decode grid with globally cached K/V copies.
+        head_size=128,
+        block_size=16,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        kv_cache_policy="global",
     ),
 }
 

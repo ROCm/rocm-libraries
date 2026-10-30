@@ -793,14 +793,8 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_mfma32_skip_legacy_qreg = true;
         s->use_transposed_half_local_pv = true;
         break;
-    /* idx52 REMOVED: it exercised the deep K prefetch ring (kv_ring_depth=3), a
-     * Python-only experimental lever the production selector never sets and the
-     * gfx950 C twin rejects by design. A config one engine cannot emit is
-     * intrinsically asymmetric and does not belong in the byte-identity (emit-
-     * comparison) gate. The C reject guard remains in the public entry glue;
-     * ring-3 was superseded by use_softmax_mfma_interleave (not production). */
-    /* idx52 (renumbered from 53 after the ring-3 config was removed; kept
-     * contiguous so the gate does not stop early on a hole): #69 K single-buffer
+    /* idx52 (renumbered from 53; kept contiguous so the gate does not stop
+     * early on a hole; the ring-3 config is idx72): #69 K single-buffer
      * at T=64 -- the d128 long-context 2-WG/CU win. tile_size=64 +
      * use_k_single_buffer (K_lds 2->1 slot, next-K deferred to after the PV-wait
      * barrier). Ported to the gfx950 C twin -> must be C/Python byte-identical. */
@@ -1257,6 +1251,143 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_fp8_mfma_qk = true;
         break;
 
+    /* Q re-read and the depth-3 deep K prefetch ring. idx70 re-reads Q on the
+     * transposed 32x32 combo, idx71 adds the grouped-KV2 second score tile,
+     * idx72 is the d128 small-tile ring with the two-phase mask peel, idx73
+     * combines both. */
+    case 70:
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->num_warps = 4;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_transposed_mask_limit = true;
+        s->use_q_reread = true;
+        break;
+    case 71:
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_invariant_hoist = true;
+        s->use_transposed_mask_once = true;
+        s->use_grouped_kv2_softmax = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_q_reread = true;
+        break;
+    case 72:
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_transposed_mask_limit = true;
+        s->use_mask_phase_split = true;
+        s->kv_ring_depth = 3;
+        break;
+    case 73:
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 16;
+        s->dtype = "fp16";
+        s->use_sinks = true;
+        s->sliding_window = 128;
+        s->has_softcap = true;
+        s->num_seqs = 2;
+        s->num_warps = 2;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_half_local_pv = true;
+        s->kv_ring_depth = 3;
+        s->use_q_reread = true;
+        break;
+
+    case 74: /* selector spec: single-batch fp16 D128 SW prefill combo. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->use_sinks = false;
+        s->sliding_window = 256;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_softmax_mfma_interleave = true;
+        break;
+    case 75: /* config 50 with sched_barrier mask 8 (MFMA may cross). */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 1;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_invariant_hoist = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_mask_limit = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_sched_barrier = true;
+        s->sched_barrier_mask = 8;
+        break;
     default:
         return -1;
     }

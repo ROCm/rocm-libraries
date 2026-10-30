@@ -20,7 +20,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <string>
+#include <vector>
+
 #include "rocke/arch_target.h" /* rocke_arch_target_from_gfx, lds_capacity_bytes */
+#include "rocke/error.hpp"
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/ir.h"
@@ -1738,6 +1742,86 @@ static int attn_lds_bytes_regpv(const rocke_attention_tiled_2d_spec_t* s)
                                                  /*v_pad=*/0);
 }
 
+/* The gfx950 spec class's __post_init__ checks that read use_k_single_buffer or
+ * tile_size, in Python's order and with Python's text. The spec reaching the
+ * resolver already passed __post_init__, so only these can newly fail on a lever
+ * candidate. Returns "" when the candidate is valid. */
+static std::string attn_gfx950_lever_rejection(const rocke_attention_tiled_2d_spec_t* s)
+{
+    char msg[512];
+    if(s->use_k_single_buffer)
+    {
+        if(s->use_v_double_buffer)
+            return "use_k_single_buffer requires V single-buffer (it shares the post-PV K "
+                   "re-issue point; V double-buffer uses a different K/V prefetch schedule)";
+        if(s->kv_ring_depth != 2)
+            return "use_k_single_buffer is incompatible with kv_ring_depth!=2 (the ring owns >2 "
+                   "K slots)";
+        if(s->use_grouped_kv2_softmax)
+            return "use_k_single_buffer does not support grouped_kv2 (needs 2 K tiles resident "
+                   "for the dual-tile QK)";
+        if(s->kv_storage_dtype != NULL)
+            return "use_k_single_buffer v1 does not support FP8 KV";
+        if(s->use_early_v_schedule)
+            return "use_k_single_buffer does not support early_v_schedule";
+        if(s->use_staggered_iter_wait)
+            return "use_k_single_buffer does not support staggered_iter_wait";
+        int block_m = s->num_warps * s->block_m_per_warp;
+        int t_eff = attn_spec_tile_size_eff(s);
+        if(block_m > t_eff && !s->use_q_direct_reg)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "use_k_single_buffer requires block_m <= tile_size (Q must fit in the "
+                     "single K slot; got block_m=%d, tile_size=%d). Set use_q_direct_reg to "
+                     "lift this (Q is then gathered to VGPRs, never to the K slot).",
+                     block_m,
+                     t_eff);
+            return msg;
+        }
+    }
+    if(s->has_tile_size && (s->tile_size <= 0 || s->tile_size % s->block_size != 0))
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "tile_size must be a positive multiple of block_size (got tile_size=%d, "
+                 "block_size=%d)",
+                 s->tile_size,
+                 s->block_size);
+        return msg;
+    }
+    return "";
+}
+
+/* Python's lever helpers build each candidate with dataclasses.replace(), which
+ * re-runs the arch spec class's __post_init__; a ValueError makes the lever n/a.
+ * Returns the ValueError text, or "" when the candidate is valid. */
+static std::string attn_lever_rejection(const rocke_attention_tiled_2d_spec_t* c, const char* arch)
+{
+    if(!arch_is(arch, "gfx942"))
+        return attn_gfx950_lever_rejection(c);
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "resolve_lds_budget") != ROCKE_OK)
+        ckc::raise_status(ROCKE_ERR_OOM, "resolve_lds_budget: builder init failed");
+    std::string why;
+    try
+    {
+        if(!rocke_attention_tiled_2d_spec_validate(&b, c))
+            why = rocke_ir_builder_error(&b);
+    }
+    catch(const ckc::Error& e)
+    {
+        if(e.code() != ROCKE_ERR_VALUE)
+        {
+            rocke_ir_builder_free(&b);
+            throw;
+        }
+        why = e.what();
+    }
+    rocke_ir_builder_free(&b);
+    return why;
+}
+
 bool rocke_unified_attn_resolve_lds_budget(rocke_attention_tiled_2d_spec_t* spec,
                                            const char* arch,
                                            char* reason,
@@ -1753,67 +1837,105 @@ bool rocke_unified_attn_resolve_lds_budget(rocke_attention_tiled_2d_spec_t* spec
     const rocke_arch_target_t* t = rocke_arch_target_from_gfx(arch);
     if(t == NULL)
         return true; /* arch has no declared LDS cap -> nothing to resolve against */
-    int cap = t->lds_capacity_bytes;
+    const int cap = t->lds_capacity_bytes;
     if(attn_lds_bytes_regpv(spec) <= cap)
         return true;
 
-    /* Cheapest-first ladder: single-buffer K, then T=64, then both. Each lever
-     * mirrors the Python precondition guards (single-K needs the lone K slot to
-     * hold Q: block_m <= tile_size; T=64 only shrinks a larger tile). The
-     * dataclass __post_init__ validate() is the builder's backstop at build
-     * time; these preconditions are what actually gate the levers here. */
-    int block_m = spec->num_warps * spec->block_m_per_warp;
-    int t_eff = attn_spec_tile_size_eff(spec);
-    bool single_k_ok = !spec->use_k_single_buffer && block_m <= t_eff;
+    std::vector<std::string> tried; /* per-lever diagnostics, reported if nothing fits */
+    /* Python _consider: true when the candidate fits; otherwise records why not. */
+    auto consider
+        = [&](const char* label, const rocke_attention_tiled_2d_spec_t* c, const std::string& why) {
+              if(c == NULL)
+              {
+                  tried.push_back(std::string(label) + " n/a (" + why + ")");
+                  return false;
+              }
+              const int used = attn_lds_bytes_regpv(c);
+              if(used <= cap)
+                  return true;
+              tried.push_back(std::string(label) + " still " + std::to_string(used) + " B > "
+                              + std::to_string(cap) + " B");
+              return false;
+          };
+    /* Python _ldsfix_tile64. */
+    auto tile64 = [&](const rocke_attention_tiled_2d_spec_t& from,
+                      rocke_attention_tiled_2d_spec_t& out,
+                      std::string& why) {
+        if(attn_spec_tile_size_eff(&from) <= 64)
+        {
+            why = "tile_size already <= 64";
+            return false;
+        }
+        out = from;
+        out.tile_size = 64;
+        out.has_tile_size = true;
+        why = attn_lever_rejection(&out, arch);
+        if(!why.empty())
+        {
+            why = "rejected by spec validation: " + why;
+            return false;
+        }
+        return true;
+    };
 
-    /* Lever 1: single-buffer K. */
-    if(single_k_ok)
+    /* Cheapest-first ladder: single-buffer K, then T=64, then both. */
+    rocke_attention_tiled_2d_spec_t single_k = *spec;
+    bool have_single_k = false;
+    std::string why;
+    if(spec->use_k_single_buffer)
+        why = "K already single-buffered";
+    else if(spec->num_warps * spec->block_m_per_warp > attn_spec_tile_size_eff(spec))
+        why = "block_m > tile_size (Q would not fit the lone K slot)";
+    else
     {
-        rocke_attention_tiled_2d_spec_t c = *spec;
-        c.use_k_single_buffer = true;
-        if(attn_lds_bytes_regpv(&c) <= cap)
-        {
-            *spec = c;
-            return true;
-        }
+        single_k.use_k_single_buffer = true;
+        why = attn_lever_rejection(&single_k, arch);
+        have_single_k = why.empty();
+        if(!have_single_k)
+            why = "rejected by spec validation: " + why;
     }
-    /* Lever 2: shrink the KV tile to T=64. */
-    if(t_eff > 64)
+    if(consider("single-K", have_single_k ? &single_k : NULL, why))
     {
-        rocke_attention_tiled_2d_spec_t c = *spec;
-        c.tile_size = 64;
-        c.has_tile_size = true;
-        if(attn_lds_bytes_regpv(&c) <= cap)
-        {
-            *spec = c;
-            return true;
-        }
+        *spec = single_k;
+        return true;
     }
-    /* Lever 3: single-K + T=64 (only when single-K's precondition held). */
-    if(single_k_ok && t_eff > 64)
+
+    rocke_attention_tiled_2d_spec_t t64;
+    bool have_t64 = tile64(*spec, t64, why);
+    if(consider("T=64", have_t64 ? &t64 : NULL, why))
     {
-        rocke_attention_tiled_2d_spec_t c = *spec;
-        c.use_k_single_buffer = true;
-        c.tile_size = 64;
-        c.has_tile_size = true;
-        if(attn_lds_bytes_regpv(&c) <= cap)
+        *spec = t64;
+        return true;
+    }
+
+    if(have_single_k)
+    {
+        rocke_attention_tiled_2d_spec_t both;
+        bool have_both = tile64(single_k, both, why);
+        if(consider("single-K+T=64", have_both ? &both : NULL, why))
         {
-            *spec = c;
+            *spec = both;
             return true;
         }
     }
 
     if(reason != NULL && reason_cap > 0)
+    {
+        std::string joined;
+        for(const std::string& entry : tried)
+            joined += (joined.empty() ? "" : "; ") + entry;
         snprintf(reason,
                  reason_cap,
                  "LDS budget: 2D register-PV D%d block_size=%d T=%d needs %d B > cap %d B "
-                 "on %s; no validated reduction (single-K, T=64) fits",
+                 "on %s; no validated reduction fits [%s].",
                  spec->head_size,
                  spec->block_size,
-                 t_eff,
+                 attn_spec_tile_size_eff(spec),
                  attn_lds_bytes_regpv(spec),
                  cap,
-                 arch);
+                 arch,
+                 joined.c_str());
+    }
     return false;
 }
 

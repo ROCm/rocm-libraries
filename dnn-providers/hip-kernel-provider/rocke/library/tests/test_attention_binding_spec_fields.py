@@ -6,6 +6,7 @@ it has no slot for is rejected unless it holds its default."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, fields
 
 import pytest
@@ -106,6 +107,46 @@ def test_2d_binding_rejects_unported_fields(engine, field, value):
         engine.gfx950_attention_tiled_2d_lower_llvm(d, "gfx950")
 
 
+_TRANSPOSED_32X32 = {
+    "use_mfma_32x32": True,
+    "use_transposed_qk_32x32": True,
+    "block_m_per_warp": 32,
+    "tile_size": 64,
+}
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"use_q_reread": True, "use_transposed_qk_32x32": False},
+        {"use_q_reread": True, "kv_storage_dtype": "fp8e4m3"},
+        {"kv_ring_depth": 4},
+        {"kv_ring_depth": 3, "kv_storage_dtype": "fp8e4m3"},
+        {"kv_ring_depth": 3, "use_grouped_kv2_softmax": True},
+        {"kv_ring_depth": 3, "use_v_double_buffer": True},
+        {"kv_ring_depth": 3, "use_early_v_schedule": True},
+        {
+            "kv_ring_depth": 3,
+            "use_v_double_buffer": True,
+            "use_staggered_iter_wait": True,
+        },
+        {"kv_ring_depth": 3, "use_transposed_qk_32x32": False},
+        {"kv_ring_depth": 3, "use_k_single_buffer": True},
+    ],
+)
+def test_gfx950_2d_ring_and_q_reread_rejects_match_python(engine, changes):
+    d = dict(_REQUIRED_2D, dtype="bf16", **dict(_TRANSPOSED_32X32, **changes))
+    with pytest.raises((ValueError, NotImplementedError)) as py_err:
+        Gfx950Spec2D(**d)
+    full = asdict(Gfx950Spec2D(**_REQUIRED_2D, dtype="bf16"))
+    full.update(d)
+    with pytest.raises(
+        (ValueError, NotImplementedError, RuntimeError),
+        match=re.escape(str(py_err.value)),
+    ):
+        engine.gfx950_attention_tiled_2d_lower_llvm(full, "gfx950")
+
+
 def test_3d_binding_rejects_unported_fields(engine):
     spec = UnifiedAttention3DTiledSpec(
         head_size=64,
@@ -122,6 +163,35 @@ def test_3d_binding_rejects_unported_fields(engine):
     d["right_bound"] = 5
     with pytest.raises(NotImplementedError, match="right_bound"):
         engine.gfx950_attention_tiled_3d_lower_llvm(d, "gfx950")
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize(
+    "changes, message",
+    [
+        ({"kv_layout": "dense"}, "kv_layout must be 'paged' or 'strided'"),
+        (
+            {"kv_layout": "strided", "kv_storage_dtype": "fp8e4m3"},
+            "strided KV requires",
+        ),
+        ({"kv_layout": "strided", "use_wave_page_id_load": True}, "needs paged"),
+    ],
+)
+def test_3d_binding_validates_kv_layout(engine, arch, changes, message):
+    d = dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=8,
+        dtype="fp16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_segments=8,
+        **changes,
+    )
+    with pytest.raises((ValueError, RuntimeError), match=message):
+        getattr(engine, f"{arch}_attention_tiled_3d_lower_llvm")(d, arch)
 
 
 def test_scalar_binding_rejects_fp8_kv(engine):
@@ -175,9 +245,9 @@ def test_3d_selector_hook_returns_every_spec_field(engine, arch):
     python_fields = {f.name for f in fields(Gfx942Spec3D)} | {
         f.name for f in fields(UnifiedAttention3DTiledSpec)
     }
-    # kv_layout selects the strided-KV builder; the problem always builds paged.
-    unported = {"use_additive_bias", "causal_top_left", "right_bound", "kv_layout"}
+    unported = {"use_additive_bias", "causal_top_left", "right_bound"}
     assert set(spec) == python_fields - unported
+    assert spec["kv_layout"] == "paged"
 
 
 def test_selector_hook_rejects_unported_arch_and_fields(engine):

@@ -664,7 +664,10 @@ void rocke_gfx950_attn2d_emit_pv_bucket(rocke_gfx950_attn2d_build_ctx_t* ctx,
     for(n = 0; n < ctx->ACC_N_TILES; ++n)
         for(atom = 0; atom < ctx->ACC_M_ATOMS; ++atom)
             yields[yc++] = new_acc[n * ctx->ACC_M_ATOMS + atom];
-    yields[yc++] = ctx->GROUPED_KV2 ? in->cur_buf : ctx->nxt_buf_v;
+    if(ctx->RING3)
+        yields[yc++] = ctx->ring_next_cur_v;
+    else
+        yields[yc++] = ctx->GROUPED_KV2 ? in->cur_buf : ctx->nxt_buf_v;
 
     /* Record the rewritten carry for callers that thread phases (the driver's
      * single-phase path reads this back via the loop results). */

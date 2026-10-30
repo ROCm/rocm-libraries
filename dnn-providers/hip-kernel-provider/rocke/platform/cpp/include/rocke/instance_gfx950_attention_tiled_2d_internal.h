@@ -3,7 +3,7 @@
  *
  * rocke/instance_gfx950_attention_tiled_2d_internal.h -- PRIVATE shared state +
  * phase-function contract for the C99 port of build_unified_attention_2d_tiled
- * (rocke/instances/gfx950/attention_tiled_2d.py, build body lines 711-3818).
+ * (library/kernels/gfx950/attention_tiled_2d.py).
  *
  * WHY THIS HEADER EXISTS.
  *   build_unified_attention_2d_tiled() in Python is a single ~3100-line function
@@ -144,6 +144,12 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     int SOFTMAX_INTERLEAVE_GROUPS; /* mode 2: (MFMA, VALU) group-barrier pairs */
     /* Q gathered straight from global into VGPRs: no Q_lds, no Q aliasing. */
     bool Q_DIRECT_REG;
+    /* Q re-read: the QK loop reads its Q operand from a dedicated Q_lds each
+     * iteration instead of holding it in q32_regs. */
+    bool Q_REREAD;
+    /* Depth-3 K prefetch ring: K_lds has 3 slots and each iteration prefetches
+     * K[i+2]; cur_buf advances (mod 3) through the slots. */
+    bool RING3;
     /* K_lds slab pad in halves (0 = off) and the rows one wave's async-DMA
      * slab fills; K_lds is then [K_BUFS, T/KQ_SLAB_ROWS, KQ_SLAB_ROWS*HD+pad]. */
     int KQ_LDS_PAD, KQ_SLAB_ROWS;
@@ -305,6 +311,7 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     int q_regs_count;
     rocke_value_t* q32_regs[ROCKE_GFX950_ATTN2D_MAX_K_ITERS];
     int q32_regs_count;
+    rocke_value_t* q32_row_v; /* Q_lds row of this lane's 32x32 Q operand */
 
     /* ---- KV-loop bounds + step (lines 1981-2006 analogue) ---- */
     rocke_value_t* tile_start;
@@ -355,6 +362,9 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* kv_tile_iv;
     rocke_value_t* cur_buf;
     rocke_value_t* nxt_buf_v; /* 1 - cur_buf (or cur_buf single-buffered) */
+    /* RING3 only: K[i+2] prefetch tile/slot and the next iteration's slot. */
+    rocke_value_t* ring_pf_tile_v;
+    rocke_value_t* ring_next_cur_v;
     bool skip_mask;
     rocke_value_t* m_cur[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* l_cur[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];

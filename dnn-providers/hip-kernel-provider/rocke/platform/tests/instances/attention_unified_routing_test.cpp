@@ -4,7 +4,8 @@
  * Host-only test for the C port of unified-attention routing and coverage
  * gates: select_path / select_2d / select_3d, select_*_config,
  * _canonical_arch_for_selection, supports_native_unified_attention and
- * supports_native_unified_attention_3d_tiled. Expected values were produced by
+ * supports_native_unified_attention_3d_tiled, and the tiled-attention arch gate
+ * (validate/require_tiled_attention_arch). Expected values were produced by
  * the Python implementations (library/kernels/common/attention_unified.py,
  * platform/python/rocke/helpers/attention.py) on the same inputs.
  */
@@ -13,8 +14,10 @@
 #include <string.h>
 
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h"
+#include "rocke/helper_rocke.instances.common.attention_arch.h"
 #include "rocke/instance_attention_unified.h"
 #include "rocke/instance_gfx942_attention_4warp_gqa.h"
+#include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 
 static int g_failures = 0;
 
@@ -395,6 +398,54 @@ static void test_gfx942_4warp_launch_grid(void)
     CHECK(!rocke_gfx942_4warp_launch_grid(&p, grid));
 }
 
+static void test_tiled_attention_arch(void)
+{
+    static const char* const rejected[]
+        = {"gfx11-generic", "gfx1151", "gfx12-generic", "gfx1201", "gfx1250", "gfx90a"};
+    char reason[512];
+    char want[512];
+
+    CHECK(rocke_validate_tiled_attention_arch("gfx942", reason, sizeof(reason)));
+    CHECK_EQ_STR(reason, "ok");
+    CHECK(rocke_validate_tiled_attention_arch("gfx950", reason, sizeof(reason)));
+    CHECK_EQ_STR(reason, "ok");
+    for(size_t i = 0; i < sizeof(rejected) / sizeof(rejected[0]); ++i)
+    {
+        snprintf(want,
+                 sizeof(want),
+                 "tiled attention requires either the wide-K MFMA atoms (mfma_f32_16x16x32 / "
+                 "mfma_f32_32x32x16, gfx950) or, on a narrow variant arch (gfx942), the 16x16x16 "
+                 "f16/bf16 atom; neither path is available on %s",
+                 rejected[i]);
+        CHECK(!rocke_validate_tiled_attention_arch(rejected[i], reason, sizeof(reason)));
+        CHECK_EQ_STR(reason, want);
+    }
+    static const char* const k_unknown
+        = "\"unknown gfx target 'gfx9999'; known: ['gfx11-generic', 'gfx1151', "
+          "'gfx12-generic', 'gfx1201', 'gfx1250', 'gfx90a', 'gfx942', 'gfx950']. Add a row to "
+          "arch_specs.json.\"";
+    CHECK(!rocke_validate_tiled_attention_arch("gfx9999", reason, sizeof(reason)));
+    CHECK_EQ_STR(reason, k_unknown);
+
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "k") == ROCKE_OK);
+    CHECK(!rocke_require_tiled_attention_arch(&b, "gfx90a"));
+    CHECK(rocke_ir_builder_status(&b) == ROCKE_ERR_NOTIMPL);
+    CHECK(strstr(rocke_ir_builder_error(&b), "neither path is available on gfx90a") != NULL);
+    /* An earlier sticky error is kept. */
+    CHECK(!rocke_require_tiled_attention_arch(&b, "gfx9999"));
+    CHECK(strstr(rocke_ir_builder_error(&b), "gfx90a") != NULL);
+    rocke_ir_builder_free(&b);
+
+    /* Python's gfx950 tiled-2D builder admits gfx942 at its arch gate. */
+    rocke_unified_attention_problem_t p = decode_problem();
+    rocke_attention_tiled_2d_spec_t spec = rocke_unified_attn_tiled_spec_from_problem(&p, "gfx950");
+    rocke_gfx950_attn2d_build_ctx_t ctx;
+    CHECK(rocke_ir_builder_init(&b, "k") == ROCKE_OK);
+    CHECK(rocke_gfx950_attn2d_build_ctx_init(&ctx, &b, &spec, "gfx942"));
+    rocke_ir_builder_free(&b);
+}
+
 int main(void)
 {
     test_select_path();
@@ -405,6 +456,7 @@ int main(void)
     test_supports_tiled_2d();
     test_supports_scalar();
     test_gfx942_4warp_launch_grid();
+    test_tiled_attention_arch();
     if(g_failures)
     {
         fprintf(stderr, "attention_unified_routing_test: %d failure(s)\n", g_failures);

@@ -275,6 +275,57 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_kv_lds_swizzle = true;
         s->use_wave_page_id_load = true;
         break;
+    case 16:
+        /* Two-page tiles from strided (non-paged) K/V into swizzled LDS, with
+         * softcap. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 4;
+        s->dtype = "fp16";
+        s->num_segments = 32;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = true;
+        s->kv_storage_dtype = NULL;
+        s->num_seqs = 4;
+        s->has_tile_size_override = true;
+        s->tile_size_override = 32;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        s->use_kv_lds_swizzle = true;
+        s->kv_layout = "strided";
+        break;
+    case 17:
+        /* Decode grid with SC0 + NT K/V copies. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "nt";
+        break;
+    case 18:
+        /* Decode grid with globally cached K/V copies. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "global";
+        break;
     default:
         return -1;
     }

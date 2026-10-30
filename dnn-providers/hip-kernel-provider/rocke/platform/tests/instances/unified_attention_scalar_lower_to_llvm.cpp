@@ -18,7 +18,9 @@
  * not which gfx9 constant it names.
  *
  * It also pins the scalar kernel names (fp8 K/V and mask tokens) and the 2D
- * signature's fp8 K/V pointer type to the values the Python specs produce.
+ * signature's fp8 K/V pointer type to the values the Python specs produce, and
+ * mirrors test_attention_scalar_cache_key.py: the dynamic shape never reaches the
+ * kernel name or IR, and the block-table row stride is a kernarg.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -265,6 +267,185 @@ static int check_names_and_signature(void)
     return failures;
 }
 
+/* The shape test_attention_scalar_cache_key.py uses for the Python side. */
+static rocke_unified_attention_problem_t make_cache_key_base(void)
+{
+    rocke_unified_attention_problem_t p = rocke_unified_attention_problem_default();
+    p.total_q = 64;
+    p.num_seqs = 4;
+    p.num_query_heads = 8;
+    p.num_kv_heads = 2;
+    p.head_size = 128;
+    p.block_size = 16;
+    p.max_seqlen_q = 16;
+    p.max_seqlen_k = 256;
+    p.dtype = "bf16";
+    return p;
+}
+
+static rocke_status_t
+    kernel_name_for(kind_t kind, const rocke_unified_attention_problem_t* p, char* name, size_t cap)
+{
+    switch(kind)
+    {
+    case KIND_2D:
+        return rocke_unified_attention_2d_scalar_kernel_name(p, NULL, name, cap);
+    case KIND_3D:
+        return rocke_unified_attention_3d_scalar_kernel_name(p, NULL, NUM_SEGMENTS, name, cap);
+    case KIND_REDUCE:
+        return rocke_unified_attention_reduce_scalar_kernel_name(p, NULL, NUM_SEGMENTS, name, cap);
+    }
+    return ROCKE_ERR_VALUE;
+}
+
+/* Name and .ll of one scalar kernel; the caller frees *ll. */
+static int name_and_ll(
+    kind_t kind, const rocke_unified_attention_problem_t* p, char* name, size_t cap, char** ll)
+{
+    char err[ERR_CAP];
+    err[0] = '\0';
+    *ll = NULL;
+    if(kernel_name_for(kind, p, name, cap) != ROCKE_OK)
+    {
+        fprintf(stderr, "%s: kernel name failed\n", kind_name(kind));
+        return 1;
+    }
+    if(lower_for_target(kind, p, WRAPPER_TARGET, ll, err, sizeof err) != ROCKE_OK || *ll == NULL)
+    {
+        fprintf(stderr, "%s: lowering failed: %s\n", kind_name(kind), err);
+        free(*ll);
+        *ll = NULL;
+        return 1;
+    }
+    return 0;
+}
+
+/* The scalar kernels read total_q / num_seqs / max_seqlen_q / max_seqlen_k only
+ * through kernargs and the grid, and the block-table row stride is the
+ * block_table_stride kernarg. So shapes that differ only there must share one
+ * kernel name (the binary's cache identity) and lower to the same bytes, while
+ * every static field the build reads must split the name. */
+static int check_dynamic_shape_shares_binary(void)
+{
+    static const kind_t kinds[] = {KIND_2D, KIND_3D, KIND_REDUCE};
+    static const struct
+    {
+        int total_q, num_seqs, max_seqlen_q, max_seqlen_k;
+    } dynamic[] = {
+        {200, 4, 16, 256},
+        {16, 1, 16, 256},
+        {37, 37, 1, 256},
+        {64, 4, 50, 256},
+        {64, 4, 16, 250},
+        {64, 4, 16, 1000},
+        {1, 1, 1, 65536},
+    };
+    int failures = 0;
+    size_t k, i;
+
+    for(k = 0; k < sizeof kinds / sizeof kinds[0]; ++k)
+    {
+        const rocke_unified_attention_problem_t base = make_cache_key_base();
+        char base_name[256];
+        char* base_ll = NULL;
+        if(name_and_ll(kinds[k], &base, base_name, sizeof base_name, &base_ll) != 0)
+        {
+            ++failures;
+            continue;
+        }
+        if(kinds[k] != KIND_REDUCE
+           && (strstr(base_ll, "i32 %block_table_stride)") == NULL
+               || strstr(base_ll, ", %block_table_stride\n") == NULL))
+        {
+            fprintf(stderr, "%s: block_table_stride is not a kernarg\n", kind_name(kinds[k]));
+            ++failures;
+        }
+        for(i = 0; i < sizeof dynamic / sizeof dynamic[0]; ++i)
+        {
+            rocke_unified_attention_problem_t p = base;
+            char name[256];
+            char* ll = NULL;
+            p.total_q = dynamic[i].total_q;
+            p.num_seqs = dynamic[i].num_seqs;
+            p.max_seqlen_q = dynamic[i].max_seqlen_q;
+            p.max_seqlen_k = dynamic[i].max_seqlen_k;
+            if(name_and_ll(kinds[k], &p, name, sizeof name, &ll) != 0)
+            {
+                ++failures;
+                continue;
+            }
+            if(strcmp(name, base_name) != 0 || strcmp(ll, base_ll) != 0)
+            {
+                fprintf(stderr,
+                        "%s: dynamic variant %zu changes the %s\n",
+                        kind_name(kinds[k]),
+                        i,
+                        strcmp(name, base_name) != 0 ? "kernel name" : "IR");
+                ++failures;
+            }
+            free(ll);
+        }
+        free(base_ll);
+    }
+
+    for(i = 0; i < 11; ++i)
+    {
+        rocke_unified_attention_problem_t base = make_cache_key_base();
+        rocke_unified_attention_problem_t p = base;
+        char base_name[256], name[256];
+        char *base_ll = NULL, *ll = NULL;
+        switch(i)
+        {
+        case 0:
+            p.num_query_heads = 16;
+            break;
+        case 1:
+            p.num_kv_heads = 8;
+            break;
+        case 2:
+            p.head_size = 64;
+            break;
+        case 3:
+            p.block_size = 32;
+            break;
+        case 4:
+            p.dtype = "fp16";
+            break;
+        case 5:
+            p.sliding_window = 128;
+            break;
+        case 6:
+            p.use_sinks = true;
+            break;
+        case 7:
+            p.softcap = 30.0;
+            break;
+        case 8:
+            p.use_fp8 = true;
+            break;
+        case 9:
+            p.causal_top_left = true;
+            break;
+        default:
+            p.right_bound = 8;
+            break;
+        }
+        if(name_and_ll(KIND_2D, &base, base_name, sizeof base_name, &base_ll) != 0
+           || name_and_ll(KIND_2D, &p, name, sizeof name, &ll) != 0)
+        {
+            ++failures;
+        }
+        else if(strcmp(name, base_name) == 0 || strcmp(ll, base_ll) == 0)
+        {
+            fprintf(stderr, "2d_scalar: static variant %zu does not split name and IR\n", i);
+            ++failures;
+        }
+        free(base_ll);
+        free(ll);
+    }
+    return failures;
+}
+
 int main(void)
 {
     static const kind_t kinds[] = {KIND_2D, KIND_3D, KIND_REDUCE};
@@ -274,6 +455,7 @@ int main(void)
     for(i = 0; i < sizeof kinds / sizeof kinds[0]; ++i)
         failures += run_case(kinds[i]);
     failures += check_names_and_signature();
+    failures += check_dynamic_shape_shares_binary();
 
     if(failures != 0)
     {

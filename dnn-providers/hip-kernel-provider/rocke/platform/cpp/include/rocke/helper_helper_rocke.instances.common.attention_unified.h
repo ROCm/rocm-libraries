@@ -3,7 +3,7 @@
  *
  * rocke/helper_helper_rocke.instances.common.attention_unified.h -- C99 port of
  * the scalar-correct reference kernels of the AITER unified-attention
- * dispatcher, rocke/instances/common/attention_unified.py.
+ * dispatcher, library/kernels/common/attention_unified.py.
  *
  * SCOPE OF THIS PORT (the requested symbol set):
  *

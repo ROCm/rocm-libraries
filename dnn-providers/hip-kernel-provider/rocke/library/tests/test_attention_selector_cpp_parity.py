@@ -430,11 +430,8 @@ def test_gfx942_spec_matches_python(engine):
 
 # Python tiled-3D spec fields the C++ 3D spec has no slot for, per arch.
 _PY_ONLY_3D_SPEC_FIELDS = {
-    "gfx942": {
-        "kv_layout": "spec-from-problem always picks the paged layout; C++ has no field",
-    },
+    "gfx942": {},
     "gfx950": {
-        "kv_layout": "spec-from-problem always picks the paged layout; C++ has no field",
         "use_additive_bias": "additive bias is not in the C++ tiled-3D spec",
         "causal_top_left": "the top-left mask band is not in the C++ tiled-3D spec",
         "right_bound": "the right-bound mask band is not in the C++ tiled-3D spec",

@@ -3,7 +3,7 @@
  *
  * rocke/instance_attention_unified.h -- C99 port of the SCALAR-correct reference
  * kernel builders of the AITER unified-attention dispatcher
- * (rocke/instances/common/attention_unified.py, 3270 LOC).
+ * (library/kernels/common/attention_unified.py).
  *
  * SCOPE. This header is the PUBLIC entry/glue surface for the three scalar
  * reference kernel builders that the Python module exposes as a fallback path
@@ -112,9 +112,8 @@ bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_probl
                                              size_t reason_cap);
 
 /* supports_native_unified_attention_tiled(problem, arch) -- the tiled 2D path.
- * Not ported yet, so rejected after Python's checks: gfx1250; on gfx942 the
- * 4-warp GQA cohort, the sliced-K ring and flash mask-limit; elsewhere additive
- * bias, non-default masks and the V double-buffer. */
+ * Not ported yet, so rejected after Python's checks: gfx1250; off gfx942,
+ * additive bias and non-default masks. */
 bool rocke_unified_attention_supports_tiled_2d(const rocke_unified_attention_problem_t* p,
                                                const char* arch,
                                                char* reason,

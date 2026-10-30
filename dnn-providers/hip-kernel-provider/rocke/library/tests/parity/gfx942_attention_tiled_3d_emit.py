@@ -33,7 +33,6 @@ except ImportError:  # pragma: no cover - older reference tree
 from rocke.core.ir_serialize import serialize
 from rocke.core.verify import verify
 
-
 _CONFIGS = {
     0: dict(
         head_size=64,
@@ -302,6 +301,38 @@ _CONFIGS = {
         kv_storage_dtype=None,
         tile_size_override=16,
         use_wave_page_id_load=True,
+    ),
+    18: dict(
+        # Decode K/V streamed by the async copies from strided (non-paged) K/V.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=True,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        num_seqs=4,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+        kv_layout="strided",
+    ),
+    19: dict(
+        # Decode K/V with globally cached copies through the 1-DWORD async loader.
+        head_size=128,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="fp16",
+        num_segments=16,
+        use_sinks=True,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        kv_cache_policy="global",
     ),
 }
 

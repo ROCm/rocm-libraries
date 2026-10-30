@@ -3,7 +3,7 @@
  *
  * rocke/instance_attention_unified_internal.h -- PRIVATE shared state + phase-
  * function contract for the C99 port of the SCALAR unified-attention kernel
- * builders (rocke/instances/common/attention_unified.py:
+ * builders (library/kernels/common/attention_unified.py:
  *   build_unified_attention_2d        lines 2589-2774
  *   build_unified_attention_3d        lines 2798-2914
  *   build_unified_attention_reduce    lines 2941-3009

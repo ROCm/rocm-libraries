@@ -187,6 +187,67 @@ def test_gfx942_2d_knob_list_order_matches_python(engine):
         engine.gfx942_attention_tiled_2d_lower_llvm({**spec, **knobs}, "gfx942")
 
 
+def test_gfx942_2d_lds_budget_messages_match_python(engine, clean_env):
+    # The single-K lever is rejected by spec validation on these shapes, so the
+    # text carries the validator's message as well as the per-lever results.
+    rejected = 0
+    for p in _problems_2d():
+        try:
+            _tiled_spec_from_problem(p, "gfx942")
+            continue
+        except RuntimeError as e:
+            message = str(e)
+        except (ValueError, NotImplementedError):
+            continue
+        rejected += "single-K n/a (rejected by spec validation: " in message
+        with pytest.raises(RuntimeError) as cpp:
+            engine.gfx942_attn_tiled_spec_from_problem(asdict(p), "gfx942")
+        assert str(cpp.value) == message, p
+    assert rejected
+
+
+def _gfx950_regpv_d256_spec(monkeypatch):
+    import kernels.common.attention_unified as au
+
+    # The D256 fast route turns register-PV off, which bypasses the resolver.
+    monkeypatch.setattr(au, "_d256_gfx950_fast", lambda *args, **kwargs: False)
+    p = UnifiedAttentionProblem(
+        dtype="bf16",
+        head_size=256,
+        block_size=64,
+        num_query_heads=16,
+        num_kv_heads=2,
+        num_seqs=1,
+        total_q=4096,
+        max_seqlen_q=4096,
+        max_seqlen_k=4096,
+    )
+    spec = _tiled_spec_from_problem(p, "gfx950")
+    assert spec.use_register_pv and spec.tile_size == 128
+    return replace(spec, use_k_single_buffer=False)
+
+
+def test_gfx950_lds_resolver_skips_lever_rejected_by_validation(engine, monkeypatch):
+    from kernels.common.attention_unified import _resolve_lds_budget
+
+    base = _gfx950_regpv_d256_spec(monkeypatch)
+    # Single-K would fit, but early-V rejects it; Python falls through to T=64.
+    early_v = replace(base, use_early_v_schedule=True)
+    py = asdict(_resolve_lds_budget(early_v, "gfx950"))
+    assert (py["use_k_single_buffer"], py["tile_size"]) == (False, 64)
+    cpp = engine.unified_attention_resolve_lds_budget(asdict(early_v), "gfx950")
+    diff = {k: (cpp[k], py[k]) for k in py.keys() & cpp.keys() if cpp[k] != py[k]}
+    assert not diff, diff
+    # Nothing fits: the text lists single-K's validation reject.
+    wide = replace(base, use_v_double_buffer=True, num_warps=8)
+    with pytest.raises(RuntimeError) as py_err:
+        _resolve_lds_budget(wide, "gfx950")
+    assert "single-K n/a (rejected by spec validation: " in str(py_err.value)
+    with pytest.raises(RuntimeError) as cpp_err:
+        engine.unified_attention_resolve_lds_budget(asdict(wide), "gfx950")
+    assert str(cpp_err.value) == str(py_err.value)
+
+
 def _problems_3d():
     for (
         dtype,

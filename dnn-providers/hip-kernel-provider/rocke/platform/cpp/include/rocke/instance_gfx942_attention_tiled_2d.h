@@ -3,7 +3,7 @@
  *
  * rocke/instance_gfx942_attention_tiled_2d.h -- PUBLIC C99 surface for the gfx942
  * (CDNA3) narrow-atom tiled-2D unified-attention kernel INSTANCE BUILDER
- * (rocke/instances/gfx942/attention_tiled_2d.py, 5287 LOC).
+ * (library/kernels/gfx942/attention_tiled_2d.py).
  *
  *   Python (attention_tiled_2d.py)                C99 (this header)
  *   -------------------------------------------   ------------------------------------------------
@@ -23,8 +23,8 @@
  *   This header REUSES those by include and does NOT redeclare them. The entry
  *   point rocke_build_unified_attention_2d_tiled_scalar keeps the exact name the
  *   porting task fixed (it is the kernel emitter, declared here as the real
- *   build whose ~4000-line body lives in the instance_gfx942_attention_tiled_2d_*
- *   .c translation units).
+ *   build whose body lives in the instances/gfx942/attention_tiled_2d_*.cpp
+ *   translation units).
  *
  *   Every NEW symbol this builder family adds (beyond the already-ported spec
  *   surface) carries the ``rocke_gfx942_attention_tiled_2d_`` prefix so it never
@@ -142,8 +142,8 @@ bool rocke_gfx942_attention_tiled_2d_supports(
  * ``b`` and return the kernel (b->kernel) on success, or NULL with b's sticky
  * error set. ``arch`` NULL == the Python default "gfx942".
  *
- * This is the REAL emitter (the porting task pins this name): the ~4000-line
- * body is split across the instance_gfx942_attention_tiled_2d_*.c translation
+ * This is the REAL emitter (the porting task pins this name): the body is
+ * split across the instances/gfx942/attention_tiled_2d_*.cpp translation
  * units, driven through the build-context + phase-function contract in
  * rocke/instance_gfx942_attention_tiled_2d_internal.h. It reproduces the Python
  * prologue -> Q-load -> KV-loop (QK / mask / softmax / PV) -> epilogue order

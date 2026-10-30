@@ -40,6 +40,7 @@
 
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h" /* rocke_unified_attn_tiled_2d_lds_bytes */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.instances.common.attention_arch.h" /* rocke_require_tiled_attention_arch */
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include <stdio.h>
@@ -68,84 +69,6 @@ static void rocke__set_err(char* err, size_t err_cap, const char* m)
 static void rocke__reason(char* reason, size_t reason_cap, const char* m)
 {
     rocke__set_err(reason, reason_cap, m);
-}
-
-/* ===================================================================== *
- *  attention_arch.py predicates (validate_tiled_attention_arch port).
- *
- *  These mirror instances/common/attention_arch.py: _wide_k_mfma_available,
- *  _narrow_k_mfma_available, the _NARROW_TILED_2D_ARCHES set ({"gfx942"}), and
- *  validate_tiled_attention_arch itself. Catalog-driven via rocke_arch_target.
- * ===================================================================== */
-
-/* _wide_k_mfma_available(target): 16x16x32 f16 atom OR has_ds_read_tr. */
-static bool rocke__wide_k_mfma_available(const rocke_arch_target_t* target)
-{
-    if(rocke_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 32))
-        return true;
-    return target->memory.has_ds_read_tr;
-}
-
-/* _narrow_k_mfma_available(target): 16x16x16 f16 AND bf16 atoms. */
-static bool rocke__narrow_k_mfma_available(const rocke_arch_target_t* target)
-{
-    return rocke_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 16)
-           && rocke_mma_catalog_has_shape(&target->mma, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
-}
-
-/* arch in _NARROW_TILED_2D_ARCHES == frozenset({"gfx942"}). */
-static bool rocke__arch_in_narrow_set(const char* arch)
-{
-    return arch != NULL && strcmp(arch, "gfx942") == 0;
-}
-
-/* validate_tiled_attention_arch(arch) -> (ok, reason). Returns true/false and
- * writes the reason (cap reason_cap) on every path. */
-static bool rocke__validate_tiled_attention_arch(const char* arch, char* reason, size_t reason_cap)
-{
-    const rocke_arch_target_t* target = rocke_arch_target_from_gfx(arch);
-    if(target == NULL)
-    {
-        /* Python: except KeyError as e: return False, str(e). The KeyError
-         * carries the missing gfx key. */
-        char buf[128];
-        snprintf(buf, sizeof(buf), "%s", arch ? arch : "None");
-        rocke__reason(reason, reason_cap, buf);
-        return false;
-    }
-    if(rocke__wide_k_mfma_available(target) && target->memory.has_ds_read_tr)
-    {
-        rocke__reason(reason, reason_cap, "ok");
-        return true;
-    }
-    if(rocke__arch_in_narrow_set(arch) && rocke__narrow_k_mfma_available(target))
-    {
-        rocke__reason(reason, reason_cap, "ok");
-        return true;
-    }
-    if(!rocke__wide_k_mfma_available(target))
-    {
-        char buf[320];
-        snprintf(buf,
-                 sizeof(buf),
-                 "tiled attention requires either the wide-K MFMA atoms "
-                 "(mfma_f32_16x16x32 / mfma_f32_32x32x16, gfx950) or, on a "
-                 "narrow variant arch (gfx942), the 16x16x16 f16/bf16 atom; "
-                 "neither path is available on %s",
-                 arch);
-        rocke__reason(reason, reason_cap, buf);
-        return false;
-    }
-    {
-        char buf[256];
-        snprintf(buf,
-                 sizeof(buf),
-                 "tiled attention requires LDS transpose reads "
-                 "(ds_read_b64_tr_b16) for the wide-K path, absent on %s",
-                 arch);
-        rocke__reason(reason, reason_cap, buf);
-        return false;
-    }
 }
 
 /* ===================================================================== *
@@ -181,7 +104,7 @@ bool rocke_gfx942_attention_tiled_2d_supports(
     arch = args->arch ? args->arch : "gfx942";
 
     /* arch_ok, arch_reason = validate_tiled_attention_arch(arch) */
-    if(!rocke__validate_tiled_attention_arch(arch, reason, reason_cap))
+    if(!rocke_validate_tiled_attention_arch(arch, reason, reason_cap))
         return false;
 
     /* The fp8 K/V cache path needs ds_read_tr_b8 (gfx950-only). */
