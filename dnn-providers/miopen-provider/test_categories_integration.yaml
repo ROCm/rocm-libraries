@@ -101,7 +101,8 @@ test_categories:
       - "quick_ConvolutionFwd_Default.1_16_16_16_bfp16_nchw_dil1x1_postpad0x0_prepad0x0"
       - "quick_BatchnormInference_Default.1_3_224_fp32_ncl"
       - "quick_Pointwise_Default.2_4_8_8_fp16_nchw"
-      - "quick_Reduction_Default.1_16_8_8_bfp16_nchw_modeadd"
+      # fp32: the MIOpen provider declines bf16 reduction (legacy reduce has no bf16 kernels).
+      - "quick_Reduction_Default.1_16_8_8_fp32_nchw_modemin"
       - "quick_RMSNorm_Default.2_3_4_4_bfp16_nchw_bcd247"
       # Layernorm had no entry here at all, so the op had no fast-feedback
       # signal; this is the smallest quick-tier layernorm bundle case.

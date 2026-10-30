@@ -100,6 +100,15 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->in_tensor_uid(), InputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->out_tensor_uid(), OutputDataTypeEnum);
 
+        // GpuFpReferenceReduction::reduce() rejects a higher rank only when it runs. Declining
+        // here lets auto verification move on to the CPU reference without an executor error.
+        const auto* inputDims = tensorMap.at(nodeAttributes->in_tensor_uid())->dims();
+        if(inputDims == nullptr
+           || inputDims->size() > hipdnn_gpu_ref::GpuFpReferenceReduction::MAX_DIMS)
+        {
+            return false;
+        }
+
         using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
         auto mode = nodeAttributes->mode();
         switch(mode)

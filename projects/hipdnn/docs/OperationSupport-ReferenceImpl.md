@@ -156,8 +156,8 @@ input with `FP32` scale for dequantize) are also registered.
 The integration test project selects this implementation with `--verification-mode cpu` (or as the last
 step of the default `auto` chain). The harness only registers bundles for CPU validation when every
 node type in the graph is in its CPU-required set. That set is a subset of the operations above:
-BatchNorm (all four variants), Layernorm (forward/backward), RMSNorm (forward/backward), Pointwise and
-SDPA Forward (see `ReferenceOpCoverage.cpp` in the integration test project). SDPA bundles are
+BatchNorm (all four variants), Layernorm (forward/backward), RMSNorm (forward/backward), Pointwise,
+Reduction and SDPA Forward (see `ReferenceOpCoverage.cpp` in the integration test project). SDPA bundles are
 additionally limited to `quick`-tier bundles with a bounded working set, to keep CPU time down. See the
 [integration test docs](../../../dnn-providers/integration-tests/docs/running-tests.md#verification-modes)
 for the verification modes.

@@ -583,6 +583,98 @@
         "seed": 1,
         "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_8"
       }
+    },
+    {
+      "id": "2_8_4_4_fp32_nchw_modeadd",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              8,
+              4,
+              4
+            ],
+            "strides": [
+              128,
+              16,
+              4,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              8,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              2,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "mode": "add"
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "graph.template.json rendered with shapes covering the MIOpen provider reduction gate (rank 1-6, innermost and multi-axis, padded output strides, multi-block lengths); graph-only, verified by the GPU/CPU reference",
+        "seed": 1,
+        "generator": "import_graph.py"
+      }
+    },
+    {
+      "id": "2_4096_fp32_modeadd",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              4096
+            ],
+            "strides": [
+              4096,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              1
+            ],
+            "strides": [
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "mode": "add"
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "graph.template.json rendered with shapes covering the MIOpen provider reduction gate (rank 1-6, innermost and multi-axis, padded output strides, multi-block lengths); graph-only, verified by the GPU/CPU reference",
+        "seed": 1,
+        "generator": "import_graph.py"
+      }
     }
   ]
 }

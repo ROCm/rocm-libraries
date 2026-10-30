@@ -458,7 +458,7 @@ counts are printed at registration so the gap is visible rather than silent:
 ```text
 Golden-data validation (CpuRef): 12 bundle(s) registered, 40 without golden data,
     7 outside this reference's supported-op set
-    (BatchnormInferenceAttributes, ReductionAttributes)
+    (ConvolutionFwdAttributes, MatmulAttributes)
 ```
 
 Adding an op to a reference's set is a commitment: every bundle using it becomes a

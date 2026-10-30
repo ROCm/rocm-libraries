@@ -60,7 +60,7 @@ The following table lists the operations currently executable through the GPU gr
 | Layernorm Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference | Mean/inv-variance optional |
 | RMSNorm Forward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
 | RMSNorm Backward | FP16, BFP16, FP32 | Stride-based | GPU Reference |  |
-| Reduction | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 or FP64 compute; see [Reduction Modes](#reduction-modes) |
+| Reduction | FP16, BFP16, FP32 | Stride-based | GPU Reference | FP32 or FP64 compute; at most 5 dimensions; see [Reduction Modes](#reduction-modes) |
 | SDPA Forward (dense) | FP16, BFP16, FP32 | Op-defined | GPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | SDPA Forward (ragged) | BFP16, FP8 E4M3 | Op-defined | GPU Reference | Selected when a Q/K/V/O tensor carries a `ragged_offset` |
 | Pointwise Unary | FP16, BFP16, FP32 | All | GPU Reference | See [Pointwise Modes](#pointwise-modes) |
@@ -143,6 +143,8 @@ pass-by-value operand is rejected, as are Convolution Forward nodes with such an
 ### Reduction Modes
 
 `ADD`, `AVG`, `AMAX`, `NORM1`, `NORM2`, `MUL`, `MUL_NO_ZEROS`, `MIN_OP`, `MAX_OP`. Compute type is `FP32` or `FP64`.
+Tensors have at most 5 dimensions. The plan builder declines a higher-rank node as not applicable, so
+`auto` verification moves on to the CPU reference without reporting a reference executor error.
 
 ### SDPA Restrictions
 
@@ -191,7 +193,7 @@ host validator.
 | MoE Grouped Matmul (forward, backward) | Yes | No |
 | Layernorm Forward / Backward | Yes | Yes |
 | RMSNorm Forward / Backward | Yes | Yes |
-| Reduction | Yes | Yes |
+| Reduction | Yes | Yes (at most 5 dimensions) |
 | Resample Forward | Yes | No (library only) |
 | Resample Backward | Yes | No |
 | SDPA Forward | Yes (FP8 E4M3 / E4M3 FNUZ; no variable seq. len., no ragged) | Yes (dense; ragged incl. FP8 E4M3) |

@@ -21,6 +21,7 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
   - Fused operation graphs
   - Standalone pointwise activation
   - Standalone pointwise binary elementwise (ADD, SUB, MUL, MAX, MIN)
+  - Standalone reduction (ADD, MUL, MIN, MAX, AMAX, AVG, NORM1, NORM2)
 
 - **[hipBLASLt Provider Plugin](../../../dnn-providers/hipblaslt-provider/docs/OperationSupport.md)** - Integration with AMD's hipBLASLt library that provides optimized GEMM operations.
   - Stand-alone Matmul (FP32/FP16/BF16 inputs and outputs, with optional fused bias and activation)

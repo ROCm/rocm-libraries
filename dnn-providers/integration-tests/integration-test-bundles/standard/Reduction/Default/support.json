@@ -1,0 +1,40 @@
+{
+  "claims": {
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "1_16_8_8_fp16_nchw_modemul",
+          "1_16_8_8_fp16_nchw_modenorm2",
+          "1_16_8_8_fp16_nhwc_modeamax",
+          "1_16_8_8_fp32_nchw_modeavg",
+          "1_16_8_8_fp32_nhwc_modemin",
+          "1_1_32_32_fp16_nhwc_modemax",
+          "1_1_32_32_fp32_nchw_modeadd",
+          "2_3_16_8_fp16_nhwc_modeadd",
+          "2_3_16_8_fp32_nchw_modemax",
+          "2_3_4_4_fp16_nhwc_modeadd",
+          "2_3_4_4_fp32_nchw_modemax",
+          "4_8_4_4_fp16_nhwc_modemax_1c164d",
+          "4_8_4_4_fp16_nhwc_modemax_a80799",
+          "4_8_4_4_fp32_nchw_modeadd_4b440c",
+          "4_8_4_4_fp32_nchw_modeadd_e3c97c"
+        ],
+        "support": {
+          "gfx1201": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}
