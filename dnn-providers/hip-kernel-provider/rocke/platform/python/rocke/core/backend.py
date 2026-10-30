@@ -515,26 +515,15 @@ _PYTHON_ONLY_GEMM_LEVERS = (
     # coverage / correctness knobs
     ("pad_row_clamp", False),
     ("pad_k_fast", False),
-    ("split_k_aligned", False),
     ("dtl_k_tail", 0),
-    # register-staged global prefetch body (gfx942)
-    ("vgpr_prefetch", 0),
-    ("vgpr_prefetch_depth", 1),
-    ("vp_unroll", 0),
-    ("vp_late_reads", 0),
-    # gfx942: early single-buffer LDS release and main-loop placement
-    ("vp_release_atoms", 1),
-    ("vp_tail_pack", 0),
-    ("vp_pair_reads", 0),
-    ("vp_mfma_first", 0),
     # the MN operand loads of the VGPR-staged loader, the scheduler-strategy
     # knob and the guarded padded rows of the VGPR loader
     ("mn_vec", 8),
     ("sched_strategy", ""),
     ("kc_row_guard", False),
-    # in-launch split-K reduction
-    ("split_k_serial", False),
-    # MN-contiguous operands in the vgpr_prefetch body
+    # MN-contiguous operands in the vgpr_prefetch body (the K-contiguous body,
+    # vgpr_prefetch and its vp_* main-loop levers, split_k_aligned and
+    # split_k_serial are mirrored: gemm_build_vp.cpp / gemm_build_sks.cpp)
     ("vp_mn_kv", 0),
     ("vp_mn_order", 0),
     ("vp_mn_worder", 0),
@@ -665,6 +654,7 @@ def _prologue_to_dict(pro: Any) -> Dict[str, Any]:
         conj_b=pro.conj_b,
         epi=pro.epi,
         agpr_out=pro.agpr_out,
+        split_mode=pro.split_mode,
     )
 
 
@@ -884,6 +874,21 @@ def _gemm_lever_keys(tr: Any) -> Dict[str, Any]:
         mfma_order=tr.mfma_order,
         rve_pad=tr.rve_pad,
         dtl_tight_ragged_only=tr.dtl_tight_ragged_only,
+        # the register-staged prefetch body (K-contiguous operands) and its
+        # main-loop levers, the whole-tile split-K slices and the in-launch
+        # split-K reduction
+        vgpr_prefetch=tr.vgpr_prefetch,
+        vgpr_prefetch_depth=tr.vgpr_prefetch_depth,
+        vp_unroll=tr.vp_unroll,
+        vp_late_reads=tr.vp_late_reads,
+        vp_release_atoms=tr.vp_release_atoms,
+        vp_tail_pack=tr.vp_tail_pack,
+        vp_pair_reads=tr.vp_pair_reads,
+        vp_mfma_first=tr.vp_mfma_first,
+        split_k_aligned=tr.split_k_aligned,
+        split_k_serial=tr.split_k_serial,
+        # the XOR group width of the vgpr_prefetch body's LDS swizzle
+        lds_swizzle_l=tr.lds_swizzle_l,
     )
 
 

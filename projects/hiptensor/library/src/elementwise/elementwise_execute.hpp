@@ -49,6 +49,9 @@ namespace hiptensor
     // Whether the elementwise kernels implement the data types of the operation
     // (HIPTENSOR_PERMUTATION, HIPTENSOR_ELEMENTWISE_BINARY or HIPTENSOR_ELEMENTWISE_TRINARY):
     // HIPTENSOR_STATUS_NOT_SUPPORTED otherwise. Used when the plan is created and when it runs.
+    // These are the rows of the Composable Kernel backend; the API accepts further rows (a bf16
+    // permutation, an f16 or bf16 trinary operation with f32 scalars, ...) that the rocKE
+    // backend serves (rocke_plan.cpp, apiElementwiseRow), so this backend declines them.
     hiptensorStatus_t checkElementwiseDataTypes(hiptensorOperationDescriptor const& desc,
                                                 char const*                         apiFuncName);
 

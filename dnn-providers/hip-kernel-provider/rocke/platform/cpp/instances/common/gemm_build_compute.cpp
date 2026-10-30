@@ -220,6 +220,10 @@ void rocke_gemm_emit_compute_and_epilogue(rocke_gemm_build_ctx_t* ctx)
     }
     else if(ctx->prefetch)
         rocke_gemm_emit_kloop_prefetch(ctx);
+    else if(ctx->vpf >= 3)
+        rocke_gemm_emit_kloop_vpf_ilv(ctx);
+    else if(ctx->vpf)
+        rocke_gemm_emit_kloop_vpf(ctx);
     else if(ctx->db)
         rocke_gemm_emit_kloop_db(ctx);
     else

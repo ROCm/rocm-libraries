@@ -203,7 +203,8 @@ K order (each product enters unrounded). The error bound is the one above with
 `u = 2^-24` (and the same knobs reorder the sum within it). Integer-valued
 inputs whose products and partial sums are exact in f32 give exact results.
 hipTensor uses this form as the native route of f32 contractions with the 32F
-compute type.
+compute type (`HIPTENSOR_ROCKE_F32_RECIPE=native`), with the tuned f32
+configurations below.
 
 ## Knobs (`GettF64Spec`)
 
@@ -303,6 +304,56 @@ largest split whose K range is still `SPLIT_MIN_K` elements or longer (and
 drops `unroll2` and `k_stagger`); when the K range of one CTA is still `K_BLOCK_MIN_K` or longer
 it also sets `k_block` to `K_BLOCK_ELEMS / tile_k` tiles. Knobs passed to
 `tuned_spec` override both.
+
+## Tuned f32 configurations
+
+f32 problems (`dtype="f32"`) have tuned configurations of their own,
+`TUNED_CONFIGS_F32` (arch, real / complex, class): `tuned_configs(arch, kind,
+"f32")` returns them where the table has classes for (arch, kind), else the
+f64 classes of `TUNED_CONFIGS`; `gett_f32_shape_class(problem, arch,
+num_cus)` picks the class (`gett_f64_shape_class` on a target without f32
+classes), and `tuned_spec` takes both for f32 problems. Every knob of an f32
+row is explicit; the C policy mirrors the table (`rocke_gett_f32_tuned_config`,
+`rocke_gett_f32_tuned_class_at`, with the same fallback; `k_stagger` is a knob
+of the C knob set, `ROCKE_GETT_F64_KNOB_K_STAGGER`).
+
+The configurations were found with the search engine
+(`rocke.dispatch.tuning.search`, its default portfolio, warm-started from the
+f64 classes) on the packed, K-contiguous layouts that hipTensor's native f32
+route launches (runtime sizes, `split_k` 1): the GEMM views of hipTensor's
+benchmark contractions and a space-filling set of views, every evaluation
+checked against an f64 reference under the f32 bound. The classes are the
+greedy set cover of the cross-evaluation of every problem's winner on every
+problem, and the rule a small decision tree over the tile count per CU, K
+and min(M, N) with power-of-two thresholds; both were checked on problems
+outside the tuning set. hipTensor's pack carries every class (and the
+default configuration) for its selection models; its planner's static order
+starts with the rule's class (`rocke_plan.cpp` `gett32Class`).
+
+| arch | kind | class | rule | configuration |
+|---|---|---|---|---|
+| gfx950 | real | `tiny` | 128x128 tiles per CU <= 1/8 | 32x32x64, 2x2 waves, group 8, XCD remap, 4 waves/EU, 2 LDS stages, prefetch depth 2, pad 1 |
+| gfx950 | real | `small` | <= 1/2 | 32x32x64, 2x2 waves, group 4, XCD remap, 4 waves/EU, 2 LDS stages, pad 1 |
+| gfx950 | real | `medium` | <= 1 | 64x32x32, 2x2 waves, group 32, XCD remap, 4 waves/EU, 1 LDS stage, pad 1 |
+| gfx950 | real | `large` | <= 4 | 64x64x32, 2x2 waves, group 32, XCD remap, 4 waves/EU, 1 LDS stage, swizzle mode 0 |
+| gfx950 | real | `xlarge` | <= 8 | 128x64x16, 2x2 waves, group 16, 4 waves/EU, 2 LDS stages, unroll2, no sched fence, swizzle mode 1 |
+| gfx950 | real | `huge` | more | 128x128x16, 2x2 waves, group 32, 3 waves/EU, 2 LDS stages, unroll2, no sched fence, k_stagger 1, swizzle mode 1 |
+| gfx950 | complex | `small` | 64x64 tiles per CU <= 4, K <= 256, min(M, N) <= 512 | 32x32x16, 2x2 waves, group 4, XCD remap, 4 waves/EU, 2 LDS stages, pad 4 |
+| gfx950 | complex | `medium` | <= 4 per CU with K <= 256 and min(M, N) > 512, or <= 32 per CU | 64x64x8, 2x2 waves, group 32, 4 waves/EU, 1 LDS stage, pad 4 |
+| gfx950 | complex | `longk` | <= 4 per CU, K > 256 | 32x32x32, 2x2 waves, group 32, 4 waves/EU, 2 LDS stages, unroll2, pad 4 |
+| gfx950 | complex | `large` | more than 32 per CU | 64x128x8, 1x4 waves, group 32, 4 waves/EU, 1 LDS stage, pad 4 |
+| gfx942 | real | `tiny` | 128x128 tiles per CU <= 1/8 | 32x32x64, 2x2 waves, group 4, 2 waves/EU, 2 LDS stages, swizzle mode 0 |
+| gfx942 | real | `small` | <= 1/4 | 32x32x32, 1x2 waves, group 8, 3 waves/EU, 2 LDS stages, swizzle mode 0 |
+| gfx942 | real | `medium` | <= 8 per CU, min(M, N) <= 4096 | 64x64x32, 2x2 waves, group 32, 3 waves/EU, 1 LDS stage, swizzle mode 0 |
+| gfx942 | real | `large` | <= 8 per CU, min(M, N) > 4096 | 64x128x16, 2x2 waves, group 4, XCD remap, 3 waves/EU, 1 LDS stage, swizzle mode 0 |
+| gfx942 | real | `xlarge` | more, K <= 1024 | 128x128x16, 2x2 waves, group 4, XCD remap, 3 waves/EU, 1 LDS stage, swizzle mode 0 |
+| gfx942 | real | `huge` | more, K > 1024 | 128x128x32, 2x2 waves, group 32, 2 waves/EU, 1 LDS stage, swizzle mode 0 |
+| gfx942 | real | `compact` | (selection models only) | 32x32x32, 2x2 waves, group 16, 3 waves/EU, 2 LDS stages, swizzle mode 0 |
+| gfx942 | complex | `small` | 64x64 tiles per CU <= 1/2 | 32x32x24, 2x2 waves, group 32, 3 waves/EU, 1 LDS stage, prefetch depth 2, swizzle mode 0 |
+| gfx942 | complex | `compact` | <= 1 | 64x32x24, 4x1 waves, group 1, 3 waves/EU, 1 LDS stage, pad 4 |
+| gfx942 | complex | `medium` | <= 64 | 64x64x8, 4x2 waves, group 2, 1 waves/EU, 2 LDS stages, swizzle mode 0 |
+| gfx942 | complex | `large` | more | 128x128x4, 2x2 waves, group 32, 2 waves/EU, 1 LDS stage, swizzle mode 0 |
+| gfx942 | complex | `wide` | (selection models only) | 128x64x4, 2x2 waves, group 2, 3 waves/EU, 2 LDS stages, swizzle mode 0 |
 
 ## Pipelined configurations
 

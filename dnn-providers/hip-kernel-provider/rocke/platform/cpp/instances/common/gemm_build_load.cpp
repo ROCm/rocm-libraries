@@ -506,6 +506,12 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                               : (rvar))))
 
 #define PADK_VALID(elem_col) rocke_b_cmp_lt(b, rocke_b_add(b, k_off, (elem_col)), ctx->K)
+/* _safe_k0(): the column a masked lane reads instead (any in-bounds element):
+ * the tile's first column, or with split_k_aligned -- whose empty slices sit
+ * past K -- the row's first column (k_off + (-k_off)) */
+#define SAFE_K0()                                                                 \
+    (spec->trait.split_k_aligned ? rocke_b_sub(b, rocke_b_const_i32(b, 0), k_off) \
+                                 : rocke_b_const_i32(b, 0))
 #define STORAGE_ZERO() rocke_b_cast_f32_to(b, rocke_b_const_f32(b, 0.0), ctx->storage_dtype)
 #define MASK_STORAGE(value, valid) rocke_b_select(b, (valid), (value), STORAGE_ZERO())
 
@@ -526,8 +532,7 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
             {
                 rocke_value_t* elem_col = i ? rocke_b_add(b, col, rocke_b_const_i32(b, i)) : col;
                 rocke_value_t* valid = PADK_VALID(elem_col);
-                rocke_value_t* safe_col
-                    = rocke_b_select(b, valid, elem_col, rocke_b_const_i32(b, 0));
+                rocke_value_t* safe_col = rocke_b_select(b, valid, elem_col, SAFE_K0());
                 rocke_value_t* gidx[3] = {rocke_b_const_i32(b, 0), row, safe_col};
                 rocke_value_t* raw = rocke_tile_window_load_scalar(b, &a_global_tile, gidx, 3);
                 comps[i] = MASK_STORAGE(raw, valid);
@@ -643,8 +648,7 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                     rocke_value_t* elem_col
                         = i ? rocke_b_add(b, col, rocke_b_const_i32(b, i)) : col;
                     rocke_value_t* valid = PADK_VALID(elem_col);
-                    rocke_value_t* safe_col
-                        = rocke_b_select(b, valid, elem_col, rocke_b_const_i32(b, 0));
+                    rocke_value_t* safe_col = rocke_b_select(b, valid, elem_col, SAFE_K0());
                     rocke_value_t* gidx[3] = {rocke_b_const_i32(b, 0), row, safe_col};
                     rocke_value_t* raw = rocke_tile_window_load_scalar(b, &b_global_tile, gidx, 3);
                     comps[i] = MASK_STORAGE(raw, valid);
@@ -679,6 +683,7 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
     }
 #undef MASK_STORAGE
 #undef STORAGE_ZERO
+#undef SAFE_K0
 #undef PADK_VALID
 #undef LD_ROW
 }

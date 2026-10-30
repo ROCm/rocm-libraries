@@ -338,7 +338,11 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @param[in] opA Unary operator applied to each element of A before further processing. The original tensor data remains unchanged.
 //! @param[in] descB Descriptor containing information about B's data type, modes, and strides.
 //! @param[in] modeB Array of size descB->numModes containing the mode names of B.
-//! @param[in] descCompute Determines the precision used for this operation.
+//! @param[in] descCompute Determines the precision used for this operation, and the type of alpha. Data types (A, B, descCompute):
+//!   f16 with `HIPTENSOR_COMPUTE_DESC_16F` or `HIPTENSOR_COMPUTE_DESC_32F`; f32 with `HIPTENSOR_COMPUTE_DESC_32F`; f64 with
+//!   `HIPTENSOR_COMPUTE_DESC_64F` (B of A's type, or another type the kernels convert to); bf16 to bf16 with
+//!   `HIPTENSOR_COMPUTE_DESC_16BF` or `HIPTENSOR_COMPUTE_DESC_32F`; f32 to f64 with `HIPTENSOR_COMPUTE_DESC_64F`. The
+//!   backend that serves the plan may decline some of them: `hiptensorCreatePlan` then returns `HIPTENSOR_STATUS_NOT_SUPPORTED`.
 //! @retval HIPTENSOR_STATUS_NOT_SUPPORTED When data type combinations or operations aren't supported
 //! @retval HIPTENSOR_STATUS_INVALID_VALUE When tensor dimensions or modes contain illegal values
 //! @retval HIPTENSOR_STATUS_SUCCESS When the operation completes successfully
@@ -550,7 +554,11 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t hand
 //! @param[in] descD Descriptor containing D's data type, modes, and strides. Currently must be identical to descC.
 //! @param[in] modeD Host memory array of size descD->numModes with D's mode names.
 //! @param[in] opAC Element-wise binary operator: HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX or HIPTENSOR_OP_MIN. Any other value is rejected with `HIPTENSOR_STATUS_INVALID_VALUE`.
-//! @param[in] descCompute Determines the precision for this operation.
+//! @param[in] descCompute Determines the precision for this operation, and the type of alpha and gamma. Data types (A, C = D,
+//!   descCompute): f16 or bf16 with the compute descriptor of the data type or `HIPTENSOR_COMPUTE_DESC_32F`; f32 with
+//!   `HIPTENSOR_COMPUTE_DESC_32F`; f64 with `HIPTENSOR_COMPUTE_DESC_64F`; an f32 A with an f16 C and `HIPTENSOR_COMPUTE_DESC_32F`;
+//!   an f64 A with an f32 C and `HIPTENSOR_COMPUTE_DESC_64F`. The backend that serves the plan may decline some of them:
+//!   `hiptensorCreatePlan` then returns `HIPTENSOR_STATUS_NOT_SUPPORTED`.
 //! @retval HIPTENSOR_STATUS_NOT_SUPPORTED When data type combinations or operations aren't supported
 //! @retval HIPTENSOR_STATUS_INVALID_VALUE When tensor dimensions or modes contain illegal values
 //! @retval HIPTENSOR_STATUS_SUCCESS When the operation completes successfully
@@ -628,7 +636,10 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hipte
 //! @param[in] modeD Host memory array of size descD->numModes with D's mode names.
 //! @param[in] opAB Element-wise binary operator that combines A and B: HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX or HIPTENSOR_OP_MIN. Any other value is rejected with `HIPTENSOR_STATUS_INVALID_VALUE`.
 //! @param[in] opABC Element-wise binary operator that combines the result of opAB with C: HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX or HIPTENSOR_OP_MIN. Any other value is rejected with `HIPTENSOR_STATUS_INVALID_VALUE`.
-//! @param[in] descCompute Determines the precision for this operation.
+//! @param[in] descCompute Determines the precision for this operation, and the type of alpha, beta and gamma. Data types (A = B = C,
+//!   descCompute): f16, f32 or f64 with the compute descriptor of the data type; f16 with `HIPTENSOR_COMPUTE_DESC_32F` and bf16
+//!   with `HIPTENSOR_COMPUTE_DESC_16BF` or `HIPTENSOR_COMPUTE_DESC_32F` (D of C's type). The backend that serves the plan may
+//!   decline some of them: `hiptensorCreatePlan` then returns `HIPTENSOR_STATUS_NOT_SUPPORTED`.
 //! @retval HIPTENSOR_STATUS_SUCCESS When the operation completes successfully.
 //! @retval HIPTENSOR_STATUS_NOT_INITIALIZED When the handle isn't initialized.
 //! @retval HIPTENSOR_STATUS_INVALID_VALUE When input data is invalid (typically user error).

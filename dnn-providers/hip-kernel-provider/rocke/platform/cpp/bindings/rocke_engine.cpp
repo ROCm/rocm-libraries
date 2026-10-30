@@ -346,7 +346,18 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
                               "mfma_serpentine",
                               "mfma_order",
                               "rve_pad",
-                              "dtl_tight_ragged_only"};
+                              "dtl_tight_ragged_only",
+                              "vgpr_prefetch",
+                              "vgpr_prefetch_depth",
+                              "vp_unroll",
+                              "vp_late_reads",
+                              "vp_release_atoms",
+                              "vp_tail_pack",
+                              "vp_pair_reads",
+                              "vp_mfma_first",
+                              "split_k_aligned",
+                              "split_k_serial",
+                              "lds_swizzle_l"};
         for(const char* k : keys)
         {
             py::dict got = pick(trait, k);
@@ -470,6 +481,19 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
         spec->trait.rve_pad = dict_int(tr, "rve_pad", spec->trait.rve_pad);
         spec->trait.dtl_tight_ragged_only
             = dict_bool(tr, "dtl_tight_ragged_only", spec->trait.dtl_tight_ragged_only);
+        spec->trait.vgpr_prefetch = dict_int(tr, "vgpr_prefetch", spec->trait.vgpr_prefetch);
+        spec->trait.vgpr_prefetch_depth
+            = dict_int(tr, "vgpr_prefetch_depth", spec->trait.vgpr_prefetch_depth);
+        spec->trait.vp_unroll = dict_int(tr, "vp_unroll", spec->trait.vp_unroll);
+        spec->trait.vp_late_reads = dict_int(tr, "vp_late_reads", spec->trait.vp_late_reads);
+        spec->trait.vp_release_atoms
+            = dict_int(tr, "vp_release_atoms", spec->trait.vp_release_atoms);
+        spec->trait.vp_tail_pack = dict_int(tr, "vp_tail_pack", spec->trait.vp_tail_pack);
+        spec->trait.vp_pair_reads = dict_int(tr, "vp_pair_reads", spec->trait.vp_pair_reads);
+        spec->trait.vp_mfma_first = dict_int(tr, "vp_mfma_first", spec->trait.vp_mfma_first);
+        spec->trait.split_k_serial = dict_int(tr, "split_k_serial", spec->trait.split_k_serial);
+        spec->trait.split_k_aligned = dict_bool(tr, "split_k_aligned", spec->trait.split_k_aligned);
+        spec->trait.lds_swizzle_l = dict_int(tr, "lds_swizzle_l", spec->trait.lds_swizzle_l);
     }
 
     /* ---- data ---- */
@@ -643,7 +667,18 @@ SpecHolder build_spec(const py::dict& root)
                               "mfma_serpentine",
                               "mfma_order",
                               "rve_pad",
-                              "dtl_tight_ragged_only"};
+                              "dtl_tight_ragged_only",
+                              "vgpr_prefetch",
+                              "vgpr_prefetch_depth",
+                              "vp_unroll",
+                              "vp_late_reads",
+                              "vp_release_atoms",
+                              "vp_tail_pack",
+                              "vp_pair_reads",
+                              "vp_mfma_first",
+                              "split_k_aligned",
+                              "split_k_serial",
+                              "lds_swizzle_l"};
         for(const char* k : keys)
         {
             py::dict got = pick(trait, k);
@@ -772,6 +807,20 @@ SpecHolder build_spec(const py::dict& root)
         h.spec.trait.rve_pad = dict_int(tr, "rve_pad", h.spec.trait.rve_pad);
         h.spec.trait.dtl_tight_ragged_only
             = dict_bool(tr, "dtl_tight_ragged_only", h.spec.trait.dtl_tight_ragged_only);
+        h.spec.trait.vgpr_prefetch = dict_int(tr, "vgpr_prefetch", h.spec.trait.vgpr_prefetch);
+        h.spec.trait.vgpr_prefetch_depth
+            = dict_int(tr, "vgpr_prefetch_depth", h.spec.trait.vgpr_prefetch_depth);
+        h.spec.trait.vp_unroll = dict_int(tr, "vp_unroll", h.spec.trait.vp_unroll);
+        h.spec.trait.vp_late_reads = dict_int(tr, "vp_late_reads", h.spec.trait.vp_late_reads);
+        h.spec.trait.vp_release_atoms
+            = dict_int(tr, "vp_release_atoms", h.spec.trait.vp_release_atoms);
+        h.spec.trait.vp_tail_pack = dict_int(tr, "vp_tail_pack", h.spec.trait.vp_tail_pack);
+        h.spec.trait.vp_pair_reads = dict_int(tr, "vp_pair_reads", h.spec.trait.vp_pair_reads);
+        h.spec.trait.vp_mfma_first = dict_int(tr, "vp_mfma_first", h.spec.trait.vp_mfma_first);
+        h.spec.trait.split_k_serial = dict_int(tr, "split_k_serial", h.spec.trait.split_k_serial);
+        h.spec.trait.split_k_aligned
+            = dict_bool(tr, "split_k_aligned", h.spec.trait.split_k_aligned);
+        h.spec.trait.lds_swizzle_l = dict_int(tr, "lds_swizzle_l", h.spec.trait.lds_swizzle_l);
     }
 
     /* ---- data ---- */
@@ -811,7 +860,7 @@ SpecHolder build_spec(const py::dict& root)
         std::string s;
         /* every string field in its own storage slot: h.storage is reserved
          * for 32 strings, so keep() never reallocates (name + 3 trait + 5 data +
-         * at most 9 prologue strings) */
+         * at most 10 prologue strings) */
         if(dict_str(pd, "src", s))
             p->src = h.keep(s);
         if(dict_str(pd, "recipe", s))
@@ -830,6 +879,8 @@ SpecHolder build_spec(const py::dict& root)
             p->stage = h.keep(s);
         if(dict_str(pd, "epi", s))
             p->epi = h.keep(s);
+        if(dict_str(pd, "split_mode", s))
+            p->split_mode = h.keep(s);
         p->out_f32 = dict_bool(pd, "out_f32", p->out_f32);
         p->cap = dict_bool(pd, "cap", p->cap);
         p->pin_v = dict_bool(pd, "pin_v", p->pin_v);

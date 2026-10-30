@@ -474,8 +474,11 @@ void rocke_gemm_emit_store_swapped_acc(rocke_ir_builder_t* b,
             {
                 /* acc_agpr: hand the atom out of the AGPRs at its use (identity
                  * without acc_agpr) */
-                rocke_value_t* acc_h = rocke_b_vec_cast_f32_to(
-                    b, rocke_gemm_acc_agpr_out(b, spec, accs[flat]), storage_dtype);
+                /* (an f32 C -- the prologue's out_f32 -- stores the accumulator) */
+                rocke_value_t* acc_o = rocke_gemm_acc_agpr_out(b, spec, accs[flat]);
+                rocke_value_t* acc_h = rocke_type_eq(storage_dtype, rocke_f32())
+                                           ? acc_o
+                                           : rocke_b_vec_cast_f32_to(b, acc_o, storage_dtype);
                 rocke_value_t* n_tile;
                 flat += 1;
                 n_tile = rocke_b_add(b, n_base_off, rocke_b_const_i32(b, ni * t->warp_tile_n));
@@ -1375,6 +1378,16 @@ void rocke_gemm_emit_epilogue(rocke_gemm_build_ctx_t* ctx)
     void* fused_ep = spec->_fused_epilogue;
     bool fused_is_mde = spec->_fused_epilogue_is_mde;
 
+    if(ctx->sk_serial)
+    {
+        if(fused_ep != NULL)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "split_k_serial does not support a fused epilogue");
+            return;
+        }
+        rocke_gemm_ep_split_k_serial(ctx, ctx->for_results, ctx->num_for_results);
+        return;
+    }
     if(ctx->is_split_k)
     {
         /* Split-K: atomic-add each warp's f32 accumulator into the Cf32[M, N]
@@ -1419,6 +1432,41 @@ void rocke_gemm_emit_epilogue(rocke_gemm_build_ctx_t* ctx)
                                           fused_ep,
                                           fused_is_mde);
     }
+    else if(ctx->vpf && spec->trait.wide_addr)
+    {
+        /* vgpr_prefetch wide_addr: C rebased (i64) at the batch and the tile's
+         * first row; the stores count rows from it (M - block_m_off rows left),
+         * so only a tile's own tile_m * N span needs i32 offsets */
+        const rocke_type_t* I64 = rocke_i64();
+        if(fused_ep != NULL)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "wide_addr (vgpr_prefetch): no fused epilogue");
+            return;
+        }
+        rocke_value_t* zm = rocke_b_zext(b, ctx->block_m_off, I64);
+        rocke_value_t* zn = rocke_b_zext(b, ctx->N, I64);
+        rocke_value_t* c_el = rocke_b_mul(b, zm, zn);
+        rocke_value_t* cb = rocke_gemm_vp_batch_off64(ctx, 'C');
+        if(cb != NULL)
+            c_el = rocke_b_add(b, cb, c_el);
+        int c_esz = (ctx->pro != NULL && ctx->pro->out_f32)
+                        ? 4
+                        : rocke_i_type_bits(ctx->storage_dtype) / 8;
+        rocke_value_t* m_ext = rocke_b_sub(b, ctx->M, ctx->block_m_off);
+        rocke_value_t* cesz = rocke_b_const_i64(b, c_esz);
+        rocke_value_t* cbytes = rocke_b_mul(b, c_el, cesz);
+        rocke_value_t* c_ptr = rocke_b_global_ptr_add(b, ctx->C, cbytes);
+        rocke_gemm_ep_default_ext(ctx,
+                                  ctx->for_results,
+                                  ctx->num_for_results,
+                                  ctx->c0,
+                                  ctx->block_n_off,
+                                  NULL,
+                                  NULL,
+                                  false,
+                                  m_ext,
+                                  c_ptr);
+    }
     else
     {
         rocke_gemm_ep_default(ctx,
@@ -1445,7 +1493,26 @@ void rocke_gemm_ep_default(rocke_gemm_build_ctx_t* ctx,
                            void* fused_epilogue,
                            bool fused_is_mde)
 {
+    rocke_gemm_ep_default_ext(
+        ctx, vals, num_vals, bm, bn, batch_off_c, fused_epilogue, fused_is_mde, NULL, NULL);
+}
+
+void rocke_gemm_ep_default_ext(rocke_gemm_build_ctx_t* ctx,
+                               rocke_value_t* const* vals,
+                               int num_vals,
+                               rocke_value_t* bm,
+                               rocke_value_t* bn,
+                               rocke_value_t* batch_off_c,
+                               void* fused_epilogue,
+                               bool fused_is_mde,
+                               rocke_value_t* m_ext,
+                               rocke_value_t* c_ptr)
+{
     rocke_ir_builder_t* b = ctx->b;
+    /* m_ext / c_ptr (the vgpr_prefetch wide_addr form): the M extent and the C
+     * base the stores use instead of M / C */
+    rocke_value_t* eM = m_ext != NULL ? m_ext : ctx->M;
+    rocke_value_t* eC = c_ptr != NULL ? c_ptr : ctx->C;
     const rocke_gemm_universal_spec_t* spec = ctx->spec;
     rocke_value_t* full = NULL;
     rocke_gemm_universal_spec_t nopad;
@@ -1478,9 +1545,9 @@ void rocke_gemm_ep_default(rocke_gemm_build_ctx_t* ctx,
                                          ctx->lane,
                                          bm,
                                          bn,
-                                         ctx->M,
+                                         eM,
                                          ctx->N,
-                                         ctx->C,
+                                         eC,
                                          ctx->c_per_lane,
                                          batch_off_c,
                                          fused_epilogue,
@@ -1490,7 +1557,7 @@ void rocke_gemm_ep_default(rocke_gemm_build_ctx_t* ctx,
     if(spec->trait.pad_m)
     {
         rocke_value_t* e = rocke_b_add(b, bm, ctx->c_block_m);
-        full = rocke_b_cmp_le(b, e, ctx->M);
+        full = rocke_b_cmp_le(b, e, eM);
     }
     if(spec->trait.pad_n)
     {
@@ -1513,9 +1580,9 @@ void rocke_gemm_ep_default(rocke_gemm_build_ctx_t* ctx,
                                      ctx->lane,
                                      bm,
                                      bn,
-                                     ctx->M,
+                                     eM,
                                      ctx->N,
-                                     ctx->C,
+                                     eC,
                                      ctx->c_per_lane,
                                      batch_off_c,
                                      fused_epilogue,
@@ -1532,9 +1599,9 @@ void rocke_gemm_ep_default(rocke_gemm_build_ctx_t* ctx,
                                      ctx->lane,
                                      bm,
                                      bn,
-                                     ctx->M,
+                                     eM,
                                      ctx->N,
-                                     ctx->C,
+                                     eC,
                                      ctx->c_per_lane,
                                      batch_off_c,
                                      fused_epilogue,

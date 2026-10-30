@@ -70,7 +70,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, replace
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from ...core.arch import ArchTarget, known_arches
 from ...core.ir import (
@@ -3408,6 +3408,415 @@ TUNED_CONFIGS = {
 }
 
 
+#: Tuned configurations of the f32 / complex-f32 GETT (``problem.dtype ==
+#: "f32"``: f32 words, the f32 16x16x4 atom) per (arch, real / complex, shape
+#: class), selected by :func:`tuned_spec` through :func:`gett_f32_shape_class`.
+#: Found with the search engine (rocke.dispatch.tuning.search) on the packed,
+#: K-contiguous layouts hipTensor's native f32 route launches (runtime sizes),
+#: then chosen from the cross-evaluation of every problem's winner on every
+#: problem; every knob is explicit. Targets without entries use
+#: :data:`TUNED_CONFIGS` (:func:`tuned_configs`). See
+#: dsl_docs/instances/gett_f64.md, "Tuned f32 configurations".
+TUNED_CONFIGS_F32 = {
+    ("gfx942", "real", "compact"): dict(
+        tile_m=32,
+        tile_n=32,
+        tile_k=32,
+        warps_m=2,
+        warps_n=2,
+        group_m=16,
+        xcds=0,
+        waves_per_eu=3,
+        lds_stages=2,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=None,
+        lds_swizzle=True,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx942", "real", "huge"): dict(
+        tile_m=128,
+        tile_n=128,
+        tile_k=32,
+        warps_m=2,
+        warps_n=2,
+        group_m=32,
+        xcds=0,
+        waves_per_eu=2,
+        lds_stages=1,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=None,
+        lds_swizzle=True,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx942", "real", "large"): dict(
+        tile_m=64,
+        tile_n=128,
+        tile_k=16,
+        warps_m=2,
+        warps_n=2,
+        group_m=4,
+        xcds=8,
+        waves_per_eu=3,
+        lds_stages=1,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=None,
+        lds_swizzle=True,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx942", "real", "medium"): dict(
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warps_m=2,
+        warps_n=2,
+        group_m=32,
+        xcds=0,
+        waves_per_eu=3,
+        lds_stages=1,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=None,
+        lds_swizzle=True,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx942", "real", "small"): dict(
+        tile_m=32,
+        tile_n=32,
+        tile_k=32,
+        warps_m=1,
+        warps_n=2,
+        group_m=8,
+        xcds=0,
+        waves_per_eu=3,
+        lds_stages=2,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=None,
+        lds_swizzle=True,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx942", "real", "tiny"): dict(
+        tile_m=32,
+        tile_n=32,
+        tile_k=64,
+        warps_m=2,
+        warps_n=2,
+        group_m=4,
+        xcds=0,
+        waves_per_eu=2,
+        lds_stages=2,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=None,
+        lds_swizzle=True,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx942", "real", "xlarge"): dict(
+        tile_m=128,
+        tile_n=128,
+        tile_k=16,
+        warps_m=2,
+        warps_n=2,
+        group_m=4,
+        xcds=8,
+        waves_per_eu=3,
+        lds_stages=1,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=None,
+        lds_swizzle=True,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx942", "complex", "compact"): dict(
+        tile_m=64,
+        tile_n=32,
+        tile_k=24,
+        warps_m=4,
+        warps_n=1,
+        group_m=1,
+        xcds=0,
+        waves_per_eu=3,
+        lds_stages=1,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=4,
+        lds_swizzle=False,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx942", "complex", "large"): dict(
+        tile_m=128,
+        tile_n=128,
+        tile_k=4,
+        warps_m=2,
+        warps_n=2,
+        group_m=32,
+        xcds=0,
+        waves_per_eu=2,
+        lds_stages=1,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=None,
+        lds_swizzle=True,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx942", "complex", "medium"): dict(
+        tile_m=64,
+        tile_n=64,
+        tile_k=8,
+        warps_m=4,
+        warps_n=2,
+        group_m=2,
+        xcds=0,
+        waves_per_eu=1,
+        lds_stages=2,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=None,
+        lds_swizzle=True,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx942", "complex", "small"): dict(
+        tile_m=32,
+        tile_n=32,
+        tile_k=24,
+        warps_m=2,
+        warps_n=2,
+        group_m=32,
+        xcds=0,
+        waves_per_eu=3,
+        lds_stages=1,
+        prefetch_depth=2,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=None,
+        lds_swizzle=True,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx942", "complex", "wide"): dict(
+        tile_m=128,
+        tile_n=64,
+        tile_k=4,
+        warps_m=2,
+        warps_n=2,
+        group_m=2,
+        xcds=0,
+        waves_per_eu=3,
+        lds_stages=2,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=None,
+        lds_swizzle=True,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx950", "real", "huge"): dict(
+        tile_m=128,
+        tile_n=128,
+        tile_k=16,
+        warps_m=2,
+        warps_n=2,
+        group_m=32,
+        xcds=0,
+        waves_per_eu=3,
+        lds_stages=2,
+        prefetch_depth=1,
+        unroll2=True,
+        sched_fence=False,
+        k_stagger=1,
+        lds_pad=None,
+        lds_swizzle=True,
+        lds_swizzle_mode=1,
+    ),
+    ("gfx950", "real", "large"): dict(
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warps_m=2,
+        warps_n=2,
+        group_m=32,
+        xcds=8,
+        waves_per_eu=4,
+        lds_stages=1,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=None,
+        lds_swizzle=True,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx950", "real", "medium"): dict(
+        tile_m=64,
+        tile_n=32,
+        tile_k=32,
+        warps_m=2,
+        warps_n=2,
+        group_m=32,
+        xcds=8,
+        waves_per_eu=4,
+        lds_stages=1,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=1,
+        lds_swizzle=False,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx950", "real", "small"): dict(
+        tile_m=32,
+        tile_n=32,
+        tile_k=64,
+        warps_m=2,
+        warps_n=2,
+        group_m=4,
+        xcds=8,
+        waves_per_eu=4,
+        lds_stages=2,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=1,
+        lds_swizzle=False,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx950", "real", "tiny"): dict(
+        tile_m=32,
+        tile_n=32,
+        tile_k=64,
+        warps_m=2,
+        warps_n=2,
+        group_m=8,
+        xcds=8,
+        waves_per_eu=4,
+        lds_stages=2,
+        prefetch_depth=2,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=1,
+        lds_swizzle=False,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx950", "real", "xlarge"): dict(
+        tile_m=128,
+        tile_n=64,
+        tile_k=16,
+        warps_m=2,
+        warps_n=2,
+        group_m=16,
+        xcds=0,
+        waves_per_eu=4,
+        lds_stages=2,
+        prefetch_depth=1,
+        unroll2=True,
+        sched_fence=False,
+        k_stagger=0,
+        lds_pad=None,
+        lds_swizzle=True,
+        lds_swizzle_mode=1,
+    ),
+    ("gfx950", "complex", "large"): dict(
+        tile_m=64,
+        tile_n=128,
+        tile_k=8,
+        warps_m=1,
+        warps_n=4,
+        group_m=32,
+        xcds=0,
+        waves_per_eu=4,
+        lds_stages=1,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=4,
+        lds_swizzle=False,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx950", "complex", "longk"): dict(
+        tile_m=32,
+        tile_n=32,
+        tile_k=32,
+        warps_m=2,
+        warps_n=2,
+        group_m=32,
+        xcds=0,
+        waves_per_eu=4,
+        lds_stages=2,
+        prefetch_depth=1,
+        unroll2=True,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=4,
+        lds_swizzle=False,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx950", "complex", "medium"): dict(
+        tile_m=64,
+        tile_n=64,
+        tile_k=8,
+        warps_m=2,
+        warps_n=2,
+        group_m=32,
+        xcds=0,
+        waves_per_eu=4,
+        lds_stages=1,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=4,
+        lds_swizzle=False,
+        lds_swizzle_mode=0,
+    ),
+    ("gfx950", "complex", "small"): dict(
+        tile_m=32,
+        tile_n=32,
+        tile_k=16,
+        warps_m=2,
+        warps_n=2,
+        group_m=4,
+        xcds=8,
+        waves_per_eu=4,
+        lds_stages=2,
+        prefetch_depth=1,
+        unroll2=False,
+        sched_fence=True,
+        k_stagger=0,
+        lds_pad=4,
+        lds_swizzle=False,
+        lds_swizzle_mode=0,
+    ),
+}
+
+
 def _along_k_count(problem: GettF64Problem, tile_k: int = 16) -> int:
     """Operands the loader reads along K (K-contiguous in memory)."""
     probe = GettF64Spec(problem, tile_k=tile_k)
@@ -3480,6 +3889,89 @@ def gett_f64_shape_class(
     return "medium"
 
 
+def _tiles_le(tiles: int, cus: int, octave: int) -> bool:
+    """``tiles <= cus * 2^octave`` in integers."""
+    if octave >= 0:
+        return tiles <= cus << octave
+    return tiles << -octave <= cus
+
+
+def tuned_configs(arch: str, kind: str, dtype: str = "f64") -> Dict[str, dict]:
+    """``{class: knobs}`` of the tuned configurations of ``(arch, kind)`` for
+    ``dtype``: f32 problems take :data:`TUNED_CONFIGS_F32` where it has
+    classes for ``(arch, kind)``, else (and f64 problems) :data:`TUNED_CONFIGS`."""
+    if dtype == "f32":
+        own = {
+            c: cfg
+            for (a, k, c), cfg in TUNED_CONFIGS_F32.items()
+            if a == arch and k == kind
+        }
+        if own:
+            return own
+    return {
+        c: cfg for (a, k, c), cfg in TUNED_CONFIGS.items() if a == arch and k == kind
+    }
+
+
+def gett_f32_shape_class(
+    problem: GettF64Problem, arch: str, num_cus: Optional[int] = None
+) -> str:
+    """The :data:`TUNED_CONFIGS_F32` class of an f32 problem on ``arch``
+    (:func:`gett_f64_shape_class` on a target without f32 classes).
+
+    gfx942 real, by the 128x128 tiles per CU (``t``): ``tiny`` for t <= 1/8,
+    ``small`` <= 1/4; up to 8 per CU ``medium`` when min(M, N) <= 4096, else
+    ``large``; above, ``xlarge`` for K <= 1024, else ``huge`` (``compact``
+    serves the selection models only). gfx942 complex, by the 64x64 tiles per
+    CU: ``small`` <= 1/2, ``compact`` <= 1, ``medium`` <= 64, else ``large``
+    (``wide``: the selection models only).
+    gfx950 real, by the 128x128 tiles of the grid per CU (``t``): ``tiny``
+    for t <= 1/8, ``small`` <= 1/2, ``medium`` <= 1, ``large`` <= 4,
+    ``xlarge`` <= 8, else ``huge``. gfx950 complex, by the 64x64 tiles per
+    CU: up to 4 per CU, ``small`` (K <= 256 and min(M, N) <= 512),
+    ``medium`` (K <= 256) or ``longk``; up to 32 per CU ``medium``, else
+    ``large``.
+    hipTensor's planner applies the same rule to its packed operands
+    (``rocke_plan.cpp`` gett32Class).
+
+    ``num_cus``: see :func:`resolve_num_cus`.
+    """
+    kind = "complex" if problem.complex_ else "real"
+    if not any(a == arch and k == kind for (a, k, _c) in TUNED_CONFIGS_F32):
+        return gett_f64_shape_class(problem, arch, num_cus)
+    cus = resolve_num_cus(arch, num_cus)
+    p = problem
+    if arch == "gfx942":
+        if p.complex_:
+            t = -(-p.M // 64) * -(-p.N // 64) * p.L
+            if _tiles_le(t, cus, 0):
+                return "small" if _tiles_le(t, cus, -1) else "compact"
+            return "medium" if _tiles_le(t, cus, 6) else "large"
+        t = -(-p.M // 128) * -(-p.N // 128) * p.L
+        if _tiles_le(t, cus, -2):
+            return "tiny" if _tiles_le(t, cus, -3) else "small"
+        if _tiles_le(t, cus, 3):
+            return "medium" if min(p.M, p.N) <= 4096 else "large"
+        return "xlarge" if p.K <= 1024 else "huge"
+    if arch == "gfx950":
+        if p.complex_:
+            t = -(-p.M // 64) * -(-p.N // 64) * p.L
+            if _tiles_le(t, cus, 2):
+                if p.K <= 256:
+                    return "small" if min(p.M, p.N) <= 512 else "medium"
+                return "longk"
+            return "medium" if _tiles_le(t, cus, 5) else "large"
+        t = -(-p.M // 128) * -(-p.N // 128) * p.L
+        if _tiles_le(t, cus, 0):
+            if _tiles_le(t, cus, -1):
+                return "tiny" if _tiles_le(t, cus, -3) else "small"
+            return "medium"
+        if _tiles_le(t, cus, 2):
+            return "large"
+        return "xlarge" if _tiles_le(t, cus, 3) else "huge"
+    raise ValueError(f"no f32 class rule for {arch}")
+
+
 #: CTAs per CU :func:`tuned_spec` aims for when it splits K (``split_k``).
 SPLIT_CTAS_PER_CU = 2
 #: The largest split count :func:`tuned_spec` picks.
@@ -3540,7 +4032,9 @@ def tuned_spec(
     **knobs,
 ) -> GettF64Spec:
     """The tuned configuration of ``problem``'s shape class on ``arch``
-    (:func:`gett_f64_shape_class`), overridden by ``knobs``.
+    (:func:`gett_f64_shape_class`; f32 problems :func:`gett_f32_shape_class`
+    and :data:`TUNED_CONFIGS_F32`, see :func:`tuned_configs`), overridden by
+    ``knobs``.
 
     Falls back to the other classes of the same arch and dtype, then to
     :func:`arch_spec`, when the class configuration is not valid for the
@@ -3555,10 +4049,12 @@ def tuned_spec(
     :func:`_long_k` (few CTAs per CU and a long K).
     """
     kind = "complex" if problem.complex_ else "real"
-    cls = gett_f64_shape_class(problem, arch, num_cus)
-    order = [cls] + [
-        c for (a, k, c) in TUNED_CONFIGS if a == arch and k == kind and c != cls
-    ]
+    table = tuned_configs(arch, kind, problem.dtype)
+    if problem.dtype == "f32":
+        cls = gett_f32_shape_class(problem, arch, num_cus)
+    else:
+        cls = gett_f64_shape_class(problem, arch, num_cus)
+    order = [cls] + [c for c in table if c != cls]
 
     def usable(spec: GettF64Spec) -> bool:
         if not is_valid_spec(spec, arch=arch)[0]:
@@ -3572,7 +4068,7 @@ def tuned_spec(
 
     cus = resolve_num_cus(arch, num_cus)
     for c in order:
-        cfg = TUNED_CONFIGS.get((arch, kind, c))
+        cfg = table.get(c)
         if cfg is None:
             continue
         spec = arch_spec(problem, arch, bilinear=bilinear, **{**cfg, **knobs})
@@ -3951,6 +4447,7 @@ __all__ = [
     "PIPE_LONG_RUN",
     "PIPE_MIN_RUN",
     "TUNED_CONFIGS",
+    "TUNED_CONFIGS_F32",
     "GettF64Problem",
     "GettF64Spec",
     "arch_spec",
@@ -3972,6 +4469,7 @@ __all__ = [
     "gett_f64_runtime_args",
     "gett_f64_pipe_class",
     "gett_f64_shape_class",
+    "gett_f32_shape_class",
     "gett_f64_signature",
     "is_valid_spec",
     "k_split",
@@ -3981,5 +4479,6 @@ __all__ = [
     "resolve_num_cus",
     "runtime_compatible",
     "runtime_template",
+    "tuned_configs",
     "tuned_spec",
 ]

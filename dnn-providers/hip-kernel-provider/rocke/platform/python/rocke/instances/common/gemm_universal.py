@@ -1056,6 +1056,15 @@ class TraitSpec:
     # s_waitcnt lgkmcnt(0) right behind a fresh ds_read). 1 = the first MFMA of
     # each K tile, 2 = every MFMA. 0 (default) = off.
     vp_mfma_first: int = 0
+    # ``lds_swizzle_l`` (vgpr_prefetch with lds_swizzle): the XOR group width
+    # 2^L halves of ``col ^= ((row >> R) % 2^W) << L`` (W = log2(tile_k >> L):
+    # every group slot of a row). -1 (default) keeps the geometry rule of
+    # :func:`lds_swizzle_params` (L = log2 of the MFMA fragment length). An f32
+    # operand prologue (``src="f32"``) reads fragments twice as wide as the
+    # 16-bit atom's (16x16x16: 8 halves, two 4-half swizzle groups, two
+    # ds_read_b64 per fragment); L = 3 makes the fragment one group (one
+    # ds_read_b128, one ds_write_b128 per 16-byte loaded vector). Python only.
+    lds_swizzle_l: int = -1
     # ``mn_pad`` / ``mn_chunk`` (native NN / TN / TT: only read
     # when ``DataSpec.layout`` makes an operand MN-contiguous, see
     # :mod:`gemm_mn_operand`): the bytes of pad after every 1 KiB LDS block of
@@ -1310,6 +1319,7 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
                 f"vtp{tr.vp_tail_pack}": tr.vp_tail_pack > 0,
                 f"vpp{tr.vp_pair_reads}": tr.vp_pair_reads > 0,
                 f"vmf{tr.vp_mfma_first}": tr.vp_mfma_first > 0,
+                f"swl{tr.lds_swizzle_l}": tr.lds_swizzle_l >= 0,
                 f"su{tr.stagger_u}s{tr.stagger_u_stride}m{tr.stagger_u_map}": tr.stagger_u
                 > 0,
                 "msp": tr.mfma_serpentine,
@@ -1698,10 +1708,12 @@ def launch_shape_error(
         # the MN operand's masked rows take an out-of-range voffset next to
         # an soffset of up to K * ld * 2 bytes (kept below 2^31: no u32 wrap)
         _vp_lim = 2**31
-    if tr.vgpr_prefetch and max(int(M), int(N)) * int(K) * 2 >= _vp_lim:
+    # (wide_addr: 64-bit tile origins, only a tile's span is checked below;
+    # a complex B addresses N / 2 rows)
+    if tr.vgpr_prefetch and not tr.wide_addr and max(_ra, _rb) * int(K) * 2 >= _vp_lim:
         return (
             f"vgpr_prefetch: operand bytes max(M, N) * K * 2 = "
-            f"{max(int(M), int(N)) * int(K) * 2} do not fit the buffer range "
+            f"{max(_ra, _rb) * int(K) * 2} do not fit the buffer range "
             f"({_vp_lim})"
         )
     if tr.split_k > 1 and not tr.split_k_aligned:
@@ -1889,6 +1901,70 @@ def _prologue_launch_error(
             f"prologue cplx_b: N={N} must be even (2 rows per complex row) and "
             f"K={K} a multiple of 4 (interleaved complex f32)"
         )
+    return None
+
+
+def batched_launch_error(
+    spec: "UniversalGemmSpec",
+    M: int,
+    N: int,
+    K: int,
+    batch: int,
+    stride_a: int,
+    stride_b: int,
+    stride_c: int,
+) -> Optional[str]:
+    """:func:`launch_shape_error` of one batch plus the rules of the whole
+    batched launch (grid z = ``batch``; strides in elements), or ``None``.
+
+    * grid z holds the batch: ``batch <= 65535``.
+    * vgpr_prefetch body without ``wide_addr``: each operand's buffer base is
+      at element ``z * stride + row0 * K`` (an i32 element offset, doubled as
+      an unsigned byte offset), the C stores at ``z * stride_c + m * N + n``
+      (i32): ``(batch - 1) * stride + rows * K < 2^31`` per operand and
+      ``(batch - 1) * stride_c + M * N <= 2^31``.
+    * vgpr_prefetch with ``wide_addr``: the batch and tile origins are 64-bit;
+      only a tile's own span is checked (by :func:`launch_shape_error`).
+    * other bodies (conservative): every operand's byte span from the base,
+      ``((batch - 1) * stride + rows * K) * 2``, inside the DMA buffer range,
+      and the C element offsets below 2^31.
+    """
+    err = launch_shape_error(spec, int(M), int(N), int(K))
+    if err is not None:
+        return err
+    if not spec.batched:
+        return "batched_launch_error: the spec is not batched"
+    batch = int(batch)
+    if batch < 1 or batch > _GRID_YZ_MAX:
+        return f"batch {batch} outside 1 .. the grid.z limit {_GRID_YZ_MAX}"
+    if min(int(stride_a), int(stride_b), int(stride_c)) < 0:
+        return "negative batch strides"
+    if max(int(stride_a), int(stride_b), int(stride_c)) >= 2**31:
+        # the strides are i32 kernel arguments (also in the 64-bit form)
+        return "batch strides must be below 2^31 elements (i32 kernel arguments)"
+    tr = spec.trait
+    if tr.vgpr_prefetch and tr.wide_addr:
+        return None
+    _ra, _rb = _operand_rows(spec, int(M), int(N))
+    for nm, st, el in (
+        ("A", int(stride_a), _ra * int(K)),
+        ("B", int(stride_b), _rb * int(K)),
+    ):
+        span = (batch - 1) * st + el
+        if tr.vgpr_prefetch:
+            if span >= 2**31:
+                return (
+                    f"vgpr_prefetch batched: operand {nm} spans {span} elements "
+                    "from its base (i32 element offsets; needs wide_addr)"
+                )
+        elif span * 2 > DTL_BUFFER_NUM_RECORDS:
+            return (
+                f"batched: operand {nm} spans {span * 2} bytes from its base, past "
+                f"the buffer range {DTL_BUFFER_NUM_RECORDS:#x}"
+            )
+    cspan = (batch - 1) * int(stride_c) + int(M) * int(N)
+    if cspan > 2**31:
+        return f"batched: C spans {cspan} elements (i32 element offsets)"
     return None
 
 
@@ -2269,6 +2345,22 @@ def lds_swizzle_params(
     return 3, 1, 4
 
 
+def _spec_swizzle_params(
+    spec: "UniversalGemmSpec", a_per_lane: int, b_per_lane: int
+) -> Tuple[int, int, int]:
+    """``(R, W, L)`` of ``spec``'s ``lds_swizzle`` with the trait overrides
+    (``lds_swizzle_r``; ``lds_swizzle_l``, which also sets W = log2(tile_k >>
+    L)); environment-free (the emitter's CK_SWZ_* debug overrides excluded)."""
+    tr = spec.trait
+    r, w, l_ = lds_swizzle_params(a_per_lane, b_per_lane, spec.tile.tile_k)
+    if tr.lds_swizzle_r >= 0:
+        r = tr.lds_swizzle_r
+    if tr.lds_swizzle_l >= 0:
+        l_ = int(tr.lds_swizzle_l)
+        w = _ilog2_exact(spec.tile.tile_k >> l_) or 0
+    return r, w, l_
+
+
 def _sab_vec16_error(spec: "UniversalGemmSpec", arch: str) -> Optional[str]:
     """Why ``TraitSpec.sab_vec16`` cannot apply to ``spec`` (None: it can)."""
     t, tr = spec.tile, spec.trait
@@ -2594,6 +2686,18 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             f"lds_swizzle_r must be -1 (auto) or 0..4 with lds_swizzle "
             f"(got {tr.lds_swizzle_r})"
         )
+    if tr.lds_swizzle_l != -1 and not (
+        tr.lds_swizzle
+        and tr.vgpr_prefetch
+        and 1 <= tr.lds_swizzle_l <= 4
+        and t.tile_k % (1 << tr.lds_swizzle_l) == 0
+        and (_ilog2_exact(t.tile_k >> tr.lds_swizzle_l) or 0) >= 1
+    ):
+        return False, (
+            "lds_swizzle_l must be -1 (auto) or 1..4 with lds_swizzle on the "
+            "vgpr_prefetch body, tile_k / 2^L a power of two >= 2 "
+            f"(got {tr.lds_swizzle_l})"
+        )
     if tr.dtl_hoist and tr.dtl_stages < 2:
         return False, "dtl_hoist requires dtl_stages >= 2"
     if tr.vgpr_prefetch_depth != 1 and not tr.vgpr_prefetch:
@@ -2611,7 +2715,7 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     if tr.vp_release_atoms != 1 and (
         int(tr.vgpr_prefetch) != 4
         or tr.vp_late_reads
-        or not 1 <= int(tr.vp_release_atoms) < t.k_atoms_per_tile_k
+        or not 1 <= int(tr.vp_release_atoms) < _hb_k_atoms(spec)
     ):
         return False, (
             "vp_release_atoms must be 1 .. K atoms per tile - 1 and requires "
@@ -2648,6 +2752,13 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             "vp_mn_kv / vp_mn_order / vp_mn_worder / vp_mn_pipe / vp_mn_wrap require vgpr_prefetch and an MN-contiguous "
             "operand (layout RRR / CRR / CCR)"
         )
+    _sm_pro = getattr(spec, "_prologue", None)
+    if (
+        _sm_pro is not None
+        and getattr(_sm_pro, "split_mode", "rne") != "rne"
+        and _storage_dtype(spec) != BF16
+    ):
+        return False, "prologue split_mode trunc / rnef needs a bf16 compute type"
     if tr.vgpr_prefetch:
         if tr.vgpr_prefetch not in (1, 2, 3, 4):
             return False, f"vgpr_prefetch must be 0..4 (got {tr.vgpr_prefetch})"
@@ -2667,21 +2778,37 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             )
         if tr.lds_swizzle and family == "mma":
             _vop = _resolve_mma_op(spec, arch)
-            _vr, _vw, _vl = lds_swizzle_params(
-                _vop.a_frag_len, _vop.b_frag_len, t.tile_k
-            )
-            if tr.lds_swizzle_r >= 0:
-                _vr = tr.lds_swizzle_r
+            _vr, _vw, _vl = _spec_swizzle_params(spec, _vop.a_frag_len, _vop.b_frag_len)
             if t.tile_m % (1 << (_vr + _vw)) or t.tile_n % (1 << (_vr + _vw)):
                 return False, (
                     "vgpr_prefetch with lds_swizzle: tile_m / tile_n must be multiples "
                     f"of the swizzle row period 2^(R+W) = {1 << (_vr + _vw)} (the XOR key "
                     "is taken on the parity-free row)"
                 )
+            if tr.lds_swizzle_l >= 0 and (1 << _vl) < max(
+                _vop.a_frag_len, _vop.b_frag_len
+            ):
+                # the fragment reads without a prologue are one ds_read of a
+                # whole fragment at one swizzled column
+                return False, (
+                    f"lds_swizzle_l: the XOR group 2^L = {1 << _vl} halves must hold "
+                    f"a whole MFMA fragment ({_vop.a_frag_len} halves)"
+                )
         # mfma_swap_ab is admitted on the interleaved bodies
         # (the MFMA call swaps its operands; fragments, LDS and the schedule
         # are unchanged) -- the 8-byte vector epilogue of the 16x16 atoms
-        if tr.vgpr_prefetch >= 3 and (t.k_atoms_per_tile_k < 2 or tr.acc_agpr_pin):
+        _vp_pro = getattr(spec, "_prologue", None)
+        if _vp_pro is not None and _vp_pro.stage != "lds":
+            # stage="vgpr" converts in the DTL ring's staging only
+            return False, "vgpr_prefetch: prologue stage='vgpr' unsupported"
+        if getattr(spec, "_batch2", False):
+            return False, "vgpr_prefetch: the two-mode batch (_batch2) is unsupported"
+        if _vp_pro is not None and t.k_atoms_per_tile_k % _vp_pro.kmul:
+            return False, (
+                "vgpr_prefetch with an f32 operand prologue: tile_k must hold whole "
+                "f32 K atoms (an even number of 16-bit K atoms)"
+            )
+        if tr.vgpr_prefetch >= 3 and (_hb_k_atoms(spec) < 2 or tr.acc_agpr_pin):
             return False, (
                 "vgpr_prefetch 3 / 4 need >= 2 K atoms per tile and exclude "
                 "acc_agpr_pin"
@@ -2702,10 +2829,20 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
                 "vgpr_prefetch 1 / 2 / 3 require the AB LDS double buffer "
                 "(ab_double_buffer)"
             )
-        if tr.preshuffle_b or tr.active_tile_skip or spec.batched or tr.lds_k_pad:
+        if tr.preshuffle_b or tr.active_tile_skip or tr.lds_k_pad:
             return False, (
-                "vgpr_prefetch excludes preshuffle_b, active_tile_skip, lds_k_pad "
-                "and the batched body"
+                "vgpr_prefetch excludes preshuffle_b, active_tile_skip and lds_k_pad"
+            )
+        if spec.batched and (
+            tr.split_k > 1
+            or tr.split_k_serial
+            or str(spec.data.layout).upper() != "RCR"
+        ):
+            # grid z is the batch (split-K would need it too); the batch
+            # offsets ride in the K-contiguous operands' buffer bases
+            return False, (
+                "vgpr_prefetch batched: the RCR layout without split-K "
+                "(grid z is the batch)"
             )
         if tr.pad_k and tr.split_k > 1 and not tr.split_k_aligned:
             # ragged K // split_k slices: the K mask is the kernel's K, not the
@@ -2877,7 +3014,30 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             "dtl_base_fold requires dtl_soff0 + dtl_hoist, no dtl_tight_rsrc and "
             "a non-persistent grid"
         )
-    if tr.wide_addr and not (
+    _w_pro = getattr(spec, "_prologue", None)
+    if tr.wide_addr and tr.vgpr_prefetch:
+        # the register-staged body: 64-bit operand bases at the batch + tile
+        # origin and a 64-bit C base at the batch + tile's first row (scatter /
+        # swapped-accumulator stores), batched or not
+        if (
+            tr.direct_to_lds
+            or tr.epilogue != "default"
+            or tr.rilv_vec_epilogue
+            or tr.split_k > 1
+            or tr.split_k_serial
+            or tr.persistent_ctas
+            or tr.streamk
+            or str(spec.data.layout).upper() != "RCR"
+            or getattr(spec, "_gett", None) is not None
+            or getattr(spec, "_mono", None) is not None
+            or (_w_pro is not None and _w_pro.epi)
+        ):
+            return False, (
+                "wide_addr on the vgpr_prefetch body requires the default (scatter) "
+                "epilogue without split-K / persistent / stream-K, the RCR layout, "
+                "no GETT / rich-epilogue hook and no prologue epi"
+            )
+    elif tr.wide_addr and not (
         tr.direct_to_lds
         and tr.dtl_hoist
         and (tr.dtl_soff0 or tr.dtl_tight_rsrc)
@@ -3330,7 +3490,7 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
                     )
         if spec.trait.lds_swizzle:
             _op = _resolve_mma_op(spec, arch)
-            _swz_l = lds_swizzle_params(_op.a_frag_len, _op.b_frag_len, t.tile_k)[2]
+            _swz_l = _spec_swizzle_params(spec, _op.a_frag_len, _op.b_frag_len)[2]
             if spec.trait.direct_to_lds:
                 _chunk = _dtl_h
             else:
@@ -3855,6 +4015,11 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         if spec.trait.dtl_k_tail and _pro.src == "f32":
             # the K tail masks 16-bit halves; an f32 pair view needs whole pairs
             raise ValueError("prologue src='f32': dtl_k_tail unsupported")
+        if spec.trait.vgpr_prefetch and _pro.stage != "lds":
+            # the register-staged loader writes the raw words (no conversion)
+            raise ValueError("prologue stage='vgpr' on the vgpr_prefetch body")
+        if _pro.split_mode != "rne" and _storage_dtype(spec) != BF16:
+            raise ValueError("prologue split_mode trunc / rnef needs bf16 compute")
     b = IRBuilder(spec.kernel_name() + (_pro.suffix() if _pro is not None else ""))
     # IMPORTANT: AMDGPU bakes `amdgpu-flat-work-group-size` into the
     # kernel descriptor; if we launch with more threads than that, HIP
@@ -4110,6 +4275,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     _def_r, _def_w, _def_l = lds_swizzle_params(a_per_lane, b_per_lane, block_k)
     if spec.trait.lds_swizzle_r >= 0:
         _def_r = spec.trait.lds_swizzle_r
+    if spec.trait.lds_swizzle_l >= 0:
+        _def_r, _def_w, _def_l = _spec_swizzle_params(spec, a_per_lane, b_per_lane)
     _swz_r = int(_os.environ.get("CK_SWZ_R", str(_def_r)))
     _swz_w = int(_os.environ.get("CK_SWZ_W", str(_def_w)))
     _swz_l = int(_os.environ.get("CK_SWZ_L", str(_def_l)))
@@ -4153,6 +4320,23 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         batch_off_a = c0
         batch_off_b = c0
         batch_off_c = c0
+
+    def _vp_batch_off64(nm: str) -> Optional[Value]:
+        """The batch's element offset in operand ``nm`` ("A" / "B" / "C") as an
+        i64 (the vgpr_prefetch body's ``wide_addr`` form); None when not batched.
+        Built only where it is used (no op otherwise)."""
+        if not spec.batched:
+            return None
+        from ...core.ir import I64 as _I64b
+
+        s1 = {"A": stride_a, "B": stride_b, "C": stride_c}[nm]
+        if _batch2:
+            s2 = {"A": stride_a2, "B": stride_b2, "C": stride_c2}[nm]
+            return b.add(
+                b.mul(b.zext(_z1, _I64b), b.zext(s1, _I64b)),
+                b.mul(b.zext(_z2, _I64b), b.zext(s2, _I64b)),
+            )
+        return b.mul(b.zext(batch_idx, _I64b), b.zext(s1, _I64b))
 
     # Tile-index assignment. By default ``block_id_x`` maps to the
     # N-tile and ``block_id_y`` to the M-tile (the host launcher uses
@@ -4390,8 +4574,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # complex B (real embedding, see Prologue.cplx_b): tile row r of B' is complex row r >> 1
     _cplx = _pe is not None and bool(_pro.cplx_b)
     if _cplx:
-        if not spec.trait.direct_to_lds:
-            raise ValueError("cplx_b needs the direct-to-LDS ring")
+        if not (spec.trait.direct_to_lds or spec.trait.vgpr_prefetch):
+            raise ValueError(
+                "cplx_b needs the direct-to-LDS ring or the vgpr_prefetch body"
+            )
         if int(spec.trait.pingpong) == 7:
             raise ValueError("cplx_b does not support pingpong 7")
         if _rilv and not spec.trait.rilv_vec_epilogue:
@@ -4419,11 +4605,17 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             return _emit_smem_load(b, src, row, col, n, storage_dtype)
         n_raw = _pe.raw_len()
         raw = None
-        for off in range(0, n_raw, 8):
+        # read chunk: 8 halves; the vgpr_prefetch body keeps every chunk inside
+        # one swizzle group (an f32 fragment of a 16x16x16 atom is two 4-half
+        # groups, each at its own swizzled column)
+        _cw = 8
+        if spec.trait.vgpr_prefetch and _SWZ and swz:
+            _cw = min(8, 1 << _swz_l)
+        for off in range(0, n_raw, _cw):
             col = col_base if off == 0 else b.add(col_base, b.const_i32(off))
             if swz:
                 col = _swz_col(col, key)
-            ch = _emit_smem_load(b, src, row, col, min(8, n_raw), storage_dtype)
+            ch = _emit_smem_load(b, src, row, col, min(_cw, n_raw), storage_dtype)
             raw = ch if raw is None else b.vec_concat(raw, ch)
         return _pe.after_load(raw, which)
 
@@ -5019,7 +5211,26 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     if _vpf:
         _vp_c2 = b.const_i32(2)
 
-        def _vp_rsrc(ptr: Value, row0: Value, rows_total: Value, padded: bool):
+        _vp_wide = bool(spec.trait.wide_addr)
+
+        def _vp_rsrc(
+            ptr: Value, row0: Value, rows_total: Value, padded: bool, nm: str = "A"
+        ):
+            if _vp_wide:
+                return _vp_rsrc_wide(ptr, row0, rows_total, padded, nm)
+            if spec.batched:
+                # batched: the batch's element offset rides in the base too
+                # (launch rule: batch offset + rows * K < 2^31 elements)
+                _bo = batch_off_a if nm == "A" else batch_off_b
+                _e = b.add(_bo, b.mul(row0, K))
+                org = b.to_sgpr_u32(b.add_nuw(_e, _e))
+                if padded:
+                    _t = b.add(_bo, b.mul(rows_total, K))
+                    nbytes = b.to_sgpr_u32(b.add_nuw(_t, _t))
+                    rec = b.smax(b.sub(nbytes, org), c0)
+                else:
+                    rec = b.const_i32(DTL_BUFFER_NUM_RECORDS)
+                return b.buffer_rsrc(b.global_ptr_add(ptr, org), rec)
             # byte offsets reach 2^32 (launch_shape_error): x + x as an unsigned
             # add (a signed i32 multiply by 2 would overflow past 2^31)
             _e = b.mul(row0, K)
@@ -5031,6 +5242,39 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             else:
                 rec = b.const_i32(DTL_BUFFER_NUM_RECORDS)
             return b.buffer_rsrc(b.global_ptr_add(ptr, org), rec)
+
+        def _vp_rsrc_wide(
+            ptr: Value, row0: Value, rows_total: Value, padded: bool, nm: str
+        ):
+            """wide_addr: the tile origin (batch offset + row0 * K elements) as
+            a 64-bit byte offset of the base; only the tile's own span must fit
+            the i32 voffsets and the buffer range (launch_shape_error)."""
+            from ...core.ir import I64 as _I64v
+
+            _k64 = b.zext(K, _I64v)
+            _b64 = _vp_batch_off64(nm)
+            _e = b.mul(b.zext(row0, _I64v), _k64)
+            if _b64 is not None:
+                _e = b.add(_b64, _e)
+            org = b.mul(_e, b.const_i64(2))
+            if padded:
+                _t = b.mul(b.zext(rows_total, _I64v), _k64)
+                if _b64 is not None:
+                    _t = b.add(_b64, _t)
+                left = b.sub(b.mul(_t, b.const_i64(2)), org)
+                _big = b.const_i64(DTL_BUFFER_NUM_RECORDS)
+                left = b.select(b.cmp_lt(left, _big), left, _big)
+                rec = b.to_sgpr_u32(
+                    b.trunc(
+                        b.select(b.cmp_lt(left, b.const_i64(0)), b.const_i64(0), left),
+                        I32,
+                    )
+                )
+            else:
+                rec = b.const_i32(DTL_BUFFER_NUM_RECORDS)
+            return b.buffer_rsrc(b.global_ptr_add(ptr, org), rec)
+
+        _vp_c2b = (_brow(block_n_off), _brow(N)) if _cplx else (block_n_off, N)
 
         # an MN-contiguous operand ([K, ld], vp_mn_kv): base
         # at the tile's MN origin, untight range (rows past ld and K past K are
@@ -5047,12 +5291,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         _vp_a_rsrc = (
             _vp_rsrc_mn(A, block_m_off)
             if _mn_a
-            else _vp_rsrc(A, block_m_off, M, bool(spec.trait.pad_m))
+            else _vp_rsrc(A, block_m_off, M, bool(spec.trait.pad_m), "A")
         )
+        # (complex B: tile row r of B' is complex row r >> 1 of B, so the base
+        # is at complex row block_n_off / 2 and the operand has N / 2 rows)
         _vp_b_rsrc = (
             _vp_rsrc_mn(Bp, block_n_off)
             if _mn_b
-            else _vp_rsrc(Bp, block_n_off, N, bool(spec.trait.pad_n))
+            else _vp_rsrc(Bp, _vp_c2b[0], _vp_c2b[1], bool(spec.trait.pad_n), "B")
         )
 
         def _vp_rc(e: int) -> Tuple[Value, Value]:
@@ -5114,7 +5360,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         _vp_b_voff = (
             _vp_mn_voff(_vp_b_rc, N, block_n_off, bool(spec.trait.pad_n))
             if _mn_b
-            else [b.mul(b.add(b.mul(r, K), c), _vp_c2) for r, c in _vp_b_rc]
+            else [b.mul(b.add(b.mul(_brow(r), K), c), _vp_c2) for r, c in _vp_b_rc]
         )
         _vp_ld2 = {
             "A": b.to_sgpr_u32(b.mul(M, _vp_c2)) if _mn_a else None,
@@ -5727,9 +5973,16 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         bn: Value,
         batch_off_c=None,
         fused_epilogue=None,
+        m_ext=None,
+        c_ptr=None,
     ) -> None:
         """``_emit_epilogue_default`` of one output tile; with ``pad_fast_tile``
-        a uniform branch sends tiles fully inside M x N to the unguarded body."""
+        a uniform branch sends tiles fully inside M x N to the unguarded body.
+        ``m_ext`` / ``c_ptr`` (the vgpr_prefetch ``wide_addr`` form): the M
+        extent and the C base the stores use instead of M / C (a 64-bit C
+        base at the tile's first row, rows counted from it)."""
+        _M = M if m_ext is None else m_ext
+        _C = C if c_ptr is None else c_ptr
         if _gett is not None and not spec.trait.rilv_vec_epilogue:
             _gett.epilogue(
                 b,
@@ -5743,20 +5996,25 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 acc_out=lambda v: _acc_agpr_out(b, spec, v),
             )
             return
-        args = (warp_m_idx, warp_n_idx, lane, bm, bn, M, N, C, c_per_lane)
+        args = (warp_m_idx, warp_n_idx, lane, bm, bn, _M, N, _C, c_per_lane)
         kw = dict(batch_off_c=batch_off_c, fused_epilogue=fused_epilogue)
         if not spec.trait.pad_fast_tile:
             _emit_epilogue_default(b, spec, op, vals, *args, **kw)
             return
         full = None
         if spec.trait.pad_m:
-            full = b.cmp_le(b.add(bm, c_block_m), M)
+            full = b.cmp_le(b.add(bm, c_block_m), _M)
         if spec.trait.pad_n:
             fn = b.cmp_le(b.add(bn, c_block_n), N)
             full = fn if full is None else b.land(full, fn)
         nopad = _dc_replace(
             spec, trait=_dc_replace(spec.trait, pad_m=False, pad_n=False)
         )
+        # dataclasses.replace drops the side channels (the prologue's out_f32
+        # store type, hooks): carry them over (the C++ engine copies the spec)
+        for _sc in ("_prologue", "_gett", "_mono", "_batch2", "_fused_epilogue"):
+            if hasattr(spec, _sc):
+                object.__setattr__(nopad, _sc, getattr(spec, _sc))
         with b.scf_if_else(full) as (fast, edge):
             with fast:
                 _emit_epilogue_default(b, nopad, op, vals, *args, **kw)
@@ -6365,10 +6623,25 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         n_in_atom = b.mod(lane, b.const_i32(t.warp_tile_n))
         warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
         warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
-        k_blk_kbase = b.mul(k_blk, b.const_i32(a_per_lane))
+        k_blk_kbase = b.mul(k_blk, b.const_i32(a_per_lane * _kmul))
 
         def rd(kk: int, idx: int, is_a: bool, par):
-            col = b.add(k_blk_kbase, b.const_i32(kk * t.warp_tile_k))
+            col = b.add(k_blk_kbase, b.const_i32(kk * t.warp_tile_k * _kmul))
+            if _pe is not None:
+                # operand prologue: the raw fragment (f32 pair view: twice the
+                # halves) through the prologue hook; each read chunk at its own
+                # swizzled column (_frag_ld)
+                if is_a:
+                    r0 = b.add(
+                        warp_m_off, b.add(b.const_i32(idx * t.warp_tile_m), m_in_atom)
+                    )
+                    row = _vp_par_row(r0, par, block_m)
+                    return _frag_ld(A_smem, row, col, r0, a_per_lane, "A")
+                r0 = b.add(
+                    warp_n_off, b.add(b.const_i32(idx * t.warp_tile_n), n_in_atom)
+                )
+                row = _vp_par_row(r0, par, block_n)
+                return _frag_ld(B_smem, row, col, r0, b_per_lane, "B")
             if is_a:
                 r0 = b.add(
                     warp_m_off, b.add(b.const_i32(idx * t.warp_tile_m), m_in_atom)
@@ -9911,6 +10184,32 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 c_per_lane,
                 batch_off_c=batch_off_c,
                 fused_epilogue=fused_ep,
+            )
+        elif _vpf and spec.trait.wide_addr:
+            # vgpr_prefetch wide_addr: C rebased (i64) at the batch and the
+            # tile's first row; the stores count rows from it (M - block_m_off
+            # rows left), so only a tile's own tile_m * N span needs i32 offsets
+            from ...core.ir import I64 as _I64e
+
+            if fused_ep is not None:
+                raise ValueError("wide_addr (vgpr_prefetch): no fused epilogue")
+            _c_el = b.mul(b.zext(block_m_off, _I64e), b.zext(N, _I64e))
+            _cb = _vp_batch_off64("C")
+            if _cb is not None:
+                _c_el = b.add(_cb, _c_el)
+            _c_esz = (
+                4
+                if (_pro is not None and _pro.out_f32)
+                else (type_bits(storage_dtype) // 8)
+            )
+            _ep_default(
+                _for_results,
+                c0,
+                block_n_off,
+                batch_off_c=None,
+                fused_epilogue=None,
+                m_ext=b.sub(M, block_m_off),
+                c_ptr=b.global_ptr_add(C, b.mul(_c_el, b.const_i64(_c_esz))),
             )
         else:
             _ep_default(

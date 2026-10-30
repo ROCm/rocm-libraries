@@ -228,7 +228,8 @@ enum
     ROCKE_GETT_F64_KNOB_LDS_STAGES = 1u << 13,
     ROCKE_GETT_F64_KNOB_PREFETCH_DEPTH = 1u << 14,
     ROCKE_GETT_F64_KNOB_UNROLL2 = 1u << 15,
-    ROCKE_GETT_F64_KNOB_RUNTIME_SIZES = 1u << 16
+    ROCKE_GETT_F64_KNOB_RUNTIME_SIZES = 1u << 16,
+    ROCKE_GETT_F64_KNOB_K_STAGGER = 1u << 17
 };
 
 typedef struct rocke_gett_f64_knobs
@@ -251,6 +252,7 @@ typedef struct rocke_gett_f64_knobs
     int prefetch_depth;
     bool unroll2;
     bool runtime_sizes;
+    int k_stagger;
 } rocke_gett_f64_knobs_t;
 
 /* Python arch_spec(problem, arch, **knobs). knobs NULL: no overrides. */
@@ -268,6 +270,18 @@ bool rocke_gett_f64_tuned_config(const char* arch,
 /* The shape classes TUNED_CONFIGS has for (arch, kind), sorted by name: the
  * i-th name, or NULL past the end. */
 const char* rocke_gett_f64_tuned_class_at(const char* arch, const char* kind, int index);
+
+/* Python tuned_configs(arch, kind, "f32")[cls]: the f32 / complex-f32 GETT's
+ * own TUNED_CONFIGS_F32 rows where that table has classes for (arch, kind),
+ * else the TUNED_CONFIGS rows. False when there is no such class. */
+bool rocke_gett_f32_tuned_config(const char* arch,
+                                 const char* kind,
+                                 const char* cls,
+                                 rocke_gett_f64_knobs_t* out);
+
+/* The classes of tuned_configs(arch, kind, "f32"), sorted by name: the i-th
+ * name, or NULL past the end. */
+const char* rocke_gett_f32_tuned_class_at(const char* arch, const char* kind, int index);
 
 /* Python _with_k_block(spec, arch): spec with k_block = K_BLOCK_ELEMS /
  * tile_k (even with unroll2) when that spec is valid on arch, else spec. */

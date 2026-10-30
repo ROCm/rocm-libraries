@@ -1056,8 +1056,8 @@ namespace
         {
             if(char const* old = std::getenv(name))
             {
-                mOld     = old;
-                mHadOld  = true;
+                mOld    = old;
+                mHadOld = true;
             }
             set(value);
         }
@@ -1149,8 +1149,8 @@ TEST_P(ScalarAlignmentTest, ComplexContractionWithUnalignedScalars)
     std::vector<int64_t> lA = {cc, d, a, b}, lB = {e, f, a, b}, lD = {cc, d, e, f};
     std::vector<int32_t> mA = {'c', 'd', 'a', 'b'}, mB = {'e', 'f', 'a', 'b'},
                          mD = {'c', 'd', 'e', 'f'};
-    std::size_t const    nA = cc * d * a * b, nB = e * f * a * b, nD = cc * d * e * f;
-    auto                 make = [&](TensorDescGuard& g, std::vector<int64_t> const& l) {
+    std::size_t const nA = cc * d * a * b, nB = e * f * a * b, nD = cc * d * e * f;
+    auto              make = [&](TensorDescGuard& g, std::vector<int64_t> const& l) {
         auto s = colMajorStrides(l);
         return hiptensorCreateTensorDescriptor(handle.handle,
                                                &g.desc,
@@ -1246,9 +1246,10 @@ TEST_P(ScalarAlignmentTest, ComplexContractionWithUnalignedScalars)
     }
 
     // alpha = 2 - i, beta = -1 + 3i, `offset` bytes past 16-byte boundaries
-    std::complex<double> const alpha(2.0, -1.0), beta(c.bilinear ? -1.0 : 0.0, c.bilinear ? 3.0 : 0.0);
-    alignas(16) uint8_t        scalars[64] = {};
-    std::vector<uint8_t>       sa(es), sb(es);
+    std::complex<double> const alpha(2.0, -1.0),
+        beta(c.bilinear ? -1.0 : 0.0, c.bilinear ? 3.0 : 0.0);
+    alignas(16) uint8_t  scalars[64] = {};
+    std::vector<uint8_t> sa(es), sb(es);
     putComplex(sa, 0, f64, alpha.real(), alpha.imag());
     putComplex(sb, 0, f64, beta.real(), beta.imag());
     std::memcpy(scalars + c.offset, sa.data(), es);
@@ -1302,24 +1303,24 @@ TEST_P(ScalarAlignmentTest, ComplexContractionWithUnalignedScalars)
     EXPECT_EQ(bad, 0);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Backends,
-    ScalarAlignmentTest,
-    ::testing::ValuesIn([] {
-        std::vector<ScalarAlignmentCase> cases;
-        for(char const* backend : {"ck", "rocke"})
-        {
-            for(auto type : {HIPTENSOR_C_64F, HIPTENSOR_C_32F})
-            {
-                for(bool bilinear : {false, true})
-                {
-                    for(std::size_t offset : {std::size_t(0), std::size_t(4), std::size_t(8)})
-                    {
-                        cases.push_back({backend, type, bilinear, offset});
-                    }
-                }
-            }
-        }
-        return cases;
-    }()),
-    scalarAlignmentName);
+INSTANTIATE_TEST_SUITE_P(Backends,
+                         ScalarAlignmentTest,
+                         ::testing::ValuesIn([] {
+                             std::vector<ScalarAlignmentCase> cases;
+                             for(char const* backend : {"ck", "rocke"})
+                             {
+                                 for(auto type : {HIPTENSOR_C_64F, HIPTENSOR_C_32F})
+                                 {
+                                     for(bool bilinear : {false, true})
+                                     {
+                                         for(std::size_t offset :
+                                             {std::size_t(0), std::size_t(4), std::size_t(8)})
+                                         {
+                                             cases.push_back({backend, type, bilinear, offset});
+                                         }
+                                     }
+                                 }
+                             }
+                             return cases;
+                         }()),
+                         scalarAlignmentName);

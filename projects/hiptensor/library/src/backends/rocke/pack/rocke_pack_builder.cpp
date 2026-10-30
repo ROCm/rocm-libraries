@@ -44,8 +44,8 @@
 // Every kernel family is built with rocKE's C++ builders (the descriptor tables of the Python
 // reference): ew, reduce, rreduce (the tuned reduction classes of rocKE's reduction route
 // table), ewt, ewv, dgett and rgett (rocke/instance_hiptensor_aot.h),
-// gemm (the emulated-f32 GEMM bodies with their operand prologue: rocke_gemm_cf32_body,
-// rocke_build_universal_gemm), gett (the launches of the tuned and AOT GETT route tables the
+// gemm (the emulated-f32 GEMM bodies of each target with their operand prologue:
+// rocke_gemm_cf32_body, rocke_build_universal_gemm; gfx950 / gfx942), gett (the launches of the tuned and AOT GETT route tables the
 // engine carries: the tensor pack and GETT kernels of rocke/instance_tensor_gett.h) and gett64 /
 // gett32 (rocke_build_gett_f64 through the gett_f64 spec policy, f64 and f32 words), and ewf
 // (the flat elementwise kernel, rocke_build_htaot_ewf; gfx942 / gfx950).
@@ -83,6 +83,7 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -109,6 +110,7 @@
 
 #include "../rocke_comgr.hpp"
 #include "../rocke_ew_rows.hpp"
+#include "../rocke_ewp_rule.hpp"
 #include "../rocke_rreduce_rule.hpp"
 #include "rocke_pack_format.hpp"
 
@@ -141,7 +143,7 @@ namespace
     // ---------------------------------------------------------------------------------------------
 
     // The arches with GEMM bodies (GEMM_ARCHES) and f64 GETT kernels (GETT64_CLASS_ARCHES).
-    char const* const kGemmArches[]   = {"gfx950"};
+    char const* const kGemmArches[]   = {"gfx950", "gfx942"};
     char const* const kGett64Arches[] = {"gfx90a", "gfx942", "gfx950"};
     // the native f32 strided GEMM (the Python reference's GETT32_CLASS_ARCHES)
     char const* const kGett32Arches[] = {"gfx942", "gfx950"};
@@ -160,21 +162,58 @@ namespace
     // Python repr(float(x)) of the route constants.
     std::string pyFloat(double v)
     {
+        if(!std::isfinite(v))
+        {
+            return std::isnan(v) ? "nan" : v > 0 ? "inf" : "-inf";
+        }
+        // the shortest significant digits that read back as v, laid out as Python's repr: fixed
+        // notation for decimal exponents -4 .. 15, else d.ddde+XX
         char buf[64];
         for(int prec = 1; prec <= 17; ++prec)
         {
-            std::snprintf(buf, sizeof buf, "%.*g", prec, v);
+            std::snprintf(buf, sizeof buf, "%.*e", prec - 1, v);
             if(std::strtod(buf, nullptr) == v)
             {
                 break;
             }
         }
-        std::string s = buf;
-        if(s.find_first_of(".en") == std::string::npos)
+        std::string s   = buf;
+        bool const  neg = s[0] == '-';
+        auto const  e   = s.find('e');
+        int const   exp = std::atoi(s.c_str() + e + 1);
+        std::string digits;
+        for(size_t i = neg ? 1 : 0; i < e; ++i)
         {
-            s += ".0";
+            if(s[i] != '.')
+            {
+                digits += s[i];
+            }
         }
-        return s;
+        while(digits.size() > 1 && digits.back() == '0')
+        {
+            digits.pop_back();
+        }
+        std::string out;
+        if(exp < -4 || exp >= 16)
+        {
+            out = digits.substr(0, 1) + (digits.size() > 1 ? "." + digits.substr(1) : "");
+            char eb[16];
+            std::snprintf(eb, sizeof eb, "e%c%02d", exp < 0 ? '-' : '+', exp < 0 ? -exp : exp);
+            out += eb;
+        }
+        else if(exp < 0)
+        {
+            out = "0." + std::string(size_t(-exp - 1), '0') + digits;
+        }
+        else if(digits.size() <= size_t(exp) + 1)
+        {
+            out = digits + std::string(size_t(exp) + 1 - digits.size(), '0') + ".0";
+        }
+        else
+        {
+            out = digits.substr(0, size_t(exp) + 1) + "." + digits.substr(size_t(exp) + 1);
+        }
+        return (neg ? "-" : "") + out;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -316,9 +355,9 @@ namespace
                                                                     false);
         prob.f32                                 = f32;
         rocke_gett_f64_knobs_t knobs{};
-        if(cls != "default"
-           && !rocke_gett_f64_tuned_config(
-               arch.c_str(), cplx ? "complex" : "real", cls.c_str(), &knobs))
+        // f32 words: the f32 GETT's own tuned classes (rocKE's tuned_configs(arch, kind, "f32"))
+        auto const tuned = f32 ? rocke_gett_f32_tuned_config : rocke_gett_f64_tuned_config;
+        if(cls != "default" && !tuned(arch.c_str(), cplx ? "complex" : "real", cls.c_str(), &knobs))
         {
             why = "no tuned configuration " + cls;
             return false;
@@ -370,7 +409,8 @@ namespace
             std::vector<std::string> classes;
             for(int i = 0;; ++i)
             {
-                char const* c = rocke_gett_f64_tuned_class_at(ctx.arch.c_str(), kind, i);
+                char const* c = f32 ? rocke_gett_f32_tuned_class_at(ctx.arch.c_str(), kind, i)
+                                    : rocke_gett_f64_tuned_class_at(ctx.arch.c_str(), kind, i);
                 if(c == nullptr)
                 {
                     break;
@@ -451,7 +491,8 @@ namespace
     // ---- gemm: the universal GEMM bodies of the emulated-f32 routes (rocKE dispatch/gemm/cf32
     // cf32_body) with their fused operand prologue (the Python reference's _gemm_spec) ----
 
-    // route: bodies (GEMM_BODIES); the 64-bit-address body (GEMM_WIDE_BODY)
+    // route: bodies of each target (GEMM_BODIES, in GEMM_ROUTES order); the 64-bit-address body
+    // of each target (GEMM_WIDE_BODY)
     struct GemmRoute
     {
         char const*              route;
@@ -459,9 +500,9 @@ namespace
         std::vector<char const*> dtypes;
     };
 
-    std::vector<GemmRoute> const& gemmRoutes()
+    std::vector<GemmRoute> const& gemmRoutes(std::string const& arch)
     {
-        static std::vector<GemmRoute> const routes = {
+        static std::vector<GemmRoute> const gfx950 = {
             {"h16", {"RIW", "RIW_SK", "C3", "Q3_SK"}, {"fp16", "bf16"}},
             {"x6", {"RIW", "RIW_SK", "C3"}, {"bf16"}},
             {"cf32", {"RIW", "RIW_SK", "Q3_SK"}, {"bf16"}},
@@ -473,9 +514,57 @@ namespace
             {"cf32x4", {"RIW", "RIW_SK", "Q3_SK"}, {"bf16"}},
             {"cf32x9", {"RIW", "RIW_SK", "Q3_SK"}, {"bf16"}},
         };
-        return routes;
+        // gfx942: the register-staged bodies of rocKE's CF32_ROUTE_BODIES (x3 / x4 / x9 on x6's,
+        // cf32x3 / cf32x4 / cf32x9 on cf32's)
+        static std::vector<char const*> const g942H16  = {"G64x64x128L3",
+                                                          "G128x128x128L3",
+                                                          "G64x32x128U",
+                                                          "G192x128x64L3",
+                                                          "G256x256x64L3",
+                                                          "G32x32x128U",
+                                                          "G256x224x64L3"};
+        static std::vector<char const*> const g942X6   = {"G64x64x128L3",
+                                                          "G32x32x128L3",
+                                                          "G128x128x128L3",
+                                                          "G192x128x64L1S3",
+                                                          "G256x224x64L1",
+                                                          "G128x64x64",
+                                                          "G64x32x128U"};
+        static std::vector<char const*> const g942Cf32 = {"G64x64x128L3",
+                                                          "G32x32x128L3",
+                                                          "G128x128x128L3",
+                                                          "G192x128x64US3",
+                                                          "G256x224x64L1",
+                                                          "G128x64x64U",
+                                                          "G64x32x128U"};
+        static std::vector<GemmRoute> const   gfx942   = {
+            {"h16", g942H16, {"fp16", "bf16"}},
+            {"x6", g942X6, {"bf16"}},
+            {"cf32", g942Cf32, {"bf16"}},
+            {"x3", g942X6, {"bf16"}},
+            {"x4", g942X6, {"bf16"}},
+            {"x9", g942X6, {"bf16"}},
+            {"cf32x3", g942Cf32, {"bf16"}},
+            {"cf32x4", g942Cf32, {"bf16"}},
+            {"cf32x9", g942Cf32, {"bf16"}},
+        };
+        static std::vector<GemmRoute> const none;
+        return arch == "gfx950" ? gfx950 : arch == "gfx942" ? gfx942 : none;
     }
-    char const* const kGemmWideBody = "RIW";
+    // the 64-bit-address body of a route (GEMM_WIDE_BODY: one for h16, one for the f32 routes)
+    char const* gemmWideBody(std::string const& arch, std::string const& route)
+    {
+        if(arch == "gfx942")
+        {
+            return route == "h16" ? "G256x224x64L3" : "G256x224x64L1";
+        }
+        return "RIW";
+    }
+    // rocKE's body rule of the target (rocke.dispatch.gemm.cf32 CF32_BODY_RULE)
+    bool gemmCostRule(std::string const& arch)
+    {
+        return arch == "gfx942";
+    }
 
     std::string lowercase(std::string s)
     {
@@ -492,7 +581,7 @@ namespace
         {
             return;
         }
-        for(auto const& r : gemmRoutes())
+        for(auto const& r : gemmRoutes(ctx.arch))
         {
             std::string route = r.route;
             for(char const* dt : r.dtypes)
@@ -511,7 +600,7 @@ namespace
                 }
                 // the 64-bit-address body for operands past the DMA buffer range or a result
                 // past 2^31 elements (one batch per launch)
-                items.push_back({kGemmWideBody, false, true});
+                items.push_back({gemmWideBody(ctx.arch, route), false, true});
                 for(auto const& it : items)
                 {
                     Descriptor d;
@@ -562,6 +651,9 @@ namespace
                         pro.split_at = "use";
                         pro.cplx_b   = cplx;
                         pro.psub     = true;
+                        // the target's operand split of the route
+                        pro.split_mode
+                            = rocke_gemm_cf32_split_mode(ctx.arch.c_str(), route.c_str());
                     }
                     if(!rocke_gemm_prologue_check(&pro, reason, sizeof reason))
                     {
@@ -581,6 +673,8 @@ namespace
                     {
                         throw std::runtime_error("gemm " + d.label + ": stream-K workspace");
                     }
+                    rocke_gemm_cf32_limits_t lim;
+                    rocke_gemm_cf32_launch_limits(&spec, &lim);
                     Kernel k;
                     k.name  = kd->name;
                     k.attrs = {
@@ -599,19 +693,26 @@ namespace
                         {"sk_flags_bytes", int64_t(fb)},
                         {"sk_part_bytes", int64_t(pb)},
                         {"wide", int64_t(it.wide)},
-                        // capability: launched on extents padded to tile multiples; the operands
-                        // within the DMA buffer range, C within the i32 element offsets, rows of
-                        // tiles on grid y. The 64-bit-address body: only one tile's operand rows
-                        // within the DMA buffer range and one tile's C rows within the i32
-                        // element offsets.
-                        {"limit_operand_bytes",
-                         int64_t(ROCKE_GEMM_UNIVERSAL_DTL_BUFFER_NUM_RECORDS)},
-                        {"limit_c_elements", int64_t((int64_t(1) << 31) - 1)},
-                        {"limit_tile_operand_bytes",
-                         int64_t(ROCKE_GEMM_UNIVERSAL_DTL_BUFFER_NUM_RECORDS)},
-                        {"limit_c_tile_elements", int64_t(1) << 31},
-                        {"limit_grid_yz", int64_t(65535)},
+                        // capability (rocke_gemm_cf32_launch_limits): launched on extents
+                        // padded to tile multiples; the operands (all batches) within the 32-bit
+                        // offsets of the body (the DMA buffer range of the ring bodies), C within
+                        // the i32 element offsets, rows of tiles on grid y. The 64-bit-address
+                        // body: only one tile's operand rows within the DMA buffer range and one
+                        // tile's C rows within the i32 element offsets.
+                        {"limit_operand_bytes", int64_t(lim.operand_bytes)},
+                        {"limit_c_elements", int64_t(lim.c_elements)},
+                        {"limit_tile_operand_bytes", int64_t(lim.tile_operand_bytes)},
+                        {"limit_c_tile_elements", int64_t(lim.c_tile_elements)},
+                        {"limit_grid_yz", int64_t(lim.grid_yz)},
                     };
+                    if(gemmCostRule(ctx.arch))
+                    {
+                        // the target's operand split of the route ("none": h16, no split)
+                        k.attrs["split_mode"] = std::string(
+                            route == "h16"
+                                ? "none"
+                                : rocke_gemm_cf32_split_mode(ctx.arch.c_str(), route.c_str()));
+                    }
                     std::string why;
                     if(!lower(ctx, kd, k, why))
                     {
@@ -1060,6 +1161,66 @@ namespace
                           {"vec", int64_t(rocke_htaot_ewf_vec(&s))},
                           {"unroll", int64_t(ROCKE_HTAOT_EWF_UNROLL)},
                           {"nt", int64_t(s.nt)},
+                          {"limit_index", kLimitIndex},
+                      });
+            out.push_back(std::move(d));
+        }
+    }
+
+    // the tuned tiled elementwise classes of the target (ewp_host.pack_classes: the engine's
+    // route table, rocke_htaot_ewp_pack_classes), attribute rank = the place in that order
+    std::vector<rocke_htaot_ewp_spec_t> ewpClasses(std::string const& arch)
+    {
+        int const n = rocke_htaot_ewp_pack_classes(arch.c_str(), nullptr, 0);
+        if(n < 0)
+        {
+            throw std::runtime_error("ewp: no route table");
+        }
+        std::vector<rocke_htaot_ewp_spec_t> out(size_t(std::max(n, 1)));
+        rocke_htaot_ewp_pack_classes(arch.c_str(), out.data(), n);
+        out.resize(size_t(n));
+        return out;
+    }
+
+    void ewpDescriptors(Context const& ctx, std::vector<Descriptor>& out)
+    {
+        auto const classes = ewpClasses(ctx.arch);
+        for(size_t i = 0; i < classes.size(); ++i)
+        {
+            auto const& s         = classes[i];
+            char        name[256] = {0};
+            rocke_htaot_ewp_kernel_name(&s, name, sizeof name);
+            Descriptor d;
+            d.family = "ewp";
+            d.label  = name;
+            Builder b;
+            addKernel(ctx,
+                      d,
+                      b,
+                      rocke_build_htaot_ewp(&b.b, &s),
+                      {
+                          {"family", std::string("ewp")},
+                          {"abi", std::string(ROCKE_HTAOT_EWP_ABI)},
+                          {"arity", int64_t(s.arity)},
+                          {"a", str(s.a)},
+                          {"b", str(s.b)},
+                          {"c", str(s.c)},
+                          {"d", str(s.d)},
+                          {"kinds", str(s.kinds)},
+                          {"mode", str(s.mode)},
+                          {"to", int64_t(s.to)},
+                          {"tt", int64_t(s.tt)},
+                          {"tw", int64_t(s.tw)},
+                          {"block", int64_t(s.block)},
+                          {"nt", int64_t(s.nt)},
+                          {"swz", int64_t(s.swz)},
+                          {"swsh", int64_t(s.swsh)},
+                          {"walk", str(s.walk)},
+                          {"tpc", int64_t(s.tpc)},
+                          {"ilp", int64_t(s.ilp)},
+                          {"vec", int64_t(rocke_htaot_ewp_vec(&s))},
+                          {"rank", int64_t(i)},
+                          {"slots_b", int64_t(ROCKE_HTAOT_EWP_SLOTS_B)},
                           {"limit_index", kLimitIndex},
                       });
             out.push_back(std::move(d));
@@ -1615,7 +1776,44 @@ namespace
     {
         std::map<std::string, std::string> r;
         r["num_cus"] = std::to_string(numCus);
-        if(contains(kGemmArches, arch))
+        if(contains(kGemmArches, arch) && gemmCostRule(arch))
+        {
+            // the "cost" body rule of rocke.dispatch.gemm.cf32 (the Python reference's
+            // gemm_cost_routes): the coefficients of every body of every route, and the x6
+            // recipe's native f32 route with its thresholds
+            r["gemm.rule"] = "cost";
+            for(auto const& rt : gemmRoutes(arch))
+            {
+                for(char const* b : rt.bodies)
+                {
+                    double a = 0, bk = 0;
+                    int    occ = 0;
+                    if(rocke_gemm_cf32_body_cost(b, rt.route, &a, &bk, &occ))
+                    {
+                        std::string const key
+                            = "gemm.cost." + std::string(rt.route) + "." + lowercase(b);
+                        r[key + ".a"]   = pyFloat(a);
+                        r[key + ".b"]   = pyFloat(bk);
+                        r[key + ".occ"] = pyFloat(double(occ));
+                    }
+                }
+            }
+            bool native = false;
+            for(char const* route : {"cf32", "x6"})
+            {
+                double const lim = rocke_gemm_cf32_native_first(arch.c_str(), route);
+                if(lim > 0)
+                {
+                    r["gemm.x6_gett32_first." + std::string(route)] = pyFloat(lim);
+                    native                                          = true;
+                }
+            }
+            if(native)
+            {
+                r["gemm.x6_admits_gett32"] = "1";
+            }
+        }
+        else if(contains(kGemmArches, arch))
         {
             // the thresholds of rocKE's emulated-f32 body rule (rocke.dispatch.gemm.cf32)
             r["gemm.cf32_sk_always_waves"] = pyFloat(ROCKE_GEMM_CF32_SK_ALWAYS_WAVES);
@@ -1643,6 +1841,18 @@ namespace
                 throw std::runtime_error("rreduce route " + std::to_string(i) + " of " + arch);
             }
             r[name.data()] = value.data();
+        }
+        // the tuned elementwise problems of the target: ewp.tuned.<hash> (class) and .key
+        int const ne = rocke_htaot_ewp_route_count(arch.c_str());
+        for(int i = 0; i < ne; ++i)
+        {
+            char const* name  = nullptr;
+            char const* value = nullptr;
+            if(!rocke_htaot_ewp_route(arch.c_str(), i, &name, &value))
+            {
+                throw std::runtime_error("ewp route " + std::to_string(i) + " of " + arch);
+            }
+            r[name] = value;
         }
         // the records the planner parses (rocke_rreduce_rule.hpp): a malformed one fails the
         // build instead of silently changing the reduction choice
@@ -1722,6 +1932,7 @@ namespace
         ewtDescriptors(ctx, descs);
         ewvDescriptors(ctx, descs);
         ewfDescriptors(ctx, descs);
+        ewpDescriptors(ctx, descs);
         gemmDescriptors(ctx, descs);
         gettPlanDescriptors(ctx, descs);
         dgettDescriptors(ctx, descs);
@@ -1863,6 +2074,7 @@ namespace
         bool                     list = false; // --list
         std::string              checkManifests;
         std::string              rreducePicks; // --rreduce-picks FILE
+        std::string              ewpPicks; // --ewp-picks FILE
     };
 
     [[noreturn]] void usage(char const* msg)
@@ -1875,7 +2087,8 @@ namespace
             "       [--compiler-id STR] [--rocke-version STR]\n"
             "       rocke_pack_builder --list --arch GFX [--arch GFX ...] [--out DIR]\n"
             "       [--check-manifests DIR] [--num-cus N]\n"
-            "       rocke_pack_builder --rreduce-picks FILE --arch GFX\n",
+            "       rocke_pack_builder --rreduce-picks FILE --arch GFX\n"
+            "       rocke_pack_builder --ewp-picks FILE --arch GFX\n",
             msg);
         std::exit(2);
     }
@@ -1921,6 +2134,8 @@ namespace
                 o.checkManifests = val();
             else if(a == "--rreduce-picks")
                 o.rreducePicks = val();
+            else if(a == "--ewp-picks")
+                o.ewpPicks = val();
             else
                 usage(("unknown argument " + a).c_str());
         }
@@ -1928,11 +2143,11 @@ namespace
         {
             usage("--check-manifests needs --list");
         }
-        if(!o.rreducePicks.empty())
+        if(!o.rreducePicks.empty() || !o.ewpPicks.empty())
         {
-            if(o.arches.size() != 1 || o.list)
+            if(o.arches.size() != 1 || o.list || (!o.rreducePicks.empty() && !o.ewpPicks.empty()))
             {
-                usage("--rreduce-picks takes one --arch and no --list");
+                usage("--rreduce-picks / --ewp-picks take one --arch and no --list");
             }
             return o;
         }
@@ -2266,11 +2481,150 @@ namespace
         return 0;
     }
 
+    // --ewp-picks FILE: the planner's tuned tiled elementwise choice (rocke_ewp_rule.hpp
+    // eChoose over the target's classes and tuned routes) for each problem of FILE, one canonical
+    // problem key per line (ewp_host.problem_key: "arity|a,b,c,d|extent:strides;..."). Prints one
+    // line per problem: "<kernel> <tuned|rule> <grid x>,<grid y>,<grid z> <name>=<value>,..." (the
+    // arguments sorted by name), "-" for none. rocKE's cross-check test compares them with
+    // ewp_host.choose and ewp_plan.
+    int runEwpPicks(Options const& o)
+    {
+        namespace er                  = hiptensor::rockebackend::ewprule;
+        auto const&             arch  = o.arches[0];
+        auto const              specs = ewpClasses(arch);
+        std::vector<er::EClass> classes;
+        for(size_t i = 0; i < specs.size(); ++i)
+        {
+            auto const& s         = specs[i];
+            char        name[256] = {0};
+            rocke_htaot_ewp_kernel_name(&s, name, sizeof name);
+            er::EClass c;
+            c.name  = name;
+            c.rank  = int64_t(i);
+            c.arity = s.arity;
+            c.a     = str(s.a);
+            c.b     = str(s.b);
+            c.c     = str(s.c);
+            c.d     = str(s.d);
+            c.kinds = str(s.kinds);
+            c.mode  = str(s.mode);
+            c.walk  = str(s.walk);
+            c.to    = s.to;
+            c.tt    = s.tt;
+            c.tw    = s.tw;
+            c.block = s.block;
+            c.tpc   = s.tpc;
+            c.vec   = rocke_htaot_ewp_vec(&s);
+            c.slots = ROCKE_HTAOT_EWP_SLOTS_B;
+            classes.push_back(c);
+        }
+        auto const    routes = routesFor(arch, o.numCus > 0 ? o.numCus : 256);
+        std::ifstream in(o.ewpPicks);
+        if(!in)
+        {
+            throw std::runtime_error("cannot read " + o.ewpPicks);
+        }
+        auto split = [](std::string const& t, char sep) {
+            std::vector<std::string> out;
+            size_t                   at = 0;
+            while(at <= t.size())
+            {
+                size_t const e = t.find(sep, at);
+                out.push_back(t.substr(at, e == std::string::npos ? std::string::npos : e - at));
+                if(e == std::string::npos)
+                {
+                    break;
+                }
+                at = e + 1;
+            }
+            return out;
+        };
+        std::string line;
+        while(std::getline(in, line))
+        {
+            if(!line.empty() && line.back() == '\r')
+            {
+                line.pop_back();
+            }
+            if(line.empty())
+            {
+                continue;
+            }
+            auto const parts = split(line, '|');
+            if(parts.size() != 3)
+            {
+                throw std::runtime_error("bad problem " + line);
+            }
+            int64_t const arity = std::stoll(parts[0]);
+            auto const    dt    = split(parts[1], ',');
+            if(dt.size() != 4)
+            {
+                throw std::runtime_error("bad data types in " + line);
+            }
+            std::array<std::string, 4> dts{dt[0], dt[1], dt[2], dt[3]};
+            std::vector<er::EMode>     dims;
+            for(auto const& m :
+                parts[2].empty() ? std::vector<std::string>{} : split(parts[2], ';'))
+            {
+                auto const es = split(m, ':');
+                if(es.size() != 2)
+                {
+                    throw std::runtime_error("bad mode " + m + " in " + line);
+                }
+                er::EMode mode;
+                mode.extent   = std::stoll(es[0]);
+                auto const st = split(es[1], ',');
+                if(int64_t(st.size()) != arity + 1)
+                {
+                    throw std::runtime_error("bad strides " + m + " in " + line);
+                }
+                for(size_t t = 0; t < st.size(); ++t)
+                {
+                    mode.stride[t] = std::stoll(st[t]);
+                }
+                dims.push_back(mode);
+            }
+            std::string const key   = er::eKey(arity, dts, dims);
+            std::string const route = "ewp.tuned." + er::eHex16(er::eFnv1a64(key));
+            std::string       tuned;
+            auto const        it = routes.find(route);
+            auto const        ik = routes.find(route + ".key");
+            if(it != routes.end() && ik != routes.end() && ik->second == key)
+            {
+                tuned = it->second;
+            }
+            er::ELaunch launch;
+            bool        isTuned = false;
+            int const   pick    = er::eChoose(classes, tuned, arity, dts, dims, launch, isTuned);
+            if(pick < 0)
+            {
+                std::printf("-\n");
+                continue;
+            }
+            std::string text = classes[size_t(pick)].name + (isTuned ? " tuned " : " rule ")
+                               + std::to_string(launch.grid[0]) + ","
+                               + std::to_string(launch.grid[1]) + ","
+                               + std::to_string(launch.grid[2]) + " ";
+            bool first = true;
+            for(auto const& [name, value] : launch.args)
+            {
+                text += (first ? "" : ",") + name + "=" + std::to_string(value);
+                first = false;
+            }
+            std::printf("%s\n", text.c_str());
+        }
+        return 0;
+    }
+
     int run(Options const& o)
     {
         if(!o.rreducePicks.empty())
         {
             return runRreducePicks(o);
+        }
+        if(!o.ewpPicks.empty())
+        {
+            return runEwpPicks(o);
         }
         if(o.list)
         {

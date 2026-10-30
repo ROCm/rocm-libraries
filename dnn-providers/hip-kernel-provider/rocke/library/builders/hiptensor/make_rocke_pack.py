@@ -37,7 +37,9 @@ Kernel families (attribute "family"):
     gemm     universal GEMM bodies with an f32 output (routes h16: f16 / bf16 operands;
              x3 / x4 / x6 / x9: f32 operands split into bf16 parts, the recipes of
              rocke.instances.common.gemm_prologue; cf32 (x6) and cf32x3 / cf32x4 / cf32x9:
-             complex f32 operands)
+             complex f32 operands); the bodies of each target (GEMM_BODIES: gfx950 the
+             DMA ring bodies, gfx942 the register-staged bodies of a set per route), each
+             non-batched and batched, plus the 64-bit-address form of one body per route
     gett64   f64 / complex f64 strided batched GEMM with runtime sizes
     gett32   the same strided GEMM with f32 / complex f32 words (f32 products, f32
              accumulation): the native route of f32 contractions
@@ -60,6 +62,12 @@ Kernel families (attribute "family"):
              same layout (no index arithmetic, two 16-byte vectors per thread, streaming
              accesses; kernels.common.hiptensor_aot.ewf), for the all-16-bit rows on gfx942 and
              gfx950
+    ewp      the tuned tiled elementwise classes of permutations and elementwise operations whose
+             inputs are not all laid out like the output (16-byte accesses on both sides of an
+             LDS tile, element transposition or whole shared-mode atoms;
+             kernels.common.hiptensor_aot.ewp), the palette and tuned problems of
+             kernels.common.hiptensor_aot.ewp_host, on gfx942 and gfx950; attribute rank: the
+             class's place in the palette (the untuned choice's order)
 
 The backend's JIT (HIPTENSOR_ENABLE_ROCKE_JIT) needs nothing from this script: hipTensor builds
 the problem-specialized kernels (kernels.common.hiptensor_aot.jit_ew) at run time with their C++
@@ -67,9 +75,10 @@ twins, which it links.
 
 The route table carries the tuning constants of rocKE's body rules, per problem of the tuned
 and AOT GETT route tables ``gett.tuned.<hash>`` (the launch record) and ``gett.tuned.<hash>.key``
-(the canonical problem, see :func:`gett_problem_key`), and per tuned reduction problem
+(the canonical problem, see :func:`gett_problem_key`), per tuned reduction problem
 ``reduce.tuned.<hash>`` (the knobs) and ``reduce.tuned.<hash>.key`` (the canonical problem,
-``rreduce_host.problem_key``). With --select-models, it also carries the kernel selection models
+``rreduce_host.problem_key``), and per tuned elementwise problem ``ewp.tuned.<hash>`` (the kernel
+name of its class) and ``ewp.tuned.<hash>.key`` (``ewp_host.problem_key``). With --select-models, it also carries the kernel selection models
 of the target, ``select.model.<cell>`` (``<dir>/<arch>/<cell>.model``, written by the selection
 training flow; see rocke_select.hpp for the format).
 
@@ -224,23 +233,66 @@ EW_ROWS_C2_MIXED = [
 ]
 REDUCE_ROWS = [("f16", "f16"), ("bf16", "bf16"), ("f32", "f32"), ("f64", "f64")]
 
+# The GEMM routes (pack order) and, per target, the bodies of each route
+# (rocke.dispatch.gemm.cf32.cf32_body names).
+GEMM_ROUTES = ("h16", "x6", "cf32", "x3", "x4", "x9", "cf32x3", "cf32x4", "cf32x9")
+# gfx942: the register-staged bodies of rocke.dispatch.gemm.cf32.CF32_ROUTE_BODIES (x3 / x4 / x9
+# on x6's, cf32x3 / cf32x4 / cf32x9 on cf32's)
+_G942_H16 = (
+    "G64x64x128L3",
+    "G128x128x128L3",
+    "G64x32x128U",
+    "G192x128x64L3",
+    "G256x256x64L3",
+    "G32x32x128U",
+    "G256x224x64L3",
+)
+_G942_X6 = (
+    "G64x64x128L3",
+    "G32x32x128L3",
+    "G128x128x128L3",
+    "G192x128x64L1S3",
+    "G256x224x64L1",
+    "G128x64x64",
+    "G64x32x128U",
+)
+_G942_CF32 = (
+    "G64x64x128L3",
+    "G32x32x128L3",
+    "G128x128x128L3",
+    "G192x128x64US3",
+    "G256x224x64L1",
+    "G128x64x64U",
+    "G64x32x128U",
+)
 GEMM_BODIES = {
-    # route: bodies
-    "h16": ("RIW", "RIW_SK", "C3", "Q3_SK"),
-    "x6": ("RIW", "RIW_SK", "C3"),
-    "cf32": ("RIW", "RIW_SK", "Q3_SK"),
-    # the other f32 recipes (HIPTENSOR_ROCKE_F32_RECIPE), on the bodies of x6 / cf32
-    "x3": ("RIW", "RIW_SK", "C3"),
-    "x4": ("RIW", "RIW_SK", "C3"),
-    "x9": ("RIW", "RIW_SK", "C3"),
-    "cf32x3": ("RIW", "RIW_SK", "Q3_SK"),
-    "cf32x4": ("RIW", "RIW_SK", "Q3_SK"),
-    "cf32x9": ("RIW", "RIW_SK", "Q3_SK"),
+    "gfx950": {
+        # route: bodies
+        "h16": ("RIW", "RIW_SK", "C3", "Q3_SK"),
+        "x6": ("RIW", "RIW_SK", "C3"),
+        "cf32": ("RIW", "RIW_SK", "Q3_SK"),
+        # the other f32 recipes (HIPTENSOR_ROCKE_F32_RECIPE), on the bodies of x6 / cf32
+        "x3": ("RIW", "RIW_SK", "C3"),
+        "x4": ("RIW", "RIW_SK", "C3"),
+        "x9": ("RIW", "RIW_SK", "C3"),
+        "cf32x3": ("RIW", "RIW_SK", "Q3_SK"),
+        "cf32x4": ("RIW", "RIW_SK", "Q3_SK"),
+        "cf32x9": ("RIW", "RIW_SK", "Q3_SK"),
+    },
+    "gfx942": {
+        r: _G942_H16 if r == "h16" else _G942_CF32 if r.startswith("cf32") else _G942_X6
+        for r in GEMM_ROUTES
+    },
 }
-GEMM_ARCHES = ("gfx950",)
-# The body of the 64-bit-address GEMM kernels (rocke.dispatch.gemm.cf32 picks it for operands
-# past the DMA buffer range: 64-bit tile origins need the non-persistent grid).
-GEMM_WIDE_BODY = "RIW"
+GEMM_ARCHES = tuple(GEMM_BODIES)
+# The body of the 64-bit-address GEMM kernels of each target, for the h16 route and the f32 routes
+# (rocke.dispatch.gemm.cf32.CF32_WIDE_BODY: picked for operands past the 32-bit offsets of the
+# bodies; gfx950: 64-bit tile origins need the non-persistent grid; gfx942: wide_addr on a
+# register-staged body, 64-bit batch and tile origins).
+GEMM_WIDE_BODY = {
+    "gfx950": {"h16": "RIW", "f32": "RIW"},
+    "gfx942": {"h16": "G256x224x64L3", "f32": "G256x224x64L1"},
+}
 GETT64_CLASS_ARCHES = ("gfx90a", "gfx942", "gfx950")
 # The native f32 strided GEMM (gett32): the pack targets whose MMA catalog has the f32 atom, with
 # the shape classes of the f64 GEMM's tuned configurations.
@@ -248,14 +300,52 @@ GETT32_CLASS_ARCHES = ("gfx942", "gfx950")
 # The direct GETT (every target with MFMA) and the ring GETT classes (gfx950: ds_read_b64_tr_b16).
 DGETT_ARCHES = ("gfx90a", "gfx942", "gfx950")
 RGETT_ARCHES = ("gfx950",)
-# The thresholds of rocKE's emulated-f32 body rule (rocke.dispatch.gemm.cf32), shipped in the
-# route table so the C++ runtime picks the body the rocKE rule picks.
+# The constants of rocKE's emulated-f32 body rule of each target (rocke.dispatch.gemm.cf32
+# CF32_BODY_RULE), shipped in the route table so the C++ runtime picks the body the rocKE rule
+# picks: "waves" (gfx950) the thresholds below; "cost" (gfx942) the entries of
+# gemm_cost_routes().
 GEMM_ROUTE_KEYS = (
     "CF32_SK_ALWAYS_WAVES",
     "CF32_SK_MAX_WAVES",
     "CF32_SK_MAX_TAIL",
     "CF32_SMALL_MAX_WAVES",
 )
+
+
+def _wide_body(arch, route):
+    return GEMM_WIDE_BODY[arch]["h16" if route == "h16" else "f32"]
+
+
+def gemm_split_mode(arch, route):
+    """The operand split of an f32 route's prologue on ``arch`` (rocke.dispatch.gemm.cf32
+    split_mode; "rne" on trees without it)."""
+    from rocke.dispatch.gemm import cf32 as rcf32
+
+    f = getattr(rcf32, "split_mode", None)
+    return "rne" if f is None or route == "h16" else f(arch, route)
+
+
+def gemm_cost_routes(arch):
+    """The route entries of the "cost" body rule of ``arch`` (rocke.dispatch.gemm.cf32):
+    ``gemm.rule`` = ``cost``; per route and body of the route ``gemm.cost.<route>.<body>.a`` /
+    ``.b`` / ``.occ`` (gemm_body_coef, body names in lowercase); the x6 recipe's native f32 route
+    (CF32_NATIVE_FIRST): ``gemm.x6_admits_gett32`` = 1 and its thresholds
+    ``gemm.x6_gett32_first.<route>`` (real multiply-adds; routes x6 and cf32)."""
+    from rocke.dispatch.gemm import cf32 as rcf32
+
+    r = {"gemm.rule": "cost"}
+    for route in GEMM_ROUTES:
+        for b in GEMM_BODIES[arch].get(route, ()):
+            coef = rcf32.gemm_body_coef(b, route)
+            if coef is not None:
+                for k, v in zip(("a", "b", "occ"), coef):
+                    r[f"gemm.cost.{route}.{b.lower()}.{k}"] = repr(float(v))
+    native = rcf32.CF32_NATIVE_FIRST.get(arch, {})
+    if native:
+        r["gemm.x6_admits_gett32"] = "1"
+        for route, lim in sorted(native.items()):
+            r[f"gemm.x6_gett32_first.{route}"] = repr(float(lim))
+    return r
 
 
 def rocke_features():
@@ -308,7 +398,13 @@ def rocke_features():
     try:
         from rocke.instances.common import gett_f64 as g
 
-        for name in ("GETT_DTYPES", "f32_atom", "runtime_template", "TUNED_CONFIGS"):
+        for name in (
+            "GETT_DTYPES",
+            "f32_atom",
+            "runtime_template",
+            "TUNED_CONFIGS_F32",
+            "tuned_configs",
+        ):
             getattr(g, name)
         out["gett32"] = ""
     except (ImportError, AttributeError) as e:
@@ -353,6 +449,16 @@ def rocke_features():
         out["ewf"] = ""
     except (ImportError, AttributeError) as e:
         out["ewf"] = f"no flat elementwise kernel ({e})"
+    try:
+        from kernels.common.hiptensor_aot import ewp, ewp_host
+
+        for name in ("EwpSpec", "build_ewp", "EWP_ABI", "SLOTS_B"):
+            getattr(ewp, name)
+        for name in ("pack_classes", "routes"):
+            getattr(ewp_host, name)
+        out["ewp"] = ""
+    except (ImportError, AttributeError) as e:
+        out["ewp"] = f"no tuned tiled elementwise classes ({e})"
     try:
         from kernels.common.hiptensor_aot import rreduce, rreduce_host
 
@@ -451,8 +557,18 @@ def kernel_descriptors(arch, num_cus):
         out.extend(
             ("ewf", asdict(c)) for c in ewf_classes(ew_params(False, mixed=False), arch)
         )
+    if not features["ewp"]:
+        # the tuned tiled elementwise classes of the target (palette, then tuned problems)
+        from dataclasses import asdict
+
+        from kernels.common.hiptensor_aot import ewp_host
+
+        out.extend(("ewp", asdict(s)) for s in ewp_host.pack_classes(arch))
     if arch in GEMM_ARCHES and not features["gemm"]:
-        for route, bodies in GEMM_BODIES.items():
+        for route in GEMM_ROUTES:
+            bodies = GEMM_BODIES[arch].get(route, ())
+            if not bodies:
+                continue
             dts = ("fp16", "bf16") if route == "h16" else ("bf16",)
             for dt in dts:
                 for body in bodies:
@@ -471,7 +587,7 @@ def kernel_descriptors(arch, num_cus):
                         dict(
                             route=route,
                             dtype=dt,
-                            body=GEMM_WIDE_BODY,
+                            body=_wide_body(arch, route),
                             batched=False,
                             wide=True,
                         ),
@@ -513,13 +629,12 @@ def kernel_descriptors(arch, num_cus):
     ):
         if arch not in arches or features[family]:
             continue
-        from rocke.instances.common.gett_f64 import TUNED_CONFIGS
+        from rocke.instances.common.gett_f64 import tuned_configs
 
         for cplx in (False, True):
             kind = "complex" if cplx else "real"
-            classes = sorted(
-                c for (a, k, c) in TUNED_CONFIGS if a == arch and k == kind
-            )
+            dtype = "f32" if family == "gett32" else "f64"
+            classes = sorted(tuned_configs(arch, kind, dtype))
             for cls in classes + ["default"]:
                 for dclass in ("m", "n", "x"):
                     for bilinear in (False, True):
@@ -537,6 +652,12 @@ def kernel_descriptors(arch, num_cus):
                                 )
                             )
     return out
+
+
+def _rcf32():
+    from rocke.dispatch.gemm import cf32
+
+    return cf32
 
 
 def _gemm_spec(params, arch):
@@ -579,7 +700,7 @@ def _gemm_spec(params, arch):
         # real routes name their recipe; complex routes are cf32 (x6) or cf32<recipe>
         cplx = route.startswith("cf32")
         recipe = (route[len("cf32") :] or "x6") if cplx else route
-        pro = Prologue(
+        pro = dict(
             src="f32",
             recipe=recipe,
             out_f32=True,
@@ -587,6 +708,11 @@ def _gemm_spec(params, arch):
             cplx_b=cplx,
             psub=True,
         )
+        # the target's operand split of the route (a Prologue field of newer trees)
+        sm = gemm_split_mode(arch, route)
+        if sm != "rne":
+            pro["split_mode"] = sm
+        pro = Prologue(**pro)
     attach_prologue(spec, pro)
     _ = replace
     return spec, "ok"
@@ -597,12 +723,12 @@ def _gett64_spec(params, arch, num_cus, dtype="f64"):
     from dataclasses import replace
 
     from rocke.instances.common.gett_f64 import (
-        TUNED_CONFIGS,
         _with_k_block,
         arch_spec,
         gemm_problem,
         is_valid_spec,
         runtime_template,
+        tuned_configs,
     )
 
     cplx = params["cplx"]
@@ -626,7 +752,7 @@ def _gett64_spec(params, arch, num_cus, dtype="f64"):
     cfg = (
         {}
         if params["cls"] == "default"
-        else dict(TUNED_CONFIGS[(arch, kind, params["cls"])])
+        else dict(tuned_configs(arch, kind, dtype)[params["cls"]])
     )
     cfg.pop("split_k", None)
     if dtype == "f32":
@@ -899,6 +1025,18 @@ def build_kernel(family, params, arch, num_cus):
             return None, why
         t, tr = spec.tile, spec.trait
         fb, pb = streamk_workspace_bytes(spec)
+        try:
+            from rocke.dispatch.gemm.cf32 import gemm_launch_limits
+
+            limits = gemm_launch_limits(spec)
+        except ImportError:  # an older rocKE tree: the ring bodies' limits
+            limits = dict(
+                limit_operand_bytes=DTL_BUFFER_NUM_RECORDS,
+                limit_c_elements=(1 << 31) - 1,
+                limit_tile_operand_bytes=DTL_BUFFER_NUM_RECORDS,
+                limit_c_tile_elements=1 << 31,
+                limit_grid_yz=65535,
+            )
         attrs = dict(
             family="gemm",
             abi="hiptensor-aot-gemm/v1",
@@ -915,16 +1053,20 @@ def build_kernel(family, params, arch, num_cus):
             sk_flags_bytes=fb,
             sk_part_bytes=pb,
             wide=int(bool(params.get("wide", False))),
-            # capability: launched on extents padded to tile multiples; the operands within
-            # the DMA buffer range, C within the i32 element offsets, rows of tiles on grid y.
-            # The 64-bit-address body: only one tile's operand rows within the DMA buffer
-            # range and one tile's C rows within the i32 element offsets.
-            limit_operand_bytes=DTL_BUFFER_NUM_RECORDS,
-            limit_c_elements=(1 << 31) - 1,
-            limit_tile_operand_bytes=DTL_BUFFER_NUM_RECORDS,
-            limit_c_tile_elements=1 << 31,
-            limit_grid_yz=65535,
+            # capability (rocke.dispatch.gemm.cf32.gemm_launch_limits): launched on extents
+            # padded to tile multiples; the operands (all batches) within the 32-bit offsets of
+            # the body (the DMA buffer range of the ring bodies), C within the i32 element
+            # offsets, rows of tiles on grid y. The 64-bit-address body: only one tile's operand
+            # rows within the DMA buffer range and one tile's C rows within the i32 element
+            # offsets.
+            **limits,
         )
+        if arch in getattr(_rcf32(), "CF32_SPLIT_MODE", {}):
+            # the target's operand split of the route ("none": h16, no split)
+            route = params["route"]
+            attrs["split_mode"] = (
+                "none" if route == "h16" else gemm_split_mode(arch, route)
+            )
         return build_universal_gemm(spec, arch), attrs
     if family == "ewv":
         from kernels.common.hiptensor_aot.ew import EwSpec
@@ -974,6 +1116,38 @@ def build_kernel(family, params, arch, num_cus):
             limit_index=(1 << 31) - 1,
         )
         return build_ewf(spec), attrs
+    if family == "ewp":
+        from kernels.common.hiptensor_aot import ewp as ep
+        from kernels.common.hiptensor_aot import ewp_host
+
+        spec = ep.EwpSpec(**params)
+        attrs = dict(
+            family="ewp",
+            abi=ep.EWP_ABI,
+            arity=spec.arity,
+            a=spec.a,
+            b=spec.b or "",
+            c=spec.c or "",
+            d=spec.d,
+            kinds=spec.kinds,
+            mode=spec.mode,
+            to=spec.to,
+            tt=spec.tt,
+            tw=spec.tw,
+            block=spec.block,
+            nt=spec.nt,
+            swz=spec.swz,
+            swsh=spec.swsh,
+            walk=spec.walk,
+            tpc=spec.tpc,
+            ilp=spec.ilp,
+            vec=spec.vec,
+            rank=ewp_host.pack_classes(arch).index(spec),
+            # capability: batch digit slots, i32 element offsets
+            slots_b=ep.SLOTS_B,
+            limit_index=(1 << 31) - 1,
+        )
+        return ep.build_ewp(spec), attrs
     if family == "ewt":
         from kernels.common.hiptensor_aot import ewt as et
 
@@ -1510,8 +1684,11 @@ def routes_for(arch, num_cus):
     if arch in GEMM_ARCHES and not features["gemm"]:
         from rocke.dispatch.gemm import cf32 as rcf32
 
-        for k in GEMM_ROUTE_KEYS:
-            r[f"gemm.{k.lower()}"] = repr(float(getattr(rcf32, k)))
+        if getattr(rcf32, "CF32_BODY_RULE", {}).get(arch, "waves") == "cost":
+            r.update(gemm_cost_routes(arch))
+        else:
+            for k in GEMM_ROUTE_KEYS:
+                r[f"gemm.{k.lower()}"] = repr(float(getattr(rcf32, k)))
     if arch in GETT64_CLASS_ARCHES and not features["gett64"]:
         from rocke.instances.common import gett_f64 as g
 
@@ -1521,6 +1698,11 @@ def routes_for(arch, num_cus):
         from kernels.common.hiptensor_aot import rreduce_host
 
         r.update(rreduce_host.routes(arch))
+    if not features["ewp"]:
+        # the tuned elementwise problems of the target: ewp.tuned.<hash> (class) and .key
+        from kernels.common.hiptensor_aot import ewp_host
+
+        r.update(ewp_host.routes(arch))
     return r
 
 

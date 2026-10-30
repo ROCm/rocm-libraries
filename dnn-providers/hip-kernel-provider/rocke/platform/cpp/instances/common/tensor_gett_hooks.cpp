@@ -144,6 +144,17 @@ std::vector<std::pair<std::string, std::string>> trait_fields(const rocke_gemm_t
     f.push_back({"mfma_order", I(t.mfma_order)});
     f.push_back({"rve_pad", I(t.rve_pad)});
     f.push_back({"dtl_tight_ragged_only", rb(t.dtl_tight_ragged_only)});
+    f.push_back({"vgpr_prefetch", I(t.vgpr_prefetch)});
+    f.push_back({"vgpr_prefetch_depth", I(t.vgpr_prefetch_depth)});
+    f.push_back({"vp_unroll", I(t.vp_unroll)});
+    f.push_back({"vp_late_reads", I(t.vp_late_reads)});
+    f.push_back({"vp_release_atoms", I(t.vp_release_atoms)});
+    f.push_back({"vp_tail_pack", I(t.vp_tail_pack)});
+    f.push_back({"vp_pair_reads", I(t.vp_pair_reads)});
+    f.push_back({"vp_mfma_first", I(t.vp_mfma_first)});
+    f.push_back({"split_k_serial", I(t.split_k_serial)});
+    f.push_back({"split_k_aligned", rb(t.split_k_aligned)});
+    f.push_back({"lds_swizzle_l", I(t.lds_swizzle_l)});
     return f;
 }
 

@@ -88,8 +88,13 @@ extern "C" {
  *    prologue / GETT hook pointers), which changes their sizeof and layout.
  * 5: rocke_gemm_trait_spec_t gained the hb_sched slot-schedule levers, the MFMA
  *    issue order, rve_pad and dtl_tight_ragged_only at its end, which changes the
- *    sizeof of it and of rocke_gemm_universal_spec_t. */
-#define ROCKE_ABI_VERSION 5
+ *    sizeof of it and of rocke_gemm_universal_spec_t.
+ * 6: rocke_gemm_trait_spec_t gained the register-staged prefetch body levers
+ *    (vgpr_prefetch and its vp_* main-loop levers), split_k_aligned,
+ *    split_k_serial and lds_swizzle_l at its end, which changes the sizeof of
+ *    it and of rocke_gemm_universal_spec_t; rocke_gemm_prologue_t gained
+ *    split_mode at its end. */
+#define ROCKE_ABI_VERSION 6
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them. */

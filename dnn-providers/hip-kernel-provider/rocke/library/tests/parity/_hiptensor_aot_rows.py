@@ -285,3 +285,186 @@ def ewf_rows():
     """(row, nt) of the flat kernels: every plain row (the API's real 32-bit rows) without and
     with streaming accesses (the pack has the streaming classes on gfx942 / gfx950)."""
     return [(p, nt) for nt in (False, True) for p in plain_rows()]
+
+
+#: Knob coverage of the tuned tiled elementwise kernel (ewp): every mode, kind mix, swizzle,
+#: walk, tiles per CTA, phase-2 grouping, streaming bits and element size, beside the classes of
+#: the packs. The C emitter lists the same specs in the same order.
+EWP_COVER = [
+    dict(
+        arity=1,
+        a="f16",
+        d="f16",
+        kinds="T",
+        mode="t",
+        to=64,
+        tt=64,
+        block=256,
+        nt=3,
+        swz=16,
+        swsh=6,
+    ),
+    dict(arity=1, a="f32", d="f32", kinds="T", mode="t", to=32, tt=32, block=128),
+    dict(
+        arity=1,
+        a="f64",
+        d="f64",
+        kinds="T",
+        mode="t",
+        to=16,
+        tt=16,
+        block=64,
+        nt=1,
+        walk="t",
+    ),
+    dict(
+        arity=1,
+        a="f16",
+        d="f16",
+        kinds="T",
+        mode="a",
+        to=8,
+        tt=8,
+        tw=8,
+        block=256,
+        nt=3,
+        swz=2,
+        swsh=6,
+    ),
+    dict(
+        arity=2,
+        a="f16",
+        c="f16",
+        d="f16",
+        kinds="TV",
+        mode="t",
+        to=64,
+        tt=64,
+        block=128,
+        nt=3,
+        swz=16,
+        swsh=6,
+        walk="t",
+        tpc=2,
+        ilp=1,
+    ),
+    dict(
+        arity=2,
+        a="bf16",
+        c="bf16",
+        d="bf16",
+        kinds="VT",
+        mode="t",
+        to=32,
+        tt=64,
+        block=64,
+        nt=2,
+        ilp=2,
+    ),
+    dict(
+        arity=2,
+        a="f32",
+        c="f32",
+        d="f32",
+        kinds="TT",
+        mode="t",
+        to=32,
+        tt=32,
+        block=256,
+        tpc=4,
+    ),
+    dict(
+        arity=2,
+        a="f64",
+        c="f64",
+        d="f64",
+        kinds="TV",
+        mode="a",
+        to=4,
+        tt=8,
+        tw=1,
+        block=64,
+    ),
+    dict(
+        arity=3,
+        a="f16",
+        b="f16",
+        c="f16",
+        d="f16",
+        kinds="TTV",
+        mode="t",
+        to=64,
+        tt=64,
+        block=128,
+        nt=3,
+        swz=16,
+        swsh=6,
+        ilp=4,
+    ),
+    dict(
+        arity=3,
+        a="f32",
+        b="f32",
+        c="f32",
+        d="f32",
+        kinds="VVT",
+        mode="t",
+        to=16,
+        tt=32,
+        block=64,
+    ),
+    dict(
+        arity=3,
+        a="f32",
+        b="f32",
+        c="f32",
+        d="f32",
+        kinds="TVT",
+        mode="a",
+        to=2,
+        tt=4,
+        tw=4,
+        block=128,
+        nt=3,
+        tpc=8,
+        ilp=8,
+    ),
+    dict(
+        arity=2,
+        a="bf16",
+        c="bf16",
+        d="bf16",
+        kinds="TV",
+        mode="t",
+        to=256,
+        tt=64,
+        block=256,
+        nt=3,
+        swz=16,
+        swsh=8,
+        ilp=4,
+    ),
+]
+
+
+def ewp_rows():
+    """The ewp specs of the parity family: :data:`EWP_COVER`, then the classes of the gfx950 and
+    gfx942 packs (``ewp_host.pack_classes``) not listed before (by kernel name)."""
+    from dataclasses import asdict
+
+    from kernels.common.hiptensor_aot import ewp_host
+    from kernels.common.hiptensor_aot.ewp import EwpSpec
+
+    out, seen = [], set()
+    for d in EWP_COVER:
+        n = EwpSpec(**d).kernel_name()
+        if n not in seen:
+            seen.add(n)
+            out.append(dict(d))
+    for arch in ("gfx950", "gfx942"):
+        for s in ewp_host.pack_classes(arch):
+            n = s.kernel_name()
+            if n not in seen:
+                seen.add(n)
+                out.append(asdict(s))
+    return out

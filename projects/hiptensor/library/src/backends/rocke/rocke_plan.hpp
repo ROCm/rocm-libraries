@@ -96,6 +96,16 @@ namespace hiptensor
 
         char const* f32RecipeName(F32Recipe recipe);
 
+        // The recipe of a contraction on `arch` when HIPTENSOR_ROCKE_F32_RECIPE is unset, empty or
+        // not a recipe name: x6 on gfx950 (f32 accuracy class; its GEMM on bf16 parts is faster
+        // than the native f32 strided GEMM there), native on the other targets. On gfx942 x6 runs
+        // on the GEMM route of truncated bf16 parts (less accurate than native) and also lists the
+        // native candidates, so native, never the less accurate one, stays the default; gfx90a has
+        // no x6 GEMM route: x6 would run on the direct GETT or the f64 route, which the f64 route
+        // matches or beats in both speed and accuracy. Never a default that is both slower and
+        // less accurate than another recipe; re-measure a target's entry when its routes change.
+        F32Recipe defaultF32Recipe(std::string const& arch);
+
         // Parses a recipe name (native, x3, x4, x6, x9, f64); false for any other text.
         bool parseF32Recipe(std::string const& text, F32Recipe& recipe);
 
@@ -139,7 +149,7 @@ namespace hiptensor
             bool jitMode = false;
             // The f32 recipe that decided the routes of a contraction, when it is not x6: its
             // candidates are ranked by the models of the selection cells <cell>.<tag> (the packs
-            // have them for the default recipe, native), else by the static order.
+            // have them for the native recipe), else by the static order.
             std::string selectTag;
         };
 
@@ -176,7 +186,7 @@ namespace hiptensor
             // elementwise operations: no flat kernel (HIPTENSOR_ROCKE_DISABLE_TUNED).
             bool disableTuned = false;
             // Contractions of f32 / complex f32 data with the 32F / C32F compute type: the recipe
-            // (HIPTENSOR_ROCKE_F32_RECIPE; native by default).
+            // (HIPTENSOR_ROCKE_F32_RECIPE, else the target's defaultF32Recipe; the backend sets it).
             F32Recipe f32Recipe = F32Recipe::Native;
             // Contractions the GETT route tables do not hold: the JitGett candidate of rocKE's
             // tensor GETT planner (plans with HIPTENSOR_JIT_MODE_DEFAULT in a library built with

@@ -499,6 +499,23 @@ std::vector<std::pair<std::string, FieldValue>> trait_fields(const Trait& t)
 std::string trait_json(const Trait& t)
 {
     std::vector<std::pair<std::string, FieldValue>> f = trait_fields(t);
+    /* TraitSpec fields added after the first tensor GETT release are hashed only
+     * when set (Python tensor.gett _GETT_LATE_TRAIT_FIELDS): every earlier GETT
+     * spec keeps its kernel name */
+    {
+        static const char* const late[] = {"lds_swizzle_l"};
+        std::vector<std::pair<std::string, FieldValue>> d = trait_fields(Trait{});
+        std::vector<std::pair<std::string, FieldValue>> keep;
+        for(size_t i = 0; i < f.size(); ++i)
+        {
+            bool drop = false;
+            for(const char* l : late)
+                drop = drop || (f[i].first == l && field_eq(f[i].second, d[i].second));
+            if(!drop)
+                keep.push_back(f[i]);
+        }
+        f.swap(keep);
+    }
     std::sort(f.begin(), f.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
     std::string o = "{";
     for(size_t i = 0; i < f.size(); ++i)

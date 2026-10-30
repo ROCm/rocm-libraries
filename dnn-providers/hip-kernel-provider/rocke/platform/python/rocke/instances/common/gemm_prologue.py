@@ -160,6 +160,25 @@ class Prologue:
     # AGPRs through the compiler's own copy, whose MFMA hazard wait the compiler
     # inserts (the direct form gave wrong stream-K tiles on the device).
     agpr_out: bool = False
+    # ``split_mode`` (src="f32", bf16 compute): how the split rounds each f32
+    # part to bf16. "rne" (default): round to nearest even (the compiler's
+    # f32 -> bf16 conversion; gfx950 has v_cvt_pk_bf16_f32, gfx942 expands it
+    # to a NaN-guarded integer sequence per element). "trunc": each part is the
+    # f32 with its low 16 bits cleared (one v_and per element; the parts of a
+    # pair packed by one v_perm), the residual x - part exact; P truncated
+    # parts keep 8 P significant bits (three: all 24, an exact split), the
+    # omitted products of x3 / x6 are at most 4x the RNE ones (|r1| < 2^-7 |x|
+    # instead of 2^-8). "rnef": round to nearest even by the integer sequence
+    # (x + 0x7FFF + bit 16) & 0xFFFF0000, skipped for Inf / NaN words
+    # ((x & 0x7FFFFFFF) >= 0x7F800000: a select instead of the compiler's
+    # quieting sequence). In both modes a NaN whose payload is only in the low
+    # half becomes an Inf part while the residual x - part is NaN, so the
+    # NaN still reaches the output; with one part it would not, so both need
+    # a recipe of >= 2 parts (no cvt). trunc never overflows (|part| <= |x|);
+    # rnef, like rne, rounds |x| >= 0x7F7F8000 to an Inf part (the residual
+    # is then -+Inf: the output is NaN) unless ``cap``. bf16 compute only
+    # (refused for an f16 storage type). Python only.
+    split_mode: str = "rne"
 
     def check(self) -> None:
         if self.src not in ("same", "f32"):
@@ -187,6 +206,13 @@ class Prologue:
             self.src != "f32" or self.stage != "lds" or self.split_at != "use"
         ):
             raise ValueError("cplx_b needs src='f32', stage='lds', split_at='use'")
+        if self.split_mode not in ("rne", "trunc", "rnef"):
+            raise ValueError(f"prologue split_mode {self.split_mode!r}")
+        if self.split_mode != "rne" and (self.src != "f32" or self.stage != "lds"):
+            raise ValueError("split_mode trunc / rnef needs src='f32', stage='lds'")
+        if self.split_mode != "rne" and self.parts < 2:
+            # one part: a low-payload NaN would become a finite / Inf part
+            raise ValueError("split_mode trunc / rnef needs a recipe with >= 2 parts")
         if self.epi not in ("", "alpha", "bilinear"):
             raise ValueError(f"prologue epi {self.epi!r}")
         if self.epi and not self.out_f32:
@@ -239,6 +265,8 @@ class Prologue:
             s += "_e" + ("a" if self.epi == "alpha" else "ab")
         if self.agpr_out:
             s += "_ao"
+        if self.split_mode != "rne":
+            s += "_sm" + ("t" if self.split_mode == "trunc" else "f")
         return s
 
 
@@ -364,6 +392,12 @@ class PrologueEmitter:
         """``<n x f32>`` -> ``parts`` fragments of the compute type (RNE)."""
         b = self.b
         P = self.pro.parts
+        if self.pro.split_mode != "rne":
+            if self.compute != BF16 or x.type.count % 2:
+                raise ValueError(
+                    "split_mode trunc / rnef needs bf16 compute and even fragments"
+                )
+            return self._split_bits(x)
         hi_src = x
         if self.pro.cap and self.compute == BF16:
             n = x.type.count
@@ -378,6 +412,46 @@ class PrologueEmitter:
         for _p in range(1, P):
             r = self._sub(r, self._to_f32_vec(parts[-1]))
             parts.append(b.vec_cast_f32_to(r, self.compute))
+        return parts
+
+    def _split_bits(self, x: Value) -> List[Value]:
+        """``split_mode`` "trunc" / "rnef": the bf16 parts from the f32 bits
+        (each part's f32 value is its masked word: no widening back)."""
+        b = self.b
+        P = self.pro.parts
+        n = x.type.count
+        hi_src = x
+        if self.pro.cap:
+            sat = b.const_f32(_BF16_SAT)
+            nsat = b.const_f32(-_BF16_SAT)
+            hi_src = b.vec_pack(
+                [b.fmax(b.fmin(b.vec_extract(x, i), sat), nsat) for i in range(n)],
+                F32,
+            )
+        chi = b.const_i32(-65536)  # 0xFFFF0000
+        c16 = b.const_i32(16)
+        parts: List[Value] = []
+        r = x
+        for p_ in range(P):
+            src = hi_src if p_ == 0 else r
+            w = b.vec_bitcast(src, VectorType(I32, n))
+            hs = []
+            for i in range(n):
+                d = b.vec_extract(w, i)
+                if self.pro.split_mode == "rnef":
+                    lsb = b.land(b.lshr(d, c16), b.const_i32(1))
+                    rnd = b.add(b.add(d, lsb), b.const_i32(0x7FFF))
+                    # Inf / NaN words keep their bits (no carry into the sign)
+                    spec_ = b.cmp_ge(
+                        b.land(d, b.const_i32(0x7FFFFFFF)), b.const_i32(0x7F800000)
+                    )
+                    d = b.select(spec_, d, rnd)
+                hs.append(b.land(d, chi))
+            pk = [b.lor(b.lshr(hs[i], c16), hs[i + 1]) for i in range(0, n, 2)]
+            parts.append(b.vec_bitcast(b.vec_pack(pk, I32), VectorType(BF16, n)))
+            if p_ < P - 1:
+                hf = b.vec_pack([b.bitcast(h, F32) for h in hs], F32)
+                r = self._sub(r, hf)
         return parts
 
     def _sub(self, x: Value, y: Value) -> Value:

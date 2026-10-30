@@ -313,6 +313,8 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     # hipTensor's tuned reduction classes: the class identity (mode, data types, operator)
     "kernels.common.hiptensor_aot.rreduce.RreduceSpec": ("a", "d", "mode", "op"),
     "kernels.common.hiptensor_aot.rreduce.RreduceFinalSpec": ("a", "d", "op"),
+    # hipTensor's tuned tiled elementwise classes: the arity and the data types of A and D
+    "kernels.common.hiptensor_aot.ewp.EwpSpec": ("a", "arity", "d"),
     "kernels.gfx950.hiptensor_mono.persistent_contraction.OperandPackSpec": ("plan",),
     "kernels.gfx950.hiptensor_mono.persistent_contraction.PersistentContractionKnobs": (),
     "kernels.gfx950.hiptensor_mono.persistent_contraction.PersistentContractionSpec": (

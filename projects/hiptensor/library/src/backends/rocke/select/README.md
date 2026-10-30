@@ -20,8 +20,8 @@ tools/train_select.py      trains, exports and evaluates the models; proposes th
 Classes: `contraction.h` (f16, bf16, and f32 with a 16-bit compute type), `contraction.s` (f32),
 `contraction.c` (complex f32), `contraction.d` (f64), `contraction.z` (complex f64),
 `reduction.s` (f16, bf16, f32), `reduction.d` (f64). Contractions of f32 and complex f32 data
-whose recipe (`HIPTENSOR_ROCKE_F32_RECIPE`) is not `x6` look up `<class>.<recipe>`, for example
-`contraction.s.native` for the default recipe. The library also looks up `contraction` and
+whose recipe (`HIPTENSOR_ROCKE_F32_RECIPE`, else the target's default: x6 on gfx950, native on gfx942 and
+gfx90a) is not `x6` look up `<class>.<recipe>`, for example `contraction.s.native` for `native`. The library also looks up `contraction` and
 `reduction` (one model for all data types of an operation) when there is no model of the class.
 
 ## Model format

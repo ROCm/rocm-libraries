@@ -20,6 +20,8 @@ arguments, so one compiled kernel serves every problem of its data-type row.
 | `gett_host.py` | Python statement of the planner rules of `dgett` and `rgett` (K plans: in-tile and tile digits, padding of the K space) | - |
 | `ewt.py` | tiled elementwise kernel for transposing layouts: inputs fastest along another mode than D read through an LDS tile, 16-byte vectors on both sides; 10 batch digits; folded classes for planes smaller than half a tile | `hiptensor-aot-ewt/v2` |
 | `ewf.py` | flat elementwise kernel of tensors that are all one contiguous run in the same order: no index arithmetic, two 16-byte vectors of D per thread (`EWF_UNROLL`), streaming loads / stores (`nt`, the pack's gfx942 / gfx950 classes of the all-16-bit rows), branch-free loads when every scale is non-zero; the generic kernel's results bit for bit (`library/tests/test_hiptensor_aot_ewf.py`; C++ twin `rocke_build_htaot_ewf`, parity family `hiptensor_aot_ewf`) | `hiptensor-aot-ewf/v1` |
+| `ewp.py` | tuned tiled elementwise classes of transposing layouts (tensors of one element size): two runs of up to two modes each form the tile (D's stride-1 mode, the transposed inputs' stride-1 mode), the other modes batch digits, all geometry as kernel arguments; mode `t` transposes `V x V` element blocks in registers into a swizzled LDS tile, mode `a` moves 16-byte pieces of a mode every tensor shares; inputs of kind `T` go through LDS, kind `V` are read like D; 16-byte accesses on both sides, streaming bits `nt`, a fast path for identity operators per binary operator, knobs tile / block / swizzle / walk / tiles per CTA / phase-2 grouping as the class; the generic kernel's results bit for bit (`library/tests/test_hiptensor_aot_ewp.py`; C++ twin `rocke_build_htaot_ewp`, parity family `hiptensor_aot_ewp`) | `hiptensor-aot-ewp/v1` |
+| `ewp_host.py` | Python statement of the ewp host rules that hipTensor's `rocke_ewp_rule.hpp` implements: the palette of each target (`pack_classes`), the tuned problems (`TUNED`: canonical problem key -> class) and their pack routes, the choice (`choose`: the tuned class, else the first palette class that serves the layout with enough CTAs); the C++ engine's copy is `platform/cpp/instances/common/hiptensor_aot_ewp_table.inc` (`builders/hiptensor/gen_ewp_table.py`, `--check` in the default tests) | - |
 | `jit_ew.py` | the JIT form of `ew.py`: every integer argument (operator codes, sizes, magic numbers, strides, limits) a compile-time constant, and `vec` elements of mode 0 per thread with vector accesses where the layout allows; hipTensor builds it for the problem of each `HIPTENSOR_JIT_MODE_DEFAULT` plan with its C++ twin (`rocke_build_htaot_ew_jit`, linked into the library); `roll_jit_ew` rolls a class into a parametric recipe of rocKE's recipe VM (tested here, not used by hipTensor); with no geometry, the same class with the geometry as kernel arguments (`hiptensor_aot_ewv...`, the vector classes of the kernel pack) | `hiptensor-jit-ew/v1`, `hiptensor-aot-ewv/v1` |
 
 Rank bucket R8: at most 8 modes per index space after the host drops extent-1 modes and merges
@@ -56,7 +58,11 @@ against an exact 60-digit reference, with their special arguments) and
 lowered to a workspace limit, plans against the kernels' parameters). hipTensor's C++ rule
 (`rocke_rreduce_rule.hpp`) is compared with `untuned_choices` by
 `library/tests/test_hiptensor_pack_cross_check.py` (`test_cpp_rreduce_picks_equal_python`, with hipTensor's
-built pack builder).
+built pack builder). Tuned tiled elementwise classes: `library/tests/test_hiptensor_aot_ewp.py` (GPU: classes
+against the generic kernel bit for bit and against float64 references on integer data, every kind mix, both
+modes, every data-type row, the fast path, NaN / Inf / signed zeros, zero and NaN scales; CPU: spec checks, runs
+and launch arguments, refusals, the palettes, the tuned problems, the choice, the engine table); hipTensor's C++
+rule (`rocke_ewp_rule.hpp`) is compared with `ewp_host.choose` by `test_cpp_ewp_picks_equal_python`.
 
 Tests: `library/tests/test_hiptensor_aot_math_ops.py` (GPU: the math operators of every row,
 generic and JIT forms, several inputs, reductions, specials, all exact against the host model of

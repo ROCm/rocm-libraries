@@ -130,9 +130,10 @@ class TestSplitKSerial(unittest.TestCase):
         for ir in (ir1, ir2):
             self.assertNotIn("atomicrmw fadd", ir)
 
-    def test_python_only(self):
-        with self.assertRaises(NotImplementedError):
-            backend.universal_gemm_spec_to_dict(_spec(split_k=4, split_k_serial=2))
+    def test_converted(self):
+        # the in-launch reduction is mirrored by the C++ engine (gemm_build_sks.cpp)
+        d = backend.universal_gemm_spec_to_dict(_spec(split_k=4, split_k_serial=2))
+        self.assertEqual((d["split_k"], d["split_k_serial"]), (4, 2))
 
 
 class TestSplitKTail(unittest.TestCase):

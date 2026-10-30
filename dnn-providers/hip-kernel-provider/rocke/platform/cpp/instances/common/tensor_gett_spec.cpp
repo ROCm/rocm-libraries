@@ -233,6 +233,21 @@ std::string trait_json(const rocke_gemm_trait_spec_t& t)
     v["mfma_order"] = I(t.mfma_order);
     v["rve_pad"] = I(t.rve_pad);
     v["dtl_tight_ragged_only"] = jbool(t.dtl_tight_ragged_only);
+    v["vgpr_prefetch"] = I(t.vgpr_prefetch);
+    v["vgpr_prefetch_depth"] = I(t.vgpr_prefetch_depth);
+    v["vp_unroll"] = I(t.vp_unroll);
+    v["vp_late_reads"] = I(t.vp_late_reads);
+    v["vp_release_atoms"] = I(t.vp_release_atoms);
+    v["vp_tail_pack"] = I(t.vp_tail_pack);
+    v["vp_pair_reads"] = I(t.vp_pair_reads);
+    v["vp_mfma_first"] = I(t.vp_mfma_first);
+    v["split_k_serial"] = I(t.split_k_serial);
+    v["split_k_aligned"] = jbool(t.split_k_aligned);
+    v["lds_swizzle_l"] = I(t.lds_swizzle_l);
+    /* TraitSpec fields added after the first tensor GETT release are hashed only
+     * when set (Python tensor.gett _GETT_LATE_TRAIT_FIELDS) */
+    if(t.lds_swizzle_l == -1 || t.lds_swizzle_l == 0)
+        v.erase("lds_swizzle_l");
     std::vector<std::pair<std::string, std::string>> m(v.begin(), v.end());
     return jobj(m, ", ", ": ");
 }

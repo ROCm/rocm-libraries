@@ -101,6 +101,13 @@ def collect_ref_shas(results):
 
 MAX_CFG = 256  # default cap on config enumeration per family
 FAMILY_MAX_CFG = {
+    "gemm_vp_h16": 512,
+    "gemm_vp_menu": 1024,
+    "gemm_vp_modes": 4096,
+    "gemm_vp_pick": 1024,
+    "gemm_vp_pro": 4096,
+    "gemm_vp_pro2": 4096,
+    "gemm_vp_sk": 512,
     "gfx1250_lowering": 512,
     "gett_f64_pack": 1024,
     "hiptensor_aot_dgett": 512,
@@ -115,10 +122,18 @@ FAMILY_MAX_CFG = {
 # incomplete batch for them (raise the cap), not a sampled family.
 EXHAUSTIVE_FAMILIES = frozenset(
     {
+        "gemm_vp_h16",
+        "gemm_vp_menu",
+        "gemm_vp_modes",
+        "gemm_vp_pick",
+        "gemm_vp_pro",
+        "gemm_vp_pro2",
+        "gemm_vp_sk",
         "gett_f64_pack",
         "hiptensor_aot_dgett",
         "hiptensor_aot_ew",
         "hiptensor_aot_ewf",
+        "hiptensor_aot_ewp",
         "hiptensor_aot_ewt",
         "hiptensor_aot_ewv",
         "hiptensor_aot_jit_ew",

@@ -131,21 +131,24 @@ namespace hiptensor
 
             // HIPTENSOR_ROCKE_F32_RECIPE=native|x3|x4|x6|x9|f64: how contractions of f32 /
             // complex f32 data with the 32F / C32F compute type multiply (rocke_plan.hpp
-            // F32Recipe). Unset or empty: native. Another value: native, and the plan log says
-            // so (no recipe less accurate than the default is taken by mistake).
-            F32Recipe f32Recipe(std::string& note)
+            // F32Recipe) on a target. Unset or empty: the target's default (defaultF32Recipe:
+            // x6 on gfx950, native elsewhere). Another value: the target's default, and the plan
+            // log says so (no recipe less accurate than the default is taken by mistake).
+            F32Recipe f32Recipe(std::string const& arch, std::string& note)
             {
-                auto value = getEnvironmentVariable("HIPTENSOR_ROCKE_F32_RECIPE");
+                F32Recipe const fallback = defaultF32Recipe(arch);
+                auto            value    = getEnvironmentVariable("HIPTENSOR_ROCKE_F32_RECIPE");
                 if(!value || value->empty())
                 {
-                    return F32Recipe::Native;
+                    return fallback;
                 }
-                F32Recipe recipe = F32Recipe::Native;
+                F32Recipe recipe = fallback;
                 if(!parseF32Recipe(*value, recipe))
                 {
                     note = "HIPTENSOR_ROCKE_F32_RECIPE=" + *value
-                           + " is not one of native, x3, x4, x6, x9, f64: native";
-                    return F32Recipe::Native;
+                           + " is not one of native, x3, x4, x6, x9, f64: "
+                           + f32RecipeName(fallback) + " (the default of " + arch + ")";
+                    return fallback;
                 }
                 return recipe;
             }
@@ -207,7 +210,7 @@ namespace hiptensor
                 auto tables        = getEnvironmentVariable("HIPTENSOR_ROCKE_GETT_TABLES");
                 options.gettTables = !(tables && (*tables == "off" || *tables == "0"));
                 std::string recipeNote;
-                options.f32Recipe = f32Recipe(recipeNote);
+                options.f32Recipe = f32Recipe(pack.arch(), recipeNote);
                 if(note != nullptr)
                 {
                     *note = recipeNote;
@@ -625,23 +628,22 @@ namespace hiptensor
                     }
                     markJitMode(candidates, context.planPref);
                     auto const sel = rankCandidates(problem, *pack, candidates, useModel());
-                    // DEFAULT: the workspace of the candidate a plan selects (of every
-                    // candidate the measured selection may time); MIN: the least that some
-                    // candidate runs with; MAX: what every candidate runs with.
+                    // DEFAULT: room for the leading candidates of the selection (the ones the
+                    // measured selection times, and the next ones a plan falls back to when a
+                    // JIT candidate cannot be built), so that a plan limited to the estimate
+                    // selects what an unlimited plan selects, and never only the candidates
+                    // that need less workspace than the best one (e.g. the zero-workspace direct
+                    // GETT); MIN: the least that some candidate runs with; MAX: what every
+                    // candidate runs with.
                     auto const& pref  = context.planPref;
-                    size_t      count = 1;
-                    int const   rank  = pref != nullptr ? pref->mKernelRank : 0;
+                    size_t      count = static_cast<size_t>(
+                        std::max(envInt("HIPTENSOR_ROCKE_AUTOTUNE_TOPK", kAutotuneTopK), 1));
+                    int const rank = pref != nullptr ? pref->mKernelRank : 0;
                     if(rank > 0)
                     {
                         // KERNEL_RANK orders the candidates a plan admits: room for all of
                         // them keeps the order of the estimate
                         count = sel.order.size();
-                    }
-                    else if(pref != nullptr
-                            && pref->mSelectionAlgorithm == HIPTENSOR_ALGO_DEFAULT_PATIENT)
-                    {
-                        count = static_cast<size_t>(
-                            envInt("HIPTENSOR_ROCKE_AUTOTUNE_TOPK", kAutotuneTopK));
                     }
                     if(context.workspacePref == HIPTENSOR_WORKSPACE_MIN)
                     {
@@ -666,6 +668,28 @@ namespace hiptensor
                         estimate
                             = std::max(estimate, candidates[sel.order[i]].program.workspaceBytes);
                     }
+                    // The selection within a limit ranks the candidates the limit admits (some
+                    // with their workspace lowered to fit), which can order them differently
+                    // (e.g. the model's margin against another first candidate of the static
+                    // order). If the leading candidates within the estimate are not the
+                    // unlimited selection's, the estimate leaves room for every candidate.
+                    bool const patient
+                        = pref != nullptr
+                          && pref->mSelectionAlgorithm == HIPTENSOR_ALGO_DEFAULT_PATIENT;
+                    if(count < sel.order.size()
+                       && !sameLeaders(problem,
+                                       *pack,
+                                       jitPlan(pref),
+                                       candidates,
+                                       sel,
+                                       patient ? count : 1,
+                                       estimate))
+                    {
+                        for(auto const& c : candidates)
+                        {
+                            estimate = std::max(estimate, c.program.workspaceBytes);
+                        }
+                    }
                     // a plan of this problem takes the plan cache's kernel: room for it too
                     bool const pedantic
                         = pref == nullptr || pref->mCacheMode == HIPTENSOR_CACHE_MODE_PEDANTIC;
@@ -688,6 +712,41 @@ namespace hiptensor
                 }
 
             private:
+                // Whether a plan limited to `limit` ranks the same `leaders` candidates first as
+                // the unlimited selection `sel` of `candidates` (by key, in order).
+                static bool sameLeaders(Problem const&                problem,
+                                        Pack const&                   pack,
+                                        bool                          jit,
+                                        std::vector<Candidate> const& candidates,
+                                        Selection const&              sel,
+                                        size_t                        leaders,
+                                        uint64_t                      limit)
+                {
+                    std::vector<Candidate> within;
+                    std::string            reason;
+                    if(enumerateCandidates(
+                           problem, pack, candidateOptions(pack, jit), limit, within, reason)
+                       != HIPTENSOR_STATUS_SUCCESS)
+                    {
+                        return false;
+                    }
+                    markJitMode(within, jit);
+                    auto const order = rankCandidates(problem, pack, within, useModel()).order;
+                    leaders          = std::min(leaders, sel.order.size());
+                    if(order.size() < leaders)
+                    {
+                        return false;
+                    }
+                    for(size_t i = 0; i < leaders; i++)
+                    {
+                        if(within[order[i]].key != candidates[sel.order[i]].key)
+                        {
+                            return false;
+                        }
+                    }
+                    return true;
+                }
+
                 static void logSelection(Problem const&                problem,
                                          std::vector<Candidate> const& candidates,
                                          Selection const&              sel,

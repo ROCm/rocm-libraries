@@ -1557,9 +1557,20 @@ class TensorGettSpec:
         for f, dflt in (("epi_v16", False), ("c_prefetch", 0), ("store_nt", False)):
             if d["knobs"][f] == dflt:
                 del d["knobs"][f]
+        # TraitSpec fields added after the first release, likewise
+        for f in ("mn_trait", "kc_trait"):
+            if f in d:
+                for tf, dflt in _GETT_LATE_TRAIT_FIELDS:
+                    if d[f].get(tf) == dflt:
+                        del d[f][tf]
         key = json.dumps(d, sort_keys=True)
         dt = "f16" if self.dtype in ("f16", "fp16") else self.dtype
         return f"tensor_gett_{dt}_{hashlib.sha1(key.encode()).hexdigest()[:12]}"
+
+
+# TraitSpec fields added after the first tensor GETT release: hashed into
+# kernel_name() only when set (mirrored by the C++ trait_json of the GETT specs)
+_GETT_LATE_TRAIT_FIELDS = (("lds_swizzle_l", -1),)
 
 
 def _span_bytes(ext: Dict[str, int], strides: Dict[str, int], modes) -> int:

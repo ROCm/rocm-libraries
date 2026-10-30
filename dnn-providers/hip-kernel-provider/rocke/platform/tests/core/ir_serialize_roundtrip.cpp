@@ -35,8 +35,8 @@
  * these numbers in the same change. 64-bit only, where the pointer width that
  * is part of the layout is known. */
 #if INTPTR_MAX == INT64_MAX
-static_assert(sizeof(rocke_gemm_trait_spec_t) == 248 && sizeof(rocke_gemm_universal_spec_t) == 384
-                  && ROCKE_ABI_VERSION >= 5,
+static_assert(sizeof(rocke_gemm_trait_spec_t) == 296 && sizeof(rocke_gemm_universal_spec_t) == 432
+                  && ROCKE_ABI_VERSION >= 6,
               "a GEMM spec struct changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
               "update this pin");
 #endif

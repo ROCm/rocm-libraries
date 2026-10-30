@@ -29,7 +29,10 @@ same ``index.txt`` byte for byte.
 
 With the built C++ builder, its ``--rreduce-picks`` mode (hipTensor's untuned reduction choice,
 ``rocke_rreduce_rule.hpp``) must return the candidates of ``rreduce_host.untuned_choices`` for
-random problems, compute-unit counts and workspace limits on every pack target.
+random problems, compute-unit counts and workspace limits on every pack target, and its
+``--ewp-picks`` mode (hipTensor's tuned tiled elementwise choice, ``rocke_ewp_rule.hpp``) the
+class, source and launch of ``ewp_host.choose`` / ``ewp.ewp_plan`` for random layouts and the
+tuned problems.
 """
 
 import json
@@ -175,6 +178,7 @@ def test_writer_descriptor_families():
         "ewt",
         "ewv",
         "ewf",
+        "ewp",
         "gemm",
         "gett_plan",
         "dgett",
@@ -318,6 +322,7 @@ def test_kernel_abi_names_match_the_c_header():
         dgett,
         ew,
         ewf,
+        ewp,
         ewt,
         jit_ew,
         reduce,
@@ -342,6 +347,7 @@ def test_kernel_abi_names_match_the_c_header():
         "EWV": jit_ew.EWV_ABI,
         "EWT": ewt.EWT_ABI,
         "EWF": ewf.EWF_ABI,
+        "EWP": ewp.EWP_ABI,
         "DGETT": dgett.DGETT_ABI,
         "RGETT": rgett.RGETT_ABI,
     }
@@ -535,6 +541,110 @@ def test_cpp_rreduce_picks_equal_python(arch, tmp_path):
     problems.write_text("\n".join(lines) + "\n")
     got = _run(
         [tool, "--rreduce-picks", str(problems), "--arch", arch],
+        dict(os.environ),
+        tmp_path / "picks.log",
+    ).splitlines()
+    assert len(got) == len(want)
+    bad = [(p, g, w) for p, g, w in zip(lines, got, want) if g != w]
+    assert not bad, f"{len(bad)} of {len(want)} differ:\n" + "\n".join(
+        f"{p}\n  C++    {g}\n  Python {w}" for p, g, w in bad[:10]
+    )
+
+
+def _ewp_problem(rng):
+    """A random elementwise problem in hipTensor's canonical form: arity, the data types and
+    ``(extent, [stride per tensor])`` ordered by D's strides, contiguous modes merged; the inputs
+    stored in random mode orders (sometimes D's, sometimes padded), extents that are often
+    multiples of the classes' tiles."""
+    from kernels.common.hiptensor_aot.host import canonicalize
+
+    arity = rng.choice((1, 2, 2, 3))
+    dt = rng.choice(
+        {
+            1: ("f16", "f32", "f64"),
+            2: ("f16", "bf16", "f32", "f64"),
+            3: ("f16", "f32", "f64"),
+        }[arity]
+    )
+    if rng.random() < 0.1:
+        dt = rng.choice(("f16", "f32"))
+        dts = [dt] * arity + ["f32" if dt == "f16" else "f16"]  # mixed sizes: no class
+    else:
+        dts = [dt] * (arity + 1)
+    rank = rng.randrange(2, 7)
+    shape = [
+        rng.choice([1, 2, 3, 4, 6, 8, 16, 24, 32, 48, 64, 112, 128, 256])
+        for _ in range(rank)
+    ]
+    while math.prod(shape) > 1 << 26:
+        i = max(range(rank), key=lambda j: shape[j])
+        shape[i] = max(1, shape[i] // 2)
+    d_order = list(range(rank))
+    rng.shuffle(d_order)
+    orders = []
+    for _ in range(arity):
+        o = list(range(rank))
+        rng.shuffle(o)
+        orders.append(d_order if rng.random() < 0.3 else o)
+    orders.append(d_order)
+    strides = []
+    for o in orders:
+        st, acc = [0] * rank, 1
+        for j, i in enumerate(o):
+            st[i] = acc
+            acc *= shape[i] + (8 if j == 0 and rng.random() < 0.1 else 0)
+        strides.append(st)
+    dims = canonicalize(
+        [(shape[i], [s[i] for s in strides]) for i in range(rank)], arity
+    )
+    full = [
+        dts[0],
+        dts[1] if arity == 3 else None,
+        dts[-2] if arity >= 2 else None,
+        dts[-1],
+    ]
+    return arity, full, dims
+
+
+@pytest.mark.parametrize("arch", ("gfx942", "gfx950"))
+def test_cpp_ewp_picks_equal_python(arch, tmp_path):
+    """hipTensor's tuned tiled elementwise choice is rocKE's: the C++ rule (rocke_ewp_rule.hpp,
+    which hipTensor's planner runs; here through the C++ builder's --ewp-picks with the target's
+    classes and tuned routes) returns the class, the source (tuned / rule), the grid and every
+    launch argument of ewp_host.choose and ewp.ewp_plan, for random layouts and every tuned
+    problem of the target."""
+    from kernels.common.hiptensor_aot import ewp_host as H
+
+    tool = _builder()
+    classes = H.pack_classes(arch)
+    rng = random.Random(8192 + ("gfx942", "gfx950").index(arch))
+    probs = [_ewp_problem(rng) for _ in range(3000)]
+    for key, _c in H.TUNED.get(arch, []):
+        ar, dt, modes = key.split("|")
+        dims = [
+            (int(m.split(":")[0]), [int(x) for x in m.split(":")[1].split(",")])
+            for m in modes.split(";")
+        ]
+        probs.append((int(ar), [x or None for x in dt.split(",")], dims))
+    lines, want = [], []
+    picked = tuned = 0
+    for arity, dts, dims in probs:
+        lines.append(H.problem_key(arity, dts, dims))
+        got = H.choose(arch, arity, dts, dims, classes)
+        if got is None:
+            want.append("-")
+            continue
+        s, (vals, grid), src = got
+        picked += 1
+        tuned += src == "tuned"
+        args = ",".join(f"{k}={vals[k]}" for k in sorted(vals))
+        want.append(f"{s.kernel_name()} {src} {grid[0]},{grid[1]},{grid[2]} {args}")
+    # the sample exercises the classes and the tuned routes
+    assert picked > 300 and tuned == len(H.TUNED.get(arch, [])), (picked, tuned)
+    problems = tmp_path / "problems.txt"
+    problems.write_text("\n".join(lines) + "\n")
+    got = _run(
+        [tool, "--ewp-picks", str(problems), "--arch", arch],
         dict(os.environ),
         tmp_path / "picks.log",
     ).splitlines()

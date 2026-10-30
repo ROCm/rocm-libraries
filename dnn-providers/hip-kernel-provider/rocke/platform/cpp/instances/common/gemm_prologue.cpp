@@ -121,6 +121,7 @@ rocke_gemm_prologue_t rocke_gemm_prologue_default(void)
     p.stage = "lds";
     p.fast_exp = true;
     p.epi = "";
+    p.split_mode = "rne";
     return p;
 }
 
@@ -158,6 +159,15 @@ bool rocke_gemm_prologue_check(const rocke_gemm_prologue_t* p, char* reason, siz
         return fail("%s", "conj_a / conj_b need cplx_b");
     if(p->cplx_b && (!eq(p->src, "f32") || !eq(p->stage, "lds") || !eq(p->split_at, "use")))
         return fail("%s", "cplx_b needs src='f32', stage='lds', split_at='use'");
+    {
+        const char* sm = p->split_mode != nullptr ? p->split_mode : "rne";
+        if(!eq(sm, "rne") && !eq(sm, "trunc") && !eq(sm, "rnef"))
+            return fail("prologue split_mode '%s'", sm);
+        if(!eq(sm, "rne") && (!eq(p->src, "f32") || !eq(p->stage, "lds")))
+            return fail("%s", "split_mode trunc / rnef needs src='f32', stage='lds'");
+        if(!eq(sm, "rne") && rocke_gemm_prologue_parts(p) < 2)
+            return fail("%s", "split_mode trunc / rnef needs a recipe with >= 2 parts");
+    }
     if(p->epi != nullptr && !empty(p->epi) && !eq(p->epi, "alpha") && !eq(p->epi, "bilinear"))
         return fail("prologue epi '%s'", p->epi);
     if(!empty(p->epi) && !p->out_f32)
@@ -223,6 +233,8 @@ int rocke_gemm_prologue_suffix(const rocke_gemm_prologue_t* p, char* out, size_t
         s += std::string("_e") + (eq(p->epi, "alpha") ? "a" : "ab");
     if(p->agpr_out)
         s += "_ao";
+    if(p->split_mode != nullptr && !eq(p->split_mode, "rne"))
+        s += std::string("_sm") + (eq(p->split_mode, "trunc") ? "t" : "f");
     if(s.size() + 1 > out_cap)
         return -1;
     memcpy(out, s.c_str(), s.size() + 1);
@@ -445,10 +457,96 @@ struct rocke_gemm_pro_emitter
         return u != nullptr ? u : "";
     }
 
+    const char* split_mode() const
+    {
+        return pro->split_mode != nullptr ? pro->split_mode : "rne";
+    }
+
+    /* Python _split_bits: split_mode "trunc" / "rnef", the bf16 parts from the
+     * f32 bits (each part's f32 value is its masked word: no widening back) */
+    std::vector<rocke_value_t*> split_bits(rocke_value_t* x)
+    {
+        int P = rocke_gemm_prologue_parts(pro);
+        int cnt = x->type->count;
+        bool rnef = eq(split_mode(), "rnef");
+        rocke_value_t* hi_src = x;
+        if(pro->cap)
+        {
+            rocke_value_t* sat = rocke_b_const_f32(b, k_bf16_sat);
+            rocke_value_t* nsat = rocke_b_const_f32(b, -k_bf16_sat);
+            std::vector<rocke_value_t*> xs;
+            for(int i = 0; i < cnt; ++i)
+            {
+                rocke_value_t* e = rocke_b_vec_extract(b, x, i);
+                rocke_value_t* mn = rocke_b_fmin(b, e, sat);
+                xs.push_back(rocke_b_fmax(b, mn, nsat));
+            }
+            hi_src = rocke_b_vec_pack(b, xs.data(), cnt, rocke_f32());
+        }
+        rocke_value_t* chi = rocke_b_const_i32(b, -65536); /* 0xFFFF0000 */
+        rocke_value_t* c16 = rocke_b_const_i32(b, 16);
+        std::vector<rocke_value_t*> parts;
+        rocke_value_t* r = x;
+        for(int p = 0; p < P; ++p)
+        {
+            rocke_value_t* src = p == 0 ? hi_src : r;
+            rocke_value_t* w = rocke_b_vec_bitcast(b, src, rocke_vector_type(b, rocke_i32(), cnt));
+            std::vector<rocke_value_t*> hs;
+            for(int i = 0; i < cnt; ++i)
+            {
+                rocke_value_t* d = rocke_b_vec_extract(b, w, i);
+                if(rnef)
+                {
+                    rocke_value_t* sh = rocke_b_lshr(b, d, c16);
+                    rocke_value_t* one = rocke_b_const_i32(b, 1);
+                    rocke_value_t* lsb = rocke_b_land(b, sh, one);
+                    rocke_value_t* s1 = rocke_b_add(b, d, lsb);
+                    rocke_value_t* bias = rocke_b_const_i32(b, 0x7FFF);
+                    rocke_value_t* rnd = rocke_b_add(b, s1, bias);
+                    /* Inf / NaN words keep their bits (no carry into the sign) */
+                    rocke_value_t* mabs = rocke_b_const_i32(b, 0x7FFFFFFF);
+                    rocke_value_t* ad = rocke_b_land(b, d, mabs);
+                    rocke_value_t* inf = rocke_b_const_i32(b, 0x7F800000);
+                    rocke_value_t* sp = rocke_b_cmp_ge(b, ad, inf);
+                    d = rocke_b_select(b, sp, d, rnd);
+                }
+                hs.push_back(rocke_b_land(b, d, chi));
+            }
+            std::vector<rocke_value_t*> pk;
+            for(int i = 0; i < cnt; i += 2)
+            {
+                rocke_value_t* lo = rocke_b_lshr(b, hs[i], c16);
+                pk.push_back(rocke_b_lor(b, lo, hs[i + 1]));
+            }
+            rocke_value_t* pv = rocke_b_vec_pack(b, pk.data(), (int)pk.size(), rocke_i32());
+            parts.push_back(rocke_b_vec_bitcast(b, pv, rocke_vector_type(b, rocke_bf16(), cnt)));
+            if(p < P - 1)
+            {
+                std::vector<rocke_value_t*> hf;
+                for(rocke_value_t* h : hs)
+                    hf.push_back(rocke_b_bitcast(b, h, rocke_f32()));
+                rocke_value_t* hv = rocke_b_vec_pack(b, hf.data(), cnt, rocke_f32());
+                r = sub(r, hv);
+            }
+        }
+        return parts;
+    }
+
     /* Python _split */
     std::vector<rocke_value_t*> split(rocke_value_t* x)
     {
         int P = rocke_gemm_prologue_parts(pro);
+        if(!eq(split_mode(), "rne"))
+        {
+            if(!rocke_type_eq(compute, rocke_bf16()) || x->type->count % 2)
+            {
+                rocke_i_set_err(b,
+                                ROCKE_ERR_VALUE,
+                                "split_mode trunc / rnef needs bf16 compute and even fragments");
+                return {};
+            }
+            return split_bits(x);
+        }
         rocke_value_t* hi_src = x;
         if(pro->cap && rocke_type_eq(compute, rocke_bf16()))
         {
@@ -742,7 +840,13 @@ rocke_value_t* rocke_gemm_frag_ld(rocke_gemm_build_ctx_t* ctx,
     }
     int n_raw = rocke_gemm_pro_raw_len(ctx->pe);
     rocke_value_t* raw = nullptr;
-    for(int off = 0; off < n_raw; off += 8)
+    /* read chunk: 8 halves; the vgpr_prefetch body keeps every chunk inside one
+     * swizzle group (an f32 fragment of a 16x16x16 atom is two 4-half groups,
+     * each at its own swizzled column) */
+    int cw = 8;
+    if(ctx->spec->trait.vgpr_prefetch && ctx->swz && swz)
+        cw = (1 << ctx->swz_l) < 8 ? (1 << ctx->swz_l) : 8;
+    for(int off = 0; off < n_raw; off += cw)
     {
         rocke_value_t* col = col_base;
         if(off != 0)
@@ -753,7 +857,7 @@ rocke_value_t* rocke_gemm_frag_ld(rocke_gemm_build_ctx_t* ctx,
         if(swz)
             col = rocke_gemm_swz_col(ctx, col, key);
         rocke_value_t* ch = rocke_gemm_emit_smem_load(
-            b, src, row, col, n_raw < 8 ? n_raw : 8, ctx->storage_dtype);
+            b, src, row, col, n_raw < cw ? n_raw : cw, ctx->storage_dtype);
         raw = raw == nullptr ? ch : rocke_b_vec_concat(b, raw, ch);
     }
     return rocke_gemm_pro_after_load(ctx->pe, raw, which);

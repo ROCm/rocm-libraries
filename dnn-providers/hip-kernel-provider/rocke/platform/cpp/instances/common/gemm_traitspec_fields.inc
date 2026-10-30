@@ -130,6 +130,7 @@
 {"vp_tail_pack", "0"},
 {"vp_pair_reads", "0"},
 {"vp_mfma_first", "0"},
+{"lds_swizzle_l", "-1"},
 {"mn_pad", "32"},
 {"mn_chunk", "0"},
 {"mn_vec", "8"},

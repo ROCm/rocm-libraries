@@ -298,6 +298,17 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.mfma_order = 0;
     s.trait.rve_pad = 0;
     s.trait.dtl_tight_ragged_only = false;
+    s.trait.vgpr_prefetch = 0; /* register-staged prefetch body: off */
+    s.trait.vgpr_prefetch_depth = 1;
+    s.trait.vp_unroll = 0;
+    s.trait.vp_late_reads = 0;
+    s.trait.vp_release_atoms = 1;
+    s.trait.vp_tail_pack = 0;
+    s.trait.vp_pair_reads = 0;
+    s.trait.vp_mfma_first = 0;
+    s.trait.split_k_aligned = false;
+    s.trait.split_k_serial = 0;
+    s.trait.lds_swizzle_l = -1; /* the geometry rule */
     s._prologue = NULL; /* no fused operand prologue */
     s._gett = NULL; /* no tensor GETT hooks */
 
@@ -385,9 +396,19 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     char part_htl[32];
     char part_hsd[32];
     char part_mo[32];
+    char part_vp[32];
+    char part_vpd[32];
+    char part_vpu[32];
+    char part_vpl[32];
+    char part_vpr[32];
+    char part_vtp[32];
+    char part_vpp[32];
+    char part_vmf[32];
+    char part_sks[32];
+    char part_swl[32];
     const char* parts[5];
-    const char* flag_names[69];
-    int flag_on[69];
+    const char* flag_names[80];
+    int flag_on[80];
     const rocke_gemm_tile_spec_t* t;
     const rocke_gemm_trait_spec_t* tr;
 
@@ -517,19 +538,46 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_names[60] = part_hsd;
     flag_names[61] = "dsa";
     flag_names[62] = "dsl";
-    flag_names[63] = "msp";
+    /* the register-staged prefetch body (Python f"vp{n}", f"vpd{n}", f"vpu{n}",
+     * f"vpl{n}", f"vpr{n}", f"vtp{n}", f"vpp{n}", f"vmf{n}") */
+    snprintf(part_vp, sizeof(part_vp), "vp%d", tr->vgpr_prefetch);
+    flag_names[63] = part_vp;
+    snprintf(
+        part_vpd, sizeof(part_vpd), "vpd%d", tr->vgpr_prefetch_depth ? tr->vgpr_prefetch_depth : 1);
+    flag_names[64] = part_vpd;
+    snprintf(part_vpu, sizeof(part_vpu), "vpu%d", tr->vp_unroll);
+    flag_names[65] = part_vpu;
+    snprintf(part_vpl, sizeof(part_vpl), "vpl%d", tr->vp_late_reads);
+    flag_names[66] = part_vpl;
+    snprintf(part_vpr, sizeof(part_vpr), "vpr%d", tr->vp_release_atoms ? tr->vp_release_atoms : 1);
+    flag_names[67] = part_vpr;
+    snprintf(part_vtp, sizeof(part_vtp), "vtp%d", tr->vp_tail_pack);
+    flag_names[68] = part_vtp;
+    snprintf(part_vpp, sizeof(part_vpp), "vpp%d", tr->vp_pair_reads);
+    flag_names[69] = part_vpp;
+    snprintf(part_vmf, sizeof(part_vmf), "vmf%d", tr->vp_mfma_first);
+    flag_names[70] = part_vmf;
+    /* lds_swizzle_l (Python f"swl{L}"; 0 reads as -1) */
+    snprintf(part_swl, sizeof(part_swl), "swl%d", tr->lds_swizzle_l);
+    flag_names[71] = part_swl;
+    flag_names[72] = "msp";
     snprintf(part_mo, sizeof(part_mo), "mo%d", tr->mfma_order);
-    flag_names[64] = part_mo;
+    flag_names[73] = part_mo;
+    /* split-K slices of whole tiles / the in-launch reduction ("ska",
+     * f"sks{n}") */
+    flag_names[74] = "ska";
+    snprintf(part_sks, sizeof(part_sks), "sks%d", tr->split_k_serial);
+    flag_names[75] = part_sks;
     /* native NN / TN / TT (MN-contiguous operands): Python f"L{layout}",
      * f"mnp{mn_pad}", f"mnc{mn_chunk}", "mnla" (f"mnv{mn_vec}" is a Python-engine
      * lever, never on here) */
     snprintf(part_lay, sizeof(part_lay), "L%s", spec->data.layout);
-    flag_names[65] = part_lay;
+    flag_names[76] = part_lay;
     snprintf(part_mnp, sizeof(part_mnp), "mnp%d", tr->mn_pad_set ? tr->mn_pad : 32);
-    flag_names[66] = part_mnp;
+    flag_names[77] = part_mnp;
     snprintf(part_mnc, sizeof(part_mnc), "mnc%d", tr->mn_chunk);
-    flag_names[67] = part_mnc;
-    flag_names[68] = "mnla";
+    flag_names[78] = part_mnc;
+    flag_names[79] = "mnla";
 
     flag_on[0] = (tr->pad_m || tr->pad_n || tr->pad_k) ? 1 : 0;
     flag_on[1] = tr->persistent ? 1 : 0;
@@ -595,18 +643,29 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_on[60] = (tr->hb_skew_dtl > 0) ? 1 : 0;
     flag_on[61] = tr->das_anchor ? 1 : 0;
     flag_on[62] = tr->das_late ? 1 : 0;
-    flag_on[63] = tr->mfma_serpentine ? 1 : 0;
-    flag_on[64] = (tr->mfma_order > 0) ? 1 : 0;
+    flag_on[63] = (tr->vgpr_prefetch > 0) ? 1 : 0;
+    flag_on[64] = (tr->vgpr_prefetch_depth != 0 && tr->vgpr_prefetch_depth != 1) ? 1 : 0;
+    flag_on[65] = (tr->vp_unroll > 0) ? 1 : 0;
+    flag_on[66] = (tr->vp_late_reads > 0) ? 1 : 0;
+    flag_on[67] = (tr->vp_release_atoms != 0 && tr->vp_release_atoms != 1) ? 1 : 0;
+    flag_on[68] = (tr->vp_tail_pack > 0) ? 1 : 0;
+    flag_on[69] = (tr->vp_pair_reads > 0) ? 1 : 0;
+    flag_on[70] = (tr->vp_mfma_first > 0) ? 1 : 0;
+    flag_on[71] = (tr->lds_swizzle_l > 0) ? 1 : 0;
+    flag_on[72] = tr->mfma_serpentine ? 1 : 0;
+    flag_on[73] = (tr->mfma_order > 0) ? 1 : 0;
+    flag_on[74] = tr->split_k_aligned ? 1 : 0;
+    flag_on[75] = (tr->split_k_serial > 0) ? 1 : 0;
     {
         bool rcr = strcmp(spec->data.layout, "RCR") == 0;
-        flag_on[65] = !rcr ? 1 : 0;
-        flag_on[66] = (!rcr && (tr->mn_pad_set ? tr->mn_pad : 32) != 32) ? 1 : 0;
-        flag_on[67] = (!rcr && tr->mn_chunk > 0) ? 1 : 0;
-        flag_on[68] = tr->mn_ld_any ? 1 : 0;
+        flag_on[76] = !rcr ? 1 : 0;
+        flag_on[77] = (!rcr && (tr->mn_pad_set ? tr->mn_pad : 32) != 32) ? 1 : 0;
+        flag_on[78] = (!rcr && tr->mn_chunk > 0) ? 1 : 0;
+        flag_on[79] = tr->mn_ld_any ? 1 : 0;
     }
 
     return rocke_kernel_name_join(
-        spec->name, parts, 5, flag_names, flag_on, 69, out, out_cap, NULL);
+        spec->name, parts, 5, flag_names, flag_on, 80, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -791,6 +850,35 @@ void rocke_gemm_lds_swizzle_params(
     {
         *out_l = l;
     }
+}
+
+/* _spec_swizzle_params(spec, a, b): lds_swizzle_params with the trait overrides
+ * (lds_swizzle_r; lds_swizzle_l, which also sets W = log2(tile_k >> L)); env-free */
+void rocke_gemm_spec_swizzle_params(const rocke_gemm_universal_spec_t* spec,
+                                    int a_per_lane,
+                                    int b_per_lane,
+                                    int* out_r,
+                                    int* out_w,
+                                    int* out_l)
+{
+    int r = 0, w = 0, l = 0;
+    int swl = spec->trait.lds_swizzle_l == 0 ? -1 : spec->trait.lds_swizzle_l;
+    rocke_gemm_lds_swizzle_params(a_per_lane, b_per_lane, spec->tile.tile_k, &r, &w, &l);
+    if(spec->trait.lds_swizzle_r >= 0)
+        r = spec->trait.lds_swizzle_r;
+    if(swl >= 0)
+    {
+        l = swl;
+        w = ck_gemm_ilog2_exact(spec->tile.tile_k >> l);
+        if(w < 0)
+            w = 0;
+    }
+    if(out_r != NULL)
+        *out_r = r;
+    if(out_w != NULL)
+        *out_w = w;
+    if(out_l != NULL)
+        *out_l = l;
 }
 
 /* _ab_lds_plan(spec, arch) -> (ab_single, db, two_buf). Pure ints/bools. */
@@ -1342,9 +1430,197 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
             CK_GEMM_REJECT("lds_swizzle_r must be -1 (auto) or 0..4 with lds_swizzle (got %d)",
                            tr->lds_swizzle_r);
         }
+        {
+            /* lds_swizzle_l (0 reads as -1, the geometry rule) */
+            int swl = tr->lds_swizzle_l == 0 ? -1 : tr->lds_swizzle_l;
+            if(swl != -1
+               && !(tr->lds_swizzle && tr->vgpr_prefetch && 1 <= swl && swl <= 4
+                    && t->tile_k % (1 << swl) == 0 && ck_gemm_ilog2_exact(t->tile_k >> swl) >= 1))
+            {
+                CK_GEMM_REJECT("lds_swizzle_l must be -1 (auto) or 1..4 with lds_swizzle on the "
+                               "vgpr_prefetch body, tile_k / 2^L a power of two >= 2 (got %d)",
+                               swl);
+            }
+        }
         if(tr->dtl_hoist && tr->dtl_stages < 2)
         {
             CK_GEMM_REJECT("dtl_hoist requires dtl_stages >= 2");
+        }
+        /* the register-staged prefetch body and its main-loop levers (same order
+         * and reasons as the Python predicate; the MN-contiguous vp_mn_* levers
+         * are Python-engine-only, so an MN-contiguous layout is refused) */
+        {
+            /* 0 reads as the Python default 1 (a zero-initialised trait is valid) */
+            int vpf = tr->vgpr_prefetch;
+            int vpd = tr->vgpr_prefetch_depth ? tr->vgpr_prefetch_depth : 1;
+            int vrel = tr->vp_release_atoms ? tr->vp_release_atoms : 1;
+            int k_atoms = rocke_gemm_tile_k_atoms_per_tile_k(&spec->tile);
+            /* K atoms as the MFMA stream issues them (an f32 pair-view prologue
+             * packs two 16-bit atoms into one) */
+            int hb_ka = rocke_gemm_hb_k_atoms(spec);
+            if(vpd != 1 && !vpf)
+            {
+                CK_GEMM_REJECT("vgpr_prefetch_depth requires vgpr_prefetch");
+            }
+            if(tr->vp_unroll && (tr->vp_unroll != 1 || vpf < 3))
+            {
+                CK_GEMM_REJECT("vp_unroll must be 0 / 1 and requires vgpr_prefetch 3 / 4");
+            }
+            if(tr->vp_late_reads && (tr->vp_late_reads != 1 || vpf != 4 || vpd != 1))
+            {
+                CK_GEMM_REJECT(
+                    "vp_late_reads must be 0 / 1 and requires vgpr_prefetch 4 with depth 1");
+            }
+            if(vrel != 1 && (vpf != 4 || tr->vp_late_reads || !(1 <= vrel && vrel < hb_ka)))
+            {
+                CK_GEMM_REJECT("vp_release_atoms must be 1 .. K atoms per tile - 1 and requires "
+                               "vgpr_prefetch 4 without vp_late_reads");
+            }
+            if(tr->vp_tail_pack && (!(tr->vp_tail_pack >= 1 && tr->vp_tail_pack <= 3) || vpf != 4))
+            {
+                CK_GEMM_REJECT("vp_tail_pack must be 0 .. 3 and requires vgpr_prefetch 4");
+            }
+            if(tr->vp_mfma_first
+               && (!(tr->vp_mfma_first == 1 || tr->vp_mfma_first == 2) || !(vpf == 3 || vpf == 4)))
+            {
+                CK_GEMM_REJECT("vp_mfma_first must be 0 / 1 / 2 and requires vgpr_prefetch 3 / 4");
+            }
+            if(tr->vp_pair_reads
+               && (!(tr->vp_pair_reads == 1 || tr->vp_pair_reads == 2) || vpf != 4 || vpd != 1
+                   || tr->vp_late_reads || tr->vp_tail_pack == 2
+                   || strcmp(spec->data.layout, "RCR") != 0))
+            {
+                CK_GEMM_REJECT("vp_pair_reads must be 0 / 1 / 2 and requires vgpr_prefetch 4 with "
+                               "depth 1, the RCR layout, no vp_late_reads and vp_tail_pack 0 / 1 "
+                               "/ 3");
+            }
+            if(spec->_prologue != NULL && spec->_prologue->split_mode != NULL
+               && strcmp(spec->_prologue->split_mode, "rne") != 0
+               && strcmp(spec->data.dtype_a, "bf16") != 0)
+            {
+                CK_GEMM_REJECT("prologue split_mode trunc / rnef needs a bf16 compute type");
+            }
+            if(vpf)
+            {
+                if(!(vpf >= 1 && vpf <= 4))
+                {
+                    CK_GEMM_REJECT("vgpr_prefetch must be 0..4 (got %d)", vpf);
+                }
+                if(!(vpd >= 1 && vpd <= 3))
+                {
+                    CK_GEMM_REJECT("vgpr_prefetch_depth must be 1..3 (got %d)", vpd);
+                }
+                if(vpd > 1 && tr->acc_agpr)
+                {
+                    CK_GEMM_REJECT("vgpr_prefetch_depth > 1 with AGPR accumulators (acc_agpr): "
+                                   "spill-heavy, wrong results measured");
+                }
+                if(tr->lds_swizzle && strcmp(family, "mma") == 0)
+                {
+                    const rocke_mmaop_t* vop = ck_gemm_resolve_mma_op(spec, target);
+                    int vr = 0, vw = 0, vl = 0;
+                    rocke_gemm_spec_swizzle_params(spec,
+                                                   vop != NULL ? vop->a_frag_len : 0,
+                                                   vop != NULL ? vop->b_frag_len : 0,
+                                                   &vr,
+                                                   &vw,
+                                                   &vl);
+                    if(t->tile_m % (1 << (vr + vw)) || t->tile_n % (1 << (vr + vw)))
+                    {
+                        CK_GEMM_REJECT("vgpr_prefetch with lds_swizzle: tile_m / tile_n must be "
+                                       "multiples of the swizzle row period 2^(R+W) = %d (the XOR "
+                                       "key is taken on the parity-free row)",
+                                       1 << (vr + vw));
+                    }
+                    {
+                        int fa = vop != NULL ? vop->a_frag_len : 0;
+                        int fb = vop != NULL ? vop->b_frag_len : 0;
+                        if(tr->lds_swizzle_l > 0 && (1 << vl) < (fa > fb ? fa : fb))
+                        {
+                            /* the fragment reads without a prologue are one ds_read of a
+                             * whole fragment at one swizzled column */
+                            CK_GEMM_REJECT("lds_swizzle_l: the XOR group 2^L = %d halves must hold "
+                                           "a whole MFMA fragment (%d halves)",
+                                           1 << vl,
+                                           fa);
+                        }
+                    }
+                }
+                if(spec->_prologue != NULL && spec->_prologue->stage != NULL
+                   && strcmp(spec->_prologue->stage, "lds") != 0)
+                {
+                    /* stage="vgpr" converts in the DTL ring's staging only */
+                    CK_GEMM_REJECT("vgpr_prefetch: prologue stage='vgpr' unsupported");
+                }
+                if(spec->_prologue != NULL && k_atoms % rocke_gemm_prologue_kmul(spec->_prologue))
+                {
+                    CK_GEMM_REJECT("vgpr_prefetch with an f32 operand prologue: tile_k must hold "
+                                   "whole f32 K atoms (an even number of 16-bit K atoms)");
+                }
+                if(vpf >= 3 && (hb_ka < 2 || tr->acc_agpr_pin))
+                {
+                    CK_GEMM_REJECT("vgpr_prefetch 3 / 4 need >= 2 K atoms per tile and exclude "
+                                   "acc_agpr_pin");
+                }
+                if(!(strcmp(family, "mma") == 0 && strcmp(tr->pipeline, "compv4") == 0
+                     && !tr->direct_to_lds))
+                {
+                    CK_GEMM_REJECT("vgpr_prefetch requires the MFMA compv4 VGPR-staged body (no "
+                                   "direct_to_lds)");
+                }
+                if(vpf == 4)
+                {
+                    if(!(tr->ab_double_buffer_set && !tr->ab_double_buffer)
+                       || strcmp(tr->epilogue, "default") != 0)
+                    {
+                        CK_GEMM_REJECT("vgpr_prefetch 4 is the single-LDS-buffer body: it needs "
+                                       "ab_double_buffer=False and the default epilogue");
+                    }
+                }
+                else
+                {
+                    bool vdb = false;
+                    ck_gemm_ab_lds_plan(spec, target, NULL, &vdb, NULL);
+                    if(!vdb)
+                    {
+                        CK_GEMM_REJECT("vgpr_prefetch 1 / 2 / 3 require the AB LDS double buffer "
+                                       "(ab_double_buffer)");
+                    }
+                }
+                if(tr->preshuffle_b || tr->active_tile_skip || tr->lds_k_pad)
+                {
+                    CK_GEMM_REJECT(
+                        "vgpr_prefetch excludes preshuffle_b, active_tile_skip and lds_k_pad");
+                }
+                if(spec->batched
+                   && (tr->split_k > 1 || tr->split_k_serial
+                       || strcmp(spec->data.layout, "RCR") != 0))
+                {
+                    /* grid z is the batch; the batch offsets ride in the buffer bases */
+                    CK_GEMM_REJECT("vgpr_prefetch batched: the RCR layout without split-K (grid "
+                                   "z is the batch)");
+                }
+                if(tr->pad_k && tr->split_k > 1 && !tr->split_k_aligned)
+                {
+                    CK_GEMM_REJECT("vgpr_prefetch with pad_k and split-K needs split_k_aligned");
+                }
+                {
+                    int lv = rocke_gemm_choose_load_vec(spec);
+                    if(!(lv == 2 || lv == 4 || lv == 8))
+                    {
+                        CK_GEMM_REJECT("vgpr_prefetch needs 4 / 8 / 16-byte global loads per "
+                                       "lane (load_vec %d)",
+                                       lv);
+                    }
+                }
+                if(strcmp(spec->data.layout, "RCR") != 0)
+                {
+                    /* the MN-contiguous operand loader (vp_mn_*) is Python-only */
+                    CK_GEMM_REJECT("vgpr_prefetch with an MN-contiguous operand (layout %s): "
+                                   "implemented by the Python engine only",
+                                   spec->data.layout);
+                }
+            }
         }
         if(tr->ilv_read_span != 0
            && (!tr->mfma_interleave || !(0 < tr->ilv_read_span && tr->ilv_read_span <= 100)
@@ -1560,10 +1836,27 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
             CK_GEMM_REJECT(
                 "hb_sched places its own reads / DTL issues (no ilv_read_span / ilv_dtl_span)");
         }
-        if(tr->wide_addr
-           && !(tr->direct_to_lds && tr->dtl_hoist && (tr->dtl_soff0 || tr->dtl_tight_rsrc)
-                && tr->rilv_vec_epilogue && !tr->persistent_ctas && !tr->streamk && tr->split_k <= 1
-                && strcmp(spec->data.layout, "RCR") == 0 && !spec->batched && spec->_gett == NULL))
+        if(tr->wide_addr && tr->vgpr_prefetch)
+        {
+            /* the register-staged body: 64-bit operand bases at the batch + tile
+             * origin and a 64-bit C base at the batch + first tile row */
+            if(tr->direct_to_lds || strcmp(tr->epilogue, "default") != 0 || tr->rilv_vec_epilogue
+               || tr->split_k > 1 || tr->split_k_serial || tr->persistent_ctas || tr->streamk
+               || strcmp(spec->data.layout, "RCR") != 0 || spec->_gett != NULL
+               || (spec->_prologue != NULL && spec->_prologue->epi != NULL
+                   && spec->_prologue->epi[0] != 0))
+            {
+                CK_GEMM_REJECT("wide_addr on the vgpr_prefetch body requires the default (scatter) "
+                               "epilogue without split-K / persistent / stream-K, the RCR layout, "
+                               "no GETT / rich-epilogue hook and no prologue epi");
+            }
+        }
+        else if(tr->wide_addr
+                && !(tr->direct_to_lds && tr->dtl_hoist && (tr->dtl_soff0 || tr->dtl_tight_rsrc)
+                     && tr->rilv_vec_epilogue && !tr->persistent_ctas && !tr->streamk
+                     && tr->split_k <= 1 && !tr->split_k_serial
+                     && strcmp(spec->data.layout, "RCR") == 0 && !spec->batched
+                     && spec->_gett == NULL))
         {
             CK_GEMM_REJECT("wide_addr requires the direct-to-LDS ring with dtl_hoist and "
                            "dtl_soff0 or dtl_tight_rsrc, the row-interleave vector epilogue, a "
@@ -1653,12 +1946,12 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         {
             const rocke_mmaop_t* op = ck_gemm_resolve_mma_op(spec, target);
             int swz_l = 0;
-            rocke_gemm_lds_swizzle_params(op != NULL ? op->a_frag_len : 0,
-                                          op != NULL ? op->b_frag_len : 0,
-                                          t->tile_k,
-                                          NULL,
-                                          NULL,
-                                          &swz_l);
+            rocke_gemm_spec_swizzle_params(spec,
+                                           op != NULL ? op->a_frag_len : 0,
+                                           op != NULL ? op->b_frag_len : 0,
+                                           NULL,
+                                           NULL,
+                                           &swz_l);
             int chunk;
             if(spec->trait.direct_to_lds)
             {
@@ -1676,6 +1969,13 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
                                    t->tile_k,
                                    spec->block_size);
                 }
+            }
+            if(spec->trait.vgpr_prefetch && !spec->trait.direct_to_lds && swz_l >= 1
+               && chunk % (1 << swz_l) == 0)
+            {
+                /* vgpr_prefetch splits each loaded vector into XOR-group-sized
+                 * LDS writes (one ds_write per group): a narrower group is fine */
+                chunk = 1 << swz_l;
             }
             if(swz_l < 0 || ((1 << swz_l) % chunk) != 0)
             {
@@ -1815,6 +2115,37 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         if(sk > 1 && strcmp(family, "mma") != 0)
         {
             CK_GEMM_REJECT("split_k > 1 is CDNA-only (got family '%s' on %s)", family, arch);
+        }
+        /* coverage / correctness levers: split-K slices of whole tiles and the
+         * in-launch reduction (Python SPLIT_K_ALIGNED_DTL / SPLIT_K_SERIAL_DTL are
+         * on, SPLIT_K_SERIAL_FENCED_VALID off; pingpong, asm_loop and dtl_k_tail
+         * are Python-engine-only levers, off here) */
+        const rocke_gemm_trait_spec_t* tr = &spec->trait;
+        bool ska_ring = tr->direct_to_lds && !tr->pad_k && !tr->persistent_ctas;
+        if(tr->split_k_aligned
+           && (sk < 2 || !((tr->pad_k && !tr->direct_to_lds) || ska_ring) || tr->streamk
+               || tr->preshuffle_b))
+        {
+            CK_GEMM_REJECT("split_k_aligned requires split_k > 1 and pad_k on the global-load "
+                           "body, or a direct_to_lds ring without pad_k / dtl_k_tail / ping-pong "
+                           "/ asm loop / persistent CTAs (no streamk / preshuffle_b)");
+        }
+        if(!(tr->split_k_serial >= 0 && tr->split_k_serial <= 3))
+        {
+            CK_GEMM_REJECT("split_k_serial must be 0, 1, 2 or 3 (got %d)", tr->split_k_serial);
+        }
+        if(tr->split_k_serial == 1)
+        {
+            CK_GEMM_REJECT("split_k_serial 1 (fenced partials) returned wrong results: use 2");
+        }
+        if(tr->split_k_serial
+           && (sk < 2 || !(tr->vgpr_prefetch || tr->direct_to_lds)
+               || strcmp(tr->epilogue, "default") != 0 || tr->streamk || tr->persistent_ctas
+               || spec->batched || t->warp_k != 1))
+        {
+            CK_GEMM_REJECT("split_k_serial requires split_k > 1 on the vgpr_prefetch body or a "
+                           "direct_to_lds ring without ping-pong / asm loop, with the default "
+                           "epilogue (no streamk / persistent_ctas / batched; warp_k 1)");
         }
     }
 

@@ -244,7 +244,9 @@ class TestValidity(unittest.TestCase):
             is_valid_spec(_spec(vgpr_prefetch_depth=2), arch="gfx942"), (True, "ok")
         )
 
-    def test_python_only(self):
+    def test_converted(self):
+        # the C++ engine mirrors the main-loop levers (gemm_build_vp.cpp): the
+        # converter passes each one through, none is on the Python-only list
         for kv in (
             dict(vp_release_atoms=2),
             dict(vp_tail_pack=1),
@@ -252,10 +254,9 @@ class TestValidity(unittest.TestCase):
             dict(vp_mfma_first=1),
         ):
             with self.subTest(kv=kv):
-                with self.assertRaises(NotImplementedError):
-                    backend.universal_gemm_spec_to_dict(_spec(**kv))
-        # every main-loop lever is listed with its default (the C++ engine has no
-        # mirror; a non-default value must never reach it)
+                d = backend.universal_gemm_spec_to_dict(_spec(**kv))
+                for k, v in kv.items():
+                    self.assertEqual(d[k], v)
         levers = dict(backend._PYTHON_ONLY_GEMM_LEVERS)
         for k, off in (
             ("vp_release_atoms", 1),
@@ -264,7 +265,7 @@ class TestValidity(unittest.TestCase):
             ("vp_mfma_first", 0),
         ):
             with self.subTest(lever=k):
-                self.assertEqual(levers.get(k, "missing"), off)
+                self.assertNotIn(k, levers)
                 self.assertEqual(getattr(TraitSpec(), k), off)
 
 

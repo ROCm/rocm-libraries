@@ -40,6 +40,7 @@
 #include <string>
 #include <tuple>
 
+#include "rocke_ewp_rule.hpp"
 #include "rocke_plan.hpp"
 #include "rocke_rreduce_rule.hpp"
 #ifdef HIPTENSOR_ENABLE_ROCKE_JIT
@@ -695,6 +696,11 @@ namespace hiptensor
             return "?";
         }
 
+        F32Recipe defaultF32Recipe(std::string const& arch)
+        {
+            return arch == "gfx950" ? F32Recipe::X6 : F32Recipe::Native;
+        }
+
         bool parseF32Recipe(std::string const& text, F32Recipe& recipe)
         {
             for(auto r : {F32Recipe::Native,
@@ -726,6 +732,67 @@ namespace hiptensor
                 std::vector<std::pair<std::string, std::string>> strs;
                 std::array<int, 2>                               binaryOps{};
             };
+
+            // The data type rows of the API's elementwise operations that this backend serves: the
+            // real rows of cuTENSOR 2.x whose kernels the pack builds (make_rocke_pack.py
+            // EW_ROWS_1 / EW_ROWS_2 / EW_ROWS_3; every row computes in f32, or in f64 when a tensor
+            // or the scalars are f64, and rounds once to D's type). `ta`, `tb`, `tc`: the types of
+            // A, B and C (the slots an operation has), `td`: the output's, `sc`: the scalars'.
+            //  - permutation: f16 data with f16 or f32 scalars, f32 with f32, f64 with f64 (B of any
+            //    type the pack converts A to); bf16 into bf16 with bf16 or f32 scalars; f32 into
+            //    f64 with f64 scalars;
+            //  - binary (D of C's type): f16 or bf16 data with scalars of the data type or f32, f32
+            //    with f32, f64 with f64; an f32 A with an f16 C and f32 scalars; an f64 A with an
+            //    f32 C and f64 scalars;
+            //  - trinary (A, B and C of one type): f16 with f16 scalars, f32 with f32, f64 with f64
+            //    (D of any type the pack converts to); f16 with f32 scalars, bf16 with bf16 or f32
+            //    scalars (D of C's type).
+            // The other backend serves a subset (elementwise_execute.cpp, checkElementwiseDataTypes)
+            // and declines the rest.
+            bool apiElementwiseRow(OpKind              kind,
+                                   hiptensorDataType_t ta,
+                                   hiptensorDataType_t tb,
+                                   hiptensorDataType_t tc,
+                                   hiptensorDataType_t td,
+                                   hiptensorDataType_t sc)
+            {
+                auto const f16 = HIPTENSOR_R_16F, bf16 = HIPTENSOR_R_16BF, f32 = HIPTENSOR_R_32F,
+                           f64 = HIPTENSOR_R_64F;
+                switch(kind)
+                {
+                case OpKind::Permute:
+                    return (ta == f16 && (sc == f16 || sc == f32)) || (ta == f32 && sc == f32)
+                           || (ta == f64 && sc == f64)
+                           || (ta == bf16 && td == bf16 && (sc == bf16 || sc == f32))
+                           || (ta == f32 && td == f64 && sc == f64);
+                case OpKind::ElementwiseBinary:
+                    if(tc != td)
+                    {
+                        return false;
+                    }
+                    if(ta != tc)
+                    {
+                        return (ta == f32 && tc == f16 && sc == f32)
+                               || (ta == f64 && tc == f32 && sc == f64);
+                    }
+                    return ((ta == f16 || ta == bf16) && (sc == ta || sc == f32))
+                           || (ta == f32 && sc == f32) || (ta == f64 && sc == f64);
+                case OpKind::ElementwiseTrinary:
+                    if(ta != tb || ta != tc)
+                    {
+                        return false;
+                    }
+                    if(sc == ta && (ta == f16 || ta == f32 || ta == f64))
+                    {
+                        return true;
+                    }
+                    return td == tc
+                           && ((ta == f16 && sc == f32)
+                               || (ta == bf16 && (sc == bf16 || sc == f32)));
+                default:
+                    return false;
+                }
+            }
 
             hiptensorStatus_t planElementwise(Problem const&  problem,
                                               Pack const&     pack,
@@ -844,32 +911,15 @@ namespace hiptensor
                 operands.push_back(d);
                 canonicalize(dims, tensors, tensors - 1);
 
-                // The data type rows of the API (the same as the other backend's)
-                auto const sc  = problem.scalarType;
-                auto const ta  = problem.t[0].type;
-                bool       row = false;
-                if(problem.kind == OpKind::Permute)
-                {
-                    row = (ta == HIPTENSOR_R_16F
-                           && (sc == HIPTENSOR_R_16F || sc == HIPTENSOR_R_32F))
-                          || (ta == HIPTENSOR_R_32F && sc == HIPTENSOR_R_32F)
-                          || (ta == HIPTENSOR_R_64F && sc == HIPTENSOR_R_64F);
-                }
-                else if(problem.kind == OpKind::ElementwiseBinary)
-                {
-                    auto const tc = problem.t[2].type;
-                    row           = tc == out.type && ta == tc
-                          && (((ta == HIPTENSOR_R_16F || ta == HIPTENSOR_R_16BF)
-                               && (sc == ta || sc == HIPTENSOR_R_32F))
-                              || (ta == HIPTENSOR_R_32F && sc == HIPTENSOR_R_32F)
-                              || (ta == HIPTENSOR_R_64F && sc == HIPTENSOR_R_64F));
-                }
-                else
-                {
-                    row = ta == problem.t[1].type && ta == problem.t[2].type && sc == ta
-                          && (ta == HIPTENSOR_R_16F || ta == HIPTENSOR_R_32F
-                              || ta == HIPTENSOR_R_64F);
-                }
+                // The data type rows of the API's elementwise operations that this backend serves
+                // (apiElementwiseRow): the rows of the other backend and the further real rows of
+                // cuTENSOR 2.x whose kernels the pack builds.
+                bool const row = apiElementwiseRow(problem.kind,
+                                                   problem.t[0].type,
+                                                   problem.t[1].type,
+                                                   problem.t[2].type,
+                                                   out.type,
+                                                   problem.scalarType);
                 if(!row)
                 {
                     reason = "data type combination not supported by the API";
@@ -932,6 +982,7 @@ namespace hiptensor
             constexpr char kEwt[] = "ewt";
             constexpr char kEwv[] = "ewv";
             constexpr char kEwf[] = "ewf";
+            constexpr char kEwp[] = "ewp";
 
             // The value of integer argument `name` of a prepared launch.
             bool stepArg(LaunchStep const& step, std::string const& name, int64_t& value)
@@ -1289,6 +1340,178 @@ namespace hiptensor
                 facts.ctas         = int64_t(prog.steps[0].grid.x);
                 facts.block        = block;
                 program            = std::move(prog);
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+
+            // The tuned tiled classes (the kernel pack's ewp classes,
+            // kernels.common.hiptensor_aot.ewp) of an elementwise operation whose tensors share
+            // one element size and whose inputs are not all laid out like D: the class of a tuned
+            // problem (route ewp.tuned.<hash>), else the first class of the pack's palette that
+            // serves the layout with enough CTAs (rocke_ewp_rule.hpp: ewp_host.choose). Every
+            // tensor is accessed with 16-byte vectors; the generic program is the fallback
+            // (buffers not aligned to them).
+            hiptensorStatus_t planEwp(EwLayout const& lay,
+                                      Pack const&     pack,
+                                      Program const&  generic,
+                                      Program&        program,
+                                      CandidateFacts& facts,
+                                      std::string&    reason)
+            {
+                namespace er  = ewprule;
+                int const nt  = static_cast<int>(lay.operands.size());
+                int const ari = nt - 1;
+                for(int k = 0; k < ari; k++)
+                {
+                    if(mathUnary(lay.operands[k].op))
+                    {
+                        reason = "the tuned tiled classes have no math operators";
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
+                }
+                auto dtype = [&lay](char key) {
+                    for(auto const& s : lay.strs)
+                    {
+                        if(s.first.size() == 1 && s.first[0] == key)
+                        {
+                            return s.second;
+                        }
+                    }
+                    return std::string();
+                };
+                std::array<std::string, 4> dts{dtype('a'),
+                                               ari == 3 ? dtype('b') : std::string(),
+                                               ari >= 2 ? dtype('c') : std::string(),
+                                               dtype('d')};
+                std::vector<er::EClass>    classes;
+                for(auto const& k : pack.kernels())
+                {
+                    if(k.family != kEwp)
+                    {
+                        continue;
+                    }
+                    er::EClass c;
+                    c.name  = k.name;
+                    c.rank  = k.attr("rank", 0);
+                    c.arity = k.attr("arity", 0);
+                    c.a     = k.attrStr("a");
+                    c.b     = k.attrStr("b");
+                    c.c     = k.attrStr("c");
+                    c.d     = k.attrStr("d");
+                    c.kinds = k.attrStr("kinds");
+                    c.mode  = k.attrStr("mode");
+                    c.walk  = k.attrStr("walk");
+                    c.to    = k.attr("to", 0);
+                    c.tt    = k.attr("tt", 0);
+                    c.tw    = k.attr("tw", 1);
+                    c.block = k.attr("block", 256);
+                    c.tpc   = k.attr("tpc", 1);
+                    c.vec   = k.attr("vec", 0);
+                    c.slots = k.attr("slots_b", 0);
+                    classes.push_back(std::move(c));
+                }
+                if(classes.empty())
+                {
+                    reason = "the pack has no tuned tiled elementwise classes";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                std::stable_sort(classes.begin(), classes.end(), [](auto const& x, auto const& y) {
+                    return x.rank < y.rank;
+                });
+                std::vector<er::EMode> dims;
+                for(auto const& d : lay.dims)
+                {
+                    er::EMode m;
+                    m.extent = d.extent;
+                    for(int t = 0; t < nt; t++)
+                    {
+                        m.stride[t] = d.stride[t];
+                    }
+                    dims.push_back(m);
+                }
+                // the tuned problem's class (its key route guards against a hash collision)
+                std::string const key   = er::eKey(ari, dts, dims);
+                std::string const route = "ewp.tuned." + er::eHex16(er::eFnv1a64(key));
+                std::string       tuned = pack.route(route);
+                if(!tuned.empty() && pack.route(route + ".key") != key)
+                {
+                    tuned.clear();
+                }
+                er::ELaunch launch;
+                bool        isTuned = false;
+                int const   pick    = er::eChoose(classes, tuned, ari, dts, dims, launch, isTuned);
+                if(pick < 0)
+                {
+                    reason = "no tuned tiled elementwise class serves this layout";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                auto const* kernel = pack.byName(classes[size_t(pick)].name);
+                if(kernel == nullptr)
+                {
+                    reason = "the pack lost its tuned tiled elementwise class";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                LaunchStep step;
+                step.kernel = kernel;
+                ArgWriter                                    w(step);
+                char const*                                  scal[] = {"alpha", "beta", "gamma"};
+                bool                                         good   = true;
+                std::vector<std::pair<BufferRole, uint32_t>> align;
+                for(int k = 0; k < nt; k++)
+                {
+                    auto const& op = lay.operands[k];
+                    good           = good && w.pointer(op.name, op.role, op.bytes);
+                    align.emplace_back(op.role, 16u);
+                    if(k == ari)
+                    {
+                        continue;
+                    }
+                    std::string const sname = op.name == "A"   ? scal[0]
+                                              : op.name == "B" ? scal[1]
+                                                               : scal[2];
+                    good = good && w.scalar(sname, op.scale) && w.set("op" + op.name, op.op);
+                }
+                if(ari >= 2)
+                {
+                    good = good && w.set("opAB", lay.binaryOps[0]);
+                }
+                if(ari == 3)
+                {
+                    good = good && w.set("opABC", lay.binaryOps[1]);
+                }
+                for(auto const& [name, value] : launch.args)
+                {
+                    good = good && w.set(name, value);
+                }
+                if(!good)
+                {
+                    reason = "tuned tiled elementwise arguments do not fit the kernel arguments";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                step.grid  = dim3(static_cast<uint32_t>(launch.grid[0]),
+                                 static_cast<uint32_t>(launch.grid[1]),
+                                 static_cast<uint32_t>(launch.grid[2]));
+                step.block = dim3(static_cast<uint32_t>(kernel->attr("block", 256)), 1, 1);
+                if(auto st = finishStep(step, w, reason); st != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    return st;
+                }
+                Program prog;
+                prog.pack            = &pack;
+                prog.scalarType      = generic.scalarType;
+                prog.nullStatus      = generic.nullStatus;
+                prog.requiredScalars = generic.requiredScalars;
+                prog.requiredBuffers = generic.requiredBuffers;
+                prog.steps.push_back(std::move(step));
+                prog.description   = kernel->name;
+                prog.fallback      = std::make_shared<Program>(generic);
+                prog.fallbackAlign = align;
+                facts              = CandidateFacts{};
+                facts.route        = Route::Elementwise;
+                facts.main         = kernel;
+                facts.ctas         = launch.grid[0] * launch.grid[1] * launch.grid[2];
+                facts.block        = kernel->attr("block", 256);
+                program            = std::move(prog);
+                reason             = isTuned ? "tuned" : "rule";
                 return HIPTENSOR_STATUS_SUCCESS;
             }
 
@@ -2958,8 +3181,8 @@ namespace hiptensor
                 return HIPTENSOR_STATUS_SUCCESS;
             }
 
-            // rocKE's body rule of the emulated-f32 routes (rocke.dispatch.gemm.cf32), with the
-            // thresholds from the pack's route table.
+            // rocKE's "waves" body rule of the emulated-f32 routes (rocke.dispatch.gemm.cf32, the
+            // gfx950 bodies), with the thresholds from the pack's route table.
             std::string gemmBody(Pack const& pack, int64_t M, int64_t Nk, int cus, bool cplx)
             {
                 double const smallMax = pack.routeDouble("gemm.cf32_small_max_waves", 0.5);
@@ -2983,10 +3206,97 @@ namespace hiptensor
                 return "RIW";
             }
 
-            // The bodies of a GEMM route in the static order: the rule's body first.
-            std::vector<std::string>
-                gemmBodies(Pack const& pack, int64_t M, int64_t Nk, int cus, bool cplx)
+            // The 32-bit-offset GEMM kernels of a route in the pack (non-batched; every body has
+            // its batched twin), in pack order.
+            std::vector<PackKernel const*>
+                gemmKernels(Pack const& pack, std::string const& route, std::string const& storage)
             {
+                std::vector<PackKernel const*> out;
+                for(auto const& k : pack.kernels())
+                {
+                    if(k.family == kGemm && k.attr("wide", 0) == 0 && k.attr("batched", 0) == 0
+                       && k.attrStr("route") == route && k.attrStr("dtype") == storage)
+                    {
+                        out.push_back(&k);
+                    }
+                }
+                return out;
+            }
+
+            // rocKE's "cost" body rule (rocke.dispatch.gemm.cf32.gemm_body_cost, the gfx942 bodies):
+            // a body's predicted time a + b * ceil(tiles * L / (CUs * occ)) * Kk for kernel extents
+            // M x Nk (the body's output tiles) and Kk the problem's K (complex: 2 per element),
+            // with its coefficients from the pack's route table (gemm.cost.<route>.<body>.*);
+            // +inf without coefficients.
+            double gemmBodyCost(Pack const&        pack,
+                                PackKernel const&  kernel,
+                                std::string const& route,
+                                int64_t            M,
+                                int64_t            Nk,
+                                int64_t            Kk,
+                                int64_t            L,
+                                int                cus)
+            {
+                std::string body = kernel.attrStr("body");
+                for(auto& ch : body)
+                {
+                    ch = char(std::tolower(static_cast<unsigned char>(ch)));
+                }
+                double const      nan = std::numeric_limits<double>::quiet_NaN();
+                std::string const key = "gemm.cost." + route + "." + body;
+                double const      a   = pack.routeDouble(key + ".a", nan);
+                double const      b   = pack.routeDouble(key + ".b", nan);
+                double const      occ = pack.routeDouble(key + ".occ", nan);
+                int64_t const     tm = kernel.attr("tile_m"), tn = kernel.attr("tile_n");
+                if(std::isnan(a) || std::isnan(b) || std::isnan(occ) || tm <= 0 || tn <= 0)
+                {
+                    return std::numeric_limits<double>::infinity();
+                }
+                int64_t const tiles = ceilDiv(M, tm) * ceilDiv(Nk, tn) * L;
+                int64_t const per = int64_t(std::max(1, cus)) * std::max<int64_t>(1, int64_t(occ));
+                // (the Python reference: a + b * waves * Kk, left to right)
+                return a + b * double(ceilDiv(tiles, per)) * double(Kk);
+            }
+
+            // The bodies of a GEMM route, the rule's choice first: the "cost" rule of the pack's
+            // route table (gemm.rule=cost: every body of the route in the pack, cheapest first,
+            // equal costs by name), else the "waves" rule's body, then the gfx950 bodies in the
+            // static order.
+            std::vector<std::string> gemmBodies(Pack const&        pack,
+                                                std::string const& route,
+                                                std::string const& storage,
+                                                int64_t            M,
+                                                int64_t            Nk,
+                                                int64_t            Kk,
+                                                int64_t            L,
+                                                int                cus,
+                                                bool               cplx)
+            {
+                if(pack.route("gemm.rule") == "cost")
+                {
+                    std::vector<std::pair<double, std::string>> ranked;
+                    for(auto const* k : gemmKernels(pack, route, storage))
+                    {
+                        auto const body = k->attrStr("body");
+                        bool       seen = false;
+                        for(auto const& r : ranked)
+                        {
+                            seen = seen || r.second == body;
+                        }
+                        if(!seen)
+                        {
+                            ranked.emplace_back(gemmBodyCost(pack, *k, route, M, Nk, Kk, L, cus),
+                                                body);
+                        }
+                    }
+                    std::sort(ranked.begin(), ranked.end());
+                    std::vector<std::string> bodies;
+                    for(auto const& r : ranked)
+                    {
+                        bodies.push_back(r.second);
+                    }
+                    return bodies;
+                }
                 std::vector<std::string> bodies{gemmBody(pack, M, Nk, cus, cplx)};
                 for(auto const* b : {"RIW", "C3", "Q3_SK", "RIW_SK"})
                 {
@@ -2998,13 +3308,39 @@ namespace hiptensor
                 return bodies;
             }
 
+            // The selection features' body id of a GEMM body (append only: a new body takes the
+            // next free id; 9 an unknown body, 10 .. 15 the f64 GEMM classes).
             int gemmBodyId(std::string const& body)
             {
-                return body == "RIW"      ? 0
-                       : body == "RIW_SK" ? 1
-                       : body == "C3"     ? 2
-                       : body == "Q3_SK"  ? 3
-                                          : 9;
+                static std::pair<char const*, int> const ids[] = {
+                    // gfx950
+                    {"RIW", 0},
+                    {"RIW_SK", 1},
+                    {"C3", 2},
+                    {"Q3_SK", 3},
+                    // gfx942
+                    {"G64x64x128L3", 20},
+                    {"G128x128x128L3", 21},
+                    {"G64x32x128U", 22},
+                    {"G192x128x64L3", 23},
+                    {"G256x256x64L3", 24},
+                    {"G32x32x128U", 25},
+                    {"G256x224x64L3", 26},
+                    {"G32x32x128L3", 27},
+                    {"G192x128x64L1S3", 28},
+                    {"G256x224x64L1", 29},
+                    {"G128x64x64", 30},
+                    {"G192x128x64US3", 31},
+                    {"G128x64x64U", 32},
+                };
+                for(auto const& [name, id] : ids)
+                {
+                    if(body == name)
+                    {
+                        return id;
+                    }
+                }
+                return 9;
             }
 
             // The group of tensor t's stride-1 mode: 0 none, 1 M, 2 N, 3 K, 4 L.
@@ -3051,15 +3387,22 @@ namespace hiptensor
             // offsets (the 64-bit-address body may then serve it).
             constexpr char kPastGemmOffsets[]
                 = "operands past the 32-bit offsets of the GEMM bodies";
-            // The body of the 64-bit-address GEMM kernels in the pack (pack/rocke_pack_builder.cpp
-            // kGemmWideBody).
-            constexpr char kGemmWideBody[] = "RIW";
+            // The body of the 64-bit-address GEMM kernels of a route in the pack (one per target and
+            // route: pack/rocke_pack_builder.cpp gemmWideBody; gfx950 "RIW"), "" when there is none.
+            std::string
+                gemmWideBody(Pack const& pack, std::string const& route, std::string const& storage)
+            {
+                auto const* k
+                    = pack.find(kGemm, {{"wide", 1}}, {{"route", route}, {"dtype", storage}});
+                return k != nullptr ? k->attrStr("body") : std::string();
+            }
 
             // f16 / bf16 (and f32 with a 16-bit compute type), f32 and complex f32 contractions
             // on one universal GEMM body with an f32 output: pack A and B, GEMM, epilogue.
-            // `wide`: the 64-bit-address body (rocKE's wide_addr RIW form), for operands past the
-            // DMA buffer range or a result past 2^31 elements; one launch per batch and per
-            // 65535 rows of tiles.
+            // `wide`: the 64-bit-address body (rocKE's wide_addr form of the target's wide body),
+            // for operands past the 32-bit offsets of the bodies or a result past 2^31 elements;
+            // one launch per batch and per 65535 rows of tiles. The capability limits are the
+            // kernel's pack attributes (limit_*: rocKE's gemm_launch_limits).
             hiptensorStatus_t planGemmBody(Problem const&     p,
                                            Pack const&        pack,
                                            Classified const&  c,
@@ -3148,6 +3491,20 @@ namespace hiptensor
                         = static_cast<uint64_t>(kernel->attr("limit_c_elements", kI32Max));
                     if(aBytes >= opLimit || bBytes >= opLimit || tElems > cLimit
                        || ceilDiv(Mp, tm) > gridLimit || L > gridLimit)
+                    {
+                        reason = kPastGemmOffsets;
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
+                    // the batched launch's i32 element offsets (rocKE's batched_launch_error):
+                    // (L - 1) * stride + rows * K below 2^31 elements per operand (16-bit halves),
+                    // (L - 1) * stride_c + M * N at most 2^31 (implied by the byte limits above for
+                    // packed batches; checked here so the kernel arguments stay in range)
+                    uint64_t const halves = es / 2;
+                    if(L > 1
+                       && (uint64_t(L) * uint64_t(Mp) * uint64_t(Kp) * halves >= (uint64_t(1) << 31)
+                           || uint64_t(L) * uint64_t(Np) * uint64_t(Kp) * halves
+                                  >= (uint64_t(1) << 31)
+                           || uint64_t(L) * uint64_t(kM) * uint64_t(kN) > (uint64_t(1) << 31)))
                     {
                         reason = kPastGemmOffsets;
                         return HIPTENSOR_STATUS_NOT_SUPPORTED;
@@ -3343,14 +3700,91 @@ namespace hiptensor
                 return "medium";
             }
 
+            // `tiles` <= `cus` * 2^`octave`, in integers (rocKE's _tiles_le).
+            bool tilesLe(int64_t tiles, int64_t cus, int octave)
+            {
+                return octave >= 0 ? tiles <= (cus << octave) : (tiles << -octave) <= cus;
+            }
+
+            // rocke.instances.common.gett_f64.gett_f32_shape_class for packed operands: the class
+            // of the f32 GEMM's own tuned configurations (the pack's gett32 kernels) on targets
+            // that have them, else gett64Class.
+            std::string gett32Class(std::string const& arch,
+                                    bool               cplx,
+                                    int64_t            M,
+                                    int64_t            N,
+                                    int64_t            K,
+                                    int64_t            L,
+                                    int                cus)
+            {
+                if(arch == "gfx942")
+                {
+                    if(cplx)
+                    {
+                        int64_t const t = ceilDiv(M, 64) * ceilDiv(N, 64) * L;
+                        if(tilesLe(t, cus, 0))
+                        {
+                            return tilesLe(t, cus, -1) ? "small" : "compact";
+                        }
+                        return tilesLe(t, cus, 6) ? "medium" : "large";
+                    }
+                    int64_t const t = ceilDiv(M, 128) * ceilDiv(N, 128) * L;
+                    if(tilesLe(t, cus, -2))
+                    {
+                        return tilesLe(t, cus, -3) ? "tiny" : "small";
+                    }
+                    if(tilesLe(t, cus, 3))
+                    {
+                        return std::min(M, N) <= 4096 ? "medium" : "large";
+                    }
+                    return K <= 1024 ? "xlarge" : "huge";
+                }
+                if(arch != "gfx950")
+                {
+                    return gett64Class(arch, cplx, M, N, K, L, cus);
+                }
+                if(cplx)
+                {
+                    int64_t const t = ceilDiv(M, 64) * ceilDiv(N, 64) * L;
+                    if(tilesLe(t, cus, 2))
+                    {
+                        if(K <= 256)
+                        {
+                            return std::min(M, N) <= 512 ? "small" : "medium";
+                        }
+                        return "longk";
+                    }
+                    return tilesLe(t, cus, 5) ? "medium" : "large";
+                }
+                int64_t const t = ceilDiv(M, 128) * ceilDiv(N, 128) * L;
+                if(tilesLe(t, cus, 0))
+                {
+                    if(tilesLe(t, cus, -1))
+                    {
+                        return tilesLe(t, cus, -3) ? "tiny" : "small";
+                    }
+                    return "medium";
+                }
+                if(tilesLe(t, cus, 2))
+                {
+                    return "large";
+                }
+                return tilesLe(t, cus, 3) ? "xlarge" : "huge";
+            }
+
             int gett64ClassId(std::string const& cls)
             {
-                return cls == "small"    ? 10
-                       : cls == "medium" ? 11
-                       : cls == "large"  ? 12
-                       : cls == "wide"   ? 13
-                       : cls == "kk"     ? 14
-                                         : 15;
+                return cls == "small"     ? 10
+                       : cls == "medium"  ? 11
+                       : cls == "large"   ? 12
+                       : cls == "wide"    ? 13
+                       : cls == "kk"      ? 14
+                       : cls == "tiny"    ? 16
+                       : cls == "xlarge"  ? 17
+                       : cls == "huge"    ? 18
+                       : cls == "longk"   ? 19
+                       : cls == "compact" ? 20
+                                          : 15;
             }
 
             // How the f64 strided GEMM writes a contraction: D (and C) through their own
@@ -5519,7 +5953,16 @@ namespace hiptensor
                              + " tensors is not supported by the rocKE kernels";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
-                auto const routes = contractionRoutes(problem, options.f32Recipe);
+                auto routes = contractionRoutes(problem, options.f32Recipe);
+                // the x6 recipe (real x6, complex cf32) also lists the native f32 route where the
+                // pack says so (rocKE's CF32_NATIVE_FIRST): it is at least as accurate
+                bool const x6Native = routes.gemm
+                                      && (routes.route == "x6" || routes.route == "cf32")
+                                      && pack.route("gemm.x6_admits_gett32") == "1";
+                if(x6Native)
+                {
+                    routes.gett32 = true;
+                }
                 if(!routes.gemm && !routes.gett32 && !routes.f64)
                 {
                     reason = routes.why;
@@ -5730,55 +6173,6 @@ namespace hiptensor
                     }
                 }
 
-                // the GEMM route of the data and compute types
-                if(!f64Only && routes.gemm)
-                {
-                    std::string const& route   = routes.route;
-                    std::string const& storage = routes.storage;
-                    int64_t const      nk      = c.N.size() * (cplx ? 2 : 1);
-                    int const          cus     = std::max(1, problem.device.cuCount);
-                    // the bodies of the route, then (only for operands or a result past their
-                    // 32-bit offsets) the 64-bit-address body
-                    bool pastOffsets = false;
-                    auto bodies      = gemmBodies(pack, c.M.size(), nk, cus, cplx);
-                    for(size_t i = 0; i <= bodies.size(); i++)
-                    {
-                        bool const wide = i == bodies.size();
-                        if(wide && !pastOffsets)
-                        {
-                            break;
-                        }
-                        Program        program;
-                        CandidateFacts facts;
-                        std::string    why;
-                        auto           status = planGemmBody(problem,
-                                                   pack,
-                                                   c,
-                                                   route,
-                                                   storage,
-                                                   wide ? std::string(kGemmWideBody) : bodies[i],
-                                                   wide,
-                                                   workspaceLimit,
-                                                   program,
-                                                   facts,
-                                                   why);
-                        if(status == HIPTENSOR_STATUS_SUCCESS)
-                        {
-                            add("gemm:" + facts.main->name, std::move(program), facts);
-                        }
-                        else if(isDecline(status))
-                        {
-                            pastOffsets = pastOffsets || why == kPastGemmOffsets;
-                            note(why);
-                        }
-                        else
-                        {
-                            reason = why;
-                            return status;
-                        }
-                    }
-                }
-
                 // the strided GEMM with f32 words (`f32`: the native route of f32 data) or f64
                 // words (the route of f64 / complex f64 data, and the F64 route of the other
                 // types: operands converted to f64, the result rounded once); a status other
@@ -5793,8 +6187,20 @@ namespace hiptensor
                     int const     cus    = std::max(1, problem.device.cuCount);
                     int64_t const kbMin
                         = static_cast<int64_t>(pack.routeDouble("gett64.k_block_min_k", 4096));
-                    auto const cls = gett64Class(
-                        pack.arch(), cplx, cd.M.size(), cd.N.size(), Kp, cd.L.size(), cus);
+                    auto const cls     = f32 ? gett32Class(pack.arch(),
+                                                       cplx,
+                                                       cd.M.size(),
+                                                       cd.N.size(),
+                                                       Kp,
+                                                       cd.L.size(),
+                                                       cus)
+                                             : gett64Class(pack.arch(),
+                                                       cplx,
+                                                       cd.M.size(),
+                                                       cd.N.size(),
+                                                       Kp,
+                                                       cd.L.size(),
+                                                       cus);
                     auto const kernels = gett64Kernels(pack, layout, cplx, cls, Kp >= kbMin, f32);
                     if(kernels.empty())
                     {
@@ -5838,7 +6244,85 @@ namespace hiptensor
                     }
                     return HIPTENSOR_STATUS_SUCCESS;
                 };
-                if(!f64Only && routes.gett32)
+                // the x6 recipe's native f32 route ahead of the GEMM bodies below the pack's
+                // threshold of real multiply-adds of the whole contraction (L M N K, complex
+                // 4 L M N K, L the batch modes; rocKE's native_first)
+                bool const nativeFirst
+                    = x6Native
+                      && double(c.L.size()) * double(c.M.size()) * double(c.N.size())
+                                 * double(c.K.size()) * (cplx ? 4.0 : 1.0)
+                             < pack.routeDouble("gemm.x6_gett32_first." + routes.route, 0.0);
+                if(!f64Only && nativeFirst)
+                {
+                    if(auto status = stridedGemm(true); status != HIPTENSOR_STATUS_SUCCESS)
+                    {
+                        return status;
+                    }
+                }
+
+                // the GEMM route of the data and compute types
+                if(!f64Only && routes.gemm)
+                {
+                    std::string const& route   = routes.route;
+                    std::string const& storage = routes.storage;
+                    int64_t const      nk      = c.N.size() * (cplx ? 2 : 1);
+                    // the cost rule's K: the problem's K (complex: 2 per element)
+                    int64_t const kk  = c.K.size() * (cplx ? 2 : 1);
+                    int const     cus = std::max(1, problem.device.cuCount);
+                    // the bodies of the route, then (only for operands or a result past their
+                    // 32-bit offsets) the 64-bit-address body
+                    bool pastOffsets = false;
+                    auto bodies      = gemmBodies(
+                        pack, route, storage, c.M.size(), nk, kk, c.L.size(), cus, cplx);
+                    if(bodies.empty())
+                    {
+                        note("no " + route + " GEMM body");
+                    }
+                    auto const wideBody = gemmWideBody(pack, route, storage);
+                    for(size_t i = 0; i <= bodies.size(); i++)
+                    {
+                        bool const wide = i == bodies.size();
+                        if(wide && !pastOffsets)
+                        {
+                            break;
+                        }
+                        if(wide && wideBody.empty())
+                        {
+                            note("no " + route + " GEMM body (64-bit addresses)");
+                            break;
+                        }
+                        Program        program;
+                        CandidateFacts facts;
+                        std::string    why;
+                        auto           status = planGemmBody(problem,
+                                                   pack,
+                                                   c,
+                                                   route,
+                                                   storage,
+                                                   wide ? wideBody : bodies[i],
+                                                   wide,
+                                                   workspaceLimit,
+                                                   program,
+                                                   facts,
+                                                   why);
+                        if(status == HIPTENSOR_STATUS_SUCCESS)
+                        {
+                            add("gemm:" + facts.main->name, std::move(program), facts);
+                        }
+                        else if(isDecline(status))
+                        {
+                            pastOffsets = pastOffsets || why == kPastGemmOffsets;
+                            note(why);
+                        }
+                        else
+                        {
+                            reason = why;
+                            return status;
+                        }
+                    }
+                }
+
+                if(!f64Only && routes.gett32 && !nativeFirst)
                 {
                     if(auto status = stridedGemm(true); status != HIPTENSOR_STATUS_SUCCESS)
                     {
@@ -5863,14 +6347,14 @@ namespace hiptensor
                     auto status = planDgett(problem, pack, c, program, facts, why, routes.f64Only);
                     if(status == HIPTENSOR_STATUS_SUCCESS)
                     {
-                        // on a target without the GEMM routes (gfx90a, gfx942: no GEMM kernel in
-                        // the pack) the direct GETT of a 16-bit or f32 compute class is preferred
+                        // on a target without the GEMM routes (gfx90a: no GEMM kernel in the
+                        // pack) the direct GETT of a 16-bit or f32 compute class is preferred
                         // to the f64 route. A property of the target, not of the candidates
                         // within the workspace limit, so that a plan with the workspace of the
                         // estimate selects the estimate's kernel.
-                        // The native f32 route (gett32) of such a target (gfx942) is the
-                        // recipe's own route and stays ahead: the direct GETT is preferred to
-                        // the f64 route only (also a property of the target and the recipe).
+                        // The native f32 route (gett32) of such a target is the recipe's own
+                        // route and stays ahead: the direct GETT is preferred to the f64 route
+                        // only (also a property of the target and the recipe).
                         bool const gemmTarget = pack.find(kGemm, {}, {}) != nullptr;
                         bool const ownRoute
                             = routes.gett32 && pack.find(kGett32, {}, {}) != nullptr;
@@ -6232,6 +6716,17 @@ namespace hiptensor
                     flat.key        = "ewf:" + flat.program.description;
                     flat.staticRank = static_cast<int>(out.size());
                     out.push_back(std::move(flat));
+                }
+                // the tuned tiled classes when the inputs are not all laid out like the output
+                // and every tensor has one element size (not with HIPTENSOR_ROCKE_DISABLE_TUNED)
+                Candidate tuned;
+                if(!options.disableTuned
+                   && planEwp(layout, pack, candidate.program, tuned.program, tuned.facts, why)
+                          == HIPTENSOR_STATUS_SUCCESS)
+                {
+                    tuned.key        = "ewp:" + tuned.program.description;
+                    tuned.staticRank = static_cast<int>(out.size());
+                    out.push_back(std::move(tuned));
                 }
                 // the tiled kernel when an input is fastest along another mode than the output
                 // (the generic program is its fallback)

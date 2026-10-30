@@ -5,7 +5,8 @@
  * bodies of the emulated-f32 routes with their fused operand prologues. Builds
  * the specs of gemm_cf32_emit.py (same order, same values) through the C API
  * (rocke_gemm_cf32_body, rocke_gemm_cf32_adjust_k, rocke_gemm_prologue_t) so
- * run_diff.py can byte-compare the two engines. The cases of make_spec() are
+ * run_diff.py can byte-compare the two engines (a case may set its target,
+ * g_arch; gfx950 otherwise). The cases of make_spec() are
  * generated: `python gemm_cf32_emit.py --c-cases`.
  */
 #include <stdbool.h>
@@ -23,6 +24,9 @@
 
 #define ARCH "gfx950"
 
+/* The target of the config being built (gfx950 unless the case sets it). */
+static const char* g_arch = ARCH;
+
 /* One config's base: cf32_body(body), the data types, batched and the
  * 64-bit-address adjustment (_adjust_k at the tile extents). */
 static void base(rocke_gemm_universal_spec_t* spec,
@@ -34,7 +38,7 @@ static void base(rocke_gemm_universal_spec_t* spec,
 {
     *spec = rocke_gemm_universal_spec_default();
     spec->name = name;
-    if(!rocke_gemm_cf32_body(body, ARCH, spec))
+    if(!rocke_gemm_cf32_body(body, g_arch, spec))
     {
         fprintf(stderr, "unknown body %s\n", body);
         exit(2);
@@ -53,6 +57,7 @@ static int
 {
     *pro = rocke_gemm_prologue_default();
     *has_pro = false;
+    g_arch = ARCH;
     switch(idx)
     {
     case 0:
@@ -708,6 +713,804 @@ static int
         pro->recipe = "cvt";
         pro->out_f32 = true;
         return 1;
+    case 73:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g64x64x128l3", "G64x64x128L3", "fp16", false, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 74:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g64x64x128l3", "G64x64x128L3", "fp16", true, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 75:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g128x128x128l3", "G128x128x128L3", "fp16", false, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 76:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g128x128x128l3", "G128x128x128L3", "fp16", true, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 77:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g64x32x128u", "G64x32x128U", "fp16", false, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 78:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g64x32x128u", "G64x32x128U", "fp16", true, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 79:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g192x128x64l3", "G192x128x64L3", "fp16", false, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 80:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g192x128x64l3", "G192x128x64L3", "fp16", true, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 81:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g256x256x64l3", "G256x256x64L3", "fp16", false, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 82:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g256x256x64l3", "G256x256x64L3", "fp16", true, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 83:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g32x32x128u", "G32x32x128U", "fp16", false, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 84:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g32x32x128u", "G32x32x128U", "fp16", true, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 85:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g256x224x64l3", "G256x224x64L3", "fp16", false, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 86:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g256x224x64l3", "G256x224x64L3", "fp16", true, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 87:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g256x224x64l3_w64", "G256x224x64L3", "fp16", false, true);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 88:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g64x64x128l3", "G64x64x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 89:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g64x64x128l3", "G64x64x128L3", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 90:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g128x128x128l3", "G128x128x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 91:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g128x128x128l3", "G128x128x128L3", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 92:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g64x32x128u", "G64x32x128U", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 93:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g64x32x128u", "G64x32x128U", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 94:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g192x128x64l3", "G192x128x64L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 95:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g192x128x64l3", "G192x128x64L3", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 96:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g256x256x64l3", "G256x256x64L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 97:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g256x256x64l3", "G256x256x64L3", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 98:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g32x32x128u", "G32x32x128U", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 99:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g32x32x128u", "G32x32x128U", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 100:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g256x224x64l3", "G256x224x64L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 101:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g256x224x64l3", "G256x224x64L3", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 102:
+        g_arch = "gfx942";
+        base(spec, "pk942_h16_g256x224x64l3_w64", "G256x224x64L3", "bf16", false, true);
+        *has_pro = true;
+        pro->src = "same";
+        pro->recipe = "cvt";
+        pro->out_f32 = true;
+        return 1;
+    case 103:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g64x64x128l3", "G64x64x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 104:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g64x64x128l3", "G64x64x128L3", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 105:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g32x32x128l3", "G32x32x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 106:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g32x32x128l3", "G32x32x128L3", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 107:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g128x128x128l3", "G128x128x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 108:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g128x128x128l3", "G128x128x128L3", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 109:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g192x128x64l1s3", "G192x128x64L1S3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 110:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g192x128x64l1s3", "G192x128x64L1S3", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 111:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g256x224x64l1", "G256x224x64L1", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 112:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g256x224x64l1", "G256x224x64L1", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 113:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g128x64x64", "G128x64x64", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 114:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g128x64x64", "G128x64x64", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 115:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g64x32x128u", "G64x32x128U", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 116:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g64x32x128u", "G64x32x128U", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 117:
+        g_arch = "gfx942";
+        base(spec, "pk942_x6_g256x224x64l1_w64", "G256x224x64L1", "bf16", false, true);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 118:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g64x64x128l3", "G64x64x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 119:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g64x64x128l3", "G64x64x128L3", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 120:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g32x32x128l3", "G32x32x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 121:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g32x32x128l3", "G32x32x128L3", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 122:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g128x128x128l3", "G128x128x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 123:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g128x128x128l3", "G128x128x128L3", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 124:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g192x128x64us3", "G192x128x64US3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 125:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g192x128x64us3", "G192x128x64US3", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 126:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g256x224x64l1", "G256x224x64L1", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 127:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g256x224x64l1", "G256x224x64L1", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 128:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g128x64x64u", "G128x64x64U", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 129:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g128x64x64u", "G128x64x64U", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 130:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g64x32x128u", "G64x32x128U", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 131:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g64x32x128u", "G64x32x128U", "bf16", true, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 132:
+        g_arch = "gfx942";
+        base(spec, "pk942_cf32_g256x224x64l1_w64", "G256x224x64L1", "bf16", false, true);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 133:
+        g_arch = "gfx942";
+        base(spec, "ex942_x9_g128x128x128l3", "G128x128x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x9";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 134:
+        g_arch = "gfx942";
+        base(spec, "ex942_x3_g128x128x128l3", "G128x128x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x3";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        return 1;
+    case 135:
+        g_arch = "gfx942";
+        base(spec, "ex942_x4_g128x128x128l3", "G128x128x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x4";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        return 1;
+    case 136:
+        g_arch = "gfx942";
+        base(spec, "ex942_cf32x3_g128x128x128l3", "G128x128x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x3";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        return 1;
+    case 137:
+        g_arch = "gfx942";
+        base(spec, "ex942_x9_g64x32x128u", "G64x32x128U", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x9";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 138:
+        g_arch = "gfx942";
+        base(spec, "ex942_x3_g64x32x128u", "G64x32x128U", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x3";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        return 1;
+    case 139:
+        g_arch = "gfx942";
+        base(spec, "ex942_x4_g64x32x128u", "G64x32x128U", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x4";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        return 1;
+    case 140:
+        g_arch = "gfx942";
+        base(spec, "ex942_cf32x3_g64x32x128u", "G64x32x128U", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x3";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        return 1;
+    case 141:
+        g_arch = "gfx942";
+        base(spec, "ex942_cj10_g256x224x64l1", "G256x224x64L1", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        pro->conj_a = true;
+        pro->conj_b = false;
+        return 1;
+    case 142:
+        g_arch = "gfx942";
+        base(spec, "ex942_cj01_g256x224x64l1", "G256x224x64L1", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        pro->conj_a = false;
+        pro->conj_b = true;
+        return 1;
+    case 143:
+        g_arch = "gfx942";
+        base(spec, "ex942_cj11_g256x224x64l1", "G256x224x64L1", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        pro->conj_a = true;
+        pro->conj_b = true;
+        return 1;
+    case 144:
+        g_arch = "gfx942";
+        base(spec, "ex942_cj10_g32x32x128l3", "G32x32x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        pro->conj_a = true;
+        pro->conj_b = false;
+        return 1;
+    case 145:
+        g_arch = "gfx942";
+        base(spec, "ex942_cj01_g32x32x128l3", "G32x32x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        pro->conj_a = false;
+        pro->conj_b = true;
+        return 1;
+    case 146:
+        g_arch = "gfx942";
+        base(spec, "ex942_cj11_g32x32x128l3", "G32x32x128L3", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        pro->conj_a = true;
+        pro->conj_b = true;
+        return 1;
+    case 147:
+        g_arch = "gfx942";
+        base(spec, "lv942_g192x128x64l1s3", "G192x128x64L1S3", "bf16", false, false);
+        return 1;
+    case 148:
+        g_arch = "gfx942";
+        base(spec, "lv942_g128x64x64u_bat", "G128x64x64U", "fp16", true, false);
+        return 1;
+    case 149:
+        g_arch = "gfx942";
+        base(spec, "lv942_g256x256x64l3_w64", "G256x256x64L3", "bf16", false, true);
+        return 1;
+    case 150:
+        g_arch = "gfx942";
+        base(spec, "lv942_g256x224x64l1_w64_bat_x6", "G256x224x64L1", "bf16", true, true);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 151:
+        g_arch = "gfx942";
+        base(spec, "lv942_g64x64x128l3_w64_bat_cf", "G64x64x128L3", "bf16", true, true);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        pro->cplx_b = true;
+        pro->split_mode = "trunc";
+        return 1;
+    case 152:
+        g_arch = "gfx942";
+        base(spec, "lv942_g128x64x64_rne", "G128x64x64", "bf16", false, false);
+        *has_pro = true;
+        pro->src = "f32";
+        pro->recipe = "x6";
+        pro->out_f32 = true;
+        pro->split_at = "use";
+        pro->psub = true;
+        return 1;
     default:
         return 0;
     }
@@ -736,7 +1539,7 @@ int main(int argc, char** argv)
         return 2;
     }
     char reason[512];
-    if(!rocke_gemm_universal_is_valid_spec(&spec, ARCH, reason, sizeof reason))
+    if(!rocke_gemm_universal_is_valid_spec(&spec, g_arch, reason, sizeof reason))
     {
         fprintf(stderr, "invalid spec: %s\n", reason);
         return 1;
@@ -752,7 +1555,7 @@ int main(int argc, char** argv)
     }
     rocke_ir_builder_t b;
     memset(&b, 0, sizeof b);
-    rocke_kernel_def_t* kernel = rocke_build_universal_gemm_new(&b, &spec, ARCH);
+    rocke_kernel_def_t* kernel = rocke_build_universal_gemm_new(&b, &spec, g_arch);
     if(kernel == NULL)
     {
         fprintf(stderr, "builder error: %s\n", rocke_ir_builder_error(&b));
@@ -766,7 +1569,7 @@ int main(int argc, char** argv)
         char err[ROCKE_ERR_MSG_CAP];
         err[0] = 0;
         rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
-            kernel, ROCKE_LLVM_FLAVOR_AUTO, ARCH, &llvm_text, err, sizeof err);
+            kernel, ROCKE_LLVM_FLAVOR_AUTO, g_arch, &llvm_text, err, sizeof err);
         if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err);

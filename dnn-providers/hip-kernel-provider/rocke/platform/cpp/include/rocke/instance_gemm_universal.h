@@ -277,6 +277,33 @@ typedef struct rocke_gemm_trait_spec
     /* (dtl_tight_rsrc + dtl_hoist + pad_m / pad_n) exact DTL bounds only on
      * the operand whose row dimension is padded */
     bool dtl_tight_ragged_only;
+    /* ---- the register-staged global prefetch body of the K-contiguous (RCR)
+     * operands and its main-loop levers (Python TraitSpec fields of the same
+     * names; see gemm_universal.py; every default keeps the emission
+     * unchanged; the defaults vgpr_prefetch_depth 1 / vp_release_atoms 1 are
+     * set by rocke_gemm_universal_spec_default) ---- */
+    /* 1 / 2: global reads into VGPRs one K tile ahead of their LDS write
+     * (before / after the tile's MFMAs, AB LDS double buffer); 3: the
+     * instruction-level interleave; 4: as 3 with one LDS buffer */
+    int vgpr_prefetch;
+    int vgpr_prefetch_depth; /* register sets in flight (1..3; 0 reads as 1) */
+    int vp_unroll; /* 1: D + 1 tiles per loop iteration                    */
+    int vp_late_reads; /* (4) the global reads behind the LDS writes        */
+    int vp_release_atoms; /* (4) release before atom KA - R (0 reads as 1) */
+    int vp_tail_pack; /* (4) refill placement in the release window (0..3) */
+    int vp_pair_reads; /* (4) load / ds_write pairs in the release window  */
+    int vp_mfma_first; /* (3 / 4) sched_barrier after the slot's MFMA      */
+    /* ---- split-K slices of whole tiles and the in-launch reduction ---- */
+    /* (split_k > 1, pad_k) slices of ceil(K / (split_k * tile_k)) tiles */
+    bool split_k_aligned;
+    /* (split_k > 1) reduce the partials in the launch: params W (f32 slots)
+     * and Cnt (i32 counters) after C; 2: write-through partials, 3: atomic
+     * f32 partials (1, the fenced form, is refused) */
+    int split_k_serial;
+    /* (vgpr_prefetch + lds_swizzle) the XOR group width 2^L halves of the LDS
+     * swizzle (W = log2(tile_k >> L)); -1 (default; 0 reads as -1) = the
+     * geometry rule (L = log2 of the MFMA fragment length) */
+    int lds_swizzle_l;
 } rocke_gemm_trait_spec_t;
 
 /* ------------------------------------------------------------------ DataSpec */

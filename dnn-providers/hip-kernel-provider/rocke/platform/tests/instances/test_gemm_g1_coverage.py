@@ -9,8 +9,9 @@
   HIP limits.
 * ``pad_row_clamp``, ``pad_k_fast``, ``split_k_aligned`` and ``dtl_k_tail`` make
   those classes correct (GPU-checked by a fuzz harness); each is
-  default-off, scoped by ``is_valid_spec``, flagged in the kernel name and
-  Python-engine only.
+  default-off, scoped by ``is_valid_spec`` and flagged in the kernel name;
+  all but ``split_k_aligned`` (mirrored by the C++ engine) are Python-engine
+  only.
 * The dispatcher admits every RCR shape on gfx942 / gfx950 (f16 and bf16) with
   a spec the launch rules accept; aligned shapes keep their previous kernels.
 """
@@ -171,6 +172,11 @@ class TestLeverScope(unittest.TestCase):
         for f in _G1:
             with self.subTest(f=f):
                 self.assertFalse(getattr(tr, f))
+                if f == "split_k_aligned":
+                    # mirrored by the C++ engine: converted, not refused
+                    self.assertNotIn(f, listed)
+                    _be._refuse_python_only_levers(replace(tr, **{f: True}))
+                    continue
                 self.assertIn(f, listed)
                 self.assertEqual(listed[f], False)
                 with self.assertRaises(NotImplementedError):

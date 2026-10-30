@@ -79,10 +79,11 @@ These environment variables, read at every plan creation and workspace estimate,
             (``../share/hiptensor/rocke``), in the install prefix and in the build tree. Without a pack for the device,
             the rocKE backend declines every problem.
     *   -   ``HIPTENSOR_ROCKE_F32_RECIPE``
-        -   ``native`` (default), ``x3``, ``x4``, ``x6``, ``x9`` or ``f64``: how the rocKE backend multiplies
-            contractions with ``HIPTENSOR_COMPUTE_DESC_32F`` or ``HIPTENSOR_COMPUTE_DESC_C32F`` whose operands are f32
-            or complex f32 (or mixed 16-bit and f32), see :ref:`rocke-f32-recipes`. Other values select ``native``,
-            and the plan log says so.
+        -   ``native``, ``x3``, ``x4``, ``x6``, ``x9`` or ``f64``: how the rocKE backend multiplies contractions with
+            ``HIPTENSOR_COMPUTE_DESC_32F`` or ``HIPTENSOR_COMPUTE_DESC_C32F`` whose operands are f32 or complex f32 (or
+            mixed 16-bit and f32), see :ref:`rocke-f32-recipes`. The default depends on the GPU target: ``x6`` on
+            gfx950, ``native`` on gfx942 and gfx90a. Other values select the target's default, and the plan log says
+            so.
     *   -   ``HIPTENSOR_ROCKE_CONTRACTION_ROUTE``
         -   ``f64``, for debugging and testing: the rocKE backend runs every contraction in f64 (complex f64), with the
             operands converted to f64 and the result rounded once to the output type.
@@ -91,7 +92,8 @@ These environment variables, read at every plan creation and workspace estimate,
             contractions of its tuned and AOT route tables, and plans them like any other contraction (without
             the contraction JIT's planner route either), it runs
             reductions on the generic reduction kernels only (no tuned reduction kernel: neither the launches of
-            its reduction route table nor the untuned choice), and it doesn't use the flat elementwise kernel.
+            its reduction route table nor the untuned choice), and it doesn't use the flat elementwise kernel
+            or the tuned tiled elementwise kernels.
     *   -   ``HIPTENSOR_ROCKE_SELECT``
         -   ``static``, for debugging and testing: the rocKE backend selects kernels by rocKE's rules (the
             contraction JIT's route first, then the ring GETT, ...) instead of the selection model of its kernel
@@ -145,8 +147,8 @@ The rocKE backend selects kernels when the plan is created. It lists the candida
 programs that its kernel pack can run the problem with within the plan's workspace limit (for a contraction, the
 ring GETT, the universal GEMM bodies of the data type's route, the f64 strided GEMM classes and the direct GETT;
 for a reduction, the tuned reduction kernels of the pack and the generic row and column kernels with several
-splits of the reduced modes; for a permutation or an elementwise operation, the flat kernel, the tiled kernel
-and the generic kernel), checking every capability on the host without launching anything. It then orders them:
+splits of the reduced modes; for a permutation or an elementwise operation, the flat kernel, a tuned tiled
+kernel, the tiled kernel and the generic kernel), checking every capability on the host without launching anything. It then orders them:
 
 1. A contraction of rocKE's tuned or AOT route table (f16 and bf16 on gfx950) takes the launches of that
    table: a GETT on one of rocKE's GEMM bodies reading the operands in place, optionally after packing one or
@@ -157,7 +159,8 @@ and the generic kernel), checking every capability on the host without launching
    padding, is planned on the routes below; in a plan created with ``HIPTENSOR_JIT_MODE_DEFAULT``, the route
    rocKE's tensor-contraction planner chooses for it (see "Contraction JIT" below) is one of its candidates.
    A reduction of rocKE's reduction route table (gfx950) takes the launch of that table: a tuned reduction
-   kernel with the knobs measured for the problem.
+   kernel with the knobs measured for the problem. A permutation or an elementwise operation of rocKE's
+   tuned elementwise route table (gfx950) takes the tuned tiled kernel measured for the problem.
 2. Otherwise, a reduction takes the knobs of the nearest of the measured reductions that the pack carries
    (same kind and element size; distance over the sizes of the output, the reduced elements, the fastest run and
    the mode counts), on the tuned reduction kernel of the pack with those knobs, and a split of the reduced modes
@@ -174,7 +177,7 @@ and the generic kernel), checking every capability on the host without launching
    integer features of the problem and the candidate, trained on measured timings of every candidate) ranks
    the candidates of the routes it was trained on. The contraction models of the gfx950 and gfx942 packs
    (f16, bf16 and f32 with a 16-bit compute type; f32 and complex f32 with the default recipe; f64; complex
-   f64) are trained on cold timings of every route of their class: on gfx950 the contraction JIT's route,
+   f64) are trained on cold timings of the routes of their class: on gfx950 the contraction JIT's route,
    the ring GETT, the GEMM routes, the native f32 route, the f64 route and the direct GETT. They choose
    among all of them, so a contraction takes, for example, the ring GETT, the contraction JIT's route or a
    GEMM route, whichever its model predicts fastest. Whether the plan specializes its elementwise launches
@@ -189,10 +192,10 @@ and the generic kernel), checking every capability on the host without launching
 4. Routes the model of the class doesn't score, and every route of a class without a model, follow rocKE's
    rules: the contraction JIT's route first; then a contraction the ring GETT serves takes it (with the
    operands whose fastest free run is not a multiple of 8 elements first packed into the workspace when the
-   limit allows, else read in place), and on a target without the GEMM routes (gfx90a, gfx942) the direct
+   limit allows, else read in place), and on a target without the GEMM routes (gfx90a) the direct
    GETT of a 16-bit or f32 compute class; the other routes not scored follow the scored candidates in the
-   static order (a permutation or elementwise operation: the flat kernel, then the tiled kernel, then the
-   vector form of the generic kernel, then the generic kernel).
+   static order (a permutation or elementwise operation: the flat kernel, then a tuned tiled kernel, then
+   the tiled kernel, then the vector form of the generic kernel, then the generic kernel).
 
 The plan preference changes this:
 
@@ -207,10 +210,14 @@ selected candidate) is stored in the handle's plan cache, and later plans of the
 a handle that read the plan cache file, take it from there without timing or selecting again, as long as their
 workspace limit admits it.
 
-``hiptensorEstimateWorkspaceSize`` reports, for ``HIPTENSOR_WORKSPACE_DEFAULT``, the workspace of the candidate
-a plan selects (of the candidates ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` times, of every candidate for a
-``KERNEL_RANK`` preference, and at least that of the plan cache's kernel); for ``HIPTENSOR_WORKSPACE_MIN``, the
-least workspace some candidate runs with; for ``HIPTENSOR_WORKSPACE_MAX``, the workspace every candidate runs with.
+``hiptensorEstimateWorkspaceSize`` reports, for ``HIPTENSOR_WORKSPACE_DEFAULT``, the workspace of the leading
+candidates of the selection, with either algorithm: the ones ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` times
+(``HIPTENSOR_ROCKE_AUTOTUNE_TOPK``, 4 by default), so that a plan created with the estimate as its workspace limit
+selects the kernel an unlimited plan selects and is not confined to the candidates that need less workspace (for
+example the direct GETT, which needs none); every candidate for a ``KERNEL_RANK`` preference, or when the selection
+within the leading candidates' workspace would differ; at least the plan cache's kernel. For
+``HIPTENSOR_WORKSPACE_MIN``, the least workspace some candidate runs with; for ``HIPTENSOR_WORKSPACE_MAX``, the
+workspace every candidate runs with.
 The plan's ``HIPTENSOR_PLAN_REQUIRED_WORKSPACE`` is the workspace of the selected candidate.
 
 The rocKE backend serves contractions and trinary contractions, permutations, elementwise binary and trinary
@@ -224,8 +231,11 @@ declined; the fallback backend serves what it supports of them. A contraction ru
   accumulation and no operators, when each operand's fastest free mode runs over an even number of elements and
   the K modes split at its K tile of 32 elements (one K mode may be padded inside the tile), without batch modes,
   with C laid out as D.
-* The GEMM routes (gfx950): A and B are packed into the workspace, a GEMM computes an f32 result in the
-  workspace, and an elementwise epilogue writes D.
+* The GEMM routes (gfx950 and gfx942): A and B are packed into the workspace, a GEMM computes an f32 result in
+  the workspace, and an elementwise epilogue writes D. Each route has a set of GEMM bodies of several tile sizes
+  per target (gfx942: rocKE's register-staged GEMM bodies), each a candidate; without a selection model that
+  scores them, rocKE's body rule of the target orders them (gfx942: the predicted time of each body from the
+  problem's output tiles and K, with coefficients from the kernel pack).
 * The native f32 route (gfx942 and gfx950): contractions of f32 or complex f32 data with
   ``HIPTENSOR_COMPUTE_DESC_32F`` or ``HIPTENSOR_COMPUTE_DESC_C32F`` (the default recipe, see
   :ref:`rocke-f32-recipes`): A and B are packed into the workspace and an f32 strided GEMM with f32 products and
@@ -248,20 +258,56 @@ kernel runs). Otherwise, when an input is contiguous along the output's fastest 
 kernel handles 16 bytes of the output per thread, with vector loads of those inputs (the classes of the JIT's
 vector kernels, with the sizes and strides as kernel arguments). When the output's two tiled modes span less
 than half a tile, one workgroup of the tiled kernel computes the planes of several consecutive batch indices.
-On gfx942 and gfx950, a permutation or an elementwise operation of f16 tensors, or an elementwise binary
-operation of bf16 tensors, that are all one contiguous run of elements in the same order (no broadcast, the
-element count a multiple of 16 bytes of D) runs on
+On gfx942 and gfx950, a permutation or an elementwise operation of f16 or bf16 tensors (one type) that are all
+one contiguous run of elements in the same order (no broadcast, the element count a multiple of 16 bytes of D)
+runs on
 a flat kernel first: no index arithmetic, two 16-byte vectors of D per thread with streaming loads and stores, and, when no
 scale is zero, the loads of every input issued without branches. Buffers not aligned to its vectors run the
 generic kernel. The JIT doesn't specialize the flat kernel (it has no sizes or strides to build in).
 
-Permutations and elementwise operations accept the same data type combinations on both backends (the API's
-rows): a permutation of f16 data with f16 or f32 scalars, of f32 data with f32 scalars and of f64 data with f64
-scalars; an elementwise binary operation of f16 or bf16 data with scalars of the data type or f32, of f32 data
-with f32 scalars and of f64 data with f64 scalars; an elementwise trinary operation of f16, f32 or f64 data with
-scalars of the data type. Other combinations, for example a bf16 permutation or an f16 trinary operation with
-f32 scalars, are declined: ``hiptensorEstimateWorkspaceSize`` and ``hiptensorCreatePlan`` return
-``HIPTENSOR_STATUS_NOT_SUPPORTED``.
+On gfx942 and gfx950, a permutation or an elementwise operation whose tensors share one element size and
+whose inputs are not all laid out like the output runs first on a tuned tiled kernel. Two runs of modes form
+the tile: the output's fastest mode, and the fastest mode of the inputs that are transposed, each with the
+mode contiguous after it when one mode alone does not hold a whole number of tiles; the other modes are
+batch modes. The transposed inputs are read with 16-byte loads along their run and transposed in
+registers into an LDS tile, the other inputs are read with 16-byte loads along the output's run, and D is
+written with 16-byte stores, all with streaming accesses. When every tensor is contiguous along the same
+mode (for example a permutation that keeps the fastest mode), the tile moves whole 16-byte pieces of that
+mode instead of single elements. With identity operators and one binary operator, the kernel runs a path
+without the operator tables. The kernel pack carries a palette of these kernels per data-type row (tile
+sizes, block size, LDS swizzle, the order of the tiles over the workgroups, tiles per workgroup and the
+loads issued together), and the kernel measured for each problem of rocKE's tuned elementwise route table
+(gfx950); any other problem takes the first palette kernel that serves its layout with at least 1024
+workgroups, or the one with the most. Results are those of the generic kernel. Buffers not aligned to
+16 bytes run the generic kernel. The JIT doesn't specialize these kernels.
+
+.. _elementwise-data-types:
+
+The data type combinations of permutations and elementwise operations are the real ones of cuTENSOR 2.x
+whose kernels the rocKE backend's kernel pack holds (the scalars' type is the compute descriptor's):
+
+* Permutation: f16 data with f16 or f32 scalars, f32 data with f32 scalars, f64 data with f64 scalars (into
+  B of A's type or of a type the kernels convert to, for example f16 into f32); bf16 into bf16 with bf16 or
+  f32 scalars; f32 into f64 with f64 scalars.
+* Elementwise binary operation (D of C's type): f16 or bf16 data with scalars of the data type or f32, f32
+  data with f32 scalars, f64 data with f64 scalars; an f32 A with an f16 C and f32 scalars; an f64 A with an
+  f32 C and f64 scalars.
+* Elementwise trinary operation (A, B and C of one type): f16, f32 or f64 data with scalars of the data type;
+  f16 data with f32 scalars and bf16 data with bf16 or f32 scalars (D of C's type).
+
+The rocKE backend serves every row. It computes in f32 (in f64 when a tensor is f64): every value is
+converted to that type exactly, the scaling, the operators and the binary operators run in it, and D is
+rounded once, to nearest even, from it. So f16 and bf16 data with f16 or bf16 scalars give the results of
+f32 scalars of the same values, and an intermediate result that only exceeds D's range (for example the sum
+of two large f16 values that a third input brings back into range) stays finite. The Composable Kernel
+backend serves the f16, f32 and f64 permutation rows with scalars of the data type (and f16 with f32
+scalars), the binary rows of one data type except bf16, and the trinary rows of one data type with scalars
+of that type. It declines the others: with the Composable Kernel backend (the default selection, or
+``HIPTENSOR_BACKEND=ck``), ``hiptensorCreatePlan`` returns ``HIPTENSOR_STATUS_NOT_SUPPORTED`` for them, and
+``HIPTENSOR_BACKEND=rocke`` runs them on the rocKE backend. Other combinations, for example a bf16
+permutation into f32 data, a trinary operation of mixed data types, or an f64 permutation into f32 data,
+are declined by both backends: ``hiptensorCreatePlan`` returns ``HIPTENSOR_STATUS_NOT_SUPPORTED`` (with
+the rocKE backend selected, ``hiptensorEstimateWorkspaceSize`` too).
 
 A reduction runs on rocKE's tuned reduction kernels: A is read in its own layout (no permutation), with the
 kept and reduced modes merged where they are contiguous. When A's fastest mode is reduced, several threads
@@ -363,21 +409,22 @@ same type without an operator keep their 16-bit GEMM route (exact products) unde
         -   **Kernels**
         -   **Products**
         -   **Accuracy class**
-    *   -   ``native`` (default)
+    *   -   ``native`` (default on gfx942 and gfx90a)
         -   f32 (complex f32) strided GEMM on f32 matrix instructions, gfx942 and gfx950
         -   every product enters unrounded into a chain of correctly rounded f32 fmas in K order; complex
             products as four real products (4M)
         -   f32
     *   -   ``x9``
-        -   universal GEMM, every operand split into three bf16 parts, gfx950
+        -   universal GEMM, every operand split into three bf16 parts, gfx950 and gfx942
         -   all nine part products (each exact), summed in f32: a product carries a few f32 roundings
         -   f32
-    *   -   ``x6``
+    *   -   ``x6`` (default on gfx950)
         -   as ``x9``, without the three smallest part products
-        -   the dropped part products are at most about 2^-23 of a product, summed in f32
+        -   the dropped part products are at most about 2^-23 of a product (2^-20 on gfx942, whose parts are
+            truncated rather than rounded), summed in f32
         -   f32
     *   -   ``x4``
-        -   universal GEMM, every operand split into two bf16 parts, gfx950
+        -   universal GEMM, every operand split into two bf16 parts, gfx950 and gfx942
         -   operands kept to about 16 significant bits: relative error of a product at most about 2^-15
         -   between bf16 and f32 (about 16 bits)
     *   -   ``x3``
@@ -392,12 +439,26 @@ same type without an operator keep their 16-bit GEMM route (exact products) unde
 For the f32-class recipes, the error of an element of D against the exact result is at most
 ``2 (n K + 4) u |alpha| sum |a b| + e |alpha| sum |a b| + 2 u_d |d| + 4 u |beta c|``, with ``u`` = 2^-24, ``n`` the part
 products per product (1 for ``native``, 9, 6, 4 or 3) and ``e`` the relative error of a product's representation (0
-for ``native`` and ``x9``, 2^-21 for ``x6``, 2^-14 for ``x4`` and ``x3``); for ``f64`` the bound above with
-``u_c`` = 2^-53 applies. ``native`` (the default) and ``x6`` rank their candidates with the selection models of the
-kernel pack trained on their route sets (classes ``contraction.s.native`` and ``contraction.c.native`` for
-``native``); the other recipes rank them by rocKE's rules. A plan-cache entry written under one recipe names a
+for ``native`` and ``x9``, 2^-21 for ``x6`` (2^-19 on gfx942), 2^-14 for ``x4`` and ``x3``); for ``f64`` the bound above with
+``u_c`` = 2^-53 applies.
+
+The default recipe depends on the GPU target, and is never both slower and less accurate than another recipe on
+that target. On gfx950 it is ``x6``: it is in the f32 accuracy class (its products carry the relative term ``e`` =
+2^-21 on top of the f32 accumulation bound), and its GEMM on bf16 parts is faster than the native f32 GEMM, which runs
+at the f32 matrix-instruction rate. On gfx942 it is ``native``: there ``x6`` runs on the GEMM route of
+truncated bf16 parts (``e`` = 2^-19) and also lists the native f32 GEMM as a candidate, so it is faster than
+``native`` for large contractions but not as accurate, and ``native`` stays the default. On gfx90a it is
+``native`` as well: that target has no GEMM route for the bf16 parts, so ``x6`` would run on the direct GETT or the
+f64 route, which the f64 route (gfx90a has no f32 matrix-instruction GEMM) matches or beats in speed and accuracy. ``native`` keeps IEEE
+f32 fma behaviour (one unrounded product per fma, no ``e`` term) on every target. ``x6`` and ``native`` rank their
+candidates with the selection models of the kernel pack trained on their route sets (classes
+``contraction.s.native`` and ``contraction.c.native`` for ``native``, whose f32 strided GEMM has shape classes
+tuned for f32 words); the other recipes rank them by rocKE's rules. A plan-cache entry written under one recipe names a
 kernel the other recipes do not list, so plans under another recipe select their kernel as if the entry were not
-there.
+there. On gfx942 the ``x6`` recipe also lists the native f32 route (at least as accurate as ``x6``); where no selection
+model scores them, it goes ahead of the GEMM bodies for problems below a size threshold that the kernel pack carries
+(real multiply-adds of the whole contraction L M N K, complex 4 L M N K, with L the batch modes' extent),
+and after them above it.
 
 A trinary contraction runs as the library's two contractions: T = opA(A) opB(B), stored with E's data type at the
 start of the workspace (its size is part of the plan's required workspace), then
@@ -408,8 +469,8 @@ of each step with each other, ordered by the sum of their ranks. ``KERNEL_RANK``
 ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` apply to these pairs.
 
 Tensors of 2 GiB and more are served. The elementwise and reduction kernels have 64-bit-offset variants, the
-contraction routes of gfx950 have a GEMM body with 64-bit tile addresses (one launch per batch and per 65535 rows
-of tiles), and the f64 GEMM runs as several launches over ranges of its rows, columns and batches. When one row
+contraction routes of gfx950 and gfx942 have a GEMM body with 64-bit tile addresses (one launch per batch and per
+65535 rows of tiles), and the f64 GEMM runs as several launches over ranges of its rows, columns and batches. When one row
 of A or B is past 2 GiB, the f64 GEMM splits K into ranges that run as the batches of one launch, each writing an
 f64 partial result, and a reduction adds the partial results in f64 before the epilogue. What one launch can't
 address (a mode of more than 2^31 elements, more than eight modes after merging contiguous modes, more than 2^31

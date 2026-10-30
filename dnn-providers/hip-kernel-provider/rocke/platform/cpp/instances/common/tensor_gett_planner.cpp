@@ -515,6 +515,27 @@ const char* lit(const std::string& s)
 bool to_c_trait(const gd::Trait& t, rocke_gemm_trait_spec_t* out, std::string* why)
 {
     std::string py = gd::python_only_levers(t);
+    /* the register-staged prefetch body and the split-K slice / reduction levers
+     * have a C++ builder mirror (gemm_build_vp.cpp / gemm_build_sks.cpp) but the
+     * GETT bodies take none of them: refused here as before */
+    {
+        static const char* const vp_levers[] = {"split_k_aligned",
+                                                "vgpr_prefetch",
+                                                "vgpr_prefetch_depth",
+                                                "vp_unroll",
+                                                "vp_late_reads",
+                                                "vp_release_atoms",
+                                                "vp_tail_pack",
+                                                "vp_pair_reads",
+                                                "vp_mfma_first",
+                                                "split_k_serial",
+                                                "lds_swizzle_l"};
+        gd::Trait d;
+        for(const char* n : vp_levers)
+            if(!gd::detail::field_eq(gd::detail::get_trait_field(t, n),
+                                     gd::detail::get_trait_field(d, n)))
+                py += (py.empty() ? "" : ", ") + std::string(n);
+    }
     if(!py.empty())
         return set_why(why, "TraitSpec " + py + ": implemented by the Python engine only");
     rocke_gemm_universal_spec_t d = rocke_gemm_universal_spec_default();

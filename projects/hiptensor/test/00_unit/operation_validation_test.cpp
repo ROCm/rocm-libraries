@@ -42,9 +42,11 @@
 #include <hip/hip_bfloat16.h>
 
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <numeric>
 #include <string>
+#include <vector>
 
 using hiptensor_test::ApiObjects;
 using hiptensor_test::DeviceBuffer;
@@ -727,6 +729,302 @@ TEST(ReductionPlanValidationTest, RefusesMalformedReductionsAtPlanTime)
         if(c.expected != HIPTENSOR_STATUS_SUCCESS)
         {
             EXPECT_EQ(plan, nullptr) << c.name;
+        }
+    }
+}
+
+namespace
+{
+    // The elementwise data type rows of cuTENSOR 2.x that the API accepts beyond the Composable
+    // Kernel backend's rows: the rocKE backend serves them, the Composable Kernel backend declines
+    // them when the plan is created.
+    struct ExtendedRow
+    {
+        char const*         name;
+        int                 arity; // 1 permutation, 2 binary, 3 trinary
+        hiptensorDataType_t a, c, d; // C: B and C of a trinary operation, C of a binary one
+        hiptensorComputeDescriptor_t compute;
+    };
+
+    std::vector<ExtendedRow> extendedRows()
+    {
+        auto const f16 = HIPTENSOR_R_16F, bf16 = HIPTENSOR_R_16BF;
+        auto const f32 = HIPTENSOR_R_32F, f64 = HIPTENSOR_R_64F;
+        return {
+            {"bf16 permutation, bf16 scalars", 1, bf16, bf16, bf16, HIPTENSOR_COMPUTE_DESC_16BF},
+            {"bf16 permutation, f32 scalars", 1, bf16, bf16, bf16, HIPTENSOR_COMPUTE_DESC_32F},
+            {"f32 into f64 permutation, f64 scalars", 1, f32, f32, f64, HIPTENSOR_COMPUTE_DESC_64F},
+            {"binary f32 A, f16 C, f32 scalars", 2, f32, f16, f16, HIPTENSOR_COMPUTE_DESC_32F},
+            {"binary f64 A, f32 C, f64 scalars", 2, f64, f32, f32, HIPTENSOR_COMPUTE_DESC_64F},
+            {"f16 trinary, f32 scalars", 3, f16, f16, f16, HIPTENSOR_COMPUTE_DESC_32F},
+            {"bf16 trinary, bf16 scalars", 3, bf16, bf16, bf16, HIPTENSOR_COMPUTE_DESC_16BF},
+            {"bf16 trinary, f32 scalars", 3, bf16, bf16, bf16, HIPTENSOR_COMPUTE_DESC_32F}};
+    }
+
+    size_t bytesOf(hiptensorDataType_t t)
+    {
+        return t == HIPTENSOR_R_64F ? 8 : t == HIPTENSOR_R_32F ? 4 : 2;
+    }
+
+    // Values of type `t` (exactly representable ones) as bytes, and back.
+    std::vector<uint8_t> encode(std::vector<double> const& values, hiptensorDataType_t t)
+    {
+        std::vector<uint8_t> out(values.size() * bytesOf(t));
+        for(size_t i = 0; i < values.size(); ++i)
+        {
+            auto* p = out.data() + i * bytesOf(t);
+            if(t == HIPTENSOR_R_16F)
+            {
+                auto v = static_cast<_Float16>(values[i]);
+                std::memcpy(p, &v, 2);
+            }
+            else if(t == HIPTENSOR_R_16BF)
+            {
+                auto v = static_cast<hip_bfloat16>(static_cast<float>(values[i]));
+                std::memcpy(p, &v, 2);
+            }
+            else if(t == HIPTENSOR_R_32F)
+            {
+                auto v = static_cast<float>(values[i]);
+                std::memcpy(p, &v, 4);
+            }
+            else
+            {
+                std::memcpy(p, &values[i], 8);
+            }
+        }
+        return out;
+    }
+
+    std::vector<double> decode(std::vector<uint8_t> const& bytes, hiptensorDataType_t t)
+    {
+        std::vector<double> out(bytes.size() / bytesOf(t));
+        for(size_t i = 0; i < out.size(); ++i)
+        {
+            auto const* p = bytes.data() + i * bytesOf(t);
+            if(t == HIPTENSOR_R_16F)
+            {
+                _Float16 v;
+                std::memcpy(&v, p, 2);
+                out[i] = static_cast<double>(v);
+            }
+            else if(t == HIPTENSOR_R_16BF)
+            {
+                hip_bfloat16 v;
+                std::memcpy(&v, p, 2);
+                out[i] = static_cast<double>(static_cast<float>(v));
+            }
+            else if(t == HIPTENSOR_R_32F)
+            {
+                float v;
+                std::memcpy(&v, p, 4);
+                out[i] = v;
+            }
+            else
+            {
+                std::memcpy(&out[i], p, 8);
+            }
+        }
+        return out;
+    }
+
+    struct RowOutcome
+    {
+        hiptensorStatus_t estimate = HIPTENSOR_STATUS_SUCCESS;
+        hiptensorStatus_t plan     = HIPTENSOR_STATUS_SUCCESS;
+    };
+
+    // Estimates and plans `row` on a 6 x 5 problem (A stored transposed, the other inputs and D
+    // column-major) with the backends the environment selects. A plan is executed with
+    // alpha = 2, beta = -1, gamma = 0.5 and small integers and D is compared exactly with a loop:
+    // D = alpha A, alpha A + gamma C, or alpha A + beta B + gamma C.
+    RowOutcome planAndRun(ExtendedRow const& row)
+    {
+        RowOutcome out;
+        ApiObjects api;
+        if(!api.supports(row.a) || !api.supports(row.c) || !api.supports(row.d))
+        {
+            out.estimate = out.plan = HIPTENSOR_STATUS_NOT_SUPPORTED;
+            return out;
+        }
+        constexpr int64_t M = 6, N = 5;
+        int32_t const     modeAt[] = {'n', 'm'}, modes[] = {'m', 'n'};
+        auto              dA = api.tensor({N, M}, {}, row.a);
+        auto              dC = api.tensor({M, N}, {}, row.c);
+        auto              dD = api.tensor({M, N}, {}, row.d);
+
+        hiptensorOperationDescriptor_t op = nullptr;
+        auto const                     id = HIPTENSOR_OP_IDENTITY;
+        hiptensorStatus_t              created;
+        if(row.arity == 1)
+        {
+            created = hiptensorCreatePermutation(
+                api.handle, &op, dA, modeAt, id, dD, modes, row.compute);
+        }
+        else if(row.arity == 2)
+        {
+            created = hiptensorCreateElementwiseBinary(api.handle,
+                                                       &op,
+                                                       dA,
+                                                       modeAt,
+                                                       id,
+                                                       dC,
+                                                       modes,
+                                                       id,
+                                                       dD,
+                                                       modes,
+                                                       HIPTENSOR_OP_ADD,
+                                                       row.compute);
+        }
+        else
+        {
+            created = hiptensorCreateElementwiseTrinary(api.handle,
+                                                        &op,
+                                                        dA,
+                                                        modeAt,
+                                                        id,
+                                                        dC,
+                                                        modes,
+                                                        id,
+                                                        dC,
+                                                        modes,
+                                                        id,
+                                                        dD,
+                                                        modes,
+                                                        HIPTENSOR_OP_ADD,
+                                                        HIPTENSOR_OP_ADD,
+                                                        row.compute);
+        }
+        EXPECT_EQ(created, HIPTENSOR_STATUS_SUCCESS) << row.name;
+        api.keep(op);
+
+        uint64_t workspace = 0;
+        out.estimate       = hiptensorEstimateWorkspaceSize(
+            api.handle, op, nullptr, HIPTENSOR_WORKSPACE_DEFAULT, &workspace);
+        hiptensorPlan_t plan = nullptr;
+        out.plan             = api.plan(op, plan, workspace);
+        if(out.plan != HIPTENSOR_STATUS_SUCCESS)
+        {
+            EXPECT_EQ(plan, nullptr) << row.name;
+            return out;
+        }
+        EXPECT_EQ(out.estimate, HIPTENSOR_STATUS_SUCCESS) << row.name;
+
+        // A(n, m), B(m, n), C(m, n); D(m, n) starts as a value no result has
+        std::vector<double> a(M * N), b(M * N), c(M * N);
+        for(int64_t i = 0; i < M * N; ++i)
+        {
+            a[i] = double(i % 7 - 3);
+            b[i] = double(i % 5 - 2);
+            c[i] = double(i % 9 - 4);
+        }
+        DeviceBuffer<uint8_t> devA(encode(a, row.a)), devB(encode(b, row.c)),
+            devC(encode(c, row.c)), devD(encode(std::vector<double>(M * N, -77.0), row.d));
+        uint8_t      scalars[3][8] = {};
+        double const values[3]     = {2.0, -1.0, 0.5};
+        auto const   scalarType    = row.compute == HIPTENSOR_COMPUTE_DESC_64F    ? HIPTENSOR_R_64F
+                                     : row.compute == HIPTENSOR_COMPUTE_DESC_16BF ? HIPTENSOR_R_16BF
+                                     : row.compute == HIPTENSOR_COMPUTE_DESC_16F  ? HIPTENSOR_R_16F
+                                                                                  : HIPTENSOR_R_32F;
+        for(int s = 0; s < 3; ++s)
+        {
+            auto bytes = encode({values[s]}, scalarType);
+            std::memcpy(scalars[s], bytes.data(), bytes.size());
+        }
+        hiptensorStatus_t executed;
+        if(row.arity == 1)
+        {
+            executed = hiptensorPermute(api.handle, plan, scalars[0], devA.ptr, devD.ptr, nullptr);
+        }
+        else if(row.arity == 2)
+        {
+            executed = hiptensorElementwiseBinaryExecute(
+                api.handle, plan, scalars[0], devA.ptr, scalars[2], devC.ptr, devD.ptr, nullptr);
+        }
+        else
+        {
+            executed = hiptensorElementwiseTrinaryExecute(api.handle,
+                                                          plan,
+                                                          scalars[0],
+                                                          devA.ptr,
+                                                          scalars[1],
+                                                          devB.ptr,
+                                                          scalars[2],
+                                                          devC.ptr,
+                                                          devD.ptr,
+                                                          nullptr);
+        }
+        EXPECT_EQ(executed, HIPTENSOR_STATUS_SUCCESS) << row.name;
+        CHECK_HIP_ERROR(hipDeviceSynchronize());
+        auto d = decode(devD.read(), row.d);
+        for(int64_t m = 0; m < M; ++m)
+        {
+            for(int64_t n = 0; n < N; ++n)
+            {
+                double want = values[0] * a[n + N * m];
+                if(row.arity == 3)
+                {
+                    want += values[1] * b[m + M * n];
+                }
+                if(row.arity >= 2)
+                {
+                    want += values[2] * c[m + M * n];
+                }
+                EXPECT_EQ(d[m + M * n], want) << row.name << " at (" << m << ", " << n << ")";
+            }
+        }
+        return out;
+    }
+} // namespace
+
+// The Composable Kernel backend declines the rows that only the rocKE backend serves when the plan
+// is created: with the default selection and with HIPTENSOR_BACKEND=ck, with and without the
+// fallback (which only falls back to the Composable Kernel backend).
+TEST(ElementwiseTypeRowsTest, CkBackendDeclinesTheRocKERows)
+{
+    for(char const* selection : {static_cast<char const*>(nullptr), "ck"})
+    {
+        for(char const* fallback : {static_cast<char const*>(nullptr), "0"})
+        {
+            hiptensor_test::ScopedBackend             backend(selection);
+            hiptensor_test::ScopedEnvironmentVariable noFallback("HIPTENSOR_BACKEND_FALLBACK",
+                                                                 fallback);
+            for(auto const& row : extendedRows())
+            {
+                SCOPED_TRACE(std::string(selection == nullptr ? "default selection" : selection)
+                             + (fallback == nullptr ? ", fallback" : ", no fallback"));
+                auto out = planAndRun(row);
+                EXPECT_EQ(out.plan, HIPTENSOR_STATUS_NOT_SUPPORTED) << row.name;
+            }
+        }
+    }
+}
+
+// With HIPTENSOR_BACKEND=rocke, the rows are either served with the loop's result (a library built
+// with the rocKE backend, with a kernel pack for the device) or declined when the plan is created
+// (no rocKE backend, or no pack for the device; the fallback backend declines them too); never a
+// plan that fails or computes another result.
+TEST(ElementwiseTypeRowsTest, RocKERowsServedExactlyOrDeclined)
+{
+    for(char const* fallback : {static_cast<char const*>(nullptr), "0"})
+    {
+        hiptensor_test::ScopedBackend             backend("rocke");
+        hiptensor_test::ScopedEnvironmentVariable noFallback("HIPTENSOR_BACKEND_FALLBACK",
+                                                             fallback);
+        for(auto const& row : extendedRows())
+        {
+            SCOPED_TRACE(fallback == nullptr ? "fallback" : "no fallback");
+            auto out = planAndRun(row);
+            if(out.plan == HIPTENSOR_STATUS_SUCCESS)
+            {
+                EXPECT_EQ(out.estimate, HIPTENSOR_STATUS_SUCCESS) << row.name;
+                std::cout << row.name << ": planned and executed" << std::endl;
+                continue;
+            }
+            EXPECT_TRUE(out.plan == HIPTENSOR_STATUS_NOT_SUPPORTED
+                        || out.plan == HIPTENSOR_STATUS_ARCH_MISMATCH)
+                << row.name << ": " << hiptensorGetErrorString(out.plan);
+            std::cout << row.name << ": refused when the plan is created" << std::endl;
         }
     }
 }

@@ -23,12 +23,12 @@ import numpy as np
 import pytest
 from rocke.instances.common.gett_f64 import (
     F32_GETT_ARCHS,
-    TUNED_CONFIGS,
     _with_k_block,
     arch_spec,
     gemm_problem,
     mixed_offset,
     runtime_template,
+    tuned_configs,
 )
 from rocke.runtime.hip_module import get_device_arch
 
@@ -194,12 +194,12 @@ def test_complex_fused_4m(kw, conj):
     _run_check(arch_spec(p, arch, tile_m=64, tile_n=64, tile_k=8, **kw), arch, seed=13)
 
 
-def test_tuned_shapes():
-    """The f64 tuned tile shapes of this target, with f32 words."""
+@pytest.mark.parametrize("kind", ["real", "complex"])
+def test_tuned_shapes(kind):
+    """The f32 GETT's tuned configurations of this target (tuned_configs: its
+    own classes, or the f64 classes with f32 words)."""
     arch = _arch()
-    for (a, kind, cls), cfg in TUNED_CONFIGS.items():
-        if a != arch:
-            continue
+    for cls, cfg in sorted(tuned_configs(arch, kind, "f32").items()):
         cfg = dict(cfg)
         cfg.pop("split_k", None)
         p = _gp(
@@ -266,7 +266,7 @@ def _pack_spec(arch, cplx, cls, dclass, bilinear, kblock, K):
         complex_=cplx,
     )
     kind = "complex" if cplx else "real"
-    cfg = {} if cls == "default" else dict(TUNED_CONFIGS[(arch, kind, cls)])
+    cfg = {} if cls == "default" else dict(tuned_configs(arch, kind, "f32")[cls])
     cfg.pop("split_k", None)
     spec = arch_spec(prob, arch, bilinear=bilinear, runtime_sizes=True, **cfg)
     spec = replace(spec, split_k=1, problem=runtime_template(prob))
@@ -285,7 +285,7 @@ def test_pack_kernels_serve_many_problems(cplx, dclass):
     block forms) on problems of other sizes in the same layout class."""
     arch = _arch()
     kind = "complex" if cplx else "real"
-    classes = sorted(c for (a, k, c) in TUNED_CONFIGS if a == arch and k == kind)
+    classes = sorted(tuned_configs(arch, kind, "f32"))
     for cls in classes + ["default"]:
         for kblock in (False, True):
             spec = _pack_spec(arch, cplx, cls, dclass, True, kblock, 64)

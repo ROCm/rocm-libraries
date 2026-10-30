@@ -138,6 +138,29 @@ void lds_swizzle_params(
     *L = 4;
 }
 
+/* gemm_universal._spec_swizzle_params: lds_swizzle_params with the trait
+ * overrides lds_swizzle_r and lds_swizzle_l (W = log2(tile_k >> L)) */
+void spec_swizzle_params(const Trait& tr,
+                         int64_t a_per_lane,
+                         int64_t b_per_lane,
+                         int64_t block_k,
+                         int64_t* R,
+                         int64_t* W,
+                         int64_t* L)
+{
+    lds_swizzle_params(a_per_lane, b_per_lane, block_k, R, W, L);
+    if(tr.lds_swizzle_r >= 0)
+        *R = tr.lds_swizzle_r;
+    if(tr.lds_swizzle_l >= 0)
+    {
+        *L = tr.lds_swizzle_l;
+        int64_t w = 0;
+        if(!ilog2_exact(block_k >> *L, &w))
+            w = 0;
+        *W = w;
+    }
+}
+
 } // namespace
 
 /* ------------------------------------------------------------- gemm_mn_operand */
@@ -1286,6 +1309,17 @@ bool is_valid_spec_x(
     if(tr.lds_swizzle_r != -1
        && !(tr.lds_swizzle && 0 <= tr.lds_swizzle_r && tr.lds_swizzle_r <= 4))
         return set_why(why, "lds_swizzle_r must be -1 (auto) or 0..4 with lds_swizzle");
+    if(tr.lds_swizzle_l != -1)
+    {
+        int64_t w = 0;
+        bool okw = 1 <= tr.lds_swizzle_l && tr.lds_swizzle_l <= 4
+                   && ilog2_exact(t.tile_k >> tr.lds_swizzle_l, &w);
+        if(!(tr.lds_swizzle && tr.vgpr_prefetch && 1 <= tr.lds_swizzle_l && tr.lds_swizzle_l <= 4
+             && t.tile_k % (int64_t(1) << tr.lds_swizzle_l) == 0 && okw && w >= 1))
+            return set_why(why,
+                           "lds_swizzle_l must be -1 (auto) or 1..4 with lds_swizzle on the "
+                           "vgpr_prefetch body");
+    }
     if(tr.dtl_hoist && tr.dtl_stages < 2)
         return set_why(why, "dtl_hoist requires dtl_stages >= 2");
     if(tr.vgpr_prefetch_depth != 1 && !tr.vgpr_prefetch)
@@ -1340,13 +1374,13 @@ bool is_valid_spec_x(
         if(tr.lds_swizzle)
         {
             int64_t R, W, L;
-            lds_swizzle_params(a_frag, b_frag, t.tile_k, &R, &W, &L);
-            if(tr.lds_swizzle_r >= 0)
-                R = tr.lds_swizzle_r;
+            spec_swizzle_params(tr, a_frag, b_frag, t.tile_k, &R, &W, &L);
             if(t.tile_m % (int64_t(1) << (R + W)) || t.tile_n % (int64_t(1) << (R + W)))
                 return set_why(why,
                                "vgpr_prefetch with lds_swizzle: tile_m / tile_n must be multiples "
                                "of the swizzle row period");
+            if(tr.lds_swizzle_l >= 0 && (int64_t(1) << L) < std::max(a_frag, b_frag))
+                return set_why(why, "lds_swizzle_l: the XOR group must hold a whole MFMA fragment");
         }
         if(tr.vgpr_prefetch >= 3)
         {
@@ -1367,10 +1401,16 @@ bool is_valid_spec_x(
         }
         else if(!ab_double_buffer_decision(spec, target.lds_capacity_bytes))
             return set_why(why, "vgpr_prefetch 1 / 2 / 3 require the AB LDS double buffer");
-        if(tr.preshuffle_b || tr.active_tile_skip || spec.batched || tr.lds_k_pad)
+        if(tr.preshuffle_b || tr.active_tile_skip || tr.lds_k_pad)
             return set_why(why,
-                           "vgpr_prefetch excludes preshuffle_b, active_tile_skip, lds_k_pad and "
-                           "the batched body");
+                           "vgpr_prefetch excludes preshuffle_b, active_tile_skip and lds_k_pad");
+        {
+            std::string l = d.layout;
+            for(auto& c : l)
+                c = (char)toupper((unsigned char)c);
+            if(spec.batched && (tr.split_k > 1 || tr.split_k_serial || l != "RCR"))
+                return set_why(why, "vgpr_prefetch batched: the RCR layout without split-K");
+        }
         if(tr.pad_k && tr.split_k > 1 && !tr.split_k_aligned)
             return set_why(why, "vgpr_prefetch with pad_k and split-K needs split_k_aligned");
         int64_t lv = 0;
@@ -1471,11 +1511,19 @@ bool is_valid_spec_x(
         std::string l = d.layout;
         for(auto& c : l)
             c = (char)toupper((unsigned char)c);
-        if(tr.wide_addr
-           && !(tr.direct_to_lds && tr.dtl_hoist && (tr.dtl_soff0 || tr.dtl_tight_rsrc)
-                && tr.rilv_vec_epilogue && !tr.dtl_base_fold && !tr.persistent_ctas && !tr.streamk
-                && tr.split_k <= 1 && !tr.split_k_serial && !tr.pingpong && tr.asm_loop.empty()
-                && !tr.dtl_k_tail && l == "RCR" && !spec.batched && !gett))
+        if(tr.wide_addr && tr.vgpr_prefetch)
+        {
+            if(tr.direct_to_lds || tr.epilogue != "default" || tr.rilv_vec_epilogue
+               || tr.split_k > 1 || tr.split_k_serial || tr.persistent_ctas || tr.streamk
+               || l != "RCR" || gett)
+                return set_why(why, "wide_addr on the vgpr_prefetch body constraints");
+        }
+        else if(tr.wide_addr
+                && !(tr.direct_to_lds && tr.dtl_hoist && (tr.dtl_soff0 || tr.dtl_tight_rsrc)
+                     && tr.rilv_vec_epilogue && !tr.dtl_base_fold && !tr.persistent_ctas
+                     && !tr.streamk && tr.split_k <= 1 && !tr.split_k_serial && !tr.pingpong
+                     && tr.asm_loop.empty() && !tr.dtl_k_tail && l == "RCR" && !spec.batched
+                     && !gett))
             return set_why(why, "wide_addr constraints");
     }
     {
@@ -1768,7 +1816,7 @@ bool is_valid_spec_x(
     if(tr.lds_swizzle)
     {
         int64_t R, W, L;
-        lds_swizzle_params(a_frag, b_frag, t.tile_k, &R, &W, &L);
+        spec_swizzle_params(tr, a_frag, b_frag, t.tile_k, &R, &W, &L);
         int64_t chunk;
         if(tr.direct_to_lds)
             chunk = dtl_h;
@@ -1990,7 +2038,8 @@ std::string launch_shape_error(const UGemm& spec, int64_t M, int64_t N, int64_t 
     int64_t vp_lim = (tr.pad_m || tr.pad_n) ? (int64_t(1) << 31) : (int64_t(1) << 32);
     if(lay != "RCR" && tr.pad_k)
         vp_lim = int64_t(1) << 31;
-    if(tr.vgpr_prefetch && std::max(M, N) * K * 2 >= vp_lim)
+    /* (wide_addr: 64-bit tile origins, only a tile's span is checked) */
+    if(tr.vgpr_prefetch && !tr.wide_addr && std::max(M, N) * K * 2 >= vp_lim)
         return "vgpr_prefetch: operand bytes do not fit the buffer range";
     if(tr.split_k > 1 && !tr.split_k_aligned)
     {

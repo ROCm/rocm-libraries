@@ -59,6 +59,153 @@ constexpr unsigned k_pd = ROCKE_GETT_F64_KNOB_PREFETCH_DEPTH;
         }                                                                                        \
     }
 
+/* Every knob of an f32 row is explicit (Python TUNED_CONFIGS_F32). */
+constexpr unsigned k_all = k_base | ROCKE_GETT_F64_KNOB_LDS_PAD | ROCKE_GETT_F64_KNOB_LDS_SWIZZLE
+                           | ROCKE_GETT_F64_KNOB_LDS_SWIZZLE_MODE | ROCKE_GETT_F64_KNOB_XCDS
+                           | ROCKE_GETT_F64_KNOB_PREFETCH_DEPTH | ROCKE_GETT_F64_KNOB_UNROLL2
+                           | ROCKE_GETT_F64_KNOB_K_STAGGER;
+
+/* f32 knob row: tile m / n / k, warps m / n, lds_pad (-1: None), lds_swizzle,
+ * group_m, xcds, waves_per_eu (0: None), sched_fence, lds_swizzle_mode,
+ * lds_stages, prefetch_depth, unroll2, k_stagger. */
+#define ROW32(                                                                               \
+    arch, kind, cls, tm, tn, tk, wm, wn, pad, swz, gm, xcds, wpe, sf, mode, st, pd, u2, ks)  \
+    {                                                                                        \
+        arch, kind, cls,                                                                     \
+        {                                                                                    \
+            k_all, tm, tn, tk, wm, wn, pad, swz, gm, xcds, wpe, false, sf, mode, st, pd, u2, \
+                false, ks                                                                    \
+        }                                                                                    \
+    }
+
+/* Python TUNED_CONFIGS_F32, sorted by (arch, kind, cls). Keep in step with
+ * gett_f64.py: the gett_f64_pack parity family compares every row. */
+const tuned_row k_tuned_f32[] = {
+    ROW32("gfx942",
+          "complex",
+          "compact",
+          64,
+          32,
+          24,
+          4,
+          1,
+          4,
+          false,
+          1,
+          0,
+          3,
+          true,
+          0,
+          1,
+          1,
+          false,
+          0),
+    ROW32("gfx942",
+          "complex",
+          "large",
+          128,
+          128,
+          4,
+          2,
+          2,
+          -1,
+          true,
+          32,
+          0,
+          2,
+          true,
+          0,
+          1,
+          1,
+          false,
+          0),
+    ROW32(
+        "gfx942", "complex", "medium", 64, 64, 8, 4, 2, -1, true, 2, 0, 1, true, 0, 2, 1, false, 0),
+    ROW32("gfx942",
+          "complex",
+          "small",
+          32,
+          32,
+          24,
+          2,
+          2,
+          -1,
+          true,
+          32,
+          0,
+          3,
+          true,
+          0,
+          1,
+          2,
+          false,
+          0),
+    ROW32(
+        "gfx942", "complex", "wide", 128, 64, 4, 2, 2, -1, true, 2, 0, 3, true, 0, 2, 1, false, 0),
+    ROW32(
+        "gfx942", "real", "compact", 32, 32, 32, 2, 2, -1, true, 16, 0, 3, true, 0, 2, 1, false, 0),
+    ROW32(
+        "gfx942", "real", "huge", 128, 128, 32, 2, 2, -1, true, 32, 0, 2, true, 0, 1, 1, false, 0),
+    ROW32("gfx942", "real", "large", 64, 128, 16, 2, 2, -1, true, 4, 8, 3, true, 0, 1, 1, false, 0),
+    ROW32(
+        "gfx942", "real", "medium", 64, 64, 32, 2, 2, -1, true, 32, 0, 3, true, 0, 1, 1, false, 0),
+    ROW32("gfx942", "real", "small", 32, 32, 32, 1, 2, -1, true, 8, 0, 3, true, 0, 2, 1, false, 0),
+    ROW32("gfx942", "real", "tiny", 32, 32, 64, 2, 2, -1, true, 4, 0, 2, true, 0, 2, 1, false, 0),
+    ROW32(
+        "gfx942", "real", "xlarge", 128, 128, 16, 2, 2, -1, true, 4, 8, 3, true, 0, 1, 1, false, 0),
+    ROW32("gfx950",
+          "complex",
+          "large",
+          64,
+          128,
+          8,
+          1,
+          4,
+          4,
+          false,
+          32,
+          0,
+          4,
+          true,
+          0,
+          1,
+          1,
+          false,
+          0),
+    ROW32(
+        "gfx950", "complex", "longk", 32, 32, 32, 2, 2, 4, false, 32, 0, 4, true, 0, 2, 1, true, 0),
+    ROW32("gfx950",
+          "complex",
+          "medium",
+          64,
+          64,
+          8,
+          2,
+          2,
+          4,
+          false,
+          32,
+          0,
+          4,
+          true,
+          0,
+          1,
+          1,
+          false,
+          0),
+    ROW32(
+        "gfx950", "complex", "small", 32, 32, 16, 2, 2, 4, false, 4, 8, 4, true, 0, 2, 1, false, 0),
+    ROW32(
+        "gfx950", "real", "huge", 128, 128, 16, 2, 2, -1, true, 32, 0, 3, false, 1, 2, 1, true, 1),
+    ROW32("gfx950", "real", "large", 64, 64, 32, 2, 2, -1, true, 32, 8, 4, true, 0, 1, 1, false, 0),
+    ROW32(
+        "gfx950", "real", "medium", 64, 32, 32, 2, 2, 1, false, 32, 8, 4, true, 0, 1, 1, false, 0),
+    ROW32("gfx950", "real", "small", 32, 32, 64, 2, 2, 1, false, 4, 8, 4, true, 0, 2, 1, false, 0),
+    ROW32("gfx950", "real", "tiny", 32, 32, 64, 2, 2, 1, false, 8, 8, 4, true, 0, 2, 2, false, 0),
+    ROW32(
+        "gfx950", "real", "xlarge", 128, 64, 16, 2, 2, -1, true, 16, 0, 4, false, 1, 2, 1, true, 0),
+};
+
 /* Python TUNED_CONFIGS, sorted by (arch, kind, cls). Keep in step with
  * gett_f64.py: the gett_f64_pack parity family compares every row. */
 const tuned_row k_tuned[] = {
@@ -468,6 +615,8 @@ void apply(rocke_gett_f64_spec_t* s, const rocke_gett_f64_knobs_t& k)
         s->unroll2 = k.unroll2;
     if(k.set & ROCKE_GETT_F64_KNOB_RUNTIME_SIZES)
         s->runtime_sizes = k.runtime_sizes;
+    if(k.set & ROCKE_GETT_F64_KNOB_K_STAGGER)
+        s->k_stagger = k.k_stagger;
 }
 
 /* Python TILE_K_CANDIDATES */
@@ -587,6 +736,56 @@ const char* rocke_gett_f64_tuned_class_at(const char* arch, const char* kind, in
 {
     int i = 0;
     for(const tuned_row& r : k_tuned)
+    {
+        if(str_eq(r.arch, arch) && str_eq(r.kind, kind))
+        {
+            if(i == index)
+                return r.cls;
+            ++i;
+        }
+    }
+    return nullptr;
+}
+
+namespace
+{
+/* Whether TUNED_CONFIGS_F32 has a class for (arch, kind). */
+bool has_f32_classes(const char* arch, const char* kind)
+{
+    for(const tuned_row& r : k_tuned_f32)
+    {
+        if(str_eq(r.arch, arch) && str_eq(r.kind, kind))
+            return true;
+    }
+    return false;
+}
+} // namespace
+
+bool rocke_gett_f32_tuned_config(const char* arch,
+                                 const char* kind,
+                                 const char* cls,
+                                 rocke_gett_f64_knobs_t* out)
+{
+    if(!has_f32_classes(arch, kind))
+        return rocke_gett_f64_tuned_config(arch, kind, cls, out);
+    for(const tuned_row& r : k_tuned_f32)
+    {
+        if(str_eq(r.arch, arch) && str_eq(r.kind, kind) && str_eq(r.cls, cls))
+        {
+            if(out != nullptr)
+                *out = r.knobs;
+            return true;
+        }
+    }
+    return false;
+}
+
+const char* rocke_gett_f32_tuned_class_at(const char* arch, const char* kind, int index)
+{
+    if(!has_f32_classes(arch, kind))
+        return rocke_gett_f64_tuned_class_at(arch, kind, index);
+    int i = 0;
+    for(const tuned_row& r : k_tuned_f32)
     {
         if(str_eq(r.arch, arch) && str_eq(r.kind, kind))
         {

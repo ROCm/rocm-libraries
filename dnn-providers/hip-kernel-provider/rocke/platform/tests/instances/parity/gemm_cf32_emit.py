@@ -17,6 +17,9 @@
 # without its vector epilogue / with rilv_pad 32, the levers without a
 # prologue, dtl_soff0 on a swizzled body, the non-ring DTL body and the VGPR
 # body. A config that is not valid (is_valid_spec) is rejected by both engines.
+# Then the gfx942 configs (key "arch"): the pack's gfx942 GEMM descriptors (the
+# register-staged bodies of every route, batched, the 64-bit-address body) and
+# the recipes, conjugation and lever forms around them.
 #
 # The C cases are generated from this table: `python gemm_cf32_emit.py
 # --c-cases` prints the body of make_spec() in gemm_cf32_emit.c.
@@ -216,7 +219,141 @@ def _extra_configs():
     return out
 
 
-CONFIGS = _pack_configs() + _extra_configs()
+# the gfx942 pack's bodies per route (make_rocke_pack.py GEMM_BODIES["gfx942"]: x3 / x4 / x9 on
+# x6's, cf32x3 / cf32x4 / cf32x9 on cf32's) and its 64-bit-address bodies (GEMM_WIDE_BODY)
+_G942 = {
+    "h16": (
+        "G64x64x128L3",
+        "G128x128x128L3",
+        "G64x32x128U",
+        "G192x128x64L3",
+        "G256x256x64L3",
+        "G32x32x128U",
+        "G256x224x64L3",
+    ),
+    "x6": (
+        "G64x64x128L3",
+        "G32x32x128L3",
+        "G128x128x128L3",
+        "G192x128x64L1S3",
+        "G256x224x64L1",
+        "G128x64x64",
+        "G64x32x128U",
+    ),
+    "cf32": (
+        "G64x64x128L3",
+        "G32x32x128L3",
+        "G128x128x128L3",
+        "G192x128x64US3",
+        "G256x224x64L1",
+        "G128x64x64U",
+        "G64x32x128U",
+    ),
+}
+_G942_WIDE = {"h16": "G256x224x64L3", "x6": "G256x224x64L1", "cf32": "G256x224x64L1"}
+# the gfx942 split of x6 / x9 / cf32 (rocke.dispatch.gemm.cf32.CF32_SPLIT_MODE)
+_X6T = dict(_X6, split_mode="trunc")
+_CFT = dict(_CF, split_mode="trunc")
+
+
+def _g942_configs():
+    """The gfx942 pack's GEMM descriptors of the h16 / x6 / cf32 routes, then
+    the other recipes, conjugation, the bodies without a prologue and the
+    batched 64-bit-address forms."""
+    out = []
+    for route in ("h16", "x6", "cf32"):
+        dts = ("fp16", "bf16") if route == "h16" else ("bf16",)
+        pro = {"h16": _H16, "x6": _X6T, "cf32": _CFT}[route]
+        for dt in dts:
+            for body in _G942[route]:
+                for batched in (False, True):
+                    out.append(
+                        dict(
+                            name=f"pk942_{route}_{body.lower()}",
+                            body=body,
+                            dtype=dt,
+                            batched=batched,
+                            pro=pro,
+                        )
+                    )
+            out.append(
+                dict(
+                    name=f"pk942_{route}_{_G942_WIDE[route].lower()}_w64",
+                    body=_G942_WIDE[route],
+                    dtype=dt,
+                    wide=True,
+                    pro=pro,
+                )
+            )
+    # the other recipes: x9 truncated, x3 / x4 rounded (as the pack builds them)
+    for body in ("G128x128x128L3", "G64x32x128U"):
+        for recipe, pro in (
+            ("x9", dict(_X6T, recipe="x9")),
+            ("x3", dict(_X6, recipe="x3")),
+            ("x4", dict(_X6, recipe="x4")),
+        ):
+            out.append(
+                dict(
+                    name=f"ex942_{recipe}_{body.lower()}",
+                    body=body,
+                    dtype="bf16",
+                    pro=pro,
+                )
+            )
+        out.append(
+            dict(
+                name=f"ex942_cf32x3_{body.lower()}",
+                body=body,
+                dtype="bf16",
+                pro=dict(_CF, recipe="x3"),
+            )
+        )
+    for body in ("G256x224x64L1", "G32x32x128L3"):
+        for ca, cb in ((True, False), (False, True), (True, True)):
+            out.append(
+                dict(
+                    name=f"ex942_cj{int(ca)}{int(cb)}_{body.lower()}",
+                    body=body,
+                    dtype="bf16",
+                    pro=dict(_CFT, conj_a=ca, conj_b=cb),
+                )
+            )
+    out += [
+        # the bodies without a prologue (16-bit output)
+        dict(name="lv942_g192x128x64l1s3", body="G192x128x64L1S3", dtype="bf16"),
+        dict(
+            name="lv942_g128x64x64u_bat", body="G128x64x64U", dtype="fp16", batched=True
+        ),
+        dict(
+            name="lv942_g256x256x64l3_w64",
+            body="G256x256x64L3",
+            dtype="bf16",
+            wide=True,
+        ),
+        # the 64-bit-address form of a batched launch (64-bit batch origins)
+        dict(
+            name="lv942_g256x224x64l1_w64_bat_x6",
+            body="G256x224x64L1",
+            dtype="bf16",
+            batched=True,
+            wide=True,
+            pro=_X6T,
+        ),
+        dict(
+            name="lv942_g64x64x128l3_w64_bat_cf",
+            body="G64x64x128L3",
+            dtype="bf16",
+            batched=True,
+            wide=True,
+            pro=_CFT,
+        ),
+        # the rounded split on a truncated route's body (rocKE's dispatch default elsewhere)
+        dict(name="lv942_g128x64x64_rne", body="G128x64x64", dtype="bf16", pro=_X6),
+    ]
+    return [dict(c, arch="gfx942") for c in out]
+
+
+CONFIGS = _pack_configs() + _extra_configs() + _g942_configs()
 
 
 def _spec(idx: int):
@@ -233,7 +370,8 @@ def _spec(idx: int):
     if idx < 0 or idx >= len(CONFIGS):
         raise SystemExit(f"unknown config index {idx}")
     c = CONFIGS[idx]
-    tile, trait, bs = cf32_body(c["body"], ARCH)
+    arch = c.get("arch", ARCH)
+    tile, trait, bs = cf32_body(c["body"], arch)
     dt = c["dtype"]
     spec = UniversalGemmSpec(
         name=c["name"],
@@ -247,7 +385,7 @@ def _spec(idx: int):
         spec = _adjust_k(spec, tile.tile_m, tile.tile_n, True)
     if c.get("trait"):
         spec = replace(spec, trait=replace(spec.trait, **c["trait"]))
-    ok, why = is_valid_spec(spec, arch=ARCH)
+    ok, why = is_valid_spec(spec, arch=arch)
     if not ok:
         sys.stderr.write(f"invalid spec: {why}\n")
         sys.exit(1)
@@ -257,7 +395,7 @@ def _spec(idx: int):
         except ValueError as e:  # pragma: no cover - not a refused form today
             sys.stderr.write(f"prologue: {e}\n")
             sys.exit(1)
-    return spec, ARCH
+    return spec, arch
 
 
 def _build(spec, arch):
@@ -279,6 +417,8 @@ def c_cases() -> str:
     lines = []
     for i, c in enumerate(CONFIGS):
         lines.append(f"    case {i}:")
+        if c.get("arch", ARCH) != ARCH:
+            lines.append(f'        g_arch = "{c["arch"]}";')
         lines.append(
             f'        base(spec, "{c["name"]}", "{c["body"]}", "{c["dtype"]}", '
             f'{_c_value(bool(c.get("batched")))}, {_c_value(bool(c.get("wide")))});'

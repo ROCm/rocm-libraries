@@ -1001,3 +1001,247 @@ def test_f32_lds_and_registers_halve():
     assert is_valid_spec(GettF64Spec(_rcr32(), tile_m=256, tile_n=256), arch="gfx950")[
         0
     ]
+
+
+# ------------------------------------------------- tuned f32 classes
+
+_F32_KNOBS = (
+    "tile_m",
+    "tile_n",
+    "tile_k",
+    "warps_m",
+    "warps_n",
+    "group_m",
+    "xcds",
+    "waves_per_eu",
+    "lds_stages",
+    "prefetch_depth",
+    "unroll2",
+    "sched_fence",
+    "k_stagger",
+    "lds_pad",
+    "lds_swizzle",
+    "lds_swizzle_mode",
+)
+
+
+def test_f32_tuned_classes_are_explicit_valid_pack_templates():
+    """Every TUNED_CONFIGS_F32 row sets every knob the C table carries, and is a
+    valid pack kernel (hipTensor's packed layout template, runtime sizes) on
+    its arch for every D layout, scale and bilinear."""
+    from dataclasses import replace
+
+    from rocke.instances.common.gett_f64 import (
+        TUNED_CONFIGS_F32,
+        arch_spec,
+        runtime_template,
+    )
+
+    assert TUNED_CONFIGS_F32
+    for (arch, kind, cls), cfg in TUNED_CONFIGS_F32.items():
+        assert set(cfg) == set(_F32_KNOBS), (arch, kind, cls)
+        cplx = kind == "complex"
+        for dclass, d_strides in (("m", (1, 64)), ("n", (64, 1)), ("x", (2, 128))):
+            prob = gemm_problem(
+                64,
+                64,
+                64,
+                a_strides=(64, 1),
+                b_strides=(64, 1),
+                d_strides=d_strides,
+                batch=2,
+                batch_strides=(64 * 64, 64 * 64, 4 * 64 * 64),
+                complex_=cplx,
+                dtype="f32",
+            )
+            for bilinear in (False, True):
+                spec = arch_spec(
+                    prob, arch, bilinear=bilinear, runtime_sizes=True, **cfg
+                )
+                spec = replace(spec, problem=runtime_template(prob))
+                ok, why = is_valid_spec(spec, arch=arch)
+                assert ok, (arch, kind, cls, dclass, bilinear, why)
+
+
+def test_tuned_configs_by_dtype():
+    """f32 problems take the f32 rows where (arch, kind) has them; f64 problems
+    and (arch, kind) without f32 rows take TUNED_CONFIGS."""
+    from rocke.instances.common.gett_f64 import (
+        TUNED_CONFIGS,
+        TUNED_CONFIGS_F32,
+        tuned_configs,
+    )
+
+    archs = {a for (a, _k, _c) in TUNED_CONFIGS} | {
+        a for (a, _k, _c) in TUNED_CONFIGS_F32
+    }
+    for arch in sorted(archs):
+        for kind in ("real", "complex"):
+            f64 = {
+                c: v
+                for (a, k, c), v in TUNED_CONFIGS.items()
+                if a == arch and k == kind
+            }
+            f32 = {
+                c: v
+                for (a, k, c), v in TUNED_CONFIGS_F32.items()
+                if a == arch and k == kind
+            }
+            assert tuned_configs(arch, kind) == f64
+            assert tuned_configs(arch, kind, "f64") == f64
+            assert tuned_configs(arch, kind, "f32") == (f32 or f64)
+
+
+_F32_CLASS_CASES = (
+    (False, 100, 90, 64, 1, "tiny"),
+    (False, 1024, 1024, 64, 1, "small"),
+    (False, 1536, 1440, 576, 1, "medium"),
+    (False, 2560, 2560, 128, 1, "large"),
+    (False, 4608, 4608, 288, 1, "xlarge"),
+    (False, 8192, 8192, 256, 1, "huge"),
+    (False, 4096, 6144, 100, 1, "xlarge"),
+    (False, 128, 8000, 4100, 1, "small"),
+    (True, 200, 180, 100, 1, "small"),
+    (True, 600, 900, 128, 1, "medium"),
+    (True, 256, 512, 1000, 1, "longk"),
+    (True, 2048, 2048, 64, 1, "medium"),
+    (True, 8192, 8192, 200, 1, "large"),
+    (True, 520, 512, 256, 1, "small"),
+    (True, 1000, 300, 257, 1, "longk"),
+)
+
+
+@pytest.mark.parametrize("cplx,M,N,K,L,cls", _F32_CLASS_CASES)
+def test_gett_f32_shape_class_gfx950(cplx, M, N, K, L, cls):
+    """gfx950 (256 CUs) classes of packed problems (K padded the way hipTensor's
+    planner pads it); hipTensor's RockeGett32Class test expects the same."""
+    from rocke.instances.common.gett_f64 import gett_f32_shape_class
+
+    Kp = -(-K // (2 if cplx else 4)) * (2 if cplx else 4)
+    p = gemm_problem(
+        M,
+        N,
+        Kp,
+        a_strides=(Kp, 1),
+        b_strides=(Kp, 1),
+        d_strides=(N, 1),
+        batch=L,
+        batch_strides=(M * Kp, N * Kp, M * N),
+        complex_=cplx,
+        dtype="f32",
+    )
+    assert gett_f32_shape_class(p, "gfx950", 256) == cls
+
+
+def test_gett_f32_shape_class_boundaries_gfx950():
+    """The real rule's tile-count edges (128x128 tiles per CU 1/8, 1/2, 1, 4, 8)
+    and the complex rule's (64x64 tiles per CU 4 and 32, K 256, min(M, N) 512)."""
+    from rocke.instances.common.gett_f64 import gett_f32_shape_class
+
+    def real(tiles_m, tiles_n):
+        p = gemm_problem(
+            128 * tiles_m,
+            128 * tiles_n,
+            64,
+            a_strides=(64, 1),
+            b_strides=(64, 1),
+            d_strides=(128 * tiles_n, 1),
+            dtype="f32",
+        )
+        return gett_f32_shape_class(p, "gfx950", 256)
+
+    assert [real(1, 32), real(1, 33)] == ["tiny", "small"]
+    assert [real(2, 64), real(2, 65)] == ["small", "medium"]
+    assert [real(4, 64), real(4, 65)] == ["medium", "large"]
+    assert [real(16, 64), real(16, 65)] == ["large", "xlarge"]
+    assert [real(32, 64), real(32, 65)] == ["xlarge", "huge"]
+
+    def cx(M, N, K):
+        p = gemm_problem(
+            M,
+            N,
+            K,
+            a_strides=(K, 1),
+            b_strides=(K, 1),
+            d_strides=(N, 1),
+            complex_=True,
+            dtype="f32",
+        )
+        return gett_f32_shape_class(p, "gfx950", 256)
+
+    assert [cx(512, 1024, 256), cx(576, 1024, 256), cx(512, 1024, 258)] == [
+        "small",
+        "medium",
+        "longk",
+    ]
+    assert [cx(64 * 32, 64 * 32, 64), cx(64 * 32, 64 * 33, 64)] == ["medium", "medium"]
+    assert [cx(64 * 64, 64 * 128, 64), cx(64 * 64, 64 * 129, 64)] == ["medium", "large"]
+
+
+def test_gett_f32_shape_class_boundaries_gfx942():
+    """gfx942 (304 CUs): real 128x128 tiles per CU 1/8, 1/4, 8 with min(M, N)
+    4096 and K 1024 above; complex 64x64 tiles per CU 1/2, 1, 64."""
+    from rocke.instances.common.gett_f64 import gett_f32_shape_class
+
+    def real(M, N, K=64):
+        p = gemm_problem(
+            M, N, K, a_strides=(K, 1), b_strides=(K, 1), d_strides=(N, 1), dtype="f32"
+        )
+        return gett_f32_shape_class(p, "gfx942", 304)
+
+    assert [real(128, 128 * 38), real(128, 128 * 39)] == ["tiny", "small"]
+    assert [real(256, 128 * 38), real(256, 128 * 39)] == ["small", "medium"]
+    assert [real(4096, 128 * 73), real(4224, 128 * 73)] == ["medium", "large"]
+    assert [real(4224, 128 * 73), real(4224, 128 * 74)] == ["large", "xlarge"]
+    assert [real(4224, 128 * 74, 1024), real(4224, 128 * 74, 1028)] == [
+        "xlarge",
+        "huge",
+    ]
+
+    def cx(M, N):
+        p = gemm_problem(
+            M,
+            N,
+            64,
+            a_strides=(64, 1),
+            b_strides=(64, 1),
+            d_strides=(N, 1),
+            complex_=True,
+            dtype="f32",
+        )
+        return gett_f32_shape_class(p, "gfx942", 304)
+
+    assert [cx(64, 64 * 152), cx(64, 64 * 153)] == ["small", "compact"]
+    assert [cx(128, 64 * 152), cx(128, 64 * 153)] == ["compact", "medium"]
+    assert [cx(64 * 152, 64 * 128), cx(64 * 152, 64 * 129)] == ["medium", "large"]
+
+
+def test_tuned_spec_takes_the_f32_class():
+    """tuned_spec of an f32 problem is its f32 class's configuration; the same
+    problem with f64 words takes the f64 class."""
+    from rocke.instances.common.gett_f64 import (
+        TUNED_CONFIGS,
+        TUNED_CONFIGS_F32,
+        arch_spec,
+        gett_f64_shape_class,
+        tuned_spec,
+    )
+
+    for dtype in ("f32", "f64"):
+        p = gemm_problem(
+            1536,
+            1440,
+            576,
+            a_strides=(576, 1),
+            b_strides=(576, 1),
+            d_strides=(1440, 1),
+            dtype=dtype,
+        )
+        spec = tuned_spec(p, "gfx950", num_cus=256)
+        if dtype == "f32":
+            cfg = TUNED_CONFIGS_F32[("gfx950", "real", "medium")]
+        else:
+            cfg = TUNED_CONFIGS[
+                ("gfx950", "real", gett_f64_shape_class(p, "gfx950", 256))
+            ]
+        assert spec == arch_spec(p, "gfx950", bilinear=True, **cfg)

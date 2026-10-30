@@ -177,13 +177,14 @@ class TestValidity(unittest.TestCase):
             dict(vp_mn_worder=1),
             dict(vp_mn_pipe=1),
             dict(vp_mn_wrap=1),
-            dict(vp_late_reads=1),
-            dict(vp_unroll=1),
         ):
             with self.subTest(kw):
                 with self.assertRaises(NotImplementedError):
                     backend._refuse_python_only_levers(TraitSpec(**kw))
         backend._refuse_python_only_levers(TraitSpec())
+        # the K-contiguous body's levers are mirrored by the C++ engine
+        for kw in (dict(vp_late_reads=1), dict(vp_unroll=1)):
+            backend._refuse_python_only_levers(TraitSpec(**kw))
 
 
 class TestLaunch(unittest.TestCase):

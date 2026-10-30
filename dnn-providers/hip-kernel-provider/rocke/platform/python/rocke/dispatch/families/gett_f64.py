@@ -47,7 +47,6 @@ from typing import Optional, Sequence, Tuple
 from ...instances.common.gett_f64 import (
     F64_GETT_ARCHS,
     PIPE_CONFIGS,
-    TUNED_CONFIGS,
     GettF64Problem,
     GettF64Spec,
     arch_spec,
@@ -59,6 +58,7 @@ from ...instances.common.gett_f64 import (
     resolve_num_cus,
     runtime_compatible,
     runtime_template,
+    tuned_configs,
     tuned_spec,
 )
 from ..core import (
@@ -182,17 +182,16 @@ def _neighbourhood(spec: GettF64Spec, arch: str = "") -> Tuple[GettF64Spec, ...]
     one-knob moves the tuner starts from."""
     out = [spec]
     kind = "complex" if spec.problem.complex_ else "real"
-    for (a, k, _c), cfg in TUNED_CONFIGS.items():
-        if a == arch and k == kind:
-            cand = arch_spec(
-                spec.problem,
-                arch,
-                bilinear=spec.bilinear,
-                runtime_sizes=spec.runtime_sizes,
-                **cfg,
-            )
-            if cand not in out:
-                out.append(cand)
+    for cfg in tuned_configs(arch, kind, spec.problem.dtype).values():
+        cand = arch_spec(
+            spec.problem,
+            arch,
+            bilinear=spec.bilinear,
+            runtime_sizes=spec.runtime_sizes,
+            **cfg,
+        )
+        if cand not in out:
+            out.append(cand)
     for kw in (
         {"tile_k": 8},
         {"tile_k": 16},

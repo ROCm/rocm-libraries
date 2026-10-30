@@ -308,8 +308,9 @@ def test_hb_sched_body_builds_with_pair_view_prologue():
 
 
 def test_route_refuses_other_arches():
+    # (gfx942 has its own bodies: test_cf32_route_gfx942.py)
     with pytest.raises(ValueError):
-        plan_cf32_gemm(512, 512, 512, arch="gfx942")
+        plan_cf32_gemm(512, 512, 512, arch="gfx90a")
 
 
 # ---- real f32 (bf16-split emulation) on the same bodies

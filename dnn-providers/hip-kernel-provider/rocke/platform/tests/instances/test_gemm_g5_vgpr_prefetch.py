@@ -144,10 +144,15 @@ class TestVgprPrefetchValidity(unittest.TestCase):
         self.assertIsNone(launch_shape_error(sp, 1000, 1000, 1024))
         self.assertIsNotNone(launch_shape_error(sp, 40000, 256, 32768))
 
-    def test_python_only(self):
-        s = _spec(vgpr_prefetch=1)
-        with self.assertRaises(NotImplementedError):
-            backend.universal_gemm_spec_to_dict(s)
+    def test_converted(self):
+        # the K-contiguous body is mirrored by the C++ engine (gemm_build_vp.cpp):
+        # the converter passes the levers through instead of refusing them
+        s = _spec(vgpr_prefetch=1, vgpr_prefetch_depth=2)
+        d = backend.universal_gemm_spec_to_dict(s)
+        self.assertEqual((d["vgpr_prefetch"], d["vgpr_prefetch_depth"]), (1, 2))
+        listed = dict(backend._PYTHON_ONLY_GEMM_LEVERS)
+        for k in ("vgpr_prefetch", "vgpr_prefetch_depth", "vp_unroll", "vp_late_reads"):
+            self.assertNotIn(k, listed)
         backend.universal_gemm_spec_to_dict(_spec())  # default converts
 
 

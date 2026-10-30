@@ -281,6 +281,15 @@ typedef struct rocke_gemm_build_ctx
     struct rocke_gett_hooks* gett; /* _gett                              */
     bool gett_addr; /* _gett_addr: the hook owns the operand addressing */
     bool gett_own_lds; /* _gett_own_lds: ... and the LDS stages too       */
+    /* ---- register-staged global prefetch body (trait.vgpr_prefetch,
+     * gemm_build_vp.cpp; vpf 0 = off) -- */
+    int vpf; /* _vpf = trait.vgpr_prefetch                     */
+    int vpd; /* _vpd = trait.vgpr_prefetch_depth               */
+    struct rocke_gemm_vp_state* vp; /* the _vp_* loader state (NULL: off) */
+    /* ---- in-launch split-K reduction (trait.split_k_serial, split_k > 1) -- */
+    bool sk_serial; /* _sk_serial                                  */
+    rocke_value_t* sks_w; /* param W (f32 partial slots)               */
+    rocke_value_t* sks_cnt; /* param Cnt (i32 arrival counters)          */
 } rocke_gemm_build_ctx_t;
 
 /* ===================================================================== *
@@ -310,6 +319,15 @@ bool rocke_gemm_ab_db_decision(const rocke_gemm_universal_spec_t* spec,
  * same name (gemm_universal.py). */
 void rocke_gemm_lds_swizzle_params(
     int a_per_lane, int b_per_lane, int block_k, int* out_r, int* out_w, int* out_l);
+
+/* _spec_swizzle_params(spec, a, b): lds_swizzle_params with the trait overrides
+ * lds_swizzle_r and lds_swizzle_l (which also sets W = log2(tile_k >> L)) */
+void rocke_gemm_spec_swizzle_params(const rocke_gemm_universal_spec_t* spec,
+                                    int a_per_lane,
+                                    int b_per_lane,
+                                    int* out_r,
+                                    int* out_w,
+                                    int* out_l);
 
 /* DTL_BUFFER_NUM_RECORDS (gemm_universal.py): num_records of the A/B buffer
  * resources of the direct-to-LDS load path. Loads past it return 0, so a DTL
@@ -455,6 +473,24 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx);
  * (gemm_build_staged.cpp). */
 void rocke_gemm_emit_kloop_staged(rocke_gemm_build_ctx_t* ctx);
 
+/* ---- the register-staged global prefetch body (gemm_build_vp.cpp) ---- */
+/* the _vp_* loader state (resources at the tile origin, per-lane voffsets):
+ * emitted after the DTL plumbing, sets ctx->vp (freed by
+ * rocke_gemm_vp_state_free) */
+void rocke_gemm_vp_setup(rocke_gemm_build_ctx_t* ctx);
+void rocke_gemm_vp_state_free(struct rocke_gemm_vp_state* st);
+/* _emit_kloop_vpf (vgpr_prefetch 1 / 2) */
+void rocke_gemm_emit_kloop_vpf(rocke_gemm_build_ctx_t* ctx);
+/* _emit_kloop_vpf_ilv (vgpr_prefetch 3 / 4) */
+void rocke_gemm_emit_kloop_vpf_ilv(rocke_gemm_build_ctx_t* ctx);
+/* _vp_batch_off64(nm): the batch element offset of operand 'A' / 'B' / 'C' as an
+ * i64 (the wide_addr form); NULL when not batched (no op) */
+rocke_value_t* rocke_gemm_vp_batch_off64(rocke_gemm_build_ctx_t* ctx, char nm);
+/* _ep_split_k_serial (trait.split_k_serial 2 / 3; gemm_build_sks.cpp) */
+void rocke_gemm_ep_split_k_serial(rocke_gemm_build_ctx_t* ctx,
+                                  rocke_value_t* const* vals,
+                                  int num_vals);
+
 /* _emit_store_swapped_acc (mfma_swap_ab): direct epilogue writing the C^T
  * accumulator as kCM1PerLane-wide vector stores (gemm_epilogue.cpp). */
 void rocke_gemm_emit_store_swapped_acc(rocke_ir_builder_t* b,
@@ -525,6 +561,19 @@ void rocke_gemm_ep_default(rocke_gemm_build_ctx_t* ctx,
                            rocke_value_t* batch_off_c,
                            void* fused_epilogue,
                            bool fused_is_mde);
+
+/* _ep_default with the vgpr_prefetch wide_addr arguments m_ext / c_ptr (the M
+ * extent and C base the stores use; NULL: M / C) */
+void rocke_gemm_ep_default_ext(rocke_gemm_build_ctx_t* ctx,
+                               rocke_value_t* const* vals,
+                               int num_vals,
+                               rocke_value_t* bm,
+                               rocke_value_t* bn,
+                               rocke_value_t* batch_off_c,
+                               void* fused_epilogue,
+                               bool fused_is_mde,
+                               rocke_value_t* m_ext,
+                               rocke_value_t* c_ptr);
 
 void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                       const rocke_gemm_universal_spec_t* spec,

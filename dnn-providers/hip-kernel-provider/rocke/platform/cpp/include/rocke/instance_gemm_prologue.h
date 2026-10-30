@@ -16,7 +16,8 @@
  *   cplx_b      complex-f32 B through its real embedding (conj_a / conj_b).
  *
  * Mirrored fields: src, recipe, unary_a, unary_b, unary_impl, out_f32, cap,
- * order, split_at, pin_v, fast_exp, psub, cplx_b, conj_a, conj_b, agpr_out.
+ * order, split_at, pin_v, fast_exp, psub, cplx_b, conj_a, conj_b, agpr_out,
+ * split_mode.
  * Not mirrored yet (rocke_gemm_prologue_check refuses them, so the C++ engine
  * never builds a different kernel than Python): stage "vgpr", epi "alpha" /
  * "bilinear".
@@ -52,6 +53,10 @@ typedef struct rocke_gemm_prologue
     bool conj_b;
     const char* epi; /* "" (only "" is mirrored)                             */
     bool agpr_out;
+    /* (src "f32", bf16 compute) the rounding of the split parts: "rne"
+     * (default; NULL reads as "rne"), "trunc" (low 16 bits cleared), "rnef"
+     * (integer RNE without the NaN guard, >= 2 parts) */
+    const char* split_mode;
 } rocke_gemm_prologue_t;
 
 /* Python Prologue() defaults. */

@@ -14,6 +14,7 @@
  *   jit_ew.EwJitSpec / build_ew_jit         rocke_htaot_ew_jit_spec_t / rocke_build_htaot_ew_jit
  *   ewt.EwtSpec / build_ewt                 rocke_htaot_ewt_spec_t / rocke_build_htaot_ewt
  *   ewf.EwfSpec / build_ewf                 rocke_htaot_ewf_spec_t / rocke_build_htaot_ewf
+ *   ewp.EwpSpec / build_ewp                 rocke_htaot_ewp_spec_t / rocke_build_htaot_ewp
  *
  * Every builder makes the same builder calls in the same order as its Python
  * twin, so both engines lower every kernel to the same LLVM IR (enforced by the
@@ -251,6 +252,54 @@ bool rocke_htaot_ewf_check(const rocke_htaot_ewf_spec_t* s, char* reason, size_t
 int rocke_htaot_ewf_vec(const rocke_htaot_ewf_spec_t* s);
 rocke_status_t rocke_htaot_ewf_kernel_name(const rocke_htaot_ewf_spec_t* s, char* out, size_t cap);
 rocke_kernel_def_t* rocke_build_htaot_ewf(rocke_ir_builder_t* b, const rocke_htaot_ewf_spec_t* s);
+
+/* ----------------------------------------------------------------- ewp */
+
+/* Python ewp.EWP_ABI, SLOTS_B, MAX_VECTORS, LDS_BYTES. */
+#define ROCKE_HTAOT_EWP_ABI "hiptensor-aot-ewp/v1"
+#define ROCKE_HTAOT_EWP_SLOTS_B 8
+#define ROCKE_HTAOT_EWP_MAX_VECTORS 32
+#define ROCKE_HTAOT_EWP_LDS_BYTES 163840
+
+/* Python ewp.EwpSpec (frozen dataclass): the tuned tiled elementwise kernel of transposing
+ * layouts (tensors of one element size). */
+typedef struct rocke_htaot_ewp_spec
+{
+    int arity;
+    const char* a;
+    const char* d;
+    const char* b;
+    const char* c;
+    const char* kinds; /* one of 'T' / 'V' per input (A [B] C) */
+    const char* mode; /* "t" (element transposition) or "a" (shared stride-1 mode) */
+    int to; /* tile along the o run */
+    int tt; /* tile along the t run */
+    int tw; /* mode a: 16-byte chunks of the shared mode per tile */
+    int block;
+    int nt; /* bit 0 streaming loads, bit 1 streaming stores */
+    int swz; /* XOR group of the LDS chunk index (0 / 1: none) */
+    int swsh; /* chunk-index bit the swizzle key starts at */
+    const char* walk; /* "o" or "t": the tile coordinate fastest across consecutive CTAs */
+    int tpc; /* tiles per CTA */
+    int ilp; /* phase-2 units whose loads are issued together (0: all) */
+} rocke_htaot_ewp_spec_t;
+
+rocke_htaot_ewp_spec_t rocke_htaot_ewp_spec_default(void);
+bool rocke_htaot_ewp_check(const rocke_htaot_ewp_spec_t* s, char* reason, size_t cap);
+/* EwpSpec.vec: elements per 16-byte vector. */
+int rocke_htaot_ewp_vec(const rocke_htaot_ewp_spec_t* s);
+/* EwpSpec.chunks(): 16-byte chunks of one LDS tile. */
+int rocke_htaot_ewp_chunks(const rocke_htaot_ewp_spec_t* s);
+rocke_status_t rocke_htaot_ewp_kernel_name(const rocke_htaot_ewp_spec_t* s, char* out, size_t cap);
+rocke_kernel_def_t* rocke_build_htaot_ewp(rocke_ir_builder_t* b, const rocke_htaot_ewp_spec_t* s);
+/* ewp_host.pack_classes(arch): the classes of the target's kernel pack in choice order; returns
+ * their number (the first `cap` written to `out` when it is not NULL), 0 for a target without
+ * classes, -1 for a NULL arch. */
+int rocke_htaot_ewp_pack_classes(const char* arch, rocke_htaot_ewp_spec_t* out, int cap);
+/* ewp_host.routes(arch): the routes of the target's tuned problems (ewp.tuned.<hash> = the class's
+ * kernel name, ewp.tuned.<hash>.key = the canonical problem), sorted by name. */
+int rocke_htaot_ewp_route_count(const char* arch);
+bool rocke_htaot_ewp_route(const char* arch, int i, const char** name, const char** value);
 
 /* --------------------------------------------------------------- dgett */
 

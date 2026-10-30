@@ -4,8 +4,9 @@
 #
 # tests/parity/gett_f64_pack_emit.py -- Python reference emitter for the f64
 # and f32 GETT kernels of hipTensor's kernel pack, resolved through the
-# gett_f64 spec policy (gemm_problem, arch_spec, TUNED_CONFIGS,
-# runtime_template, _with_k_block). gett_f64_pack_emit.c resolves the same
+# gett_f64 spec policy (gemm_problem, arch_spec, tuned_configs: TUNED_CONFIGS
+# for f64 words, TUNED_CONFIGS_F32 for f32 words, runtime_template,
+# _with_k_block). gett_f64_pack_emit.c resolves the same
 # specs through the C policy API (gett_f64_policy.cpp), so run_diff.py proves
 # the policy and the builder byte-identical together.
 #
@@ -19,13 +20,13 @@ import sys
 from dataclasses import replace
 
 from rocke.instances.common.gett_f64 import (
-    TUNED_CONFIGS,
     _with_k_block,
     arch_spec,
     build_gett_f64,
     gemm_problem,
     is_valid_spec,
     runtime_template,
+    tuned_configs,
 )
 
 from _emit_common import run_emit
@@ -40,9 +41,7 @@ def entries():
         for arch in arches:
             for cplx in (False, True):
                 kind = "complex" if cplx else "real"
-                classes = sorted(
-                    c for (a, k, c) in TUNED_CONFIGS if a == arch and k == kind
-                )
+                classes = sorted(tuned_configs(arch, kind, dtype))
                 for cls in classes + ["default"]:
                     for dclass in ("m", "n", "x"):
                         for bilinear in (False, True):
@@ -70,7 +69,7 @@ def pack_spec(arch, cplx, cls, dclass, bilinear, kblock, dtype="f64"):
         dtype=dtype,
     )
     kind = "complex" if cplx else "real"
-    cfg = {} if cls == "default" else dict(TUNED_CONFIGS[(arch, kind, cls)])
+    cfg = {} if cls == "default" else dict(tuned_configs(arch, kind, dtype)[cls])
     cfg.pop("split_k", None)
     spec = arch_spec(prob, arch, bilinear=bilinear, runtime_sizes=True, **cfg)
     spec = replace(spec, split_k=1, problem=runtime_template(prob))

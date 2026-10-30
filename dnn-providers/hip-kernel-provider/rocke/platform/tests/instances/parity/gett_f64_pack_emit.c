@@ -4,7 +4,8 @@
  * tests/parity/gett_f64_pack_emit.c -- C-side emitter for the f64 and f32 GETT
  * kernels of hipTensor's kernel pack. Resolves every spec of gett_f64_pack_emit.py
  * (same order) through the C spec policy (rocke_gett_f64_gemm_problem,
- * rocke_gett_f64_arch_spec, rocke_gett_f64_tuned_config,
+ * rocke_gett_f64_arch_spec, rocke_gett_f64_tuned_config (f32 words:
+ * rocke_gett_f32_tuned_config),
  * rocke_gett_f64_runtime_template, rocke_gett_f64_with_k_block) and builds it
  * with rocke_build_gett_f64, so run_diff.py byte-compares policy and builder.
  */
@@ -43,7 +44,8 @@ static int entry(int idx,
                 const char* kind = c ? "complex" : "real";
                 for(int ci = 0;; ++ci)
                 {
-                    const char* name = rocke_gett_f64_tuned_class_at(k_arches[a], kind, ci);
+                    const char* name = w ? rocke_gett_f32_tuned_class_at(k_arches[a], kind, ci)
+                                         : rocke_gett_f64_tuned_class_at(k_arches[a], kind, ci);
                     if(name == NULL)
                         name = "default";
                     for(int d = 0; d < 3; ++d)
@@ -121,8 +123,10 @@ static int pack_spec(const char* arch,
     prob.f32 = f32 != 0;
     rocke_gett_f64_knobs_t knobs;
     memset(&knobs, 0, sizeof knobs);
+    const char* kind = cplx ? "complex" : "real";
     if(strcmp(cls, "default") != 0
-       && !rocke_gett_f64_tuned_config(arch, cplx ? "complex" : "real", cls, &knobs))
+       && !(f32 ? rocke_gett_f32_tuned_config(arch, kind, cls, &knobs)
+                : rocke_gett_f64_tuned_config(arch, kind, cls, &knobs)))
         return 0;
     knobs.set |= ROCKE_GETT_F64_KNOB_BILINEAR | ROCKE_GETT_F64_KNOB_RUNTIME_SIZES;
     knobs.bilinear = bilinear != 0;

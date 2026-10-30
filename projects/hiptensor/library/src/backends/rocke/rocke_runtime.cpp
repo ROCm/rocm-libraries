@@ -826,17 +826,22 @@ namespace hiptensor
                 }
                 if(complexValue)
                 {
+                    // Copied, not dereferenced: the API does not require the scalars to have
+                    // the alignment of hipDoubleComplex (16 bytes), and an aligned load of a
+                    // pointer with less (a double[2], a byte buffer) faults.
                     if(type == HIPTENSOR_C_64F)
                     {
-                        auto v = *static_cast<hipDoubleComplex const*>(value);
-                        out.re = hipCreal(v);
-                        out.im = hipCimag(v);
+                        double v[2];
+                        std::memcpy(v, value, sizeof(v));
+                        out.re = v[0];
+                        out.im = v[1];
                     }
                     else
                     {
-                        auto v = *static_cast<hipFloatComplex const*>(value);
-                        out.re = hipCrealf(v);
-                        out.im = hipCimagf(v);
+                        float v[2];
+                        std::memcpy(v, value, sizeof(v));
+                        out.re = v[0];
+                        out.im = v[1];
                     }
                     return out;
                 }

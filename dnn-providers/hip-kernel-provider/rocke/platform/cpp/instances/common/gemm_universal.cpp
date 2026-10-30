@@ -963,6 +963,17 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
             c->pe = NULL;
         }
     } pe_guard{&ctx};
+    /* the vgpr_prefetch loader state is owned by this build too */
+    struct vp_owner
+    {
+        rocke_gemm_build_ctx_t* c;
+        ~vp_owner()
+        {
+            if(c->vp != NULL)
+                rocke_gemm_vp_state_free(c->vp);
+            c->vp = NULL;
+        }
+    } vp_guard{&ctx};
 
     ctx.op = rocke_gemm_resolve_mma_op(spec, arch, ctx.target);
     if(ctx.op == NULL)
@@ -1002,6 +1013,20 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
             /* MN-contiguous operand / GETT fragments bypass the prologue's
              * fragment transform (they would be used untransformed) */
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "prologue: K-contiguous (RCR) operands only");
+            return NULL;
+        }
+        if(spec->trait.vgpr_prefetch && ctx.pro->stage != NULL
+           && strcmp(ctx.pro->stage, "lds") != 0)
+        {
+            /* the register-staged loader writes the raw words (no conversion) */
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "prologue stage='vgpr' on the vgpr_prefetch body");
+            return NULL;
+        }
+        if(ctx.pro->split_mode != NULL && strcmp(ctx.pro->split_mode, "rne") != 0
+           && strcmp(spec->data.dtype_a, "bf16") != 0)
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "prologue split_mode trunc / rnef needs bf16 compute");
             return NULL;
         }
     }
@@ -1102,8 +1127,10 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         /* In split-K mode the output is the f32 accumulation workspace the
          * epilogue atomic-adds into (the caller casts it afterwards). It is
          * read+write (atomicrmw), so drop writeonly. Outside split-K the C
-         * param is byte-identical to before. */
-        if(spec->trait.split_k > 1)
+         * param is byte-identical to before. split_k_serial reduces in the
+         * launch: C keeps the output dtype. */
+        ctx.sk_serial = spec->trait.split_k > 1 && spec->trait.split_k_serial;
+        if(spec->trait.split_k > 1 && !ctx.sk_serial)
         {
             memset(&opts, 0, sizeof(opts));
             opts.noalias = true;
@@ -1128,6 +1155,21 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
                                       ? rocke_ptr_type(b, rocke_f32(), "global")
                                       : ptr_storage,
                                   &opts);
+        }
+        if(ctx.sk_serial)
+        {
+            /* split_k_serial (split_k_serial_workspace): f32 partial slots and
+             * the per (tile, wave) arrival counters */
+            memset(&opts, 0, sizeof(opts));
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.align = 16;
+            opts.align_set = true;
+            ctx.sks_w = rocke_b_param(b, "W", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
+            memset(&opts, 0, sizeof(opts));
+            opts.align = 4;
+            opts.align_set = true;
+            ctx.sks_cnt = rocke_b_param(b, "Cnt", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
         }
 
         ctx.M = rocke_b_param(b, "M", rocke_i32(), NULL);
@@ -1196,7 +1238,20 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
      * non-split body stays byte-identical (Python: k_hi None -> _k_upper = K). */
     ctx.split_k = spec->trait.split_k;
     ctx.is_split_k = ctx.split_k > 1;
-    if(ctx.is_split_k)
+    if(ctx.is_split_k && spec->trait.split_k_aligned)
+    {
+        /* whole-tile slices: ks = ceil(K / (split_k * tile_k)) * tile_k; the
+         * last non-empty slice ends at K (pad_k masks its tail), empty slices
+         * (k_lo >= K) run no loop iteration and their prologue tile is masked */
+        int skt = ctx.split_k * t->tile_k;
+        rocke_value_t* up = rocke_b_add(b, ctx.K, rocke_b_const_i32(b, skt - 1));
+        rocke_value_t* c_skt = rocke_b_const_i32(b, skt);
+        rocke_value_t* q = rocke_b_div(b, up, c_skt);
+        rocke_value_t* ks = rocke_b_mul(b, q, rocke_b_const_i32(b, t->tile_k));
+        ctx.k_lo = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_block_id_z(b), ks));
+        ctx.k_upper = rocke_b_to_sgpr_u32(b, rocke_b_smin(b, rocke_b_add(b, ctx.k_lo, ks), ctx.K));
+    }
+    else if(ctx.is_split_k)
     {
         rocke_value_t* ks = rocke_b_div(b, ctx.K, rocke_b_const_i32(b, ctx.split_k));
         ctx.k_lo = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_block_id_z(b), ks));
@@ -1241,6 +1296,10 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
             ctx.a_per_lane, ctx.b_per_lane, ctx.block_k, &def_r, &def_w, &def_l);
         if(spec->trait.lds_swizzle_r >= 0)
             def_r = spec->trait.lds_swizzle_r; /* AGPR / interleave knob */
+        /* lds_swizzle_l (vgpr_prefetch): L and W = log2(tile_k >> L) (0 reads as -1) */
+        if(spec->trait.lds_swizzle_l > 0)
+            rocke_gemm_spec_swizzle_params(
+                spec, ctx.a_per_lane, ctx.b_per_lane, &def_r, &def_w, &def_l);
         ctx.swz_r = rocke_gemm_env_int("CK_SWZ_R", def_r);
         ctx.swz_w = rocke_gemm_env_int("CK_SWZ_W", def_w);
         ctx.swz_l = rocke_gemm_env_int("CK_SWZ_L", def_l);
@@ -1452,9 +1511,11 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     ctx.cplx = ctx.pe != NULL && ctx.pro->cplx_b;
     if(ctx.cplx)
     {
-        if(!spec->trait.direct_to_lds)
+        if(!(spec->trait.direct_to_lds || spec->trait.vgpr_prefetch))
         {
-            rocke_i_set_err(b, ROCKE_ERR_VALUE, "cplx_b needs the direct-to-LDS ring");
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "cplx_b needs the direct-to-LDS ring or the vgpr_prefetch body");
             return NULL;
         }
         if(ctx.rilv && !spec->trait.rilv_vec_epilogue)
@@ -1642,6 +1703,15 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         ctx.dtl_c_chunks_per_row = rocke_b_const_i32(b, ctx.dtl_chunks_per_row);
         ctx.dtl_c_halves_per_chunk = rocke_b_const_i32(b, ctx.dtl_halves);
         ctx.dtl_c_block_size = rocke_b_const_i32(b, spec->block_size);
+    }
+
+    /* ---- vgpr_prefetch: the register-staged global prefetch loader state
+     * (Python: the `if _vpf:` block right after emit_load_phase) -- */
+    ctx.vpf = spec->trait.vgpr_prefetch;
+    ctx.vpd = spec->trait.vgpr_prefetch_depth ? spec->trait.vgpr_prefetch_depth : 1;
+    if(ctx.vpf)
+    {
+        rocke_gemm_vp_setup(&ctx);
     }
 
     /* ---- active-tile gate (batched && active_tile_skip) -- */
