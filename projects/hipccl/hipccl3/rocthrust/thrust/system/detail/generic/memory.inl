@@ -50,7 +50,7 @@ THRUST_HOST_DEVICE void malloc(thrust::execution_policy<DerivedPolicy>&, Size)
 template <typename T, typename DerivedPolicy>
 THRUST_HOST_DEVICE thrust::pointer<T, DerivedPolicy> malloc(thrust::execution_policy<DerivedPolicy>& exec, std::size_t n)
 {
-  if constexpr (::cuda::std::is_void_v<T>)
+  if constexpr (_THRUST_STD::is_void_v<T>)
   {
     // We cannot determine sizeof(void), but if void is the target type we are allocating bytes anyway
     return pointer<void, DerivedPolicy>(thrust::malloc(exec, n).get());
