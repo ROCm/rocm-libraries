@@ -161,10 +161,15 @@ using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 using AElementOp = PassThrough;
 using BElementOp = PassThrough;
 
-static constexpr auto GemmSpec         = ck::tensor_operation::device::GemmSpecialization::Default;
-static constexpr ck::index_t MPerBlock = 128;
-static constexpr ck::index_t NPerBlock = 128;
-static constexpr ck::index_t MNPerXDL  = 16;
+// MOE_PADDING tests an N that no tile divides, where the gate and up rows share a row block.
+#ifdef MOE_PADDING
+static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::NKPadding;
+#else
+static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::Default;
+#endif
+static constexpr ck::index_t MPerBlock   = 128;
+static constexpr ck::index_t NPerBlock   = 128;
+static constexpr ck::index_t MNPerXDL    = 16;
 static constexpr ck::index_t MXDLPerWave = MPerBlock / (MNPerXDL * 1);
 static constexpr ck::index_t NXDLPerWave = NPerBlock / (MNPerXDL * 4);
 
