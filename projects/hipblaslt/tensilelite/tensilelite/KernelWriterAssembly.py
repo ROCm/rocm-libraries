@@ -17118,7 +17118,8 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprPool.checkIn(tmpV0)
 
       nElements = kernel["MacroTile0"]*kernel["MatrixInstN"]//kernel["MIWaveGroup"][0]//self.states.kernel["WavefrontSize"]
-      rpe = self.states.bpeCexternal / self.states.bpr
+      # Readback buffers serve both final output and wider accumulation stores.
+      rpe = max(self.states.bpeCexternal, self.states.bpeCinternal) / self.states.bpr
       rpv = rpe * gwvw
       self.vgprs.storeRemapAS = []
       for i in range(0, nElements, gwvw):
