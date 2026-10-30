@@ -6658,6 +6658,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # Tail Loop
       # which means tail loop needed.
       ########################################
+      assert not kernel["ReuseAcrossPersistent"], \
+        "ReuseAcrossPersistent tail-folds the K remainder into the main loop and has no tail loop"
       self.states.inTailLoop = True
       module.addComment2("Tail Loop")
 
