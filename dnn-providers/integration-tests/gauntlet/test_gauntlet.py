@@ -462,6 +462,10 @@ def test_data_seed_can_be_fixed_and_is_validated():
     )
 
 
+# the spaces that declare node_patches (and no add_tensors) to switch a feature per sample
+NODE_PATCHED_SPACES = {"SdpaBackward/Default"}
+
+
 @pytest.mark.parametrize("space_id", SPACE_IDS)
 def test_row_has_sweep_json_format(space_id):
     s = sampler.sample(space_by_id(space_id), 913377)
@@ -472,8 +476,10 @@ def test_row_has_sweep_json_format(space_id):
         "node_patches",
         "tensor_patches",
     }
-    # the shipped spaces switch no feature yet; the keys are there only when a space declares them
-    assert not {"add_tensors", "node_patches"} & set(row)
+    # only a space that switches a feature declares these keys
+    assert {"add_tensors", "node_patches"} & set(row) == (
+        {"node_patches"} if space_id in NODE_PATCHED_SPACES else set()
+    )
     assert ("tensor_patches" in row) == (space_id in PATCHED_OPERANDS)
     assert row["id"] == "s913377"
     meta = row["metadata"]
@@ -504,6 +510,7 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "RMSNorm/Default",
         "RMSNormBackward/Default",
         "ResampleFwd/Default",
+        "SdpaBackward/Default",
         "SdpaFwd/Default",
         "SdpaFwd/Flash2",
         "SdpaFwd/Gfx950Dense",
@@ -526,6 +533,7 @@ def test_shipped_spaces_declare_cost_ceilings():
     }
     assert any("2**31" in r for r in rules["SdpaFwd/Default"])
     assert any("2**31" in r for r in rules["SdpaFwd/Gfx950Dense"])
+    assert any("2**26" in r for r in rules["SdpaBackward/Default"])
     assert any("2**30" in r for r in rules["RMSNorm/Default"])
     assert any("2**30" in r for r in rules["ResampleFwd/Default"])
     assert any("sq==skv" in r for r in rules["SdpaFwd/Gfx950Dense"])
@@ -555,7 +563,10 @@ def test_shipped_space_row_appended_to_the_template_sweep_expands(tmp_path, spac
     topology = tmp_path / "quick" / sp.operation / sp.template_path.parent.name
     topology.mkdir(parents=True)
     for name in ("graph.template.json", "sweep.json", "support.json"):
-        shutil.copyfile(sp.template_path.parent / name, topology / name)
+        if (
+            sp.template_path.parent / name
+        ).is_file():  # SdpaBackward ships no support.json
+            shutil.copyfile(sp.template_path.parent / name, topology / name)
     sweep = json.loads((topology / "sweep.json").read_text())
     existing = len(sweep["cases"])
     samples = [sampler.sample(sp, seed) for seed in range(200, 240)]
@@ -611,6 +622,120 @@ def test_gfx950_dense_space_obeys_the_rocke_rules():
         ]  # BSHD
 
 
+def test_sdpa_backward_space_draws_every_feature_and_renders_it():
+    # bug caught: a mask axis that never reaches the node's left_bound, right_bound or
+    # diagonal_alignment, a scale patch that leaves the template's literal 1/sqrt(128), an
+    # inputs recipe for the derived O or LSE (which the fill overwrites), a head size or mask the
+    # space cannot draw, and a cost ceiling that a sample exceeds
+    sp = space_by_id("SdpaBackward/Default")
+    template = json.loads(sp.template_path.read_text())
+    node = template["nodes"][0]
+    uid = {t["name"]: t["uid"] for t in template["tensors"]}
+    literal_scale = node["parameters"]["attn_scale_value"]
+    bands = {
+        "none": ("TOP_LEFT", None, None),
+        "causal_top_left": ("TOP_LEFT", None, 0),
+        "causal_bottom_right": ("BOTTOM_RIGHT", None, 0),
+    }
+    seen = {name: set() for name in sp.axes}
+    seen_heads_masks, groups_above_one, scale_moved = set(), 0, 0
+    for seed in range(800):
+        s = sampler.sample(sp, seed)
+        axes = s.axis_values
+        env = sp.derive_env(axes)
+        assert sp.first_violation(env) is None
+        for name, value in axes.items():
+            seen[name].add(json.dumps(value))
+        seen_heads_masks.add((axes["d"], axes["mask"]))
+        groups_above_one += axes["group"] > 1
+
+        graph = expanded_graph(template, s.row)
+        params = graph["nodes"][0]["parameters"]
+        assert params["attn_scale_value"] == axes["scale"]  # the patch, not the literal
+        scale_moved += (
+            abs(axes["scale"] - literal_scale) > 1e-6
+        )  # the template holds a float32
+        want = bands.get(axes["mask"]) or (
+            axes["walign"].upper(),
+            axes["wl"],
+            axes["wr"],
+        )
+        assert (
+            params["diagonal_alignment"], params["left_bound"], params["right_bound"]
+        ) == want, (seed, axes["mask"])  # fmt: skip
+        assert not (
+            params["causal_mask"] or params["causal_mask_bottom_right"]
+        ), "the deprecated flags stay off: the bounds carry the mask"
+
+        by_name = {t["name"]: t for t in graph["tensors"]}
+        d, hq, hkv = axes["d"], env["hq"], axes["hkv"]
+        for name in ("Q", "O", "dO", "SdpaBwd_0::dQ"):
+            assert by_name[name]["dims"] == [axes["b"], hq, axes["sq"], d], name
+        for name in ("K", "V", "SdpaBwd_0::dK", "SdpaBwd_0::dV"):
+            assert by_name[name]["dims"] == [axes["b"], hkv, axes["skv"], d], name
+        assert by_name["stats"]["dims"] == [axes["b"], hq, axes["sq"], 1]
+        assert by_name["stats"]["data_type"] == "float"
+        assert {by_name[n]["data_type"] for n in by_name if n != "stats"} == {
+            axes["dtype"]
+        }
+        # the ceiling the description states: dqk == dv == d
+        assert axes["b"] * hq * axes["sq"] * axes["skv"] * (d + d) <= 2**26
+
+        # O and the LSE are derived by the fill from Q, K and V, so they carry no recipe
+        recipes = {int(u) for u in s.row["metadata"]["inputs"]}
+        assert recipes == {uid[n] for n in ("Q", "K", "V", "dO")}, recipes
+
+    for name, axis in sp.axes.items():
+        if not axis.is_range:
+            assert seen[name] == {json.dumps(v) for v in axis.values}, name
+    assert seen_heads_masks == {
+        (d, m) for d in (64, 128, 192) for m in sp.axes["mask"].values
+    }
+    assert (
+        0 < groups_above_one < 400
+    ), "a small grouped-query slice, kept as decline probes"
+    assert scale_moved > 400
+
+
+def test_sdpa_backward_rows_see_a_key_follows_the_reference_mask():
+    # bug caught: a constraint that disagrees with the CPU reference's mask (left_bound L keeps
+    # the L keys ending at the diagonal), so a sample leaves a query row with no key (an LSE of
+    # -inf the kernels do not define) or the space drops legal windows
+    sp = space_by_id("SdpaBackward/Default")
+    rng = random.Random(7)
+    seen = set()
+    for _ in range(6000):
+        axes = {
+            name: (
+                axis.values[rng.randrange(len(axis.values))]
+                if not axis.is_range
+                else rng.randint(axis.lo, min(axis.hi, 24))
+            )
+            for name, axis in sp.axes.items()
+        }
+        env = sp.derive_env(axes)
+        attrs = sp.render(env)["values"]["attributes"]
+        left, right = attrs["parameters__left_bound"], attrs["parameters__right_bound"]
+        top_left = attrs["parameters__diagonal_alignment"] == "TOP_LEFT"
+        sq, skv = axes["sq"], axes["skv"]
+        offset = 0 if top_left else skv - sq
+
+        def masked(i, j):  # CpuFpReferenceSdpa::isMasked
+            return (right is not None and j >= i + 1 + offset + right) or (
+                left is not None and j <= i + offset - left
+            )
+
+        every_row_sees_a_key = all(
+            any(not masked(i, j) for j in range(skv)) for i in range(sq)
+        )
+        assert env["rows_see_a_key"] == every_row_sees_a_key, (axes, left, right)
+        seen.add((axes["mask"], every_row_sees_a_key))
+    assert seen == {
+        (m, ok) for m in ("none", "causal_top_left", "causal_bottom_right", "window")
+        for ok in (True, False)
+    } - {("none", False), ("causal_top_left", False)}  # fmt: skip
+
+
 # --------------------------------------------------------------------------
 # S13: the domain axis (phase 1 ranges, phase 2 fill kinds) and the late-axis mechanism
 # --------------------------------------------------------------------------
@@ -641,6 +766,7 @@ LARGE_SCALE = {
     "LayernormBackward/Default": 4,
     "RMSNormBackward/Default": 4,
     "SdpaFwd/Default": 8,
+    "SdpaBackward/Default": 8,
     "SdpaFwd/Gfx950Dense": 8,
 }
 # The poisoned share of V: a non-finite element of V reaches only its own head-dim column of the
@@ -665,6 +791,16 @@ POISON_FRACTION = {
 OPERAND_DOMAIN = {
     ("SdpaFwd/Default", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
     ("SdpaFwd/Gfx950Dense", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
+    # V and dO of the backward keep magnitude 1 where wide and large widen Q and K (the
+    # outputs grow with |dO| * |V| and the engine tolerances are calibrated at magnitude 1)
+    **{
+        ("SdpaBackward/Default", name): {
+            "wide": (-1, 1, 1),
+            "positive": (0.25, 1, 1),
+            "large": (-1, 1, 1),
+        }
+        for name in ("V", "dO")
+    },
 }
 # The sample the domain test renders when seed 11 is not one the nan and inf domains poison (a
 # causal sample, half, or a softmax scale above 1 falls back to the default fill, see
@@ -682,6 +818,7 @@ PRIMARY_OPERANDS = {
     "ResampleFwd/Default": ["X"],
     "SdpaFwd/Default": ["Q", "K", "V"],
     "SdpaFwd/Gfx950Dense": ["Q", "K", "V"],
+    "SdpaBackward/Default": ["Q", "K", "V", "dO"],
 }
 # The operands that carry the `special` fill in the nan and inf domains, per space. The other
 # primary operands keep the default range there. Each choice keeps the non-finite positions
@@ -696,6 +833,7 @@ POISONED_OPERANDS = {
     "RMSNormBackward/Default": ["dy"],
     "ResampleFwd/Default": ["X"],
     "SdpaFwd/Default": ["V"],
+    "SdpaBackward/Default": [],  # nan and inf are not drawn: see that space's description
     "SdpaFwd/Gfx950Dense": ["V"],
 }
 # sha256 over seeds 0..299 of the pre-existing axes' draws, taken before the domain axis existed
@@ -721,6 +859,7 @@ PLACEMENT_OPERAND = {
     "RMSNorm/Default": "x",
     "RMSNormBackward/Default": "x",
     "ResampleFwd/Default": "X",
+    "SdpaBackward/Default": "Q",
     "SdpaFwd/Default": "Q",
     "SdpaFwd/Flash2": "Q",
     "SdpaFwd/Gfx950Dense": "Q",
@@ -728,6 +867,17 @@ PLACEMENT_OPERAND = {
 PATCHED_OPERANDS = (
     PLACEMENT_OPERAND  # every space declares alignments through tensor_patches
 )
+
+# the spaces whose domain axis leaves out nan and inf (each space's description says why)
+NONFINITE_EXCLUDED = {"SdpaBackward/Default"}
+
+
+def domains_of(space_id):
+    return [
+        d
+        for d in DOMAINS
+        if space_id not in NONFINITE_EXCLUDED or d not in POISONING_DOMAINS
+    ]
 
 
 def test_every_shipped_space_has_its_operands_listed():
@@ -752,7 +902,7 @@ def test_the_last_axes_are_domain_alignment_placement_in_that_order(space_id):
     assert sp.axes["alignment"].values == ALIGNMENTS
     assert sp.axes["placement"].values == PLACEMENTS
     if "domain" in sp.axes:
-        assert sp.axes["domain"].values == DOMAINS
+        assert sp.axes["domain"].values == domains_of(space_id)
     assert [name for name, axis in sp.axes.items() if axis.late] == (
         tail if space_id in OLD_SHAPE_DIGESTS else []
     )
@@ -768,7 +918,7 @@ def _rendered_by_domain(sp, seed=11):
         domain: sp.render(sp.derive_env(dict(sample.axis_values, domain=domain)))[
             "metadata"
         ]
-        for domain in DOMAINS
+        for domain in sp.axes["domain"].values
     }
 
 
@@ -785,7 +935,10 @@ def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
     poisoned = [uid_of[name] for name in POISONED_OPERANDS[space_id]]
     quick = json.loads((sp.template_path.parent / "sweep.json").read_text())["cases"]
     metas = _rendered_by_domain(sp, seed=POISONABLE_SEED.get(space_id, 11))
+    assert set(metas) == set(domains_of(space_id))
     default = metas["default"]["inputs"]
+    # a space that poisons nothing carries no special and fraction keys
+    leaf_keys = LEAF_KEYS if POISONED_OPERANDS[space_id] else LEAF_KEYS[:5]
     for domain, (
         kind,
         lo,
@@ -796,6 +949,8 @@ def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
         fraction,
         validator,
     ) in DOMAIN_TABLE.items():
+        if domain not in metas:
+            continue
         meta = metas[domain]
         inputs = meta["inputs"]
         assert meta["purpose"] == "probe"
@@ -832,14 +987,15 @@ def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
                 domain, (lo, hi, scale)
             )
             expected = dict(
-                zip(LEAF_KEYS, (kind, lo_u, hi_u, value, scale_u, special, fraction))
+                zip(leaf_keys, (kind, lo_u, hi_u, value, scale_u, special, fraction))
             )
-            assert {k: leaf[k] for k in LEAF_KEYS} == expected, (
+            assert {k: leaf[k] for k in leaf_keys} == expected, (
                 space_id,
                 domain,
                 uid,
                 leaf,
             )
+            assert set(leaf) == set(leaf_keys), (space_id, domain, uid, leaf)
         for uid in poisoned:
             if uid in primary:
                 continue
@@ -2170,6 +2326,88 @@ def test_the_hip_mlops_dtype_thresholds_reach_layernorm_backward_cases(run):
     assert {"half", "bfloat16"} <= set(seen)
 
 
+ASM_SDPA_TOML = (
+    TESTS_ROOT.parent / "hip-kernel-provider" / "config" / "ASM_SDPA_ENGINE.toml"
+)
+
+
+def _gtest_glob_matches(pattern, text):
+    """GTest's glob, as ``globMatches`` in ``src/harness/bundle/GTestFilter.hpp`` has it: ``*``
+    matches any run of characters (none included) and ``?`` exactly one; nothing else is special
+    (``fnmatch`` would also read ``[...]``)."""
+    p = t = 0
+    star = star_text = None
+    while t < len(text):
+        if p < len(pattern) and pattern[p] == "*":
+            star, star_text = p, t
+            p += 1
+        elif p < len(pattern) and pattern[p] in ("?", text[t]):
+            p += 1
+            t += 1
+        elif star is not None:
+            star_text += 1
+            p, t = star + 1, star_text
+        else:
+            return False
+    while p < len(pattern) and pattern[p] == "*":
+        p += 1
+    return p == len(pattern)
+
+
+def _toml_tolerance(config, test_name):
+    """The (atol, rtol) the harness resolves for a test name: the last ``[[tolerance_overrides]]``
+    entry with a matching filter wins (``TestSettings::findToleranceOverride``); None when none
+    matches, which leaves the common suite's tolerance."""
+    result = None
+    for entry in config.get("tolerance_overrides", []):
+        if any(_gtest_glob_matches(g, test_name) for g in entry["filters"]):
+            result = (entry["atol"], entry["rtol"])
+    return result
+
+
+def test_the_asm_sdpa_backward_tolerances_reach_fuzz_and_quick_cases(run):
+    # bug caught (A4): the filters read `*_SdpaBackward_*.*_fp16_*`, which needs the dtype token
+    # in the case id. The fuzz cases are named s<seed> and carry it in the suite, so every fuzz
+    # backward sample was graded at the tight forward tolerance instead of the calibrated one
+    tomllib = pytest.importorskip("tomllib")
+    if not ASM_SDPA_TOML.is_file():
+        pytest.skip("the hip-kernel-provider config is not in this checkout")
+    config = tomllib.loads(ASM_SDPA_TOML.read_text(encoding="utf-8"))
+    space_id = "SdpaBackward/Default"
+    sp = space_by_id(space_id)
+    f = _fuzz(run, space=space_id)
+    expected = {"half": (2.5e-3, 2.5e-3), "bfloat16": (1e-2, 1e-2)}
+    seen = {}
+    for seed in range(200):
+        s = sampler.sample(sp, seed)
+        name = f._test_name(sp, s)
+        dtype = s.axis_values["dtype"]
+        assert _toml_tolerance(config, name) == expected[dtype], (name, dtype)
+        seen[dtype] = seen.get(dtype, 0) + 1
+    assert set(seen) == set(expected)  # fp16 and bfp16 each drawn, and never crossed
+
+    # the quick bundle cases resolve as before: the dtype token is in the case id
+    quick_dir = sp.template_path.parent
+    suite = "_".join(quick_dir.relative_to(BUNDLES).parts)
+    assert suite == "quick_SdpaBackward_Default"
+    quick = json.loads((quick_dir / "sweep.json").read_text())["cases"]
+    tokens = set()
+    for case in quick:
+        io = case["values"]["io_data_type"]
+        name = f"{suite}.{re.sub(r'[^A-Za-z0-9_]', '_', case['id'])}"
+        assert _toml_tolerance(config, name) == expected[io], name
+        tokens.add(TAG_OF_DTYPE[io])
+    assert tokens == {"fp16", "bfp16"}
+
+    # no other operation, fuzz or quick, picks up the backward tolerances
+    for other in (
+        "gauntlet_SdpaFwd_Default_fp16_cases.s7",
+        "gauntlet_SdpaFwd_Default_bfp16_cases.s7",
+        "quick_SdpaFwd_Default.1_1_256_128_fp16_nchw",
+    ):
+        assert _toml_tolerance(config, other) is None, other
+
+
 def test_samples_are_split_into_batches_with_consecutive_seeds(run):
     assert run.run("--samples", "7", "--batch-size", "3") == 0
     runs = [i["tests"] for i in run.invocations if i["mode"] == "run"]
@@ -2802,7 +3040,10 @@ def test_fault_folder_imports_for_real_and_expands_back_identically(
     topology = tree / "quick" / sp.operation / sp.template_path.parent.name
     topology.mkdir(parents=True)
     for name in ("graph.template.json", "sweep.json", "support.json"):
-        shutil.copyfile(sp.template_path.parent / name, topology / name)
+        if (
+            sp.template_path.parent / name
+        ).is_file():  # SdpaBackward ships no support.json
+            shutil.copyfile(sp.template_path.parent / name, topology / name)
     before = json.loads((topology / "sweep.json").read_text())["cases"]
 
     def import_it():

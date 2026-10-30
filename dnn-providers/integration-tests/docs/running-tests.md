@@ -368,6 +368,7 @@ reports `DECLINED`, not a failure.
 | `RMSNormBackward/Default` | `HIP_MLOPS_ENGINE` | `RMSNormBackward/Default` | backward (dx, dscale, dbias; saved inverse RMS) |
 | `ResampleFwd/Default` | `HIP_MLOPS_ENGINE` | `ResampleFwd/Variant2` | pooling forward, no index output |
 | `SdpaFwd/Default` | `ASM_SDPA_ENGINE` | `SdpaFwd/Default` | SDPA forward, bfloat16, head size 128 or 192 |
+| `SdpaBackward/Default` | `ASM_SDPA_ENGINE` | `SdpaBackward/Default` | SDPA backward on gfx942, half or bfloat16, head size 64, 128 or 192, no/causal/sliding-window masks through `left_bound`/`right_bound`, scale set per sample; grouped-query heads and head size 64 are decline probes; cost ceiling provisional |
 | `SdpaFwd/Gfx950Dense` | `hipkernel:Gfx950AttentionDense` | `SdpaFwd/Default` | SDPA forward, BSHD, head size 64 or 128 |
 | `SdpaFwd/Flash2` | `HIP_FLASH2_ENGINE` | `SdpaFwd/Default` | **not a shape space**: one fixed fp16 SDPA forward (BHSD, head size 128, seqlen 256), varying only `alignment` and `placement`; gfx942 builds with `-DENABLE_HIP_FLASH2_ENGINE=ON` only |
 | `Matmul/Align` | none (probes MIOpen and hipBLASLt) | `Matmul/Default` | **not a shape space**: one fixed float batched matmul, varying only `alignment` and `placement` |
@@ -385,7 +386,7 @@ live in the one `hip_kernel_provider` plugin, so `--test-article` is the same fi
 | Engine | Spaces | `--test-article` | `--test-engine` | `--test-config` | Required build flags | Arch | Extra env |
 |---|---|---|---|---|---|---|---|
 | ASM_SDPA forward | `SdpaFwd/Default` | `lib/hipdnn_plugins/engines/libhip_kernel_provider.so` | `ASM_SDPA_ENGINE` | `dnn-providers/hip-kernel-provider/config/ASM_SDPA_ENGINE.toml` | `-DHIPDNN_ENABLE_SDPA=ON` (`ENABLE_ASM_SDPA_ENGINE` is ON by default) | gfx942, gfx950 | none |
-| ASM_SDPA backward | none yet | same | `ASM_SDPA_ENGINE` | same | same | gfx942 (the engine also ships gfx950 backward kernels) | none |
+| ASM_SDPA backward | `SdpaBackward/Default` | same | `ASM_SDPA_ENGINE` | same | same | gfx942 (the region the space draws; the engine also ships gfx950 backward kernels) | none |
 | HIP_FLASH2 | `SdpaFwd/Flash2` | same | `HIP_FLASH2_ENGINE` | `dnn-providers/hip-kernel-provider/src/engines/hip_flash2_engine/config/HIP_FLASH2_ENGINE.toml` | `-DENABLE_HIP_FLASH2_ENGINE=ON -DHIPDNN_ENABLE_SDPA=ON` | gfx942 (fp16; the engine declines gfx950) | `HIP_FLASH2_KERNEL_DIR=<build>/dnn-providers/hip-kernel-provider/src/hip_flash2_kernels`, the directory CMake copies the shipped `.co` files to (its path is the cache variable `HIP_FLASH2_KERNEL_DIR_BUILD`). No CTest sets it, and without it every case fails in `hipModuleLoad` |
 | `hipkernel:Gfx950AttentionDense` | `SdpaFwd/Gfx950Dense` | same | `hipkernel:Gfx950AttentionDense` | `dnn-providers/hip-kernel-provider/config/hipkernel_Gfx950AttentionDense.toml` | `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DHIPDNN_ENABLE_SDPA=ON -DGPU_TARGETS=gfx950`, and the rocKE descriptors pulled (`dvc pull -r ingestor`; add `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` to fail configure on a missing one) | gfx950 | none |
 | `hipkernel:Gfx1151WmmaAttention` (prefill) | none yet | same | `hipkernel:Gfx1151WmmaAttention` | `dnn-providers/hip-kernel-provider/config/hipkernel_Gfx1151WmmaAttention.toml` | as Gfx950, with `-DGPU_TARGETS=gfx1151` | gfx1151 (the descriptors list gfx1100 to gfx1153 and gfx1200/gfx1201) | none |
@@ -430,10 +431,17 @@ case metadata and `tensor_patches` rather than shape values:
 | `nan`, `inf` | `special` (`"nan"` or `"inf"`), `fraction` 0.05, planted on tensors chosen so a non-finite element stays local to a few outputs (the space's `description` names them); the case grades with `match_nonfinite` |
 
 A domain a data type cannot hold (`subnormal` on an integer tensor, `inf` on fp8) is
-`UNEXERCISED`, not a failure. In the SDPA spaces a non-finite V element reaches a whole
+`UNEXERCISED`, not a failure. In the `SdpaFwd` spaces a non-finite V element reaches a whole
 output column, so most `nan`/`inf` samples with a long kv sequence produce an all
 non-finite reference, which `match_nonfinite` fails by design: expect `WRONG` there
 without an engine defect.
+
+`SdpaBackward/Default` draws neither `nan` nor `inf`: one non-finite element of dO makes the
+softmax-backward term non-finite for its whole row, so `dK` has no finite element and
+`match_nonfinite` fails the reference by design, whichever operand is poisoned (the space's
+`description` gives the citations). Its `wide` and `large` domains widen Q and K only, and its
+`positive` domain keeps V and dO at `[0.25, 1]`; those choices are provisional until an on-device
+run checks the engine tolerances against them.
 
 **`late` axes.** `RMSNorm`, `SdpaFwd/Default` and `SdpaFwd/Gfx950Dense` declare their
 `domain`, `alignment` and `placement` axes with `"late": true`; the other spaces declare

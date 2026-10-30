@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "operation": "SdpaBackward",
+  "description": "SDPA backward in the ASM_SDPA_ENGINE region on gfx942 (SdpaBwdPlanBuilder.cpp; asm_kernels/gfx942/fmha_v3_bwd/fmha_bwd_dqdkdv.csv): half or bfloat16, head size 64, 128 or 192 with dqk == dv, BSHD or BHSD. The builder dispatches the A32 kernels with pssk = 1 and pddv = 1 and no group mode (computeDispatchTuples), so a case runs only where the CSV ships that row: head size 128 with every mask (none, top-left causal, bottom-right causal, sliding window), head size 192 with the first three, both dtypes. Head size 64 ships only pddv = 0 rows and a sliding window at head size 192 has no row: both decline and stay as probes. So do grouped-query heads, which isApplicable rejects (Hq != Hkv: the kernel indexes dK and dV by query head), and an alignment below 16 bytes (K_ROW_ALIGNMENT_BYTES); a quarter of the samples draw a group above 1. The mask goes through the template's left_bound, right_bound and diagonal_alignment, which follow the cuDNN left_bound semantics (L keeps the L keys ending at the diagonal, diagonal included; resolveDiagonalBand() turns it into the kernels' L - 1, develop #14483); a window that covers the whole span collapses to no mask or plain causal, as the builder classifies it. The softmax scale is set per sample by a node patch on the node's attn_scale_value (the template holds the literal 1/sqrt(128)). O and the LSE are not inputs of this space: the harness derives them from Q, K and V by the CPU forward (SdpaBackwardInputs.cpp, run by fillInputs after every fill and before the engine), so an inputs recipe for uid 1 or 8 would be overwritten and the space gives none. The domain axis fills Q, K, V and dO. wide and large widen only Q and K (large at scale 8, as SdpaFwd, so Q.K of a 192-wide head stays inside the half range): the gradients grow with |dO| * |V| (dP = dO V^T) and the engine tolerances are calibrated on data of magnitude 1 (ASM_SDPA_ENGINE.toml), so V and dO keep (-1, 1) there and positive uses (0.25, 1) for them; PROVISIONAL, to be checked against the on-device run. The nan and inf domains are excluded: one non-finite element of dO makes D = sum(dO * O) and dP non-finite for its row, so dS is non-finite across that whole row and dK (a sum of dS * Q over the rows) has no finite element (CpuFpReferenceSdpa.hpp backward, steps 1-4); a non-finite element of Q, K or V reaches whole rows or columns of the derived O and LSE the same way (SdpaFwd documents it for Q and K). The non-finite mask fails a reference with no finite element (NonFiniteMask.hpp), so no operand keeps the outputs partly finite. The cost ceiling b * hq * sq * skv * (dqk + dv) <= 2**26 is PROVISIONAL, the largest quick case: the CPU backward reference is serial (CpuFpReferenceSdpa.hpp, 'cannot be parallelized without atomics') and the reference-affordability gate covers the golden lanes only (ReferenceOpCoverage.cpp referenceShapeIsAffordable, called from GoldenDataPlan.cpp), so the space carries the bound; the measured ceiling replaces it.",
+  "engine": "ASM_SDPA_ENGINE",
+  "template": "../../integration-test-bundles/quick/SdpaBackward/Default/graph.template.json",
+  "axes": {
+    "dtype":  {"values": ["half", "bfloat16"]},
+    "layout": {"values": ["bshd", "bhsd"]},
+    "b":      {"values": [1, 2, 3, 4]},
+    "hkv":    {"values": [1, 2, 4, 8]},
+    "group":  {"values": [1, 1, 1, 1, 1, 1, 2, 4]},
+    "sq":     {"range": [1, 512], "boundaries": [1, 15, 16, 17, 63, 64, 65, 127, 128, 129, 192, 256, 512]},
+    "skv":    {"range": [1, 512], "boundaries": [1, 63, 64, 65, 127, 128, 129, 191, 192, 193, 256, 512]},
+    "d":      {"values": [64, 128, 192]},
+    "mask":   {"values": ["none", "causal_top_left", "causal_bottom_right", "window"]},
+    "wl":     {"range": [1, 512], "boundaries": [1, 2, 16, 17, 64, 65, 128, 192, 256]},
+    "wr":     {"values": [null, 0, 1, 16, 64, 128]},
+    "walign": {"values": ["top_left", "bottom_right"]},
+    "scale":  {"values": [0.0883883461356163, 0.07216878235340118, 0.125, 0.25, 0.5, 1.0]},
+    "domain": {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal"]},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256]},
+    "placement": {"values": ["default", "exact", "under"]}
+  },
+  "derive": {
+    "hq":       "hkv * group",
+    "dims_q":   "[b, hq, sq, d]",
+    "dims_kv":  "[b, hkv, skv, d]",
+    "dims_lse": "[b, hq, sq, 1]",
+    "stride_q": "[sq*hq*d, d, hq*d, 1] if layout == 'bshd' else [hq*sq*d, sq*d, d, 1]",
+    "stride_kv": "[skv*hkv*d, d, hkv*d, 1] if layout == 'bshd' else [hkv*skv*d, skv*d, d, 1]",
+    "stride_lse": "[hq*sq, sq, 1, 1]",
+    "bottom":   "mask == 'causal_bottom_right' or (mask == 'window' and walign == 'bottom_right')",
+    "align":    "'BOTTOM_RIGHT' if bottom else 'TOP_LEFT'",
+    "left":     "wl if mask == 'window' else None",
+    "right":    "0 if mask in ['causal_top_left', 'causal_bottom_right'] else (wr if mask == 'window' else None)",
+    "diag":     "skv - sq if bottom else 0",
+    "rows_see_a_key": "(right == None or diag + right >= 0) and (left == None or sq + diag - left <= skv - 1)",
+    "dom_kind":  "'fixed' if domain == 'constant' else ('free' if domain in ['default', 'narrow', 'wide', 'positive'] else domain)",
+    "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
+    "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
+    "dom_value": "0.5 if domain == 'constant' else 0",
+    "dom_scale": "8 if domain == 'large' else 1",
+    "dom_g_lo":  "-1 if domain == 'wide' else dom_lo",
+    "dom_g_hi":  "1 if domain in ['wide', 'positive'] else dom_hi",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
+  },
+  "constraints": [
+    {"rule": "rows_see_a_key", "reason": "a query row with no key left under the mask has an LSE of -inf in the derived stats (CpuFpReferenceSdpa.hpp forward, 'fully masked rows'), which is not an input the backward kernels define; SdpaFwd excludes the same samples (bottom-right causal needs sq <= skv). A key that no row sees is fine: its dK and dV are zero"},
+    {"rule": "b*hq*sq*skv*(d+d) <= 2**26", "reason": "PROVISIONAL cost ceiling, the largest quick SdpaBackward case: the CPU backward reference is serial (CpuFpReferenceSdpa.hpp:624-628) and no gate caps it in the fuzz path (referenceShapeIsAffordable, ReferenceOpCoverage.cpp:139-207, gates the golden lanes only: GoldenDataPlan.cpp:115); to be replaced by the measured ceiling"}
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_kv}", "strides": "${stride_kv}", "data_type": "${dtype}"},
+        {"uid": 1, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}"},
+        {"uid": 2, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}"},
+        {"uid": 3, "dims": "${dims_kv}", "strides": "${stride_kv}", "data_type": "${dtype}"},
+        {"uid": 4, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}"},
+        {"uid": 5, "dims": "${dims_kv}", "strides": "${stride_kv}", "data_type": "${dtype}"},
+        {"uid": 6, "dims": "${dims_kv}", "strides": "${stride_kv}", "data_type": "${dtype}"},
+        {"uid": 7, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}"},
+        {"uid": 8, "dims": "${dims_lse}", "strides": "${stride_lse}", "data_type": "float"}
+      ],
+      "attributes": {
+        "parameters__diagonal_alignment": "${align}",
+        "parameters__left_bound": "${left}",
+        "parameters__right_bound": "${right}"
+      }
+    },
+    "metadata": {
+      "purpose": "probe",
+      "validator": "default",
+      "inputs": {
+        "2": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}"},
+        "0": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}"},
+        "6": {"kind": "${dom_kind}", "lo": "${dom_g_lo}", "hi": "${dom_g_hi}", "value": "${dom_value}", "scale": 1},
+        "7": {"kind": "${dom_kind}", "lo": "${dom_g_lo}", "hi": "${dom_g_hi}", "value": "${dom_value}", "scale": 1}
+      },
+      "placement": "${eff_placement}",
+      "placement_uid": 2
+    },
+    "node_patches": [
+      {"node": "SdpaBwd_0", "section": "parameters", "set": {"attn_scale_value": "${scale}"}}
+    ],
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 2, "set": {"alignment": "${alignment}"}},
+      {"uid": 3, "set": {"alignment": "${alignment}"}},
+      {"uid": 4, "set": {"alignment": "${alignment}"}},
+      {"uid": 5, "set": {"alignment": "${alignment}"}},
+      {"uid": 6, "set": {"alignment": "${alignment}"}},
+      {"uid": 7, "set": {"alignment": "${alignment}"}},
+      {"uid": 8, "set": {"alignment": "${alignment}"}}
+    ]
+  }
+}
