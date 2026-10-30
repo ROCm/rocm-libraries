@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <complex>
@@ -10,10 +11,15 @@
 #include <limits>
 #include <memory>
 #include <ostream>
+#include <roc/hostnumerics/detail/prime.hpp>
+#include <roc/hostnumerics/index_range.hpp>
 #include <roc/hostnumerics/layout.hpp>
+#include <roc/hostnumerics/permutation.hpp>
+#include <roc/hostnumerics/sampling.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <roc/hostnumerics/shape.hpp>
 #include <roc/hostnumerics/version.hpp>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -36,6 +42,60 @@ void PrintTo(const Shape& shape, std::ostream* output) {
 
 namespace {
 using namespace roc::hostnumerics;
+
+// Coordinate traversal tutorials. Run these examples with
+// --gtest_filter=CoordinateTraversalTutorial.*.
+
+TEST(CoordinateTraversalTutorial, GenerateDiagonalPattern) {
+    // For a matrix, axis 0 is the row and axis 1 is the column. The named
+    // whole-shape overload visits every position with the column changing fastest.
+    const Shape shape{3, 4};
+    std::vector<double> values;
+    values.reserve(shape.elementCount());
+
+    // A callback can take only coordinates when it does not need the flat index.
+    // The span is borrowed and reused, so compute and store the value during the call.
+    shape.forEachCoordinateLastDimensionFastest(
+        [&](std::span<const size_t> at) { values.push_back(at[0] == at[1] ? 1.0 : 0.0); });
+
+    EXPECT_EQ(values, (std::vector<double>{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0}));
+}
+
+TEST(CoordinateTraversalTutorial, GroupSelectedOutputsByBatch) {
+    // Axes are (row, column, batch). Order (2, 1, 0) makes batch slowest and row
+    // fastest, so the first eight flat indices belong to batch 0, then batch 1.
+    const Shape output{2, 4, 2};
+    const IndexRange selection(1, 14, 3);
+    std::array<std::vector<size_t>, 2> selectedByBatch;
+    std::vector<size_t> visited;
+
+    // This callback uses both the global flat index and its coordinates. Each
+    // batch's reference uses row-major indices, so project (row, column) into that
+    // local order. Store the computed indices rather than the borrowed spans.
+    const auto groupByBatch = [&](size_t index, std::span<const size_t> at) {
+        visited.push_back(index);
+        selectedByBatch[at[2]].push_back(at[0] * output[1] + at[1]);
+    };
+    output.forEachCoordinate(selection, Permutation{2, 1, 0}, groupByBatch);
+
+    // The stop is exclusive: select 1, 4, 7, 10 and 13. Their (row, column, batch)
+    // coordinates are (1,0,0), (0,2,0), (1,3,0), (0,1,1) and (1,2,1).
+    EXPECT_EQ(selection.count(), 5);
+    EXPECT_EQ(visited, (std::vector<size_t>{1, 4, 7, 10, 13}));
+    EXPECT_EQ(selectedByBatch[0], (std::vector<size_t>{4, 2, 7}));
+    EXPECT_EQ(selectedByBatch[1], (std::vector<size_t>{1, 6}));
+
+    // Use an explicit sequence when the requested positions do not form a range.
+    // Traversal preserves the sequence's order and repeated positions.
+    visited.clear();
+    for (auto& batch : selectedByBatch) batch.clear();
+    output.forEachCoordinate(std::vector<size_t>{13, 1, 13}, Permutation{2, 1, 0}, groupByBatch);
+    EXPECT_EQ(visited, (std::vector<size_t>{13, 1, 13}));
+    EXPECT_EQ(selectedByBatch[0], (std::vector<size_t>{4}));
+    EXPECT_EQ(selectedByBatch[1], (std::vector<size_t>{6, 6}));
+}
+
+// Core API checks.
 
 TEST(Core, Version) {
     EXPECT_EQ(version(), "0.1.0");
@@ -334,6 +394,114 @@ TEST(Core, ScalarDispatchExceptions) {
     }
 }
 
+// Tutorial: choosing a traversal order with Permutation.
+//
+// An axis order lists every axis once, from slowest (outermost loop) to fastest
+// (innermost loop). Shape and Layout take orders only as Permutations, so a
+// vector of flat indices or extents cannot be passed where an order is meant.
+TEST(PermutationTutorial, ColumnMajorMatrixIndexing) {
+    // A 2x3 matrix stored column-major: rows change fastest, so the column axis
+    // (1) is outermost and the row axis (0) innermost.
+    const Shape matrix{2, 3};
+    const Permutation columnMajor = Permutation::reverse(matrix.rank());
+    EXPECT_EQ(columnMajor, (Permutation{1, 0}));
+
+    // Element (row 1, column 2) is the last of six in either order, while
+    // (row 1, column 0) is second in column-major order and fourth in row-major.
+    const std::array<size_t, 2> lastElement{1, 2};
+    const std::array<size_t, 2> secondRowFirstColumn{1, 0};
+    EXPECT_EQ(matrix.linearIndex(lastElement, columnMajor), 5);
+    EXPECT_EQ(matrix.linearIndex(secondRowFirstColumn, columnMajor), 1);
+    EXPECT_EQ(matrix.linearIndex(secondRowFirstColumn, Permutation::identity(matrix.rank())), 3);
+
+    // The matching contiguous storage has unit stride along the fastest axis.
+    EXPECT_EQ(Layout::contiguous(matrix, columnMajor), (Layout(matrix, {1, 2}, 0)));
+}
+
+TEST(PermutationTutorial, ReorderingExtentsAndUndoingIt) {
+    // apply() reorders values by position: result[i] == values[order[i]]. With
+    // an axis order, it lists the extents from the outermost loop inward.
+    const Shape shape{2, 3, 5};
+    const Permutation order{1, 2, 0};
+    const std::vector<size_t> loopExtents = order.apply(shape.dimensions());
+    EXPECT_EQ(loopExtents, (std::vector<size_t>{3, 5, 2}));
+
+    // inverse() undoes the reordering, recovering each axis's original extent.
+    EXPECT_EQ(order.inverse(), (Permutation{2, 0, 1}));
+    EXPECT_EQ(order.inverse().apply(loopExtents), (std::vector<size_t>{2, 3, 5}));
+}
+
+template <typename T>
+constexpr bool acceptsBracedPair = requires(void (*sink)(T)) { sink({1, 0}); };
+
+template <typename Indices>
+constexpr bool acceptsIndicesAsOrder =
+    requires(const Shape& shape, const Indices& indices) { shape.linearIndex(indices, indices); };
+
+TEST(PermutationCpp, ConstructionValidatesEntries) {
+    static_assert(std::ranges::random_access_range<Permutation>);
+    static_assert(!std::is_default_constructible_v<Permutation>);
+    static_assert(!std::is_convertible_v<std::vector<size_t>, Permutation>);
+    static_assert(!std::is_convertible_v<std::span<const size_t>, Permutation>);
+    static_assert(!acceptsBracedPair<const Permutation&>);
+    static_assert(!acceptsIndicesAsOrder<std::vector<size_t>>);
+
+    const std::array<size_t, 3> entries{2, 0, 1};
+    for (const Permutation& permutation :
+         {Permutation{2, 0, 1}, Permutation(std::vector<size_t>{2, 0, 1}),
+          Permutation(std::span<const size_t>(entries))}) {
+        EXPECT_EQ(permutation.size(), 3);
+        EXPECT_EQ(permutation[0], 2);
+        EXPECT_EQ(std::vector<size_t>(permutation.begin(), permutation.end()),
+                  (std::vector<size_t>{2, 0, 1}));
+        EXPECT_TRUE(std::ranges::equal(permutation.entries(), entries));
+    }
+    EXPECT_EQ(Permutation(std::vector<size_t>{}).size(), 0);
+    for (const std::vector<size_t>& invalid :
+         {std::vector<size_t>{0, 0}, std::vector<size_t>{1, 2}, std::vector<size_t>{1},
+          std::vector<size_t>{0, 1, std::numeric_limits<size_t>::max()}})
+        EXPECT_THROW(Permutation{invalid}, std::runtime_error);
+    try {
+        const Permutation repeated{0, 2, 2};
+        FAIL() << "Expected a repeated entry to be rejected.";
+    } catch (const std::runtime_error& error) {
+        EXPECT_STREQ(error.what(),
+                     "Permutation entry 2 at position 2 is repeated or outside [0, 3); each "
+                     "value must appear exactly once.");
+    }
+}
+
+TEST(PermutationCpp, NamedOrdersInverseAndApply) {
+    for (size_t size : {0, 1, 4}) {
+        const Permutation identity = Permutation::identity(size);
+        const Permutation reverse = Permutation::reverse(size);
+        for (size_t position = 0; position < size; ++position) {
+            EXPECT_EQ(identity[position], position);
+            EXPECT_EQ(reverse[position], size - 1 - position);
+        }
+        EXPECT_EQ(identity.inverse(), identity);
+        EXPECT_EQ(reverse.inverse(), reverse);
+    }
+    const Permutation permutation{3, 0, 2, 1};
+    const Permutation inverse = permutation.inverse();
+    for (size_t position = 0; position < permutation.size(); ++position)
+        EXPECT_EQ(inverse[permutation[position]], position);
+    const std::vector<std::string> values{"a", "b", "c", "d"};
+    EXPECT_EQ(permutation.apply(values), (std::vector<std::string>{"d", "a", "c", "b"}));
+    EXPECT_EQ(inverse.apply(permutation.apply(values)), values);
+    EXPECT_THROW(permutation.apply(std::vector<int>{1, 2, 3}), std::runtime_error);
+    EXPECT_NE(permutation, inverse);
+}
+
+TEST(PermutationCpp, ApplyBooleanVector) {
+    const Permutation order{2, 0, 1};
+    const std::vector<bool> values{true, false, false};
+    EXPECT_EQ(order.apply(values), (std::vector<bool>{false, true, false}));
+    EXPECT_EQ(order.inverse().apply(order.apply(values)), values);
+    EXPECT_TRUE(Permutation::identity(0).apply(std::vector<bool>{}).empty());
+    EXPECT_THROW(order.apply(std::vector<bool>{true}), std::runtime_error);
+}
+
 TEST(ShapeCpp, ConstructionAndOwnership) {
     EXPECT_EQ(::testing::PrintToString(Shape{}), "Shape{}");
     EXPECT_EQ(::testing::PrintToString(Shape{2, 3, 4}), "Shape{2, 3, 4}");
@@ -382,10 +550,10 @@ TEST(ShapeCpp, ArrayArguments) {
     EXPECT_EQ(shape.fromDimensions(axes), (Shape{5, 2, 5}));
 
     const std::array<size_t, 3> indices{1, 2, 3};
-    const std::array<size_t, 3> order{1, 2, 0};
+    const Permutation order{1, 2, 0};
     const std::vector<size_t> expected(indices.begin(), indices.end());
-    EXPECT_EQ(shape.linearIndex(indices), 28);
-    EXPECT_EQ(shape.coordinates(28), expected);
+    EXPECT_EQ(shape.linearIndexLastDimensionFastest(indices), 28);
+    EXPECT_EQ(shape.coordinatesLastDimensionFastest(28), expected);
     EXPECT_EQ(shape.linearIndex(indices, order), 27);
     EXPECT_EQ(shape.coordinates(27, order), expected);
 }
@@ -403,8 +571,8 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
         // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
         EXPECT_EQ(copied.rank(), 0);
         EXPECT_EQ(copied.elementCount(), 1);
-        EXPECT_TRUE(copied.coordinates(0).empty());
-        EXPECT_THROW(copied.coordinates(1), std::runtime_error);
+        EXPECT_TRUE(copied.coordinatesLastDimensionFastest(0).empty());
+        EXPECT_THROW(copied.coordinatesLastDimensionFastest(1), std::runtime_error);
         // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
 
         Shape assigned{7};
@@ -418,8 +586,8 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
         // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
         EXPECT_EQ(assigned.rank(), 0);
         EXPECT_EQ(assigned.elementCount(), 1);
-        EXPECT_TRUE(assigned.coordinates(0).empty());
-        EXPECT_THROW(assigned.coordinates(1), std::runtime_error);
+        EXPECT_TRUE(assigned.coordinatesLastDimensionFastest(0).empty());
+        EXPECT_THROW(assigned.coordinatesLastDimensionFastest(1), std::runtime_error);
         // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
 
         Shape& alias = moveAssigned;
@@ -427,6 +595,171 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
         EXPECT_EQ(moveAssigned, original);
         EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
     }
+}
+
+TEST(PrimeCpp, InclusiveSearchAndPrimality) {
+    const std::array<size_t, 25> primes{2,  3,  5,  7,  11, 13, 17, 19, 23, 29, 31, 37, 41,
+                                        43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97};
+    for (size_t value = 0; value <= primes.back(); ++value) {
+        SCOPED_TRACE(value);
+        EXPECT_EQ(detail::isPrime(value), std::binary_search(primes.begin(), primes.end(), value));
+        EXPECT_EQ(detail::getNextPrime(value),
+                  *std::lower_bound(primes.begin(), primes.end(), value));
+    }
+    EXPECT_EQ(detail::getNextPrime(121), 127);
+    EXPECT_FALSE(detail::getNextPrime(std::numeric_limits<size_t>::max()));
+}
+
+TEST(ShapeVisitationCpp, RangeAndSetCoordinatesAndBounds) {
+    const Shape shape{2, 4};
+    const Permutation order{0, 1};
+    const IndexRange range{1, 7, 2};
+    const std::set<size_t> indices{5, 1, 3, 5};
+    std::vector<std::vector<size_t>> ranged, explicitCoordinates;
+    shape.forEachCoordinate(range, order, [&](size_t, std::span<const size_t> coordinates) {
+        ranged.emplace_back(coordinates.begin(), coordinates.end());
+    });
+    shape.forEachCoordinate(indices, order, [&](size_t, std::span<const size_t> coordinates) {
+        explicitCoordinates.emplace_back(coordinates.begin(), coordinates.end());
+    });
+    EXPECT_EQ(ranged, (std::vector<std::vector<size_t>>{{0, 1}, {0, 3}, {1, 1}}));
+    EXPECT_EQ(explicitCoordinates, ranged);
+    const std::vector<size_t> repeated{5, 1, 5};
+    std::vector<size_t> visited;
+    shape.forEachCoordinate(
+        repeated, order, [&](size_t index, std::span<const size_t>) { visited.push_back(index); });
+    EXPECT_EQ(visited, repeated);
+    size_t calls = 0;
+    const std::array<size_t, 3> invalid{0, 1, 8};
+    EXPECT_THROW(
+        shape.forEachCoordinate(invalid, order, [&](size_t, std::span<const size_t>) { ++calls; }),
+        std::runtime_error);
+    EXPECT_EQ(calls, 0);
+    for (const IndexRange beyond : {IndexRange{6, 9, 2}, IndexRange{9, 9, 1}})
+        EXPECT_THROW(shape.forEachCoordinate(beyond, order,
+                                             [&](size_t, std::span<const size_t>) { ++calls; }),
+                     std::runtime_error);
+    EXPECT_EQ(calls, 0);
+    shape.forEachCoordinate(
+        IndexRange{6, 8, 2}, order, [&](size_t index, std::span<const size_t> coordinates) {
+            EXPECT_EQ(index, 6);
+            EXPECT_EQ(std::vector<size_t>(coordinates.begin(), coordinates.end()),
+                      (std::vector<size_t>{1, 2}));
+            ++calls;
+        });
+    EXPECT_EQ(calls, 1);
+    EXPECT_THROW(IndexRange(0, 3, 0), std::runtime_error);
+}
+
+TEST(ShapeVisitationCpp, ContiguousRangeCrossesAxis) {
+    const Shape shape{2, 3};
+    const Permutation order{0, 1};
+    std::vector<size_t> indices;
+    std::vector<std::vector<size_t>> points;
+    shape.forEachCoordinate(IndexRange(2, 5, 1), order,
+                            [&](size_t index, std::span<const size_t> coordinates) {
+                                indices.push_back(index);
+                                points.emplace_back(coordinates.begin(), coordinates.end());
+                            });
+    EXPECT_EQ(indices, (std::vector<size_t>{2, 3, 4}));
+    EXPECT_EQ(points, (std::vector<std::vector<size_t>>{{0, 2}, {1, 0}, {1, 1}}));
+}
+
+TEST(ShapeVisitationCpp, ChecksCompleteOrdersForEmptyWork) {
+    const Shape shape{2, 0};
+    const Permutation wrongRank{0};
+    size_t calls = 0;
+    const auto visit = [&](size_t, std::span<const size_t>) { ++calls; };
+    EXPECT_THROW(shape.forEachCoordinate(IndexRange::all(shape.elementCount()), wrongRank, visit),
+                 std::runtime_error);
+    EXPECT_THROW(shape.forEachCoordinate(std::set<size_t>{}, wrongRank, visit), std::runtime_error);
+    EXPECT_EQ(calls, 0);
+    const Shape scalar{};
+    scalar.forEachCoordinateLastDimensionFastest(
+        IndexRange::all(scalar.elementCount()),
+        [&](size_t index, std::span<const size_t> coordinates) {
+            EXPECT_EQ(index, 0);
+            EXPECT_TRUE(coordinates.empty());
+            ++calls;
+        });
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(IndexRangeCpp, SizeBoundaries) {
+    static_assert(!std::is_default_constructible_v<IndexRange>);
+    const size_t maximum = std::numeric_limits<size_t>::max();
+    EXPECT_EQ(IndexRange::all(maximum).count(), maximum);
+    EXPECT_EQ(IndexRange(maximum - 2, maximum, 3).indices(), (std::vector<size_t>{maximum - 2}));
+    EXPECT_EQ(IndexRange(1, maximum, maximum - 2).indices(), (std::vector<size_t>{1, maximum - 1}));
+    EXPECT_EQ(IndexRange(2, 3, 3).indices(), (std::vector<size_t>{2}));
+    EXPECT_EQ(IndexRange(10, 10, 1).count(), 0);
+    EXPECT_EQ(IndexRange(10, 9, 1).count(), 0);
+    EXPECT_EQ(IndexRange::all(0).count(), 0);
+    const IndexRange range(1, 7, 2);
+    EXPECT_EQ(range.start(), 1);
+    EXPECT_EQ(range.stop(), 7);
+    EXPECT_EQ(range.stride(), 2);
+}
+
+TEST(SamplingCpp, PrimeIndexRangeBoundaries) {
+    const size_t maximum = std::numeric_limits<size_t>::max();
+    EXPECT_THROW(primeIndexRange({.logicalElements = maximum, .requestedElements = 1}),
+                 std::runtime_error);
+    // Zero requested elements selects none; a request covering every element selects all.
+    EXPECT_EQ(primeIndexRange({.logicalElements = 10, .requestedElements = 0}).count(), 0);
+    EXPECT_EQ(primeIndexRange({.logicalElements = 10, .requestedElements = 10}).count(), 10);
+    EXPECT_EQ(primeIndexRange({.logicalElements = 10, .requestedElements = 3}),
+              IndexRange(0, 10, 3));
+}
+
+template <typename T>
+constexpr bool acceptsBracedTriple = requires(void (*sink)(T)) { sink({1, 2, 3}); };
+
+TEST(IndexRangeCpp, IteratesAndComparesByValue) {
+    static_assert(std::ranges::forward_range<IndexRange>);
+    static_assert(acceptsBracedTriple<std::vector<size_t>>);
+    static_assert(!acceptsBracedTriple<IndexRange>);
+    std::vector<size_t> iterated;
+    for (size_t index : IndexRange(1, 8, 3)) iterated.push_back(index);
+    EXPECT_EQ(iterated, (std::vector<size_t>{1, 4, 7}));
+    const size_t maximum = std::numeric_limits<size_t>::max();
+    const IndexRange nearLimit(maximum - 2, maximum, 2);
+    EXPECT_EQ(std::vector<size_t>(nearLimit.begin(), nearLimit.end()),
+              (std::vector<size_t>{maximum - 2}));
+    EXPECT_EQ(IndexRange(1, 7, 2), IndexRange(1, 7, 2));
+    EXPECT_NE(IndexRange(1, 7, 2), IndexRange(1, 8, 2));
+}
+
+TEST(ShapeVisitationCpp, WholeShapesExplicitOrdersAndCoordinateOnlyCallbacks) {
+    const Shape shape{2, 3};
+    std::vector<std::vector<size_t>> lastFastest, firstFastest, explicitOrder;
+    shape.forEachCoordinateLastDimensionFastest([&](std::span<const size_t> coordinates) {
+        lastFastest.emplace_back(coordinates.begin(), coordinates.end());
+    });
+    shape.forEachCoordinate(Permutation{1, 0}, [&](std::span<const size_t> coordinates) {
+        firstFastest.emplace_back(coordinates.begin(), coordinates.end());
+    });
+    EXPECT_EQ(lastFastest,
+              (std::vector<std::vector<size_t>>{{0, 0}, {0, 1}, {0, 2}, {1, 0}, {1, 1}, {1, 2}}));
+    EXPECT_EQ(firstFastest,
+              (std::vector<std::vector<size_t>>{{0, 0}, {1, 0}, {0, 1}, {1, 1}, {0, 2}, {1, 2}}));
+    std::vector<size_t> indices;
+    shape.forEachCoordinate(IndexRange(1, 6, 2), Permutation{1, 0},
+                            [&](size_t index, std::span<const size_t> coordinates) {
+                                indices.push_back(index);
+                                explicitOrder.emplace_back(coordinates.begin(), coordinates.end());
+                            });
+    shape.forEachCoordinate(
+        std::vector<size_t>{4}, Permutation{1, 0},
+        [&](size_t index, std::span<const size_t>) { indices.push_back(index); });
+    EXPECT_EQ(indices, (std::vector<size_t>{1, 3, 5, 4}));
+    EXPECT_EQ(explicitOrder, (std::vector<std::vector<size_t>>{{1, 0}, {1, 1}, {1, 2}}));
+    EXPECT_EQ(shape.linearIndex(std::array<size_t, 2>{1, 2}, Permutation{1, 0}), 5);
+    EXPECT_EQ(shape.coordinates(5, Permutation{1, 0}), (std::vector<size_t>{1, 2}));
+    size_t calls = 0;
+    EXPECT_THROW(shape.forEachCoordinate(Permutation{0}, [&](std::span<const size_t>) { ++calls; }),
+                 std::runtime_error);
+    EXPECT_EQ(calls, 0);
 }
 
 TEST(LayoutCpp, OwnedStridesAndArrayCoordinates) {
@@ -447,20 +780,19 @@ TEST(LayoutCpp, OwnedStridesAndArrayCoordinates) {
 TEST(LayoutCpp, FactoriesAndExplicitOrders) {
     const Shape shape{2, 3, 5};
     const Layout rowMajor(shape, {15, 5, 1}, 0);
-    EXPECT_EQ(Layout::contiguous(shape), rowMajor);
     EXPECT_EQ(Layout::contiguousLastDimensionFastest(shape), rowMajor);
+    EXPECT_EQ(Layout::contiguous(shape, Permutation{0, 1, 2}), rowMajor);
     EXPECT_EQ(Layout::contiguousFirstDimensionFastest(shape), (Layout(shape, {1, 2, 6}, 0)));
-    const std::array<size_t, 3> order{1, 2, 0};
+    const Permutation order{1, 2, 0};
     const auto checked = Layout::getContiguousLayout(shape, order);
     ASSERT_TRUE(checked);
     EXPECT_EQ(*checked, (Layout(shape, {1, 10, 2}, 0)));
     EXPECT_EQ(Layout::contiguous(shape, order), *checked);
-    EXPECT_EQ(Layout::contiguous(shape, {1, 2, 0}), *checked);
     const std::array<size_t, 3> coordinates{1, 2, 3};
     const auto offset = checked->elementOffset(coordinates);
     ASSERT_TRUE(offset);
     EXPECT_EQ(*offset, static_cast<ptrdiff_t>(shape.linearIndex(coordinates, order)));
-    EXPECT_EQ(Layout::contiguous(Shape{}, {}), Layout{});
+    EXPECT_EQ(Layout::contiguous(Shape{}, Permutation::identity(0)), Layout{});
     EXPECT_EQ(Layout::contiguousLastDimensionFastest(Shape{2, 0, 3}),
               (Layout(Shape{2, 0, 3}, {0, 3, 1}, 0)));
     EXPECT_EQ(Layout::contiguousFirstDimensionFastest(Shape{2, 0, 3}),
@@ -471,8 +803,9 @@ TEST(LayoutCpp, InvalidStrideRanksAndDimensionsThrow) {
     const Shape shape{2, 3};
     EXPECT_THROW((Layout(shape, std::vector<ptrdiff_t>{1}, 0)), std::runtime_error);
     EXPECT_THROW(Layout(shape, {3, 1}, 0).stride(shape.rank()), std::runtime_error);
-    EXPECT_THROW(Layout::contiguous(shape, {0}), std::runtime_error);
-    EXPECT_THROW(Layout::contiguous(Shape{std::numeric_limits<size_t>::max()}), std::runtime_error);
+    EXPECT_THROW(Layout::contiguous(shape, Permutation{0}), std::runtime_error);
+    EXPECT_THROW(Layout::contiguousLastDimensionFastest(Shape{std::numeric_limits<size_t>::max()}),
+                 std::runtime_error);
 }
 
 TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
@@ -515,33 +848,24 @@ TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
 
 TEST(LayoutCpp, ContiguousFailureIsReturnedBeforeBoundaryReporting) {
     using namespace roc::hostnumerics::detail;
-    const auto result = Layout::getContiguousLayout(Shape{std::numeric_limits<size_t>::max()});
+    const auto result =
+        Layout::getContiguousLayoutLastDimensionFastest(Shape{std::numeric_limits<size_t>::max()});
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().error, LayoutError::ExtentOutOfRange);
     EXPECT_EQ(result.error().dimension, 0);
     EXPECT_EQ(result.error().value, std::numeric_limits<size_t>::max());
     EXPECT_EQ(result.error().limit, static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()));
-    const auto valid = Layout::getContiguousLayout(Shape{2, 3});
+    const auto valid = Layout::getContiguousLayoutLastDimensionFastest(Shape{2, 3});
     ASSERT_TRUE(valid);
     EXPECT_EQ(valid->stride(0), 3);
     EXPECT_EQ(valid->stride(1), 1);
-    const auto invalidOrder = Layout::getContiguousLayout(Shape{2, 3}, std::array<size_t, 2>{1, 1});
-    ASSERT_FALSE(invalidOrder);
-    EXPECT_EQ(invalidOrder.error().error, LayoutError::InvalidOrder);
-    EXPECT_EQ(invalidOrder.error().dimension, 1);
-    EXPECT_EQ(invalidOrder.error().value, 1);
-    EXPECT_EQ(invalidOrder.error().limit, 2);
-    const auto outside = Layout::getContiguousLayout(Shape{2, 3}, {0, 2});
-    ASSERT_FALSE(outside);
-    EXPECT_EQ(outside.error().error, LayoutError::InvalidOrder);
-    EXPECT_EQ(outside.error().value, 2);
-    const auto rank = Layout::getContiguousLayout(Shape{2, 3}, {0});
+    const auto rank = Layout::getContiguousLayout(Shape{2, 3}, Permutation{0});
     ASSERT_FALSE(rank);
     EXPECT_EQ(rank.error().error, LayoutError::OrderRankMismatch);
     EXPECT_EQ(rank.error().value, 1);
     EXPECT_EQ(rank.error().limit, 2);
     const size_t halfRange = (static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()) + 1) / 2;
-    const auto overflow = Layout::getContiguousLayout(Shape{2, halfRange});
+    const auto overflow = Layout::getContiguousLayoutLastDimensionFastest(Shape{2, halfRange});
     ASSERT_FALSE(overflow);
     EXPECT_EQ(overflow.error().error, LayoutError::ContiguousStrideOverflow);
     EXPECT_EQ(overflow.error().dimension, 0);

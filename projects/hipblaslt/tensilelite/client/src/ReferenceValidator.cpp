@@ -25,18 +25,22 @@
  *******************************************************************************/
 
 #include "ReferenceValidator.hpp"
-#include "ResultComparison.hpp"
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
+#include <TensileLite/Client/hostnumerics/GemmInvocationAdapter.hpp>
+#include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
+#include <hipblaslt/client/FreivaldsCheck.hpp>
+#include <hipblaslt/client/FreivaldsDevice.hpp>
 
-#include "Reference.hpp"
+#include <TensileLite/Client/hostnumerics/Reference.hpp>
 
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <array>
 #include <cstddef>
-#include <iostream>
+#include <limits>
 #include <sstream>
 
 namespace TensileLite
@@ -63,9 +67,13 @@ namespace TensileLite
 
             m_printAny = m_printTensorA || m_printTensorB || m_printTensorC || m_printTensorD
                          || m_printTensorRef || m_printTensorBias || m_printTensorGate
-                         || m_printTensorAmaxD;
+                         || m_printTensorAmaxD || m_printTensorScaleAlphaVec;
 
-            m_enabled = m_elementsToValidate != 0 || m_printAny;
+            m_freivalds = args.count("freivalds") && args["freivalds"].as<bool>();
+            if(m_freivalds && m_printTensorRef)
+                throw std::invalid_argument(
+                    "Freivalds does not compute a reference tensor to print.");
+            m_enabled = m_freivalds || m_elementsToValidate != 0 || m_printAny;
         }
 
         bool ReferenceValidator::needMoreBenchmarkRuns() const
@@ -85,6 +93,9 @@ namespace TensileLite
 
         void ReferenceValidator::preProblem(ContractionProblem* const problem)
         {
+            m_outputSelections.clear();
+            m_freivaldsPlans.clear();
+            m_freivaldsPlans.resize(m_devices.size());
             if(m_enabled)
             {
                 m_problem = problem;
@@ -92,25 +103,43 @@ namespace TensileLite
                 // Report problem context for timing correlation
                 if(auto gemm = dynamic_cast<ContractionProblemGemm*>(problem))
                 {
+                    if(m_freivalds && gemm->fusedGemmA2A())
+                        throw std::runtime_error(
+                            "Freivalds does not support fused GEMM all-to-all validation.");
+                    if(!m_freivalds)
+                        m_outputSelections.push_back(referenceIndexRange(
+                            gemm->d(), static_cast<size_t>(m_elementsToValidate)));
                     size_t M          = gemm->freeSizeA(0);
                     size_t N          = gemm->freeSizeB(0);
                     size_t K          = gemm->boundSize(0);
                     size_t batchCount = gemm->batchSize(0);
-                    reportProblemContext(M, N, K, batchCount,
+                    reportProblemContext(M,
+                                         N,
+                                         K,
+                                         batchCount,
                                          TensileLite::ToString(gemm->a().dataType()),
                                          TensileLite::ToString(gemm->d().dataType()));
                 }
                 else if(auto grouped = dynamic_cast<ContractionProblemGroupedGemm*>(problem))
                 {
                     size_t totalGemms = grouped->gemms.size();
+                    m_outputSelections.reserve(totalGemms);
                     for(size_t i = 0; i < totalGemms; i++)
                     {
-                        auto&  g          = grouped->gemms[i];
+                        auto& g = grouped->gemms[i];
+                        if(!m_freivalds)
+                            m_outputSelections.push_back(referenceIndexRange(
+                                g.d(), static_cast<size_t>(m_elementsToValidate)));
                         size_t M          = g.freeSizeA(0);
                         size_t N          = g.freeSizeB(0);
                         size_t K          = g.boundSize(0);
                         size_t batchCount = g.batchSize(0);
-                        reportGroupedProblemContext(i, totalGemms, M, N, K, batchCount,
+                        reportGroupedProblemContext(i,
+                                                    totalGemms,
+                                                    M,
+                                                    N,
+                                                    K,
+                                                    batchCount,
                                                     TensileLite::ToString(g.a().dataType()),
                                                     TensileLite::ToString(g.d().dataType()));
                     }
@@ -119,15 +148,28 @@ namespace TensileLite
                 {
                     ScopedTimer timer("cpu_data_init");
                     m_referenceInputs.clear();
-                    forEachDevice(m_devices, [&](DeviceContext& ctx) {
-                        m_referenceInputs.push_back(ctx.dataInit->prepareCPUInputs(problem));
+                    forEachDevice(m_devices, [&](DeviceContext& device) {
+                        m_referenceInputs.push_back(device.dataInit->prepareCPUInputs(problem));
                     });
                 }
 
                 {
-                    ScopedTimer timer("cpu_reference_gemm");
-                    for(auto const& reference : m_referenceInputs)
-                        SolveCPU(problem, reference.get(), m_elementsToValidate);
+                    ScopedTimer timer(m_freivalds ? "freivalds_prepare" : "cpu_reference_gemm");
+                    auto        referenceSelections = m_outputSelections;
+                    if(auto gemm = dynamic_cast<ContractionProblemGemm*>(problem);
+                       gemm && gemm->fusedGemmA2A() && m_elementsToValidate != 0)
+                    {
+                        // Receive checks need full source goldens even when D validation is sampled.
+                        referenceSelections.front()
+                            = roc::hostnumerics::IndexRange::all(gemm->d().totalLogicalElements());
+                    }
+                    for(size_t card = 0; card < m_devices.size(); ++card)
+                    {
+                        if(m_freivalds)
+                            prepareFreivalds(card);
+                        else
+                            SolveCPU(problem, m_referenceInputs[card].get(), referenceSelections);
+                    }
                 }
             }
         }
@@ -153,12 +195,17 @@ namespace TensileLite
                 // inputs for this solution (solution-dependent HostPreSwizzle).
                 // Otherwise the preProblem reference is unchanged, so reuse it
                 // instead of paying a full dense reference GEMM per solution.
-                for(size_t d = 0; d < m_devices.size(); d++)
+                for(size_t card = 0; card < m_devices.size(); ++card)
                 {
-                    if(!m_devices[d]->dataInit->referenceNeedsPerSolutionRecompute(*gemm, solution))
+                    if(!m_devices[card]->dataInit->referenceNeedsPerSolutionRecompute(*gemm,
+                                                                                      solution))
                         continue;
-                    ScopedTimer timer("cpu_reference_gemm_per_solution");
-                    SolveCPU(m_problem, m_referenceInputs[d].get(), m_elementsToValidate);
+                    ScopedTimer timer(m_freivalds ? "freivalds_prepare_per_solution"
+                                                  : "cpu_reference_gemm_per_solution");
+                    if(m_freivalds)
+                        prepareFreivalds(card);
+                    else
+                        SolveCPU(m_problem, m_referenceInputs[card].get(), m_outputSelections);
                 }
             }
         }
@@ -189,33 +236,170 @@ namespace TensileLite
             m_executedSolution = true;
         }
 
+        void ReferenceValidator::prepareFreivalds(size_t card)
+        {
+            using namespace roc::hostnumerics;
+            auto& plans = m_freivaldsPlans.at(card);
+            plans.clear();
+            auto prepare = [&](const ContractionProblemGemm& problem,
+                               const ContractionInputs&      inputs) {
+                if(!problem.stridedBatched())
+                    throw std::invalid_argument("TensileLite Freivalds requires strided batches.");
+                auto translated = hostnumerics::translateGemmInvocation(
+                    problem,
+                    inputs,
+                    roc::hostnumerics::IndexRange::all(problem.d().totalLogicalElements()),
+                    referenceIndexOrder(problem.d()));
+                if(const auto* failure = std::get_if<hostnumerics::TranslationFailure>(&translated))
+                    throw std::invalid_argument("Freivalds: " + failure->reason);
+                const auto& adapter = std::get<hostnumerics::GemmInvocationAdapter>(translated);
+                std::vector<FreivaldsBatch> batches;
+                for(size_t batch = 0; batch < adapter.batchCount(); ++batch)
+                {
+                    auto prepared = adapter.prepareFreivalds(batch, {}, {});
+                    if(const auto* failure = std::get_if<FreivaldsPreparationFailure>(&prepared))
+                        throw std::invalid_argument("Freivalds: " + failure->reason);
+                    batches.emplace_back(std::get<FreivaldsPlan>(std::move(prepared)),
+                                         adapter.outputLayout(batch));
+                }
+                plans.push_back(std::move(batches));
+            };
+            if(const auto* grouped = dynamic_cast<const ContractionProblemGroupedGemm*>(m_problem))
+            {
+                const auto& inputs
+                    = dynamic_cast<const ContractionGroupedInputs&>(*m_referenceInputs.at(card));
+                for(size_t i = 0; i < grouped->gemms.size(); ++i)
+                    prepare(grouped->gemms[i], inputs.grouped.at(i));
+            }
+            else
+                prepare(dynamic_cast<const ContractionProblemGemm&>(*m_problem),
+                        dynamic_cast<const ContractionInputs&>(*m_referenceInputs.at(card)));
+        }
+
+        bool ReferenceValidator::validateFreivalds(size_t card, const ProblemInputs& inputs)
+        {
+            using namespace roc::hostnumerics;
+            const auto&     plans       = m_freivaldsPlans.at(card);
+            const auto      boundsCheck = m_devices.at(card)->dataInit->getCurBoundsCheck();
+            int             device      = 0;
+            hipDeviceProp_t properties{};
+            HIP_CHECK_EXC(hipGetDevice(&device));
+            HIP_CHECK_EXC(hipGetDeviceProperties(&properties, device));
+            bool   passed          = true;
+            size_t checkedElements = 0, readbackBytes = 0;
+            bool   fallback = false;
+            auto   check    = [&](size_t                        gemm,
+                             const ContractionProblemGemm& problem,
+                             const ContractionInputs&      reference,
+                             const ContractionInputs&      output) {
+                const auto* data = static_cast<const std::byte*>(output.d) + output.batchOffsetD;
+                for(size_t batch = 0; batch < plans.at(gemm).size(); ++batch)
+                {
+                    const auto& [plan, layout] = plans[gemm][batch];
+                    auto observation           = hipblaslt::client::observeFreivalds(
+                        plan.copyRequest(), data, layout, m_devices.at(card)->stream);
+                    const auto options = hipblaslt::client::freivaldsCheckOptions(
+                        properties.major,
+                        plan,
+                        problem.boundSize(0),
+                        toHostNumericsScalarType(problem.a().dataType()),
+                        toHostNumericsScalarType(problem.b().dataType()),
+                        toHostNumericsScalarType(problem.computeType()));
+                    const auto result = std::visit(
+                        [&](const auto& value) {
+                            return plan.check(value, std::numeric_limits<size_t>::max(), options);
+                        },
+                        observation.output);
+                    checkedElements += result.checkedElements;
+                    readbackBytes += observation.readbackBytes;
+                    fallback |= std::holds_alternative<Tensor>(observation.output);
+                    if(result.status != VerificationStatus::Passed)
+                    {
+                        passed = false;
+                        std::cerr << "Freivalds failed for GEMM " << gemm << ", batch " << batch
+                                  << ": " << result.reason << " (" << result.badRowCount
+                                  << " rows, " << result.badColumnCount << " columns, "
+                                  << result.badElementCount << " exceptional elements)\n";
+                    }
+                }
+                if(m_printAny)
+                    printTensors(problem, reference, output);
+                if(boundsCheck == BoundsCheckMode::NaN && problem.d().totalLogicalElements() != 0)
+                {
+                    // Preserve the requested guard check without a numerical reference.
+                    // Its existing readback includes D; account for this explicit cost.
+                    const size_t index = static_cast<size_t>(ContractionProblemGemm::TENSOR::D);
+                    passed &= !checkResults(problem.d(),
+                                            reference.d,
+                                            output.d,
+                                            output.maxElements.at(index),
+                                            output.gpu,
+                                            roc::hostnumerics::IndexRange(0, 0, 1),
+                                            -1,
+                                            boundsCheck);
+                    readbackBytes
+                        += output.maxElements.at(index) * size_t(problem.d().elementBytes());
+                    fallback = true;
+                }
+            };
+            if(const auto* grouped = dynamic_cast<const ContractionGroupedInputs*>(&inputs))
+            {
+                const auto& problems
+                    = dynamic_cast<const ContractionProblemGroupedGemm&>(*m_problem);
+                const auto& references
+                    = dynamic_cast<const ContractionGroupedInputs&>(*m_referenceInputs.at(card));
+                for(size_t i = 0; i < grouped->grouped.size(); ++i)
+                    check(i, problems.gemms.at(i), references.grouped.at(i), grouped->grouped[i]);
+            }
+            else
+                check(0,
+                      dynamic_cast<const ContractionProblemGemm&>(*m_problem),
+                      dynamic_cast<const ContractionInputs&>(*m_referenceInputs.at(card)),
+                      dynamic_cast<const ContractionInputs&>(inputs));
+            std::cout << "Freivalds: checked_elements=" << checkedElements
+                      << ", readback_bytes=" << readbackBytes
+                      << ", full_output_fallback=" << fallback << std::endl;
+            m_errorInSolution |= !passed;
+            return passed;
+        }
+
         bool ReferenceValidator::validateSolution(size_t                         card,
                                                   std::shared_ptr<ProblemInputs> inputs)
         {
             if(!m_enabled)
                 return false;
 
+            if(m_freivalds)
+                return validateFreivalds(card, *inputs);
             bool rv = false;
 
             if(m_elementsToValidate != 0)
             {
                 if(auto problems = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
                 {
-                    auto reference
-                        = dynamic_cast<ContractionGroupedInputs const&>(*m_referenceInputs[card]);
+                    auto reference = dynamic_cast<ContractionGroupedInputs const&>(
+                        *m_referenceInputs.at(card));
                     auto result = dynamic_cast<ContractionGroupedInputs const&>(*inputs);
                     rv          = true;
                     for(size_t j = 0; j < problems->gemms.size(); j++)
                     {
-                        rv &= validate(problems->gemms[j], reference.grouped[j], result.grouped[j]);
+                        rv &= validate(problems->gemms[j],
+                                       reference.grouped[j],
+                                       result.grouped[j],
+                                       m_outputSelections.at(j),
+                                       m_devices.at(card)->dataInit->getCurBoundsCheck());
                     }
                 }
                 else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
                 {
                     auto reference
-                        = dynamic_cast<ContractionInputs const&>(*m_referenceInputs[card]);
-                    auto result    = dynamic_cast<ContractionInputs const&>(*inputs);
-                    rv             = validate(*problem, reference, result);
+                        = dynamic_cast<ContractionInputs const&>(*m_referenceInputs.at(card));
+                    auto result = dynamic_cast<ContractionInputs const&>(*inputs);
+                    rv          = validate(*problem,
+                                  reference,
+                                  result,
+                                  m_outputSelections.front(),
+                                  m_devices.at(card)->dataInit->getCurBoundsCheck());
                 }
                 else
                 {
@@ -270,42 +454,55 @@ namespace TensileLite
 
         bool ReferenceValidator::recvMatches(size_t dst, ContractionInputs const& inputs)
         {
-            auto const&  problem  = dynamic_cast<ContractionProblemGemm const&>(*m_problem);
-            const size_t W        = m_devices.size();
-            const size_t N        = problem.freeSizeB(0);
-            const size_t nShard   = (size_t)problem.fusedA2AExtent() / W;
-            auto const&  dDesc    = problem.d();
-            const size_t dMStride = dDesc.strides()[problem.freeIndices()[0].d];
-            const size_t dNStride = dDesc.strides()[problem.freeIndices()[1].d];
+            using namespace roc::hostnumerics;
+            auto const&  problem      = dynamic_cast<ContractionProblemGemm const&>(*m_problem);
+            const size_t world        = m_devices.size();
+            const size_t columns      = problem.freeSizeB(0);
+            const size_t shard        = static_cast<size_t>(problem.fusedA2AExtent()) / world;
+            const auto&  descriptor   = problem.d();
+            const auto   rowStride    = descriptor.strides()[problem.freeIndices()[0].d];
+            const auto   columnStride = descriptor.strides()[problem.freeIndices()[1].d];
 
-            // Slot src on card dst holds features [dst*nShard, (dst+1)*nShard) of
-            // card src's golden, for every token.
-            std::vector<BFloat16> host(W * N * nShard);
-            HIP_CHECK_EXC(hipMemcpy(host.data(),
+            auto host = std::make_shared<std::vector<BFloat16>>(world * columns * shard);
+            HIP_CHECK_EXC(hipMemcpy(host->data(),
                                     inputs.fusedA2APeers[dst][FUSED_A2A_SLOT_RECV_PTR],
-                                    host.size() * sizeof(BFloat16),
+                                    host->size() * sizeof(BFloat16),
                                     hipMemcpyDeviceToHost));
-            size_t mismatches = 0;
-            for(size_t src = 0; src < W; src++)
+            auto options = validationComparisonOptions(rocisa::DataType::BFloat16, -1);
+            options.computeElementwiseStatistics = false;
+            options.computeFrobenius             = false;
+            size_t mismatches                    = 0;
+            for(size_t src = 0; src < world; ++src)
             {
+                // Each source sends this destination's feature shard for every token.
                 auto const& golden
                     = dynamic_cast<ContractionInputs const&>(*m_referenceInputs[src]);
-                auto const* goldenD = static_cast<BFloat16 const*>(golden.d);
-                for(size_t t = 0; t < N; t++)
-                {
-                    for(size_t f = 0; f < nShard; f++)
-                    {
-                        BFloat16 got  = host[(src * N + t) * nShard + f];
-                        BFloat16 want = goldenD[(dst * nShard + f) * dMStride + t * dNStride];
-                        if(AlmostEqual(want, got))
-                            continue;
-                        if(mismatches < 5)
-                            std::cerr << "[fused-a2a] RECV MISMATCH card=" << dst << " src=" << src
-                                      << " t=" << t << " f=" << f << " got=" << (float)got
-                                      << " want=" << (float)want << "\n";
-                        mismatches++;
-                    }
-                }
+                const auto expected = Tensor::shareExternalMutableBackingStorage(
+                    ScalarType::BFloat16,
+                    Layout(
+                        Shape{shard, columns},
+                        {static_cast<ptrdiff_t>(rowStride), static_cast<ptrdiff_t>(columnStride)},
+                        static_cast<ptrdiff_t>(dst * shard * rowStride)),
+                    m_referenceInputs[src],
+                    std::span(static_cast<std::byte*>(golden.d), descriptor.totalAllocatedBytes()));
+                const auto observed = Tensor::shareExternalMutableBackingStorage(
+                    ScalarType::BFloat16,
+                    Layout(Shape{shard, columns},
+                           {1, static_cast<ptrdiff_t>(shard)},
+                           static_cast<ptrdiff_t>(src * columns * shard)),
+                    host,
+                    std::as_writable_bytes(std::span(*host)));
+                options.maxReportedMismatches = mismatches < 5 ? 5 - mismatches : 0;
+                const auto report             = compare(observed,
+                                            expected,
+                                            options,
+                                            IndexRange::all(expected.elementCount()),
+                                            roc::hostnumerics::Permutation{1, 0});
+                for(const auto& sample : report.reportedMismatches)
+                    std::cerr << "[fused-a2a] RECV MISMATCH card=" << dst << " src=" << src
+                              << " t=" << sample.coordinates[1] << " f=" << sample.coordinates[0]
+                              << " got=" << sample.observed << " want=" << sample.expected << "\n";
+                mismatches += report.mismatches;
             }
             if(mismatches)
                 std::cerr << "[fused-a2a] RECV card " << dst << ": " << mismatches
@@ -313,176 +510,243 @@ namespace TensileLite
             return mismatches == 0;
         }
 
-        bool ReferenceValidator::checkResults(TensorDescriptor const& tensor,
-                                              void const*             refPtr,
-                                              void const*             resPtr,
-                                              size_t                  maxElements,
-                                              bool                    isgpu,
-                                              size_t                  validationStride,
-                                              double                  threshold)
+        bool ReferenceValidator::checkResults(TensorDescriptor const&              tensor,
+                                              void const*                          refPtr,
+                                              void const*                          resPtr,
+                                              size_t                               maxElements,
+                                              bool                                 isgpu,
+                                              const roc::hostnumerics::IndexRange& outputSelection,
+                                              double                               threshold,
+                                              BoundsCheckMode                      boundsCheck)
         {
-            bool rv = false;
-            switch(tensor.dataType())
+            const roc::hostnumerics::ScalarType scalarType
+                = toHostNumericsScalarType(tensor.dataType());
+            const size_t storageBits = roc::hostnumerics::scalarTypeInfo(scalarType).storageBits;
+            if(storageBits % 8 != 0)
             {
-            case rocisa::DataType::Float:
-            {
-                rv = checkResultsTyped(tensor,
-                                       (float const*)refPtr,
-                                       (float const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                throw std::runtime_error(
+                    "Sub-byte output validation requires a packed readback adapter.");
             }
-            break;
-            case rocisa::DataType::Double:
+
+            const size_t elementBytes       = storageBits / 8;
+            size_t       elementsToCopy     = tensor.totalAllocatedElements();
+            size_t       elementsBeforeData = 0;
+            size_t       elementsAfterData  = 0;
+
+            if(boundsCheck == BoundsCheckMode::NaN)
+                elementsToCopy = maxElements;
+
+            const bool hasNullPointer  = resPtr == nullptr || refPtr == nullptr;
+            const bool hasZeroElements = elementsToCopy == 0 || maxElements == 0;
+            if(shouldSkipNullTensor(tensor.getName(), hasNullPointer, hasZeroElements))
+                return true;
+            if(hasNullPointer || hasZeroElements)
             {
-                rv = checkResultsTyped(tensor,
-                                       (double const*)refPtr,
-                                       (double const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                std::stringstream ss;
+                ss << "Unexpected null pointer or no data for tensor " << tensor.getName()
+                   << " (result=" << resPtr << ", reference=" << refPtr
+                   << ", elementsToCopy=" << elementsToCopy << ", maxElements=" << maxElements
+                   << ")";
+                throw std::runtime_error(ss.str());
             }
-            break;
-            case rocisa::DataType::ComplexFloat:
+
+            if(elementsToCopy > std::numeric_limits<size_t>::max() / elementBytes)
+                throw std::overflow_error("Validation readback byte count overflow.");
+            const size_t bytesToCopy = elementsToCopy * elementBytes;
+            allocateResultBuffer(bytesToCopy);
+
+            void const* copySource = resPtr;
+            if(boundsCheck == BoundsCheckMode::NaN)
             {
-                rv = checkResultsTyped(tensor,
-                                       (std::complex<float> const*)refPtr,
-                                       (std::complex<float> const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                if(maxElements < tensor.totalAllocatedElements())
+                    throw std::runtime_error(
+                        "Validation guard allocation is smaller than the tensor.");
+                const ptrdiff_t paddingElements = maxElements - tensor.totalAllocatedElements();
+                size_t paddingBytes = multiplyElementSize(paddingElements, tensor.elementBytes());
+                const size_t alignmentBytes
+                    = 2 * static_cast<size_t>(std::ceil(std::max(1.0f, tensor.elementBytes())));
+                paddingBytes                 = paddingBytes / alignmentBytes * alignmentBytes;
+                const size_t bytesBeforeData = paddingBytes / 2;
+                if(bytesBeforeData % elementBytes != 0)
+                    throw std::runtime_error("Validation guard offset is not element-aligned.");
+
+                copySource         = static_cast<uint8_t const*>(resPtr) - bytesBeforeData;
+                elementsBeforeData = bytesBeforeData / elementBytes;
             }
-            break;
-            case rocisa::DataType::ComplexDouble:
+
+            if(elementsToCopy < elementsBeforeData + tensor.totalAllocatedElements())
+                throw std::runtime_error("Validation guard allocation is smaller than the tensor.");
+            elementsAfterData
+                = elementsToCopy - elementsBeforeData - tensor.totalAllocatedElements();
+
             {
-                rv = checkResultsTyped(tensor,
-                                       (std::complex<double> const*)refPtr,
-                                       (std::complex<double> const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                ScopedTimer timer("validate_gpu_readback");
+                const auto  copyKind = isgpu ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
+                HIP_CHECK_EXC(
+                    hipMemcpy(m_cpuResultBuffer.get(), copySource, bytesToCopy, copyKind));
             }
-            break;
-            case rocisa::DataType::Half:
+
+            std::vector<size_t>    dimensions(tensor.sizes().begin(), tensor.sizes().end());
+            std::vector<ptrdiff_t> strides;
+            strides.reserve(tensor.strides().size());
+            for(const auto stride : tensor.strides())
+                strides.push_back(static_cast<ptrdiff_t>(stride));
+            const roc::hostnumerics::Layout layout(
+                roc::hostnumerics::Shape(std::move(dimensions)), std::move(strides), 0);
+
+            if(tensor.totalAllocatedElements() > std::numeric_limits<size_t>::max() / elementBytes)
+                throw std::overflow_error("Validation tensor byte count overflow.");
+            const size_t allocatedBytes = tensor.totalAllocatedElements() * elementBytes;
+            const auto   referenceStorage
+                = std::span<const std::byte>(static_cast<const std::byte*>(refPtr), allocatedBytes);
+            const auto resultStorage
+                = std::span<std::byte>(reinterpret_cast<std::byte*>(m_cpuResultBuffer.get())
+                                           + elementsBeforeData * elementBytes,
+                                       allocatedBytes);
+            const roc::hostnumerics::Tensor resultTensor
+                = roc::hostnumerics::Tensor::shareExternalMutableBackingStorage(
+                    scalarType, layout, m_cpuResultBuffer, resultStorage);
+            const roc::hostnumerics::Tensor referenceTensor
+                = roc::hostnumerics::Tensor::copyEncodedBackingStorage(
+                    scalarType, layout, referenceStorage);
+
+            roc::hostnumerics::ComparisonOptions options
+                = validationComparisonOptions(tensor.dataType(), threshold);
+            options.computeElementwiseStatistics = false;
+            options.computeFrobenius             = false;
+            options.reportMatchingElements       = m_printValids;
+            options.maxReportedMismatches = m_printMax > 0 ? static_cast<size_t>(m_printMax) : 0;
+
+            roc::hostnumerics::ComparisonReport comparison;
             {
-                rv = checkResultsTyped(tensor,
-                                       (Half const*)refPtr,
-                                       (Half const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                ScopedTimer timer("validate_element_comparison");
+                comparison = roc::hostnumerics::compare(resultTensor,
+                                                        referenceTensor,
+                                                        options,
+                                                        outputSelection,
+                                                        referenceIndexOrder(tensor));
             }
-            break;
-            case rocisa::DataType::Float8:
+
+            const bool isComplex = roc::hostnumerics::scalarTypeInfo(scalarType).category
+                                   == roc::hostnumerics::ScalarCategory::Complex;
+            const auto& samples
+                = m_printValids ? comparison.reportedComparisons : comparison.reportedMismatches;
+            if(!samples.empty() && m_printMax > 0)
             {
-                rv = checkResultsTyped(tensor,
-                                       (Float8 const*)refPtr,
-                                       (Float8 const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                ScopedTimer timer("validate_mismatch_printing");
+                std::cout << "Index:  Device | Reference" << std::endl;
+                size_t printed = 0;
+                for(const auto& sample : samples)
+                {
+                    std::cout << "[" << printed++ << "] elem=" << sample.index
+                              << " idx=" << sample.observedOffset << ": ";
+                    if(isComplex)
+                    {
+                        std::cout << "(" << sample.observed << "," << sample.observedImaginary
+                                  << ")" << (sample.matched ? "==" : "!=") << "(" << sample.expected
+                                  << "," << sample.expectedImaginary << ")";
+                    }
+                    else
+                    {
+                        std::cout << sample.observed << (sample.matched ? "==" : "!=")
+                                  << sample.expected;
+                    }
+                    std::cout << std::endl;
+                }
             }
-            break;
-            case rocisa::DataType::BFloat8:
+            if(comparison.mismatches != 0 && m_printMax > 0)
             {
-                rv = checkResultsTyped(tensor,
-                                       (BFloat8 const*)refPtr,
-                                       (BFloat8 const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                std::cout << "Found " << comparison.mismatches << " incorrect values in "
+                          << comparison.compared << " total values compared." << std::endl;
             }
-            break;
-            case rocisa::DataType::Float8_fnuz:
+
+            roc::hostnumerics::SentinelReport sentinel;
+            const auto                        completeStorage = std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(m_cpuResultBuffer.get()), bytesToCopy);
+            if(elementsBeforeData != 0)
             {
-                rv = checkResultsTyped(tensor,
-                                       (Float8_fnuz const*)refPtr,
-                                       (Float8_fnuz const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                sentinel.append(roc::hostnumerics::checkUnwrittenSentinel(
+                                    scalarType,
+                                    completeStorage,
+                                    0,
+                                    elementsBeforeData,
+                                    roc::hostnumerics::SentinelRegion::Before,
+                                    options.maxReportedMismatches),
+                                options.maxReportedMismatches);
             }
-            break;
-            case rocisa::DataType::BFloat8_fnuz:
+            if(boundsCheck == BoundsCheckMode::NaN
+               && (outputSelection.count() == resultTensor.elementCount() || m_freivalds))
             {
-                rv = checkResultsTyped(tensor,
-                                       (BFloat8_fnuz const*)refPtr,
-                                       (BFloat8_fnuz const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                sentinel.append(roc::hostnumerics::checkUnusedTensorStorage(
+                                    resultTensor,
+                                    tensor.totalAllocatedElements(),
+                                    roc::hostnumerics::SentinelRegion::Inside,
+                                    options.maxReportedMismatches),
+                                options.maxReportedMismatches);
             }
-            break;
-            case rocisa::DataType::Int8x4:
+            if(elementsAfterData != 0)
             {
-                throw std::runtime_error("Unsupported validator data type Int8x4 for output.");
+                sentinel.append(roc::hostnumerics::checkUnwrittenSentinel(
+                                    scalarType,
+                                    completeStorage,
+                                    elementsBeforeData + tensor.totalAllocatedElements(),
+                                    elementsAfterData,
+                                    roc::hostnumerics::SentinelRegion::After,
+                                    options.maxReportedMismatches),
+                                options.maxReportedMismatches);
             }
-            break;
-            case rocisa::DataType::Int32:
+
+            if(sentinel.checked != 0 && m_printMax > 0)
             {
-                rv = checkResultsTyped(tensor,
-                                       (int32_t const*)refPtr,
-                                       (int32_t const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                std::cout << "Performed bounds check on " << sentinel.checked << " elements."
+                          << std::endl;
             }
-            break;
-            case rocisa::DataType::BFloat16:
+            for(const auto& mismatch : sentinel.reportedMismatches)
             {
-                rv = checkResultsTyped(tensor,
-                                       (BFloat16 const*)refPtr,
-                                       (BFloat16 const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
+                const char* location = "near";
+                switch(mismatch.region)
+                {
+                case roc::hostnumerics::SentinelRegion::Before:
+                    location = "before";
+                    break;
+                case roc::hostnumerics::SentinelRegion::Inside:
+                    location = "inside";
+                    break;
+                case roc::hostnumerics::SentinelRegion::After:
+                    location = "after";
+                    break;
+                case roc::hostnumerics::SentinelRegion::Unspecified:
+                    break;
+                }
+                std::cout << "Value written " << location << " output buffer at index "
+                          << mismatch.index << ": found " << mismatch.observed.real
+                          << " instead of the unwritten sentinel" << std::endl;
             }
-            break;
-            case rocisa::DataType::Int8:
+
+            const bool failed = !comparison.passed() || !sentinel.passed();
+            if(failed)
             {
-                rv = checkResultsTyped(tensor,
-                                       (int8_t const*)refPtr,
-                                       (int8_t const*)resPtr,
-                                       maxElements,
-                                       isgpu,
-                                       validationStride,
-                                       threshold);
-            }
-            break;
-            default:
-                throw std::runtime_error("Unsupported validator data type");
-            }
-            if(rv)
-            {
+                m_errorInSolution = true;
+                m_error           = true;
                 std::cout << "Check failed in output tensor: " << tensor << std::endl;
             }
-            return rv;
+            return failed;
         }
 
         bool ReferenceValidator::shouldSkipNullTensor(const std::string& tensorName,
-                                                      bool hasNullPointer,
-                                                      bool hasZeroElements) const
+                                                      bool               hasNullPointer,
+                                                      bool               hasZeroElements) const
         {
             // Only output tensors reach this function (filtered by isOutput() check)
             // Output tensors should never have null pointers or zero elements
             return false;
         }
 
-        bool ReferenceValidator::validate(ContractionProblemGemm const& problem,
-                                          ContractionInputs const&      reference,
-                                          ContractionInputs const&      result)
+        bool ReferenceValidator::validate(ContractionProblemGemm const&        problem,
+                                          ContractionInputs const&             reference,
+                                          ContractionInputs const&             result,
+                                          const roc::hostnumerics::IndexRange& outputSelection,
+                                          BoundsCheckMode                      boundsCheck)
         {
             if(problem.tensors().empty())
                 return false;
@@ -492,17 +756,20 @@ namespace TensileLite
             if(m_printAny)
                 printTensors(problem, reference, result);
 
-            auto k = problem.transA() ? problem.a().sizes().at(0) : problem.a().sizes().at(1);
-            bool isTF32 = (problem.f32XdlMathOp() == rocisa::DataType::XFloat32);
-            bool isTF32x1 = (problem.computeInputTypeA() == rocisa::DataType::BFloat16
-                && problem.computeInputTypeB() == rocisa::DataType::BFloat16
-                && problem.computeType() == rocisa::DataType::Float
-                && problem.a().dataType() == rocisa::DataType::Float
-                && problem.b().dataType() == rocisa::DataType::Float);
+            auto   k = problem.transA() ? problem.a().sizes().at(0) : problem.a().sizes().at(1);
+            bool   isTF32    = (problem.f32XdlMathOp() == rocisa::DataType::XFloat32);
+            bool   isTF32x1  = (problem.computeInputTypeA() == rocisa::DataType::BFloat16
+                             && problem.computeInputTypeB() == rocisa::DataType::BFloat16
+                             && problem.computeType() == rocisa::DataType::Float
+                             && problem.a().dataType() == rocisa::DataType::Float
+                             && problem.b().dataType() == rocisa::DataType::Float);
             double threshold = -1.0;
-            if (isTF32) {
+            if(isTF32)
+            {
                 threshold = 0.01 * sqrt(double(k));
-            } else if (isTF32x1) {
+            }
+            else if(isTF32x1)
+            {
                 threshold = 0.3 * sqrt(double(k));
             }
 
@@ -512,14 +779,16 @@ namespace TensileLite
                 if(!tensor.isOutput())
                     continue;
 
-                size_t validationStride = 1;
-                if(m_elementsToValidate > 0 && m_elementsToValidate < tensor.totalLogicalElements())
-                    validationStride
-                        = NextPrime(tensor.totalAllocatedElements() / m_elementsToValidate);
+                const auto tensorRole = static_cast<ContractionProblemGemm::TENSOR>(i);
+                const roc::hostnumerics::IndexRange comparisonSelection
+                    = tensorRole == ContractionProblemGemm::TENSOR::D
+                              || tensorRole == ContractionProblemGemm::TENSOR::E
+                          ? outputSelection
+                          : referenceIndexRange(tensor, static_cast<size_t>(m_elementsToValidate));
 
                 void const* refPtr = nullptr;
                 void const* resPtr = nullptr;
-                switch(static_cast<ContractionProblemGemm::TENSOR>(i))
+                switch(tensorRole)
                 {
                 case ContractionProblemGemm::TENSOR::A:
                 {
@@ -618,7 +887,7 @@ namespace TensileLite
                               << ", size = " << result.maxElements[i] << std::endl;
 
                 // Check if we should skip this tensor due to null pointers or zero elements
-                bool hasNullPointer = (resPtr == nullptr || refPtr == nullptr);
+                bool hasNullPointer  = (resPtr == nullptr || refPtr == nullptr);
                 bool hasZeroElements = (result.maxElements[i] == 0);
 
                 if(shouldSkipNullTensor(tensor.getName(), hasNullPointer, hasZeroElements))
@@ -637,12 +906,13 @@ namespace TensileLite
                 }
 
                 rv &= checkResults(*validationTensor,
-                    refPtr,
-                    resPtr,
-                    result.maxElements[i],
-                    result.gpu,
-                    validationStride,
-                    threshold);
+                                   refPtr,
+                                   resPtr,
+                                   result.maxElements[i],
+                                   result.gpu,
+                                   comparisonSelection,
+                                   threshold,
+                                   boundsCheck);
             }
             return rv;
         }
@@ -706,14 +976,10 @@ namespace TensileLite
             {
                 m_reporter->logTensor(
                     LogLevel::Verbose, "A", reference.a, problem.a(), reference.a);
-                if(problem.a().dataType() == rocisa::DataType::Float4
-                   && problem.mxBlockA() > 0)
+                if(problem.a().dataType() == rocisa::DataType::Float4 && problem.mxBlockA() > 0)
                 {
-                    m_reporter->logTensor(LogLevel::Verbose,
-                                          "MXSA",
-                                          reference.mxsa,
-                                          problem.mxsa(),
-                                          reference.mxsa);
+                    m_reporter->logTensor(
+                        LogLevel::Verbose, "MXSA", reference.mxsa, problem.mxsa(), reference.mxsa);
                 }
                 if(problem.sparse() && problem.sparse() != 2)
                 {
@@ -729,14 +995,10 @@ namespace TensileLite
             {
                 m_reporter->logTensor(
                     LogLevel::Verbose, "B", reference.b, problem.b(), reference.b);
-                if(problem.b().dataType() == rocisa::DataType::Float4
-                   && problem.mxBlockB() > 0)
+                if(problem.b().dataType() == rocisa::DataType::Float4 && problem.mxBlockB() > 0)
                 {
-                    m_reporter->logTensor(LogLevel::Verbose,
-                                          "MXSB",
-                                          reference.mxsb,
-                                          problem.mxsb(),
-                                          reference.mxsb);
+                    m_reporter->logTensor(
+                        LogLevel::Verbose, "MXSB", reference.mxsb, problem.mxsb(), reference.mxsb);
                 }
                 if(problem.sparse() && problem.sparse() == 2)
                 {
@@ -855,231 +1117,6 @@ namespace TensileLite
             }
         }
 
-        template <typename ValidType, typename Comparator>
-        void forEachElement(TensorDescriptor const& tensor,
-                            ValidType const*        reference,
-                            ValidType const*        resultData,
-                            size_t                  validationStride,
-                            Comparator&             compare)
-        {
-            if(validationStride == 1)
-            {
-                std::vector<size_t> coord(tensor.dimensions());
-                size_t outerCount
-                    = CoordCount(tensor.sizes().begin() + 1, tensor.sizes().end());
-
-                size_t       elemNumberBase = 0;
-                const size_t innerDimSize   = tensor.sizes()[0];
-                const size_t initialStride  = tensor.strides()[0];
-
-                for(size_t i = 0; i < outerCount; i++)
-                {
-                    CoordNumbered(i,
-                                  coord.begin() + 1,
-                                  coord.end(),
-                                  tensor.sizes().begin() + 1,
-                                  tensor.sizes().end());
-                    size_t baseElemIndex = tensor.index(coord);
-
-                    for(size_t j = 0; j < innerDimSize; j++)
-                    {
-                        size_t elemIndex  = baseElemIndex + (j * initialStride);
-                        size_t elemNumber = elemNumberBase + j;
-
-                        compare(reference[elemIndex], resultData[elemIndex],
-                                elemIndex, elemNumber);
-                    }
-                    elemNumberBase += innerDimSize;
-                }
-            }
-            else
-            {
-                std::vector<size_t> coord(tensor.dimensions());
-                for(size_t elemNumber = 0;
-                    elemNumber < tensor.totalLogicalElements();
-                    elemNumber += validationStride)
-                {
-                    CoordNumbered(elemNumber,
-                                  coord.begin(),
-                                  coord.end(),
-                                  tensor.sizes().begin(),
-                                  tensor.sizes().end());
-                    size_t elemIndex = tensor.index(coord);
-
-                    compare(reference[elemIndex], resultData[elemIndex],
-                            elemIndex, elemNumber);
-                }
-            }
-        }
-
-        template <typename ValidType>
-        bool ReferenceValidator::checkResultsTyped(TensorDescriptor const& tensor,
-                                                   ValidType const*        reference,
-                                                   ValidType const*        result,
-                                                   size_t                  maxElement,
-                                                   bool                    isgpu,
-                                                   size_t                  validationStride,
-                                                   double                  threshold)
-        {
-            size_t elementsToCopy       = tensor.totalAllocatedElements();
-            size_t elementsOffsetToCopy = 0;
-            size_t elementsBeforeData   = 0;
-            size_t elementsAfterData    = 0;
-
-            BoundsCheckMode boundsCheck = m_devices[0]->dataInit->getCurBoundsCheck();
-            // For NaN bounds checking, copy the full padded buffer from GPU for all tensors
-            if(boundsCheck == BoundsCheckMode::NaN)
-                elementsToCopy = maxElement;
-            size_t bytesToCopy = elementsToCopy * sizeof(ValidType);
-
-            // Check if we should skip this tensor due to null pointers or no data
-            bool hasNullPointer = (result == nullptr || reference == nullptr);
-            bool hasZeroElements = (bytesToCopy == 0 || maxElement == 0);
-
-            if(shouldSkipNullTensor(tensor.getName(), hasNullPointer, hasZeroElements))
-            {
-                return true;
-            }
-
-            // If we reach here with null pointers or no data, it's an error
-            if(hasNullPointer || hasZeroElements)
-            {
-                std::stringstream ss;
-                ss << "Unexpected null pointer or no data for tensor " << tensor.getName()
-                   << " (result=" << result << ", reference=" << reference
-                   << ", bytesToCopy=" << bytesToCopy << ", maxElement=" << maxElement << ")";
-                throw std::runtime_error(ss.str());
-            }
-
-            allocateResultBuffer(bytesToCopy);
-
-            auto copykind = isgpu ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
-
-            // For NaN bounds checking, the result pointer points to valid data (middle of buffer)
-            // We need to adjust it back to buffer start to copy the NaN padding
-            void const* copySource = result;
-            if(boundsCheck == BoundsCheckMode::NaN)
-            {
-                // Match the EXACT allocation logic in copyBadInputBuffers:
-                // dPadding = totalElements - totalAllocatedElements()  (in elements)
-                // dPadding = multiplyElementSize(dPadding, elementBytes())  (convert to bytes)
-                // dPadding = round to multiple of (2 * ceil(max(1, elementBytes)))  (ensure alignment)
-                // dstOffset = dst + dPadding / 2  (divide bytes by 2)
-                ptrdiff_t paddingElements = maxElement - tensor.totalAllocatedElements();
-                size_t paddingBytes = multiplyElementSize(paddingElements, tensor.elementBytes());
-
-                // Ensure paddingBytes/2 is properly aligned for the element type
-                // Match the exact rounding logic from copyBadInputBuffers
-                float elementBytes = tensor.elementBytes();
-                size_t alignmentBytes = 2 * static_cast<size_t>(std::ceil(std::max(1.0f, elementBytes)));
-                paddingBytes = (paddingBytes / alignmentBytes) * alignmentBytes;
-
-                size_t bytesBeforeData = paddingBytes / 2;
-
-                copySource = (uint8_t const*)result - bytesBeforeData;
-
-                // Calculate elementsBeforeData for bounds checking display
-                // Note: for sub-byte types this may not be exact due to rounding
-                elementsBeforeData = bytesBeforeData / std::max(static_cast<size_t>(1),
-                                                                 static_cast<size_t>(tensor.elementBytes()));
-                elementsAfterData
-                    = elementsToCopy - (tensor.totalAllocatedElements() + elementsBeforeData);
-            }
-
-            {
-                ScopedTimer timer("validate_gpu_readback");
-                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(), copySource, bytesToCopy, copykind));
-            }
-            // If there was extra data allocated before the tensor to do bounds
-            // checking, resultBuffer is the whole allocation, while resultData
-            // points directly to the result.
-            ValidType const* resultBuffer
-                = reinterpret_cast<ValidType const*>(m_cpuResultBuffer.get());
-            ValidType const* resultData      = resultBuffer + elementsBeforeData;
-            ValidType const* resultAfterData = resultData + tensor.totalAllocatedElements();
-
-            FastPointwiseComparison<ValidType> compareValid(m_printMax > 0, threshold);
-            InvalidComparison<ValidType>   compareInvalid(m_printMax, m_printMax > 0);
-
-            size_t boundsCheckElements = 0;
-
-            {
-                ScopedTimer timer("validate_element_comparison");
-
-                for(ptrdiff_t i = 0; i < elementsBeforeData; i++)
-                {
-                    boundsCheckElements++;
-                    compareInvalid.before(resultBuffer[i], i, elementsBeforeData);
-                }
-
-                forEachElement(tensor, reference, resultData, validationStride, compareValid);
-
-                if(boundsCheck == BoundsCheckMode::NaN && validationStride == 1)
-                {
-                    std::vector<size_t> coord(tensor.dimensions());
-                    size_t outerCount
-                        = CoordCount(tensor.sizes().begin() + 1, tensor.sizes().end());
-                    size_t       prevBaseIndex = 0;
-                    const size_t innerDimSize  = tensor.sizes()[0];
-
-                    for(size_t i = 0; i < outerCount; i++)
-                    {
-                        CoordNumbered(i,
-                                      coord.begin() + 1,
-                                      coord.end(),
-                                      tensor.sizes().begin() + 1,
-                                      tensor.sizes().end());
-                        size_t baseElemIndex = tensor.index(coord);
-
-                        if(baseElemIndex != 0
-                           && baseElemIndex != prevBaseIndex + innerDimSize)
-                        {
-                            for(auto innerIndex = prevBaseIndex + innerDimSize;
-                                innerIndex < baseElemIndex;
-                                innerIndex++)
-                            {
-                                compareInvalid.inside(
-                                    resultData[innerIndex], innerIndex, baseElemIndex);
-                            }
-                        }
-                        prevBaseIndex = baseElemIndex;
-                    }
-                }
-
-                for(ptrdiff_t i = 0; i < elementsAfterData; i++)
-                {
-                    compareInvalid.after(resultAfterData[i], i, elementsAfterData);
-                }
-            }
-
-            if(boundsCheckElements > 0)
-                std::cout << "Performed bounds check on " << boundsCheckElements << " elements ("
-                          << elementsBeforeData << " before data)" << std::endl;
-
-            if((compareValid.errorCount() > 0 || m_printValids) && m_printMax > 0)
-            {
-                ScopedTimer timer("validate_mismatch_printing");
-
-                PointwiseComparison<ValidType> comparePrint(
-                    m_printValids, m_printMax, false, threshold);
-
-                forEachElement(tensor, reference, resultData, validationStride, comparePrint);
-            }
-
-            compareValid.report();
-            compareInvalid.report();
-
-            if(compareValid.error() || compareInvalid.error())
-            {
-                m_errorInSolution = true;
-                m_error           = true;
-
-                return true;
-            }
-
-            return false;
-        }
-
         void ReferenceValidator::postSolution()
         {
             ScopedTimer timer("post_solution_validation");
@@ -1089,7 +1126,7 @@ namespace TensileLite
             if(m_enabled && !m_validatedSolution)
                 return;
 
-            if(m_elementsToValidate != 0)
+            if(m_freivalds || m_elementsToValidate != 0)
             {
                 if(m_errorInSolution)
                 {

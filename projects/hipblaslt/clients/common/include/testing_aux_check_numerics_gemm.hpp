@@ -37,14 +37,17 @@
 
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
+#include <roc/hostnumerics/generation.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <mutex>
+#include <span>
 #include <sstream>
 #include <streambuf>
 #include <string>
@@ -119,10 +122,28 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         hipStream_t stream = nullptr;
         CHECK_HIP_ERROR(hipStreamCreate(&stream));
 
-        std::vector<float> A_clean(M * K, 1.0f);
-        std::vector<float> B_h(K * N, 1.0f);
+        std::vector<float> A_clean(M * K);
+        std::vector<float> B_h(K * N);
+        const auto         ones = roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+            roc::hostnumerics::GenerationRecipe::constant({.value = 1.0}), 0);
+        roc::hostnumerics::Tensor cleanTensor = roc::hostnumerics::generate(
+            roc::hostnumerics::ScalarType::Float32, roc::hostnumerics::Shape{A_clean.size()}, ones);
+        std::memcpy(A_clean.data(),
+                    cleanTensor.rawEncodedBackingStorage().data(),
+                    cleanTensor.rawEncodedBackingStorage().size());
+        roc::hostnumerics::Tensor bTensor = roc::hostnumerics::generate(
+            roc::hostnumerics::ScalarType::Float32, roc::hostnumerics::Shape{B_h.size()}, ones);
+        std::memcpy(B_h.data(),
+                    bTensor.rawEncodedBackingStorage().data(),
+                    bTensor.rawEncodedBackingStorage().size());
         std::vector<float> A_dirty = A_clean;
-        A_dirty[0]                 = std::numeric_limits<float>::quiet_NaN();
+        const auto         nan = roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+            roc::hostnumerics::GenerationRecipe::typeNaN(), 0);
+        roc::hostnumerics::Tensor dirtyTensor = cleanTensor.deepCopy();
+        roc::hostnumerics::generateAt(dirtyTensor, 0, nan);
+        std::memcpy(A_dirty.data(),
+                    dirtyTensor.rawEncodedBackingStorage().data(),
+                    dirtyTensor.rawEncodedBackingStorage().size());
 
         float *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr;
         CHECK_HIP_ERROR(hipMalloc(&dA, sizeof(float) * M * K));
@@ -158,10 +179,8 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         // 1 MiB is plenty and keeps per-scenario hipMalloc cheap.
         uint64_t ws_size = 1ull * 1024ull * 1024ull;
         EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatmulPreferenceSetAttribute(pref,
-                                                  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-                                                  &ws_size,
-                                                  sizeof(ws_size)),
+            hipblasLtMatmulPreferenceSetAttribute(
+                pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &ws_size, sizeof(ws_size)),
             HIPBLAS_STATUS_SUCCESS);
 
         hipblasLtMatmulHeuristicResult_t heur[1]{};
@@ -432,8 +451,8 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     // the last batch so a scanner that only looks at batch 0 also fails.
     // 128x128x128 fp32 matches matmul_pointer_array_distinct_c_d_layout_smoke,
     // which has pointer-array solutions on every architecture that runs it.
-    constexpr int kNoNanBatch = -1;
-    auto run_pointer_array_scenario = [&](int       nan_batch,
+    constexpr int kNoNanBatch                = -1;
+    auto          run_pointer_array_scenario = [&](int       nan_batch,
                                           int64_t   d_offset,
                                           bool      prefix_nan,
                                           bool      use_cpp,
@@ -473,8 +492,7 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
             CHECK_HIP_ERROR(hipMemcpy(
                 hD[b], D_initial.data(), sizeof(float) * D_initial.size(), hipMemcpyHostToDevice));
             const float* srcA = (b == nan_batch) ? A_dirty.data() : A_clean.data();
-            CHECK_HIP_ERROR(
-                hipMemcpy(hA[b], srcA, sizeof(float) * M * K, hipMemcpyHostToDevice));
+            CHECK_HIP_ERROR(hipMemcpy(hA[b], srcA, sizeof(float) * M * K, hipMemcpyHostToDevice));
             CHECK_HIP_ERROR(
                 hipMemcpy(hB[b], B_h.data(), sizeof(float) * K * N, hipMemcpyHostToDevice));
             CHECK_HIP_ERROR(hipMemset(hC[b], 0, sizeof(float) * M * N));
@@ -532,10 +550,8 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
         uint64_t ws_size = 32ull * 1024ull * 1024ull;
         EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatmulPreferenceSetAttribute(pref,
-                                                  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-                                                  &ws_size,
-                                                  sizeof(ws_size)),
+            hipblasLtMatmulPreferenceSetAttribute(
+                pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &ws_size, sizeof(ws_size)),
             HIPBLAS_STATUS_SUCCESS);
 
         hipblasLtMatmulHeuristicResult_t heur[1]{};
@@ -644,8 +660,7 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
 
         reset_env();
         setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
-        run_pointer_array_scenario(
-            kNoNanBatch, kDOffset, /*prefix_nan=*/true, use_cpp, &reported);
+        run_pointer_array_scenario(kNoNanBatch, kDOffset, /*prefix_nan=*/true, use_cpp, &reported);
         EXPECT_EQ(reported, 0u) << "NaNs before offset pointer-array output must be ignored";
     }
 

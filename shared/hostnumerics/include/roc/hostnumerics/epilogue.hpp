@@ -1,0 +1,95 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <optional>
+#include <roc/hostnumerics/operation_types.hpp>
+#include <roc/hostnumerics/permutation.hpp>
+#include <roc/hostnumerics/tensor.hpp>
+#include <set>
+#include <vector>
+
+namespace roc::hostnumerics {
+enum class ActivationApplication {
+    Forward,   // Writes activation(value).
+    Gradient,  // Multiplies input by activation'(auxiliaryInput).
+};
+
+// Numerical policy and optional inputs for the standalone rank-two epilogue.
+struct EpilogueOptions {
+    explicit EpilogueOptions(ScalarType compute)
+        : computeType(compute),
+          outputScale(Tensor::scalar(compute, 1)),
+          auxiliaryScale(Tensor::scalar(compute, 1)) {}
+
+    ScalarType computeType;
+    // Ordered broadcast factors are combined first, then applied to the input.
+    // inputScale is an additional rank-zero factor applied afterward.
+    std::vector<Tensor> inputScaleFactors;
+    std::optional<Tensor> inputScale;
+    std::optional<Tensor> addend;       // Optional matrix added before bias and activation.
+    std::optional<Tensor> addendScale;  // Optional rank-zero factor applied to addend.
+    std::optional<Tensor> auxiliaryInput;
+    std::optional<Tensor> gateResidual;
+    std::optional<Tensor> bias;  // Any shape broadcast-compatible with input.
+    Tensor outputScale;
+    Tensor auxiliaryScale;
+    OutputConversion outputConversion = OutputConversion::Default;
+    ActivationFunction activation;
+    ActivationApplication activationApplication = ActivationApplication::Forward;
+    bool accumulateAmax = false;
+};
+
+// Scalar types to allocate for an owning epilogue call. Optional types request
+// the corresponding additional result tensor.
+struct EpilogueOutputTypes {
+    ScalarType output = ScalarType::Float32;
+    std::optional<ScalarType> rawOutput;
+    std::optional<ScalarType> auxiliaryOutput;
+    std::optional<ScalarType> amax;
+};
+
+struct EpilogueOutputs {
+    Tensor output;
+    std::optional<Tensor> rawOutput;
+    std::optional<Tensor> auxiliaryOutput;
+    std::optional<Tensor> amax;
+};
+
+EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& outputTypes,
+                                  const EpilogueOptions& options);
+
+EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& outputTypes,
+                                  const EpilogueOptions& options, const IndexRange& range,
+                                  const Permutation& order);
+EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& outputTypes,
+                                  const EpilogueOptions& options, const std::set<size_t>& indices,
+                                  const Permutation& order);
+
+// Writes selected coordinates into caller-owned destinations. The primary
+// output may exactly alias input; other overlapping input/output or
+// output/output storage is rejected.
+void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
+                           const EpilogueOptions& options);
+void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
+                           const EpilogueOptions& options, const IndexRange& range,
+                           const Permutation& order);
+void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
+                           const EpilogueOptions& options, const std::set<size_t>& indices,
+                           const Permutation& order);
+template <typename Indices>
+EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& types,
+                                  const EpilogueOptions& options, const Indices& indices,
+                                  LastDimensionFastest) {
+    return referenceEpilogue(input, types, options, indices,
+                             Permutation::identity(input.shape().rank()));
+}
+template <typename Indices>
+void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
+                           const EpilogueOptions& options, const Indices& indices,
+                           LastDimensionFastest) {
+    referenceEpilogueInto(input, std::move(outputs), options, indices,
+                          Permutation::identity(input.shape().rank()));
+}
+}  // namespace roc::hostnumerics

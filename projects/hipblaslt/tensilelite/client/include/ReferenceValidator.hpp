@@ -37,6 +37,10 @@
 #include "DataInitialization.hpp"
 
 #include <cstddef>
+#include <roc/hostnumerics/freivalds.hpp>
+#include <roc/hostnumerics/operation_types.hpp>
+#include <span>
+#include <vector>
 
 namespace TensileLite
 {
@@ -92,26 +96,20 @@ namespace TensileLite
                                           TimingEvents const&        startEvents,
                                           TimingEvents const&        stopEvents) override;
 
-            bool validate(ContractionProblemGemm const& problem,
-                          ContractionInputs const&      reference,
-                          ContractionInputs const&      result);
+            bool validate(ContractionProblemGemm const&        problem,
+                          ContractionInputs const&             reference,
+                          ContractionInputs const&             result,
+                          const roc::hostnumerics::IndexRange& outputSelection,
+                          BoundsCheckMode                      boundsCheck);
 
-            bool checkResults(TensorDescriptor const& tensor,
-                              void const*             refPtr,
-                              void const*             resPtr,
-                              size_t                  maxElements,
-                              bool                    isgpu,
-                              size_t                  validationStride,
-                              double                  threshold);
-
-            template <typename ValidType>
-            bool checkResultsTyped(TensorDescriptor const& tensor,
-                                   ValidType const*        reference,
-                                   ValidType const*        result,
-                                   size_t                  maxElement,
-                                   bool                    isgpu,
-                                   size_t                  validationStride,
-                                   double                  threshold);
+            bool checkResults(TensorDescriptor const&              tensor,
+                              void const*                          refPtr,
+                              void const*                          resPtr,
+                              size_t                               maxElements,
+                              bool                                 isgpu,
+                              const roc::hostnumerics::IndexRange& outputSelection,
+                              double                               threshold,
+                              BoundsCheckMode                      boundsCheck);
 
             void printTensors(ContractionProblemGemm const& problem,
                               ContractionInputs const&      reference,
@@ -123,18 +121,26 @@ namespace TensileLite
 
             std::shared_ptr<ProblemInputs> referenceInputs(size_t card) const
             {
-                return m_referenceInputs[card];
+                return m_referenceInputs.at(card);
             }
 
         private:
+            void prepareFreivalds(size_t card);
+            bool validateFreivalds(size_t card, const ProblemInputs& inputs);
+            using FreivaldsBatch
+                = std::pair<roc::hostnumerics::FreivaldsPlan, roc::hostnumerics::Layout>;
+            std::vector<std::vector<std::vector<FreivaldsBatch>>> m_freivaldsPlans;
+            bool                                                  m_freivalds = false;
+
             void allocateResultBuffer(size_t bytes);
 
             bool shouldSkipNullTensor(const std::string& tensorName,
-                                      bool hasNullPointer,
-                                      bool hasZeroElements) const;
+                                      bool               hasNullPointer,
+                                      bool               hasZeroElements) const;
 
             std::vector<std::shared_ptr<DeviceContext>> m_devices;
             std::vector<std::shared_ptr<ProblemInputs>> m_referenceInputs;
+            std::vector<roc::hostnumerics::IndexRange>  m_outputSelections;
 
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;

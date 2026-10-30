@@ -8,6 +8,8 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <numeric>
+#include <roc/hostnumerics/scalar_conversion_options.hpp>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -113,7 +115,7 @@ struct FloatingPointOptions {
 
 constexpr ScalarTypeInfo getFloatingPoint(std::string_view name, uint16_t bits,
                                           uint8_t exponentBits, uint8_t mantissaBits,
-                                          int16_t exponentBias, FloatingPointOptions options = {}) {
+                                          int16_t exponentBias, FloatingPointOptions options) {
     return {name,
             ScalarCategory::FloatingPoint,
             bits,
@@ -151,7 +153,7 @@ inline constexpr std::array<ScalarTypeInfo, scalarTypeCount> scalarTypeInfos{{
     detail::getFloatingPoint("f6e3m2", 6, 3, 2, 3,
                              {.supportsNaN = false, .supportsInfinity = false}),
     detail::getFloatingPoint("f8e4m3", 8, 4, 3, 7, {.supportsInfinity = false}),
-    detail::getFloatingPoint("f8e5m2", 8, 5, 2, 15),
+    detail::getFloatingPoint("f8e5m2", 8, 5, 2, 15, {}),
     detail::getFloatingPoint("f8e4m3fnuz", 8, 4, 3, 8, {.supportsInfinity = false}),
     detail::getFloatingPoint("f8e5m2fnuz", 8, 5, 2, 16, {.supportsInfinity = false}),
     detail::getFloatingPoint("e4m3", 8, 4, 3, 7, {.isSigned = false, .supportsInfinity = false}),
@@ -159,12 +161,12 @@ inline constexpr std::array<ScalarTypeInfo, scalarTypeCount> scalarTypeInfos{{
     detail::getFloatingPoint("e8m0", 8, 8, 0, 127, {.isSigned = false, .supportsInfinity = false}),
     detail::getFloatingPoint("e8m0_zero", 8, 8, 0, 127,
                              {.isSigned = false, .supportsInfinity = false}),
-    detail::getFloatingPoint("f16", 16, 5, 10, 15),
-    detail::getFloatingPoint("bf16", 16, 8, 7, 127),
-    detail::getFloatingPoint("f32", 32, 8, 23, 127),
-    detail::getFloatingPoint("f64", 64, 11, 52, 1023),
-    detail::getComplex("c64", detail::getFloatingPoint("f32", 32, 8, 23, 127)),
-    detail::getComplex("c128", detail::getFloatingPoint("f64", 64, 11, 52, 1023)),
+    detail::getFloatingPoint("f16", 16, 5, 10, 15, {}),
+    detail::getFloatingPoint("bf16", 16, 8, 7, 127, {}),
+    detail::getFloatingPoint("f32", 32, 8, 23, 127, {}),
+    detail::getFloatingPoint("f64", 64, 11, 52, 1023, {}),
+    detail::getComplex("c64", detail::getFloatingPoint("f32", 32, 8, 23, 127, {})),
+    detail::getComplex("c128", detail::getFloatingPoint("f64", 64, 11, 52, 1023, {})),
 }};
 
 // The caller must supply a concrete scalar type, including in release builds.
@@ -175,6 +177,11 @@ inline constexpr const ScalarTypeInfo& scalarTypeInfo(ScalarType type) {
 
 inline constexpr std::string_view scalarTypeName(ScalarType type) {
     return scalarTypeInfo(type).name;
+}
+
+inline constexpr size_t scalarElementGroupSize(ScalarType type) {
+    const size_t bits = scalarTypeInfo(type).storageBits;
+    return 8 / std::gcd(bits, size_t{8});
 }
 
 namespace detail {

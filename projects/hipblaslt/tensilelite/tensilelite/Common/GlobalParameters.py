@@ -177,6 +177,7 @@ globalParameters["CSVMergeSameProblemID"] = False
 # See ClientWriter.py, the DataInitName(Enum) for a list of initialization patterns
 #       - Problem-Independent: 0=0, 1=1, 2=2, 3=rand, 4=Nan, 5=Infinity, 6=BadInput(Nan), 7=BadOutput(Inf), 16=RandomNarrow,
 #                              21=RandomNegPosLimited(-128~128 or -1~1), 23~26=Ind Cos/Sin Abs or Not
+#       - MAF: 28=Maf2_0, 29=Maf2_0UnitScale, 30=Maf1_0 (floating inputs; geometry dependent)
 #       - Problem-dependent: 8=SerialID, 9=SerialDim0, 10=SerialDim1, 11=Identity, 12~15= Cos/Sin, Abs or Not
 #       For A, B, C, D: All the InitMode (0~16) can be used
 #       For Alpha/Beta: Only problem-independent init (0~7, 16, 23~26) can be used,
@@ -236,8 +237,8 @@ globalParameters["CheckSynchronizer"] = True
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
-# When this parameter is set to 0, the TensileLite client will use srand(time(NULL)).
-# If not 0 the TensileLite client will use srand(seed).
+# The TensileLite client always uses this exact seed. Zero is a valid deterministic
+# seed rather than an alias for wall-clock time.
 globalParameters["DataInitSeed"] = 0
 globalParameters["PruneSparseMode"] = (
     0  # Prune mode for Sparse Matrix: 0=random, 1=XX00, 2=X0X0, 3=0XX0, 4=X00X, 5=0X0X, 6=00XX

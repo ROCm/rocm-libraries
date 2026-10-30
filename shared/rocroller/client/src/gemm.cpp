@@ -3,9 +3,15 @@
 
 #include "rocRoller/Serialization/YAML.hpp"
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -21,11 +27,10 @@
 #include <rocRoller/Utilities/Timer.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 #include <rocRoller/Utilities/Version.hpp>
+#include <rocRoller/hostnumerics/HostDataGeneration.hpp>
+#include <rocRoller/hostnumerics/HostReference.hpp>
 
 #include <rocRoller/Serialization/KernelGraph.hpp>
-
-#include <common/Utilities.hpp>
-#include <common/mxDataGen.hpp>
 
 #include "client/CLI_Utils.hpp"
 #include "client/DataParallelGEMMSolution.hpp"
@@ -34,7 +39,8 @@
 #include "client/RotatingBuffer.hpp"
 #include "client/StreamKGEMMSolution.hpp"
 
-#include <mxDataGenerator/PreSwizzle.hpp>
+#include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
+#include <roc/hostnumerics/amd_gpu_layout/operand.hpp>
 
 #include <CLI/CLI.hpp>
 
@@ -50,73 +56,115 @@ enum ReturnCodes : int
     SolutionNotSupportedOnArch = 3
 };
 
+namespace
+{
+    template <typename T>
+    std::shared_ptr<T> allocateZeroedDevice(size_t elementCount)
+    {
+        T*   pointer = nullptr;
+        auto status  = hipMalloc(&pointer, elementCount * sizeof(T));
+        if(status != hipSuccess)
+            throw std::runtime_error(hipGetErrorString(status));
+
+        std::shared_ptr<T> result(pointer, [](T* devicePointer) {
+            if(devicePointer != nullptr)
+                (void)hipFree(devicePointer);
+        });
+        status = hipMemset(pointer, 0, elementCount * sizeof(T));
+        if(status != hipSuccess)
+            throw std::runtime_error(hipGetErrorString(status));
+        return result;
+    }
+
+    template <typename T>
+    std::shared_ptr<T> copyToDevice(std::vector<T> const& values)
+    {
+        T*   pointer = nullptr;
+        auto status  = hipMalloc(&pointer, values.size() * sizeof(T));
+        if(status != hipSuccess)
+            throw std::runtime_error(hipGetErrorString(status));
+
+        std::shared_ptr<T> result(pointer, [](T* devicePointer) {
+            if(devicePointer != nullptr)
+                (void)hipFree(devicePointer);
+        });
+        status
+            = hipMemcpy(pointer, values.data(), values.size() * sizeof(T), hipMemcpyHostToDevice);
+        if(status != hipSuccess)
+            throw std::runtime_error(hipGetErrorString(status));
+        return result;
+    }
+
+    std::shared_ptr<uint8_t> copyByteStorageToDevice(std::vector<std::byte> const& values)
+    {
+        auto owner = copyToDevice(values);
+        return {owner, reinterpret_cast<uint8_t*>(owner.get())};
+    }
+}
+
 namespace rocRoller::Client::GEMMClient
 {
+    namespace hostnumerics = rocRoller::hostnumerics;
+
     using GEMMSolutionPtr = std::shared_ptr<Client::GEMMClient::GEMMSolution>;
 
-    template <typename A, typename B, typename C, typename D>
+    template <typename A, typename B, typename D>
     std::pair<bool, double>
-        validate(std::vector<typename PackedTypeOf<A>::type> const&      h_A,
-                 std::vector<typename PackedTypeOf<B>::type> const&      h_B,
-                 std::vector<C> const&                                   h_C,
-                 std::vector<D> const&                                   h_D,
-                 std::vector<uint8_t> const&                             h_scaleA,
-                 std::vector<uint8_t> const&                             h_scaleB,
+        validate(hostnumerics::GeneratedGEMMInputs const&                generatedInputs,
+                 const roc::hostnumerics::Tensor&                        hostD,
+                 std::vector<uint8_t> const&                             hostScaleA,
+                 std::vector<uint8_t> const&                             hostScaleB,
                  rocRoller::Client::GEMMClient::ProblemParameters const& problemParams,
                  GPUArchitecture const&                                  arch)
     {
-        using namespace rocRoller::Client::GEMMClient;
+        const bool hasScales = generatedInputs.scaleA || generatedInputs.scaleB
+                               || !hostScaleA.empty() || !hostScaleB.empty();
+        const size_t scaleBlockSize
+            = hasScales ? (problemParams.types.scaleBlockSize > 0
+                               ? static_cast<size_t>(problemParams.types.scaleBlockSize)
+                               : problemParams.k)
+                        : 0;
 
-        // Host result
-        std::vector<D> h_result(problemParams.m * problemParams.n, static_cast<D>(0.0));
-
-        if(!h_scaleA.empty() || !h_scaleB.empty())
+        std::optional<roc::hostnumerics::Tensor> runtimeScaleA;
+        std::optional<roc::hostnumerics::Tensor> runtimeScaleB;
+        if(!generatedInputs.scaleA && !hostScaleA.empty())
         {
-            rocRoller::ScaledCPUMM(h_result,
-                                   h_C,
-                                   h_A,
-                                   h_B,
-                                   h_scaleA,
-                                   h_scaleB,
-                                   problemParams.m,
-                                   problemParams.n,
-                                   problemParams.k,
-                                   problemParams.alpha,
-                                   problemParams.beta,
-                                   problemParams.types.transA == TransposeType::T,
-                                   problemParams.types.transB == TransposeType::T,
-                                   problemParams.types.scaleBlockSize,
-                                   problemParams.types.scaleTypeA,
-                                   problemParams.types.scaleTypeB);
+            runtimeScaleA = hostnumerics::hostScaleTensor(problemParams.types.scaleTypeA,
+                                                          std::span<const uint8_t>(hostScaleA),
+                                                          problemParams.m,
+                                                          problemParams.k,
+                                                          scaleBlockSize);
         }
-        else
+        if(!generatedInputs.scaleB && !hostScaleB.empty())
         {
-            CPUMM(h_result,
-                  h_C,
-                  h_A,
-                  h_B,
-                  problemParams.m,
-                  problemParams.n,
-                  problemParams.k,
-                  problemParams.alpha,
-                  problemParams.beta,
-                  problemParams.types.transA == TransposeType::T,
-                  problemParams.types.transB == TransposeType::T);
+            runtimeScaleB = hostnumerics::hostScaleTensor(problemParams.types.scaleTypeB,
+                                                          std::span<const uint8_t>(hostScaleB),
+                                                          problemParams.n,
+                                                          problemParams.k,
+                                                          scaleBlockSize);
         }
 
-        auto tol = gemmAcceptableError<A, B, D>(
-            problemParams.m, problemParams.n, problemParams.k, arch.target());
-        auto res = compare(h_D, h_result, tol);
+        const auto floatReference = hostnumerics::computeHostReference(generatedInputs,
+                                                                       runtimeScaleA,
+                                                                       runtimeScaleB,
+                                                                       scaleBlockSize,
+                                                                       problemParams.alpha,
+                                                                       problemParams.beta);
+        const auto hostReference  = hostnumerics::convertHostReferenceTensor<D>(floatReference);
+        const auto acceptableError
+            = hostnumerics::acceptableGEMMError<A, B, D>(problemParams.k, arch.target());
+        const auto comparison
+            = hostnumerics::compareHostReference(hostD, hostReference, acceptableError);
 
-        Log::debug(res.message());
+        Log::debug(comparison.message());
 
-        std::cout << "Result: " << (res.ok ? "Correct" : "Incorrect") << std::endl;
-        std::cout << "RNorm: " << res.relativeNormL2 << std::endl;
-        if(!res.ok)
+        std::cout << "Result: " << (comparison.ok() ? "Correct" : "Incorrect") << std::endl;
+        std::cout << "RNorm: " << comparison.statistics.relativeFrobeniusError << std::endl;
+        if(!comparison.ok())
         {
-            std::cerr << "WARNING: Result incorrect.  " << res.message() << std::endl;
+            std::cerr << "WARNING: Result incorrect.  " << comparison.message() << std::endl;
         }
-        return {res.ok, res.relativeNormL2};
+        return {comparison.ok(), comparison.statistics.relativeFrobeniusError};
     }
 
     // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
@@ -150,18 +198,24 @@ namespace rocRoller::Client::GEMMClient
 
         using PackedTypeA = typename PackedTypeOf<A>::type;
         using PackedTypeB = typename PackedTypeOf<B>::type;
-        std::vector<PackedTypeA> hostA;
-        std::vector<PackedTypeB> hostB;
-        std::vector<C>           hostC;
-        std::vector<D>           hostD(problemParams.m * problemParams.n, D{});
-        std::vector<uint8_t>     hostScaleA, hostScaleB;
+        std::vector<PackedTypeA>  hostA;
+        std::vector<PackedTypeB>  hostB;
+        std::vector<C>            hostC;
+        roc::hostnumerics::Tensor hostD(
+            hostnumerics::HostReferenceDetail::outputScalarType<D>(),
+            hostnumerics::hostOutputLayout(problemParams.m, problemParams.n));
+        std::vector<uint8_t> hostScaleA, hostScaleB;
 
-        auto seed = 31415u;
+        constexpr auto seed           = 31415u;
+        auto           scaleTypeA     = DataType::None;
+        auto           scaleTypeB     = DataType::None;
+        auto           scaleBlockSize = size_t{1};
         if(problemParams.types.scaleA == Operations::ScaleMode::Separate
            || problemParams.types.scaleB == Operations::ScaleMode::Separate)
         {
-            auto scaleBlockSize = problemParams.types.scaleBlockSize;
-            AssertFatal(scaleBlockSize > 0, "scaleBlockSize must be set to scale A or B.");
+            AssertFatal(problemParams.types.scaleBlockSize > 0,
+                        "scaleBlockSize must be set to scale A or B.");
+            scaleBlockSize = static_cast<size_t>(problemParams.types.scaleBlockSize);
             AssertFatal(arch.isSupportedScaleBlockSize(scaleBlockSize),
                         fmt::format("Architecture {} does not support block scaling (size: {}).",
                                     arch.target().toString(),
@@ -170,39 +224,31 @@ namespace rocRoller::Client::GEMMClient
                         fmt::format("K: {} must be a multiple of the scale block size: {}",
                                     problemParams.k,
                                     scaleBlockSize));
-            DGenInput(seed,
-                      hostA,
-                      descA,
-                      hostB,
-                      descB,
-                      hostC,
-                      descC,
-                      hostScaleA,
-                      hostScaleB,
-                      problemParams.types.scaleTypeA,
-                      problemParams.types.scaleTypeB,
-                      -1.f,
-                      1.f,
-                      static_cast<uint>(scaleBlockSize),
-                      problemParams.initModeA,
-                      problemParams.initModeB,
-                      problemParams.initModeC);
+            if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
+                scaleTypeA = problemParams.types.scaleTypeA;
+            if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
+                scaleTypeB = problemParams.types.scaleTypeB;
         }
-        else
-        {
-            DGenInput(seed,
-                      hostA,
-                      descA,
-                      hostB,
-                      descB,
-                      hostC,
-                      descC,
-                      -1.f,
-                      1.f,
-                      problemParams.initModeA,
-                      problemParams.initModeB,
-                      problemParams.initModeC);
-        }
+
+        auto generatedInputs = hostnumerics::generateGEMMInputs(descA,
+                                                                descB,
+                                                                descC,
+                                                                problemParams.initModeA,
+                                                                problemParams.initModeB,
+                                                                problemParams.initModeC,
+                                                                scaleTypeA,
+                                                                scaleTypeB,
+                                                                scaleBlockSize,
+                                                                -1.f,
+                                                                1.f,
+                                                                seed);
+        hostA                = hostnumerics::copyTensorStorage<PackedTypeA>(generatedInputs.a);
+        hostB                = hostnumerics::copyTensorStorage<PackedTypeB>(generatedInputs.b);
+        hostC                = hostnumerics::copyTensorStorage<C>(generatedInputs.c);
+        if(generatedInputs.scaleA)
+            hostScaleA = hostnumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleA);
+        if(generatedInputs.scaleB)
+            hostScaleB = hostnumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleB);
 
         // Pre-tile B on the host when pretileB is set (kernel expects pre-tiled layout)
         std::vector<PackedTypeB> hostBForKernel(hostB);
@@ -228,7 +274,13 @@ namespace rocRoller::Client::GEMMClient
                 sizes[0] /= packing;
                 preTileSize[0] /= packing;
             }
-            hostBForKernel = DGen::preSwizzle(hostB, sizes, {}, preTileSize);
+            // B is K x N with K contiguous.
+            hostBForKernel = roc::hostnumerics::amd_gpu_layout::copyOperandToPhysicalLayout(
+                hostB,
+                {.k = sizes[0], .mn = sizes[1]},
+                std::nullopt,
+                roc::hostnumerics::amd_gpu_layout::OperandTile{.k  = preTileSize[0],
+                                                               .mn = preTileSize[1]});
         }
 
         // Pre-tile A on the host when pretileA is set (kernel expects pre-tiled layout)
@@ -255,10 +307,13 @@ namespace rocRoller::Client::GEMMClient
                 preTileSize[1] /= packing;
             }
 
-            // The preSwizzle helper assumes column-major; so we swap sizes here.
-            std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
-            std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
-            hostAForKernel = DGen::preSwizzle(hostA, swappedSizes, {}, swappedPreTileSize);
+            // A is M x K with K contiguous.
+            hostAForKernel = roc::hostnumerics::amd_gpu_layout::copyOperandToPhysicalLayout(
+                hostA,
+                {.k = sizes[1], .mn = sizes[0]},
+                std::nullopt,
+                roc::hostnumerics::amd_gpu_layout::OperandTile{.k  = preTileSize[1],
+                                                               .mn = preTileSize[0]});
         }
 
         size_t rotatingSize = benchmarkParams.rotatingBuffSize;
@@ -277,7 +332,7 @@ namespace rocRoller::Client::GEMMClient
         RotatingBuffer<PackedTypeA> rotatingA(hostAForKernel, rotatingSize);
         RotatingBuffer<PackedTypeB> rotatingB(hostBForKernel, rotatingSize);
         RotatingBuffer<C>           rotatingC(hostC, rotatingSize);
-        auto deviceD = make_shared_device<D>(problemParams.m * problemParams.n, D{});
+        auto deviceD = allocateZeroedDevice<D>(problemParams.m * problemParams.n);
 
         std::shared_ptr<uint8_t> deviceScaleA, deviceScaleB;
         AssertFatal(problemParams.types.scaleA == Operations::ScaleMode::None
@@ -302,14 +357,18 @@ namespace rocRoller::Client::GEMMClient
                     descScaleA = TensorDescriptor(descScaleA.dataType(), std::move(sizes));
                 }
 
-                std::vector<size_t> preSwizzleSize;
+                std::optional<roc::hostnumerics::amd_gpu_layout::OperandSwizzle> scaleSwizzle;
                 if(problemParams.types.scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                 {
-                    AssertFatal(problemParams.types.scaleShuffleTileA.size() == 3);
-                    preSwizzleSize = problemParams.types.scaleShuffleTileA;
+                    auto const& shuffleTile = problemParams.types.scaleShuffleTileA;
+                    AssertFatal(shuffleTile.size() == 3);
+                    scaleSwizzle = roc::hostnumerics::amd_gpu_layout::OperandSwizzle{
+                        .tileK    = shuffleTile[1],
+                        .tileMN   = shuffleTile[0],
+                        .subTileK = shuffleTile[2]};
                 }
 
-                std::vector<size_t> preTileSize;
+                std::optional<roc::hostnumerics::amd_gpu_layout::OperandTile> scaleTile;
                 if(not problemParams.types.scalePretileA.empty())
                 {
                     AssertFatal(problemParams.types.transA == TransposeType::T,
@@ -320,24 +379,39 @@ namespace rocRoller::Client::GEMMClient
                     // Because we used "withNormalizedDimensions"
                     // above and A is T, the K dimension becomes the
                     // leftmost dimension
-                    preTileSize = {problemParams.types.scalePretileA[1],
-                                   problemParams.types.scalePretileA[0]};
+                    scaleTile = roc::hostnumerics::amd_gpu_layout::OperandTile{
+                        .k  = problemParams.types.scalePretileA[1],
+                        .mn = problemParams.types.scalePretileA[0]};
                 }
 
-                auto tmpScaleA = [&]() {
-                    if(problemParams.types.scaleSkipPermlane
-                       == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
-                        return DGen::preSwizzleScalesGFX950(
-                            hostScaleA, {descScaleA.sizes()[1], descScaleA.sizes()[0]});
-                    else
-                        return DGen::preSwizzle(
-                            hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
-                }();
-                deviceScaleA = make_shared_device(tmpScaleA);
+                if(problemParams.types.scaleSkipPermlane
+                   == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                {
+                    const auto scalePlan = roc::hostnumerics::amd_gpu_layout::planMxScaleStorage(
+                        {descScaleA.sizes()[1], descScaleA.sizes()[0]},
+                        scaleBlockSize,
+                        roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950);
+                    const auto tmpScaleA
+                        = roc::hostnumerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
+                            reinterpret_cast<const std::byte*>(hostScaleA.data()),
+                            hostScaleA.size(),
+                            scalePlan);
+                    deviceScaleA = copyByteStorageToDevice(tmpScaleA);
+                }
+                else
+                {
+                    const auto tmpScaleA
+                        = roc::hostnumerics::amd_gpu_layout::copyOperandToPhysicalLayout(
+                            hostScaleA,
+                            {.k = descScaleA.sizes()[0], .mn = descScaleA.sizes()[1]},
+                            scaleSwizzle,
+                            scaleTile);
+                    deviceScaleA = copyToDevice(tmpScaleA);
+                }
             }
             else
             {
-                deviceScaleA = make_shared_device(hostScaleA);
+                deviceScaleA = copyToDevice(hostScaleA);
             }
         }
         if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
@@ -352,14 +426,18 @@ namespace rocRoller::Client::GEMMClient
                     descScaleB = TensorDescriptor(descScaleB.dataType(), std::move(sizes));
                 }
 
-                std::vector<size_t> preSwizzleSize;
+                std::optional<roc::hostnumerics::amd_gpu_layout::OperandSwizzle> scaleSwizzle;
                 if(problemParams.types.scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                 {
-                    AssertFatal(problemParams.types.scaleShuffleTileB.size() == 3);
-                    preSwizzleSize = problemParams.types.scaleShuffleTileB;
+                    auto const& shuffleTile = problemParams.types.scaleShuffleTileB;
+                    AssertFatal(shuffleTile.size() == 3);
+                    scaleSwizzle = roc::hostnumerics::amd_gpu_layout::OperandSwizzle{
+                        .tileK    = shuffleTile[1],
+                        .tileMN   = shuffleTile[0],
+                        .subTileK = shuffleTile[2]};
                 }
 
-                std::vector<size_t> preTileSize;
+                std::optional<roc::hostnumerics::amd_gpu_layout::OperandTile> scaleTile;
                 if(not problemParams.types.scalePretileB.empty())
                 {
                     // Note scalePretileB is K x N (usually something like 8 x 256)
@@ -370,24 +448,39 @@ namespace rocRoller::Client::GEMMClient
                     AssertFatal(problemParams.types.transB == TransposeType::N,
                                 "Can only pre-tile B if it is TransposeType::N");
 
-                    preTileSize = {problemParams.types.scalePretileB[0],
-                                   problemParams.types.scalePretileB[1]};
+                    scaleTile = roc::hostnumerics::amd_gpu_layout::OperandTile{
+                        .k  = problemParams.types.scalePretileB[0],
+                        .mn = problemParams.types.scalePretileB[1]};
                 };
 
-                auto tmpScaleB = [&]() {
-                    if(problemParams.types.scaleSkipPermlane
-                       == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
-                        return DGen::preSwizzleScalesGFX950(
-                            hostScaleB, {descScaleB.sizes()[1], descScaleB.sizes()[0]});
-                    else
-                        return DGen::preSwizzle(
-                            hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
-                }();
-                deviceScaleB = make_shared_device(tmpScaleB);
+                if(problemParams.types.scaleSkipPermlane
+                   == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                {
+                    const auto scalePlan = roc::hostnumerics::amd_gpu_layout::planMxScaleStorage(
+                        {descScaleB.sizes()[1], descScaleB.sizes()[0]},
+                        scaleBlockSize,
+                        roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950);
+                    const auto tmpScaleB
+                        = roc::hostnumerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
+                            reinterpret_cast<const std::byte*>(hostScaleB.data()),
+                            hostScaleB.size(),
+                            scalePlan);
+                    deviceScaleB = copyByteStorageToDevice(tmpScaleB);
+                }
+                else
+                {
+                    const auto tmpScaleB
+                        = roc::hostnumerics::amd_gpu_layout::copyOperandToPhysicalLayout(
+                            hostScaleB,
+                            {.k = descScaleB.sizes()[0], .mn = descScaleB.sizes()[1]},
+                            scaleSwizzle,
+                            scaleTile);
+                    deviceScaleB = copyToDevice(tmpScaleB);
+                }
             }
             else
             {
-                deviceScaleB = make_shared_device(hostScaleB);
+                deviceScaleB = copyToDevice(hostScaleB);
             }
         }
 
@@ -458,7 +551,7 @@ namespace rocRoller::Client::GEMMClient
             auto scratchSpaceRequired = commandKernel->scratchSpaceRequired(policy, runtimeArgs);
             if(scratchSpaceRequired > 0)
             {
-                deviceScratch[i] = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
+                deviceScratch[i] = allocateZeroedDevice<uint8_t>(scratchSpaceRequired);
                 commandArgs.setArgument(
                     gemm->getScratchTag(policy), ArgumentType::Value, deviceScratch[i].get());
             }
@@ -557,14 +650,16 @@ namespace rocRoller::Client::GEMMClient
 
         if(benchmarkParams.check)
         {
-            AssertFatal(hipMemcpy(hostD.data(),
-                                  deviceD.get(),
-                                  problemParams.m * problemParams.n * sizeof(D),
-                                  hipMemcpyDeviceToHost)
-                        == (hipError_t)HIP_SUCCESS);
+            const auto hostDStorage = hostD.rawEncodedBackingStorage();
+            if(!hostDStorage.empty())
+                AssertFatal(hipMemcpy(hostDStorage.data(),
+                                      deviceD.get(),
+                                      hostDStorage.size(),
+                                      hipMemcpyDeviceToHost)
+                            == (hipError_t)HIP_SUCCESS);
 
-            auto [correct, rnorm] = validate<A, B, C, D>(
-                hostA, hostB, hostC, hostD, hostScaleA, hostScaleB, problemParams, arch);
+            auto [correct, rnorm] = validate<A, B, D>(
+                generatedInputs, hostD, hostScaleA, hostScaleB, problemParams, arch);
 
             // Verify ZeroedBeforeAndAfter scratch is all zeros after kernel
             auto zeroedIdx = static_cast<size_t>(Operations::ScratchPolicy::ZeroedBeforeAndAfter);
@@ -1564,10 +1659,6 @@ int main(int argc, const char* argv[])
 
         .scaleValueA = 1.0f,
         .scaleValueB = 1.0f,
-
-        .initModeA = DataInitMode(Bounded{}),
-        .initModeB = DataInitMode(Bounded{}),
-        .initModeC = DataInitMode(Bounded{}),
     };
 
     rocRoller::Client::GEMMClient::TypeParameters types;

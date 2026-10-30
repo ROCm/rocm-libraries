@@ -18,10 +18,10 @@
 // gtest suite has no such token, so it would be invisible to every ctest preset.
 
 #include <gtest/gtest.h>
-#include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
+#include <roc/hostnumerics/generation.hpp>
 
 // hipblaslt-test links roc::tensilelite-host (through hipblaslt-clients-common),
 // so the solution metadata the launch gate reasons from is available here even
@@ -52,12 +52,12 @@
 #endif
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <memory>
-#include <random>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -70,8 +70,10 @@ namespace
     // budget, and weighted towards the sweep because only a minority of the
     // candidates that witness the bug are repaired by the StaggerU clamp rather
     // than refused by the launch gate.
-    constexpr size_t kMaxHeuristicCandidates = 4;
-    constexpr size_t kMaxSweepCandidates     = 30;
+    constexpr size_t   kMaxHeuristicCandidates = 4;
+    constexpr size_t   kMaxSweepCandidates     = 30;
+    constexpr uint64_t kOperandASeedOffset     = 0;
+    constexpr uint64_t kOperandBSeedOffset     = 1;
 
     bool gpuAvailable()
     {
@@ -132,8 +134,7 @@ namespace
             std::string raw(MAX_PATH, '\0');
             for(;;)
             {
-                DWORD n = GetModuleFileNameA(
-                    hModule, raw.data(), static_cast<DWORD>(raw.size()));
+                DWORD n = GetModuleFileNameA(hModule, raw.data(), static_cast<DWORD>(raw.size()));
                 if(n == 0)
                     break;
                 if(n < raw.size())
@@ -173,12 +174,12 @@ namespace
             const std::string processor = arch.substr(0, arch.find(':'));
             // The subtree the runtime loads, which for an A0 part reporting
             // gfx1250 is not the one named for processor.
-            hipDeviceProp_t props{};
-            int             device = 0;
-            const int       rev    = hipGetDevice(&device) == hipSuccess
+            hipDeviceProp_t   props{};
+            int               device  = 0;
+            const int         rev     = hipGetDevice(&device) == hipSuccess
                                     && hipGetDeviceProperties(&props, device) == hipSuccess
-                                ? props.asicRevision
-                                : -1;
+                                            ? props.asicRevision
+                                            : -1;
             const std::string libArch = rocblaslt_revisioned_arch_name(processor, rev);
 
             std::string tried;
@@ -194,9 +195,8 @@ namespace
                    && !std::filesystem::exists(logical.string() + ".zlib"))
                     continue;
 
-                auto loaded
-                    = TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm>(
-                        logical.string());
+                auto loaded = TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm>(
+                    logical.string());
                 auto master = std::dynamic_pointer_cast<ContractionLibrary>(loaded);
                 if(master && master->initLibraryMapping(logical.string()))
                     return master;
@@ -222,8 +222,8 @@ namespace
     // The solution record behind an enumerated algorithm, or null with a
     // populated reason. This is metadata only: getSolutionByIndex pulls in a
     // placeholder's .dat on demand and never touches the code objects.
-    std::shared_ptr<TensileLite::ContractionSolution> solutionForAlgo(
-        const hipblasLtMatmulHeuristicResult_t& candidate, std::string& reason)
+    std::shared_ptr<TensileLite::ContractionSolution>
+        solutionForAlgo(const hipblasLtMatmulHeuristicResult_t& candidate, std::string& reason)
     {
         auto library = masterLibrary(reason);
         if(!library)
@@ -259,29 +259,10 @@ namespace
         return true;
     }
 
-    // Wide dynamic range, mixed sign, non-dyadic. The rand_int fill hipBLASLt
-    // uses by default produces fp32 values in [-2,2], which sum exactly, so
-    // every summation order would agree and these tests would pass against a
-    // completely broken implementation. Magnitudes land in [2^-12, 2^13): with
-    // K up to 12288 the largest possible accumulator stays far below FLT_MAX and
-    // the smallest product far above the smallest normal, so neither overflow
-    // nor denormal flush can occur.
-    float wideRangeSample(std::mt19937& rng)
-    {
-        std::uniform_int_distribution<int>    exponentOf{-12, 12};
-        std::uniform_real_distribution<float> mantissaOf{0.0f, 1.0f};
-        std::uniform_int_distribution<int>    signOf{0, 1};
-
-        const int   exponent = exponentOf(rng);
-        const float mantissa = 1.0f + mantissaOf(rng);
-        const float sign     = signOf(rng) ? 1.0f : -1.0f;
-        return sign * std::ldexp(mantissa, exponent);
-    }
-
     // The A/B storage type is a parameter because the only shipped shape known
     // to reach the newly admitted StreamK split regime through a public API
     // attribute is a bf16-in / f32-out entry; every pre-existing case stays on
-    // the fp32 default, for which the conversions below are the identity.
+    // the fp32 default.
     struct Problem
     {
         int64_t     m;
@@ -296,35 +277,87 @@ namespace
         bool useBias = false;
     };
 
-    size_t elementSizeOf(hipDataType type)
+    roc::hostnumerics::ScalarType hostnumericsOperandType(hipDataType type)
     {
-        return type == HIP_R_32F ? sizeof(float) : sizeof(uint16_t);
+        switch(type)
+        {
+        case HIP_R_32F:
+            return roc::hostnumerics::ScalarType::Float32;
+        case HIP_R_16BF:
+            return roc::hostnumerics::ScalarType::BFloat16;
+        default:
+            throw std::invalid_argument("Row-uniformity operands must be FP32 or BF16");
+        }
     }
 
-    // Rounds values in place to what the device will actually hold, then
-    // returns the byte image to upload. Rounding in place matters: the host
-    // reference below must see the same numbers the kernel does, or its
-    // order-sensitivity self-check describes a different problem.
-    //
-    // HIP_R_16BF uses hip_bfloat16. hipBLASLt leaves mxDataGenerator off on
-    // Windows, so this harness cannot depend on DGen headers.
-    std::vector<uint8_t> encodeOperand(std::vector<float>& values, hipDataType type)
+    size_t encodedElementBytes(hipDataType type)
     {
-        std::vector<uint8_t> bytes(values.size() * elementSizeOf(type));
-        if(type == HIP_R_32F)
-        {
-            std::memcpy(bytes.data(), values.data(), bytes.size());
-            return bytes;
-        }
+        const auto& info = roc::hostnumerics::scalarTypeInfo(hostnumericsOperandType(type));
+        if(info.storageBits % 8 != 0)
+            throw std::invalid_argument("Row-uniformity operands must be byte-addressable");
+        return info.storageBits / 8;
+    }
 
-        auto* out = reinterpret_cast<uint16_t*>(bytes.data());
-        for(size_t idx = 0; idx < values.size(); ++idx)
-        {
-            const hip_bfloat16 packed{values[idx]};
-            out[idx]     = packed.data;
-            values[idx]  = static_cast<float>(packed);
-        }
-        return bytes;
+    // Wide dynamic range, mixed sign, non-dyadic. The rand_int fill hipBLASLt
+    // uses by default produces fp32 values in [-2,2], which sum exactly, so
+    // every summation order would agree and these tests would pass against a
+    // completely broken implementation. FP32 is the source encoding even for
+    // BF16 operands, so BF16 takes the same generate-then-round path as before.
+    // Magnitudes land in [2^-12, 2^13] after rounding: with K up to 12288 the
+    // largest possible accumulator stays far below FLT_MAX and the smallest
+    // product far above the smallest normal, so neither overflow nor denormal
+    // flush can occur.
+    roc::hostnumerics::Tensor
+        generateWideRangeOperand(hipDataType type, size_t elementCount, uint64_t seed)
+    {
+        using namespace roc::hostnumerics;
+        const auto recipe = GenerationRecipe::realOnlyLastDimensionFastest(
+            GenerationRecipe::randomEncodedExponent({.lowerUnbiasedExponent = -12,
+                                                     .upperUnbiasedExponent = 12,
+                                                     .sourceType            = ScalarType::Float32}),
+            seed);
+        return generate(hostnumericsOperandType(type), Shape{elementCount}, recipe);
+    }
+
+    TEST(RowUniformityData_pre_checkin, SharedGenerationAndTensorCodecDefineOperands)
+    {
+        constexpr size_t   elementCount = 4096;
+        constexpr uint64_t seed         = 0x52755f31u;
+
+        const auto checkType = [&](hipDataType type) {
+            const auto sameStorage = [](const auto& left, const auto& right) {
+                const auto leftStorage  = left.rawEncodedBackingStorage();
+                const auto rightStorage = right.rawEncodedBackingStorage();
+                return leftStorage.size() == rightStorage.size()
+                       && std::equal(leftStorage.begin(), leftStorage.end(), rightStorage.begin());
+            };
+            const auto a = generateWideRangeOperand(type, elementCount, seed + kOperandASeedOffset);
+            const auto aRepeat
+                = generateWideRangeOperand(type, elementCount, seed + kOperandASeedOffset);
+            const auto b = generateWideRangeOperand(type, elementCount, seed + kOperandBSeedOffset);
+
+            EXPECT_TRUE(sameStorage(a, aRepeat));
+            EXPECT_FALSE(sameStorage(a, b));
+
+            const auto decoded   = a.copyConvertedTo(roc::hostnumerics::ScalarType::Float32);
+            const auto roundTrip = decoded.copyConvertedTo(hostnumericsOperandType(type));
+            EXPECT_TRUE(sameStorage(a, roundTrip));
+
+            float forward = 0.0f;
+            for(size_t index = 0; index < elementCount; ++index)
+                forward += a.loadAs<float>({index}) * b.loadAs<float>({index});
+
+            float reverse = 0.0f;
+            for(size_t index = elementCount; index > 0; --index)
+                reverse += a.loadAs<float>({index - 1}) * b.loadAs<float>({index - 1});
+
+            EXPECT_NE(std::memcmp(&forward, &reverse, sizeof(float)), 0)
+                << "The generated " << roc::hostnumerics::scalarTypeName(a.type())
+                << " sample does not expose summation-order changes";
+        };
+
+        checkType(HIP_R_32F);
+        checkType(HIP_R_16BF);
     }
 
     // Owns every device and host resource for one problem size and can replay
@@ -358,7 +391,7 @@ namespace
                 hipblasLtDestroy(m_handle);
         }
 
-        RowUniformityHarness(const RowUniformityHarness&)            = delete;
+        RowUniformityHarness(const RowUniformityHarness&) = delete;
         RowUniformityHarness& operator=(const RowUniformityHarness&) = delete;
 
         // Returns false with a populated skipReason when the environment cannot
@@ -377,7 +410,7 @@ namespace
                 return false;
             }
 
-            const size_t abBytes = elementSizeOf(m_problem.abType);
+            const size_t abBytes = encodedElementBytes(m_problem.abType);
             if(hipMalloc(&m_deviceA, static_cast<size_t>(m * k) * abBytes) != hipSuccess
                || hipMalloc(&m_deviceB, static_cast<size_t>(k * n) * abBytes) != hipSuccess
                || hipMalloc(&m_deviceD, static_cast<size_t>(m * n) * sizeof(float)) != hipSuccess
@@ -452,15 +485,11 @@ namespace
 
                 const hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_BIAS;
                 const hipDataType         biasType = HIP_R_32F;
-                if(hipblasLtMatmulDescSetAttribute(m_desc,
-                                                   HIPBLASLT_MATMUL_DESC_EPILOGUE,
-                                                   &epilogue,
-                                                   sizeof(epilogue))
+                if(hipblasLtMatmulDescSetAttribute(
+                       m_desc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue))
                        != HIPBLAS_STATUS_SUCCESS
-                   || hipblasLtMatmulDescSetAttribute(m_desc,
-                                                      HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE,
-                                                      &biasType,
-                                                      sizeof(biasType))
+                   || hipblasLtMatmulDescSetAttribute(
+                          m_desc, HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, &biasType, sizeof(biasType))
                           != HIPBLAS_STATUS_SUCCESS
                    || hipblasLtMatmulDescSetAttribute(m_desc,
                                                       HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
@@ -482,17 +511,19 @@ namespace
         {
             float forward = 0.0f;
             for(int64_t idx = 0; idx < m_problem.k; ++idx)
-                forward += m_aVector[static_cast<size_t>(idx)] * m_hostB[static_cast<size_t>(idx)];
+                forward += m_aVector.loadAs<float>({static_cast<size_t>(idx)})
+                           * m_hostB.loadAs<float>({static_cast<size_t>(idx)});
 
             float reverse = 0.0f;
             for(int64_t idx = m_problem.k - 1; idx >= 0; --idx)
-                reverse += m_aVector[static_cast<size_t>(idx)] * m_hostB[static_cast<size_t>(idx)];
+                reverse += m_aVector.loadAs<float>({static_cast<size_t>(idx)})
+                           * m_hostB.loadAs<float>({static_cast<size_t>(idx)});
 
             return std::memcmp(&forward, &reverse, sizeof(float)) != 0;
         }
 
-        std::vector<hipblasLtMatmulHeuristicResult_t> candidateAlgos(
-            int& enumeratedCount, size_t sweepBudget = kMaxSweepCandidates)
+        std::vector<hipblasLtMatmulHeuristicResult_t>
+            candidateAlgos(int& enumeratedCount, size_t sweepBudget = kMaxSweepCandidates)
         {
             std::vector<hipblasLtMatmulHeuristicResult_t> supported;
 
@@ -696,18 +727,15 @@ namespace
             const int64_t n = m_problem.n;
             const int64_t k = m_problem.k;
 
-            std::mt19937 rng(0x52755f31u ^ static_cast<uint32_t>(m * 31 + n * 17 + k));
+            const uint64_t seed = 0x52755f31u ^ static_cast<uint32_t>(m * 31 + n * 17 + k);
 
-            m_aVector.resize(static_cast<size_t>(k));
-            for(auto& value : m_aVector)
-                value = wideRangeSample(rng);
+            m_aVector = generateWideRangeOperand(
+                m_problem.abType, static_cast<size_t>(k), seed + kOperandASeedOffset);
+            m_hostB = generateWideRangeOperand(
+                m_problem.abType, static_cast<size_t>(k * n), seed + kOperandBSeedOffset);
 
-            m_hostB.resize(static_cast<size_t>(k * n));
-            for(auto& value : m_hostB)
-                value = wideRangeSample(rng);
-
-            const std::vector<uint8_t> bBytes = encodeOperand(m_hostB, m_problem.abType);
-            if(hipMemcpy(m_deviceB, bBytes.data(), bBytes.size(), hipMemcpyHostToDevice)
+            const auto bStorage = m_hostB.rawEncodedBackingStorage();
+            if(hipMemcpy(m_deviceB, bStorage.data(), bStorage.size(), hipMemcpyHostToDevice)
                != hipSuccess)
             {
                 skipReason = "hipMemcpy of B failed";
@@ -716,19 +744,19 @@ namespace
 
             // Column k of a column-major A is M copies of a[k], so A goes up one
             // column at a time and never needs an M*K host buffer.
-            const size_t         abBytes = elementSizeOf(m_problem.abType);
-            std::vector<float>   column(static_cast<size_t>(m));
-            std::vector<uint8_t> aColumn;
+            const size_t              abBytes = encodedElementBytes(m_problem.abType);
+            roc::hostnumerics::Tensor column(hostnumericsOperandType(m_problem.abType),
+                                             roc::hostnumerics::Shape{static_cast<size_t>(m)});
             for(int64_t idx = 0; idx < k; ++idx)
             {
-                std::fill(column.begin(), column.end(), m_aVector[static_cast<size_t>(idx)]);
-                aColumn = encodeOperand(column, m_problem.abType);
-                // encodeOperand rounds in place, so the reference vector picks
-                // up the value the device will hold.
-                m_aVector[static_cast<size_t>(idx)] = column[0];
-                if(hipMemcpy(static_cast<uint8_t*>(m_deviceA) + static_cast<size_t>(idx * m) * abBytes,
-                             aColumn.data(),
-                             aColumn.size(),
+                const float value = m_aVector.loadAs<float>({static_cast<size_t>(idx)});
+                roc::hostnumerics::generate(column,
+                                            [value](std::span<const size_t>) { return value; });
+                const auto columnStorage = column.rawEncodedBackingStorage();
+                if(hipMemcpy(static_cast<uint8_t*>(m_deviceA)
+                                 + static_cast<size_t>(idx * m) * abBytes,
+                             columnStorage.data(),
+                             columnStorage.size(),
                              hipMemcpyHostToDevice)
                    != hipSuccess)
                 {
@@ -739,21 +767,23 @@ namespace
             return true;
         }
 
-        Problem                 m_problem;
-        hipblasLtHandle_t       m_handle          = nullptr;
-        hipStream_t             m_stream          = nullptr;
-        hipblasLtMatrixLayout_t m_layoutA         = nullptr;
-        hipblasLtMatrixLayout_t m_layoutB         = nullptr;
-        hipblasLtMatrixLayout_t m_layoutD         = nullptr;
-        hipblasLtMatmulDesc_t   m_desc            = nullptr;
-        void*                   m_deviceA         = nullptr;
-        void*                   m_deviceB         = nullptr;
-        void*                   m_deviceD         = nullptr;
-        void*                   m_deviceBias      = nullptr;
-        void*                   m_deviceWorkspace = nullptr;
-        std::vector<float>      m_aVector;
-        std::vector<float>      m_hostB;
-        std::vector<float>      m_hostD;
+        Problem                   m_problem;
+        hipblasLtHandle_t         m_handle          = nullptr;
+        hipStream_t               m_stream          = nullptr;
+        hipblasLtMatrixLayout_t   m_layoutA         = nullptr;
+        hipblasLtMatrixLayout_t   m_layoutB         = nullptr;
+        hipblasLtMatrixLayout_t   m_layoutD         = nullptr;
+        hipblasLtMatmulDesc_t     m_desc            = nullptr;
+        void*                     m_deviceA         = nullptr;
+        void*                     m_deviceB         = nullptr;
+        void*                     m_deviceD         = nullptr;
+        void*                     m_deviceBias      = nullptr;
+        void*                     m_deviceWorkspace = nullptr;
+        roc::hostnumerics::Tensor m_aVector{roc::hostnumerics::ScalarType::Float32,
+                                            roc::hostnumerics::Shape{0}};
+        roc::hostnumerics::Tensor m_hostB{roc::hostnumerics::ScalarType::Float32,
+                                          roc::hostnumerics::Shape{0}};
+        std::vector<float>        m_hostD;
     };
 
     // A fixture rather than bare TEST() only so the shared drivers can reach
@@ -825,8 +855,7 @@ namespace
                 // sweep of hundreds broke, which is not enough to reproduce.
                 EXPECT_EQ(badRow, -1)
                     << "Row " << badRow << " of D differs bitwise from row 0 for "
-                    << harness.solutionName(candidate)
-                    << " with uniform summation order enabled";
+                    << harness.solutionName(candidate) << " with uniform summation order enabled";
                 if(badRow < 0)
                     ++honored;
             }
@@ -985,7 +1014,7 @@ namespace
                 return;
 
             int        enumeratedCount = 0;
-            const auto candidates = harness.candidateAlgos(enumeratedCount, /*sweepBudget=*/0);
+            const auto candidates      = harness.candidateAlgos(enumeratedCount, /*sweepBudget=*/0);
             ASSERT_FALSE(candidates.empty()) << "No heuristic pick for this problem";
 
             for(const auto& candidate : candidates)
@@ -1162,9 +1191,8 @@ namespace
                   c.rowUniform)
             << "tiles=" << c.tiles << " itersPerTile=" << c.itersPerTile << " grid=" << c.grid
             << " skFullTiles=" << c.skFullTiles << " forceDPOnly=" << c.forceDPOnly
-            << " perTileExtraIters=" << c.perTileExtraIters
-            << " -> skTiles=" << split.skTiles << " skItersPerWG=" << split.skItersPerWG
-            << " extraIters=" << split.extraIters;
+            << " perTileExtraIters=" << c.perTileExtraIters << " -> skTiles=" << split.skTiles
+            << " skItersPerWG=" << split.skItersPerWG << " extraIters=" << split.extraIters;
     }
 
     INSTANTIATE_TEST_SUITE_P(RowUniformity,
@@ -1182,10 +1210,10 @@ namespace
         constexpr size_t itersPerTile = 17;
         constexpr size_t skGrid       = 8;
         // Expected WG owners for iterations 0..67 under the per-tile column.
-        const int expectedWg[68] = {
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-            3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5,
-            6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7};
+        const int expectedWg[68]
+            = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2,
+               2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5,
+               5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7};
 
         for(size_t w = 0; w < skGrid; ++w)
         {
@@ -1206,39 +1234,46 @@ namespace
 
         // Without the capability, the same shape stays on the global first-E
         // mapping and is not row-uniform.
-        const auto split
-            = TensileLite::streamKStaticSplit(tiles, itersPerTile, skGrid, 1, false);
+        const auto split = TensileLite::streamKStaticSplit(tiles, itersPerTile, skGrid, 1, false);
         EXPECT_FALSE(TensileLite::streamKStaticSplitRowUniform(split,
-                                                              tiles,
-                                                              itersPerTile,
-                                                              skGrid,
-                                                              /*perTileCapable=*/false,
-                                                              /*uniformSummationOrder=*/true));
+                                                               tiles,
+                                                               itersPerTile,
+                                                               skGrid,
+                                                               /*perTileCapable=*/false,
+                                                               /*uniformSummationOrder=*/true));
         EXPECT_TRUE(TensileLite::streamKStaticSplitRowUniform(split,
-                                                             tiles,
-                                                             itersPerTile,
-                                                             skGrid,
-                                                             /*perTileCapable=*/true,
-                                                             /*uniformSummationOrder=*/true));
-        // Capability alone is not enough: with the mode off the kernel still runs the
-        // global first-E mapping.
-        EXPECT_FALSE(TensileLite::streamKStaticSplitRowUniform(split,
                                                               tiles,
                                                               itersPerTile,
                                                               skGrid,
                                                               /*perTileCapable=*/true,
-                                                              /*uniformSummationOrder=*/false));
+                                                              /*uniformSummationOrder=*/true));
+        // Capability alone is not enough: with the mode off the kernel still runs the
+        // global first-E mapping.
+        EXPECT_FALSE(TensileLite::streamKStaticSplitRowUniform(split,
+                                                               tiles,
+                                                               itersPerTile,
+                                                               skGrid,
+                                                               /*perTileCapable=*/true,
+                                                               /*uniformSummationOrder=*/false));
 
         // When I % F == 0 the per-tile mapping must match the global E==0 path.
         constexpr size_t evenI = 16;
         for(size_t w = 0; w < skGrid; ++w)
         {
-            const auto perTile = TensileLite::streamKWorkgroupIterRange(
-                w, tiles, evenI, skGrid, /*perTileCapable=*/true,
-                /*uniformSummationOrder=*/true);
-            const auto global = TensileLite::streamKWorkgroupIterRange(
-                w, tiles, evenI, skGrid, /*perTileCapable=*/false,
-                /*uniformSummationOrder=*/true);
+            const auto perTile
+                = TensileLite::streamKWorkgroupIterRange(w,
+                                                         tiles,
+                                                         evenI,
+                                                         skGrid,
+                                                         /*perTileCapable=*/true,
+                                                         /*uniformSummationOrder=*/true);
+            const auto global
+                = TensileLite::streamKWorkgroupIterRange(w,
+                                                         tiles,
+                                                         evenI,
+                                                         skGrid,
+                                                         /*perTileCapable=*/false,
+                                                         /*uniformSummationOrder=*/true);
             EXPECT_EQ(perTile.start, global.start) << "w=" << w;
             EXPECT_EQ(perTile.end, global.end) << "w=" << w;
         }
@@ -1283,26 +1318,26 @@ namespace
     // on this mock.
     std::shared_ptr<TensileLite::ContractionSolution> probeSolution()
     {
-        auto solution                            = std::make_shared<TensileLite::ContractionSolution>();
-        solution->kernelName                     = "row_uniformity_probe_kernel";
+        auto solution        = std::make_shared<TensileLite::ContractionSolution>();
+        solution->kernelName = "row_uniformity_probe_kernel";
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
-        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
-        solution->sizeMapping.streamKAtomic      = 0;
+        solution->sizeMapping.workAssignment         = TensileLite::WorkAssignment::StaticGrid;
+        solution->sizeMapping.streamKAtomic          = 0;
 
-        solution->sizeMapping.macroTile          = TensileLite::dim3(128, 128, 1);
-        solution->sizeMapping.workGroupSize      = TensileLite::dim3(256, 1, 1);
-        solution->sizeMapping.threadTile         = TensileLite::dim3(1, 1, 1);
-        solution->sizeMapping.depthU             = 256;
-        solution->sizeMapping.matrixInstruction  = {32, 32, 128, 1};
-        solution->sizeMapping.LocalSplitU        = 1;
-        solution->sizeMapping.packBatchDims      = 0;
-        solution->sizeMapping.workGroupMapping   = 1;
+        solution->sizeMapping.macroTile           = TensileLite::dim3(128, 128, 1);
+        solution->sizeMapping.workGroupSize       = TensileLite::dim3(256, 1, 1);
+        solution->sizeMapping.threadTile          = TensileLite::dim3(1, 1, 1);
+        solution->sizeMapping.depthU              = 256;
+        solution->sizeMapping.matrixInstruction   = {32, 32, 128, 1};
+        solution->sizeMapping.LocalSplitU         = 1;
+        solution->sizeMapping.packBatchDims       = 0;
+        solution->sizeMapping.workGroupMapping    = 1;
         solution->sizeMapping.workGroupMappingXCC = 0;
-        solution->sizeMapping.staggerU           = 0;
-        solution->sizeMapping.globalSplitU       = 1;
-        solution->sizeMapping.globalAccumulation = 4;
-        solution->internalArgsSupport.staggerU   = true;
-        solution->problemType.mxScaleFormat      = 1;
+        solution->sizeMapping.staggerU            = 0;
+        solution->sizeMapping.globalSplitU        = 1;
+        solution->sizeMapping.globalAccumulation  = 4;
+        solution->internalArgsSupport.staggerU    = true;
+        solution->problemType.mxScaleFormat       = 1;
         return solution;
     }
 
@@ -1341,19 +1376,23 @@ namespace
         EXPECT_EQ(solution->getSKReduction(problem, hardware), origami::reduction_t::tree);
         const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
         ASSERT_GT(tiles, 0u);
-        const size_t grid = solution->getSKGrid(problem, hardware, tiles, origami::reduction_t::tree);
+        const size_t grid
+            = solution->getSKGrid(problem, hardware, tiles, origami::reduction_t::tree);
         ASSERT_GT(grid, 0u);
-        const size_t iters
-            = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
-        const auto split = TensileLite::streamKStaticSplit(
-            tiles, iters, grid, hardware.skFullTiles, solution->sizeMapping.isPersistentDataParallel());
-        EXPECT_TRUE(
-            TensileLite::streamKStaticSplitRowUniform(split,
-                                                      tiles,
-                                                      iters,
-                                                      grid,
-                                                      solution->internalArgsSupport.perTileExtraIters,
-                                                      problem.getParams().uniformSummationOrder()))
+        const size_t iters = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
+        const auto   split
+            = TensileLite::streamKStaticSplit(tiles,
+                                              iters,
+                                              grid,
+                                              hardware.skFullTiles,
+                                              solution->sizeMapping.isPersistentDataParallel());
+        EXPECT_TRUE(TensileLite::streamKStaticSplitRowUniform(
+            split,
+            tiles,
+            iters,
+            grid,
+            solution->internalArgsSupport.perTileExtraIters,
+            problem.getParams().uniformSummationOrder()))
             << "the unmodified probe must be launch-legal on the static split "
                "(tiles="
             << tiles << " grid=" << grid << " skTiles=" << split.skTiles
@@ -1383,8 +1422,8 @@ namespace
     // free index per operand, so PackBatchDims is the reachable half.
     TEST(RowUniformityStreamKRejection_pre_checkin, PackedC0IndexSet)
     {
-        const auto hardware                  = probeHardware();
-        auto       solution                  = probeSolution();
+        const auto hardware                 = probeHardware();
+        auto       solution                 = probeSolution();
         solution->sizeMapping.packBatchDims = 0x1;
 
         EXPECT_FALSE(admitsUniformSummationOrder(*solution, hardware))
@@ -1393,8 +1432,8 @@ namespace
 
     TEST(RowUniformityStreamKRejection_pre_checkin, PackedC1IndexSet)
     {
-        const auto hardware                  = probeHardware();
-        auto       solution                  = probeSolution();
+        const auto hardware                 = probeHardware();
+        auto       solution                 = probeSolution();
         solution->sizeMapping.packBatchDims = 0x2;
 
         EXPECT_FALSE(admitsUniformSummationOrder(*solution, hardware))
@@ -1406,8 +1445,8 @@ namespace
     // partials store StreamK writes.
     TEST(RowUniformityStreamKRejection_pre_checkin, WaveSplitK)
     {
-        const auto hardware                  = probeHardware();
-        auto       solution                  = probeSolution();
+        const auto hardware                 = probeHardware();
+        auto       solution                 = probeSolution();
         solution->sizeMapping.workGroupSize = TensileLite::dim3(256, 1, 16);
         solution->sizeMapping.LocalSplitU   = 1;
 
@@ -1420,8 +1459,8 @@ namespace
     // stay accepted: the two are mutually exclusive projections of one slot.
     TEST(RowUniformityStreamKRejection_pre_checkin, LocalSplitUIsNotWaveSplitK)
     {
-        const auto hardware                  = probeHardware();
-        auto       solution                  = probeSolution();
+        const auto hardware                 = probeHardware();
+        auto       solution                 = probeSolution();
         solution->sizeMapping.workGroupSize = TensileLite::dim3(256, 1, 16);
         solution->sizeMapping.LocalSplitU   = 16;
 
@@ -1434,11 +1473,11 @@ namespace
     // StreamK 0, and an unconditional form would refuse them for nothing.
     TEST(RowUniformityStreamKRejection_pre_checkin, WaveSplitKWithoutStreamK)
     {
-        const auto hardware                  = probeHardware();
-        auto       solution                  = probeSolution();
+        const auto hardware                          = probeHardware();
+        auto       solution                          = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
-        solution->sizeMapping.workGroupSize = TensileLite::dim3(256, 1, 16);
-        solution->sizeMapping.LocalSplitU   = 1;
+        solution->sizeMapping.workGroupSize          = TensileLite::dim3(256, 1, 16);
+        solution->sizeMapping.LocalSplitU            = 1;
 
         EXPECT_TRUE(admitsUniformSummationOrder(*solution, hardware))
             << "WaveSplitK without StreamK must stay admitted";
@@ -1466,12 +1505,12 @@ namespace
     // must stay admitted rather than being refused for nothing.
     TEST(RowUniformityStreamKRejection_pre_checkin, GeneratedKernelWithCompiledInStaggerU)
     {
-        const auto hardware                    = probeHardware();
-        auto       solution                    = probeSolution();
+        const auto hardware                          = probeHardware();
+        auto       solution                          = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
-        solution->internalArgsSupport.staggerU = false;
-        solution->sizeMapping.staggerU         = 16;
-        auto problem                           = probeProblem();
+        solution->internalArgsSupport.staggerU       = false;
+        solution->sizeMapping.staggerU               = 16;
+        auto problem                                 = probeProblem();
 
         // The admission below is only meaningful because the clamp really does
         // settle this launch at StaggerU 0: it is the resolved value, not the
@@ -1488,13 +1527,13 @@ namespace
 
     TEST(RowUniformityStreamKRejection_pre_checkin, UsoKeepsStaggerOnlyWhenMappingIsAlready1)
     {
-        const auto hardware                    = probeHardware();
-        auto       solution                    = probeSolution();
+        const auto hardware                          = probeHardware();
+        auto       solution                          = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
-        solution->internalArgsSupport.staggerU = true;
-        solution->sizeMapping.staggerUMapping  = 1;
-        solution->sizeMapping.staggerU         = 16;
-        auto problem                           = probeProblem();
+        solution->internalArgsSupport.staggerU       = true;
+        solution->sizeMapping.staggerUMapping        = 1;
+        solution->sizeMapping.staggerU               = 16;
+        auto problem                                 = probeProblem();
         {
             const int32_t autoWGM
                 = std::get<0>(solution->calculateAutoWGM(problem, &hardware, /*skgrid=*/0));
@@ -1505,11 +1544,11 @@ namespace
             EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware));
         }
 
-        auto remap = probeSolution();
+        auto remap                                = probeSolution();
         remap->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
-        remap->internalArgsSupport.staggerU   = true;
-        remap->sizeMapping.staggerUMapping    = 0;
-        remap->sizeMapping.staggerU           = 16;
+        remap->internalArgsSupport.staggerU       = true;
+        remap->sizeMapping.staggerUMapping        = 0;
+        remap->sizeMapping.staggerU               = 16;
         {
             const int32_t autoWGM
                 = std::get<0>(remap->calculateAutoWGM(problem, &hardware, /*skgrid=*/0));
@@ -1581,14 +1620,14 @@ namespace
     // becomes admissible.
     TEST(RowUniformityStreamKRejection_pre_checkin, HandwrittenCustomKernelWithCompiledInStaggerU)
     {
-        const auto hardware                    = probeHardware();
-        auto       solution                    = probeSolution();
+        const auto hardware                          = probeHardware();
+        auto       solution                          = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
-        solution->internalArgsSupport.staggerU = false;
-        solution->sizeMapping.staggerU         = 16;
-        solution->customKernel.name            = "DummyCustomKernel";
-        solution->customKernel.generated       = false;
-        auto problem                           = probeProblem();
+        solution->internalArgsSupport.staggerU       = false;
+        solution->sizeMapping.staggerU               = 16;
+        solution->customKernel.name                  = "DummyCustomKernel";
+        solution->customKernel.generated             = false;
+        auto problem                                 = probeProblem();
 
         EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))
             << "a hand-written custom kernel with a compiled-in StaggerU must be refused";
@@ -1600,13 +1639,13 @@ namespace
     // now resolves accumulation the same way solve() does.
     TEST(RowUniformityStreamKRejection_pre_checkin, AdaptiveGsuThatLaunchWouldReject)
     {
-        const auto hardware                      = probeHardware();
-        auto       solution                      = probeSolution();
+        const auto hardware                          = probeHardware();
+        auto       solution                          = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
-        solution->sizeMapping.adaptiveGemmGSUA   = 1;
-        solution->sizeMapping.globalAccumulation = 0;
-        solution->sizeMapping.globalSplitU       = 4;
-        auto problem                             = probeProblem();
+        solution->sizeMapping.adaptiveGemmGSUA       = 1;
+        solution->sizeMapping.globalAccumulation     = 0;
+        solution->sizeMapping.globalSplitU           = 4;
+        auto problem                                 = probeProblem();
 
         // 1024x1024x1024 / MT 128x128 / DepthU 256 → 64 tiles, 4 iters/tile,
         // GSU 4. AdaptiveGemmGSUA upgrades to MultipleBuffer only when
@@ -1628,11 +1667,11 @@ namespace
     // return it as a USO winner.
     TEST(RowUniformityStreamKRejection_pre_checkin, DynamicStreamKGridDoesNotDivideTiles)
     {
-        const auto hardware           = probeHardware();
-        auto       solution           = probeSolution();
+        const auto hardware                          = probeHardware();
+        auto       solution                          = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
         solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
-        auto problem                  = probeProblem();
+        auto problem                         = probeProblem();
 
         ASSERT_EQ(hardware.persistentDynamicGrid, 0);
         const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
@@ -1657,9 +1696,9 @@ namespace
     // the clamp to repair a grid after the fact.
     TEST(RowUniformityStreamKRejection_pre_checkin, FlagClampedDynamicGridFailsClosed)
     {
-        auto hardware                 = probeHardware();
-        hardware.persistentFixedGrid          = 4096;
-        auto solution                 = probeSolution();
+        auto hardware                                = probeHardware();
+        hardware.persistentFixedGrid                 = 4096;
+        auto solution                                = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
         solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
 
@@ -1694,12 +1733,12 @@ namespace
 
     TEST(RowUniformityStreamKRejection_pre_checkin, FilterIsIdleWhenUniformSummationOrderIsOff)
     {
-        const auto hardware           = probeHardware();
-        auto       solution           = probeSolution();
+        const auto hardware                          = probeHardware();
+        auto       solution                          = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
         solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
-        auto problemOn                = probeProblem();
-        auto problemOff               = probeProblem();
+        auto problemOn                       = probeProblem();
+        auto problemOff                      = probeProblem();
         problemOff.setParams().setUniformSummationOrder(0);
 
         EXPECT_TRUE(solution->uniformSummationOrderSupported(problemOn, hardware))
@@ -1721,10 +1760,10 @@ namespace
 
     TEST(RowUniformityStreamKRejection_pre_checkin, GroupedGemmNonStreamKStillAdmitted)
     {
-        const auto hardware           = probeHardware();
-        auto       solution           = probeSolution();
+        const auto hardware                          = probeHardware();
+        auto       solution                          = probeSolution();
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
-        auto problem                  = probeProblem();
+        auto problem                                 = probeProblem();
         problem.setGroupedGemm(true);
 
         EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware))
@@ -1766,10 +1805,10 @@ namespace
         const MXCase& c        = GetParam();
         const auto    hardware = probeHardware();
 
-        auto solution                    = probeSolution();
-        solution->problemType.mxBlockA   = c.mxBlock;
-        solution->problemType.mxBlockB   = c.mxBlock;
-        solution->sizeMapping.depthU     = c.depthU;
+        auto solution                  = probeSolution();
+        solution->problemType.mxBlockA = c.mxBlock;
+        solution->problemType.mxBlockB = c.mxBlock;
+        solution->sizeMapping.depthU   = c.depthU;
 
         EXPECT_EQ(!admitsUniformSummationOrder(*solution, hardware), c.rejected)
             << "mxBlock=" << c.mxBlock << " depthU=" << c.depthU;
@@ -1787,8 +1826,8 @@ namespace
     // than a violated one, so the envelope is pinned too.
     TEST(RowUniformityStreamKRejection_pre_checkin, MXScaleFormatEnvelope)
     {
-        const auto hardware                  = probeHardware();
-        auto       solution                  = probeSolution();
+        const auto hardware                 = probeHardware();
+        auto       solution                 = probeSolution();
         solution->problemType.mxBlockA      = 32;
         solution->problemType.mxBlockB      = 32;
         solution->problemType.mxScaleFormat = 2; // InMemorySwizzle
@@ -1799,10 +1838,10 @@ namespace
 
     TEST(RowUniformityStreamKRejection_pre_checkin, MXMatrixInstKEnvelope)
     {
-        const auto hardware                       = probeHardware();
-        auto       solution                       = probeSolution();
-        solution->problemType.mxBlockA           = 32;
-        solution->problemType.mxBlockB           = 32;
+        const auto hardware                     = probeHardware();
+        auto       solution                     = probeSolution();
+        solution->problemType.mxBlockA          = 32;
+        solution->problemType.mxBlockB          = 32;
         solution->sizeMapping.matrixInstruction = {32, 32, 64, 1};
 
         EXPECT_FALSE(admitsUniformSummationOrder(*solution, hardware))
@@ -1837,33 +1876,33 @@ namespace
     // would collapse the grid to the tile count and quietly move every case
     // into the regime the gate already accepted.
     TensileLite::ContractionProblemGemm tensileProblemFor(const Problem& problem,
-                                                         size_t         workspaceBytes)
+                                                          size_t         workspaceBytes)
     {
-        const rocisa::DataType ab = problem.abType == HIP_R_32F ? rocisa::DataType::Float
-                                                                : rocisa::DataType::BFloat16;
-        const size_t           m  = static_cast<size_t>(problem.m);
-        const size_t           n  = static_cast<size_t>(problem.n);
-        const size_t           k  = static_cast<size_t>(problem.k);
+        const rocisa::DataType ab
+            = problem.abType == HIP_R_32F ? rocisa::DataType::Float : rocisa::DataType::BFloat16;
+        const size_t m = static_cast<size_t>(problem.m);
+        const size_t n = static_cast<size_t>(problem.n);
+        const size_t k = static_cast<size_t>(problem.k);
 
         auto tensile = TensileLite::ContractionProblemGemm::GEMM_Strides(false,
-                                                                        false,
-                                                                        ab,
-                                                                        ab,
-                                                                        rocisa::DataType::Float,
-                                                                        rocisa::DataType::Float,
-                                                                        m,
-                                                                        n,
-                                                                        k,
-                                                                        1,
-                                                                        m,
-                                                                        m * k,
-                                                                        k,
-                                                                        k * n,
-                                                                        m,
-                                                                        m * n,
-                                                                        m,
-                                                                        m * n,
-                                                                        0.0);
+                                                                         false,
+                                                                         ab,
+                                                                         ab,
+                                                                         rocisa::DataType::Float,
+                                                                         rocisa::DataType::Float,
+                                                                         m,
+                                                                         n,
+                                                                         k,
+                                                                         1,
+                                                                         m,
+                                                                         m * k,
+                                                                         k,
+                                                                         k * n,
+                                                                         m,
+                                                                         m * n,
+                                                                         m,
+                                                                         m * n,
+                                                                         0.0);
         tensile.setComputeInputTypeA(ab);
         tensile.setComputeInputTypeB(ab);
         tensile.setAlphaType(rocisa::DataType::Float);
@@ -1892,32 +1931,34 @@ namespace
 
         out.streamK = true;
 
-        const bool effectiveDynamic = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid
-                                          ? solution.streamK5EffectiveDynamic(tensile, hardware)
-                                          : false;
-        out.staticPacking           = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::StaticGrid
-                                      || (solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid && !effectiveDynamic);
+        const bool effectiveDynamic
+            = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid
+                  ? solution.streamK5EffectiveDynamic(tensile, hardware)
+                  : false;
+        out.staticPacking
+            = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::StaticGrid
+              || (solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid
+                  && !effectiveDynamic);
 
-        const origami::reduction_t reduction
-            = effectiveDynamic ? origami::reduction_t::tree
-                               : solution.getSKReduction(tensile, hardware);
-        out.tree = reduction == origami::reduction_t::tree;
+        const origami::reduction_t reduction = effectiveDynamic
+                                                   ? origami::reduction_t::tree
+                                                   : solution.getSKReduction(tensile, hardware);
+        out.tree                             = reduction == origami::reduction_t::tree;
 
-        out.tiles = tensile.getNumTiles(solution.sizeMapping, 1);
-        out.itersPerTile
-            = std::max(size_t{1}, tensile.getItersPerTile(solution.sizeMapping));
-        out.grid = solution.getSKGrid(tensile, hardware, out.tiles, reduction);
+        out.tiles        = tensile.getNumTiles(solution.sizeMapping, 1);
+        out.itersPerTile = std::max(size_t{1}, tensile.getItersPerTile(solution.sizeMapping));
+        out.grid         = solution.getSKGrid(tensile, hardware, out.tiles, reduction);
 
         if(!out.staticPacking || !out.tree || out.grid == 0)
             return out;
 
         auto const* amdgpu = dynamic_cast<TensileLite::AMDGPU const*>(&hardware);
-        out.split          = TensileLite::streamKStaticSplit(
-            out.tiles,
-            out.itersPerTile,
-            out.grid,
-            amdgpu != nullptr ? amdgpu->skFullTiles : 1,
-            solution.sizeMapping.isPersistentDataParallel());
+        out.split
+            = TensileLite::streamKStaticSplit(out.tiles,
+                                              out.itersPerTile,
+                                              out.grid,
+                                              amdgpu != nullptr ? amdgpu->skFullTiles : 1,
+                                              solution.sizeMapping.isPersistentDataParallel());
         out.perTileExtraIters = solution.internalArgsSupport.perTileExtraIters;
         out.rowUniform        = TensileLite::streamKStaticSplitRowUniform(
             out.split,
@@ -1926,8 +1967,7 @@ namespace
             out.grid,
             out.perTileExtraIters,
             tensile.getParams().uniformSummationOrder());
-        out.newlyAdmitted
-            = out.rowUniform && out.split.skTiles != 0 && out.tiles % out.grid != 0;
+        out.newlyAdmitted = out.rowUniform && out.split.skTiles != 0 && out.tiles % out.grid != 0;
         return out;
     }
 
@@ -1977,183 +2017,181 @@ namespace
             int        enumeratedCount = 0;
             const auto candidates      = harness.candidateAlgos(enumeratedCount, 256);
 
-                int         streamKCandidates   = 0;
-                int         admitted            = 0;
-                int         admittedParallel    = 0;
-                int         refusedParallel     = 0;
-                std::string firstAdmitted;
+            int         streamKCandidates = 0;
+            int         admitted          = 0;
+            int         admittedParallel  = 0;
+            int         refusedParallel   = 0;
+            std::string firstAdmitted;
 
-                for(const auto& candidate : candidates)
+            for(const auto& candidate : candidates)
+            {
+                std::string reason;
+                auto        solution = solutionForAlgo(candidate, reason);
+                if(!solution)
+                    continue;
+
+                const StreamKResolution resolved = resolveStreamK(*solution, tensile, *hardware);
+                if(!resolved.streamK)
+                    continue;
+                ++streamKCandidates;
+
+                const std::string name = harness.solutionName(candidate);
+
+                // Parallel reduction: admit when the shared helper would
+                // (F = grid/tiles >= 2 and grid % tiles == 0 under static
+                // two-tile packing). Otherwise still refuse.
+                if(resolved.staticPacking && !resolved.tree)
                 {
-                    std::string reason;
-                    auto        solution = solutionForAlgo(candidate, reason);
-                    if(!solution)
-                        continue;
-
-                    const StreamKResolution resolved
-                        = resolveStreamK(*solution, tensile, *hardware);
-                    if(!resolved.streamK)
-                        continue;
-                    ++streamKCandidates;
-
-                    const std::string name = harness.solutionName(candidate);
-
-                    // Parallel reduction: admit when the shared helper would
-                    // (F = grid/tiles >= 2 and grid % tiles == 0 under static
-                    // two-tile packing). Otherwise still refuse.
-                    if(resolved.staticPacking && !resolved.tree)
+                    const bool admitParallel = resolved.tiles != 0
+                                               && resolved.grid % resolved.tiles == 0
+                                               && (resolved.grid / resolved.tiles) >= 2;
+                    if(admitParallel)
                     {
-                        const bool admitParallel
-                            = resolved.tiles != 0 && resolved.grid % resolved.tiles == 0
-                              && (resolved.grid / resolved.tiles) >= 2;
-                        if(admitParallel)
-                        {
-                            EXPECT_EQ(harness.run(candidate, /*uniformMode=*/true),
-                                      HIPBLAS_STATUS_SUCCESS)
-                                << name
-                                << " resolves to row-uniform parallel reduction and must be "
-                                   "honored";
-                            EXPECT_EQ(harness.firstNonUniformRowOfLastRun(), -1)
-                                << name << " parallel launch must keep identical D rows";
-                            ++admittedParallel;
-                            continue;
-                        }
-
                         EXPECT_EQ(harness.run(candidate, /*uniformMode=*/true),
-                                  HIPBLAS_STATUS_INVALID_VALUE)
+                                  HIPBLAS_STATUS_SUCCESS)
                             << name
-                            << " resolves to parallel reduction that is not row-uniform and "
-                               "must still be refused";
-                        ++refusedParallel;
+                            << " resolves to row-uniform parallel reduction and must be "
+                               "honored";
+                        EXPECT_EQ(harness.firstNonUniformRowOfLastRun(), -1)
+                            << name << " parallel launch must keep identical D rows";
+                        ++admittedParallel;
                         continue;
                     }
 
-                    if(!resolved.newlyAdmitted)
-                        continue;
-
-                    // The split is only one of the gate's clauses. Consulting the
-                    // selection-time predicate for the rest -- it now resolves
-                    // StreamK / GSU / StaggerU the same way solve() does -- is
-                    // what makes the success assertion below an assertion about
-                    // a launch-legal winner, not a kernel the gate would still
-                    // refuse.
-                    if(!solution->uniformSummationOrderSupported(tensile, *hardware))
-                        continue;
-
-                    // Pin the resolution, not just the outcome: asserting only
-                    // success would let a future threshold change degrade this case
-                    // into a duplicate of the pre-existing one with no signal.
-                    //
-                    // Clause 2 is grid = F * tiles with F >= 2 and skTiles == tiles.
-                    // That admits two K-splits:
-                    //   even: extraIters == 0 and I % skItersPerWG == 0 (F divides I)
-                    //   leftover: extraIters != 0, admitted only when the kernel
-                    //     redistributes extras within each tile. Intra-tile chunk
-                    //     lengths may still differ when I % F != 0; that is the
-                    //     leftover regime, not the even-split one.
-                    EXPECT_EQ(resolved.grid % resolved.tiles, 0u)
-                        << name << ": clause 2 requires the grid to be a multiple of the tile count";
-                    EXPECT_NE(resolved.grid, resolved.tiles)
-                        << name << ": a grid equal to the tile count is the pre-existing regime";
-                    EXPECT_EQ(resolved.split.skTiles, resolved.tiles);
-                    EXPECT_NE(resolved.split.skItersPerWG, resolved.itersPerTile);
-                    ASSERT_NE(resolved.split.skItersPerWG, 0u);
-
-                    const bool leftoverSplit = resolved.split.extraIters != 0u;
-                    if(leftoverSplit)
-                    {
-                        EXPECT_TRUE(resolved.perTileExtraIters)
-                            << name << ": leftover extraIters=" << resolved.split.extraIters
-                            << " (itersPerTile%skItersPerWG="
-                            << (resolved.itersPerTile % resolved.split.skItersPerWG)
-                            << ") is admitted only with per-tile extra-iters; do not "
-                               "classify it as the even K-split";
-                    }
-                    else
-                    {
-                        EXPECT_EQ(resolved.split.extraIters, 0u);
-                        EXPECT_EQ(resolved.itersPerTile % resolved.split.skItersPerWG, 0u);
-                    }
-
-                    if(admitted == 0)
-                    {
-                        firstAdmitted = name;
-                        RecordProperty("tiles", static_cast<int>(resolved.tiles));
-                        RecordProperty("iters_per_tile", static_cast<int>(resolved.itersPerTile));
-                        RecordProperty("sk_grid", static_cast<int>(resolved.grid));
-                        RecordProperty("grid_over_tiles",
-                                       static_cast<int>(resolved.grid / resolved.tiles));
-                        RecordProperty("sk_tiles", static_cast<int>(resolved.split.skTiles));
-                        RecordProperty("sk_iters_per_wg",
-                                       static_cast<int>(resolved.split.skItersPerWG));
-                        RecordProperty("extra_iters",
-                                       static_cast<int>(resolved.split.extraIters));
-                        RecordProperty("leftover_split", leftoverSplit ? 1 : 0);
-                    }
-                    ++admitted;
-
-                    EXPECT_EQ(harness.run(candidate, /*uniformMode=*/true), HIPBLAS_STATUS_SUCCESS)
-                        << name << " has a row-uniform StreamK split (tiles=" << resolved.tiles
-                        << " itersPerTile=" << resolved.itersPerTile << " grid=" << resolved.grid
-                        << " skTiles=" << resolved.split.skTiles
-                        << " skItersPerWG=" << resolved.split.skItersPerWG
-                        << " extraIters=" << resolved.split.extraIters
-                        << (leftoverSplit ? ", leftover per-tile extra-iters" : ", even K-split")
-                        << ") and must be admitted rather than refused";
-
-                    const int64_t badRow = harness.firstNonUniformRowOfLastRun();
-                    EXPECT_EQ(badRow, -1)
-                        << "Row " << badRow << " of D differs bitwise from row 0 for " << name;
+                    EXPECT_EQ(harness.run(candidate, /*uniformMode=*/true),
+                              HIPBLAS_STATUS_INVALID_VALUE)
+                        << name
+                        << " resolves to parallel reduction that is not row-uniform and "
+                           "must still be refused";
+                    ++refusedParallel;
+                    continue;
                 }
 
-                RecordProperty("arch", gpuArchName());
-                RecordProperty("algos_enumerated", enumeratedCount);
-                RecordProperty("candidates_tried", static_cast<int>(candidates.size()));
-                RecordProperty("streamk_candidates", streamKCandidates);
-                RecordProperty("newly_admitted", admitted);
-                RecordProperty("admitted_parallel", admittedParallel);
-                RecordProperty("refused_parallel", refusedParallel);
+                if(!resolved.newlyAdmitted)
+                    continue;
 
-                if(admitted == 0 && admittedParallel == 0 && refusedParallel == 0)
+                // The split is only one of the gate's clauses. Consulting the
+                // selection-time predicate for the rest -- it now resolves
+                // StreamK / GSU / StaggerU the same way solve() does -- is
+                // what makes the success assertion below an assertion about
+                // a launch-legal winner, not a kernel the gate would still
+                // refuse.
+                if(!solution->uniformSummationOrderSupported(tensile, *hardware))
+                    continue;
+
+                // Pin the resolution, not just the outcome: asserting only
+                // success would let a future threshold change degrade this case
+                // into a duplicate of the pre-existing one with no signal.
+                //
+                // Clause 2 is grid = F * tiles with F >= 2 and skTiles == tiles.
+                // That admits two K-splits:
+                //   even: extraIters == 0 and I % skItersPerWG == 0 (F divides I)
+                //   leftover: extraIters != 0, admitted only when the kernel
+                //     redistributes extras within each tile. Intra-tile chunk
+                //     lengths may still differ when I % F != 0; that is the
+                //     leftover regime, not the even-split one.
+                EXPECT_EQ(resolved.grid % resolved.tiles, 0u)
+                    << name << ": clause 2 requires the grid to be a multiple of the tile count";
+                EXPECT_NE(resolved.grid, resolved.tiles)
+                    << name << ": a grid equal to the tile count is the pre-existing regime";
+                EXPECT_EQ(resolved.split.skTiles, resolved.tiles);
+                EXPECT_NE(resolved.split.skItersPerWG, resolved.itersPerTile);
+                ASSERT_NE(resolved.split.skItersPerWG, 0u);
+
+                const bool leftoverSplit = resolved.split.extraIters != 0u;
+                if(leftoverSplit)
                 {
-                    const std::string arch      = gpuArchName();
-                    const std::string processor = arch.substr(0, arch.find(':'));
-                    const std::string detail
-                        = std::string("No candidate resolved into either the newly admitted "
-                                      "StreamK split regime, an admitted parallel reduction, or "
-                                      "a refused parallel reduction, so this run witnessed "
-                                      "neither. arch=")
-                          + arch + " problem=" + std::to_string(problem.m) + "x"
-                          + std::to_string(problem.n) + "x" + std::to_string(problem.k)
-                          + " smCountTarget=" + std::to_string(problem.smCountTarget)
-                          + " useBias=" + (problem.useBias ? "1" : "0")
-                          + " algos_enumerated=" + std::to_string(enumeratedCount)
-                          + " candidates_tried=" + std::to_string(candidates.size())
-                          + " streamk_candidates=" + std::to_string(streamKCandidates);
-                    // No Stream-K kernels in this device library for this
-                    // problem: skip rather than fail-closed. Math CI gfx942 and
-                    // TheRock gfx94X enumerate algos but streamk_candidates==0
-                    // even with Bias; the GridBased exact-size SK entry from
-                    // report 09 is not in those libraries.
-                    if(streamKCandidates == 0)
-                        GTEST_SKIP() << detail;
-                    // Fail-closed only when Stream-K candidates exist and still
-                    // none of the ClauseTwo outcomes fired (gate/steering bug):
-                    //   gfx950 + no-bias  (Math CI / local MI355X)
-                    //   gfx942 + Bias     (only if this library actually has SK)
-                    // Elsewhere skip: gfx1201 and other empty-SK arches are
-                    // already covered by streamKCandidates==0 above.
-                    const bool expectWitness
-                        = (processor.rfind("gfx950", 0) == 0 && !problem.useBias)
-                          || (processor.rfind("gfx942", 0) == 0 && problem.useBias);
-                    if(expectWitness)
-                        FAIL() << detail;
-                    GTEST_SKIP() << detail;
+                    EXPECT_TRUE(resolved.perTileExtraIters)
+                        << name << ": leftover extraIters=" << resolved.split.extraIters
+                        << " (itersPerTile%skItersPerWG="
+                        << (resolved.itersPerTile % resolved.split.skItersPerWG)
+                        << ") is admitted only with per-tile extra-iters; do not "
+                           "classify it as the even K-split";
+                }
+                else
+                {
+                    EXPECT_EQ(resolved.split.extraIters, 0u);
+                    EXPECT_EQ(resolved.itersPerTile % resolved.split.skItersPerWG, 0u);
                 }
 
-                RecordProperty("first_admitted_solution", firstAdmitted);
+                if(admitted == 0)
+                {
+                    firstAdmitted = name;
+                    RecordProperty("tiles", static_cast<int>(resolved.tiles));
+                    RecordProperty("iters_per_tile", static_cast<int>(resolved.itersPerTile));
+                    RecordProperty("sk_grid", static_cast<int>(resolved.grid));
+                    RecordProperty("grid_over_tiles",
+                                   static_cast<int>(resolved.grid / resolved.tiles));
+                    RecordProperty("sk_tiles", static_cast<int>(resolved.split.skTiles));
+                    RecordProperty("sk_iters_per_wg",
+                                   static_cast<int>(resolved.split.skItersPerWG));
+                    RecordProperty("extra_iters", static_cast<int>(resolved.split.extraIters));
+                    RecordProperty("leftover_split", leftoverSplit ? 1 : 0);
+                }
+                ++admitted;
+
+                EXPECT_EQ(harness.run(candidate, /*uniformMode=*/true), HIPBLAS_STATUS_SUCCESS)
+                    << name << " has a row-uniform StreamK split (tiles=" << resolved.tiles
+                    << " itersPerTile=" << resolved.itersPerTile << " grid=" << resolved.grid
+                    << " skTiles=" << resolved.split.skTiles
+                    << " skItersPerWG=" << resolved.split.skItersPerWG
+                    << " extraIters=" << resolved.split.extraIters
+                    << (leftoverSplit ? ", leftover per-tile extra-iters" : ", even K-split")
+                    << ") and must be admitted rather than refused";
+
+                const int64_t badRow = harness.firstNonUniformRowOfLastRun();
+                EXPECT_EQ(badRow, -1)
+                    << "Row " << badRow << " of D differs bitwise from row 0 for " << name;
             }
-        };
+
+            RecordProperty("arch", gpuArchName());
+            RecordProperty("algos_enumerated", enumeratedCount);
+            RecordProperty("candidates_tried", static_cast<int>(candidates.size()));
+            RecordProperty("streamk_candidates", streamKCandidates);
+            RecordProperty("newly_admitted", admitted);
+            RecordProperty("admitted_parallel", admittedParallel);
+            RecordProperty("refused_parallel", refusedParallel);
+
+            if(admitted == 0 && admittedParallel == 0 && refusedParallel == 0)
+            {
+                const std::string arch      = gpuArchName();
+                const std::string processor = arch.substr(0, arch.find(':'));
+                const std::string detail
+                    = std::string("No candidate resolved into either the newly admitted "
+                                  "StreamK split regime, an admitted parallel reduction, or "
+                                  "a refused parallel reduction, so this run witnessed "
+                                  "neither. arch=")
+                      + arch + " problem=" + std::to_string(problem.m) + "x"
+                      + std::to_string(problem.n) + "x" + std::to_string(problem.k)
+                      + " smCountTarget=" + std::to_string(problem.smCountTarget)
+                      + " useBias=" + (problem.useBias ? "1" : "0")
+                      + " algos_enumerated=" + std::to_string(enumeratedCount)
+                      + " candidates_tried=" + std::to_string(candidates.size())
+                      + " streamk_candidates=" + std::to_string(streamKCandidates);
+                // No Stream-K kernels in this device library for this
+                // problem: skip rather than fail-closed. Math CI gfx942 and
+                // TheRock gfx94X enumerate algos but streamk_candidates==0
+                // even with Bias; the GridBased exact-size SK entry from
+                // report 09 is not in those libraries.
+                if(streamKCandidates == 0)
+                    GTEST_SKIP() << detail;
+                // Fail-closed only when Stream-K candidates exist and still
+                // none of the ClauseTwo outcomes fired (gate/steering bug):
+                //   gfx950 + no-bias  (Math CI / local MI355X)
+                //   gfx942 + Bias     (only if this library actually has SK)
+                // Elsewhere skip: gfx1201 and other empty-SK arches are
+                // already covered by streamKCandidates==0 above.
+                const bool expectWitness
+                    = (processor.rfind("gfx950", 0) == 0 && !problem.useBias)
+                      || (processor.rfind("gfx942", 0) == 0 && problem.useBias);
+                if(expectWitness)
+                    FAIL() << detail;
+                GTEST_SKIP() << detail;
+            }
+
+            RecordProperty("first_admitted_solution", firstAdmitted);
+        }
+    };
 
     // An 80-CU budget through the public HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET
     // attribute. This is the configuration report 09 identified as reaching
@@ -2200,40 +2238,38 @@ namespace
     TensileLite::hip::HipAMDGPU uniformitySteeringDevice()
     {
         using arch_t = origami::hardware_t::architecture_t;
-        auto hw      = std::make_shared<origami::hardware_t>(
-            arch_t::gfx950,
-            /*N_CU=*/256,
-            /*L2=*/163840,
-            /*rf_capacity=*/262144,
-            /*NUM_XCD=*/8,
-            1.0,
-            1.0,
-            1.0,
-            4000000,
-            1.2,
-            1,
-            std::make_tuple(0.0, 0.008, 0.0));
+        auto hw      = std::make_shared<origami::hardware_t>(arch_t::gfx950,
+                                                        /*N_CU=*/256,
+                                                        /*L2=*/163840,
+                                                        /*rf_capacity=*/262144,
+                                                        /*NUM_XCD=*/8,
+                                                        1.0,
+                                                        1.0,
+                                                        1.0,
+                                                        4000000,
+                                                        1.2,
+                                                        1,
+                                                        std::make_tuple(0.0, 0.008, 0.0));
 
         TensileLite::hip::HipAMDGPU device;
-        device.processor          = TensileLite::AMDGPU::Processor::gfx950;
-        device.computeUnitCount   = 256;
-        device.deviceName         = "row_uniformity_grid_steering";
-        device.analyticalHardware = hw;
-        device.persistentDynamicGrid
-            = static_cast<int>(origami::grid_selection_t::k_split_aware);
-        device.persistentFixedGrid      = 0;
-        device.persistentMaxCUs         = 0;
+        device.processor             = TensileLite::AMDGPU::Processor::gfx950;
+        device.computeUnitCount      = 256;
+        device.deviceName            = "row_uniformity_grid_steering";
+        device.analyticalHardware    = hw;
+        device.persistentDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
+        device.persistentFixedGrid   = 0;
+        device.persistentMaxCUs      = 0;
         device.persistentGridMultiplier = 1;
         return device;
     }
 
     std::shared_ptr<TensileLite::ContractionSolution> uniformitySteeringSolution()
     {
-        auto solution = probeSolution();
-        solution->sizeMapping.depthU                = 64;
-        solution->sizeMapping.matrixInstruction     = {16, 16, 32, 1};
-        solution->sizeMapping.CUOccupancy           = 1;
-        solution->sizeMapping.workspaceSizePerElemC = 4;
+        auto solution                                   = probeSolution();
+        solution->sizeMapping.depthU                    = 64;
+        solution->sizeMapping.matrixInstruction         = {16, 16, 32, 1};
+        solution->sizeMapping.CUOccupancy               = 1;
+        solution->sizeMapping.workspaceSizePerElemC     = 4;
         solution->internalArgsSupport.perTileExtraIters = false;
         return solution;
     }
@@ -2250,17 +2286,18 @@ namespace
 
     TEST(RowUniformityGridSteering_pre_checkin, KeepParallelUnderUniformSummationOrderWhenEligible)
     {
-        auto solution = uniformitySteeringSolution();
-        auto device   = uniformitySteeringDevice();
-        auto problem  = uniformityGemm(512, 512, 8192);
-        const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
+        auto         solution = uniformitySteeringSolution();
+        auto         device   = uniformitySteeringDevice();
+        auto         problem  = uniformityGemm(512, 512, 8192);
+        const size_t tiles    = problem.getNumTiles(solution->sizeMapping, 1);
 
         problem.setParams().setUniformSummationOrder(0);
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::parallel);
 
         problem.setParams().setUniformSummationOrder(1);
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::parallel)
-            << "uniform summation order must keep parallel when SK3 static, non-atomic, and obstacles clear";
+            << "uniform summation order must keep parallel when SK3 static, non-atomic, and "
+               "obstacles clear";
 
         const size_t grid
             = solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel);
@@ -2279,26 +2316,27 @@ namespace
 
     TEST(RowUniformityGridSteering_pre_checkin, ForceTreeUnderUniformSummationOrderWhenIneligible)
     {
-        auto solution = uniformitySteeringSolution();
+        auto solution                       = uniformitySteeringSolution();
         solution->sizeMapping.streamKAtomic = 1;
-        auto device  = uniformitySteeringDevice();
-        auto problem = uniformityGemm(512, 512, 8192);
+        auto device                         = uniformitySteeringDevice();
+        auto problem                        = uniformityGemm(512, 512, 8192);
 
         problem.setParams().setUniformSummationOrder(0);
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::parallel);
 
         problem.setParams().setUniformSummationOrder(1);
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::tree)
-            << "uniform summation order must force tree when parallel is ineligible (StreamKAtomic=1)";
+            << "uniform summation order must force tree when parallel is ineligible "
+               "(StreamKAtomic=1)";
     }
 
     TEST(RowUniformityGridSteering_pre_checkin, ForceTreeUnderUniformSummationOrderCustomKernel)
     {
-        auto solution = uniformitySteeringSolution();
+        auto solution                    = uniformitySteeringSolution();
         solution->customKernel.name      = "DummyCustomKernel";
         solution->customKernel.generated = false;
-        auto device  = uniformitySteeringDevice();
-        auto problem = uniformityGemm(512, 512, 8192);
+        auto device                      = uniformitySteeringDevice();
+        auto problem                     = uniformityGemm(512, 512, 8192);
 
         problem.setParams().setUniformSummationOrder(0);
         EXPECT_EQ(solution->getSKReduction(problem, device), origami::reduction_t::tree);
@@ -2308,8 +2346,8 @@ namespace
 
     TEST(RowUniformityGridSteering_pre_checkin, NonDivisorGridBelowTilesSnapsToTiles)
     {
-        auto solution = uniformitySteeringSolution();
-        auto device   = uniformitySteeringDevice();
+        auto solution                = uniformitySteeringSolution();
+        auto device                  = uniformitySteeringDevice();
         device.persistentDynamicGrid = 0;
         device.persistentFixedGrid   = 10;
 
@@ -2326,8 +2364,8 @@ namespace
 
     TEST(RowUniformityGridSteering_pre_checkin, DivisorGridBelowTilesSnapsToTiles)
     {
-        auto solution = uniformitySteeringSolution();
-        auto device   = uniformitySteeringDevice();
+        auto solution                = uniformitySteeringSolution();
+        auto device                  = uniformitySteeringDevice();
         device.persistentDynamicGrid = 0;
         device.persistentFixedGrid   = 8;
 
@@ -2344,15 +2382,14 @@ namespace
     {
         // T=4, I=17 (K=1088, DepthU=64), g0=8=T*F with F=2 and 2 does not divide 17.
         // Without perTileExtraIters: snap to T. With capability: keep T*F.
-        auto solution = uniformitySteeringSolution();
-        auto device   = uniformitySteeringDevice();
+        auto solution                = uniformitySteeringSolution();
+        auto device                  = uniformitySteeringDevice();
         device.persistentDynamicGrid = 0;
         device.persistentFixedGrid   = 8;
 
         auto         problem = uniformityGemm(256, 256, 1088);
         const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
-        const size_t I
-            = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
+        const size_t I       = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
         ASSERT_EQ(tiles, 4u);
         ASSERT_EQ(I, 17u);
         // The whole point of the case: F=2 must NOT divide I, otherwise the
@@ -2375,15 +2412,14 @@ namespace
 
     TEST(RowUniformityGridSteering_pre_checkin, ParallelSnapSkipsFIRequirement)
     {
-        auto solution = uniformitySteeringSolution();
-        auto device   = uniformitySteeringDevice();
+        auto solution                = uniformitySteeringSolution();
+        auto device                  = uniformitySteeringDevice();
         device.persistentDynamicGrid = 0;
         device.persistentFixedGrid   = 8;
 
         auto         problem = uniformityGemm(256, 256, 1088);
         const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
-        const size_t I
-            = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
+        const size_t I       = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
         ASSERT_EQ(tiles, 4u);
         ASSERT_EQ(I, 17u);
         ASSERT_EQ(I % 2, 1u);
@@ -2392,15 +2428,14 @@ namespace
         solution->internalArgsSupport.perTileExtraIters = false;
         EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), tiles)
             << "Tree without perTileExtraIters must still require F | I";
-        EXPECT_EQ(
-            solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel), 8u)
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel), 8u)
             << "Parallel snap must skip F | I and keep T*F when workspace fits";
     }
 
     TEST(RowUniformityGridSteering_pre_checkin, ModeOffLeavesNaturalGridAndReduction)
     {
-        auto solution = uniformitySteeringSolution();
-        auto device   = uniformitySteeringDevice();
+        auto solution                   = uniformitySteeringSolution();
+        auto device                     = uniformitySteeringDevice();
         device.persistentFixedGrid      = 0;
         device.persistentMaxCUs         = 0;
         device.persistentGridMultiplier = 1;
@@ -2456,7 +2491,7 @@ namespace
         // SK5 hybrid: the only mode whose sub-mode streamK5EffectiveDynamic()
         // resolves, and therefore the only one tile scheduling can steer.
         solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
-        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::Hybrid;
+        solution->sizeMapping.workAssignment         = TensileLite::WorkAssignment::Hybrid;
 
         auto device = uniformitySteeringDevice();
         // No override knobs: the grid must come from the CU-bounded analytical
@@ -2502,7 +2537,7 @@ namespace
 
         // Dummy addresses: solve() only stores pointers into the kernel argument
         // block, it never dereferences them.
-        void* const                   fake = reinterpret_cast<void*>(0x1000);
+        void* const                    fake = reinterpret_cast<void*>(0x1000);
         TensileLite::ContractionInputs inputs;
         inputs.a             = fake;
         inputs.b             = fake;
@@ -2561,7 +2596,7 @@ namespace
     //   I=15, F=2 -> I/F == 7 must be REJECTED (fails if the floor drops to 7)
     TEST(RowUniformityGridSteering_pre_checkin, MinItersPerCUBoundaryIsEight)
     {
-        auto device          = uniformitySteeringDevice();
+        auto device                  = uniformitySteeringDevice();
         device.persistentDynamicGrid = 0;
         device.persistentFixedGrid   = 8; // g0 = 8 = T * 2 with T = 4
 
@@ -2570,15 +2605,14 @@ namespace
             auto         solution = uniformitySteeringSolution();
             auto         problem  = uniformityGemm(256, 256, 1024);
             const size_t tiles    = problem.getNumTiles(solution->sizeMapping, 1);
-            const size_t I
-                = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
+            const size_t I = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
             ASSERT_EQ(tiles, 4u);
             ASSERT_EQ(I, 16u);
             ASSERT_EQ(I / 2, 8u);
 
             problem.setParams().setUniformSummationOrder(1);
-            EXPECT_EQ(
-                solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel), 8u)
+            EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel),
+                      8u)
                 << "I/F == MinItersPerCU (8) is admissible; F=2 must be kept";
         }
 
@@ -2587,15 +2621,14 @@ namespace
             auto         solution = uniformitySteeringSolution();
             auto         problem  = uniformityGemm(256, 256, 960);
             const size_t tiles    = problem.getNumTiles(solution->sizeMapping, 1);
-            const size_t I
-                = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
+            const size_t I = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
             ASSERT_EQ(tiles, 4u);
             ASSERT_EQ(I, 15u);
             ASSERT_EQ(I / 2, 7u);
 
             problem.setParams().setUniformSummationOrder(1);
-            EXPECT_EQ(
-                solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel), tiles)
+            EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel),
+                      tiles)
                 << "I/F == 7 is below MinItersPerCU (8); F=2 must be refused and "
                    "the grid must snap down to all-full (T)";
         }
@@ -2621,8 +2654,8 @@ namespace
         // T=100 (1280x1280, MT 128x128), I=256 (K=16384, DepthU=64),
         // g0 = 3200 = T*32. F=32 and F=16 both divide I and both clear
         // MinItersPerCU, so the flag bound is the only thing separating them.
-        auto solution = uniformitySteeringSolution();
-        auto device   = uniformitySteeringDevice();
+        auto solution                = uniformitySteeringSolution();
+        auto device                  = uniformitySteeringDevice();
         device.persistentDynamicGrid = 0;
         device.persistentFixedGrid   = 3200;
 
@@ -2632,8 +2665,7 @@ namespace
         problem.setWorkspaceSize(1ull << 30);
 
         const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
-        const size_t I
-            = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
+        const size_t I     = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
         ASSERT_EQ(tiles, 100u);
         ASSERT_EQ(I, 256u);
         ASSERT_EQ(I % 32, 0u) << "F=32 must be rejected by the flag bound alone";
@@ -2654,8 +2686,7 @@ namespace
                "post-selection flag clamp";
 
         problem.setParams().setUniformSummationOrder(1);
-        const size_t grid
-            = solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree);
+        const size_t grid = solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree);
         EXPECT_EQ(grid, 1600u)
             << "F must step down to the largest value keeping T*F inside the flag region";
         EXPECT_LE(grid, static_cast<size_t>(TensileLite::StreamKFlagElements));
@@ -2664,18 +2695,18 @@ namespace
         // The grid is admissible on its own terms, not merely small enough.
         const TensileLite::StreamKStaticSplit split = TensileLite::streamKStaticSplit(
             tiles, I, grid, /*skFullTiles=*/1, /*forceDPOnly=*/false);
-        EXPECT_TRUE(
-            TensileLite::streamKStaticSplitRowUniform(split,
-                                                      tiles,
-                                                      I,
-                                                      grid,
-                                                      solution->internalArgsSupport.perTileExtraIters,
-                                                      problem.getParams().uniformSummationOrder()))
+        EXPECT_TRUE(TensileLite::streamKStaticSplitRowUniform(
+            split,
+            tiles,
+            I,
+            grid,
+            solution->internalArgsSupport.perTileExtraIters,
+            problem.getParams().uniformSummationOrder()))
             << "grid=" << grid << " must pack row-uniformly";
 
         // What clamping after selection produces instead -- the mode-off grid above.
-        const TensileLite::StreamKStaticSplit clamped = TensileLite::streamKStaticSplit(
-            tiles, I, TensileLite::StreamKFlagElements, 1, false);
+        const TensileLite::StreamKStaticSplit clamped
+            = TensileLite::streamKStaticSplit(tiles, I, TensileLite::StreamKFlagElements, 1, false);
         EXPECT_FALSE(TensileLite::streamKStaticSplitRowUniform(
             clamped,
             tiles,
@@ -2695,8 +2726,8 @@ namespace
     TEST(RowUniformityGridSteering_pre_checkin, AllFullGridExemptFromFlagRegionBound)
     {
         // T=4096 (8192x8192, MT 128x128) is already twice the bound.
-        auto solution = uniformitySteeringSolution();
-        auto device   = uniformitySteeringDevice();
+        auto solution                = uniformitySteeringSolution();
+        auto device                  = uniformitySteeringDevice();
         device.persistentDynamicGrid = 0;
         device.persistentFixedGrid   = 8192; // g0 = T*2
 
@@ -2704,8 +2735,7 @@ namespace
         problem.setWorkspaceSize(1ull << 30);
 
         const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
-        const size_t I
-            = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
+        const size_t I     = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
         ASSERT_EQ(tiles, 4096u);
         ASSERT_EQ(I, 16u);
         ASSERT_GT(tiles, static_cast<size_t>(TensileLite::StreamKFlagElements))
@@ -2716,8 +2746,7 @@ namespace
             << "F=2 must be rejected by the flag bound, not by the workspace";
 
         problem.setParams().setUniformSummationOrder(1);
-        const size_t grid
-            = solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree);
+        const size_t grid = solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree);
         EXPECT_EQ(grid, tiles)
             << "with every F >= 2 outside the flag region, the search must land on all-full";
         EXPECT_EQ(tiles % grid, 0u)
@@ -2726,13 +2755,13 @@ namespace
 
         const TensileLite::StreamKStaticSplit split = TensileLite::streamKStaticSplit(
             tiles, I, grid, /*skFullTiles=*/1, /*forceDPOnly=*/false);
-        EXPECT_TRUE(
-            TensileLite::streamKStaticSplitRowUniform(split,
-                                                      tiles,
-                                                      I,
-                                                      grid,
-                                                      solution->internalArgsSupport.perTileExtraIters,
-                                                      problem.getParams().uniformSummationOrder()))
+        EXPECT_TRUE(TensileLite::streamKStaticSplitRowUniform(
+            split,
+            tiles,
+            I,
+            grid,
+            solution->internalArgsSupport.perTileExtraIters,
+            problem.getParams().uniformSummationOrder()))
             << "the all-full grid must remain admissible above the bound";
     }
 
@@ -2742,8 +2771,8 @@ namespace
     // otherwise the bound would shrink grids that have no flag region to overrun.
     TEST(RowUniformityGridSteering_pre_checkin, FlagRegionBoundDoesNotBindParallelReduction)
     {
-        auto solution = uniformitySteeringSolution();
-        auto device   = uniformitySteeringDevice();
+        auto solution                = uniformitySteeringSolution();
+        auto device                  = uniformitySteeringDevice();
         device.persistentDynamicGrid = 0;
         device.persistentFixedGrid   = 3200;
 
@@ -2755,11 +2784,10 @@ namespace
         ASSERT_GT(3200u, static_cast<size_t>(TensileLite::StreamKFlagElements));
 
         problem.setParams().setUniformSummationOrder(1);
-        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree),
-                  1600u)
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 1600u)
             << "tree takes the flag region, so the bound binds";
-        EXPECT_EQ(
-            solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel), 3200u)
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel),
+                  3200u)
             << "parallel never reaches the flags; the bound must not shrink its grid";
     }
 

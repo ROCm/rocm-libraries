@@ -1,0 +1,404 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include <nanobind/stl/complex.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/set.h>
+#include <nanobind/stl/vector.h>
+
+#include <complex>
+#include <optional>
+#include <roc/hostnumerics/permutation.hpp>
+#include <roc/hostnumerics/validation.hpp>
+#include <utility>
+#include <vector>
+
+#include "bindings.hpp"
+
+namespace nb = nanobind;
+using namespace nb::literals;
+
+namespace roc::hostnumerics::python_bindings {
+namespace {
+Tensor addOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
+                std::optional<ScalarType> computeType) {
+    if (!outputType && !computeType) return add(left, tensorOperand(right, left.type()));
+    const ScalarType resolvedCompute = computeType.value_or(outputType.value_or(left.type()));
+    const ScalarType resolvedOutput = outputType.value_or(resolvedCompute);
+    return add(left, tensorOperand(right, resolvedCompute), resolvedOutput, resolvedCompute,
+               std::nullopt);
+}
+
+void addIntoBound(const Tensor& left, nb::object right, Tensor output, ScalarType computeType) {
+    const auto indices = IndexRange::all(output.elementCount());
+    addInto(left, tensorOperand(right, computeType), std::move(output), computeType, indices,
+            LastDimensionFastest{});
+}
+
+Tensor subtractOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
+                     std::optional<ScalarType> computeType) {
+    if (!outputType && !computeType) return subtract(left, tensorOperand(right, left.type()));
+    const ScalarType resolvedCompute = computeType.value_or(outputType.value_or(left.type()));
+    const ScalarType resolvedOutput = outputType.value_or(resolvedCompute);
+    return subtract(left, tensorOperand(right, resolvedCompute), resolvedOutput, resolvedCompute,
+                    std::nullopt);
+}
+
+void subtractIntoBound(const Tensor& left, nb::object right, Tensor output,
+                       ScalarType computeType) {
+    const auto indices = IndexRange::all(output.elementCount());
+    subtractInto(left, tensorOperand(right, computeType), std::move(output), computeType, indices,
+                 LastDimensionFastest{});
+}
+
+Tensor multiplyOwned(const Tensor& left, nb::object right, std::optional<ScalarType> outputType,
+                     std::optional<ScalarType> computeType) {
+    if (!outputType && !computeType) return multiply(left, tensorOperand(right, left.type()));
+    const ScalarType resolvedCompute = computeType.value_or(outputType.value_or(left.type()));
+    const ScalarType resolvedOutput = outputType.value_or(resolvedCompute);
+    return multiply(left, tensorOperand(right, resolvedCompute), resolvedOutput, resolvedCompute,
+                    std::nullopt);
+}
+
+void multiplyIntoBound(const Tensor& left, nb::object right, Tensor output,
+                       ScalarType computeType) {
+    const auto indices = IndexRange::all(output.elementCount());
+    multiplyInto(left, tensorOperand(right, computeType), std::move(output), computeType, indices,
+                 LastDimensionFastest{});
+}
+
+ActivationFunction activationFunction(Activation activation, double parameter0, double parameter1) {
+    switch (activation) {
+        case Activation::None:
+            return IdentityActivation{};
+        case Activation::Absolute:
+            return AbsoluteActivation{};
+        case Activation::ClippedRelu:
+            return ClippedReluActivation{parameter0, parameter1};
+        case Activation::Relu:
+            return ReluActivation{};
+        case Activation::Gelu:
+            return GeluActivation{};
+        case Activation::GeluDerivative:
+            return GeluDerivativeActivation{};
+        case Activation::GeluScaling:
+            return GeluScalingActivation{parameter0};
+        case Activation::LeakyRelu:
+            return LeakyReluActivation{parameter0};
+        case Activation::ReluDerivative:
+            return ReluDerivativeActivation{};
+        case Activation::Sigmoid:
+            return SigmoidActivation{};
+        case Activation::Tanh:
+            return TanhActivation{parameter0, parameter1};
+        case Activation::Silu:
+            return SiluActivation{};
+        case Activation::Swish:
+            return SwishActivation{parameter0};
+        case Activation::Clamp:
+            return ClampActivation{parameter0, parameter1};
+    }
+    throw std::runtime_error("Unsupported Python activation.");
+}
+
+Tensor referenceSoftmaxOwned(Tensor input, ScalarType outputType, ScalarType accumulatorType,
+                             size_t axis) {
+    return referenceSoftmax(std::move(input), axis, outputType, accumulatorType);
+}
+
+LayerNormOutputs referenceLayerNormOwned(Tensor input, ScalarType outputType,
+                                         ScalarType statisticsType, ScalarType accumulatorType,
+                                         size_t axis, double epsilon, std::optional<Tensor> gamma,
+                                         std::optional<Tensor> beta) {
+    LayerNormOptions options;
+    options.axis = axis;
+    options.accumulatorType = accumulatorType;
+    options.gamma = std::move(gamma);
+    options.beta = std::move(beta);
+    options.epsilon = epsilon;
+    return referenceLayerNorm(
+        std::move(input),
+        {.output = outputType, .mean = statisticsType, .inverseVariance = statisticsType}, options);
+}
+
+template <typename Indices, typename Order>
+EpilogueOutputs referenceEpilogueOwned(
+    Tensor input, ScalarType outputType, ScalarType computeType, std::optional<Tensor> bias,
+    Activation activation, ActivationApplication activationApplication,
+    std::optional<Tensor> auxiliaryInput, std::optional<ScalarType> auxiliaryOutputType,
+    std::optional<Tensor> gateResidual, nb::object outputScale, nb::object auxiliaryScale,
+    nb::object activationParameter0, nb::object activationParameter1,
+    OutputConversion outputConversion, bool includeRawOutput, bool includeAmax,
+    const Indices& indices, const Order& order) {
+    EpilogueOptions options(computeType);
+    options.auxiliaryInput = std::move(auxiliaryInput);
+    options.gateResidual = std::move(gateResidual);
+    options.bias = std::move(bias);
+    options.outputScale = scalarFromPython(outputScale);
+    options.auxiliaryScale = scalarFromPython(auxiliaryScale);
+    options.outputConversion = outputConversion;
+    options.activation = activationFunction(activation, nb::cast<double>(activationParameter0),
+                                            nb::cast<double>(activationParameter1));
+    options.activationApplication = activationApplication;
+    return referenceEpilogue(
+        std::move(input),
+        {.output = outputType,
+         .rawOutput = includeRawOutput ? std::optional(computeType) : std::nullopt,
+         .auxiliaryOutput = auxiliaryOutputType,
+         .amax = includeAmax ? std::optional(computeType) : std::nullopt},
+        options, indices, order);
+}
+
+template <typename Indices, typename Order>
+void referenceEpilogueIntoBound(
+    Tensor input, Tensor output, ScalarType computeType, std::optional<Tensor> bias,
+    Activation activation, ActivationApplication activationApplication,
+    std::optional<Tensor> auxiliaryInput, std::optional<Tensor> rawOutput,
+    std::optional<Tensor> auxiliaryOutput, std::optional<Tensor> gateResidual,
+    nb::object outputScale, nb::object auxiliaryScale, nb::object activationParameter0,
+    nb::object activationParameter1, OutputConversion outputConversion, std::optional<Tensor> amax,
+    bool accumulateAmax, const Indices& indices, const Order& order) {
+    EpilogueOptions options(computeType);
+    options.auxiliaryInput = std::move(auxiliaryInput);
+    options.gateResidual = std::move(gateResidual);
+    options.bias = std::move(bias);
+    options.outputScale = scalarFromPython(outputScale);
+    options.auxiliaryScale = scalarFromPython(auxiliaryScale);
+    options.outputConversion = outputConversion;
+    options.activation = activationFunction(activation, nb::cast<double>(activationParameter0),
+                                            nb::cast<double>(activationParameter1));
+    options.activationApplication = activationApplication;
+    options.accumulateAmax = accumulateAmax;
+    referenceEpilogueInto(std::move(input),
+                          {.output = std::move(output),
+                           .rawOutput = std::move(rawOutput),
+                           .auxiliaryOutput = std::move(auxiliaryOutput),
+                           .amax = std::move(amax)},
+                          options, indices, order);
+}
+
+Tensor referenceSumOwned(const Tensor& input, ScalarType outputType, ScalarType accumulatorType,
+                         std::vector<size_t> axes) {
+    return referenceSum(input, std::move(axes), outputType, accumulatorType);
+}
+
+Tensor referenceMaximumAbsoluteOwned(const Tensor& input, ScalarType outputType,
+                                     ScalarType accumulatorType) {
+    return referenceMaximumAbsolute(input, outputType, accumulatorType);
+}
+
+StructuredSparseTensor applyStructuredSparsityOwned(Tensor input, StructuredSparsityPattern pattern,
+                                                    bool emitTwoOfFourMetadata) {
+    return applyStructuredSparsity(
+        std::move(input), std::move(pattern),
+        {.retainedIndices = true, .twoOfFourMetadata = emitTwoOfFourMetadata});
+}
+
+}  // namespace
+
+void registerOperationBindings(nb::module_& module) {
+    nb::class_<LayerNormOutputs>(module, "LayerNormOutputs")
+        .def_prop_ro(
+            "output",
+            [](const LayerNormOutputs& outputs) -> const Tensor& { return outputs.output; },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "mean",
+            [](const LayerNormOutputs& outputs) -> const std::optional<Tensor>& {
+                return outputs.mean;
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "inverse_variance",
+            [](const LayerNormOutputs& outputs) -> const std::optional<Tensor>& {
+                return outputs.inverseVariance;
+            },
+            nb::rv_policy::reference_internal);
+
+    nb::class_<EpilogueOutputs>(module, "EpilogueOutputs")
+        .def_prop_ro(
+            "output",
+            [](const EpilogueOutputs& outputs) -> const Tensor& { return outputs.output; },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "raw_output",
+            [](const EpilogueOutputs& outputs) -> const std::optional<Tensor>& {
+                return outputs.rawOutput;
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "auxiliary_output",
+            [](const EpilogueOutputs& outputs) -> const std::optional<Tensor>& {
+                return outputs.auxiliaryOutput;
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "amax",
+            [](const EpilogueOutputs& outputs) -> const std::optional<Tensor>& {
+                return outputs.amax;
+            },
+            nb::rv_policy::reference_internal);
+
+    nb::class_<StructuredSparsityPattern>(module, "StructuredSparsityPattern")
+        .def(nb::init<>())
+        .def_rw("axis", &StructuredSparsityPattern::axis)
+        .def_rw("group_size", &StructuredSparsityPattern::groupSize)
+        .def_rw("retained_elements", &StructuredSparsityPattern::retainedElements)
+        .def_rw("selection", &StructuredSparsityPattern::selection)
+        .def_rw("fixed_positions", &StructuredSparsityPattern::fixedPositions)
+        .def_rw("seed", &StructuredSparsityPattern::seed)
+        .def_rw("index_order", &StructuredSparsityPattern::indexOrder);
+    nb::class_<StructuredSparsitySliceRange>(module, "StructuredSparsitySliceRange")
+        .def(nb::init<>())
+        .def_rw("first_slice", &StructuredSparsitySliceRange::firstSlice)
+        .def_rw("slice_count", &StructuredSparsitySliceRange::sliceCount);
+    nb::class_<StructuredSparseTensor>(module, "StructuredSparseTensor")
+        .def_prop_ro(
+            "pruned",
+            [](const StructuredSparseTensor& outputs) -> const Tensor& { return outputs.pruned; },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "compressed",
+            [](const StructuredSparseTensor& outputs) -> const Tensor& {
+                return outputs.compressed;
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "retained_indices",
+            [](const StructuredSparseTensor& outputs) -> const std::optional<Tensor>& {
+                return outputs.retainedIndices;
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "two_of_four_metadata",
+            [](const StructuredSparseTensor& outputs) -> const std::optional<Tensor>& {
+                return outputs.twoOfFourMetadata;
+            },
+            nb::rv_policy::reference_internal);
+
+    module.def("add", &addOwned, "left"_a, "right"_a, "output_type"_a, "compute_type"_a);
+    module.def("add_into", &addIntoBound, "left"_a, "right"_a, "output"_a, "compute_type"_a);
+    module.def("subtract", &subtractOwned, "left"_a, "right"_a, "output_type"_a, "compute_type"_a);
+    module.def("subtract_into", &subtractIntoBound, "left"_a, "right"_a, "output"_a,
+               "compute_type"_a);
+    module.def("multiply", &multiplyOwned, "left"_a, "right"_a, "output_type"_a, "compute_type"_a);
+    module.def("multiply_into", &multiplyIntoBound, "left"_a, "right"_a, "output"_a,
+               "compute_type"_a);
+    module.def("absolute", [](const Tensor& input) { return absolute(input); }, "input"_a);
+    module.def("relu", [](const Tensor& input) { return relu(input); }, "input"_a);
+    module.def("gelu", [](const Tensor& input) { return gelu(input); }, "input"_a);
+    module.def("sigmoid", [](const Tensor& input) { return sigmoid(input); }, "input"_a);
+    module.def(
+        "tanh",
+        [](const Tensor& input, double inputScale, double outputScale) {
+            return tanh(input, inputScale, outputScale);
+        },
+        "input"_a, "input_scale"_a, "output_scale"_a);
+    module.def("silu", [](const Tensor& input) { return silu(input); }, "input"_a);
+    module.def(
+        "swish", [](const Tensor& input, double beta) { return swish(input, beta); }, "input"_a,
+        "beta"_a);
+    module.def(
+        "clip",
+        [](const Tensor& input, double minimum, double maximum) {
+            return clip(input, minimum, maximum);
+        },
+        "input"_a, "minimum"_a, "maximum"_a);
+
+    module.def("reference_softmax", &referenceSoftmaxOwned, "input"_a, "output_type"_a,
+               "accumulator_type"_a, "axis"_a);
+    module.def("reference_softmax_into", &referenceSoftmaxInto, "input"_a, "output"_a, "axis"_a,
+               "accumulator_type"_a);
+
+    module.def("reference_layer_norm", &referenceLayerNormOwned, "input"_a, "output_type"_a,
+               "statistics_type"_a, "accumulator_type"_a, "axis"_a, "epsilon"_a,
+               "gamma"_a = std::optional<Tensor>{}, "beta"_a = std::optional<Tensor>{});
+
+    module.def("reference_reduce", &referenceReduce, "input"_a, "axes"_a, "operation"_a,
+               "output_type"_a, "accumulator_type"_a);
+    module.def("reference_reduce_into", &referenceReduceInto, "input"_a, "output"_a, "axes"_a,
+               "operation"_a, "accumulator_type"_a);
+    module.def("reference_sum", &referenceSumOwned, "input"_a, "output_type"_a,
+               "accumulator_type"_a, "axes"_a);
+    module.def("reference_sum_into", &referenceSumInto, "input"_a, "output"_a, "axes"_a,
+               "accumulator_type"_a);
+    module.def("reference_maximum_absolute", &referenceMaximumAbsoluteOwned, "input"_a,
+               "output_type"_a, "accumulator_type"_a);
+    module.def("reference_maximum_absolute_into", &referenceMaximumAbsoluteInto, "input"_a,
+               "output"_a, "accumulator_type"_a);
+
+    module.def("reference_epilogue", &referenceEpilogueOwned<IndexRange, Permutation>, "input"_a,
+               "output_type"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{},
+               "activation"_a, "activation_application"_a,
+               "auxiliary_input"_a = std::optional<Tensor>{},
+               "auxiliary_output_type"_a = std::optional<ScalarType>{},
+               "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+               "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+               "include_raw_output"_a, "include_amax"_a, "indices"_a, "index_order"_a);
+    module.def(
+        "reference_epilogue_into", &referenceEpilogueIntoBound<IndexRange, Permutation>, "input"_a,
+        "output"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
+        "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
+        "raw_output"_a = std::optional<Tensor>{}, "auxiliary_output"_a = std::optional<Tensor>{},
+        "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+        "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+        "amax"_a = std::optional<Tensor>{}, "accumulate_amax"_a, "indices"_a, "index_order"_a);
+
+    module.def("reference_epilogue", &referenceEpilogueOwned<IndexRange, LastDimensionFastest>,
+               "input"_a, "output_type"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{},
+               "activation"_a, "activation_application"_a,
+               "auxiliary_input"_a = std::optional<Tensor>{},
+               "auxiliary_output_type"_a = std::optional<ScalarType>{},
+               "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+               "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+               "include_raw_output"_a, "include_amax"_a, "indices"_a, "index_order"_a);
+    module.def(
+        "reference_epilogue_into", &referenceEpilogueIntoBound<IndexRange, LastDimensionFastest>,
+        "input"_a, "output"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
+        "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
+        "raw_output"_a = std::optional<Tensor>{}, "auxiliary_output"_a = std::optional<Tensor>{},
+        "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+        "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+        "amax"_a = std::optional<Tensor>{}, "accumulate_amax"_a, "indices"_a, "index_order"_a);
+
+    module.def("reference_epilogue", &referenceEpilogueOwned<std::set<size_t>, Permutation>,
+               "input"_a, "output_type"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{},
+               "activation"_a, "activation_application"_a,
+               "auxiliary_input"_a = std::optional<Tensor>{},
+               "auxiliary_output_type"_a = std::optional<ScalarType>{},
+               "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+               "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+               "include_raw_output"_a, "include_amax"_a, "indices"_a, "index_order"_a);
+    module.def(
+        "reference_epilogue_into", &referenceEpilogueIntoBound<std::set<size_t>, Permutation>,
+        "input"_a, "output"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
+        "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
+        "raw_output"_a = std::optional<Tensor>{}, "auxiliary_output"_a = std::optional<Tensor>{},
+        "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+        "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+        "amax"_a = std::optional<Tensor>{}, "accumulate_amax"_a, "indices"_a, "index_order"_a);
+
+    module.def(
+        "reference_epilogue", &referenceEpilogueOwned<std::set<size_t>, LastDimensionFastest>,
+        "input"_a, "output_type"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{},
+        "activation"_a, "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
+        "auxiliary_output_type"_a = std::optional<ScalarType>{},
+        "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+        "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+        "include_raw_output"_a, "include_amax"_a, "indices"_a, "index_order"_a);
+    module.def(
+        "reference_epilogue_into",
+        &referenceEpilogueIntoBound<std::set<size_t>, LastDimensionFastest>, "input"_a, "output"_a,
+        "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
+        "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
+        "raw_output"_a = std::optional<Tensor>{}, "auxiliary_output"_a = std::optional<Tensor>{},
+        "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
+        "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
+        "amax"_a = std::optional<Tensor>{}, "accumulate_amax"_a, "indices"_a, "index_order"_a);
+
+    module.def("apply_structured_sparsity", &applyStructuredSparsityOwned, "input"_a, "pattern"_a,
+               "emit_two_of_four_metadata"_a);
+    module.def("encode_two_of_four_metadata", &encodeTwoOfFourMetadata, "retained_indices"_a,
+               "axis"_a);
+}
+}  // namespace roc::hostnumerics::python_bindings

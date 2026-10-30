@@ -1,11 +1,11 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <gtest/gtest.h>
-#include "DataInitialization.hpp"             // isMXTensor / Problem
 #include "ClientProblemFactory.hpp"
-#include "DataInitializationHelpers.hpp"    // detail::* (MX-only, internally guarded)
+#include "DataInitialization.hpp" // isMXTensor / Problem
 #include "ProgramOptions.hpp"
+#include "ReferenceValidator.hpp"
+#include "ResultReporter.hpp"
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/DataTypes.hpp>
@@ -14,27 +14,29 @@
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
 #include <Tensile/hip/HipUtils.hpp>
+#include <TensileLite/Client/hostnumerics/DataInitializationHelpers.hpp>
+#include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 #include <limits>
+#include <memory>
 #include <numeric>
+#include <roc/hostnumerics/validation.hpp>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-#include <hip/hip_runtime.h>
-#include <mxDataGenerator/dataTypeInfo.hpp>
-#include <mxDataGenerator/ocp_e2m1_mxfp4.hpp>
-#include <mxDataGenerator/ocp_e2m3_mxfp6.hpp>
-#include <mxDataGenerator/ocp_e3m2_mxfp6.hpp>
-#include <mxDataGenerator/ocp_e4m3_mxfp8.hpp>
-#include <mxDataGenerator/ocp_e5m2_mxfp8.hpp>
-#endif
 
 using TensileLite::ContractionProblemGemm;
 using TensileLite::ContractionSolution;
@@ -42,13 +44,18 @@ using TensileLite::DataTypeInfo;
 using TensileLite::KernelLanguage;
 using TensileLite::PerformanceMetric;
 using TensileLite::TensorDescriptor;
+using TensileLite::Client::DataInitialization;
+using TensileLite::Client::DataInitializationKey;
+using TensileLite::Client::initCPUSparseInput;
+using TensileLite::Client::initializeHostBufferWithHostNumerics;
+using TensileLite::Client::InitMode;
 using TensileLite::Client::isMXProblem;
 using TensileLite::Client::isMXTensor;
+using TensileLite::Client::PruneSparseMode;
+using TensileLite::Client::toHostNumericsScalarType;
 
-// Shorthand for the production helper namespace under test (MX builds only).
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-namespace dt = TensileLite::Client::detail;
-#endif
+// Shorthand for the production helper namespace under test.
+namespace dt = TensileLite::Client::hostnumerics::detail;
 namespace
 {
     template <typename T>
@@ -56,6 +63,11 @@ namespace
     {
         args[name].value() = std::move(value);
     }
+
+    constexpr DataInitializationKey fixedInitializationKey{0x12345678ULL, 0x01020304ULL};
+    constexpr DataInitializationKey firstRandomInitializationKey{0x12345678ULL, 101};
+    constexpr DataInitializationKey secondRandomInitializationKey{0x12345678ULL, 202};
+    constexpr DataInitializationKey otherSeedInitializationKey{0x87654321ULL, 101};
 
     // -----------------------------------------------------------------------
     // Helper: build a ContractionProblemGemm with the requested A/B dtypes.
@@ -70,37 +82,41 @@ namespace
                                        rocisa::DataType bType,
                                        int              mxBlockA,
                                        int              mxBlockB,
-                                       size_t           M = 128,
-                                       size_t           N = 128,
-                                       size_t           K = 256,
-                                       size_t           batch  = 1,
-                                       bool             transA = true,
-                                       bool             transB = false,
+                                       size_t           M            = 128,
+                                       size_t           N            = 128,
+                                       size_t           K            = 256,
+                                       size_t           batch        = 1,
+                                       bool             transA       = true,
+                                       bool             transB       = false,
                                        int              mxBlockFreeA = 1,
                                        int              mxBlockFreeB = 1)
     {
-        auto problem = ContractionProblemGemm::GEMM_Strides(
-            transA, transB,
-            aType, bType,
-            rocisa::DataType::BFloat16, rocisa::DataType::BFloat16,
-            M, N, K, batch,
-            transA ? K : M,                 // lda
-            transA ? K * M : M * K,         // strideA
-            transB ? N : K,                 // ldb
-            transB ? N * K : K * N,         // strideB
-            M, M * N,                       // ldc, strideC
-            M, M * N,                       // ldd, strideD
-            0.0);                           // beta
+        auto problem = ContractionProblemGemm::GEMM_Strides(transA,
+                                                            transB,
+                                                            aType,
+                                                            bType,
+                                                            rocisa::DataType::BFloat16,
+                                                            rocisa::DataType::BFloat16,
+                                                            M,
+                                                            N,
+                                                            K,
+                                                            batch,
+                                                            transA ? K : M, // lda
+                                                            transA ? K * M : M * K, // strideA
+                                                            transB ? N : K, // ldb
+                                                            transB ? N * K : K * N, // strideB
+                                                            M,
+                                                            M * N, // ldc, strideC
+                                                            M,
+                                                            M * N, // ldd, strideD
+                                                            0.0); // beta
         if(mxBlockA > 0)
-            problem.setMXScaleA(rocisa::DataType::E8, mxBlockA, {},
-                                /*padScaleTensorFreeDim=*/true, mxBlockFreeA);
+            problem.setMXScaleA(rocisa::DataType::E8, mxBlockA, {}, true, mxBlockFreeA);
         if(mxBlockB > 0)
-            problem.setMXScaleB(rocisa::DataType::E8, mxBlockB, {},
-                                /*padScaleTensorFreeDim=*/true, mxBlockFreeB);
+            problem.setMXScaleB(rocisa::DataType::E8, mxBlockB, {}, true, mxBlockFreeB);
         return problem;
     }
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
     TensileLite::Client::po::variables_map makeMinimalClientArgs(int mxScaleFormat)
     {
         using namespace TensileLite::Client;
@@ -156,22 +172,6 @@ namespace
         setOption(args, "output-amaxD", false);
         setOption(args, "use-scaleAB", std::string());
         setOption(args, "use-scaleCD", false);
-        // ClientProblemFactory::m_useBias / m_biasSrc are plain `int` members
-        // with NO default member initializer (see ClientProblemFactory.hpp);
-        // they're only assigned when args.count("use-bias") /
-        // args.count("bias-source") is true. Without these two options,
-        // m_useBias holds whatever garbage was left on the stack/heap when
-        // ClientProblemFactory was constructed. If that garbage is non-zero,
-        // ContractionProblemGemm::setBias() takes a branch that indexes
-        // m_tensors[m_biasSrc].sizes()[batchIdx] with batchIdx left at its
-        // default of 2 for this non-batched dummy problem (m_batchIndices is
-        // empty) -- an out-of-bounds read that segfaults. This is why the
-        // crash only showed up when the test ran in isolation (a fresh
-        // process, as CI's per-test ctest invocation does): the leftover
-        // stack/heap contents differ from running the whole 733-test binary
-        // in one process, where prior tests happened to leave zeroed memory
-        // behind and masked the bug. Setting these explicitly makes the
-        // behavior deterministic regardless of process/memory history.
         setOption(args, "use-bias", 0);
         setOption(args, "bias-source", static_cast<int>(ContractionProblemGemm::TENSOR::D));
         setOption(args, "use-scaleAlphaVec", 0);
@@ -185,9 +185,621 @@ namespace
         return args;
     }
 
+} // namespace
+
+TEST(ClientProblemFactoryDefaults, DisablesOmittedOptionalOutputsAndScales)
+{
+    using namespace TensileLite::Client;
+    po::variables_map args;
+    const std::array  omitted{"use-bias",
+                             "bias-source",
+                             "use-scaleCD",
+                             "use-scaleAlphaVec",
+                             "use-gradient",
+                             "output-amaxD"};
+    for(const auto& entry : makeMinimalClientArgs(0))
+        if(std::ranges::find(omitted, entry.first) == omitted.end())
+            args.insert(entry);
+    alignas(ClientProblemFactory) std::array<std::byte, sizeof(ClientProblemFactory)> storage;
+    storage.fill(std::byte{0xa5});
+    auto destroy = [](ClientProblemFactory* factory) { std::destroy_at(factory); };
+    std::unique_ptr<ClientProblemFactory, decltype(destroy)> factory(
+        std::construct_at(reinterpret_cast<ClientProblemFactory*>(storage.data()), args), destroy);
+    ASSERT_EQ(factory->problems().size(), 1u);
+    const auto& problem = dynamic_cast<const ContractionProblemGemm&>(*factory->problems().front());
+    EXPECT_FALSE(problem.useE());
+    EXPECT_FALSE(problem.useGradient());
+    EXPECT_FALSE(problem.outputAmaxD());
+    EXPECT_EQ(problem.useBias(), 0);
+    EXPECT_FALSE(problem.useScaleCD());
+    EXPECT_EQ(problem.useScaleAlphaVec(), 0);
+}
+
+TEST(HostNumericsDataInitialization, GeneratesStridedProblemDependentPatterns)
+{
+    TensorDescriptor   descriptor("t", rocisa::DataType::Float, {2, 3}, {1, 4});
+    std::vector<float> values(descriptor.totalAllocatedElements(), -99.0f);
+
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::SerialIdx,
+                                         values.data(),
+                                         descriptor,
+                                         fixedInitializationKey);
+    EXPECT_EQ(values[0], 0);
+    EXPECT_EQ(values[1], 1);
+    EXPECT_EQ(values[4], 2);
+    EXPECT_EQ(values[5], 3);
+    EXPECT_EQ(values[8], 4);
+    EXPECT_EQ(values[9], 5);
+    EXPECT_EQ(values[2], -99);
+    EXPECT_EQ(values[3], -99);
+
+    TensorDescriptor   identityDescriptor("identity", rocisa::DataType::Float, {3, 4}, {1, 3});
+    std::vector<float> identity(identityDescriptor.totalAllocatedElements(), -1.0f);
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Identity,
+                                         identity.data(),
+                                         identityDescriptor,
+                                         fixedInitializationKey);
+    for(size_t column = 0; column < 4; ++column)
+        for(size_t row = 0; row < 3; ++row)
+            EXPECT_EQ(identity[row + column * 3], row == column ? 1.0f : 0.0f);
+
+    TensorDescriptor halfDescriptor("half-raw-dimension", rocisa::DataType::Half, {2, 3}, {1, 4});
+    std::vector<uint16_t> halfBits(halfDescriptor.totalAllocatedElements(), 0xffffU);
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Half,
+                                         InitMode::SerialDim1,
+                                         halfBits.data(),
+                                         halfDescriptor,
+                                         fixedInitializationKey);
+    for(size_t column = 0; column < 3; ++column)
+        for(size_t row = 0; row < 2; ++row)
+            EXPECT_EQ(halfBits[row + column * 4], column);
+    EXPECT_EQ(halfBits[2], 0xffffU);
+    EXPECT_EQ(halfBits[3], 0xffffU);
+}
+
+TEST(HostNumericsDataInitialization, SizesDescriptorStorageForTheRequestedType)
+{
+    TensorDescriptor bfloat16Descriptor(
+        "cross-type-bias", rocisa::DataType::BFloat16, {3, 1, 1}, {1, 3, 0});
+    std::array<float, 3> floatValues{-1.0f, -1.0f, -1.0f};
+
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Zero,
+                                         floatValues.data(),
+                                         bfloat16Descriptor,
+                                         fixedInitializationKey);
+    EXPECT_EQ(floatValues, (std::array<float, 3>{0.0f, 0.0f, 0.0f}));
+
+    TensorDescriptor halfDescriptor(
+        "cross-type-bias", rocisa::DataType::Half, {3, 1, 1}, {1, 3, 0});
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Random,
+                                         floatValues.data(),
+                                         halfDescriptor,
+                                         fixedInitializationKey);
+}
+
+TEST(HostNumericsDataInitialization, ThrowsForUnsupportedTypeOrRecipe)
+{
+    std::array<float, 1> value{};
+    EXPECT_THROW(initializeHostBufferWithHostNumerics(rocisa::DataType::None,
+                                                      InitMode::Zero,
+                                                      value.data(),
+                                                      value.size(),
+                                                      fixedInitializationKey),
+                 std::runtime_error);
+    EXPECT_THROW(initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                                      InitMode::UniformLowPrecision,
+                                                      value.data(),
+                                                      value.size(),
+                                                      fixedInitializationKey),
+                 std::runtime_error);
+}
+
+TEST(HostNumericsDataInitialization, RejectsDescriptorStrideOutsidePtrdiff)
+{
+    if constexpr(std::numeric_limits<size_t>::digits <= std::numeric_limits<ptrdiff_t>::digits)
+        GTEST_SKIP() << "size_t has no values outside ptrdiff_t range";
+
+    const size_t oversizedStride = static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()) + 1;
+    TensorDescriptor descriptor(
+        "oversized-stride", rocisa::DataType::Float, {1, 1}, {1, oversizedStride});
+    std::array<float, 1> value{};
+    EXPECT_THROW(initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                                      InitMode::Zero,
+                                                      value.data(),
+                                                      descriptor,
+                                                      fixedInitializationKey),
+                 std::runtime_error);
+}
+
+TEST(HostNumericsDataInitialization, HandlesIndexedAndEncodedRandomModes)
+{
+    std::array<float, 4> values{-1, -1, -1, -1};
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::RandomNarrow,
+                                         values.data(),
+                                         values.size(),
+                                         fixedInitializationKey);
+    for(float value : values)
+    {
+        const uint32_t exponent = (std::bit_cast<uint32_t>(value) >> 23) & 0xffU;
+        EXPECT_GE(exponent, 27U);
+        EXPECT_LE(exponent, 127U);
+    }
+
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Two,
+                                         values.data(),
+                                         values.size(),
+                                         fixedInitializationKey);
+    EXPECT_EQ(values, (std::array<float, 4>{2, 2, 2, 2}));
+
+    std::array<float, 4> randomFirst{};
+    std::array<float, 4> randomSecond{};
+    std::array<float, 4> randomFirstRepeat{};
+    std::array<float, 4> randomOtherSeed{};
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Random,
+                                         randomFirst.data(),
+                                         randomFirst.size(),
+                                         firstRandomInitializationKey);
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Random,
+                                         randomSecond.data(),
+                                         randomSecond.size(),
+                                         secondRandomInitializationKey);
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Random,
+                                         randomFirstRepeat.data(),
+                                         randomFirstRepeat.size(),
+                                         firstRandomInitializationKey);
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                         InitMode::Random,
+                                         randomOtherSeed.data(),
+                                         randomOtherSeed.size(),
+                                         otherSeedInitializationKey);
+    EXPECT_EQ(randomFirst, randomFirstRepeat);
+    EXPECT_NE(randomFirst, randomSecond);
+    EXPECT_NE(randomFirst, randomOtherSeed);
+    for(float value : randomFirst)
+    {
+        EXPECT_GE(value, -100);
+        EXPECT_LE(value, 100);
+    }
+
+    std::array<uint8_t, 64> e8Values{};
+    initializeHostBufferWithHostNumerics(rocisa::DataType::E8,
+                                         InitMode::RandomNegPosLimited,
+                                         e8Values.data(),
+                                         e8Values.size(),
+                                         fixedInitializationKey);
+
+    std::array<TensileLite::E5M3, 64> unsignedScale{};
+    initializeHostBufferWithHostNumerics(rocisa::DataType::E5M3,
+                                         InitMode::Random,
+                                         unsignedScale.data(),
+                                         unsignedScale.size(),
+                                         fixedInitializationKey);
+    for(const TensileLite::E5M3 value : unsignedScale)
+    {
+        EXPECT_FALSE(value.is_nan());
+        EXPECT_GE(static_cast<float>(value), 0);
+        EXPECT_LE(static_cast<float>(value), 3);
+    }
+
+#ifndef _WIN32
+#ifdef TENSILE_USE_FP4
+    constexpr size_t                                  logicalFP4Elements = 1024;
+    std::array<uint8_t, (logicalFP4Elements + 1) / 2> packedFP4{};
+    initializeHostBufferWithHostNumerics(rocisa::DataType::Float4,
+                                         InitMode::RandomNarrow,
+                                         packedFP4.data(),
+                                         logicalFP4Elements,
+                                         fixedInitializationKey);
+    bool observedEncodingFifteen = false;
+    for(size_t index = 0; index < logicalFP4Elements; ++index)
+    {
+        const uint8_t byte = packedFP4[index / 2];
+        const uint8_t raw  = index % 2 == 0 ? byte & 0xfU : byte >> 4;
+        EXPECT_LE(raw, 15);
+        observedEncodingFifteen |= raw == 15;
+    }
+    EXPECT_TRUE(observedEncodingFifteen);
+#endif
+#endif
+}
+
+TEST(HostNumericsDataInitialization, ComplexRandomValuesAreRepeatableAndIndependent)
+{
+    std::array<std::complex<float>, 32> first{};
+    std::array<std::complex<float>, 32> repeat{};
+    std::array<std::complex<float>, 32> other{};
+
+    initializeHostBufferWithHostNumerics(rocisa::DataType::ComplexFloat,
+                                         InitMode::Random,
+                                         first.data(),
+                                         first.size(),
+                                         firstRandomInitializationKey);
+    initializeHostBufferWithHostNumerics(rocisa::DataType::ComplexFloat,
+                                         InitMode::Random,
+                                         repeat.data(),
+                                         repeat.size(),
+                                         firstRandomInitializationKey);
+    initializeHostBufferWithHostNumerics(rocisa::DataType::ComplexFloat,
+                                         InitMode::Random,
+                                         other.data(),
+                                         other.size(),
+                                         secondRandomInitializationKey);
+
+    EXPECT_EQ(first, repeat);
+    EXPECT_NE(first, other);
+    EXPECT_TRUE(std::ranges::any_of(
+        first, [](const std::complex<float>& value) { return value.real() != value.imag(); }));
+    for(const std::complex<float>& value : first)
+    {
+        EXPECT_GE(value.real(), -3);
+        EXPECT_LE(value.real(), 3);
+        EXPECT_GE(value.imag(), -3);
+        EXPECT_LE(value.imag(), 3);
+    }
+}
+
+namespace
+{
+    template <typename T>
+    void expectComponentInitializationBytes(rocisa::DataType dataType,
+                                            InitMode         mode,
+                                            const T&         expected)
+    {
+        constexpr size_t                 logicalElements = TensileLite::TypeInfo<T>::Packing;
+        std::array<std::byte, sizeof(T)> observed{};
+        initializeHostBufferWithHostNumerics(
+            dataType, mode, observed.data(), logicalElements, fixedInitializationKey);
+        EXPECT_EQ(std::memcmp(observed.data(), &expected, sizeof(T)), 0)
+            << "dataType=" << dataType << " mode=" << mode;
+    }
+}
+
+TEST(HostNumericsDataInitialization, TypeDerivedSpecialValuesMatchTensileEncoding)
+{
+    expectComponentInitializationBytes<int8_t>(
+        rocisa::DataType::Int8, InitMode::Max, std::numeric_limits<int8_t>::max());
+    expectComponentInitializationBytes<int32_t>(
+        rocisa::DataType::Int32, InitMode::Max, std::numeric_limits<int32_t>::max());
+    expectComponentInitializationBytes<int8_t>(
+        rocisa::DataType::Int8, InitMode::BadInput, std::numeric_limits<int8_t>::max());
+    expectComponentInitializationBytes<int8_t>(
+        rocisa::DataType::Int8, InitMode::BadOutput, std::numeric_limits<int8_t>::min());
+    expectComponentInitializationBytes<int32_t>(
+        rocisa::DataType::Int32, InitMode::BadInput, std::numeric_limits<int32_t>::max());
+    expectComponentInitializationBytes<int32_t>(
+        rocisa::DataType::Int32, InitMode::BadOutput, std::numeric_limits<int32_t>::min());
+
+    expectComponentInitializationBytes<TensileLite::BFloat16>(
+        rocisa::DataType::BFloat16,
+        InitMode::Max,
+        TensileLite::BFloat16(std::numeric_limits<float>::max()));
+#ifndef _WIN32
+    expectComponentInitializationBytes<TensileLite::BFloat6x32>(
+        rocisa::DataType::BFloat6, InitMode::Max, TensileLite::BFloat6x32(7.5f));
+    expectComponentInitializationBytes<TensileLite::BFloat6x32>(
+        rocisa::DataType::BFloat6, InitMode::DenormMin, TensileLite::BFloat6x32(0.125f));
+    expectComponentInitializationBytes<TensileLite::BFloat6x32>(
+        rocisa::DataType::BFloat6, InitMode::DenormMax, TensileLite::BFloat6x32(0.875f));
 #endif
 
-} // namespace
+    expectComponentInitializationBytes<TensileLite::E8>(
+        rocisa::DataType::E8, InitMode::Zero, TensileLite::E8(uint8_t{0}));
+    expectComponentInitializationBytes<TensileLite::E8>(
+        rocisa::DataType::E8, InitMode::One, TensileLite::E8(1.0f));
+    expectComponentInitializationBytes<TensileLite::E8>(
+        rocisa::DataType::E8, InitMode::Two, TensileLite::E8(2.0f));
+    expectComponentInitializationBytes<TensileLite::E8>(
+        rocisa::DataType::E8, InitMode::Max, TensileLite::E8(static_cast<uint8_t>(0xfe)));
+    for(const InitMode mode : {InitMode::NaN, InitMode::BadInput, InitMode::BadOutput})
+        expectComponentInitializationBytes<TensileLite::E8>(
+            rocisa::DataType::E8, mode, TensileLite::E8(static_cast<uint8_t>(0xff)));
+}
+
+TEST(HostNumericsStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
+{
+    auto problem = makeProblem(rocisa::DataType::Int8,
+                               rocisa::DataType::Int8,
+                               /*mxBlockA=*/0,
+                               /*mxBlockB=*/0,
+                               /*M=*/2,
+                               /*N=*/2,
+                               /*K=*/8,
+                               /*batch=*/1,
+                               /*transA=*/false,
+                               /*transB=*/false);
+    problem.setSparse(1, 0);
+
+    const TensorDescriptor& denseDescriptor      = problem.a();
+    const TensorDescriptor& compressedDescriptor = problem.compressed();
+    const TensorDescriptor& metadataDescriptor   = problem.metadata();
+    const size_t            sparseAxis           = problem.boundIndices()[0].a;
+
+    std::vector<int8_t> original(denseDescriptor.totalAllocatedElements());
+    for(size_t index = 0; index < original.size(); ++index)
+        original[index] = static_cast<int8_t>(index + 1);
+
+    std::vector<int8_t>  adapterPruned = original;
+    std::vector<int8_t>  adapterCompressed(compressedDescriptor.totalAllocatedElements());
+    std::vector<uint8_t> adapterMetadata(metadataDescriptor.totalAllocatedElements());
+    initCPUSparseInput(PruneSparseMode::PruneXX00,
+                       adapterPruned.data(),
+                       adapterCompressed.data(),
+                       adapterMetadata.data(),
+                       denseDescriptor,
+                       compressedDescriptor,
+                       metadataDescriptor,
+                       sparseAxis,
+                       problem.metadataLayout());
+
+    auto layout = [](const TensorDescriptor& descriptor) {
+        return TensileLite::Client::hostnumericsLayout(descriptor);
+    };
+    using namespace roc::hostnumerics;
+    const ScalarType     scalarType = toHostNumericsScalarType(denseDescriptor.dataType());
+    std::vector<int8_t>  componentPruned(original.size());
+    std::vector<int8_t>  componentCompressed(adapterCompressed.size());
+    std::vector<uint8_t> componentMetadata(adapterMetadata.size());
+    const Shape          logicalMetadataShape{
+        denseDescriptor.sizes()[0], denseDescriptor.sizes()[1] / 8, denseDescriptor.sizes()[2]};
+    const Layout metadataLayout = layout(metadataDescriptor);
+    const Layout logicalMetadataLayout(
+        logicalMetadataShape,
+        {metadataLayout.stride(1), metadataLayout.stride(0), metadataLayout.stride(2)},
+        0);
+
+    StructuredSparsityPattern pattern;
+    pattern.indexOrder           = roc::hostnumerics::Permutation{0, 1, 2};
+    pattern.axis                 = sparseAxis;
+    pattern.fixedPositions       = {0, 1};
+    Tensor componentPrunedTensor = Tensor::copyEncodedBackingStorage(
+        scalarType,
+        layout(denseDescriptor),
+        std::as_writable_bytes(std::span<int8_t>(componentPruned)));
+    Tensor componentCompressedTensor = Tensor::copyEncodedBackingStorage(
+        scalarType,
+        layout(compressedDescriptor),
+        std::as_writable_bytes(std::span<int8_t>(componentCompressed)));
+    Tensor componentMetadataTensor = Tensor::copyEncodedBackingStorage(
+        ScalarType::UInt8,
+        logicalMetadataLayout,
+        std::as_writable_bytes(std::span<uint8_t>(componentMetadata)));
+    applyStructuredSparsityInto(
+        Tensor::copyEncodedBackingStorage(
+            scalarType, layout(denseDescriptor), std::as_bytes(std::span<const int8_t>(original))),
+        {.pruned            = componentPrunedTensor,
+         .compressed        = componentCompressedTensor,
+         .twoOfFourMetadata = componentMetadataTensor},
+        pattern,
+        {});
+    std::memcpy(componentPruned.data(),
+                componentPrunedTensor.rawEncodedBackingStorage().data(),
+                componentPrunedTensor.rawEncodedBackingStorage().size());
+    std::memcpy(componentCompressed.data(),
+                componentCompressedTensor.rawEncodedBackingStorage().data(),
+                componentCompressedTensor.rawEncodedBackingStorage().size());
+    std::memcpy(componentMetadata.data(),
+                componentMetadataTensor.rawEncodedBackingStorage().data(),
+                componentMetadataTensor.rawEncodedBackingStorage().size());
+
+    EXPECT_EQ(componentPruned, adapterPruned);
+    EXPECT_EQ(componentCompressed, adapterCompressed);
+    EXPECT_EQ(componentMetadata, adapterMetadata);
+}
+
+TEST(HostNumericsStructuredSparsity, ValidationFailureDoesNotMutateCallerStorage)
+{
+    const TensorDescriptor dense("dense", rocisa::DataType::Int8, {2, 4}, {1, 2});
+    const TensorDescriptor compressed("compressed", rocisa::DataType::Int8, {2, 2}, {1, 4});
+    const TensorDescriptor metadata("metadata", rocisa::DataType::Int8, {2, 2}, {1, 4});
+
+    std::vector<int8_t>  pruned(dense.totalAllocatedElements(), 11);
+    std::vector<int8_t>  compressedOutput(compressed.totalAllocatedElements(), 22);
+    std::vector<uint8_t> metadataOutput(metadata.totalAllocatedElements(), 33);
+    const auto           originalPruned     = pruned;
+    const auto           originalCompressed = compressedOutput;
+    const auto           originalMetadata   = metadataOutput;
+
+    ASSERT_GT(compressed.totalAllocatedElements(), compressed.totalLogicalElements());
+    ASSERT_GT(metadata.totalAllocatedElements(), metadata.totalLogicalElements());
+    EXPECT_THROW(initCPUSparseInput(PruneSparseMode::PruneXX00,
+                                    pruned.data(),
+                                    compressedOutput.data(),
+                                    metadataOutput.data(),
+                                    dense,
+                                    compressed,
+                                    metadata,
+                                    dense.dimensions(),
+                                    false),
+                 std::runtime_error);
+
+    EXPECT_EQ(pruned, originalPruned);
+    EXPECT_EQ(compressedOutput, originalCompressed);
+    EXPECT_EQ(metadataOutput, originalMetadata);
+}
+
+TEST(HostNumericsStructuredSparsity, ZeroExtentIsANoOp)
+{
+    const TensorDescriptor dense("dense", rocisa::DataType::Int8, {0, 4}, {1, 1});
+    const TensorDescriptor compressed("compressed", rocisa::DataType::Int8, {0, 4}, {1, 1});
+    const TensorDescriptor metadata("metadata", rocisa::DataType::Int8, {0, 4}, {1, 1});
+
+    EXPECT_NO_THROW(initCPUSparseInput(PruneSparseMode::PruneXX00,
+                                       nullptr,
+                                       nullptr,
+                                       nullptr,
+                                       dense,
+                                       compressed,
+                                       metadata,
+                                       0,
+                                       false));
+}
+
+TEST(HostNumericsStructuredSparsity, TensileAdapterCoversModesLayoutsAndSparseSides)
+{
+    const std::array<PruneSparseMode, 7> modes{
+        PruneSparseMode::PruneRandom,
+        PruneSparseMode::PruneXX00,
+        PruneSparseMode::PruneX0X0,
+        PruneSparseMode::Prune0XX0,
+        PruneSparseMode::PruneX00X,
+        PruneSparseMode::Prune0X0X,
+        PruneSparseMode::Prune00XX,
+    };
+    const std::array<std::array<size_t, 2>, 7> retainedPositionSets{{
+        {0, 0},
+        {0, 1},
+        {0, 2},
+        {1, 2},
+        {0, 3},
+        {1, 3},
+        {2, 3},
+    }};
+    struct SparseCase
+    {
+        int  sparseSide;
+        bool transA;
+        bool transB;
+    };
+    const std::array<SparseCase, 4> sparseCases{{
+        {1, false, false},
+        {1, true, false},
+        {2, false, false},
+        {2, false, true},
+    }};
+
+    for(const SparseCase& sparseCase : sparseCases)
+    {
+        for(const int metadataLayout : {0, 1})
+        {
+            for(const PruneSparseMode mode : modes)
+            {
+                SCOPED_TRACE(::testing::Message()
+                             << "sparseSide=" << sparseCase.sparseSide
+                             << " transA=" << sparseCase.transA << " transB=" << sparseCase.transB
+                             << " metadataLayout=" << metadataLayout
+                             << " mode=" << static_cast<int>(mode));
+                auto problem = makeProblem(rocisa::DataType::Int8,
+                                           rocisa::DataType::Int8,
+                                           0,
+                                           0,
+                                           8,
+                                           8,
+                                           16,
+                                           2,
+                                           sparseCase.transA,
+                                           sparseCase.transB);
+                problem.setSparse(sparseCase.sparseSide, metadataLayout);
+
+                const TensorDescriptor& denseDescriptor
+                    = sparseCase.sparseSide == 1 ? problem.a() : problem.b();
+                const TensorDescriptor& compressedDescriptor = problem.compressed();
+                const TensorDescriptor& metadataDescriptor   = problem.metadata();
+                const size_t sparseAxis = sparseCase.sparseSide == 1 ? problem.boundIndices()[0].a
+                                                                     : problem.boundIndices()[0].b;
+
+                std::vector<int8_t> original(denseDescriptor.totalAllocatedElements());
+                for(size_t index = 0; index < original.size(); ++index)
+                    original[index] = static_cast<int8_t>(index % 127 + 1);
+                std::vector<int8_t>  pruned = original;
+                std::vector<int8_t>  compressed(compressedDescriptor.totalAllocatedElements(),
+                                               static_cast<int8_t>(-101));
+                std::vector<uint8_t> metadata(metadataDescriptor.totalAllocatedElements(), 0xff);
+
+                initCPUSparseInput(mode,
+                                   pruned.data(),
+                                   compressed.data(),
+                                   metadata.data(),
+                                   denseDescriptor,
+                                   compressedDescriptor,
+                                   metadataDescriptor,
+                                   sparseAxis,
+                                   problem.metadataLayout());
+
+                const size_t groupsPerSlice = denseDescriptor.sizes()[sparseAxis] / 4;
+                const size_t sliceCount
+                    = denseDescriptor.totalLogicalElements() / denseDescriptor.sizes()[sparseAxis];
+                std::vector<size_t> denseCoordinates(denseDescriptor.dimensions(), 0);
+                std::vector<size_t> compressedCoordinates(compressedDescriptor.dimensions(), 0);
+                std::vector<size_t> metadataCoordinates(metadataDescriptor.dimensions(), 0);
+                for(size_t slice = 0; slice < sliceCount; ++slice)
+                {
+                    TensileLite::CoordNumberedExclude(slice,
+                                                      denseCoordinates.begin(),
+                                                      denseCoordinates.end(),
+                                                      denseDescriptor.sizes().begin(),
+                                                      denseDescriptor.sizes().end(),
+                                                      sparseAxis);
+                    TensileLite::CoordNumberedExclude(slice,
+                                                      metadataCoordinates.begin(),
+                                                      metadataCoordinates.end(),
+                                                      metadataDescriptor.sizes().begin(),
+                                                      metadataDescriptor.sizes().end(),
+                                                      problem.metadataLayout());
+                    compressedCoordinates = denseCoordinates;
+                    for(size_t group = 0; group < groupsPerSlice; ++group)
+                    {
+                        std::array<size_t, 2>        randomRetainedPositions{};
+                        const std::array<size_t, 2>* retained
+                            = &retainedPositionSets[static_cast<uint32_t>(mode)];
+                        if(mode == PruneSparseMode::PruneRandom)
+                        {
+                            size_t retainedCount = 0;
+                            for(size_t position = 0; position < 4; ++position)
+                            {
+                                denseCoordinates[sparseAxis] = group * 4 + position;
+                                if(pruned[denseDescriptor.index(denseCoordinates)] != 0)
+                                {
+                                    ASSERT_LT(retainedCount, randomRetainedPositions.size());
+                                    randomRetainedPositions[retainedCount++] = position;
+                                }
+                            }
+                            ASSERT_EQ(retainedCount, randomRetainedPositions.size());
+                            retained = &randomRetainedPositions;
+                        }
+                        const uint8_t expectedMetadata
+                            = static_cast<uint8_t>((*retained)[0] | ((*retained)[1] << 2));
+
+                        for(size_t position = 0; position < 4; ++position)
+                        {
+                            denseCoordinates[sparseAxis] = group * 4 + position;
+                            const size_t denseIndex      = denseDescriptor.index(denseCoordinates);
+                            const bool   isRetained
+                                = position == (*retained)[0] || position == (*retained)[1];
+                            EXPECT_EQ(pruned[denseIndex], isRetained ? original[denseIndex] : 0);
+                        }
+                        for(size_t retainedIndex = 0; retainedIndex < retained->size();
+                            ++retainedIndex)
+                        {
+                            denseCoordinates[sparseAxis] = group * 4 + (*retained)[retainedIndex];
+                            compressedCoordinates[sparseAxis] = group * 2 + retainedIndex;
+                            EXPECT_EQ(compressed[compressedDescriptor.index(compressedCoordinates)],
+                                      original[denseDescriptor.index(denseCoordinates)]);
+                        }
+
+                        metadataCoordinates[problem.metadataLayout()] = group / 2;
+                        const size_t metadataIndex
+                            = TensileLite::CoordFlattenIndex(metadataCoordinates.begin(),
+                                                             metadataCoordinates.end(),
+                                                             metadataDescriptor.sizes().begin(),
+                                                             metadataDescriptor.sizes().end());
+                        const uint8_t observedMetadata
+                            = static_cast<uint8_t>(metadata[metadataIndex] >> ((group % 2) * 4));
+                        EXPECT_EQ(observedMetadata & 0xfU, expectedMetadata);
+                    }
+                }
+            }
+        }
+    }
+}
 
 // =============================================================================
 //   Section 1 - TensileLite::Client::isMXTensor
@@ -213,41 +825,36 @@ TEST_P(IsMXTensorTest, MatchesContract)
     // 1x1 descriptor is enough; the helper only inspects .dataType().
     TensorDescriptor t("t", p.dtype, {1, 1}, {1, 1});
     EXPECT_EQ(isMXTensor(t, p.mxBlock), p.expected)
-        << "case=" << p.name
-        << " dtype=" << static_cast<int>(p.dtype)
-        << " mxBlock=" << p.mxBlock;
+        << "case=" << p.name << " dtype=" << static_cast<int>(p.dtype) << " mxBlock=" << p.mxBlock;
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    MXFP4OrFP8Coverage,
-    IsMXTensorTest,
-    ::testing::Values(
-        // ----- (a) mxBlock==0 must short-circuit even for MX dtypes --------
-        TensorParam{rocisa::DataType::Float4,   0, false, "Float4_block0"},
-        TensorParam{rocisa::DataType::Float6,   0, false, "Float6_block0"},
-        TensorParam{rocisa::DataType::BFloat6,  0, false, "BFloat6_block0"},
-        TensorParam{rocisa::DataType::Float8,   0, false, "Float8_block0"},
-        TensorParam{rocisa::DataType::BFloat8,  0, false, "BFloat8_block0"},
-        // ----- (b) supported MX dtypes with mxBlock>0 -> true --------------
-        TensorParam{rocisa::DataType::Float4,  32, true,  "Float4_block32"},
-        TensorParam{rocisa::DataType::Float6,  32, true,  "Float6_block32"},
-        TensorParam{rocisa::DataType::BFloat6, 32, true,  "BFloat6_block32"},
-        TensorParam{rocisa::DataType::Float8,  32, true,  "Float8_block32"},
-        TensorParam{rocisa::DataType::BFloat8, 32, true,  "BFloat8_block32"},
-        // ----- (b') unsupported dtypes with mxBlock>0 -> false -------------
-        TensorParam{rocisa::DataType::Float,   32, false, "Float_block32"},
-        TensorParam{rocisa::DataType::Half,    32, false, "Half_block32"},
-        TensorParam{rocisa::DataType::BFloat16,32, false, "BFloat16_block32"},
-        TensorParam{rocisa::DataType::Int8,    32, false, "Int8_block32"},
-        TensorParam{rocisa::DataType::Int32,   32, false, "Int32_block32"},
-        // ----- mxBlock not equal to 32 (any positive value works) ----------
-        TensorParam{rocisa::DataType::Float8,    1, true, "Float8_block1"},
-        TensorParam{rocisa::DataType::BFloat8, 128, true, "BFloat8_block128"}
-    ),
-    [](::testing::TestParamInfo<TensorParam> const& info) {
-        return std::string(info.param.name);
-    }
-);
+INSTANTIATE_TEST_SUITE_P(MXFP4OrFP8Coverage,
+                         IsMXTensorTest,
+                         ::testing::Values(
+                             // ----- (a) mxBlock==0 must short-circuit even for MX dtypes --------
+                             TensorParam{rocisa::DataType::Float4, 0, false, "Float4_block0"},
+                             TensorParam{rocisa::DataType::Float6, 0, false, "Float6_block0"},
+                             TensorParam{rocisa::DataType::BFloat6, 0, false, "BFloat6_block0"},
+                             TensorParam{rocisa::DataType::Float8, 0, false, "Float8_block0"},
+                             TensorParam{rocisa::DataType::BFloat8, 0, false, "BFloat8_block0"},
+                             // ----- (b) supported MX dtypes with mxBlock>0 -> true --------------
+                             TensorParam{rocisa::DataType::Float4, 32, true, "Float4_block32"},
+                             TensorParam{rocisa::DataType::Float6, 32, true, "Float6_block32"},
+                             TensorParam{rocisa::DataType::BFloat6, 32, true, "BFloat6_block32"},
+                             TensorParam{rocisa::DataType::Float8, 32, true, "Float8_block32"},
+                             TensorParam{rocisa::DataType::BFloat8, 32, true, "BFloat8_block32"},
+                             // ----- (b') unsupported dtypes with mxBlock>0 -> false -------------
+                             TensorParam{rocisa::DataType::Float, 32, false, "Float_block32"},
+                             TensorParam{rocisa::DataType::Half, 32, false, "Half_block32"},
+                             TensorParam{rocisa::DataType::BFloat16, 32, false, "BFloat16_block32"},
+                             TensorParam{rocisa::DataType::Int8, 32, false, "Int8_block32"},
+                             TensorParam{rocisa::DataType::Int32, 32, false, "Int32_block32"},
+                             // ----- mxBlock not equal to 32 (any positive value works) ----------
+                             TensorParam{rocisa::DataType::Float8, 1, true, "Float8_block1"},
+                             TensorParam{rocisa::DataType::BFloat8, 128, true, "BFloat8_block128"}),
+                         [](::testing::TestParamInfo<TensorParam> const& info) {
+                             return std::string(info.param.name);
+                         });
 
 // =============================================================================
 //   Section 2 - TensileLite::Client::isMXProblem
@@ -259,65 +866,85 @@ INSTANTIATE_TEST_SUITE_P(
 // =============================================================================
 TEST(IsMXProblem, BothFP4)
 {
-    auto p = makeProblem(rocisa::DataType::Float4, rocisa::DataType::Float4,
-                         /*mxBlockA=*/32, /*mxBlockB=*/32);
+    auto p = makeProblem(rocisa::DataType::Float4,
+                         rocisa::DataType::Float4,
+                         /*mxBlockA=*/32,
+                         /*mxBlockB=*/32);
     EXPECT_TRUE(isMXProblem(p));
 }
 TEST(IsMXProblem, BothFP6)
 {
-    auto p = makeProblem(rocisa::DataType::Float6, rocisa::DataType::Float6,
-                         /*mxBlockA=*/32, /*mxBlockB=*/32);
+    auto p = makeProblem(rocisa::DataType::Float6,
+                         rocisa::DataType::Float6,
+                         /*mxBlockA=*/32,
+                         /*mxBlockB=*/32);
     EXPECT_TRUE(isMXProblem(p));
 }
 TEST(IsMXProblem, BothBFloat6)
 {
-    auto p = makeProblem(rocisa::DataType::BFloat6, rocisa::DataType::BFloat6,
-                         /*mxBlockA=*/32, /*mxBlockB=*/32);
+    auto p = makeProblem(rocisa::DataType::BFloat6,
+                         rocisa::DataType::BFloat6,
+                         /*mxBlockA=*/32,
+                         /*mxBlockB=*/32);
     EXPECT_TRUE(isMXProblem(p));
 }
 TEST(IsMXProblem, BothFP8)
 {
-    auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::Float8,
-                         /*mxBlockA=*/32, /*mxBlockB=*/32);
+    auto p = makeProblem(rocisa::DataType::Float8,
+                         rocisa::DataType::Float8,
+                         /*mxBlockA=*/32,
+                         /*mxBlockB=*/32);
     EXPECT_TRUE(isMXProblem(p));
 }
 TEST(IsMXProblem, BothBFloat8)
 {
-    auto p = makeProblem(rocisa::DataType::BFloat8, rocisa::DataType::BFloat8,
-                         /*mxBlockA=*/32, /*mxBlockB=*/32);
+    auto p = makeProblem(rocisa::DataType::BFloat8,
+                         rocisa::DataType::BFloat8,
+                         /*mxBlockA=*/32,
+                         /*mxBlockB=*/32);
     EXPECT_TRUE(isMXProblem(p));
 }
 TEST(IsMXProblem, MixedFP4AandFP8B)
 {
-    auto p = makeProblem(rocisa::DataType::Float4, rocisa::DataType::Float8,
-                         /*mxBlockA=*/32, /*mxBlockB=*/32);
+    auto p = makeProblem(rocisa::DataType::Float4,
+                         rocisa::DataType::Float8,
+                         /*mxBlockA=*/32,
+                         /*mxBlockB=*/32);
     EXPECT_TRUE(isMXProblem(p));
 }
 TEST(IsMXProblem, MixedBFloat8AandFP4B)
 {
-    auto p = makeProblem(rocisa::DataType::BFloat8, rocisa::DataType::Float4,
-                         /*mxBlockA=*/32, /*mxBlockB=*/32);
+    auto p = makeProblem(rocisa::DataType::BFloat8,
+                         rocisa::DataType::Float4,
+                         /*mxBlockA=*/32,
+                         /*mxBlockB=*/32);
     EXPECT_TRUE(isMXProblem(p));
 }
 TEST(IsMXProblem, OnlyA_isMX_BIsBF16)
 {
     // First disjunct true, second disjunct short-circuits false (mxBlockB=0).
-    auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::BFloat16,
-                         /*mxBlockA=*/32, /*mxBlockB=*/0);
+    auto p = makeProblem(rocisa::DataType::Float8,
+                         rocisa::DataType::BFloat16,
+                         /*mxBlockA=*/32,
+                         /*mxBlockB=*/0);
     EXPECT_TRUE(isMXProblem(p));
 }
 TEST(IsMXProblem, OnlyB_isMX_AIsBF16)
 {
-    auto p = makeProblem(rocisa::DataType::BFloat16, rocisa::DataType::Float4,
-                         /*mxBlockA=*/0, /*mxBlockB=*/32);
+    auto p = makeProblem(rocisa::DataType::BFloat16,
+                         rocisa::DataType::Float4,
+                         /*mxBlockA=*/0,
+                         /*mxBlockB=*/32);
     EXPECT_TRUE(isMXProblem(p));
 }
 TEST(IsMXProblem, BothFP8Block128)
 {
     // 1x128 block scaling: mxBlock only has to be positive, so widening the
     // block must not change MX-problem detection or the scale dtypes.
-    auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::Float8,
-                         /*mxBlockA=*/128, /*mxBlockB=*/128);
+    auto p = makeProblem(rocisa::DataType::Float8,
+                         rocisa::DataType::Float8,
+                         /*mxBlockA=*/128,
+                         /*mxBlockB=*/128);
     EXPECT_TRUE(isMXProblem(p));
     EXPECT_EQ(p.mxBlockA(), 128);
     EXPECT_EQ(p.mxBlockB(), 128);
@@ -326,11 +953,18 @@ TEST(IsMXProblem, BothFP8FreeTile128)
 {
     // 128x128 block scaling. isMXProblem keys off mxBlock{A,B} only, so adding a
     // free-dimension extent must not change detection either way.
-    auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::Float8,
-                         /*mxBlockA=*/128, /*mxBlockB=*/128,
-                         /*M=*/128, /*N=*/128, /*K=*/256, /*batch=*/1,
-                         /*transA=*/true, /*transB=*/false,
-                         /*mxBlockFreeA=*/128, /*mxBlockFreeB=*/128);
+    auto p = makeProblem(rocisa::DataType::Float8,
+                         rocisa::DataType::Float8,
+                         /*mxBlockA=*/128,
+                         /*mxBlockB=*/128,
+                         /*M=*/128,
+                         /*N=*/128,
+                         /*K=*/256,
+                         /*batch=*/1,
+                         /*transA=*/true,
+                         /*transB=*/false,
+                         /*mxBlockFreeA=*/128,
+                         /*mxBlockFreeB=*/128);
     EXPECT_TRUE(isMXProblem(p));
     EXPECT_EQ(p.mxBlockA(), 128);
     EXPECT_EQ(p.mxBlockB(), 128);
@@ -341,21 +975,27 @@ TEST(IsMXProblem, FreeTileDefaultsToOne)
 {
     // Every problem built before MXBlockFree* existed must keep reporting 1,
     // which is the divide-by-nothing 1xmxBlock layout.
-    auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::Float8,
-                         /*mxBlockA=*/128, /*mxBlockB=*/128);
+    auto p = makeProblem(rocisa::DataType::Float8,
+                         rocisa::DataType::Float8,
+                         /*mxBlockA=*/128,
+                         /*mxBlockB=*/128);
     EXPECT_EQ(p.mxBlockFreeA(), 1);
     EXPECT_EQ(p.mxBlockFreeB(), 1);
 }
 TEST(IsMXProblem, NeitherIsMX)
 {
-    auto p = makeProblem(rocisa::DataType::BFloat16, rocisa::DataType::BFloat16,
-                         /*mxBlockA=*/0, /*mxBlockB=*/0);
+    auto p = makeProblem(rocisa::DataType::BFloat16,
+                         rocisa::DataType::BFloat16,
+                         /*mxBlockA=*/0,
+                         /*mxBlockB=*/0);
     EXPECT_FALSE(isMXProblem(p));
 }
 TEST(IsMXProblem, FloatABIsFalse)
 {
-    auto p = makeProblem(rocisa::DataType::Float, rocisa::DataType::Float,
-                         /*mxBlockA=*/0, /*mxBlockB=*/0);
+    auto p = makeProblem(rocisa::DataType::Float,
+                         rocisa::DataType::Float,
+                         /*mxBlockA=*/0,
+                         /*mxBlockB=*/0);
     EXPECT_FALSE(isMXProblem(p));
 }
 
@@ -375,8 +1015,8 @@ TEST(InitializeMXDataForFP4OrFP8_BatchStrideFormula, FP8_OneBytePerElement)
         << "OCP E4M3 must pack 1 byte per element; if this assertion fires the "
            "patch 3/3 batch-stride formula needs to be revisited.";
     constexpr size_t kStrideElems = 12345; // arbitrary, prime-ish
-    size_t const     bytes        = TensileLite::multiplyElementSize(
-        kStrideElems, static_cast<float>(info.elementSize));
+    size_t const     bytes
+        = TensileLite::multiplyElementSize(kStrideElems, static_cast<float>(info.elementSize));
     EXPECT_EQ(bytes, kStrideElems);
 }
 
@@ -385,12 +1025,11 @@ TEST(InitializeMXDataForFP4OrFP8_BatchStrideFormula, BFloat8_OneBytePerElement)
     auto const info = DataTypeInfo::Get(rocisa::DataType::BFloat8);
     ASSERT_EQ(info.elementSize, 1u) << "OCP E5M2 must pack 1 byte per element.";
     constexpr size_t kStrideElems = 1u << 20; // 1 Mi elements
-    size_t const     bytes        = TensileLite::multiplyElementSize(
-        kStrideElems, static_cast<float>(info.elementSize));
+    size_t const     bytes
+        = TensileLite::multiplyElementSize(kStrideElems, static_cast<float>(info.elementSize));
     EXPECT_EQ(bytes, kStrideElems);
 }
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 TEST(DataInitializationReferenceRecompute, Gfx950RequiresPerSolutionRecomputeForSwizzledMX)
 {
     hipDeviceProp_t prop{};
@@ -398,11 +1037,11 @@ TEST(DataInitializationReferenceRecompute, Gfx950RequiresPerSolutionRecomputeFor
     if(std::string(prop.gcnArchName).find("gfx950") == std::string::npos)
         GTEST_SKIP() << "gfx950-specific recompute behavior is only observable on gfx950";
 
-    auto problem = makeProblem(rocisa::DataType::Float8,
+    auto                                      problem = makeProblem(rocisa::DataType::Float8,
                                rocisa::DataType::Float8,
                                /*mxBlockA=*/32,
                                /*mxBlockB=*/32);
-    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
+    auto                                      args    = makeMinimalClientArgs(/*mxScaleFormat=*/1);
     TensileLite::Client::ClientProblemFactory factory(args);
     TensileLite::Client::DataInitialization   dataInit(args, factory);
 
@@ -422,11 +1061,11 @@ TEST(DataInitializationReferenceRecompute, Gfx1250ReusesPreswizzledMXAcrossSolut
     if(std::string(prop.gcnArchName).find("gfx1250") == std::string::npos)
         GTEST_SKIP() << "gfx1250-specific reuse behavior is only observable on gfx1250";
 
-    auto problem = makeProblem(rocisa::DataType::Float8,
+    auto                                      problem = makeProblem(rocisa::DataType::Float8,
                                rocisa::DataType::Float8,
                                /*mxBlockA=*/32,
                                /*mxBlockB=*/32);
-    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
+    auto                                      args    = makeMinimalClientArgs(/*mxScaleFormat=*/1);
     TensileLite::Client::ClientProblemFactory factory(args);
     TensileLite::Client::DataInitialization   dataInit(args, factory);
 
@@ -435,361 +1074,353 @@ TEST(DataInitializationReferenceRecompute, Gfx1250ReusesPreswizzledMXAcrossSolut
 
     EXPECT_FALSE(dataInit.referenceNeedsPerSolutionRecompute(problem, &swizzleSolution));
 }
-#endif
 
 // =============================================================================
-//   Section 4 — direct calls into TensileLite::Client::detail (MX builds only)
+//   Section 4 — direct calls into TensileLite::Client::detail
 // =============================================================================
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-// -----------------------------------------------------------------------------
-// 4.1  detail::hipMxScaleTypeForDataGenerator
-// -----------------------------------------------------------------------------
-TEST(HipMxScaleTypeForDataGenerator, MapsFloat8ToHIP_R_8F_E4M3)
+TEST(TensileMxGenerationTranslation, MapsTypesAndInitializationPolicy)
 {
-    EXPECT_EQ(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::Float8),
-              HIP_R_8F_E4M3);
-}
-TEST(HipMxScaleTypeForDataGenerator, MapsE5M3ToHIP_R_8F_E5M3_EXT)
-{
-    EXPECT_EQ(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::E5M3),
-              static_cast<hipDataType>(HIP_R_8F_E5M3_EXT));
-}
-TEST(HipMxScaleTypeForDataGenerator, MapsE8AndNoneToHIP_R_8F_UE8M0)
-{
-    EXPECT_EQ(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::E8),
-              HIP_R_8F_UE8M0);
-    EXPECT_EQ(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::None),
-              HIP_R_8F_UE8M0);
-}
-TEST(HipMxScaleTypeForDataGenerator, ThrowsOnUnsupportedScaleType)
-{
-    EXPECT_THROW(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::Float4),
-                 std::runtime_error);
-    EXPECT_THROW(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::BFloat8),
-                 std::runtime_error);
-    EXPECT_THROW(dt::hipMxScaleTypeForDataGenerator(rocisa::DataType::Float),
-                 std::runtime_error);
+    using namespace roc::hostnumerics;
+
+    const MxTensor generated = dt::generateMxData(rocisa::DataType::Float4,
+                                                  rocisa::DataType::E5M3,
+                                                  Shape{8, 4},
+                                                  8,
+                                                  0,
+                                                  4,
+                                                  InitMode::Random,
+                                                  InitMode::One,
+                                                  17,
+                                                  false);
+    EXPECT_EQ(generated.data.type(), ScalarType::Float4E2M1);
+    EXPECT_EQ(generated.scales.type(), ScalarType::E5M3);
 }
 
-// -----------------------------------------------------------------------------
-// 4.2  detail::hipMxDataTypeForDataGenerator
-// -----------------------------------------------------------------------------
-TEST(HipMxDataTypeForDataGenerator, MapsFloat4ToHIP_R_4F_E2M1)
+TEST(TensileMxGenerationTranslation, PreservesTheFullCallerSeed)
 {
-    EXPECT_EQ(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::Float4),
-              static_cast<hipDataType>(HIP_R_4F_E2M1));
-}
-TEST(HipMxDataTypeForDataGenerator, MapsFloat8ToHIP_R_8F_E4M3)
-{
-    EXPECT_EQ(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::Float8),
-              HIP_R_8F_E4M3);
-}
-TEST(HipMxDataTypeForDataGenerator, MapsBFloat8ToHIP_R_8F_E5M2)
-{
-    EXPECT_EQ(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::BFloat8),
-              HIP_R_8F_E5M2);
-}
-TEST(HipMxDataTypeForDataGenerator, MapsFloat6ToHIP_R_6F_E2M3)
-{
-    EXPECT_EQ(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::Float6),
-              static_cast<hipDataType>(HIP_R_6F_E2M3));
-}
-TEST(HipMxDataTypeForDataGenerator, MapsBFloat6ToHIP_R_6F_E3M2)
-{
-    EXPECT_EQ(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::BFloat6),
-              static_cast<hipDataType>(HIP_R_6F_E3M2));
-}
-TEST(HipMxDataTypeForDataGenerator, ThrowsOnUnsupportedDataType)
-{
-    EXPECT_THROW(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::Float),
-                 std::runtime_error);
-    EXPECT_THROW(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::Half),
-                 std::runtime_error);
-    EXPECT_THROW(dt::hipMxDataTypeForDataGenerator(rocisa::DataType::BFloat16),
-                 std::runtime_error);
+    using namespace roc::hostnumerics;
+
+    const auto generateWithSeed = [](uint64_t seed) {
+        return dt::generateMxData(rocisa::DataType::Float4,
+                                  rocisa::DataType::E8,
+                                  Shape{32, 4},
+                                  32,
+                                  0,
+                                  32,
+                                  InitMode::Random,
+                                  InitMode::One,
+                                  seed,
+                                  false);
+    };
+    const MxTensor first  = generateWithSeed(17);
+    const MxTensor replay = generateWithSeed(17);
+    const MxTensor other  = generateWithSeed(17 + (uint64_t{1} << 40));
+
+    EXPECT_TRUE(std::ranges::equal(first.data.rawEncodedBackingStorage(),
+                                   replay.data.rawEncodedBackingStorage()));
+    EXPECT_FALSE(std::ranges::equal(first.data.rawEncodedBackingStorage(),
+                                    other.data.rawEncodedBackingStorage()));
 }
 
-// -----------------------------------------------------------------------------
-// 4.8  detail::decodeE8M0
-// -----------------------------------------------------------------------------
-TEST(DecodeE8M0, ZeroByteIsZero)        { EXPECT_EQ(dt::decodeE8M0(0x00), 0.0f); }
-TEST(DecodeE8M0, AllOnesByteIsNaN)      { EXPECT_TRUE(std::isnan(dt::decodeE8M0(0xFF))); }
-TEST(DecodeE8M0, BiasByteIsOne)         { EXPECT_EQ(dt::decodeE8M0(0x7F), 1.0f); }   // 2^0
-TEST(DecodeE8M0, NextAboveBiasIsTwo)    { EXPECT_EQ(dt::decodeE8M0(0x80), 2.0f); }   // 2^1
-TEST(DecodeE8M0, NextBelowBiasIsHalf)   { EXPECT_EQ(dt::decodeE8M0(0x7E), 0.5f); }   // 2^-1
-TEST(DecodeE8M0, MatchesLdexpFormulaOverWideRange)
+TEST(TensileMxGenerationTranslation, MapsArchitectureToPhysicalScaleLayout)
 {
-    for(int byte = 1; byte < 0xFF; ++byte)
+    using roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout;
+
+    EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx950"), MxScaleStorageLayout::Gfx950);
+    EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx950:sramecc+:xnack-"),
+              MxScaleStorageLayout::Gfx950);
+    EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx1250"), MxScaleStorageLayout::Gfx1250);
+    EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx942"), MxScaleStorageLayout::Natural);
+}
+
+// One scale must cover a whole MX block of K. Every element of a block shares its scale
+// index, and its reference value divided by that scale lies on the FP4 E2M1 grid.
+class TensileMxBlockScaleGranularity : public ::testing::TestWithParam<size_t>
+{
+};
+
+TEST_P(TensileMxBlockScaleGranularity, BlockSharesOneScale)
+{
+    using namespace roc::hostnumerics;
+
+    const size_t   mxBlock   = GetParam();
+    const size_t   K         = 512;
+    const size_t   M         = 64;
+    const MxTensor generated = dt::generateMxData(rocisa::DataType::Float4,
+                                                  rocisa::DataType::E8,
+                                                  Shape{K, M},
+                                                  K,
+                                                  0,
+                                                  mxBlock,
+                                                  InitMode::Random,
+                                                  InitMode::Random,
+                                                  29,
+                                                  false);
+    ASSERT_EQ(generated.scales.elementCount(), (K / mxBlock) * M);
+
+    const std::array<double, 8>          grid{0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0};
+    const roc::hostnumerics::Permutation order{0, 1};
+    for(size_t m = 0; m < M; ++m)
+        for(size_t k = 0; k < K; ++k)
+        {
+            const auto index      = generated.scaleIndices.loadAs<uint32_t>({k, m});
+            const auto blockStart = generated.scaleIndices.loadAs<uint32_t>({k - k % mxBlock, m});
+            ASSERT_EQ(index, blockStart) << "k=" << k << " m=" << m;
+            const std::array<size_t, 1> selected{index};
+            const double                scale
+                = generated.scales.copySelectedElements(selected, order).loadAs<double>({0});
+            ASSERT_GT(scale, 0.0);
+            const double quotient = std::abs(generated.reference.loadAs<double>({k, m})) / scale;
+            EXPECT_TRUE(std::ranges::any_of(
+                grid, [&](double value) { return std::abs(quotient - value) <= 1e-6; }))
+                << quotient << " at k=" << k << " m=" << m;
+        }
+}
+
+INSTANTIATE_TEST_SUITE_P(MxBlockSizes,
+                         TensileMxBlockScaleGranularity,
+                         ::testing::Values(size_t{32}, size_t{128}));
+
+namespace
+{
+    roc::hostnumerics::Tensor mxScales(roc::hostnumerics::ScalarType type,
+                                       roc::hostnumerics::Shape      shape,
+                                       std::vector<uint8_t>          bytes)
     {
-        float expected = std::ldexp(1.0f, byte - 127);
-        EXPECT_EQ(dt::decodeE8M0(static_cast<uint8_t>(byte)), expected)
-            << "byte=" << byte;
+        return roc::hostnumerics::Tensor::copyEncodedBackingStorage(
+            type,
+            roc::hostnumerics::Layout::contiguousLastDimensionFastest(std::move(shape)),
+            std::as_bytes(std::span<const uint8_t>(bytes)));
+    }
+
+    std::vector<uint8_t> mxScaleBytes(const roc::hostnumerics::Tensor& scales)
+    {
+        std::vector<size_t> all(scales.elementCount());
+        std::iota(all.begin(), all.end(), size_t{0});
+        const auto flat = scales.copySelectedElements(
+            all, roc::hostnumerics::Permutation::identity(scales.shape().rank()));
+        std::vector<uint8_t> result;
+        for(const std::byte byte : flat.rawEncodedBackingStorage())
+            result.push_back(std::to_integer<uint8_t>(byte));
+        return result;
+    }
+
+    constexpr auto kE8 = roc::hostnumerics::ScalarType::E8M0Zero;
+}
+
+// A K-fast operand's scales are [free, K block]; a 2-row tile keeps each column's maximum.
+TEST(TileMxScalesAlongFreeDimension, KFastTakesGroupMaximumPerKBlock)
+{
+    const auto tiled = dt::tileMxScalesAlongFreeDimension(
+        mxScales(kE8, {4, 2}, {10, 1, 3, 20, 7, 7, 7, 8}), 0, 2);
+    EXPECT_EQ(tiled.shape(), (roc::hostnumerics::Shape{2, 2}));
+    EXPECT_EQ(mxScaleBytes(tiled), (std::vector<uint8_t>{10, 20, 7, 8}));
+}
+
+TEST(TileMxScalesAlongFreeDimension, KSlowTakesGroupMaximumPerKBlock)
+{
+    const auto tiled = dt::tileMxScalesAlongFreeDimension(
+        mxScales(kE8, {2, 4}, {10, 3, 7, 7, 1, 20, 7, 8}), 1, 2);
+    EXPECT_EQ(tiled.shape(), (roc::hostnumerics::Shape{2, 2}));
+    EXPECT_EQ(mxScaleBytes(tiled), (std::vector<uint8_t>{10, 7, 20, 8}));
+}
+
+TEST(TileMxScalesAlongFreeDimension, PartialLastTileStopsAtTheFreeDimension)
+{
+    const auto tiled = dt::tileMxScalesAlongFreeDimension(mxScales(kE8, {3, 1}, {5, 9, 4}), 0, 2);
+    EXPECT_EQ(mxScaleBytes(tiled), (std::vector<uint8_t>{9, 4}));
+}
+
+// The maximum keeps NaN, whose 0xFF byte orders above every finite E8M0 scale.
+TEST(TileMxScalesAlongFreeDimension, NaNDominatesItsTile)
+{
+    const auto tiled
+        = dt::tileMxScalesAlongFreeDimension(mxScales(kE8, {2, 1}, {0x7F, 0xFF}), 0, 2);
+    EXPECT_EQ(mxScaleBytes(tiled), (std::vector<uint8_t>{0xFF}));
+}
+
+// Without an exponent-ordered encoding, each tile keeps its first scale.
+TEST(TileMxScalesAlongFreeDimension, NonExponentScaleKeepsFirstOfEachTile)
+{
+    const auto tiled = dt::tileMxScalesAlongFreeDimension(
+        mxScales(roc::hostnumerics::ScalarType::E4M3, {4, 1}, {5, 9, 4, 1}), 0, 2);
+    EXPECT_EQ(mxScaleBytes(tiled), (std::vector<uint8_t>{5, 4}));
+}
+
+TEST(TileMxScalesAlongFreeDimension, TileExtentOneKeepsEveryScale)
+{
+    const auto tiled
+        = dt::tileMxScalesAlongFreeDimension(mxScales(kE8, {2, 2}, {5, 9, 4, 1}), 0, 1);
+    EXPECT_EQ(mxScaleBytes(tiled), (std::vector<uint8_t>{5, 9, 4, 1}));
+}
+
+// The offset is (tile + 2 * K block) % 5 - 2, so neighbouring tiles always differ.
+TEST(VaryMxScaleTiles, KFastNeighbouringTilesDiffer)
+{
+    const auto varied = mxScaleBytes(
+        dt::varyMxScaleTiles(mxScales(kE8, {4, 2}, std::vector<uint8_t>(8, 0x7F)), 0));
+    EXPECT_EQ(varied, (std::vector<uint8_t>{0x7D, 0x7F, 0x7E, 0x80, 0x7F, 0x81, 0x80, 0x7D}));
+}
+
+TEST(VaryMxScaleTiles, KSlowMatchesKFastPerTile)
+{
+    const auto fast = mxScaleBytes(
+        dt::varyMxScaleTiles(mxScales(kE8, {3, 2}, std::vector<uint8_t>(6, 0x7F)), 0));
+    const auto slow = mxScaleBytes(
+        dt::varyMxScaleTiles(mxScales(kE8, {2, 3}, std::vector<uint8_t>(6, 0x7F)), 1));
+    for(size_t tile = 0; tile < 3; ++tile)
+        for(size_t block = 0; block < 2; ++block)
+            EXPECT_EQ(fast[tile * 2 + block], slow[block * 3 + tile]);
+}
+
+TEST(VaryMxScaleTiles, KeepsZeroAndNaNAndClampsToFiniteRange)
+{
+    const auto varied
+        = mxScaleBytes(dt::varyMxScaleTiles(mxScales(kE8, {4, 1}, {0x00, 0xFF, 0x01, 0xFE}), 0));
+    EXPECT_EQ(varied, (std::vector<uint8_t>{0x00, 0xFF, 0x01, 0xFE}));
+}
+
+TEST(TensileMxGenerationTranslation, RejectsUnsupportedTypesAndModes)
+{
+    using namespace roc::hostnumerics;
+
+    EXPECT_THROW(dt::generateMxData(rocisa::DataType::Float,
+                                    rocisa::DataType::E8,
+                                    Shape{8, 4},
+                                    8,
+                                    0,
+                                    4,
+                                    InitMode::Random,
+                                    InitMode::One,
+                                    17,
+                                    false),
+                 std::runtime_error);
+    EXPECT_THROW(dt::generateMxData(rocisa::DataType::Float4,
+                                    rocisa::DataType::E8,
+                                    Shape{8, 4},
+                                    8,
+                                    0,
+                                    4,
+                                    InitMode::Free,
+                                    InitMode::One,
+                                    17,
+                                    false),
+                 std::runtime_error);
+}
+
+TEST(DataInitializationFreivalds, RestoresOutputAndChecksRequestedGuards)
+{
+    using namespace TensileLite::Client;
+    class Reporter : public ResultReporter
+    {
+    public:
+        std::vector<std::string> verdicts;
+        void reportValue_string(const std::string& key, const std::string& value) override
+        {
+            if(key == ResultKey::Validation)
+                verdicts.push_back(value);
+        }
+        void reportValue_uint(const std::string&, uint64_t) override {}
+        void reportValue_int(const std::string&, int64_t) override {}
+        void reportValue_double(const std::string&, double) override {}
+        void reportValue_sizes(const std::string&, const std::vector<size_t>&) override {}
+        void reportValue_vecOfSizes(const std::string&,
+                                    const std::vector<std::vector<size_t>>&) override
+        {
+        }
+        void finalizeReport() override {}
+    };
+    auto args = makeMinimalClientArgs(0);
+    setOption(args, "problem-size", std::vector<std::vector<size_t>>{{2, 3, 2, 4}});
+    setOption(args, "d-strides", std::vector<std::vector<size_t>>{{1, 4, 16}});
+    for(const char* name : {"type",
+                            "a-type",
+                            "b-type",
+                            "c-type",
+                            "d-type",
+                            "compute-input-type-A",
+                            "compute-input-type-B"})
+        setOption(args, name, rocisa::DataType::Float);
+    setOption(args, "init-seed", 0u);
+    for(const char* name : {"init-a", "init-b", "init-c", "init-alpha", "init-beta"})
+        setOption(args, name, InitMode::One);
+    setOption(args, "init-d", InitMode::Two);
+    setOption(args, "freivalds", true);
+    for(const char* name : {"print-valids",
+                            "print-tensor-a",
+                            "print-tensor-b",
+                            "print-tensor-c",
+                            "print-tensor-d",
+                            "print-tensor-ref",
+                            "print-tensor-bias",
+                            "print-tensor-gate",
+                            "print-tensor-scale-alpha-vec",
+                            "print-tensor-amaxd"})
+        setOption(args, name, false);
+    setOption(args, "print-max", 8);
+    auto device = std::make_shared<DeviceContext>(0, false);
+    for(const auto bounds : {BoundsCheckMode::Disable, BoundsCheckMode::NaN})
+    {
+        SCOPED_TRACE(static_cast<int>(bounds));
+        setOption(args, "bounds-check", bounds);
+        ClientProblemFactory factory(args);
+        auto                 dataInit = std::make_shared<DataInitialization>(args, factory);
+        auto*                problem  = factory.problems().front().get();
+        auto                 reporter = std::make_shared<Reporter>();
+        device->dataInit              = dataInit;
+        ReferenceValidator validator(args, {device});
+        validator.setReporter(reporter);
+        dataInit->preProblem(problem);
+        validator.preProblem(problem);
+        const TimingEvents events({}, 0, 0);
+        for(int attempt = 0; attempt < 4; ++attempt)
+        {
+            SCOPED_TRACE(attempt);
+            validator.preSolution(nullptr);
+            EXPECT_EQ(validator.numWarmupRuns(), 1);
+            auto inputs               = dataInit->prepareGPUInputs(problem);
+            device->inputArr          = {inputs};
+            auto&              output = dynamic_cast<TensileLite::ContractionInputs&>(*inputs);
+            std::vector<float> observed(26);
+            ASSERT_EQ(hipMemcpy(observed.data(),
+                                output.d,
+                                observed.size() * sizeof(float),
+                                hipMemcpyDeviceToHost),
+                      hipSuccess);
+            for(size_t batch = 0; batch < 2; ++batch)
+                for(size_t column = 0; column < 3; ++column)
+                    for(size_t row = 0; row < 2; ++row)
+                    {
+                        const size_t index = batch * 16 + column * 4 + row;
+                        EXPECT_EQ(observed[index], 2);
+                        observed[index] = 5; // four 1*1 products plus C=1
+                    }
+            if(bounds == BoundsCheckMode::NaN)
+                EXPECT_FALSE(std::isfinite(observed[2]));
+            if(attempt == 1)
+                observed[17] += 1; // finite fault in the second batch
+            if(attempt == 2)
+                observed[2] = 5; // padding is checked only when requested
+            ASSERT_EQ(hipMemcpyAsync(output.d,
+                                     observed.data(),
+                                     observed.size() * sizeof(float),
+                                     hipMemcpyHostToDevice,
+                                     device->stream),
+                      hipSuccess);
+            validator.postWarmup(events, events);
+            validator.validateWarmups({0}, events, events);
+            EXPECT_EQ(validator.numWarmupRuns(), 0);
+            validator.postSolution();
+        }
+        EXPECT_EQ(reporter->verdicts,
+                  (std::vector<std::string>{"PASSED",
+                                            "FAILED",
+                                            bounds == BoundsCheckMode::NaN ? "FAILED" : "PASSED",
+                                            "PASSED"}));
+        EXPECT_EQ(validator.error(), bounds == BoundsCheckMode::NaN ? 2 : 1);
     }
 }
 
-// -----------------------------------------------------------------------------
-// 4.9  detail::decodeMXElement
-//      Calls the production dispatcher AND DGen directly with the same inputs;
-//      the two must agree for every supported dtype, and the unsupported
-//      branch must return NaN.
-// -----------------------------------------------------------------------------
-TEST(DecodeMXElement, FP4PathMatchesDGenToFloatPacked)
-{
-    // Two FP4 elements packed in one byte: low nibble 0x2 (= +1.0),
-    // high nibble 0x0 (= +0.0). Scale 0x7F = 1.0.
-    uint8_t data [1] = {0x02};
-    uint8_t scale[1] = {0x7F};
-    for(size_t e : {size_t{0}, size_t{1}})
-    {
-        float prod = dt::decodeMXElement(rocisa::DataType::Float4,
-                                         scale, data, 0, e);
-        float dgen = DGen::toFloatPacked<DGen::ocp_e2m1_mxfp4>(
-            scale, data, 0, e);
-        EXPECT_EQ(prod, dgen) << "elem=" << e;
-    }
-}
-TEST(DecodeMXElement, Float8PathMatchesDGenToFloat_E4M3)
-{
-    uint8_t data [1] = {0x38};   // 2^0 = +1.0 in E4M3
-    uint8_t scale[1] = {0x7F};
-    float   prod = dt::decodeMXElement(rocisa::DataType::Float8,
-                                       scale, data, 0, 0);
-    float   dgen = DGen::toFloat<DGen::ocp_e4m3_mxfp8>(scale, data, 0, 0);
-    EXPECT_EQ(prod, dgen);
-    EXPECT_EQ(prod, 1.0f);
-}
-TEST(DecodeMXElement, BFloat8PathMatchesDGenToFloat_E5M2)
-{
-    uint8_t data [1] = {0x3C};   // 2^0 = +1.0 in E5M2
-    uint8_t scale[1] = {0x7F};
-    float   prod = dt::decodeMXElement(rocisa::DataType::BFloat8,
-                                       scale, data, 0, 0);
-    float   dgen = DGen::toFloat<DGen::ocp_e5m2_mxfp8>(scale, data, 0, 0);
-    EXPECT_EQ(prod, dgen);
-    EXPECT_EQ(prod, 1.0f);
-}
-TEST(DecodeMXElement, Float6PathMatchesDGenToFloatPacked)
-{
-    uint8_t data [3] = {0x00, 0x00, 0x00};
-    uint8_t scale[1] = {0x7F};
-    for(size_t e = 0; e < 4; ++e)
-    {
-        float prod = dt::decodeMXElement(rocisa::DataType::Float6,
-                                         scale, data, 0, e);
-        float dgen = DGen::toFloatPacked<DGen::ocp_e2m3_mxfp6>(
-            scale, data, 0, e);
-        EXPECT_EQ(prod, dgen) << "elem=" << e;
-    }
-}
-TEST(DecodeMXElement, BFloat6PathMatchesDGenToFloatPacked)
-{
-    uint8_t data [3] = {0x00, 0x00, 0x00};
-    uint8_t scale[1] = {0x7F};
-    for(size_t e = 0; e < 4; ++e)
-    {
-        float prod = dt::decodeMXElement(rocisa::DataType::BFloat6,
-                                         scale, data, 0, e);
-        float dgen = DGen::toFloatPacked<DGen::ocp_e3m2_mxfp6>(
-            scale, data, 0, e);
-        EXPECT_EQ(prod, dgen) << "elem=" << e;
-    }
-}
-TEST(DecodeMXElement, UnsupportedDataTypeReturnsNaN)
-{
-    uint8_t data [1] = {0x00};
-    uint8_t scale[1] = {0x7F};
-    EXPECT_TRUE(std::isnan(dt::decodeMXElement(rocisa::DataType::Float,
-                                               scale, data, 0, 0)));
-    EXPECT_TRUE(std::isnan(dt::decodeMXElement(rocisa::DataType::Half,
-                                               scale, data, 0, 0)));
-}
-
-
-// =============================================================================
-//   Section 5 - downsampleMXScaleFreeDim
-//
-//   mxDataGenerator only tiles scales along one axis, so a 2D MX scaling tile
-//   (MXBlockFree{A,B} > 1) is produced by generating the 1xmxBlock layout and
-//   collapsing every group of mxBlockFree free-dimension entries here. The
-//   representative is the group MAXIMUM for UE8M0 scales (byte order == numeric
-//   order, so a byte-wise max is exact) and the group's first entry otherwise.
-//
-//   Two buffer layouts have to work:
-//     kFast  (bound dim at index 0, TN A / NT B) -> [free][kBlock]
-//     !kFast                                     -> [kBlock][free]
-// =============================================================================
-
-// kFast: src is [free][kBlock] with 4 free rows x 2 K-blocks; a 2-row tile
-// collapses it to [2][2], taking the max down each column of the pair.
-TEST(DownsampleMXScaleFreeDim, KFastTakesGroupMaxPerKBlock)
-{
-    //            kb0   kb1
-    // free 0:     10     1
-    // free 1:      3    20
-    // free 2:      7     7
-    // free 3:      7     8
-    std::vector<uint8_t> src = {10, 1, 3, 20, 7, 7, 7, 8};
-    std::vector<uint8_t> dst(4, 0xEE);
-
-    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
-                                 /*kBlocks=*/2, /*mxBlockFree=*/2, /*elemBytes=*/1,
-                                 /*kFast=*/true, /*unsignedExponentScale=*/true);
-
-    EXPECT_EQ(dst[0], 10); // tile 0, kb0: max(10, 3)
-    EXPECT_EQ(dst[1], 20); // tile 0, kb1: max(1, 20)
-    EXPECT_EQ(dst[2],  7); // tile 1, kb0: max(7, 7)
-    EXPECT_EQ(dst[3],  8); // tile 1, kb1: max(7, 8)
-}
-
-// !kFast: src is [kBlock][free], so the free axis is the fast one.
-TEST(DownsampleMXScaleFreeDim, KSlowTakesGroupMaxPerKBlock)
-{
-    // kb0: free 0..3 = 10, 3, 7, 7
-    // kb1: free 0..3 =  1, 20, 7, 8
-    std::vector<uint8_t> src = {10, 3, 7, 7, 1, 20, 7, 8};
-    std::vector<uint8_t> dst(4, 0xEE);
-
-    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
-                                 /*kBlocks=*/2, /*mxBlockFree=*/2, /*elemBytes=*/1,
-                                 /*kFast=*/false, /*unsignedExponentScale=*/true);
-
-    // dst is [kBlock][tiledFree] with tiledFree == 2.
-    EXPECT_EQ(dst[0], 10); // kb0, tile 0
-    EXPECT_EQ(dst[1],  7); // kb0, tile 1
-    EXPECT_EQ(dst[2], 20); // kb1, tile 0
-    EXPECT_EQ(dst[3],  8); // kb1, tile 1
-}
-
-// A free dimension that is not a multiple of the tile leaves a short last
-// group; the max must be taken over only the entries that exist.
-TEST(DownsampleMXScaleFreeDim, PartialLastTileStopsAtTheFreeDimension)
-{
-    // 3 free rows x 1 K-block, tile of 2 -> tiles {0,1} and {2}.
-    std::vector<uint8_t> src = {5, 9, 4};
-    std::vector<uint8_t> dst(2, 0xEE);
-
-    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/3,
-                                 /*kBlocks=*/1, /*mxBlockFree=*/2, /*elemBytes=*/1,
-                                 /*kFast=*/true, /*unsignedExponentScale=*/true);
-
-    EXPECT_EQ(dst[0], 9); // max(5, 9)
-    EXPECT_EQ(dst[1], 4); // the lone survivor, not a read past the buffer
-}
-
-// Without an unsigned-exponent encoding a byte-wise max is meaningless, so the
-// group's first entry is copied verbatim.
-TEST(DownsampleMXScaleFreeDim, NonExponentScaleKeepsFirstOfEachGroup)
-{
-    std::vector<uint8_t> src = {5, 9, 4, 1};
-    std::vector<uint8_t> dst(2, 0xEE);
-
-    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
-                                 /*kBlocks=*/1, /*mxBlockFree=*/2, /*elemBytes=*/1,
-                                 /*kFast=*/true, /*unsignedExponentScale=*/false);
-
-    EXPECT_EQ(dst[0], 5);
-    EXPECT_EQ(dst[1], 4);
-}
-
-// mxBlockFree == 1 is the layout every pre-MXBlockFree config uses: the helper
-// must not touch the destination at all, since the caller writes straight into
-// the scale buffer in that case.
-TEST(DownsampleMXScaleFreeDim, TileExtentOneIsANoOp)
-{
-    std::vector<uint8_t> src = {5, 9, 4, 1};
-    std::vector<uint8_t> dst(4, 0xEE);
-
-    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), 4, 1, /*mxBlockFree=*/1, 1,
-                                 true, true);
-    for(auto b : dst)
-        EXPECT_EQ(b, 0xEE);
-
-    // Empty buffers are equally inert.
-    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/0, 1, 2, 1,
-                                 true, true);
-    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), 4, /*kBlocks=*/0, 2, 1,
-                                 true, true);
-    for(auto b : dst)
-        EXPECT_EQ(b, 0xEE);
-}
-
-// Multi-byte scale elements are copied whole. elemBytes != 1 also disables the
-// max, since the comparison only inspects the first byte.
-TEST(DownsampleMXScaleFreeDim, MultiByteElementsAreCopiedWhole)
-{
-    // 4 free rows x 1 K-block, 2 bytes per scale, tile of 2.
-    std::vector<uint8_t> src = {0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44};
-    std::vector<uint8_t> dst(4, 0xEE);
-
-    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
-                                 /*kBlocks=*/1, /*mxBlockFree=*/2, /*elemBytes=*/2,
-                                 /*kFast=*/true, /*unsignedExponentScale=*/true);
-
-    EXPECT_EQ(dst[0], 0xAA);
-    EXPECT_EQ(dst[1], 0xBB);
-    EXPECT_EQ(dst[2], 0x11);
-    EXPECT_EQ(dst[3], 0x22);
-}
-
-// =============================================================================
-//   Section 6 - varyMXScaleFreeTiles
-//
-//   Random data quantizes every block against 0x7F, so the downsampled 2D
-//   scales are all equal and a wrong scale row would still validate. The helper
-//   offsets each tile by -2..2 so neighbouring free tiles always differ.
-// =============================================================================
-
-// kFast: [tiledFree][kBlock]. delta = (g + 2*kb) % 5 - 2.
-TEST(VaryMXScaleFreeTiles, KFastNeighbouringTilesDiffer)
-{
-    std::vector<uint8_t> s(4 * 2, 0x7F); // 4 tiles x 2 K-blocks
-
-    dt::varyMXScaleFreeTiles(s.data(), /*tiledFreeDim=*/4, /*kBlocks=*/2, /*kFast=*/true);
-
-    EXPECT_EQ(s[0], 0x7F - 2); // g0 kb0
-    EXPECT_EQ(s[1], 0x7F + 0); // g0 kb1
-    EXPECT_EQ(s[2], 0x7F - 1); // g1 kb0
-    EXPECT_EQ(s[3], 0x7F + 1); // g1 kb1
-    EXPECT_EQ(s[4], 0x7F + 0); // g2 kb0
-    EXPECT_EQ(s[6], 0x7F + 1); // g3 kb0
-    for(size_t kb = 0; kb < 2; kb++)
-        for(size_t g = 0; g + 1 < 4; g++)
-            EXPECT_NE(s[g * 2 + kb], s[(g + 1) * 2 + kb]) << "g=" << g << " kb=" << kb;
-}
-
-// !kFast: [kBlock][tiledFree] gets the same per-(tile, K-block) offset.
-TEST(VaryMXScaleFreeTiles, KSlowMatchesKFastPerTile)
-{
-    std::vector<uint8_t> fast(3 * 2, 0x7F);
-    std::vector<uint8_t> slow(3 * 2, 0x7F);
-
-    dt::varyMXScaleFreeTiles(fast.data(), 3, 2, /*kFast=*/true);
-    dt::varyMXScaleFreeTiles(slow.data(), 3, 2, /*kFast=*/false);
-
-    for(size_t g = 0; g < 3; g++)
-        for(size_t kb = 0; kb < 2; kb++)
-            EXPECT_EQ(fast[g * 2 + kb], slow[kb * 3 + g]) << "g=" << g << " kb=" << kb;
-}
-
-// Zero and NaN encodings are left alone; the result never reaches either.
-TEST(VaryMXScaleFreeTiles, KeepsZeroNaNAndClampsToFiniteRange)
-{
-    std::vector<uint8_t> s = {0x00, 0xFF, 0x01, 0xFE};
-
-    // kFast, 4 tiles x 1 K-block: deltas -2, -1, 0, +1.
-    dt::varyMXScaleFreeTiles(s.data(), 4, 1, /*kFast=*/true);
-
-    EXPECT_EQ(s[0], 0x00);
-    EXPECT_EQ(s[1], 0xFF);
-    EXPECT_EQ(s[2], 0x01); // 0x01 + 0
-    EXPECT_EQ(s[3], 0xFE); // 0xFE + 1 clamps to 0xFE
-}
-
-#endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
-
-// =============================================================================
-//   Section 5 — TensileLite::hip::CopyTensorVoid
-// =============================================================================
 TEST(CopyTensorVoid, CopiesSource)
 {
     TensorDescriptor   desc("t", rocisa::DataType::Float, {3, 2});
@@ -801,4 +1432,379 @@ TEST(CopyTensorVoid, CopiesSource)
     ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
 
     EXPECT_EQ(dst, src);
+}
+
+TEST(TensileMxGenerationTranslation, IndependentDataMatchesOrdinaryInitialization)
+{
+    using namespace roc::hostnumerics;
+    for(auto type : {rocisa::DataType::Float8, rocisa::DataType::BFloat8, rocisa::DataType::Float4})
+        for(size_t blockAxis : {0u, 1u})
+            for(auto scaleMode : {InitMode::Two, InitMode::SerialDim0, InitMode::SerialDim1})
+            {
+                const auto             generated = dt::generateMxData(type,
+                                                          rocisa::DataType::E8,
+                                                          Shape{8, 12},
+                                                          16,
+                                                          blockAxis,
+                                                          4,
+                                                          InitMode::SerialDim1,
+                                                          scaleMode,
+                                                          17,
+                                                          true);
+                const TensorDescriptor descriptor("A", type, {8, 12}, {1, 16});
+                std::vector<std::byte> expected(descriptor.totalAllocatedBytes());
+                initializeHostBufferWithHostNumerics(
+                    type, InitMode::SerialDim1, expected.data(), descriptor, {17, 0});
+                const auto ordinary = Tensor::copyEncodedBackingStorage(
+                    toHostNumericsScalarType(type), generated.data.layout(), expected);
+                const size_t           scaleRows = blockAxis == 0 ? 2 : 8;
+                const size_t           scaleCols = blockAxis == 0 ? 12 : 3;
+                const TensorDescriptor scaleDescriptor(
+                    "MXSA", rocisa::DataType::E8, {scaleRows, scaleCols}, {1, scaleRows});
+                std::vector<std::byte> expectedScale(scaleDescriptor.totalAllocatedBytes());
+                initializeHostBufferWithHostNumerics(rocisa::DataType::E8,
+                                                     scaleMode,
+                                                     expectedScale.data(),
+                                                     scaleDescriptor,
+                                                     {17, 0});
+                const auto ordinaryScale = Tensor::copyEncodedBackingStorage(
+                    toHostNumericsScalarType(rocisa::DataType::E8),
+                    Layout(Shape{scaleRows, scaleCols}, {1, static_cast<ptrdiff_t>(scaleRows)}, 0),
+                    expectedScale);
+                for(size_t row = 0; row < 8; ++row)
+                    for(size_t col = 0; col < 12; ++col)
+                    {
+                        const float  data     = generated.data.loadAs<float>({row, col});
+                        const size_t scaleRow = blockAxis == 0 ? row / 4 : row;
+                        const size_t scaleCol = blockAxis == 0 ? col : col / 4;
+                        const float  scale    = ordinaryScale.loadAs<float>({scaleRow, scaleCol});
+                        EXPECT_EQ(data, ordinary.loadAs<float>({row, col}));
+                        EXPECT_EQ(generated.scales.loadAs<float>({scaleCol, scaleRow}), scale);
+                        EXPECT_EQ(generated.reference.loadAs<float>({row, col}), data * scale);
+                    }
+            }
+}
+
+TEST(TensileMxGenerationTranslation, NonMxSwitchUsesCoordinatedBytesForBothOperands)
+{
+    using namespace TensileLite::Client;
+    using namespace roc::hostnumerics;
+    for(auto type : {rocisa::DataType::Float8, rocisa::DataType::BFloat8})
+    {
+        auto args = makeMinimalClientArgs(0);
+        setOption(args, "problem-size", std::vector<std::vector<size_t>>{{8, 12, 2, 64}});
+        setOption(args, "mx-data-generator", 1);
+        setOption(args, "init-seed", 17u);
+        for(const char* name :
+            {"type", "a-type", "b-type", "compute-input-type-A", "compute-input-type-B"})
+            setOption(args, name, type);
+        for(const char* name : {"init-a", "init-b"})
+            setOption(args, name, InitMode::RandomNarrow);
+        for(const char* name : {"init-mx-a", "init-mx-b", "init-alpha", "init-beta"})
+            setOption(args, name, InitMode::One);
+        ClientProblemFactory factory(args);
+        DataInitialization   dataInit(args, factory);
+        const auto&          problem
+            = dynamic_cast<const ContractionProblemGemm&>(*factory.problems().front());
+        const auto inputs = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+            dataInit.prepareCPUInputs(problem));
+        ASSERT_NE(inputs, nullptr);
+        for(bool matrixA : {true, false})
+        {
+            const auto& descriptor = matrixA ? problem.a() : problem.b();
+            const auto  storage    = std::span<const std::byte>(
+                static_cast<const std::byte*>(matrixA ? inputs->a : inputs->b),
+                descriptor.totalAllocatedBytes());
+            const auto observed = Tensor::copyEncodedBackingStorage(
+                toHostNumericsScalarType(type), hostnumericsLayout(descriptor), storage);
+            const size_t blockAxis
+                = matrixA ? (problem.transA() ? 0 : 1) : (problem.transB() ? 1 : 0);
+            for(size_t batch = 0; batch < 2; ++batch)
+            {
+                const auto generated = dt::generateMxData(
+                    type,
+                    rocisa::DataType::E8,
+                    Shape{descriptor.sizes()[0], descriptor.sizes()[1]},
+                    descriptor.strides()[1],
+                    blockAxis,
+                    32,
+                    InitMode::RandomNarrow,
+                    InitMode::Zero,
+                    17 + stableDataInitializationStream(descriptor.getName()) + batch,
+                    false);
+                for(size_t row = 0; row < descriptor.sizes()[0]; ++row)
+                    for(size_t col = 0; col < descriptor.sizes()[1]; ++col)
+                        EXPECT_EQ(observed.loadAs<float>({row, col, batch}),
+                                  generated.data.loadAs<float>({row, col}));
+            }
+        }
+    }
+}
+
+// 2D MX tiles: each operand's canonical scales are the generated per-row scales tiled along
+// the free dimension, with their exponents varied because data and scales are random.
+TEST(TensileMxGenerationTranslation, FreeTileScalesAreTiledAndVaried)
+{
+    using namespace TensileLite::Client;
+    using namespace roc::hostnumerics;
+    constexpr size_t mxBlock     = 32;
+    constexpr size_t mxBlockFree = 32;
+
+    auto args = makeMinimalClientArgs(0);
+    setOption(args, "problem-size", std::vector<std::vector<size_t>>{{80, 64, 1, 64}});
+    setOption(args, "mx-data-generator", 1);
+    setOption(args, "init-seed", 17u);
+    for(const char* name : {"mx-a-block", "mx-b-block"})
+        setOption(args, name, static_cast<int>(mxBlock));
+    for(const char* name : {"mx-a-free-block", "mx-b-free-block"})
+        setOption(args, name, static_cast<int>(mxBlockFree));
+    for(const char* name : {"init-a", "init-b", "init-mx-a", "init-mx-b"})
+        setOption(args, name, InitMode::Random);
+    ClientProblemFactory factory(args);
+    const auto& problem = dynamic_cast<const ContractionProblemGemm&>(*factory.problems().front());
+    ASSERT_EQ(problem.mxBlockFreeA(), mxBlockFree);
+    DataInitialization dataInit(args, factory);
+    const auto         inputs = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+        dataInit.prepareCPUInputs(problem));
+    ASSERT_NE(inputs, nullptr);
+
+    for(bool matrixA : {true, false})
+    {
+        const auto&  descriptor      = matrixA ? problem.a() : problem.b();
+        const auto&  scaleDescriptor = matrixA ? problem.mxsa() : problem.mxsb();
+        const size_t boundIndex
+            = matrixA ? problem.boundIndices()[0].a : problem.boundIndices()[0].b;
+        const size_t freeIndex
+            = matrixA ? problem.freeIndicesA()[0].i : problem.freeIndicesB()[0].i;
+        const bool   kFast    = boundIndex == 0;
+        const size_t freeAxis = kFast ? 0 : 1;
+        const auto   generated
+            = dt::generateMxData(rocisa::DataType::Float8,
+                                 rocisa::DataType::E8,
+                                 Shape{descriptor.sizes()[0], descriptor.sizes()[1]},
+                                 descriptor.strides()[1],
+                                 kFast ? 0 : 1,
+                                 mxBlock,
+                                 InitMode::Random,
+                                 InitMode::Random,
+                                 17 + stableDataInitializationStream(descriptor.getName()),
+                                 false);
+        const auto tiled
+            = dt::tileMxScalesAlongFreeDimension(generated.scales, freeAxis, mxBlockFree);
+        const auto expected = dt::varyMxScaleTiles(tiled, freeAxis);
+        ASSERT_NE(mxScaleBytes(expected), mxScaleBytes(tiled));
+        const Shape paddedShape{
+            kFast ? scaleDescriptor.sizes()[freeIndex] : scaleDescriptor.sizes()[boundIndex],
+            kFast ? scaleDescriptor.sizes()[boundIndex] : scaleDescriptor.sizes()[freeIndex]};
+        ASSERT_EQ(expected.shape()[freeAxis], paddedShape[freeAxis]);
+        const auto observed = Tensor::copyEncodedBackingStorage(
+            toHostNumericsScalarType(rocisa::DataType::E8),
+            Layout::contiguousLastDimensionFastest(paddedShape),
+            std::span<const std::byte>(
+                static_cast<const std::byte*>(matrixA ? inputs->mxsa : inputs->mxsb),
+                scaleDescriptor.totalAllocatedBytes()));
+        const auto unpadded = observed.shareStorageWithLayout(
+            Layout(expected.shape(), {static_cast<ptrdiff_t>(paddedShape[1]), 1}, 0));
+        EXPECT_EQ(mxScaleBytes(expected), mxScaleBytes(unpadded)) << (matrixA ? "A" : "B");
+    }
+}
+
+TEST(TensileMxGenerationTranslation, IndependentSwitchPreservesDataScalePatternsAndPadding)
+{
+    using namespace TensileLite::Client;
+    using namespace roc::hostnumerics;
+    for(auto type : {rocisa::DataType::Float8, rocisa::DataType::BFloat8, rocisa::DataType::Float4})
+    {
+        auto args = makeMinimalClientArgs(0);
+        setOption(args, "problem-size", std::vector<std::vector<size_t>>{{8, 12, 1, 64}});
+        setOption(args, "mx-data-generator", 0);
+        setOption(args, "init-seed", 17u);
+        for(const char* name :
+            {"type", "a-type", "b-type", "compute-input-type-A", "compute-input-type-B"})
+            setOption(args, name, type);
+        for(const char* name : {"mx-a-block", "mx-b-block"})
+            setOption(args, name, 32);
+        for(const char* name : {"init-a", "init-b"})
+            setOption(args, name, InitMode::SerialDim1);
+        for(const char* name : {"init-mx-a", "init-mx-b"})
+            setOption(args, name, InitMode::SerialDim0);
+        ClientProblemFactory factory(args);
+        auto& problem = dynamic_cast<ContractionProblemGemm&>(*factory.problems().front());
+        // Exercise gfx950's free-dimension padding on every architecture.
+        problem.setMXScaleA(rocisa::DataType::E8, 32, {}, true);
+        problem.setMXScaleB(rocisa::DataType::E8, 32, {}, true);
+        DataInitialization dataInit(args, factory);
+        const auto         inputs = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+            dataInit.prepareCPUInputs(problem));
+        ASSERT_NE(inputs, nullptr);
+        for(bool matrixA : {true, false})
+        {
+            const auto&            descriptor = matrixA ? problem.a() : problem.b();
+            std::vector<std::byte> expected(descriptor.totalAllocatedBytes());
+            initializeHostBufferWithHostNumerics(
+                type, InitMode::SerialDim1, expected.data(), descriptor, {17, 0});
+            const auto layout   = hostnumericsLayout(descriptor);
+            const auto ordinary = Tensor::copyEncodedBackingStorage(
+                toHostNumericsScalarType(type), layout, expected);
+            const auto observed = Tensor::copyEncodedBackingStorage(
+                toHostNumericsScalarType(type),
+                layout,
+                std::span<const std::byte>(
+                    static_cast<const std::byte*>(matrixA ? inputs->a : inputs->b),
+                    expected.size()));
+            const auto& scaleDescriptor = matrixA ? problem.mxsa() : problem.mxsb();
+            const auto  scaleLayout     = hostnumericsLayout(scaleDescriptor);
+            const auto  scales          = Tensor::copyEncodedBackingStorage(
+                toHostNumericsScalarType(rocisa::DataType::E8),
+                scaleLayout,
+                std::span<const std::byte>(
+                    static_cast<const std::byte*>(matrixA ? inputs->mxsa : inputs->mxsb),
+                    scaleDescriptor.totalAllocatedBytes()));
+            const size_t blockAxis
+                = matrixA ? (problem.transA() ? 0 : 1) : (problem.transB() ? 1 : 0);
+            const size_t blocks = descriptor.sizes()[blockAxis] / 32;
+            for(size_t row = 0; row < descriptor.sizes()[0]; ++row)
+                for(size_t col = 0; col < descriptor.sizes()[1]; ++col)
+                    EXPECT_EQ(observed.loadAs<float>({row, col, 0}),
+                              ordinary.loadAs<float>({row, col, 0}));
+            std::vector<std::byte> expectedScales(scaleDescriptor.totalAllocatedBytes());
+            initializeHostBufferWithHostNumerics(rocisa::DataType::E8,
+                                                 InitMode::SerialDim0,
+                                                 expectedScales.data(),
+                                                 scaleDescriptor,
+                                                 {17, 0});
+            const auto ordinaryScales = Tensor::copyEncodedBackingStorage(
+                toHostNumericsScalarType(rocisa::DataType::E8), scaleLayout, expectedScales);
+            for(size_t row = 0; row < scaleDescriptor.sizes()[0]; ++row)
+                for(size_t col = 0; col < scaleDescriptor.sizes()[1]; ++col)
+                {
+                    const bool padding
+                        = (blockAxis == 0 ? row : col) >= blocks
+                          || (blockAxis == 0 ? col : row) >= descriptor.sizes()[1 - blockAxis];
+                    EXPECT_EQ(scales.loadAs<float>({row, col, 0}),
+                              padding ? 0.0f : ordinaryScales.loadAs<float>({row, col, 0}));
+                }
+        }
+    }
+}
+
+TEST(TensileMafInitialization, LogicalBroadcastAndMxTailScales)
+{
+    using namespace roc::hostnumerics;
+    const TensorDescriptor descriptor("A", rocisa::DataType::Double, {3, 4, 2}, {1, 3, 0});
+    std::vector<std::byte> storage(descriptor.totalAllocatedBytes());
+    initializeHostBufferWithHostNumerics(
+        rocisa::DataType::Double,
+        InitMode::Maf1_0,
+        storage.data(),
+        descriptor,
+        {0, TensileLite::Client::stableDataInitializationStream("A")});
+    const auto observed = Tensor::copyEncodedBackingStorage(
+        ScalarType::Float64, TensileLite::Client::hostnumericsLayout(descriptor), storage);
+    for(size_t b = 0; b < 2; ++b)
+        for(size_t j = 0; j < 4; ++j)
+            for(size_t i = 0; i < 3; ++i)
+                EXPECT_EQ(observed.loadAs<double>({i, j, b}), std::sin(double(i + j * 3)));
+    for(size_t axis : {0u, 1u})
+    {
+        auto mx = dt::generateMxData(rocisa::DataType::Float4,
+                                     rocisa::DataType::E8,
+                                     axis == 0 ? Shape{40, 4} : Shape{4, 40},
+                                     48,
+                                     axis,
+                                     32,
+                                     InitMode::Maf1_0,
+                                     InitMode::One,
+                                     0,
+                                     false,
+                                     0,
+                                     0);
+        EXPECT_EQ(mx.scales.type(), ScalarType::E8M0);
+        EXPECT_EQ(mx.scales.elementCount(), 8);
+        EXPECT_EQ(mx.data.loadAs<double>({1, 0}), 1.0);
+        EXPECT_EQ(mx.reference.loadAs<double>({1, 0}), 0.5);
+    }
+}
+
+TEST(TensileMafInitialization, NonMxGeneratorSwitchUsesNormalForBothOperands)
+{
+    using namespace TensileLite::Client;
+    using namespace roc::hostnumerics;
+    for(auto type : {rocisa::DataType::Float8, rocisa::DataType::BFloat8})
+    {
+        auto args = makeMinimalClientArgs(0);
+        setOption(args, "problem-size", std::vector<std::vector<size_t>>{{64, 64, 2, 256}});
+        setOption(args, "mx-data-generator", 1);
+        for(const char* name :
+            {"type", "a-type", "b-type", "compute-input-type-A", "compute-input-type-B"})
+            setOption(args, name, type);
+        for(const char* name : {"init-a", "init-b"})
+            setOption(args, name, InitMode::Maf2_0);
+        ClientProblemFactory factory(args);
+        DataInitialization   dataInit(args, factory);
+        const auto&          problem
+            = dynamic_cast<const ContractionProblemGemm&>(*factory.problems().front());
+        const auto inputs = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+            dataInit.prepareCPUInputs(problem));
+        ASSERT_NE(inputs, nullptr);
+        for(bool matrixA : {true, false})
+        {
+            const auto& desc     = matrixA ? problem.a() : problem.b();
+            const auto  observed = Tensor::copyEncodedBackingStorage(
+                toHostNumericsScalarType(type),
+                hostnumericsLayout(desc),
+                std::span<const std::byte>(
+                    static_cast<const std::byte*>(matrixA ? inputs->a : inputs->b),
+                    desc.totalAllocatedBytes()));
+            std::vector<std::byte> expected(desc.totalAllocatedBytes());
+            initializeHostBufferWithHostNumerics(
+                type,
+                InitMode::Maf2_0,
+                expected.data(),
+                desc,
+                {0, stableDataInitializationStream(matrixA ? "A" : "B")});
+            EXPECT_TRUE(std::ranges::equal(observed.rawEncodedBackingStorage(), expected));
+            double squares = 0;
+            for(size_t b = 0; b < 2; ++b)
+                for(size_t j = 0; j < desc.sizes()[1]; ++j)
+                    for(size_t i = 0; i < desc.sizes()[0]; ++i)
+                        squares += std::pow(observed.loadAs<double>({i, j, b}), 2);
+            EXPECT_NEAR(squares / observed.elementCount(), 1.0, 0.04);
+        }
+    }
+}
+
+TEST(TensileMafInitialization, ParserPreservesConfigurationValues)
+{
+    for(auto const& [mode, name, number] :
+        {std::tuple{InitMode::Maf2_0, "Maf2_0", 28},
+         std::tuple{InitMode::Maf2_0UnitScale, "Maf2_0UnitScale", 29},
+         std::tuple{InitMode::Maf1_0, "Maf1_0", 30}})
+    {
+        EXPECT_EQ(static_cast<int>(mode), number);
+        EXPECT_EQ(TensileLite::Client::ToString(mode), name);
+        for(auto const& text : {std::string(name), std::to_string(number)})
+        {
+            InitMode           parsed = InitMode::Zero;
+            std::istringstream input(text);
+            input >> parsed;
+            EXPECT_EQ(parsed, mode);
+        }
+    }
+}
+
+TEST(TensileMafInitialization, ScalarAndVectorOperandScalesAreHalf)
+{
+    using namespace TensileLite::Client;
+    for(auto name : {"scaleA", "scaleB"})
+    {
+        const TensorDescriptor descriptor(name, rocisa::DataType::Float, {7}, {1});
+        std::vector<float>     values(7);
+        initializeHostBufferWithHostNumerics(rocisa::DataType::Float,
+                                             InitMode::Maf1_0,
+                                             values.data(),
+                                             descriptor,
+                                             {0, stableDataInitializationStream(name)});
+        EXPECT_TRUE(std::ranges::all_of(values, [](float value) { return value == 0.5f; }));
+    }
 }

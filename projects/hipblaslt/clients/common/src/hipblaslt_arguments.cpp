@@ -85,13 +85,13 @@ void Arguments::init()
 
     // Adaptive timing: off by default (gated on `adaptive`); the per-knob values are
     // the preset defaults, used when `adaptive` is enabled.
-    warmup_time      = hipblaslt_bench::adaptive_defaults::warmup_time;
-    sample_time      = hipblaslt_bench::adaptive_defaults::sample_time;
-    measure_time     = hipblaslt_bench::adaptive_defaults::measure_time;
-    max_measure_time = hipblaslt_bench::adaptive_defaults::max_measure_time;
-    noise_threshold  = hipblaslt_bench::adaptive_defaults::noise_threshold;
-    min_iters        = hipblaslt_bench::adaptive_defaults::min_iters;
-    max_iters        = hipblaslt_bench::adaptive_defaults::max_iters;
+    warmup_time         = hipblaslt_bench::adaptive_defaults::warmup_time;
+    sample_time         = hipblaslt_bench::adaptive_defaults::sample_time;
+    measure_time        = hipblaslt_bench::adaptive_defaults::measure_time;
+    max_measure_time    = hipblaslt_bench::adaptive_defaults::max_measure_time;
+    noise_threshold     = hipblaslt_bench::adaptive_defaults::noise_threshold;
+    min_iters           = hipblaslt_bench::adaptive_defaults::min_iters;
+    max_iters           = hipblaslt_bench::adaptive_defaults::max_iters;
     stability_threshold = hipblaslt_bench::adaptive_defaults::stability_threshold;
     stability_window    = hipblaslt_bench::adaptive_defaults::stability_window;
     stability_interval  = hipblaslt_bench::adaptive_defaults::stability_interval;
@@ -125,19 +125,20 @@ void Arguments::init()
     a2a_world  = 1;
     a2a_extent = 0;
 
-    norm_check     = 0;
-    allclose_check = 0;
-    unit_check     = 1;
-    ulp_check      = 0;
-    fast_check     = 0;
-    placement[0]   = 0;
-    placement_offset = 0;
-    fast_check_repeat = 1;
-    fast_check_inject = -1;
-    requires_streamk  = 0;
+    norm_check               = 0;
+    allclose_check           = 0;
+    unit_check               = 1;
+    ulp_check                = 0;
+    freivalds                = 0;
+    bounds_check             = 0;
+    placement[0]             = 0;
+    placement_offset         = 0;
+    validation_iters         = 1;
+    validation_inject        = -1;
+    requires_streamk         = 0;
     integer_exact_pattern[0] = 0;
     allow_no_solution        = 0;
-    timing         = 0;
+    timing                   = 0;
 
     transA = '*';
     transB = '*';

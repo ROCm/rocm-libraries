@@ -25,7 +25,6 @@
  *******************************************************************************/
 
 #include "hipblaslt_data.hpp"
-#include "hipblaslt_init.hpp"
 #include "hipblaslt_parse_data.hpp"
 #include "hipblaslt_test.hpp"
 #include "test_cleanup.hpp"
@@ -204,21 +203,6 @@ static std::string hipblaslt_capture_args(int argc, char** argv)
     return cmdLine.str();
 }
 
-// Remove host_side_fill_kernel flag so gtest does not reject it
-static void hipblaslt_gtest_check_host_side_fill_kernel_flags(int& argc, char** argv)
-{
-    char** dst = argv + 1;
-    for(int i = 1; i < argc; ++i)
-    {
-        if(!strcmp(argv[i], "--host_side_fill_kernel"))
-            set_host_side_fill_kernel_state(true);
-        else
-            *dst++ = argv[i];
-    }
-    *dst = nullptr;
-    argc = static_cast<int>(dst - argv);
-}
-
 static void hipblaslt_print_args(const std::string& args)
 {
     hipblaslt_cout << args << std::endl;
@@ -242,8 +226,8 @@ static void hipblaslt_gtest_run_child(int argc, char** argv)
 static void hipblaslt_set_test_device()
 {
     hipDeviceProp_t props;
-    int device_id    = 0;
-    int device_count = query_device_property(device_id, props);
+    int             device_id    = 0;
+    int             device_count = query_device_property(device_id, props);
     if(device_count <= device_id)
     {
         hipblaslt_cerr << "Error: invalid device ID. There may not be such device ID." << std::endl;
@@ -256,15 +240,11 @@ static void hipblaslt_set_test_device()
  * Main function *
  *****************/
 int main(int argc, char** argv)
+try
 {
     hipblaslt_gtest_run_child(argc, argv);
 
     std::string args = hipblaslt_capture_args(argc, argv);
-
-    hipblaslt_gtest_check_host_side_fill_kernel_flags(argc, argv);
-    if(host_side_fill_kernel())
-        hipblaslt_cout << "info: --host_side_fill_kernel enabled (device matrix init via host + hipMemcpy)\n"
-                       << std::endl;
 
     // Set signal handler
     hipblaslt_test_sigaction();
@@ -281,6 +261,15 @@ int main(int argc, char** argv)
 
     // Initialize Google Tests
     testing::InitGoogleTest(&argc, argv);
+
+    // GoogleTest leaves unknown options in argv. Do not silently ignore a
+    // misspelled validation control and run a different test than requested.
+    for(int i = 1; i < argc; ++i)
+        if(strcmp(argv[i], "--help") && strcmp(argv[i], "-h"))
+        {
+            hipblaslt_cerr << "Unknown option: " << argv[i] << std::endl;
+            return 1;
+        }
 
     // Free up all temporary data generated during test creation
     test_cleanup::cleanup();
@@ -300,4 +289,9 @@ int main(int argc, char** argv)
     //hipblaslt_shutdown();
 
     return status;
+}
+catch(const std::exception& error)
+{
+    hipblaslt_cerr << error.what() << std::endl;
+    return 1;
 }

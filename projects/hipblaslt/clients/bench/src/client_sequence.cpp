@@ -23,9 +23,10 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include <cstring>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
-#include <hipblaslt_init.hpp>
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
 #include <iostream>
 #include <numeric>
 #include <string>
@@ -181,28 +182,21 @@ int32_t type2Size(hipDataType type)
 
 void initData(hipDataType type, void* data, int m, int n, int lda, int stride, int batch_count)
 {
-    switch(type)
-    {
-    case hipDataType::HIP_R_8F_E4M3_FNUZ:
-    {
-        hipblaslt_init_cos<hipblaslt_f8_fnuz>(
-            (hipblaslt_f8_fnuz*)data, m, n, lda, stride, batch_count);
-    }
-    break;
-    case hipDataType::HIP_R_8F_E4M3:
-    {
-        hipblaslt_init_cos<hipblaslt_f8>((hipblaslt_f8*)data, m, n, lda, stride, batch_count);
-    }
-    break;
-    case hipDataType::HIP_R_16F:
-    {
-        hipblaslt_init_cos<hipblasLtHalf>((hipblasLtHalf*)data, m, n, lda, stride, batch_count);
-    }
-    break;
-    default:
-        exit(1);
-    }
-    return;
+    const auto                      scalar = hipblaslt::hostnumerics::scalarType(type);
+    const roc::hostnumerics::Layout layout(
+        roc::hostnumerics::Shape{
+            static_cast<size_t>(m), static_cast<size_t>(n), static_cast<size_t>(batch_count)},
+        {1, lda, stride},
+        0);
+    const roc::hostnumerics::Tensor generated = roc::hostnumerics::generate(
+        scalar,
+        layout,
+        roc::hostnumerics::GenerationRecipe::realOnlyLastDimensionFastest(
+            roc::hostnumerics::GenerationRecipe::cosine(),
+            hipblaslt::hostnumerics::defaultInitializationSeed));
+    const auto storage = generated.rawEncodedBackingStorage();
+    if(!storage.empty())
+        std::memcpy(data, storage.data(), storage.size());
 }
 
 void initAndCopy(
@@ -237,18 +231,18 @@ public:
     int64_t  max_workspace_size = 128 * 1024 * 1024;
     bool     graph_mode         = false;
     // Adaptive timing (gated on `adaptive`); per-knob values are the preset defaults.
-    float    warmup_time        = hipblaslt_bench::adaptive_defaults::warmup_time;
-    float    sample_time        = hipblaslt_bench::adaptive_defaults::sample_time;
-    float    measure_time       = hipblaslt_bench::adaptive_defaults::measure_time;
-    float    max_measure_time   = hipblaslt_bench::adaptive_defaults::max_measure_time;
-    float    noise_threshold    = hipblaslt_bench::adaptive_defaults::noise_threshold;
-    int32_t  min_iters          = hipblaslt_bench::adaptive_defaults::min_iters;
-    int32_t  max_iters          = hipblaslt_bench::adaptive_defaults::max_iters;
-    float    stability_threshold = hipblaslt_bench::adaptive_defaults::stability_threshold;
-    int32_t  stability_window    = hipblaslt_bench::adaptive_defaults::stability_window;
-    int32_t  stability_interval  = hipblaslt_bench::adaptive_defaults::stability_interval;
-    bool     use_gpu_timer      = true;
-    bool     adaptive           = false;
+    float   warmup_time         = hipblaslt_bench::adaptive_defaults::warmup_time;
+    float   sample_time         = hipblaslt_bench::adaptive_defaults::sample_time;
+    float   measure_time        = hipblaslt_bench::adaptive_defaults::measure_time;
+    float   max_measure_time    = hipblaslt_bench::adaptive_defaults::max_measure_time;
+    float   noise_threshold     = hipblaslt_bench::adaptive_defaults::noise_threshold;
+    int32_t min_iters           = hipblaslt_bench::adaptive_defaults::min_iters;
+    int32_t max_iters           = hipblaslt_bench::adaptive_defaults::max_iters;
+    float   stability_threshold = hipblaslt_bench::adaptive_defaults::stability_threshold;
+    int32_t stability_window    = hipblaslt_bench::adaptive_defaults::stability_window;
+    int32_t stability_interval  = hipblaslt_bench::adaptive_defaults::stability_interval;
+    bool    use_gpu_timer       = true;
+    bool    adaptive            = false;
 };
 
 class LayerConfigIO
@@ -614,7 +608,8 @@ int main(int argc, char** argv)
         for(int i = 0; i < iters; i++)
             launch(i);
         CHECK_HIP_ERROR(hipStreamEndCapture(stream, &graph));
-        CHECK_HIP_ERROR(hipStreamSynchronize(stream)); // drain warmup before timing (matches original)
+        CHECK_HIP_ERROR(
+            hipStreamSynchronize(stream)); // drain warmup before timing (matches original)
 
         hipGraphExec_t graph_exec = NULL;
         CHECK_HIP_ERROR(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
@@ -646,8 +641,8 @@ int main(int argc, char** argv)
                   << ", mean " << timing.mean_us << " us, min " << timing.min_us << " us, cv "
                   << timing.cv
                   << (timing.noise_active ? (timing.converged ? ", converged"
-                                             : timing.stable   ? ", stable"
-                                                               : ", noisy")
+                                             : timing.stable  ? ", stable"
+                                                              : ", noisy")
                                           : "")
                   << std::endl;
 

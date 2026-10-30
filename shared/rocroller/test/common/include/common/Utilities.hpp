@@ -26,6 +26,7 @@
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
+#include <rocRoller/hostnumerics/HostReference.hpp>
 
 template <typename Transform, typename... Args>
 rocRoller::KernelGraph::KernelGraph transform(rocRoller::KernelGraph::KernelGraph& graph,
@@ -87,104 +88,42 @@ auto make_shared_device(std::ranges::range auto const& init, size_t padding = 0)
 std::shared_ptr<void> make_shared_device(rocRoller::CommandArgumentValue const& arg);
 
 template <typename T>
-double normL2(std::vector<T> a)
+roc::hostnumerics::Tensor hostComparisonTensor(std::vector<T> const& values)
 {
-    double r = 0.0;
-
-#pragma omp parallel for reduction(+ : r)
-    for(int i = 0; i < a.size(); ++i)
-    {
-        double t = double(a[i]);
-        r        = r + t * t;
-    }
-    return std::sqrt(r);
+    constexpr size_t packing = rocRoller::TypeInfo<T>::Packing;
+    if(values.size() > std::numeric_limits<size_t>::max() / packing)
+        throw std::runtime_error("rocRoller comparison element count overflow.");
+    const size_t logicalElements = values.size() * packing;
+    const auto   type            = rocRoller::hostnumerics::hostScalarType(
+        rocRoller::TypeInfo<T>::SegmentVariableType.dataType,
+        rocRoller::hostnumerics::DataTypeInterpretation::Unscaled);
+    return roc::hostnumerics::Tensor::copyEncodedBackingStorage(
+        type,
+        roc::hostnumerics::Layout::contiguousLastDimensionFastest(
+            roc::hostnumerics::Shape{logicalElements}),
+        std::as_bytes(std::span<const T>(values)));
 }
 
 template <typename T>
-double relativeNormL2(std::vector<T> a, std::vector<T> b)
+double relativeNormL2(std::vector<T> const& observed, std::vector<T> const& expected)
 {
-    double d = 0.0;
-    double r = 0.0;
-
-#pragma omp parallel for reduction(+ : d, r)
-    for(size_t i = 0; i < a.size(); ++i)
-    {
-        double td = double(a[i] - b[i]);
-        double t  = double(b[i]);
-        d         = d + td * td;
-        r         = r + t * t;
-    }
-
-    return std::sqrt(d / r);
+    if(observed.size() != expected.size())
+        throw std::runtime_error("rocRoller comparison vectors have different sizes.");
+    roc::hostnumerics::ComparisonOptions options;
+    options.allClose                               = false;
+    options.computeElementwiseStatistics           = true;
+    options.computeFrobenius                       = true;
+    options.computeUlp                             = false;
+    options.maxReportedMismatches                  = 0;
+    options.zeroExpectedNormIsNaN                  = true;
+    options.nonFiniteValuesInvalidateRelativeNorms = true;
+    return roc::hostnumerics::compare(
+               hostComparisonTensor(observed), hostComparisonTensor(expected), options)
+        .relativeFrobeniusError;
 }
 
-template <typename T>
-double normInf(std::vector<T> a)
-{
-    double r = 0.0;
-
-#pragma omp parallel for reduction(max : r)
-    for(int i = 0; i < a.size(); ++i)
-    {
-        double t = fabs(double(a[i]));
-        if(t > r)
-            r = t;
-    }
-    return r;
-}
-
-template <typename T>
-double relativeNormInf(std::vector<T> a, std::vector<T> b)
-{
-    double d = 0.0;
-    double r = 0.0;
-
-#pragma omp parallel for reduction(max : d, r)
-    for(size_t i = 0; i < a.size(); ++i)
-    {
-        double td = fabs(double(a[i] - b[i]));
-        double t  = fabs(double(b[i]));
-
-        if(td > d)
-            d = td;
-        if(t > r)
-            r = t;
-    }
-
-    return d / r;
-}
-
-struct AcceptableError
-{
-    double      relativeL2Tolerance;
-    std::string reasoning;
-};
-
-struct ComparisonResult
-{
-    bool ok;
-
-    double relativeNormL2, relativeNormInf;
-    double referenceNormL2, referenceNormInf;
-    double xNormL2, xNormInf;
-
-    AcceptableError acceptableError;
-
-    std::string message() const
-    {
-        std::stringstream ss;
-        ss << (ok ? "Comparison PASSED." : "Comparison FAILED.");
-        ss << "  Relative norms:";
-        ss << " L2 " << std::scientific << relativeNormL2;
-        ss << " Inf " << std::scientific << relativeNormInf;
-        ss << "  Norms (x/ref):";
-        ss << " L2 " << std::scientific << xNormL2 << "/" << referenceNormL2;
-        ss << " Inf " << std::scientific << xNormInf << "/" << referenceNormInf;
-        ss << "  Tolerance: " << std::scientific << acceptableError.relativeL2Tolerance;
-        ss << " (" << acceptableError.reasoning << ")";
-        return ss.str();
-    }
-};
+using AcceptableError  = rocRoller::hostnumerics::AcceptableGEMMError;
+using ComparisonResult = rocRoller::hostnumerics::HostComparisonResult;
 
 /**
  * Return expected machine epsilon for `T`.
@@ -192,23 +131,7 @@ struct ComparisonResult
 template <typename T>
 double epsilon()
 {
-    using namespace rocRoller;
-
-    double rv = 0.0;
-    if constexpr(std::is_same_v<T, __half>)
-        rv = std::pow(2.0, -10);
-    else if constexpr(std::is_same_v<T, BFloat16>)
-        rv = std::pow(2.0, -5);
-    else if constexpr(std::is_same_v<T, FP8>)
-        rv = std::pow(2.0, -3);
-    else if constexpr(std::is_same_v<T, BF8>)
-        rv = std::pow(2.0, -2);
-    else
-        rv = std::numeric_limits<T>::epsilon();
-
-    AssertFatal(rv != 0.0, "Unknown data type.");
-
-    return rv;
+    return rocRoller::hostnumerics::hostReferenceEpsilon<T>();
 }
 
 /**
@@ -221,98 +144,15 @@ double epsilon()
  * they did, we would want to include `M` and `N` in the scaling).
  */
 template <typename TA, typename TB, typename TD>
-AcceptableError
-    gemmAcceptableError(int M, int N, int K, rocRoller::GPUArchitectureTarget const& arch)
+AcceptableError gemmAcceptableError(int K, rocRoller::GPUArchitectureTarget const& arch)
 {
-    double eps       = epsilon<TD>();
-    double tolerance = 0.0;
-
-    std::stringstream ss;
-    ss << "Output epsilon: " << std::scientific << eps;
-
-    if constexpr(std::is_same_v<TD, rocRoller::FP8> || std::is_same_v<TD, rocRoller::BF8>)
-    {
-        tolerance = eps;
-        ss << " Error expected to be dominated by conversion.";
-    }
-    else
-    {
-        double scale             = std::sqrt(K);
-        double fudge             = 5;
-        double extraArchFudgeBF8 = 0.0;
-        double extraArchFudgeBF6 = 0.0;
-        double extraArchFudgeFP4 = 0.0;
-
-        if(arch.gfx == rocRoller::GPUArchitectureGFX::GFX1250)
-        {
-            extraArchFudgeBF8 = 5.8;
-            extraArchFudgeBF6 = 5.8;
-            extraArchFudgeFP4 = 2.8;
-        }
-        else if(arch.gfx == rocRoller::GPUArchitectureGFX::GFX950)
-        {
-            extraArchFudgeBF8 = 2.58;
-        }
-
-        ss << " K: " << K;
-        ss << " Problem size scaling: " << scale;
-        ss << " Fudge: " << fudge;
-
-        if constexpr(std::is_same_v<TA, TB>)
-        {
-            if constexpr(std::is_same_v<TA, rocRoller::BF6>)
-            {
-                fudge *= 3 + extraArchFudgeBF6;
-                ss << " Increase fudge for BF6: " << fudge;
-            }
-            if constexpr(std::is_same_v<TA, rocRoller::BF8>)
-            {
-                fudge *= 5 + extraArchFudgeBF8;
-                ss << " Increase fudge for BF8: " << fudge;
-            }
-            if constexpr(std::is_same_v<TA, rocRoller::FP8>)
-            {
-                fudge *= 6.0 + (arch.gfx == rocRoller::GPUArchitectureGFX::GFX950 ? 0.5 : 0.0);
-
-                ss << " Increase fudge for FP8: " << fudge;
-            }
-        }
-        else
-        {
-            if constexpr(std::is_same_v<TA, rocRoller::BF8> || std::is_same_v<TB, rocRoller::BF8>)
-            {
-                fudge *= 5 + extraArchFudgeBF8;
-                ss << " Increase fudge for mixed BF8: " << fudge;
-            }
-            else if constexpr(std::is_same_v<TA,
-                                             rocRoller::FP8> || std::is_same_v<TB, rocRoller::FP8>)
-            {
-                fudge *= 4.95;
-                ss << " Increase fudge for mixed FP8: " << fudge;
-            }
-            else if constexpr(std::is_same_v<TA,
-                                             rocRoller::BF6> || std::is_same_v<TB, rocRoller::BF6>)
-            {
-                fudge *= 3;
-                ss << " Increase fudge for mixed BF6: " << fudge;
-            }
-
-            if constexpr(std::is_same_v<TA, rocRoller::FP4> || std::is_same_v<TB, rocRoller::FP4>)
-            {
-                fudge *= 3 + extraArchFudgeFP4;
-                ss << " Increase fudge for mixed FP4: " << fudge;
-            }
-        }
-        tolerance = fudge * epsilon<TD>() * std::sqrt(K);
-    }
-
-    return {tolerance, ss.str()};
+    return rocRoller::hostnumerics::acceptableGEMMError<TA, TB, TD>(K, arch);
 }
 
 /**
  * @brief Compare `x` to a reference `r`.
  *
- * The boolean `ok` field of the return value is true if the relative
+ * The `ok()` result is true if the relative
  * L2 norm between `x` and `r` is less than `scale` * `epsilon`.
  *
  * Various norms are computed and included in the return value.
@@ -322,180 +162,11 @@ ComparisonResult compare(std::vector<T> const&  x,
                          std::vector<T> const&  r,
                          AcceptableError const& acceptableError)
 {
-    ComparisonResult rv;
-
-    rv.acceptableError  = acceptableError;
-    rv.referenceNormL2  = normL2(r);
-    rv.referenceNormInf = normInf(r);
-    rv.xNormL2          = normL2(x);
-    rv.xNormInf         = normInf(x);
-    rv.relativeNormL2   = relativeNormL2(x, r);
-    rv.relativeNormInf  = relativeNormInf(x, r);
-
-    rv.ok = rv.relativeNormL2 < rv.acceptableError.relativeL2Tolerance;
-
-    return rv;
+    return rocRoller::hostnumerics::compareHostReference(
+        hostComparisonTensor(x), hostComparisonTensor(r), acceptableError);
 }
 
 int countSubstring(const std::string& str, const std::string& sub);
-
-/*
- * Matrix multiply.
- */
-
-namespace rocRoller
-{
-    void CPUMM(std::vector<float>&       D,
-               const std::vector<float>& C,
-               const std::vector<float>& A,
-               const std::vector<float>& B,
-               int                       M,
-               int                       N,
-               int                       K,
-               float                     alpha,
-               float                     beta,
-               bool                      transA = false,
-               bool                      transB = true);
-
-    template <typename TA, typename TB, typename TC, typename TD>
-    void CPUMM(std::vector<TD>&       D,
-               const std::vector<TC>& C,
-               const std::vector<TA>& A,
-               const std::vector<TB>& B,
-               int                    M,
-               int                    N,
-               int                    K,
-               float                  alpha,
-               float                  beta,
-               bool                   transA = false,
-               bool                   transB = true)
-    {
-        if constexpr(std::same_as<TD, float> && std::same_as<TC, float>)
-        {
-            CPUMM(D, C, unpackToFloat(A), unpackToFloat(B), M, N, K, alpha, beta, transA, transB);
-        }
-        else if constexpr((std::same_as<TD, __half> && std::same_as<TC, __half>)
-                          || (std::same_as<TD, BFloat16> && std::same_as<TC, BFloat16>))
-        {
-            auto floatD = unpackToFloat(C);
-            CPUMM(floatD,
-                  floatD,
-                  unpackToFloat(A),
-                  unpackToFloat(B),
-                  M,
-                  N,
-                  K,
-                  alpha,
-                  beta,
-                  transA,
-                  transB);
-#pragma omp parallel for
-            for(std::size_t i = 0; i != floatD.size(); ++i)
-            {
-                D[i] = TD(floatD[i]);
-            }
-        }
-        else
-        {
-            Throw<FatalError>("CPUMM invalid types.");
-        }
-    }
-
-    void ScaledCPUMM(std::vector<float>&         D,
-                     const std::vector<float>&   C,
-                     const std::vector<float>&   floatA,
-                     const std::vector<float>&   floatB,
-                     const std::vector<uint8_t>& AX,
-                     const std::vector<uint8_t>& BX,
-                     int                         M,
-                     int                         N,
-                     int                         K,
-                     float                       alpha,
-                     float                       beta,
-                     bool                        transA,
-                     bool                        transB,
-                     const uint                  scaleBlockSize = 32,
-                     const DataType              scaleTypeA     = DataType::E8M0,
-                     const DataType              scaleTypeB     = DataType::E8M0);
-
-    template <typename TA, typename TB, typename TC, typename TD>
-    void ScaledCPUMM(std::vector<TD>&            D,
-                     const std::vector<TC>&      C,
-                     const std::vector<TA>&      A,
-                     const std::vector<TB>&      B,
-                     const std::vector<uint8_t>& AX,
-                     const std::vector<uint8_t>& BX,
-                     int                         M,
-                     int                         N,
-                     int                         K,
-                     float                       alpha,
-                     float                       beta,
-                     bool                        transA,
-                     bool                        transB,
-                     const uint                  scaleBlockSize = 32,
-                     const DataType              scaleTypeA     = DataType::E8M0,
-                     const DataType              scaleTypeB     = DataType::E8M0)
-    {
-        if constexpr(std::same_as<TD, float> && std::same_as<TC, float>)
-        {
-            auto aConverted = unpackToFloat(A);
-            auto bConverted = unpackToFloat(B);
-            ScaledCPUMM(D,
-                        C,
-                        aConverted,
-                        bConverted,
-                        AX,
-                        BX,
-                        M,
-                        N,
-                        K,
-                        alpha,
-                        beta,
-                        transA,
-                        transB,
-                        scaleBlockSize,
-                        scaleTypeA,
-                        scaleTypeB);
-        }
-        else if constexpr((std::same_as<TD, __half> && std::same_as<TC, __half>)
-                          || (std::same_as<TD, BFloat16> && std::same_as<TC, BFloat16>))
-        {
-            auto aConverted = unpackToFloat(A);
-            auto bConverted = unpackToFloat(B);
-            auto floatD     = unpackToFloat(C);
-            ScaledCPUMM(floatD,
-                        floatD,
-                        aConverted,
-                        bConverted,
-                        AX,
-                        BX,
-                        M,
-                        N,
-                        K,
-                        alpha,
-                        beta,
-                        transA,
-                        transB,
-                        scaleBlockSize,
-                        scaleTypeA,
-                        scaleTypeB);
-#pragma omp parallel for
-            for(std::size_t i = 0; i != floatD.size(); ++i)
-            {
-                D[i] = TD(floatD[i]);
-            }
-        }
-        else
-        {
-            auto dataTypeC = TypeInfo<TC>::Var.dataType;
-            auto dataTypeD = TypeInfo<TD>::Var.dataType;
-
-            Throw<FatalError>("ScaledCPUMM only supported for float, not ",
-                              ShowValue(dataTypeC),
-                              ShowValue(dataTypeD));
-        }
-    }
-}
 
 /*
  * Random vector generator.

@@ -6,6 +6,7 @@
 #include <nanobind/stl/vector.h>
 
 #include <roc/hostnumerics/layout.hpp>
+#include <roc/hostnumerics/permutation.hpp>
 #include <vector>
 
 namespace nb = nanobind;
@@ -26,7 +27,7 @@ distinct coordinates can share one. Layout does not know the datatype or the
 extent of the underlying storage.
 
 Examples:
-    >>> layout = Layout.contiguous(Shape([2, 3]))
+    >>> layout = Layout.contiguous_last_dimension_fastest(Shape([2, 3]))
     >>> layout.strides
     [3, 1]
     >>> layout.element_offset([1, 2])
@@ -35,10 +36,11 @@ Examples:
     >>> reversed_rows.element_offset([1, 2])
     2
 
-Layout() is a scalar with zero offset. Invalid ranks, coordinates, orders, and
-arithmetic overflow raise RuntimeError. Negative axes or coordinates, and other
-values that do not fit size_t or ptrdiff_t, raise TypeError. Layouts are
-immutable and compare and hash by shape, strides, and offset.
+Layout() is a scalar with zero offset. Orders are Permutations. Invalid ranks,
+coordinates, order ranks, and arithmetic overflow raise RuntimeError. Negative
+axes or coordinates, and other values that do not fit size_t or ptrdiff_t,
+raise TypeError. Layouts are immutable and compare and hash by shape, strides,
+and offset.
 Contiguous factories require each extent and running stride product, including
 the final element count, to fit ptrdiff_t. Even empty shapes can overflow before
 the traversal reaches a zero extent.
@@ -47,18 +49,15 @@ the traversal reaches a zero extent.
         .def(nb::init<Shape, std::vector<ptrdiff_t>, ptrdiff_t>(), "shape"_a, "strides"_a,
              "offset"_a)
         .def_static(
-            "contiguous", [](const Shape& shape) { return Layout::contiguous(shape); }, "shape"_a,
-            "Contiguous C-order layout with zero offset; the last dimension is fastest.")
-        .def_static(
             "contiguous",
-            [](const Shape& shape, const std::vector<size_t>& order) {
+            [](const Shape& shape, const Permutation& order) {
                 return Layout::contiguous(shape, order);
             },
             "shape"_a, "order"_a,
-            "Contiguous layout with zero offset. Order lists each axis once, from slowest "
-            "to fastest, as in Shape.linear_index.")
+            "Contiguous layout with zero offset. Order is a Permutation of the axes, from "
+            "slowest to fastest, as in Shape.linear_index.")
         .def_static("contiguous_last_dimension_fastest", &Layout::contiguousLastDimensionFastest,
-                    "shape"_a, "Same as contiguous(shape): C order, last dimension fastest.")
+                    "shape"_a, "Contiguous C order, last dimension fastest.")
         .def_static("contiguous_first_dimension_fastest", &Layout::contiguousFirstDimensionFastest,
                     "shape"_a, "Contiguous Fortran order, first dimension fastest.")
         .def_prop_ro("shape", &Layout::shape, nb::rv_policy::copy)
