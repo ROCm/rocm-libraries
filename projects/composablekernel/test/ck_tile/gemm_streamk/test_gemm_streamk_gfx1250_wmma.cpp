@@ -21,6 +21,16 @@ using Gfx1250StreamKParams = std::tuple<Row,
                                         Pipeline,
                                         Reduction>;
 
+#if GFX1250_STREAMK_SMOKE
+// The gfx1250 emulator runs one workgroup at a time, so a Linear or Tree tile owner would wait
+// forever for later workgroups. Cover both pipelines, persistence modes and input widths with
+// atomic reduction instead.
+using Gfx1250StreamKTypes =
+    ::testing::Types<Gfx1250StreamKParams<F16, CompV3, Atomic, NonPersistent>,
+                     Gfx1250StreamKParams<F16, CompV4, Atomic, Persistent>,
+                     Gfx1250StreamKParams<BF16, CompV4, Atomic, NonPersistent>,
+                     Gfx1250StreamKParams<F8, CompV3, Atomic, NonPersistent>>;
+#else
 using Gfx1250StreamKTypes =
     ::testing::Types<Gfx1250StreamKParams<F16, CompV3, Atomic, NonPersistent>,
                      Gfx1250StreamKParams<F16, CompV3, Linear, NonPersistent>,
@@ -52,6 +62,7 @@ using Gfx1250StreamKTypes =
                      Gfx1250StreamKParams<BF8, CompV4, Atomic, NonPersistent>,
                      Gfx1250StreamKParams<BF8, CompV4, Linear, NonPersistent>,
                      Gfx1250StreamKParams<BF8, CompV4, Tree, NonPersistent>>;
+#endif
 
 template <typename Params>
 class TestGfx1250StreamK : public TestCkTileStreamK<Params>
