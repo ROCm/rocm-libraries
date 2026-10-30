@@ -111,7 +111,7 @@ packs:
       dtype:
         bf16: BF16
         fp16: FP16
-    spec_defaults: {block_size: 16, use_sinks: false, sliding_window: 0, has_softcap: false, num_seqs: 1, use_decode_grid: true, kv_cache_policy: stream, right_bound: 0, use_i64_kv_addr: false}
+    spec_defaults: {block_size: 16, use_sinks: false, sliding_window: 0, has_softcap: false, num_seqs: 1, use_decode_grid: true, kv_cache_policy: all, right_bound: 0, use_i64_kv_addr: false}
     knob_sets:
       knobs0:
       - {num_segments: 16, tag: 3d.bf16, default: true}
@@ -241,7 +241,7 @@ packs:
       dtype:
         bf16: BF16
         fp16: FP16
-    spec_defaults: {head_size: 128, block_size: 16, dtype: bf16, use_sinks: false, sliding_window: 0, has_softcap: false, num_seqs: 1, use_decode_grid: true, kv_cache_policy: stream, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, right_bound: 0, use_i64_kv_addr: false}
+    spec_defaults: {head_size: 128, block_size: 16, dtype: bf16, use_sinks: false, sliding_window: 0, has_softcap: false, num_seqs: 1, use_decode_grid: true, kv_cache_policy: all, use_kv_lds_swizzle: true, use_wave_page_id_load: true, causal_top_left: false, right_bound: 0, use_i64_kv_addr: false}
     knob_sets:
       knobs0:
       - {num_segments: 32, tag: 'seg{md_num_segments}.gfx950'}
