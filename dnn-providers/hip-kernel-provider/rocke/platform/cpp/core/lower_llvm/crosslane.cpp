@@ -165,15 +165,26 @@ static void _op_tile_wave_ballot(rocke_lower_t* L, const rocke_op_t* op)
 
 static void _op_tile_wave_all(rocke_lower_t* L, const rocke_op_t* op)
 {
-    /* wave_all(p) = (ballot(p) == -1). */
+    /* wave_all(p) = (ballot(p) == full-wave mask): -1 on wave64, 0xffffffff on
+     * wave32 (ballot.i64 sets only the low wave_size bits). Mirrors Python. */
     const rocke_value_t* pred = op->operands[0];
+    const rocke_arch_target_t* target;
     const char* b_name;
     const char* eq_name;
     rocke_ll_need(L, "ballot.i64");
     b_name = rocke_ll_fresh(L, "ballot");
     rocke_ll_emit_wave_ballot(L, pred, b_name);
+    target = rocke_arch_target_from_gfx(L->backend->gfx);
+    if(target == NULL)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "arch metadata not present for %s", L->backend->gfx);
+    }
     eq_name = rocke_ll_fresh(L, "all_eq");
-    rocke_ll_emitf(L, "  %s = icmp eq i64 %s, -1", eq_name, b_name);
+    rocke_ll_emitf(L,
+                   "  %s = icmp eq i64 %s, %s",
+                   eq_name,
+                   b_name,
+                   target->wave_size == 64 ? "-1" : "4294967295");
     rocke_ll_emitf(L, "  %s = zext i1 %s to i32", ll_result_name(op), eq_name);
 }
 
@@ -764,21 +775,6 @@ static void _op_tile_byte_perm(rocke_lower_t* L, const rocke_op_t* op)
 /* ds_read_tr16_b64 / ds_read_tr16_b128 / ds_read_tr_b8                   */
 /* ====================================================================== */
 
-/* Python ISABackend.ds_tr16_b128_spec: the gfx950 opcode is type-agnostic --
- * it returns <8 x i16> whatever the payload is, so the handler reinterprets. */
-bool rocke_ll_tr16_spec_b128_default(const char* elem_type, rocke_ll_tr16_spec_t* out)
-{
-    if(strcmp(elem_type, "bf16") != 0 && strcmp(elem_type, "f16") != 0
-       && strcmp(elem_type, "fp16") != 0)
-    {
-        return false;
-    }
-    out->decl_key = "ds.read.tr16.b128";
-    out->intrinsic = "llvm.amdgcn.ds.read.tr16.b128";
-    out->ret_ty = "<8 x i16>";
-    return true;
-}
-
 /* Python Gfx1250Backend.ds_tr16_b128_spec: the gfx1250 wave32 opcode is
  * overloaded on the result element type. Select the one matching the op so an
  * f16 read does not reinterpret a bf16 payload (and vice versa). */
@@ -799,18 +795,6 @@ bool rocke_ll_tr16_spec_b128_gfx1250(const char* elem_type, rocke_ll_tr16_spec_t
         return true;
     }
     return false;
-}
-
-/* Python self._backend.ds_tr16_b128_spec(elem_type), with the type-agnostic
- * gfx950 opcode as the fallback when no backend is bound. */
-static bool
-    ll_backend_tr16_spec_b128(rocke_lower_t* L, const char* elem_type, rocke_ll_tr16_spec_t* out)
-{
-    if(L && L->backend && L->backend->ds_tr16_b128_spec)
-    {
-        return L->backend->ds_tr16_b128_spec(elem_type, out);
-    }
-    return rocke_ll_tr16_spec_b128_default(elem_type, out);
 }
 
 /* Shared prologue for the b16 transpose reads: emit the getelementptr that
@@ -880,25 +864,35 @@ static void _op_tile_ds_read_tr16_b64(rocke_lower_t* L, const rocke_op_t* op)
     }
     rocke_ll_need(L, "ds.read.tr16.b64");
     raw = rocke_ll_fresh(L, "tr.raw");
-    rocke_ll_emitf(
-        L, "  %s = call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3) %s)", raw, base);
+    rocke_ll_emitf(L,
+                   "  %s = call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3) %s)%s",
+                   raw,
+                   base,
+                   rocke_ll_lds_aa_suffix(L, rocke_ll_smem_global_name(L, op->operands[0], NULL)));
     elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
     rocke_ll_emitf(L, "  %s = bitcast <4 x i16> %s to <4 x %s>", ll_result_name(op), raw, elem_ty);
 }
 
-/* ds_read_b128_tr_b16. The backend chooses the opcode: gfx950 has one
- * type-agnostic <8 x i16> form that the payload is reinterpreted out of, while
- * gfx1250 has per-element-type forms that land in the right type directly. */
+/* ds_load_tr16_b128. Only gfx1250 has a wide transpose read: its backend
+ * selects an element-typed opcode that lands in the result type directly. Any
+ * other backend has no spec, because LLVM has no ds.read.tr16.b128. */
 static void _op_tile_ds_read_tr16_b128(rocke_lower_t* L, const rocke_op_t* op)
 {
     const char* base = ll_ds_read_tr16_base(L, op, "trw.base");
     const char* elem_name = "f16";
     rocke_ll_tr16_spec_t spec;
-    const char* elem_ty;
-    char want_ty[32];
 
     if(!rocke_ll_live(L))
     {
+        return;
+    }
+    if(!L->backend || !L->backend->ds_tr16_b128_spec)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "ds_read_tr16_b128 is not available on %s: LLVM has no "
+                      "ds.read.tr16.b128 intrinsic; use ds_read_tr16_b64",
+                      L->backend ? L->backend->gfx : "(unknown)");
         return;
     }
     {
@@ -908,35 +902,22 @@ static void _op_tile_ds_read_tr16_b128(rocke_lower_t* L, const rocke_op_t* op)
             elem_name = attr;
         }
     }
-    if(!ll_backend_tr16_spec_b128(L, elem_name, &spec))
+    if(!L->backend->ds_tr16_b128_spec(elem_name, &spec))
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_NOTIMPL,
                       "ds_load_tr16_b128 on %s supports f16/bf16 only, got elem_type='%s'",
-                      L->backend ? L->backend->gfx : "(unknown)",
+                      L->backend->gfx,
                       elem_name);
         return;
     }
     rocke_ll_need(L, spec.decl_key);
-    elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
-    snprintf(want_ty, sizeof(want_ty), "<8 x %s>", elem_ty);
-    if(strcmp(spec.ret_ty, want_ty) == 0)
-    {
-        rocke_ll_emitf(L,
-                       "  %s = call %s @%s(ptr addrspace(3) %s)",
-                       ll_result_name(op),
-                       spec.ret_ty,
-                       spec.intrinsic,
-                       base);
-        return;
-    }
-    {
-        const char* raw = rocke_ll_fresh(L, "trw.raw");
-        rocke_ll_emitf(
-            L, "  %s = call %s @%s(ptr addrspace(3) %s)", raw, spec.ret_ty, spec.intrinsic, base);
-        rocke_ll_emitf(
-            L, "  %s = bitcast %s %s to %s", ll_result_name(op), spec.ret_ty, raw, want_ty);
-    }
+    rocke_ll_emitf(L,
+                   "  %s = call %s @%s(ptr addrspace(3) %s)",
+                   ll_result_name(op),
+                   spec.ret_ty,
+                   spec.intrinsic,
+                   base);
 }
 
 static void _op_tile_ds_read_tr_b8(rocke_lower_t* L, const rocke_op_t* op)
@@ -1018,6 +999,16 @@ static void _op_tile_inline_asm(rocke_lower_t* L, const rocke_op_t* op)
 
     const char* required_arch = rocke_attr_get_str(&op->attrs, "required_arch");
     const char* required_flavor = rocke_attr_get_str(&op->attrs, "required_llvm_flavor");
+    const rocke_attr_value_t* minimum_flavor_attr
+        = rocke_attr_get(&op->attrs, "minimum_llvm_flavor");
+    if(minimum_flavor_attr != NULL && minimum_flavor_attr->kind != ROCKE_ATTR_STR)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_TYPE,
+                      "tile.inline_asm failed - minimum_llvm_flavor has a non-string value, "
+                      "expected a string");
+    }
+    const char* minimum_flavor = minimum_flavor_attr != NULL ? minimum_flavor_attr->u.s : NULL;
     if(required_arch
        && (!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, required_arch) != 0))
     {
@@ -1034,6 +1025,18 @@ static void _op_tile_inline_asm(rocke_lower_t* L, const rocke_op_t* op)
                       "tile.inline_asm requires LLVM flavor %s, got %s",
                       required_flavor,
                       rocke_llvm_flavor_name(L->flavor));
+    }
+    if(minimum_flavor)
+    {
+        rocke_llvm_flavor_t minimum = rocke_llvm_flavor_from_name(minimum_flavor);
+        if(minimum == ROCKE_LLVM_FLAVOR_AUTO || !rocke_ll_flavor_at_least(L->flavor, minimum))
+        {
+            rocke_ll_fail(L,
+                          ROCKE_ERR_VALUE,
+                          "tile.inline_asm requires LLVM flavor %s, got %s",
+                          minimum_flavor,
+                          rocke_llvm_flavor_name(L->flavor));
+        }
     }
     raw_template = rocke_attr_get_str(&op->attrs, "template");
     if(raw_template == NULL)

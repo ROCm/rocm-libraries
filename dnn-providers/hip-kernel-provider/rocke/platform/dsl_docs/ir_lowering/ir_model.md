@@ -24,16 +24,20 @@ Composite types:
   - other     -> LLVM `ptr`
 - `SmemType(elem, shape)` — opaque token for an LDS allocation. Lowers to `ptr addrspace(3)`.
 
-Cache-coherence AUX hints (constants in `core/ir.py`) for `async_buffer_load_lds_addr` / `buffer_load_vN_*`:
+Cache-policy bits (the AUX operand; constants in `core/ir.py`) for `async_buffer_load_lds_addr` /
+`buffer_load_vN_*`:
 
 ```text
-CACHE_ALL    = 0   # default, cache at all levels
-CACHE_GLOBAL = 1   # GLC set, skip L2
-CACHE_STREAM = 2   # SLC set, streaming hint (don't evict useful lines)
-NON_TEMPORAL = 3   # GLC + SLC, bypass cache hierarchy
+CACHE_ALL    = 0   # no bits: the default caching
+CACHE_GLOBAL = 1   # GLC (gfx90a) / SC0 (gfx942, gfx950)
+CACHE_STREAM = 2   # SLC (gfx90a) / NT (gfx942, gfx950): streaming data
+NON_TEMPORAL = 3   # GLC + SLC / SC0 + NT
 ```
 
-GLC / SLC are the gfx90a names; on gfx942 / gfx950 the same values are SC0 (1) and NT (2).
+On gfx942 / gfx950, SC0 selects the coherence scope and NT marks the data as streaming; for loads, NT
+caches the same with or without SC0. Spec fields name a policy with one of `CACHE_POLICY_NAMES`
+(`"all"`, `"global"`, `"stream"`, `"nt"`); `cache_policy_from_name` gives its bits (C:
+`rocke_cache_policy_from_name`).
 These are raw bit values for buffer ops. They are **not** `temporal_hint=TemporalHint.STREAMING`
 on `global_load_vN` / `global_store_vN` (below), whose bits the backend picks per arch: on
 gfx942 / gfx950 it sets NT only, the bits of `CACHE_STREAM`, **not** `NON_TEMPORAL`.
@@ -99,10 +103,12 @@ zero_vec(elem, n)          # f32 / f16 / bf16 / f64 / fp8e4m3 / bf8e5m2 / i8 / i
 
 ```text
 add, sub, mul, div, mod                    # integer arithmetic
+add_nuw                                    # integer add, no unsigned wrap (i32/i64)
 fadd, fsub, fmul, fdiv, fneg               # f64/f32/f16/bf16 arithmetic
 fmax, fmin                                 # llvm.maxnum / llvm.minnum (f64/f32/f16/bf16)
 fcmp(pred, a, b)                           # pred in {olt,ole,ogt,oge,oeq,one,ord,uno}
 cmp_lt, cmp_le, cmp_gt, cmp_ge, cmp_eq, cmp_ne   # integer compare (-> i1)
+cmp_ult                                    # unsigned compare (i32/i64 -> i1)
 land, lor, lnot                            # bitwise + i1 logic
 zext(v, target_int_type)
 sext(v, target_int_type)
@@ -128,7 +134,7 @@ cvt_f32_to_i8_sat(v)     # round + saturate to i8
 
 ### Math intrinsics
 
-LLVM target intrinsics; lowering is f32-centric. `exp2`, `exp2_fast`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `tanh`, `fabs`, `fma`, `fmax3`, `fmin3` and `vector_fma` have no f64 lowering and reject f64 inputs in both the LLVM and HIP lowerings; `rcp` is a plain `fdiv` and accepts f64.
+LLVM target intrinsics; lowering is f32-centric. `exp2`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `fma`, `fmax3`, `fmin3` and `vector_fma` have no f64 lowering and reject f64 inputs in both the LLVM and HIP lowerings. `exp2_fast` rejects f64 in the LLVM lowering and has no HIP lowering for any dtype. `tanh` accepts only f32: the builder rejects any other operand type. `rcp` is a plain `fdiv` and accepts f64, and `fabs` lowers f64 to `llvm.fabs.f64`.
 
 ```text
 exp2(v)        # llvm.exp2.f32
@@ -176,6 +182,7 @@ global_load_bf16(ptr, idx, align=2)
 global_load_f32(ptr, idx, align=4)
 global_load_i32(ptr, idx, align=4)
 global_load_i64(ptr, idx, align=8)
+global_load_f64(ptr, idx, align=8)
 global_load_fp8e4m3(ptr, idx, align=1)
 masked_global_load(ptr, idx, mask, other, dtype, align=1)   # clamps false-lane idx to 0
 global_store(ptr, idx, value, align=1)
@@ -230,6 +237,7 @@ mfma_f32_16x16x32_bf16(a, b, c)    # <8 x bfloat>, <8 x bfloat>, <4 x float>
 mfma_f32_32x32x8_f16(a, b, c)      # <4 x half>, <4 x half>, <16 x float>
 mfma_f32_32x32x16_f16(a, b, c)     # <8 x half>, <8 x half>, <16 x float>  (gfx950 only)
 mfma_f32_4x4x4_f16(a, b, c)        # 16 independent 4x4 matmuls per wave
+mfma_f32_4x4x4_bf16(a, b, c)       # bf16 twin, lowers via *_1k variant with <4 x i16> operands
 ```
 
 The shipped `MFMA_F16_ATOMS` catalog in `helpers/atoms.py` exposes the five f16 variants with full lane mapping and dispatch. See `reference/mfma_atom_catalog.md`. These MFMA atoms target the CDNA (wave64) backends. For RDNA (wave32) targets the builder also exposes WMMA matrix ops (`wmma_f32_16x16x16_f16` / `wmma_f32_16x16x16_bf16`, and the gfx12 variants) backed by `WmmaAtom` in `helpers/atoms.py`; all matrix ops route through the generic `mma()` builder method.

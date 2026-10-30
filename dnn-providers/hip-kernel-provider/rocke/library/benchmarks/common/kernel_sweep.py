@@ -379,6 +379,7 @@ def _compile_worker(payload):
             comgr_input.llvm_text,
             isa=comgr_input.isa,
             options=list(comgr_input.options),
+            fresh_process=comgr_input.fresh_process,
         )
         return key, hsaco, comgr_input.kernel_name, None
     except Exception as exc:  # noqa: BLE001 - reported per binary, never fatal

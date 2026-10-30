@@ -72,6 +72,8 @@ int run_bench_test(Arguments&         arg,
     // disable unit_check in client benchmark, it is only used in gtest unit test
     arg.unit_check = 0;
 
+    hipblaslt_bench_options::apply_strict_verification(arg);
+
     // enable timing check,otherwise no performance data collected
     arg.timing = 1;
 
@@ -214,6 +216,16 @@ int hipblaslt_bench_datafile(const std::string& filter, bool any_stride, hipDevi
     return ret;
 }
 
+int verification_exit(int ret)
+{
+    const int code = hipblaslt_bench_options::verification_exit_code(ret);
+    if(code != ret)
+        hipblaslt_cerr << "hipblaslt-bench: " << hipblaslt_bench_options::verification_failures()
+                       << " --verify check(s) failed; exiting with code " << code
+                       << " (--verify_strict)" << std::endl;
+    return code;
+}
+
 // Replace --batch with --batch_count for backward compatibility
 void fix_batch(int argc, char* argv[])
 {
@@ -289,6 +301,7 @@ try
     std::string filter;
     std::string activation_type;
     std::string aux_type;
+    std::string int4_encoding;
     int         scaleAFormat;
     int         scaleBFormat;
     int         scaleCFormat;
@@ -475,6 +488,12 @@ try
          value<bool>(&verify)->default_value(false),
          "Validate GPU results with CPU?")
 
+        ("verify_strict",
+         value<bool>(&hipblaslt_bench_options::verify_strict())->default_value(false),
+         "Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose "
+         "failed). Checks D only. Implies --verify. Computes a CPU reference per problem and "
+         "copies and compares D on the host for each solution.")
+
         ("ulp",
          value<bool>(&ulp)->default_value(false),
          "Report ULP (unit in the last place) error vs CPU; reports max and average. Implies --verify.")
@@ -588,7 +607,17 @@ try
 
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
-         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
+         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8. "
+         "w4a16 group scales (require --a_type i4_r), numbered as hipblasLtMatmulMatrixScale_t: "
+         "bf16 scales: 1006 = VEC32, 1007 = VEC64, 1008 = VEC128, 1009 = VEC32_ZP, "
+         "1010 = VEC64_ZP, 1011 = VEC128_ZP; fp16 scales: 1012..1017 in the same "
+         "order. The named scale type must match --b_type.")
+
+        ("int4_encoding",
+         value<std::string>(&int4_encoding)->default_value("signed"),
+         "w4a16 only: encoding of the int4 weights in A (hipblasLtInt4Encoding_t). "
+         "signed = two's complement, unsigned_bias8 = unsigned with an implicit "
+         "zero-point of 8 (GPTQ). The numerals 0 and 1 are also accepted.")
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
@@ -661,7 +690,8 @@ try
         ("api_method",
          value<std::string>(&api_method_str)->default_value("c"),
          "Use extension API. c: C style API. mix: declaration with C hipblasLtMatmul Layout/Desc but set, initialize, and run the problem with C++ extension API. cpp: Using C++ extension API only. "
-         "Options: c, mix, cpp.")
+         "grouped_gemm_c: with --grouped_gemm, grouped matrix layouts and hipblasLtMatmul instead of the C++ GroupedGemm class. "
+         "Options: c, mix, cpp, grouped_gemm_c.")
 
         ("print_kernel_info",
          value<bool>(&arg.print_kernel_info)->default_value(false),
@@ -729,7 +759,7 @@ try
          "Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. "
          "Accepts off|0, on|1 (case-insensitive). When on, the matmul returns "
          "HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. "
-         "When omitted the bench leaves the attribute unset so the library default (off) applies.")
+         "When omitted the bench leaves the attribute unset so the library default (on) applies.")
 
         ("help,h", "produces this help message")
 
@@ -810,6 +840,9 @@ try
         return 0;
     }
 
+    if(!hipblaslt_timing_allowed_with_adaptive_sm_count())
+        return EXIT_FAILURE;
+
     if(api_method_str.compare("c") == 0)
     {
         api_method = 0;
@@ -821,6 +854,10 @@ try
     else if(api_method_str.compare("cpp") == 0)
     {
         api_method = 2;
+    }
+    else if(api_method_str.compare("grouped_gemm_c") == 0)
+    {
+        api_method = kApiMethodGroupedC;
     }
     else
     {
@@ -1028,7 +1065,7 @@ try
         perf_monitor->setDeviceId(device_id);
 
     if(datafile)
-        return hipblaslt_bench_datafile(filter, any_stride, props);
+        return verification_exit(hipblaslt_bench_datafile(filter, any_stride, props));
 
     // single bench run
 
@@ -1180,6 +1217,9 @@ try
             return hipblaslt_scaling_format::Block_16_UE5M3;
         if(s == 1001)
             return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        // w4a16 group scales; numbered as hipblasLtMatmulMatrixScale_t.
+        if(s >= 1006 && s <= 1017)
+            return static_cast<hipblaslt_scaling_format>(s);
         return hipblaslt_scaling_format::none;
     };
     arg.scaleA = scaleInt2Enum(scaleAFormat);
@@ -1243,6 +1283,34 @@ try
                                         + hip_datatype_to_string(arg.d_type));
     }
 
+    // Require int4 A, 16-bit B, and group scales together.
+    {
+        const auto encoding = string_to_int4_encoding(int4_encoding);
+        if(encoding == HIPBLASLT_INT4_ENCODING_END_EXT)
+            throw std::invalid_argument("Invalid --int4_encoding "s + int4_encoding
+                                        + "; expected one of " + c_int4_encoding_names);
+        arg.int4_encoding = static_cast<int32_t>(encoding);
+
+        // w4a16 modes are A-only; reject here rather than surface a bare B_SCALE_MODE status.
+        if(isW4A16Scaling(arg.scaleB))
+            throw std::invalid_argument(
+                "--scaleB does not accept the w4a16 group-scale modes 1006..1017; got "s
+                + std::to_string(static_cast<int>(arg.scaleB)));
+
+        const bool int4A = (arg.a_type == HIP_R_4I);
+        if(int4A != isW4A16Scaling(arg.scaleA))
+            throw std::invalid_argument(
+                "w4a16 needs --a_type i4_r together with --scaleA 1006..1017; got --a_type "s
+                + hip_datatype_to_string(arg.a_type) + " --scaleA "
+                + std::to_string(static_cast<int>(arg.scaleA)));
+        if(int4A)
+        {
+            if(arg.b_type != HIP_R_16BF && arg.b_type != HIP_R_16F)
+                throw std::invalid_argument("w4a16 requires --b_type bf16_r or f16_r, got "s
+                                            + hip_datatype_to_string(arg.b_type));
+        }
+    }
+
     if(arg.M[0] < 0)
         throw std::invalid_argument("Invalid value for -m " + std::to_string(arg.M[0]));
     if(arg.N[0] < 0)
@@ -1268,9 +1336,11 @@ try
         arg.ulp_check = 1;
     }
 
+    arg.api_method = api_method;
     switch(api_method)
     {
     case 0:
+    case kApiMethodGroupedC:
         arg.use_ext            = false;
         arg.use_ext_setproblem = false;
         break;
@@ -1288,7 +1358,7 @@ try
     }
 
     arg.norm_check_assert = false;
-    return run_bench_test(arg, filter, any_stride, props);
+    return verification_exit(run_bench_test(arg, filter, any_stride, props));
 }
 catch(const std::invalid_argument& exp)
 {

@@ -12,9 +12,9 @@
  *   K_dg  = Y*X*kpg       (filter spatial x output channels per group -- reduction)
  *   A: dY (NHWK), B: W (KYXC, per-group packed [K, Y, X, cpg]), D: dX (NHWC)
  *
- * Grouped convolution (problem.groups > 1, channels-per-group > 1) runs
- * grid-per-group with the conv group on blockIdx.y, as the Python builder
- * does; depthwise (cpg == 1) is rejected.
+ * Grouped convolution (problem.groups > 1) runs grid-per-group with the conv
+ * group on blockIdx.y, as the Python builder does; depthwise (cpg == 1) is a
+ * one-column GEMM per group.
  *
  * For stride=1 a single GEMM is used (compile-time descriptor transforms).
  * For stride>1 a tilde decomposition splits the problem into up to 64+
@@ -154,6 +154,41 @@ typedef struct rocke_dgrad_conv_spec
      * Appended last so existing aggregate initialisers keep their layout.
      * Default false: every existing config emits byte-identical IR. */
     bool uniform_k_decode; /* default false */
+
+    /* patch: a patch embedding (stride >= filter, no padding or dilation,
+     * ungrouped) as ONE GEMM over the filter's (y, x, c): M = N*Ho*Wo,
+     * N = Y*X*C, K = K. The record is the pointwise problem's, so the K loop
+     * is unchanged; the dX store splits column n into (y, x*C + c) and lands
+     * y*Wi*C + x*C + c past the patch's first element. MFMA only; rejected
+     * with split_k > 1, wavelet and groups > 1. Mirrors DgradConvSpec.patch.
+     * Appended last; default false: every existing config is byte-identical. */
+    bool patch; /* default false */
+    /* tap_outer_k: stride-1 K loop as (filter tap outer) x (output-channel
+     * chunk inner). Needs stride 1, dilation 1, kpg % tile_k == 0, split_k
+     * == 1, the wave64 MFMA loop, and uniform_k_decode off; the validator
+     * rejects anything else (the loop has no fallback). Mirrors
+     * DgradConvSpec.tap_outer_k; tags the kernel name "_tapk". Appended last
+     * so existing aggregate initialisers keep their layout. */
+    bool tap_outer_k; /* default false */
+
+    /* xcd_tile_order: XCD-contiguous tile order for grouped stride-1 kernels
+     * on gfx950, applied when the kernargs ask for it (see
+     * _dgrad_xcd_tile_order_xcds). An A/B knob, default true (set by
+     * rocke_dgrad_conv_spec_default); false tags the kernel name "_noxcd".
+     * Mirrors DgradConvSpec.xcd_tile_order. Appended last. */
+    bool xcd_tile_order; /* default true */
+
+    /* dY halo reuse, a mode of the tap-outer K loop (Python
+     * DgradConvSpec.dy_halo / dy_halo_setprio / dy_halo_kouter_pad /
+     * halo_max_wo): dy_halo 0 = off, 1 = staged halo, 2 = staged halo with a
+     * double-buffered B tile; setprio 0..3; kouter_pad a multiple of 8 (0
+     * keeps ROCKE_DGRAD_KOUTER_PAD); halo_max_wo the widest Wo served (the
+     * staged halo is sized for it). All default 0. Name tags "_halo<n>",
+     * "_hprio<n>", "_hkp<n>", "_hwo<n>". Appended last. */
+    int dy_halo;
+    int dy_halo_setprio;
+    int dy_halo_kouter_pad;
+    int halo_max_wo;
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
@@ -161,6 +196,10 @@ typedef struct rocke_dgrad_conv_spec
  * conv_implicit_gemm_dgrad.py: the stride must not be a multiple of the
  * 32-dword LDS bank period or the transpose read degenerates. */
 #define ROCKE_DGRAD_KOUTER_PAD 8
+
+/* Upper bound on fp32 accumulators per lane accepted by
+ * rocke_dgrad_conv_is_valid_spec. Mirrors _MAX_ACC_REGS_PER_LANE. */
+#define ROCKE_DGRAD_MAX_ACC_REGS_PER_LANE 256
 
 rocke_dgrad_conv_spec_t rocke_dgrad_conv_spec_default(void);
 

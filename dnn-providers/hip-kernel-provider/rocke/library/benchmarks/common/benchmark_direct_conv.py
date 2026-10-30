@@ -22,12 +22,17 @@ and K), so they can instead be compiled once and reused for any matching shape:
   python benchmark_direct_conv.py --run-from-cache ./kernel_cache --N 8 --Hi 56 --Wi 56 \
       --C 1024 --K 1024 --groups 64 --verify
 The capability list (filters, strides, paddings, channels per group) lives in
-benchmarks/common/direct_kernel_sweep.py.
+benchmarks/common/direct_kernel_sweep.py. ``--variants`` restricts a
+``--run-from-cache`` run to some of its variants, e.g. only the single-kernel
+grouped dgrad forms:
+  python benchmark_direct_conv.py --run-from-cache ./kernel_cache --direction dgrad \
+      --variants direct_grouped_dgrad_4c,direct_grouped_dgrad_fused ...
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import itertools
 import os
 import sys
@@ -123,6 +128,7 @@ class DepthwiseResult:
 
 _MIOPEN_DTYPE_MAP = {
     "conv": "fp32",  # rejected — fp32 not supported
+    "convfp32": "fp32",
     "convfp16": "fp16",
     "convbfp16": "bf16",
     "convint8": "int8",  # rejected — int8 not supported
@@ -147,6 +153,10 @@ def parse_miopen_cmd_direct(cmd: str):
     driver_kw = None
     driver_idx = None
     for i, t in enumerate(tokens):
+        # The driver keyword precedes every flag; stop at the first flag so a
+        # flag *value* (e.g. the "conv" in "-m conv") is never taken for it.
+        if t.startswith("-"):
+            break
         key = t.split("/")[-1].lower()
         if key in _MIOPEN_DTYPE_MAP:
             driver_kw = key
@@ -214,9 +224,12 @@ def parse_miopen_cmd_direct(cmd: str):
     kpg = K // groups
     # For fprop the grouped direct kernels require cpg == kpg.
     # For dgrad and wgrad cpg and kpg may differ; the spec validators enforce the
-    # kernel-specific constraints, so we skip the symmetric check here.
+    # kernel-specific constraints, so we skip the symmetric check here. So do
+    # ungrouped forward problems (stems with C = 3 included): the non-grouped
+    # and small-channel kernels take any channel counts their validators accept.
     if (
         miopen_args.forw not in (2, 4)
+        and groups != 1
         and cpg != 1
         and cpg != kpg
         and (cpg % 4 != 0 or cpg < 4)
@@ -226,23 +239,26 @@ def parse_miopen_cmd_direct(cmd: str):
         )
 
     dilated = miopen_args.dH != 1 or miopen_args.dW != 1
-    if dilated and (miopen_args.forw != 1 or groups != 1):
+    # Dilated: the non-grouped forward kernel and the WMMA dgrad.
+    if dilated and (miopen_args.forw not in (1, 2) or groups != 1):
         raise ValueError(
-            f"direct conv computes a dilated convolution only forward and "
+            f"direct conv computes a dilated convolution only forward / dgrad and "
             f"ungrouped (got -l {miopen_args.dH} -j {miopen_args.dW}, "
             f"-F {miopen_args.forw}, -g {groups})"
         )
 
+    # The direct kernels take one stride and one padding for both axes;
+    # substituting the H value for W would run, and report, another problem.
     sH = miopen_args.sH
     if miopen_args.sH != miopen_args.sW:
-        print(
-            f"[warn] sH={miopen_args.sH} != sW={miopen_args.sW}; using sH={miopen_args.sH}",
-            file=sys.stderr,
+        raise ValueError(
+            f"direct conv takes one stride for both axes "
+            f"(got -u {miopen_args.sH} -v {miopen_args.sW})"
         )
     if miopen_args.pH != miopen_args.pW:
-        print(
-            f"[warn] pH={miopen_args.pH} != pW={miopen_args.pW}; using pH={miopen_args.pH}",
-            file=sys.stderr,
+        raise ValueError(
+            f"direct conv takes one padding for both axes "
+            f"(got -p {miopen_args.pH} -q {miopen_args.pW})"
         )
 
     from kernels.common.conv_direct_grouped import DirectConvProblem
@@ -544,10 +560,14 @@ def _run_depthwise_sweep(
     from rocke.runtime.hip_module import HipError
 
     p = problem
-    # Use spatial kernel when groups fit in one wave (better thread utilisation).
-    # Derive wave_size from the spec default so this stays correct on wave32 targets
-    # (groups == wave_size would leave zero W-positions per wave — not valid).
-    _wave_size = DirectDepthwiseSpatialSpec(problem=p).wave_size
+    from rocke.core.arch import ArchTarget
+
+    # Every depthwise variant is built at the target's wave size (64 on CDNA,
+    # 32 on gfx1250), as the AOT cache does; the tiled and column-streamed
+    # validators reject any other.
+    _wave_size = ArchTarget.from_gfx(arch).wave_size
+    # Use spatial kernel when groups fit in one wave (better thread utilisation;
+    # groups == wave_size would leave zero W-positions per wave — not valid).
     _use_spatial = p.groups < _wave_size
 
     # All three variants take fp16 and bf16 -- preload and spatial off
@@ -617,6 +637,7 @@ def _run_depthwise_sweep(
             spec = DirectDepthwiseTiledSpec(
                 problem=p,
                 name="rocke_bench_direct_depthwise_tiled",
+                wave_size=_wave_size,
                 block_w=block_w,
                 block_h=block_h,
                 block_waves=block_waves,
@@ -628,6 +649,7 @@ def _run_depthwise_sweep(
             spec = DirectDepthwiseSpatialSpec(
                 problem=p,
                 name="rocke_bench_direct_depthwise_spatial",
+                wave_size=_wave_size,
                 block_waves=block_waves,
             )
             ok, _ = is_valid_depthwise_spatial_spec(spec, arch=arch)
@@ -636,6 +658,7 @@ def _run_depthwise_sweep(
             spec = DirectDepthwiseColSpec(
                 problem=p,
                 name="rocke_bench_direct_depthwise_col",
+                wave_size=_wave_size,
                 block_h=block_h,
                 block_w=block_w,
                 block_waves=block_waves,
@@ -647,6 +670,7 @@ def _run_depthwise_sweep(
             spec = DirectDepthwiseSpec(
                 problem=p,
                 name="rocke_bench_direct_depthwise",
+                wave_size=_wave_size,
                 block_w=block_w,
                 block_waves=block_waves,
             )
@@ -2104,6 +2128,49 @@ def _cache_directions(args) -> "tuple[str, ...] | None":
     return directions
 
 
+def _cache_variants(args) -> "frozenset[str]":
+    """The cache variants ``--variants`` keeps (empty: every variant)."""
+    if not getattr(args, "variants", None):
+        return frozenset()
+    from benchmarks.common.direct_kernel_sweep import DIRECT_CAPABILITIES
+
+    variants = frozenset(v.strip() for v in args.variants.split(",") if v.strip())
+    unknown = sorted(variants - set(DIRECT_CAPABILITIES))
+    if unknown:
+        raise ValueError(
+            f"unknown direct variant(s) {', '.join(unknown)}; use "
+            f"{', '.join(DIRECT_CAPABILITIES)}"
+        )
+    return variants
+
+
+def _filter_variants(plans: list, rejected: list, variants: "frozenset[str]"):
+    """``(plans, rejected)`` of the cache variants ``--variants`` keeps (all of
+    them when ``variants`` is empty). Either list may come back empty."""
+    if not variants:
+        return plans, rejected
+    return (
+        [pl for pl in plans if pl.identity.algorithm in variants],
+        [r for r in rejected if r[0].algorithm in variants],
+    )
+
+
+def _no_plan_reason(rejected: list, dtype: str, variants: "frozenset[str]") -> str:
+    """Why a case has no runnable cached kernel, from its (filtered) rejections:
+    the first rejection's reason, else what is missing from the cache."""
+    if rejected:
+        return rejected[0][1]
+    if variants:
+        return (
+            f"no cached {dtype} kernel of --variants {', '.join(sorted(variants))} "
+            "has these capabilities"
+        )
+    return (
+        f"no cached {dtype} kernel has these capabilities; "
+        f"build them with --compile-all --dtype {dtype}"
+    )
+
+
 def _cache_dispatch(args, arch: str, cases: list) -> int:
     """Handle the two cache modes.
 
@@ -2124,6 +2191,14 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
         directions = _cache_directions(args)
     except ValueError as e:
         print(f"error: --directions: {e}", file=sys.stderr)
+        return 2
+    if args.compile_all and args.variants:
+        print("error: --variants only filters --run-from-cache", file=sys.stderr)
+        return 2
+    try:
+        _cache_variants(args)
+    except ValueError as e:
+        print(f"error: --variants: {e}", file=sys.stderr)
         return 2
 
     if args.compile_all:
@@ -2154,12 +2229,77 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
             "direct_fwd",
             "direct_dgrad",
             "direct_dgrad_helper",
+            "direct_fwd_helper",
             "direct_wgrad",
         ),
     )
     if rc:
         return rc
     return _run_from_cache(args, arch, cases, cache, directions)
+
+
+_TENSOR_LIMIT = 1 << 31
+
+
+def _batch_chunks(p, direction: str) -> List[int]:
+    """Images per launch: the fewest balanced batch chunks that keep every
+    activation under 2 GiB (``[N]`` when one launch fits, and for wgrad).
+
+    The chunks need not divide N; they differ by at most one image (N=31 that
+    fits 15 images per launch runs as 11 + 10 + 10).
+    """
+    if direction == "wgrad":
+        return [p.N]
+    elem = 2
+    per_image = max(p.H * p.W * p.total_c, p.Ho * p.Wo * p.total_k) * elem
+    per_launch = (_TENSOR_LIMIT - 1) // per_image
+    if p.N <= per_launch or per_launch < 1:
+        return [p.N]
+    n_steps = -(-p.N // per_launch)
+    base, extra = divmod(p.N, n_steps)
+    return [base + (i < extra) for i in range(n_steps)]
+
+
+def _chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i):
+    """``(ptrs, sizes)`` with the activations narrowed to batch chunk ``i``
+    of ``chunks`` (images per chunk, in batch order)."""
+    if len(chunks) == 1:
+        return ptrs, sizes
+    ptrs, sizes = dict(ptrs), dict(sizes)
+    n_total, n0 = sum(chunks), sum(chunks[:i])
+    for name in [n for n in inputs if n != "w"] + [out_name]:
+        per_image = sizes[name] // n_total
+        ptrs[name] = ptrs[name] + n0 * per_image
+        sizes[name] = chunks[i] * per_image
+    return ptrs, sizes
+
+
+def _chunk_plans(plan_fn, p, chunks):
+    """Plans for a problem run as ``chunks`` (see :func:`_batch_chunks`).
+
+    ``plan_fn(problem)`` returns ``(plans, rejected)`` for one launch's
+    problem; each distinct chunk size is planned on its own batch, so a
+    kernel's grid and re-validation see the images it really runs. Returns
+    ``(plans, rejected, per_chunk)``: the kernels that serve every chunk size
+    (as planned for the first chunk), the rejections, and per plan label the
+    plan of each chunk in order.
+    """
+    by_size = {}
+    for n in dict.fromkeys(chunks):
+        by_size[n] = plan_fn(p if n == p.N else dataclasses.replace(p, N=n))
+    plans, rejected = by_size[chunks[0]]
+    rejected = list(rejected)
+    labels = {n: {pl.label: pl for pl in sized[0]} for n, sized in by_size.items()}
+    for n, sized in by_size.items():
+        rejected += [r for r in sized[1] if r not in rejected]
+        missing = [pl for pl in plans if pl.label not in labels[n]]
+        rejected += [
+            (pl.identity, f"does not serve a batch chunk of {n} images")
+            for pl in missing
+        ]
+        plans = [pl for pl in plans if pl.label in labels[n]]
+    per_chunk = {pl.label: [labels[n][pl.label] for n in chunks] for pl in plans}
+    return plans, rejected, per_chunk
 
 
 def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
@@ -2182,6 +2322,7 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
 
     from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
 
+    variants = _cache_variants(args)
     overall_rc = 0
     for case_idx, (p, dtype, case_direction) in enumerate(cases, 1):
         if dtype not in DIRECT_DTYPES:
@@ -2192,14 +2333,18 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
             continue
         torch_dt = torch.bfloat16 if dtype == "bf16" else torch.float16
         for direction in directions or (case_direction,):
-            plans, rejected = direct_plans(cache, p, direction, arch)
+            # A problem whose tensors pass the kernels' 2 GiB (i32 offset)
+            # limit runs as balanced batch chunks, each launch on its slice.
+            chunks = _batch_chunks(p, direction)
+            plans, rejected, per_chunk = _chunk_plans(
+                lambda q: _filter_variants(
+                    *direct_plans(cache, q, direction, arch), variants
+                ),
+                p,
+                chunks,
+            )
             if not plans:
-                why = (
-                    rejected[0][1]
-                    if rejected
-                    else f"no cached {dtype} kernel has these capabilities; "
-                    f"build them with --compile-all --dtype {dtype}"
-                )
+                why = _no_plan_reason(rejected, dtype, variants)
                 print(
                     f"Case {case_idx} {p.short()} {direction}: no runnable kernel "
                     f"(KH={p.KH} PAD={p.PAD} stride={p.stride} cpg={p.cpg} kpg={p.kpg}: {why})",
@@ -2259,8 +2404,9 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 rt.memset(ptrs[out_name], 0, Out_t.nbytes)
             # Scratch buffers are sized for the largest plan and shared.
             for plan in plans:
-                for name, nbytes in plan.workspaces.items():
-                    sizes[name] = max(sizes.get(name, 0), nbytes)
+                for chunk_plan in per_chunk[plan.label]:
+                    for name, nbytes in chunk_plan.workspaces.items():
+                        sizes[name] = max(sizes.get(name, 0), nbytes)
             for name in set(sizes) - set(ptrs):
                 ptrs[name] = rt.alloc(sizes[name])
 
@@ -2277,10 +2423,16 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                                 kernel_name=st.kernel_name,
                                 signature=st.signature,
                             ),
-                            launch_values(st, ptrs, sizes),
+                            launch_values(
+                                st,
+                                *_chunk_buffers(
+                                    ptrs, sizes, inputs, out_name, chunks, i
+                                ),
+                            ),
                             LaunchConfig(grid=st.grid, block=st.block, stream=0),
                         )
-                        for st in plan.steps
+                        for i, chunk_plan in enumerate(per_chunk[plan.label])
+                        for st in chunk_plan.steps
                     ]
                 except HipError as e:
                     print(f"  [skip] {plan.label}: {e}", flush=True)
@@ -2543,6 +2695,17 @@ def main() -> int:
         "--run-from-cache defaults to each case's own direction.",
     )
     cache_grp.add_argument(
+        "--variants",
+        default=None,
+        dest="variants",
+        help="--run-from-cache only: comma-separated cache variants to run "
+        "(the keys of DIRECT_CAPABILITIES in "
+        "benchmarks/common/direct_kernel_sweep.py), e.g. "
+        "direct_grouped_dgrad_4c,direct_grouped_dgrad_fused to time only the "
+        "single-kernel grouped dgrad forms. Default: every cached kernel that "
+        "fits the case.",
+    )
+    cache_grp.add_argument(
         "--limit",
         type=int,
         default=None,
@@ -2651,25 +2814,22 @@ def main() -> int:
             return 2
 
         if (args.dH != 1 or args.dW != 1) and (
-            args.direction != "fwd" or args.groups != 1
+            args.direction not in ("fwd", "dgrad") or args.groups != 1
         ):
             print(
-                f"error: direct conv computes a dilated convolution only forward "
-                f"and ungrouped (got dH={args.dH}, dW={args.dW})",
+                f"error: direct conv computes a dilated convolution only forward / "
+                f"dgrad and ungrouped (got dH={args.dH}, dW={args.dW})",
                 file=sys.stderr,
             )
             return 2
 
-        if args.sH != args.sW:
+        if args.sH != args.sW or args.pH != args.pW:
             print(
-                f"warning: sH={args.sH} != sW={args.sW}; using sH={args.sH}",
+                f"error: direct conv takes one stride and one padding for both "
+                f"axes (got sH={args.sH} sW={args.sW} pH={args.pH} pW={args.pW})",
                 file=sys.stderr,
             )
-        if args.pH != args.pW:
-            print(
-                f"warning: pH={args.pH} != pW={args.pW}; using pH={args.pH}",
-                file=sys.stderr,
-            )
+            return 2
 
         problem = DirectConvProblem(
             N=args.N,

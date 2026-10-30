@@ -396,10 +396,10 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     sdpaAttrs.set_dbias(dbias);
     sdpaAttrs.set_alibi_mask(true);
     sdpaAttrs.set_padding_mask(true);
-    sdpaAttrs.set_causal_mask(true);
-    sdpaAttrs.set_causal_mask_bottom_right(true);
+    sdpaAttrs.causal_mask = true;
+    sdpaAttrs.causal_mask_bottom_right = true;
     sdpaAttrs.set_attn_scale(0.125f);
-    sdpaAttrs.set_diagonal_band_left_bound(0);
+    sdpaAttrs.set_diagonal_band_left_bound(64);
     sdpaAttrs.set_diagonal_band_right_bound(128);
     sdpaAttrs.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
 
@@ -587,7 +587,7 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
 
     // Integer scalars
     ASSERT_TRUE(sdpa->left_bound.has_value());
-    EXPECT_EQ(sdpa->left_bound.value(), 0);
+    EXPECT_EQ(sdpa->left_bound.value(), 64);
 
     ASSERT_TRUE(sdpa->right_bound.has_value());
     EXPECT_EQ(sdpa->right_bound.value(), 128);

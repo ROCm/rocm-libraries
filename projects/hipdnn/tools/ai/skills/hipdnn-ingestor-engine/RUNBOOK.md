@@ -17,7 +17,7 @@ PY="$GEN/.venv/bin/python"
 BUILD=/absolute/path/to/build
 INSTALL=/absolute/path/to/future-install
 SWEEP_ROOT=/existing/device-visible/writable/experiment-root
-GENERATED=/absolute/path/to/empty-generation-destination
+GENERATED=/absolute/path/to/empty-generation-destination  # a new one per pass needs --ids-from <previous>/<descriptor dir>; the same one needs --force
 CONFIG=/absolute/path/to/generator-config.yaml  # a registry-backed engine's authored selection, configs/<slug>.yaml
 MANIFEST=/absolute/path/to/<slug>.engine.yaml   # rocKE registry-backed engines
 SHAPES=/absolute/path/to/request-shapes.json
@@ -31,11 +31,25 @@ ENGINE=<your-bundle-engine-id>
 Replace `<your-bundle-engine-id>` with your bundle's engine ID; it is consumed verbatim
 as `--expect-engine` below. The worked example's is `hipkernel:Gfx950AttentionDense`.
 
-Follow the **Setup** section of `$GEN/README.md`. Authoring and mining imports need the
-rocKE library environment (`$PROVIDER/rocke/library`); production packaging uses its own selected
-compiler/wheel interpreter. Full artifact checking also needs `rocm_kpack` and its
-dependencies (`zstandard`, `msgpack`) importable from `$PY`; `--kpack-python-dir`
-supplies an import root, not missing dependencies.
+Follow the **Setup** section of `$GEN/README.md`; its venv holds only PyYAML, Jinja2 and
+pytest. Authoring and mining tools also import the rocKE library
+(`kernels`, `builders`, `dispatch`, which need `numpy`), so editable-install both rocKE
+roots into the same venv, `platform` first, as `$PROVIDER/rocke/BUILDING.md` *Manual
+setup* describes. Do not build a second venv for them:
+
+```bash
+"$PY" -m pip install --config-settings editable_mode=compat -e "$PROVIDER/rocke/platform"
+"$PY" -m pip install --config-settings editable_mode=compat --no-deps \
+  -e "$PROVIDER/rocke/library"
+"$PY" -c "import yaml, jinja2, numpy, rocke, kernels, builders, dispatch"
+```
+
+Without it the builder check fails with `RockeIntrospectionError: module not importable
+... No module named 'kernels'`. After a rocKE-enabled build, `$BUILD/rocke-pyenv/bin/python`
+already imports rocKE and numpy but has no Jinja2, so it cannot run `generate.py`.
+Production packaging uses its own selected compiler/wheel interpreter. Full artifact
+checking also needs `rocm_kpack` and its dependencies (`zstandard`, `msgpack`) importable
+from `$PY`; `--kpack-python-dir` supplies an import root, not missing dependencies.
 
 Verify every path on the actual execution host. Host-local backing paths and symlink
 targets are not automatically visible on a different host, even when the link itself
@@ -52,10 +66,27 @@ output; create both before the first command that writes there:
 mkdir -p "$SCRATCH" "$EVIDENCE"
 ```
 
+The agent host (where the agent reads these pages) and the execution host (where it
+builds and runs) may differ, for example an agent on a laptop driving a GPU node over
+ssh. `install-skills.py` copies into the home directory of the host it runs on, so run
+it where the agent reads skills, from any checkout of `projects/hipdnn/tools/ai`, or pass
+`--target` with that agent's skills directory. A skills-only checkout is enough there:
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse --branch develop \
+  https://github.com/ROCm/rocm-libraries.git rocm-libraries-skills
+git -C rocm-libraries-skills sparse-checkout set projects/hipdnn/tools/ai
+```
+
+Every command on these pages still runs on the execution host against `$REPO`, the
+checkout being built; the agent-host copy is for reading only and must match `$REPO`'s
+revision.
+
 ## 1. Entry and early feasibility
 
 Record the entry contract; for extend, inventory the installed baseline per
-[extend.md](extend.md). Select `direct_load` or `packaged` before staging files.
+[extend.md](extend.md) with `"$PY" "$GEN/tools/inventory.py"` (the command is there).
+Select `direct_load` or `packaged` before staging files.
 Establish representability and a capable independent numerical reference using
 [graph-contract.md](graph-contract.md); a reference's skip is not verification, and
 unavailable semantics require an explicit scope/reference decision.
@@ -102,6 +133,11 @@ source (`hip`, `hsaco`, a hand-written rocKE selection) writes its selection, `r
 block and each cell's `default: true` arm directly and continues at stage 3.
 
 ### Corpus
+
+External graph corpora come from `ROCm/dnn-benchmarking`: its `Workloads/` tree holds
+only DVC pointers (`*.tar.gz.dvc`) to an anonymous-read S3 remote. Fetch and unpack the
+corpora you need on the execution host; [workloads.md](workloads.md) *Fetching the
+external corpora* has the commands and the read-only `/var/tmp` fix.
 
 Inventory owner-published results, owner benchmark shapes and external graphs per
 [workloads.md](workloads.md). `$SHAPES` is a JSON list of semantic requests; the
@@ -168,8 +204,9 @@ valid answer.
   owner's performance or accuracy data? If not, record "no ground truth supplied".
 - **Knobs:** after enumerating the variant space below, ask whether to exclude or
   prioritise knobs or narrow cells, using `--plan-space`'s exact instance counts; above
-  `reduction.aot_budget_per_arch` the user narrows them before any pack. Estimate compile
-  time as instances × seconds per kernel compile, measured on the build machine.
+  `reduction.aot_budget_per_arch` the user narrows them, or approves the count in
+  `$EVIDENCE`, before any pack. Estimate compile time as instances × seconds per kernel
+  compile, measured on the build machine.
 
 **Owner data.** Set `OWNER_DATA` to the owner's file (CSV with a header, or a JSON list
 of rows) and convert each row into a graph of a separate `ground_truth` corpus. Pass one
@@ -232,8 +269,11 @@ per the README's *Updating the captured catalog*.
 
 ## 3. Generate, implement and splice
 
-Generate from the selection `$CONFIG` into an empty scratch directory, never over the live
-engine:
+Generate from the selection `$CONFIG` into a scratch directory, never over the live
+engine. Descriptor ids are reused from the installed bundle by default; use `--new-ids`
+only for an engine being replaced or renamed. [extend.md](extend.md) states what an
+extension must keep, and the *Descriptor ids* section of `$GEN/README.md` has the rules
+(lookup order, matching, retunes, the `Ids:` line, warnings, refusals, siblings).
 
 ```bash
 "$PY" "$GEN/generate.py" --config "$CONFIG" \
@@ -241,7 +281,28 @@ engine:
 "$PY" "$GEN/generate.py" --config "$CONFIG" --output-dir "$GENERATED"
 ```
 
-Run both against the revision you are about to splice; a render from an earlier revision
+`--dry-run` resolves ids too, so run it first as the preflight. It and a real run exit 2
+on an unusable previous bundle, including this bundle's DVC-stored KDP left unpulled (run
+`dvc pull`, or pass `--new-ids`); a scripted invocation must do one or the other.
+`--check-placeholders` resolves ids only when sibling bundles are in play, so on its own
+it reports an unpulled KDP as a missing file (exit 1).
+
+Read the `Ids:` line the real run prints. For an extension `minted` is the added kernels;
+investigate a retired name you did not remove, a retune, and any arch clause. Read the
+stderr warnings too: none is fatal, but delete any descriptor file they name that the run
+will not write, or the next run reads it as part of the previous bundle.
+
+**Iterating within a ticket.** Regenerate into the **same** output directory with
+`--force`, or into a **new** one with `--ids-from <previous scratch>/<descriptor dir>`;
+a new directory without it remints every added descriptor. A same-directory run
+overwrites hand-filled C++ stubs: hand-fill and splice only once the descriptors settle,
+or keep hand-filled C++ outside the scratch directory.
+
+**More than one bundle for one engine.** Follow [extend.md](extend.md)'s *Sibling
+bundles*. `--check-placeholders` on a satellite reports `Located 1 of this engine's 1
+shippable files`: its KDP alone.
+
+Run these against the revision you are about to splice; a render from an earlier revision
 is not evidence for this one. The config loader rejects a YAML mapping that repeats a key,
 including a repeated `<<`, and reports both source positions.
 
@@ -256,6 +317,9 @@ EMITTED_ROOT="$GENERATED/descriptors"        # packaged
   baseline "$EMITTED_ROOT"
 ```
 
+The gate checks every launch of a multi-launch (`sources`) descriptor; a failure names
+its launch.
+
 Exactly one assignment must be live. Both commented passes an empty root, which the
 descriptor index expands as the recursive glob `/**/*.json` — a walk of the whole
 filesystem.
@@ -269,9 +333,26 @@ supplies the matcher vocabulary (`specialization.vocabulary`), never compiler ev
 after packing.
 
 Implement [native-pack.md](native-pack.md)'s referenced hooks and behavioral tests.
-Extensions remap scratch references and copy only additions per [extend.md](extend.md),
-including consumer IDs in shared KDP or per-UKD specialization declarations. Never edit
-packed evidence to match a changed descriptor; rebuild from authored inputs.
+Extensions copy only additions per [extend.md](extend.md); confirm the reused ids with
+`catalog_diff.py --expect-ids` against the pre-splice KDP. For descriptors,
+`projects/hipdnn/tools/IngestorGenerator/tools/splice_additions.py` applies the additions
+and refuses any change to a retained entry:
+
+```bash
+"$PY" "$GEN/tools/splice_additions.py" \
+  --scratch "$GENERATED/descriptors/<producer>/<bundle>" \
+  --live "$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/<producer>/<bundle>" \
+  --report "$EVIDENCE/splice_report.json"
+```
+
+A KDP stored with DVC (gfx950: `<bundle>/artifacts/`) is not in the bundle directory, so
+`--live <bundle>` does not see it. Splice that KDP by hand, or copy the scratch KDP alone
+into an otherwise empty directory and pass it as `--scratch` with `--live
+<bundle>/artifacts`; then run `dvc add artifacts` there, not `git add`.
+
+Copy the generated census test whole; it carries no UUIDs. Review the KDP diff with
+`git diff --diff-algorithm=histogram`. Never edit packed evidence to match a changed
+descriptor; rebuild from authored inputs.
 
 Apply fragments to their actual consumers, preserving unrelated entries:
 
@@ -282,11 +363,31 @@ Apply fragments to their actual consumers, preserving unrelated entries:
 | Engine test `target_sources` | `$PROVIDER/src/tests/engines/kernel_ingestor_engine/CMakeLists.txt` | Always — the applicable tests and any census suite |
 | `add_kernels_for_embedding(TARGET … FILES … KEYS …)` | `$PROVIDER/src/tests/CMakeLists.txt` | Only `kernel_source.kind == "embedded_source"` — see [extend.md](extend.md) |
 | `hkp_register_census_tests(TARGET hip_kernel_provider_census_tests PACK_NAME … [ARCHES …] SUITES … EXPECTED_CASES …)` | `$PROVIDER/src/tests/CMakeLists.txt` | A census suite that reads exactly one pack target's shard |
-| Descriptors themselves | — | **Never.** There is no descriptor splice |
+| Descriptors themselves | No CMake consumer | **Never a CMake edit.** Author them under the right root; an extension adds entries to its live bundle with `projects/hipdnn/tools/IngestorGenerator/tools/splice_additions.py` |
 
 **Descriptors need no CMake edit.** The packer walks a source root recursively and no
 descriptor is named in CMake, so installing one is dropping files under the right root.
-A `cmake_descriptor_files.txt` fragment states that fact; it is not a list to paste.
+A `cmake_descriptor_files.txt` fragment states that fact; it is not a list to paste. A
+satellite bundle installs only its KDP (see [extend.md](extend.md)'s *Sibling bundles*).
+
+**A new packaged engine shipped from `descriptors/`** with its own device tests needs
+further sites that no generator fragment emits. `hipkernel:Gfx950AttentionDense`
+(PR #12311) added each one; mirror its lines with your engine's names, and gate every
+registration on the same availability predicate so a build that does not ship the
+engine for an arch registers nothing for it, rather than a target whose engine never
+appears:
+
+| Site | Consumer (the gfx950 instance) | Purpose |
+|---|---|---|
+| `<engine>KpackModuleCache()` declaration | `$PROVIDER/src/engines/kernel_ingestor_engine/IngestorKernelCode.hpp` (`gfx950AttentionDenseKpackModuleCache`) | The per-pack kpack module cache the native file defines and its `reset<Engine>ModuleCache` clears; one cache per pack |
+| Availability predicate `hkp_<engine>_available(<out>)` | `$PROVIDER/descriptor-packaging/cmake/HkpPackaging.cmake` (`hkp_gfx950_attention_dense_available`) | TRUE only when the `product` pack is wired, the arch is in its list and its root declares the engine for that arch |
+| Census call gated on the predicate, `PACK_NAME product ARCHES <arch>` | `$PROVIDER/src/tests/CMakeLists.txt` | The census row above, for a shipped bundle |
+| Device test source in `hip_kernel_provider_integration_tests` | `$PROVIDER/src/integration_tests/CMakeLists.txt` (`IntegrationGpuGfx950AttentionDenseKnobs.cpp`) | Explicit-selection cases: forced knobs, exact kernel ID, CPU reference; see stage 5 |
+| `add_external_integration_test_target(TARGET_NAME hip_kernel_provider_<engine>_gpu_ref_integration_tests … ENGINE_NAME … REFERENCE_EXECUTOR gpu GTEST_FILTER …)` in the arch's census shard (`hkp_reserve_census_shard`) | `$PROVIDER/src/integration_tests/CMakeLists.txt` | The engine-pinned bundle run stage 5 executes |
+| `<provider>-<engine>-external-integration-check` with `TEST_CONFIG` and `TEST_CATEGORIES_YAML`, in the same shard | `$PROVIDER/src/CMakeLists.txt` | The engine-pinned tiered suites |
+| Categories YAML variable, its `EXISTS` check and list entry | `$PROVIDER/CMakeLists.txt` | Feeds the YAML categorization; any listed file missing drops the whole provider to legacy CTest labels |
+| New files `hipkernel_<Engine>_test_categories_integration.yaml` and `config/hipkernel_<Engine>.toml` | `$PROVIDER/` | Tier patterns and the per-engine test config |
+| Bundles plus `.support.json` claims naming the engine and arch | `dnn-providers/integration-tests/integration-test-bundles/{quick,standard}/<Op>/…` | Without matching bundles the engine-pinned target selects zero cases |
 
 Census registration is one `hkp_register_census_tests()` call per packed target, in
 `$PROVIDER/src/tests/CMakeLists.txt` beside `hkp_verify_embedded_sources()`, after the
@@ -360,8 +461,9 @@ Three packaging-time constraints:
   it.
 
 **There is no shared stage tree.** Each root packs straight to its own `OUT_ROOT`, so
-"stage the descriptors" means "author them under the right root". Re-emit after every
-regeneration and compare content and identities, not only counts. A fragment file is not
+"stage the descriptors" means "author them under the right root". Regenerate an existing
+engine after every change (ids are reused as in stage 3), then compare content and
+identities, not only counts. A fragment file is not
 evidence that its splice was applied.
 
 Set `SCHEMA` to the operation `.fbs` and `NATIVE_SOURCE` to its implementation; pass all
@@ -426,6 +528,9 @@ The component selection must include the provider. The `hipdnn-providers` preset
 **not** build hip-kernel-provider; the presets that do are `hipdnn-providers-all`,
 `hip-kernel-provider`, `hipdnn-dev-all` and `miopen-hipdnn-dev-all`.
 
+Clang-tidy defaults and how to turn it off for local iteration are in
+`projects/hipdnn/docs/Building.md` and the `ENABLE_CLANG_TIDY` row of `hipdnn-superbuild`.
+
 **`HIPKERNELPROVIDER_ENABLE_ROCKE=ON` is required to pack a rocKE bundle.** With it ON,
 rocKE is resolved once for **every** root, test roots included, so an unresolvable comgr
 is fatal at configure even in a hip-only build. With it OFF the ingestor still
@@ -477,6 +582,20 @@ from the configured install prefix by default; building its executable, copying 
 into a build tree, or using its runtime override does not satisfy that path. Keep the
 configured prefix aligned with `$INSTALL`.
 
+**Reusing a build directory is allowed; reusing an install prefix is not.** An earlier
+build tree of the same `$REPO` checkout (for example a develop warm-up build) may be
+reconfigured and built incrementally. The pack step tracks its whole authored root:
+`hkp_wire_pack_target()` in `descriptor-packaging/cmake/HkpPackaging.cmake` globs every
+source file with `CONFIGURE_DEPENDS`, writes the input set to a manifest so a removed
+descriptor also forces a repack, and wipes its `OUT_ROOT` before packing. The
+production-root checks re-run configure when a KDP or UED is added or edited. Reconfigure
+with every stage 4 flag stated explicitly, `CMAKE_INSTALL_PREFIX="$INSTALL"` included,
+because the cache keeps whatever an earlier configure set. Use a fresh build directory for a
+different checkout or toolchain (CMake rejects a cache from another source tree). Install
+each candidate into an empty `$INSTALL`: `cmake --install` copies files but never deletes
+one, so a descriptor removed since an earlier install into that prefix would stay there.
+Record whether the build directory was reused.
+
 Set `FINAL_DESCRIPTOR_ROOT` to the installed per-arch shard. Every root is staged per
 architecture, `embedded_source` included: the packer stamps the shard architecture onto
 a passthrough descriptor and records the authored values in the descriptor's
@@ -514,6 +633,16 @@ authored, so a shard of only `embedded_source` UKDs then gets no provenance chec
 `--provenance-root` only relocates sidecars: given for a descriptor whose directory holds
 no marker, it is a usage error.
 
+The validator also loads every UHD a role map binds (`sort_kernel_catalog`,
+`predict_engine`, `predict_applicable_kernels`), for every architecture key and every
+metric, and fails the run when the loader refuses one. A trained model whose recorded
+`trained_against` does not match this set's UED, KMD or matchers fails here. So does a
+model whose features read an undeclared KMD field or whose `features_hash` disagrees. At
+runtime the same model is only disabled, with declared-order fallback. A signature that
+reads dynamic bindings is extracted only for engines a `--feature-samples` entry covers;
+without one the extraction check is skipped with a warning. See stage 6, **Trained
+heuristics survive regeneration only by intent**.
+
 **The embedded-source invariant.** A staged tree holds descriptor JSON, provenance
 sidecars and packed markers only, so an `embedded_source` descriptor resolves its
 `source_file` against a key table compiled into the binary.
@@ -549,6 +678,9 @@ drop it.
 `hkp_desk_check.py` takes `--provenance-root DIR` with `--descriptor-root` (the root
 the provenance root mirrors, holding the KDP), and `coverage_gate.py` takes
 `--provenance-root DIR` mirroring its `--tree`.
+
+A multi-launch descriptor is checked per launch (spec, symbol and code object); a failure
+names the launch.
 
 Omit `--manifest` when neither bundle selection nor extra vocabulary needs it. Add
 `--kpack-python-dir <dir>` if the reader environment requires it. Interpret outcomes
@@ -591,8 +723,9 @@ census is a direct native obligation with no Python launcher and no XML guard. S
 count decides eligibility, not the authored dialect: `TestPointwisePacks` is censused
 although `unit/pointwise/` is `embedded_source`.
 
-For each declared suite and each eligible arch — the pack target's recorded list,
-narrowed by `ARCHES` when given — CMake registers **four** tests. The census entry is
+For each declared suite and each eligible arch (the pack target's recorded list,
+narrowed by `ARCHES` when given), CMake registers **five** tests, or four when the call
+has no `EXPECTED_CASES` pin. The census entry is
 `hip-kernel-provider-hkp-census-<arch>-<suite>`, which invokes
 
 ```text
@@ -603,9 +736,12 @@ with `HIPDNN_TEST_CENSUS_SUITE` set to that suite, `HIPDNN_TEST_EXPECTED_ARCH` t
 arch — taken from the wired arch list, never from a detected device or the descriptors —
 and `HIPDNN_DESCRIPTOR_DIR` to that pack target's own `OUT_ROOT` shard for the arch,
 never a shared stage tree; labelled `unit_test;hip-kernel-provider;host` plus the tier
-labels `HKP_PACK_CTEST_CATEGORIES_YAML` assigns, which the installed twin carries too. The other
-three append `-control-unvisited`, `-control-absent-root` and
-`-control-unregistered-case`, the last only where a pin exists. Each control breaks one
+labels `HKP_PACK_CTEST_CATEGORIES_YAML` assigns, which the installed twin carries too. The
+controls append `-control-unvisited`, `-control-absent-root`,
+`-control-unexpected-stamp` and `-control-unregistered-case`, the last only where a pin
+exists (`_hkp_add_census_entry` in `descriptor-packaging/cmake/HkpPackaging.cmake`).
+`-control-unexpected-stamp` runs the entry with an expected arch no shard can carry and
+passes on the stamp comparison's refusal. Each control breaks one
 precondition deliberately and passes on the census's own refusal wording rather than on
 exit status, so a red control means that refusal stopped happening. Run the whole
 family.
@@ -715,6 +851,14 @@ executable/plugin/config paths and the intended quick/standard selection. Then e
 ctest --test-dir "$CTEST_ROOT" --no-tests=error -V -R "^${DEVICE_TEST}$"
 ```
 
+The device CTest can print nothing for a long time before its first case. Before
+`--gtest_filter` applies, `hipdnn_integration_tests` registers every bundle under its
+bundle root, expanding each sweep (`registerBundleTests()` runs before `RUN_ALL_TESTS()`
+in `dnn-providers/integration-tests/src/main.cpp`; discovery is in `harness/bundle/BundleDiscovery.hpp`).
+While it is working, the process stays busy on CPU and reads `sweep.json` files under the
+bundle root; on Linux, `ls -l /proc/<pid>/fd` shows the file it is reading. A silent
+process that is busy reading bundles is still working; a silent idle one needs a look.
+
 Keep verbose output in the retained log. **`--output-on-failure` hides passing suites'
 case counts; an all-skip suite can still report CTest PASS.** Record selected, served,
 skipped/declined and failed counts with observed reasons. Missing registration, zero
@@ -726,12 +870,37 @@ Use nontrivial inputs for quick feature breadth and bounded standard numerical d
 Exercise required declines separately; another winning engine must not hide them. NaN or
 unwritten output is a failure, not a tolerance adjustment.
 
+These device tests grade at hipDNN's own test tolerance, which differs from the stage 7
+benchmark's; [workloads.md](workloads.md) *Correctness tolerances* says which one
+governs where and how to report a miss.
+
 Extensions must select the addition explicitly. The disposable pointwise example adds
 HALF/block_size=256 to ADD, preserves MUL/SUB and changes ADD's expected census from
 three to four. Select HALF/256 on logical dims `{1,1,1,1}`, check the actual
 `hipkernel:Pointwise` plan and arithmetic, and retain old ADD/MUL/SUB and required
 multi-element/two-node declines. Its source computes one element, so neither a
 default-FLOAT pass nor this smoke proves arbitrary-size coverage.
+
+**Where an extension's explicit selection runs.** The engine-pinned bundle target
+(`hip_kernel_provider_<engine>_gpu_ref_integration_tests`) runs only the bundles its
+`GTEST_FILTER` matches, so it exercises an added variant only if a bundle at that shape
+exists. Put the explicit-selection cases (forced knobs, exact kernel ID, independent
+reference) in the engine's own device test in `hip_kernel_provider_integration_tests`,
+for `hipkernel:Gfx950AttentionDense` that is
+`$PROVIDER/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp`,
+or add bundles with `.support.json` claims so the pinned target selects them. That
+binary's CTest entry is the shared `hip_kernel_provider_integration_tests_quick_suite`,
+which runs every engine's cases, and `discover_test_targets.py` lists neither. Run the
+engine's cases directly from the installed CTest root and count them:
+
+```bash
+cd "$CTEST_ROOT" && "$INSTALL/bin/hip_kernel_provider_integration_tests" \
+  --gtest_filter='Quick/IntegrationGpuGfx950AttentionDenseKnob*'
+```
+
+Require the new cases by name in the output with zero failed and zero skipped, and the
+same command on the baseline installation as the before count. A failure elsewhere in the
+shared quick suite does not excuse or replace this count.
 
 **Gate:** intended-engine dispatch, capable-reference numerics and complete case
 accounting on `$ARCH`.
@@ -798,8 +967,10 @@ among variants sharing its other knobs, which divide every shape a larger tile d
      cp "$SCRATCH/selection.rules.yaml" "$CONFIG"
    ```
 
-6. **Repeat stages 3–6** with a new empty generation destination and a fresh sweep
-   `output_dir`. With ground truth, compare it every iteration; its report lists every row
+6. **Repeat stages 3–6** with a fresh sweep `output_dir`, regenerating into the same
+   destination with `--force`, or into a new empty one with `--ids-from <previous
+   destination>/<descriptor dir>`. With ground truth, compare it every iteration; its
+   report lists every row
    outside the margin, failing correctness, with no usable reference, or missing:
 
    ```bash
@@ -819,6 +990,69 @@ among variants sharing its other knobs, which divide every shape a larger tile d
    selection being shipped. A `space: full` selection ships with the manifest's flip, per
    the README's *Updating the captured catalog*.
 
+**Catalog size.** In the kernel ingestor, a cold benchmarked plan build prepares every
+candidate left after knob and workspace filtering, so its cost grows with the candidate
+count. Keep the catalog small enough to stay buildable and searchable; when it grows too
+large, reduce it with this stage. A winner cache cannot ship with the engine: it serves
+only the hipDNN build that wrote it and needs a writable `HIPDNN_CACHE_DIR`
+(`HIPDNN_FORCE_BENCHMARKING` in `projects/hipdnn/docs/Environment.md`),
+so users of every new build pay the cold build. Nothing in CI or the build checks
+`reduction.aot_budget_per_arch`. This stage's `variant_reduce.py` and the stage 7
+`generate.py --strict` dry run gate on it, as does `registry_enumerator.py --strict`, and
+`generate.py` warns on every run. The budget counts kernels per pack per arch, but
+build cost follows the per-graph candidate count N, so a catalog under budget can still
+have a large N.
+
+**Explicitly untuned engine.** To show what the shipped selection leaves on the table,
+measure the cold heuristic against `dnn-benchmark --autotune` (fresh `--cache-dir` per
+phase, the cohort rules in [workloads.md](workloads.md)) and report the gap and the
+winning kernels as a finding; it is not a gate.
+
+### Trained heuristics survive regeneration only by intent
+
+Inventory the live engine's trained models before splicing a regenerated set. They are
+the per-architecture lists under the UED's `sort_kernel_catalog` and `predict_engine`,
+installed under `heuristics/<ued-id>/<role>/<arch>/<metric>/` beside the UED by
+`uhd_gen promote`, plus any `predict_applicable_kernels` binding. The generator does not
+produce or preserve them:
+
+- **Every scratch identity is new.** A scratch UED carries fresh UUIDs for itself, its
+  KMD, UMDs and UHD, no `revision`, and a single binding,
+  `sort_kernel_catalog: {default: <native UHD>}`. It has no per-arch lists and no
+  `predict_engine`.
+- **A trained model is bound to the set it was measured on.** Its
+  `trained_against` records the UED, KMD and matcher ids and revisions. The loader
+  accepts the same id at the same major revision with a minor revision no older than the
+  recorded one; anything else disables that `(role, arch, metric)` binding. The binding
+  never falls back to the `default` key's model for the same metric: the engine still
+  serves, and logs `… disabled: …; engine remains available with declared-order fallback`
+  at ERROR. Numerical and census gates stay green through this, so they are not evidence
+  that ranking survived.
+- **`uhd_gen promote --remove-knob` edits the UED, not the generator config.** It drops
+  the knob and bumps the UED's major revision. Regenerating from a config that still
+  lists the knob, or that drops the revision, invalidates every model promoted against
+  the revised UED.
+
+For a set with trained models, choose one of these and record the choice in the handoff:
+
+1. **Retain.** Splice per [extend.md](extend.md): keep the live UED, KMD, UMDs and every
+   role-map entry, and copy only KDP or UKD additions. Remove knobs from the config's
+   `engine.knobs` when `promote` removed them. Retained models remain valid only while
+   KMD fields, matcher identities and revisions are unchanged; the stage-4 validator is
+   the check.
+2. **Retrain.** When identities, KMD fields, matchers or knobs legitimately change,
+   regenerate the trained models against the final installed set with `uhd_gen
+   generate`, once for every bound architecture and with `--metric` for every bound
+   metric. See `projects/hipdnn/tools/uhd_gen/README.md`, **Reproducible generation**.
+   Promotion changes the descriptor tree, so return to stages 4–5 before stage 7.
+3. **Drop.** Remove the stale role-map entries and their `heuristics/<ued-id>/` subtree
+   explicitly, and state that the engine now ranks with its `default` model or declared
+   order.
+
+Never splice a scratch UED over a live one carrying role maps, and never edit
+`trained_against` to match: it records what the model was measured against, and
+rewriting it binds a model to a set it never saw.
+
 **Gate:** a user-accepted selection with its applied rules recorded in `$EVIDENCE`, no
 open correctness failure, and a revalidated installation of exactly that selection.
 
@@ -832,13 +1066,26 @@ status means — `SWEEP_DONE`, `SWEEP_TIMING_ONLY`, `SWEEP_INCOMPLETE` — and w
 does and does not make a single cohort. With ground truth, rerun stage 6's `compare` on
 this output with `--strict`: exit 1 means a row is outside the margin, missing, declined
 in any timing round, failing correctness or without a passing correctness verdict, so fix
-it or record the user's acceptance of that row in `$EVIDENCE`. Check the budget the same way; a dry run writes
-nothing, and exit 1 means a pack arch is over `reduction.aot_budget_per_arch`, so reduce
-further or justify the count in `$EVIDENCE`:
+it or record the user's acceptance of that row in `$EVIDENCE`. Check the budget the same
+way; a dry run writes nothing. Exit 1 is a refusal or an internal failure, so read stderr:
+`exceed the AOT budget and --strict is set` means a pack arch is over
+`reduction.aot_budget_per_arch`. Reduce further, or record the user's approval of the
+count in `$EVIDENCE`; once an approval is recorded, that exit 1 is expected:
 
 ```bash
 "$PY" "$GEN/generate.py" --config "$CONFIG" --output-dir "$GENERATED" --dry-run --strict
 ```
+
+**Large catalogs: plan-build measurement.** Before shipping a large catalog (stage 6's
+*Catalog size*), measure the cold plan-build time on the final installed selection with
+`HIPDNN_FORCE_BENCHMARKING=1`, `HIPDNN_LOG_LEVEL=info` and a fresh `HIPDNN_CACHE_DIR`.
+Judge "large" by the per-graph candidate count N in the engine log line
+`ingestor: engine '<name>' will benchmark N candidate(s) (M before knob filtering), ranked front <id>`
+and by the measured time, not by the per-arch kernel total. That build loads about N
+kpack modules (fewer where candidates share a code object, more where a multi-launch
+kernel names one per launch), and they stay resident for the life of the process. Keep
+the numbers in `$EVIDENCE` and summarise them on the Jira ticket. If the build is too slow
+or N is too large, reduce the selection (stage 6) and repeat.
 
 Harvest final phase results and available engine logs into the per-input outcome ledger,
 then join within each corpus/phase.

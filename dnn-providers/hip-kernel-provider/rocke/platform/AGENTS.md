@@ -115,14 +115,15 @@ The Python engine (`core/lower_llvm.py`) and the C++ engine (`cpp/`) MUST emit t
 change must be made in **both** engines in the same change. Prove it:
 
 ```bash
-python tools/check_byte_identity.py            # build engine fresh + gate (llvm20)
+ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # build engine fresh + gate
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # and llvm22
 ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # and llvm23
+ROCKE_LLVM_FLAVOR=llvm24 python tools/check_byte_identity.py   # and llvm24
 ```
 
 A change is done only when the gate is GREEN for every family at every flavor.
 The llvm20 and llvm22 runs also re-run the `gfx1250_lowering` family at llvm23,
-because its gfx1250-only ops lower at no other flavor.
+because its gfx1250-only ops need the LLVM23-generation emission profile.
 
 ## Build / test / run
 
@@ -134,10 +135,11 @@ export PYTHONPATH=<rocke/platform>/python                 # then: import rocke
 cmake -S <rocke/platform> -B /tmp/rocke -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/rocke -j
 
-# relative-path guard + byte-identity gate + pytest; also runs ctest only when
-# --build-root already holds the built C++ test binaries (default temp run skips it)
-python tests/run_all.py                          # guard + gate + pytest
-python tests/run_all.py --build-root /tmp/rocke  # + ctest from the build above
+# Complete developer pre-merge gate. It configures/builds the default build root,
+# runs host/corpus gates and pytest, then runs all registered CTests, including
+# toolchain integrations. Use --build-root to reuse a chosen out-of-tree build.
+python tests/run_all.py
+python tests/run_all.py --build-root /tmp/rocke
 python -m pytest tests/instances/test_rocke_multiarch.py   # a fast CPU-only suite
 ```
 
@@ -441,46 +443,66 @@ dense square atoms (`InterleavedStyle`); `c_transpose`, sparse, and MX remain re
 
 ## helpers/ placement
 
-**Default:** new kernel logic goes in `instances/`. Promote to `helpers/` only when
-justified. See `dsl_docs/architecture/helpers_classification.md` for the
-dual-engine vs Python-only split.
+This section is the one home of the helpers rule; other docs point here.
 
-### Add to helpers when ALL of:
+**Default: reuse, write, fix, all in the kernel's PR.** The `build_*()` body
+names what is special about the op (spec, tile shape, atom, descriptor) and
+calls helpers for the rest. Raw `IRBuilder` calls in the kernel body are for
+short, one-off glue between helper calls.
 
-1. Emits reusable kernel SSA (or is intentionally host-only / fusion-planner), AND
-2. At least one of:
-   - Used (or will be used) by ≥2 kernel families
-   - A specific emitter, primitive, or pipeline would potentially be used across
-     different kernel families (e.g. `SoftwarePipeline`, `CoalescedTileLoader`,
-     `mfma_gemm_inner` — even if only one family uses it today)
-   - CK-Tile-parity primitive (tensor view, distribution, sweep, transform DAG)
-   - Prevents a class of silent bugs if duplicated (lane maps, barriers, pipelining)
-   - Cuts instance authoring to a spec + callback skeleton (target: 60–80 line kernels)
-3. If it emits SSA: plan Python + C++ mirror + byte-identity in the same PR
+1. **Use what is there.** Check `helpers/` and the family modules
+   (`_<family>_*.py`) before writing new IR. Extend a helper rather than copy it.
+2. **Write what is missing, with a test.** IR that repeats, or hides index
+   math, lane maps, layout, masking, or a pipeline stage, becomes a named
+   helper in the same PR. A brand-new family, a single kernel, or addressing
+   specific to one op's layout is not a reason to stay in raw IR: the helper
+   goes in that family's module even if nothing else uses it yet. A host-only
+   helper gets a unit test (e.g. `tests/test_helpers_spec.py`,
+   `library/tests/test_attention_bwd_shared_helpers.py`); an SSA helper is
+   covered by the parity pair, golden, and numeric test of the kernel that
+   uses it.
+3. **Fix what is broken, with a regression test.** If a helper is wrong or
+   does not fit, fix the helper, not a workaround in the kernel. Add a test
+   that fails without the fix. A fix that changes emission is mirrored in C++
+   and re-blesses the affected goldens (KERNEL_AUTHORING.md Process F).
 
-### Keep in instances when ANY of:
+### Where a new helper goes
 
-- Single kernel or single family (`instances/common/_<family>_*.py` for family glue)
-- Descriptor/addressing logic specific to one op's layout
-- Launch orchestration or multi-kernel pipelines
-- Doesn't generalize cleanly — use raw `IRBuilder` in the instance
+| Scope | Home |
+|---|---|
+| One family today | A family helper module next to the kernel: `instances/common/_<family>_*.py`, or `library/kernels/common/_<family>_*.py` for a library kernel |
+| ≥2 families, a general emitter/primitive/pipeline (e.g. `SoftwarePipeline`, `CoalescedTileLoader`, `mfma_gemm_inner`), a CK-Tile-parity primitive, or a guard against a class of silent bugs (lane maps, barriers, pipelining) | `helpers/` |
 
-### Do NOT add to helpers:
+Move a family helper into `helpers/` when a second family needs it
+(KERNEL_AUTHORING.md Process G). Launch orchestration and multi-kernel
+pipelines stay in the instance.
 
-- One-off logic "for later reuse" with no plausible cross-family consumer
-- Instance-specific specs, manifests, or dispatch heuristics
-- Emitters without a C++ port path (extends the not-yet-ported cpp-backend gap;
-  see `helpers_classification.md`)
+### The C++ mirror is not a reason to inline
+
+Every emission change is mirrored in the C++ engine anyway (byte-identity), so
+inlined raw IR is mirrored too, once per copy. A helper is mirrored once, as one
+function (e.g. `library/kernels/common/_fmha_common.py` and
+`cpp/instances/common/_fmha_common.cpp`). If it emits SSA: Python + C++ mirror +
+byte-identity in the same PR, the same rule the kernel already follows.
+
+### Do NOT
+
+- Write a helper that only renames one builder call. A helper earns its place
+  by hiding detail that repeats or that a reader should not have to re-derive.
+- Put instance-specific specs, manifests, or dispatch heuristics in `helpers/`.
+- Add an SSA emitter to `helpers/` without its C++ port in the same PR.
 
 ## Key env flags
 
 | flag | meaning |
 |---|---|
-| `ROCKE_ARCH_DOMAIN` | `warn` (default) \| `off` — warn when a kernel demands an intrinsic the committed arch-domain table says the target cannot lower. `off` skips the lookup entirely. Any other value raises rather than falling back to `warn`: every way of misspelling this is an attempt to switch the lane *off*, and defaulting would leave it on |
+| `ROCKE_ARCH_DOMAIN` | `error` \| `warn` (default) \| `off` — what both engines do when a kernel demands an intrinsic the committed arch-domain table says the target cannot lower. `error` refuses the lowering (`ArchDomainError`) unless the cell is waived in `arch_domain_waivers.json`; `warn` reports it; `off` skips the lookup. Any other value raises rather than falling back to the default, because a misspelling is always an attempt to change what the lane does. A wrong measurement is waived per cell, not worked around with this variable; see TESTING.md, the arch-domain gate |
 | `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
 | `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
 | `ROCKE_DEBUG_LOC` | `1` = capture Python source locations while building and emit DWARF, so ATT traces map to source; off by default because it changes the emitted `.ll` |
-| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (must match the ROCm `comgr` in use: <7.2, 7.2-7.12, 7.13+) |
+| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` \| `llvm24` (AUTO queries loaded COMGR: LLVM <=20, 21/22, 23, or 24; newer majors and unavailable evidence raise; explicit lanes support offline emission) |
 | `ROCKE_TEST_VERIFY_IR` | `1` = assemble emitted IR with `llvm-as` in `TestNewTargetIntrinsics`; needs an LLVM as new as the newest flavor |
 | `ROCM_PATH` / `ROCM_HOME` | ROCm install root; `<root>/lib` is searched for `comgr`/HIP before the globbed `/opt/rocm*` trees |
 | `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` | explicit full path to `libamd_comgr` / `libamdhip64`; wins over all discovery |
+| `ROCKE_ONLINE_LIB` / `ROCKE_REPLAY_CLI` | explicit portable-IR shared engine / standalone replay CLI; explicit paths never fall back |
+| `ROCKE_PROVENANCE_MANIFEST` | build-generated expected version/build ID for validating explicit native artifacts in a source-less installed test tree |

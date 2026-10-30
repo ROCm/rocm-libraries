@@ -28,6 +28,8 @@
  * getattr-dispatch raises immediately and we reproduce that same rejection.
  * Every opcode is registered in the dispatch table; none is dropped.
  */
+#include <ctype.h>
+
 #include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
@@ -40,6 +42,7 @@
 
 #include <stdio.h> /* snprintf */
 #include <stdlib.h> /* atoi     */
+#include <string.h> /* strcmp   */
 
 namespace ckc
 {
@@ -118,13 +121,28 @@ static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const ro
     const bool scale16 = spec->scales.block_k == 16;
     const char* builtin = scale16 ? "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
                                   : "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4";
-    if(!lw->arch.gfx || __builtin_strcmp(lw->arch.gfx, "gfx1250") != 0)
+    /* Admitted on any target whose MMA catalog lists the atom, never by the
+     * target's name; the rule and message of Python _require_wmma_arch. */
+    const rocke_arch_target_t* target
+        = lw->arch.gfx ? rocke_arch_target_from_gfx(lw->arch.gfx) : NULL;
+    if(!target || !rocke_mma_catalog_by_op_id(&target->mma, op_id))
     {
+        char family[16] = "(UNKNOWN)";
+        if(target)
+        {
+            size_t i = 0;
+            for(; target->family[i] && i + 1 < sizeof(family); ++i)
+                family[i] = (char)toupper((unsigned char)target->family[i]);
+            family[i] = '\0';
+        }
         return rocke_h_fail(lw,
                             ROCKE_ERR_NOTIMPL,
-                            "WMMA op '%s' is not available on %s",
+                            "WMMA op '%s' is not available on %s "
+                            "(WMMA is an RDNA/gfx11 instruction; this is a %s target). "
+                            "The MFMA atoms are the matrix path on CDNA.",
                             op_id,
-                            lw->arch.gfx ? lw->arch.gfx : "(unknown)");
+                            lw->arch.gfx ? lw->arch.gfx : "(unknown)",
+                            family);
     }
     if(op->num_operands != 5 || op->num_results != 1)
     {
@@ -232,6 +250,45 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
                       small ? 4 : 16,
                       rocke_h_name(lw, op->results[0]),
                       small ? "mfma_f32_16x16x4f32" : "mfma_f32_32x32x2f32",
+                      a_arg,
+                      b_arg,
+                      rocke_h_name(lw, op->operands[2]));
+        return ROCKE_OK;
+    }
+    /* Batched 4x4x4 atoms. No legacy opcode either; Python reaches them as the
+     * tile.mfma_f32_4x4x4_{f16,bf16} handlers, which pass the operands as they are. */
+    if(strcmp(op_id, "mfma_f32_4x4x4_f16") == 0 || strcmp(op_id, "mfma_f32_4x4x4_bf16") == 0)
+    {
+        bool bf16 = strcmp(op_id, "mfma_f32_4x4x4_bf16") == 0;
+        rocke_h_emitf(lw,
+                      "f32x4 %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
+                      rocke_h_name(lw, op->results[0]),
+                      bf16 ? "mfma_f32_4x4x4bf16_1k" : "mfma_f32_4x4x4f16",
+                      rocke_h_name(lw, op->operands[0]),
+                      rocke_h_name(lw, op->operands[1]),
+                      rocke_h_name(lw, op->operands[2]));
+        return ROCKE_OK;
+    }
+    /* f64 atoms: A and B are passed as f64 (h_mma_operand). */
+    if(strcmp(op_id, "mfma_f64_4x4x4_f64") == 0)
+    {
+        const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, rocke_f64());
+        const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, rocke_f64());
+        rocke_h_emitf(lw,
+                      "f64x1 %s = {__builtin_amdgcn_mfma_f64_4x4x4f64(%s, %s, %s[0], 0, 0, 0)};",
+                      rocke_h_name(lw, op->results[0]),
+                      a_arg,
+                      b_arg,
+                      rocke_h_name(lw, op->operands[2]));
+        return ROCKE_OK;
+    }
+    if(strcmp(op_id, "mfma_f64_16x16x4_f64") == 0)
+    {
+        const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, rocke_f64());
+        const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, rocke_f64());
+        rocke_h_emitf(lw,
+                      "f64x4 %s = __builtin_amdgcn_mfma_f64_16x16x4f64(%s, %s, %s, 0, 0, 0);",
+                      rocke_h_name(lw, op->results[0]),
                       a_arg,
                       b_arg,
                       rocke_h_name(lw, op->operands[2]));
@@ -732,12 +789,6 @@ static rocke_status_t rocke_h_op_tile_ds_read_tr16_b64(rocke_h_lowerer_t* lw, co
         lw, op, "ds_read_tr16_b64", "i16x4_raw", "_llvm_amdgcn_ds_read_tr16_b64", 4, 8);
 }
 
-static rocke_status_t rocke_h_op_tile_ds_read_tr16_b128(rocke_h_lowerer_t* lw, const rocke_op_t* op)
-{
-    return h_ds_read_tr16(
-        lw, op, "ds_read_tr16_b128", "i16x8_raw", "_llvm_amdgcn_ds_read_tr16_b128", 8, 16);
-}
-
 /* tile.ds_read_tr_b8 has NO _op_tile_ds_read_tr_b8 method in lower_hip.py: the
  * HIP source backend has no 8-bit transpose-read lowering (the IRBuilder exposes
  * ds_read_tr_b8 but only the LLVM path lowers it). Python's getattr-dispatch
@@ -759,11 +810,38 @@ static rocke_status_t rocke_h_op_tile_ds_read_tr_b8(rocke_h_lowerer_t* lw, const
 
 /* ============================== barriers / scheduling ==================== */
 
-/* def _op_tile_sync(self, op): self._emit("__syncthreads();") */
+/* def _barrier_fence(op): the fence attr (NULL, "compiler" or "workgroup");
+ * any other value is an error. */
+static const char* rocke_h_barrier_fence(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const char* fence = rocke_attr_get_str(&op->attrs, "fence");
+    if(fence && strcmp(fence, "compiler") != 0 && strcmp(fence, "workgroup") != 0)
+    {
+        rocke_h_fail(lw,
+                     ROCKE_ERR_VALUE,
+                     "%s: unknown fence '%s'",
+                     op->name ? op->name : "tile.sync",
+                     fence);
+        return NULL;
+    }
+    return fence;
+}
+
+/* def _emit_barrier_clobber(self, op): fence attr -> compiler memory barrier
+ * after the barrier (__syncthreads carries the workgroup fences already). */
+static void rocke_h_emit_barrier_clobber(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    if(rocke_h_barrier_fence(lw, op))
+    {
+        rocke_h_emit(lw, "__asm__ volatile(\"\" ::: \"memory\");");
+    }
+}
+
+/* def _op_tile_sync(self, op): self._emit("__syncthreads();") + clobber */
 static rocke_status_t rocke_h_op_tile_sync(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    (void)op;
     rocke_h_emit(lw, "__syncthreads();");
+    rocke_h_emit_barrier_clobber(lw, op);
     return lw->status;
 }
 
@@ -783,19 +861,30 @@ static rocke_status_t rocke_h_op_tile_sync_half_block(rocke_h_lowerer_t* lw, con
 static rocke_status_t rocke_h_op_tile_sync_lds_only(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     int mask;
-    (void)op;
     mask = rocke_h_encode_waitcnt(lw, -1, -1, 0);
     rocke_h_emitf(lw, "__builtin_amdgcn_s_waitcnt(%d);", mask);
     rocke_h_emit(lw, "__syncthreads();");
+    rocke_h_emit_barrier_clobber(lw, op);
     return lw->status;
 }
 
 /* def _op_tile_s_barrier_bare(self, op):
+ *     fence attr: workgroup release / acquire fences around the barrier
  *     self._emit("__builtin_amdgcn_s_barrier();") */
 static rocke_status_t rocke_h_op_tile_s_barrier_bare(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    (void)op;
+    const char* fence = rocke_h_barrier_fence(lw, op);
+    bool workgroup = fence && strcmp(fence, "workgroup") == 0;
+    if(workgroup)
+    {
+        rocke_h_emit(lw, "__builtin_amdgcn_fence(__ATOMIC_RELEASE, \"workgroup\");");
+    }
     rocke_h_emit(lw, "__builtin_amdgcn_s_barrier();");
+    if(workgroup)
+    {
+        rocke_h_emit(lw, "__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, \"workgroup\");");
+    }
+    rocke_h_emit_barrier_clobber(lw, op);
     return lw->status;
 }
 
@@ -1357,6 +1446,13 @@ static rocke_status_t rocke_h_op_scf_for(rocke_h_lowerer_t* lw, const rocke_op_t
     {
         return lw->status;
     }
+    {
+        char descriptor_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_scf_for_carried_descriptor_error(op, descriptor_error, sizeof descriptor_error))
+        {
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", descriptor_error);
+        }
+    }
     rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
 
     iter_meta = rocke_attr_get(&op->attrs, "iter_args");
@@ -1552,7 +1648,6 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mma(void)
         {ROCKE_OP_TILE_PERMLANEX16, rocke_h_op_tile_permlanex16},
         {ROCKE_OP_TILE_BYTE_PERM, rocke_h_op_tile_byte_perm},
         {ROCKE_OP_TILE_DS_READ_TR16_B64, rocke_h_op_tile_ds_read_tr16_b64},
-        {ROCKE_OP_TILE_DS_READ_TR16_B128, rocke_h_op_tile_ds_read_tr16_b128},
         {ROCKE_OP_TILE_DS_READ_TR_B8, rocke_h_op_tile_ds_read_tr_b8},
         /* barriers / scheduling */
         {ROCKE_OP_TILE_SYNC, rocke_h_op_tile_sync},

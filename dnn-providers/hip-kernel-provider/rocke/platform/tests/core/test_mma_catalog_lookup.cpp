@@ -28,6 +28,11 @@
 static_assert(sizeof(rocke_mma_op_t) == 160 && ROCKE_ABI_VERSION >= 3,
               "rocke_mma_op_t changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
               "update this pin");
+/* Same canary for rocke_memory_caps_t, which sits inside rocke_arch_target_t
+ * ahead of its limits. */
+static_assert(sizeof(rocke_memory_caps_t) == 20 && ROCKE_ABI_VERSION >= 4,
+              "rocke_memory_caps_t changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
+              "update this pin");
 #endif
 
 static const char* short_dtype(const char* dtype)
@@ -351,6 +356,8 @@ static int test_scale_layouts_and_families()
 {
     CHECK(!rocke_arch_mma_op_id_family(NULL));
     CHECK(!rocke_arch_mma_op_id_family("unknown"));
+    CHECK(!rocke_arch_mma_op_by_id(NULL));
+    CHECK(!rocke_arch_mma_op_by_id("unknown"));
     int num_arches = 0;
     const char* const* arches = rocke_known_arches(&num_arches);
     int scaled = 0;
@@ -361,6 +368,10 @@ static int test_scale_layouts_and_families()
         {
             const auto* op = &arch->mma.ops[j];
             CHECK(strcmp(rocke_arch_mma_op_id_family(op->op_id), op->family) == 0);
+            /* The target-free lookup finds the same atom from its op_id alone. */
+            const auto* found = rocke_arch_mma_op_by_id(op->op_id);
+            CHECK(found && strcmp(found->op_id, op->op_id) == 0
+                  && strcmp(found->family, op->family) == 0);
             if(!op->a_scale_dtype)
             {
                 CHECK(op->a_scale_frag_len == 0 && op->b_scale_frag_len == 0);

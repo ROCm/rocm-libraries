@@ -205,6 +205,29 @@ std::string getKernelTocKey(const std::string& coName)
 constexpr int64_t K_BF16_BYTES = 2;
 constexpr int64_t K_FP32_BYTES = 4;
 
+// Validate that every backward dimension fits the 32-bit field that carries it.
+// Batch reaches the kernels only as gridDimZ and the head counts land in uint32
+// kernarg fields. The head dims are narrowed to int for the registry lookup,
+// and the sequence lengths become int32 mask coordinates on the sliding-window
+// path (computeMaskCoordinates) besides driving `(extent + ts - 1) / ts` grid
+// math evaluated in unsigned int, so both of those take the signed limit.
+// Checked before the first narrowing cast so the engine declines instead of
+// dispatching a kernel on a truncated shape.
+bool wouldBwdDimsFitKernargFields(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v)
+{
+    bool ok = true;
+    ok &= plan_utils::dimFitsU32("batch", q.dims()->Get(0));
+    ok &= plan_utils::dimFitsU32("nhead_q", q.dims()->Get(1));
+    ok &= plan_utils::dimFitsU32("nhead_k", k.dims()->Get(1));
+    ok &= plan_utils::dimFitsI32("seqlen_q", q.dims()->Get(2));
+    ok &= plan_utils::dimFitsI32("seqlen_k", k.dims()->Get(2));
+    ok &= plan_utils::dimFitsI32("head_dim_q", q.dims()->Get(3));
+    ok &= plan_utils::dimFitsI32("head_dim_v", v.dims()->Get(3));
+    return ok;
+}
+
 // Validates that every byte stride consumed by the backward kernels fits in
 // the uint32_t fields of the kernarg structs.  Catches overflow at
 // applicability time so the engine can be excluded from heuristics for graphs
@@ -268,9 +291,10 @@ bool wouldBwdByteStridesFitUint32(
         ok &= check("batch_stride_dq_acc", batchStrideDqAcc, K_FP32_BYTES);
     }
 
-    // DQDKDV's `Ts` kernarg is the 3-way product (tsKv * stride_k * BF16).
-    ok &= check(
-        "Ts (tsKv * stride_k)", tsKv * static_cast<int64_t>(k.strides()->Get(2)), K_BF16_BYTES);
+    // DQDKDV's `Ts` kernarg is the 3-way product (tsKv * stride_k * BF16). The
+    // tile size folds into the element size so the product is never formed
+    // outside the predicate.
+    ok &= check("Ts (tsKv * stride_k)", k.strides()->Get(2), K_BF16_BYTES * tsKv);
 
     return ok;
 }
@@ -557,6 +581,13 @@ bool SdpaBwdPlanBuilder::isApplicable(
         vTensor->dims()->size() != 4,
         "v tensor must be rank 4 (Actual rank: " + std::to_string(vTensor->dims()->size()) + ")");
 
+    // Every dimension below is narrowed to 32 bits before it reaches a kernel,
+    // starting with the head-dim cast and the mask classification further down,
+    // so the range gate comes first.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !wouldBwdDimsFitKernargFields(*qTensor, *kTensor, *vTensor),
+        "Tensor dimensions overflow the 32-bit kernarg fields that carry them");
+
     // The AITER dqdkdv kernel indexes dK/dV by q-head: workgroup.y spans nhead_q and
     // the kernel divides by ratio only for the K/V *reads*, never for the dK/dV
     // *writes*.  Supporting GQA therefore requires caller-side head expansion -
@@ -630,10 +661,14 @@ bool SdpaBwdPlanBuilder::isApplicable(
 
     // Classify the mask; contradictory mask attributes are an invalid-input
     // condition the engine declines rather than dispatches.
+    const int64_t seqLenQ = qTensor->dims()->Get(2);
+    const int64_t seqLenKv = kTensor->dims()->Get(2);
     MaskType maskType = MaskType::NO_MASK;
     try
     {
-        maskType = plan_utils::getMaskType(attrs);
+        const auto band = plan_utils::makeCoveringBoundsUnbound(
+            plan_utils::resolveDiagonalBand(attrs), seqLenQ, seqLenKv);
+        maskType = plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
@@ -712,7 +747,6 @@ bool SdpaBwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(!dqdkdvCfgOpt,
                                "Failed to resolve dqdkdv config for byte-stride validation");
     const bool useA32 = (dqdkdvTuple.atomic32 == static_cast<int>(AccumulatorMode::A32));
-    const int64_t seqLenQ = qTensor->dims()->Get(2);
     HIP_KERNEL_RETURN_FALSE_IF(!wouldBwdByteStridesFitUint32(*qTensor,
                                                              *kTensor,
                                                              *vTensor,
@@ -959,7 +993,13 @@ void SdpaBwdPlanBuilder::buildPlan(
             "(isApplicable should have rejected)");
     }
     const auto& dataTypeId = *dataTypeIdOpt;
-    auto maskType = plan_utils::getMaskType(sdpaAttrs);
+    // Classify on the graph dims, exactly as isApplicable does. Passing the
+    // narrowed unsigned locals instead would let the two sites resolve
+    // different mask types for the same graph.
+    const auto maskBand = plan_utils::makeCoveringBoundsUnbound(
+        plan_utils::resolveDiagonalBand(sdpaAttrs), qDims->Get(2), kTensor->dims()->Get(2));
+    const auto maskType
+        = plan_utils::getMaskType(maskBand.leftBound, maskBand.rightBound, maskBand.alignment);
     auto batchMode = getBatchMode(sdpaAttrs);
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(sdpaAttrs));
@@ -1172,16 +1212,16 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.attnScale = attnScale;
     params.accumulatorType = accType;
     params.maskOrdinal = static_cast<int32_t>(maskType);
+    // A surviving bound is strictly below its sequence span (the covering ones
+    // became -1), and isApplicable capped both sequence lengths at INT32_MAX, so
+    // the narrowing below and the mask coordinates computed from it in
+    // SdpaBwdPlan are exact.
     if(maskType == MaskType::SLIDING_WINDOW)
     {
-        params.windowLeft = sdpaAttrs.left_bound().has_value()
-                                ? static_cast<int32_t>(sdpaAttrs.left_bound().value())
-                                : -1;
-        params.windowRight = sdpaAttrs.right_bound().has_value()
-                                 ? static_cast<int32_t>(sdpaAttrs.right_bound().value())
-                                 : -1;
+        params.windowLeft = static_cast<int32_t>(maskBand.leftBound);
+        params.windowRight = static_cast<int32_t>(maskBand.rightBound);
         params.topLeftAlignment
-            = sdpaAttrs.diagonal_alignment()
+            = maskBand.alignment
               != hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
     }
 

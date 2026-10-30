@@ -9,16 +9,19 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "GraphTest.hpp"
+#include "asm_fmha_v3_bwd_configs.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaKernelUtils.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
+#include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <optional>
 
 namespace asm_sdpa_engine
 {
@@ -883,13 +886,13 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
 }
 
 // =============================================================================
-// Canonical mask-attribute policy (plan_utils::getMaskType)
+// Canonical mask-attribute policy (resolveDiagonalBand + getMaskType)
 // =============================================================================
 //
-// These tests exercise the shared mask-precedence policy directly through
-// plan_utils::getMaskType rather than through isApplicable. When a deprecated
-// causal boolean is set it takes precedence over the modern bounds trio; only
-// setting both deprecated booleans at once throws. The policy is
+// These tests exercise the shared mask policy directly through
+// plan_utils::resolveDiagonalBand and plan_utils::getMaskType rather than through isApplicable. A deprecated causal
+// boolean is merged with the stored bounds and alignment (see
+// plan_utils::resolveDiagonalBand); only setting both booleans throws. The policy is
 // hardware-agnostic (it runs before any device dispatch and independent of the
 // kernel registry), so the assertions are meaningful on any device — including
 // this gfx950 box. The backward isApplicable cannot be used here: it rejects
@@ -997,7 +1000,7 @@ flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithMask(
     return builder;
 }
 
-// Resolve the SDPA backward attributes from a graph buffer and classify the mask.
+// Extract the diagonal band from a backward graph buffer and classify the mask.
 plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
 {
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
@@ -1006,7 +1009,8 @@ plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
         = graphWrapper.nodeWrappers()
               .front()
               ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
-    return plan_utils::getMaskType(attrs);
+    const auto band = plan_utils::resolveDiagonalBand(attrs);
+    return plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
 }
 
 // cuDNN's default: no attn_scale_value and no scale tensor means no scaling.
@@ -1028,93 +1032,187 @@ TEST_F(TestSdpaBwdPlanBuilder, AbsentAttnScaleValueIsOne)
     EXPECT_EQ(plan_utils::attnScaleOrDefault(attrs), 1.0f);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsCausalMaskAndBottomRightSetTogether)
+class TestSdpaBwdDeprecatedCausalMask : public ::testing::TestWithParam<DeprecatedCausalMaskCase>
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
+};
 
-    // Both deprecated causal booleans set is a contradiction.
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/true,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::nullopt,
-        flatbuffers::nullopt,
-        DiagonalAlignment::TOP_LEFT);
-
-    EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
-}
-
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersCausalMaskOverWindowBounds)
+TEST_P(TestSdpaBwdDeprecatedCausalMask, Classifies)
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const auto& param = GetParam();
+    auto builder = createSdpaBwdGraphWithMask(param.causalMask,
+                                              param.causalMaskBottomRight,
+                                              param.leftBound,
+                                              param.rightBound,
+                                              param.alignment);
 
-    // causal_mask=true takes precedence over the bounds trio, even though the
-    // bounds describe a sliding window (left=64, right=64): result is causal.
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/true,
-        /*causalMaskBottomRight=*/false,
-        flatbuffers::Optional<int64_t>(64),
-        flatbuffers::Optional<int64_t>(64),
-        DiagonalAlignment::TOP_LEFT);
-
+    if(!param.expected.has_value())
+    {
+        EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
+        return;
+    }
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
+    EXPECT_EQ(maskType, param.expected.value());
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverTopLeftBounds)
+INSTANTIATE_TEST_SUITE_P(,
+                         TestSdpaBwdDeprecatedCausalMask,
+                         ::testing::ValuesIn(deprecatedCausalMaskCases()),
+                         deprecatedCausalMaskCaseName);
+
+// =============================================================================
+// plan_utils::makeCoveringBoundsUnbound
+// =============================================================================
+//
+// A window that already covers the whole sequence span masks nothing on that
+// side, so it classifies as the plain causal or unmasked kernel. Narrower windows
+// stay sliding windows. Spans: top-left left=seqLenQ-1 right=seqLenKv-1;
+// bottom-right left=seqLenKv-1 right=seqLenQ-1.
+
+namespace
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
+using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
 
-    // causal_mask_bottom_right=true takes precedence over the bounds trio, even
-    // though the trio (left=-1, right=0, diag=TOP_LEFT) would derive
-    // TOP_LEFT_CAUSAL: result is bottom-right causal.
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/false,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::Optional<int64_t>(-1),
-        flatbuffers::Optional<int64_t>(0),
-        DiagonalAlignment::TOP_LEFT);
+constexpr int64_t COVERING_SEQ_LEN_Q = 128;
+constexpr int64_t COVERING_SEQ_LEN_KV = 512;
 
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+plan_utils::MaskType classifyAfterUnbounding(int64_t leftBound,
+                                             int64_t rightBound,
+                                             DiagonalAlignment alignment,
+                                             int64_t seqLenQ = COVERING_SEQ_LEN_Q,
+                                             int64_t seqLenKv = COVERING_SEQ_LEN_KV)
+{
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        {leftBound, rightBound, alignment}, seqLenQ, seqLenKv);
+    return plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
+}
+} // namespace
+
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, TopLeftCoveringLeftBoundIsCausal)
+{
+    EXPECT_EQ(classifyAfterUnbounding(127, 0, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::TOP_LEFT_CAUSAL);
+    EXPECT_EQ(classifyAfterUnbounding(126, 0, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::SLIDING_WINDOW);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsConsistentCausalMaskAndBounds)
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, TopLeftCoveringRightBoundIsNoMask)
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    // causal_mask=true with a consistent bounds trio (left=-1, right=0,
-    // diag=TOP_LEFT -> TOP_LEFT_CAUSAL) must not throw and classify as causal.
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/true,
-        /*causalMaskBottomRight=*/false,
-        flatbuffers::Optional<int64_t>(-1),
-        flatbuffers::Optional<int64_t>(0),
-        DiagonalAlignment::TOP_LEFT);
-
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 511, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 510, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::SLIDING_WINDOW);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverWindowBounds)
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, BottomRightCoveringLeftBoundIsCausal)
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    EXPECT_EQ(classifyAfterUnbounding(511, 0, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+    EXPECT_EQ(classifyAfterUnbounding(510, 0, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
 
-    // causal_mask_bottom_right=true takes precedence over the bounds trio, even
-    // though a symmetric sliding window (left=64, right=64) would derive
-    // SLIDING_WINDOW: result is bottom-right causal.
-    auto builder = createSdpaBwdGraphWithMask(
-        /*causalMask=*/false,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::Optional<int64_t>(64),
-        flatbuffers::Optional<int64_t>(64),
-        DiagonalAlignment::BOTTOM_RIGHT);
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, BottomRightCoveringRightBoundIsNoMask)
+{
+    EXPECT_EQ(classifyAfterUnbounding(-1, 127, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 126, DiagonalAlignment::BOTTOM_RIGHT),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
 
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, BothBoundsCoveringIsNoMask)
+{
+    EXPECT_EQ(classifyAfterUnbounding(127, 511, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, -1, DiagonalAlignment::TOP_LEFT),
+              plan_utils::MaskType::NO_MASK);
+}
+
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, BoundsInsideSequencePassThroughUnchanged)
+{
+    for(const auto alignment : {DiagonalAlignment::TOP_LEFT, DiagonalAlignment::BOTTOM_RIGHT})
+    {
+        const auto band = plan_utils::makeCoveringBoundsUnbound(
+            {10, 20, alignment}, COVERING_SEQ_LEN_Q, COVERING_SEQ_LEN_KV);
+        EXPECT_EQ(band.leftBound, 10);
+        EXPECT_EQ(band.rightBound, 20);
+        EXPECT_EQ(band.alignment, alignment);
+    }
+}
+
+// A raw int64 bound of 4294967298 would wrap to 2 in an int32 kernel field and
+// shrink the window; once covering it is the unbounded request instead.
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, HugeCoveringBoundBecomesUnboundedRequest)
+{
+    constexpr int64_t HUGE_BOUND = 4294967298;
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        {HUGE_BOUND, 0, DiagonalAlignment::TOP_LEFT}, COVERING_SEQ_LEN_Q, COVERING_SEQ_LEN_KV);
+    EXPECT_EQ(band.leftBound, -1);
+    EXPECT_EQ(plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment),
+              plan_utils::MaskType::TOP_LEFT_CAUSAL);
+
+    constexpr auto SEQ_Q = static_cast<int32_t>(COVERING_SEQ_LEN_Q);
+    constexpr auto SEQ_KV = static_cast<int32_t>(COVERING_SEQ_LEN_KV);
+    EXPECT_EQ(plan_utils::computeMaskCoordinates(
+                  static_cast<int32_t>(band.leftBound), 0, SEQ_Q, SEQ_KV, true),
+              plan_utils::computeMaskCoordinates(SEQ_Q - 1, 0, SEQ_Q, SEQ_KV, true));
+}
+
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, HugeBoundBelowHugeSequenceStaysSlidingWindow)
+{
+    constexpr int64_t HUGE_BOUND = 4294967298;
+    constexpr int64_t HUGE_SEQ_LEN = int64_t{1} << 40;
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        {HUGE_BOUND, 0, DiagonalAlignment::TOP_LEFT}, HUGE_SEQ_LEN, HUGE_SEQ_LEN);
+    EXPECT_EQ(band.leftBound, HUGE_BOUND);
+    EXPECT_EQ(plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment),
+              plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+// A sequence length of 0 or 1 gives a span <= 0, so a causal right bound of 0
+// covers it and the mask is dropped on that side.
+TEST(TestSdpaBwdMakeCoveringBoundsUnbound, SingleTokenSequenceDropsCausalMaskOnItsAxis)
+{
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::TOP_LEFT, 128, 1),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::BOTTOM_RIGHT, 1, 128),
+              plan_utils::MaskType::NO_MASK);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::TOP_LEFT, 1, 128),
+              plan_utils::MaskType::TOP_LEFT_CAUSAL);
+    EXPECT_EQ(classifyAfterUnbounding(-1, 0, DiagonalAlignment::BOTTOM_RIGHT, 128, 1),
+              plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+}
+
+// The backward sliding-window path hands the extracted band to the kernel, so a
+// deprecated boolean must contribute its causal right bound to the window.
+TEST(TestSdpaBwdDeprecatedCausalMaskBand, CausalWithLeftBoundResolvesToCausalWindow)
+{
+    auto builder = createSdpaBwdGraphWithMask(true, false, 64, NO_BOUND, ALIGN_BOTTOM_RIGHT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attrs
+        = graphWrapper.nodeWrappers()
+              .front()
+              ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
+
+    // left_bound = 64 keeps 64 keys (cuDNN), which is FlashAttention's window_size_left 63.
+    const auto band = plan_utils::resolveDiagonalBand(attrs);
+    EXPECT_EQ(band.leftBound, 63);
+    EXPECT_EQ(band.rightBound, 0);
+    EXPECT_EQ(band.alignment, ALIGN_BOTTOM_RIGHT);
+
+    constexpr int64_t SEQ_LEN_ABOVE_BOUND = 256;
+    const auto windowed
+        = plan_utils::makeCoveringBoundsUnbound(band, SEQ_LEN_ABOVE_BOUND, SEQ_LEN_ABOVE_BOUND);
+    EXPECT_EQ(windowed.leftBound, 63);
+    EXPECT_EQ(windowed.rightBound, 0);
+
+    // 64 keys cover every row of a 64-long sequence; at 65 the last row would drop key 0.
+    constexpr int64_t SEQ_LEN_COVERED_BY_BOUND = 64;
+    const auto covered = plan_utils::makeCoveringBoundsUnbound(
+        band, SEQ_LEN_COVERED_BY_BOUND, SEQ_LEN_COVERED_BY_BOUND);
+    EXPECT_EQ(covered.leftBound, -1);
+    EXPECT_EQ(covered.rightBound, 0);
 }
 
 // Modern bounds-trio path (no deprecated boolean set). An unset bound is treated
@@ -1291,6 +1389,226 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsWindowMask)
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+// =============================================================================
+// Kernarg range guards
+// =============================================================================
+//
+// The predicates these guards are built from are covered at their exact
+// boundaries by the TestSdpaKernargRanges suite in TestSdpaFwdPlanBuilder.cpp.
+// What follows is the backward builder's use of them.
+
+// Build a backward graph with per-tensor dims and one explicit stride set, so a
+// dimension can be driven to the limit of its field without the contiguous
+// stride for that shape tripping the byte-stride guard first. Only descriptors
+// are built, so the dims cost no memory. The graph utility derives the stats
+// strides from qDims, which is why the accepted cases below drive the k-side
+// dims: an nhead_q or seqlen_q at its own limit makes the (legitimate,
+// unchanged) stats stride guard decline the graph first.
+auto createSdpaBwdGraphForDims(const std::vector<int64_t>& qDims,
+                               const std::vector<int64_t>& kDims,
+                               const std::vector<int64_t>& vDims)
+{
+    const std::vector<int64_t> oDims = {qDims[0], qDims[1], qDims[2], vDims[3]};
+    const std::vector<int64_t> strides = {32768, 32768, 128, 1};
+    return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+        qDims,
+        strides,
+        kDims,
+        strides,
+        vDims,
+        strides,
+        oDims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+}
+
+struct BwdDimRangeCase
+{
+    const char* label;
+    std::vector<int64_t> qDims;
+    std::vector<int64_t> kDims;
+    std::vector<int64_t> vDims;
+};
+
+constexpr int64_t K_U32_DIM_LIMIT = static_cast<int64_t>(UINT32_MAX);
+constexpr int64_t K_I32_DIM_LIMIT = static_cast<int64_t>(INT32_MAX);
+
+// Batch reaches the kernels only as gridDimZ, a uint32; seqlen_k takes the
+// signed limit because it becomes an int32 mask coordinate on the window path
+// and drives a ceil-division evaluated in unsigned int.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsDimensionsAtTheir32BitLimits)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<BwdDimRangeCase> cases = {
+        {"batch at UINT32_MAX",
+         {K_U32_DIM_LIMIT, 8, 256, 128},
+         {K_U32_DIM_LIMIT, 8, 256, 128},
+         {K_U32_DIM_LIMIT, 8, 256, 128}},
+        {"seqlen_k at INT32_MAX",
+         {4, 8, 256, 128},
+         {4, 8, K_I32_DIM_LIMIT, 128},
+         {4, 8, K_I32_DIM_LIMIT, 128}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.label);
+        auto builder = createSdpaBwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, gw));
+    }
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesDimensionsPastTheir32BitLimits)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<BwdDimRangeCase> cases = {
+        {"batch one past UINT32_MAX",
+         {K_U32_DIM_LIMIT + 1, 8, 256, 128},
+         {K_U32_DIM_LIMIT + 1, 8, 256, 128},
+         {K_U32_DIM_LIMIT + 1, 8, 256, 128}},
+        {"nhead one past UINT32_MAX",
+         {4, K_U32_DIM_LIMIT + 1, 256, 128},
+         {4, K_U32_DIM_LIMIT + 1, 256, 128},
+         {4, K_U32_DIM_LIMIT + 1, 256, 128}},
+        {"seqlen_q one past INT32_MAX",
+         {4, 8, K_I32_DIM_LIMIT + 1, 128},
+         {4, 8, 256, 128},
+         {4, 8, 256, 128}},
+        {"seqlen_k one past INT32_MAX",
+         {4, 8, 256, 128},
+         {4, 8, K_I32_DIM_LIMIT + 1, 128},
+         {4, 8, K_I32_DIM_LIMIT + 1, 128}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.label);
+        auto builder = createSdpaBwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, gw));
+    }
+}
+
+// The head dims are narrowed to int before the {64, 128, 192} membership test
+// and the registry lookup, so a head dim whose low 32 bits are a supported
+// value used to resolve a kernel built for that supported value. That registry
+// set is what bounds the head dims in practice, which is why there is no case
+// at INT32_MAX here.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesHeadDimsThatTruncateToASupportedValue)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    constexpr int64_t K_WRAPS_TO_128 = (int64_t{1} << 32) + 128;
+
+    const std::vector<BwdDimRangeCase> cases = {
+        {"supported head dims (control)", {4, 8, 256, 128}, {4, 8, 256, 128}, {4, 8, 256, 128}},
+        {"head_dim_q wraps to 128",
+         {4, 8, 256, K_WRAPS_TO_128},
+         {4, 8, 256, K_WRAPS_TO_128},
+         {4, 8, 256, 128}},
+        {"head_dim_v wraps to 128",
+         {4, 8, 256, 128},
+         {4, 8, 256, 128},
+         {4, 8, 256, K_WRAPS_TO_128}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.label);
+        auto builder = createSdpaBwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
+            builder.GetBufferPointer(), builder.GetSize());
+        const bool isControl = testCase.label == std::string("supported head dims (control)");
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, gw), isControl);
+    }
+}
+
+// The `ts` of the DQDKDV row isApplicable resolves for a bf16 hd128 no-mask
+// batch graph on the default A32 accumulator path.
+std::optional<int> resolveBwdTileSizeKv()
+{
+    for(const auto& entry : cfg_fmha_bwd_dqdkdv)
+    {
+        const auto& cfg = entry.second;
+        if(cfg.arch == "gfx942" && cfg.dtype == "bf16" && cfg.hdim_q == 128 && cfg.hdim_v == 128
+           && cfg.mask == 0 && cfg.atomic32 == 1 && cfg.pssk == 1 && cfg.pddv == 1 && cfg.mode == 0
+           && cfg.bf16_cvt == 0)
+        {
+            return cfg.ts;
+        }
+    }
+    return std::nullopt;
+}
+
+// The Ts kernarg is tsKv * stride_k * sizeof(bf16). The per-field stride guard
+// only bounds stride_k * 2, so the tile factor is what this guard adds: the
+// accepted K sequence stride shrinks by tsKv.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSize)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const auto tileSizeKv = resolveBwdTileSizeKv();
+    ASSERT_TRUE(tileSizeKv.has_value()) << "no gfx942 bf16 hd128 no-mask a32 dqdkdv row";
+
+    constexpr int64_t K_BF16_BYTES = 2;
+    const int64_t limit = static_cast<int64_t>(UINT32_MAX) / (K_BF16_BYTES * *tileSizeKv);
+    // One past the Ts limit must still clear the per-field stride guard, or the
+    // test would prove nothing about Ts.
+    ASSERT_LE((limit + 1) * K_BF16_BYTES, static_cast<int64_t>(UINT32_MAX));
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> normalStrides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    auto buildWithKSeqStride = [&](int64_t kSeqStride) {
+        const std::vector<int64_t> kStrides = {kSeqStride, kSeqStride, kSeqStride, 1};
+        return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+            dims,
+            normalStrides,
+            dims,
+            kStrides,
+            dims,
+            normalStrides,
+            dims,
+            normalStrides,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    };
+
+    auto builderAtLimit = buildWithKSeqStride(limit);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwAtLimit(
+        builderAtLimit.GetBufferPointer(), builderAtLimit.GetSize());
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwAtLimit));
+
+    auto builderPastLimit = buildWithKSeqStride(limit + 1);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwPastLimit(
+        builderPastLimit.GetBufferPointer(), builderPastLimit.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwPastLimit));
 }
 
 // =============================================================================

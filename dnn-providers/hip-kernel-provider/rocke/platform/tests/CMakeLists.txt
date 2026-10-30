@@ -14,6 +14,31 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/smoke.cpp")
 endif()
 
 if(BUILD_TESTING)
+  # Build-tree artifact-reproduction gate, deliberately separate from pytest.
+  # It re-probes the full intrinsic/architecture matrix and therefore has a
+  # different timeout, resource, and skip contract from Python unit tests. The
+  # installed test manifest registers the same logical gate against its staged
+  # generator and relocated package data.
+  if(Python3_Interpreter_FOUND)
+    add_test(
+      NAME rocke_arch_domain_reproducibility
+      COMMAND "${Python3_EXECUTABLE}" -u
+              "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen_arch_domain.py"
+              --check --unvalidated-exit-code 77)
+    set_tests_properties(
+      rocke_arch_domain_reproducibility
+      PROPERTIES
+        LABELS "ckc;python;host;integration;toolchain;generated-artifact;standard"
+        RUN_SERIAL TRUE
+        SKIP_RETURN_CODE 77
+        TIMEOUT 1800
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+  else()
+    message(WARNING
+            "rocKE: Python3 interpreter not found; arch-domain reproducibility "
+            "CTest is not registered")
+  endif()
+
   add_executable(rocke_optimization_barrier core/test_optimization_barrier.cpp)
   target_link_libraries(rocke_optimization_barrier PRIVATE rocke_core)
   add_test(NAME rocke_optimization_barrier COMMAND rocke_optimization_barrier)
@@ -36,6 +61,18 @@ if(BUILD_TESTING)
   set_target_properties(rocke_tf32 PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
   install(TARGETS rocke_tf32 RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_tf32)
+
+  add_executable(rocke_fp8_scale_conversion_gate core/test_fp8_scale_conversion_gate.cpp)
+  target_link_libraries(rocke_fp8_scale_conversion_gate PRIVATE rocke_core)
+  add_test(NAME rocke_fp8_scale_conversion_gate COMMAND rocke_fp8_scale_conversion_gate)
+  set_tests_properties(rocke_fp8_scale_conversion_gate PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_fp8_scale_conversion_gate)
+  set_target_properties(rocke_fp8_scale_conversion_gate
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_fp8_scale_conversion_gate
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_fp8_scale_conversion_gate)
 
   add_executable(rocke_storage core/test_storage.cpp)
   target_link_libraries(rocke_storage PRIVATE rocke_core)
@@ -133,6 +170,40 @@ if(BUILD_TESTING)
                  rocke_future_intrinsic_lowering)
   endif()
 
+  # The C++ engine's arch-domain lane -- mode parsing, the message, and the
+  # refusal itself -- without the rocke_engine extension.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_arch_domain_refusal.cpp")
+    add_executable(rocke_arch_domain_refusal core/test_arch_domain_refusal.cpp)
+    target_link_libraries(rocke_arch_domain_refusal PRIVATE rocke_core)
+    add_test(NAME rocke_arch_domain_refusal COMMAND rocke_arch_domain_refusal)
+    set_tests_properties(rocke_arch_domain_refusal
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_arch_domain_refusal)
+    set_target_properties(rocke_arch_domain_refusal
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_arch_domain_refusal
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_arch_domain_refusal)
+  endif()
+
+  # QkScaleSpec validation in the C++ engine: the Python messages, bad value included.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_qk_scale_spec_validate.cpp")
+    add_executable(rocke_qk_scale_spec_validate core/test_qk_scale_spec_validate.cpp)
+    target_link_libraries(rocke_qk_scale_spec_validate PRIVATE rocke_core)
+    add_test(NAME rocke_qk_scale_spec_validate
+             COMMAND rocke_qk_scale_spec_validate)
+    set_tests_properties(rocke_qk_scale_spec_validate
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_qk_scale_spec_validate)
+    set_target_properties(rocke_qk_scale_spec_validate
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_qk_scale_spec_validate
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_qk_scale_spec_validate)
+  endif()
+
   # temporal_hint (rocke_mem_opts_t) on global_load_vN/global_store_vN and the
   # io helpers, through the C++ builders and HIP/LLVM lowerers.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_nontemporal_hip.cpp")
@@ -147,6 +218,38 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_nontemporal_hip)
+  endif()
+
+  # The buffer descriptor word (DWORD3) the HIP lowerer emits per target, and
+  # its agreement with the LLVM lowerer's word.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_buffer_rsrc_hip.cpp")
+    add_executable(rocke_buffer_rsrc_hip core/test_buffer_rsrc_hip.cpp)
+    target_link_libraries(rocke_buffer_rsrc_hip PRIVATE rocke_core)
+    add_test(NAME rocke_buffer_rsrc_hip COMMAND rocke_buffer_rsrc_hip)
+    set_tests_properties(rocke_buffer_rsrc_hip PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_buffer_rsrc_hip)
+    set_target_properties(rocke_buffer_rsrc_hip
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_buffer_rsrc_hip
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_buffer_rsrc_hip)
+  endif()
+
+  # A buffer descriptor refused as a loop-carried value by the C++ builder and
+  # verifier.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_loop_carried_descriptor.cpp")
+    add_executable(rocke_loop_carried_descriptor core/test_loop_carried_descriptor.cpp)
+    target_link_libraries(rocke_loop_carried_descriptor PRIVATE rocke_core)
+    add_test(NAME rocke_loop_carried_descriptor COMMAND rocke_loop_carried_descriptor)
+    set_tests_properties(rocke_loop_carried_descriptor PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_loop_carried_descriptor)
+    set_target_properties(rocke_loop_carried_descriptor
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_loop_carried_descriptor
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_loop_carried_descriptor)
   endif()
 
   # Direct f32 tanh lowering and narrow-type rejection in the C++ engine.
@@ -165,6 +268,22 @@ if(BUILD_TESTING)
                  rocke_tanh_lowering)
   endif()
 
+  # Fenced barriers (fence attr of tile.sync / sync_lds_only / s_barrier_bare).
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_barrier_fence.cpp")
+    add_executable(rocke_barrier_fence core/test_barrier_fence.cpp)
+    target_link_libraries(rocke_barrier_fence PRIVATE rocke_core)
+    add_test(NAME rocke_barrier_fence COMMAND rocke_barrier_fence)
+    set_tests_properties(rocke_barrier_fence
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_barrier_fence)
+    set_target_properties(rocke_barrier_fence
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_barrier_fence
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_barrier_fence)
+  endif()
+
   # BF16x3 expansion of the emulated XF32 atoms, lowered from serialized IR.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_xf32_bf16x3_lowering.cpp")
     add_executable(rocke_xf32_bf16x3_lowering core/test_xf32_bf16x3_lowering.cpp)
@@ -179,6 +298,23 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_xf32_bf16x3_lowering)
+  endif()
+
+  # Unsigned compare, no-unsigned-wrap add and range marker: C API builders,
+  # both C++ lowerers, the verifier and the constant folder.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_unsigned_int_ops.cpp")
+    add_executable(rocke_unsigned_int_ops core/test_unsigned_int_ops.cpp)
+    target_link_libraries(rocke_unsigned_int_ops PRIVATE rocke_core)
+    add_test(NAME rocke_unsigned_int_ops COMMAND rocke_unsigned_int_ops)
+    set_tests_properties(rocke_unsigned_int_ops
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_unsigned_int_ops)
+    set_target_properties(rocke_unsigned_int_ops
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_unsigned_int_ops
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_unsigned_int_ops)
   endif()
 
   # f64 op rejection and f64 vector arithmetic in both C++ lowerers.
@@ -211,6 +347,22 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_opcode_values)
+  endif()
+
+  # The E8M0 scale decoder reads its byte unsigned in both C++ lowerers.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_mx_scale_decode.cpp")
+    add_executable(rocke_mx_scale_decode core/test_mx_scale_decode.cpp)
+    target_link_libraries(rocke_mx_scale_decode PRIVATE rocke_core)
+    add_test(NAME rocke_mx_scale_decode COMMAND rocke_mx_scale_decode)
+    set_tests_properties(rocke_mx_scale_decode
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_mx_scale_decode)
+    set_target_properties(rocke_mx_scale_decode
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_mx_scale_decode
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_mx_scale_decode)
   endif()
 
   # Holds the ISA-layer and lower_llvm-layer flavor->datalayout tables together.
@@ -289,6 +441,8 @@ if(BUILD_TESTING)
     # Python recipe tests need the native VM in relocated test artifacts.
     install(TARGETS rocke_portable_ir_replay_cli
             RUNTIME DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/portable_ir")
+    install(FILES "${ROCKE_BUILD_ID_MANIFEST}"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/portable_ir")
   endif()
 
   # --- instances layer --------------------------------------------------------

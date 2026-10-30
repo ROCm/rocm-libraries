@@ -3,7 +3,7 @@
 
 """Regression tests for ROCM-26842 (SEC-00394).
 
-Tensile's ``--global-parameters`` option accepts ``key=value`` overrides. Historically
+TensileLite's ``--global-parameters`` option accepts ``key=value`` overrides. Historically
 the value was passed through ``eval()``, letting any CLI/CI-supplied argument execute
 arbitrary Python. These tests lock in the fix: values are parsed as Python literals via
 ``ast.literal_eval``, and any expression that would execute code is rejected.
@@ -17,7 +17,7 @@ import argparse
 
 import pytest
 
-import Tensile.Tensile as T
+import tensilelite.Tensile as T
 
 pytestmark = pytest.mark.unit
 

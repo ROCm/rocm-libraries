@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass, field
 
 __all__ = [
@@ -130,6 +131,21 @@ class KernelIdentity:
     # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
     # decode K loop. Left out of the hash while False, like prefetch_addr.
     uniform_k_decode: bool = False
+    # dgrad only (DgradConvSpec.patch): a patch embedding as one GEMM over the
+    # filter's (y, x, c). Changes the store and the problems served (see
+    # identity_supports_problem). Left out of the hash while False.
+    patch: bool = False
+    # dgrad only (DgradConvSpec.tap_outer_k): the stride-1 tap-outer K loop.
+    # Serves only problems whose kpg is a multiple of tile_k (see
+    # identity_supports_problem). Left out of the hash while False.
+    tap_outer_k: bool = False
+    # dgrad only (DgradConvSpec.dy_halo / dy_halo_setprio /
+    # dy_halo_kouter_pad): the dY halo mode of the tap-outer K loop and its
+    # knobs. A halo binary also bakes its filter (filter_h/w) and the widest
+    # Wo it serves (halo_max_wo, below). Left out of the hash at 0.
+    dy_halo: int = 0
+    dy_halo_setprio: int = 0
+    dy_halo_kouter_pad: int = 0
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
     # ---- capability: bounds which problems this binary can serve ----
@@ -160,6 +176,10 @@ class KernelIdentity:
     # Dgrad only: the largest tilde sub-GEMM count the record table (and the
     # binary search's runtime trip count) was built to support.
     max_sub_gemms: int = 0
+    # Dgrad dY halo only (DgradConvSpec.halo_max_wo): the staged halo is
+    # sized for this output width, so the binary serves Wo <= halo_max_wo.
+    # 0 = not a halo binary. Left out of the hash at 0.
+    halo_max_wo: int = 0
     # async_dma only: elements per DRAM->LDS chunk of the A and B loaders. The
     # width is picked from the build-time cpg so a chunk never straddles a
     # filter position, and is baked into the ISA -- a binary is only correct
@@ -204,6 +224,13 @@ class KernelIdentity:
             del fields["prefetch_addr"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
+        if not fields["patch"]:
+            del fields["patch"]
+        if not fields["tap_outer_k"]:
+            del fields["tap_outer_k"]
+        for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo"):
+            if not fields[name]:
+                del fields[name]
         # Same for the stream-K pair at "no stream-K".
         if fields["streamk"] == "off" and not fields["streamk_reduction"]:
             del fields["streamk"], fields["streamk_reduction"]
@@ -274,8 +301,13 @@ def dgrad_sub_gemms(identity: KernelIdentity, problem: object) -> list:
     from kernels.common.conv_implicit_gemm_dgrad import (
         compute_tilde,
         enumerate_sub_gemms,
+        patch_sub_gemms,
     )
 
+    if identity.patch:
+        return patch_sub_gemms(
+            problem, identity.tile_m, identity.tile_n, tile_k=identity.tile_k
+        )
     return enumerate_sub_gemms(
         problem,
         compute_tilde(problem),
@@ -418,6 +450,20 @@ def identity_supports_problem(
         extents = ((kpg, "kpg"), (cpg, "cpg"), (cpg, "cpg"))
     else:
         extents = ((cpg, "cpg"), (cpg, "cpg"), (kpg, "kpg"))
+    if identity.patch:
+        # One GEMM over the filter's (y, x, c): dY along K, W along Y*X*C,
+        # dX along the X*C of one filter row, which starts at a multiple of
+        # sW*C and of the row Wi*C.
+        from kernels.common.conv_implicit_gemm_dgrad import is_patch_problem
+
+        if not is_patch_problem(problem):
+            return False, (
+                "patch kernel serves patch embeddings only (2-D, ungrouped, "
+                "no padding or dilation, stride >= filter)"
+            )
+        C, X, Y = int(problem.C), int(problem.X), int(problem.Y)
+        run = math.gcd(X * C, int(problem.sW) * C, int(problem.Wi) * C)
+        extents = ((kpg, "kpg"), (Y * X * C, "Y*X*C"), (run, "dX run"))
     gm = max(1, int(identity.group_merge))
     if gm > 1:
         ok, why = _group_merge_fits(identity, problem, gm)
@@ -472,7 +518,10 @@ def identity_supports_problem(
         )
 
         ok, why = wgrad_atomic_epilogue_available(
-            problem, identity.dtype_d, identity.vector_size_c or None
+            problem,
+            identity.dtype_d,
+            identity.vector_size_c or None,
+            identity.wave_size,
         )
         if not ok:
             return False, why
@@ -546,6 +595,38 @@ def identity_supports_problem(
                 "depthwise dgrad (cpg == 1) is not supported by the "
                 "implicit-GEMM grouped path"
             )
+        # The tap-outer K loop has no fallback: every K tile must lie inside
+        # one filter tap, and the tap must be the plain (y, x). The
+        # stride/dilation fields above already pin a stride-1 binary; this
+        # states the rule for the loop itself.
+        if identity.tap_outer_k:
+            strided = any(
+                int(getattr(problem, a, 1)) != 1 for a in ("sH", "sW", "dH", "dW")
+            )
+            if strided:
+                return False, "tap_outer_k serves stride 1 / dilation 1 only"
+            if kpg % max(1, identity.tile_k):
+                return False, (
+                    f"tap_outer_k needs kpg % tile_k == 0; kpg={kpg}, "
+                    f"tile_k={identity.tile_k}"
+                )
+        # The dY halo loop shifts the linear pixel index by whole output
+        # rows, so the output must be the input's size, and its LDS tile
+        # is sized for halo_max_wo. The filter (filter_h/w, baked) is
+        # matched above; with stride 1 and Ho == Hi it fixes the pad.
+        if identity.dy_halo:
+            ho = int(getattr(problem, "Ho", -1))
+            wo = int(getattr(problem, "Wo", -1))
+            if (ho, wo) != (
+                int(getattr(problem, "Hi", -2)),
+                int(getattr(problem, "Wi", -2)),
+            ):
+                return False, "dy_halo needs Ho == Hi and Wo == Wi"
+            if wo > identity.halo_max_wo:
+                return False, (
+                    f"dy_halo binary serves Wo <= {identity.halo_max_wo}, "
+                    f"problem has Wo={wo}"
+                )
 
     if not identity.is_direct:
         ok, why = _grid_fits(identity, problem)

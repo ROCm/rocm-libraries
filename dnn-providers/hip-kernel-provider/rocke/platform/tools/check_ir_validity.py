@@ -11,8 +11,8 @@
 #
 # Why the oracle is a LINK and not a verify or a codegen
 # -----------------------------------------------------
-# A declare for an intrinsic that does not exist (e.g. the fictional
-# llvm.amdgcn.mfma.f32.16x16x128.fp4 in the decl table) is accepted by
+# A declare for an intrinsic that does not exist (e.g. a fictional fp4 MFMA
+# intrinsic, which an earlier decl table declared) is accepted by
 # `opt -passes=verify`, and is accepted by `clang -S` as well -- the backend
 # quietly treats the unknown llvm.* name as an ordinary external function and
 # emits a GOT-relative call to it. The undefined symbol only surfaces when the
@@ -85,16 +85,7 @@ def _bootstrap_sys_path() -> None:
 # library/tests/test_library_layering.py, and carries the same rule: this list
 # only ever SHRINKS. An entry that starts passing is itself a failure (see
 # STALE below) so a fix cannot silently leave dead weight behind.
-KNOWN_BAD: dict[str, str] = {
-    "attention/gfx942/3d_bf16_d128_b64": (
-        "LLVM23 backend fatal: 'Do not know how to expand this operator's "
-        "operand'; attention 3d on gfx942 only"
-    ),
-    "attention/gfx942/3d_fp16_d128_b64": (
-        "LLVM23 backend fatal: 'Do not know how to expand this operator's "
-        "operand'; attention 3d on gfx942 only"
-    ),
-}
+KNOWN_BAD: dict[str, str] = {}
 
 
 def _llvm_tool(name: str) -> str | None:
@@ -228,7 +219,8 @@ def _dump_corpus(
         cid = case["case_id"]
         try:
             _rec, llvm = lower_case(case, flavor)
-        except NotImplementedError as exc:
+        except (NotImplementedError, ValueError) as exc:
+            # The llvm23-gated target ops refuse with a ValueError.
             if not _requires_newer_flavor(exc):
                 raise
             skipped[cid] = ("UNVALIDATED", f"{type(exc).__name__}: {exc}")
