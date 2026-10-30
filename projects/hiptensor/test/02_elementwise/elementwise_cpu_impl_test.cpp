@@ -35,7 +35,8 @@
 template <typename floatTypeA, typename floatTypeB, typename floatTypeCompute>
 auto permuteWithCpu(hiptensorDataType_t typeA,
                     hiptensorDataType_t typeB,
-                    hiptensorDataType_t typeCompute)
+                    hiptensorDataType_t typeCompute,
+                    double              tolerance = 0.0)
 {
     std::vector<int> modeA{'w', 'h', 'c', 'n'};
     std::vector<int> modeB{'c', 'n', 'h', 'w'};
@@ -79,15 +80,15 @@ auto permuteWithCpu(hiptensorDataType_t typeA,
 
     std::vector<floatTypeA> aArray(elementsA);
     std::vector<floatTypeB> bArray(elementsB);
-    std::iota(aArray.begin(), aArray.end(), 0);
-    std::vector<floatTypeB> referenceArray;
+    std::iota(aArray.begin(), aArray.end(), static_cast<floatTypeA>(0.0f));
+    std::vector<double> referenceValues;
 
     using hiptensor::HiptensorOptions;
     auto& options = HiptensorOptions::instance();
 
     if(options->isColMajorStrides())
     {
-        referenceArray = {
+        referenceValues = {
             0.,     -12.6,  -25.2,  -37.8,  -50.4,  -63.,   -75.6,  -88.2,  -100.8, -113.4, -126.,
             -138.6, -151.2, -163.8, -176.4, -189.,  -201.6, -214.2, -226.8, -239.4, -6.3,   -18.9,
             -31.5,  -44.1,  -56.7,  -69.3,  -81.9,  -94.5,  -107.1, -119.7, -132.3, -144.9, -157.5,
@@ -102,7 +103,7 @@ auto permuteWithCpu(hiptensorDataType_t typeA,
     }
     else
     {
-        referenceArray = {
+        referenceValues = {
             0.,     -84.,   -168.,  -42.,   -126.,  -210.,  -2.1,   -86.1,  -170.1, -44.1,  -128.1,
             -212.1, -4.2,   -88.2,  -172.2, -46.2,  -130.2, -214.2, -6.3,   -90.3,  -174.3, -48.3,
             -132.3, -216.3, -8.4,   -92.4,  -176.4, -50.4,  -134.4, -218.4, -10.5,  -94.5,  -178.5,
@@ -116,7 +117,9 @@ auto permuteWithCpu(hiptensorDataType_t typeA,
             -205.8, -79.8,  -163.8, -247.8, -39.9,  -123.9, -207.9, -81.9,  -165.9, -249.9};
     }
 
-    const floatTypeCompute alphaValue = 2.1f;
+    std::vector<floatTypeB> referenceArray(referenceValues.begin(), referenceValues.end());
+
+    const floatTypeCompute alphaValue = static_cast<floatTypeCompute>(2.1);
     hiptensorHandle_t      handle;
     CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
     hiptensorTensorDescriptor_t descA = nullptr;
@@ -127,16 +130,16 @@ auto permuteWithCpu(hiptensorDataType_t typeA,
     CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
         handle, &descB, nmodeB, extentB.data(), NULL /* stride */, typeB, 0));
 
-    hiptensorElementwisePermuteReference(&alphaValue,
-                                  aArray.data(),
-                                  descA,
-                                  modeA.data(),
-                                  HIPTENSOR_OP_NEG,
-                                  bArray.data(),
-                                  descB,
-                                  modeB.data(),
-                                  typeCompute,
-                                  0);
+    CHECK_HIPTENSOR_ERROR(hiptensorElementwisePermuteReference(&alphaValue,
+                                                               aArray.data(),
+                                                               descA,
+                                                               modeA.data(),
+                                                               HIPTENSOR_OP_NEG,
+                                                               bArray.data(),
+                                                               descB,
+                                                               modeB.data(),
+                                                               typeCompute,
+                                                               0));
 
     CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
     if(descA)
@@ -153,7 +156,7 @@ auto permuteWithCpu(hiptensorDataType_t typeA,
                         bArray.data(),
                         bArray.size(),
                         hiptensor::convertToComputeType(typeCompute),
-                        0);
+                        tolerance);
 }
 
 TEST(PermutationCpuImplTest, CompareF32ResultWithReference)
@@ -180,6 +183,57 @@ TEST(PermutationCpuImplTest, CompareF16ResultWithReference)
     hiptensorDataType_t typeA       = HIPTENSOR_R_16F;
     hiptensorDataType_t typeB       = HIPTENSOR_R_16F;
     hiptensorDataType_t typeCompute = HIPTENSOR_R_16F;
+
+    auto [result, maxRelativeError]
+        = permuteWithCpu<floatTypeA, floatTypeB, floatTypeCompute>(typeA, typeB, typeCompute);
+    EXPECT_TRUE(result) << "max_relative_error: " << maxRelativeError;
+}
+
+TEST(PermutationCpuImplTest, CompareF64ResultWithReference)
+{
+    typedef double floatTypeA;
+    typedef double floatTypeB;
+    typedef double floatTypeCompute;
+
+    hiptensorDataType_t typeA       = HIPTENSOR_R_64F;
+    hiptensorDataType_t typeB       = HIPTENSOR_R_64F;
+    hiptensorDataType_t typeCompute = HIPTENSOR_R_64F;
+
+    if(!isF64Supported())
+    {
+        GTEST_SKIP();
+    }
+
+    // Tight enough that a reference computing in float (~1e-8 relative error) fails.
+    auto [result, maxRelativeError] = permuteWithCpu<floatTypeA, floatTypeB, floatTypeCompute>(
+        typeA, typeB, typeCompute, 1e-12);
+    EXPECT_TRUE(result) << "max_relative_error: " << maxRelativeError;
+}
+
+TEST(PermutationCpuImplTest, CompareBF16ResultWithReference)
+{
+    typedef hip_bfloat16 floatTypeA;
+    typedef hip_bfloat16 floatTypeB;
+    typedef hip_bfloat16 floatTypeCompute;
+
+    hiptensorDataType_t typeA       = HIPTENSOR_R_16BF;
+    hiptensorDataType_t typeB       = HIPTENSOR_R_16BF;
+    hiptensorDataType_t typeCompute = HIPTENSOR_R_16BF;
+
+    auto [result, maxRelativeError]
+        = permuteWithCpu<floatTypeA, floatTypeB, floatTypeCompute>(typeA, typeB, typeCompute);
+    EXPECT_TRUE(result) << "max_relative_error: " << maxRelativeError;
+}
+
+TEST(PermutationCpuImplTest, CompareBF16WithF32ScalarResultWithReference)
+{
+    typedef hip_bfloat16 floatTypeA;
+    typedef hip_bfloat16 floatTypeB;
+    typedef float        floatTypeCompute;
+
+    hiptensorDataType_t typeA       = HIPTENSOR_R_16BF;
+    hiptensorDataType_t typeB       = HIPTENSOR_R_16BF;
+    hiptensorDataType_t typeCompute = HIPTENSOR_R_32F;
 
     auto [result, maxRelativeError]
         = permuteWithCpu<floatTypeA, floatTypeB, floatTypeCompute>(typeA, typeB, typeCompute);

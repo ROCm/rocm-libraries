@@ -403,8 +403,9 @@ class TestComboSweepLifecycle(unittest.TestCase):
             req, candidate.spec_id, {"pv_priority": 2, "o_store_width": 2}
         )
         self.assertNotEqual(tuned.tuning_id, shipped.tuning_id)
-        # Wide DMA records its problem-dependent default tile.
-        recorded = {"block_m": 256}
+        # Wide DMA records its problem-dependent default tile (128 rows: this
+        # problem has fewer 256-row work items than persistent CTAs).
+        recorded = {"block_m": 128}
         self.assertEqual(
             sweep._row_skeleton(req, candidate, shipped, 0)["knobs"], recorded
         )
