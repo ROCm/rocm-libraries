@@ -49,7 +49,7 @@ What a developer does between making a change and getting it merged.
 
 ```bash
 cd projects/rocalution
-# -c → BUILD_CLIENTS_SAMPLES + TESTS + BENCHMARKS; -d fetches dependencies (incl. googletest)
+# -c → BUILD_CLIENTS_SAMPLES + TESTS + BENCHMARKS; -d installs distro packages (GoogleTest must already be installed)
 ./install.sh -dc
 # host-only (no GPU), OpenMP on:            ./install.sh -c --host
 # MPI multi-node build:                     ./install.sh -c --host --mpi=on --no-openmp
@@ -99,7 +99,9 @@ only show that some operation on the way to convergence went wrong, and a wrong 
 let a solver converge to the right answer more slowly.
 
 **Location and build:** the unit tests live in `clients/unittests/` and are built together with the
-other tests (`BUILD_CLIENTS_TESTS`, for example `./install.sh -c`). They link the object files of the
+other tests (`BUILD_CLIENTS_TESTS`, for example `./install.sh -c`). All test binaries use GoogleTest
+(`find_package(GTest)`; if it isn't installed, it is built from `FETCHCONTENT_SOURCE_DIR_GOOGLETEST`
+or, with `-DALLOW_FETCH_DEPS=ON`, downloaded). They link the object files of the
 library (the `rocalution_objects` target) instead of the library itself, so that they can test the
 internal backend classes directly. As a consequence they can only be built in the same build as the
 library, not against an installed rocALUTION. They never link `roc::rocalution` as well, because

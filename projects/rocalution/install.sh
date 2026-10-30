@@ -13,7 +13,7 @@ function display_help()
   echo "    [-h|--help] prints this help message"
 #  echo "    [--prefix] Specify an alternate CMAKE_INSTALL_PREFIX for cmake"
   echo "    [-i|--install] install after build"
-  echo "    [-d|--dependencies] install build dependencies"
+  echo "    [-d|--dependencies] install build dependencies from the distro package manager (GoogleTest is not installed)"
   echo "    [-r]--relocatable] create a package to support relocatable ROCm"
   echo "    [-c|--clients] build library clients too (combines with -i & -d)"
   echo "    [-o|--clients-only] build clients only"
@@ -216,7 +216,7 @@ install_packages( )
 install_openmpi( )
 {
   if [ ! -d "./deps/ucx" ]; then
-    cd deps
+    mkdir -p deps && cd deps
     git clone --branch v1.10.0 https://github.com/openucx/ucx.git ucx
     cd ucx; ./autogen.sh; ./autogen.sh #why do we have to run this twice?
     mkdir build; cd build
@@ -225,7 +225,7 @@ install_openmpi( )
   fi
 
   if [ ! -d "./deps/openmpi" ]; then
-    cd deps
+    mkdir -p deps && cd deps
     git clone --branch v4.1.0 https://github.com/open-mpi/ompi.git openmpi
     cd openmpi; ./autogen.pl; mkdir build; cd build
     ../configure --prefix=${PWD}/../ --with-ucx=${PWD}/../../ucx --without-verbs
@@ -415,15 +415,6 @@ esac
 if [[ "${install_dependencies}" == true ]]; then
 
   install_packages
-
-  # The following builds googletest from source, installs into cmake default /usr/local
-  pushd .
-    printf "\033[32mBuilding \033[33mgoogletest\033[32m from source; installing into \033[33m/usr/local\033[0m\n"
-    mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-    ${cmake_executable} ../../deps
-    make -j$(nproc)
-    elevate_if_not_root make install
-  popd
 fi
 
 # We append customary rocm path; if user provides custom rocm path in ${path}, our
