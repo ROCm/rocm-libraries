@@ -150,6 +150,7 @@
     X(WmmaRefillOnQueueDrain, bool,                                                                \
       false) /* refill: WMMA first when a pick drains the queue; false = only on a stall */        \
     X(DsReadCyclesPerLoad, int, 6) /* LDS return rate (cycles per ds_load); 0 = off */             \
+    X(VgprMsbSwitchCycles, int, 0) /* s_set_vgpr_msb cost on an MSB group change; 0 = off */       \
     X(QueueStartForceWmmaBurst, bool,                                                              \
       false)                           /* loop head / barrier wait burst ignores ds windows */     \
     X(QueueStartBurstEveryRegion, bool,                                                            \

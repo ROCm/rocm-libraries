@@ -218,6 +218,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.dsBatchWmmas = moduleOptions.DsBatchWmmas;
                 passFeatureConfig.dagFeatures.dsReadCyclesPerLoad =
                     moduleOptions.DsReadCyclesPerLoad;
+                passFeatureConfig.dagFeatures.vgprMsbSwitchCycles =
+                    moduleOptions.VgprMsbSwitchCycles;
                 // The hold mirrors InsertWaitAlu, which only runs with ESM2.
                 passFeatureConfig.dagFeatures.waitAluHoldStrictCount =
                     moduleOptions.EnableESM2 ? moduleOptions.WaitAluHoldStrictCount : -1;

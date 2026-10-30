@@ -665,6 +665,21 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // issue, reset per region. pickFreeBest prefers a free candidate matching it.
     // -1 = unknown.
     int currentMsb_ = -1;
+    // Issue cycles of the s_set_vgpr_msb InsertVgprMsbPass puts in front of \p node (0 = no
+    // switch, the bank is unknown, or dagFeatures.vgprMsbSwitchCycles is off).
+    int msbSwitchCycles(const DAGNode* node) const {
+        const int cost = getPassContext().getPassFeatureConfig().dagFeatures.vgprMsbSwitchCycles;
+        if (cost <= 0 || node->requiredMsb == -1 || currentMsb_ == -1) return 0;
+        return node->requiredMsb != currentMsb_ ? cost : 0;
+    }
+    // A non-WMMA pick that switches the MSB bank must fit, switch included, in the free shadow
+    // of the queued WMMAs; otherwise it waits for a later window. Out of a window, or with no
+    // WMMA left to open one, it may go.
+    bool msbSwitchOverrunsWindow(const DAGNode* node, int wait) const {
+        const int sw = msbSwitchCycles(node);
+        if (sw == 0 || coIssueCyclePos_ >= activeWmmaLatency_ || wmmaQueue.empty()) return false;
+        return sw + nonWmmaPickCycles(*node->inst, wait) > freeCoIssueSpace();
+    }
 
     // Region ds_read totals: the relief paces against cumulative progress, so it needs the
     // region's totals as well as what has issued so far.
@@ -1319,6 +1334,7 @@ int CDNA5ReadyQueue::nonWmmaPickCycles(const StinkyInstruction& inst, int wait) 
 // result latency (latencyCycles); VALU/transcendentals use co-issue-aware issue
 // progress; others use issueCycles.
 void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
+    if (const int sw = msbSwitchCycles(node)) advanceTime(sw, TimeKind::Issue);
     int cycles = nonWmmaIssueCycles(*node->inst);
     TimeKind kind = TimeKind::Issue;
     if (isBarrier(*node->inst)) {
@@ -1617,6 +1633,7 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
         if (wait > 0 && (!allowHiddenStall || coIssueSpace <= 0 || wait > coIssueSpace ||
                          destOverlapsActiveWmmaSrc(n)))
             continue;
+        if (msbSwitchOverrunsWindow(n, wait)) continue;
         const int elapse = nodeElapseKey(n);
         // MSB bank affinity: a tiebreak BELOW the free/hazard tier and ABOVE elapse
         // — prefer a same-bank candidate to avoid an s_set_vgpr_msb switch. Inert
@@ -1680,6 +1697,8 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     }
     if (shortfall > 0) pendingFillerVNops_ = shortfall;
 
+    // The s_set_vgpr_msb ahead of a bank switch issues first, inside any wait for queue room.
+    if (const int sw = msbSwitchCycles(node)) advanceTime(sw, TimeKind::Issue);
     // Wait until the queue has room (depth 1: until the previous WMMA finished). The
     // queue never waits for a window end while it has room.
     while (outstandingWmmas() >= wmmaQueueDepth())
@@ -1760,6 +1779,14 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // everything else unless/until decidePromote() forces it.
     auto consider = [&](DAGNode* cand, int candKind, int candWait) {
         if (!cand || barrierSpanHolds(cand)) return;
+        // A ds credit wait is charged to the ds budget, not the timeline.
+        if (msbSwitchOverrunsWindow(cand, candKind == kLocalRead ? 0 : candWait)) {
+            PASS_DEBUG(std::cerr << "[CDNA5 msbSwitch] held dagId=" << cand->id
+                                 << " msb=" << cand->requiredMsb << " currentMsb=" << currentMsb_
+                                 << " switch=" << msbSwitchCycles(cand)
+                                 << " space=" << freeCoIssueSpace() << "\n");
+            return;
+        }
         const int availabilityRank = candWait == 0 ? 0 : (candKind == kLocalRead ? 1 : 2);
         const int kindRank = (candKind == kGlobalRead) ? 0 : 1;
         if (considerBest(cand, std::make_tuple(availabilityRank, kindRank, (int)cand->id), best,
@@ -2670,7 +2697,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         const bool pickGivesWay =
             hasPickableNonWmma &&
             (getPassContext().getPassFeatureConfig().dagFeatures.wmmaRefillOnQueueDrain
-                 ? queuedCoverCycles() - nonWmmaPickCycles(*smallestPickable->inst, pickWait) <= 0
+                 ? queuedCoverCycles() - nonWmmaPickCycles(*smallestPickable->inst, pickWait) -
+                           msbSwitchCycles(smallestPickable) <=
+                       0
                  : pickWait > 0);
         // After a forced burst the modeled cover runs ahead of the hardware: once the calibrated
         // cover cannot take one more pick before this WMMA, the WMMA goes first, as in the burst.
@@ -2763,8 +2792,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             int pickWait = 0;
             if (findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind, &pickWait)) {
                 PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase C picked non-WMMA dagId="
-                                     << smallestPickable->id << " kind=" << pickKind
-                                     << " wait=" << pickWait << "\n");
+                                     << smallestPickable->id << " kind=" << pickKind << " wait="
+                                     << pickWait << " msb=" << smallestPickable->requiredMsb
+                                     << " currentMsb=" << currentMsb_ << "\n");
                 // A ds credit wait consumes only its independent scheduling
                 // budget. RAW/hazard waits remain genuine elapsed stalls.
                 if (pickWait > 0) {

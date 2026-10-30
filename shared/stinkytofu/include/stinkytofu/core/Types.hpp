@@ -170,6 +170,12 @@ struct PassFeatureConfig {
         /// queue depth). The windows the ds_loads in front of a barrier need are at least
         /// loads * cycles / WMMA window. 0 = off (the even-spread density only).
         int dsReadCyclesPerLoad = 0;
+        /// Issue cycles of the s_set_vgpr_msb InsertVgprMsbPass puts in front of a pick whose
+        /// VGPR MSB group differs from the previous pick's. The switch is charged to the
+        /// timeline, and a non-WMMA pick that switches groups is left for a later window when
+        /// the switch plus its own issue would run past the queued WMMA cover. 0 = off.
+        /// Mirrors ModuleOptions::VgprMsbSwitchCycles.
+        int vgprMsbSwitchCycles = 0;
         /// ds_loads a WMMA batch (dsBatchWmmas WMMAs) may take above the region's even share when
         /// the batch began behind the even line (a dependency delayed its loads), so the region
         /// closes the gap gradually. 0 = no catching up.

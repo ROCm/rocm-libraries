@@ -2481,6 +2481,59 @@ TEST_F(DAGSchedulerPassTest, WmmaQueue_OffIsTheOriginalSchedule) {
     EXPECT_NE(shapes[0].substr(0, 2), "WW") << shapes[0];
 }
 
+// VgprMsbSwitchCycles: the WMMAs and the 'd' ds_loads share VGPR bank 0 (MSB 0); the 'D'
+// ds_loads write bank 2, so InsertVgprMsbPass puts an s_set_vgpr_msb in front of each switch.
+// Off, the first WMMA window takes d d D d. With 3 cycles per switch the window still takes
+// d d D, but switching back for the next d (3 + its issue) no longer fits in the cover left, so
+// it waits for the next WMMA. With a switch longer than any window, no D goes between WMMAs
+// while one is left, and the same-group d ds_loads still fill the windows.
+TEST_F(DAGSchedulerPassTest, VgprMsbSwitch_GroupSwitchMustFitTheWindow) {
+    const int costs[3] = {0, 3, 1000};
+    std::string shapes[3];
+    for (int v = 0; v < 3; ++v) {
+        SetUp();
+        bb->addSuccessor(bb);
+        for (int i = 0; i < 8; i++)
+            createMovableDsLoad((i % 3 == 2 ? 600 : 200) + i * 4, /*addrReg=*/80, i + 1);
+        for (int i = 0; i < 8; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+        createSCmpWritingScc(bb, /*srcSgpr=*/90);
+        createSCbranchReadingScc(bb);
+        const int beforeCount = countStinkyInstructions(*bb);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.wmmaQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.vgprMsbSwitchCycles = costs[v];
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        ASSERT_EQ(countStinkyInstructions(*bb), beforeCount);
+        for (const IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const auto* inst = cast<StinkyInstruction>(&ir);
+            const HwInstDesc* hw = inst->getHwInstDesc();
+            if (!hw || !hw->mnemonic) continue;
+            const std::string m = hw->mnemonic;
+            if (m.find("wmma") != std::string::npos)
+                shapes[v] += 'W';
+            else if (m.find("ds_load") == 0)
+                shapes[v] += inst->getDestRegs()[0].reg.idx >= 512 ? 'D' : 'd';
+        }
+    }
+    auto firstWindow = [](const std::string& s) {
+        const size_t second = s.find('W', 1);
+        return s.substr(1, second == std::string::npos ? std::string::npos : second - 1);
+    };
+    EXPECT_EQ(shapes[0][0], 'W') << shapes[0];
+    EXPECT_EQ(firstWindow(shapes[0]), "ddDd") << shapes[0];
+    EXPECT_EQ(firstWindow(shapes[1]), "ddD") << shapes[1];
+    const size_t lastWmma = shapes[2].rfind('W');
+    EXPECT_LT(lastWmma, shapes[2].find('D')) << shapes[2];
+    EXPECT_EQ(firstWindow(shapes[2]), "dd") << shapes[2];
+}
+
 // A long queue run (more than 64 cycles of pipe window) keeps every instruction and
 // issues all WMMAs: exercises the window compaction.
 TEST_F(DAGSchedulerPassTest, WmmaQueue_LongRunKeepsEveryInstruction) {
