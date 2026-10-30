@@ -10,12 +10,22 @@
 # first build of BUILDS prints, and in each build of MEMO_BUILDS the re-rank
 # memo must answer TensileLite's re-rank (rerank_check) and scenario S06 of
 # memo_check, the same pair of rankings, for some shape of some model, so that
-# the comparison reaches the memo. Without a materialized shipped model the
-# entry is skipped. Each run's output is kept in OUT.
+# the comparison reaches the memo. With VETO_MODELS (tests/veto_models.cpp),
+# copies of the models the alignment veto can serve, each without the veto
+# and with the veto of the gfx950 recipes (K above 512, 128-byte lines)
+# whether or not it ships with one, rank bf16 problems of the two layouts the
+# veto applies to (A and B transposed, and neither) with the sample kernels
+# and their siblings whose cache hint on A or on B is the non-temporal one,
+# and the same holds of the copies with the veto: equal hashes in every
+# build, memo answers in each memo build, and, so that the comparison
+# reaches the veto, hashes of some copy that differ from those of the copy
+# without it in the first build.
+# Without a materialized shipped model the entry is skipped. Each run's output
+# is kept in OUT.
 #
 #   cmake -DWEIGHTS=DIR -DKERNELS=FILE -DSHAPES=FILE -DOUT=DIR -DBUILDS=a,b,...
 #         -DMEMO_BUILDS=b,... -Drerank_check_<build>=EXE -Dmemo_check_<build>=EXE ...
-#         -P levers_parity.cmake
+#         [-DVETO_MODELS=EXE] -P levers_parity.cmake
 
 cmake_minimum_required(VERSION 3.25.2)
 
@@ -150,6 +160,168 @@ foreach(_build IN LISTS _memo_builds)
         endif()
     endforeach()
 endforeach()
+# The hashes of one tool's output: without its timings and the memo's counts.
+function(_tw_hashes out text)
+    string(REGEX REPLACE "SECOND_P50_US [^\n]*\n" "" _h "${text}")
+    string(REGEX REPLACE " second_p50_us [^ \n]*" "" _h "${_h}")
+    string(REGEX REPLACE "# memo replays[^\n]*\n" "" _h "${_h}")
+    set(${out} "${_h}" PARENT_SCOPE)
+endfunction()
+
+set(_veto_summary "")
+if(DEFINED VETO_MODELS)
+    execute_process(
+        COMMAND "${VETO_MODELS}" "${OUT}/veto" 512 1024 ${_models}
+        OUTPUT_VARIABLE _copies
+        ERROR_VARIABLE _err
+        RESULT_VARIABLE _rc
+    )
+    if(NOT _rc EQUAL 0)
+        message(FATAL_ERROR "the alignment veto's copies: exit ${_rc}\n${_err}")
+    endif()
+    # The sample kernels, then each with the non-temporal hint on A, then on B.
+    set(_hinted_lines)
+    foreach(_hints "a" "b")
+        foreach(_line IN LISTS _kernels)
+            separate_arguments(_fields UNIX_COMMAND "${_line}")
+            list(REMOVE_AT _fields 7 8)
+            if(_hints STREQUAL "a")
+                list(INSERT _fields 7 4 0)
+            else()
+                list(INSERT _fields 7 0 4)
+            endif()
+            string(JOIN " " _joined ${_fields})
+            list(APPEND _hinted_lines "${_joined}")
+        endforeach()
+    endforeach()
+    list(LENGTH _hinted_lines _n_hinted)
+    math(EXPR _n_veto_kernels "${_n_kernels} + ${_n_hinted}")
+    string(JOIN "\n" _hinted_text ${_hinted_lines})
+    foreach(_layout tt nn)
+        if(_layout STREQUAL "tt")
+            set(_transposes "0 0")
+        else()
+            set(_transposes "1 1")
+        endif()
+        file(WRITE "${OUT}/inputs_veto_${_layout}.txt"
+             "PROBLEM 7 7 7 7 7 ${_transposes}\nHARDWARE 128 65536 4194304\n"
+             "SHAPES ${_n_shapes}\n${_shape_lines}\nCONFIGS ${_n_veto_kernels}\n"
+             "${_kernel_lines}\n${_hinted_text}\n"
+        )
+    endforeach()
+    foreach(_build IN LISTS _memo_builds)
+        foreach(_check rerank_check memo_check)
+            set(_veto_answered_${_check}_${_build} 0)
+        endforeach()
+    endforeach()
+    string(REGEX MATCHALL "copy [^\n]+" _pairs "${_copies}")
+    list(LENGTH _pairs _n_copies)
+    set(_veto_changed 0)
+    foreach(_pair IN LISTS _pairs)
+        separate_arguments(_pp UNIX_COMMAND "${_pair}")
+        list(GET _pp 1 _original)
+        list(GET _pp 2 _copy)
+        get_filename_component(_name "${_copy}" NAME)
+        string(REPLACE ".tilewright.bin" "" _stem "${_name}")
+        set(_summary "${_stem} with the veto:")
+        foreach(_layout tt nn)
+            set(_veto_inputs "${OUT}/inputs_veto_${_layout}.txt")
+            foreach(_check rerank_check memo_check)
+                string(APPEND _summary " ${_layout} ${_check}")
+                foreach(_build IN LISTS _builds)
+                    execute_process(
+                        COMMAND "${${_check}_${_build}}" "${_copy}" "${_veto_inputs}"
+                        OUTPUT_VARIABLE _out
+                        ERROR_VARIABLE _err
+                        RESULT_VARIABLE _rc
+                    )
+                    file(WRITE "${OUT}/${_stem}.veto.${_layout}.${_check}.${_build}.txt" "${_out}")
+                    if(NOT _rc EQUAL 0)
+                        message(FATAL_ERROR "${_check} (${_build}) on ${_name} with the veto, "
+                                            "${_layout}: exit ${_rc}\n${_err}"
+                        )
+                    endif()
+                    _tw_hashes(_hashes "${_out}")
+                    string(REGEX MATCH "# memo replays[^\n]*" _replays "${_out}")
+                    if(_build STREQUAL _reference)
+                        set(_want "${_hashes}")
+                        # The copy without the veto, in the first build.
+                        execute_process(
+                            COMMAND "${${_check}_${_build}}" "${_original}" "${_veto_inputs}"
+                            OUTPUT_VARIABLE _plain
+                            RESULT_VARIABLE _rc
+                        )
+                        if(NOT _rc EQUAL 0)
+                            message(FATAL_ERROR "${_check} (${_build}) on ${_original}, ${_layout}: "
+                                                "exit ${_rc}"
+                            )
+                        endif()
+                        _tw_hashes(_plain_hashes "${_plain}")
+                        if(NOT _plain_hashes STREQUAL _want)
+                            math(EXPR _veto_changed "${_veto_changed} + 1")
+                        endif()
+                    elseif(NOT _hashes STREQUAL _want)
+                        message(
+                            SEND_ERROR
+                                "${_check} on ${_name} with the veto (${_layout}): the ${_build} "
+                                "build's hashes differ from the ${_reference} build's\n"
+                                "${_reference}:\n${_want}\n${_build}:\n${_hashes}"
+                        )
+                        math(EXPR _failures "${_failures} + 1")
+                    endif()
+                    if(NOT _build IN_LIST _memo_builds)
+                        if(_replays)
+                            message(SEND_ERROR "${_check} (${_build}) counts memo answers without the memo")
+                            math(EXPR _failures "${_failures} + 1")
+                        endif()
+                        continue()
+                    endif()
+                    if(_check STREQUAL "rerank_check")
+                        string(REGEX MATCH "^# memo replays ([0-9]+)" _match "${_replays}")
+                    else()
+                        string(REGEX MATCH " S06 ([0-9]+)" _match "${_replays}")
+                    endif()
+                    if(NOT _match)
+                        message(FATAL_ERROR "${_check} (${_build}) on ${_name} printed no memo count")
+                    endif()
+                    math(EXPR _veto_answered_${_check}_${_build}
+                         "${_veto_answered_${_check}_${_build}} + ${CMAKE_MATCH_1}"
+                    )
+                    string(APPEND _summary " ${_build} ${CMAKE_MATCH_1}")
+                endforeach()
+            endforeach()
+        endforeach()
+        message(STATUS "${_summary} (re-ranks the memo answered, of ${_n_shapes})")
+    endforeach()
+    if(_n_copies EQUAL 0)
+        message(SEND_ERROR "no shipped model can be served with the alignment veto")
+        math(EXPR _failures "${_failures} + 1")
+    endif()
+    if(_veto_changed EQUAL 0)
+        message(
+            SEND_ERROR
+                "the alignment veto changed no hash of any copy, so the comparison does not reach it"
+        )
+        math(EXPR _failures "${_failures} + 1")
+    endif()
+    foreach(_build IN LISTS _memo_builds)
+        foreach(_check rerank_check memo_check)
+            if(_veto_answered_${_check}_${_build} EQUAL 0)
+                message(
+                    SEND_ERROR
+                        "${_check} (${_build}): the memo answered no re-rank of any copy with the "
+                        "alignment veto, so the comparison does not reach it"
+                )
+                math(EXPR _failures "${_failures} + 1")
+            endif()
+        endforeach()
+    endforeach()
+    string(CONCAT _veto_summary
+                  ", and so do ${_n_copies} copies with the alignment veto on TT and NN "
+                  "problems (the veto changed the hashes of ${_veto_changed} runs)"
+    )
+endif()
+
 list(LENGTH _models _n_models)
 list(LENGTH _builds _n_builds)
 if(_failures GREATER 0)
@@ -158,5 +330,5 @@ endif()
 message(
     STATUS
         "levers parity: ${_n_models} models, ${_n_shapes} shapes, ${_n_kernels} kernels: "
-        "rerank_check and memo_check hash alike in ${_n_builds} builds (${BUILDS})"
+        "rerank_check and memo_check hash alike in ${_n_builds} builds (${BUILDS})${_veto_summary}"
 )

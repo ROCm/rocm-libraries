@@ -15,6 +15,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <set>
@@ -205,6 +206,11 @@ TEST_CASE("shipped models load, route and rank", "[real]") {
     CHECK(info.feature_catalog_hash ==
           tw::feature_catalog_hashes().at(static_cast<std::size_t>(info.format_version - 2)));
     CHECK(info.n_cells > 0);
+    // A model that declares the alignment veto is one the veto can serve.
+    if (info.alignment_veto.on) {
+      CHECK(info.format_version == 3);
+      CHECK_FALSE(info.non_temporal_rule);
+    }
 
     const tw::PoolOptions options = shipped_options(*model);
     const tw::CandidateSet real(model, real_pool, options);
@@ -244,6 +250,91 @@ TEST_CASE("shipped models load, route and rank", "[real]") {
     CHECK(routed > 0);
     CHECK(scored > 0);
   }
+}
+
+TEST_CASE("shipped models given the alignment veto rank as without the kernels it names",
+          "[real]") {
+  std::size_t pointers               = 0;
+  const std::vector<fs::path> models = shipped_models(&pointers);
+  if (models.empty()) SKIP("no materialized shipped models under " TILEWRIGHT_TEST_WEIGHTS_DIR);
+  // The synthetic pool with each kernel's non-temporal B sibling as well.
+  std::vector<tw::Config> pool = synthetic_pool();
+  for (std::size_t i = 0, n = pool.size(); i < n; ++i)
+    if (pool[i].cache_hints_a == 0) {
+      tw::Config c    = pool[i];
+      c.cache_hints_b = 4;
+      pool.push_back(c);
+    }
+  for (std::size_t i = 0; i < pool.size(); ++i) pool[i].index = i;
+  const tw::Hardware hw{128, 65536, 4u << 20};
+  std::size_t flagged = 0, changed = 0;
+  for (const fs::path& path : models) {
+    INFO(path.string());
+    std::ifstream in(path, std::ios::binary);
+    const std::vector<unsigned char> shipped((std::istreambuf_iterator<char>(in)),
+                                             std::istreambuf_iterator<char>());
+    // The model without the veto, whether or not it ships with one.
+    const std::vector<unsigned char> stripped = without_alignment_veto(shipped);
+    const std::vector<unsigned char>& bytes   = stripped.empty() ? shipped : stripped;
+    std::string err;
+    const tw::ModelPtr plain = tw::load_model_from_memory(bytes.data(), bytes.size(), &err);
+    INFO(err);
+    REQUIRE(plain);
+    const tw::ModelInfo info = tw::describe(*plain);
+    REQUIRE_FALSE(info.alignment_veto.on);
+    if (bytes.size() != shipped.size()) {
+      // A model shipped with the veto is the model without it, the veto added.
+      const tw::ModelPtr as_shipped =
+          tw::load_model_from_memory(shipped.data(), shipped.size(), &err);
+      REQUIRE(as_shipped);
+      const tw::AlignmentVeto v = tw::describe(*as_shipped).alignment_veto;
+      REQUIRE(v.on);
+      CHECK(with_alignment_veto(bytes, v.k_min, v.align_bits) == shipped);
+    }
+    const std::vector<unsigned char> veto = with_alignment_veto(bytes, 512, 1024);
+    if (info.format_version < 3) {
+      CHECK(veto.empty());
+      continue;
+    }
+    REQUIRE_FALSE(veto.empty());
+    const tw::ModelPtr with = tw::load_model_from_memory(veto.data(), veto.size(), &err);
+    if (info.non_temporal_rule) {
+      // The veto is never served with the non-temporal rule.
+      CHECK_FALSE(with);
+      continue;
+    }
+    INFO(err);
+    REQUIRE(with);
+    REQUIRE(tw::describe(*with).alignment_veto.on);
+    ++flagged;
+    const tw::PoolOptions options = shipped_options(*plain);
+    const tw::CandidateSet set(with, pool, options);
+    for (const tw::Transpose ta : {tw::Transpose::T, tw::Transpose::N})
+      for (const tw::Transpose tb : {tw::Transpose::T, tw::Transpose::N})
+        for (std::size_t m : {64, 4096})
+          for (std::size_t k : {1000, 1024, 4100})
+            for (std::size_t min_scored : {std::size_t{1}, std::size_t{1000}}) {
+              const tw::Problem p = make_problem(m, 9000, k, 1, tw::DataType::BFloat16, ta, tb);
+              INFO("m " << m << " k " << k << " layout " << static_cast<int>(ta)
+                        << static_cast<int>(tb) << " min_scored " << min_scored);
+              const std::vector<tw::Result> got =
+                  tw::rank_configs(*with, p, hw, tw::ExecutionContext{}, pool, options, min_scored);
+              const std::vector<tw::Result> want =
+                  expected_with_veto(p, pool, [&](const std::vector<tw::Config>& configs) {
+                    return tw::rank_configs(
+                        *plain, p, hw, tw::ExecutionContext{}, configs, options, min_scored);
+                  });
+              CHECK(same_results(got, want));
+              CHECK(same_results(set.rank(p, hw, tw::ExecutionContext{}, min_scored), got));
+              if (!same_results(
+                      got,
+                      tw::rank_configs(
+                          *plain, p, hw, tw::ExecutionContext{}, pool, options, min_scored)))
+                ++changed;
+            }
+  }
+  if (flagged == 0) SKIP("no shipped model is served without the non-temporal rule");
+  CHECK(changed > 0);
 }
 
 TEST_CASE("shipped models rank repeated kernels like kernels scored one by one", "[real]") {

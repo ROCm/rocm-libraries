@@ -175,14 +175,16 @@ inline bool in_family_region(std::uint64_t m,
 // The feasibility rules for one problem and device, with the values that
 // depend only on them computed once. `nt_a_available` / `nt_b_available`: the
 // candidate pool contains a kernel with cache_hints_a / cache_hints_b == 4.
-// The LDS fit always applies; `soft` selects the others.
+// The LDS fit always applies; `soft` selects the others, and `veto` is the
+// model's alignment veto, a serving rule for rankings only.
 class Feasibility {
  public:
   Feasibility(const Problem& p,
               const Hardware& hardware,
               bool nt_a_available,
               bool nt_b_available,
-              const SoftRules& soft = SoftRules{});
+              const SoftRules& soft     = SoftRules{},
+              const AlignmentVeto& veto = AlignmentVeto{});
 
   // Validity: the tile's A and B slices fit in LDS. A kernel whose LDS
   // allocation exceeds the device's cannot launch, and TensileLite rejects
@@ -204,15 +206,24 @@ class Feasibility {
     if (small_batched_ && (k.mt_m < M_ || k.mt_n < N_)) return false;
     // Soft: Dot2 kernels serve only M < 3.
     if (dot2_rule_ && k.dot2 && M_ > 2) return false;
+    const unsigned hints = hint_class(k.cache_hints_a, k.cache_hints_b);
+    if (vetoed(hints)) return false;
     // Soft: on 128-byte-aligned K a skinny problem requires the matching
     // operand's non-temporal variant when the pool has one, and every other
     // aligned problem rejects hinted kernels.
-    return non_temporal_rule(tile_aligned(k.mt_k % 1024),
-                             b_branch(k.mt_m),
-                             a_branch(k.mt_n),
-                             hint_class(k.cache_hints_a, k.cache_hints_b),
-                             k.family);
+    return non_temporal_rule(
+        tile_aligned(k.mt_k % 1024), b_branch(k.mt_m), a_branch(k.mt_n), hints, k.family);
   }
+
+  // Whether the alignment veto applies to this problem, and whether it
+  // rejects a kernel of hint_class `hints`: one whose cache hint on the
+  // operand the veto reads is the non-temporal one.
+  bool vetoes() const { return veto_ != 0; }
+  bool vetoed(unsigned hints) const { return (hints & veto_) != 0; }
+
+  // The rules without the alignment veto, for a ranking it would leave
+  // without a kernel to rank.
+  void drop_veto() { veto_ = 0; }
 
   // The non-temporal rule from its tests of a kernel: whether its tile keeps
   // K aligned (tile_aligned), whether the B and A branches apply, its
@@ -287,6 +298,9 @@ class Feasibility {
   static bool at_most_twice(std::uint64_t v, std::uint64_t t) { return (v >> 1) + (v & 1) <= t; }
 
   std::uint64_t M_ = 0, N_ = 0, a_bits_ = 0;
+  // The hint_class bit of the kernels the alignment veto rejects: 2 (A's
+  // cache hint), 4 (B's), or 0 where the veto does not apply.
+  unsigned veto_  = 0;
   double bytes_a_ = 0.0, bytes_b_ = 0.0, lds_capacity_ = 0.0;
   bool lds_valid_ = false, small_batched_ = false, dot2_rule_ = true, leading_free_a_ = false,
        leading_free_b_ = false, non_temporal_rule_ = true, k_aligned_ = false, skinny_a_ = false,

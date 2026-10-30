@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "features.hpp"
 #include "kernels.hpp"
 #include "model_writer.hpp"
 #include "test_util.hpp"
@@ -966,4 +967,274 @@ TEST_CASE("features use the model's arch constants and the documented formulas",
   const tw::ModelPtr slow = load_spec(spec);
   CHECK(tw::compute_features(*slow, make_problem(1024, 2000, 3000), c, hw).interaction[33] ==
         16.0f);
+}
+
+namespace {
+
+// The alignment veto of the gfx950 recipes: K above 512, 128-byte lines.
+constexpr std::uint32_t kAlignmentVeto      = 0x200;
+constexpr std::uint32_t kVetoTrainedKeyGate = 0x80;
+constexpr std::uint32_t kVetoNoWhitelist    = 0x08;
+
+ModelSpec with_veto(ModelSpec spec) {
+  spec.v3_serving_flags |= kAlignmentVeto;
+  spec.veto_k_min      = 512;
+  spec.veto_align_bits = 1024;
+  return spec;
+}
+
+// Four tiles, each with its hint-free sibling, the non-temporal one of A, of
+// B and of both, and one with a temporal hint on A.
+std::vector<tw::Config> sibling_pool() {
+  std::vector<tw::Config> pool;
+  for (const std::array<std::size_t, 3>& t : {std::array<std::size_t, 3>{64, 64, 32},
+                                              std::array<std::size_t, 3>{128, 64, 64},
+                                              std::array<std::size_t, 3>{64, 256, 32},
+                                              std::array<std::size_t, 3>{32, 32, 64}})
+    for (const std::array<int, 2>& h : {std::array<int, 2>{0, 0},
+                                        std::array<int, 2>{4, 0},
+                                        std::array<int, 2>{0, 4},
+                                        std::array<int, 2>{4, 4},
+                                        std::array<int, 2>{1, 0}}) {
+      tw::Config c = make_config(t[0], t[1], t[2], 16, 16, 32, h[0], h[1]);
+      c.index      = pool.size();
+      pool.push_back(c);
+    }
+  return pool;
+}
+
+// The problems of the veto's tests: every layout, bf16, f32 and f8 data, and
+// K below, at and above 512, aligned or not to 128 bytes in each width.
+std::vector<tw::Problem> veto_problems() {
+  std::vector<tw::Problem> out;
+  for (const tw::Transpose ta : {tw::Transpose::T, tw::Transpose::N})
+    for (const tw::Transpose tb : {tw::Transpose::T, tw::Transpose::N})
+      for (const tw::DataType dt :
+           {tw::DataType::BFloat16, tw::DataType::Float, tw::DataType::Float8})
+        for (const std::size_t k : {512, 513, 576, 640, 1000, 1024, 4096, 4100})
+          for (const std::array<std::size_t, 3>& mnb :
+               {std::array<std::size_t, 3>{4096, 4096, 1}, std::array<std::size_t, 3>{24, 3000, 4}})
+            out.push_back(make_problem(mnb[0], mnb[1], k, mnb[2], dt, ta, tb));
+  return out;
+}
+
+std::uint64_t signature_hash(const tw::Config& c) {
+  const std::uint64_t key[8] = {
+      c.mt.m,
+      c.mt.n,
+      c.mt.k,
+      c.mi.m,
+      c.mi.n,
+      c.mi.k,
+      static_cast<std::uint64_t>(static_cast<std::int64_t>(c.cache_hints_a)),
+      static_cast<std::uint64_t>(static_cast<std::int64_t>(c.cache_hints_b))};
+  return tw::detail::view_key_hash(key, 8);
+}
+
+// What a model with the gfx950 veto must rank, from `plain`, the same model
+// without it (expected_with_veto).
+std::vector<tw::Result> ranked_with_veto(const tw::Model& plain,
+                                         const tw::Problem& p,
+                                         const std::vector<tw::Config>& pool,
+                                         std::size_t min_scored) {
+  return expected_with_veto(p, pool, [&](const std::vector<tw::Config>& configs) {
+    return tw::rank_configs(plain, p, test_hardware(), configs, min_scored);
+  });
+}
+
+// `spec` with every cell's whitelist the signatures of the configs of `pool`
+// that `keep` accepts.
+template <class Keep>
+ModelSpec whitelisting(ModelSpec spec, const std::vector<tw::Config>& pool, Keep keep) {
+  std::vector<Signature> signatures;
+  for (const tw::Config& c : pool)
+    if (keep(c)) signatures.push_back(sig(c));
+  std::sort(signatures.begin(), signatures.end());
+  for (CellSpec& cell : spec.cells) cell.signatures = signatures;
+  return spec;
+}
+
+}  // namespace
+
+TEST_CASE("alignment veto: the vetoed ranking is the ranking without the vetoed kernels",
+          "[rank][veto]") {
+  const std::vector<tw::Config> pool = sibling_pool();
+  const tw::Hardware& hw             = test_hardware();
+  const ModelSpec open               = as_v3(grid_model());
+  const auto two_tiles = [](const tw::Config& c) { return c.mt.n == 64 && c.mt.k == 32; };
+  // Without a whitelist tier, and with one holding every sibling of one tile.
+  for (const ModelSpec& plain : {open, whitelisting(open, pool, two_tiles)}) {
+    const tw::ModelPtr without = load_spec(plain), with = load_spec(with_veto(plain));
+    CHECK_FALSE(tw::describe(*without).alignment_veto.on);
+    REQUIRE(tw::describe(*with).alignment_veto.on);
+    std::size_t applied = 0, changed = 0;
+    for (const tw::Problem& p : veto_problems())
+      for (const std::size_t min_scored : {std::size_t{0}, std::size_t{1}, pool.size()}) {
+        INFO("m " << p.size.m << " n " << p.size.n << " k " << p.size.k << " layout "
+                  << static_cast<int>(p.a_transpose) << static_cast<int>(p.b_transpose) << " dtype "
+                  << static_cast<int>(p.a_dtype) << " min_scored " << min_scored);
+        const std::vector<tw::Result> base = tw::rank_configs(*without, p, hw, pool, min_scored);
+        const std::vector<tw::Result> got  = tw::rank_configs(*with, p, hw, pool, min_scored);
+        check_structure(got, pool.size());
+        std::vector<tw::Result> removed;
+        for (const tw::Result& r : base)
+          if (r.scored && !vetoed(p, pool[r.config_index])) removed.push_back(r);
+        CHECK(same_results(scored_prefix(got, pool.size()), removed));
+        for (const tw::Result& r : got)
+          if (r.scored) CHECK_FALSE(vetoed(p, pool[r.config_index]));
+        if (veto_applies(p)) ++applied;
+        if (!same_results(got, base)) ++changed;
+        const tw::CandidateSet set(with, pool);
+        CHECK(same_results(set.rank(p, hw, min_scored), got));
+        CHECK(same_results(set.rank_top(p, hw, tw::ExecutionContext{}, 1), scored_prefix(got, 1)));
+      }
+    CHECK(applied > 0);
+    CHECK(changed > 0);
+  }
+}
+
+TEST_CASE("alignment veto: it applies to TT and NN at unaligned K above 512 only", "[rank][veto]") {
+  const std::vector<tw::Config> pool = sibling_pool();
+  const tw::ModelPtr with            = load_spec(with_veto(as_v3(grid_model())));
+  const tw::Hardware& hw             = test_hardware();
+  // K at which the veto applies, per data type, for TT and NN.
+  const std::vector<std::size_t> bf16 = {513, 1000, 4100}, f32 = {513, 1000, 4100},
+                                 f8 = {513, 576, 1000, 4100};
+  for (const tw::Problem& p : veto_problems()) {
+    const std::vector<std::size_t>& in_scope = p.a_dtype == tw::DataType::Float    ? f32
+                                               : p.a_dtype == tw::DataType::Float8 ? f8
+                                                                                   : bf16;
+    const bool one_contiguous =
+        (p.a_transpose == tw::Transpose::T) == (p.b_transpose == tw::Transpose::T);
+    const bool applies =
+        one_contiguous && std::find(in_scope.begin(), in_scope.end(), p.size.k) != in_scope.end();
+    INFO("k " << p.size.k << " layout " << static_cast<int>(p.a_transpose)
+              << static_cast<int>(p.b_transpose) << " dtype " << static_cast<int>(p.a_dtype));
+    REQUIRE(veto_applies(p) == applies);
+    const std::vector<std::size_t> scored =
+        scored_indices(tw::rank_configs(*with, p, hw, pool, pool.size()));
+    bool any_nt_a = false, any_nt_b = false;
+    for (const std::size_t i : scored) {
+      any_nt_a = any_nt_a || pool[i].cache_hints_a == 4;
+      any_nt_b = any_nt_b || pool[i].cache_hints_b == 4;
+    }
+    const bool tt = p.a_transpose == tw::Transpose::T && p.b_transpose == tw::Transpose::T;
+    const bool nn = p.a_transpose == tw::Transpose::N && p.b_transpose == tw::Transpose::N;
+    CHECK(any_nt_a == !(applies && tt));
+    CHECK(any_nt_b == !(applies && nn));
+  }
+}
+
+TEST_CASE("alignment veto: it reads the width of the operand it applies to", "[rank][veto]") {
+  // Operands of different widths: at K 576 the 8-bit operand's elements fill
+  // no whole 128-byte line and the 16-bit one's do, so the veto applies only
+  // where the K-contiguous operand (A in TT, B in NN) is the 8-bit one.
+  const std::vector<tw::Config> pool = sibling_pool();
+  const ModelSpec open               = as_v3(grid_model());
+  const tw::ModelPtr without = load_spec(open), with = load_spec(with_veto(open));
+  const tw::Hardware& hw = test_hardware();
+  struct Case {
+    tw::Transpose ta, tb;
+    tw::DataType a, b;
+    bool applies;
+  };
+  const tw::Transpose T = tw::Transpose::T, N = tw::Transpose::N;
+  const tw::DataType f8 = tw::DataType::Float8, bf16 = tw::DataType::BFloat16;
+  for (const Case& c : {Case{T, T, f8, bf16, true},
+                        Case{T, T, bf16, f8, false},
+                        Case{N, N, bf16, f8, true},
+                        Case{N, N, f8, bf16, false}}) {
+    tw::Problem p = make_problem(4096, 4096, 576, 1, c.a, c.ta, c.tb);
+    p.b_dtype     = c.b;
+    INFO("layout " << static_cast<int>(c.ta) << static_cast<int>(c.tb) << " a "
+                   << static_cast<int>(c.a) << " b " << static_cast<int>(c.b));
+    REQUIRE(veto_applies(p) == c.applies);
+    for (const std::size_t min_scored : {std::size_t{1}, pool.size()}) {
+      const std::vector<tw::Result> base = tw::rank_configs(*without, p, hw, pool, min_scored);
+      const std::vector<tw::Result> got  = tw::rank_configs(*with, p, hw, pool, min_scored);
+      check_structure(got, pool.size());
+      CHECK(same_results(got, ranked_with_veto(*without, p, pool, min_scored)));
+      CHECK(same_results(got, base) == !c.applies);
+      for (const tw::Result& r : got)
+        if (r.scored) CHECK_FALSE(vetoed(p, pool[r.config_index]));
+    }
+  }
+}
+
+TEST_CASE("alignment veto: whitelists, the cascade and the trained-key gate rank the rest",
+          "[rank][veto]") {
+  const std::vector<tw::Config> pool = sibling_pool();
+  const tw::Hardware& hw             = test_hardware();
+  const ModelSpec open               = as_v3(grid_model());
+  std::vector<std::uint64_t> nt_a_keys;
+  for (const tw::Config& c : pool)
+    if (c.cache_hints_a == 4) nt_a_keys.push_back(signature_hash(c));
+  std::sort(nt_a_keys.begin(), nt_a_keys.end());
+  ModelSpec cascade                  = open;
+  cascade.v3_cascade_keys            = 3;
+  ModelSpec gate                     = open;
+  gate.v3_serving_flags              = kVetoTrainedKeyGate | kVetoNoWhitelist;
+  gate.trained_keys                  = nt_a_keys;
+  ModelSpec gated_cascade            = gate;
+  gated_cascade.v3_cascade_keys      = 2;
+  const std::vector<ModelSpec> specs = {
+      // Whitelists of the kernels the veto names in TT, or in NN, alone: a
+      // problem whose whitelist it empties ranks every other feasible kernel.
+      whitelisting(open, pool, [](const tw::Config& c) { return c.cache_hints_a == 4; }),
+      whitelisting(open, pool, [](const tw::Config& c) { return c.cache_hints_b == 4; }),
+      cascade,
+      whitelisting(cascade, pool, [](const tw::Config& c) { return c.mt.m == 32; }),
+      // Only the kernels the veto names in TT are trained: in TT the untrained
+      // others are ranked, as when no trained kernel is feasible.
+      gate,
+      gated_cascade};
+  for (std::size_t s = 0; s < specs.size(); ++s) {
+    const tw::ModelPtr without = load_spec(specs[s]), with = load_spec(with_veto(specs[s]));
+    std::size_t changed = 0;
+    for (const tw::Problem& p : veto_problems())
+      for (const std::size_t min_scored :
+           {std::size_t{0}, std::size_t{1}, std::size_t{4}, pool.size()}) {
+        INFO("spec " << s << " m " << p.size.m << " k " << p.size.k << " layout "
+                     << static_cast<int>(p.a_transpose) << static_cast<int>(p.b_transpose)
+                     << " dtype " << static_cast<int>(p.a_dtype) << " min_scored " << min_scored);
+        const std::vector<tw::Result> got = tw::rank_configs(*with, p, hw, pool, min_scored);
+        CHECK(same_results(got, ranked_with_veto(*without, p, pool, min_scored)));
+        const tw::CandidateSet lazy(with, pool), ready(with, pool);
+        ready.prepare();
+        CHECK(same_results(lazy.rank(p, hw, min_scored), got));
+        CHECK(same_results(ready.rank(p, hw, min_scored), got));
+        if (!same_results(got, tw::rank_configs(*without, p, hw, pool, min_scored))) ++changed;
+      }
+    CHECK(changed > 0);
+  }
+}
+
+TEST_CASE("alignment veto: a ranking it would empty ranks as without it", "[rank][veto]") {
+  const tw::Hardware& hw = test_hardware();
+  std::vector<tw::Config> nt_a, nt_b;
+  for (const tw::Config& c : sibling_pool()) {
+    if (c.cache_hints_a == 4) nt_a.push_back(c);
+    if (c.cache_hints_b == 4) nt_b.push_back(c);
+  }
+  const ModelSpec open = as_v3(grid_model());
+  for (const ModelSpec& plain :
+       {open, whitelisting(open, nt_a, [](const tw::Config& c) { return c.mt.m == 64; })}) {
+    const tw::ModelPtr without = load_spec(plain), with = load_spec(with_veto(plain));
+    std::size_t emptied = 0;
+    for (const tw::Problem& p : veto_problems())
+      for (const std::vector<tw::Config>* pool : {&nt_a, &nt_b})
+        for (const std::size_t min_scored : {std::size_t{1}, pool->size()}) {
+          INFO("m " << p.size.m << " k " << p.size.k << " layout "
+                    << static_cast<int>(p.a_transpose) << static_cast<int>(p.b_transpose)
+                    << " dtype " << static_cast<int>(p.a_dtype) << " min_scored " << min_scored);
+          bool all = true;
+          for (const tw::Config& c : *pool) all = all && vetoed(p, c);
+          const std::vector<tw::Result> got  = tw::rank_configs(*with, p, hw, *pool, min_scored);
+          const std::vector<tw::Result> base = tw::rank_configs(*without, p, hw, *pool, min_scored);
+          CHECK(same_results(got, all ? base : ranked_with_veto(*without, p, *pool, min_scored)));
+          CHECK(same_results(tw::CandidateSet(with, *pool).rank(p, hw, min_scored), got));
+          if (all && count_scored(got) > 0) ++emptied;
+        }
+    CHECK(emptied > 0);
+  }
 }

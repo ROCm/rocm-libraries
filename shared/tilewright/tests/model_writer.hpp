@@ -97,6 +97,10 @@ struct ModelSpec {
   std::vector<std::uint64_t> trained_keys;
   // The CU floor, written as given when the serving flags ask for it (0x100).
   std::uint32_t min_effective_cus = 0;
+  // The alignment veto's K and line in bits, written as given when the
+  // serving flags ask for it (0x200).
+  std::uint32_t veto_k_min      = 0;
+  std::uint32_t veto_align_bits = 0;
   // Written instead of the spec's hash when nonzero.
   std::uint64_t spec_hash_override = 0;
   // MLREC_v3 provenance entries (key, value), written when not empty, then

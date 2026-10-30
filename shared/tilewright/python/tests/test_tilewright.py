@@ -311,6 +311,9 @@ def test_describe_route_and_labels(model):
     recorded = info.provenance
     assert isinstance(recorded, tw.Provenance) and "config_id=''" in repr(recorded)
     assert (recorded.training_data_hash, recorded.source_revision) == ("", "")
+    veto = info.alignment_veto
+    assert isinstance(veto, tw.AlignmentVeto)
+    assert (veto.on, veto.k_min, veto.align_bits) == (False, 0, 0)
     assert tw.cell_label(model, tw.route(model, _problem(m=2048))) == LARGE + "#M<=2048"
     assert tw.cell_label(model, tw.route(model, _problem(m=2049))) == LARGE
     assert tw.route(model, _problem(m=8, n=8, k=8)) == -1

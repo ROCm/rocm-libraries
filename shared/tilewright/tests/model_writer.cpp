@@ -316,6 +316,12 @@ Image write_model(const ModelSpec& spec) {
       w.mark("min_effective_cus");
       w.u32(spec.min_effective_cus);
     }
+    if ((spec.v3_serving_flags & 0x200) != 0) {
+      w.mark("veto_k_min");
+      w.u32(spec.veto_k_min);
+      w.mark("veto_align_bits");
+      w.u32(spec.veto_align_bits);
+    }
     if (!spec.provenance.empty()) {
       w.mark("n_provenance");
       w.u16(static_cast<std::uint16_t>(spec.provenance.size()));

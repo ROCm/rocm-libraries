@@ -372,7 +372,30 @@ TEST_CASE("v3 header defects are rejected", "[v3][loader]") {
   CHECK(mentions(with([](ModelSpec& s) { s.i_dim += 1; }), "feature dims"));
   CHECK(mentions(with([](ModelSpec& s) { s.q_dim = 55; }), "feature dims"));
   CHECK(mentions(with([](ModelSpec& s) { s.x_dim = 37; }), "feature dims"));
-  CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x200; }), "unknown serving flags"));
+  CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x400; }), "unknown serving flags"));
+  ModelSpec veto        = good;
+  veto.v3_serving_flags = 0x200;
+  veto.veto_k_min       = 512;
+  veto.veto_align_bits  = 1024;
+  REQUIRE(spec_error(veto).empty());
+  for (const std::uint32_t k_min : {0u}) {
+    ModelSpec bad  = veto;
+    bad.veto_k_min = k_min;
+    CHECK(mentions(spec_error(bad), "the alignment veto's K must be at least 1"));
+  }
+  for (const std::uint32_t bits :
+       {0u, 1u, 2u, 4u, 7u, 12u, 1000u, 1025u, 0x80000001u, 0xFFFFFFFFu}) {
+    ModelSpec bad       = veto;
+    bad.veto_align_bits = bits;
+    INFO("line " << bits);
+    CHECK(mentions(spec_error(bad), "is not a power of two of at least 8 bits"));
+  }
+  for (const std::uint32_t flags : {0x204u, 0x224u, 0x205u, 0x20Cu}) {
+    ModelSpec bad        = veto;
+    bad.v3_serving_flags = flags;
+    INFO("flags " << flags);
+    CHECK(mentions(spec_error(bad), "ask for the alignment veto with the non-temporal rule"));
+  }
   CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x20; }),
                  "without the non-temporal rule"));
   CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x80; }), "no trained key"));
@@ -1472,6 +1495,140 @@ TEST_CASE("v3 models declare the contexts they support", "[v3][context]") {
   CHECK(same_results(partial_set.rank(p, hw, context(33, tw::Schedule::Auto)), r32));
   CHECK(same_results(partial_set.rank(p, hw, context(0, tw::Schedule::Auto)), r32));
   CHECK(scored_indices(partial_set.rank(p, hw, context(32, tw::Schedule::Default))).empty());
+}
+
+TEST_CASE("the alignment veto round-trips with both fields", "[v3][loader][veto]") {
+  const ModelSpec plain   = v3_one_cell("Large|Large|LargeK|Bnone", sample_attributes());
+  const tw::ModelInfo off = tw::describe(*load_spec(plain));
+  CHECK_FALSE(off.alignment_veto.on);
+  CHECK(off.alignment_veto.k_min == 0);
+  CHECK(off.alignment_veto.align_bits == 0);
+  for (const std::pair<std::uint32_t, std::uint32_t>& field :
+       {std::pair<std::uint32_t, std::uint32_t>{512, 1024},
+        std::pair<std::uint32_t, std::uint32_t>{1, 8},
+        std::pair<std::uint32_t, std::uint32_t>{4096, 2048},
+        std::pair<std::uint32_t, std::uint32_t>{0xFFFFFFFFu, 0x80000000u}}) {
+    INFO("k_min " << field.first << " line " << field.second);
+    for (const std::uint32_t others : {0u, 0x80u | 0x100u}) {
+      ModelSpec spec         = plain;
+      spec.v3_serving_flags  = 0x200 | others;
+      spec.veto_k_min        = field.first;
+      spec.veto_align_bits   = field.second;
+      spec.trained_keys      = {3, 9};
+      spec.min_effective_cus = 32;
+      spec.provenance        = {{"config_id", "cfg"}};
+      const Image image      = write_model(spec);
+      if (others != 0) {
+        REQUIRE(image.at.at("trained_key1") < image.at.at("min_effective_cus"));
+        REQUIRE(image.at.at("min_effective_cus") < image.at.at("veto_k_min"));
+      }
+      REQUIRE(image.at.at("veto_k_min") < image.at.at("veto_align_bits"));
+      REQUIRE(image.at.at("veto_align_bits") < image.at.at("n_provenance"));
+      std::string err;
+      const tw::ModelPtr m =
+          tw::load_model_from_memory(image.bytes.data(), image.bytes.size(), &err);
+      INFO(err);
+      REQUIRE(m);
+      const tw::ModelInfo info = tw::describe(*m);
+      CHECK(info.alignment_veto.on);
+      CHECK(info.alignment_veto.k_min == field.first);
+      CHECK(info.alignment_veto.align_bits == field.second);
+      CHECK_FALSE(info.non_temporal_rule);
+      CHECK(info.trained_key_gate == (others != 0));
+      CHECK(info.min_effective_cus == (others != 0 ? 32u : 0u));
+      CHECK(info.provenance.config_id == "cfg");
+      // The tests' editors of the veto (test_util.hpp) undo each other and
+      // give the writer's bytes.
+      ModelSpec bare        = spec;
+      bare.v3_serving_flags = others;
+      const Image without   = write_model(bare);
+      CHECK(without_alignment_veto(image.bytes) == without.bytes);
+      CHECK(without_alignment_veto(without.bytes) == without.bytes);
+      CHECK(with_alignment_veto(without.bytes, field.first, field.second) == image.bytes);
+      CHECK(with_alignment_veto(image.bytes, field.first, field.second).empty());
+    }
+  }
+}
+
+namespace {
+
+// The FNV-1a 64 hash of rankings that the selection-time benches print: per
+// result its config index, scored flag and score bits, then a separator per
+// ranking.
+void hash_word(std::uint64_t* h, std::uint64_t v) {
+  for (int i = 0; i < 8; ++i) {
+    *h ^= (v >> (8 * i)) & 0xFF;
+    *h *= 0x100000001b3ull;
+  }
+}
+
+void hash_ranking(std::uint64_t* h, const std::vector<tw::Result>& results) {
+  for (const tw::Result& r : results) {
+    std::uint64_t bits;
+    std::memcpy(&bits, &r.score, sizeof bits);
+    hash_word(h, r.config_index);
+    hash_word(h, r.scored ? 1 : 0);
+    hash_word(h, bits);
+  }
+  hash_word(h, ~std::uint64_t{0});
+}
+
+// Rankings by v3 models without the alignment veto, whitelisted or not, with
+// the trained-key gate or the cascade, of a pool of hint-free and hinted
+// siblings, for problems of every layout in bf16, f32 and f8 at K below, at
+// and above 512, aligned to 128 bytes or not: the problems and kernels the
+// veto reads.
+std::uint64_t rankings_without_veto() {
+  std::vector<tw::Config> pool;
+  for (const std::size_t mt_m : {32, 64, 128})
+    for (const std::size_t mt_k : {32, 64})
+      for (const std::pair<int, int>& h : {std::pair<int, int>{0, 0},
+                                           std::pair<int, int>{4, 0},
+                                           std::pair<int, int>{0, 4},
+                                           std::pair<int, int>{4, 4},
+                                           std::pair<int, int>{1, 0}}) {
+        tw::Config c = make_config(mt_m, 64, mt_k, 16, 16, 32, h.first, h.second);
+        c.index      = pool.size();
+        pool.push_back(c);
+      }
+  std::vector<std::uint64_t> trained;
+  for (const tw::Config& c : pool)
+    if (c.cache_hints_a == 4) trained.push_back(key_hash(c, {}));
+  std::sort(trained.begin(), trained.end());
+  std::vector<ModelSpec> specs(4, v3_grid({}));
+  for (CellSpec& cell : specs[1].cells)
+    for (const tw::Config& c : pool)
+      if (c.mt.m == 64) cell.signatures.push_back(tw::detail::signature_of(c));
+  for (CellSpec& cell : specs[1].cells) std::sort(cell.signatures.begin(), cell.signatures.end());
+  specs[2].v3_serving_flags = 0x80 | 0x08;
+  specs[2].trained_keys     = trained;
+  specs[3].v3_cascade_keys  = 3;
+  const tw::Hardware hw     = test_hardware();
+  std::uint64_t h           = 0xcbf29ce484222325ull;
+  for (const ModelSpec& spec : specs) {
+    const tw::ModelPtr m = load_spec(spec);
+    const tw::CandidateSet set(m, pool);
+    for (const tw::Transpose ta : {tw::Transpose::T, tw::Transpose::N})
+      for (const tw::Transpose tb : {tw::Transpose::T, tw::Transpose::N})
+        for (const tw::DataType dt :
+             {tw::DataType::BFloat16, tw::DataType::Float, tw::DataType::Float8})
+          for (const std::size_t k : {512, 513, 576, 640, 1000, 1024, 4096, 4100})
+            for (const std::size_t mn : {24, 4096}) {
+              const tw::Problem p = make_problem(mn, 4096, k, mn == 24 ? 4 : 1, dt, ta, tb);
+              for (const std::size_t min_scored : {std::size_t{0}, std::size_t{1}, kAll})
+                hash_ranking(&h, tw::rank_configs(*m, p, hw, pool, min_scored));
+              hash_ranking(&h, set.rank_top(p, hw, tw::ExecutionContext{}, 1));
+            }
+  }
+  return h;
+}
+
+}  // namespace
+
+TEST_CASE("a model without the alignment veto ranks as before the veto existed",
+          "[v3][rank][veto]") {
+  // What the engine gave these rankings before it had the alignment veto.
+  CHECK(rankings_without_veto() == 0xc85c0d4c93a42073ull);
 }
 
 TEST_CASE("a CU floor raises a context with fewer usable CUs to it, or a smaller device whole",

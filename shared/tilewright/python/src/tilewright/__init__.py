@@ -4,6 +4,7 @@
 """Python bindings of the tilewright GEMM kernel ranking engine."""
 
 from ._tilewright import (
+    AlignmentVeto,
     CandidateSet,
     Config,
     DataType,
@@ -43,6 +44,7 @@ from ._tilewright import (
 __version__ = "1.0.0"
 
 __all__ = [
+    "AlignmentVeto",
     "CandidateSet",
     "Config",
     "DataType",

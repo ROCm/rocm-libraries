@@ -190,6 +190,8 @@ class Model {
   // trained-key gate (trained_keys).
   bool bank             = false;
   bool trained_key_gate = false;
+  // MLREC_v3: the alignment veto the header declares (Feasibility applies it).
+  AlignmentVeto alignment_veto;
 
   // Contexts an MLREC_v3 model supports: usable CUs as a fraction of the
   // device, a bit per Schedule value, and the fewest usable CUs on any

@@ -1037,7 +1037,7 @@ void rank_in_cell(const Model& model,
     return pool.member_begin[key + 1] - pool.member_begin[key];
   };
 
-  const std::uint32_t epoch = s.next_epoch(nk);
+  std::uint32_t epoch = s.next_epoch(nk);
 #if TW_LEVER_PREFETCH
   // A whitelist tier's ranking reads, per whitelisted key, lines scattered
   // over the pool's arrays and this thread's marks, then the query tower's
@@ -1065,7 +1065,8 @@ void rank_in_cell(const Model& model,
     prefetch_vector(w.q_b4);
   }
 #endif
-  const Feasibility rules(problem, hardware, keys.nt_a, keys.nt_b, model.soft_rules);
+  Feasibility rules(
+      problem, hardware, keys.nt_a, keys.nt_b, model.soft_rules, model.alignment_veto);
   const auto feasible = [&](std::size_t key) {
     std::uint32_t& f = s.feasible[key];
     if (f < 2 * epoch) f = 2 * epoch + (rules(pool.shape[key]) ? 1 : 0);
@@ -1089,17 +1090,6 @@ void rank_in_cell(const Model& model,
   const auto candidate = [&](std::size_t key) {
     return all_keys || keys.trained.empty() || keys.trained[key] != 0;
   };
-  if (have_whitelist) {
-    if (cache != nullptr) {
-      for (std::size_t key : wl.keys)
-        if (feasible(key)) add_tier1(key);
-    } else {
-      for (std::size_t key = 0; key < nk; ++key)
-        if (candidate(key) && feasible(key) &&
-            whitelisted(model, cell, configs[keys.first[key]], keys.attributes(key)))
-          add_tier1(key);
-    }
-  }
   const bool pruned     = cache != nullptr && cache->pruned;
   const bool plain_pass = pruned && rules.all_pass(cache->plain_bounds);
   const bool hinted     = pruned && cache->hinted_keys > 0 && rules.hinted_may_pass();
@@ -1133,11 +1123,13 @@ void rank_in_cell(const Model& model,
     if (passing.size() < possible.size()) passing.resize(possible.size());
     const std::vector<CellCache::Possible>& shape = cache->possible_shape;
     if (plain_tile && (hinted_tile || !hinted)) {
-      // The rule's outcome for each value of its tests.
+      // The outcome of the non-temporal rule and the alignment veto for each
+      // value of their tests.
       unsigned char pass[64];
       for (unsigned t = 0; t < 64; ++t) {
-        const bool r = rules.non_temporal_rule(t & 1, (t >> 1) & 1, (t >> 2) & 1, t >> 3);
-        pass[t]      = (t >> 3 == 0 ? plain_pass || r : hinted && r) ? 1 : 0;
+        const bool r = !rules.vetoed(t >> 3) &&
+                       rules.non_temporal_rule(t & 1, (t >> 1) & 1, (t >> 2) & 1, t >> 3);
+        pass[t] = (t >> 3 == 0 ? plain_pass || r : hinted && r) ? 1 : 0;
       }
       if (!rules.family_region()) {
         for (std::size_t i = 0; i < possible.size(); ++i) {
@@ -1169,11 +1161,11 @@ void rank_in_cell(const Model& model,
         const std::size_t key        = possible[i];
         const CellCache::Possible& k = shape[i];
         const auto rule              = [&] {
-          return rules.non_temporal_rule(rules.tile_aligned(k.mt_k_low),
-                                         rules.b_branch(k.mt_m),
-                                         rules.a_branch(k.mt_n),
-                                         k.hints,
-                                         k.family);
+          return !rules.vetoed(k.hints) && rules.non_temporal_rule(rules.tile_aligned(k.mt_k_low),
+                                                                   rules.b_branch(k.mt_m),
+                                                                   rules.a_branch(k.mt_n),
+                                                                   k.hints,
+                                                                   k.family);
         };
         const bool ok      = k.hints == 0 ? plain_pass || (plain_tile ? rule() : feasible(key))
                                           : hinted && (hinted_tile ? rule() : feasible(key));
@@ -1204,21 +1196,48 @@ void rank_in_cell(const Model& model,
     tier1_configs += size_of(key);
   };
   bool tier1_is_whitelist = have_whitelist;
-  if (tier1.empty()) {
-    tier1_is_whitelist = false;
-    if (plain_pass && !hinted) {
-      tier1.assign(cache->plain.begin(), cache->plain.end());
-      tier1_configs = cache->plain_configs;
-    } else if (plain_pass && hinted_tile && rules.only_kept_hinted_may_pass()) {
-      tier1.assign(plain_and_kept().begin(), plain_and_kept().end());
-      tier1_configs = cache->plain_configs + cache->kept_configs;
-    } else {
+  const auto build_tier1  = [&] {
+    if (have_whitelist) {
+      if (cache != nullptr) {
+        for (std::size_t key : wl.keys)
+          if (feasible(key)) add_tier1(key);
+      } else {
+        for (std::size_t key = 0; key < nk; ++key)
+          if (candidate(key) && feasible(key) &&
+              whitelisted(model, cell, configs[keys.first[key]], keys.attributes(key)))
+            add_tier1(key);
+      }
+    }
+    if (tier1.empty()) {
+      tier1_is_whitelist = false;
+      if (plain_pass && !hinted) {
+        tier1.assign(cache->plain.begin(), cache->plain.end());
+        tier1_configs = cache->plain_configs;
+      } else if (plain_pass && hinted_tile && rules.only_kept_hinted_may_pass()) {
+        tier1.assign(plain_and_kept().begin(), plain_and_kept().end());
+        tier1_configs = cache->plain_configs + cache->kept_configs;
+      } else {
+        each_feasible(add_feasible);
+      }
+    }
+    if (tier1.empty() && !keys.trained.empty()) {
+      all_keys = true;
       each_feasible(add_feasible);
     }
-  }
-  if (tier1.empty() && !keys.trained.empty()) {
-    all_keys = true;
-    each_feasible(add_feasible);
+  };
+  build_tier1();
+  // The alignment veto takes no part in a ranking it would leave without a
+  // kernel: the tiers are built again without it, under a new epoch, so that
+  // no mark of the vetoed attempt counts.
+  if (tier1.empty() && rules.vetoes()) {
+    rules.drop_veto();
+    epoch              = s.next_epoch(nk);
+    tier1_configs      = 0;
+    all_keys           = false;
+    listed_passing     = false;
+    n_passing          = 0;
+    tier1_is_whitelist = have_whitelist;
+    build_tier1();
   }
   if (tier1.empty()) return write_unscored(n, out);
 
@@ -2692,6 +2711,7 @@ ModelInfo describe(const Model& model) {
   info.dot2_rule                = model.soft_rules.dot2_small_m;
   info.non_temporal_rule        = model.soft_rules.non_temporal;
   info.non_temporal_family_rule = model.soft_rules.non_temporal_family;
+  info.alignment_veto           = model.alignment_veto;
   info.clip                     = model.clip;
   info.bank                     = model.bank;
   info.trained_key_gate         = model.trained_key_gate;

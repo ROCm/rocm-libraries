@@ -35,8 +35,9 @@ constexpr std::uint8_t kServingFlagsKnown = kNoNonTemporalRule;
 // grouped by launch key, whether the non-temporal rule keeps one member of a
 // family it would reject whole (needs the rule itself), whether the model
 // was trained on the bank as well as the table, whether only the keys the
-// header lists as trained are scored while one of them is feasible, and
-// whether the header declares the fewest usable CUs the model supports.
+// header lists as trained are scored while one of them is feasible, whether
+// the header declares the fewest usable CUs the model supports, and whether
+// it declares the alignment veto (never with the non-temporal rule).
 constexpr std::uint32_t kV3SmallBatchedRule  = 0x01;
 constexpr std::uint32_t kV3Dot2Rule          = 0x02;
 constexpr std::uint32_t kV3NonTemporalRule   = 0x04;
@@ -46,9 +47,10 @@ constexpr std::uint32_t kV3NonTemporalFamily = 0x20;
 constexpr std::uint32_t kV3Bank              = 0x40;
 constexpr std::uint32_t kV3TrainedKeyGate    = 0x80;
 constexpr std::uint32_t kV3CuFloor           = 0x100;
+constexpr std::uint32_t kV3AlignmentVeto     = 0x200;
 constexpr std::uint32_t kV3ServingFlagsKnown =
     kV3SmallBatchedRule | kV3Dot2Rule | kV3NonTemporalRule | kV3NoWhitelistTier | kV3LaunchKeys |
-    kV3NonTemporalFamily | kV3Bank | kV3TrainedKeyGate | kV3CuFloor;
+    kV3NonTemporalFamily | kV3Bank | kV3TrainedKeyGate | kV3CuFloor | kV3AlignmentVeto;
 constexpr std::uint8_t kScheduleBits     = 0x07;
 constexpr std::uint16_t kMaxAttributes   = 64;
 constexpr std::uint16_t kMaxOneHotValues = 64;
@@ -456,6 +458,9 @@ class Parser {
     if ((flags & kV3NonTemporalFamily) != 0 && (flags & kV3NonTemporalRule) == 0)
       return fail("serving flags " + std::to_string(flags) +
                   " ask for the family-wise non-temporal rule without the non-temporal rule");
+    if ((flags & kV3AlignmentVeto) != 0 && (flags & kV3NonTemporalRule) != 0)
+      return fail("serving flags " + std::to_string(flags) +
+                  " ask for the alignment veto with the non-temporal rule");
     if (!(model_->min_cu_fraction > 0.0 && model_->min_cu_fraction <= model_->max_cu_fraction &&
           model_->max_cu_fraction <= 1.0))
       return fail("CU fraction range must satisfy 0 < min <= max <= 1");
@@ -512,6 +517,7 @@ class Parser {
     }
     if (model_->trained_key_gate && !parse_trained_keys(r)) return false;
     if ((flags & kV3CuFloor) != 0 && !parse_cu_floor(r)) return false;
+    if ((flags & kV3AlignmentVeto) != 0 && !parse_alignment_veto(r)) return false;
     if (r.remaining() != 0 && !parse_provenance(r)) return false;
     if (r.remaining() != 0) return fail("header_size does not match the header contents");
     if (feature_spec_hash(spec) != spec_hash)
@@ -556,6 +562,22 @@ class Parser {
     if (!r.u32(&cus, "CU floor")) return false;
     if (cus == 0) return r.fail_at("the CU floor must be at least 1", at);
     model_->min_effective_cus = cus;
+    return true;
+  }
+
+  // `u32` K the veto applies above, at least 1, then `u32` the line in bits,
+  // a power of two of at least 8.
+  bool parse_alignment_veto(Reader& r) {
+    const std::size_t at = r.pos();
+    std::uint32_t k_min = 0, align_bits = 0;
+    if (!r.u32(&k_min, "alignment veto K") || !r.u32(&align_bits, "alignment veto line"))
+      return false;
+    if (k_min == 0) return r.fail_at("the alignment veto's K must be at least 1", at);
+    if (align_bits < 8 || (align_bits & (align_bits - 1)) != 0)
+      return r.fail_at("the alignment veto's line of " + std::to_string(align_bits) +
+                           " bits is not a power of two of at least 8 bits",
+                       at);
+    model_->alignment_veto = AlignmentVeto{true, k_min, align_bits};
     return true;
   }
 

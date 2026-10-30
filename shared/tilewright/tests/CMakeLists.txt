@@ -140,6 +140,12 @@ if(EXISTS "${_tw_experiments}/rerank_check.cpp" AND EXISTS "${_tw_experiments}/m
             list(APPEND _tw_parity_args "-D${_tw_check}_${_tw_build}=$<TARGET_FILE:${_tw_exe}>")
         endforeach()
     endforeach()
+    # Copies of the shipped models with the alignment veto, which the entry
+    # ranks as well.
+    add_executable(tilewright-veto-models "${CMAKE_CURRENT_SOURCE_DIR}/veto_models.cpp"
+                                          "${CMAKE_CURRENT_SOURCE_DIR}/model_writer.cpp")
+    target_include_directories(tilewright-veto-models PRIVATE "${tilewright_SOURCE_DIR}/src/tilewright")
+    target_link_libraries(tilewright-veto-models PRIVATE roc::tilewright)
     add_test(
         NAME tilewright-levers-parity
         COMMAND
@@ -148,7 +154,8 @@ if(EXISTS "${_tw_experiments}/rerank_check.cpp" AND EXISTS "${_tw_experiments}/m
             "-DSHAPES=${_tw_experiments}/bench_default_shapes.txt"
             "-DOUT=${CMAKE_CURRENT_BINARY_DIR}/levers-parity"
             "-DBUILDS=off,prefetch,memo,nocheck,check" "-DMEMO_BUILDS=memo,nocheck,check"
-            ${_tw_parity_args} -P "${CMAKE_CURRENT_SOURCE_DIR}/levers_parity.cmake"
+            "-DVETO_MODELS=$<TARGET_FILE:tilewright-veto-models>" ${_tw_parity_args} -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/levers_parity.cmake"
     )
     set_tests_properties(
         tilewright-levers-parity PROPERTIES SKIP_REGULAR_EXPRESSION "no materialized shipped models"

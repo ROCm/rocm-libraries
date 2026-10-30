@@ -150,7 +150,15 @@ base index), and scores it with the first trained cell found.
    `(cache_hints_a, cache_hints_b)`. The rule then passes every kernel of that
    signature, so with spec attributes or launch keys a family can keep
    several candidates. A `CandidateSet` finds each kernel's family once, when
-   it is built;
+   it is built. An MLREC_v3 model served without the non-temporal rule may
+   instead declare an alignment veto (its file's K and line size, which are
+   the architecture's) for the layouts with exactly one K-contiguous operand:
+   A when both operands are transposed, B when neither is. For a problem whose
+   K exceeds the veto's K and whose K elements of that operand, in the
+   element widths of the non-temporal rule, fill no whole number of lines,
+   kernels whose cache hint on that operand is the non-temporal one (4) do
+   not pass. When the veto would leave a ranking with no kernel at all, it
+   does not apply to that problem, which ranks as without it;
 3. the cell's whitelist: kernel signatures
    `(mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, cache_hints_a, cache_hints_b)` and, in
    MLREC_v3 files, view-key hashes (see below). An MLREC_v3 model whose serving
@@ -338,7 +346,7 @@ width) must be 0. The header tail is:
 | arch | `u16` length + ASCII | |
 | parallel_mi_cu, mi_default_cycles | `f64` each | > 0 |
 | n_mi, MI table | as in v2 | |
-| serving_flags | `u32` | bit 0 small-batched rule, bit 1 Dot2 rule, bit 2 non-temporal rule (each applied when set), bit 3 no whitelist tier, bit 4 launch keys (the pool is grouped by launch key), bit 5 family-wise non-temporal rule (only with bit 2), bit 6 trained on the integration's bank as well as its table (ranking ignores it; an integration with a bank serves both), bit 7 trained-key gate, bit 8 CU floor; other bits 0 |
+| serving_flags | `u32` | bit 0 small-batched rule, bit 1 Dot2 rule, bit 2 non-temporal rule (each applied when set), bit 3 no whitelist tier, bit 4 launch keys (the pool is grouped by launch key), bit 5 family-wise non-temporal rule (only with bit 2), bit 6 trained on the integration's bank as well as its table (ranking ignores it; an integration with a bank serves both), bit 7 trained-key gate, bit 8 CU floor, bit 9 alignment veto (never with bit 2); other bits 0 |
 | cascade_keys | `u32` | the cascade width, 0 for none |
 | min_cu_fraction, max_cu_fraction | `f64` each | `0 < min <= max <= 1`: the `N_eff / N_CU` the model supports |
 | schedules | `u8` | bit 0 Default, bit 1 Dynamic, bit 2 Auto; not 0 |
@@ -346,6 +354,7 @@ width) must be 0. The header tail is:
 | n_attributes | `u16` | at most 64, then per attribute: `u16`+name, `i64` default, `u8` transform (0 identity, 1 log2p1, 2 nonzero, 3 onehot) and, for onehot, `u16` value count (1-64) and distinct `i64` values |
 | trained keys | with bit 7 only | `u32` count (at least 1), then that many `u64` view-key hashes, strictly ascending: the view keys with training data |
 | CU floor | with bit 8 only | `u32`, at least 1: the fewest usable CUs (`N_eff`) the model supports on any device; a file without it has no floor |
+| alignment veto | with bit 9 only | `u32` K the veto applies above (at least 1), then `u32` the line in bits (a power of two, at least 8); see *Filtering* |
 | provenance | optional | present when header bytes remain: `u16` entry count (1-5), then per entry a `u16`+key and a `u16`+value (printable ASCII without spaces), the keys `config_id`, `training_data_hash`, `source_revision`, `date` and `launch_model`, each at most once |
 
 A loader refuses a file with a serving flag it does not know (`unknown serving
@@ -354,7 +363,8 @@ so an engine that predates the floor refuses those models, and hipBLASLt then
 ranks with Origami and warns: ship such models only with an engine that has
 the floor. `with_cu_floor(data, None)` of `training_pipeline/lib/mlrec.py`
 removes the floor from a file without retraining; the file then loads in such
-an engine and ranks as a model without a floor.
+an engine and ranks as a model without a floor. The same holds for the
+alignment veto: an engine that predates it refuses a file that declares it.
 
 `i_dim` is 8 plus the attribute features: one per identity, log2p1 and
 nonzero attribute (`x`, `log2(1 + max(x, 0))`, `x != 0`) and one per value of a
@@ -537,7 +547,8 @@ if (!tilewright::scoring_context(*model, context, hw)) { /* use another ranking 
   `describe(model)` returns the arch, hash, weight type and sizes, the bytes of
   the packed weights and of the fp32 weights of every cell, and for v3
   the spec hash, supported contexts (the CU floor as `min_effective_cus`, 0
-  for none), serving flags (with `bank`, which an
+  for none), serving flags (with the alignment veto as `alignment_veto`, whose
+  `on` is false for a model without one, and with `bank`, which an
   integration reads to decide whether it serves its bank, and the number of
   view keys the trained-key gate lists), the number of base
   labels without a trained cell and the provenance the file records;
@@ -773,8 +784,13 @@ rankings the memo answered. The entry `tilewright-levers-parity`
 option, with each alone, and with both, with and without the check, and runs
 them on every shipped model with the sample kernel pool and the benches'
 default shapes: every build must print the hashes of the build with neither,
-and the memo must answer some re-rank in every build that has it. Without a
-materialized shipped model it is skipped.
+and the memo must answer some re-rank in every build that has it. It does
+the same with copies of the shipped models the alignment veto can serve,
+given the veto whether or not they ship with one (`tests/veto_models.cpp`),
+on problems of the two layouts it applies to, with each sample kernel's
+non-temporal siblings in the pool, and requires the veto to change some of
+their hashes against the copies without it. Without a materialized shipped
+model it is skipped.
 
 As a subproject, `add_subdirectory(shared/tilewright)` provides the static
 library `roc::tilewright`. An installed tilewright is found with

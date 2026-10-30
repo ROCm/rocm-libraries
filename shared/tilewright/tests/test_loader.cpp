@@ -458,7 +458,7 @@ TEST_CASE("the v3 CU floor is validated", "[loader][v3]") {
   }
   SECTION("an unknown flag beside it") {
     Image bad = good;
-    put_u32(bad, bad.at.at("v3_serving_flags"), kFloor | 0x200);
+    put_u32(bad, bad.at.at("v3_serving_flags"), kFloor | 0x400);
     CHECK(mentions(load_error(bad), "unknown serving flags"));
   }
   SECTION("truncated at any byte of the header") {
@@ -484,6 +484,97 @@ TEST_CASE("the v3 CU floor is validated", "[loader][v3]") {
     CHECK(info.provenance.config_id == "cfg");
     Image swapped = image;
     put_u32(swapped, swapped.at.at("v3_serving_flags"), kFloor);
+    CHECK_FALSE(load_error(swapped).empty());
+  }
+}
+
+TEST_CASE("the v3 alignment veto is validated", "[loader][v3]") {
+  constexpr std::uint32_t kGate = 0x80, kFloor = 0x100, kVeto = 0x200, kNonTemporal = 0x04;
+  ModelSpec spec        = as_v3(small_spec());
+  spec.v3_serving_flags = kVeto;
+  spec.veto_k_min       = 512;
+  spec.veto_align_bits  = 1024;
+  const Image good      = write_model(spec);
+  REQUIRE(load_error(good).empty());
+  const tw::ModelPtr m = tw::load_model_from_memory(good.bytes.data(), good.bytes.size());
+  REQUIRE(m);
+  CHECK(tw::describe(*m).alignment_veto.on);
+  CHECK(tw::describe(*m).alignment_veto.k_min == 512);
+  CHECK(tw::describe(*m).alignment_veto.align_bits == 1024);
+  CHECK_FALSE(tw::describe(*load_spec(as_v3(small_spec()))).alignment_veto.on);
+  CHECK_FALSE(tw::describe(*load_spec(small_spec())).alignment_veto.on);
+
+  SECTION("a K of zero") {
+    Image bad = good;
+    put_u32(bad, bad.at.at("veto_k_min"), 0);
+    CHECK(mentions(load_error(bad), "the alignment veto's K must be at least 1"));
+  }
+  SECTION("a line that is not a power of two of at least 8 bits") {
+    for (const std::uint32_t bits : {0u, 4u, 6u, 24u, 1023u, 0xFFFFFFFFu}) {
+      Image bad = good;
+      put_u32(bad, bad.at.at("veto_align_bits"), bits);
+      INFO("line " << bits);
+      CHECK(mentions(load_error(bad), "is not a power of two of at least 8 bits"));
+    }
+  }
+  SECTION("with the non-temporal rule") {
+    Image bad = good;
+    put_u32(bad, bad.at.at("v3_serving_flags"), kVeto | kNonTemporal);
+    CHECK(mentions(load_error(bad), "ask for the alignment veto with the non-temporal rule"));
+  }
+  SECTION("the flag without the fields") {
+    Image bad = good;
+    bad.bytes.erase(bad.bytes.begin() + static_cast<long>(bad.at.at("veto_k_min")),
+                    bad.bytes.begin() + static_cast<long>(bad.at.at("veto_k_min") + 8));
+    put_u32(bad, bad.at.at("header_size"), static_cast<std::uint32_t>(good.header_size - 8));
+    CHECK(mentions(load_error(bad), "truncated header: alignment veto K"));
+  }
+  SECTION("one field") {
+    Image bad = good;
+    bad.bytes.erase(bad.bytes.begin() + static_cast<long>(bad.at.at("veto_align_bits")),
+                    bad.bytes.begin() + static_cast<long>(bad.at.at("veto_align_bits") + 4));
+    put_u32(bad, bad.at.at("header_size"), static_cast<std::uint32_t>(good.header_size - 4));
+    CHECK(mentions(load_error(bad), "truncated header: alignment veto line"));
+  }
+  SECTION("the fields without the flag") {
+    Image bad = good;
+    put_u32(bad, bad.at.at("v3_serving_flags"), 0);
+    CHECK_FALSE(load_error(bad).empty());
+  }
+  SECTION("an unknown flag beside it") {
+    Image bad = good;
+    put_u32(bad, bad.at.at("v3_serving_flags"), kVeto | 0x400);
+    CHECK(mentions(load_error(bad), "unknown serving flags"));
+  }
+  SECTION("truncated at any byte of the header") {
+    for (std::size_t n = 0; n <= good.header_size; ++n) {
+      INFO("size " << n);
+      REQUIRE_FALSE(load_error(good.bytes, n).empty());
+    }
+  }
+  SECTION("after the trained keys and the CU floor, before the provenance") {
+    ModelSpec all         = spec;
+    all.v3_serving_flags  = kGate | kFloor | kVeto;
+    all.trained_keys      = {4, 8};
+    all.min_effective_cus = 64;
+    all.veto_k_min        = 0xFFFFFFFFu;
+    all.veto_align_bits   = 8;
+    all.provenance        = {{"config_id", "cfg"}};
+    const Image image     = write_model(all);
+    REQUIRE(image.at.at("trained_key1") < image.at.at("min_effective_cus"));
+    REQUIRE(image.at.at("min_effective_cus") < image.at.at("veto_k_min"));
+    REQUIRE(image.at.at("veto_align_bits") < image.at.at("n_provenance"));
+    const tw::ModelPtr loaded = tw::load_model_from_memory(image.bytes.data(), image.bytes.size());
+    REQUIRE(loaded);
+    const tw::ModelInfo info = tw::describe(*loaded);
+    CHECK(info.alignment_veto.on);
+    CHECK(info.alignment_veto.k_min == 0xFFFFFFFFu);
+    CHECK(info.alignment_veto.align_bits == 8);
+    CHECK(info.min_effective_cus == 64);
+    CHECK(info.trained_keys == 2);
+    CHECK(info.provenance.config_id == "cfg");
+    Image swapped = image;
+    put_u32(swapped, swapped.at.at("v3_serving_flags"), kGate | kVeto);
     CHECK_FALSE(load_error(swapped).empty());
   }
 }

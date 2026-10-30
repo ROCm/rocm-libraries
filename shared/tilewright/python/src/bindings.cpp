@@ -525,6 +525,22 @@ NB_MODULE(_tilewright, m) {
                p.date + "', launch_model='" + p.launch_model + "')";
       });
 
+  nb::class_<tw::AlignmentVeto>(m,
+                                "AlignmentVeto",
+                                "An MLREC_v3 serving rule: for a layout with exactly one "
+                                "K-contiguous operand and a K above k_min whose elements of that "
+                                "operand leave a partial align_bits-bit line, kernels whose cache "
+                                "hint on it is the non-temporal one take no part in a ranking "
+                                "while another kernel can.")
+      .def_ro("on", &tw::AlignmentVeto::on)
+      .def_ro("k_min", &tw::AlignmentVeto::k_min)
+      .def_ro("align_bits", &tw::AlignmentVeto::align_bits)
+      .def("__repr__", [](const tw::AlignmentVeto& v) {
+        return "AlignmentVeto(on=" + std::string(v.on ? "True" : "False") +
+               ", k_min=" + std::to_string(v.k_min) +
+               ", align_bits=" + std::to_string(v.align_bits) + ")";
+      });
+
   nb::class_<tw::ModelInfo>(m, "ModelInfo")
       .def_ro("arch", &tw::ModelInfo::arch)
       .def_ro("feature_catalog_hash", &tw::ModelInfo::feature_catalog_hash)
@@ -554,6 +570,9 @@ NB_MODULE(_tilewright, m) {
               &tw::ModelInfo::non_temporal_family_rule,
               "Whether a kernel family the non-temporal rule rejects whole keeps one signature, "
               "with every kernel of it, in the rule's region (MLREC_v3).")
+      .def_ro("alignment_veto",
+              &tw::ModelInfo::alignment_veto,
+              "The alignment veto (MLREC_v3); `on` is False for a model without one.")
       .def_ro("clip", &tw::ModelInfo::clip)
       .def_ro("bank",
               &tw::ModelInfo::bank,

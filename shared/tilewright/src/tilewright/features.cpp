@@ -256,7 +256,8 @@ Feasibility::Feasibility(const Problem& p,
                          const Hardware& hardware,
                          bool nt_a_available,
                          bool nt_b_available,
-                         const SoftRules& soft) {
+                         const SoftRules& soft,
+                         const AlignmentVeto& veto) {
   M_                         = p.size.m;
   N_                         = p.size.n;
   const std::uint64_t K      = p.size.k;
@@ -280,6 +281,13 @@ Feasibility::Feasibility(const Problem& p,
   nt_a_              = nt_a_available;
   nt_b_              = nt_b_available;
   family_ = soft.non_temporal && soft.non_temporal_family && in_family_region(M_, N_, K, p.batch);
+  // A is K-contiguous when transposed, B when not; the veto reads the one
+  // K-contiguous operand of a layout that has exactly one.
+  const bool a_contiguous = a_trans, b_contiguous = !b_trans;
+  if (veto.on && veto.align_bits != 0 && K > veto.k_min && a_contiguous != b_contiguous) {
+    const std::uint64_t bits = a_contiguous ? a_bits_ : b_bits;
+    if ((K % veto.align_bits) * bits % veto.align_bits != 0) veto_ = a_contiguous ? 2u : 4u;
+  }
 }
 
 bool Feasibility::family_keeps(bool aligned, bool by_b, bool by_a, unsigned family) const {

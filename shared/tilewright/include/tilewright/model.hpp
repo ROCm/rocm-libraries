@@ -27,6 +27,22 @@ struct Provenance {
   std::string launch_model;        // LaunchModel::id() of the plans it trained with
 };
 
+// An MLREC_v3 serving rule for the layouts with exactly one K-contiguous
+// operand: A transposed with B transposed (A is), and neither transposed (B
+// is). For a problem whose K exceeds `k_min` and whose K elements of that
+// operand fill no whole number of `align_bits`-bit lines (counted in the
+// element widths of the non-temporal rule: 32 bits for Float and XFloat32, 8
+// for the 8-bit floating types, 16 for any other type), a kernel whose cache
+// hint on that operand is the non-temporal one (4) takes no part in the
+// ranking, unless no other kernel would; then the problem ranks as without the
+// veto. Off unless the model file declares it, and never together with the
+// non-temporal rule.
+struct AlignmentVeto {
+  bool on                  = false;
+  std::uint32_t k_min      = 0;
+  std::uint32_t align_bits = 0;
+};
+
 struct ModelInfo {
   std::string arch;
   std::string feature_catalog_hash;
@@ -59,7 +75,9 @@ struct ModelInfo {
   // cache_hints_b), with every kernel of it whatever its attributes or launch
   // key.
   bool non_temporal_family_rule = false;
-  bool clip                     = false;
+  // MLREC_v3: the alignment veto, off for a model whose file has none.
+  AlignmentVeto alignment_veto;
+  bool clip = false;
   // MLREC_v3: the model was trained on the integration's bank as well as its
   // table, so an integration with a bank serves both. Ranking does not read it.
   bool bank = false;
