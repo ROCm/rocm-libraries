@@ -224,6 +224,18 @@ const rocke_tv_buffer_resource_t* rocke_tensor_view_buffer(rocke_ir_builder_t* b
     return &v->buffer;
 }
 
+/* C-only guard with no Python counterpart (Python cannot pass a missing value):
+ * a buffer store refuses a NULL value, as global_store_vN does, before any IR
+ * is emitted. */
+static bool
+    rocke_tv_buffer_store_has_value(rocke_ir_builder_t* b, rocke_value_t* value, const char* op)
+{
+    if(value != NULL)
+        return true;
+    rocke_i_set_err(b, ROCKE_ERR_VALUE, "buffer %s: null value", op);
+    return false;
+}
+
 /* Buffer branch of TensorView.load_vec_at / store_vec_at, shared by the
  * unmasked and masked entry points (Python passes mask=None for the former).
  *   rsrc = self.buffer
@@ -240,7 +252,8 @@ const rocke_tv_buffer_resource_t* rocke_tensor_view_buffer(rocke_ir_builder_t* b
 static rocke_value_t* rocke_tv_buffer_vec_at(rocke_ir_builder_t* b,
                                              const rocke_tensor_view_t* v,
                                              rocke_value_t* elem_off,
-                                             rocke_value_t* value, /* NULL => load */
+                                             bool is_store,
+                                             rocke_value_t* value,
                                              int n,
                                              rocke_value_t* mask)
 {
@@ -249,6 +262,8 @@ static rocke_value_t* rocke_tv_buffer_vec_at(rocke_ir_builder_t* b,
     rocke_value_t* c_bytes;
     rocke_value_t* byte_off;
     int elem_bytes;
+    if(is_store && !rocke_tv_buffer_store_has_value(b, value, "store_vec_at"))
+        return NULL;
     rsrc = rocke_tensor_view_buffer(b, v);
     if(rsrc == NULL)
         return NULL;
@@ -266,21 +281,20 @@ static rocke_value_t* rocke_tv_buffer_vec_at(rocke_ir_builder_t* b,
         {
             rocke_i_set_err(b,
                             ROCKE_ERR_VALUE,
-                            value == NULL
-                                ? "buffer load_vec_at f16 supports n in {2, 4, 8} (got %d)"
-                                : "buffer store_vec_at f16 supports n in {2, 4, 8} (got %d)",
+                            is_store ? "buffer store_vec_at f16 supports n in {2, 4, 8} (got %d)"
+                                     : "buffer load_vec_at f16 supports n in {2, 4, 8} (got %d)",
                             n);
             return NULL;
         }
-        if(value == NULL)
+        if(!is_store)
             return rocke_b_buffer_load_vN_f16(b, rsrc->rsrc, byte_off, rsrc->soffset, n / 2);
         rocke_b_buffer_store_vN_f16(b, rsrc->rsrc, byte_off, rsrc->soffset, value, n / 2);
         return NULL;
     }
     rocke_i_set_err(b,
                     ROCKE_ERR_NOTIMPL,
-                    value == NULL ? "buffer load_vec_at not wired for dtype %s"
-                                  : "buffer store_vec_at not wired for dtype %s",
+                    is_store ? "buffer store_vec_at not wired for dtype %s"
+                             : "buffer load_vec_at not wired for dtype %s",
                     dt && dt->name ? dt->name : "<null>");
     return NULL;
 }
@@ -397,10 +411,13 @@ void rocke_tensor_view_store_scalar(rocke_ir_builder_t* b,
          *       return
          *   raise NotImplementedError(...)
          */
-        const rocke_tv_buffer_resource_t* rsrc = rocke_tensor_view_buffer(b, v);
+        const rocke_tv_buffer_resource_t* rsrc;
         rocke_value_t* c_bytes;
         rocke_value_t* byte_off;
         int elem_bytes;
+        if(!rocke_tv_buffer_store_has_value(b, value, "store_scalar"))
+            return;
+        rsrc = rocke_tensor_view_buffer(b, v);
         if(rsrc == NULL)
             return;
         off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
@@ -543,12 +560,15 @@ void rocke_tensor_view_store_vec(rocke_ir_builder_t* b,
          *       return
          *   raise NotImplementedError(...)
          */
-        const rocke_tv_buffer_resource_t* rsrc = rocke_tensor_view_buffer(b, v);
+        const rocke_tv_buffer_resource_t* rsrc;
         const rocke_type_t* dt = v->desc.dtype;
         rocke_value_t* elem_off;
         rocke_value_t* c_bytes;
         rocke_value_t* byte_off;
         int elem_bytes;
+        if(!rocke_tv_buffer_store_has_value(b, value, "store_vec"))
+            return;
+        rsrc = rocke_tensor_view_buffer(b, v);
         if(rsrc == NULL)
             return;
         elem_off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
@@ -591,7 +611,7 @@ rocke_value_t* rocke_tensor_view_load_vec_at(rocke_ir_builder_t* b,
     if(v->addr_space == ROCKE_ADDR_BUFFER)
     {
         /* Python buffer branch with mask=None (see rocke_tv_buffer_vec_at). */
-        return rocke_tv_buffer_vec_at(b, v, elem_off, NULL, n, NULL);
+        return rocke_tv_buffer_vec_at(b, v, elem_off, false, NULL, n, NULL);
     }
     if(v->addr_space == ROCKE_ADDR_LDS)
     {
@@ -624,7 +644,7 @@ void rocke_tensor_view_store_vec_at(rocke_ir_builder_t* b,
     if(v->addr_space == ROCKE_ADDR_BUFFER)
     {
         /* Python buffer branch with mask=None (see rocke_tv_buffer_vec_at). */
-        rocke_tv_buffer_vec_at(b, v, elem_off, value, n, NULL);
+        rocke_tv_buffer_vec_at(b, v, elem_off, true, value, n, NULL);
         return;
     }
     rocke_b_global_store_vN(b, v->base, elem_off, value, n, 0);
@@ -663,7 +683,7 @@ rocke_value_t* rocke_tensor_view_load_vec_at_masked(rocke_ir_builder_t* b,
         return NULL;
     }
     if(v->addr_space == ROCKE_ADDR_BUFFER)
-        return rocke_tv_buffer_vec_at(b, v, elem_off, NULL, n, mask);
+        return rocke_tv_buffer_vec_at(b, v, elem_off, false, NULL, n, mask);
     return rocke_tensor_view_load_vec_at(b, v, elem_off, n);
 }
 
@@ -692,7 +712,7 @@ void rocke_tensor_view_store_vec_at_masked(rocke_ir_builder_t* b,
     }
     if(v->addr_space == ROCKE_ADDR_BUFFER)
     {
-        rocke_tv_buffer_vec_at(b, v, elem_off, value, n, mask);
+        rocke_tv_buffer_vec_at(b, v, elem_off, true, value, n, mask);
         return;
     }
     rocke_tensor_view_store_vec_at(b, v, elem_off, value, n);
