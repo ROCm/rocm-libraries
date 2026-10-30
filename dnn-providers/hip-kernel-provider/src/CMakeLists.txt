@@ -1,9 +1,14 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# ApplicabilityPool runs worker threads.
+find_package(Threads REQUIRED)
+
 # OBJECT library with all implementation
 add_library(
     hip_kernel_provider_impl OBJECT
+    core/ApplicabilityManager.cpp
+    core/ApplicabilityPool.cpp
     core/Handle.cpp
     core/Container.cpp
     core/PluginPublic.cpp
@@ -35,7 +40,7 @@ target_include_directories(hip_kernel_provider_impl PUBLIC
 )
 
 dnn_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_impl ${CMAKE_CURRENT_LIST_DIR}/..)
-target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
+target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc Threads::Threads)
 if(KPACK_NEEDED)
     target_link_libraries(hip_kernel_provider_impl PRIVATE rocm::rocm_kpack)
     if(NOT WIN32)
@@ -114,13 +119,21 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
     )
 
-    # The kpack kernel source adapter. Listed here rather than beside Kernel.cpp above
-    # because it does not compile without the ingestor: KpackArchive.cpp is the only
-    # translation unit in the provider that includes <rocm_kpack/kpack.h>.
+    # The kpack kernel source adapter, and the loader for saved code objects. Listed here
+    # rather than beside Kernel.cpp above because they do not compile without the
+    # ingestor: KpackArchive.cpp is the only translation unit in the provider that
+    # includes <rocm_kpack/kpack.h>.
     target_sources(hip_kernel_provider_impl PRIVATE
+        compilation/CodeObjectLoad.cpp
         compilation/KpackArchive.cpp
         compilation/KpackKernelLoader.cpp
         compilation/KpackProgram.cpp
+    )
+
+    # The plan serialization hooks. They save and load only ingestor plans, so a build
+    # without the ingestor exports none of them.
+    target_sources(hip_kernel_provider_impl PRIVATE
+        core/PluginSerialization.cpp
     )
 endif()
 
@@ -128,7 +141,7 @@ endif()
 add_library(hip_kernel_provider SHARED
     $<TARGET_OBJECTS:hip_kernel_provider_impl>
 )
-target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
+target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host Threads::Threads)
 if(KPACK_NEEDED)
     # $<TARGET_OBJECTS:...> carries no link interface, so the plugin has to name
     # the kpack reader itself (same for _private above).
@@ -373,14 +386,18 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         # Route the installed entry and its TOML into the gfx950 shard, so pruning to
         # another architecture removes them along with the engine they name. Reserved
         # here rather than earlier so the shard is claimed exactly when something is
-        # registered into it.
+        # registered into it. The TOML goes to the reservation as well as TEST_CONFIG;
+        # hkp_reserve_census_shard() says why.
         #
         # Both YAML modes. Each gets a common entrypoint further down -- the categorized
         # file, or the one install_provider_ctest_files() writes -- and the discovery
         # stub is appended to whichever it is, so a sharded entry is reachable either
         # way. Both keywords move together: the staging key alone would divert the
         # uncategorized fallback out of the drain that serves that path.
-        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+        set(_gfx950_attention_dense_config
+            "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950AttentionDense.toml")
+        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950
+            FILES "${_gfx950_attention_dense_config}")
         set(_gfx950_shard_args
             INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_gfx950)
@@ -397,7 +414,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             ENGINE_NAME    "hipkernel:Gfx950AttentionDense"
             INSTALL_SUBDIR hip_kernel_provider
             ${_gfx950_shard_args}
-            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950AttentionDense.toml
+            TEST_CONFIG    ${_gfx950_attention_dense_config}
             GTEST_FILTER   "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
             ENVIRONMENT    ${TEST_ENVIRONMENT}
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}

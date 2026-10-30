@@ -109,8 +109,13 @@ def _grid() -> List[ArgSpec]:
     return [("p_num_pid_m", "i32"), ("p_num_pid_n", "i32")]
 
 
-def _fwd_arg_names(*, is_3d: bool = False) -> List[ArgSpec]:
-    """Forward implicit-GEMM conv: ``A`` (N[D]HWC), ``B`` (K[Z]YXC), ``D`` (N[D]HWK)."""
+def _fwd_arg_names(*, is_3d: bool = False, split_k: bool = False) -> List[ArgSpec]:
+    """Forward implicit-GEMM conv: ``A`` (N[D]HWC), ``B`` (K[Z]YXC), ``D`` (N[D]HWK).
+
+    ``split_k`` is the split-K binary's ABI: the fp32 workspace its slices
+    store into, then the slice width and degree (wgrad's ``ks`` /
+    ``ks_count``).
+    """
     out: List[ArgSpec] = [
         ("A", "a"),
         ("B", "b"),
@@ -140,6 +145,9 @@ def _fwd_arg_names(*, is_3d: bool = False) -> List[ArgSpec]:
     # k -> ([z,] y, x, c): divisors cpg, X[, Y].
     out += _magic("k_", (["Y"] if is_3d else []) + ["X", "cpg"])
     out += _grid()
+    if split_k:
+        out += [("ws_ptr", "f32*"), ("ws_bytes", "i32")]
+        out += [("ks", "i32"), ("ks_count", "i32")]
     return out
 
 
@@ -313,17 +321,18 @@ def conv_arg_names(
     callers that already dispatch on it (the manifest emitter, the grouped
     dispatcher, the AOT cache) stop branching.
 
-    ``two_stage`` belongs to wgrad's deterministic epilogue and is rejected
-    elsewhere rather than ignored: silently accepting it would hand back a
-    signature that does not match any kernel the flag can build.
+    ``two_stage`` is wgrad's deterministic epilogue, and on fwd the split-K
+    binary (fp32 workspace slabs + a Stage 2 reduce). dgrad has neither, so it
+    is rejected there rather than ignored: silently accepting it would hand
+    back a signature that does not match any kernel the flag can build.
 
     ``streamk`` (wgrad only) is the stream-K reduction, or ``None`` for a
     kernel without stream-K. Stream-K partitions K itself, so it excludes the
     two-stage split-K variant.
     """
-    if two_stage and direction != "wgrad":
+    if two_stage and direction not in ("wgrad", "fwd"):
         raise ValueError(
-            f"two_stage is a wgrad-only variant (got direction={direction!r})"
+            f"two_stage is a wgrad / fwd split-K variant (got direction={direction!r})"
         )
     if streamk is not None:
         if direction != "wgrad":
@@ -338,7 +347,7 @@ def conv_arg_names(
         if two_stage:
             raise ValueError("streamk and two_stage are exclusive: both partition K_wg")
     if direction == "fwd":
-        return _fwd_arg_names(is_3d=is_3d)
+        return _fwd_arg_names(is_3d=is_3d, split_k=two_stage)
     if direction == "wgrad":
         return _wgrad_arg_names(is_3d=is_3d, two_stage=two_stage, streamk=streamk)
     if direction == "dgrad":

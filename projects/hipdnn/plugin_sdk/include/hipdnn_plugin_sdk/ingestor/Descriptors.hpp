@@ -5,6 +5,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -12,6 +13,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -76,6 +78,28 @@ enum class MetadataType
     INT_LIST,
 };
 
+/// The descriptor spelling of @p type, which `metadataTypeFromString` parses. A value
+/// outside the enum gives "unknown (<value>)".
+inline std::string toString(MetadataType type)
+{
+    switch(type)
+    {
+    case MetadataType::BOOL:
+        return "bool";
+    case MetadataType::INT:
+        return "int";
+    case MetadataType::FLOAT:
+        return "float";
+    case MetadataType::STRING:
+        return "string";
+    case MetadataType::INT_LIST:
+        return "int_list";
+    default:
+        break;
+    }
+    return "unknown (" + std::to_string(static_cast<int>(type)) + ")";
+}
+
 inline MetadataType metadataTypeOf(const MetadataValue& value)
 {
     return static_cast<MetadataType>(value.index());
@@ -112,6 +136,44 @@ static_assert(
 /// the same arch tier on any device; a better tier shadows a worse one.
 using MetadataValues = std::map<std::string, MetadataValue>;
 
+namespace detail
+{
+
+/// Equality for two metadata values that treats an integer and a floating-point alternative
+/// holding the same number as equal, as JSON does: a kernel's metadata is typed by its KMD only
+/// at resolve time, so `1` and `1.0` are one authored value at parse. A bool never equals a
+/// number.
+inline bool metadataValueEquivalent(const MetadataValue& lhs, const MetadataValue& rhs)
+{
+    if(lhs.index() == rhs.index())
+    {
+        return lhs == rhs;
+    }
+    if(const auto* integer = std::get_if<int64_t>(&lhs))
+    {
+        const auto* real = std::get_if<double>(&rhs);
+        return real != nullptr && static_cast<double>(*integer) == *real;
+    }
+    if(const auto* real = std::get_if<double>(&lhs))
+    {
+        const auto* integer = std::get_if<int64_t>(&rhs);
+        return integer != nullptr && static_cast<double>(*integer) == *real;
+    }
+    return false;
+}
+
+inline bool metadataValuesEquivalent(const MetadataValues& lhs, const MetadataValues& rhs)
+{
+    return lhs.size() == rhs.size()
+           && std::equal(
+               lhs.begin(), lhs.end(), rhs.begin(), [](const auto& left, const auto& right) {
+                   return left.first == right.first
+                          && metadataValueEquivalent(left.second, right.second);
+               });
+}
+
+} // namespace detail
+
 /// One field a kernel may vary along, as declared by an engine's KMD.
 struct MetadataField
 {
@@ -120,6 +182,17 @@ struct MetadataField
     /// nullopt means the field is mandatory.
     std::optional<MetadataValue> defaultValue;
 };
+
+inline bool operator==(const MetadataField& lhs, const MetadataField& rhs)
+{
+    return std::tie(lhs.name, lhs.type, lhs.defaultValue)
+           == std::tie(rhs.name, rhs.type, rhs.defaultValue);
+}
+
+inline bool operator!=(const MetadataField& lhs, const MetadataField& rhs)
+{
+    return !(lhs == rhs);
+}
 
 /// KMD: the metadata schema, one per engine. Field set is the kernel key; matchers
 /// read fields as `$kernel.<field>`.
@@ -131,6 +204,17 @@ struct MetadataSchema
     /// Authored semantics; independent of the JSON file-format version.
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
 };
+
+inline bool operator==(const MetadataSchema& lhs, const MetadataSchema& rhs)
+{
+    return std::tie(lhs.id, lhs.name, lhs.fields, lhs.revision)
+           == std::tie(rhs.id, rhs.name, rhs.fields, rhs.revision);
+}
+
+inline bool operator!=(const MetadataSchema& lhs, const MetadataSchema& rhs)
+{
+    return !(lhs == rhs);
+}
 
 /// How a UHD ranks a catalog. RFC 0019 §4.2: one discriminant, which also selects the
 /// adapter-scoped body's key.
@@ -155,12 +239,33 @@ struct UhdScore
     std::string transform; ///< Applied to raw model output: "identity", "log1p".
 };
 
+inline bool operator==(const UhdScore& lhs, const UhdScore& rhs)
+{
+    return std::tie(lhs.metric, lhs.calibrated, lhs.transform)
+           == std::tie(rhs.metric, rhs.calibrated, rhs.transform);
+}
+
+inline bool operator!=(const UhdScore& lhs, const UhdScore& rhs)
+{
+    return !(lhs == rhs);
+}
+
 /// A semantic dependency, independent of the descriptor file-format version.
 struct DescriptorDependency
 {
     DescriptorId id;
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
 };
+
+inline bool operator==(const DescriptorDependency& lhs, const DescriptorDependency& rhs)
+{
+    return std::tie(lhs.id, lhs.revision) == std::tie(rhs.id, rhs.revision);
+}
+
+inline bool operator!=(const DescriptorDependency& lhs, const DescriptorDependency& rhs)
+{
+    return !(lhs == rhs);
+}
 
 /// The resolved descriptor definitions used to collect a model's training corpus.
 struct HeuristicProvenance
@@ -170,7 +275,22 @@ struct HeuristicProvenance
     std::vector<DescriptorDependency> umd;
 };
 
+inline bool operator==(const HeuristicProvenance& lhs, const HeuristicProvenance& rhs)
+{
+    return std::tie(lhs.ued, lhs.kmd, lhs.umd) == std::tie(rhs.ued, rhs.kmd, rhs.umd);
+}
+
+inline bool operator!=(const HeuristicProvenance& lhs, const HeuristicProvenance& rhs)
+{
+    return !(lhs == rhs);
+}
+
 /// UHD: the kernel-selection model for one engine.
+///
+/// `operator==` is authored-content equality: it ignores @ref modelArtifactPath, @ref baseDir,
+/// @ref treeRoot, @ref engineName, @ref role and @ref arch, which the loader derives from the
+/// file's location or fills after parsing, so the copies of one UHD shipped in per-arch shards
+/// compare equal.
 struct HeuristicDescriptor
 {
     DescriptorId id;
@@ -197,8 +317,13 @@ struct HeuristicDescriptor
 
     /// NATIVE: the symbol the engine registered its scorer under.
     std::string nativeSymbol;
-    /// TREE_DATA / TABLE / CUSTOM_LIBRARY: the artifact path, relative to @ref baseDir.
+    /// TREE_DATA / TABLE / CUSTOM_LIBRARY: the artifact path the adapter opens. The loader
+    /// stores it resolved and absolute; a descriptor built in memory may give it relative to
+    /// @ref baseDir. Derived from the file's location; not part of operator==.
     std::string modelArtifactPath;
+    /// The authored `artifact` (or `library`) value, relative to the declaring `.uhd.json`.
+    /// Compared by operator== in place of @ref modelArtifactPath.
+    std::string authoredArtifactPath;
     /// SHA-256 of the artifact (lowercase hex): the declared digest, else that of the bytes
     /// present at parse. Verifies the artifact at load; empty when no artifact exists yet.
     std::string modelHash;
@@ -206,11 +331,13 @@ struct HeuristicDescriptor
     std::string customLibrarySymbol;
 
     /// Directory of the `.uhd.json` that declared this; @ref modelArtifactPath resolves
-    /// against it. Empty for descriptors built in memory.
+    /// against it. Empty for descriptors built in memory. Derived from the file's location; not
+    /// part of operator==.
     std::filesystem::path baseDir;
     /// The tree root the loader walked: the containment boundary for the author-controlled
     /// artifact path (RFC 0019 §16), which may leave @ref baseDir but never the tree. Filled
     /// by the loader; empty for descriptors built in memory.
+    /// Not part of operator==.
     std::filesystem::path treeRoot;
 
     /// Required for feature-consuming models. Semantic revisions are checked against
@@ -223,6 +350,7 @@ struct HeuristicDescriptor
     /// The role-map entry that resolved this model: backfilled by
     /// DescriptorLoader::resolveRole from the owning UED, never authored in the UHD
     /// (RFC 0019 §3.1). Empty for a model no role map has resolved yet.
+    /// Backfilled, not authored. Not part of operator==.
     std::string engineName;
     std::string role;
     std::string arch;
@@ -230,8 +358,50 @@ struct HeuristicDescriptor
     nlohmann::json trainedAgainstJson;
 };
 
+inline bool operator==(const HeuristicDescriptor& lhs, const HeuristicDescriptor& rhs)
+{
+    return std::tie(lhs.id,
+                    lhs.name,
+                    lhs.adapter,
+                    lhs.featuresSignature,
+                    lhs.featuresHash,
+                    lhs.categoricalEncoding,
+                    lhs.objective,
+                    lhs.score,
+                    lhs.nativeSymbol,
+                    lhs.authoredArtifactPath,
+                    lhs.modelHash,
+                    lhs.customLibrarySymbol,
+                    lhs.trainedAgainst,
+                    lhs.trainedAgainstSelectorRevision,
+                    lhs.trainedAgainstJson)
+           == std::tie(rhs.id,
+                       rhs.name,
+                       rhs.adapter,
+                       rhs.featuresSignature,
+                       rhs.featuresHash,
+                       rhs.categoricalEncoding,
+                       rhs.objective,
+                       rhs.score,
+                       rhs.nativeSymbol,
+                       rhs.authoredArtifactPath,
+                       rhs.modelHash,
+                       rhs.customLibrarySymbol,
+                       rhs.trainedAgainst,
+                       rhs.trainedAgainstSelectorRevision,
+                       rhs.trainedAgainstJson);
+}
+
+inline bool operator!=(const HeuristicDescriptor& lhs, const HeuristicDescriptor& rhs)
+{
+    return !(lhs == rhs);
+}
+
 /// UED: the engine itself, carrying no logic of its own. `name` hashes into hipDNN's
 /// engine-id space; must be globally unique, e.g. "rocke:SDPA".
+///
+/// `operator==` is authored-content equality: it ignores @ref heuristicId, which the loader
+/// fills after parsing.
 struct EngineDescriptor
 {
     DescriptorId id;
@@ -240,6 +410,7 @@ struct EngineDescriptor
     /// nullopt when the engine ships no UHD; selection then falls back to the
     /// descriptor-declared order. Filled by resolveDescriptorSets(), not at parse, because the
     /// default depends on the metric each loaded UHD declares.
+    /// Not part of operator==.
     std::optional<DescriptorId> heuristicId;
 
     /// RFC 0019 §3.1 role-scoped UHDs, each optional, keyed by `gcnArchName` with an optional
@@ -265,6 +436,39 @@ struct EngineDescriptor
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
 };
 
+inline bool operator==(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
+{
+    return std::tie(lhs.id,
+                    lhs.name,
+                    lhs.sortKernelCatalog,
+                    lhs.predictEngine,
+                    lhs.predictApplicableKernels,
+                    lhs.metadataSchemaId,
+                    lhs.knobs,
+                    lhs.behaviorNotes,
+                    lhs.sdkVersion,
+                    lhs.numericalNotes,
+                    lhs.graphMatchNativeSymbol,
+                    lhs.revision)
+           == std::tie(rhs.id,
+                       rhs.name,
+                       rhs.sortKernelCatalog,
+                       rhs.predictEngine,
+                       rhs.predictApplicableKernels,
+                       rhs.metadataSchemaId,
+                       rhs.knobs,
+                       rhs.behaviorNotes,
+                       rhs.sdkVersion,
+                       rhs.numericalNotes,
+                       rhs.graphMatchNativeSymbol,
+                       rhs.revision);
+}
+
+inline bool operator!=(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
+{
+    return !(lhs == rhs);
+}
+
 /// Which inputs a matcher reads, and so what its failure prunes.
 enum class MatchScope
 {
@@ -282,6 +486,17 @@ struct MatchDescriptor
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
 };
 
+inline bool operator==(const MatchDescriptor& lhs, const MatchDescriptor& rhs)
+{
+    return std::tie(lhs.id, lhs.name, lhs.scope, lhs.matchSymbol, lhs.revision)
+           == std::tie(rhs.id, rhs.name, rhs.scope, rhs.matchSymbol, rhs.revision);
+}
+
+inline bool operator!=(const MatchDescriptor& lhs, const MatchDescriptor& rhs)
+{
+    return !(lhs == rhs);
+}
+
 /// UDD: how to invoke a kernel, shared by every kernel in a pack.
 struct DispatchDescriptor
 {
@@ -289,6 +504,17 @@ struct DispatchDescriptor
     std::string name;
     std::string dispatchSymbol; ///< Resolved through NativeRegistry.
 };
+
+inline bool operator==(const DispatchDescriptor& lhs, const DispatchDescriptor& rhs)
+{
+    return std::tie(lhs.id, lhs.name, lhs.dispatchSymbol)
+           == std::tie(rhs.id, rhs.name, rhs.dispatchSymbol);
+}
+
+inline bool operator!=(const DispatchDescriptor& lhs, const DispatchDescriptor& rhs)
+{
+    return !(lhs == rhs);
+}
 
 /// Which adapter loads and prepares one kernel's code.
 enum class KernelSourceKind
@@ -298,6 +524,26 @@ enum class KernelSourceKind
     HSACO_FILE, ///< Standalone `.hsaco` code-object file. No adapter yet.
     ROCKE_BUILDER, ///< rocke builder name plus build values. No adapter yet.
 };
+
+/// The descriptor spelling of @p kind, which `kernelSourceKindFromString` parses. A value
+/// outside the enum gives "unknown (<value>)".
+inline std::string toString(KernelSourceKind kind)
+{
+    switch(kind)
+    {
+    case KernelSourceKind::EMBEDDED_SOURCE:
+        return "embedded_source";
+    case KernelSourceKind::KPACK:
+        return "kpack";
+    case KernelSourceKind::HSACO_FILE:
+        return "hsaco_file";
+    case KernelSourceKind::ROCKE_BUILDER:
+        return "rocke_builder";
+    default:
+        break;
+    }
+    return "unknown (" + std::to_string(static_cast<int>(kind)) + ")";
+}
 
 /// One argument a kernel expects the host to marshal, as the compiled code object's AMDGPU
 /// metadata note declares it -- read out of the object by the packager, never authored.
@@ -317,6 +563,17 @@ struct KernelArgument
     /// never "named the empty string".
     std::string name;
 };
+
+inline bool operator==(const KernelArgument& lhs, const KernelArgument& rhs)
+{
+    return std::tie(lhs.kind, lhs.size, lhs.offset, lhs.name)
+           == std::tie(rhs.kind, rhs.size, rhs.offset, rhs.name);
+}
+
+inline bool operator!=(const KernelArgument& lhs, const KernelArgument& rhs)
+{
+    return !(lhs == rhs);
+}
 
 /// One argument list rendered for a diagnostic, as `kind:size@offset` per argument with the
 /// name appended when there is one.
@@ -380,6 +637,31 @@ struct KernelSource
     std::vector<KernelArgument> signature;
 };
 
+inline bool operator==(const KernelSource& lhs, const KernelSource& rhs)
+{
+    return std::tie(lhs.kind,
+                    lhs.sourceFile,
+                    lhs.entryPoint,
+                    lhs.library,
+                    lhs.tocKey,
+                    lhs.symbol,
+                    lhs.sha256,
+                    lhs.signature)
+           == std::tie(rhs.kind,
+                       rhs.sourceFile,
+                       rhs.entryPoint,
+                       rhs.library,
+                       rhs.tocKey,
+                       rhs.symbol,
+                       rhs.sha256,
+                       rhs.signature);
+}
+
+inline bool operator!=(const KernelSource& lhs, const KernelSource& rhs)
+{
+    return !(lhs == rhs);
+}
+
 namespace detail
 {
 
@@ -429,6 +711,11 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
               "assertion.");
 
 /// UKD: one launchable kernel. Matchers, engine, and dispatch come from its pack.
+///
+/// `operator==` is authored-content equality: it ignores @ref originDirectory and @ref treeRoot,
+/// which the loader stamps from the file's location after parsing, so a kernel shipped
+/// identically in several per-arch shards compares equal. `metadata` values compare
+/// numerically across the integer and floating-point alternatives (`1` equals `1.0`).
 struct KernelDescriptor
 {
     DescriptorId id;
@@ -458,7 +745,8 @@ struct KernelDescriptor
     /// Directory of the descriptor file that defined this kernel. Any path a descriptor
     /// names is resolved against it, so a relocated, DESTDIR-staged or drop-in install
     /// resolves from where the file actually is rather than from a loader root. Empty for a
-    /// kernel built in memory, which names no file. Filled by the loader, never authored.
+    /// kernel built in memory, which names no file. Filled by the loader, never authored. Not part
+    /// of operator==.
     std::filesystem::path originDirectory;
     /// The descriptor tree @c originDirectory was found under -- the root the loader was
     /// pointed at, not the file's own folder.
@@ -473,9 +761,62 @@ struct KernelDescriptor
     /// The tree root rather than the arch shard root: it is what the loader actually
     /// walked, so it needs no probing and no assumption about how deep a shard sits, and
     /// it stays correct for a flat tree where the two coincide. Empty for a kernel built
-    /// in memory. Filled by the loader, never authored.
+    /// in memory. Filled by the loader, never authored. Not part of operator==.
     std::filesystem::path treeRoot;
 };
+
+inline bool operator==(const KernelDescriptor& lhs, const KernelDescriptor& rhs)
+{
+    return detail::metadataValuesEquivalent(lhs.metadata, rhs.metadata)
+           && std::tie(lhs.id, lhs.name, lhs.source, lhs.sources, lhs.priority, lhs.arch)
+                  == std::tie(rhs.id, rhs.name, rhs.source, rhs.sources, rhs.priority, rhs.arch);
+}
+
+inline bool operator!=(const KernelDescriptor& lhs, const KernelDescriptor& rhs)
+{
+    return !(lhs == rhs);
+}
+
+/// The launch names of a kernel's @c sources map: the set a native dispatch handler must
+/// declare to launch the kernel. Empty for a single-launch kernel, which keeps `source`.
+inline std::set<std::string> launchNamesOf(const std::map<std::string, KernelSource>& sources)
+{
+    std::set<std::string> names;
+    for(const auto& launch : sources)
+    {
+        names.insert(launch.first);
+    }
+    return names;
+}
+
+// A multi-launch kernel leaves `source` default, and a default KernelSource reads as an
+// EMBEDDED_SOURCE kernel with no file. Read a kernel's sources through the two helpers
+// below, which look at `sources` first, rather than through `source` directly. Each takes
+// a KernelDescriptor or a KernelDefinition; both carry `source` and `sources`.
+
+/// The one source of a single-launch @p kernel, or nullptr for a multi-launch kernel. For a
+/// reader that needs exactly one code object, which must refuse a multi-launch kernel. The
+/// pointer refers into @p kernel and is valid only while @p kernel is, so never pass a
+/// temporary.
+template <typename Kernel>
+const KernelSource* singleLaunchSource(const Kernel& kernel)
+{
+    return kernel.sources.empty() ? &kernel.source : nullptr;
+}
+
+/// True iff @p predicate holds for every launch of @p kernel: each `sources` entry of a
+/// multi-launch kernel, or the one `source` of a single-launch kernel.
+template <typename Kernel, typename Predicate>
+bool allLaunchSources(const Kernel& kernel, Predicate predicate)
+{
+    if(kernel.sources.empty())
+    {
+        return predicate(kernel.source);
+    }
+    return std::all_of(kernel.sources.begin(), kernel.sources.end(), [&](const auto& launch) {
+        return predicate(launch.second);
+    });
+}
 
 /// KDP: one pack binding a matcher set, one engine, and one dispatch descriptor over
 /// a vector of child kernels.
@@ -503,6 +844,31 @@ struct KernelDescriptorPack
     /// built in memory leave it empty and fill `kernels` directly.
     std::vector<DescriptorId> kernelIds;
 };
+
+inline bool operator==(const KernelDescriptorPack& lhs, const KernelDescriptorPack& rhs)
+{
+    return std::tie(lhs.id,
+                    lhs.name,
+                    lhs.matcherIds,
+                    lhs.engineId,
+                    lhs.dispatchId,
+                    lhs.arch,
+                    lhs.kernels,
+                    lhs.kernelIds)
+           == std::tie(rhs.id,
+                       rhs.name,
+                       rhs.matcherIds,
+                       rhs.engineId,
+                       rhs.dispatchId,
+                       rhs.arch,
+                       rhs.kernels,
+                       rhs.kernelIds);
+}
+
+inline bool operator!=(const KernelDescriptorPack& lhs, const KernelDescriptorPack& rhs)
+{
+    return !(lhs == rhs);
+}
 
 /// One engine and every descriptor it references by id; self-contained.
 struct DescriptorSet

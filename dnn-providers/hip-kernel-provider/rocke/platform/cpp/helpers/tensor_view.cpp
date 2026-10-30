@@ -253,7 +253,8 @@ void rocke_tensor_view_store_scalar(rocke_ir_builder_t* b,
 
     if(v->addr_space == ROCKE_ADDR_LDS)
     {
-        if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16"))
+        if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16")
+           || rocke_tv_name_is(dt, "f64"))
         {
             rocke_b_smem_store_vN(b, v->base, indices, num_indices, value, 1);
             return;

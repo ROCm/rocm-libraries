@@ -206,6 +206,46 @@ double rocblas_internal_value_category(const T* beta, rocblas_datatype compute_t
 
 extern const char* c_rocblas_internal;
 
+// One internal GEMM sub-problem as reported by ROCBLAS_LAYER=0x10
+// (rocblas_layer_mode_log_kernel_select). A and B share input_type; C and D share output_type.
+// alpha and beta must point to host memory of compute_type.
+struct rocblas_internal_gemm_problem
+{
+    rocblas_operation trans_a        = rocblas_operation_none;
+    rocblas_operation trans_b        = rocblas_operation_none;
+    int64_t           m              = 0;
+    int64_t           n              = 0;
+    int64_t           k              = 0;
+    const void*       alpha          = nullptr;
+    const void*       beta           = nullptr;
+    rocblas_datatype  input_type     = rocblas_datatype_invalid;
+    rocblas_datatype  output_type    = rocblas_datatype_invalid;
+    rocblas_datatype  compute_type   = rocblas_datatype_invalid;
+    int64_t           lda            = 0;
+    int64_t           ldb            = 0;
+    int64_t           ldc            = 0;
+    int64_t           ldd            = 0;
+    rocblas_stride    stride_a       = 0;
+    rocblas_stride    stride_b       = 0;
+    rocblas_stride    stride_c       = 0;
+    rocblas_stride    stride_d       = 0;
+    int64_t           batch_count    = 1;
+    bool              pointer_array  = false;
+    rocblas_gemm_algo algo           = rocblas_gemm_algo_standard;
+    int32_t           solution_index = 0;
+    uint32_t          flags          = 0;
+};
+
+// Writes one rocblas-bench-replayable line for `prob` to the trace stream, followed by a
+// `# source=... kernel=... fallback_from=... parent_api=...` comment. The bench function is
+// gemm_ex, gemm_batched_ex or gemm_strided_batched_ex, matching how the sub-problem is laid out.
+// `kernel` may be null when the backend does not expose a kernel identifier.
+void rocblas_internal_log_kernel_select(rocblas_handle                       handle,
+                                        const rocblas_internal_gemm_problem& prob,
+                                        const char*                          source,
+                                        const char*                          kernel,
+                                        const char*                          fallback_from);
+
 /******************************************************************
  * ROCBLAS LOGGER *
  ******************************************************************/
