@@ -1103,8 +1103,9 @@ LDS chunk `c ^ (r mod chunks_per_row)`. XOR is its own inverse, so the lane that
 LDS chunk `c` fetches global chunk `c ^ (r mod chunks_per_row)`, and every LDS reader
 applies the same permutation to its column. The copies stay contiguous and the tile
 needs no padding. A loader that stages through registers can permute on the store
-instead (the gfx942 3D wide feed does, by default for decode at head size 64 and 128,
-with no A/B of its own recorded: see the
+instead (the gfx942 3D wide feed does, by default for decode at head size 64 and 128; at
+head size 128 it measured slightly faster alone, at head size 64 it has no A/B of its
+own: see the
 [3D decode case study](../../../library/builders/common/attention_3d_decode/CASE_STUDY.md)),
 but §6.4 measured a manually swizzled layout with register-staged LDS writes to regress
 slightly, so A/B it on your loader. The 3D attention kernels' `use_kv_lds_swizzle` is
@@ -2120,11 +2121,11 @@ them by hand only through an explicit tuning spec.
 
 | Field | Effect | Selected by / when to change |
 |---|---|---|
-| `num_segments` | Split-KV segments per sequence; the reduce kernel merges them | `_num_segments`. Decode wants enough workgroups (`num_seqs × num_kv_heads × num_segments`) to fill the device without over-splitting short sequences; the rule is spelled out in [gfx950 §6.1](../../../library/builders/gfx950/attention/ALGORITHM.md#61-how-many-segments-the-decode-split-rule) and [gfx942 §8.3](../../../library/builders/gfx942/attention/ALGORITHM.md#83-the-decode-split-rule); tuning candidate `0` takes the count `_num_segments` picks (the split rule's, where it applies), so a sweep can include the dispatched config when it tunes at the dispatcher's `num_cus` (without one, tuning uses the architecture's full-part CU count) |
+| `num_segments` | Split-KV segments per sequence; the reduce kernel merges them | `_num_segments`. Decode wants enough workgroups (`num_seqs × num_kv_heads × num_segments`) to fill the device without over-splitting short sequences; the rule is spelled out in [gfx950 §6.1](../../../library/builders/gfx950/attention/ALGORITHM.md#61-how-many-segments-the-decode-split-rule) and [gfx942 §8.3](../../../library/builders/gfx942/attention/ALGORITHM.md#83-the-decode-split-rule); tuning candidate `0` takes the count `_num_segments` picks (the split rule's, where it applies), so a sweep can include the dispatched config when it tunes at the dispatcher's `num_cus` (without one, tuning uses the architecture's full-part CU count); a count below about 100 can put the reduce kernel in a compiler-dependent slow zone ([case study §4](../../../library/builders/common/attention_3d_decode/CASE_STUDY.md#4-caveats-and-honest-losses)), so check the reduce's ISA when a sweep picks one |
 | `tile_size_override` | KV tokens per loop iteration. gfx950: a multiple of the page size (multi-page tiles); gfx942: a divisor of it | gfx950 `_gfx950_3d_tile_size_override`: large tiles for decode with too few workgroups to fill the device (under revision, [case study §7](../../../library/builders/common/attention_3d_decode/CASE_STUDY.md#7-open-items)); gfx942 `_gfx942_3d_tile_size_override` |
 | `use_wide_kv_load` (gfx942) | Wide synchronous K/V loads instead of 4-byte async copies | `_enable_gfx942_3d_wide_kv_load`; relies on the compiler overlapping the loads, so large head sizes keep the async copies |
 | `kv_cache_policy` | Cache policy of the K/V copies (`CACHE_POLICY_NAMES`, as the 2D field) | `_kv_cache_policy_3d`: `"stream"` (non-temporal) when every sequence decodes and K/V is fp16/bf16 (fp8 keeps `"all"`), since each K/V byte is read once |
-| `use_kv_lds_swizzle` | XOR-permutes each K/V LDS row's 16-byte chunks; the copies fetch permuted source chunks, so the tiles stay unpadded | `_kv_lds_swizzle_3d`; measured faster with gfx950 multi-page tiles and neutral with page-sized ones; gfx942 decode turns it on with no outcome of its own recorded (at head size 256 only together with `use_wave_page_id_load`, since alone it is slower under some compilers) |
+| `use_kv_lds_swizzle` | XOR-permutes each K/V LDS row's 16-byte chunks; the copies fetch permuted source chunks, so the tiles stay unpadded | `_kv_lds_swizzle_3d`; measured faster with gfx950 multi-page tiles and neutral with page-sized ones; gfx942 decode turns it on (head size 128: slightly faster alone and more with the page-id window; head size 64: no A/B of its own; head size 256 only together with `use_wave_page_id_load`, since alone it is slower under some compilers); gfx950 strided K/V measured slower with it, so automatic strided selection leaves it off |
 | `use_wave_page_id_load` | The wave loads 64 page-table entries at once and each tile reads its page ids from registers | `_wave_page_id_load_3d`; takes the page-table load off the KV loop's critical path, which lets fewer workgroups per CU hide latency |
 | `use_decode_grid` | One workgroup per sequence on grid x, no search over `query_start_len` | Derived (`_use_decode_grid`), legal only when every sequence has one query token; not a tuning axis |
 | `use_invariant_hoist` | Inert; kept so saved specs that set it still load | — |

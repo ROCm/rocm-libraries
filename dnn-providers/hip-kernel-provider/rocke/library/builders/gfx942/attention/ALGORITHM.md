@@ -493,6 +493,11 @@ $w \ge 304 / 16 = 19$ the rule applies despite the long KV, and it gives
 $\lfloor 4 \cdot 304 / 32 \rfloor = 38$ segments (a row of the
 [split-rule test](../../../tests/test_attention_tiled_3d_decode_split.py)).
 
+The rule's counts above 64 occur only at head size 64 (at most 96, because
+$w \ge \text{CUs}/16$ at long KV), where the reduce kernel does not serialize its loads;
+at head size 256 some counts below about 100 make it do so, depending on the compiler
+([case study §4](../../common/attention_3d_decode/CASE_STUDY.md#4-caveats-and-honest-losses)).
+
 Outside the scope (fp8 K/V, a sliding window, an explicit `target_ctas`, head size 256,
 a `block_size` other than 16, non-decode problems, and $w < \text{CUs}/16$ with 8K or
 more KV tokens) the count is what `_num_segments` gave before the series: the

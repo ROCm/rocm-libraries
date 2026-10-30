@@ -381,6 +381,9 @@ In the second row each workgroup's KV loop is latency-bound, so the tile widens 
 tokens; the swizzle is neutral at page-sized tiles and pays at multi-page ones. The
 64-token tile and the page-id loader are under revision
 ([case study §7](../../common/attention_3d_decode/CASE_STUDY.md#7-open-items)).
+Strided K/V takes the 64-token tile without the swizzle, which measured slower there,
+and under LLVM 22 that tile is slower than the previous kernel
+([case study §4](../../common/attention_3d_decode/CASE_STUDY.md#4-caveats-and-honest-losses)).
 
 Worked examples on 256 CUs, both cases that the
 [split-rule test](../../../tests/test_attention_tiled_3d_decode_split.py) pins:
@@ -389,6 +392,13 @@ Worked examples on 256 CUs, both cases that the
   so the second row applies: 64 segments with 64-token tiles.
 - 4 sequences, 8 KV heads, 16K KV tokens: $w = 32$ and $w \cdot 32 > \text{CUs}$, so the
   first row applies: $\lfloor 4 \cdot 256 / 32 \rfloor = 32$ segments with one-page tiles.
+
+Known issue: the first row returns non-power-of-two counts, and for some counts below
+about 100 the reduce kernel unrolls its segment loop into one load wait per load, which
+is markedly slower; which counts depends on the compiler and the head size. With 256 CUs
+and 8K or more KV tokens, $w = 9$ to $15$ gives 113, 102, 93, 85, 78, 73 and 68 segments;
+under LLVM 22, head size 256 is affected from $w = 10$ (partly) to 15 and head size 128
+at $w = 10$ ([case study §4](../../common/attention_3d_decode/CASE_STUDY.md#4-caveats-and-honest-losses)).
 
 Every other problem — fp8 K/V, sliding windows, an explicit `target_ctas`, non-decode,
 head size 64, head size 256 with $w \cdot 32 \le \text{CUs}$, a `block_size` other than

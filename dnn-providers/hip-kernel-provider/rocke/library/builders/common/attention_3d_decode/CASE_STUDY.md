@@ -10,9 +10,11 @@ measured configurations, not a general claim. Those configurations are the per-l
 A/Bs over decode shapes that the series' author ran during development (the exp2 one
 over various shapes routed to the 3D path) and the series-wide comparison with default
 dispatch on both arms (§5). The outcomes are transcribed from the commit messages and
-the description of #13492 (the gfx950 head-size-256 compiler note in §4 from the
-docstring of `_gfx950_3d_decode_ctas_per_segment`) and were not re-measured for this
-file. The algorithm is written up in the
+the description of #13492 and from the author's development A/Bs and notes, which are
+not in the repository (the gfx950 head-size-256 compiler note in §4 comes from the
+docstring of `_gfx950_3d_decode_ctas_per_segment`), and were not re-measured for this
+file. What was checked against the code or the compiler is listed in §5. The algorithm
+is written up in the
 [gfx950](../../gfx950/attention/ALGORITHM.md#51-inside-the-segment-kernel) and
 [gfx942](../../gfx942/attention/ALGORITHM.md#8-the-decode-path-3d-split-kv)
 `ALGORITHM.md` files; the fields are in the
@@ -95,10 +97,10 @@ for:
 Outcome words compare against the previous kernel on the same shapes: *faster*,
 *neutral* or *slower* at the measured configurations. *Kept* means the lever ships on
 its default path; *conditional* means it is on only where it measured well; *under
-revision* means it overlaps open work (§7). *No separate outcome recorded* means the
-lever has no A/B of its own: either it was measured only together with other levers,
-in a joint A/B that the row or the split-rule history names, or it had no A/B at all
-and only the series-wide comparison covers it.
+revision* means it overlaps open work (§7). *Alone* means the lever was timed without
+the levers it ships with. *No separate outcome recorded* means the lever has no A/B of
+its own, so only the series-wide comparison covers it. Most A/Bs ran on K/V that is
+not cache-resident between calls (§4).
 
 ### 2.1 Always on
 
@@ -108,10 +110,10 @@ and [gfx942 §8](../../gfx942/attention/ALGORITHM.md#8-the-decode-path-3d-split-
 | Lever | Arch | Mechanism | Outcome |
 |---|---|---|---|
 | Transposed QK, register-resident $P$ | both | $S^{\top} = K Q^{\top}$: one $(m, \ell)$ per lane, no $P$ tile in LDS | Kept. gfx950: faster on long-KV, single-sequence and head-size-256 decode, neutral on short batched decode. gfx942: faster on batched, single-sequence and head-size-256 decode. Outputs match the previous kernel within rounding. |
-| $Q^{\top}$ read once | both | loaded into registers before the KV loop instead of read from LDS every tile | Kept. gfx950: faster on long-KV and batched decode, neutral on short single-sequence decode; costs a few VGPRs and leaves occupancy unchanged. gfx942: landed with the transposed-QK change; no separate outcome recorded. |
+| $Q^{\top}$ read once | both | loaded into registers before the KV loop instead of read from LDS every tile | Kept. gfx950: faster on long-KV and batched decode, neutral on short single-sequence decode; costs a few VGPRs and leaves occupancy unchanged. gfx942: faster alone on the 3D decode rows (it also landed with the transposed-QK change). |
 | One V LDS slot | both | $V(i)$ is consumed in the iteration that loads it, so the second slot never held a live tile | Kept. gfx950: raises occupancy at the default tile, with broad gains on decode shapes. gfx942: head size 256 at block size 64 now builds (it had exceeded the 64 KiB LDS limit while reported as supported); neutral at the default decode tile. |
 | Native `exp2` | both | `llvm.amdgcn.exp2` (one `v_exp_f32`) in the segment softmax and the reduce kernel | Kept. No regression, small gains on kernel-bound decode shapes, outputs matched on the measured shapes. |
-| `16x16x32` PV | gfx950 | two 16-token blocks per MFMA on tiles of 32 or more tokens | Kept. Half as many PV MFMAs on those tiles; 16-token tiles unchanged. No separate timing outcome recorded. |
+| `16x16x32` PV | gfx950 | two 16-token blocks per MFMA on tiles of 32 or more tokens | Kept. Half as many PV MFMAs on those tiles; 16-token tiles unchanged. Paged K/V at 64-token tiles: slightly faster under LLVM 22 and LLVM 23. Strided K/V at 64-token tiles: slower under LLVM 22 (the series' author traced it to LLVM 22 issuing all QK$^{\top}$ MFMAs before the next tile's copies) and slightly faster under LLVM 23, a loss in a shipped default (§4). |
 | Page ids a tile ahead | gfx950 | for paged fp16/bf16 K/V the next tile's page id is read during the current tile and passed as the copy's `soffset` (or folded into a 64-bit buffer base for caches above 2 GiB), instead of a block-table read issued with the K/V copies, whose wait drained the copies already in flight | Kept, under revision. Neutral to positive on decode shapes, largest on kernel-bound single-sequence and large-page shapes. Overlaps the open decoupled-KV-pages work (§7). |
 
 ### 2.2 Spec fields and dispatch rules
@@ -149,8 +151,9 @@ script takes no command-line arguments and its own requests use `num_cus=120`, s
 `dump_shape` yourself with your own request and the device's CU count: the script's
 `_req(**overrides)` builds one, and
 `dump_shape("4 seqs, 16K", _req(batch=4, seqlen_k=16384, num_cus=256))` prints
-`num_segments=32` and `tile=16`, the second worked example of gfx950 §6.1. The
-kernel-name tokens in §3 show which levers are on.
+`num_segments=32` and `tile=16`, the second worked example of gfx950 §6.1. It first
+prints every registered candidate, thousands of lines for this example, so the summary
+lines are the last ones. The kernel-name tokens in §3 show which levers are on.
 
 Outcomes by lever (the conditions are in the table above):
 
@@ -158,9 +161,9 @@ Outcomes by lever (the conditions are in the table above):
 |---|---|---|
 | Decode grid, `use_decode_grid` | both | Kept. Large gains at 16 query heads per KV head, neutral elsewhere. |
 | Streaming K/V, `kv_cache_policy="stream"` | both | Kept. gfx950: faster on batched decode, neutral on single-sequence decode. gfx942: neutral to slightly faster. Both measured with K/V that is not cache-resident between calls (§4). |
-| K/V LDS swizzle, `use_kv_lds_swizzle` | both | gfx950: conditional. Neutral at page-sized tiles, faster at multi-page tiles, most on single-sequence and head-size-256 decode; that A/B set the multi-page tiles by explicit spec, since default dispatch then selected none, and default dispatch now gives them only to head size 128 (table above). gfx942: kept for all-decode problems (conditions in the table above). Head size 64 and 128: no separate outcome recorded. Head size 256: alone it is slower under some compilers, hence the pairing with the page-id window; the pair has no separate outcome recorded. |
-| Wave page-id window, `use_wave_page_id_load` | both | Kept. gfx950: one A/B, together with the retune to about 4 workgroups per CU (below): faster on batched decode, unchanged on single-sequence decode and outside the rule's scope. gfx942: no separate outcome recorded. |
-| Multi-page KV tiles | gfx950 | Conditional, under revision. No separate outcome recorded: measured only together with 64 segments and the swizzle (the single-sequence tune and the first split rule, below). Overlaps the open decoupled-KV-pages work (§7). |
+| K/V LDS swizzle, `use_kv_lds_swizzle` | both | gfx950: conditional. Neutral at page-sized tiles, faster at multi-page tiles, most on single-sequence and head-size-256 decode; that A/B set the multi-page tiles by explicit spec, since default dispatch then selected none, and default dispatch now gives them only to head size 128 (table above). Strided K/V: slower in the segment-by-knob sweeps (the best arm with the swizzle was behind the best arm overall, clearly so on the worst shape), so default dispatch leaves it off; there is no gfx942 strided measurement. gfx942: kept for all-decode problems (conditions in the table above). Head size 128: faster alone, and faster still with the page-id window. Head size 64: no separate outcome recorded. Head size 256 (async copies): alone it is slightly faster under LLVM 22 but clearly slower under LLVM 23; the window alone is neutral under LLVM 22 and slightly faster under LLVM 23; the pair is slightly faster under LLVM 22 and faster under LLVM 23, which is why the two ship together. |
+| Wave page-id window, `use_wave_page_id_load` | both | Kept. gfx950: only the pair with the retune to about 4 workgroups per CU (below) paid. The window alone, at the then-current about 8 workgroups per CU, was slightly slower on batched decode, and halving the segments without the window was slower too; the pair was faster on batched decode and unchanged on single-sequence decode and outside the rule's scope. gfx942, head size 128: alone neutral on batched decode and faster on a single-sequence row; with the swizzle faster than the swizzle alone. Head size 64: no separate outcome recorded; head size 256: see the swizzle row. |
+| Multi-page KV tiles | gfx950 | Conditional, under revision. 64-token tiles with 64 segments and the swizzle off: faster than the previous kernel on single-sequence decode (the single-sequence tune, below). The swizzle adds a little more at 64-token tiles and is neutral at 16-token tiles. The tile was not separated from the 64 segments (§7). Overlaps the open decoupled-KV-pages work (§7). |
 | Async K/V copies at head size 256 | gfx942 | Kept. A large win with LLVM 23, where the wide feed's load/store pairs serialize at head size 256; neutral with LLVM 22. |
 | Decode split rule | both | Kept. History and attribution below. |
 | Invariant hoist, `use_invariant_hoist` | both | Removed. The kernels compute the query-row invariants once per lane before the loop, so the field selected nothing. The environment toggle, dispatch helper, tuning axis and name token are gone; the spec field stays, inert, so saved specs still load. |
@@ -168,21 +171,27 @@ Outcomes by lever (the conditions are in the table above):
 Decode split rule history:
 
 - gfx950, single-sequence tune (one sequence, head size 128, paged K/V, KV of 4K tokens
-  or more): 64-token tiles, 64 segments and the swizzle, in one A/B. Faster on every
-  covered single-sequence shape, unchanged elsewhere.
+  or more): 64-token tiles and 64 segments with the swizzle off, then the swizzle on
+  top, as two A/Bs. Faster on every covered single-sequence shape, unchanged elsewhere.
 - gfx950, first version, which generalized it (about 8 workgroups per CU, rounded down
   to a power of two between 4 and 64 segments; 64-token tiles when even 64 segments
   leave the device underfilled): faster on large batches and on small batches with few
   KV heads, and unchanged where the previous split already matched.
-- gfx950, retune to about 4 workgroups per CU (still a power of two, 4 to 64): measured
-  only together with the page-id window (above). The later extension recorded no
-  separate outcome. It added KV below 4K tokens, head size 256 and strided K/V, and it
-  changed the counts to what ships: $\lfloor 4\,\text{CUs}/w \rfloor$ without the
+- gfx950, retune to about 4 workgroups per CU (still a power of two, 4 to 64): only
+  together with the page-id window (above). A later 48-shape refit with the window on
+  put about 4 per CU close to the best arm (geomean; the worst shape was clearly
+  behind). The later extension added KV below 4K tokens, head size 256 and strided K/V,
+  and it changed the counts to what ships: $\lfloor 4\,\text{CUs}/w \rfloor$ without the
   power-of-two rounding, at least 2 and at most 64 (128 from 8K KV tokens), and with few
-  workgroups at most one segment per 64-token tile. The series-wide comparison covers
-  the final rule.
-- gfx942: scoped to where it measured well (enough workgroups per segment, or KV below
-  8K tokens); the previous counts stay elsewhere.
+  workgroups at most one segment per 64-token tile. Against the previous counts, on the
+  shapes whose count changed, it was faster on the changed decode rows (no losses), on a
+  synthetic paged sweep (a few shapes slightly slower) and on a synthetic strided sweep,
+  and similarly under LLVM 23. The series-wide comparison covers the final rule.
+- gfx942: scoped to where it measured well on net (enough workgroups per segment, or KV
+  below 8K tokens); the previous counts stay elsewhere. Against the previous counts it
+  was faster on the changed decode rows (no losses), on a synthetic paged sweep (a few
+  shapes slower) and on a synthetic strided sweep, with small losses at short KV inside
+  its scope (§4).
 
 ## 3. Compatibility
 
@@ -207,17 +216,21 @@ Decode split rule history:
 
 ## 4. Caveats and honest losses
 
-- **K/V residency.** Real decode reads each K/V byte once per step. The A/Bs of the
-  non-temporal hint on both architectures, the gfx942 transposed QK and the gfx942
-  head-size-256 copies used K/V that was not cache-resident between calls. The other
-  per-lever A/Bs do not record it, and the series-wide comparison replayed the same
-  inputs, so the K/V could stay warm. That is the conservative direction for the
-  non-temporal hint (replaying a small K/V makes it look slower, because the K/V no
-  longer stays in the caches). For the other levers the direction is not known: the
-  split rule, the decode grid, both page-id levers, the swizzle, the one V slot, exp2,
-  the gfx950 transposed QK and $Q^{\top}$ read once, and the levers with no A/B of their
-  own were judged on warm or unrecorded K/V. For the split rule in particular, shorter
-  load latency can make fewer workgroups per CU look sufficient (§7).
+- **K/V residency.** Real decode reads each K/V byte once per step, so most per-lever
+  A/Bs used K/V that was not cache-resident between calls ("cold": every call read the
+  next of several K/V copies in distinct memory, about 2 GB per shape in total, timed
+  kernel-only). Cold were every split-rule step and the segment sweeps it was fitted
+  from, the K/V swizzle and the wave page-id window on both architectures, the
+  transposed QK and $Q^{\top}$ read once on both (gfx950 also warm, where the results agreed),
+  the `16x16x32` PV, the non-temporal policy on both, and the gfx942 head-size-256
+  copies. Four levers were measured warm, with host launch included, before the cold
+  mode existed: the decode grid, native exp2, the one V slot and page ids a tile ahead.
+  The series-wide comparison replayed the same inputs, so its K/V could stay warm; it is
+  the only coverage of the levers with no A/B of their own (§2.2). Warm is the
+  conservative direction for the non-temporal hint (replaying a small K/V makes it look
+  slower, because the K/V no longer stays in the caches). For the four warm levers the
+  direction is not known; they change instruction counts and waits rather than memory
+  behavior, and the series' author expects them not to flip (§7).
 - **Host launch.** A few small decode shapes are marginally slower once the host launch
   is included. Their kernels are faster on the device, but each call is bound by host
   launch overhead, which the series raises slightly. No measured shape on the 3D path
@@ -227,13 +240,50 @@ Decode split rule history:
   size 256), and the gfx942 head-size-256 swizzle alone is slower under some compilers.
   The gfx950 head-size-256 split rule is limited to grids with enough workgroups for
   page-sized tiles because its few-workgroup splits measured faster under one compiler
-  and slower under another. Re-measure these on a compiler change.
+  and slower under another. The strided-K/V loss and the reduce-kernel slow zone below
+  depend on the compiler too. The compiler is the COMGR the process loaded, not
+  `ROCKE_LLVM_FLAVOR` (§6). Re-measure these on a compiler change.
+- **Strided K/V at 64-token tiles.** gfx950 strided decode with few workgroups
+  ($w \cdot 32 \le$ CUs) gets 64-token tiles by default and, with them, the unconditional
+  `16x16x32` PV (§2.1). Under LLVM 22 that is slower than the previous kernel; under
+  LLVM 23 it is slightly faster. It is a loss in a shipped default. The strided K/V
+  swizzle is off because it measured slower (§2.2).
+- **Small split-rule losses.** The split rule is faster in aggregate, not on every shape.
+  gfx942 lost a little at 32 to 64 workgroups per segment with 1K to 2K KV tokens,
+  inside its scope (the "KV below 8K tokens" clause). gfx950 lost a little at 16 to 32
+  workgroups with 1K KV tokens, and at head size 256 with 64 KV heads and at least 64
+  workgroups. Every changed decode row of the benchmark set improved. Not tested:
+  non-power-of-two $w$ (the synthetic sweeps used powers of two), ragged batches and KV
+  beyond 64K tokens.
+- **Reduce kernel slow zone.** The reduce kernel loops over the segments with a
+  compile-time trip count. Up to about 100 segments LLVM unrolls the loop completely, and
+  for some counts the unrolled code waits for each load before issuing the next
+  (`s_waitcnt vmcnt(0)` after almost every load), which makes the reduce markedly
+  slower: the series' author timed it on gfx942 at head size 256 with 76 and 96 segments,
+  against 64 or 128. Which counts serialize depends on the compiler and the head size,
+  and they are not a clean range. Compiled offline (no device) and counted as described
+  below, every count tried from 66 to 101 serialized at gfx942 head size 256 under
+  LLVM 22 (48 to 101 under LLVM 20) while 112 and 128 stayed rolled, and none of 57 to 101
+  did at gfx942 head size 64. On gfx950 under LLVM 22, head size 256 serialized at all but
+  80 of the counts tried from 67 to 101 (only partly at 102), and head size 128 only at
+  102. To check a count, compile a reduce spec with that `num_segments` for the target and
+  compiler (`build_unified_attention_reduce_tiled`, `compile_kernel`), disassemble it with
+  `llvm-objdump -d`, and compare the `s_waitcnt` lines that wait for `vmcnt(0)` with the
+  `global_load` lines: about one per load is the serialized form. The shipped split rule
+  reaches the zone on gfx950: with 256 CUs and 8K or more KV tokens it returns 113, 102,
+  93, 85, 78, 73 and 68 segments at 9 to 15 workgroups per segment, so under LLVM 22 head
+  size 256 serializes for 11 to 15 workgroups (partly for 10) and head size 128 for 10. On
+  gfx942 the rule's counts above 64 occur only at head size 64, which does not serialize,
+  and head size 256 is outside the rule. No shape of the series' benchmark set landed in
+  the zone. A reduce redesign is a follow-up (§7).
 - **Coverage.**
-  - The series-wide comparison used one device per architecture and one compiler build,
-    which the PR names only as the benchmark's ROCm build, so its LLVM version is not
-    recorded; the gfx942 head-size-256 loader was also compared across LLVM 22 and 23
-    (§2.2). A GQA ratio that does not divide 16 runs the scalar kernels in both arms
-    (§7).
+  - The series-wide comparison used one device per architecture and one compiler build
+    (an LLVM 23 COMGR, per the series' author; the PR names only the benchmark's ROCm
+    build). The per-lever A/Bs from the gfx950 K/V swizzle on, and all gfx942 ones, ran
+    with the LLVM 22 COMGR bundled with torch, several also under LLVM 23; the earlier
+    gfx950 A/Bs recorded only the node's ROCm with torch loaded. The gfx942 head-size-256
+    loader was compared across LLVM 22 and 23 (§2.2). A GQA ratio that does not divide 16
+    runs the tiled 2D kernel in both arms, not the 3D path (§7).
   - The kernel-body rewrites of §2.1 are not decode-gated: they run for every problem
     routed to the 3D path (prefill, speculative decode, mixed batches), subject only to
     their own conditions (paged fp16/bf16 K/V for page ids a tile ahead; tiles of 32 or
@@ -253,7 +303,11 @@ Decode split rule history:
 ## 5. Method and correctness gate
 
 **Provenance.** The outcomes in §2 come from the #13492 commit messages and PR
-description, where the relative results live; none was re-measured for this file.
+description, where the relative results live, and from the series author's development
+A/Bs and notes (not in the repository); none was re-measured for this file, and the
+outcome words are the series author's statements. The code facts (dispatch paths,
+defaults, split-rule counts, harness scope, the cost of the per-launch cache key) were
+checked against the tree, and the reduce-kernel slow zone of §4 against compiled code.
 
 **Correctness.** The PR description says every shape's result was checked against a
 reference before it was timed. The gates it lists:
@@ -264,13 +318,11 @@ reference before it was timed. The gates it lists:
   [wave page-id window](../../../tests/test_attention_tiled_3d_wave_page_id_load.py);
   their GPU tests run on a gfx942 or gfx950 device, each on its own architecture, and
   skip elsewhere) with reversed and poisoned page tables, ragged and empty sequences
-  and multi-page tiles, the
-  [strided-KV decode numerics](../../../tests/test_strided_kv_decode_numeric.py), and
-  the forced-3D parity harness (§6). The knob and strided suites run fp16 and bf16 and
-  compare with absolute/relative tolerances of 0.003/0.005 (fp16) and 0.01/0.02 (bf16).
-  The PR description gives no dtype or tolerance for the check that gated the timed
-  runs, so the outcome words in §2 are the series author's statements; recording the
-  tolerance is an open item (§7).
+  and multi-page tiles, and the
+  [strided-KV decode numerics](../../../tests/test_strided_kv_decode_numeric.py). The
+  knob and strided suites run fp16 and bf16 and compare with absolute/relative
+  tolerances of 0.003/0.005 (fp16) and 0.01/0.02 (bf16). The test plan also lists the
+  forced-3D parity harness (§6) on both architectures; it ran on gfx950 only (below).
 - CPU suites for the [split rule](../../../tests/test_attention_tiled_3d_decode_split.py)
   and the [cache policy](../../../tests/test_attention_tiled_3d_kv_cache_policy.py), and
   a platform [ISA test](../../../../platform/tests/core/test_buffer_lds_cache_policy_isa.py)
@@ -284,15 +336,38 @@ reference before it was timed. The gates it lists:
   [strided KV](../../../tests/parity/attention_strided_kv_emit.py). The representative
   and strided-KV IR goldens were re-blessed where the 3D kernels changed.
 
+The PR description does not say the following; it comes from the series author's notes:
+
+- The check that gated the timed runs. In the per-lever A/Bs, each row compared the
+  output of its first and its last sequence against an FP32 reference before timing,
+  with a max-abs tolerance of 2e-2, in fp16 and bf16. In the series-wide comparison,
+  each shape's whole output was compared by max-abs against an FP32 reference before
+  timing; anything above 5e-2 was flagged, not dropped. Its decode rows are fp16/bf16.
+  Both tolerances are absolute, so the checks catch less where the reference outputs are
+  small, as they are for long-KV decode on random inputs (the outputs shrink with the KV
+  length).
+- The forced-3D parity run, on gfx950 only: `parity_unified_attention.py --paths 3d
+  --set all`, once per scenario, without the nine `pr9233_*` scenarios, which fault when
+  forced to 3D on develop too. That leaves 48 scenarios, 45 of which produce a 3D result
+  (the three `gqa_nqk` scenarios with ratios 3, 5 and 7 fail the 3D gate and produce
+  none). The harness has no pass/fail and exits 0 whenever it runs to the end, so the
+  author judged each scenario's max-abs against the previous commit's run.
+- gfx942 3D correctness. The gfx942 parity harness is 2D-only (§6), so no forced-3D
+  parity ran there, which the #13492 test plan overstated. The 3D kernels rest on the
+  knob, strided-KV and page-id suites above, on feature checks against the base tree
+  (bit-identical for the cache policy, $Q^{\top}$ read once, the swizzle and the page
+  ids; within rounding for the transposed QK) and on the per-row check above.
+
 **Performance.** The per-lever A/Bs ran over decode shapes (the exp2 one over various
-shapes routed to the 3D path), most of them interleaved; the commit messages do not say
-how each arm was built (the commit against its parent, or a spec field set both ways on
-one build). The series-wide comparison used default dispatch on both sides (no tuned
-specs) against develop at `a76c2460399`, over a corpus of LLM attention shapes (prefill
-and decode; 251 on gfx950, 248 on gfx942) on one gfx950 and one gfx942 device. Each
-shape ran 5 rounds of 75 warm-up and 250 timed calls, reported as the median, with two
-timings: wall time per call including the host launch, and device time from HIP-graph
-replay. The cohorts on the 3D path were:
+shapes routed to the 3D path), most of them interleaved. An arm was either an
+environment toggle in one tree with per-arm kernel caches, interleaved row by row, or a
+commit run against its parent in alternating processes. The series-wide comparison used
+default dispatch on both sides (no tuned specs): the series with develop `a76c2460399`
+merged in (`5b2dd750b61`, a commit of #13492) against `a76c2460399`, over a corpus of LLM
+attention shapes (prefill and decode; 251 on gfx950, 248 on gfx942) on one gfx950 and one
+gfx942 device. Each shape ran 5 rounds of 75 warm-up and 250 timed calls, reported as the
+median, with two timings: wall time per call including the host launch, and device time
+from HIP-graph replay. The cohorts on the 3D path were:
 
 | Cohort | Shapes |
 |---|---|
@@ -301,17 +376,30 @@ replay. The cohorts on the 3D path were:
 | Decode, 32 or more sequences | 16 |
 | Decode, head size 256 | 7 |
 | Prefill routed to 3D | 1 on gfx950, 3 on gfx942 |
-| Decode with query heads per KV head not dividing 16 (scalar fallback on both sides) | 15 |
+
+Another 15 decode shapes have query heads per KV head that do not divide 16. They are not
+on the 3D path: both arms ran the tiled 2D kernel on them, or the scalar kernels where 2D
+rejects the shape (§7).
 
 **Step 0.** The series' commit messages and PR description record no
 [Step 0](../../../../platform/dsl_docs/optimization/optimization_runbook.md#step-0--exhaust-the-existing-lever-space-first-do-this-before-touching-the-algorithm-or-structure)
-sweep of the existing lever space before the kernel-body rewrites of §2.1, and no
-reason for skipping one. Commit `9007caa2880` records a separate limit: until then the
-3D tuning space could not express what default dispatch builds for decode (production
-sweeps never enabled the K/V swizzle or the page-id window, and the segment catalog
-missed the split rule's counts); §3 describes what it expresses now. So §2 rests on
-A/Bs against the previous kernel, not on a sweep; a sweep of the current space is an
-open item (§7).
+sweep of the existing lever space before the kernel-body rewrites of §2.1, but the
+series' author did one on gfx950 and did not record it there. The then-existing lever
+space was measured at its per-shape tuned ceiling (offline-tuned specs per shape), with
+a leave-one-out and an add-one knob ablation and profiling, warm and with host launch
+included. On the 3D shapes the segment count was the main lever and alone gave the full
+tuned gain; `waves_per_eu`, staggered waits and `num_cus` were neutral. The remaining
+tuned gains came from routing short-KV and large-batch shapes to tuned 2D configs and
+from graph replay. Even the tuned ceiling trailed AITER from 8K KV tokens up, and from
+4K for the largest-head and batch-64 shapes, and that gap motivated the kernel changes.
+The split-rule constants then came from segment × tile × knob sweeps on both
+architectures, all cold. gfx942 had a cold baseline against develop and AITER before its
+lever ports, but no sweep of its existing lever space. Commit `9007caa2880` records a
+separate limit: until then the 3D tuning space could not express what default dispatch
+builds for decode (production sweeps never enabled the K/V swizzle or the page-id
+window, and the segment catalog missed the split rule's counts); §3 describes what it
+expresses now. So on gfx942 §2 rests on A/Bs against the previous kernel, not on a
+sweep, and a sweep of the current space is an open item (§7).
 
 ## 6. Reproducing
 
@@ -320,10 +408,10 @@ up as in [BUILDING.md](../../../../BUILDING.md) and see
 [TESTING.md](../../../../TESTING.md) for the tiers.
 
 ```bash
-# Gates that need no GPU: relative-path guard, Python/C++ byte identity, parity, pytest.
-# The byte-identity gate runs every LLVM flavor the runner supports (the --flavor
-# choices) unless --flavor <name> pins one of them.
-python tools/run_checks.py --steps guard,gate,parity,pytest
+# Gates that need no GPU: relative-path guard, Python/C++ byte identity, the emitted-IR
+# and arch-domain corpus gates, parity, pytest. The byte-identity gate runs every LLVM
+# flavor the runner supports (the --flavor choices) unless --flavor <name> pins one.
+python tools/run_checks.py --steps guard,gate,ir-validity,arch-domain,parity,pytest
 
 # Representative IR goldens (prints "IR parity OK" with the flavors it checked).
 PYTHONPATH=platform/python:library \
@@ -333,9 +421,11 @@ PYTHONPATH=platform/python:library \
 
 The pytest stage picks up the new tests by itself, and the gate stage picks up the
 emitter pairs; the GPU tests in the knob suites run on a gfx942 or gfx950 device and
-skip elsewhere. `--steps numeric` is a different lane (the attention FMHA numeric
-harness `numeric_attention.py`, plus the gfx950 fp8 decode 3D check), and it fails
-without a device when requested explicitly.
+skip elsewhere. `ir-validity` and `arch-domain` are stages of their own, which a
+`--steps` list that omits them skips; the arch-domain gate flagged this series' kernels
+while the series was in development. `--steps numeric` is a different lane (the
+attention FMHA numeric harness `numeric_attention.py`, plus the gfx950 fp8 decode 3D
+check), and it fails without a device when requested explicitly.
 
 GPU numerics, on a gfx942 or gfx950 device. The C++-engine cases skip unless the
 `rocke_engine` module is built (see BUILDING.md):
@@ -344,7 +434,8 @@ GPU numerics, on a gfx942 or gfx950 device. The C++-engine cases skip unless the
 PYTHONPATH=platform/python:library python -m pytest \
     library/tests/test_attention_tiled_3d_kv_lds_swizzle.py \
     library/tests/test_attention_tiled_3d_wave_page_id_load.py \
-    library/tests/test_strided_kv_decode_numeric.py
+    library/tests/test_strided_kv_decode_numeric.py \
+    library/tests/test_attention_tiled_3d_running_max.py
 
 # Forced-3D parity on gfx950 (RocKE lanes only; drop --skip-triton and set AITER_PATH
 # to compare with AITER's Triton kernel as well).
@@ -352,18 +443,28 @@ PYTHONPATH=platform/python:library python -m pytest \
     builders.gfx950.attention.prefill.parity_unified_attention --paths 3d --skip-triton)
 ```
 
-The PR description does not name the harness it calls the forced-3D parity harness. On
-gfx950 the in-repo harness that forces the 3D path is
+The running-max test is the regression test of
+[#14276](https://github.com/ROCm/rocm-libraries/pull/14276): its GPU tests are the
+overflow cases that fix removed (each hit one of them before it), which is the hazard the
+paragraph on replay and the overflow fixes below warns about. They are torch-free.
+
+The PR description calls the harness the forced-3D parity harness; the series ran the
+gfx950 one,
 [`parity_unified_attention.py`](../../gfx950/attention/prefill/parity_unified_attention.py)
-with `--paths 3d`. It builds every problem with `num_cus=120`, so its decode shapes get
-the split rule's choice for 120 CUs, not the device's. The gfx942 parity harness
+with `--paths 3d`. The command above runs its default set (27 scenarios, none of them a
+`pr9233_*` one); §5 describes the set the series ran. It builds every problem with
+`num_cus=120`, so its decode shapes get the split rule's choice for 120 CUs, not the
+device's. The gfx942 parity harness
 ([`parity_unified_attention.py`](../../gfx942/attention/prefill/parity_unified_attention.py))
 builds and launches only the 2D tiled kernel (explicit spec, `block_size` 64), so it
-never runs the 3D path; which harness the series ran on gfx942 is not recorded (§7).
+never runs the 3D path, and no forced-3D parity ran on gfx942 (§5).
 
-For the A/B, build one checkout per arm. The series' own comparison used develop at
-`a76c2460399` as the baseline; to replay the series as it merged, check out the squash
-commit `b53003d7bb6` and its first parent `503f5c82876` (both predate the fixes below).
+For the A/B, build one checkout per arm. The series-wide comparison's own pair was
+`5b2dd750b61` (the series with develop `a76c2460399` merged in, a commit of #13492 on
+`refs/pull/13492/head`) against `a76c2460399`. To replay the series as it merged, check
+out the squash commit `b53003d7bb6` and its first parent `503f5c82876`; that pair also
+holds the twelve later commits of the PR (tests, docs, tuning ids, the tuning-space
+change `9007caa2880` and two merges of develop). Both pairs predate the fixes below.
 To replay a per-lever A/B, compare the series commit that introduced the lever with its
 parent; the series' commits are on `refs/pull/13492/head`, in the order of the PR, and
 the squash merge does not keep them. That measures the lever in the kernel as it was at
@@ -373,6 +474,13 @@ in one process on one stream, which gives the same-session ratios
 [KERNEL_AUTHORING.md](../../../../KERNEL_AUTHORING.md#d-perf-optimization-no-new-feature)
 asks for (on gfx950, `decode_table_sweep` times a shape's tuning variants in one
 process).
+
+Each arm must import its own tree. With one editable environment (BUILDING.md),
+`python -m benchmarks…` run from either checkout imports `rocke`, `kernels`, `builders`,
+`dispatch` and `benchmarks` from the environment's tree, so both arms would run the same
+code. Use each checkout's own environment (`build/rocke-pyenv/bin/python`), or run from
+its `rocke/` directory with `PYTHONPATH=platform/python:library` as the commands below
+do, and check with `python -c 'import kernels; print(kernels.__file__)'`.
 
 **Replay and the overflow fixes.** The series' commits predate later fixes to the 3D
 kernels, among them [#14276](https://github.com/ROCm/rocm-libraries/pull/14276) (the
@@ -395,6 +503,7 @@ series used, and the series' own shape corpus (prefill and decode attention shap
 not in the repo:
 
 ```bash
+export PYTHONPATH=platform/python:library  # this checkout's own tree, for each arm
 python -m benchmarks.gfx950.attention.decode.benchmark_decode_live \
     --shapes library/benchmarks/gfx950/attention/decode/decode_shapes.json \
     --num-cus-sweep <device CU count> --warmup 75 --iterations 250
@@ -450,8 +559,14 @@ and note what this harness does and does not do:
   commits, every `HIPDNN_*` and `ROCKE_*` variable set, and per shape the correctness
   status and max error (runbook §2.4 and §15.1). Leave `ROCKE_LLVM_FLAVOR` unset so that
   each arm takes its flavor from that compiler; a set value changes only the emitted IR,
-  not the compiler. The compiler-dependent levers of §4 can flip between compiler
-  versions, and the PR does not record which one the series used.
+  not the compiler: an `llvm23` flavor on an LLVM 22 COMGR is still compiled by LLVM 22
+  (only a flavor with a different datalayout, `llvm20` against LLVM 22 or 23, is
+  rejected). The process loads `ROCKE_COMGR_LIB` if set, else the COMGR bundled with
+  torch when torch is already imported (unless it is older than the newest ROCm
+  install), else the newest ROCm install, so pin `ROCKE_COMGR_LIB` to make both arms use
+  the same one. The compiler-dependent levers of §4 can flip between compiler versions:
+  the series-wide comparison used an LLVM 23 COMGR and most per-lever A/Bs the LLVM 22
+  one bundled with torch (§4).
 - It builds each shape's inputs once and reuses them for every timed call, so it
   measures the warm case (§4). A non-temporal comparison needs K/V that is not
   cache-resident between calls, which no in-repo harness provides: allocate distinct K/V
@@ -474,57 +589,78 @@ and note what this harness does and does not do:
 
 - **GQA ratios that do not divide 16.** On gfx942 and gfx950, a decode problem whose
   query heads per KV head is outside 1…16 or does not divide `BLOCK_M = 16` (for
-  example 5) is rejected by `supports_tiled_3d` and runs the scalar kernels, as before
-  the series. None of the levers above reach it.
-- **Reduce kernel.** The series changes only its `exp2`; a faster reduce kernel is a
-  follow-up.
-- **Host launch overhead per call** (§4) is a follow-up.
+  example 5) is rejected by `supports_tiled_3d`. `backend="3d"` raises with the gate's
+  reason; `backend="auto"` falls back, without saying so, to the tiled 2D kernel, where
+  one workgroup per sequence and KV head walks the whole KV range, and to the scalar
+  kernels only where 2D rejects the problem too (a ratio above 16, or another 2D limit,
+  for example gfx942 head size 256 with 64-token pages exceeding LDS). `select_path()`
+  still labels these shapes "3d". None of the levers above reach them, as before the
+  series. The open
+  [#14367](https://github.com/ROCm/rocm-libraries/pull/14367) adds split-KV support for
+  these ratios (with padded rows); when it lands, this item and the matching entry in
+  [`limitations.md`](../../../../platform/dsl_docs/runtime/limitations.md) need updating.
+- **Reduce kernel.** The series changes only its `exp2`. The follow-up is the slow zone
+  of §4 plus the reduce's share of small-batch decode time, not only a faster reduce
+  kernel.
+- **Host launch overhead per call** (§4) is a follow-up. The 3D binary cache key is
+  computed on every launch, and it now also recomputes the five derived settings the
+  series added (decode grid, cache policy, gfx950 tile, swizzle and page-id window),
+  besides the segment count it already recomputed. Caching the derived 3D dispatch per
+  problem is the obvious first step.
+- **Pre-PV LDS-DMA drain.** The gfx950 segment kernel still waits for all in-flight K/V
+  copies (`vmcnt(0)`) before the PV-side LDS reads. Two causes stack: the partial wait
+  is followed by `sync()`, which lowers to a `vmcnt(0)` wait plus a barrier, and LLVM
+  cannot tell the pooled LDS buffers apart, so it must assume a read can alias any copy
+  in flight. Prototypes on an earlier commit removed both, with an LDS-only barrier plus
+  separate LDS globals or blanket alias scopes (an LLVM 23 async-mark variant measured
+  the same), and gained clearly on single-sequence decode on top of 64-token tiles. They also moved the batched optimum to about 4 workgroups per CU then; the
+  page-id window has since done that without them, so their batched gain on today's
+  kernel is unmeasured. The opt-in `lds_alias_scopes` kernel attribute and
+  `sync_lds_only` now exist, so this may need no platform change; the
+  [gfx942 MLA prefill example](../../../examples/gfx942/mla_prefill/README.md) (levers
+  9, 47 and 48) applies the same two.
 - **Multi-page tiles and the page-id KV loader** are to be reconciled with the open
   decoupled-KV-pages work
   ([#13128](https://github.com/ROCm/rocm-libraries/pull/13128)), which reworks the same
   3D KV loading.
 - **Compiler changes** can move the compiler-dependent levers in §4; re-measure the
   gfx942 wide feed and the head-size-256 swizzle pairing.
-- **Non-resident K/V.** Re-check the split rule, and ideally the decode grid, the
-  page-id window and the swizzle, on K/V that is not cache-resident between calls (§4).
-  No in-repo harness has a cold-K/V mode.
-- **Isolating levers measured only together** (§8). A/B each alone: the 64-token tile
-  against one-page tiles at the same segment count, with the swizzle off in both arms;
-  about 4 against about 8 workgroups per CU with the page-id window on; the shipped
-  segment counts (no power-of-two rounding, 2 to 128) against the retune's
-  power-of-two counts; the gfx950 split rule's later extensions (KV below 4K tokens,
-  head size 256, strided K/V) against the previous counts; the gfx942 swizzle and
-  page-id window at head size 64 and 128, and their pairing at 256 against neither; the
-  gfx942 $Q^{\top}$ read once; the gfx950 `16x16x32` PV. Most are spec fields or
-  dispatch rules that an explicit tuning spec sets on the current tree; the two
-  kernel-body items (the $Q^{\top}$ read and the PV) have no field, so compare their
-  commits with their parents (§6).
+- **Non-resident K/V.** Re-check the decode grid, exp2, the one V slot and page ids a
+  tile ahead on K/V that is not cache-resident between calls (§4); every other lever
+  with an A/B of its own was measured that way. These four are structural and unlikely
+  to flip, so this item could also be dropped. No in-repo harness has a cold-K/V mode.
+- **Levers without an A/B of their own, and untested ranges** (§8). The gfx942 swizzle
+  and page-id window at head size 64 have no A/B of their own; A/B each alone. The
+  gfx950 64-token tile has not been separated from the 64 segments: A/B it against
+  one-page tiles at the same segment count, with the swizzle off in both arms. Both are
+  spec fields that an explicit tuning spec sets on the current tree. The split rule
+  is also untested for non-power-of-two $w$ (where it returns counts in the reduce slow
+  zone of §4, so check the reduce's ISA first), ragged batches and KV beyond 64K tokens.
 - **Step 0 sweep** (§5). Sweep the 3D lever space on the decode cohorts and compare the
   swept best with the dispatched config, which the tuning space can now express (§3).
+  Step 0 was done on gfx950 before the series but not recorded, so this repeats it on
+  the current kernel there; gfx942 has no sweep at all.
   On gfx950, `decode_table_sweep --sweep-level full --tuning-sample 0` walks every legal
   tuning spec and checks each against a reference before timing it; tuning specs use the
   architecture's full-part CU count when `num_cus` is unset (§3), so run it on a part
   with that count. On gfx942, the arch-generic `attention_combo_sweep` does the same, one
   shape grid per run, with `--arch gfx942 --seqlen-q 1` and
   `--sweep-level full --tuning-sample 0`.
-- **Unrecorded conditions.** The input dtypes and tolerance of the correctness check in
-  the timed runs, the K/V residency of the per-lever A/Bs that do not state it, the LLVM
-  version of the compiler in the series-wide comparison and which harness the PR means
-  by "the forced-3D parity harness" (§6) are not in the PR description; ask the series'
-  author and record them here. The series' shape corpus is not in the repo either (§6).
+- **Series shape corpus.** The shape corpus of the series-wide comparison is not in the
+  repo (§6).
 
 ## 8. Decision
 
 Keep every lever in §2 on its default path as listed. The swizzle and the multi-page
-tile path are conditional by construction, and the invariant hoist is removed. Several
-levers were never measured alone. Three are kept on joint A/Bs: the multi-page tiles
-(with 64 segments and the swizzle), the retune to about 4 workgroups per CU (with the
-page-id window) and the gfx942 $Q^{\top}$ read once (with the transposed QK). The others
-have no A/B of their own and are kept on the series-wide comparison alone: the later
-split-rule extension (its scope and the shipped segment counts), the gfx942 swizzle and
-page-id window at head size 64 and 128 and their pairing at 256, and the gfx950
-`16x16x32` PV. That comparison ran default dispatch on both arms, so each lever ran only
-on the corpus shapes that meet its conditions, and which shapes those were is not
-recorded; no shape on the 3D path was slower in device time. §7 lists the isolating A/Bs
-and the Step 0 sweep. Revisit when the decoupled-KV-pages work lands, on a compiler
-upgrade, if the GQA gate is widened, and when those A/Bs or the sweep run.
+tile path are conditional by construction, and the invariant hoist is removed. Almost
+every lever has an A/B of its own (§2). The exceptions are the gfx942 swizzle and
+page-id window at head size 64, which are kept on the series-wide comparison alone, and
+the gfx950 64-token tile, which was measured together with 64 segments but not
+separated from them. That comparison ran default dispatch on both arms, so each lever
+ran only on the corpus shapes that meet its conditions, and which shapes those were is
+not recorded; no shape on the 3D path was slower in device time. The losses of §4
+(strided K/V at 64-token tiles under LLVM 22, the small split-rule losses at short KV)
+and the reduce-kernel slow zone are documented, not fixed. §7 lists the open A/Bs, the
+Step 0 sweep and the reduce redesign. Revisit when the decoupled-KV-pages work lands, on
+a compiler upgrade, if the GQA gate is widened, and when those A/Bs, the sweep or the
+redesign run.

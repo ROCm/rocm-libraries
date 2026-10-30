@@ -71,7 +71,11 @@ rule ([gfx950](../library/builders/gfx950/attention/ALGORITHM.md#61-how-many-seg
 [gfx942](../library/builders/gfx942/attention/ALGORITHM.md#83-the-decode-split-rule)),
 the per-architecture tile override (multi-page tiles on gfx950, sub-page tiles on
 gfx942), the all-decode grid and the K/V cache policy. It leaves the
-K/V LDS swizzle off; an explicit kernel spec may enable it for fp16/bf16 K/V.
+K/V LDS swizzle off because the strided swizzle measured slower on gfx950 (no gfx942
+measurement exists); an explicit kernel spec may enable it for fp16/bf16 K/V. On gfx950
+the default 64-token tile for few workgroups is slower than the previous kernel under
+LLVM 22 for strided K/V and slightly faster under LLVM 23; see the
+[3D decode case study](../library/builders/common/attention_3d_decode/CASE_STUDY.md#4-caveats-and-honest-losses).
 A non-`None` `problem.clamp_arch` must match the selected target (the active device
 at launch).
 The binding accepts only `softmax_scale` and `stream` keyword overrides; it
