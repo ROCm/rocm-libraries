@@ -522,6 +522,28 @@ namespace
         return cases;
     }
 
+    // The default triangular solves, and iterative ones with enough iterations to
+    // reach the direct solve. The host iterative analyses assert in every build, so a
+    // move that does not clear them fails in Release as well.
+    template <typename T>
+    std::vector<std::pair<std::string, rocalution::SolverDescr>> triangular_solves()
+    {
+        rocalution::SolverDescr iterative;
+        iterative.SetTriSolverAlg(rocalution::TriSolverAlg_Iterative);
+        iterative.SetIterativeSolverMaxIteration(100);
+        iterative.SetIterativeSolverTolerance(iterative_solve_tolerance<T>());
+        return {{"default triangular solves", rocalution::SolverDescr()},
+                {"iterative triangular solves", iterative}};
+    }
+
+    // The iterative triangular solves stop above the rounding of the direct ones
+    template <typename T>
+    double triangular_solve_tol(const rocalution::SolverDescr& descr, double direct)
+    {
+        return descr.GetTriSolverAlg() == rocalution::TriSolverAlg_Iterative ? loose_tol<T>(1e-11)
+                                                                             : direct;
+    }
+
     const std::vector<Format>& formats()
     {
         static const std::vector<Format> all = {{rocalution::CSR, 1},
@@ -1472,22 +1494,27 @@ TYPED_TEST(preconditioners, built_preconditioners_move_to_the_other_backend)
     const Csr<T>         ref = spd<T>(12);
     const std::vector<T> r   = rhs<T>(ref.n);
 
-    for(auto& c : direct_cases(ref))
+    for(const auto& [alg, descr] : triangular_solves<T>())
     {
-        if(c.name == "SGS" || c.name == "ILUT" || c.name == "IC")
+        SCOPED_TRACE(alg);
+        for(auto& c : direct_cases(ref))
         {
-            continue;
+            if(c.name == "SGS" || c.name == "ILUT" || c.name == "IC")
+            {
+                continue;
+            }
+            SCOPED_TRACE(c.name);
+            auto A = this->make(ref);
+            c.p->SetSolverDescriptor(descr);
+            c.p->SetOperator(*A);
+            c.p->Build();
+
+            move(other(this->backend()), *c.p, *A);
+            expect_near(apply(*c.p, *A, r), c.reference, loose_tol<T>(1e-11));
+
+            move(this->backend(), *c.p, *A);
+            expect_near(apply(*c.p, *A, r), c.reference, loose_tol<T>(1e-11));
         }
-        SCOPED_TRACE(c.name);
-        auto A = this->make(ref);
-        c.p->SetOperator(*A);
-        c.p->Build();
-
-        move(other(this->backend()), *c.p, *A);
-        expect_near(apply(*c.p, *A, r), c.reference, loose_tol<T>(1e-11));
-
-        move(this->backend(), *c.p, *A);
-        expect_near(apply(*c.p, *A, r), c.reference, loose_tol<T>(1e-11));
     }
 }
 
@@ -1499,18 +1526,23 @@ TYPED_TEST(preconditioners, built_ilut_and_ic_move_to_the_other_backend)
     const Csr<T>         ref = spd<T>(12);
     const std::vector<T> r   = rhs<T>(ref.n);
 
-    for(auto& c : direct_cases(ref))
+    for(const auto& [alg, descr] : triangular_solves<T>())
     {
-        if(c.name != "ILUT" && c.name != "IC")
+        SCOPED_TRACE(alg);
+        for(auto& c : direct_cases(ref))
         {
-            continue;
+            if(c.name != "ILUT" && c.name != "IC")
+            {
+                continue;
+            }
+            SCOPED_TRACE(c.name);
+            auto A = make_local_matrix(this->backend(), ref);
+            c.p->SetSolverDescriptor(descr);
+            c.p->SetOperator(*A);
+            c.p->Build();
+            move(other(this->backend()), *c.p, *A);
+            expect_near(apply(*c.p, *A, r), c.reference, loose_tol<T>(1e-11));
         }
-        SCOPED_TRACE(c.name);
-        auto A = make_local_matrix(this->backend(), ref);
-        c.p->SetOperator(*A);
-        c.p->Build();
-        move(other(this->backend()), *c.p, *A);
-        expect_near(apply(*c.p, *A, r), c.reference, loose_tol<T>(1e-11));
     }
 }
 
@@ -1543,20 +1575,27 @@ TYPED_TEST(preconditioners, sgs_moves_with_its_factors_and_its_diagonal)
     using T                  = typename TypeParam::value_type;
     const Csr<T>         ref = nonsymmetric<T>(10);
     const std::vector<T> r   = rhs<T>(ref.n);
-    auto                 A   = this->make(ref);
 
-    rocalution::SGS<Matrix<T>, Vector<T>, T> p;
-    p.SetOperator(*A);
-    p.Build();
-    p.Build();
-    p.ResetOperator(*A);
-    expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), scaled_tol<T>(1e-14));
-
-    for(Backend to : {this->backend(), other(this->backend()), this->backend()})
+    for(const auto& [alg, descr] : triangular_solves<T>())
     {
-        SCOPED_TRACE("moved to the " + backend_name(to));
-        move(to, p, *A);
-        expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), scaled_tol<T>(1e-14));
+        SCOPED_TRACE(alg);
+        const double tolerance = triangular_solve_tol<T>(descr, scaled_tol<T>(1e-14));
+        auto         A         = this->make(ref);
+
+        rocalution::SGS<Matrix<T>, Vector<T>, T> p;
+        p.SetSolverDescriptor(descr);
+        p.SetOperator(*A);
+        p.Build();
+        p.Build();
+        p.ResetOperator(*A);
+        expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), tolerance);
+
+        for(Backend to : {this->backend(), other(this->backend()), this->backend()})
+        {
+            SCOPED_TRACE("moved to the " + backend_name(to));
+            move(to, p, *A);
+            expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), tolerance);
+        }
     }
 }
 
@@ -1568,24 +1607,29 @@ TYPED_TEST(preconditioners, built_preconditioners_move_to_their_own_backend)
     const Csr<T>         ref = spd<T>(12);
     const std::vector<T> r   = rhs<T>(ref.n);
 
-    for(auto& c : direct_cases(ref))
+    for(const auto& [alg, descr] : triangular_solves<T>())
     {
-        if(c.name == "SGS")
+        SCOPED_TRACE(alg);
+        for(auto& c : direct_cases(ref))
         {
-            continue;
-        }
-        SCOPED_TRACE(c.name);
-        auto A = this->make(ref);
-        c.p->SetOperator(*A);
-        c.p->Build();
+            if(c.name == "SGS")
+            {
+                continue;
+            }
+            SCOPED_TRACE(c.name);
+            auto A = this->make(ref);
+            c.p->SetSolverDescriptor(descr);
+            c.p->SetOperator(*A);
+            c.p->Build();
 
-        move(this->backend(), *c.p, *A);
-        expect_near(apply(*c.p, *A, r), c.reference, loose_tol<T>(1e-11));
-
-        if(c.name == "ILUT" && this->backend() == Backend::Accelerator)
-        {
-            move(Backend::Host, *c.p, *A);
+            move(this->backend(), *c.p, *A);
             expect_near(apply(*c.p, *A, r), c.reference, loose_tol<T>(1e-11));
+
+            if(c.name == "ILUT" && this->backend() == Backend::Accelerator)
+            {
+                move(Backend::Host, *c.p, *A);
+                expect_near(apply(*c.p, *A, r), c.reference, loose_tol<T>(1e-11));
+            }
         }
     }
 }
@@ -2770,18 +2814,25 @@ TYPED_TEST(preconditioners, multielimination_with_two_levels_moves_to_the_other_
     const Csr<T>         ref = spd<T>(12);
     const std::vector<T> r   = rhs<T>(ref.n);
 
-    auto                                    A = this->make(ref);
-    rocalution::LU<Matrix<T>, Vector<T>, T> lu;
-    lu.Verbose(0);
-    rocalution::MultiElimination<Matrix<T>, Vector<T>, T> p;
-    p.Set(lu, 2);
-    p.SetOperator(*A);
-    p.Build();
+    for(const auto& [alg, descr] : triangular_solves<T>())
+    {
+        SCOPED_TRACE(alg);
+        auto                                    A = this->make(ref);
+        rocalution::LU<Matrix<T>, Vector<T>, T> lu;
+        lu.Verbose(0);
+        lu.SetSolverDescriptor(descr);
+        rocalution::MultiElimination<Matrix<T>, Vector<T>, T> p;
+        p.Set(lu, 2);
+        p.SetOperator(*A);
+        p.Build();
+        EXPECT_EQ(p.GetLevel(), 2);
+        const double tolerance = triangular_solve_tol<T>(descr, tol<T>());
 
-    move(other(this->backend()), p, *A);
-    expect_near(apply(p, *A, r), exact_solve(ref, r), tol<T>());
-    move(this->backend(), p, *A);
-    expect_near(apply(p, *A, r), exact_solve(ref, r), tol<T>());
+        move(other(this->backend()), p, *A);
+        expect_near(apply(p, *A, r), exact_solve(ref, r), tolerance);
+        move(this->backend(), p, *A);
+        expect_near(apply(p, *A, r), exact_solve(ref, r), tolerance);
+    }
 }
 
 // Moving the inverse of the last level twice does no harm, unlike the analysis of LU
