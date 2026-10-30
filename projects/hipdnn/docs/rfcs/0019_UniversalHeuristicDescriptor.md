@@ -1885,7 +1885,7 @@ The constraint is on linkage, not compilation. Compiling a model *into* the prov
 non-portable to third-party provider builds; a model may still be compiled (a Treelite `.so`) provided it
 ships as a loadable artifact alongside the engine's descriptor set rather than statically linked into
 `libhipdnn_provider.so`. `custom_library` mirrors
-[RFC 0017](0017_UniversalKernelDescriptor.md)'s native-predicate and custom-plan escape hatches: the
+[RFC 0017](0017_UniversalKernelDescriptor.md)'s native-predicate (`match_symbol`) and native-dispatch (`dispatch_symbol`) escape hatches: the
 author ships a `.so`, the provider `dlopen`s it. **OPEN:** See [Open Question 11](#operational)
 (dependency + trust audit).
 

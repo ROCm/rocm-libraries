@@ -25,6 +25,17 @@ its pack's kernels, so this proves load and keep for a multi-launch pack, not eq
 with a real handler. The `kpack` entries name an archive that is not shipped; the loader
 reads only the descriptors.
 
+## `declarative_launch/`
+
+A standalone loader-valid bundle (engine `hipkernel:ValidateFixtureDeclarative`, one pack
+targeting `gfx942`) whose UDD is the declarative launch of the `conv_fwd` test pack: grid,
+block and an `args_signature` of three tensor pointers and seven `i32` extents, over the
+engine's `nodes` pattern. Its two `kpack` kernels carry the matching signature, and its UMD
+is declarative `criteria`. Expected: exit 0 with the engine loaded. The loader gives the UDD
+the reserved dispatch symbol `hipdnn.declarative_launch`; the validator registers one stub
+under it and harvests no stub for it, so a validator that did either wrongly drops the
+engine. The `kpack` archive is not shipped; the loader reads only the descriptors.
+
 ## `bad_arch/`
 
 The pack's `arch` list is `["GFX942"]` (uppercase) instead of `["gfx942"]`.
@@ -99,4 +110,6 @@ GenericEngine evaluates it with (`uhd::prediction_detail::validateBinding` and `
   `sort_kernel_catalog` and `predict_engine` both succeed.
 
 `tests/test_round_trip.py` and the `hipdnn_validate_descriptors_<fixture>` CTest cases
-(`tools/CMakeLists.txt`; `multi_launch/` is `hipdnn_validate_descriptors_smoke_multi_launch`) assert these exit statuses and `model_checks` verdicts.
+(`tools/CMakeLists.txt`; `multi_launch/` is `hipdnn_validate_descriptors_smoke_multi_launch`
+and `declarative_launch/` is `hipdnn_validate_descriptors_smoke_declarative_launch`) assert
+these exit statuses and `model_checks` verdicts.

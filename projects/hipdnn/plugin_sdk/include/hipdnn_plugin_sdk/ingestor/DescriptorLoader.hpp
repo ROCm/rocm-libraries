@@ -42,6 +42,7 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdParser.hpp>
 #include <hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp>
 #include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledLaunch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorJsonRules.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
@@ -129,6 +130,13 @@
  * the JSON Expression Language while the file is read (CompiledCriteria.hpp), and each
  * pack listing the UMD checks its references against the pack's engine; a reference that
  * engine does not publish drops the pack.
+ *
+ * A UDD carries exactly one of `dispatch_symbol` and the declarative launch keys (`grid`,
+ * `block`, `shared_mem_bytes`, `workspace_bytes`, `args_signature`). `dispatch_symbol` is
+ * resolved through the native registries when the set is validated, and may not use the
+ * reserved name DECLARATIVE_LAUNCH_SYMBOL. The declarative keys are compiled while the file
+ * is read (CompiledLaunch.hpp), the UDD takes the reserved name, and each pack listing the
+ * UDD checks its references against the pack's engine as for `criteria`.
  *
  * Only fields Descriptors.hpp models are parsed. The RFCs describe more, such as an
  * engine-scoped `criteria` beside `graph_match.nodes` and `features_signature`, which
@@ -1073,15 +1081,61 @@ inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root, const st
     return matcher;
 }
 
+/// The keys a UDD's declarative arm may carry. `launches` and `intermediates` are listed so
+/// compileLaunch refuses them as not supported yet rather than as unknown keys.
+inline constexpr std::array<std::string_view, 7> UDD_DECLARATIVE_KEYS = {"grid",
+                                                                         "block",
+                                                                         "shared_mem_bytes",
+                                                                         "workspace_bytes",
+                                                                         "args_signature",
+                                                                         "launches",
+                                                                         "intermediates"};
+
 inline DispatchDescriptor parseDispatchDescriptor(const nlohmann::json& root,
                                                   const std::string& where)
 {
-    requireKnownKeys(root, {"version", "id", "name", "dispatch_symbol"}, where);
+    std::vector<std::string_view> known{"version", "id", "name", "dispatch_symbol"};
+    known.insert(known.end(), UDD_DECLARATIVE_KEYS.begin(), UDD_DECLARATIVE_KEYS.end());
+    requireKnownKeys(root, known.data(), known.data() + known.size(), where);
 
     DispatchDescriptor dispatch;
     dispatch.id = requireId(root, "id", where);
     dispatch.name = requireString(root, "name", where);
-    dispatch.dispatchSymbol = requireString(root, "dispatch_symbol", where);
+    // A UDD that declares neither arm says nothing about how to launch; one that declares
+    // both leaves two launches for one kernel.
+    const bool native = root.contains("dispatch_symbol");
+    const bool declarative
+        = std::any_of(std::begin(UDD_DECLARATIVE_KEYS),
+                      std::end(UDD_DECLARATIVE_KEYS),
+                      [&root](std::string_view key) { return root.contains(key); });
+    if(native == declarative)
+    {
+        fail(where
+             + " must declare exactly one of 'dispatch_symbol' and the declarative launch keys"
+               " ('grid', 'block', 'shared_mem_bytes', 'workspace_bytes', 'args_signature')");
+    }
+    if(native)
+    {
+        dispatch.dispatchSymbol = requireString(root, "dispatch_symbol", where);
+        // The reserved name belongs to the handler that runs every declarative launch; an
+        // authored UDD naming it would run that handler with no compiled launch.
+        const std::string_view symbol = dispatch.dispatchSymbol;
+        const bool reserved
+            = symbol.substr(0, DECLARATIVE_LAUNCH_SYMBOL.size()) == DECLARATIVE_LAUNCH_SYMBOL
+              && (symbol.size() == DECLARATIVE_LAUNCH_SYMBOL.size()
+                  || symbol[DECLARATIVE_LAUNCH_SYMBOL.size()] == '.');
+        if(reserved)
+        {
+            fail(where + " names dispatch_symbol '" + dispatch.dispatchSymbol
+                 + "', which is reserved for declarative launches");
+        }
+    }
+    else
+    {
+        dispatch.launch = compileLaunch(root, dispatch.name, "UDD in " + where);
+        dispatch.launchJson = dispatch.launch->source();
+        dispatch.dispatchSymbol = std::string(DECLARATIVE_LAUNCH_SYMBOL);
+    }
     return dispatch;
 }
 
@@ -2732,6 +2786,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
         // RFC 0018 A.5 checks 5 and 6, per (matcher, engine): a matcher several of this
         // engine's packs list is checked once. "" means its references all resolve.
         std::map<DescriptorId, std::string> criteriaErrors;
+        // The same pair check for a declarative UDD's launch formulas, per (UDD, engine).
+        std::map<DescriptorId, std::string> launchErrors;
 
         for(auto* packEntry : packEntries)
         {
@@ -2794,6 +2850,21 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
             {
                 reason = "names dispatch descriptor " + toString(pack.dispatchId)
                          + ", which no descriptor defines";
+            }
+            if(reason.empty() && dispatch->launch != nullptr)
+            {
+                auto [checked, inserted] = launchErrors.try_emplace(dispatch->id);
+                if(inserted)
+                {
+                    checked->second
+                        = launchReferenceError(*dispatch->launch, engine.graphMatch, set.schema);
+                }
+                if(!checked->second.empty())
+                {
+                    reason = "pairs " + describeDescriptor("dispatch", dispatch->name, dispatch->id)
+                             + " with engine '" + engine.name + "', but its launch "
+                             + checked->second;
+                }
             }
 
             // Referenced kernels join the inline ones before either check below, so a

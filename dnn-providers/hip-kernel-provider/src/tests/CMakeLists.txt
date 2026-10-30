@@ -170,6 +170,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         core/TestPluginSerialization.cpp
         engines/kernel_ingestor_engine/TestIngestorPlanCapture.cpp
         engines/kernel_ingestor_engine/TestIngestorPlanRoundTrip.cpp
+        engines/kernel_ingestor_engine/packs/TestConvFwdDeclarativeLaunch.cpp
         engines/kernel_ingestor_engine/packs/TestPointwiseKpackDispatch.cpp
         ingestor/TestPackedDescriptorLoad.cpp
     )

@@ -789,9 +789,213 @@ def _validate_umd(desc):
     )
 
 
+# The reserved dispatch symbol a declarative UDD resolves to; its versioned
+# aliases extend it with '.'. Loader is authoritative: CompiledLaunch.hpp
+# DECLARATIVE_LAUNCH_SYMBOL.
+DECLARATIVE_LAUNCH_SYMBOL = "hipdnn.declarative_launch"
+# The keys of the declarative arm. Any one of them selects it; `launches` and
+# `intermediates` select it only to be refused as not supported yet.
+_UDD_DECLARATIVE_KEYS = (
+    "grid",
+    "block",
+    "shared_mem_bytes",
+    "workspace_bytes",
+    "args_signature",
+)
+_UDD_UNSUPPORTED_KEYS = ("launches", "intermediates")
+_LAUNCH_ARG_KINDS = ("pointer", "workspace", "scalar")
+_LAUNCH_SCALAR_TYPES = ("i32", "u32", "i64", "f32")
+# The keys each supported argument source takes besides `from`.
+_LAUNCH_SOURCE_KEYS = {
+    "tensor": ("ref",),
+    "dim": ("ref", "axis"),
+    "stride": ("ref", "axis"),
+}
+_LAUNCH_SCALAR_SOURCES = ("dim", "stride", "expr")
+_UNSUPPORTED_LAUNCH_SOURCES = ("scalar", "attribute")
+_LAUNCH_REF_RE = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*")
+# Largest magnitude a double holds exactly as an integer; formulas are evaluated
+# in double.
+_EXACT_INTEGER_LIMIT = 2**53
+_UINT32_MAX = 2**32 - 1
+_FLT_MAX = 3.4028234663852886e38
+# Literal range per formula rule: (low, high) for whole numbers, None for f32.
+_LAUNCH_LITERAL_RANGES = {
+    "grid_block": (1, _UINT32_MAX),
+    "shared_mem_bytes": (0, _UINT32_MAX),
+    "workspace_bytes": (0, _EXACT_INTEGER_LIMIT),
+    "i32": (-(2**31), 2**31 - 1),
+    "u32": (0, _UINT32_MAX),
+    "i64": (-_EXACT_INTEGER_LIMIT, _EXACT_INTEGER_LIMIT),
+    "f32": None,
+}
+
+
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _validate_launch_formula(value, rule, where):
+    """One launch formula: an expression object, a `$`-reference, or a number.
+
+    Mirrors compileLaunch: any other literal is refused, and a number literal is
+    checked against its rule here, since evaluation could only refuse it later.
+    """
+    if isinstance(value, dict):
+        return
+    if (
+        isinstance(value, str)
+        and len(value) > 1
+        and value[0] == "$"
+        and value[1] != "$"
+    ):
+        return
+    if not _is_number(value):
+        raise HkpPackError(
+            f"{where} {value!r} is not a formula; "
+            "use an expression object, a '$' reference or a number"
+        )
+    bounds = _LAUNCH_LITERAL_RANGES[rule]
+    if bounds is None:
+        if not abs(value) <= _FLT_MAX:
+            raise HkpPackError(f"{where} {value!r} is not a finite f32 value")
+        return
+    low, high = bounds
+    whole = isinstance(value, int) or value.is_integer()
+    if not whole or abs(value) > _EXACT_INTEGER_LIMIT or not low <= value <= high:
+        raise HkpPackError(
+            f"{where} {value!r} must be a whole number in [{low}, {high}]"
+        )
+
+
+def _udd_known_keys(value, allowed, where):
+    """_known_keys for a UDD object. The loader's requireKnownKeys also admits an
+    unprefixed `provenance`, at every level."""
+    _known_keys(value, (*allowed, "provenance"), where)
+
+
+def _validate_launch_dim3(doc, key, where):
+    dim3 = doc[key]
+    dim3_where = f"{where} {key}"
+    _udd_known_keys(dim3, ("x", "y", "z"), dim3_where)
+    _require(dim3, ("x", "y", "z"), dim3_where)
+    for axis in ("x", "y", "z"):
+        _validate_launch_formula(dim3[axis], "grid_block", f"{dim3_where}.{axis}")
+
+
+def _validate_launch_source(arg, kind, where):
+    """An argument's `source`, which must suit its kind. Mirrors compileLaunch."""
+    if "source" not in arg:
+        raise HkpPackError(f"{where} missing required field 'source'")
+    source = arg["source"]
+    source_where = f"{where} source"
+    if not isinstance(source, dict):
+        raise HkpPackError(f"{source_where} must be an object")
+    origin = source.get("from")
+    if origin in _UNSUPPORTED_LAUNCH_SOURCES:
+        raise HkpPackError(f"{source_where} 'from': '{origin}' is not supported yet")
+    allowed = ("tensor",) if kind == "pointer" else _LAUNCH_SCALAR_SOURCES
+    if origin not in allowed:
+        raise HkpPackError(
+            f"{source_where} has invalid from {origin!r} for a {kind} argument "
+            f"(expected one of {', '.join(allowed)})"
+        )
+    keys = ("expr",) if origin == "expr" else _LAUNCH_SOURCE_KEYS[origin]
+    _udd_known_keys(source, ("from", *keys), source_where)
+    _require(source, keys, source_where)
+    if origin == "expr":
+        _validate_launch_formula(source["expr"], arg["type"], f"{source_where} expr")
+        return
+    ref = source["ref"]
+    if not isinstance(ref, str) or not _LAUNCH_REF_RE.fullmatch(ref):
+        raise HkpPackError(
+            f"{source_where} ref {ref!r} must be a '$'-prefixed pattern variable"
+        )
+    if "axis" in keys:
+        axis = source["axis"]
+        if isinstance(axis, bool) or not isinstance(axis, int) or axis < 0:
+            raise HkpPackError(
+                f"{source_where} axis {axis!r} must be a non-negative integer"
+            )
+
+
+def _validate_launch_arguments(doc, where):
+    arguments = doc["args_signature"]
+    if not isinstance(arguments, list):
+        raise HkpPackError(f"{where} 'args_signature' must be an array")
+    names = set()
+    for index, arg in enumerate(arguments):
+        arg_where = f"{where} args_signature[{index}]"
+        if not isinstance(arg, dict):
+            raise HkpPackError(f"{arg_where} must be an object")
+        if "offset" in arg:
+            raise HkpPackError(f"{arg_where} key 'offset' is not supported yet")
+        _udd_known_keys(arg, ("name", "kind", "type", "source"), arg_where)
+        _require(arg, ("name", "kind"), arg_where)
+        _string(arg["name"], f"{arg_where}.name")
+        if arg["name"] in names:
+            raise HkpPackError(f"{arg_where} repeats argument name '{arg['name']}'")
+        names.add(arg["name"])
+        arg_where = f"{where} argument '{arg['name']}'"
+        _require_enum(arg, "kind", _LAUNCH_ARG_KINDS, arg_where)
+        kind = arg["kind"]
+        if kind == "scalar":
+            _require(arg, ("type",), arg_where)
+            _require_enum(arg, "type", _LAUNCH_SCALAR_TYPES, arg_where)
+        elif "type" in arg:
+            raise HkpPackError(f"{arg_where} is a {kind} argument and takes no 'type'")
+        if kind == "workspace":
+            if "source" in arg:
+                raise HkpPackError(
+                    f"{arg_where} is a workspace argument and takes no 'source'"
+                )
+            continue
+        _validate_launch_source(arg, kind, arg_where)
+
+
 def _validate_udd(desc):
-    """UDD: dispatch_symbol is required. Mirrors parseDispatchDescriptor."""
-    _require(desc.doc, ["name", "dispatch_symbol"], f"UDD {desc.path.name}")
+    """UDD: exactly one of dispatch_symbol and the declarative launch keys.
+
+    Mirrors parseDispatchDescriptor and compileLaunch: the static checks the
+    loader makes when it reads the file. A formula's references are resolved
+    later, against each engine the UDD is paired with, so only their shape is
+    checked here.
+    """
+    doc = desc.doc
+    where = f"UDD {desc.path.name}"
+    for key in _UDD_UNSUPPORTED_KEYS:
+        if key in doc:
+            raise HkpPackError(f"{where} key '{key}' is not supported yet")
+    _udd_known_keys(
+        doc,
+        ("version", "id", "name", "dispatch_symbol", *_UDD_DECLARATIVE_KEYS),
+        where,
+    )
+    _require(doc, ["name"], where)
+    native = "dispatch_symbol" in doc
+    if native == any(key in doc for key in _UDD_DECLARATIVE_KEYS):
+        raise HkpPackError(
+            f"{where} must declare exactly one of 'dispatch_symbol' and the "
+            "declarative launch keys"
+        )
+    if native:
+        symbol = doc["dispatch_symbol"]
+        _string(symbol, f"{where} dispatch_symbol")
+        if symbol == DECLARATIVE_LAUNCH_SYMBOL or symbol.startswith(
+            DECLARATIVE_LAUNCH_SYMBOL + "."
+        ):
+            raise HkpPackError(
+                f"{where} names dispatch_symbol '{symbol}', which is reserved for "
+                "declarative launches"
+            )
+        return
+    _require(doc, ["grid", "block", "args_signature"], where)
+    _validate_launch_dim3(doc, "grid", where)
+    _validate_launch_dim3(doc, "block", where)
+    for key in ("shared_mem_bytes", "workspace_bytes"):
+        if key in doc:
+            _validate_launch_formula(doc[key], key, f"{where} {key}")
+    _validate_launch_arguments(doc, where)
 
 
 def _validate_uuid(value, where):

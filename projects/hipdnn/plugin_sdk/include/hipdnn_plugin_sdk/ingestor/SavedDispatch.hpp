@@ -26,7 +26,9 @@ struct SavedLaunchInputs
     /// plans saved under it must load.
     std::string dispatchSymbol;
     /// The named, typed inputs the launch is computed from. Never computed grid or
-    /// argument values.
+    /// argument values, with one exception: a declarative launch saves its resolved
+    /// launch (saveResolvedLaunch() in CompiledLaunch.hpp), because its formulas are data
+    /// that can change independently of the saved code object.
     MetadataValues values;
 };
 

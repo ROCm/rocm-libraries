@@ -270,7 +270,8 @@ public:
 inline size_t packModuleCacheEntries()
 {
     return pointwiseKpackModuleCache().size() + convFwdKpackModuleCache().size()
-           + gfx950AttentionDenseKpackModuleCache().size();
+           + gfx950AttentionDenseKpackModuleCache().size()
+           + declarativeLaunchKpackModuleCache().size();
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

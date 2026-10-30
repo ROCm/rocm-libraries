@@ -303,7 +303,8 @@ public:
     }
 
     /// The largest scratch any surviving kernel needs; reused, not partitioned, since
-    /// kernels launch one at a time on one stream.
+    /// kernels launch one at a time on one stream. A kernel whose workspace formula does
+    /// not fit this graph (see workspaceBytesFor) needs none.
     size_t getMaxWorkspaceSize(const THandle& handle,
                                const IGraph& opGraph,
                                const TSettings& executionSettings) const override
@@ -326,8 +327,10 @@ public:
         size_t maxBytes = 0;
         for(const KernelDefinition* kernel : filtered)
         {
-            const auto* handler = _stateManager.dispatchHandlerFor(*kernel);
-            maxBytes = std::max(maxBytes, handler->workspaceBytes(context, catalog.bound, *kernel));
+            if(const auto bytes = workspaceBytesFor(context, catalog.bound, *kernel))
+            {
+                maxBytes = std::max(maxBytes, *bytes);
+            }
         }
         return maxBytes;
     }
@@ -1048,6 +1051,34 @@ private:
         return ranking;
     }
 
+    /// The kernel's workspace for this graph, or nullopt when its handler answers
+    /// BAD_PARAM: a declarative launch's workspace formula that evaluates to a value its
+    /// rule refuses on this shape. Such a kernel declines the graph, as a failed
+    /// applicability check would. Any other failure propagates.
+    std::optional<size_t> workspaceBytesFor(const MatchContext& context,
+                                            const BoundTokens& bound,
+                                            const KernelDefinition& kernel) const
+    {
+        try
+        {
+            return _stateManager.dispatchHandlerFor(kernel)->workspaceBytes(context, bound, kernel);
+        }
+        catch(const HipdnnPluginException& error)
+        {
+            if(error.getStatus() != HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+            {
+                throw;
+            }
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: "
+                                   << describeDescriptor("kernel", kernel.name, kernel.kernelId)
+                                   << " declined the graph: " << error.what());
+            return std::nullopt;
+        }
+    }
+
+    /// Applies the knob filter, then the workspace limit. A kernel whose workspace does
+    /// not evaluate for this graph (see workspaceBytesFor) is removed along with any whose
+    /// workspace exceeds the limit.
     std::vector<const KernelDefinition*> applyConstraints(const Catalog& catalog,
                                                           const IngestorSettings& settings,
                                                           const MatchContext& context) const
@@ -1055,16 +1086,13 @@ private:
         auto filtered = applyKnobFilter(catalog.entries, settings.knobFilter);
         if(settings.workspaceLimit)
         {
-            filtered.erase(
-                std::remove_if(filtered.begin(),
-                               filtered.end(),
-                               [&](const KernelDefinition* kernel) {
-                                   const auto dispatch = _stateManager.getDispatchDetails(*kernel);
-                                   return dispatch.handler->workspaceBytes(
-                                              context, catalog.bound, *kernel)
-                                          > static_cast<uint64_t>(*settings.workspaceLimit);
-                               }),
-                filtered.end());
+            const auto limit = static_cast<uint64_t>(*settings.workspaceLimit);
+            const auto exceeds = [&](const KernelDefinition* kernel) {
+                const auto bytes = workspaceBytesFor(context, catalog.bound, *kernel);
+                return !bytes.has_value() || *bytes > limit;
+            };
+            filtered.erase(std::remove_if(filtered.begin(), filtered.end(), exceeds),
+                           filtered.end());
         }
         return filtered;
     }

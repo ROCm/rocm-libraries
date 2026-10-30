@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "id": "1a9d24f3-52a5-434f-8a69-2d59ae0557d4",
+  "name": "conv_fwd declarative variant fields",
+  "fields": [
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 64
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    }
+  ]
+}

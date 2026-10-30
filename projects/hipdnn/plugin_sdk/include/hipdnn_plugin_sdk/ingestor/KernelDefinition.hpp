@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -54,6 +55,11 @@ struct KernelDefinition
     /// the same reason as treeRoot. A native handler reaches one entry through the
     /// provider's launchKernelDefinition(), which returns a single-launch definition.
     std::map<std::string, KernelSource> sources;
+    /// The compiled launch of the pack's UDD when it is declarative, set by the state
+    /// manager for every kernel of such a pack; null for a native UDD. The handler under
+    /// DECLARATIVE_LAUNCH_SYMBOL evaluates it. Shared and immutable, so a plan that copies
+    /// the definition carries the launch with it.
+    std::shared_ptr<const CompiledLaunch> launch = nullptr;
 
     std::optional<MetadataValue> tryGetMetadata(const std::string& field) const
     {
@@ -120,7 +126,7 @@ struct KernelDefinition
     }
 };
 
-// KernelDefinition is built positionally, eleven initializers at a time, so its field count
+// KernelDefinition is built positionally, twelve initializers at a time, so its field count
 // is pinned here the way KernelSource's is in Descriptors.hpp. std::string converts
 // implicitly to std::filesystem::path, so a path field inserted ahead of originDirectory
 // would otherwise compile and silently rebind every initializer after it. Only the count
@@ -136,7 +142,8 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                std::filesystem::path,
                                                std::string,
                                                std::filesystem::path,
-                                               std::map<std::string, KernelSource>>
+                                               std::map<std::string, KernelSource>,
+                                               std::shared_ptr<const CompiledLaunch>>
                   && !detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                        DescriptorId,
                                                        DescriptorId,
@@ -149,6 +156,7 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                        std::string,
                                                        std::filesystem::path,
                                                        std::map<std::string, KernelSource>,
+                                                       std::shared_ptr<const CompiledLaunch>,
                                                        std::string>,
               "KernelDefinition gained or lost a field; append only, then extend this "
               "assertion and every positional construction of it.");

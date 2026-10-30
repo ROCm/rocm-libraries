@@ -472,6 +472,26 @@ endforeach()
         )
         list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_smoke_multi_launch)
 
+        # The declarative-launch bundle: a UDD written as launch formulas, which the loader
+        # gives the reserved dispatch symbol. A validator that harvested that symbol, or
+        # registered no stub under it, drops this engine and fails here.
+        set(HIPDNN_VALIDATE_DESCRIPTORS_DECLARATIVE_ROOT
+            "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/declarative_launch"
+        )
+        set(HIPDNN_VALIDATE_DESCRIPTORS_DECLARATIVE_ENGINE "hipkernel:ValidateFixtureDeclarative")
+        add_test(
+            NAME hipdnn_validate_descriptors_smoke_declarative_launch
+            COMMAND
+                ${CMAKE_COMMAND}
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${HIPDNN_VALIDATE_DESCRIPTORS_DECLARATIVE_ROOT}"
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_DECLARATIVE_ENGINE}"
+                -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake"
+        )
+        list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS
+             hipdnn_validate_descriptors_smoke_declarative_launch
+        )
+
         # <fixture>:<exit status>:<model checks>, as the fixtures' README states them. A
         # predict_engine model is admitted only through the L1 guards, so a static_order
         # estimate fails the run while a static_order kernel ranker does not. A ranker whose

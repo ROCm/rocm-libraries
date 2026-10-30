@@ -1626,6 +1626,114 @@ TEST(TestKernelIngestorStateManager, DropsOnlyTheUnadaptedKernelAndKeepsItsPack)
 namespace
 {
 
+/// A FLOAT kernel packaged as kpack with @p signature.
+KernelDescriptor makeKpackKernel(const DescriptorId& id,
+                                 const std::string& name,
+                                 int64_t blockSize,
+                                 const std::vector<KernelArgument>& signature)
+{
+    KernelDescriptor kernel = makeKernel(id, name, blockSize, "FLOAT");
+    kernel.source = makeKpackSource();
+    kernel.source.signature = signature;
+    return kernel;
+}
+
+/// The catalog of one pack holding @p kernels under a declarative UDD whose launch passes
+/// only the workspace, for the graph and device the other tests here use.
+std::vector<KernelDefinition>
+    definitionsUnderDeclarativeLaunch(const std::vector<KernelDescriptor>& kernels)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    pack.kernels = kernels;
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               {makeDeclarativeDispatch<TestHandle>(workspaceOnlyLaunch())},
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               GraphMatch{});
+
+    const TestGraph graph(makeGraphId(0x90));
+    const auto properties = testDeviceProperties();
+    std::vector<KernelDefinition> owned;
+    for(const KernelDefinition* definition :
+        manager.unsortedDefinitions(MatchContext{graph, 0, properties}))
+    {
+        owned.push_back(*definition);
+    }
+    return owned;
+}
+
+} // namespace
+
+/// The declarative handler reads the launch from the kernel it is handed, so every kernel
+/// of a declarative pack carries its UDD's compiled launch.
+TEST(TestKernelIngestorStateManager, AttachesTheDeclarativeLaunchToEveryKernelOfItsPack)
+{
+    const auto definitions = definitionsUnderDeclarativeLaunch(
+        {makeKpackKernel(testId(0x91), "kernel_64", 64, {{"global_buffer", 8, 0, ""}}),
+         makeKpackKernel(testId(0x92), "kernel_256", 256, {{"global_buffer", 8, 0, ""}})});
+
+    ASSERT_EQ(definitions.size(), 2U);
+    for(const auto& definition : definitions)
+    {
+        ASSERT_NE(definition.launch, nullptr) << definition.name;
+        EXPECT_EQ(definition.launch->source(), workspaceOnlyLaunch()) << definition.name;
+    }
+}
+
+/// A declarative launch carries no compile options, so it runs precompiled code only: an
+/// EMBEDDED_SOURCE kernel under it is dropped alone, and its sibling still serves.
+TEST(TestKernelIngestorStateManager, DropsAnEmbeddedSourceKernelUnderADeclarativeLaunch)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const auto definitions = definitionsUnderDeclarativeLaunch(
+        {makeKernel(testId(0x93), "embedded", 64, "FLOAT"),
+         makeKpackKernel(testId(0x94), "kpack", 256, {{"global_buffer", 8, 0, ""}})});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().name, "kpack");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'embedded'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "precompiled kernels only"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The launch marshals exactly what its args_signature lists, so a kernel packaged with a
+/// different argument count, kind or size could never launch. An empty packaged signature
+/// is a kernel that takes no arguments, not an unknown one. Each is dropped alone.
+TEST(TestKernelIngestorStateManager, DropsAKernelWhoseSignatureDisagreesWithTheDeclarativeLaunch)
+{
+    const std::vector<std::pair<std::string, std::vector<KernelArgument>>> mismatches{
+        {"count", {{"global_buffer", 8, 0, ""}, {"global_buffer", 8, 8, ""}}},
+        {"none", {}},
+        {"kind", {{"by_value", 8, 0, ""}}},
+        {"size", {{"global_buffer", 4, 0, ""}}}};
+    for(const auto& [label, signature] : mismatches)
+    {
+        SCOPED_TRACE(label);
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+        const auto definitions = definitionsUnderDeclarativeLaunch(
+            {makeKpackKernel(testId(0x95), "mismatched", 64, signature),
+             makeKpackKernel(testId(0x96), "matching", 256, {{"global_buffer", 8, 0, ""}})});
+
+        ASSERT_EQ(definitions.size(), 1U);
+        EXPECT_EQ(definitions.front().name, "matching");
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'mismatched'"))
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+namespace
+{
+
 /// A native handler that launches the named stages of a multi-launch kernel. Its stages are
 /// the only thing it declares; the checks under test never call prepare or launch.
 class LaunchesHandler : public NoopDispatchHandler<TestHandle>

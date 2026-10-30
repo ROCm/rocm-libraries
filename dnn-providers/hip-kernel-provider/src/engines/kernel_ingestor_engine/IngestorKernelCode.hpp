@@ -84,6 +84,8 @@ inline int launchDeviceOrdinal(hipStream_t stream)
 compilation::KpackModuleCache& pointwiseKpackModuleCache();
 compilation::KpackModuleCache& convFwdKpackModuleCache();
 compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache();
+/// The declarative launch handler's cache, shared by every pack whose UDD is declarative.
+compilation::KpackModuleCache& declarativeLaunchKpackModuleCache();
 
 /// What a kpack kernel needs to be loaded again for another device, or read again for a
 /// save: the archive it was resolved to, the entry inside it, and the declared digest the

@@ -16,6 +16,7 @@ pages supply contracts, not alternate procedures:
 | [graph-contract.md](graph-contract.md) | Graph semantics, UID edges, fields and reference capability |
 | [rocke-mining.md](rocke-mining.md) | Applicability, specialization, layout, geometry and ABI |
 | [native-pack.md](native-pack.md) | Native hooks, ownership, registration and census scope |
+| [declarative-dispatch.md](declarative-dispatch.md) | Declarative UDD launch formulas: authoring, refusals and drop triage |
 | [workloads.md](workloads.md) | Corpus identity, coverage and runtime accounting |
 | Sweep reference, from the repository root in `projects/hipdnn/tools/IngestorGenerator/tools/README-sweeps.md` (RUNBOOK's `$GEN/tools/README-sweeps.md`) | Python CLI, YAML, measurement and resume |
 

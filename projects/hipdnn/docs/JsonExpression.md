@@ -22,6 +22,17 @@ Its data source, `CriteriaSymbols`, resolves the tokens the engine's
 device's properties as `$device.*`. A criterion passes only when it evaluates to
 boolean `true`. See [RFC 0018](rfcs/0018_UniversalMatchDescriptor.md).
 
+**UDD launch formulas.** A Universal Dispatch Descriptor (UDD) may describe its
+launch declaratively, which the descriptor loader compiles with this language
+([`CompiledLaunch.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/ingestor/CompiledLaunch.hpp)).
+Each `grid` and `block` axis, `shared_mem_bytes`, `workspace_bytes` and every
+`expr` argument source is a value-rooted rule over the same `CriteriaSymbols`
+data source. Arithmetic runs in double, so the launch reads a result as an
+integer only when it is a whole number of magnitude at most 2^53, and then
+checks it against its field's range. A result that is null, or breaks its
+field's rule, makes the kernel decline that graph. See
+[RFC 0017 §6](rfcs/0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace).
+
 ## Quickstart
 
 The pipeline has two halves. Compilation happens once per rule; evaluation

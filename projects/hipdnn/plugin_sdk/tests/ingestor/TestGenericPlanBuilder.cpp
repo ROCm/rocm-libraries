@@ -400,6 +400,116 @@ TEST(TestIngestorGenericPlanBuilder, GetMaxWorkspaceSizeTakesTheMaxAcrossSurvivo
     EXPECT_EQ(builder.getMaxWorkspaceSize(0, graph, KnobFilterSettings{}), 256U);
 }
 
+/// The default engine's pack packaged as kpack, under a declarative UDD whose workspace is
+/// `block_size - 100`. That is negative, so BAD_PARAM, for kernel_64_float and 156 bytes
+/// for kernel_256_float. The kernel matcher declines kernel_64_half.
+std::unique_ptr<StateManager> makeDeclarativeWorkspaceStateManager()
+{
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    for(auto& kernel : pack.kernels)
+    {
+        kernel.source = makeKpackSource();
+    }
+    return std::make_unique<StateManager>(
+        makeSchema(),
+        std::vector<MatchDescriptor>{
+            {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}},
+        std::vector<DispatchDescriptor>{makeDeclarativeDispatch<TestHandle>(
+            workspaceOnlyLaunch(nlohmann::json::parse(R"({"-": ["$kernel.block_size", 100]})")))},
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        NativeGraphMatch{"test.graph"});
+}
+
+/// A workspace formula that evaluates out of range for this graph declines its kernel:
+/// the largest workspace is the surviving kernel's, with or without a workspace limit, and
+/// neither path fails the engine for the graph.
+TEST(TestIngestorGenericPlanBuilder, GetMaxWorkspaceSizeSkipsAKernelWhoseWorkspaceFormulaFails)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeDeclarativeWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+    const TestGraph graph(makeGraphId(0xA0));
+
+    EXPECT_EQ(builder.getMaxWorkspaceSize(0, graph, KnobFilterSettings{}), 156U);
+
+    KnobFilterSettings limited;
+    limited.ingestorSettings.workspaceLimit = 1000;
+    EXPECT_EQ(builder.getMaxWorkspaceSize(0, graph, limited), 156U);
+}
+
+/// Answers block size as WorkspaceEqualsBlockSizeHandler does, but throws @p status from
+/// workspaceBytes for the 64-thread kernel.
+class ThrowingWorkspaceHandler : public WorkspaceEqualsBlockSizeHandler
+{
+public:
+    explicit ThrowingWorkspaceHandler(hipdnnPluginStatus_t status)
+        : _status(status)
+    {
+    }
+
+    size_t workspaceBytes(const MatchContext& context,
+                          const BoundTokens& bound,
+                          const KernelDefinition& kernel) const override
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == 64)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(_status, "workspace failed");
+        }
+        return WorkspaceEqualsBlockSizeHandler::workspaceBytes(context, bound, kernel);
+    }
+
+private:
+    hipdnnPluginStatus_t _status;
+};
+
+/// Only BAD_PARAM means "this kernel does not fit the graph". Any other failure from
+/// workspaceBytes is a fault, and still propagates from both workspace paths; BAD_PARAM
+/// from a native handler is skipped like a formula's.
+TEST(TestIngestorGenericPlanBuilder, OnlyBadParamFromWorkspaceBytesDeclinesTheKernel)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    KnobFilterSettings limited;
+    limited.ingestorSettings.workspaceLimit = 1000;
+    for(const auto& settings : {KnobFilterSettings{}, limited})
+    {
+        SCOPED_TRACE(settings.ingestorSettings.workspaceLimit.has_value() ? "limited"
+                                                                          : "unlimited");
+        {
+            const ThrowingWorkspaceHandler handler(HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+            const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+            const auto manager = makeStateManager();
+            const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+            const TestDeviceResolver resolver;
+            const TestPlanBuilder builder(engine, *manager, resolver);
+            const TestGraph graph(makeGraphId(0xA2));
+
+            EXPECT_EQ(builder.getMaxWorkspaceSize(0, graph, settings), 256U);
+        }
+        {
+            const ThrowingWorkspaceHandler handler(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+            const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+            const auto manager = makeStateManager();
+            const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+            const TestDeviceResolver resolver;
+            const TestPlanBuilder builder(engine, *manager, resolver);
+            const TestGraph graph(makeGraphId(0xA3));
+
+            try
+            {
+                static_cast<void>(builder.getMaxWorkspaceSize(0, graph, settings));
+                ADD_FAILURE() << "expected HipdnnPluginException";
+            }
+            catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
+            {
+                EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+            }
+        }
+    }
+}
+
 TEST(TestIngestorGenericPlanBuilder, BuildPlanThrowsInternalErrorOnAnEmptyRankedCatalog)
 {
     const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", countingFloatKernels);

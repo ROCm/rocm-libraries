@@ -16,7 +16,9 @@ registration patterns, not another engine's applicability rules.
 
 In place of a pack graph criterion or candidate matcher, a UMD may carry declarative
 `criteria` (RFC 0018 A.1) over the bound tokens, `$kernel.*` and `$device.*`; it then needs
-no hook or registration.
+no hook or registration. In place of a dispatch handler, a single-launch pack of packaged
+kernels may write its UDD as declarative launch formulas, which need no hook or
+registration either; [declarative-dispatch.md](declarative-dispatch.md) owns that contract.
 
 A multi-launch pack (descriptors carrying `sources`) overrides `launchNames()` to return
 the launch names of its kernels' `sources` maps, the same set for every kernel; the state

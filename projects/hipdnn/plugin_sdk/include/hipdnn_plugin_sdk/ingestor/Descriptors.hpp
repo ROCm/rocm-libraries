@@ -560,18 +560,37 @@ inline bool operator!=(const MatchDescriptor& lhs, const MatchDescriptor& rhs)
     return !(lhs == rhs);
 }
 
-/// UDD: how to invoke a kernel, shared by every kernel in a pack.
+class CompiledLaunch;
+
+/// UDD: how to invoke a kernel, shared by every kernel in a pack. Exactly one arm is set:
+/// an authored `dispatch_symbol` names a native dispatch handler, or the declarative keys
+/// (`grid`, `block`, `args_signature`, ...) describe one launch as formulas, compiled into
+/// @ref launch. A declarative UDD's @ref dispatchSymbol is DECLARATIVE_LAUNCH_SYMBOL, the
+/// reserved name of the one handler that evaluates any compiled launch.
+///
+/// `operator==` is authored-content equality: it compares @ref launchJson and ignores the
+/// compiled @ref launch pointer, so the copies of one UDD shipped in per-arch shards, each
+/// compiled from its own file, compare equal.
 struct DispatchDescriptor
 {
     DescriptorId id;
     std::string name;
     std::string dispatchSymbol; ///< Resolved through NativeRegistry.
+    /// The authored declarative body (every key except `version`, `id` and `name`), as
+    /// `CompiledLaunch::source()`. Null for a native UDD. Compared by operator== in place of
+    /// @ref launch.
+    nlohmann::json launchJson = nullptr;
+    /// The declarative launch, compiled when the UDD is read (see CompiledLaunch.hpp). Null
+    /// for a native UDD. Immutable and shared by every copy of the descriptor. Each file
+    /// compiles its own, so two equal descriptors read from different files hold different
+    /// pointers. Not part of operator==.
+    std::shared_ptr<const CompiledLaunch> launch = nullptr;
 };
 
 inline bool operator==(const DispatchDescriptor& lhs, const DispatchDescriptor& rhs)
 {
-    return std::tie(lhs.id, lhs.name, lhs.dispatchSymbol)
-           == std::tie(rhs.id, rhs.name, rhs.dispatchSymbol);
+    return std::tie(lhs.id, lhs.name, lhs.dispatchSymbol, lhs.launchJson)
+           == std::tie(rhs.id, rhs.name, rhs.dispatchSymbol, rhs.launchJson);
 }
 
 inline bool operator!=(const DispatchDescriptor& lhs, const DispatchDescriptor& rhs)

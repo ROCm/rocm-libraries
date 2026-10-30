@@ -2,7 +2,7 @@
 
 - Contributors: TBD
 - **Status**: In progress
-- **Status notes**: The UED loads and registers a generic engine (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp`; #10606, #10679, #10850, #11033). `graph_match` has both arms: the declarative `nodes` pattern, compiled against the generated op-schema registry when the UED is read, and the `native` escape hatch. The loader reads the three role-scoped heuristic maps and the runtime resolves them by arch (#13028). The JSON Schema file is `plugin_sdk/schemas/universal_engine_descriptor.schema.json`. Each UMD `criteria` is validated against the published symbol set of every engine a pack pairs it with (`CompiledCriteria.hpp`). The cross-engine root-opcode index and the same validation for UDD formulas and the UHD `features_signature` are not built.
+- **Status notes**: The UED loads and registers a generic engine (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp`; #10606, #10679, #10850, #11033). `graph_match` has both arms: the declarative `nodes` pattern, compiled against the generated op-schema registry when the UED is read, and the `native` escape hatch. The loader reads the three role-scoped heuristic maps and the runtime resolves them by arch (#13028). The JSON Schema file is `plugin_sdk/schemas/universal_engine_descriptor.schema.json`. Each UMD `criteria`, and each declarative UDD's launch formulas, is validated against the published symbol set of every engine a pack pairs it with (`CompiledCriteria.hpp`, `CompiledLaunch.hpp`). The cross-engine root-opcode index and the same validation for the UHD `features_signature` are not built.
 - **Last verified**: 2026-10-29 against `develop` (4a3fc208880) with #13177 and #14705 applied
 - **Follows**: [RFC 0017](0017_UniversalKernelDescriptor.md) (Universal Kernel Descriptors). This is the "UED + graph matching" follow-up named in RFC 0017 § 14.2: the engine format together with the graph-matching specification: the `nodes` structural pattern, the symbols matching publishes, and the op-schema registry behind them.
 
@@ -1255,12 +1255,14 @@ performed at build time and run time alike:
 - **The published symbol set is validated per consumer pair** (declarative arm only). A pattern
   publishes a set (§ 6.1), and every descriptor written against it — a UMD listed by a pack naming
   this engine, that pack's UDD, and the engine's own UHD `features_signature` — is checked against
-  that set. The UMD check is built: `criteriaReferenceError()` (`CompiledCriteria.hpp`) checks each
-  `criteria` reference, and a failure drops the pack. An engine with no `graph_match` publishes
-  nothing, so there only `$kernel.*` and `$device.*` resolve. Not yet built: the same check for
-  UDD formulas and the UHD `features_signature`. This is the UED half of the check; the reader's
-  half, including that a failure names the matcher, the engine, the reference, **and the pack that
-  paired them**, is
+  that set. The UMD and UDD checks are built: `criteriaReferenceError()` (`CompiledCriteria.hpp`)
+  checks each `criteria` reference, and `launchReferenceError()` (`CompiledLaunch.hpp`) checks each
+  reference a declarative UDD's launch formulas read and that each tensor argument names a pattern
+  variable. A failure drops the pack. An engine with no `graph_match` publishes nothing, so there
+  only `$kernel.*` and `$device.*` resolve, and a UDD with a tensor argument cannot pair with it.
+  Not yet built: the same check for the UHD `features_signature`. This is the UED half of the
+  check; the reader's half, including that a failure names the matcher, the engine, the reference,
+  **and the pack that paired them**, is
   [RFC 0018 A.5](0018_UniversalMatchDescriptor.md#a5-compile-time-validation-normative). The
   pairing is cached on `(matcher, engine)` and re-run when either side changes, so a pattern edit
   that drops or renames a bound variable invalidates every consumer written against it, loudly, at

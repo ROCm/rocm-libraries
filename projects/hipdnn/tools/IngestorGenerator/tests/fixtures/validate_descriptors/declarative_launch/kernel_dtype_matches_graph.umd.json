@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "id": "b07e5ca4-6d91-4fc8-a40b-9c5b3f2dae81",
+  "name": "kernel dtype matches the graph's dtype",
+  "scope": "kernel",
+  "criteria": {
+    "==": [
+      "$kernel.dtype",
+      "$x.dtype"
+    ]
+  }
+}

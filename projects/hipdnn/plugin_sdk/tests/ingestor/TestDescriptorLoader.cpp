@@ -2126,6 +2126,201 @@ TEST(TestDescriptorLoader, RefusesALaterRootsUmdDifferingOnlyInCriteria)
     EXPECT_EQ(matcher->criteriaJson, pointwiseOperationIs("ADD"));
 }
 
+namespace
+{
+
+/// A declarative launch body over pointwisePatternNodes(): pointers to the pattern's three
+/// tensors and the output's leading extent as an i32, with @p blockX threads per block.
+nlohmann::json pointwiseLaunch(int64_t blockX)
+{
+    const auto pointer = [](const char* name, const char* ref) {
+        return nlohmann::json{
+            {"name", name}, {"kind", "pointer"}, {"source", {{"from", "tensor"}, {"ref", ref}}}};
+    };
+    return {{"grid", {{"x", 1}, {"y", 1}, {"z", 1}}},
+            {"block", {{"x", blockX}, {"y", 1}, {"z", 1}}},
+            {"args_signature",
+             {pointer("a", "$input_a"),
+              pointer("b", "$input_b"),
+              pointer("y", "$output"),
+              {{"name", "n"},
+               {"kind", "scalar"},
+               {"type", "i32"},
+               {"source", {{"from", "dim"}, {"ref", "$output"}, {"axis", 0}}}}}}};
+}
+
+/// Replaces @p documents' native UDD arm with the declarative @p launch.
+nlohmann::json& declareLaunch(Documents& documents, const nlohmann::json& launch)
+{
+    auto& udd = documentOfType(documents, ".udd.json");
+    udd.erase("dispatch_symbol");
+    udd.update(launch);
+    return udd;
+}
+
+/// A complete set over a declarative pointwise pattern whose UDD launches declaratively.
+Documents pointwiseLaunchSet(const std::string& engineName, int64_t blockX = 64)
+{
+    auto documents = makeSetDocuments('1', engineName);
+    documentOfType(documents, ".ued.json")["graph_match"] = {{"nodes", pointwisePatternNodes()}};
+    declareLaunch(documents, pointwiseLaunch(blockX));
+    return documents;
+}
+
+DescriptorId uddId(Documents& documents)
+{
+    return hipdnn_flatbuffers_sdk::utilities::parseUuid(
+        documentOfType(documents, ".udd.json").at("id").get<std::string>());
+}
+
+} // namespace
+
+/// A declarative UDD compiles while the file is read, keeps its authored body for
+/// equality, and takes the reserved symbol of the one handler that runs any launch.
+TEST(TestDescriptorLoader, LoadsADeclarativeUddUnderTheReservedSymbol)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declarative_udd"));
+    writeDocuments(dir.path(), pointwiseLaunchSet("test:declarative_udd"));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().dispatches.size(), 1u);
+    const auto& dispatch = sets.front().dispatches.front();
+    ASSERT_NE(dispatch.launch, nullptr);
+    EXPECT_EQ(dispatch.dispatchSymbol, DECLARATIVE_LAUNCH_SYMBOL);
+    EXPECT_EQ(dispatch.launchJson, pointwiseLaunch(64));
+    EXPECT_EQ(dispatch.launch->signature().size(), 4u);
+}
+
+/// A UDD states one way to launch: both arms, or neither, is refused with the rule's own
+/// message, and the valid engine sharing the directory still loads.
+TEST(TestDescriptorLoader, RefusesAUddWithBothOrNeitherOfDispatchSymbolAndALaunch)
+{
+    for(const bool both : {true, false})
+    {
+        SCOPED_TRACE(both ? "both arms" : "neither arm");
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+            uniqueDirectory(both ? "udd_both_arms" : "udd_no_arm"));
+        writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+        auto broken = makeSetDocuments('2', "test:broken");
+        auto& udd = documentOfType(broken, ".udd.json");
+        if(both)
+        {
+            udd["grid"] = {{"x", 1}, {"y", 1}, {"z", 1}};
+        }
+        else
+        {
+            udd.erase("dispatch_symbol");
+        }
+        writeDocuments(dir.path(), broken);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        EXPECT_EQ(sets.front().engine.name, "test:valid");
+        EXPECT_TRUE(recorder.hasLogContaining(
+            HIPDNN_SEV_ERROR,
+            "must declare exactly one of 'dispatch_symbol' and the declarative launch keys"))
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+/// The reserved name and its versioned aliases belong to the declarative handler: a native
+/// UDD naming one would run that handler with no compiled launch. A name merely sharing
+/// the prefix is an ordinary symbol.
+TEST(TestDescriptorLoader, RefusesAnAuthoredDispatchSymbolInTheReservedNamespace)
+{
+    const std::string reserved(DECLARATIVE_LAUNCH_SYMBOL);
+    for(const auto& [symbol, refused] : std::vector<std::pair<std::string, bool>>{
+            {reserved, true}, {reserved + ".v1", true}, {reserved + "_custom", false}})
+    {
+        SCOPED_TRACE(symbol);
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("reserved_symbol"));
+        auto documents = makeSetDocuments('1', "test:reserved_symbol");
+        documentOfType(documents, ".udd.json")["dispatch_symbol"] = symbol;
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        EXPECT_EQ(sets.empty(), refused);
+        EXPECT_EQ(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                            "which is reserved for declarative launches"),
+                  refused)
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+/// A launch that binds a tensor the engine's pattern does not publish drops only the pack
+/// pairing them, and the diagnostic names the reference, the UDD, the engine and the pack.
+/// A sibling pack of the same engine on a native UDD still loads.
+TEST(TestDescriptorLoader, DropsOnlyThePackWhoseLaunchReferenceDoesNotResolve)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unresolved_launch"));
+    auto documents = makeSetDocuments('1', "test:unresolved_launch");
+    documentOfType(documents, ".ued.json")["graph_match"] = {{"nodes", pointwisePatternNodes()}};
+
+    const auto nativeDispatchId = testUuid('1', 'b');
+    auto nativePack = documentOfType(documents, ".kdp.json");
+    nativePack["id"] = testUuid('1', 'c');
+    nativePack["name"] = "native pack";
+    nativePack["dispatch"] = nativeDispatchId;
+    const std::array<char, 3> slots = {'e', 'f', '0'};
+    for(size_t i = 0; i < nativePack.at("kernelDescriptors").size(); ++i)
+    {
+        nativePack["kernelDescriptors"][i]["id"] = testUuid('1', slots[i]);
+    }
+    documents.push_back({".kdp.json", nativePack});
+    documents.push_back({".udd.json",
+                         {{"version", "1.0"},
+                          {"id", nativeDispatchId},
+                          {"name", "native dispatch"},
+                          {"dispatch_symbol", DISPATCH_SYMBOL}}});
+
+    auto launch = pointwiseLaunch(64);
+    launch["args_signature"][0]["source"]["ref"] = "$weights";
+    declareLaunch(documents, launch);
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().name, "native pack");
+    for(const char* part : {"$weights", "dispatch 'dispatch'", "test:unresolved_launch", "'pack'"})
+    {
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, part))
+            << part << "\n"
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+/// The formulas are part of a UDD's content: two copies of one id in one root that differ
+/// only there poison the id.
+TEST(TestDescriptorLoader, DropsTheIdWhenTwoUddsInOneRootDifferOnlyInFormulas)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("launch_same_root"));
+    auto documents = pointwiseLaunchSet("test:launch_same_root", 64);
+    writeDocuments(dir.path() / "a", documents);
+    auto other = pointwiseLaunchSet("test:launch_same_root", 128);
+    writeDocument(dir.path() / "b", {".udd.json", documentOfType(other, ".udd.json")});
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    EXPECT_EQ(tallyOf(catalog.dispatches, uddId(documents)).conflicted, 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "with different contents"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(resolveDescriptorSets(catalog).empty());
+}
+
 TEST(TestDescriptorLoader, LoadsNothingFromAnEmptyDirectory)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("empty"));
@@ -6127,6 +6322,21 @@ TEST(TestDescriptorLoader, ChangingAMatchersCriteriaChangesTheEngineSelectorRevi
 
     EXPECT_EQ(revisionWith("ADD", "criteria_revision"), revisionWith("ADD", "criteria_revision"));
     EXPECT_NE(revisionWith("ADD", "criteria_revision"), revisionWith("SUB", "criteria_revision"));
+}
+
+/// The selector revision digests each declarative UDD's formulas. Every declarative UDD
+/// shares one reserved symbol, so without them editing a formula would keep a revision a
+/// ranker was trained against.
+TEST(TestDescriptorLoader, ChangingAUddsFormulasChangesTheEngineSelectorRevision)
+{
+    const auto revisionWith = [](int64_t blockX, const std::string& label) {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(label));
+        writeDocuments(dir.path(), pointwiseLaunchSet("test:" + label, blockX));
+        return engineSelectorRevision(loadFrom(dir.path()).at(0));
+    };
+
+    EXPECT_EQ(revisionWith(64, "launch_revision"), revisionWith(64, "launch_revision"));
+    EXPECT_NE(revisionWith(64, "launch_revision"), revisionWith(128, "launch_revision"));
 }
 
 /// A launch name is `^[a-z][a-z0-9_]*$`: underscores and digits after the first letter are

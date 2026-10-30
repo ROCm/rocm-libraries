@@ -26,6 +26,13 @@ public:
         launchImpl(stream, kernelParams.data());
     }
 
+    /// Launches with an argument array built at run time: @p kernelParams holds one
+    /// pointer to each argument's value, in kernel argument order.
+    void launchWithParams(hipStream_t stream, void** kernelParams) const
+    {
+        launchImpl(stream, kernelParams);
+    }
+
 protected:
     virtual void launchImpl(hipStream_t stream, void** kernelParams) const = 0;
 };

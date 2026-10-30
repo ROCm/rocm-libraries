@@ -874,10 +874,9 @@ def test_example_tree_field_shape_matches_the_runtime_fixture():
     """Per descriptor type, carry the fields the runtime fixture carries.
 
     `archive_fixture/` is the tree the C++ integration test actually loads
-    and dispatches, so it is the authority on shape. Comparing against it catches an
-    invented field set -- the failure that shipped here once already, where UDD
-    had `grid`/`block`/`args` instead of `dispatch_symbol` and UMD had
-    `criteria`/`nodes` instead of `match_symbol`.
+    and dispatches, so it is the authority on shape. Comparing against it catches
+    an example that drops a field the runtime fixture relies on, such as a UDD
+    without `dispatch_symbol` or a UMD without `match_symbol`.
     """
     if not RUNTIME_FIXTURE.is_dir():
         pytest.skip(f"runtime fixture not present at {RUNTIME_FIXTURE}")
@@ -907,8 +906,9 @@ def test_example_tree_field_shape_matches_the_runtime_fixture():
 def _named_native_symbols(path, doc):
     """Return the native symbols a descriptor names, read from the naming fields.
 
-    A UED names one only in the `native` arm of `graph_match`, and a UMD only in
-    `match_symbol`. A `nodes` pattern or a `criteria` expression names none.
+    A UED names one only in the `native` arm of `graph_match`, a UMD only in
+    `match_symbol`, and a UDD only in `dispatch_symbol`. A `nodes` pattern, a
+    `criteria` expression or a declarative launch names none.
     """
     kind = path.name.split(".")[-2]
     if kind == "ued":
@@ -917,7 +917,7 @@ def _named_native_symbols(path, doc):
     if kind == "umd":
         return {doc["match_symbol"]} if "match_symbol" in doc else set()
     if kind == "udd":
-        return {doc["dispatch_symbol"]}
+        return {doc["dispatch_symbol"]} if "dispatch_symbol" in doc else set()
     if kind == "uhd" and doc.get("kind") == "native":
         return {doc["payload"]}
     return set()
@@ -1048,6 +1048,75 @@ def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
     _assert_runtime_would_load(shipped, ks["library"], out)
 
 
+# A declarative launch in the shape of the conv_fwd pack: one thread per output
+# element, three tensor pointers and seven int32 extents.
+_DECLARATIVE_LAUNCH = {
+    "grid": {
+        "x": {
+            "ceil_div": [
+                {"*": ["$y.dims[0]", "$y.dims[1]", "$y.dims[2]", "$y.dims[3]"]},
+                "$kernel.block_size",
+            ]
+        },
+        "y": 1,
+        "z": 1,
+    },
+    "block": {"x": "$kernel.block_size", "y": 1, "z": 1},
+    "args_signature": [
+        {"name": "x", "kind": "pointer", "source": {"from": "tensor", "ref": "$x"}},
+        {"name": "w", "kind": "pointer", "source": {"from": "tensor", "ref": "$w"}},
+        {"name": "y", "kind": "pointer", "source": {"from": "tensor", "ref": "$y"}},
+        *(
+            {
+                "name": name,
+                "kind": "scalar",
+                "type": "i32",
+                "source": {"from": "dim", "ref": ref, "axis": axis},
+            }
+            for name, ref, axis in (
+                ("n", "$x", 0),
+                ("c", "$x", 1),
+                ("h", "$x", 2),
+                ("width", "$x", 3),
+                ("k", "$w", 0),
+                ("r", "$w", 2),
+                ("s", "$w", 3),
+            )
+        ),
+    ],
+}
+
+
+def _declarative(**changes):
+    """A `mutate` that swaps the native arm for _DECLARATIVE_LAUNCH plus @p changes."""
+    return {"dispatch_symbol": None, **_DECLARATIVE_LAUNCH, **changes}
+
+
+def _without_none(fields):
+    """`None` means "delete this key", as it does in a `mutate`."""
+    return {key: value for key, value in fields.items() if value is not None}
+
+
+def _declarative_dim3(key, **axes):
+    return _declarative(**{key: _without_none({**_DECLARATIVE_LAUNCH[key], **axes})})
+
+
+def _declarative_arg(**fields):
+    """A `mutate` whose only argument is a scalar `n` with @p fields overriding it."""
+    arg = {
+        "name": "n",
+        "kind": "scalar",
+        "type": "i32",
+        "source": {"from": "dim", "ref": "$x", "axis": 0},
+        **fields,
+    }
+    return _declarative(args_signature=[_without_none(arg)])
+
+
+def _declarative_literal(scalar_type, value):
+    return _declarative_arg(type=scalar_type, source={"from": "expr", "expr": value})
+
+
 @pytest.mark.quick
 @pytest.mark.parametrize(
     "filename,mutate,expected",
@@ -1063,7 +1132,126 @@ def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
             "invalid type",
         ),
         # Required keys the loader demands.
-        ("pointwise.udd.json", {"dispatch_symbol": None}, "dispatch_symbol"),
+        ("pointwise.udd.json", {"dispatch_symbol": None}, "exactly one of"),
+        # The UDD's two arms (RFC 0017 §6): one of them, and the declarative one
+        # holds only what compileLaunch accepts.
+        ("pointwise.udd.json", {"grid": {"x": 1, "y": 1, "z": 1}}, "exactly one of"),
+        (
+            "pointwise.udd.json",
+            {"dispatch_symbol": "hipdnn.declarative_launch"},
+            "reserved",
+        ),
+        (
+            "pointwise.udd.json",
+            {"dispatch_symbol": "hipdnn.declarative_launch.v1"},
+            "reserved",
+        ),
+        ("pointwise.udd.json", _declarative(grids={}), "unknown fields"),
+        ("pointwise.udd.json", _declarative(launches=[]), "not supported yet"),
+        ("pointwise.udd.json", _declarative(intermediates={}), "not supported yet"),
+        ("pointwise.udd.json", _declarative(block=None), "'block'"),
+        ("pointwise.udd.json", _declarative(args_signature=None), "'args_signature'"),
+        ("pointwise.udd.json", _declarative(args_signature={}), "must be an array"),
+        ("pointwise.udd.json", _declarative_dim3("grid", z=None), "'z'"),
+        ("pointwise.udd.json", _declarative_dim3("grid", w=1), "unknown fields"),
+        # Literals are checked against their rule when the file is read.
+        ("pointwise.udd.json", _declarative_dim3("block", x=0), "whole number"),
+        ("pointwise.udd.json", _declarative_dim3("block", x=1.5), "whole number"),
+        ("pointwise.udd.json", _declarative_dim3("grid", y=2**32), "whole number"),
+        ("pointwise.udd.json", _declarative(shared_mem_bytes=-1), "whole number"),
+        (
+            "pointwise.udd.json",
+            _declarative(workspace_bytes=2**53 + 2),
+            "whole number",
+        ),
+        ("pointwise.udd.json", _declarative_literal("i32", 2**31), "whole number"),
+        ("pointwise.udd.json", _declarative_literal("u32", -1), "whole number"),
+        ("pointwise.udd.json", _declarative_literal("i64", 2**53 + 2), "whole number"),
+        ("pointwise.udd.json", _declarative_literal("f32", 1e39), "finite f32"),
+        ("pointwise.udd.json", _declarative_literal("i32", True), "not a formula"),
+        ("pointwise.udd.json", _declarative_dim3("grid", x="$$x"), "not a formula"),
+        ("pointwise.udd.json", _declarative_literal("u32", None), "not a formula"),
+        # Argument entries.
+        ("pointwise.udd.json", _declarative_arg(name=""), "nonempty string"),
+        (
+            "pointwise.udd.json",
+            _declarative(args_signature=_DECLARATIVE_LAUNCH["args_signature"][:1] * 2),
+            "repeats argument name",
+        ),
+        ("pointwise.udd.json", _declarative_arg(kind="buffer"), "invalid kind"),
+        ("pointwise.udd.json", _declarative_arg(type=None), "'type'"),
+        ("pointwise.udd.json", _declarative_arg(type="f16"), "invalid type"),
+        ("pointwise.udd.json", _declarative_arg(offset=0), "not supported yet"),
+        ("pointwise.udd.json", _declarative_arg(source=None), "'source'"),
+        (
+            "pointwise.udd.json",
+            _declarative_arg(kind="pointer", type=None),
+            "invalid from 'dim' for a pointer",
+        ),
+        (
+            "pointwise.udd.json",
+            _declarative_arg(source={"from": "tensor", "ref": "$x"}),
+            "invalid from 'tensor' for a scalar",
+        ),
+        (
+            "pointwise.udd.json",
+            _declarative_arg(kind="pointer"),
+            "takes no 'type'",
+        ),
+        (
+            "pointwise.udd.json",
+            _declarative_arg(kind="workspace", type=None),
+            "takes no 'source'",
+        ),
+        (
+            "pointwise.udd.json",
+            _declarative_arg(source={"from": "scalar", "ref": "$x"}),
+            "not supported yet",
+        ),
+        (
+            "pointwise.udd.json",
+            _declarative_arg(source={"from": "attribute", "ref": "$x"}),
+            "not supported yet",
+        ),
+        (
+            "pointwise.udd.json",
+            _declarative_arg(source={"from": "workspace"}),
+            "invalid from 'workspace'",
+        ),
+        (
+            "pointwise.udd.json",
+            _declarative_arg(source={"from": "dim", "ref": "x", "axis": 0}),
+            "pattern variable",
+        ),
+        (
+            "pointwise.udd.json",
+            _declarative_arg(source={"from": "stride", "ref": "$x.dims", "axis": 0}),
+            "pattern variable",
+        ),
+        (
+            "pointwise.udd.json",
+            _declarative_arg(source={"from": "dim", "ref": "$x", "axis": -1}),
+            "non-negative integer",
+        ),
+        (
+            "pointwise.udd.json",
+            _declarative_arg(source={"from": "dim", "ref": "$x", "axis": True}),
+            "non-negative integer",
+        ),
+        (
+            "pointwise.udd.json",
+            _declarative_arg(source={"from": "dim", "ref": "$x"}),
+            "'axis'",
+        ),
+        (
+            "pointwise.udd.json",
+            _declarative_arg(
+                kind="pointer",
+                type=None,
+                source={"from": "tensor", "ref": "$x", "axis": 0},
+            ),
+            "unknown fields",
+        ),
         ("pointwise.umd.json", {"match_symbol": None}, "exactly one of"),
         (
             "pointwise.umd.json",
@@ -1110,6 +1298,69 @@ def test_umd_criteria_arm_replaces_match_symbol(tmp_path, main_fixture, criteria
     doc = _read(target)
     del doc["match_symbol"]
     doc["criteria"] = criteria
+    target.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    load_flat_input(root, GENERIC_TARGETS)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "launch",
+    [
+        pytest.param(_DECLARATIVE_LAUNCH, id="conv_fwd"),
+        pytest.param(
+            {
+                "grid": {"x": 2**32 - 1, "y": 1.0, "z": 1, "x-note": "max grid"},
+                "block": {"x": "$kernel.block_size", "y": 1, "z": 1},
+                "shared_mem_bytes": 2**32 - 1,
+                "workspace_bytes": 2**53,
+                "args_signature": [
+                    {"name": "ws", "kind": "workspace", "_note": "scratch"},
+                    {
+                        "name": "stride",
+                        "kind": "scalar",
+                        "type": "i64",
+                        "source": {"from": "stride", "ref": "$_in0", "axis": 3},
+                    },
+                    *(
+                        {
+                            "name": f"literal_{scalar_type}",
+                            "kind": "scalar",
+                            "type": scalar_type,
+                            "source": {"from": "expr", "expr": value, "x-why": "edge"},
+                        }
+                        for scalar_type, value in (
+                            ("i32", -(2**31)),
+                            ("u32", 2**32 - 1),
+                            ("i64", -(2**53)),
+                            ("f32", -3.4e38),
+                        )
+                    ),
+                ],
+                "x-owner": "packaging tests",
+                "provenance": {"tool": "hand-written"},
+            },
+            id="literal_bounds_and_extension_keys",
+        ),
+        pytest.param(
+            {
+                "grid": {"x": 1, "y": 1, "z": 1},
+                "block": {"x": 1, "y": 1, "z": 1},
+                "args_signature": [],
+            },
+            id="no_arguments",
+        ),
+    ],
+)
+def test_udd_declarative_arm_replaces_dispatch_symbol(tmp_path, main_fixture, launch):
+    """A UDD may state its launch as formulas instead of a native dispatch_symbol,
+    and every value at the edge of its rule is accepted."""
+    root = tmp_path / "root"
+    _nest(root, "hip", main_fixture)
+    target = root / "hip" / "pointwise.udd.json"
+    doc = _read(target)
+    del doc["dispatch_symbol"]
+    doc.update(launch)
     target.write_text(json.dumps(doc, indent=2), encoding="utf-8")
 
     load_flat_input(root, GENERIC_TARGETS)

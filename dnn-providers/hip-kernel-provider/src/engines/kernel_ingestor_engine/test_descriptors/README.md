@@ -41,6 +41,14 @@ The descriptors for the engine `hipkernel:ConvFwd`. Author this set one time. Th
 the packer over it two times, one time into each discovery root. Both binaries then read the
 same authored descriptors.
 
+The `conv_fwd_declarative*` files declare a second engine, `hipkernel:ConvFwdDeclarative`.
+It is a twin of `hipkernel:ConvFwd`: its kernels compile from the same `kernels/ConvFwd.cpp`
+with the same defines, and it uses the same native kernel match and score. Two things
+differ. Its UED binds the graph with a declarative `graph_match.nodes` pattern, and its UDD
+launches the kernel with declarative formulas instead of a native dispatch symbol. Every id
+in the twin is its own. The parity test compares the twin's launch and output with those
+of `hipkernel:ConvFwd`, so edit the two together.
+
 ## `unit/pointwise/` and `integration/pointwise/`
 
 Both folders declare the engine `hipkernel:Pointwise`. `unit/pointwise/` uses the

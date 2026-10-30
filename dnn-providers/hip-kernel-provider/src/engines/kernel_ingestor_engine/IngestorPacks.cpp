@@ -5,6 +5,8 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <hipdnn_plugin_sdk/ingestor/CompiledLaunch.hpp>
+
 #include "compilation/KpackModuleCache.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine
@@ -26,6 +28,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:Gfx1151WmmaAttentionDecode",
          &registerGfx1151WmmaAttentionDecodeSymbols,
          &resetGfx1151WmmaAttentionDecodeModuleCache},
+        {hipdnn_plugin_sdk::ingestor::DECLARATIVE_LAUNCH_SYMBOL,
+         &registerDeclarativeLaunchSymbols,
+         &resetDeclarativeLaunchModuleCache},
     };
     return s_packs;
 }

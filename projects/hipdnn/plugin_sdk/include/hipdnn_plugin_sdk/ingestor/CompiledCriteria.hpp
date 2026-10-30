@@ -381,45 +381,58 @@ inline std::shared_ptr<const CompiledCriteria>
         std::vector<std::string>(presence.begin(), presence.end()));
 }
 
-/// Why @p criteria cannot run on an engine whose `graph_match` is @p graphMatch and whose
-/// KMD is @p schema, or "" when it can (RFC 0018 A.5 checks 5 and 6). The message reads as
-/// a continuation of "its criteria ...".
-///
-///  - `$kernel.*` must name a field @p schema declares, or `name[i]` of an INT_LIST field,
-///    and `$device.*` must name a device property. These run on every arm.
-///  - Every other reference must be something the engine publishes: a pattern variable or
-///    one of its fields, a node attribute, or `$graph.*`. A `nodes` pattern is the only
-///    arm whose published set is known before a graph arrives, so a native `graph_match`
-///    skips this (RFC 0020 §4.5), and an engine without `graph_match` publishes nothing
-///    (RFC 0020 §6).
-///  - `present` / `not_present` may not ask about a pattern variable or attribute the
-///    pattern binds as required: the answer is fixed by the pattern (RFC 0020 §6.1).
-inline std::string criteriaReferenceError(const CompiledCriteria& criteria,
-                                          const GraphMatch& graphMatch,
-                                          const MetadataSchema& schema)
+namespace detail
 {
-    const auto* patternPtr = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&graphMatch);
-    const CompiledGraphPattern* pattern = patternPtr == nullptr ? nullptr : patternPtr->get();
-    const bool native = std::holds_alternative<NativeGraphMatch>(graphMatch);
 
-    const auto findVariable = [pattern](std::string_view name) -> const PatternVariable* {
-        if(pattern == nullptr)
+/// What an engine publishes, for checking a reference a criteria or launch formula reads
+/// against it when a pack pairs the descriptor with that engine. Holds references; build
+/// one on the stack per check.
+class PublishedSymbols
+{
+public:
+    PublishedSymbols(const GraphMatch& graphMatch, const MetadataSchema& schema)
+        : _schema(schema)
+        , _native(std::holds_alternative<NativeGraphMatch>(graphMatch))
+    {
+        const auto* pattern = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&graphMatch);
+        _pattern = pattern == nullptr ? nullptr : pattern->get();
+    }
+
+    /// The engine's `nodes` pattern, or null for a native or absent `graph_match`.
+    const CompiledGraphPattern* pattern() const noexcept
+    {
+        return _pattern;
+    }
+
+    /// True for a native `graph_match`, whose published set is unknown before a graph
+    /// arrives.
+    bool native() const noexcept
+    {
+        return _native;
+    }
+
+    /// The pattern variable named @p name, or null.
+    const PatternVariable* findVariable(std::string_view name) const
+    {
+        if(_pattern == nullptr)
         {
             return nullptr;
         }
-        const auto& variables = pattern->variables();
+        const auto& variables = _pattern->variables();
         const auto it = std::find_if(variables.begin(),
                                      variables.end(),
                                      [name](const PatternVariable& v) { return v.name == name; });
         return it == variables.end() ? nullptr : &*it;
-    };
-    const auto findAttribute
-        = [pattern](std::string_view token) -> const CompiledPatternAttribute* {
-        if(pattern == nullptr)
+    }
+
+    /// The node attribute the pattern binds to @p token, or null.
+    const CompiledPatternAttribute* findAttribute(std::string_view token) const
+    {
+        if(_pattern == nullptr)
         {
             return nullptr;
         }
-        for(const auto& node : pattern->nodes())
+        for(const auto& node : _pattern->nodes())
         {
             for(const auto& attribute : node.attributes)
             {
@@ -430,86 +443,118 @@ inline std::string criteriaReferenceError(const CompiledCriteria& criteria,
             }
         }
         return nullptr;
-    };
-    const auto kmdField = [&schema](std::string_view name) -> const MetadataField* {
-        const auto it
-            = std::find_if(schema.fields.begin(),
-                           schema.fields.end(),
-                           [name](const MetadataField& field) { return field.name == name; });
-        return it == schema.fields.end() ? nullptr : &*it;
-    };
+    }
 
-    for(const auto& path : criteria.references())
+    /// Why the sigil-free reference @p path does not resolve, or "" when it does. The
+    /// reason continues "$<path>", as in "read $<path>" + reason (RFC 0018 A.5 checks 5
+    /// and 6):
+    ///  - `$kernel.*` must name a field the schema declares, or `name[i]` of an INT_LIST
+    ///    field, and `$device.*` must name a device property. These run on every arm.
+    ///  - Every other reference must be something the engine publishes: a pattern
+    ///    variable or one of its fields, a node attribute, or `$graph.*`. A `nodes`
+    ///    pattern is the only arm whose published set is known before a graph arrives,
+    ///    so a native `graph_match` skips this (RFC 0020 §4.5), and an engine without
+    ///    `graph_match` publishes nothing (RFC 0020 §6).
+    std::string unresolved(const std::string& path) const
     {
-        const auto root = detail::symbolRoot(path);
+        const auto root = symbolRoot(path);
         if(root == KERNEL_SYMBOL_ROOT)
         {
-            const auto field = detail::symbolField(path, KERNEL_SYMBOL_ROOT);
+            const auto field = symbolField(path, KERNEL_SYMBOL_ROOT);
             bool declared = field.has_value() && kmdField(*field) != nullptr;
             if(!declared && field.has_value())
             {
-                const auto indexed = detail::splitIndexedField(*field);
+                const auto indexed = splitIndexedField(*field);
                 const auto* list = indexed.has_value() ? kmdField(indexed->first) : nullptr;
                 declared = list != nullptr && list->type == MetadataType::INT_LIST;
             }
-            if(!declared)
-            {
-                return "read $" + path + ", which metadata schema '" + schema.name
-                       + "' does not declare";
-            }
-            continue;
+            return declared ? std::string()
+                            : ", which metadata schema '" + _schema.name + "' does not declare";
         }
         if(root == DEVICE_SYMBOL_ROOT)
         {
-            const auto field = detail::symbolField(path, DEVICE_SYMBOL_ROOT);
-            if(!field.has_value() || !CriteriaDevice::declares(*field))
-            {
-                return "read $" + path + ", which is not a device property";
-            }
-            continue;
+            const auto field = symbolField(path, DEVICE_SYMBOL_ROOT);
+            return field.has_value() && CriteriaDevice::declares(*field)
+                       ? std::string()
+                       : ", which is not a device property";
         }
-        if(native)
+        if(_native)
         {
-            continue;
+            return {};
         }
-        if(pattern == nullptr)
+        if(_pattern == nullptr)
         {
-            return "read $" + path
-                   + ", but the engine declares no graph_match and so binds nothing; only "
-                     "$kernel.* and $device.* resolve";
+            return ", but the engine declares no graph_match and so binds nothing; only "
+                   "$kernel.* and $device.* resolve";
         }
         if(root == GRAPH_SYMBOL_ROOT)
         {
-            const auto field = detail::symbolField(path, GRAPH_SYMBOL_ROOT);
-            if(!field.has_value()
-               || std::find(PUBLISHED_GRAPH_FIELDS.begin(), PUBLISHED_GRAPH_FIELDS.end(), *field)
-                      == PUBLISHED_GRAPH_FIELDS.end())
-            {
-                return "read $" + path + ", which is not a published graph field";
-            }
-            continue;
+            const auto field = symbolField(path, GRAPH_SYMBOL_ROOT);
+            const bool published
+                = field.has_value()
+                  && std::find(PUBLISHED_GRAPH_FIELDS.begin(), PUBLISHED_GRAPH_FIELDS.end(), *field)
+                         != PUBLISHED_GRAPH_FIELDS.end();
+            return published ? std::string() : ", which is not a published graph field";
         }
         if(findVariable(root) != nullptr)
         {
             const auto rest = std::string_view(path).substr(root.size());
-            if(!rest.empty()
-               && (rest.front() != '.' || !detail::isPublishedTensorField(rest.substr(1))))
+            if(!rest.empty() && (rest.front() != '.' || !isPublishedTensorField(rest.substr(1))))
             {
-                return "read $" + path + ", but tensor '" + std::string(root)
-                       + "' publishes no such field";
+                return ", but tensor '" + std::string(root) + "' publishes no such field";
             }
-            continue;
+            return {};
         }
-        if(findAttribute(path) == nullptr)
+        return findAttribute(path) == nullptr ? ", which the engine's graph_match does not publish"
+                                              : std::string();
+    }
+
+private:
+    const MetadataField* kmdField(std::string_view name) const
+    {
+        const auto it
+            = std::find_if(_schema.fields.begin(),
+                           _schema.fields.end(),
+                           [name](const MetadataField& field) { return field.name == name; });
+        return it == _schema.fields.end() ? nullptr : &*it;
+    }
+
+    const MetadataSchema& _schema;
+    const CompiledGraphPattern* _pattern = nullptr;
+    bool _native = false;
+};
+
+} // namespace detail
+
+/// Why @p criteria cannot run on an engine whose `graph_match` is @p graphMatch and whose
+/// KMD is @p schema, or "" when it can (RFC 0018 A.5 checks 5 and 6). The message reads as
+/// a continuation of "its criteria ...".
+///
+///  - Every reference must resolve in what the engine publishes, under the rules of
+///    detail::PublishedSymbols::unresolved().
+///  - `present` / `not_present` may not ask about a pattern variable or attribute the
+///    pattern binds as required: the answer is fixed by the pattern (RFC 0020 §6.1).
+inline std::string criteriaReferenceError(const CompiledCriteria& criteria,
+                                          const GraphMatch& graphMatch,
+                                          const MetadataSchema& schema)
+{
+    const detail::PublishedSymbols published(graphMatch, schema);
+
+    for(const auto& path : criteria.references())
+    {
+        if(auto reason = published.unresolved(path); !reason.empty())
         {
-            return "read $" + path + ", which the engine's graph_match does not publish";
+            std::string message = "read $";
+            message += path;
+            message += reason;
+            return message;
         }
     }
 
     for(const auto& query : criteria.presenceQueries())
     {
-        const auto* variable = findVariable(query);
-        const auto* attribute = variable == nullptr ? findAttribute(query) : nullptr;
+        const auto* variable = published.findVariable(query);
+        const auto* attribute = variable == nullptr ? published.findAttribute(query) : nullptr;
         if((variable != nullptr && !variable->optional)
            || (attribute != nullptr && !attribute->optional))
         {

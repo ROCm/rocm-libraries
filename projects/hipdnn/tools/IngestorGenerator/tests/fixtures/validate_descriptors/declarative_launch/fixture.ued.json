@@ -1,0 +1,28 @@
+{
+  "version": "1.0",
+  "id": "9e5c3a82-4b7f-4da6-82e9-7a3f1d0b8c61",
+  "name": "hipkernel:ValidateFixtureDeclarative",
+  "graph_match": {
+    "nodes": [
+      {
+        "kind": "op",
+        "id": "conv",
+        "op": "convolution",
+        "operands": {
+          "x": "$x",
+          "w": "$w"
+        },
+        "results": {
+          "y": "$y"
+        }
+      }
+    ]
+  },
+  "sort_kernel_catalog": {
+    "default": "af6d4b93-5c80-4eb7-93fa-8b4a2e1c9d71"
+  },
+  "metadata": "7c1a3e58-2b9d-4f60-8e14-5d3b9a2c6e41",
+  "knobs": [
+    "block_size"
+  ]
+}

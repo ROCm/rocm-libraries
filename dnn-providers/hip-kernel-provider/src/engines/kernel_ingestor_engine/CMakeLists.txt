@@ -7,6 +7,7 @@
 # this engine statically and embeds its own copy of the kernel sources.
 
 target_sources(hip_kernel_provider_impl PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/DeclarativeLaunchDispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/IngestorPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/IngestorPlanCapture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/IngestorPlanRestore.cpp

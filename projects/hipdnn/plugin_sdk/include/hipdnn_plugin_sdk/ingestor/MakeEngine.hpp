@@ -15,6 +15,7 @@
 
 #include <hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp>
 #include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledLaunch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
@@ -202,9 +203,13 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
                                                          ? matcher.criteria->source()
                                                          : nlohmann::json(matcher.matchSymbol);
     }
+    // Likewise a native dispatch is its symbol and a declarative one its formulas: every
+    // declarative UDD shares one reserved symbol, so the symbol alone would hide an edit.
     for(const auto& dispatch : set.dispatches)
     {
-        selector["dispatches"][toString(dispatch.id)] = dispatch.dispatchSymbol;
+        selector["dispatches"][toString(dispatch.id)]
+            = dispatch.launch != nullptr ? dispatch.launch->source()
+                                         : nlohmann::json(dispatch.dispatchSymbol);
     }
     for(const auto& pack : set.packs)
     {

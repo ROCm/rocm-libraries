@@ -29,6 +29,7 @@
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp>
 #include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledLaunch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GraphPatternMatcher.hpp>
@@ -799,10 +800,12 @@ private:
 
             std::vector<KernelDefinition> packDefinitions;
             packDefinitions.reserve(pack.kernels.size());
+            const auto& packDispatch = _dispatches.find(pack.dispatchId)->second;
             // What this pack's native handler launches, read once per pack. The empty set is
             // a single-launch handler, which reads `kernel_source`.
-            const std::set<std::string> handlerLaunches
-                = _dispatches.find(pack.dispatchId)->second.handler->launchNames();
+            const std::set<std::string> handlerLaunches = packDispatch.handler->launchNames();
+            // Null for a native UDD. A declarative one is attached to every kernel it keeps.
+            const auto& packLaunch = packDispatch.descriptor.launch;
             for(const auto& kernel : pack.kernels)
             {
                 const auto isAdaptable = [](const KernelSource& source) {
@@ -862,6 +865,46 @@ private:
                     continue;
                 }
 
+                // A declarative launch runs precompiled code only: its formulas carry no
+                // compile options, so source compiled at plan-build time has nothing to read.
+                // And it marshals the arguments its args_signature lists, so a kernel whose
+                // packaged signature disagrees in count, kind or size could never launch. An
+                // empty packaged signature is a kernel that takes no arguments.
+                if(packLaunch != nullptr)
+                {
+                    if(kernel.source.kind == KernelSourceKind::EMBEDDED_SOURCE)
+                    {
+                        HIPDNN_PLUGIN_LOG_ERROR(
+                            "ingestor: " << describeDescriptor("kernel", kernel.name, kernel.id)
+                                         << " is EMBEDDED_SOURCE, but "
+                                         << describeDescriptor("pack", pack.name, pack.id)
+                                         << " launches it through a declarative UDD, which runs"
+                                            " precompiled kernels only; dropping it");
+                        continue;
+                    }
+                    const auto& packaged = kernel.source.signature;
+                    const auto& declared = packLaunch->signature();
+                    const bool agrees
+                        = std::equal(packaged.begin(),
+                                     packaged.end(),
+                                     declared.begin(),
+                                     declared.end(),
+                                     [](const KernelArgument& lhs, const KernelArgument& rhs) {
+                                         return lhs.kind == rhs.kind && lhs.size == rhs.size;
+                                     });
+                    if(!agrees)
+                    {
+                        HIPDNN_PLUGIN_LOG_ERROR(
+                            "ingestor: "
+                            << describeDescriptor("kernel", kernel.name, kernel.id)
+                            << " takes the arguments " << describeKernelSignature(packaged)
+                            << ", but the declarative UDD of "
+                            << describeDescriptor("pack", pack.name, pack.id) << " passes "
+                            << describeKernelSignature(declared) << "; dropping it");
+                        continue;
+                    }
+                }
+
                 auto key = completeMetadata(kernel);
                 // A kernel that declared no arch of its own runs wherever its pack does;
                 // one that declared a narrower list claims only that. Claiming by the
@@ -909,7 +952,8 @@ private:
                                                            kernel.originDirectory,
                                                            kernel.name,
                                                            kernel.treeRoot,
-                                                           kernel.sources});
+                                                           kernel.sources,
+                                                           packLaunch});
             }
             // Pushed even when every kernel was dropped: _definitions is indexed by pack
             // position, so skipping one entry would bind every later pack's definitions to

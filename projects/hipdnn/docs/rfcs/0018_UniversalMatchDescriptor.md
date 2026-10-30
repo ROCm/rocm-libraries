@@ -2,7 +2,7 @@
 
 - Contributors: Brian Harrison
 - **Status**: In progress
-- **Status notes**: The UMD ships both arms, the native `match_symbol` and the declarative `criteria`, parsed in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp` (#10606, #10850). `criteria` compiles with the SDK expression library (`JsonExpression.hpp`, #11632) in `CompiledCriteria.hpp`, and each pack checks its references against its engine. `kernel_fields`, `allow_override_shape`, and `$kernel.*` memoization are not built.
+- **Status notes**: The UMD ships both arms, the native `match_symbol` and the declarative `criteria`, parsed in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp` (#10606, #10850). `criteria` compiles with the SDK expression library (`JsonExpression.hpp`, #11632) in `CompiledCriteria.hpp`, and each pack checks its references against its engine; the same pair check runs for a pack's declarative UDD formulas (`CompiledLaunch.hpp`). `kernel_fields`, `allow_override_shape`, and `$kernel.*` memoization are not built.
 - **Last verified**: 2026-10-29 against `develop` (4a3fc208880) with #13177 and #14705 applied
 
 > Follow-up to [RFC 0017 (Universal Kernel Descriptors)](0017_UniversalKernelDescriptor.md),
@@ -257,8 +257,9 @@ The expression language is a header-only SDK library:
 [`docs/JsonExpression.md`](../JsonExpression.md). It implements the operators this RFC uses,
 including `in`, `divisible`, `present`, `not_present`, three-valued `and`/`or`, and the layout
 aliases of [A.4](#a4-stride_order-values-and-layout-aliases). The descriptor loader compiles a UMD's
-`criteria` with it (`CompiledCriteria.hpp`), and the UHD runtime compiles `features_signature` with
-it (`heuristics/uhd/Expressions.hpp`). Not yet built: UDD formulas.
+`criteria` with it (`CompiledCriteria.hpp`) and a declarative UDD's launch formulas
+(`CompiledLaunch.hpp`), and the UHD runtime compiles `features_signature` with it
+(`heuristics/uhd/Expressions.hpp`).
 
 A UMD's `criteria` field is a single `Bool`-rooted expression in the **descriptor expression
 language**. The language has no RFC number of its own
@@ -459,7 +460,7 @@ indexes an axis, uses width-safe arithmetic on any product of dims, and returns 
 than throwing. The provider that ships the symbol owns that obligation, and the fuzzing corpus of
 [§11](#11-security-and-hostile-input) covers the registered symbols as well as the interpreter.
 
-Together with the UDD's custom-plan hatch
+Together with the UDD's native dispatch handler
 ([RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace)), these form the graded
 ladder: fully declarative constraints, then a native matcher beside the descriptor for one gate that
 needs C++, then a full provider.
@@ -1318,8 +1319,8 @@ per-axis stride reads of §5 instead of any alias.
 
 ### A.5 Compile-time validation (normative)
 
-Not yet built: check 3n and the `kernel_fields` half of check 6, and the same pair checks for UDD
-formulas and the UHD `features_signature`. Checks 1, 2, 4, 5, and 6 run, and check 3 runs in part.
+Not yet built: check 3n and the `kernel_fields` half of check 6, and the same pair checks for the
+UHD `features_signature`. Checks 1, 2, 4, 5, and 6 run, and check 3 runs in part.
 `compileCriteria()` in `CompiledCriteria.hpp` refuses an unknown operator, a wrong argument count,
 an unknown or rank-mismatched layout alias, and a `scope` that disagrees with the `$kernel.*` reads.
 It has no static type check. It refuses a literal root, and a criterion whose result is not boolean
@@ -1329,6 +1330,13 @@ checks `$kernel.*` and `$device.*` references on every `graph_match` arm, and un
 `graph_match` it checks no other reference. A failing pair drops that pack. An
 unregistered `match_symbol` drops the whole descriptor set of that engine, not only the UMD
 (`loadValidatedDescriptorSets()` in `DescriptorLoader.hpp`).
+
+The pair checks run for a pack's declarative UDD too. `launchReferenceError()` in
+`CompiledLaunch.hpp` resolves every reference the launch formulas read under the arm rules above,
+once per `(UDD, engine)`. It also requires the `ref` of each `pointer`, `dim` and `stride`
+argument to name a variable of the engine's `nodes` pattern; a native `graph_match` skips that
+check, and an engine without `graph_match` binds no tensor for such an argument to read. A failing
+pair drops that pack with an error naming the reference, the UDD, the engine and the pack.
 
 A UMD MUST pass every check below to compile. A failure refuses the descriptor with a diagnostic,
 and on the drop-in path quarantines it ([§8](#8-the-matcher-compilation-indexing-and-caching),

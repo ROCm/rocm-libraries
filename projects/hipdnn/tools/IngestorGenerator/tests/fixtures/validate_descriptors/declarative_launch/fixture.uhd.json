@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "af6d4b93-5c80-4eb7-93fa-8b4a2e1c9d71",
+  "name": "fixture selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.fixture_declarative.score"
+  }
+}
