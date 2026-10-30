@@ -94,8 +94,8 @@ class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
             observed,
             expected,
             selected,
-            hv.IndexRange(0, 6, 2),
-            [1, 0],
+            hv.IndexRange(0, expected_values.size, 2),
+            hv.Permutation([1, 0]),
         )
         expected_flat_fortran = expected_values.reshape(-1, order="F")
         observed_flat_fortran = observed_values.reshape(-1, order="F")

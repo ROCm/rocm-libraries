@@ -60,13 +60,13 @@ namespace TensileLite
         void executeReferenceGemm(const ContractionProblemGemm&        problem,
                                   const ContractionInputs&             inputs,
                                   const roc::hostnumerics::IndexRange& indices,
-                                  std::span<const size_t>              order,
+                                  const roc::hostnumerics::Permutation&       order,
                                   roc::hostnumerics::GemmBackend       backend);
 
         void executeReferenceGemm(const ContractionProblemGemm&  problem,
                                   const ContractionInputs&       inputs,
                                   const std::set<size_t>&        indices,
-                                  std::span<const size_t>        order,
+                                  const roc::hostnumerics::Permutation& order,
                                   roc::hostnumerics::GemmBackend backend);
 
         template <typename Indices>
@@ -80,7 +80,7 @@ namespace TensileLite
                 problem,
                 inputs,
                 indices,
-                roc::hostnumerics::Shape(problem.d().sizes()).indexOrderLastDimensionFastest(),
+                roc::hostnumerics::Permutation::identity(problem.d().sizes().size()),
                 backend);
         }
 

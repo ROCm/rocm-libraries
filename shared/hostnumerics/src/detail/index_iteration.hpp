@@ -22,6 +22,11 @@ inline std::vector<size_t> validatedIndexOrder(size_t rank, std::span<const size
     return axes;
 }
 
+// Internal iteration stores validated axis orders as plain vectors.
+inline std::vector<size_t> axesOf(const Permutation& order) {
+    return std::vector<size_t>(order.begin(), order.end());
+}
+
 inline std::vector<size_t> ascendingIndexOrder(size_t rank) {
     std::vector<size_t> axes(rank);
     std::iota(axes.begin(), axes.end(), size_t{0});
@@ -56,11 +61,13 @@ inline std::optional<size_t> contiguousFirst(const std::set<size_t>& indices) {
 
 template <typename Invocation>
 void bindIndices(Invocation& invocation, const Shape& shape, const IndexRange& indices,
-                 std::span<const size_t> order) {
-    invocation.indicesOrder = validatedIndexOrder(shape.rank(), order);
-    const IndexRange clipped{indices.start(), std::min(indices.end(), shape.elementCount()),
-                             indices.stride()};
-    invocation.indicesCount = clipped.count();
+                 const Permutation& order) {
+    invocation.indicesOrder = validatedIndexOrder(shape.rank(), order.entries());
+    if (indices.stop() > shape.elementCount())
+        throw std::runtime_error("Index range stop " + std::to_string(indices.stop()) +
+                                 " exceeds the element count " +
+                                 std::to_string(shape.elementCount()) + ".");
+    invocation.indicesCount = indices.count();
     invocation.indexAt = indexFunction(indices);
     if constexpr (requires { invocation.firstContiguousIndex; })
         invocation.firstContiguousIndex = contiguousFirst(indices);
@@ -68,8 +75,8 @@ void bindIndices(Invocation& invocation, const Shape& shape, const IndexRange& i
 
 template <typename Invocation>
 void bindIndices(Invocation& invocation, const Shape& shape, const std::set<size_t>& indices,
-                 std::span<const size_t> order) {
-    invocation.indicesOrder = validatedIndexOrder(shape.rank(), order);
+                 const Permutation& order) {
+    invocation.indicesOrder = validatedIndexOrder(shape.rank(), order.entries());
     if (!indices.empty() && *indices.rbegin() >= shape.elementCount())
         throw std::runtime_error("Explicit index exceeds logical element count.");
     invocation.indicesCount = indices.size();
@@ -143,7 +150,7 @@ class IndexIteration {
 template <typename Invocation, typename Indices>
 void bindIndices(Invocation& invocation, const Shape& shape, const Indices& indices,
                  LastDimensionFastest) {
-    bindIndices(invocation, shape, indices, shape.indexOrderLastDimensionFastest());
+    bindIndices(invocation, shape, indices, Permutation::identity(shape.rank()));
 }
 
 template <typename Invocation, typename Function>

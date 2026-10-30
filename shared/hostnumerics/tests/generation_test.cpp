@@ -44,7 +44,7 @@ void testIndexedGeneration() {
 
     generateAt(point, 3,
                GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 7.0}),
-                                          {.indexOrder = std::vector<size_t>{2, 1, 0}}));
+                                          {.indexOrder = Permutation{2, 1, 0}}));
     require(point.loadAs<float>({1, 1, 0}) == 7.0f,
             "Last-dimension-fast point generation mismatch.");
 
@@ -54,7 +54,7 @@ void testIndexedGeneration() {
         Tensor elementwise(ScalarType::Float4E2M1, Shape{2, 3, 2});
         const GenerationRecipe exactRecipe =
             GenerationRecipe::realOnly(GenerationRecipe::uniformInteger({.lower = -2, .upper = 2}),
-                                       {.seed = 0x12345678, .indexOrder = order});
+                                       {.seed = 0x12345678, .indexOrder = Permutation(order)});
         generate(whole, exactRecipe);
         for (size_t index = 0; index < whole.elementCount(); ++index)
             generateAt(elementwise, index, exactRecipe);
@@ -120,7 +120,7 @@ void testIndexedGeneration() {
             const GenerationRecipe alternatingRecipe = GenerationRecipe::realOnly(
                 GenerationRecipe::uniformInteger({.lower = -4, .upper = 4})
                     .withAlternatingSign({.dimensions = {0, 1}, .negativeWhenOdd = false}),
-                {.seed = 0x14142135, .indexOrder = order});
+                {.seed = 0x14142135, .indexOrder = Permutation(order)});
             generate(alternatingWhole, alternatingRecipe);
             for (size_t index = 0; index < alternatingWhole.elementCount(); ++index)
                 generateAt(alternatingElementwise, index, alternatingRecipe);

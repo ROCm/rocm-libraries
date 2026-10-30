@@ -46,9 +46,9 @@ namespace hipblaslt::hostnumerics
             return (std::isnan(candidate) && !std::isnan(current)) || candidate > current;
         }
 
-        MatmulAllCloseFailure describeAllCloseFailure(const Tensor&           expected,
-                                                      const Tensor&           observed,
-                                                      std::span<const size_t> order)
+        MatmulAllCloseFailure describeAllCloseFailure(const Tensor&                         expected,
+                                                      const Tensor&                         observed,
+                                                      const roc::hostnumerics::Permutation& order)
         {
             const bool complex = roc::hostnumerics::scalarTypeInfo(expected.type()).category
                                  == roc::hostnumerics::ScalarCategory::Complex;
@@ -154,9 +154,7 @@ namespace hipblaslt::hostnumerics
         {
             const auto& [expected, observed] = tensors;
             ComparisonEvidence  result;
-            std::vector<size_t> order(expected.shape().rank());
-            for(size_t axis = 0; axis < order.size(); ++axis)
-                order[axis] = order.size() - 1 - axis;
+            const auto order = roc::hostnumerics::Permutation::reverse(expected.shape().rank());
 
             if(validation.compareAllClose || specialValueConsistency)
             {
@@ -212,9 +210,7 @@ namespace hipblaslt::hostnumerics
                 for(size_t batch = 0; batch < batches; ++batch)
                 {
                     const Tensor        batchExpected = batchView(expected, batch);
-                    std::vector<size_t> batchOrder(batchExpected.shape().rank());
-                    for(size_t axis = 0; axis < batchOrder.size(); ++axis)
-                        batchOrder[axis] = batchOrder.size() - 1 - axis;
+                    const auto batchOrder = roc::hostnumerics::Permutation::reverse(batchExpected.shape().rank());
 
                     const ComparisonReport batchReport
                         = compare(batchView(observed, batch),

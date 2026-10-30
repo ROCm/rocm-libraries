@@ -558,7 +558,7 @@ TEST(HostNumericsStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
         0);
 
     StructuredSparsityPattern pattern;
-    pattern.indexOrder           = {0, 1, 2};
+    pattern.indexOrder           = roc::hostnumerics::Permutation{0, 1, 2};
     pattern.axis                 = sparseAxis;
     pattern.fixedPositions       = {0, 1};
     Tensor componentPrunedTensor = Tensor::copyEncodedBackingStorage(
@@ -1244,7 +1244,7 @@ TEST_P(TensileMxBlockScaleGranularity, BlockSharesOneScale)
     ASSERT_EQ(generated.scales.elementCount(), (K / mxBlock) * M);
 
     const std::array<double, 8> grid{0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0};
-    const std::array<size_t, 2> order{0, 1};
+    const roc::hostnumerics::Permutation order{0, 1};
     for(size_t m = 0; m < M; ++m)
         for(size_t k = 0; k < K; ++k)
         {
@@ -1282,9 +1282,8 @@ namespace
     {
         std::vector<size_t> all(scales.elementCount());
         std::iota(all.begin(), all.end(), size_t{0});
-        const std::array<size_t, 2> order{0, 1};
-        const auto                  flat
-            = scales.copySelectedElements(all, std::span(order).first(scales.shape().rank()));
+        const auto flat = scales.copySelectedElements(
+            all, roc::hostnumerics::Permutation::identity(scales.shape().rank()));
         std::vector<uint8_t> result;
         for(const std::byte byte : flat.rawEncodedBackingStorage())
             result.push_back(std::to_integer<uint8_t>(byte));

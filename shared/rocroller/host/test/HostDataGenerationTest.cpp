@@ -295,7 +295,7 @@ namespace
             GenerationRecipe::realOnly(GenerationRecipe::uniformFiniteEncodedValue(),
                                        {
                                            .seed       = seed,
-                                           .indexOrder = std::vector<size_t>{1, 0},
+                                           .indexOrder = roc::hostnumerics::Permutation{1, 0},
                                        }));
         MxGenerationOptions options;
         options.dataType         = dataType;

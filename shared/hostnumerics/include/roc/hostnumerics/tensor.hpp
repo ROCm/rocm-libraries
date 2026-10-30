@@ -8,7 +8,9 @@
 #include <initializer_list>
 #include <memory>
 #include <roc/hostnumerics/layout.hpp>
+#include <roc/hostnumerics/permutation.hpp>
 #include <roc/hostnumerics/scalar.hpp>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -273,15 +275,15 @@ class Tensor {
 
     void copySelectedElementsToEncodedStorage(std::span<std::byte> destination,
                                               const IndexRange& range,
-                                              std::span<const size_t> order) const;
+                                              const Permutation& order) const;
     void copySelectedElementsToEncodedStorage(std::span<std::byte> destination,
                                               const std::set<size_t>& indices,
-                                              std::span<const size_t> order) const;
+                                              const Permutation& order) const;
 
     // Copies the selected logical elements into a contiguous rank-one Tensor
     // in selection order. Encoded bits are preserved exactly.
     Tensor copySelectedElements(std::span<const size_t> linearIndices,
-                                std::span<const size_t> indexOrder) const;
+                                const Permutation& indexOrder) const;
 
     void copyLogicalElementsFrom(const Tensor& source) const;
 

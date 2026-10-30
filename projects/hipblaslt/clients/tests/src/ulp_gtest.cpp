@@ -77,7 +77,7 @@ namespace
                       copyTensorFromEncodedStorage(hCPU, storageElements, layout),
                       options,
                       roc::hostnumerics::IndexRange::all(layout.shape().elementCount()),
-                      std::vector<size_t>{2, 1, 0});
+                      roc::hostnumerics::Permutation{2, 1, 0});
         maxUlp = std::max(maxUlp, report.maximumUlp);
         sumUlp += report.sumUlp;
         count += report.ulpCompared;
@@ -114,7 +114,7 @@ namespace
                       hipblaslt::hostnumerics::copyTensorFromEncodedStorage(hCPU, scalar, layout),
                       options,
                       roc::hostnumerics::IndexRange::all(layout.shape().elementCount()),
-                      std::vector<size_t>{2, 1, 0});
+                      roc::hostnumerics::Permutation{2, 1, 0});
         maxUlp = std::max(maxUlp, report.maximumUlp);
         sumUlp += report.sumUlp;
         count += report.ulpCompared;

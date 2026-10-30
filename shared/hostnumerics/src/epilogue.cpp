@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -10,7 +11,7 @@ namespace roc::hostnumerics {
 template <typename Indices>
 static void epilogueInto(const Tensor& input, EpilogueOutputs outputs,
                          const EpilogueOptions& options, const Indices& indices,
-                         std::span<const size_t> order) {
+                         const Permutation& order) {
     detail::EpilogueInvocation invocation(input, std::move(outputs), options);
     detail::bindIndices(invocation, input.shape(), indices, order);
     (void)detail::validateEpilogue(invocation);
@@ -36,7 +37,7 @@ static void epilogueInto(const Tensor& input, EpilogueOutputs outputs,
 template <typename Indices>
 static EpilogueOutputs epilogueOwned(const Tensor& input, const EpilogueOutputTypes& outputTypes,
                                      const EpilogueOptions& options, const Indices& indices,
-                                     std::span<const size_t> order) {
+                                     const Permutation& order) {
     Tensor output(outputTypes.output, input.shape());
     std::optional<Tensor> rawOutput;
     std::optional<Tensor> auxiliaryOutput;
@@ -62,31 +63,31 @@ static EpilogueOutputs epilogueOwned(const Tensor& input, const EpilogueOutputTy
 void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
                            const EpilogueOptions& options) {
     epilogueInto(input, std::move(outputs), options, IndexRange::all(input.elementCount()),
-                 input.shape().indexOrderLastDimensionFastest());
+                 Permutation::identity(input.shape().rank()));
 }
 EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& types,
                                   const EpilogueOptions& options) {
     return epilogueOwned(input, types, options, IndexRange::all(input.elementCount()),
-                         input.shape().indexOrderLastDimensionFastest());
+                         Permutation::identity(input.shape().rank()));
 }
 void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
                            const EpilogueOptions& options, const IndexRange& range,
-                           std::span<const size_t> order) {
+                           const Permutation& order) {
     epilogueInto(input, std::move(outputs), options, range, order);
 }
 void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
                            const EpilogueOptions& options, const std::set<size_t>& indices,
-                           std::span<const size_t> order) {
+                           const Permutation& order) {
     epilogueInto(input, std::move(outputs), options, indices, order);
 }
 EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& types,
                                   const EpilogueOptions& options, const IndexRange& range,
-                                  std::span<const size_t> order) {
+                                  const Permutation& order) {
     return epilogueOwned(input, types, options, range, order);
 }
 EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& types,
                                   const EpilogueOptions& options, const std::set<size_t>& indices,
-                                  std::span<const size_t> order) {
+                                  const Permutation& order) {
     return epilogueOwned(input, types, options, indices, order);
 }
 

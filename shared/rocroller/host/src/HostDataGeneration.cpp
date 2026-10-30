@@ -152,21 +152,22 @@ namespace rocRoller::hostnumerics
             }
         }
 
-        std::vector<size_t> indexOrder(TensorDescriptor const& descriptor)
+        roc::hostnumerics::Permutation indexOrder(TensorDescriptor const& descriptor)
         {
             if(descriptor.dimensions() != 2)
                 throw std::runtime_error("rocRoller GEMM generation requires rank-two tensors.");
             if(descriptor.stride(0) == descriptor.stride(1))
             {
                 if(descriptor.size(0) == 1)
-                    return std::vector<size_t>{0, 1};
+                    return roc::hostnumerics::Permutation{0, 1};
                 if(descriptor.size(1) == 1)
-                    return std::vector<size_t>{1, 0};
+                    return roc::hostnumerics::Permutation{1, 0};
                 throw std::runtime_error(
                     "rocRoller GEMM generation requires non-overlapping matrix strides.");
             }
-            return descriptor.stride(0) < descriptor.stride(1) ? std::vector<size_t>{1, 0}
-                                                               : std::vector<size_t>{0, 1};
+            return descriptor.stride(0) < descriptor.stride(1)
+                       ? roc::hostnumerics::Permutation{1, 0}
+                       : roc::hostnumerics::Permutation{0, 1};
         }
 
         GenerationRecipe generationRecipe(TensorDescriptor const&   descriptor,
@@ -240,11 +241,12 @@ namespace rocRoller::hostnumerics
                                           uint32_t                  seed)
         {
             auto recipe = [&](GenerationRecipe::Component component) {
-                return GenerationRecipe::realOnly(std::move(component),
-                                                  {
-                                                      .seed       = seed,
-                                                      .indexOrder = std::vector<size_t>{1, 0},
-                                                  });
+                return GenerationRecipe::realOnly(
+                    std::move(component),
+                    {
+                        .seed       = seed,
+                        .indexOrder = roc::hostnumerics::Permutation{1, 0},
+                    });
             };
 
             switch(initialization.mode)

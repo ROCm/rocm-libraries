@@ -17,8 +17,8 @@ void testTensorEncodedCopies() {
         static_cast<std::byte>(0x11),
         static_cast<std::byte>(0x11),
     };
-    packedCopySource.copySelectedElementsToEncodedStorage(packedCopyBytes, IndexRange(1, 5, 2),
-                                                          std::vector<size_t>{0});
+    packedCopySource.copySelectedElementsToEncodedStorage(packedCopyBytes, IndexRange(1, 4, 2),
+                                                          Permutation{0});
     const Tensor selectedPackedCopy = Tensor::copyEncodedBackingStorage(
         ScalarType::Int4, Layout::contiguousLastDimensionFastest(Shape{4}),
         std::span<std::byte>(packedCopyBytes.data(), packedCopyBytes.size()));
@@ -81,7 +81,7 @@ void testTensorEncodedCopies() {
     requireError(
         [&] {
             packedCopySource.copySelectedElementsToEncodedStorage(
-                undersizedCopyDestination, IndexRange(1, 5, 2), std::vector<size_t>{0});
+                undersizedCopyDestination, IndexRange(1, 4, 2), Permutation{0});
         },
         "Selected Tensor copy-to accepted undersized storage.");
 
@@ -104,7 +104,7 @@ void testTensorEncodedCopies() {
         overlappingCopyOut.shareStorageWithLayout(Layout(Shape{3}, {1}, 0));
     overlappingSelectedCopyOutSource.copySelectedElementsToEncodedStorage(
         overlappingCopyOut.rawEncodedBackingStorage().subspan(sizeof(int32_t)), IndexRange(0, 2, 1),
-        std::vector<size_t>{0});
+        Permutation{0});
     require(overlappingCopyOut.loadAs<int32_t>({0}) == 1 &&
                 overlappingCopyOut.loadAs<int32_t>({1}) == 1 &&
                 overlappingCopyOut.loadAs<int32_t>({2}) == 2 &&
@@ -128,7 +128,7 @@ void testTensorEncodedCopies() {
     std::array<int32_t, 4> orderedCopyDestination{};
     orderedCopySource.copySelectedElementsToEncodedStorage(
         std::as_writable_bytes(std::span(orderedCopyDestination)), std::set<size_t>{1},
-        std::vector<size_t>{1, 0});
+        Permutation{1, 0});
     require(orderedCopyDestination == std::array<int32_t, 4>{0, 0, 7, 0},
             "Selected Tensor copy-out ignored the requested logical index order.");
 }

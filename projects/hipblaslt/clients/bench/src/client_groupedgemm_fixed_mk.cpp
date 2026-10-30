@@ -682,10 +682,10 @@ int test_hipblaslt(hipDataType                 in_datatype,
                                 hipblaslt::hostnumerics::initialization::OperandSequence sequence) {
             const uint64_t operandSeed
                 = hipblaslt::hostnumerics::initialization::seedForSequence(seed, sequence);
-            const std::vector<size_t> order
+            const roc::hostnumerics::Permutation order
                 = sequence == hipblaslt::hostnumerics::initialization::OperandSequence::Bias
-                      ? std::vector<size_t>{0}
-                      : std::vector<size_t>{2, 1, 0};
+                      ? roc::hostnumerics::Permutation{0}
+                      : roc::hostnumerics::Permutation{2, 1, 0};
             return groupedGemmInitializationRecipe(type, initialization, sequence, operandSeed)
                 .withIndexOrder(order);
         };
@@ -1020,7 +1020,7 @@ int test_hipblaslt(hipDataType                 in_datatype,
                         hd_gold[i].shareStorageWithLayout(comparisonLayout),
                         comparisonOptions,
                         roc::hostnumerics::IndexRange::all(comparisonLayout.shape().elementCount()),
-                        std::vector<size_t>{1, 0});
+                        roc::hostnumerics::Permutation{1, 0});
                     passed = passed && comparison.passed();
                     for(const auto& mismatch : comparison.reportedMismatches)
                     {

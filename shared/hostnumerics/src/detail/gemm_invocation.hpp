@@ -26,7 +26,7 @@ struct GemmSupportInfo {
 struct GemmInvocation : MatmulOptions {
     template <typename Indices>
     GemmInvocation(Tensor aTensor, Tensor bTensor, Tensor dTensor, const MatmulOptions& options,
-                   const Indices& indices, std::span<const size_t> order)
+                   const Indices& indices, const Permutation& order)
         : MatmulOptions(options),
           a(std::move(aTensor)),
           b(std::move(bTensor)),
@@ -37,7 +37,7 @@ struct GemmInvocation : MatmulOptions {
     template <typename Indices>
     GemmInvocation(Tensor a, Tensor b, Tensor d, const MatmulOptions& options,
                    const Indices& indices, LastDimensionFastest)
-        : GemmInvocation(a, b, d, options, indices, d.shape().indexOrderLastDimensionFastest()) {}
+        : GemmInvocation(a, b, d, options, indices, Permutation::identity(d.shape().rank())) {}
 
     Tensor a;
     Tensor b;

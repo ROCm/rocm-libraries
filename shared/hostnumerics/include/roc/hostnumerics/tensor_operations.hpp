@@ -5,7 +5,9 @@
 
 #include <optional>
 #include <roc/hostnumerics/operation_types.hpp>
+#include <roc/hostnumerics/permutation.hpp>
 #include <roc/hostnumerics/tensor.hpp>
+#include <set>
 #include <type_traits>
 #include <utility>
 
@@ -18,9 +20,9 @@ Tensor add(const Tensor& left, const Tensor& right);
 Tensor add(const Tensor& left, const Tensor& right, ScalarType outputType, ScalarType computeType,
            std::optional<Layout> outputLayout);
 void addInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-             const IndexRange& range, std::span<const size_t> order);
+             const IndexRange& range, const Permutation& order);
 void addInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-             const std::set<size_t>& indices, std::span<const size_t> order);
+             const std::set<size_t>& indices, const Permutation& order);
 
 template <typename Number>
     requires NativeScalar<Number>
@@ -38,9 +40,9 @@ Tensor subtract(const Tensor& left, const Tensor& right);
 Tensor subtract(const Tensor& left, const Tensor& right, ScalarType outputType,
                 ScalarType computeType, std::optional<Layout> outputLayout);
 void subtractInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-                  const IndexRange& range, std::span<const size_t> order);
+                  const IndexRange& range, const Permutation& order);
 void subtractInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-                  const std::set<size_t>& indices, std::span<const size_t> order);
+                  const std::set<size_t>& indices, const Permutation& order);
 
 template <typename Number>
     requires NativeScalar<Number>
@@ -58,9 +60,9 @@ Tensor multiply(const Tensor& left, const Tensor& right);
 Tensor multiply(const Tensor& left, const Tensor& right, ScalarType outputType,
                 ScalarType computeType, std::optional<Layout> outputLayout);
 void multiplyInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-                  const IndexRange& range, std::span<const size_t> order);
+                  const IndexRange& range, const Permutation& order);
 void multiplyInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
-                  const std::set<size_t>& indices, std::span<const size_t> order);
+                  const std::set<size_t>& indices, const Permutation& order);
 
 template <typename Number>
     requires NativeScalar<Number>
@@ -78,10 +80,10 @@ Tensor activate(const Tensor& input, ActivationFunction function);
 Tensor activate(const Tensor& input, ActivationFunction function, ScalarType outputType,
                 ScalarType computeType, std::optional<Layout> outputLayout);
 void activateInto(const Tensor& input, Tensor output, ActivationFunction function,
-                  ScalarType computeType, const IndexRange& range, std::span<const size_t> order);
+                  ScalarType computeType, const IndexRange& range, const Permutation& order);
 void activateInto(const Tensor& input, Tensor output, ActivationFunction function,
                   ScalarType computeType, const std::set<size_t>& indices,
-                  std::span<const size_t> order);
+                  const Permutation& order);
 
 inline Tensor absolute(const Tensor& input) {
     return activate(input, AbsoluteActivation{});
@@ -171,28 +173,28 @@ template <typename Indices>
 void addInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
              const Indices& indices, LastDimensionFastest) {
     addInto(left, right, output, computeType, indices,
-            output.shape().indexOrderLastDimensionFastest());
+            Permutation::identity(output.shape().rank()));
 }
 
 template <typename Indices>
 void subtractInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
                   const Indices& indices, LastDimensionFastest) {
     subtractInto(left, right, output, computeType, indices,
-                 output.shape().indexOrderLastDimensionFastest());
+                 Permutation::identity(output.shape().rank()));
 }
 
 template <typename Indices>
 void multiplyInto(const Tensor& left, const Tensor& right, Tensor output, ScalarType computeType,
                   const Indices& indices, LastDimensionFastest) {
     multiplyInto(left, right, output, computeType, indices,
-                 output.shape().indexOrderLastDimensionFastest());
+                 Permutation::identity(output.shape().rank()));
 }
 
 template <typename Indices>
 void activateInto(const Tensor& input, Tensor output, ActivationFunction function,
                   ScalarType computeType, const Indices& indices, LastDimensionFastest) {
     activateInto(input, output, function, computeType, indices,
-                 output.shape().indexOrderLastDimensionFastest());
+                 Permutation::identity(output.shape().rank()));
 }
 
 }  // namespace roc::hostnumerics

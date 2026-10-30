@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <limits>
 #include <optional>
+#include <set>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -244,17 +245,17 @@ static ComparisonReport compareBound(const Tensor& observed, const Tensor& expec
 ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options) {
     return compare(observed, expected, options, IndexRange::all(observed.elementCount()),
-                   observed.shape().indexOrderLastDimensionFastest());
+                   Permutation::identity(observed.shape().rank()));
 }
 ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options, const IndexRange& range,
-                         std::span<const size_t> order) {
+                         const Permutation& order) {
     return compareBound(observed, expected,
                         detail::ComparisonInvocation(options, observed.shape(), range, order));
 }
 ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options, const std::set<size_t>& indices,
-                         std::span<const size_t> order) {
+                         const Permutation& order) {
     return compareBound(observed, expected,
                         detail::ComparisonInvocation(options, observed.shape(), indices, order));
 }
@@ -263,14 +264,14 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options, const IndexRange& indices,
                          LastDimensionFastest) {
     return compare(observed, expected, options, indices,
-                   observed.shape().indexOrderLastDimensionFastest());
+                   Permutation::identity(observed.shape().rank()));
 }
 
 ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options, const std::set<size_t>& indices,
                          LastDimensionFastest) {
     return compare(observed, expected, options, indices,
-                   observed.shape().indexOrderLastDimensionFastest());
+                   Permutation::identity(observed.shape().rank()));
 }
 
 std::string formatComparisonReport(const ComparisonReport& report) {
@@ -314,14 +315,14 @@ std::optional<ComparisonTolerance> findAllCloseTolerance(const Tensor& observed,
                                                          ComparisonOptions options) {
     return findAllCloseTolerance(observed, expected, absoluteCandidates, relativeCandidates,
                                  options, IndexRange::all(observed.elementCount()),
-                                 observed.shape().indexOrderLastDimensionFastest());
+                                 Permutation::identity(observed.shape().rank()));
 }
 
 template <typename Indices>
 static std::optional<ComparisonTolerance> findTolerance(
     const Tensor& observed, const Tensor& expected, std::span<const double> absoluteCandidates,
     std::span<const double> relativeCandidates, ComparisonOptions options, const Indices& indices,
-    std::span<const size_t> order) {
+    const Permutation& order) {
     for (double absolute : absoluteCandidates) {
         for (double relative : relativeCandidates) {
             options.absoluteTolerance = absolute;
@@ -336,7 +337,7 @@ static std::optional<ComparisonTolerance> findTolerance(
 std::optional<ComparisonTolerance> findAllCloseTolerance(
     const Tensor& observed, const Tensor& expected, std::span<const double> absoluteCandidates,
     std::span<const double> relativeCandidates, ComparisonOptions options,
-    const IndexRange& indices, std::span<const size_t> order) {
+    const IndexRange& indices, const Permutation& order) {
     return findTolerance(observed, expected, absoluteCandidates, relativeCandidates, options,
                          indices, order);
 }
@@ -344,7 +345,7 @@ std::optional<ComparisonTolerance> findAllCloseTolerance(
 std::optional<ComparisonTolerance> findAllCloseTolerance(
     const Tensor& observed, const Tensor& expected, std::span<const double> absoluteCandidates,
     std::span<const double> relativeCandidates, ComparisonOptions options,
-    const std::set<size_t>& indices, std::span<const size_t> order) {
+    const std::set<size_t>& indices, const Permutation& order) {
     return findTolerance(observed, expected, absoluteCandidates, relativeCandidates, options,
                          indices, order);
 }

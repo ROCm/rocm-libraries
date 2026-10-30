@@ -5,7 +5,9 @@
 
 #include <optional>
 #include <roc/hostnumerics/operation_types.hpp>
+#include <roc/hostnumerics/permutation.hpp>
 #include <roc/hostnumerics/tensor.hpp>
+#include <set>
 #include <vector>
 
 namespace roc::hostnumerics {
@@ -60,10 +62,10 @@ EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes
 
 EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& outputTypes,
                                   const EpilogueOptions& options, const IndexRange& range,
-                                  std::span<const size_t> order);
+                                  const Permutation& order);
 EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& outputTypes,
                                   const EpilogueOptions& options, const std::set<size_t>& indices,
-                                  std::span<const size_t> order);
+                                  const Permutation& order);
 
 // Writes selected coordinates into caller-owned destinations. The primary
 // output may exactly alias input; other overlapping input/output or
@@ -72,22 +74,22 @@ void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
                            const EpilogueOptions& options);
 void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
                            const EpilogueOptions& options, const IndexRange& range,
-                           std::span<const size_t> order);
+                           const Permutation& order);
 void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
                            const EpilogueOptions& options, const std::set<size_t>& indices,
-                           std::span<const size_t> order);
+                           const Permutation& order);
 template <typename Indices>
 EpilogueOutputs referenceEpilogue(const Tensor& input, const EpilogueOutputTypes& types,
                                   const EpilogueOptions& options, const Indices& indices,
                                   LastDimensionFastest) {
     return referenceEpilogue(input, types, options, indices,
-                             input.shape().indexOrderLastDimensionFastest());
+                             Permutation::identity(input.shape().rank()));
 }
 template <typename Indices>
 void referenceEpilogueInto(const Tensor& input, EpilogueOutputs outputs,
                            const EpilogueOptions& options, const Indices& indices,
                            LastDimensionFastest) {
     referenceEpilogueInto(input, std::move(outputs), options, indices,
-                          input.shape().indexOrderLastDimensionFastest());
+                          Permutation::identity(input.shape().rank()));
 }
 }  // namespace roc::hostnumerics

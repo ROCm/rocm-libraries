@@ -139,7 +139,7 @@ class ShapeTests(unittest.TestCase):
             for index in range(shape.element_count):
                 self.assertEqual(
                     shape.coordinates_last_dimension_fastest(index),
-                    shape.coordinates(index, list(range(shape.rank))),
+                    shape.coordinates(index, hn.Permutation(list(range(shape.rank)))),
                 )
                 self.assertEqual(
                     shape.linear_index_last_dimension_fastest(
@@ -183,9 +183,12 @@ class ShapeTests(unittest.TestCase):
                     with self.subTest(
                         dimensions=dimensions, order=order, indices=indices
                     ):
-                        self.assertEqual(shape.linear_index(indices, order), expected)
                         self.assertEqual(
-                            shape.coordinates(expected, order), list(indices)
+                            shape.linear_index(indices, hn.Permutation(order)), expected
+                        )
+                        self.assertEqual(
+                            shape.coordinates(expected, hn.Permutation(order)),
+                            list(indices),
                         )
 
     def test_coordinate_bounds_before_arithmetic(self):
@@ -202,22 +205,23 @@ class ShapeTests(unittest.TestCase):
                         rf"coordinate {coordinate} in dimension {dimension} is outside "
                         rf"\[0, {extent}\)",
                     ):
-                        shape.linear_index(indices, order)
+                        shape.linear_index(indices, hn.Permutation(order))
 
     def test_index_order_errors(self):
         shape = hn.Shape([2, 3, 4])
-        for order, message in (
-            ([], "index order rank 0 does not match shape rank 3"),
-            ([0], "index order rank 1 does not match shape rank 3"),
-            ([0, 1, 2, 3], "index order rank 4 does not match shape rank 3"),
-            ([0, 0, 2], r"index order must be a permutation of \[0, 3\)"),
-            ([0, 1, 3], r"index order must be a permutation of \[0, 3\)"),
-        ):
+        for order in ([], [0], [0, 1, 2, 3]):
+            message = f"index order rank {len(order)} does not match shape rank 3"
             with self.subTest(order=order):
                 with self.assertRaisesRegex(RuntimeError, message):
-                    shape.coordinates(0, order)
+                    shape.coordinates(0, hn.Permutation(order))
                 with self.assertRaisesRegex(RuntimeError, message):
-                    shape.linear_index([0, 0, 0], order)
+                    shape.linear_index([0, 0, 0], hn.Permutation(order))
+        # A plain list is never accepted as an order, even a valid permutation.
+        for order in ([0, 1, 2], (2, 1, 0)):
+            with self.subTest(order=order), self.assertRaises(TypeError):
+                shape.coordinates(0, order)
+            with self.subTest(order=order), self.assertRaises(TypeError):
+                shape.linear_index([0, 0, 0], order)
 
     def test_coordinate_errors(self):
         shape = hn.Shape([2, 3, 4])
@@ -228,6 +232,7 @@ class ShapeTests(unittest.TestCase):
             lambda: scalar.coordinates(0, hn.Permutation([0])),
             lambda: scalar.linear_index([], hn.Permutation([0])),
             lambda: shape.linear_index([], hn.Permutation([0])),
+            lambda: shape.linear_index([], hn.Permutation([0, 0, 2])),
         ):
             with self.assertRaises(RuntimeError):
                 operation()
@@ -236,7 +241,7 @@ class ShapeTests(unittest.TestCase):
                 with self.assertRaisesRegex(
                     RuntimeError, "coordinate rank .* does not match shape rank 3"
                 ):
-                    shape.linear_index(coordinates, order)
+                    shape.linear_index(coordinates, hn.Permutation(order))
             for coordinates, axis, extent in (
                 ([2, 0, 0], 0, 2),
                 ([1, 3, 0], 1, 3),
@@ -246,7 +251,7 @@ class ShapeTests(unittest.TestCase):
                     RuntimeError,
                     rf"coordinate {extent} in dimension {axis} is outside \[0, {extent}\)",
                 ):
-                    shape.linear_index(coordinates, order)
+                    shape.linear_index(coordinates, hn.Permutation(order))
             with self.assertRaisesRegex(
                 RuntimeError, r"logical index 24 is outside \[0, 24\)"
             ):
@@ -271,10 +276,12 @@ class ShapeTests(unittest.TestCase):
         self.assertEqual(boundary.element_count, SIZE_MAX)
         for order in ([0, 1], [1, 0]):
             self.assertEqual(
-                boundary.linear_index([SIZE_MAX - 1, 0], order), SIZE_MAX - 1
+                boundary.linear_index([SIZE_MAX - 1, 0], hn.Permutation(order)),
+                SIZE_MAX - 1,
             )
             self.assertEqual(
-                boundary.coordinates(SIZE_MAX - 1, order), [SIZE_MAX - 1, 0]
+                boundary.coordinates(SIZE_MAX - 1, hn.Permutation(order)),
+                [SIZE_MAX - 1, 0],
             )
         for dimensions in (
             [SIZE_MAX, 2],
@@ -310,7 +317,7 @@ class ShapeTests(unittest.TestCase):
                 shape.extent(index)
             with self.subTest(index=index), self.assertRaises(TypeError):
                 shape[index]
-        for order in (-1, 2, "row-major"):
+        for order in (-1, 2, "row-major", [0]):
             with self.subTest(order=order), self.assertRaises(TypeError):
                 shape.coordinates(0, order)
             with self.subTest(order=order), self.assertRaises(TypeError):

@@ -102,11 +102,10 @@ void checkReference(const MxCase& problem, const MxTensor& result) {
 }
 
 GenerationRecipe mxRecipe(GenerationRecipe::Component component, uint64_t seed) {
-    return GenerationRecipe::realOnly(std::move(component),
-                                      {
-                                          .seed = seed,
-                                          .indexOrder = std::vector<size_t>{1, 0},
-                                      });
+    return GenerationRecipe::realOnly(std::move(component), {
+                                                                .seed = seed,
+                                                                .indexOrder = Permutation{1, 0},
+                                                            });
 }
 
 MxDataGeneration defaultMxDataGeneration() {
@@ -157,7 +156,7 @@ void testGenerationRecipeIndexOrder() {
     auto makeProblem = [](std::vector<size_t> order) {
         MxDataGeneration data = MxDataGeneration::quantize(
             GenerationRecipe::realOnly(GenerationRecipe::uniformInteger({.lower = -4, .upper = 4}),
-                                       {.seed = 123, .indexOrder = order}));
+                                       {.seed = 123, .indexOrder = Permutation(order)}));
         MxCase problem(Shape{3, 5}, std::move(data));
         problem.dataType = ScalarType::Float8E4M3;
         problem.scaleType = ScalarType::E8M0;

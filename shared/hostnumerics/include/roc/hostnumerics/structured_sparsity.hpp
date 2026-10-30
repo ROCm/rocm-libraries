@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <roc/hostnumerics/permutation.hpp>
 #include <roc/hostnumerics/tensor.hpp>
 #include <utility>
 #include <vector>
@@ -39,7 +40,7 @@ struct StructuredSparsityPattern {
     uint64_t seed = 0;
 
     // Defines how groups on the non-sparsity axes receive linear random indices.
-    std::vector<size_t> indexOrder;
+    Permutation indexOrder = Permutation::identity(0);
 };
 
 struct StructuredSparsityOutputOptions {

@@ -33,7 +33,7 @@ namespace TensileLite
         void executeTranslatedGemm(ContractionProblemGemm const& problem,
                                    ContractionInputs const&      inputs,
                                    const Indices&                indices,
-                                   std::span<const size_t>       order,
+                                   const roc::hostnumerics::Permutation& order,
                                    GemmBackend                   backend)
         {
             auto translation
@@ -50,7 +50,7 @@ namespace TensileLite
         void executeReferenceGemm(const ContractionProblemGemm&        problem,
                                   const ContractionInputs&             inputs,
                                   const roc::hostnumerics::IndexRange& indices,
-                                  std::span<const size_t>              order,
+                                  const roc::hostnumerics::Permutation&       order,
                                   roc::hostnumerics::GemmBackend       backend)
         {
             executeTranslatedGemm(problem, inputs, indices, order, backend);
@@ -59,7 +59,7 @@ namespace TensileLite
         void executeReferenceGemm(const ContractionProblemGemm&  problem,
                                   const ContractionInputs&       inputs,
                                   const std::set<size_t>&        indices,
-                                  std::span<const size_t>        order,
+                                  const roc::hostnumerics::Permutation& order,
                                   roc::hostnumerics::GemmBackend backend)
         {
             executeTranslatedGemm(problem, inputs, indices, order, backend);

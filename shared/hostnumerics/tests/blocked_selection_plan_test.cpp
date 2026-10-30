@@ -79,7 +79,7 @@ void testStridedSelectionBlockPlan() {
     const std::vector<float> a = makeValues(rows, reductionElements, 5);
     const std::vector<float> b = makeValues(reductionElements, columns, 6);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
-    const auto selection = IndexRange(3, std::numeric_limits<size_t>::max(), 509);
+    const auto selection = IndexRange(3, rows * columns, 509);
     const auto selectionOrder = LastDimensionFastest{};
 
     GemmTestCase blockedProblem =

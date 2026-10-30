@@ -8,7 +8,9 @@
 #include <limits>
 #include <optional>
 #include <roc/hostnumerics/operation_types.hpp>
+#include <roc/hostnumerics/permutation.hpp>
 #include <roc/hostnumerics/tensor.hpp>
+#include <set>
 #include <span>
 #include <string>
 #include <vector>
@@ -260,10 +262,10 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
 
 ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options, const IndexRange& range,
-                         std::span<const size_t> order);
+                         const Permutation& order);
 ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options, const std::set<size_t>& indices,
-                         std::span<const size_t> order);
+                         const Permutation& order);
 
 ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options, const IndexRange& indices,
@@ -288,11 +290,11 @@ std::optional<ComparisonTolerance> findAllCloseTolerance(const Tensor& observed,
 std::optional<ComparisonTolerance> findAllCloseTolerance(
     const Tensor& observed, const Tensor& expected, std::span<const double> absoluteCandidates,
     std::span<const double> relativeCandidates, ComparisonOptions options,
-    const IndexRange& indices, std::span<const size_t> order);
+    const IndexRange& indices, const Permutation& order);
 std::optional<ComparisonTolerance> findAllCloseTolerance(
     const Tensor& observed, const Tensor& expected, std::span<const double> absoluteCandidates,
     std::span<const double> relativeCandidates, ComparisonOptions options,
-    const std::set<size_t>& indices, std::span<const size_t> order);
+    const std::set<size_t>& indices, const Permutation& order);
 
 /// Checks `[firstElement, firstElement + elementCount)` for the type's unwritten sentinel and
 /// reports absolute storage element indices. Signed integers use the lowest value; unsigned

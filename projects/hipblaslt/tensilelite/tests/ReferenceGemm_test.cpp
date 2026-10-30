@@ -670,9 +670,9 @@ TEST(ReferenceGemmSelection, UsesBlockedForSparseFloatValidation)
 
     SolveGemmCPU(problem, inputs, elementsToValidate);
 
-    const auto selection = roc::hostnumerics::primeIndexRange(problem.d().totalLogicalElements(),
-                                                              problem.d().totalAllocatedElements(),
-                                                              elementsToValidate);
+    const auto selection = roc::hostnumerics::primeIndexRange(
+        {.logicalElements   = problem.d().totalLogicalElements(),
+         .requestedElements = elementsToValidate});
     const std::vector<size_t> selected = selection.indices();
     ASSERT_EQ(selected.size(), elementsToValidate);
 

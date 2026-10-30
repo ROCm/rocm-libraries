@@ -401,7 +401,7 @@ namespace TensileLite::Client::hostnumerics
         template <typename Indices>
         std::optional<TranslationFailure> normalizeProblem(ContractionProblemGemm const& problem,
                                                            const Indices&                indices,
-                                                           std::span<const size_t> globalOrder)
+                                                           const roc::hostnumerics::Permutation& globalOrder)
         {
             using detail::failure;
             using roc::hostnumerics::IdentityActivation;
@@ -598,19 +598,19 @@ namespace TensileLite::Client::hostnumerics
                 return failure(TranslationFailureCode::InvalidDescriptor,
                                "Tensor shape element count exceeds size_t.");
             const Shape outputShape(problem.d().sizes());
-            if(!roc::hostnumerics::detail::ShapeAccess::isValidIndexOrder(outputShape.rank(),
-                                                                          globalOrder))
+            if(globalOrder.size() != outputShape.rank())
                 return failure(TranslationFailureCode::InvalidDescriptor,
-                               "Tensor index order must contain each dimension once.");
+                               "Tensor index order rank does not match shape rank.");
             try
             {
                 size_t selectedCount;
                 if constexpr(std::is_same_v<Indices, roc::hostnumerics::IndexRange>)
-                    selectedCount
-                        = roc::hostnumerics::IndexRange(indices.start(),
-                                                        std::min(indices.end(), *logicalCount),
-                                                        indices.stride())
-                              .count();
+                {
+                    if(indices.stop() > *logicalCount)
+                        throw std::runtime_error(
+                            "Index range stop exceeds the logical element count.");
+                    selectedCount = indices.count();
+                }
                 else
                 {
                     if(!indices.empty() && *indices.rbegin() >= *logicalCount)
@@ -1314,7 +1314,7 @@ namespace TensileLite::Client::hostnumerics
                 copyBack.source.copySelectedElementsToEncodedStorage(
                     copyBack.destination,
                     copyBack.indices,
-                    copyBack.source.shape().indexOrderLastDimensionFastest());
+                    roc::hostnumerics::Permutation::identity(copyBack.source.shape().rank()));
         }
     }
 
@@ -1599,7 +1599,7 @@ namespace TensileLite::Client::hostnumerics
         translateGemmInvocation(ContractionProblemGemm const&        problem,
                                 ContractionInputs const&             inputs,
                                 const roc::hostnumerics::IndexRange& indices,
-                                std::span<const size_t>              order)
+                                const roc::hostnumerics::Permutation&       order)
     {
         auto state = std::make_unique<GemmInvocationAdapter::State>();
         if(auto normalizationFailure = state->normalizeProblem(problem, indices, order))
@@ -1613,7 +1613,7 @@ namespace TensileLite::Client::hostnumerics
         translateGemmInvocation(ContractionProblemGemm const& problem,
                                 ContractionInputs const&      inputs,
                                 const std::set<size_t>&       indices,
-                                std::span<const size_t>       order)
+                                const roc::hostnumerics::Permutation& order)
     {
         auto state = std::make_unique<GemmInvocationAdapter::State>();
         if(auto normalizationFailure = state->normalizeProblem(problem, indices, order))

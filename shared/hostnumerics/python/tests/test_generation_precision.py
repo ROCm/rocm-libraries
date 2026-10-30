@@ -176,7 +176,7 @@ class GenerationPrecisionTests(unittest.TestCase):
             )
 
     def test_independent_mx_codes_and_scales(self):
-        settings = hv.GenerationRecipeSettings(0, [1, 0])
+        settings = hv.GenerationRecipeSettings(0, hv.Permutation([1, 0]))
         recipe = hv.GenerationRecipe.real_only(hv.GenerationRecipe.sine(), settings)
         mx_options = hv.MxGenerationOptions()
         mx_options.scale = hv.MxScaleGenerationMode.One
@@ -255,7 +255,7 @@ class GenerationPrecisionTests(unittest.TestCase):
             hv.ScalarType.Float4E2M1, [32], raw.with_index_offset(10), options()
         )
         self.assertEqual(shifted.storage, full.storage[5:21])
-        settings = hv.GenerationRecipeSettings(19, [0])
+        settings = hv.GenerationRecipeSettings(19, hv.Permutation([0]))
         complex_recipe = hv.GenerationRecipe.cartesian(
             hv.GenerationRecipe.sine(), hv.GenerationRecipe.cosine(), settings
         )

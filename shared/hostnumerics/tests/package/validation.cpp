@@ -122,7 +122,7 @@ TEST(Package, Operations) {
     ASSERT_FALSE((!layerNorm.mean || layerNorm.mean->loadAs<float>({0}) != 1.5f));
 
     StructuredSparsityPattern sparsityPattern;
-    sparsityPattern.indexOrder = {0};
+    sparsityPattern.indexOrder = Permutation{0};
     sparsityPattern.axis = 0;
     sparsityPattern.fixedPositions = {0, 2};
     const std::array<float, 4> sparseValues{1, 2, 3, 4};
