@@ -4,13 +4,14 @@
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENABLE_SDPA)
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <ostream>
 #include <random>
 #include <string>
@@ -22,12 +23,17 @@
 #include <hip/hip_runtime.h>
 
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx1151WmmaAttentionCatalog.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -37,15 +43,24 @@ using namespace hipdnn_frontend::graph;
  * @brief hipkernel:Gfx1151WmmaAttention on the cuDNN paged-K/V SDPA graph, end to end
  *        through the frontend on an RDNA (gfx11 / gfx12) device: vLLM's uniform decode
  *        (dense Q) and mixed batches (ragged Q) over a shuffled, NaN-poisoned paged cache
- *        -- the interleaved TRITON_ATTN K|V layout or separate planes -- against a
- *        gather-then-dense float64 reference, and one plan captured into a HIP graph and
- *        replayed with different sequence lengths, block ids and data; with and without
- *        attention sinks (sink_token [1, Hq, 1, 1] in the I/O data type).
+ *        -- the interleaved TRITON_ATTN K|V layout or separate planes, paged through one
+ *        page table or through separate K and V tables that place V's pages elsewhere --
+ *        against hipDNN's CPU SDPA reference (CpuFpReferenceSdpa, double compute), and one
+ *        plan captured into a HIP graph and replayed with different sequence lengths, block
+ *        ids and data; with and without attention sinks (sink_token [1, Hq, 1, 1] in the I/O
+ *        data type, upcast exactly to the reference's FLOAT sink).
  *
- * Unused cache slots and padding are NaN, so a read of anything outside the used
- * page-table entries or past seq_len_kv shows up as a non-finite output. O starts NaN:
- * every live row must be written (zeros for a row with no visible key) and every row past
- * seq_len_q -- including the gaps between ragged sequences -- must be left untouched.
+ * Every graph carries seq_len_q and seq_len_kv (hipDNN's paged contract). Unused cache
+ * slots and padding are NaN, so a read of anything outside the used page-table entries or
+ * past seq_len_kv shows up as a non-finite output. O starts NaN: every live row must be
+ * written (zeros for a row with no visible key); a dense Q's padding rows past seq_len_q,
+ * up to Sq, must be written as O = 0 and LSE = -inf (SdpaSemanticsRegister SEM-008), with
+ * or without a sink. A ragged Q follows RFC 0014: its origins are in reverse sequence
+ * order, ragged_offset[B] is poisoned, and the rows of an offset block past seq_len_q
+ * belong to no sequence and must keep their NaN.
+ *
+ * The sink cases need the frontend to accept a sink_token in the Q data type; a frontend
+ * that takes only cuDNN's FLOAT sink (SEM-022) rejects them, and they skip with a message.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -64,14 +79,16 @@ constexpr int64_t SEQ_LEN_KV_UID = 7;
 constexpr int64_t SEQ_LEN_Q_UID = 8;
 constexpr int64_t Q_OFFSET_UID = 9;
 constexpr int64_t SINK_UID = 10;
+constexpr int64_t PAGE_TABLE_V_UID = 11;
 
 constexpr uint16_t NAN_BITS = 0xFFFF; // a NaN in both FP16 and BF16
 constexpr int32_t UNUSED_BLOCK = std::numeric_limits<int32_t>::max();
+constexpr int32_t RAGGED_OFFSET_END_POISON = -7; // ragged_offset[B], which is not read
 
 enum class QueryForm
 {
-    DENSE, // uniform decode: [B, Hq, q_len, D], every row live
-    DENSE_SEQ_LEN_Q, // dense Q whose live rows per sequence are seq_len_q
+    DENSE, // uniform decode: [B, Hq, q_len, D], seq_len_q = q_len for every sequence
+    DENSE_SEQ_LEN_Q, // dense Q whose live rows per sequence are seq_len_q, padding after
     RAGGED // ragged Q / O through token-unit offsets, live rows seq_len_q
 };
 
@@ -87,20 +104,36 @@ struct PagedCase
     std::vector<int32_t> seqLenKv;
     // Live query rows per sequence; DENSE needs them all equal.
     std::vector<int32_t> seqLenQ;
-    // Untouched rows after each sequence's live rows (DENSE_SEQ_LEN_Q: up to Sq; RAGGED:
-    // before the next sequence).
+    // Rows after each sequence's live rows: padding up to Sq (DENSE_SEQ_LEN_Q), or rows of
+    // its ragged offset block that belong to no sequence (RAGGED).
     std::vector<int32_t> gaps;
+    // cuDNN's left_bound (SEM-001): L keys ending at the diagonal, the diagonal included.
     int64_t leftBound = -1;
     bool stats = false;
     bool interleavedCache = true;
     // Attention sinks: one logit per query head, in the I/O data type.
     bool sinks = false;
+    // cuDNN's separate page_table_v: V's pages through their own table, in another order.
+    bool separateVTable = false;
+    // V in its own plane with padded rows, heads and pages: none of V's page, head and
+    // token strides is K's, so V addressed through K's strides reads the wrong rows.
+    bool paddedV = false;
 };
 
 // NOLINTNEXTLINE(readability-identifier-naming) -- gtest customization point
 void PrintTo(const PagedCase& paged, std::ostream* os)
 {
     *os << paged.name;
+}
+
+/// V's element strides {page, head, token}: the +D half of the interleaved cache (K's
+/// strides), K's layout in its own plane, or with paddedV its own padded layout.
+std::array<int64_t, 3> vStridesOf(const PagedCase& paged)
+{
+    const int64_t pad = paged.paddedV ? 8 : 0;
+    const int64_t row = (paged.interleavedCache ? 2 * paged.headSize : paged.headSize) + pad;
+    const int64_t head = paged.pageSize * row + pad;
+    return {paged.kvHeads * head + 2 * pad, head, row};
 }
 
 /// Host-side bits of one batch: the build-time geometry and the device inputs.
@@ -137,33 +170,18 @@ Geometry geometryOf(const PagedCase& paged)
     return g;
 }
 
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
+
 uint16_t toBits(float value, DataType dataType)
 {
-    if(dataType == DataType::HALF)
-    {
-        const auto half = static_cast<_Float16>(value);
-        uint16_t bits = 0;
-        std::memcpy(&bits, &half, sizeof(bits));
-        return bits;
-    }
-    uint32_t word = 0;
-    std::memcpy(&word, &value, sizeof(word));
-    word += 0x7FFFU + ((word >> 16U) & 1U); // round to nearest even
-    return static_cast<uint16_t>(word >> 16U);
+    return dataType == DataType::HALF ? half(value).data : bfloat16(value).data;
 }
 
 double fromBits(uint16_t bits, DataType dataType)
 {
-    if(dataType == DataType::HALF)
-    {
-        _Float16 half = 0;
-        std::memcpy(&half, &bits, sizeof(bits));
-        return static_cast<double>(half);
-    }
-    const uint32_t word = uint32_t{bits} << 16U;
-    float value = 0.0F;
-    std::memcpy(&value, &word, sizeof(value));
-    return static_cast<double>(value);
+    return dataType == DataType::HALF ? static_cast<double>(half::from_bits(bits))
+                                      : static_cast<double>(bfloat16::from_bits(bits));
 }
 
 /// One batch's device-input contents for a given set of lengths.
@@ -177,6 +195,7 @@ struct Batch
     std::vector<uint16_t> k; // [numBlocks, Hkv, page, row]
     std::vector<uint16_t> v; // V's own plane; empty for the interleaved cache
     std::vector<int32_t> pageTable; // [B, M]
+    std::vector<int32_t> pageTableV; // [B, M], separate V table only
     std::vector<uint16_t> sinks; // [Hq], attention sinks only
 };
 
@@ -221,11 +240,20 @@ public:
         const auto d = static_cast<size_t>(_case.headSize);
 
         batch.q.assign(static_cast<size_t>(_g.totalRows * tokenStride()), NAN_BITS);
-        batch.qOffsets.assign(static_cast<size_t>(_g.batch + 1), 0);
+        // Ragged origins in reverse sequence order with ragged_offset[B] poisoned: with
+        // seq_len_q bound, origins may come in any order and ragged_offset[B] is neither
+        // used nor validated (RFC 0014).
+        batch.qOffsets.assign(static_cast<size_t>(_g.batch + 1), RAGGED_OFFSET_END_POISON);
+        int32_t origin = 0;
+        for(int64_t b = _g.batch - 1; b >= 0; --b)
+        {
+            const auto bi = static_cast<size_t>(b);
+            batch.qOffsets[bi] = origin;
+            origin += batch.seqLenQ[bi] + batch.gaps[bi];
+        }
         for(int64_t b = 0; b < _g.batch; ++b)
         {
             const auto bi = static_cast<size_t>(b);
-            batch.qOffsets[bi + 1] = batch.qOffsets[bi] + batch.seqLenQ[bi] + batch.gaps[bi];
             for(int64_t r = 0; r < batch.seqLenQ[bi]; ++r)
             {
                 const auto base = static_cast<size_t>(rowOf(batch, b, r) * tokenStride());
@@ -242,12 +270,22 @@ public:
         batch.k.assign(cacheElems, NAN_BITS);
         if(!_case.interleavedCache)
         {
-            batch.v.assign(cacheElems, NAN_BITS);
+            batch.v.assign(static_cast<size_t>(_g.numBlocks * vStridesOf(_case)[0]), NAN_BITS);
         }
         std::vector<int32_t> order(static_cast<size_t>(_g.numBlocks));
         std::iota(order.begin(), order.end(), 0);
         std::shuffle(order.begin(), order.end(), rng);
+        // A separate V table places each V page in another block than its K page.
+        std::vector<int32_t> orderV = order;
+        if(_case.separateVTable)
+        {
+            std::shuffle(orderV.begin(), orderV.end(), rng);
+        }
         batch.pageTable.assign(static_cast<size_t>(_g.batch * _g.maxBlocksPerSeq), UNUSED_BLOCK);
+        if(_case.separateVTable)
+        {
+            batch.pageTableV = batch.pageTable;
+        }
         size_t next = 0;
         for(int64_t b = 0; b < _g.batch; ++b)
         {
@@ -256,8 +294,15 @@ public:
             const int64_t pages = (keys + _case.pageSize - 1) / _case.pageSize;
             for(int64_t page = 0; page < pages; ++page)
             {
-                const int32_t block = order[next++];
-                batch.pageTable[static_cast<size_t>(b * _g.maxBlocksPerSeq + page)] = block;
+                const auto entry = static_cast<size_t>(b * _g.maxBlocksPerSeq + page);
+                const int32_t block = order[next];
+                const int32_t blockV = orderV[next];
+                ++next;
+                batch.pageTable[entry] = block;
+                if(_case.separateVTable)
+                {
+                    batch.pageTableV[entry] = blockV;
+                }
                 const int64_t live = std::min(_case.pageSize, keys - page * _case.pageSize);
                 for(int64_t h = 0; h < _case.kvHeads; ++h)
                 {
@@ -265,12 +310,12 @@ public:
                     {
                         const auto row = static_cast<size_t>(
                             ((block * _case.kvHeads + h) * _case.pageSize + t) * cacheRow());
+                        const auto rowV = vElement(blockV, h, t);
+                        auto& vPlane = _case.interleavedCache ? batch.k : batch.v;
                         for(size_t i = 0; i < d; ++i)
                         {
                             batch.k[row + i] = toBits(uniform(rng), dt);
-                            auto& vPlane = _case.interleavedCache ? batch.k : batch.v;
-                            vPlane[row + (_case.interleavedCache ? d : 0) + i]
-                                = toBits(uniform(rng), dt);
+                            vPlane[rowV + i] = toBits(uniform(rng), dt);
                         }
                     }
                 }
@@ -287,98 +332,132 @@ public:
         return batch;
     }
 
-    /// Key t of sequence b at K/V head h, element i (V at the +D half when interleaved).
-    double
-        cacheValue(const Batch& batch, int64_t b, int64_t t, int64_t h, int64_t i, bool value) const
+    /// hipDNN's CPU SDPA reference (CpuFpReferenceSdpa, double compute) over @p batch: K
+    /// and V gathered through their page tables from views of the cache (V through its own
+    /// strides), Q scattered into a dense [B, Hq, Sq, D] with seq_len_q / seq_len_kv
+    /// padding, and O gathered back to the device O's rows ([rows, Hq, D]); the natural-log
+    /// LSE is [b][h][r]. The sink upcasts exactly to the reference's FLOAT sink.
+    void reference(Batch batch, std::vector<double>& out, std::vector<double>& lse) const
     {
-        const int32_t block
-            = batch.pageTable[static_cast<size_t>(b * _g.maxBlocksPerSeq + t / _case.pageSize)];
-        const auto row = static_cast<size_t>(
-            ((block * _case.kvHeads + h) * _case.pageSize + t % _case.pageSize) * cacheRow());
-        if(value && !_case.interleavedCache)
+        if(_case.dataType == DataType::BFLOAT16)
         {
-            return fromBits(batch.v[row + static_cast<size_t>(i)], _case.dataType);
+            referenceAs<bfloat16>(batch, out, lse);
         }
-        const int64_t half = value ? _case.headSize : 0;
-        return fromBits(batch.k[row + static_cast<size_t>(half + i)], _case.dataType);
+        else
+        {
+            referenceAs<half>(batch, out, lse);
+        }
     }
 
-    /// The gather-then-dense float64 reference: O over every live row, and the
-    /// natural-log LSE ([b][h][r]); rows with no visible key give O = 0, LSE = -inf. A sink
-    /// joins each row's max and denominator with no value row (not scaled by attn_scale),
-    /// so a row with no visible key gives O = 0, LSE = the sink.
-    void reference(const Batch& batch, std::vector<double>& out, std::vector<double>& lse) const
+private:
+    template <typename T>
+    void referenceAs(Batch& batch, std::vector<double>& out, std::vector<double>& lse) const
     {
+        using hipdnn_data_sdk::utilities::ShallowTensor;
+        using hipdnn_data_sdk::utilities::Tensor;
+        using hipdnn_test_sdk::utilities::CpuFpReferenceSdpa;
+        using hipdnn_test_sdk::utilities::SdpaFwdOptions;
         const int64_t d = _case.headSize;
-        const int64_t groups = _case.queryHeads / _case.kvHeads;
-        const double scale = 1.0 / std::sqrt(static_cast<double>(d));
-        out.assign(static_cast<size_t>(_g.totalRows * tokenStride()), 0.0);
-        lse.assign(static_cast<size_t>(_g.batch * _case.queryHeads * _g.queryRows),
-                   -std::numeric_limits<double>::infinity());
+        const int64_t heads = _case.queryHeads;
+        const int64_t rows = _g.queryRows;
+        const int64_t token = tokenStride();
+
+        Tensor<T> q({_g.batch, heads, rows, d});
+        q.fillWithValue(T(0.0F));
+        Tensor<int32_t> seqLenQ({_g.batch, 1, 1, 1});
+        Tensor<int32_t> seqLenKv({_g.batch, 1, 1, 1});
         for(int64_t b = 0; b < _g.batch; ++b)
         {
             const auto bi = static_cast<size_t>(b);
-            const int64_t sk = batch.seqLenKv[bi];
-            const int64_t sq = batch.seqLenQ[bi];
-            const int64_t diag = sk - sq; // bottom-right alignment
-            for(int64_t h = 0; h < _case.queryHeads; ++h)
+            seqLenQ.setHostValue(batch.seqLenQ[bi], std::vector<int64_t>{b, 0, 0, 0});
+            seqLenKv.setHostValue(batch.seqLenKv[bi], std::vector<int64_t>{b, 0, 0, 0});
+            for(int64_t r = 0; r < batch.seqLenQ[bi]; ++r)
             {
-                const int64_t kvh = h / groups;
-                const double sink
-                    = _case.sinks ? fromBits(batch.sinks[static_cast<size_t>(h)], _case.dataType)
-                                  : -std::numeric_limits<double>::infinity();
-                for(int64_t r = 0; r < sq; ++r)
+                for(int64_t h = 0; h < heads; ++h)
                 {
-                    const auto qBase
-                        = static_cast<size_t>(rowOf(batch, b, r) * tokenStride() + h * d);
-                    std::vector<double> logits;
-                    std::vector<int64_t> keys;
-                    for(int64_t t = 0; t < sk; ++t)
-                    {
-                        if(t > r + diag || (_case.leftBound >= 0 && t < r + diag - _case.leftBound))
-                        {
-                            continue;
-                        }
-                        double dot = 0.0;
-                        for(int64_t i = 0; i < d; ++i)
-                        {
-                            dot += fromBits(batch.q[qBase + static_cast<size_t>(i)], _case.dataType)
-                                   * cacheValue(batch, b, t, kvh, i, false);
-                        }
-                        logits.push_back(dot * scale);
-                        keys.push_back(t);
-                    }
-                    const auto at
-                        = static_cast<size_t>((b * _case.queryHeads + h) * _g.queryRows + r);
-                    if(logits.empty())
-                    {
-                        lse[at] = sink;
-                        continue;
-                    }
-                    const double peak
-                        = std::max(*std::max_element(logits.begin(), logits.end()), sink);
-                    double sum = _case.sinks ? std::exp(sink - peak) : 0.0;
-                    for(auto& logit : logits)
-                    {
-                        logit = std::exp(logit - peak);
-                        sum += logit;
-                    }
+                    const auto base = static_cast<size_t>(rowOf(batch, b, r) * token + h * d);
                     for(int64_t i = 0; i < d; ++i)
                     {
-                        double acc = 0.0;
-                        for(size_t j = 0; j < keys.size(); ++j)
-                        {
-                            acc += logits[j] * cacheValue(batch, b, keys[j], kvh, i, true);
-                        }
-                        out[qBase + static_cast<size_t>(i)] = acc / sum;
+                        q.setHostValue(T::from_bits(batch.q[base + static_cast<size_t>(i)]),
+                                       std::vector<int64_t>{b, h, r, i});
                     }
-                    lse[at] = peak + std::log(sum);
+                }
+            }
+        }
+
+        const std::vector<int64_t> cacheDims{_g.numBlocks, _case.kvHeads, _case.pageSize, d};
+        const ShallowTensor<T> kCache(batch.k.data(),
+                                      cacheDims,
+                                      {_case.kvHeads * _case.pageSize * cacheRow(),
+                                       _case.pageSize * cacheRow(),
+                                       cacheRow(),
+                                       1});
+        const auto vS = vStridesOf(_case);
+        uint16_t* vPlane = _case.interleavedCache ? batch.k.data() + d : batch.v.data();
+        const ShallowTensor<T> vCache(vPlane, cacheDims, {vS[0], vS[1], vS[2], 1});
+        const std::vector<int64_t> tableDims{_g.batch, 1, _g.maxBlocksPerSeq, 1};
+        const std::vector<int64_t> tableStrides{_g.maxBlocksPerSeq, _g.maxBlocksPerSeq, 1, 1};
+        const ShallowTensor<int32_t> table(batch.pageTable.data(), tableDims, tableStrides);
+        const ShallowTensor<int32_t> tableV(_case.separateVTable ? batch.pageTableV.data()
+                                                                 : batch.pageTable.data(),
+                                            tableDims,
+                                            tableStrides);
+        const int64_t maxSeqKv = _g.maxBlocksPerSeq * _case.pageSize;
+        const auto k = CpuFpReferenceSdpa::gatherPagedKv(kCache, table, seqLenKv, maxSeqKv);
+        const auto v = CpuFpReferenceSdpa::gatherPagedKv(vCache, tableV, seqLenKv, maxSeqKv);
+
+        Tensor<double> o({_g.batch, heads, rows, d});
+        Tensor<float> stats({_g.batch, heads, rows, 1});
+        Tensor<float> sink({1, heads, 1, 1});
+        auto options = SdpaFwdOptions<double>{}
+                           .setScale(1.0F / std::sqrt(static_cast<float>(d)))
+                           .setBand(_case.leftBound, 0, false)
+                           .setSeqLens(&seqLenQ, &seqLenKv)
+                           .setLse(&stats);
+        if(_case.sinks)
+        {
+            for(int64_t h = 0; h < heads; ++h)
+            {
+                sink.setHostValue(static_cast<float>(fromBits(batch.sinks[static_cast<size_t>(h)],
+                                                              _case.dataType)),
+                                  std::vector<int64_t>{0, h, 0, 0});
+            }
+            options.setSink(&sink);
+        }
+        CpuFpReferenceSdpa::forward<T, T, T, double, double>(q, k, v, o, options);
+
+        out.assign(static_cast<size_t>(_g.totalRows * token), 0.0);
+        lse.assign(static_cast<size_t>(_g.batch * heads * rows), 0.0);
+        for(int64_t b = 0; b < _g.batch; ++b)
+        {
+            for(int64_t h = 0; h < heads; ++h)
+            {
+                for(int64_t r = 0; r < rows; ++r)
+                {
+                    lse[static_cast<size_t>((b * heads + h) * rows + r)]
+                        = static_cast<double>(stats.getHostValue(std::vector<int64_t>{b, h, r, 0}));
+                }
+                for(int64_t r = 0; r < batch.seqLenQ[static_cast<size_t>(b)]; ++r)
+                {
+                    const auto base = static_cast<size_t>(rowOf(batch, b, r) * token + h * d);
+                    for(int64_t i = 0; i < d; ++i)
+                    {
+                        out[base + static_cast<size_t>(i)]
+                            = o.getHostValue(std::vector<int64_t>{b, h, r, i});
+                    }
                 }
             }
         }
     }
 
-private:
+    /// The first element of V's row at token @p t of head @p h in page @p block.
+    size_t vElement(int64_t block, int64_t h, int64_t t) const
+    {
+        const auto s = vStridesOf(_case);
+        return static_cast<size_t>(block * s[0] + h * s[1] + t * s[2]
+                                   + (_case.interleavedCache ? _case.headSize : 0));
+    }
+
     const PagedCase& _case;
     Geometry _g;
 };
@@ -437,8 +516,11 @@ std::shared_ptr<TensorAttributes> lengthVector(int64_t uid, const std::string& n
 }
 
 /// The paged SDPA graph of @p paged: vLLM's view of the TRITON_ATTN cache when
-/// interleaved (K / V the two halves of [num_blocks, Hkv, page, 2D]).
-std::shared_ptr<Graph> buildPagedGraph(const PagedCase& paged, const Geometry& g)
+/// interleaved (K / V the two halves of [num_blocks, Hkv, page, 2D]). A sink case's
+/// sink_token is in @p sinkType (the I/O data type when unset).
+std::shared_ptr<Graph> buildPagedGraph(const PagedCase& paged,
+                                       const Geometry& g,
+                                       std::optional<DataType> sinkType = std::nullopt)
 {
     auto graph = std::make_shared<Graph>();
     graph->set_name(paged.name)
@@ -455,12 +537,16 @@ std::shared_ptr<Graph> buildPagedGraph(const PagedCase& paged, const Geometry& g
     const std::vector<int64_t> cacheStrides{
         paged.kvHeads * paged.pageSize * row, paged.pageSize * row, row, 1};
     auto k = makeTensor(K_UID, "K", paged.dataType, cacheDims, cacheStrides);
-    auto v = makeTensor(V_UID, "V", paged.dataType, cacheDims, cacheStrides);
-    auto table = makeTensor(PAGE_TABLE_UID,
-                            "page_table",
-                            DataType::INT32,
-                            {g.batch, 1, g.maxBlocksPerSeq, 1},
-                            {g.maxBlocksPerSeq, g.maxBlocksPerSeq, 1, 1});
+    const auto vS = vStridesOf(paged);
+    auto v = makeTensor(V_UID, "V", paged.dataType, cacheDims, {vS[0], vS[1], vS[2], 1});
+    const std::vector<int64_t> tableDims{g.batch, 1, g.maxBlocksPerSeq, 1};
+    const std::vector<int64_t> tableStrides{g.maxBlocksPerSeq, g.maxBlocksPerSeq, 1, 1};
+    auto table = makeTensor(PAGE_TABLE_UID, "page_table", DataType::INT32, tableDims, tableStrides);
+    auto tableV
+        = paged.separateVTable
+              ? makeTensor(
+                    PAGE_TABLE_V_UID, "page_table_v", DataType::INT32, tableDims, tableStrides)
+              : table;
     std::shared_ptr<TensorAttributes> offsets;
     if(paged.form == QueryForm::RAGGED)
     {
@@ -474,7 +560,8 @@ std::shared_ptr<Graph> buildPagedGraph(const PagedCase& paged, const Geometry& g
         .set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT)
         .set_diagonal_band_right_bound(0)
         .set_paged_attention_k_table(table)
-        .set_paged_attention_v_table(table)
+        .set_paged_attention_v_table(tableV)
+        .set_seq_len_q(lengthVector(SEQ_LEN_Q_UID, "seq_len_q", g.batch))
         .set_seq_len_kv(lengthVector(SEQ_LEN_KV_UID, "seq_len_kv", g.batch))
         .set_paged_attention_max_seq_len_kv(
             static_cast<int32_t>(g.maxBlocksPerSeq * paged.pageSize))
@@ -484,17 +571,13 @@ std::shared_ptr<Graph> buildPagedGraph(const PagedCase& paged, const Geometry& g
     {
         attributes.set_sink_token(makeTensor(SINK_UID,
                                              "sink",
-                                             paged.dataType,
+                                             sinkType.value_or(paged.dataType),
                                              {1, paged.queryHeads, 1, 1},
                                              {paged.queryHeads, 1, 1, 1}));
     }
     if(paged.leftBound >= 0)
     {
         attributes.set_diagonal_band_left_bound(paged.leftBound);
-    }
-    if(paged.form != QueryForm::DENSE)
-    {
-        attributes.set_seq_len_q(lengthVector(SEQ_LEN_Q_UID, "seq_len_q", g.batch));
     }
 
     auto outputs = graph->sdpa(q, k, v, attributes);
@@ -522,41 +605,6 @@ std::shared_ptr<Graph> buildPagedGraph(const PagedCase& paged, const Geometry& g
     return graph;
 }
 
-/// A small dense SDPA graph, with a max_seq_len_kv but no page tables when
-/// @p maxSeqLenKv: the frontend's paged K/V rules (cuDNN's) reject exactly that one.
-std::shared_ptr<Graph> pagedRuleProbe(bool maxSeqLenKv)
-{
-    constexpr int64_t SEQ = 16;
-    constexpr int64_t D = 64;
-    auto graph = std::make_shared<Graph>();
-    graph->set_name("paged_rule_probe")
-        .set_io_data_type(DataType::BFLOAT16)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_compute_data_type(DataType::FLOAT);
-    const std::vector<int64_t> dims{1, 1, SEQ, D};
-    const std::vector<int64_t> strides{SEQ * D, SEQ * D, D, 1};
-    auto q = makeTensor(Q_UID, "Q", DataType::BFLOAT16, dims, strides);
-    auto k = makeTensor(K_UID, "K", DataType::BFLOAT16, dims, strides);
-    auto v = makeTensor(V_UID, "V", DataType::BFLOAT16, dims, strides);
-    SdpaAttributes attributes;
-    attributes.set_name("paged_rule_probe")
-        .set_attn_scale(1.0F / std::sqrt(static_cast<float>(D)))
-        .set_generate_stats(false);
-    if(maxSeqLenKv)
-    {
-        attributes.set_paged_attention_max_seq_len_kv(static_cast<int32_t>(SEQ));
-    }
-    auto outputs = graph->sdpa(q, k, v, attributes);
-    outputs[0]
-        ->set_uid(O_UID)
-        .set_name("O")
-        .set_output(true)
-        .set_data_type(DataType::BFLOAT16)
-        .set_dim(dims)
-        .set_stride(strides);
-    return graph;
-}
-
 std::vector<PagedCase> pagedCases()
 {
     const auto bf16 = DataType::BFLOAT16;
@@ -573,7 +621,7 @@ std::vector<PagedCase> pagedCases()
          {0, 1, 17, 200, 513, 64},
          {1, 1, 1, 1, 1, 1},
          {0, 0, 0, 0, 0, 0}},
-        // Speculative decode (k = 2) with a sliding window, separate K / V planes.
+        // Speculative decode (k = 2) with a 32-key sliding window, separate K / V planes.
         {"specdecode_fp16_d64_p32_window",
          fp16,
          QueryForm::DENSE,
@@ -584,7 +632,7 @@ std::vector<PagedCase> pagedCases()
          {3, 70, 129, 0},
          {3, 3, 3, 3},
          {0, 0, 0, 0},
-         31,
+         32,
          false,
          false},
         // Dense Q with seq_len_q, stats, a head width served by the 96 bucket.
@@ -621,9 +669,9 @@ std::vector<PagedCase> pagedCases()
          {150, 9, 70},
          {30, 9, 1},
          {0, 0, 0},
-         15},
+         16},
         {"ragged_bf16_d256_p16", bf16, QueryForm::RAGGED, 4, 2, 256, 16, {90, 60}, {40, 2}, {0, 1}},
-        // gpt-oss: GQA 64/8 decode with sinks and a 127-key window, padding rows and a
+        // gpt-oss: GQA 64/8 decode with sinks and a 128-key window, padding rows and a
         // sequence with no keys (O = 0, LSE = the sink).
         {"sinks_decode_bf16_d64_p16_window_lse",
          bf16,
@@ -635,7 +683,7 @@ std::vector<PagedCase> pagedCases()
          {0, 1, 300, 129},
          {1, 1, 1, 1},
          {0, 0, 0, 0},
-         127,
+         128,
          true,
          true,
          true},
@@ -667,6 +715,134 @@ std::vector<PagedCase> pagedCases()
          false,
          true,
          true},
+        // Separate K and V page tables (cuDNN's page_table_k / page_table_v): a mixed
+        // batch through per-row lookups (page 16) over separate planes, and decode with
+        // stats through per-tile lookups (page 64) over the interleaved cache.
+        {"split_tables_ragged_bf16_d128_p16_mixed",
+         bf16,
+         QueryForm::RAGGED,
+         8,
+         2,
+         128,
+         16,
+         {20, 0, 300, 50},
+         {5, 0, 40, 1},
+         {0, 2, 0, 3},
+         -1,
+         false,
+         false,
+         false,
+         true},
+        {"split_tables_denseq_seqlenq_fp16_d64_p64_window_lse",
+         fp16,
+         QueryForm::DENSE_SEQ_LEN_Q,
+         8,
+         2,
+         64,
+         64,
+         {3, 200, 129, 0},
+         {3, 1, 2, 0},
+         {0, 2, 1, 3},
+         64,
+         true,
+         true,
+         false,
+         true},
+        // V in its own padded plane: its page, head and token strides all differ from K's
+        // (with a ragged Q, and with dense-Q decode, separate tables and stats).
+        {"padded_v_ragged_fp16_d128_p32_mixed",
+         fp16,
+         QueryForm::RAGGED,
+         8,
+         2,
+         128,
+         32,
+         {40, 0, 200, 65},
+         {6, 0, 33, 1},
+         {0, 1, 0, 2},
+         -1,
+         false,
+         false,
+         false,
+         false,
+         true},
+        {"padded_v_split_tables_decode_bf16_d64_p16_lse",
+         bf16,
+         QueryForm::DENSE,
+         16,
+         4,
+         64,
+         16,
+         {0, 33, 130},
+         {1, 1, 1},
+         {0, 0, 0},
+         -1,
+         true,
+         false,
+         false,
+         true,
+         true},
+        // The 96 and 256 buckets at pages 32 and 64, and the 128 bucket at page 64.
+        {"decode_fp16_d96_p32_gqa_lse",
+         fp16,
+         QueryForm::DENSE,
+         16,
+         4,
+         96,
+         32,
+         {0, 1, 33, 97, 260},
+         {1, 1, 1, 1, 1},
+         {0, 0, 0, 0, 0},
+         -1,
+         true},
+        {"ragged_bf16_d96_p64_mixed_planes",
+         bf16,
+         QueryForm::RAGGED,
+         8,
+         2,
+         96,
+         64,
+         {150, 0, 65, 9},
+         {24, 0, 2, 9},
+         {0, 2, 1, 0},
+         -1,
+         false,
+         false},
+        {"ragged_fp16_d256_p32_window",
+         fp16,
+         QueryForm::RAGGED,
+         4,
+         2,
+         256,
+         32,
+         {90, 33, 0},
+         {12, 1, 0},
+         {0, 2, 1},
+         48},
+        {"denseq_seqlenq_bf16_d256_p64_lse",
+         bf16,
+         QueryForm::DENSE_SEQ_LEN_Q,
+         4,
+         1,
+         256,
+         64,
+         {130, 64, 0, 1},
+         {3, 1, 0, 1},
+         {0, 2, 3, 2},
+         -1,
+         true},
+        {"decode_bf16_d128_p64_window_lse",
+         bf16,
+         QueryForm::DENSE,
+         16,
+         2,
+         128,
+         64,
+         {0, 1, 64, 65, 300},
+         {1, 1, 1, 1, 1},
+         {0, 0, 0, 0, 0},
+         100,
+         true},
     };
 }
 
@@ -684,20 +860,28 @@ protected:
             return;
         }
         const auto arch = hip_kernel_provider_common::getDeviceString(_stream);
-        if(arch.rfind("gfx11", 0) != 0 && arch.rfind("gfx12", 0) != 0)
+        if(std::find(GFX1151_WMMA_ATTENTION_ARCHS.begin(), GFX1151_WMMA_ATTENTION_ARCHS.end(), arch)
+           == GFX1151_WMMA_ATTENTION_ARCHS.end())
         {
-            GTEST_SKIP() << ENGINE_NAME << " ships for RDNA3/3.5/4 only; this device is " << arch;
+            GTEST_SKIP() << ENGINE_NAME << " ships no object for this device, " << arch;
         }
-        // A frontend without the paged K/V rules (SdpaFwdNode) also compares a paged
-        // container's num_blocks against the batch, so it rejects every graph below before
-        // any engine sees it. Probe for the rules rather than fail on that: the dense probe
-        // must validate, and with a max_seq_len_kv but no page tables it must not.
-        const auto denseProbe = pagedRuleProbe(false)->validate();
-        ASSERT_EQ(denseProbe.code, ErrorCode::OK) << denseProbe.err_msg;
-        if(pagedRuleProbe(true)->validate().code == ErrorCode::OK)
+        // The sink cases need the frontend to accept a sink_token in the Q data type. One
+        // that takes only cuDNN's FLOAT sink rejects them before any engine sees them.
+        const auto& paged = GetParam();
+        if(paged.sinks)
         {
-            GTEST_SKIP() << "the hipDNN frontend does not validate paged K/V SDPA graphs (no "
-                            "paged-attention rules in SdpaFwdNode), so it cannot build one";
+            const auto g = geometryOf(paged);
+            const auto qTypeSink = buildPagedGraph(paged, g)->validate();
+            if(qTypeSink.code != ErrorCode::OK
+               && buildPagedGraph(paged, g, DataType::FLOAT)->validate().code == ErrorCode::OK)
+            {
+                GTEST_SKIP() << "the hipDNN frontend accepts only a FLOAT sink_token (cuDNN, "
+                                "SdpaSemanticsRegister SEM-022); "
+                             << ENGINE_NAME
+                             << " reads the sink in the Q data type, so this case needs a "
+                                "frontend that accepts a Q-dtype sink: "
+                             << qTypeSink.err_msg;
+            }
         }
     }
 
@@ -727,9 +911,12 @@ struct DeviceInputs
         , o(static_cast<size_t>(g.totalRows * problem.tokenStride()) * sizeof(uint16_t))
         , k(static_cast<size_t>(g.numBlocks * paged.kvHeads * paged.pageSize * problem.cacheRow())
             * sizeof(uint16_t))
-        , v(paged.interleavedCache ? 16 : k.size)
+        , v(paged.interleavedCache
+                ? 16
+                : static_cast<size_t>(g.numBlocks * vStridesOf(paged)[0]) * sizeof(uint16_t))
         , lse(static_cast<size_t>(g.batch * paged.queryHeads * g.queryRows) * sizeof(float))
         , table(static_cast<size_t>(g.batch * g.maxBlocksPerSeq) * sizeof(int32_t))
+        , tableV(paged.separateVTable ? table.size : 16)
         , seqLenKv(static_cast<size_t>(g.batch) * sizeof(int32_t))
         , seqLenQ(static_cast<size_t>(g.batch) * sizeof(int32_t))
         , offsets(static_cast<size_t>(g.batch + 1) * sizeof(int32_t))
@@ -745,10 +932,11 @@ struct DeviceInputs
                        {V_UID, vPointer},
                        {O_UID, o.buffer.get()},
                        {PAGE_TABLE_UID, table.buffer.get()},
+                       {SEQ_LEN_Q_UID, seqLenQ.buffer.get()},
                        {SEQ_LEN_KV_UID, seqLenKv.buffer.get()}};
-        if(paged.form != QueryForm::DENSE)
+        if(paged.separateVTable)
         {
-            variantPack[SEQ_LEN_Q_UID] = seqLenQ.buffer.get();
+            variantPack[PAGE_TABLE_V_UID] = tableV.buffer.get();
         }
         if(paged.form == QueryForm::RAGGED)
         {
@@ -785,6 +973,10 @@ struct DeviceInputs
             v.buffer.upload(batch.v);
         }
         table.buffer.upload(batch.pageTable);
+        if(paged.separateVTable)
+        {
+            tableV.buffer.upload(batch.pageTableV);
+        }
         seqLenKv.buffer.upload(batch.seqLenKv);
         seqLenQ.buffer.upload(batch.seqLenQ);
         offsets.buffer.upload(batch.qOffsets);
@@ -802,6 +994,7 @@ struct DeviceInputs
     Sized v;
     Sized lse;
     Sized table;
+    Sized tableV;
     Sized seqLenKv;
     Sized seqLenQ;
     Sized offsets;
@@ -825,6 +1018,7 @@ void expectMatchesReference(const PagedCase& paged,
     const double tolerance = paged.dataType == DataType::BFLOAT16 ? 4e-2 : 2e-2;
     const int64_t token = problem.tokenStride();
     int64_t mismatches = 0;
+    const bool ragged = paged.form == QueryForm::RAGGED;
     for(int64_t b = 0; b < g.batch; ++b)
     {
         const auto bi = static_cast<size_t>(b);
@@ -836,16 +1030,31 @@ void expectMatchesReference(const PagedCase& paged,
             for(size_t i = 0; i < static_cast<size_t>(token); ++i)
             {
                 const double value = fromBits(got[base + i], paged.dataType);
-                const bool ok
-                    = live ? std::isfinite(value) && std::abs(value - want[base + i]) <= tolerance
-                           : std::isnan(value);
+                // A dense Q's padding past seq_len_q is written as zeros; a ragged Q's rows
+                // past it belong to no sequence and keep O's NaN.
+                bool ok = false;
+                double expected = 0.0;
+                const char* note = "";
+                if(live)
+                {
+                    expected = want[base + i];
+                    ok = std::isfinite(value) && std::abs(value - expected) <= tolerance;
+                }
+                else if(ragged)
+                {
+                    expected = std::numeric_limits<double>::quiet_NaN();
+                    ok = std::isnan(value);
+                    note = " (owned by no sequence, must stay unwritten)";
+                }
+                else
+                {
+                    ok = value == 0.0;
+                    note = " (padding past seq_len_q, must be 0)";
+                }
                 if(!ok && mismatches++ < 8)
                 {
                     ADD_FAILURE() << phase << ": sequence " << b << " row " << r << " element " << i
-                                  << (live ? "" : " (past seq_len_q, must be untouched)")
-                                  << ": got " << value << ", want "
-                                  << (live ? want[base + i]
-                                           : std::numeric_limits<double>::quiet_NaN());
+                                  << note << ": got " << value << ", want " << expected;
                 }
             }
         }
@@ -860,9 +1069,13 @@ void expectMatchesReference(const PagedCase& paged,
     device.lse.buffer.download(gotLse);
     for(int64_t b = 0; b < g.batch; ++b)
     {
+        const auto bi = static_cast<size_t>(b);
+        const int64_t span = int64_t{batch.seqLenQ[bi]} + batch.gaps[bi];
         for(int64_t h = 0; h < paged.queryHeads; ++h)
         {
-            for(int64_t r = 0; r < batch.seqLenQ[static_cast<size_t>(b)]; ++r)
+            // Padding rows past seq_len_q have LSE = -inf, as rows with no visible key
+            // and no sink do.
+            for(int64_t r = 0; r < span; ++r)
             {
                 const auto at = static_cast<size_t>((b * paged.queryHeads + h) * g.queryRows + r);
                 if(std::isinf(wantLse[at]))
@@ -890,7 +1103,7 @@ std::vector<T> reversed(std::vector<T> values)
 /// One plan executes the case directly, then the same plan is captured into a HIP graph
 /// and replayed twice with other lengths (the case's reversed, then rotated), other block
 /// ids and other data: nothing the kernel reads comes from the host at execute.
-TEST_P(IntegrationGpuGfx1151WmmaAttentionPaged, MatchesTheGatherThenDenseReferenceAndReplays)
+TEST_P(IntegrationGpuGfx1151WmmaAttentionPaged, MatchesTheHipdnnReferenceAndReplays)
 {
     const auto& paged = GetParam();
     const auto g = geometryOf(paged);
