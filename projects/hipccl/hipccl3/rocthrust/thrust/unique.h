@@ -933,7 +933,6 @@ thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(
  *  \param exec The execution policy to use for parallelization.
  *  \param first The beginning of the input range.
  *  \param last  The end of the input range.
- *  \param binary_pred  The binary predicate used to determine equality.
  *  \return The number of runs of equal elements in <tt>[first, new_last)</tt>
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
@@ -1014,7 +1013,6 @@ THRUST_HOST_DEVICE thrust::detail::it_difference_t<ForwardIterator> unique_count
  *
  *  \param first The beginning of the input range.
  *  \param last  The end of the input range.
- *  \param binary_pred  The binary predicate used to determine equality.
  *  \return The number of runs of equal elements in <tt>[first, new_last)</tt>
  *
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward

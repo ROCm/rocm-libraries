@@ -34,8 +34,8 @@
 THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup reordering
- *  \{
  *  \ingroup algorithms
+ *  \{
  */
 
 /*! \p reverse reverses a range. That is: for every <tt>i</tt> such that
@@ -206,7 +206,8 @@ THRUST_HOST_DEVICE OutputIterator reverse_copy(
 template <typename BidirectionalIterator, typename OutputIterator>
 OutputIterator reverse_copy(BidirectionalIterator first, BidirectionalIterator last, OutputIterator result);
 
-/*! \} // end reordering
+/*!
+ * \} end group reordering
  */
 
 THRUST_NAMESPACE_END
