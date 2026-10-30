@@ -15,6 +15,7 @@
 #include <roc/hostnumerics/index_range.hpp>
 #include <roc/hostnumerics/layout.hpp>
 #include <roc/hostnumerics/permutation.hpp>
+#include <roc/hostnumerics/sampling.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <roc/hostnumerics/shape.hpp>
 #include <roc/hostnumerics/version.hpp>
@@ -689,11 +690,17 @@ TEST(IndexRangeCpp, SizeBoundaries) {
     EXPECT_EQ(range.start(), 1);
     EXPECT_EQ(range.stop(), 7);
     EXPECT_EQ(range.stride(), 2);
+}
+
+TEST(SamplingCpp, PrimeIndexRangeBoundaries) {
+    const size_t maximum = std::numeric_limits<size_t>::max();
     EXPECT_THROW(primeIndexRange({.logicalElements = maximum, .requestedElements = 1}),
                  std::runtime_error);
     // Zero requested elements selects none; a request covering every element selects all.
     EXPECT_EQ(primeIndexRange({.logicalElements = 10, .requestedElements = 0}).count(), 0);
     EXPECT_EQ(primeIndexRange({.logicalElements = 10, .requestedElements = 10}).count(), 10);
+    EXPECT_EQ(primeIndexRange({.logicalElements = 10, .requestedElements = 3}),
+              IndexRange(0, 10, 3));
 }
 
 template <typename T>
