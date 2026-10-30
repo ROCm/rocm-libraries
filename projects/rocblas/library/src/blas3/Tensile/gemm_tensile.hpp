@@ -32,7 +32,9 @@
 
 // ALMIOPEN-1609 / ROCM-30996: Tensile 32-bit column*ld overflow workaround.
 // K is the column index (multiplies ld) only for A when transA=N (lda) and
-// B when transB!=N (ldb). Skip when hipBLASLt is the expected backend.
+// B when transB!=N (ldb).
+// Also used for hipBLASLt so tensile in the name is also tensileLite
+// TODO verify hipblaslt support does not require this and will never fallback to tensile
 template <typename Ti>
 inline int64_t rocblas_tensile_k_chunk(rocblas_handle    handle,
                                        rocblas_operation trans_a,
