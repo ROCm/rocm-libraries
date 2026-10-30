@@ -79,19 +79,12 @@ class Permutation {
     // (2, 0, 1) applied to (a, b, c) gives (c, a, b).
     template <typename T>
     std::vector<T> apply(std::span<const T> values) const {
-        if (values.size() != size())
-            throw std::runtime_error("Cannot apply a permutation of size " +
-                                     std::to_string(size()) + " to " +
-                                     std::to_string(values.size()) + " values.");
-        std::vector<T> result;
-        result.reserve(size());
-        for (size_t entry : m_entries) result.push_back(values[entry]);
-        return result;
+        return applyValues(values);
     }
 
     template <typename T>
     std::vector<T> apply(const std::vector<T>& values) const {
-        return apply(std::span<const T>(values));
+        return applyValues(values);
     }
 
     bool operator==(const Permutation&) const noexcept = default;
@@ -100,6 +93,18 @@ class Permutation {
     struct Validated {};
 
     Permutation(std::vector<size_t> entries, Validated) noexcept : m_entries(std::move(entries)) {}
+
+    template <typename Values>
+    std::vector<typename Values::value_type> applyValues(const Values& values) const {
+        if (values.size() != size())
+            throw std::runtime_error("Cannot apply a permutation of size " +
+                                     std::to_string(size()) + " to " +
+                                     std::to_string(values.size()) + " values.");
+        std::vector<typename Values::value_type> result;
+        result.reserve(size());
+        for (size_t entry : m_entries) result.push_back(values[entry]);
+        return result;
+    }
 
     void validate() const {
         std::vector<bool> seen(size(), false);

@@ -493,6 +493,15 @@ TEST(PermutationCpp, NamedOrdersInverseAndApply) {
     EXPECT_NE(permutation, inverse);
 }
 
+TEST(PermutationCpp, ApplyBooleanVector) {
+    const Permutation order{2, 0, 1};
+    const std::vector<bool> values{true, false, false};
+    EXPECT_EQ(order.apply(values), (std::vector<bool>{false, true, false}));
+    EXPECT_EQ(order.inverse().apply(order.apply(values)), values);
+    EXPECT_TRUE(Permutation::identity(0).apply(std::vector<bool>{}).empty());
+    EXPECT_THROW(order.apply(std::vector<bool>{true}), std::runtime_error);
+}
+
 TEST(ShapeCpp, ConstructionAndOwnership) {
     EXPECT_EQ(::testing::PrintToString(Shape{}), "Shape{}");
     EXPECT_EQ(::testing::PrintToString(Shape{2, 3, 4}), "Shape{2, 3, 4}");
