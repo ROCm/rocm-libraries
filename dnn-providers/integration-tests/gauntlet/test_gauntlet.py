@@ -462,8 +462,12 @@ def test_data_seed_can_be_fixed_and_is_validated():
     )
 
 
-# the spaces that declare node_patches (and no add_tensors) to switch a feature per sample
-NODE_PATCHED_SPACES = {"SdpaBackward/Default"}
+# the sweep-case keys a space declares to switch a feature per sample (add_tensors adds the
+# tensor of an optional input or output, node_patches edits the node)
+FEATURE_KEYS = {
+    "SdpaBackward/Default": {"node_patches"},
+    "SdpaFwd/Default": {"add_tensors", "node_patches"},
+}
 
 
 @pytest.mark.parametrize("space_id", SPACE_IDS)
@@ -478,7 +482,7 @@ def test_row_has_sweep_json_format(space_id):
     }
     # only a space that switches a feature declares these keys
     assert {"add_tensors", "node_patches"} & set(row) == (
-        {"node_patches"} if space_id in NODE_PATCHED_SPACES else set()
+        FEATURE_KEYS.get(space_id, set())
     )
     assert ("tensor_patches" in row) == (space_id in PATCHED_OPERANDS)
     assert row["id"] == "s913377"
@@ -620,6 +624,151 @@ def test_gfx950_dense_space_obeys_the_rocke_rules():
             env["hq"] * env["d"],
             1,
         ]  # BSHD
+
+
+def _row_has_a_key(left, right, top_left, sq, skv):
+    """Whether every query row keeps a key under a band, by the CPU reference's mask
+    (``CpuFpReferenceSdpa::isMasked``: left_bound L keeps the L keys ending at the diagonal,
+    right_bound R the R keys after it): row i keeps keys j with i + offset - L < j <= i + offset + R.
+    """
+    offset = 0 if top_left else skv - sq
+    for i in range(sq):
+        lo = 0 if left is None else max(0, i + offset - left + 1)
+        hi = skv - 1 if right is None else min(skv - 1, i + offset + right)
+        if lo > hi:
+            return False
+    return True
+
+
+def test_row_has_a_key_agrees_with_the_reference_mask_cell_by_cell():
+    # bug caught: an oracle off by one from CpuFpReferenceSdpa::isMasked would bless a window
+    # that leaves a row with no key (or reject a legal one) in every test that uses it
+    for sq in range(1, 7):
+        for skv in range(1, 7):
+            for top_left in (True, False):
+                for left in (None, 1, 2, 5):
+                    for right in (None, 0, 1, 3):
+                        offset = 0 if top_left else skv - sq
+
+                        def masked(i, j):
+                            return (
+                                right is not None and j >= i + 1 + offset + right
+                            ) or (left is not None and j <= i + offset - left)
+
+                        brute = all(
+                            any(not masked(i, j) for j in range(skv)) for i in range(sq)
+                        )
+                        assert _row_has_a_key(left, right, top_left, sq, skv) == brute
+
+
+def test_sdpa_forward_space_renders_the_stats_output_and_the_window_masks():
+    # bug caught: a stats axis that never adds the LSE tensor or leaves generate_stats or
+    # stats_tensor_uid unset (the case would pass without the feature), an LSE tensor whose shape
+    # or alignment differs from the sample's (the engine reads it at 16 bytes), a window value
+    # that does not reach left_bound, right_bound or diagonal_alignment, a left bound below 1
+    # (the builder throws) or one that leaves a query row with no key, and a feature
+    # combination the sampler never draws
+    sp = space_by_id("SdpaFwd/Default")
+    template = json.loads(sp.template_path.read_text())
+    seen, raised_left, passable_stats = set(), 0, 0
+    for seed in range(600):
+        s = sampler.sample(sp, seed)
+        axes = s.axis_values
+        env = sp.derive_env(axes)
+        graph = expanded_graph(template, s.row)
+        node = graph["nodes"][0]
+        attrs, outs = node["attributes"], node["outputs"]
+        by_uid = {t["uid"]: t for t in graph["tensors"]}
+        b, hq, sq, skv = axes["b"], env["hq"], axes["sq"], axes["skv"]
+        stats, window, causal = axes["stats"], axes["window"], axes["causal"]
+
+        if stats == "on":
+            assert sorted(by_uid) == [0, 1, 2, 3, 4], seed
+            lse = by_uid[4]
+            assert lse["dims"] == [b, hq, sq, 1] and lse["data_type"] == "float", seed
+            assert lse["strides"] == [hq * sq, sq, 1, 1], seed
+            assert lse["alignment"] == axes["alignment"], seed
+            assert not lse["virtual"] and not lse["is_runtime_pass_by_value"], seed
+            assert attrs["generate_stats"] is True and outs["stats_tensor_uid"] == 4
+        else:
+            assert sorted(by_uid) == [0, 1, 2, 3], seed
+            assert attrs["generate_stats"] is None and outs["stats_tensor_uid"] is None
+        assert {by_uid[u]["alignment"] for u in range(4)} == {axes["alignment"]}
+        assert (outs["o_tensor_uid"], attrs["attn_scale_value"]) == (2, axes["scale"])
+
+        assert not (attrs["causal_mask"] or attrs["causal_mask_bottom_right"]), seed
+        align = "BOTTOM_RIGHT" if causal else "TOP_LEFT"
+        if window == "none":
+            want = (align, None, 0 if causal else None)
+        elif window == "top_left_causal":
+            want = ("TOP_LEFT", None, 0)
+        else:
+            want = (align, attrs["left_bound"], axes["wr"])
+            left = attrs["left_bound"]
+            assert isinstance(left, int) and left >= max(1, axes["wl"]), seed
+            assert _row_has_a_key(left, axes["wr"], align == "TOP_LEFT", sq, skv), seed
+            # raised only as far as a key per row needs
+            if left > axes["wl"]:
+                raised_left += 1
+                assert not _row_has_a_key(
+                    left - 1, axes["wr"], align == "TOP_LEFT", sq, skv
+                ), seed
+        assert (
+            attrs["diagonal_alignment"],
+            attrs["left_bound"],
+            attrs["right_bound"],
+        ) == want
+        if window != "sliding":
+            assert attrs["left_bound"] is None
+        assert _row_has_a_key(
+            attrs["left_bound"],
+            attrs["right_bound"],
+            attrs["diagonal_alignment"] == "TOP_LEFT",
+            sq,
+            skv,
+        ), seed
+
+        seen.add((stats, window, causal))
+        passable_stats += (
+            stats == "on"
+            and window == "none"
+            and not causal
+            and axes["alignment"] >= 16
+        )
+    assert seen == {
+        (stats, window, causal)
+        for stats in ("off", "on")
+        for window in ("none", "top_left_causal", "sliding")
+        for causal in (False, True)
+    }
+    assert raised_left > 0, "no sample needed a left bound above the drawn window"
+    # the only region ASM_SDPA fwd can answer with stats (it declines stats under any mask and
+    # below 16-byte alignment) stays drawn often enough to check on a device
+    assert passable_stats > 10
+
+
+def test_sdpa_forward_constraints_ignore_the_late_stats_and_window_axes():
+    # bug caught: a constraint that reads a late axis rejects the draw, so the shared generator
+    # advances and a recorded seed fixes other shapes (the digest test would catch the shapes
+    # only where a seed happens to hit it); the window is legal by its derive chain instead
+    sp = space_by_id("SdpaFwd/Default")
+    rng = random.Random(3)
+    for _ in range(3000):
+        axes = {
+            name: (
+                axis.values[rng.randrange(len(axis.values))]
+                if not axis.is_range
+                else rng.randint(axis.lo, min(axis.hi, 600))
+            )
+            for name, axis in sp.axes.items()
+        }
+        base = dict(axes, stats="off", window="none")
+        for stats in ("off", "on"):
+            for window in sp.axes["window"].values:
+                varied = dict(axes, stats=stats, window=window)
+                assert (sp.first_violation(sp.derive_env(varied)) is None) == (
+                    sp.first_violation(sp.derive_env(base)) is None
+                ), varied
 
 
 def test_sdpa_backward_space_draws_every_feature_and_renders_it():
@@ -803,9 +952,9 @@ OPERAND_DOMAIN = {
     },
 }
 # The sample the domain test renders when seed 11 is not one the nan and inf domains poison (a
-# causal sample, half, or a softmax scale above 1 falls back to the default fill, see
-# test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree): the first that is.
-POISONABLE_SEED = {"SdpaFwd/Gfx950Dense": 12}
+# causal or window-masked sample, half, or a softmax scale above 1 falls back to the default
+# fill, see test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree): the first that is.
+POISONABLE_SEED = {"SdpaFwd/Default": 14, "SdpaFwd/Gfx950Dense": 12}
 # the tensors (by template name) whose fill the domain axis drives, per space
 PRIMARY_OPERANDS = {
     "Batchnorm/Default": ["X"],
@@ -844,6 +993,8 @@ OLD_SHAPE_DIGESTS = {
 }
 # the spaces without a domain axis: one fixed shape, only alignment and placement are drawn
 FIXED_SHAPE_SPACES = ["Matmul/Align", "SdpaFwd/Flash2"]
+# the late axes a space gained after its domain axis, which sit before `domain` in the axis order
+EXTRA_LATE_AXES = {"SdpaFwd/Default": ["stats", "window", "wl", "wr"]}
 DOMAIN_SPACE_IDS = [s for s in SPACE_IDS if s not in FIXED_SHAPE_SPACES]
 ALIGNMENTS = [1, 2, 4, 8, 16, 32, 64, 128, 256]
 PLACEMENTS = ["default", "exact", "under"]
@@ -904,7 +1055,9 @@ def test_the_last_axes_are_domain_alignment_placement_in_that_order(space_id):
     if "domain" in sp.axes:
         assert sp.axes["domain"].values == domains_of(space_id)
     assert [name for name, axis in sp.axes.items() if axis.late] == (
-        tail if space_id in OLD_SHAPE_DIGESTS else []
+        EXTRA_LATE_AXES.get(space_id, []) + tail
+        if space_id in OLD_SHAPE_DIGESTS
+        else []
     )
     drawn = [sampler.sample(sp, seed).axis_values for seed in range(300)]
     for name in tail:
@@ -1076,9 +1229,10 @@ def test_resample_nan_domain_plants_infinity_under_maxpool_only():
 
 @pytest.mark.parametrize("space_id", ["SdpaFwd/Default", "SdpaFwd/Gfx950Dense"])
 def test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree(space_id):
-    # bug caught: a non-finite V under a causal mask (probed on gfx950: NaN in the reference where
-    # the kernel is finite) and an infinity where P underflows (half, or a softmax scale above 1
-    # over bfloat16; probed: inf in one side and NaN in the other, as when 0 * inf meets a P that
+    # bug caught: a non-finite V under a causal or window mask (probed on gfx950 with a causal
+    # mask: NaN in the reference where the kernel is finite) and an infinity where P underflows
+    # (half, or a softmax scale above 1 over bfloat16; probed: inf in one side and NaN in the
+    # other, as when 0 * inf meets a P that
     # rounds to zero at different logit gaps); both fail a case that no engine defect explains
     sp = space_by_id(space_id)
     template = json.loads(sp.template_path.read_text())
@@ -1090,7 +1244,8 @@ def test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree(space_id)
             env = sp.derive_env(dict(axes, domain=domain))
             meta = sp.render(env)["metadata"]
             underflows = axes["dtype"] == "half" or axes["scale"] > 1
-            poisoned = not axes["causal"] and not (domain == "inf" and underflows)
+            masked = axes["causal"] or axes.get("window", "none") != "none"
+            poisoned = not masked and not (domain == "inf" and underflows)
             leaf = meta["inputs"][v_uid]
             assert (leaf["kind"], meta["validator"]) == (
                 ("special", "match_nonfinite") if poisoned else ("free", "default")
@@ -3065,6 +3220,8 @@ def test_fault_folder_imports_for_real_and_expands_back_identically(
     assert bu.canon(expanded) == bu.canon(failing_graph)  # the same graph back
     # UIDs unchanged: the import did not renumber a tensor (that would change its input seed)
     sampled = bu.expand(template, repro["sweep_row"]["values"])
+    # a tensor the row adds (add_tensors) is part of the graph too
+    fuzz.load_support_matrix_units().apply_case_patches(sampled, repro["sweep_row"])
     assert [(t["name"], t["uid"]) for t in failing_graph["tensors"]] == [
         (t["name"], t["uid"]) for t in sampled["tensors"]
     ]

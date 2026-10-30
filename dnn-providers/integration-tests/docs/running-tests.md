@@ -367,7 +367,7 @@ reports `DECLINED`, not a failure.
 | `RMSNorm/Default` | `HIP_MLOPS_ENGINE` | `RMSNorm/Variant4` | forward inference with scale and bias |
 | `RMSNormBackward/Default` | `HIP_MLOPS_ENGINE` | `RMSNormBackward/Default` | backward (dx, dscale, dbias; saved inverse RMS) |
 | `ResampleFwd/Default` | `HIP_MLOPS_ENGINE` | `ResampleFwd/Variant2` | pooling forward, no index output |
-| `SdpaFwd/Default` | `ASM_SDPA_ENGINE` | `SdpaFwd/Default` | SDPA forward, bfloat16, head size 128 or 192 |
+| `SdpaFwd/Default` | `ASM_SDPA_ENGINE` | `SdpaFwd/Default` | SDPA forward, bfloat16, head size 128 or 192, dense or bottom-right causal; `stats` switches the log-sum-exp output on (`add_tensors` and `node_patches`), `window` draws none, top-left causal or a sliding window (`left_bound` through a node patch). The top-left and sliding rows and stats under a mask are decline probes on ASM_SDPA |
 | `SdpaBackward/Default` | `ASM_SDPA_ENGINE` | `SdpaBackward/Default` | SDPA backward on gfx942, half or bfloat16, head size 64, 128 or 192, no/causal/sliding-window masks through `left_bound`/`right_bound`, scale set per sample; grouped-query heads and head size 64 are decline probes; cost ceiling provisional |
 | `SdpaFwd/Gfx950Dense` | `hipkernel:Gfx950AttentionDense` | `SdpaFwd/Default` | SDPA forward, BSHD, head size 64 or 128 |
 | `SdpaFwd/Flash2` | `HIP_FLASH2_ENGINE` | `SdpaFwd/Default` | **not a shape space**: one fixed fp16 SDPA forward (BHSD, head size 128, seqlen 256), varying only `alignment` and `placement`; gfx942 builds with `-DENABLE_HIP_FLASH2_ENGINE=ON` only |
@@ -450,7 +450,11 @@ seed, and a draw rejected by a constraint is retried from that generator. Adding
 there would move every later draw, retries included, so `--seed` would no longer reproduce
 the shapes of earlier runs. A `late` axis draws from a stream of its own (shape seed,
 attempt and axis name), so the earlier axes keep their draws: the same seed gives the
-same shape as before, and only the new axes get values. Late axes come last.
+same shape as before, and only the new axes get values. Late axes come last. For the same
+reason a feature axis added to an old space must not be read by a constraint: a constraint
+that a late axis can violate would reject the draw and move the earlier axes. `SdpaFwd/Default`
+gained `stats`, `window`, `wl` and `wr` this way, and its derive chain keeps every window legal
+instead of rejecting one.
 
 Before the first batch the driver lists the binary's tests on an empty bundle root with
 the run's own flags. A healthy binary lists its compiled-in tests (exit 0) or reports

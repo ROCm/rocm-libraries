@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "SdpaFwd",
-  "description": "SDPA forward in the ASM_SDPA_ENGINE region: bfloat16, head size 128 or 192 for Q and K with V and O at 128 (fmha_v3_fwd gfx942/gfx950 kernel tables), BSHD or BHSD, grouped-query heads, any sequence length, dense or bottom-right causal. gfx950 ships no causal kernel, so its causal samples decline; they stay as probes. The domain axis fills Q, K and V; large uses scale 8 instead of 32 so Q.K sums of a 192-wide head stay inside the half and bfloat16 range before the softmax scale. V keeps a smaller range than Q and K under wide (free(-2,2)) and large (scale 2): the kernel rounds P to bfloat16 for the P.V product, which errs by about 2^-9 per unit of |V| per term, and a cancelling sum leaves an output below that error, so atol 0.01 does not grade a V of magnitude 4 or more (probed on gfx950, Q and K wide or large: V in +-8 or large scale 8 fails 82 of 100 samples, V in +-4 fails 41 of 150, V in +-2 fails none of 150). The nan and inf domains put the special fill on V alone, 2^-12 of its elements, and leave Q and K at free(-1,1): a non-finite element of Q or K reaches a whole softmax row or every row, and the reference zeroes the output row of a NaN logit row where the kernel gives NaN (probed with a poisoned Q), while one in V reaches only its own head-dim column of the output; the sparse share keeps most columns finite, which the non-finite mask needs (it fails a reference with no finite element, so the earlier 5% share failed every long-kv sample by design). They poison only where the reference and the kernel agree and draw the default fill elsewhere: a causal sample (probed on Gfx950AttentionDense: NaN in the reference where the kernel is finite, as if the kernel never read the masked kv positions) and an infinity with a softmax scale above 1 (probed on Gfx950AttentionDense: inf in one and NaN in the other, as when P underflows to zero at different logit gaps and 0 * inf is NaN). The alignment axis declares that alignment on K, Q, O and V (uids 0, 1, 2, 3) through tensor_patches, and the placement axis puts the device pointers at exactly that alignment (exact) or misaligns Q (placement_uid 1) below it, a case that passes only if the backend rejects it (under, drawn as exact at alignment 1); default leaves the pointers where they are.",
+  "description": "SDPA forward in the ASM_SDPA_ENGINE region: bfloat16, head size 128 or 192 for Q and K with V and O at 128 (fmha_v3_fwd gfx942/gfx950 kernel tables), BSHD or BHSD, grouped-query heads, any sequence length, dense or bottom-right causal. gfx950 ships no causal kernel, so its causal samples decline; they stay as probes. The domain axis fills Q, K and V; large uses scale 8 instead of 32 so Q.K sums of a 192-wide head stay inside the half and bfloat16 range before the softmax scale. V keeps a smaller range than Q and K under wide (free(-2,2)) and large (scale 2): the kernel rounds P to bfloat16 for the P.V product, which errs by about 2^-9 per unit of |V| per term, and a cancelling sum leaves an output below that error, so atol 0.01 does not grade a V of magnitude 4 or more (probed on gfx950, Q and K wide or large: V in +-8 or large scale 8 fails 82 of 100 samples, V in +-4 fails 41 of 150, V in +-2 fails none of 150). The nan and inf domains put the special fill on V alone, 2^-12 of its elements, and leave Q and K at free(-1,1): a non-finite element of Q or K reaches a whole softmax row or every row, and the reference zeroes the output row of a NaN logit row where the kernel gives NaN (probed with a poisoned Q), while one in V reaches only its own head-dim column of the output; the sparse share keeps most columns finite, which the non-finite mask needs (it fails a reference with no finite element, so the earlier 5% share failed every long-kv sample by design). They poison only where the reference and the kernel agree and draw the default fill elsewhere: a masked sample (a causal or window mask; probed on Gfx950AttentionDense with a causal mask: NaN in the reference where the kernel is finite, as if the kernel never read the masked kv positions) and an infinity with a softmax scale above 1 (probed on Gfx950AttentionDense: inf in one and NaN in the other, as when P underflows to zero at different logit gaps and 0 * inf is NaN). The alignment axis declares that alignment on K, Q, O and V (uids 0, 1, 2, 3) through tensor_patches, and the placement axis puts the device pointers at exactly that alignment (exact) or misaligns Q (placement_uid 1) below it, a case that passes only if the backend rejects it (under, drawn as exact at alignment 1); default leaves the pointers where they are. Two features switch per sample through four late axes (stats; window with wl and wr). stats (off, on): on adds the log-sum-exp tensor named stats (add_tensors, uid 4, float, dims [b, hq, sq, 1], strides [hq*sq, sq, 1, 1] in either layout, declaring the sampled alignment, which SdpaFwdPlanBuilder.cpp needs to be 16 bytes: K_STATS_ALIGNMENT_BYTES; the name sorts after V because import_graph.py numbers tensors by sorted name and a freeze must keep the uids) and names it in outputs.stats_tensor_uid and attributes.generate_stats (node_patches); the builder takes it as FP32, rank 3 or 4 with B, H and Sq of Q, and its kernel args carry only the head stride, and the GPU and CPU references (GpuSdpaFwdPlan.hpp, cpu_graph_executor SdpaFwdPlan.hpp) grade the same FP32 [B, H, Sq, 1] tensor. The builder declines stats under any mask (the current causal kernel binaries do not compute the LSE), so only an unmasked sample can pass with stats on; the others are decline probes. window (none, top_left_causal, sliding; none is drawn three times in five) combines with the causal axis: none is the behavior above, top_left_causal is TOP_LEFT with right_bound 0, and sliding is a left_bound with cuDNN semantics (L keeps the L keys ending at the diagonal, diagonal included; the builder maps it to the kernels' window_size_left L - 1, resolveDiagonalBand in SdpaPlanUtils.hpp) through a node patch on attributes, because the template has no placeholder for it, with the alignment the causal axis picks (bottom-right when causal, else top-left) and a right_bound of 0 or a small positive value (axis wr). The wl axis draws the window, raised where needed to sq - skv + 1 so that every query row keeps a key under a top-left window (a bottom-right one has sq <= skv from the causal constraint); a constraint would reject the draw and move the earlier axes of a recorded seed, so the derive chain does it. Neither ASM forward kernel table (gfx942, gfx950) has a top-left causal or a sliding-window row, so every top_left_causal and sliding sample is a decline probe; none passes here until a kernel ships. The four new axes are late and draw from streams of their own, so the shapes that recorded seeds fix are unchanged.",
   "engine": "ASM_SDPA_ENGINE",
   "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
   "axes": {
@@ -15,6 +15,10 @@
     "dqk":    {"values": [128, 192]},
     "causal": {"values": [false, true]},
     "scale":  {"values": [0.0883883461356163, 0.07216878235340118, 0.125, 0.25, 0.5, 1.0]},
+    "stats":  {"values": ["off", "on"], "late": true},
+    "window": {"values": ["none", "none", "none", "top_left_causal", "sliding"], "late": true},
+    "wl":     {"range": [1, 2048], "boundaries": [1, 2, 63, 64, 65, 128, 256, 512], "late": true},
+    "wr":     {"values": [0, 1, 4, 16], "late": true},
     "domain": {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"], "late": true},
     "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256], "late": true},
     "placement": {"values": ["default", "exact", "under"], "late": true}
@@ -30,7 +34,8 @@
     "stride_k": "[skv*hkv*dqk, dqk, hkv*dqk, 1] if layout == 'bshd' else [hkv*skv*dqk, skv*dqk, dqk, 1]",
     "stride_v": "[skv*hkv*dv, dv, hkv*dv, 1] if layout == 'bshd' else [hkv*skv*dv, skv*dv, dv, 1]",
     "stride_o": "[sq*hq*dv, dv, hq*dv, 1] if layout == 'bshd' else [hq*sq*dv, sq*dv, dv, 1]",
-    "nf_ok":     "not causal and not (domain == 'inf' and (dtype == 'half' or scale > 1))",
+    "masked":    "causal or window != 'none'",
+    "nf_ok":     "not masked and not (domain == 'inf' and (dtype == 'half' or scale > 1))",
     "dom_poison": "domain in ['nan', 'inf'] and nf_ok",
     "dom_kind":  "'fixed' if domain == 'constant' else ('special' if dom_poison else ('free' if domain in ['default', 'narrow', 'wide', 'positive', 'nan', 'inf'] else domain))",
     "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
@@ -44,6 +49,13 @@
     "dom_v_lo": "-2 if domain == 'wide' else dom_lo",
     "dom_v_hi": "2 if domain == 'wide' else dom_hi",
     "dom_v_scale": "2 if domain == 'large' else dom_scale",
+    "stats_on":  "stats == 'on'",
+    "sliding":   "window == 'sliding'",
+    "dims_stats":   "[b, hq, sq, 1]",
+    "stride_stats": "[hq*sq, sq, 1, 1]",
+    "align":     "'TOP_LEFT' if window == 'top_left_causal' else ('BOTTOM_RIGHT' if causal else 'TOP_LEFT')",
+    "right":     "0 if window == 'top_left_causal' else (wr if window == 'sliding' else (0 if causal else None))",
+    "left":      "max(wl, sq - skv + 1) if window == 'sliding' else None",
     "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
   },
   "constraints": [
@@ -61,8 +73,8 @@
       ],
       "attributes": {
         "attributes__attn_scale_value": "${scale}",
-        "attributes__diagonal_alignment": "${'BOTTOM_RIGHT' if causal else 'TOP_LEFT'}",
-        "attributes__right_bound": "${0 if causal else None}"
+        "attributes__diagonal_alignment": "${align}",
+        "attributes__right_bound": "${right}"
       }
     },
     "metadata": {
@@ -76,6 +88,14 @@
       "placement": "${eff_placement}",
       "placement_uid": 1
     },
+    "add_tensors": [
+      {"when": "${stats_on}", "uid": 4, "name": "stats", "data_type": "float", "dims": "${dims_stats}", "strides": "${stride_stats}", "alignment": "${alignment}", "is_runtime_pass_by_value": false, "ragged_offset_multiplier": 1, "virtual": false}
+    ],
+    "node_patches": [
+      {"when": "${stats_on}", "node": "SdpaFwd_0", "section": "outputs", "set": {"stats_tensor_uid": 4}},
+      {"when": "${stats_on}", "node": "SdpaFwd_0", "section": "attributes", "set": {"generate_stats": true}},
+      {"when": "${sliding}", "node": "SdpaFwd_0", "section": "attributes", "set": {"left_bound": "${left}"}}
+    ],
     "tensor_patches": [
       {"uid": 0, "set": {"alignment": "${alignment}"}},
       {"uid": 1, "set": {"alignment": "${alignment}"}},
