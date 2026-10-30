@@ -291,6 +291,25 @@ def _dense_runner(arch: str):
     return run_attention_dense_torch
 
 
+def _resolve_fp8_scale(
+    name: str, kwargs: Mapping[str, Any], tensors: Mapping[str, Any], label: str
+) -> float:
+    """One per-tensor fp8 dequant scale, resolved to a float at bind time.
+
+    Resolving at bind time host-syncs a device-tensor scale once, not on every
+    launch, which keeps graph capture intact. A missing scale raises rather than
+    silently dequantizing at unit scale; pass ``1.0`` explicitly for unit-scale KV.
+    """
+    value = kwargs.get(name, tensors.get(name))
+    if value is None:
+        raise ValueError(
+            f"{label} requires {name!r} (per-tensor dequant scale); none was "
+            f"supplied via bind kwarg or tensors[{name!r}]. Pass {name}=1.0 "
+            f"explicitly for unit-scale KV."
+        )
+    return float(value)
+
+
 def bind_dense_attention_torch(
     request, tuning_spec, tensors: Mapping[str, Any], **kwargs
 ) -> TorchBinding:
@@ -302,10 +321,23 @@ def bind_dense_attention_torch(
     """
     run = _dense_runner(str(getattr(request, "arch", "")))
     spec = tuning_spec.kernel_spec
+    if getattr(spec, "kv_storage_dtype", None) == "fp8e4m3":
+        # The loader decodes OCP fp8 (float8_e4m3fn) KV. Reject a bf16 K/V read as
+        # fp8 (silently wrong) and the FNUZ variant (gfx950 is OCP-only, ~2x off).
+        for name in ("k", "v"):
+            kind = _dtype_kind(tensors[name], name)
+            if kind != "fp8":
+                raise ValueError(
+                    f"fp8 dense expects OCP fp8 {name!r} (float8_e4m3fn), got {kind}"
+                )
     scale = kwargs.get("scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(getattr(request, "hdim_q", spec.head_size)))
     stream = kwargs.get("stream", 0)
+    bind_k_scale = bind_v_scale = None
+    if getattr(spec, "kv_storage_dtype", None) is not None:
+        bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, tensors, "fp8 dense")
+        bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, tensors, "fp8 dense")
 
     def launch(**_kw):
         call = {
@@ -318,6 +350,11 @@ def bind_dense_attention_torch(
             "stream": int(_kw.get("stream", stream)),
             "arch": str(request.arch),
         }
+        # fp8 KV dequant reads per-tensor k_scale/v_scale. Resolved at bind time
+        # above; a launch kwarg may still override (e.g. a sweep varying scale).
+        if bind_k_scale is not None:
+            call["k_scale"] = float(_kw.get("k_scale", bind_k_scale))
+            call["v_scale"] = float(_kw.get("v_scale", bind_v_scale))
         optional = {
             "cu_seqlens_q": _kw.get("cu_seqlens_q", tensors.get("cu_seqlens_q")),
             "cu_seqlens_kv": _kw.get("cu_seqlens_kv", tensors.get("cu_seqlens_kv")),
@@ -419,6 +456,10 @@ def bind_tuning_attention_torch(
     scale = kwargs.get("softmax_scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(problem.head_size))
+    bind_k_scale = bind_v_scale = 1.0
+    if bool(getattr(problem, "use_fp8", False)):
+        bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, tensors, "fp8 attention")
+        bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, tensors, "fp8 attention")
 
     def launch(**_kw):
         _reject_additive_bias_inputs(_kw, "launch kwargs")
@@ -431,6 +472,8 @@ def bind_tuning_attention_torch(
             cu_seqlens_q=tensors["cu_seqlens_q"],
             seqused_k=tensors["seqused_k"],
             softmax_scale=float(_kw.get("softmax_scale", scale)),
+            k_scale=float(_kw.get("k_scale", bind_k_scale)),
+            v_scale=float(_kw.get("v_scale", bind_v_scale)),
             block_table=tensors["block_table"],
             softcap=float(_kw.get("softcap", tensors.get("softcap", 0.0))),
             sinks=_kw.get("sinks", tensors.get("sinks")),

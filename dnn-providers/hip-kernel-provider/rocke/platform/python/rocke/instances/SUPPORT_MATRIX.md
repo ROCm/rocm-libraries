@@ -144,6 +144,7 @@ be smaller than 2 GiB.
 | `unified_attention_2d` | ✅ | ✅ | ✅ | scalar (no matrix core) |
 | `unified_attention_3d` | ✅ | ✅ | ✅ | scalar |
 | `unified_attention_reduce` | ✅ | ✅ | ✅ | scalar |
+| `attention_dense` | ✅ | ✅ | ❌ | dense (non-paged) flash prefill, separate per-arch bodies; bf16/fp16 D64/D128. gfx950 grid body also takes fp8 e4m3 (OCP) K/V with per-tensor scales (aligned contiguous KV, no sinks). Lives in `library/kernels/{gfx942,gfx950}/attention_dense.py` |
 | tiled 3D `kv_layout="strided"` | ✅ | ✅ | ❌ | non-paged Sq=1, fp16/bf16 D64/128/256, aligned unit-D KV views; existing tiled segment/reduce pipeline |
 | `mla_prefill_fwd` | ✅ | ❌ | ❌ | bf16 only; paged compressed KV, `W_UK` absorbed into the query and `W_UV` applied in the epilogue (the latent KV is never expanded). Takes an already projected, RoPE-rotated query. Lives in `library/kernels/mla/`, dispatched by the separate `dispatch.mla` registry (not `dispatch.attention`). gfx950 is a later phase. |
 
