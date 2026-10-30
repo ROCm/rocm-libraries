@@ -18,7 +18,7 @@
 #include <thrust/system/detail/sequential/copy.h>
 #include <thrust/system/omp/detail/execution_policy.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::omp::detail

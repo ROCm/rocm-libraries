@@ -34,10 +34,6 @@
 
 #include <unittest/unittest.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <cstddef>
-#endif
-
 #if _CCCL_COMPILER(GCC, >=, 11)
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
 #else
@@ -755,7 +751,6 @@ struct iterator_traits<only_set_when_expected_it>
 };
 } // namespace std
 
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
 _THRUST_STD_NAMESPACE_BEGIN
 template <>
 struct iterator_traits<only_set_when_expected_it>
@@ -766,7 +761,6 @@ struct iterator_traits<only_set_when_expected_it>
   using difference_type   = _THRUST_STD::ptrdiff_t;
 };
 _THRUST_STD_NAMESPACE_END
-#  endif
 
 void TestCopyWithBigIndexesHelper(int magnitude)
 {

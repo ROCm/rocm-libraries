@@ -30,8 +30,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include _THRUST_STD_INCLUDE(type_traits)
-
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
@@ -45,13 +43,12 @@ THRUST_NAMESPACE_END
 #include <thrust/detail/allocator/no_throw_allocator.h>
 #include <thrust/detail/allocator/temporary_allocator.h>
 #include <thrust/detail/contiguous_storage.h>
-#include <thrust/detail/memory_wrapper.h>
 #include <thrust/iterator/detail/tagged_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__host_stdlib/memory)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail

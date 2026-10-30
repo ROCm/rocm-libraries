@@ -77,7 +77,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator first,
   InputIterator last,
@@ -97,7 +97,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator1 first,
   InputIterator1 last,
@@ -142,7 +142,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator first,
   InputIterator last,
@@ -162,7 +162,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator1 first,
   InputIterator1 last,
@@ -253,7 +253,7 @@ ForwardIterator stable_partition(ForwardIterator first, ForwardIterator last, In
 } // end stable_partition()
 
 template <typename InputIterator, typename OutputIterator1, typename OutputIterator2, typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
   InputIterator first, InputIterator last, OutputIterator1 out_true, OutputIterator2 out_false, Predicate pred)
 {
   using thrust::system::detail::generic::select_system;
@@ -274,7 +274,7 @@ template <typename InputIterator1,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
   InputIterator1 first,
   InputIterator1 last,
   InputIterator2 stencil,
@@ -299,7 +299,7 @@ thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
 } // end partition_copy()
 
 template <typename InputIterator, typename OutputIterator1, typename OutputIterator2, typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   InputIterator first, InputIterator last, OutputIterator1 out_true, OutputIterator2 out_false, Predicate pred)
 {
   using thrust::system::detail::generic::select_system;
@@ -320,7 +320,7 @@ template <typename InputIterator1,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   InputIterator1 first,
   InputIterator1 last,
   InputIterator2 stencil,

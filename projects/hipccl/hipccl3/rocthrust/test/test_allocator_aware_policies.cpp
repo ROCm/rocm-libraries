@@ -18,7 +18,7 @@
 #include <thrust/detail/libcxx_wrapper/__cccl_config.h>
 #include <thrust/detail/seq.h>
 #include <thrust/system/cpp/detail/execution_policy.h>
-#include <thrust/system/hip/detail/par.h>
+#include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/system/omp/detail/execution_policy.h>
 #include <thrust/system/tbb/detail/execution_policy.h>
 

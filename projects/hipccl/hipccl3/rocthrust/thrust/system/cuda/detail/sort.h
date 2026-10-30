@@ -305,7 +305,6 @@ THRUST_RUNTIME_FUNCTION void radix_sort(execution_policy<Derived>& policy, Key* 
 
 namespace __smart_sort
 {
-// TODO(bgruber): we can drop _THRUST_STD::less etc. when they truly alias to the ::cuda::std ones
 template <class Key, class CompareOp>
 using can_use_primitive_sort = ::cuda::std::integral_constant<
   bool,
@@ -318,14 +317,10 @@ using can_use_primitive_sort = ::cuda::std::integral_constant<
 #  endif // _CCCL_HAS_NVBF16() && !defined(__CUDA_NO_BFLOAT16_CONVERSIONS__) &&
          // !defined(__CUDA_NO_BFLOAT16_OPERATORS__)
    )
-    && (::cuda::std::is_same<CompareOp, _THRUST_STD::less<Key>>::value
-        || ::cuda::std::is_same<CompareOp, ::cuda::std::less<Key>>::value
-        || ::cuda::std::is_same<CompareOp, _THRUST_STD::less<void>>::value
-        || ::cuda::std::is_same<CompareOp, ::cuda::std::less<void>>::value
-        || ::cuda::std::is_same<CompareOp, _THRUST_STD::greater<Key>>::value
-        || ::cuda::std::is_same<CompareOp, ::cuda::std::greater<Key>>::value
-        || ::cuda::std::is_same<CompareOp, _THRUST_STD::greater<void>>::value
-        || ::cuda::std::is_same<CompareOp, ::cuda::std::greater<void>>::value)>;
+    && (::cuda::std::is_same_v<CompareOp, ::cuda::std::less<Key>>
+        || ::cuda::std::is_same_v<CompareOp, ::cuda::std::less<void>>
+        || ::cuda::std::is_same_v<CompareOp, ::cuda::std::greater<Key>>
+        || ::cuda::std::is_same_v<CompareOp, ::cuda::std::greater<void>>)>;
 
 template <
   class SORT_ITEMS,

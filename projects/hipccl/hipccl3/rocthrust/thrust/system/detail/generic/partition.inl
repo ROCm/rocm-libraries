@@ -25,17 +25,20 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/advance.h>
+
 #include <thrust/count.h>
 #include <thrust/detail/internal_functional.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/transform_iterator.h>
-#include <thrust/pair.h>
 #include <thrust/partition.h>
 #include <thrust/remove.h>
 #include <thrust/sort.h>
 #include <thrust/system/detail/generic/partition.h>
+
+#include _THRUST_STD_INCLUDE(__functional/not_fn.h)
+#include _THRUST_STD_INCLUDE(__iterator/advance.h)
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic
@@ -89,7 +92,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   thrust::execution_policy<DerivedPolicy>& exec,
   InputIterator first,
   InputIterator last,
@@ -105,7 +108,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partiti
   // remove_copy_if the false partition to out_false
   OutputIterator2 end_of_false_partition = thrust::remove_copy_if(exec, first, last, out_false, pred);
 
-  return thrust::make_pair(end_of_true_partition, end_of_false_partition);
+  return _THRUST_STD::make_pair(end_of_true_partition, end_of_false_partition);
 } // end stable_partition_copy()
 
 template <typename DerivedPolicy,
@@ -114,7 +117,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   thrust::execution_policy<DerivedPolicy>& exec,
   InputIterator1 first,
   InputIterator1 last,
@@ -131,7 +134,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partiti
   // remove_copy_if the false partition to out_false
   OutputIterator2 end_of_false_partition = thrust::remove_copy_if(exec, first, last, stencil, out_false, pred);
 
-  return thrust::make_pair(end_of_true_partition, end_of_false_partition);
+  return _THRUST_STD::make_pair(end_of_true_partition, end_of_false_partition);
 } // end stable_partition_copy()
 
 template <typename DerivedPolicy, typename ForwardIterator, typename Predicate>
@@ -157,7 +160,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
   thrust::execution_policy<DerivedPolicy>& exec,
   InputIterator first,
   InputIterator last,
@@ -174,7 +177,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
   thrust::execution_policy<DerivedPolicy>& exec,
   InputIterator1 first,
   InputIterator1 last,

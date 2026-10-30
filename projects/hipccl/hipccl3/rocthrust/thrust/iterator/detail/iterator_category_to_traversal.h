@@ -26,14 +26,9 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_categories.h>
 #include <thrust/iterator/iterator_traversal_tags.h>
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -58,9 +53,9 @@ THRUST_HOST_DEVICE auto cat_to_traversal_impl(const output_device_iterator_tag&)
 template <typename CategoryOrTraversal>
 struct iterator_category_to_traversal
 {
-  using type = ::internal::If<_THRUST_STD::is_convertible_v<CategoryOrTraversal, incrementable_traversal_tag>,
-                              CategoryOrTraversal,
-                              decltype(cat_to_traversal_impl(CategoryOrTraversal{}))>;
+  using type = _THRUST_STD::_If<_THRUST_STD::is_convertible_v<CategoryOrTraversal, incrementable_traversal_tag>,
+                                CategoryOrTraversal,
+                                decltype(cat_to_traversal_impl(CategoryOrTraversal{}))>;
 };
 
 template <typename CategoryOrTraversal>

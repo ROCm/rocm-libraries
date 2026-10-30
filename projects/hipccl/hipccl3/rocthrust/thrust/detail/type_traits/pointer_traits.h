@@ -25,15 +25,20 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_nested_type.h>
 #include <thrust/detail/type_traits/is_metafunction_defined.h>
 #include <thrust/detail/type_traits/is_thrust_pointer.h>
 #include <thrust/iterator/iterator_traits.h>
 
+#include _THRUST_STD_INCLUDE(__type_traits/add_lvalue_reference.h)
+#include _THRUST_STD_INCLUDE(__type_traits/conjunction.h)
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_void.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 #include _THRUST_STD_INCLUDE(cstddef)
-#include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -292,15 +297,15 @@ struct is_pointer_system_convertible : _THRUST_STD::is_convertible<iterator_syst
 
 template <typename FromPtr, typename ToPtr>
 struct is_pointer_convertible
-    : ::internal::_And<
+    : _THRUST_STD::_And<
         _THRUST_STD::is_convertible<typename pointer_element<FromPtr>::type*, typename pointer_element<ToPtr>::type*>,
         is_pointer_system_convertible<FromPtr, ToPtr>>
 {};
 
 template <typename FromPtr, typename ToPtr>
 struct is_void_pointer_system_convertible
-    : ::internal::_And<_THRUST_STD::is_same<typename pointer_element<FromPtr>::type, void>,
-                       is_pointer_system_convertible<FromPtr, ToPtr>>
+    : _THRUST_STD::_And<_THRUST_STD::is_same<typename pointer_element<FromPtr>::type, void>,
+                        is_pointer_system_convertible<FromPtr, ToPtr>>
 {};
 
 // avoid inspecting traits of the arguments if they aren't known to be pointers

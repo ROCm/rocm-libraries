@@ -44,11 +44,10 @@
 #  include <thrust/system/hip/detail/transform.h>
 #  include <thrust/type_traits/is_trivially_relocatable.h>
 
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-#    include _THRUST_LIBCXX_INCLUDE(functional)
-#    include _THRUST_STD_INCLUDE(algorithm)
-#    include _THRUST_STD_INCLUDE(iterator)
-#  endif
+#  include _THRUST_LIBCXX_INCLUDE(__functional/address_stability.h)
+#  include _THRUST_STD_INCLUDE(__algorithm/iter_swap.h)
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#  include _THRUST_STD_INCLUDE(__utility/swap.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim

@@ -31,14 +31,14 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/reference_forward_declaration.h>
-#include <thrust/detail/type_traits.h> // for internal::remove_cvref_t
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/generic/memory.h>
 #include <thrust/system/detail/generic/select_system.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(type_traits)
-#endif
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
+#include _THRUST_STD_INCLUDE(__utility/move.h)
 
 #include <ostream>
 
@@ -91,7 +91,7 @@ private:
 
 public:
   using pointer    = Pointer;
-  using value_type = ::internal::remove_cvref_t<Element>;
+  using value_type = _THRUST_STD::remove_cvref_t<Element>;
 
   reference(reference const&) = default;
 
