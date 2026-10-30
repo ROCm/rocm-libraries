@@ -312,6 +312,7 @@ def conv_arg_names(
     two_stage: bool = False,
     streamk: Optional[str] = None,
     split_k: bool = False,
+    split_tail: bool = False,
 ) -> List[ArgSpec]:
     """The implicit-GEMM conv kernarg ABI for one direction.
 
@@ -336,8 +337,12 @@ def conv_arg_names(
     tile_k) and ``ks_count`` (slices; gridDim.z = groups * ks_count), no
     workspace -- the slices add into D. wgrad always carries that pair, so the
     flag is only meaningful for fwd; the workspace (WMMA) split is
-    ``two_stage``.
+    ``two_stage``. ``split_tail`` (fwd split-K only) appends ``full_tiles``:
+    the tiles, in launch order, that run the whole reduction unsplit
+    (``ImplicitGemmConvSpec.split_tail``).
     """
+    if split_tail and not (split_k and direction == "fwd"):
+        raise ValueError("split_tail extends the fwd split-K ABI only")
     if split_k and direction != "fwd":
         raise ValueError(
             f"split_k selects the fwd split-K ABI (got direction={direction!r}; "
@@ -368,6 +373,8 @@ def conv_arg_names(
         out = _fwd_arg_names(is_3d=is_3d, split_k=two_stage)
         if split_k:
             out += [("ks", "i32"), ("ks_count", "i32")]
+        if split_tail:
+            out += [("full_tiles", "i32")]
         return out
     if direction == "wgrad":
         return _wgrad_arg_names(is_3d=is_3d, two_stage=two_stage, streamk=streamk)
@@ -511,6 +518,7 @@ def conv_args_signature(
     two_stage: bool = False,
     streamk: Optional[str] = None,
     split_k: bool = False,
+    split_tail: bool = False,
 ) -> List[Dict[str, Any]]:
     """Implicit-GEMM conv launch signature for one direction.
 
@@ -531,6 +539,7 @@ def conv_args_signature(
             two_stage=two_stage,
             streamk=streamk,
             split_k=split_k,
+            split_tail=split_tail,
         ),
         dtype,
         dtype_b or dtype,

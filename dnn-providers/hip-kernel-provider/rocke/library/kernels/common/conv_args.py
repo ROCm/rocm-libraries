@@ -484,6 +484,7 @@ class ConvArgs:
         two_stage: bool = False,
         streamk: Optional[str] = None,
         split_k: bool = False,
+        split_tail: bool = False,
     ) -> List[ArgSpec]:
         """The ordered kernarg ABI of the kernel these args launch.
 
@@ -500,6 +501,7 @@ class ConvArgs:
             two_stage=two_stage,
             streamk=streamk,
             split_k=split_k,
+            split_tail=split_tail,
         )
 
     # ---- GEMM view (implicit GEMM only) ----
@@ -718,6 +720,7 @@ class ConvArgs:
         streamk: Optional[StreamKLaunch] = None,
         sk_flags: Optional[int] = None,
         sk_partials: Optional[int] = None,
+        full_tiles: Optional[int] = None,
     ) -> Dict[str, int]:
         """Return the ``values`` dict for ``KernelLauncher.__call__()``.
 
@@ -768,6 +771,8 @@ class ConvArgs:
             and self.algorithm == "implicit_gemm"
             and split_k > 1
             and ws_ptr is None,
+            # A fwd split_tail binary: passing full_tiles selects its ABI.
+            split_tail=full_tiles is not None,
         )
         names = [n for n, _ in abi]
         values: Dict[str, int] = dict(
@@ -780,6 +785,7 @@ class ConvArgs:
             "num_sub_gemms": num_sub_gemms,
             "sk_flags": sk_flags,
             "sk_partials": sk_partials,
+            "full_tiles": full_tiles,
         }
         supplied = {k: v for k, v in supplied.items() if v is not None}
         named = self._named_values()
