@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Check repeatable GEMMs for races and numerical errors with CPU rocJITsu."""
+"""Check repeatable GEMMs for races and numerical errors with CPU rocjitsu."""
 
 import argparse
 import csv
@@ -106,7 +106,7 @@ def check_result(problem, text, race_log):
     if re.search(r"^RACE\s", text + "\n" + race_log, re.MULTILINE):
         return "race reported"
     if "[rj warn]" in text or "[rj error]" in text:
-        return "rocJITsu diagnostic; inspect bench.log"
+        return "rocjitsu diagnostic; inspect bench.log"
     if "error: NO solution found!" in text:
         return "no heuristic solution"
     rows, header = [], None
@@ -248,7 +248,7 @@ def main(argv=None):
     parser.add_argument("--bench", default="hipblaslt-bench")
     parser.add_argument("--rocjitsu", default="rocjitsu")
     parser.add_argument(
-        "--config", type=Path, help="CPU-emulation rocJITsu JSON config"
+        "--config", type=Path, help="CPU-emulation rocjitsu JSON config"
     )
     parser.add_argument(
         "--timeout", type=positive_int, default=180, help="seconds per command"
@@ -257,7 +257,7 @@ def main(argv=None):
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="write sampled inputs and reports without running bench or rocJITsu",
+        help="write sampled inputs and reports without running bench or rocjitsu",
     )
     args = parser.parse_args(argv)
     if args.case and args.case > args.count:
