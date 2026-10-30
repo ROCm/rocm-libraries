@@ -250,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn straight_line_chains_read_zero_after_allocation_and_wide_ones_in_loops_keep_the_copy() {
+    fn straight_line_chains_read_zero_after_allocation_and_wide_ones_in_loops_too() {
         // Straight-line code keeps the copies before allocation; after it,
         // each chain's first MFMA reads 0 and no zero is moved anywhere.
         let once = kernel("mfma_f32_16x16x32_f16", "vec<f16x8>", 4, 4, false);
@@ -260,11 +260,12 @@ mod tests {
         assert_eq!((lines.len(), zeros(&lines)), (4, 2), "{lines:?}");
         assert!(!listing.lines().any(|l| l.contains("v_mov_b32") && l.split("//").next().unwrap_or(l).trim_end().ends_with(", 0")), "{listing}");
         // 32x32x16: 16 result dwords, which must not overlap A or B; in the
-        // loop their copies read a zero tuple from before it.
+        // loop their copies read a zero tuple from before it, and after
+        // allocation each chain's first MFMA reads 0 instead (`zero_wide`).
         let wide = kernel("mfma_f32_32x32x16_f16", "vec<f16x8>", 4, 16, true);
         let compiled = rir::compile_any_target(&wide, Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
         let lines = mfma_lines(&compiled.listing());
-        assert_eq!((lines.len(), zeros(&lines)), (4, 0), "{lines:?}");
+        assert_eq!((lines.len(), zeros(&lines)), (4, 2), "{lines:?}");
     }
 
     fn v(r: u16, n: u8) -> Opnd {

@@ -18,7 +18,10 @@
 //! - One constant-bus read per VALU instruction: an SGPR tuple, a special
 //!   register, a literal, or the implicit VCC of `v_div_fmas`. Sources that
 //!   may be VGPRs take copies of the other scalars; scalar-only operands
-//!   (lane masks, lane selects) keep the bus.
+//!   (lane masks, lane selects) keep the bus. A block in a loop reuses a
+//!   copy of an SGPR as it does a literal's register, while nothing writes
+//!   the SGPR or EXEC: the masked selects of an attention tile's rows read
+//!   one SGPR beside their masks, and copied it at each select.
 //! - No null register: a discarded scalar result goes to a dead SGPR pair.
 //! - VGPR tuples at even registers: tuple vregs are 2-aligned, and a tuple
 //!   operand at an odd offset of one goes through an aligned copy.
@@ -34,10 +37,11 @@ pub fn run(f: &mut MFunc) {
         }
     }
     let reuse = !crate::rir::debug_flag("noliteralreuse");
+    let copy_reuse = !crate::rir::debug_flag("nocopyreuse");
     let mut blocks = std::mem::take(&mut f.blocks);
     for block in &mut blocks {
         let mut out = Vec::with_capacity(block.insts.len());
-        let mut cache = Literals { reuse: reuse && block.loop_depth > 0, held: Vec::new() };
+        let mut cache = Literals { reuse: reuse && block.loop_depth > 0, held: Vec::new(), copies: copy_reuse && block.loop_depth > 0, copied: Vec::new() };
         for inst in block.insts.drain(..) {
             legalize(f, inst, &mut out, &mut cache);
         }
@@ -50,10 +54,13 @@ pub fn run(f: &mut MFunc) {
 const REUSE: usize = 64;
 
 /// The literal registers of the block being legalized: (value, dwords, literal kind, class), the register, and
+/// the output position of its last use; with `copies`, also the VGPR copies of SGPRs: the SGPR, the copy and
 /// the output position of its last use.
 struct Literals {
     reuse: bool,
     held: Vec<((u32, u8, Lit, Class), Opnd, usize)>,
+    copies: bool,
+    copied: Vec<(VRef, Opnd, usize)>,
 }
 
 impl Literals {
@@ -77,6 +84,37 @@ impl Literals {
     /// After an EXEC write a VGPR literal may lack the lanes it now runs in.
     fn exec_written(&mut self) {
         self.held.retain(|e| e.0 .3 != Class::V);
+        self.copied.clear();
+    }
+
+    /// A VGPR copy of scalar `src` for a source that may be a VGPR: in a loop,
+    /// the block's copy of an SGPR if a use within `REUSE` instructions read
+    /// it and nothing wrote the SGPR or EXEC since (each lane holds what a
+    /// copy here would), else a fresh one.
+    fn copy(&mut self, f: &mut MFunc, src: Opnd, out: &mut Vec<MInst>) -> Opnd {
+        let at = out.len();
+        let sgpr = match src {
+            Opnd::R(v) if self.copies => Some(v),
+            _ => None,
+        };
+        if let Some(e) = sgpr.and_then(|v| self.copied.iter_mut().find(|e| e.0 == v && at - e.2 <= REUSE)) {
+            e.2 = at;
+            return e.1;
+        }
+        let dst = vreg(f, Class::V, src.dwords());
+        out.push(MInst::new(Opc::Copy, [Opnd::R(dst)], [src]));
+        if let Some(v) = sgpr {
+            self.copied.retain(|e| e.0 != v);
+            self.copied.push((v, Opnd::R(dst), out.len()));
+        }
+        Opnd::R(dst)
+    }
+
+    /// After a write of `def` the copies of what it overlaps are stale.
+    fn written(&mut self, def: &Opnd) {
+        if let Opnd::R(d) = *def {
+            self.copied.retain(|e| e.0.reg != d.reg || e.0.off + e.0.n <= d.off || d.off + d.n <= e.0.off);
+        }
     }
 }
 
@@ -128,6 +166,9 @@ fn legalize(f: &mut MFunc, mut inst: MInst, out: &mut Vec<MInst>, cache: &mut Li
         }
     }
     let exec = inst.op.flags() & F_DEF_EXEC != 0 || inst.defs.iter().any(|d| matches!(d, Opnd::P(Phys::ExecLo, _)));
+    for d in inst.defs.iter().chain(after.iter().flat_map(|a| a.defs.iter())) {
+        cache.written(d);
+    }
     out.push(inst);
     out.extend(after);
     if exec {
@@ -250,12 +291,7 @@ fn constant_bus(f: &mut MFunc, inst: &mut MInst, info: t::Info, sig: &t::Sig, ou
         }
         let copy = match s {
             Scalar::Literal(v) => cache.get(f, Class::V, v, dwords(k), lits[k], out),
-            _ => {
-                let src = inst.uses[k];
-                let dst = vreg(f, Class::V, src.dwords());
-                out.push(MInst::new(Opc::Copy, [Opnd::R(dst)], [src]));
-                Opnd::R(dst)
-            }
+            _ => cache.copy(f, inst.uses[k], out),
         };
         for j in 0..encoded {
             if scalar(f, inst, j, lits[j]) == Some(s) {
@@ -352,6 +388,34 @@ mod tests {
         let mut far = vec![cmp(1)];
         far.extend((0..REUSE).map(|_| MInst::new(Opc::VAddF32, [r(3, 1)], [r(0, 1), r(0, 1)])));
         far.push(cmp(2));
+        let code = run_in_loop(&mut f, far);
+        assert_eq!(code.iter().filter(|i| i.op == Opc::Copy).count(), 2);
+    }
+
+    #[test]
+    fn a_block_in_a_loop_copies_an_sgpr_once() {
+        // Four selects of one SGPR under lane masks in SGPR pairs: the masks keep the bus, so the SGPR is copied
+        // to a VGPR, once for all four in a loop.
+        let mut f = func(&[(Class::S, 1), (Class::S, 2), (Class::V, 1), (Class::V, 1), (Class::V, 1), (Class::V, 1)]);
+        let sel = |d: u32| MInst::new(Opc::VCndmaskB32, [r(d, 1)], [Opnd::Imm(0xffff_ffff), r(0, 1), r(1, 2)]);
+        let code = run_in_loop(&mut f, vec![sel(2), sel(3), sel(4), sel(5)]);
+        let copies: Vec<&MInst> = code.iter().filter(|i| i.op == Opc::Copy).collect();
+        assert_eq!(copies.len(), 1, "{code:?}");
+        assert!(code.iter().filter(|i| i.op == Opc::VCndmaskB32).all(|i| i.uses[1] == copies[0].defs[0] && i.uses[2] == r(1, 2)));
+        // Straight-line code copies it at each use.
+        let code = run_on(&mut f, vec![sel(2), sel(3), sel(4), sel(5)]);
+        assert_eq!(code.iter().filter(|i| i.op == Opc::Copy).count(), 4, "{code:?}");
+        // A write of the SGPR, or of EXEC, between two uses copies it again.
+        let write = MInst::new(Opc::SMovB32, [r(0, 1)], [Opnd::Imm(7)]);
+        let code = run_in_loop(&mut f, vec![sel(2), write, sel(3)]);
+        assert_eq!(code.iter().filter(|i| i.op == Opc::Copy).count(), 2, "{code:?}");
+        let exec = MInst::new(Opc::SAndSaveexecB64, [r(1, 2)], [r(1, 2)]);
+        let code = run_in_loop(&mut f, vec![sel(2), exec, sel(3)]);
+        assert_eq!(code.iter().filter(|i| i.op == Opc::Copy).count(), 2, "{code:?}");
+        // A use more than REUSE instructions after the last copies it again.
+        let mut far = vec![sel(2)];
+        far.extend((0..REUSE).map(|_| MInst::new(Opc::VAddF32, [r(3, 1)], [r(2, 1), r(2, 1)])));
+        far.push(sel(4));
         let code = run_in_loop(&mut f, far);
         assert_eq!(code.iter().filter(|i| i.op == Opc::Copy).count(), 2);
     }

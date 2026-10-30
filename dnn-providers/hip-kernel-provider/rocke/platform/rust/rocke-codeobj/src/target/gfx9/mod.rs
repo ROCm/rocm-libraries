@@ -18,6 +18,7 @@ pub mod agpr_spill;
 pub mod asm;
 pub mod atomics;
 pub mod bank_wide;
+pub mod clauses;
 pub mod attn_ops;
 pub mod conv_ops;
 pub mod cpol;
@@ -30,6 +31,7 @@ pub mod lane_cse;
 pub mod early_constants;
 pub mod fp8;
 pub mod lanes;
+pub mod latency;
 pub mod lds_dma;
 pub mod lds_tr;
 pub mod lits;
@@ -48,10 +50,12 @@ pub mod sched;
 pub mod select;
 pub mod spill;
 pub mod trade;
+pub mod unrolled;
 pub mod vectorize;
 pub mod waitcnt;
 pub mod wide_add;
 pub mod zero_acc;
+pub mod zero_wide;
 pub mod widen;
 
 /// What gfx950 does between the shared instruction selection and `legalize`:
@@ -80,7 +84,8 @@ pub fn prepare(f: &mut MFunc) {
 /// The passes after register allocation on gfx950: pseudos become moves
 /// and conversions (the shared expansion: a gfx9 copy is the same moves),
 /// MFMAs read the zeros moved into their C as the constant
-/// (`zero_acc::after_allocation`), the 64-bit shift fix, `s_waitcnt`, then
+/// (`zero_acc::after_allocation`; copied from zeros of an earlier block,
+/// `zero_wide`), the 64-bit shift fix, `s_waitcnt`, then
 /// the hazard `s_nop`s. gfx950 has no `s_delay_alu`, clauses, VOPD or VGPR
 /// release message, so none of the gfx11 passes that place them run.
 pub fn finish(func: &mut MFunc, num_vgprs: u32) -> Result<(), CompileError> {
@@ -92,6 +97,7 @@ pub fn finish(func: &mut MFunc, num_vgprs: u32) -> Result<(), CompileError> {
 pub fn finish_lapped(func: &mut MFunc, num_vgprs: u32, lap: &mut dyn FnMut(&'static str)) -> Result<(), CompileError> {
     crate::rir::post::expand_pseudos(func)?;
     zero_acc::after_allocation(func);
+    zero_wide::after_allocation(func);
     hazards::fix_shift64(func, num_vgprs)?;
     lap("expand");
     waitcnt::insert(func);

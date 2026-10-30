@@ -84,9 +84,11 @@ impl Bits {
         }
         changed
     }
+    #[cfg(test)]
     fn intersects(&self, other: &Bits) -> bool {
         self.0.iter().zip(&other.0).any(|(a, b)| a & b != 0)
     }
+    #[cfg(test)]
     fn ones(&self) -> impl Iterator<Item = usize> + '_ {
         self.0.iter().enumerate().flat_map(|(w, &word)| (0..64).filter(move |b| word >> b & 1 != 0).map(move |b| w * 64 + b))
     }
@@ -123,227 +125,298 @@ pub(super) fn place(f: &MFunc) -> Option<(Vec<u32>, u32)> {
 /// `place`; with `in_loops`, a web also moves when an access to it sits in
 /// its MFMAs' innermost loop, the move running there every iteration.
 pub(super) fn place_with(f: &MFunc, in_loops: bool) -> Option<(Vec<u32>, u32)> {
-    let nv = f.vregs.len();
-    let whole = |o: &Opnd| -> Option<u32> {
-        match *o {
-            Opnd::R(v) if v.off == 0 && v.n == f.vregs[v.reg as usize].size => Some(v.reg),
-            _ => None,
-        }
-    };
-    // Registers only whole copies and MFMAs define (or none, undefined): the
-    // others, such as a zero tuple several accumulators start from, stay out
-    // of webs, and copies from them are moves into the web.
-    let mut defined_inside = vec![true; nv];
-    for inst in f.blocks.iter().flat_map(|b| &b.insts) {
-        let inside = match inst.op {
-            Opc::Copy | Opc::ImplicitDef => true,
-            op if is_mfma(op) => inst.uses.get(2) == Some(&inst.defs[0]) || matches!(inst.uses.get(2), Some(Opnd::Imm(_))),
-            _ => false,
-        };
-        for d in &inst.defs {
-            if let Opnd::R(v) = d {
-                defined_inside[v.reg as usize] &= inside && whole(d).is_some();
+    let webs = Webs::of(f);
+    let bad = webs.marked(f, in_loops);
+    webs.placed(f, &bad)
+}
+
+/// `place_with(f, true)` and `place(f)`, from one pass over the webs, where
+/// the in-loop rule keeps other webs in VGPRs than `place`'s does; None where
+/// it keeps the same ones, and the two placements are then equal.
+pub(super) fn place_apart(f: &MFunc) -> Option<(Option<(Vec<u32>, u32)>, Option<(Vec<u32>, u32)>)> {
+    let webs = Webs::of(f);
+    let (strict, in_loops) = (webs.marked(f, false), webs.marked(f, true));
+    (strict != in_loops).then(|| (webs.placed(f, &in_loops), webs.placed(f, &strict)))
+}
+
+/// The register `o` names whole, if it does.
+fn whole_reg(f: &MFunc, o: &Opnd) -> Option<u32> {
+    match *o {
+        Opnd::R(v) if v.off == 0 && v.n == f.vregs[v.reg as usize].size => Some(v.reg),
+        _ => None,
+    }
+}
+
+/// `rows[a]` to change and `rows[b]` to read, `a != b`.
+fn pair(rows: &mut [Bits], a: usize, b: usize) -> (&mut Bits, &Bits) {
+    if a < b {
+        let (lo, hi) = rows.split_at_mut(b);
+        (&mut lo[a], &hi[0])
+    } else {
+        let (lo, hi) = rows.split_at_mut(a);
+        (&mut hi[0], &lo[b])
+    }
+}
+
+/// The webs of a function as `place_with` finds them before its in-loop
+/// rule: each register's root, which roots are webs, which of those stay in
+/// VGPRs whatever that rule says, and each web's innermost MFMA loop and
+/// weight.
+struct Webs {
+    root: Vec<u32>,
+    web: Vec<bool>,
+    bad: Vec<bool>,
+    hot: Vec<u32>,
+    value: Vec<u64>,
+}
+
+impl Webs {
+    fn of(f: &MFunc) -> Webs {
+        let nv = f.vregs.len();
+        let whole = |o: &Opnd| whole_reg(f, o);
+        // Registers only whole copies and MFMAs define (or none, undefined): the
+        // others, such as a zero tuple several accumulators start from, stay out
+        // of webs, and copies from them are moves into the web.
+        let mut defined_inside = vec![true; nv];
+        for inst in f.blocks.iter().flat_map(|b| &b.insts) {
+            let inside = match inst.op {
+                Opc::Copy | Opc::ImplicitDef => true,
+                op if is_mfma(op) => inst.uses.get(2) == Some(&inst.defs[0]) || matches!(inst.uses.get(2), Some(Opnd::Imm(_))),
+                _ => false,
+            };
+            for d in &inst.defs {
+                if let Opnd::R(v) = d {
+                    defined_inside[v.reg as usize] &= inside && whole(d).is_some();
+                }
             }
         }
-    }
-    let eligible = |v: u32| f.vregs[v as usize].class == Class::V && f.vregs[v as usize].fixed.is_none() && defined_inside[v as usize];
-    // Webs: V registers joined by whole copies, with an MFMA's tied D and C.
-    let mut parent: Vec<u32> = (0..nv as u32).collect();
-    let mut seed = vec![false; nv];
-    let mut pinned = vec![false; nv];
-    for inst in f.blocks.iter().flat_map(|b| &b.insts) {
-        if is_mfma(inst.op) {
-            match (whole(&inst.defs[0]), inst.uses.get(2).and_then(whole)) {
-                (Some(d), Some(c)) if d == c && eligible(d) => seed[d as usize] = true,
-                // C an inline constant (`zero_acc`): the web starts at this D.
-                (Some(d), None) if matches!(inst.uses.get(2), Some(Opnd::Imm(_))) && eligible(d) => seed[d as usize] = true,
-                _ => {
-                    for o in inst.defs.iter().chain(inst.uses.get(2)) {
-                        if let Opnd::R(v) = o {
-                            pinned[v.reg as usize] = true;
+        let eligible = |v: u32| f.vregs[v as usize].class == Class::V && f.vregs[v as usize].fixed.is_none() && defined_inside[v as usize];
+        // Webs: V registers joined by whole copies, with an MFMA's tied D and C.
+        let mut parent: Vec<u32> = (0..nv as u32).collect();
+        let mut seed = vec![false; nv];
+        let mut pinned = vec![false; nv];
+        for inst in f.blocks.iter().flat_map(|b| &b.insts) {
+            if is_mfma(inst.op) {
+                match (whole(&inst.defs[0]), inst.uses.get(2).and_then(whole)) {
+                    (Some(d), Some(c)) if d == c && eligible(d) => seed[d as usize] = true,
+                    // C an inline constant (`zero_acc`): the web starts at this D.
+                    (Some(d), None) if matches!(inst.uses.get(2), Some(Opnd::Imm(_))) && eligible(d) => seed[d as usize] = true,
+                    _ => {
+                        for o in inst.defs.iter().chain(inst.uses.get(2)) {
+                            if let Opnd::R(v) = o {
+                                pinned[v.reg as usize] = true;
+                            }
                         }
                     }
                 }
-            }
-        } else if inst.op == Opc::Copy {
-            if let (Some(d), Some(s)) = (whole(&inst.defs[0]), whole(&inst.uses[0])) {
-                if eligible(d) && eligible(s) && f.vregs[d as usize].size == f.vregs[s as usize].size {
-                    let (rd, rs) = (find(&mut parent, d), find(&mut parent, s));
-                    parent[rd as usize] = rs;
-                }
-            }
-        }
-    }
-    let root: Vec<u32> = (0..nv as u32).map(|v| find(&mut parent, v)).collect();
-    let mut web = vec![false; nv];
-    let mut bad = vec![false; nv];
-    for v in 0..nv {
-        web[root[v] as usize] |= seed[v];
-        bad[root[v] as usize] |= pinned[v];
-    }
-    // The innermost loop of each web's MFMAs, and their weight.
-    let (mut hot, mut value) = (vec![0u32; nv], vec![0u64; nv]);
-    for block in &f.blocks {
-        for inst in block.insts.iter().filter(|i| is_mfma(i.op)) {
-            if let Some(d) = whole(&inst.defs[0]).filter(|&d| seed[d as usize]) {
-                let r = root[d as usize] as usize;
-                hot[r] = hot[r].max(block.loop_depth);
-                value[r] += 8u64.pow(block.loop_depth.min(4));
-            }
-        }
-    }
-    let in_web = |v: u32, web: &[bool], bad: &[bool]| web[root[v as usize] as usize] && !bad[root[v as usize] as usize];
-    // A web stays in VGPRs if a move would sit in its MFMAs' innermost loop,
-    // or an instruction other than an MFMA reads and writes it in place.
-    for block in &f.blocks {
-        let depth = block.loop_depth;
-        for inst in &block.insts {
-            let mut moved: Vec<u32> = Vec::new();
-            let named = |o: &Opnd| match o {
-                Opnd::R(v) if in_web(v.reg, &web, &bad) => Some(v.reg),
-                _ => None,
-            };
-            if is_mfma(inst.op) && whole(&inst.defs[0]).is_some_and(|d| in_web(d, &web, &bad)) {
-                moved.extend(inst.uses.iter().enumerate().filter(|&(k, _)| k != 2).filter_map(|(_, o)| named(o)));
             } else if inst.op == Opc::Copy {
-                let (d, s) = (whole(&inst.defs[0]), whole(&inst.uses[0]));
-                let inside = matches!((d, s), (Some(d), Some(s)) if in_web(d, &web, &bad) && in_web(s, &web, &bad));
-                if !inside {
-                    moved.extend(inst.defs.iter().chain(inst.uses.iter()).filter_map(named));
-                }
-            } else {
-                let defs: Vec<u32> = inst.defs.iter().filter_map(named).collect();
-                let uses: Vec<u32> = inst.uses.iter().filter_map(named).collect();
-                for &d in defs.iter().filter(|d| uses.contains(d)) {
-                    bad[root[d as usize] as usize] = true;
-                }
-                if inst.op != Opc::ImplicitDef {
-                    moved.extend(defs.into_iter().chain(uses));
-                }
-            }
-            for v in moved {
-                let r = root[v as usize] as usize;
-                if !in_loops && hot[r] > 0 && depth >= hot[r] {
-                    bad[r] = true;
+                if let (Some(d), Some(s)) = (whole(&inst.defs[0]), whole(&inst.uses[0])) {
+                    if eligible(d) && eligible(s) && f.vregs[d as usize].size == f.vregs[s as usize].size {
+                        let (rd, rs) = (find(&mut parent, d), find(&mut parent, s));
+                        parent[rd as usize] = rs;
+                    }
                 }
             }
         }
-    }
-    let members: Vec<u32> = (0..nv as u32).filter(|&v| in_web(v, &web, &bad)).collect();
-    if members.is_empty() {
-        return None;
-    }
-    let mut idx = vec![NONE; nv];
-    for (i, &v) in members.iter().enumerate() {
-        idx[v as usize] = i as u32;
-    }
-    let m = members.len();
-    let member = |o: &Opnd| match o {
-        Opnd::R(v) if idx[v.reg as usize] != NONE => Some(idx[v.reg as usize] as usize),
-        _ => None,
-    };
-    let whole_member = |o: &Opnd| whole(o).filter(|&v| idx[v as usize] != NONE).map(|v| idx[v as usize] as usize);
-    // Liveness of the members, by block: upward-exposed uses (a partial
-    // definition reads the rest) and whole definitions.
-    let nb = f.blocks.len();
-    let (mut gen, mut kill) = (vec![Bits::new(m); nb], vec![Bits::new(m); nb]);
-    for (b, block) in f.blocks.iter().enumerate() {
-        for inst in &block.insts {
-            for i in inst.uses.iter().filter_map(member) {
-                if !kill[b].get(i) {
-                    gen[b].set(i);
-                }
-            }
-            for d in &inst.defs {
-                match (whole_member(d), member(d)) {
-                    (Some(i), _) => kill[b].set(i),
-                    (None, Some(i)) if !kill[b].get(i) => gen[b].set(i),
-                    _ => {}
+        let root: Vec<u32> = (0..nv as u32).map(|v| find(&mut parent, v)).collect();
+        let mut web = vec![false; nv];
+        let mut bad = vec![false; nv];
+        for v in 0..nv {
+            web[root[v] as usize] |= seed[v];
+            bad[root[v] as usize] |= pinned[v];
+        }
+        // The innermost loop of each web's MFMAs, and their weight.
+        let (mut hot, mut value) = (vec![0u32; nv], vec![0u64; nv]);
+        for block in &f.blocks {
+            for inst in block.insts.iter().filter(|i| is_mfma(i.op)) {
+                if let Some(d) = whole(&inst.defs[0]).filter(|&d| seed[d as usize]) {
+                    let r = root[d as usize] as usize;
+                    hot[r] = hot[r].max(block.loop_depth);
+                    value[r] += 8u64.pow(block.loop_depth.min(4));
                 }
             }
         }
+        Webs { root, web, bad, hot, value }
     }
-    let succs: Vec<Vec<usize>> = (0..nb).map(|b| f.successors(b)).collect();
-    let mut live_out = vec![Bits::new(m); nb];
-    let mut live_in = gen.clone();
-    loop {
-        let mut changed = false;
-        for b in (0..nb).rev() {
-            let mut out = Bits::new(m);
-            for &s in &succs[b] {
-                out.or(&live_in[s]);
-            }
-            let mut inn = out.clone();
-            for i in kill[b].ones() {
-                inn.clear(i);
-            }
-            inn.or(&gen[b]);
-            changed |= live_out[b].or(&out) | live_in[b].or(&inn);
-        }
-        if !changed {
-            break;
-        }
-    }
-    // Interference: a member defined while another is live, except the source
-    // of the copy that defines it.
-    let (adj, mut copies) = interference(f, m, &live_out, &member, &whole_member);
-    // Groups: members joined by copies while they do not interfere, the
-    // innermost copies first.
-    copies.sort_by(|a, b| b.0.cmp(&a.0).then((a.1, a.2).cmp(&(b.1, b.2))));
-    let mut gparent: Vec<u32> = (0..m as u32).collect();
-    let mut gmem: Vec<Bits> = (0..m)
-        .map(|i| {
-            let mut s = Bits::new(m);
-            s.set(i);
-            s
-        })
-        .collect();
-    let mut gadj = adj;
-    for &(_, _, _, d, s) in &copies {
-        let (rd, rs) = (find(&mut gparent, d as u32) as usize, find(&mut gparent, s as u32) as usize);
-        if rd == rs || gadj[rd].intersects(&gmem[rs]) {
-            continue;
-        }
-        let (mem, adjs) = (gmem[rs].clone(), gadj[rs].clone());
-        gmem[rd].or(&mem);
-        gadj[rd].or(&adjs);
-        gparent[rs] = rd as u32;
-    }
-    // AGPRs per group, the weightiest webs first; a web that does not fit
-    // stays in VGPRs whole.
-    let mut webs: Vec<u32> = (0..nv as u32).filter(|&r| root[r as usize] == r && web[r as usize] && !bad[r as usize]).collect();
-    webs.sort_by(|&a, &b| value[b as usize].cmp(&value[a as usize]).then(a.cmp(&b)));
-    let mut base = vec![NONE; m];
-    let mut placed: Vec<(usize, u32, u32)> = Vec::new();
-    for &w in &webs {
-        let groups: Vec<usize> = (0..m).filter(|&i| root[members[i] as usize] == w && find(&mut gparent, i as u32) as usize == i).collect();
-        let mark = placed.len();
-        for &g in &groups {
-            let size = f.vregs[members[g] as usize].size as u32;
-            let align = if size >= 4 { 4 } else { size.max(1) };
-            let fits = |at: u32| placed.iter().all(|&(h, hb, hs)| !gadj[g].intersects(&gmem[h]) || at + size <= hb || hb + hs <= at);
-            match (0..=AGPRS.saturating_sub(size)).step_by(align as usize).find(|&at| fits(at)) {
-                Some(at) => placed.push((g, at, size)),
-                None => {
-                    placed.truncate(mark);
-                    break;
+
+    /// The roots that stay in VGPRs: those `of` keeps there, a web with a
+    /// move in its MFMAs' innermost loop (unless `in_loops`), and a web an
+    /// instruction other than an MFMA reads and writes in place.
+    fn marked(&self, f: &MFunc, in_loops: bool) -> Vec<bool> {
+        let (root, web, hot) = (&self.root, &self.web, &self.hot);
+        let whole = |o: &Opnd| whole_reg(f, o);
+        let mut bad = self.bad.clone();
+        let in_web = |v: u32, bad: &[bool]| web[root[v as usize] as usize] && !bad[root[v as usize] as usize];
+        let named = |o: &Opnd, bad: &[bool]| match o {
+            Opnd::R(v) if in_web(v.reg, bad) => Some(v.reg),
+            _ => None,
+        };
+        let (mut moved, mut defs, mut uses) = (Vec::new(), Vec::new(), Vec::new());
+        // A web stays in VGPRs if a move would sit in its MFMAs' innermost loop,
+        // or an instruction other than an MFMA reads and writes it in place.
+        for block in &f.blocks {
+            let depth = block.loop_depth;
+            for inst in &block.insts {
+                moved.clear();
+                if is_mfma(inst.op) && whole(&inst.defs[0]).is_some_and(|d| in_web(d, &bad)) {
+                    moved.extend(inst.uses.iter().enumerate().filter(|&(k, _)| k != 2).filter_map(|(_, o)| named(o, &bad)));
+                } else if inst.op == Opc::Copy {
+                    let (d, s) = (whole(&inst.defs[0]), whole(&inst.uses[0]));
+                    let inside = matches!((d, s), (Some(d), Some(s)) if in_web(d, &bad) && in_web(s, &bad));
+                    if !inside {
+                        moved.extend(inst.defs.iter().chain(inst.uses.iter()).filter_map(|o| named(o, &bad)));
+                    }
+                } else {
+                    defs.clear();
+                    defs.extend(inst.defs.iter().filter_map(|o| named(o, &bad)));
+                    uses.clear();
+                    uses.extend(inst.uses.iter().filter_map(|o| named(o, &bad)));
+                    for &d in defs.iter().filter(|d| uses.contains(d)) {
+                        bad[root[d as usize] as usize] = true;
+                    }
+                    if inst.op != Opc::ImplicitDef {
+                        moved.extend(defs.iter().chain(uses.iter()).copied());
+                    }
+                }
+                for &v in &moved {
+                    let r = root[v as usize] as usize;
+                    if !in_loops && hot[r] > 0 && depth >= hot[r] {
+                        bad[r] = true;
+                    }
                 }
             }
         }
+        bad
     }
-    if placed.is_empty() {
-        return None;
-    }
-    for &(g, at, _) in &placed {
-        for i in gmem[g].ones() {
-            base[i] = at;
+
+    /// Where `bank` puts each register of the webs `bad` leaves to move (from
+    /// AGPR 0, NONE for the others), and the AGPRs they take.
+    fn placed(&self, f: &MFunc, bad: &[bool]) -> Option<(Vec<u32>, u32)> {
+        let (root, web, value) = (&self.root, &self.web, &self.value);
+        let nv = f.vregs.len();
+        let whole = |o: &Opnd| whole_reg(f, o);
+        let in_web = |v: u32| web[root[v as usize] as usize] && !bad[root[v as usize] as usize];
+        let members: Vec<u32> = (0..nv as u32).filter(|&v| in_web(v)).collect();
+        if members.is_empty() {
+            return None;
         }
+        let mut idx = vec![NONE; nv];
+        for (i, &v) in members.iter().enumerate() {
+            idx[v as usize] = i as u32;
+        }
+        let m = members.len();
+        let member = |o: &Opnd| match o {
+            Opnd::R(v) if idx[v.reg as usize] != NONE => Some(idx[v.reg as usize] as usize),
+            _ => None,
+        };
+        let whole_member = |o: &Opnd| whole(o).filter(|&v| idx[v as usize] != NONE).map(|v| idx[v as usize] as usize);
+        // Liveness of the members, by block: upward-exposed uses (a partial
+        // definition reads the rest) and whole definitions.
+        let nb = f.blocks.len();
+        let (mut gen, mut kill) = (vec![Bits::new(m); nb], vec![Bits::new(m); nb]);
+        for (b, block) in f.blocks.iter().enumerate() {
+            for inst in &block.insts {
+                for i in inst.uses.iter().filter_map(member) {
+                    if !kill[b].get(i) {
+                        gen[b].set(i);
+                    }
+                }
+                for d in &inst.defs {
+                    match (whole_member(d), member(d)) {
+                        (Some(i), _) => kill[b].set(i),
+                        (None, Some(i)) if !kill[b].get(i) => gen[b].set(i),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let succs: Vec<Vec<usize>> = (0..nb).map(|b| f.successors(b)).collect();
+        let mut live_out = vec![Bits::new(m); nb];
+        let mut live_in = gen.clone();
+        // Each block's live-in, word by word: the live-out less what it kills,
+        // and what it reads first.
+        let (mut out, mut inn) = (Bits::new(m), Bits::new(m));
+        loop {
+            let mut changed = false;
+            for b in (0..nb).rev() {
+                out.0.fill(0);
+                for &s in &succs[b] {
+                    out.or(&live_in[s]);
+                }
+                for (w, word) in inn.0.iter_mut().enumerate() {
+                    *word = (out.0[w] & !kill[b].0[w]) | gen[b].0[w];
+                }
+                changed |= live_out[b].or(&out) | live_in[b].or(&inn);
+            }
+            if !changed {
+                break;
+            }
+        }
+        // Interference: a member defined while another is live, except the source
+        // of the copy that defines it.
+        let (adj, mut copies) = interference(f, m, &live_out, &member, &whole_member);
+        // Groups: members joined by copies while they do not interfere, the
+        // innermost copies first. Each group's members are kept at its root.
+        copies.sort_by(|a, b| b.0.cmp(&a.0).then((a.1, a.2).cmp(&(b.1, b.2))));
+        let mut gparent: Vec<u32> = (0..m as u32).collect();
+        let mut gmem: Vec<Vec<u32>> = (0..m as u32).map(|i| vec![i]).collect();
+        let mut gadj = adj;
+        for &(_, _, _, d, s) in &copies {
+            let (rd, rs) = (find(&mut gparent, d as u32) as usize, find(&mut gparent, s as u32) as usize);
+            if rd == rs || gmem[rs].iter().any(|&j| gadj[rd].get(j as usize)) {
+                continue;
+            }
+            let joined = std::mem::take(&mut gmem[rs]);
+            gmem[rd].extend(joined);
+            let (into, from) = pair(&mut gadj, rd, rs);
+            into.or(from);
+            gparent[rs] = rd as u32;
+        }
+        // AGPRs per group, the weightiest webs first; a web that does not fit
+        // stays in VGPRs whole.
+        let mut webs: Vec<u32> = (0..nv as u32).filter(|&r| root[r as usize] == r && web[r as usize] && !bad[r as usize]).collect();
+        webs.sort_by(|&a, &b| value[b as usize].cmp(&value[a as usize]).then(a.cmp(&b)));
+        let mut groups_of: Vec<Vec<usize>> = vec![Vec::new(); nv];
+        for i in 0..m {
+            if find(&mut gparent, i as u32) as usize == i {
+                groups_of[root[members[i] as usize] as usize].push(i);
+            }
+        }
+        let mut base = vec![NONE; m];
+        let mut placed: Vec<(usize, u32, u32)> = Vec::new();
+        // The AGPRs of the groups placed so far that interfere with the one placed.
+        let mut near: Vec<(u32, u32)> = Vec::new();
+        for &w in &webs {
+            let mark = placed.len();
+            for &g in &groups_of[w as usize] {
+                let size = f.vregs[members[g] as usize].size as u32;
+                let align = if size >= 4 { 4 } else { size.max(1) };
+                near.clear();
+                near.extend(placed.iter().filter(|&&(h, _, _)| gmem[h].iter().any(|&j| gadj[g].get(j as usize))).map(|&(_, hb, hs)| (hb, hs)));
+                let fits = |at: u32| near.iter().all(|&(hb, hs)| at + size <= hb || hb + hs <= at);
+                match (0..=AGPRS.saturating_sub(size)).step_by(align as usize).find(|&at| fits(at)) {
+                    Some(at) => placed.push((g, at, size)),
+                    None => {
+                        placed.truncate(mark);
+                        break;
+                    }
+                }
+            }
+        }
+        if placed.is_empty() {
+            return None;
+        }
+        for &(g, at, _) in &placed {
+            for &i in &gmem[g] {
+                base[i as usize] = at;
+            }
+        }
+        let mut base_of = vec![NONE; nv];
+        for (i, &v) in members.iter().enumerate() {
+            base_of[v as usize] = base[i];
+        }
+        Some((base_of, placed.iter().map(|&(_, at, size)| at + size).max().unwrap_or(0)))
     }
-    let mut base_of = vec![NONE; nv];
-    for (i, &v) in members.iter().enumerate() {
-        base_of[v as usize] = base[i];
-    }
-    Some((base_of, placed.iter().map(|&(_, at, size)| at + size).max().unwrap_or(0)))
 }
 
 /// `bank`'s interference of its `m` members (`member` and `whole_member` map
@@ -430,7 +503,7 @@ pub(super) fn rewrite(f: &mut MFunc, base_of: &[u32]) {
     let agpr = |v: VRef| Opnd::P(Phys::V(AGPR0 + (base_of[v.reg as usize] + v.off as u32) as u16), v.n);
     // Dwords whose one definition is a move of an inline constant: a copy of
     // one into an AGPR writes the constant.
-    let mut consts: std::collections::HashMap<(u32, u8), Option<Opnd>> = std::collections::HashMap::new();
+    let mut consts: crate::rir::fx::FxHashMap<(u32, u8), Option<Opnd>> = Default::default();
     for inst in f.blocks.iter().flat_map(|b| &b.insts) {
         for d in &inst.defs {
             let Opnd::R(v) = *d else { continue };
@@ -858,6 +931,332 @@ mod tests {
             let (want, want_copies) = interference_reference(&f, m, &live_out, &member, &whole_member);
             assert_eq!(copies, want_copies, "seed {seed}");
             assert!(adj.iter().zip(&want).all(|(a, b)| a.0 == b.0), "seed {seed}");
+        }
+    }
+
+    /// `place_with` before it was split into finding, marking and placing,
+    /// kept verbatim to compare against.
+    fn place_with_reference(f: &MFunc, in_loops: bool) -> Option<(Vec<u32>, u32)> {
+        let nv = f.vregs.len();
+        let whole = |o: &Opnd| -> Option<u32> {
+            match *o {
+                Opnd::R(v) if v.off == 0 && v.n == f.vregs[v.reg as usize].size => Some(v.reg),
+                _ => None,
+            }
+        };
+        // Registers only whole copies and MFMAs define (or none, undefined): the
+        // others, such as a zero tuple several accumulators start from, stay out
+        // of webs, and copies from them are moves into the web.
+        let mut defined_inside = vec![true; nv];
+        for inst in f.blocks.iter().flat_map(|b| &b.insts) {
+            let inside = match inst.op {
+                Opc::Copy | Opc::ImplicitDef => true,
+                op if is_mfma(op) => inst.uses.get(2) == Some(&inst.defs[0]) || matches!(inst.uses.get(2), Some(Opnd::Imm(_))),
+                _ => false,
+            };
+            for d in &inst.defs {
+                if let Opnd::R(v) = d {
+                    defined_inside[v.reg as usize] &= inside && whole(d).is_some();
+                }
+            }
+        }
+        let eligible = |v: u32| f.vregs[v as usize].class == Class::V && f.vregs[v as usize].fixed.is_none() && defined_inside[v as usize];
+        // Webs: V registers joined by whole copies, with an MFMA's tied D and C.
+        let mut parent: Vec<u32> = (0..nv as u32).collect();
+        let mut seed = vec![false; nv];
+        let mut pinned = vec![false; nv];
+        for inst in f.blocks.iter().flat_map(|b| &b.insts) {
+            if is_mfma(inst.op) {
+                match (whole(&inst.defs[0]), inst.uses.get(2).and_then(whole)) {
+                    (Some(d), Some(c)) if d == c && eligible(d) => seed[d as usize] = true,
+                    // C an inline constant (`zero_acc`): the web starts at this D.
+                    (Some(d), None) if matches!(inst.uses.get(2), Some(Opnd::Imm(_))) && eligible(d) => seed[d as usize] = true,
+                    _ => {
+                        for o in inst.defs.iter().chain(inst.uses.get(2)) {
+                            if let Opnd::R(v) = o {
+                                pinned[v.reg as usize] = true;
+                            }
+                        }
+                    }
+                }
+            } else if inst.op == Opc::Copy {
+                if let (Some(d), Some(s)) = (whole(&inst.defs[0]), whole(&inst.uses[0])) {
+                    if eligible(d) && eligible(s) && f.vregs[d as usize].size == f.vregs[s as usize].size {
+                        let (rd, rs) = (find(&mut parent, d), find(&mut parent, s));
+                        parent[rd as usize] = rs;
+                    }
+                }
+            }
+        }
+        let root: Vec<u32> = (0..nv as u32).map(|v| find(&mut parent, v)).collect();
+        let mut web = vec![false; nv];
+        let mut bad = vec![false; nv];
+        for v in 0..nv {
+            web[root[v] as usize] |= seed[v];
+            bad[root[v] as usize] |= pinned[v];
+        }
+        // The innermost loop of each web's MFMAs, and their weight.
+        let (mut hot, mut value) = (vec![0u32; nv], vec![0u64; nv]);
+        for block in &f.blocks {
+            for inst in block.insts.iter().filter(|i| is_mfma(i.op)) {
+                if let Some(d) = whole(&inst.defs[0]).filter(|&d| seed[d as usize]) {
+                    let r = root[d as usize] as usize;
+                    hot[r] = hot[r].max(block.loop_depth);
+                    value[r] += 8u64.pow(block.loop_depth.min(4));
+                }
+            }
+        }
+        let in_web = |v: u32, web: &[bool], bad: &[bool]| web[root[v as usize] as usize] && !bad[root[v as usize] as usize];
+        // A web stays in VGPRs if a move would sit in its MFMAs' innermost loop,
+        // or an instruction other than an MFMA reads and writes it in place.
+        for block in &f.blocks {
+            let depth = block.loop_depth;
+            for inst in &block.insts {
+                let mut moved: Vec<u32> = Vec::new();
+                let named = |o: &Opnd| match o {
+                    Opnd::R(v) if in_web(v.reg, &web, &bad) => Some(v.reg),
+                    _ => None,
+                };
+                if is_mfma(inst.op) && whole(&inst.defs[0]).is_some_and(|d| in_web(d, &web, &bad)) {
+                    moved.extend(inst.uses.iter().enumerate().filter(|&(k, _)| k != 2).filter_map(|(_, o)| named(o)));
+                } else if inst.op == Opc::Copy {
+                    let (d, s) = (whole(&inst.defs[0]), whole(&inst.uses[0]));
+                    let inside = matches!((d, s), (Some(d), Some(s)) if in_web(d, &web, &bad) && in_web(s, &web, &bad));
+                    if !inside {
+                        moved.extend(inst.defs.iter().chain(inst.uses.iter()).filter_map(named));
+                    }
+                } else {
+                    let defs: Vec<u32> = inst.defs.iter().filter_map(named).collect();
+                    let uses: Vec<u32> = inst.uses.iter().filter_map(named).collect();
+                    for &d in defs.iter().filter(|d| uses.contains(d)) {
+                        bad[root[d as usize] as usize] = true;
+                    }
+                    if inst.op != Opc::ImplicitDef {
+                        moved.extend(defs.into_iter().chain(uses));
+                    }
+                }
+                for v in moved {
+                    let r = root[v as usize] as usize;
+                    if !in_loops && hot[r] > 0 && depth >= hot[r] {
+                        bad[r] = true;
+                    }
+                }
+            }
+        }
+        let members: Vec<u32> = (0..nv as u32).filter(|&v| in_web(v, &web, &bad)).collect();
+        if members.is_empty() {
+            return None;
+        }
+        let mut idx = vec![NONE; nv];
+        for (i, &v) in members.iter().enumerate() {
+            idx[v as usize] = i as u32;
+        }
+        let m = members.len();
+        let member = |o: &Opnd| match o {
+            Opnd::R(v) if idx[v.reg as usize] != NONE => Some(idx[v.reg as usize] as usize),
+            _ => None,
+        };
+        let whole_member = |o: &Opnd| whole(o).filter(|&v| idx[v as usize] != NONE).map(|v| idx[v as usize] as usize);
+        // Liveness of the members, by block: upward-exposed uses (a partial
+        // definition reads the rest) and whole definitions.
+        let nb = f.blocks.len();
+        let (mut gen, mut kill) = (vec![Bits::new(m); nb], vec![Bits::new(m); nb]);
+        for (b, block) in f.blocks.iter().enumerate() {
+            for inst in &block.insts {
+                for i in inst.uses.iter().filter_map(member) {
+                    if !kill[b].get(i) {
+                        gen[b].set(i);
+                    }
+                }
+                for d in &inst.defs {
+                    match (whole_member(d), member(d)) {
+                        (Some(i), _) => kill[b].set(i),
+                        (None, Some(i)) if !kill[b].get(i) => gen[b].set(i),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let succs: Vec<Vec<usize>> = (0..nb).map(|b| f.successors(b)).collect();
+        let mut live_out = vec![Bits::new(m); nb];
+        let mut live_in = gen.clone();
+        loop {
+            let mut changed = false;
+            for b in (0..nb).rev() {
+                let mut out = Bits::new(m);
+                for &s in &succs[b] {
+                    out.or(&live_in[s]);
+                }
+                let mut inn = out.clone();
+                for i in kill[b].ones() {
+                    inn.clear(i);
+                }
+                inn.or(&gen[b]);
+                changed |= live_out[b].or(&out) | live_in[b].or(&inn);
+            }
+            if !changed {
+                break;
+            }
+        }
+        // Interference: a member defined while another is live, except the source
+        // of the copy that defines it.
+        let (adj, mut copies) = interference(f, m, &live_out, &member, &whole_member);
+        // Groups: members joined by copies while they do not interfere, the
+        // innermost copies first.
+        copies.sort_by(|a, b| b.0.cmp(&a.0).then((a.1, a.2).cmp(&(b.1, b.2))));
+        let mut gparent: Vec<u32> = (0..m as u32).collect();
+        let mut gmem: Vec<Bits> = (0..m)
+            .map(|i| {
+                let mut s = Bits::new(m);
+                s.set(i);
+                s
+            })
+            .collect();
+        let mut gadj = adj;
+        for &(_, _, _, d, s) in &copies {
+            let (rd, rs) = (find(&mut gparent, d as u32) as usize, find(&mut gparent, s as u32) as usize);
+            if rd == rs || gadj[rd].intersects(&gmem[rs]) {
+                continue;
+            }
+            let (mem, adjs) = (gmem[rs].clone(), gadj[rs].clone());
+            gmem[rd].or(&mem);
+            gadj[rd].or(&adjs);
+            gparent[rs] = rd as u32;
+        }
+        // AGPRs per group, the weightiest webs first; a web that does not fit
+        // stays in VGPRs whole.
+        let mut webs: Vec<u32> = (0..nv as u32).filter(|&r| root[r as usize] == r && web[r as usize] && !bad[r as usize]).collect();
+        webs.sort_by(|&a, &b| value[b as usize].cmp(&value[a as usize]).then(a.cmp(&b)));
+        let mut base = vec![NONE; m];
+        let mut placed: Vec<(usize, u32, u32)> = Vec::new();
+        for &w in &webs {
+            let groups: Vec<usize> = (0..m).filter(|&i| root[members[i] as usize] == w && find(&mut gparent, i as u32) as usize == i).collect();
+            let mark = placed.len();
+            for &g in &groups {
+                let size = f.vregs[members[g] as usize].size as u32;
+                let align = if size >= 4 { 4 } else { size.max(1) };
+                let fits = |at: u32| placed.iter().all(|&(h, hb, hs)| !gadj[g].intersects(&gmem[h]) || at + size <= hb || hb + hs <= at);
+                match (0..=AGPRS.saturating_sub(size)).step_by(align as usize).find(|&at| fits(at)) {
+                    Some(at) => placed.push((g, at, size)),
+                    None => {
+                        placed.truncate(mark);
+                        break;
+                    }
+                }
+            }
+        }
+        if placed.is_empty() {
+            return None;
+        }
+        for &(g, at, _) in &placed {
+            for i in gmem[g].ones() {
+                base[i] = at;
+            }
+        }
+        let mut base_of = vec![NONE; nv];
+        for (i, &v) in members.iter().enumerate() {
+            base_of[v as usize] = base[i];
+        }
+        Some((base_of, placed.iter().map(|&(_, at, size)| at + size).max().unwrap_or(0)))
+    }
+
+    /// A random function for the placement: whole and partial copies, MFMAs
+    /// whose C is their D, a constant or another register, VALU instructions
+    /// (some reading and writing one register), implicit definitions and
+    /// moves of constants, over registers of one to sixteen dwords (some
+    /// fixed, some SGPRs), in blocks of loop depth 0 to 2 with branches
+    /// forward and back.
+    fn random_function(seed: u64) -> MFunc {
+        let mut x = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+        let mut next = |n: u64| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x % n) as u32
+        };
+        let nv = 4 + next(120) as usize;
+        let mut f = MFunc { target: Target::Gfx950, ..MFunc::default() };
+        for _ in 0..nv {
+            let size = [1, 2, 4, 16][next(4) as usize];
+            let class = if next(12) == 0 { Class::S } else { Class::V };
+            let fixed = (next(20) == 0).then_some(0);
+            f.vregs.push(VRegInfo { class, size, align: 1, fixed });
+        }
+        let size = |f: &MFunc, r: u32| f.vregs[r as usize].size;
+        let nb = 1 + next(6) as usize;
+        for b in 0..nb {
+            let mut insts = Vec::new();
+            for _ in 0..next(30) {
+                let (a, s, c) = (next(nv as u64), next(nv as u64), next(nv as u64));
+                let r = |reg: u32, whole: bool, k: u32| {
+                    let n = size(&f, reg);
+                    if whole || n == 1 {
+                        Opnd::R(VRef { reg, off: 0, n })
+                    } else {
+                        Opnd::R(VRef { reg, off: (k % n as u32) as u8, n: 1 })
+                    }
+                };
+                let k = next(16);
+                insts.push(match next(9) {
+                    0 | 1 => MInst::new(Opc::Copy, [r(a, true, k)], [r(s, next(5) != 0, k)]),
+                    2 | 3 => MInst::new(Opc::Gfx9(Gfx9Op::VMfma16x16x32F16), [r(a, true, k)], [r(s, false, k), r(c, false, k), r(a, true, k)]),
+                    4 => MInst::new(Opc::Gfx9(Gfx9Op::VMfma16x16x32F16), [r(a, true, k)], [r(s, false, k), r(c, false, k), Opnd::Imm(0)]),
+                    5 => MInst::new(Opc::Gfx9(Gfx9Op::VMfma16x16x32F16), [r(a, true, k)], [r(s, false, k), r(c, false, k), r(c, true, k)]),
+                    6 => MInst::new(Opc::VAddF32, [r(a, false, k)], [r(s, false, k), r(c, false, k)]),
+                    7 => MInst::new(Opc::VAddF32, [r(a, next(2) == 0, k)], [r(a, false, k), Opnd::Imm(1)]),
+                    _ if next(2) == 0 => MInst::new(Opc::ImplicitDef, [r(a, true, k)], []),
+                    _ => MInst::new(Opc::VMovB32, [r(a, false, k)], [Opnd::Imm(0)]),
+                });
+            }
+            if next(3) == 0 {
+                let target = next(nb as u64) as i64;
+                insts.push(MInst::new(Opc::SCbranchScc1, [], []).with_imm(target));
+            }
+            let depth = if b == 0 || b + 1 == nb { 0 } else { next(3) };
+            f.blocks.push(MBlock { insts, loop_depth: depth });
+        }
+        f
+    }
+
+    /// The placement agrees with the code before it was split into finding,
+    /// marking and placing, kept verbatim (`place_with_reference`), with and
+    /// without the in-loop rule; `place_apart` gives both where the rule
+    /// marks other webs and None only where the two agree.
+    #[test]
+    fn placements_place_what_they_placed() {
+        let (mut placed, mut apart, mut joined) = (0, 0, 0);
+        for seed in 0..1500u64 {
+            let f = random_function(seed);
+            let want = [place_with_reference(&f, false), place_with_reference(&f, true)];
+            assert_eq!(place_with(&f, false), want[0], "seed {seed}");
+            assert_eq!(place_with(&f, true), want[1], "seed {seed}");
+            match place_apart(&f) {
+                Some((in_loops, strict)) => {
+                    assert_eq!((in_loops, strict), (want[1].clone(), want[0].clone()), "seed {seed}");
+                    apart += 1;
+                }
+                None => assert_eq!(want[0], want[1], "seed {seed}"),
+            }
+            if let Some((base_of, _)) = &want[1] {
+                placed += 1;
+                let banked: Vec<u32> = base_of.iter().copied().filter(|&b| b != NONE).collect();
+                let distinct: std::collections::BTreeSet<u32> = banked.iter().copied().collect();
+                joined += usize::from(distinct.len() < banked.len());
+            }
+        }
+        // The random functions do exercise the placement, the in-loop rule
+        // and the coalescing of copies.
+        assert!(placed > 300 && apart > 50 && joined > 50, "{placed} placed, {apart} apart, {joined} joined");
+    }
+
+    /// The same on the selected kernels of these tests.
+    #[test]
+    fn placements_of_selected_kernels_place_what_they_placed() {
+        for (accs, in_loop) in [(3, false), (2, true), (6, false), (4, true)] {
+            let f = select(&kernel(accs, in_loop));
+            for flag in [false, true] {
+                assert_eq!(place_with(&f, flag), place_with_reference(&f, flag), "{accs} {in_loop} {flag}");
+            }
         }
     }
 }

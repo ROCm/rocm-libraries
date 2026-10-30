@@ -18,7 +18,7 @@
 
 use super::agpr::{is_mfma, place_with, rewrite};
 use super::{rules, sched};
-use crate::rir::mir::MFunc;
+use crate::rir::mir::{Fmt, MFunc, Opc, F_USE_EXEC};
 use crate::rir::regalloc::{self, Allocation, Limits, Pressure};
 use crate::target::Target;
 
@@ -79,6 +79,15 @@ pub fn widen_banked(
     let hw = Limits::for_func(func);
     let room = rules::workgroup_registers(t, wg);
     let mut bar = None;
+    // Where `func` holds no AGPRs, every candidate is a reordering of its
+    // blocks with AGPR moves added, so none issues or holds the pipe less
+    // than `issue_floor`: past the bar, nothing below can pass.
+    if chosen.0.spill.agpr_dwords == 0 {
+        let at = *bar.insert(sched::cost(func).cycles(have) * 4 / 5);
+        if issue_floor(func) >= at {
+            return chosen;
+        }
+    }
     let cap = Limits { vgprs: hw.vgprs + AGPRS, sgprs: hw.sgprs };
     let mut best: Option<(u64, MFunc, Allocation, usize)> = None;
     for window in WINDOWS.into_iter().filter(|&w| w > chosen.1) {
@@ -103,5 +112,92 @@ pub fn widen_banked(
             (a, window)
         }
         None => chosen,
+    }
+}
+
+/// `sched::Cost::floor` of `f` without its `v_mov_b32`s: per block, weighted
+/// as there, the slots its other instructions issue in or its MFMAs hold the
+/// pipe, the longer. `agpr::rewrite` keeps every instruction it is given but
+/// a move whose result nothing reads any more, and adds only moves, so no
+/// reordering of `f`'s blocks with webs banked gets below this.
+fn issue_floor(f: &MFunc) -> u64 {
+    f.blocks
+        .iter()
+        .map(|block| {
+            let (mut issue, mut pipe) = (0u64, 0u64);
+            for inst in block.insts.iter().filter(|i| !(i.op.fmt() == Fmt::Pseudo && i.op.flags() & F_USE_EXEC == 0)) {
+                pipe += u64::from(sched::pipe_slots(inst.op));
+                issue += u64::from(inst.op != Opc::VMovB32);
+            }
+            8u64.pow(block.loop_depth.min(4)) * issue.max(pipe)
+        })
+        .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rir::mir::{Class, MBlock, MInst, Opnd, VRef, VRegInfo};
+    use crate::target::gfx9::gen_isa::Gfx9Op;
+
+    /// Accumulators started from tuples of moved constants (with a dead move
+    /// now and then), MFMA chains on them in a loop that reads or copies some
+    /// of them, and reads after it: banked either way, every function issues
+    /// and holds the pipe at least `issue_floor` of the one it came from.
+    #[test]
+    fn banking_keeps_the_issue_floor() {
+        let (mut banked, mut dropped) = (0, 0);
+        for seed in 0..600u64 {
+            let mut x = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+            let mut next = |n: u64| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                (x % n) as u32
+            };
+            let mut f = MFunc { target: Target::Gfx950, ..MFunc::default() };
+            let mut reg = |size: u8| {
+                f.vregs.push(VRegInfo { class: Class::V, size, align: 1, fixed: None });
+                f.vregs.len() as u32 - 1
+            };
+            let whole = |r: u32, n: u8| Opnd::R(VRef { reg: r, off: 0, n });
+            let dword = |r: u32, k: u8| Opnd::R(VRef { reg: r, off: k, n: 1 });
+            let (ab, t) = (reg(4), reg(1));
+            let accs: Vec<u32> = (0..1 + next(4)).map(|_| reg(4)).collect();
+            let mut entry = vec![MInst::new(Opc::VAddF32, [whole(ab, 4)], [whole(ab, 4), Opnd::Imm(1)])];
+            for &a in &accs {
+                let c = reg(4);
+                for k in 0..4 {
+                    entry.push(MInst::new(Opc::VMovB32, [dword(c, k)], [Opnd::Imm(next(3))]));
+                }
+                entry.push(MInst::new(Opc::Copy, [whole(a, 4)], [whole(c, 4)]));
+                if next(3) == 0 {
+                    entry.push(MInst::new(Opc::VMovB32, [dword(reg(1), 0)], [Opnd::Imm(7)]));
+                }
+            }
+            let mut body = Vec::new();
+            for _ in 0..1 + next(12) {
+                let a = accs[next(accs.len() as u64) as usize];
+                body.push(match next(6) {
+                    0 => MInst::new(Opc::VAddF32, [dword(t, 0)], [dword(a, next(4) as u8), Opnd::Imm(1)]),
+                    1 => MInst::new(Opc::Copy, [whole(accs[next(accs.len() as u64) as usize], 4)], [whole(a, 4)]),
+                    _ => MInst::new(Opc::Gfx9(Gfx9Op::VMfma16x16x32F16), [whole(a, 4)], [whole(ab, 4), whole(ab, 4), whole(a, 4)]),
+                });
+            }
+            body.push(MInst::new(Opc::SCbranchScc1, [], []).with_imm(1));
+            let exit: Vec<MInst> = accs.iter().map(|&a| MInst::new(Opc::VAddF32, [dword(t, 0)], [dword(a, 0), dword(a, 3)])).collect();
+            f.blocks = vec![MBlock { insts: entry, loop_depth: 0 }, MBlock { insts: body, loop_depth: 1 + next(2) }, MBlock { insts: exit, loop_depth: 0 }];
+            let movs = |f: &MFunc| f.blocks.iter().flat_map(|b| &b.insts).filter(|i| i.op == Opc::VMovB32).count();
+            for in_loops in [false, true] {
+                let Some((base_of, _)) = place_with(&f, in_loops) else { continue };
+                let mut g = f.clone();
+                rewrite(&mut g, &base_of);
+                assert!(sched::cost(&g).floor() >= issue_floor(&f), "seed {seed}");
+                banked += 1;
+                dropped += usize::from(movs(&g) < movs(&f));
+            }
+        }
+        // The kernels do bank, and some lose moves of constants doing so.
+        assert!(banked > 300 && dropped > 100, "{banked} banked, {dropped} dropped moves");
     }
 }

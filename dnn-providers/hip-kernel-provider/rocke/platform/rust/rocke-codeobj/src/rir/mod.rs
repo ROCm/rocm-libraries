@@ -387,6 +387,8 @@ fn spill_best(
     });
     // gfx950: each candidate with its accumulator webs in AGPRs, moves in loops and all, where that fits (`gfx9::agpr_spill`).
     let mut banked = crate::target::gfx9::agpr_spill::banked_fits(&candidates, hw, room);
+    // gfx950: the schedules a latency-bound spill without MFMAs is weighed against (`gfx9::latency`).
+    let wider = crate::target::gfx9::latency::spill_candidates(&candidates, &needs, hw);
     let ((window, mut f, _), _) = candidates
         .into_iter()
         .zip(needs)
@@ -407,6 +409,12 @@ fn spill_best(
     banked.extend(spilled.into_iter().map(|(g, b)| (window, g, b)));
     let a = regalloc::allocate_spilling_on(&mut f, hw, cfg, threads)?;
     if let Some((w, g, b)) = crate::target::gfx9::agpr_spill::cheapest(banked, (&f, &a), lds_size, wg) {
+        *func = g;
+        return Ok((b, w));
+    }
+    // gfx950: a wider window at the same waves, SGPRs in VGPR lanes, where that costs less (`gfx9::latency`).
+    let spill = |g: &mut mir::MFunc, cfg| regalloc::allocate_spilling_on(g, hw, cfg, threads);
+    if let Some((w, g, b)) = crate::target::gfx9::latency::spilled_faster(wider, (&f, &a, window), cfg, lds_size, wg, spill) {
         *func = g;
         return Ok((b, w));
     }
@@ -561,6 +569,9 @@ fn schedule_and_widen(
         return Ok(widened);
     }
     let schedule = |window: usize, cap: regalloc::Limits| known.schedule_capped(window, cap).map(|(orders, p)| (post::reordered(&sunk, &orders), p));
+    let hw = regalloc::Limits::for_func(func);
+    let spilling = |f: &mut mir::MFunc, cfg| regalloc::allocate_spilling_on(f, hw, cfg, threads);
+    let widened = crate::target::gfx9::latency::lower(func, widened, &schedule, spilling, lds_size, wg);
     let traded = crate::target::gfx9::trade::trade(func, widened, &schedule, |f, budget| known.allocate(f, budget), lds_size, wg);
     Ok(crate::target::gfx9::bank_wide::widen_banked(func, traded, schedule, lds_size, wg))
 }
@@ -810,7 +821,9 @@ pub(crate) fn compile_parsed_by_on(
     // A retry can keep an earlier attempt's result, so a result is judged by
     // its own count; `unrolled` (the last attempt's) only covers an error.
     let mut unrolled = 0;
-    let first = compile_retrying(text, parse, Some(unroll::Auto::DEFAULT), &mut unrolled, threads, target);
+    // gfx950 also unrolls loops whose only waits on a carried value are empty register pins (`gfx9::unrolled`).
+    let auto = if target == Target::Gfx950 { crate::target::gfx9::unrolled::auto() } else { unroll::Auto::DEFAULT };
+    let first = compile_retrying(text, parse, Some(auto), &mut unrolled, threads, target);
     match &first {
         Ok(u) if u.stats.unrolled == 0 => return first,
         Err(_) if unrolled == 0 => return first,
@@ -818,8 +831,13 @@ pub(crate) fn compile_parsed_by_on(
         _ => {}
     }
     let rolled = compile_retrying(text, parse, None, &mut 0, threads, target);
+    // gfx950 weighs an unrolled compile that loses waves by its cost (`gfx9::unrolled`).
+    let keeps = |u: &CompiledKernel, r: &CompiledKernel| match target {
+        Target::Gfx950 => crate::target::gfx9::unrolled::keeps(&u.func, &u.stats, &r.func, &r.stats),
+        Target::Gfx1151 => keeps_unrolled(&u.stats, &r.stats),
+    };
     match (first, rolled) {
-        (Ok(u), Ok(r)) => Ok(if keeps_unrolled(&u.stats, &r.stats) { u } else { r }),
+        (Ok(u), Ok(r)) => Ok(if keeps(&u, &r) { u } else { r }),
         (Ok(u), Err(_)) => Ok(u),
         (Err(_), rolled) => rolled,
     }

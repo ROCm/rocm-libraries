@@ -21,7 +21,7 @@
 //! `ROCKE_DIRECT_DEBUG=nobankspill` spills alone; `nobankfits` keeps the
 //! banked spills but not the banked schedules that fit without spilling.
 
-use super::agpr::{is_mfma, place, place_with, rewrite};
+use super::agpr::{is_mfma, place, place_apart, rewrite};
 use super::asm::AGPR0;
 use super::sched;
 use crate::error::CompileError;
@@ -50,8 +50,9 @@ pub fn banked_spill(
     if !f.blocks.iter().flat_map(|b| &b.insts).any(|i| is_mfma(i.op)) {
         return Vec::new();
     }
-    let strict = place(f);
-    let in_loops = place_with(f, true).filter(|(_, n)| strict.as_ref().is_none_or(|(_, m)| n > m));
+    // Where the in-loop rule marks the same webs, its placement is `place`'s.
+    let (in_loops, strict) = place_apart(f).unwrap_or_else(|| (None, place(f)));
+    let in_loops = in_loops.filter(|(_, n)| strict.as_ref().is_none_or(|(_, m)| n > m));
     [strict, in_loops].into_iter().flatten().filter_map(|placed| spill_placed(f, placed, cfg, room, &allocate)).collect()
 }
 
@@ -72,9 +73,11 @@ pub fn banked_fits(candidates: &[(usize, MFunc, Pressure)], hw: Limits, room: u3
     candidates
         .iter()
         .filter_map(|(window, f, _)| {
-            let placed = place_with(f, true)?;
-            // `spill_best` already tried the webs `agpr::place` moves (`agpr::allocate_banked`).
-            if place(f).is_some_and(|strict| strict == placed) {
+            // `spill_best` already tried the webs `agpr::place` moves (`agpr::allocate_banked`),
+            // and only where the in-loop rule marks other webs can these differ.
+            let (placed, strict) = place_apart(f)?;
+            let placed = placed?;
+            if strict.is_some_and(|strict| strict == placed) {
                 return None;
             }
             super::bank_wide::allocate_placed(f, placed, hw).map(|(g, a)| (*window, g, a))

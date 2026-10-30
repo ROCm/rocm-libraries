@@ -1107,7 +1107,8 @@ fn allocate_analyzed(f: &mut MFunc, mut live: Live, budget: Limits) -> Result<Al
     let groups = coalesce(f, &mut live);
     let hw = Limits::for_func(f);
     let hard = Limits { vgprs: budget.vgprs.max(hw.vgprs), sgprs: budget.sgprs.max(hw.sgprs) };
-    let (phys, used, tight) = assign_best(f, &live, groups, budget, hard, 1).map_err(overflow_error)?;
+    let clauses = clauses_of(f, &groups);
+    let (phys, used, tight) = assign_best(f, &live, groups, budget, hard, 1, clauses.as_ref()).map_err(overflow_error)?;
     rewrite(f, &phys);
     let pressure = Pressure::default();
     Ok(Allocation { num_sgprs: used.sgprs, num_vgprs: used.vgprs, pressure, spill: SpillStats::default(), tight })
@@ -1119,7 +1120,7 @@ pub fn assignment_need(f: &MFunc) -> Result<Pressure, CompileError> {
     let mut live = analyze(f)?;
     let groups = coalesce(f, &mut live);
     let unbounded = Limits { vgprs: 4 * MAX_VGPRS, sgprs: 4 * MAX_SGPRS };
-    let (_, used, _) = assign_best(f, &live, groups, Limits::for_func(f), unbounded, 1).map_err(overflow_error)?;
+    let (_, used, _) = assign_best(f, &live, groups, Limits::for_func(f), unbounded, 1, None).map_err(overflow_error)?;
     Ok(used)
 }
 
@@ -1205,7 +1206,7 @@ fn assign_best_meanwhile(
     next: (u32, u32),
 ) -> Result<(Vec<u32>, Used, bool), Overflow> {
     if threads < 2 || live.slots() < 2 * PARALLEL_MIN_INSTS {
-        return assign_best(f, live, groups, hard, hard, threads);
+        return assign_fitting(f, live, groups, hard, threads);
     }
     let before = f.clone();
     let checkpoint = spiller.checkpoint();
@@ -1213,7 +1214,7 @@ fn assign_best_meanwhile(
     let fits = |used: &Used| used.vgprs <= hard.vgprs && used.sgprs <= hard.sgprs;
     let (assigned, ahead) = std::thread::scope(|s| {
         let helper = s.spawn(|| {
-            let assigned = assign_best(&before, live, groups, hard, hard, threads - 1);
+            let assigned = assign_fitting(&before, live, groups, hard, threads - 1);
             // Outcomes after which the next round asks for other targets.
             let elsewhere = match &assigned {
                 Ok((_, used, _)) => fits(used) || used.sgprs > hard.sgprs || used.vgprs != hard.vgprs + 2,
@@ -1238,6 +1239,31 @@ fn assign_best_meanwhile(
     assigned
 }
 
+/// gfx950's clause preference for assigning `f`'s groups (`gfx9::clauses`).
+fn clauses_of(f: &MFunc, groups: &Groups) -> Option<crate::target::gfx9::clauses::Clauses> {
+    if f.target != crate::target::Target::Gfx950 {
+        return None;
+    }
+    let mut roots = groups.parent.clone();
+    crate::target::gfx9::clauses::Clauses::of(f, &mut |v| find(&mut roots, v))
+}
+
+/// `assign_best` within `hard` for a round of spilling: with gfx950's clause
+/// preference, and where that does not fit and the preference moved a
+/// group, without it, so that a round fits whenever it did without it.
+fn assign_fitting(f: &MFunc, live: &Live, groups: Groups, hard: Limits, threads: usize) -> Result<(Vec<u32>, Used, bool), Overflow> {
+    let Some(clauses) = clauses_of(f, &groups) else {
+        return assign_best(f, live, groups, hard, hard, threads, None);
+    };
+    let Groups { parent, gsize, galign, gfixed } = groups;
+    let plain = Groups { parent: parent.clone(), gsize: gsize.clone(), galign: galign.clone(), gfixed: gfixed.clone() };
+    let first = assign_best(f, live, Groups { parent, gsize, galign, gfixed }, hard, hard, threads, Some(&clauses));
+    if !clauses.moved() || first.as_ref().is_ok_and(|(_, used, _)| used.vgprs <= hard.vgprs && used.sgprs <= hard.sgprs) {
+        return first;
+    }
+    assign_best(f, live, plain, hard, hard, threads, None)
+}
+
 fn overflow_error(o: Overflow) -> CompileError {
     let what = if o.class == Class::S { "SGPRs" } else { "VGPRs" };
     CompileError::new("ROCKE_DIRECT_REGISTERS", format!("out of {what}: no room for a {}-dword value", o.size))
@@ -1260,7 +1286,7 @@ struct Overflow {
 /// one using fewer VGPRs. Each may use registers up to `hard`. The flag
 /// tells that the first assignment did not fit `hard`. With `threads` above
 /// one, a large function packs tuples first meanwhile, in case it is asked
-/// for; the result is the same.
+/// for; the result is the same. With `clauses`, `assign`'s.
 fn assign_best(
     f: &MFunc,
     live: &Live,
@@ -1268,6 +1294,7 @@ fn assign_best(
     budget: Limits,
     hard: Limits,
     threads: usize,
+    clauses: Option<&crate::target::gfx9::clauses::Clauses>,
 ) -> Result<(Vec<u32>, Used, bool), Overflow> {
     let fits = |r: &Result<(Vec<u32>, Used), Overflow>| r.as_ref().is_ok_and(|(_, u)| u.vgprs <= budget.vgprs);
     // Packing tuples first recovers a few registers, not more than a tuple's.
@@ -1278,19 +1305,19 @@ fn assign_best(
     let (mut best, packed) = if threads > 1 && live.slots() >= 2 * PARALLEL_MIN_INSTS {
         let stop = AtomicBool::new(false);
         std::thread::scope(|s| {
-            let packed = s.spawn(|| assign(f, live, &groups, hard, Order::BigFirst, Some(&stop)));
-            let best = assign(f, live, &groups, hard, Order::Preferred, None);
+            let packed = s.spawn(|| assign(f, live, &groups, hard, Order::BigFirst, Some(&stop), clauses));
+            let best = assign(f, live, &groups, hard, Order::Preferred, None, clauses);
             if fits(&best) || !near(&best) {
                 stop.store(true, Ordering::Relaxed);
             }
             (best, Some(packed.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))))
         })
     } else {
-        (assign(f, live, &groups, hard, Order::Preferred, None), None)
+        (assign(f, live, &groups, hard, Order::Preferred, None, clauses), None)
     };
     let first_fit_failed = best.is_err();
     if !fits(&best) && near(&best) {
-        let next = packed.unwrap_or_else(|| assign(f, live, &groups, hard, Order::BigFirst, None));
+        let next = packed.unwrap_or_else(|| assign(f, live, &groups, hard, Order::BigFirst, None, clauses));
         best = match (&best, &next) {
             (Ok((_, a)), Ok((_, b))) if b.vgprs < a.vgprs => next,
             (Err(_), Ok(_)) => next,
@@ -1386,7 +1413,9 @@ impl Affinities {
 /// those of the values live there, so preferring one free register over
 /// another costs single-dword SSA values nothing; holes in loop-carried
 /// values and tuples can still make it cost, hence the other order.
-/// `stop` set ends it early with a meaningless `Err`.
+/// `stop` set ends it early with a meaningless `Err`. With `clauses`, a
+/// gfx950 load and the registers its soft clause reads keep off each other
+/// where another register is free (`gfx9::clauses`).
 fn assign(
     f: &MFunc,
     live: &Live,
@@ -1394,6 +1423,7 @@ fn assign(
     limits: Limits,
     order: Order,
     stop: Option<&AtomicBool>,
+    clauses: Option<&crate::target::gfx9::clauses::Clauses>,
 ) -> Result<(Vec<u32>, Used), Overflow> {
     let nv = f.vregs.len();
     let slots = live.slots();
@@ -1459,7 +1489,15 @@ fn assign(
             });
             match preferred {
                 Some(at) => at,
-                None => occ.first_free(&checks, size, align, limit).ok_or(Overflow { class, size })?,
+                None => {
+                    let at = occ.first_free(&checks, size, align, limit).ok_or(Overflow { class, size })?;
+                    let high = match class {
+                        Class::S => used.sgprs,
+                        Class::V => used.vgprs,
+                    };
+                    let same = |r: u32| f.vregs[r as usize].class == class;
+                    clauses.map_or(at, |c| c.prefer((root, at, size, align, high), &placed, &assign, same, |p| occ.free_from(p, &checks)))
+                }
             }
         };
         for k in 0..size {

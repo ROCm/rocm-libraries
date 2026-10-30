@@ -33,6 +33,9 @@ pub struct Auto {
     pub max_trips: i64,
     pub max_ops: usize,
     pub max_total_ops: usize,
+    /// Whether an empty register pin (`tile.inline_asm` without a template)
+    /// that reads a carried value keeps the loop rolled, as a load does.
+    pub pins_wait: bool,
 }
 
 impl Auto {
@@ -42,7 +45,7 @@ impl Auto {
     /// four times as much it allows copies that simplify; 16384 ops of
     /// copies keep the largest unrolled loop body measured within the reach
     /// of a 16-bit branch offset.
-    pub const DEFAULT: Auto = Auto { max_trips: 32, max_ops: 512, max_total_ops: 1 << 14 };
+    pub const DEFAULT: Auto = Auto { max_trips: 32, max_ops: 512, max_total_ops: 1 << 14, pins_wait: true };
 }
 
 /// Unrolls every eligible loop, innermost first. Cloned LDS allocations
@@ -468,8 +471,9 @@ fn has_unrollable_loop(region: &Region, any: bool) -> bool {
 /// Whether a load or a cross-lane op of the loop `op` reads a value that
 /// depends on a carried value, so that each iteration's waits on the one
 /// before. A carried value the body steps by a loop-invariant amount, as
-/// `p + stride`, is an induction variable: its copies fold apart.
-fn loads_wait_on_carried(op: &Op) -> bool {
+/// `p + stride`, is an induction variable: its copies fold apart. Without
+/// `pins_wait`, an empty register pin is not such an op.
+fn loads_wait_on_carried(op: &Op, pins_wait: bool) -> bool {
     let body = &op.regions[0].ops;
     let mut inside: FxHashSet<ValueId> = op.block_args.iter().copied().collect();
     let mut all: Vec<&Op> = Vec::new();
@@ -519,8 +523,10 @@ fn loads_wait_on_carried(op: &Op) -> bool {
             break;
         }
     }
-    all.iter()
-        .any(|o| o.kind.is_removable() && !o.kind.is_pure() && o.operands.iter().any(|v| tainted.contains(v)))
+    let pin = |o: &Op| o.kind == OpKind::InlineAsmIdentity && o.str_attr("template").is_some_and(str::is_empty);
+    all.iter().any(|o| {
+        o.kind.is_removable() && !o.kind.is_pure() && (pins_wait || !pin(o)) && o.operands.iter().any(|v| tainted.contains(v))
+    })
 }
 
 /// A loop in `ops` or in a region nested in them.
@@ -723,7 +729,7 @@ impl Unroller<'_> {
             return None;
         }
         let ops = trips as usize * (op_count(body) + 1);
-        if ops > auto.max_ops || self.auto_added + ops > auto.max_total_ops || loads_wait_on_carried(op) {
+        if ops > auto.max_ops || self.auto_added + ops > auto.max_total_ops || loads_wait_on_carried(op, auto.pins_wait) {
             return None;
         }
         Some((lb, step, trips))
