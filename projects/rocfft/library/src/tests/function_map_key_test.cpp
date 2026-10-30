@@ -29,21 +29,21 @@
 // problem, and equal keys hashing differently would make lookups miss.
 TEST(rocfft_internal, fmkey_fields_all_take_part_in_lookup)
 {
-    const std::string arch = "gfx942";
-    const auto        make = [&arch]() {
-        return FMKey(64,
+    const FMKey base(64,
                      64,
                      rocfft_precision_single,
                      CS_KERNEL_2D_SINGLE,
                      NONE,
                      KernelConfig::EmptyConfig(),
-                     arch);
-    };
-    const FMKey base = make();
+                     "gfx942");
 
-    // equal keys built separately must hash the same, or lookups would miss
-    EXPECT_TRUE(base == make());
-    EXPECT_EQ(SimpleHash{}(base), SimpleHash{}(make()));
+    // lds_size_bytes is not part of the key: kernels that differ only in LDS
+    // size share one key, and find_key_in_map picks among them, so it must not
+    // change == or the hash
+    FMKey other_lds          = base;
+    other_lds.lds_size_bytes = 65536;
+    EXPECT_TRUE(base == other_lds);
+    EXPECT_EQ(SimpleHash{}(base), SimpleHash{}(other_lds));
 
     // change each field in turn; the key must no longer match
     std::vector<FMKey> different(8, base);
@@ -71,8 +71,9 @@ TEST(rocfft_internal, fmkey_fields_all_take_part_in_lookup)
 
 // a and b differ in one problem field, with a's value smaller. Give a the larger
 // batch range: the problem field must still decide the order.
-static void expect_problem_before_batch(PPFMKey a, PPFMKey b)
+static void expect_problem_before_batch(PPFMKey a, PPFMKey b, const std::string& field)
 {
+    SCOPED_TRACE(field);
     a.batch_low  = 100;
     a.batch_high = 200;
     b.batch_low  = 1;
@@ -95,25 +96,31 @@ TEST(rocfft_internal, ppfmkey_orders_problem_then_batch_then_config)
                        KernelConfig::EmptyConfig(),
                        "gfx90a");
 
+    // as for FMKey, the LDS size must not split one key into several
+    PPFMKey other_lds        = base;
+    other_lds.lds_size_bytes = 65536;
+    EXPECT_TRUE(base == other_lds);
+    EXPECT_EQ(SimpleHashPP{}(base), SimpleHashPP{}(other_lds));
+
     // each problem field outranks the batch range
     for(size_t dim = 0; dim < 3; ++dim)
     {
         auto bigger         = base;
         bigger.lengths[dim] = 128;
-        expect_problem_before_batch(base, bigger);
+        expect_problem_before_batch(base, bigger, "lengths[" + std::to_string(dim) + "]");
     }
     auto other      = base;
     other.precision = rocfft_precision_double;
-    expect_problem_before_batch(base, other);
+    expect_problem_before_batch(base, other, "precision");
     other                = base;
     other.transform_type = rocfft_transform_type_complex_inverse;
-    expect_problem_before_batch(base, other);
+    expect_problem_before_batch(base, other, "transform_type");
     other        = base;
     other.scheme = CS_KERNEL_3D_SINGLE;
-    expect_problem_before_batch(base, other);
+    expect_problem_before_batch(base, other, "scheme");
     other               = base;
     other.gcn_arch_name = "gfx942";
-    expect_problem_before_batch(base, other);
+    expect_problem_before_batch(base, other, "gcn_arch_name");
 
     // the batch range outranks the configs
     auto low_batch                           = base;
