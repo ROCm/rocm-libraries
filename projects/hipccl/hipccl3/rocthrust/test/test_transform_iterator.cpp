@@ -56,7 +56,7 @@ TESTS_DEFINE(TransformIteratorTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveTransformIteratorTests, NumericalTestsParams);
 TESTS_DEFINE(TransformIteratorVectorTests, VectorTestsParams);
 
-// ensure that we properly support thrust::reverse_iterator from _THRUST_STD
+// ensure that we properly support thrust::transform_iterator from _THRUST_STD
 TEST(TransformIteratorTests, TestTransformIteratorTraits)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());

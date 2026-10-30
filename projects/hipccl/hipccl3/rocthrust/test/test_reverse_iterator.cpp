@@ -24,6 +24,7 @@
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
+#include _THRUST_STD_INCLUDE(iterator)
 #include _THRUST_STD_INCLUDE(type_traits)
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD

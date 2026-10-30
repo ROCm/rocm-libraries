@@ -117,7 +117,7 @@ struct index_to_gather_index_op
   }
 };
 
-// ensure that we properly support thrust::reverse_iterator from _THRUST_STD
+// ensure that we properly support thrust::tabulate_output_iterator from _THRUST_STD
 TEST(TabulateOutputIteratorTests, TestTabulateOutputIteratorTraits)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());

@@ -54,7 +54,7 @@ using SignedIntegralTestsParams =
 TESTS_DEFINE(TransformOutputIteratorVectorTests, VectorTestsParams);
 TESTS_DEFINE(TransformOutputIteratorSignedIntegralTests, SignedIntegralTestsParams);
 
-// ensure that we properly support thrust::reverse_iterator from _THRUST_STD
+// ensure that we properly support thrust::transform_output_iterator from _THRUST_STD
 TEST(TransformOutputIteratorVectorTests, TestTransformOutputIteratorTraits)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());

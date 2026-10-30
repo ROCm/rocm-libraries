@@ -70,7 +70,7 @@ using IntegralTypes = ::testing::Types<
 TESTS_DEFINE(TransformInputOutputIteratorVectorTests, VectorTestsParams);
 TESTS_DEFINE(TransformInputOutputIteratorVariableUnitTests, IntegralTypes);
 
-// ensure that we properly support thrust::reverse_iterator from _THRUST_STD
+// ensure that we properly support thrust::transform_input_output_iterator from _THRUST_STD
 TEST(TransformInputOutputIteratorVectorTests, TestTransformInputOutputIteratorTraits)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());

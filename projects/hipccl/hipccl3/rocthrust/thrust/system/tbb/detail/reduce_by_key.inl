@@ -28,7 +28,6 @@
 #include <thrust/detail/range/tail_flags.h>
 #include <thrust/detail/seq.h>
 #include <thrust/detail/temporary_array.h>
-#include <thrust/iterator/reverse_iterator.h>
 #include <thrust/scan.h>
 #include <thrust/system/tbb/detail/execution_policy.h>
 #include <thrust/system/tbb/detail/reduce_by_key.h>
@@ -42,6 +41,8 @@
 #else
 #  include <thrust/detail/algorithm_wrapper.h>
 #endif
+
+#include _THRUST_STD_INCLUDE(iterator)
 
 #include <thread>
 
@@ -84,9 +85,9 @@ reduce_last_segment_backward(
   thrust::detail::it_difference_t<InputIterator1> n = keys_last - keys_first;
 
   // reverse the ranges and consume from the end
-  thrust::reverse_iterator<InputIterator1> keys_first_r(keys_last);
-  thrust::reverse_iterator<InputIterator1> keys_last_r(keys_first);
-  thrust::reverse_iterator<InputIterator2> values_first_r(values_first + n);
+  _THRUST_STD::reverse_iterator<InputIterator1> keys_first_r(keys_last);
+  _THRUST_STD::reverse_iterator<InputIterator1> keys_last_r(keys_first);
+  _THRUST_STD::reverse_iterator<InputIterator2> values_first_r(values_first + n);
 
   thrust::detail::it_value_t<InputIterator1> result_key                        = *keys_first_r;
   typename partial_sum_type<InputIterator2, BinaryFunction>::type result_value = *values_first_r;
