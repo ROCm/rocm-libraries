@@ -487,6 +487,9 @@ defaultInternalSupportParams = {
     # but WGM is not.
     "SupportCustomWGM": True,
     "SupportCustomStaggerU": True,
+    # The kernel preserves the packed runtime StaggerU across persistent tiles.
+    # Older/custom kernels leave this false; Solution.py derives it for new assembly.
+    "SupportPersistentStaggerU": False,
     # Pure CAPABILITY, never policy: "this kernel's assembly contains BOTH
     # Stream-K K-split mappings (the historical global 'first-E' mapping and the
     # per-tile extra-iters mapping) and honors bit 29 of MagicShiftItersPerTile
