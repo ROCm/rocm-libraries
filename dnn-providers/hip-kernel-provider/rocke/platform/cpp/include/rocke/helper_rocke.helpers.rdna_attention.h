@@ -140,6 +140,7 @@ typedef struct rocke_rdna_attn_params
     rocke_value_t* num_blocks;
     rocke_value_t* k_ptr;
     rocke_value_t* v_ptr;
+    rocke_value_t* live_rows; /* optional: rows >= it are padding (O = 0, LSE = -inf) */
 } rocke_rdna_attn_params_t;
 
 /* rdna_attention_fwd_body(b, cfg, **params): emit the K loop and epilogue of

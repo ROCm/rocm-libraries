@@ -9,8 +9,9 @@ E4M3FN K/V with runtime scales, ragged (varlen) and paged K/V (per-tile and
 per-row block-table lookups, shuffled pages, NaN-poisoned unused slots, one
 table for both caches or separate K and V tables), a
 batch-strided (dense) Q against a paged cache, per-sequence live query counts
-(``seqused_q``: rows past them, and gaps between packed sequences, stay
-untouched), each alone and in model combinations (gpt-oss sinks + sliding
+(``seqused_q``: a dense Q's rows past them are padding and give O = 0,
+LSE = -inf; a ragged Q's are owned by no sequence and stay untouched, with its
+sequences in reverse order), each alone and in model combinations (gpt-oss sinks + sliding
 window at D64 GQA, Gemma-2 softcap + sliding window at D256, everything at
 once).
 
@@ -43,13 +44,14 @@ _GPTOSS = dict(Hq=16, Hkv=2, dq=64, mask="causal", wl=127, wr=0)
 # name -> options. Common keys: layout (dense / ragged / paged), B + Sq + Sk
 # (dense) or lens_q + lens_k (packed), Hq, Hkv, Hv, dq, dv, mask, br, wl, wr,
 # flags (c softcap, s sinks, a ALiBi, q QQ-bias, 8 FP8 K/V, d dense Q (paged),
-# u seqused_q, t separate K and V block tables (paged)), cap, scale, ps (page
-# size), bias ((kind, (b, h, q, k) full
+# u seqused_q, t separate K and V block tables (paged), n NaN in every
+# sequence's first V row: only the padding rows are checked), cap, scale, ps
+# (page size), bias ((kind, (b, h, q, k) full
 # flags)), qq (rows, cols, pad), bn (block_n), unsplit (gfx12 wave_pair=False),
 # ninf ((n, fill): the first n keys' bias / QQ-bias entries become fill, "inf"
 # -> -inf, "finfo" -> the dtype's most negative finite value), gaps (u: rows
-# past each sequence's live count -- packed: before the next sequence; dense
-# Q: up to Sq = max(lens_q + gaps)).
+# past each sequence's live count -- packed: in its offset block, owned by no
+# sequence; dense Q: up to Sq = max(lens_q + gaps)).
 CASES = {
     "softcap_none_d128": dict(B=2, Sq=77, Sk=150, dq=128, flags="c", cap=5.0, scale=1.0),
     "softcap_large_logits_d64": dict(
@@ -190,6 +192,12 @@ CASES = {
     "denseq_used_pair_d256": dict(
         layout="paged", ps=16, lens_q=(2, 1), gaps=(0, 1), lens_k=(70, 5),
         Hq=4, Hkv=2, dq=256, mask="causal", br=1, wr=0, flags="du", dtypes=("bf16",),
+    ),
+    # A NaN in a V row every row sees: the live rows turn NaN, the padding rows
+    # in their tile must still store O = 0.
+    "denseq_used_paged16_nan_v": dict(
+        layout="paged", ps=16, lens_q=(5, 20), gaps=(15, 0), lens_k=(40, 33),
+        dq=64, flags="dun", dtypes=("fp16",),
     ),
     # Separate K and V block tables (cuDNN's page_table_k / page_table_v): the
     # V pages sit in another order than the K pages. Per-row lookups (ps 16),
@@ -370,6 +378,17 @@ def test_prefill_feature_matches_reference(case, dtype):
     spans = [n + g for n, g in zip(lens_q, opt["gaps"] or (0,) * B)]
     assert used or spans == list(lens_q), "gaps need seqused_q"
     assert not dense_q or len(set(spans)) == 1, "a dense Q spans Sq rows per sequence"
+    # A ragged Q with seqused_q owns only its live rows (hipDNN's RFC 0014): its
+    # sequences sit in reverse order, cu_seqlens_q[B] is poisoned, and the rows
+    # of each offset block past the live count belong to no sequence, so they
+    # must keep their sentinel. Other packed layouts are in order.
+    ragged_used = used and not dense_q and layout != "dense"
+    q_order = list(range(B))[::-1] if ragged_used else list(range(B))
+    q_origins = [0] * B
+    pos = 0
+    for bi in q_order:
+        q_origins[bi] = pos
+        pos += spans[bi]
     scale = opt["scale"] or dq**-0.5
     spec = WmmaFmhaFwdV2Spec(
         dtype=dtype,
@@ -408,6 +427,9 @@ def test_prefill_feature_matches_reference(case, dtype):
     else:
         ks_dev = [rnd(n, Hk, dq).astype(npdt) for n in lens_k]
         vs_dev = [rnd(n, Hv, dv).astype(npdt) for n in lens_k]
+        if "n" in flags:
+            for x in vs_dev:
+                x[:1] = np.nan
         ks, vs = ks_dev, vs_dev
     sinks = (rng.standard_normal(Hq) * 2).astype(npdt) if "s" in flags else None
     slopes = (
@@ -486,7 +508,7 @@ def test_prefill_feature_matches_reference(case, dtype):
                 "lse": (Hq * max_q, 1, max_q),
             }
         else:
-            # Live query rows, then each sequence's untouched gap rows.
+            # Live query rows, then each sequence's padding rows.
             q_seqs = [
                 (
                     np.concatenate([q, rnd(s - len(q), Hq, dq).astype(npdt)])
@@ -511,10 +533,11 @@ def test_prefill_feature_matches_reference(case, dtype):
             else:
                 total_q = sum(spans)
                 values["seqlen_q"] = max(max(spans), 1)
-                q_all = np.concatenate(q_seqs)
+                q_all = np.concatenate([q_seqs[bi] for bi in q_order])
                 o_like = np.zeros((total_q, Hq, dv), npdt)
                 lse_like = np.zeros((Hq, max(total_q, 1)), np.float32)
-                cu_q = np.concatenate([[0], np.cumsum(spans)]).astype(np.int32)
+                # cu_seqlens_q[B] is poisoned when only the origins may be read.
+                cu_q = np.array(q_origins + [-7 if ragged_used else total_q], np.int32)
                 values["cu_seqlens_q"] = dev.put(cu_q)
                 strides = {
                     "q": (0, Hq * dq, dq),
@@ -572,7 +595,8 @@ def test_prefill_feature_matches_reference(case, dtype):
         values["K"] = dev.put(k_all)
         values["V"] = dev.put(v_all)
         values["O"] = o_ptr = dev.put(np.full_like(o_like, np.nan))
-        values["LSE"] = lse_ptr = dev.put(lse_like)
+        lse_sentinel = 7.0  # not an LSE any row of these cases produces
+        values["LSE"] = lse_ptr = dev.put(np.full_like(lse_like, lse_sentinel))
         for t, (sb, st, sh) in strides.items():
             values.update(
                 {
@@ -629,7 +653,7 @@ def test_prefill_feature_matches_reference(case, dtype):
             module.unload()
         dev.free()
 
-    gap_rows = []
+    gap_rows = gap_lses = []
     if layout == "dense":
         outs = [out[bi] for bi in range(B)]
         lses = [got_lse[bi] for bi in range(B)]
@@ -637,13 +661,31 @@ def test_prefill_feature_matches_reference(case, dtype):
         outs = [out[bi, : lens_q[bi]] for bi in range(B)]
         lses = [got_lse[bi, :, : lens_q[bi]] for bi in range(B)]
         gap_rows = [out[bi, lens_q[bi] :] for bi in range(B)]
+        gap_lses = [got_lse[bi, :, lens_q[bi] :] for bi in range(B)]
     else:
-        off = np.concatenate([[0], np.cumsum(spans)])
+        off = q_origins
         outs = [out[off[bi] : off[bi] + lens_q[bi]] for bi in range(B)]
         lses = [got_lse[:, off[bi] : off[bi] + lens_q[bi]] for bi in range(B)]
-        gap_rows = [out[off[bi] + lens_q[bi] : off[bi + 1]] for bi in range(B)]
-    for bi, rows in enumerate(gap_rows):
-        assert np.isnan(rows).all(), f"sequence {bi}: a row past seqused_q was written"
+        gaps = [slice(off[bi] + lens_q[bi], off[bi] + spans[bi]) for bi in range(B)]
+        gap_rows = [out[g] for g in gaps]
+        gap_lses = [got_lse[:, g] for g in gaps]
+    for bi, (rows, row_lse) in enumerate(zip(gap_rows, gap_lses)):
+        if ragged_used:
+            assert np.isnan(
+                rows
+            ).all(), f"sequence {bi}: a row past seqused_q, owned by no sequence, was written"
+            assert (
+                row_lse == lse_sentinel
+            ).all(), f"sequence {bi}: the LSE of a row owned by no sequence was written"
+            continue
+        assert (
+            rows == 0
+        ).all(), f"sequence {bi}: a padding row past seqused_q is not O = 0"
+        assert np.isneginf(
+            row_lse
+        ).all(), f"sequence {bi}: a padding row's LSE is not -inf"
+    if "n" in flags:
+        return  # the live rows see the NaN V row
     tol = 4e-2 if dtype == "bf16" else 2e-2
     for bi in range(B):
         o, ref = outs[bi], refs[bi]

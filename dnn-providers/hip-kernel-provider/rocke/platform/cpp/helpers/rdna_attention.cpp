@@ -1200,6 +1200,12 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
     };
 
     Val zero_rows = rocke_b_cmp_le(b, p->seqlen_k, c0);
+    if(p->live_rows != NULL)
+    {
+        /* A tile of padding rows only reaches the epilogue's zero store. */
+        Val pad = rocke_b_cmp_ge(b, p->q_start, p->live_rows);
+        zero_rows = rocke_b_lor(b, zero_rows, pad);
+    }
     Val sk = rocke_b_smax(b, p->seqlen_k, c0);
     Val n_tiles = cdiv(sk, BN);
     Val lo_t, full_lo, full_hi, hi_t, lane_hi, lane_lo;
@@ -1685,11 +1691,12 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
     Val m_f = state[0], l_f = state[1];
     Val l_tot = rocke_b_fadd(b, l_f, permx16_f32(l_f));
     Val empty = rocke_b_fcmp(b, "oeq", l_tot, zero_f);
-    Val inv_l;
+    if(p->live_rows != NULL)
     {
-        Val r = rocke_b_rcp(b, l_tot);
-        inv_l = rocke_b_select(b, empty, zero_f, r);
+        Val pad = rocke_b_cmp_ge(b, q_row, p->live_rows);
+        empty = rocke_b_lor(b, empty, pad);
     }
+    Val inv_l = rocke_b_rcp(b, l_tot);
     Val o_row_off;
     {
         Val m = rocke_b_mul(b, q_row, p->stride_o);
@@ -1706,8 +1713,11 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
         Vals v;
         for(int i = 0; i < 8; ++i)
         {
+            /* Empty and padding rows store 0 by select, not by scaling: P = 0
+             * times a non-finite V row still leaves NaN in their accumulators. */
             Val e = rocke_b_vec_extract(b, acc, i);
-            v.push_back(rocke_b_fmul(b, e, inv_l));
+            Val scaled = rocke_b_fmul(b, e, inv_l);
+            v.push_back(rocke_b_select(b, empty, zero_f, scaled));
         }
         Vals h16;
         for(Val x : v)
