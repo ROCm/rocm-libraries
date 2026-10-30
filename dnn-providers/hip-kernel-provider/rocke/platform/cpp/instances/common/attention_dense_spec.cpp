@@ -212,6 +212,18 @@ int64_t dense_gqa(const rocke_attention_dense_spec_t* s)
     return py_floordiv(s->num_query_heads, s->num_kv_heads);
 }
 
+int64_t dense_num_waves(const rocke_attention_dense_spec_t* s)
+{
+    return py_floordiv(s->block_m, 32);
+}
+
+/* The fields the accessors divide by are usable: see SPEC PRECONDITION. */
+bool divisors_ok(const rocke_attention_dense_spec_t* s)
+{
+    return s != NULL && s->num_kv_heads != 0 && s->block_m != 0 && s->head_size != 0
+           && s->chiplet_num_xcds != 0;
+}
+
 bool balance_causal(const rocke_attention_dense_spec_t* s)
 {
     return s->causal && !(s->sliding_window > 0 && s->sliding_window < s->seqlen_kv);
@@ -592,7 +604,7 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
          * num_waves 0, and a num_waves above block_n makes rows_per_wave 0 (then
          * block_size % 0); both raise ZeroDivisionError. Its text is the CPython
          * 3.14 one. */
-        const int num_waves = s->block_m / 32;
+        const int num_waves = (int)dense_num_waves(s);
         if(num_waves == 0)
             return reject(reason, cap, "division by zero");
         const int rows_per_wave = s->block_n / num_waves;
@@ -646,18 +658,20 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
 
 int rocke_attention_dense_spec_num_waves(const rocke_attention_dense_spec_t* s)
 {
-    return (int)py_floordiv(s->block_m, 32);
+    return (int)dense_num_waves(s);
 }
 
 int rocke_attention_dense_spec_num_queries_per_kv(const rocke_attention_dense_spec_t* s)
 {
-    return (int)py_floordiv(s->num_query_heads, s->num_kv_heads);
+    return (int)dense_gqa(s);
 }
 
 const char*
     rocke_attention_dense_spec_resolved_persist_decode(const rocke_attention_dense_spec_t* s,
                                                        bool lookahead)
 {
+    if(!divisors_ok(s))
+        return NULL;
     if(!streq(s->persist_decode, "auto"))
         return s->persist_decode;
 
@@ -667,8 +681,9 @@ const char*
     {
         if(s->interleave)
             return "qb_major";
-        if(gqa == 1 && s->num_query_heads % s->chiplet_num_xcds == 0
-           && s->num_persistent % s->chiplet_num_xcds == 0 && (!balance_causal(s) || nqb % 2 == 0))
+        /* Python: PERSIST_DECODES["hq_minor_swz"].check(self) is None -- the same
+         * check an explicit hq_minor_swz runs, so the two cannot drift apart. */
+        if(gqa == 1 && check_hq_minor_swz(s, lookahead, NULL, 0))
         {
             const ExactProduct work({nqb, s->num_query_heads, s->batch});
             const ExactProduct threshold({8, s->num_persistent});
@@ -690,6 +705,8 @@ const char*
     rocke_attention_dense_spec_resolved_nonpersist_decode(const rocke_attention_dense_spec_t* s,
                                                           bool lookahead)
 {
+    if(!divisors_ok(s))
+        return NULL;
     if(!streq(s->nonpersist_decode, "auto"))
         return s->nonpersist_decode;
     if(!aligned_causal(s, lookahead))
@@ -710,7 +727,7 @@ rocke_status_t rocke_attention_dense_name_parts_base(const rocke_attention_dense
                                                      bool lookahead,
                                                      rocke_attention_dense_name_parts_t* out)
 {
-    if(s == NULL || out == NULL)
+    if(!divisors_ok(s) || out == NULL)
         return ROCKE_ERR_VALUE;
     memset(out, 0, sizeof(*out));
     out->head_parts = true;
@@ -737,7 +754,7 @@ rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spe
                                                  char* out,
                                                  size_t out_cap)
 {
-    if(s == NULL || np == NULL || out == NULL || s->dtype == NULL)
+    if(!divisors_ok(s) || np == NULL || out == NULL || s->dtype == NULL)
         return ROCKE_ERR_VALUE;
     for(int count : {np->num_layout, np->num_band, np->num_algorithm})
         if(count < 0 || count > ROCKE_ATTENTION_DENSE_MAX_NAME_PARTS)
@@ -840,20 +857,24 @@ rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spe
 }
 
 bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
-                                          const char* type_name,
-                                          rocke_attention_dense_validate_fn validate,
+                                          const rocke_attention_dense_traits_t* t,
+                                          bool lookahead,
+                                          rocke_attention_dense_validate_fn arch_validate,
                                           const void* ctx,
                                           char* reason,
                                           size_t cap)
 {
-    if(s == NULL || validate == NULL)
-        return reject(reason, cap, "attention dense spec is NULL");
+    if(s == NULL || t == NULL || t->type_name == NULL)
+        return reject(reason, cap, "attention dense spec, traits or type_name is NULL");
 
-    /* 1. Re-run the concrete type's validators. */
+    /* 1. Re-run the concrete type's validators: the base __post_init__ on this
+     * same spec, then the arch's own fields. Both Python subclasses call
+     * super().__post_init__() first, so the first failing reason is the same. */
     char why[ROCKE_ATTENTION_DENSE_REASON_CAP];
     why[0] = '\0';
-    if(!validate(ctx, why, sizeof(why)))
-        return reject(reason, cap, "invalid %s: %s", type_name, why);
+    if(!rocke_attention_dense_spec_validate(s, t, lookahead, why, sizeof(why))
+       || (arch_validate != NULL && !arch_validate(ctx, why, sizeof(why))))
+        return reject(reason, cap, "invalid %s: %s", t->type_name, why);
 
     /* 2. Positive extents. */
     const struct

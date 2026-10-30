@@ -72,15 +72,14 @@ int g_failures = 0;
 /* Up to this many entries in either decode table in the "hooks" section. */
 constexpr int k_max_decodes = 8;
 
-/* The concrete validator's context. Deliberately not the spec: preflight must hand
- * its validator the ctx it was given, and the magic catches a spec passed instead. */
+/* The arch validator's context. Deliberately not the spec: preflight must hand
+ * its arch validator the ctx it was given, and the magic catches a spec passed
+ * instead. The shipped classes' own checks never change a recorded verdict (the
+ * generator refuses such hook cases), so it only accepts. */
 constexpr uint32_t k_ctx_magic = 0x5eedc7c5u;
 struct ValidatorCtx
 {
     uint32_t magic;
-    const rocke_attention_dense_spec_t* spec;
-    const rocke_attention_dense_traits_t* traits;
-    bool lookahead;
 };
 
 bool validate_ctx(const void* ctx, char* reason, size_t cap)
@@ -93,7 +92,7 @@ bool validate_ctx(const void* ctx, char* reason, size_t cap)
         std::snprintf(reason, cap, "bad validator context");
         return false;
     }
-    return rocke_attention_dense_spec_validate(c->spec, c->traits, c->lookahead, reason, cap);
+    return true;
 }
 
 bool json_bool(const jd_val_t* v, bool* out)
@@ -289,10 +288,10 @@ void check_case(const char* table,
     if(expect_text(expect, "reason", &want_text))
         CHECK_STR(valid ? "" : reason, want_text);
 
-    const ValidatorCtx ctx{k_ctx_magic, &s, t, lookahead};
+    const ValidatorCtx ctx{k_ctx_magic};
     char pre[ROCKE_ATTENTION_DENSE_REASON_CAP] = "x";
     const bool pok = rocke_attention_dense_spec_preflight(
-        &s, t->type_name, validate_ctx, &ctx, pre, sizeof(pre));
+        &s, t, lookahead, validate_ctx, &ctx, pre, sizeof(pre));
     CHECK(pok == want_preflight);
     if(expect_text(expect, "preflight_reason", &want_text))
         CHECK_STR(pre, want_text);
@@ -441,6 +440,65 @@ void check_unknown_decode()
     CHECK(rocke_attention_dense_name_parts_base(&s, false, &parts) == ROCKE_ERR_VALUE);
 }
 
+/* Preflight runs the base checks on the spec it is given, whatever the arch
+ * validator and its ctx say, and takes the type name from the traits. */
+void check_preflight_contract()
+{
+    const char* where = "preflight contract";
+    const rocke_attention_dense_traits_t t = rocke_attention_dense_traits_base();
+    char reason[ROCKE_ATTENTION_DENSE_REASON_CAP];
+    rocke_attention_dense_spec_t s = base_spec();
+    CHECK(rocke_attention_dense_spec_preflight(&s, &t, false, NULL, NULL, reason, sizeof(reason)));
+    CHECK_STR(reason, "");
+
+    s.num_query_heads = 7; /* invalid: not a multiple of num_kv_heads */
+    const ValidatorCtx ctx{k_ctx_magic};
+    CHECK(!rocke_attention_dense_spec_preflight(
+        &s, &t, false, validate_ctx, &ctx, reason, sizeof(reason)));
+    CHECK_STR(reason,
+              "invalid AttentionDenseSpec: num_query_heads (7) must be a positive multiple of "
+              "num_kv_heads (2)");
+    CHECK(!rocke_attention_dense_spec_preflight(&s, &t, false, NULL, NULL, reason, sizeof(reason)));
+
+    s = base_spec();
+    s.batch = 0; /* valid spec, preflight-only extent reject */
+    CHECK(!rocke_attention_dense_spec_preflight(&s, &t, false, NULL, NULL, reason, sizeof(reason)));
+    CHECK_STR(reason, "batch must be positive, got 0");
+
+    s = base_spec();
+    CHECK(
+        !rocke_attention_dense_spec_preflight(&s, NULL, false, NULL, NULL, reason, sizeof(reason)));
+    rocke_attention_dense_traits_t unnamed = t;
+    unnamed.type_name = NULL;
+    CHECK(!rocke_attention_dense_spec_preflight(
+        &s, &unnamed, false, NULL, NULL, reason, sizeof(reason)));
+}
+
+/* SPEC PRECONDITION: on a spec that never passed validation, the accessors and
+ * name functions report an error instead of dividing by zero. */
+void check_unvalidated_spec()
+{
+    const char* where = "unvalidated spec";
+    for(int field = 0; field < 4; ++field)
+    {
+        rocke_attention_dense_spec_t s = base_spec();
+        (field == 0   ? s.num_kv_heads
+         : field == 1 ? s.block_m
+         : field == 2 ? s.head_size
+                      : s.chiplet_num_xcds)
+            = 0;
+        CHECK(rocke_attention_dense_spec_resolved_persist_decode(&s, false) == NULL);
+        CHECK(rocke_attention_dense_spec_resolved_nonpersist_decode(&s, false) == NULL);
+        rocke_attention_dense_name_parts_t parts;
+        CHECK(rocke_attention_dense_name_parts_base(&s, false, &parts) == ROCKE_ERR_VALUE);
+        rocke_attention_dense_spec_t good = base_spec();
+        CHECK(rocke_attention_dense_name_parts_base(&good, false, &parts) == ROCKE_OK);
+        char name[ROCKE_ATTENTION_DENSE_NAME_CAP];
+        CHECK(rocke_attention_dense_kernel_name(&s, &parts, name, sizeof(name)) == ROCKE_ERR_VALUE);
+    }
+    CHECK(rocke_attention_dense_spec_resolved_persist_decode(NULL, false) == NULL);
+}
+
 /* The kernel name is the kernel's identity: a part that does not fit its slot, a
  * hook count out of range, or a short buffer is an error, never a shorter name. */
 void check_name_errors()
@@ -517,6 +575,8 @@ int main()
     check_vectors();
     check_defaults_and_tables();
     check_unknown_decode();
+    check_preflight_contract();
+    check_unvalidated_spec();
     check_name_errors();
     check_reason_truncation();
     if(g_failures != 0)

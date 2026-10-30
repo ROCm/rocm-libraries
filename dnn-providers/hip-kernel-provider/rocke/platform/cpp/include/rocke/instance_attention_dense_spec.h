@@ -33,8 +33,9 @@
  *     caller cannot set it once for a type and get it wrong per spec.
  *   - kernel_name() consults the _*_name_parts methods:
  *     rocke_attention_dense_name_parts_t, which the concrete spec fills.
- *   - check_dense_spec_preflight re-runs the CONCRETE type's validators:
- *     rocke_attention_dense_validate_fn, the arch's full validator.
+ *   - check_dense_spec_preflight re-runs the concrete type's validators: the
+ *     base checks (run by preflight itself, on the same spec) and then the
+ *     arch's own fields (rocke_attention_dense_validate_fn, optional).
  * rocke_attention_dense_traits_base() / rocke_attention_dense_name_parts_base()
  * are the base-class answers.
  *
@@ -49,6 +50,14 @@
  * or more waves than block_n rows) return the fixed text "division by zero";
  * CPython's own text varies by version, so those are compared by verdict only.
  * A reason longer than the caller's buffer ends in "...".
+ *
+ * SPEC PRECONDITION. Python cannot reach a property on a spec __post_init__
+ * refused to build. In C the accessors (num_waves, num_queries_per_kv, both
+ * resolved_*_decode), name_parts_base and kernel_name require a spec that has
+ * passed rocke_attention_dense_spec_preflight with the same traits and
+ * lookahead. They do not crash on an unvalidated spec with a zero divisor or a
+ * NULL argument (the decode accessors return NULL, the other two
+ * ROCKE_ERR_VALUE), but their answers are only Python's on a valid spec.
  *
  * Not ported: attention_dense_cache_key (a Python launcher-cache key over
  * dataclass fields and the spec's class object; it has no C caller).
@@ -134,7 +143,7 @@ rocke_attention_dense_spec_t rocke_attention_dense_spec_default(void);
 /* The subclass answers __post_init__ consults. */
 typedef struct rocke_attention_dense_traits
 {
-    /* type(spec).__name__, used by check_dense_spec_preflight's reason. */
+    /* type(spec).__name__, used by preflight's "invalid <type>: ..." reason. */
     const char* type_name;
     /* _supports_noncausal_window() */
     bool supports_noncausal_window;
@@ -162,18 +171,19 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* spe
                                          char* reason,
                                          size_t reason_cap);
 
-/* @property num_waves: block_m // 32. */
+/* @property num_waves: block_m // 32. See SPEC PRECONDITION. */
 int rocke_attention_dense_spec_num_waves(const rocke_attention_dense_spec_t* spec);
-/* @property num_queries_per_kv: num_query_heads // num_kv_heads. */
+/* @property num_queries_per_kv: num_query_heads // num_kv_heads. See SPEC
+ * PRECONDITION: a validated spec has positive head counts, so the int fits. */
 int rocke_attention_dense_spec_num_queries_per_kv(const rocke_attention_dense_spec_t* spec);
 /* @property resolved_persist_decode: explicit value, or the auto policy using
  * causal balance, chiplet locality, and persistent work thresholds.
- * lookahead: see SUBCLASS HOOKS. */
+ * lookahead: see SUBCLASS HOOKS. NULL on an unusable spec (SPEC PRECONDITION). */
 const char*
     rocke_attention_dense_spec_resolved_persist_decode(const rocke_attention_dense_spec_t* spec,
                                                        bool lookahead);
 /* @property resolved_nonpersist_decode: explicit value, or the auto policy for
- * the one-CTA-per-work-item grid. lookahead: see SUBCLASS HOOKS. */
+ * the one-CTA-per-work-item grid. lookahead and NULL: as above. */
 const char*
     rocke_attention_dense_spec_resolved_nonpersist_decode(const rocke_attention_dense_spec_t* spec,
                                                           bool lookahead);
@@ -218,19 +228,23 @@ rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spe
                                                  char* out,
                                                  size_t out_cap);
 
-/* The concrete type's full validator (its __post_init__, base checks
- * included), for preflight to re-run. Same contract as
- * rocke_attention_dense_spec_validate; ctx is the concrete spec. */
+/* An arch's validator for its OWN fields (the part of its __post_init__ after
+ * super().__post_init__()), for preflight to run after the base checks. Same
+ * reason contract as rocke_attention_dense_spec_validate; ctx is whatever the
+ * arch needs (typically its full spec struct). */
 typedef bool (*rocke_attention_dense_validate_fn)(const void* ctx, char* reason, size_t reason_cap);
 
-/* check_dense_spec_preflight(spec) -> (ok, reason): re-run the concrete
- * validators (validate(ctx)), then positive extents, block_n dividing the
- * query tile, and the 32-bit extent bounds, in the Python order. base is the
- * concrete spec's AttentionDenseSpec fields; type_name is type(spec).__name__.
- * On false, writes the Python reason into reason (if non-NULL). */
-bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* base,
-                                          const char* type_name,
-                                          rocke_attention_dense_validate_fn validate,
+/* check_dense_spec_preflight(spec) -> (ok, reason): re-run the concrete type's
+ * validators -- rocke_attention_dense_spec_validate(spec, traits, lookahead),
+ * then arch_validate(ctx) if non-NULL -- then positive extents, block_n
+ * dividing the query tile, and the 32-bit extent bounds, in the Python order.
+ * The base checks always run on `spec` itself, so no ctx can hide them. The
+ * type name comes from traits->type_name. On false, writes the Python reason
+ * into reason (if non-NULL). */
+bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* spec,
+                                          const rocke_attention_dense_traits_t* traits,
+                                          bool lookahead,
+                                          rocke_attention_dense_validate_fn arch_validate,
                                           const void* ctx,
                                           char* reason,
                                           size_t reason_cap);
