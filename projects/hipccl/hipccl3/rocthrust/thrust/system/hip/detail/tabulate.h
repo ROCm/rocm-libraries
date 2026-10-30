@@ -43,9 +43,9 @@
 #  include <thrust/system/hip/detail/transform.h>
 #  include <thrust/system/hip/execution_policy.h>
 
+#  include _THRUST_LIBCXX_INCLUDE(__functional/address_stability.h)
 #  include _THRUST_LIBCXX_INCLUDE(__iterator/counting_iterator.h)
-#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
-#  include _THRUST_STD_INCLUDE(__iterator/incrementable_traits.h)
+#  include _THRUST_STD_INCLUDE(iterator)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -56,8 +56,12 @@ tabulate(execution_policy<Derived>& policy, Iterator first, Iterator last, Tabul
 {
   using size_type  = _THRUST_STD::iter_difference_t<Iterator>;
   const auto count = _THRUST_STD::distance(first, last);
-  const auto begin = _THRUST_LIBCXX::counting_iterator<size_type>{};
-  hip_rocprim::transform(policy, begin, begin + count, first, tabulate_op);
+  hip_rocprim::transform_n(
+    policy,
+    _THRUST_LIBCXX::counting_iterator<size_type>{},
+    count,
+    first,
+    _THRUST_LIBCXX::proclaim_copyable_arguments(tabulate_op));
 }
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
