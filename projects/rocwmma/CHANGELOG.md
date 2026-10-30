@@ -12,6 +12,7 @@ Documentation for rocWMMA is available at
 ### Resolved issues
 
 * Removed the OpenMP requirement from the public CMake target and installed CMake package. OpenMP remains a dependency of samples, tests, and community samples; DEB/RPM OpenMP dependencies are scoped to client packages.
+* Fixed uint8 WMMA with an int32 accumulator at BlockK 8 on gfx1170, gfx1171, gfx1200, gfx1201 and gfx1250. It was reported as unsupported, while a uint32 accumulator was reported as supported but failed to compile.
 
 ## rocWMMA 2.2.2 for ROCm 10.2
 

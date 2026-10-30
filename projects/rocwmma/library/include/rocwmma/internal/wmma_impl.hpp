@@ -1598,7 +1598,7 @@ namespace rocwmma
         template <uint32_t GfxTargetId>
         struct amdgcn_wmma<uint8_t,
                            uint8_t,
-                           uint32_t,
+                           int32_t,
                            16u,
                            16u,
                            8u,
