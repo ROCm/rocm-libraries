@@ -24,6 +24,7 @@
 
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(ENABLE_MEGAKERNEL_ENGINE)
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -79,10 +80,10 @@ constexpr std::string_view NLAYERS = "nlayers";
 // The binary key compared with the kernel's KMD record, in the order a decline names the
 // first differing field. `src` is last: it differs whenever anything else does, so a
 // specific field is the more useful report.
-constexpr std::string_view STRING_KEYS[] = {"model", "kv", "src"};
-constexpr std::string_view INT_KEYS[] = {"cus", "block", "M", "tp", "rt"};
+constexpr std::array<std::string_view, 3> STRING_KEYS = {"model", "kv", "src"};
+constexpr std::array<std::string_view, 5> INT_KEYS = {"cus", "block", "M", "tp", "rt"};
 constexpr std::string_view BOOL_KEY = "lm_head";
-constexpr std::string_view KERNEL_KEY_ORDER[]
+constexpr std::array<std::string_view, 9> KERNEL_KEY_ORDER
     = {"model", "cus", "kv", "block", "M", "tp", "rt", "lm_head", "src"};
 
 // Launch geometry of one code object, from its KMD record.
@@ -202,7 +203,7 @@ std::optional<BoundTokens> matchCustomOp(const MatchContext& context)
         return decline("inputs", "expected exactly two inputs [tab, glob]");
     }
     const auto* bytes = op->data();
-    if(bytes == nullptr || bytes->size() == 0)
+    if(bytes == nullptr || bytes->empty())
     {
         return decline("payload", "no payload");
     }
@@ -331,6 +332,22 @@ public:
         return _code;
     }
 
+    int64_t tabUid() const
+    {
+        return _tabUid;
+    }
+
+    int64_t globUid() const
+    {
+        return _globUid;
+    }
+
+    int32_t nlayers() const
+    {
+        return _nlayers;
+    }
+
+private:
     IngestorKernelCode _code;
     int64_t _tabUid;
     int64_t _globUid;
@@ -402,13 +419,14 @@ public:
     {
         const auto& mk = dynamic_cast<const PreparedMegakernel&>(prepared);
         const auto tab
-            = hipdnn_plugin_sdk::findDeviceBuffer(mk._tabUid, deviceBuffers, numDeviceBuffers);
+            = hipdnn_plugin_sdk::findDeviceBuffer(mk.tabUid(), deviceBuffers, numDeviceBuffers);
         const auto glob
-            = hipdnn_plugin_sdk::findDeviceBuffer(mk._globUid, deviceBuffers, numDeviceBuffers);
+            = hipdnn_plugin_sdk::findDeviceBuffer(mk.globUid(), deviceBuffers, numDeviceBuffers);
         const auto tabAddress = static_cast<int64_t>(reinterpret_cast<intptr_t>(tab.ptr));
         const auto globAddress = static_cast<int64_t>(reinterpret_cast<intptr_t>(glob.ptr));
-        const int32_t nlayers = mk._nlayers;
-        mk._code.kernelForStream(handle.getStream())
+        const int32_t nlayers = mk.nlayers();
+        mk.kernelCode()
+            .kernelForStream(handle.getStream())
             .launch(handle.getStream(), tabAddress, globAddress, nlayers);
     }
 

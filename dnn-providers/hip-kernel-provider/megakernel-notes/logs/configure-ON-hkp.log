@@ -1,0 +1,4 @@
+-- [hip-kernel-provider] hkp: rocKE disabled (HIPKERNELPROVIDER_ENABLE_ROCKE=OFF); packing with the hip producer only
+-- [hip-kernel-provider] hkp: this configuration does not ship hipkernel:Gfx950AttentionDense for gfx950, so its census is not registered.
+-- [hip-kernel-provider] hkp: this configuration does not ship hipkernel:Gfx1151WmmaAttention for any RDNA arch, so its census is not registered.
+-- [hip-kernel-provider] hkp: this configuration does not ship hipkernel:Gfx1151WmmaAttentionDecode for any RDNA arch, so its census is not registered.

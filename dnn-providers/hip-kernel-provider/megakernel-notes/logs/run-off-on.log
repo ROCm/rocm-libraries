@@ -1,0 +1,42 @@
+srun: job 68218157 queued and waiting for resources
+srun: job 68218157 has been allocated resources
+py deps ok
+host=ctr-smc-s22-17.adc.amd.com nproc=32 date=2026-10-30T14:39:36+00:00
+source files updated: 10971
+cmake version 3.28.3
+HIP version: 7.17.26423-0000000
+MODE=OFF configure_rc=0 s=37
+-- [hip-kernel-provider] hkp: the production root '/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors' has nothing to pack for this build's architectures (gfx942) with disabled folder(s) megakernel, rocKE excluded and rocke kernels pruned (HIPKERNELPROVIDER_ENABLE_ROCKE=OFF); production packaging dormant (tests still run against the fixtures).
+MODE=OFF build_rc=0 s=1381
+hip_kernel_provider_census_tests
+hip_kernel_provider_integration_tests
+hip_kernel_provider_tests
+MODE=OFF unit_rc=0
+[  PASSED  ] 1109 tests.
+[  SKIPPED ] 68 tests.
+MODE=OFF megakernel_unit_rc=0
+[==========] 0 tests from 0 test suites ran. (0 ms total)
+[  PASSED  ] 0 tests.
+WARNING: filter "TestMegakernel*" did not match any test; no tests were run
+MODE=ON configure_rc=0 s=37
+MODE=ON build_rc=0 s=1374
+MODE=ON clang_tidy_rc=0
+hip_kernel_provider_census_tests
+hip_kernel_provider_integration_tests
+hip_kernel_provider_tests
+/tmp/mkeng/build-ON/lib/hipdnn_plugins/engines/test_arch_content/hip-kernel-provider/integration/integration/gfx942/megakernel/megakernel_standin.kdp.json
+/tmp/mkeng/build-ON/lib/hipdnn_plugins/engines/arch_content/hip-kernel-provider/gfx942/megakernel/artifacts/megakernel.kdp.json
+/tmp/mkeng/build-ON/dnn-providers/hip-kernel-provider/descriptor-packaging/hkp-integration-intermediate/gfx942/megakernel/megakernel_standin.kdp.json
+/tmp/mkeng/build-ON/dnn-providers/hip-kernel-provider/descriptor-packaging/hkp-product-intermediate/gfx942/megakernel/artifacts/megakernel.kdp.json
+MODE=ON unit_rc=0
+[  PASSED  ] 1119 tests.
+[  SKIPPED ] 68 tests.
+MODE=ON megakernel_unit_rc=0
+[----------] Global test environment tear-down
+[==========] 10 tests from 1 test suite ran. (1 ms total)
+[  PASSED  ] 10 tests.
+packaging pytest:
+pytest_rc=0
+...........                                                              [100%]
+11 passed in 2.87s
+done 2026-10-30T15:45:05+00:00

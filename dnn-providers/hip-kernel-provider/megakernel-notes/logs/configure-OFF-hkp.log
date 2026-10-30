@@ -1,0 +1,5 @@
+-- [hip-kernel-provider] hkp: rocKE disabled (HIPKERNELPROVIDER_ENABLE_ROCKE=OFF); packing with the hip producer only
+-- [hip-kernel-provider] hkp: the production root '/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors' has nothing to pack for this build's architectures (gfx942) with disabled folder(s) megakernel, rocKE excluded and rocke kernels pruned (HIPKERNELPROVIDER_ENABLE_ROCKE=OFF); production packaging dormant (tests still run against the fixtures).
+-- [hip-kernel-provider] hkp: this configuration does not ship hipkernel:Gfx950AttentionDense for gfx950, so its census is not registered.
+-- [hip-kernel-provider] hkp: this configuration does not ship hipkernel:Gfx1151WmmaAttention for any RDNA arch, so its census is not registered.
+-- [hip-kernel-provider] hkp: this configuration does not ship hipkernel:Gfx1151WmmaAttentionDecode for any RDNA arch, so its census is not registered.

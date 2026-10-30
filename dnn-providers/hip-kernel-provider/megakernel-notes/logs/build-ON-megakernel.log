@@ -1,0 +1,9 @@
+[61/1198] hkp: packing root 'unit' for gfx942
+[63/1198] hkp: packing root 'product' for gfx942
+skipping non-descriptor file megakernel/manifest.json
+[74/1198] hkp: packing root 'multi_launch' for gfx942
+[78/1198] hkp: packing root 'unit_archive_fixture' for gfx942
+[81/1198] hkp: packing root 'archive_fixture' for gfx942
+[93/1198] hkp: packing root 'unit_shared' for gfx942
+[94/1198] hkp: packing root 'integration_shared' for gfx942
+[113/1198] hkp: packing root 'integration' for gfx942
