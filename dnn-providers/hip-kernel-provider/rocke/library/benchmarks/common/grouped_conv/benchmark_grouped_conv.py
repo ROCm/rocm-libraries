@@ -447,10 +447,19 @@ class _Selection:
 
 
 def _select(args, problem, dtype: str, case_idx: int) -> _Selection:
-    from dispatch.grouped_convolution import dispatch_conv_grouped_all
+    from dispatch.grouped_convolution import (
+        ConvInstanceSpec,
+        dispatch_conv_grouped_all,
+    )
 
     req = _request_for(problem, dtype, args.arch, args.direction)
-    admitted = list(dispatch_conv_grouped_all(req))
+    # AOT instances only: the per-problem Winograd plans (opt-in) have no
+    # cached binary to time here.
+    admitted = [
+        r
+        for r in dispatch_conv_grouped_all(req)
+        if isinstance(r.spec, ConvInstanceSpec)
+    ]
     keep = _filters(args)
     results = [r for r in admitted if keep(r.spec)]
     if args.sample is not None and results:
@@ -528,8 +537,8 @@ def _build_jobs(specs):
 def _compile(cache, specs, arch: str, jobs: int, limit: int | None = None) -> int:
     """Bring ``cache`` up to date for ``specs``; compile only what changed."""
     from benchmarks.common.kernel_sweep import compile_jobs
-    from kernels.conv.aot_jobs import build_kernel
-    from kernels.conv.direct_aot_jobs import build_direct_job
+    from kernels.conv.aot_jobs import kernel_for_job
+    from kernels.conv.direct_aot_jobs import direct_kernel_for_job
 
     try:
         groups = _build_jobs(specs)
@@ -545,7 +554,7 @@ def _compile(cache, specs, arch: str, jobs: int, limit: int | None = None) -> in
             compile_jobs(
                 cache=cache,
                 all_jobs=all_jobs,
-                build=build_direct_job if direct else build_kernel,
+                build=direct_kernel_for_job if direct else kernel_for_job,
                 arch=arch,
                 dtype=dtype,
                 directions=sorted({j.identity.direction for j in all_jobs}),

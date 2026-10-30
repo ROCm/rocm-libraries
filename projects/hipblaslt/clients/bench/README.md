@@ -41,6 +41,7 @@ cd hipBLASLt; cd build/release
 --batch_count <value>      Number of matrices. Only applicable to batched and strided_batched routines          (Default value is: 1)
 --HMM                      Parameter requesting the use of HipManagedMemory
 --verify |-v               Validate GPU results with CPU?
+--verify_strict            Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose failed). Checks D only. Implies --verify. Computes a CPU reference per problem and copies and compares D on the host for each solution.
 --iters |-i <value>        Iterations to run inside timing loop                                                 (Default value is: 10)
 --cold_iters |-j <value>   Cold Iterations to run before entering the timing loop                               (Default value is: 2)
 --adaptive                       Enable adaptive timing; not compatible with --iters / --cold_iters
@@ -109,6 +110,12 @@ For debugging, `TENSILE_PERSISTENT_HYBRID_FORCE_MODE` overrides the policy: `-1`
 The legacy environment alias `TENSILE_STREAMK5_FORCE_MODE` remains supported;
 the preferred environment name takes precedence when present.
 
+`hipblaslt-bench`, `hipblaslt-sequence`, and `hipblaslt-api-overhead` exit with an error when
+`HIPBLASLT_ADAPTIVE_SM_COUNT` is enabled without `HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE`, because the
+adaptive hint can change the timed solution during a run. Set `HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE=<cus>`
+to time the solution adaptive mode picks at that CU count, and add
+`HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE_PROBE=1` to include the probe cost.
+
 # demo
 Run fp32 GEMM with validation
 ```
@@ -116,6 +123,27 @@ Run fp32 GEMM with validation
 [0]:transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,hipblaslt-Gflops,hipblaslt-GB/s,us,CPU-Gflops,CPU-us,norm_error,atol,rtol
     N,N,0,1,128,128,128,1,128,16384,0,128,16384,128,16384,128,16384,f32_r,f32_r,f32_r,f32_r,f32_r,0,0,0,0,0,none,0,non-supported type,403.298,17.6063,10.4,0.0960059,43688,2.44879e-07,1e-05,1e-05
 ```
+
+### What `-v` checks
+
+`-v` (`--verify`) compares the GPU result D with a CPU reference computed from the same inputs, and adds three columns to the output.
+
+- `norm_error` is the Frobenius norm of the difference divided by the Frobenius norm of the reference, summed over batches and gemms. It averages over each whole matrix, so a few wrong elements in a large result can still give a small value.
+- `atol` and `rtol` come from an element-wise check. It tries the pairs 1e-6, 1e-5, ..., 1e-1 for each, tightest `atol` first, and reports the first pair under which every element satisfies `|reference - result| <= atol + rtol * |result|`. With several batches, or the gemms of a grouped GEMM, the columns show the loosest pair any one matrix needed. `failed` means at least one element is outside even `atol 0.1 + rtol 0.1 * |result|`.
+
+The norm check of D fails when any one batch's norm_error reaches the same limit `hipblaslt-test` uses for the GEMM. The limit is the largest tolerance among the output and both input types (1e-5 for f32, 0.01 for f16, 0.1 for bf16); f32 output with `c_f32_fast_bf16_r` uses at least 0.5. For example, f16 inputs with f32 output use 0.01. The limit applies to each batch, not to the sum in the `norm_error` column. `hipblaslt-test` applies the same limit to the sum instead, so with many batches it can fail a result the bench passes. When a check fails, the bench prints one line per failing gemm to stderr, then a line naming the solution:
+```
+norm check failed for D of gemm 0: batch 2 has norm_error 0.408248, at or above the GEMM limit of 1e-05
+allclose check failed for D of gemm 0: 1 of 96 elements are outside atol 0.1 + rtol 0.1 * |result|; the worst is batch 2, row 5, column 0: result 7, reference 2
+the failed checks above are for solution 3 of 12 (library index 8805, kernel <kernel name>)
+```
+
+If D's type has no norm limit, or isn't one the norm check can compare, the bench prints that D was not verified and counts it as a failed check.
+
+By default the exit code is 0 whether or not a check fails. With `--verify_strict`, the bench exits with code 2 when any check of D failed. It checks D only: the checks of E, the bias gradient and amaxD, and `--ulp`, don't affect the exit code. Only the first launch of each solution is compared with the reference; the launches timed by `--iters` and `--cold_iters` are not checked.
+
+Verification computes a CPU reference for each problem and copies and compares D on the host for each solution, including every selected datafile record. This work is outside the timed GEMM launches and can substantially increase the total runtime of `--algo_method all` sweeps.
+
 Show the frequency with environment variable
 ```
 HIPBLASLT_BENCH_FREQ=1 ./clients/hipblaslt-bench -m 16 -n 16 -k 4096 --transA T --transB N --a_type bf16_r --b_type bf16_r --c_type bf16_r --d_type bf16_r --activation_type none --compute_type f32_r

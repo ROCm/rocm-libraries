@@ -17,14 +17,15 @@ strategy** for scaling to more toolchains and more targets.
 > obsolete. Probe results in §2.4 are LLVM-23 observations; re-run before
 > trusting them on another compiler.
 >
-> **Superseded in part.** §4's R1 has since shipped as
-> `tools/gen_arch_domain.py`, and the §2.4 hand-probes are no longer the data —
-> the generated columns under
-> `python/rocke/core/arch/data/intrinsic_arch_domain.<flavor>.json` are. All
-> three flavors are committed (`llvm20`, `llvm22`, `llvm23`), so the survey
-> above now has a machine-checked column behind it. Where §2.4
-> and the artifacts disagree, the artifacts win — see
-> [`arch_axis_proposal.md`](arch_axis_proposal.md) §3.2 for the rows that changed.
+> **Historical architecture snapshot.** §1–§2 predate the explicit LLVM24
+> compiler lane and emission-profile model. Current code separates qualified
+> compiler lanes from structural profiles; LLVM23 and LLVM24 share one profile,
+> and future compiler majors fail closed. The authoritative current description
+> is [`../ir_lowering/backend_details.md`](../ir_lowering/backend_details.md#llvm-intrinsic-flavor).
+> §4's R1 also shipped as `tools/gen_arch_domain.py`; committed columns currently
+> cover llvm20, llvm22, and llvm23, while LLVM24 artifact generation is separate
+> follow-up work. Treat the remaining tables and proposals as historical design
+> rationale, not current API documentation.
 
 ---
 
@@ -337,13 +338,19 @@ R1 and R2 change **zero emitted bytes**, need no golden re-bless, and are fully
 verifiable on a host without cmake.
 
 **R1 — generate an `arch_domain` artifact from the toolchain; do not hand-write
-it. — SHIPPED** as `tools/gen_arch_domain.py`, gated by
-`tests/core/test_arch_domain_artifact.py`.
+it. — SHIPPED** as `tools/gen_arch_domain.py`, with source structure coverage in
+`tests/tools/test_arch_domain_artifact.py` and regeneration gated by the
+`rocke_arch_domain_reproducibility` CTest in both developer build trees and
+relocated provider test artifacts.
 
 Uses the link probe (declare + call + `store volatile`, compile **and link**;
 prototype validated, §2.4), at **`-O0`** — at `-O3` the optimiser can delete the
 call being asked about and the probe reports `ok` for a target that cannot run
-it. Every decl key × every wired arch — the committed columns are the count of
+it. A probe that links is then compiled to assembly and assembled for its target
+with the same install's `llvm-mc`: the backend can select an intrinsic for a
+target that lacks the instruction and write it into the object, and only the
+text assembler checks each instruction against the target (`arch_absent`
+otherwise). Every decl key × every wired arch — the committed columns are the count of
 record, not this sentence — ~15 s wall across cores on `llvm22`. Managed like
 golden — a generator tool, a committed artifact, a test asserting regeneration is
 a no-op. Depends only on `clang`, never on install layout (§2.4).
