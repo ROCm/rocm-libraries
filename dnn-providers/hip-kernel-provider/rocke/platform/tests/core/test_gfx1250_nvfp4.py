@@ -437,7 +437,7 @@ def test_rejects_malformed_tensor_factors_without_casting(entrypoint, factors):
     from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import _launch
 
     class Runtime:
-        def alloc(self, size):
+        def alloc(self, _size):
             pytest.fail("invalid factors reached GPU allocation")
 
     spec = NvFp4GemmSpec("invalid_factors", 16, 16, 128)
