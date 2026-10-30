@@ -39,6 +39,14 @@ Datatypes:
         c_f64_pedantic_r: 8
         c_i32_r: 9
         c_i32_pedantic_r: 10
+        # hipblaslt-bench --compute_type spellings (hipblaslt_type_strings.hpp)
+        f16_r: 0
+        f32_r: 2
+        f32_f16_r: 4
+        f32_bf16_r: 5
+        xf32_r: 6
+        f64_r: 7
+        i32_r: 9
   - { half: f16_r }
   - hipblaslt_initialization:
       bases: [ c_int ]

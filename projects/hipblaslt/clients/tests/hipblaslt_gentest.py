@@ -186,21 +186,40 @@ def get_datatypes(doc):
     for declaration in doc.get('Datatypes') or ():
         for name, decl in declaration.items():
             if isinstance(decl, dict):
-                # Create derived class type based on bases and attr entries
+                # Create derived class type based on bases and attr entries.
+                # Members stay scoped to their enum class, so two enums may
+                # declare the same member name with different values.
                 dt[name] = type(name,
                                 tuple([eval(t, dt)
                                        for t in decl.get('bases') or ()
                                        if TYPE_RE.match(t)]
                                       ), decl.get('attr') or {})
-                # Import class' attributes into the datatype namespace
-                for subtype in decl.get('attr') or {}:
-                    if TYPE_RE.match(subtype):
-                        dt[subtype] = eval(name+'.'+subtype, dt)
             elif isinstance(decl, str) and TYPE_RE.match(decl):
-                dt[name] = dt[decl]
+                # An alias names a member of the enums declared above, or a type
+                owners = [t for t in dt.values()
+                          if isinstance(t, type) and t.__module__ == '__main__'
+                          and decl in vars(t)]
+                if owners:
+                    for enum in owners:
+                        setattr(enum, name, getattr(enum, decl))
+                elif decl in dt:
+                    dt[name] = dt[decl]
+                else:
+                    sys.exit("Unrecognized data type "+name+": "+repr(decl))
             else:
                 sys.exit("Unrecognized data type "+name+": "+repr(decl))
     return dt
+
+
+def enum_value(enum, field, value):
+    """Resolve a name for an enum-typed field using only that enum's members"""
+    if not isinstance(value, str):
+        return value
+    members = {k: v for k, v in vars(enum).items() if not k.startswith('_')}
+    if value not in members:
+        sys.exit("Invalid value " + repr(value) + " for " + field + ", which has type " +
+                 enum.__name__ + ".\nValid values: " + ", ".join(members) + "\n")
+    return members[value]
 
 
 def get_arguments(doc):
@@ -404,17 +423,16 @@ def instantiate(test):
 
 
     # Any Arguments fields declared as enums (a_type, b_type, etc.)
-    enum_args = [decl[0] for decl in param['Arguments']._fields_
-                 if decl[1].__module__ == '__main__']
+    enum_args = {decl[0]: decl[1] for decl in param['Arguments']._fields_
+                 if decl[1].__module__ == '__main__'}
     array_value_args = ["gsu_vector", "wgm_vector"]
 
     try:
         setdefaults(test)
 
         # For enum arguments, replace name with value
-        for typename in enum_args:
-            if test[typename] in datatypes:
-                test[typename] = datatypes[test[typename]]
+        for typename, enum in enum_args.items():
+            test[typename] = enum_value(enum, typename, test[typename])
 
         known_bug_platforms = set()
 
@@ -431,7 +449,7 @@ def instantiate(test):
                             break
                     # For keys declared as enums, compare resulting values
                     if key in enum_args:
-                        if test[key] != datatypes.get(value, value):
+                        if test[key] != enum_value(enum_args[key], key, value):
                             break
                     # For array value type, treat as known bug if empty array was given
                     elif key in array_value_args:
