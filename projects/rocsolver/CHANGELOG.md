@@ -11,7 +11,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 ### Resolved issues
 
-* Fixed failure of large batch count > 64 * 1024 for symmetric eigensolver SYEVD/HEEVD.
+* Fixed failure of large batch count > 64 * 1024 for symmetric eigensolver SYEVD/HEEVD, SYGVD/HEGVD.
 
 ## rocSOLVER 3.38.0 for ROCm 10.2.0
 
