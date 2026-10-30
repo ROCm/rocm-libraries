@@ -903,6 +903,8 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"wmma_gfx1250_f32_16x16x4_f32", 8},
     {"wmma_gfx1250_f32_16x16x32_f16", 8},
     {"wmma_gfx1250_f32_16x16x32_bf16", 8},
+    /* bf16 x bf16 with an fp32 accumulator: eight bf16 results */
+    {"wmma_gfx1250_bf16f32_16x16x32_bf16", 8},
     {"wmma_gfx1250_f32_16x16x64_fp8_fp8", 8},
     {"wmma_gfx1250_f32_16x16x64_fp8_bf8", 8},
     {"wmma_gfx1250_f32_16x16x64_bf8_fp8", 8},
@@ -2958,6 +2960,33 @@ static constexpr rocke_mma_op_t k_mma_gfx1250_unscaled[] = {
      &lm_wmma_gfx1250_32_a,
      &lm_wmma_gfx1250_32_b,
      &lm_wmma_gfx12_c},
+    /* The fp32 accumulator, a bf16 result (dst_dtype); no lane maps until one
+     * is checked against an independent source. */
+    {"wmma",
+     "bf16",
+     "bf16",
+     "fp32",
+     16,
+     16,
+     32,
+     "wmma_gfx1250_bf16f32_16x16x32_bf16",
+     16,
+     16,
+     8,
+     32,
+     NULL,
+     NULL,
+     NULL,
+     NULL,
+     NULL,
+     ROCKE_MMA_SCALE_NONE,
+     0,
+     0,
+     NULL,
+     NULL,
+     ROCKE_MMA_EMULATION_NONE,
+     NULL,
+     "bf16"},
     {"wmma",
      "fp8e4m3",
      "fp8e4m3",
@@ -3027,7 +3056,7 @@ static constexpr rocke_mma_op_t k_mma_gfx1250_unscaled[] = {
 namespace
 {
 constexpr int k_scaled_count = 86;
-constexpr int k_unscaled_count = 7;
+constexpr int k_unscaled_count = 8;
 constexpr const char* k_inputs[] = {"fp8", "bf8", "fp6", "bf6", "fp4"};
 constexpr const char* k_input_dtypes[] = {"fp8e4m3", "bf8e5m2", "fp6e2m3", "fp6e3m2", "fp4e2m1"};
 constexpr const char* k_scales[] = {"e8m0", "e5m3", "e4m3"};

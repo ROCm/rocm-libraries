@@ -89,8 +89,11 @@ extern "C" {
  *    which changes its size and that of every struct embedding a view.
  * 6: rocke_attention_tiled_2d_spec_t (gfx942) and
  *    rocke_unified_attention_reduce_tiled_spec_t (gfx942, gfx950) gained
- *    emit_lse at their end, which changes their size. */
-#define ROCKE_ABI_VERSION 6
+ *    emit_lse at their end, which changes their size.
+ * 7: rocke_mma_op_t gained dst_dtype at its end (sizeof again), and the
+ *    rocke_mma_catalog_enumerate / _has_shape / _select_largest_k /
+ *    _op_for_shape signatures gained a trailing dst_dtype parameter. */
+#define ROCKE_ABI_VERSION 7
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

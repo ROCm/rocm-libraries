@@ -137,7 +137,8 @@ typedef struct rocke_mma_scale_filter
 
 /* A supported matrix-multiply-accumulate atom. Frozen, in static storage.
  * Mirrors MmaOp: family is "mma", "wmma", or "wmma_scaled"; matrix dtypes
- * are canonical catalog keys. C describes both accumulator input and result.
+ * are canonical catalog keys. C is the accumulator input; it also describes
+ * the result (fragment length, layout and, unless dst_dtype is set, dtype).
  * op_id is an opaque backend handle; lowering reads metadata, not its spelling.
  * Layout pointers are NULL when no verified lane map is registered. */
 typedef struct rocke_mma_op
@@ -178,10 +179,19 @@ typedef struct rocke_mma_op
      * rocke_arch_mma_op_is_native. Appended ABI fields: consumers must rebuild. */
     rocke_mma_emulation_recipe_t emulation_recipe;
     const char* emulation_physical_op_id;
+    /* The result dtype where it differs from c_dtype (e.g. a bf16 result from
+     * an fp32 accumulator); NULL means equal to c_dtype, which zero-init gives
+     * every other row. Read it through rocke_mma_op_dst_dtype, which mirrors
+     * MmaOp.dst_dtype. Appended ABI field: consumers must rebuild. */
+    const char* dst_dtype;
 } rocke_mma_op_t;
 
 /* MmaOp.shape -> (m, n, k) via out params. */
 void rocke_mma_op_shape(const rocke_mma_op_t* op, int* m, int* n, int* k);
+
+/* MmaOp.dst_dtype: the dtype of the instruction's result -- op->dst_dtype when
+ * set, else op->c_dtype. A NULL op returns NULL. Do not free. */
+const char* rocke_mma_op_dst_dtype(const rocke_mma_op_t* op);
 
 /* Physical-layout accessors. Missing maps raise ckc::Error with
  * ROCKE_ERR_NOTIMPL, like Python's NotImplementedError. The enclosing public
@@ -252,11 +262,17 @@ const rocke_mma_op_t* rocke_mma_catalog_ops(const rocke_mma_catalog_t* cat, int*
 /* Optional scale filter: NULL leaves scales unconstrained; {NULL, NULL, 0}
  * selects unscaled atoms. C callers supply the filter pointer explicitly.
  * Exact selection and largest-K ties raise a query error on ambiguity.
- * As with layout queries, C++ callers catch ckc::Error at their entry boundary. */
+ * As with layout queries, C++ callers catch ckc::Error at their entry boundary.
+ *
+ * Optional result dtype (dst_dtype, after the scales): NULL means "equal to
+ * c_dtype", not "any", so a query that names no result dtype only sees atoms
+ * whose result is their accumulator. C callers pass it explicitly. */
 #ifdef __cplusplus
 #define ROCKE_MMA_DEFAULT_SCALES = nullptr
+#define ROCKE_MMA_DEFAULT_DST = nullptr
 #else
 #define ROCKE_MMA_DEFAULT_SCALES
+#define ROCKE_MMA_DEFAULT_DST
 #endif
 
 /* MmaCatalog.enumerate: filter atoms by family + (normalised) dtype combo and
@@ -273,7 +289,8 @@ int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
                                 int n,
                                 const rocke_mma_op_t** out,
                                 int cap,
-                                const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES);
+                                const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES,
+                                const char* dst_dtype ROCKE_MMA_DEFAULT_DST);
 
 /* MmaCatalog.has_shape. family NULL => "mma". */
 bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
@@ -284,20 +301,22 @@ bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
                                  int m,
                                  int n,
                                  int k,
-                                 const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES);
+                                 const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES,
+                                 const char* dst_dtype ROCKE_MMA_DEFAULT_DST);
 
 /* MmaCatalog.select_largest_k: the matching atom with the largest k (k <= k_max
  * if k_max >= 0; pass k_max<0 for Python None). Returns NULL if none match. */
-const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog_t* cat,
-                                                         const char* family,
-                                                         const char* a_dtype,
-                                                         const char* b_dtype,
-                                                         const char* c_dtype,
-                                                         int m,
-                                                         int n,
-                                                         int k_max,
-                                                         const rocke_mma_scale_filter_t* scales
-                                                             ROCKE_MMA_DEFAULT_SCALES);
+const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(
+    const rocke_mma_catalog_t* cat,
+    const char* family,
+    const char* a_dtype,
+    const char* b_dtype,
+    const char* c_dtype,
+    int m,
+    int n,
+    int k_max,
+    const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES,
+    const char* dst_dtype ROCKE_MMA_DEFAULT_DST);
 
 /* MmaCatalog.by_op_id. Returns NULL if absent. */
 const rocke_mma_op_t* rocke_mma_catalog_by_op_id(const rocke_mma_catalog_t* cat, const char* op_id);
@@ -313,7 +332,8 @@ const rocke_mma_op_t*
                                    int m,
                                    int n,
                                    int k,
-                                   const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES);
+                                   const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES,
+                                   const char* dst_dtype ROCKE_MMA_DEFAULT_DST);
 
 /* ===================== bare-op_id SSOT lookups ======================== */
 /* These resolve a bare op_id string (no MmaOp / ArchTarget in hand) against the
@@ -322,6 +342,7 @@ const rocke_mma_op_t*
  * rocke.core.ir.IRBuilder.mma consults. */
 
 #undef ROCKE_MMA_DEFAULT_SCALES
+#undef ROCKE_MMA_DEFAULT_DST
 
 /* Accumulator fragment length for op_id -- the c_frag_len projection of
  * target.py::_MMA_FRAGMENT_INFO (rocke_arch_mma_c_frag_len(op_id) ==
@@ -337,6 +358,12 @@ int rocke_arch_mma_c_frag_len(const char* op_id);
  * NULL for an op_id absent from every catalog. The returned string is an
  * interned canonical key (e.g. ROCKE_DTYPE_I32 / "fp32"); do not free. */
 const char* rocke_arch_mma_op_id_c_dtype(const char* op_id);
+
+/* Normalised result dtype for op_id, aggregated across every arch's catalog
+ * (mirrors target._op_id_dst_dtype()[op_id]): the row's dst_dtype, else its
+ * c_dtype. First catalog hit wins; NULL for an op_id absent from every
+ * catalog. Sizes the tile.mma result rocke_b_mma builds. Do not free. */
+const char* rocke_arch_mma_op_id_dst_dtype(const char* op_id);
 
 /* True when the hardware encodes this atom directly, mirroring MmaOp.is_native.
  * A NULL op is reported native: callers that lost the row have no expansion to
