@@ -13,11 +13,11 @@ from lib import features as fs
 from lib import hipblaslt_launch as hl
 
 
-def _plan(m, n, k, occupancy, attrs, context, arch="gfx950", batch=1):
+def _plan(m, n, k, occupancy, attrs, context, arch="gfx950", batch=1, version=None):
     prob = dict(m=m, n=n, k=k, batch=batch, mi_dtype="bfloat16")
     cfg = dict(mt_m=128, mt_n=128, mt_k=64, occupancy=occupancy)
     attrs = dict({"work_group_x": 256, "work_group_y": 1, "work_group_z": 1}, **attrs)
-    p = hl.launch_plan(prob, cfg, attrs, context, 256, arch)
+    p = hl.launch_plan(prob, cfg, attrs, context, 256, arch, version=version)
     return (p.dynamic_queue, p.grid_wgs, p.partial_reduction)
 
 
@@ -303,7 +303,131 @@ def test_launch_arch_is_the_compiler_target_of_the_library_suffix():
         hl.HipblasltLaunch("gfx1250v0").id,
         hl.HipblasltLaunch("gfx1250:xnack+").id,
     }
-    assert ids == {f"hipblaslt:gfx1250:{hl.RULE_VERSION}"}
+    assert ids == {f"hipblaslt:gfx1250:{hl.rule_version('gfx1250')}"}
+
+
+def test_each_arch_trains_on_its_rule_version():
+    """gfx1250 stays at rule version 1 (RULE_1_ARCHS); every other
+    architecture trains on RULE_VERSION. The id names the version."""
+    assert hl.RULE_VERSION == 2 and hl.RULE_VERSIONS == (1, 2)
+    assert hl.RULE_1_ARCHS == ("gfx1250",)
+    for arch in ("gfx950", "gfx950:xnack-", "gfx942", "gfx90a", "gfx1201"):
+        assert hl.rule_version(arch) == hl.RULE_VERSION, arch
+    for arch in ("gfx1250", "gfx1250-strict", "gfx1250v0", "gfx1250:xnack+"):
+        assert hl.rule_version(arch) == 1, arch
+    stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk"
+    gfx950 = hl.HipblasltLaunch.for_library(stem + "_Cijk_Dijk_ID75a0_gfx950")
+    assert (gfx950.version, gfx950.id) == (2, "hipblaslt:gfx950:2")
+    assert repr(gfx950) == "HipblasltLaunch('gfx950')"
+    old = hl.HipblasltLaunch("gfx950", 8, version=1)
+    assert old.id == "hipblaslt:gfx950:1"
+    assert repr(old) == "HipblasltLaunch('gfx950', num_xcd=8, version=1)"
+    assert hl.HipblasltLaunch("gfx1250", version=2).id == "hipblaslt:gfx1250:2"
+    for bad in (0, 3):
+        with pytest.raises(ValueError, match="rule version"):
+            hl.HipblasltLaunch("gfx950", version=bad)
+        with pytest.raises(ValueError, match="rule version"):
+            _plan(4096, 4096, 512, 2, HYBRID, fs.EXCLUSIVE, version=bad)
+
+
+@pytest.mark.parametrize(
+    "arch, recorded, version",
+    [
+        ("gfx950", "hipblaslt:gfx950:1", 1),
+        ("gfx950", "hipblaslt:gfx950:2", 2),
+        ("gfx950", "", 2),
+        ("gfx950", None, 2),
+        ("gfx950", "hipblaslt:gfx950:3", 2),
+        ("gfx950", "hipblaslt:gfx942:1", 2),
+        ("gfx950", "other:gfx950:1", 2),
+        ("gfx1250", "hipblaslt:gfx1250:1", 1),
+        ("gfx1250", "hipblaslt:gfx1250:2", 1),
+        ("gfx1250-strict", "hipblaslt:gfx1250:1", 1),
+        ("gfx942", "hipblaslt:gfx942:1", 1),
+    ],
+)
+def test_a_model_ranks_with_the_rule_version_it_records(arch, recorded, version):
+    """A model trained on rule version 1 ranks with it on any architecture;
+    any other model ranks with its architecture's version, under which the
+    engine refuses one that records another launch model."""
+    assert hl.served_rule_version(arch, recorded) == version
+    launch = hl.HipblasltLaunch.for_model(arch, recorded, 8)
+    assert (launch.version, launch.num_xcd) == (version, 8)
+    assert launch.id == f"hipblaslt:{hl.canonical_arch(arch)}:{version}"
+    if recorded and version == int(recorded.rsplit(":", 1)[1]):
+        assert launch.id == recorded
+
+
+SK_STATIC = {"tile_processing_strategy": 2, "work_assignment": 0}
+
+
+@pytest.mark.parametrize(
+    "m, n, k, occupancy, budget, attrs, v1, v2",
+    [
+        # 1600 tiles on 256 CUs: version 1 takes one workgroup per tile in its
+        # window of 2 to 32 tiles per CU, version 2 keeps the streaming grid
+        # of up to two workgroups per CU, which splits no tile.
+        (5120, 5120, 64, 1, 0, SK_STATIC, (False, 1600, "none"), (False, 246, "none")),
+        # 2400 tiles on 64 CUs at occupancy 4: a streaming grid of more than
+        # two workgroups per CU becomes one workgroup per tile in version 2;
+        # 2400 tiles are past version 1's window.
+        (7680, 5120, 64, 4, 64, SK_STATIC, (False, 253, "tree"), (False, 2400, "none")),
+        # One grid in both, which does not divide the tiles: the tiles of one
+        # K iteration have no partial results to reduce in version 2.
+        (7680, 5120, 64, 1, 64, SK_STATIC, (False, 64, "tree"), (False, 64, "none")),
+        (7680, 5120, 17, 1, 64, dict(SK_STATIC, stream_k_atomic=1),
+         (False, 64, "atomic"), (False, 64, "none")),
+        # Two K iterations: the rule is unchanged.
+        (7680, 5120, 128, 1, 64, SK_STATIC, (False, 2400, "none"), (False, 2400, "none")),
+        (128 * 300, 128, 64 * 300, 1, 96, SK_STATIC, (False, 86, "tree"),
+         (False, 86, "tree")),
+    ],
+)  # fmt: skip
+def test_one_k_iteration_launches_by_rule_version(
+    m, n, k, occupancy, budget, attrs, v1, v2
+):
+    ctx = fs.ExecutionContext(cu_budget=budget)
+    assert _plan(m, n, k, occupancy, attrs, ctx, version=1) == v1
+    assert _plan(m, n, k, occupancy, attrs, ctx, version=2) == v2
+    assert _plan(m, n, k, occupancy, attrs, ctx) == v2
+    assert _plan(m, n, k, occupancy, attrs, ctx, "gfx1250") == v1
+
+
+def test_rule_versions_differ_only_for_one_k_iteration_static_launches():
+    """Rule versions 1 and 2 plan alike but for a static persistent launch
+    (Stream-K, or DataParallel, whose grid select_grid_size picks too) with
+    one K iteration per tile and more tiles than usable CUs, where they differ
+    for some kernels and problems: in the grid for batch 1, and otherwise
+    only in the partial reduction version 1 reported."""
+    rng = random.Random(41)
+    differ = batch_1 = 0
+    for _ in range(3000):
+        cfg, attrs = _random_kernel(rng)
+        prob = _random_problem(rng)
+        if rng.random() < 0.5:
+            prob["k"] = rng.choice([1, 7, cfg["mt_k"]])
+            prob["m"] = rng.choice([4096, 128 * 481, 65536])
+        ctx = fs.ExecutionContext(
+            cu_budget=rng.choice([0, 31, 64, 100, 224, 256]),
+            schedule=rng.choice(fs.SCHEDULES),
+        )
+        n_cu = rng.choice([64, 256, 304])
+        v1 = hl.launch_plan(prob, cfg, attrs, ctx, n_cu, "gfx950", version=1)
+        v2 = hl.launch_plan(prob, cfg, attrs, ctx, n_cu, "gfx950", version=2)
+        if v1 == v2:
+            continue
+        differ += 1
+        budget = int(ctx.cu_budget)
+        usable = budget if 0 < budget < n_cu else n_cu
+        assert attrs.get("tile_processing_strategy") in (1, 2), (cfg, attrs, prob)
+        assert not v1.dynamic_queue and not v2.dynamic_queue
+        assert int(prob["k"]) <= int(cfg["mt_k"])
+        assert fs.output_tiles(prob, cfg) > usable
+        if int(prob["batch"]) > 1:
+            assert v1.grid_wgs == v2.grid_wgs and v2.partial_reduction == "none"
+        else:
+            batch_1 += 1
+    assert differ > 20 and batch_1 > 10
 
 
 def test_non_persistent_kernels_launch_one_workgroup_per_tile():

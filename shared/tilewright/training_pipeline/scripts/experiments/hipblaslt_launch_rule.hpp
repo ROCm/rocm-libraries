@@ -3,9 +3,9 @@
 
 // hipBLASLt's launch of its kernels as a tilewright::LaunchModel: the rule of
 // training_pipeline/lib/hipblaslt_launch.py (launch_plan), which MLREC_v3
-// models record as "hipblaslt:<arch>:<RULE_VERSION>", with its launch_key.
-// Both must give the same plan and key for every input; bench_shipped_rank
-// --dump-plans prints these for the comparison.
+// models record as "hipblaslt:<arch>:<rule version>", with its launch_key.
+// Both must give the same plan and key for every input and rule version;
+// bench_shipped_rank --dump-plans prints these for the comparison.
 
 #pragma once
 
@@ -21,7 +21,8 @@
 
 namespace hipblaslt_launch {
 
-inline constexpr int kRuleVersion = 1;
+// RULE_VERSION of hipblaslt_launch.py; plan() implements versions 1 to it.
+inline constexpr int kRuleVersion = 2;
 
 inline constexpr std::int64_t kSmTargetGranule           = 1;
 inline constexpr std::int64_t kMinTilesForDynamic        = 480;
@@ -35,6 +36,42 @@ inline constexpr std::int64_t kStreamKFlagElements       = 2048;
 inline constexpr std::int64_t kCacheLineBytes            = 128;
 inline constexpr std::int64_t kFlagBytes                 = 4;
 inline constexpr std::int64_t kU32Items                  = 1LL << 32;
+
+// canonical_arch of lib/arch.py: the compiler target of an arch name.
+inline std::string canonical_arch(const std::string& name) {
+  std::string arch = name.substr(0, name.find(':'));
+  if (arch.rfind("gfx", 0) == 0) arch = arch.substr(0, arch.find('-'));
+  const std::size_t v = arch.find_last_not_of("0123456789");
+  if (v != std::string::npos && v > 3 && v + 1 < arch.size() && arch[v] == 'v') arch.erase(v);
+  return arch;
+}
+
+// rule_version of hipblaslt_launch.py: the rule version models of `arch`
+// train on (1 for RULE_1_ARCHS, else kRuleVersion). RULE_1_ARCHS and
+// TensileLite's TilewrightLaunch::ruleVersion() hold the same table: change
+// them together.
+inline int rule_version(const std::string& arch) {
+  return canonical_arch(arch) == "gfx1250" ? 1 : kRuleVersion;
+}
+
+// served_rule_version of hipblaslt_launch.py for a launch id
+// "hipblaslt:<arch>:<version>": true, with its arch and version, when that
+// version ranks a model recording the id (1 on any arch, else the arch's
+// rule_version), false for any other id. Version 1 on an arch that trains on
+// version 2 is transitional, as served_rule_version says.
+inline bool served_launch(const std::string& id, std::string* arch, int* version) {
+  const std::string head  = "hipblaslt:";
+  const std::size_t colon = id.rfind(':');
+  if (id.compare(0, head.size(), head) != 0 || colon == std::string::npos || colon <= head.size())
+    return false;
+  const std::string name = id.substr(head.size(), colon - head.size());
+  const std::string tail = id.substr(colon + 1);
+  const int served       = tail == "1" ? 1 : rule_version(name);
+  if (name.find(':') != std::string::npos || tail != std::to_string(served)) return false;
+  *arch    = name;
+  *version = served;
+  return true;
+}
 
 // QUEUE_COUNTS of hipblaslt_launch.py; 0 for an arch missing from it.
 inline std::int64_t queue_count(const std::string& arch) {
@@ -107,7 +144,8 @@ inline std::int64_t static_grid(std::int64_t tiles,
                                 std::int64_t iters,
                                 bool parallel,
                                 std::int64_t tile_bytes,
-                                std::int64_t batch) {
+                                std::int64_t batch,
+                                int version) {
   std::int64_t grid = tiles;
   if (cu_count < n_cu) grid = std::min(grid, cu_count);
   if (tiles > cu_count) {
@@ -135,7 +173,10 @@ inline std::int64_t static_grid(std::int64_t tiles,
     }
   }
   if (tiles <= cu_count || grid == 0 || grid >= tiles || batch > 1) return grid;
-  if (iters <= 1) return (cu_count * 2 <= tiles && tiles < cu_count * 32) ? tiles : grid;
+  if (iters <= 1) {
+    if (version >= 2) return grid > cu_count * 2 ? tiles : grid;
+    return (cu_count * 2 <= tiles && tiles < cu_count * 32) ? tiles : grid;
+  }
   const std::int64_t dp_steps = ceil_div(tiles, cu_count) * cu_count;
   if (static_cast<double>(tiles) < 0.8 * static_cast<double>(dp_steps)) return grid;
   return ((tiles * iters / grid) % iters != 0) ? tiles : grid;
@@ -225,7 +266,8 @@ inline tilewright::LaunchPlan plan(const KernelInputs& in,
                                    const tilewright::ExecutionContext& context,
                                    std::int64_t n_cu,
                                    bool runtime_choice,
-                                   std::int64_t queues) {
+                                   std::int64_t queues,
+                                   int version) {
   using PR                     = tilewright::PartialReduction;
   const std::int64_t strategy  = in.strategy;
   const std::int64_t assign    = in.assign;
@@ -271,7 +313,8 @@ inline tilewright::LaunchPlan plan(const KernelInputs& in,
                        iters,
                        strategy == 1 ? false : parallel,
                        mt_m * mt_n * partial_bytes(problem.mi_dtype),
-                       batch);
+                       batch,
+                       version);
   }
   out.dynamic_queue = dynamic;
   if (strategy == 1) {
@@ -289,7 +332,9 @@ inline tilewright::LaunchPlan plan(const KernelInputs& in,
   const bool partial = grid > 0 && tiles % grid != 0;
   if (!atomic && !parallel && partial) grid = std::min(grid, flag_entries(dynamic, queues));
   out.grid_wgs = static_cast<std::size_t>(grid);
-  if (!dynamic && grid > 0 && tiles % grid != 0)
+  // With one K iteration per tile no tile has partial results (version 2).
+  const bool straddles = iters > 1 || version < 2;
+  if (!dynamic && grid > 0 && tiles % grid != 0 && straddles)
     out.partial_reduction = atomic ? PR::Atomic : (parallel ? PR::Parallel : PR::Tree);
   return out;
 }
@@ -299,8 +344,10 @@ inline tilewright::LaunchPlan plan(const tilewright::Config& config,
                                    const tilewright::ExecutionContext& context,
                                    std::int64_t n_cu,
                                    bool runtime_choice,
-                                   std::int64_t queues) {
-  return plan(kernel_inputs(config), config, problem, context, n_cu, runtime_choice, queues);
+                                   std::int64_t queues,
+                                   int version) {
+  return plan(
+      kernel_inputs(config), config, problem, context, n_cu, runtime_choice, queues, version);
 }
 
 // Given the configs it will see, a Launch looks their attributes up once, by
@@ -311,14 +358,23 @@ inline tilewright::LaunchPlan plan(const tilewright::Config& config,
 // KernelInputs per kernel, or read struct fields as TensileLite's adapter does.
 class Launch final : public tilewright::LaunchModel {
  public:
-  Launch(std::string arch, std::size_t n_cu)
+  // Under rule `version`, 0 for the arch's rule_version(); throws for a
+  // version plan() does not implement.
+  Launch(std::string arch, std::size_t n_cu, int version = 0)
       : arch_(std::move(arch))
       , n_cu_(static_cast<std::int64_t>(n_cu))
       , runtime_choice_(arch_ == "gfx950")
-      , queues_(queue_count(arch_)) {}
+      , queues_(queue_count(arch_))
+      , version_(version == 0 ? rule_version(arch_) : version) {
+    if (version_ < 1 || version_ > kRuleVersion)
+      throw std::invalid_argument("no launch rule version " + std::to_string(version_));
+  }
 
-  Launch(std::string arch, std::size_t n_cu, const std::vector<tilewright::Config>& configs)
-      : Launch(std::move(arch), n_cu) {
+  Launch(std::string arch,
+         std::size_t n_cu,
+         const std::vector<tilewright::Config>& configs,
+         int version = 0)
+      : Launch(std::move(arch), n_cu, version) {
     for (const tilewright::Config& c : configs) {
       if (c.index >= inputs_.size()) {
         inputs_.resize(c.index + 1);
@@ -338,9 +394,16 @@ class Launch final : public tilewright::LaunchModel {
                               const tilewright::Problem& problem,
                               const tilewright::ExecutionContext& context) const override {
     if (held(config))
-      return hipblaslt_launch::plan(
-          inputs_[config.index], config, problem, context, n_cu_, runtime_choice_, queues_);
-    return hipblaslt_launch::plan(config, problem, context, n_cu_, runtime_choice_, queues_);
+      return hipblaslt_launch::plan(inputs_[config.index],
+                                    config,
+                                    problem,
+                                    context,
+                                    n_cu_,
+                                    runtime_choice_,
+                                    queues_,
+                                    version_);
+    return hipblaslt_launch::plan(
+        config, problem, context, n_cu_, runtime_choice_, queues_, version_);
   }
 
   std::uint64_t launch_key(const tilewright::Config& config) const override {
@@ -348,9 +411,7 @@ class Launch final : public tilewright::LaunchModel {
                         : hipblaslt_launch::launch_key(config);
   }
 
-  std::string id() const override {
-    return "hipblaslt:" + arch_ + ":" + std::to_string(kRuleVersion);
-  }
+  std::string id() const override { return "hipblaslt:" + arch_ + ":" + std::to_string(version_); }
 
  private:
   enum : unsigned char { kNone, kHeld, kMixed };
@@ -363,6 +424,7 @@ class Launch final : public tilewright::LaunchModel {
   std::int64_t n_cu_;
   bool runtime_choice_;
   std::int64_t queues_;
+  int version_;
   std::vector<KernelInputs> inputs_;
   std::vector<unsigned char> state_;
 };

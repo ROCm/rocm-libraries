@@ -43,7 +43,8 @@
 //
 // --dump-plans N prints the launch plan of every config on the first N shapes
 // instead, under --dump-context (default: exclusive use), for --dump-arch
-// (default: the model's launch model; no model file is needed with it):
+// under --dump-rule-version (default: the model's launch model, or the arch's
+// rule version; no model file is needed with --dump-arch):
 // PLAN <shape> <config> <dynamic> <grid_wgs> <reduction> <launch_key>.
 
 #include "hipblaslt_launch_rule.hpp"
@@ -170,16 +171,6 @@ tilewright::Problem problem_of(const Inputs& ix, const Shape& sh) {
   return p;
 }
 
-// "hipblaslt:<arch>:<version>" -> arch; empty when the id is not that rule's.
-std::string hipblaslt_arch(const std::string& id) {
-  const std::string head = "hipblaslt:";
-  const std::string tail = ":" + std::to_string(hipblaslt_launch::kRuleVersion);
-  if (id.size() <= head.size() + tail.size() || id.compare(0, head.size(), head) != 0 ||
-      id.compare(id.size() - tail.size(), tail.size(), tail) != 0)
-    return {};
-  return id.substr(head.size(), id.size() - head.size() - tail.size());
-}
-
 constexpr std::uint64_t kFnvBasis = 0xcbf29ce484222325ull;
 
 std::uint64_t fnv(std::uint64_t h, std::uint64_t v) {
@@ -202,8 +193,9 @@ double percentile(const std::vector<double>& sorted, double q) {
 int dump_plans(const Inputs& ix,
                std::size_t n_shapes,
                const std::string& arch,
+               int version,
                const tilewright::ExecutionContext& context) {
-  const hipblaslt_launch::Launch rule(arch, ix.hardware.N_CU, ix.configs);
+  const hipblaslt_launch::Launch rule(arch, ix.hardware.N_CU, ix.configs, version);
   for (std::size_t si = 0; si < std::min(n_shapes, ix.shapes.size()); ++si) {
     const auto p = problem_of(ix, ix.shapes[si]);
     for (const auto& c : ix.configs) {
@@ -226,7 +218,8 @@ void usage(const char* argv0) {
                "[--min-scored 1] [--top-k K] [--prepare] [--stages] [--hash [--hash-each]] "
                "[--cycle PASSES [--thrash BYTES [--thrash-problem] [--thrash-small-pages]] "
                "[--per-call FILE]] "
-               "[--dump-plans N [--dump-context CU_BUDGET,SCHEDULE] [--dump-arch ARCH]]\n",
+               "[--dump-plans N [--dump-context CU_BUDGET,SCHEDULE] [--dump-arch ARCH] "
+               "[--dump-rule-version V]]\n",
                argv0);
 }
 
@@ -300,6 +293,7 @@ int main(int argc, char** argv) {
        thrash_small = false;
   tilewright::ExecutionContext dump_context{};
   std::string dump_arch;
+  int dump_version = 0;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     bool* flag          = a == "--prepare"              ? &prepare
@@ -340,6 +334,8 @@ int main(int argc, char** argv) {
       per_call_path = v;
     else if (a == "--dump-arch")
       dump_arch = v;
+    else if (a == "--dump-rule-version")
+      dump_version = std::stoi(v);
     else if (a == "--dump-context") {
       const auto comma = v.find(',');
       if (comma == std::string::npos) {
@@ -360,7 +356,8 @@ int main(int argc, char** argv) {
   hash = hash || hash_each;
   Inputs ix;
   if (!load_inputs(inputs_path, &ix)) return 1;
-  if (dump > 0 && !dump_arch.empty()) return dump_plans(ix, dump, dump_arch, dump_context);
+  if (dump > 0 && !dump_arch.empty())
+    return dump_plans(ix, dump, dump_arch, dump_version, dump_context);
   std::string error;
   const tilewright::ModelPtr model = tilewright::load_model(model_path, &error);
   if (!model) {
@@ -369,17 +366,19 @@ int main(int argc, char** argv) {
   }
   const std::string recorded = tilewright::describe(*model).provenance.launch_model;
   std::shared_ptr<const hipblaslt_launch::Launch> launch;
+  std::string arch;
+  int version = 0;
   if (!recorded.empty()) {
-    const std::string arch = hipblaslt_arch(recorded);
-    if (arch.empty()) {
+    if (!hipblaslt_launch::served_launch(recorded, &arch, &version)) {
       std::fprintf(
           stderr, "the model records launch model '%s', not this rule's\n", recorded.c_str());
       return 1;
     }
-    launch = std::make_shared<hipblaslt_launch::Launch>(arch, ix.hardware.N_CU, ix.configs);
+    launch =
+        std::make_shared<hipblaslt_launch::Launch>(arch, ix.hardware.N_CU, ix.configs, version);
   }
 
-  if (dump > 0) return dump_plans(ix, dump, launch ? hipblaslt_arch(recorded) : "", dump_context);
+  if (dump > 0) return dump_plans(ix, dump, arch, version, dump_context);
 
   tilewright::PoolOptions options;
   options.launch = launch;

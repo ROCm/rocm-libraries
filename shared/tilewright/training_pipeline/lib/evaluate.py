@@ -356,15 +356,18 @@ def candidate_set(
     order, `index` = pool position) with the engine's default pool-order
     tie-break, the one TensileLite uses. An MLREC_v3 model ranks with
     hipBLASLt's launch plans (`lib.hipblaslt_launch`) for its arch on
-    `hardware` (its CUs and XCDs), the plans stage05 trains with;
-    ValueError without `hardware`."""
+    `hardware` (its CUs and XCDs), under the rule version of the launch
+    model it records (`HipblasltLaunch.for_model`): the plans stage05 trains
+    with; ValueError without `hardware`."""
     configs = [make_config(tw, k, i) for i, k in enumerate(pool)]
     info = tw.describe(model)
     if int(info.format_version) < 3:
         return tw.CandidateSet(model, configs)
     if hardware is None:
         raise ValueError("an MLREC_v3 candidate set needs the device hardware")
-    launch = hipblaslt_launch.HipblasltLaunch(str(info.arch), hardware.num_xcd)
+    launch = hipblaslt_launch.HipblasltLaunch.for_model(
+        str(info.arch), str(info.provenance.launch_model or ""), hardware.num_xcd
+    )
     return tw.CandidateSet(
         model, configs, launch=engine_launch(tw, pool, launch, int(hardware.n_cu))
     )

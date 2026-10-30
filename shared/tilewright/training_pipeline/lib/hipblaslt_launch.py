@@ -58,10 +58,27 @@ from .arch import canonical_arch
 # Version of TensileLite's launch rule, part of `HipblasltLaunch.id`, which
 # models record and the engine checks. Bump it when that rule changes, or when
 # a change to `launch_plan` would make models trained before it see other
-# plans than TensileLite gives them, so that those models are refused instead
-# of ranked with plans they did not see. A fix that brings launch_plan closer
-# to TensileLite does not count: TensileLite already gave those plans.
-RULE_VERSION = 1
+# plans than TensileLite gives them, so that those models are ranked with the
+# plans they saw or refused. A fix that brings launch_plan closer to
+# TensileLite does not count: TensileLite already gave those plans.
+#
+# Version 2 takes the grid Origami's select_grid_size chooses for a static
+# Stream-K launch of batch 1 with one K iteration per tile and more tiles than
+# usable CUs: one workgroup per tile once the streaming grid holds more than
+# two workgroups per usable CU, where version 1 took one whenever the tiles
+# numbered 2 to 32 times the usable CUs. It reports no partial reduction for a
+# launch of one K iteration per tile, whose workgroups split no tile, where
+# version 1 reported the reduction of every grid that does not divide the
+# tiles.
+RULE_VERSION = 2
+# The rule versions launch_plan implements.
+RULE_VERSIONS = (1, 2)
+# Architectures whose models still train on rule version 1. TensileLite's
+# TilewrightLaunch::ruleVersion() and the C++ port's rule_version()
+# (scripts/experiments/hipblaslt_launch_rule.hpp) hold the same table, and
+# TensileLite's TilewrightLaunchTest pins the one test_hipblaslt_launch.py
+# pins: change them together.
+RULE_1_ARCHS = ("gfx1250",)
 
 # Kernel attributes (`lib.dat.kernel_dat_info`) the rule reads, 0 when a
 # kernel lacks one (TensileLite's default).
@@ -123,6 +140,29 @@ _FLAG_BYTES = 4
 _U32_ITEMS = 1 << 32
 # Bytes of one partial-tile element: the compute type's.
 _WIDE_COMPUTE_BYTES = {"double": 8, "complexfloat": 8, "int64": 8, "complexdouble": 16}
+
+
+def rule_version(arch: str) -> int:
+    """The rule version models of `arch` train on: 1 for RULE_1_ARCHS, else
+    RULE_VERSION."""
+    return 1 if canonical_arch(str(arch)) in RULE_1_ARCHS else RULE_VERSION
+
+
+def served_rule_version(arch: str, launch_model: Optional[str]) -> int:
+    """The rule version that ranks a model of `arch` recording the launch
+    model `launch_model`, as TensileLite serves models: 1 for a model trained
+    on rule version 1, whatever version `arch` trains on now, else
+    `rule_version(arch)`, so that the engine refuses a model that records
+    another launch model."""
+    # Serving version 1 outside RULE_1_ARCHS keeps models trained before
+    # their architecture moved to version 2 servable. It is transitional:
+    # once the libraries of those architectures ship models of version 2,
+    # this path goes, or serves version 1 on RULE_1_ARCHS only, here, in
+    # TilewrightLaunch::servedRuleVersion() and in the C++ port's
+    # served_launch() alike.
+    if str(launch_model or "") == f"hipblaslt:{canonical_arch(str(arch))}:1":
+        return 1
+    return rule_version(arch)
 
 
 def hybrid_runtime_choice(arch: str) -> bool:
@@ -216,8 +256,10 @@ def _static_grid(
     reduction: str,
     tile_bytes: int,
     batch: int,
+    version: int,
 ) -> int:
-    """select_grid_size(k_split_aware) for a static persistent launch."""
+    """select_grid_size(k_split_aware) for a static persistent launch under
+    rule `version`."""
     grid = tiles
     if cu_count < n_cu:
         grid = min(grid, cu_count)
@@ -243,10 +285,14 @@ def _static_grid(
         return grid
     # A streaming grid becomes one workgroup per tile where that launch fills
     # its waves and the streaming one would split tiles. With one K iteration
-    # per tile this is rule version 1's window: TensileLite takes the grid
-    # Origami's select_grid_size chooses there, which can differ, and
-    # scripts/check_launch_plans.py counts such plans as a known class.
+    # per tile it splits none: there a grid of more than two workgroups per
+    # CU becomes one workgroup per tile. Rule version 1 took one workgroup
+    # per tile there for 2 to 32 tiles per CU instead, which differs from
+    # TensileLite's grid; scripts/check_launch_plans.py counts such plans of
+    # version 1 as a known class.
     if iters <= 1:
+        if version >= 2:
+            return tiles if grid > cu_count * 2 else grid
         return tiles if cu_count * 2 <= tiles < cu_count * 32 else grid
     dp_steps = _ceil_div(tiles, cu_count) * cu_count
     if float(tiles) < 0.8 * float(dp_steps):
@@ -326,15 +372,22 @@ def launch_plan(
     n_cu: int,
     arch: str,
     num_xcd: Optional[int] = None,
+    version: Optional[int] = None,
 ) -> fs.LaunchPlan:
     """hipBLASLt's launch of a kernel (`config_kwargs` with mt_m/n/k and
     occupancy, `attributes` with LAUNCH_ATTRIBUTES) for a problem under
-    `context` on a device with `n_cu` CUs and `num_xcd` XCDs of `arch`. A
-    tile whose partial results atomic Stream-K kernels add up reports
-    "atomic"; dynamic-queue and DataParallel launches report "none".
-    ValueError for a kernel TensileLite does not load (DataParallel with a
-    work queue) and for a dynamic-queue launch whose flag region depends on
-    a `queue_count` that is unknown."""
+    `context` on a device with `n_cu` CUs and `num_xcd` XCDs of `arch`, under
+    rule `version` (default `rule_version(arch)`). A tile whose partial
+    results atomic Stream-K kernels add up reports "atomic"; dynamic-queue
+    and DataParallel launches report "none". ValueError for a kernel
+    TensileLite does not load (DataParallel with a work queue), for a
+    dynamic-queue launch whose flag region depends on a `queue_count` that is
+    unknown and for a version not in RULE_VERSIONS."""
+    version = rule_version(arch) if version is None else int(version)
+    if version not in RULE_VERSIONS:
+        raise ValueError(
+            f"launch rule version {version} is not one of {list(RULE_VERSIONS)}"
+        )
     inputs = launch_inputs(config_kwargs, attributes)
     strategy, assign, atomic_flag, threads, occupancy = inputs[:5]
     tree_only = inputs[5:] == (1,)
@@ -396,6 +449,7 @@ def launch_plan(
             "tree" if strategy == 1 else selected,
             mt_m * mt_n * _WIDE_COMPUTE_BYTES.get(mi_dtype, 4),
             batch,
+            version,
         )
     if strategy == 1:
         # Work-item counts are 32-bit.
@@ -415,7 +469,11 @@ def launch_plan(
     if not atomic and selected != "parallel" and partial:
         grid = min(grid, _flag_entries(dynamic, arch, num_xcd))
     reduction = "none"
-    if not dynamic and grid > 0 and tiles % grid != 0:
+    # With one K iteration per tile every workgroup ends on a tile's edge, so
+    # no tile has partial results (ContractionSolution.cpp
+    # streamKStraddlesTiles); rule version 1 reported a reduction there too.
+    straddles = iters > 1 or version < 2
+    if not dynamic and grid > 0 and tiles % grid != 0 and straddles:
         reduction = "atomic" if atomic else selected
     return fs.LaunchPlan(dynamic, grid, reduction)
 
@@ -437,24 +495,43 @@ def launch_arch(library_stem: str) -> str:
 class HipblasltLaunch:
     """`features.Catalog.launch` of hipBLASLt kernels on `arch`, recorded as
     its compiler target, with their `launch_key`, on a device of `num_xcd`
-    XCDs (None: unknown, which only a dynamic-queue launch needs)."""
+    XCDs (None: unknown, which only a dynamic-queue launch needs), under rule
+    `version` (default `rule_version(arch)`; ValueError for one not in
+    RULE_VERSIONS)."""
 
-    def __init__(self, arch: str, num_xcd: Optional[int] = None) -> None:
+    def __init__(
+        self, arch: str, num_xcd: Optional[int] = None, version: Optional[int] = None
+    ) -> None:
         self.arch = canonical_arch(str(arch))
         self.num_xcd = None if num_xcd is None else int(num_xcd)
+        self.version = rule_version(self.arch) if version is None else int(version)
+        if self.version not in RULE_VERSIONS:
+            raise ValueError(
+                f"launch rule version {self.version} is not one of "
+                f"{list(RULE_VERSIONS)}"
+            )
 
     @classmethod
     def for_library(
         cls, library_stem: str, num_xcd: Optional[int] = None
     ) -> "HipblasltLaunch":
-        """The launch of the kernels of the library `library_stem`."""
+        """The launch of the kernels of the library `library_stem`, under the
+        rule version its models train on."""
         return cls(launch_arch(library_stem), num_xcd)
+
+    @classmethod
+    def for_model(
+        cls, arch: str, launch_model: Optional[str], num_xcd: Optional[int] = None
+    ) -> "HipblasltLaunch":
+        """The launch that ranks a model of `arch` recording the launch model
+        `launch_model` (`served_rule_version`)."""
+        return cls(arch, num_xcd, served_rule_version(arch, launch_model))
 
     @property
     def id(self) -> str:
         """The launch model's id (tilewright LaunchModel::id) that MLREC_v3
         models trained with these plans record."""
-        return f"hipblaslt:{self.arch}:{RULE_VERSION}"
+        return f"hipblaslt:{self.arch}:{self.version}"
 
     def __call__(
         self,
@@ -472,6 +549,7 @@ class HipblasltLaunch:
             n_cu,
             self.arch,
             self.num_xcd,
+            self.version,
         )
 
     def launch_key(
@@ -482,6 +560,9 @@ class HipblasltLaunch:
         return launch_key(config_kwargs, attributes)
 
     def __repr__(self) -> str:
-        if self.num_xcd is None:
-            return f"HipblasltLaunch({self.arch!r})"
-        return f"HipblasltLaunch({self.arch!r}, num_xcd={self.num_xcd})"
+        args = [repr(self.arch)]
+        if self.num_xcd is not None:
+            args.append(f"num_xcd={self.num_xcd}")
+        if self.version != rule_version(self.arch):
+            args.append(f"version={self.version}")
+        return f"HipblasltLaunch({', '.join(args)})"

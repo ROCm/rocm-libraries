@@ -1208,6 +1208,54 @@ def test_v3_model_ranks_only_with_its_launch_model():
         )
 
 
+def test_a_model_of_launch_rule_version_1_ranks_with_its_plans(monkeypatch):
+    """A model trained on launch rule version 1 ranks with version 1's plans,
+    as TensileLite serves it, beside models of the version gfx950 trains on
+    now; the engine refuses a version the arch does not serve."""
+    tw = pytest.importorskip("tilewright")
+    assert hl.rule_version("gfx950") == 2
+    bundle = v3_bundle(labels=[LARGE])
+    gemm = _gemm()
+    kernels = [ev._kernel(c) for c in gemm["candidates"]]
+    p = ev.make_problem(tw, fs.problem_kwargs_from_row(gemm))
+    h = ev.make_hardware(tw, HW)
+    real = ev.engine_launch
+    seen = []
+
+    def engine_launch(tw_, pool, launch, n_cu):
+        seen.append(launch)
+        return real(tw_, pool, launch, n_cu)
+
+    monkeypatch.setattr(ev, "engine_launch", engine_launch)
+    ranked = {}
+    for recorded in ("hipblaslt:gfx950:1", "hipblaslt:gfx950:2"):
+        model = tw.load_model_from_memory(
+            write(bundle, provenance={"launch_model": recorded})
+        )
+        ranked[recorded] = ev.candidate_set(tw, model, kernels, HW).rank(p, h, 3)
+        assert seen[-1].id == recorded
+        assert seen[-1].version == int(recorded[-1])
+    # Two K iterations per tile and more: both versions plan alike.
+    assert ranked["hipblaslt:gfx950:1"] == ranked["hipblaslt:gfx950:2"]
+    consts = arch_constants("gfx950")
+    kw = dict(arch="gfx950", constants=consts, hardware=HW, weight_dtype="fp32", tw=tw)
+    first = dict(bundle, provenance={"launch_model": "hipblaslt:gfx950:1"})
+    assert [r.served_by for r in ev.evaluate_bundle(first, [gemm], **kw).results] == [
+        "model"
+    ]
+    assert seen[-1].version == 1
+    # The engine itself still takes only the launch model a model records.
+    old = tw.load_model_from_memory(
+        write(bundle, provenance={"launch_model": "hipblaslt:gfx950:1"})
+    )
+    with pytest.raises(ValueError, match="launch model is 'hipblaslt:gfx950:2'"):
+        tw.CandidateSet(
+            old,
+            [ev.make_config(tw, k, i) for i, k in enumerate(kernels)],
+            launch=real(tw, kernels, hl.HipblasltLaunch("gfx950"), HW.n_cu),
+        )
+
+
 # The engine pins the same values (tests/test_v3.cpp).
 ENGINE_SPEC = (
     fs.AttributeFeature("param_a", 0, "log2p1"),

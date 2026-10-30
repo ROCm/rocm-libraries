@@ -2463,7 +2463,17 @@ kernel's occupancy and its `tile_processing_strategy`, `work_assignment`,
 TensileLite reduces the partial tiles of a hand-written Stream-K kernel in a
 tree only, so such a kernel that can run on a static grid is a launch class
 of its own; evaluations hand the engine the same plans and `launch_key`s as
-its launch model;
+its launch model, under the launch rule version the model records: models
+train on `rule_version` of the arch, `RULE_VERSION` (2) but 1 on gfx1250
+(`RULE_1_ARCHS`), and a model of version 1, which TensileLite still
+serves, ranks with version 1's plans on any arch; version 2 takes Origami's
+`select_grid_size` grid for a static launch of batch 1 with one K iteration
+per tile and more tiles than CUs, where version 1 took one workgroup per
+tile for 2 to 32 tiles per CU, and reports no partial reduction for one K
+iteration per tile, where no workgroup splits a tile; TensileLite plans a
+model of version 1 with its own grid, Origami's, so a gfx1250 model trains
+and is evaluated with plans TensileLite does not make for those launches,
+and stage 7's pick and order parity of a gfx1250 run can miss on them;
 `scripts/check_launch_plans.py` compares TensileLite's plans and keys for a
 library's pool with these, and counts apart, without failing, the plans of a
 static Stream-K launch of batch 1 with one K iteration per tile and more

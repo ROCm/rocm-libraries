@@ -131,7 +131,8 @@ inline tilewright::ExecutionContext context_of(const Shape& sh) {
 }
 
 // The model at `path` and pool options for `configs`: hipBLASLt's launch
-// model when the model records it, as TensileLite ranks. Prints the reason
+// model under the rule version of the one the model records
+// (hipblaslt_launch::served_launch), as TensileLite ranks. Prints the reason
 // and returns a null model when either cannot be had.
 inline tilewright::ModelPtr load(const std::string& path,
                                  const Inputs& ix,
@@ -145,15 +146,14 @@ inline tilewright::ModelPtr load(const std::string& path,
   }
   const std::string id = tilewright::describe(*model).provenance.launch_model;
   if (id.empty()) return model;
-  const std::string head = "hipblaslt:";
-  const std::string tail = ":" + std::to_string(hipblaslt_launch::kRuleVersion);
-  if (id.size() <= head.size() + tail.size() || id.compare(0, head.size(), head) != 0 ||
-      id.compare(id.size() - tail.size(), tail.size(), tail) != 0) {
+  std::string arch;
+  int version = 0;
+  if (!hipblaslt_launch::served_launch(id, &arch, &version)) {
     std::fprintf(stderr, "the model records launch model '%s', not this rule's\n", id.c_str());
     return nullptr;
   }
-  const std::string arch = id.substr(head.size(), id.size() - head.size() - tail.size());
-  options->launch = std::make_shared<hipblaslt_launch::Launch>(arch, ix.hardware.N_CU, configs);
+  options->launch =
+      std::make_shared<hipblaslt_launch::Launch>(arch, ix.hardware.N_CU, configs, version);
   return model;
 }
 

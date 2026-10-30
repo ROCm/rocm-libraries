@@ -570,9 +570,10 @@ def test_recommend_takes_the_smallest_close_size():
     not os.environ.get("TILEWRIGHT_SHIPPED_RANK_BINARY"),
     reason="set TILEWRIGHT_SHIPPED_RANK_BINARY to a built bench_shipped_rank",
 )
+@pytest.mark.parametrize("version", [1, 2])
 @pytest.mark.parametrize("arch", ["gfx950", "gfx942"])
 @pytest.mark.parametrize("dtype", ["bf16_r", "f64_r"])
-def test_the_bench_launch_rule_matches_the_pipeline(tmp_path, arch, dtype):
+def test_the_bench_launch_rule_matches_the_pipeline(tmp_path, arch, dtype, version):
     from lib import hipblaslt_launch as hl
 
     rng = random.Random(5)
@@ -617,6 +618,7 @@ def test_the_bench_launch_rule_matches_the_pipeline(tmp_path, arch, dtype):
             [
                 os.environ["TILEWRIGHT_SHIPPED_RANK_BINARY"], "--inputs", str(inputs),
                 "--dump-plans", str(len(shapes)), "--dump-arch", arch,
+                "--dump-rule-version", str(version),
                 "--dump-context", f"{cu},{sched[schedule]}",
             ],
             capture_output=True, text=True, check=True,
@@ -628,7 +630,7 @@ def test_the_bench_launch_rule_matches_the_pipeline(tmp_path, arch, dtype):
             c = kern[int(ci)]
             want = hl.launch_plan(
                 dict(m=m, n=nn, k=k, batch=b, mi_dtype=prob["mi_dtype"]),
-                c, c["attributes"], ctx, HW.n_cu, arch,
+                c, c["attributes"], ctx, HW.n_cu, arch, version=version,
             )  # fmt: skip
             assert (bool(int(dyn)), int(grid), int(r)) == (
                 want.dynamic_queue,
@@ -683,8 +685,58 @@ def test_launch_parity_reads_the_dumped_plans(tmp_path):
         "shape": list(shapes[0]),
         "sol_idx": int(kern[3]["sol_idx_global"]),
     }
-    other = ss.launch_parity(fake, tmp_path / "i", prob, shapes, kern, HW, "tl:x:9")
-    assert not other["checked"]
+    for other in ("tl:x:9", f"hipblaslt:gfx950:{hl.RULE_VERSION + 1}"):
+        got = ss.launch_parity(fake, tmp_path / "i", prob, shapes, kern, HW, other)
+        assert not got["checked"]
+
+
+def test_launch_parity_checks_a_model_of_rule_version_1_with_its_plans(tmp_path):
+    """The latency binary ranks a model of launch rule version 1 with that
+    version's plans: they are what it must dump, where version 2's differ."""
+    from lib import hipblaslt_launch as hl
+
+    kern = [
+        dict(k, occupancy=1, mt_m=128, mt_n=128, mt_k=64)
+        for k in kernels(random.Random(3), 2, 0)
+    ]
+    for k in kern:
+        k["attributes"] = dict(
+            k["attributes"], tile_processing_strategy=2, work_assignment=0,
+            stream_k_atomic=0,
+        )  # fmt: skip
+    shapes = [(5120, 5120, 64, 1), (4096, 4096, 512, 1)]
+    prob = {"mi_dtype": "bfloat16"}
+
+    def dumped(version):
+        lines = []
+        for si, (m, n, k, b) in enumerate(shapes):
+            for ci, c in enumerate(kern):
+                p = hl.launch_plan(
+                    dict(m=m, n=n, k=k, batch=b, mi_dtype="bfloat16"), c,
+                    c["attributes"], fs.ExecutionContext(), HW.n_cu, "gfx950",
+                    version=version,
+                )  # fmt: skip
+                red = ss._REDUCTIONS[p.partial_reduction]
+                key = hl.launch_key(c, c["attributes"])
+                lines.append(
+                    f"PLAN {si} {ci} {int(p.dynamic_queue)} {p.grid_wgs} {red} {key}"
+                )
+        return lines
+
+    assert dumped(1)[:2] != dumped(2)[:2] and dumped(1)[2:] == dumped(2)[2:]
+    for version in (1, 2):
+        fake = tmp_path / f"bench{version}"
+        fake.write_text(
+            f"#!{sys.executable}\nimport sys\n"
+            "assert sys.argv[sys.argv.index('--dump-arch') + 1] == 'gfx950'\n"
+            f"assert sys.argv[sys.argv.index('--dump-rule-version') + 1] == '{version}'\n"
+            f"print({chr(10).join(dumped(version))!r})\n"
+        )
+        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+        got = ss.launch_parity(
+            fake, tmp_path / "i", prob, shapes, kern, HW, f"hipblaslt:gfx950:{version}"
+        )
+        assert (got["n"], got["n_same"], got["checked"]) == (4, 4, True), version
 
 
 def test_bench_inputs_and_pinned_run(tmp_path):

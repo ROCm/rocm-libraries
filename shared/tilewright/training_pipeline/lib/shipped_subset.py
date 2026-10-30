@@ -339,7 +339,9 @@ def model_view(data: bytes, hardware: DeviceHardware, tw: Any) -> ModelView:
         rules=feasibility.soft_rules(parsed.get("serving") or {}, 3),
         spec=spec,
         whitelists=whitelists,
-        launch=hipblaslt_launch.HipblasltLaunch(str(info.arch), hardware.num_xcd),
+        launch=hipblaslt_launch.HipblasltLaunch.for_model(
+            str(info.arch), str(info.provenance.launch_model or ""), hardware.num_xcd
+        ),
         launch_keys=bool(info.launch_keys),
     )
 
@@ -1640,17 +1642,21 @@ def launch_parity(
 ) -> Dict[str, Any]:
     """bench_shipped_rank's launch plans and launch keys of `kernels` (the
     configs of `inputs_file`) on the first `n_shapes` shapes against
-    `lib.hipblaslt_launch` for the model's launch id, exclusive use."""
+    `lib.hipblaslt_launch` for the model's launch id, exclusive use: unchecked
+    for an id the pipeline does not rank with (`served_rule_version`)."""
     from . import hipblaslt_launch as hl
 
     parts = str(launch_id).split(":")
-    if len(parts) != 3 or parts[0] != "hipblaslt" or parts[2] != str(hl.RULE_VERSION):
+    if len(parts) != 3 or parts[0] != "hipblaslt":
         return {"launch_model": launch_id, "n": 0, "n_same": 0, "checked": False}
     arch = parts[1]
+    version = hl.served_rule_version(arch, launch_id)
+    if parts[2] != str(version):
+        return {"launch_model": launch_id, "n": 0, "n_same": 0, "checked": False}
     out = subprocess.run(
         [
             str(binary), "--inputs", str(inputs_file), "--dump-plans", str(int(n_shapes)),
-            "--dump-arch", arch,
+            "--dump-arch", arch, "--dump-rule-version", str(version),
         ],
         check=True, capture_output=True, text=True,
     ).stdout  # fmt: skip
@@ -1664,6 +1670,7 @@ def launch_parity(
         want = hl.launch_plan(
             dict(m=m, n=nn, k=k, batch=b, mi_dtype=problem.get("mi_dtype")),
             c, c.get("attributes"), ctx, hardware.n_cu, arch, hardware.num_xcd,
+            version,
         )  # fmt: skip
         ok = (bool(int(dyn)), int(grid), int(red), int(key)) == (
             want.dynamic_queue,

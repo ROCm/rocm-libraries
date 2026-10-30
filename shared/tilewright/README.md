@@ -488,9 +488,10 @@ code. `LaunchModel::id()` names the rule and its version (empty by default); the
 pipeline records it as the model's `launch_model` provenance, and a
 `CandidateSet` built on a model that records one throws
 `std::invalid_argument` unless `PoolOptions::launch` has that id. hipBLASLt's
-id is `hipblaslt:<arch>:<RULE_VERSION>`, where `<arch>` is the compiler target
+id is `hipblaslt:<arch>:<rule version>`, where `<arch>` is the compiler target
 of the library's stem suffix (`_gfx1250` and `_gfx1250-strict` both give
-`gfx1250`); an adapter returns the id of the rule version it implements.
+`gfx1250`); an adapter returns the id of the rule version it plans a model
+with, the one the model records when the adapter implements it.
 
 ## C++ API
 
