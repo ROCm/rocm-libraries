@@ -70,7 +70,9 @@ def keep_pattern(B, Hq, max_sq, max_sk, p, seed, offset, device):
 @pytest.fixture
 def fake_sdpa(monkeypatch):
     """The fake `hipdnn_sdpa` module; `.calls` lists (name, kwargs) of every sdpa_* call and
-    `.decline` (a dict direction -> reason) makes a direction raise `EngineDeclined`."""
+    `.decline` (a dict direction -> reason) makes a direction raise `EngineDeclined`;
+    `.engine_lists` (direction -> tuple of names) is what `_runtime.take_engines()` hands over after
+    a successful call of that direction."""
     module = types.ModuleType("hipdnn_sdpa")
     module.EngineDeclined, module.Mask, module.Varlen, module.Dropout = (
         EngineDeclined,
@@ -81,6 +83,11 @@ def fake_sdpa(monkeypatch):
     module.philox_mask = keep_pattern
     module.calls = []
     module.decline = {}
+    module.engine_lists = {}
+    pending = []
+    module._runtime = types.SimpleNamespace(
+        take_engines=lambda: tuple(pending.pop()) if pending else ()
+    )
 
     def sdpa_fwd(
         q,
@@ -116,6 +123,7 @@ def fake_sdpa(monkeypatch):
         )
         if "fwd" in module.decline:
             raise EngineDeclined("fwd", module.decline["fwd"])
+        pending[:] = [module.engine_lists.get("fwd", ())]
         o.fill_(1.0)
         if stats is not None:
             stats.fill_(2.0)
@@ -165,6 +173,7 @@ def fake_sdpa(monkeypatch):
         )
         if "bwd" in module.decline:
             raise EngineDeclined("bwd", module.decline["bwd"])
+        pending[:] = [module.engine_lists.get("bwd", ())]
         return "fake_bwd"
 
     module.sdpa_fwd, module.sdpa_bwd = sdpa_fwd, sdpa_bwd

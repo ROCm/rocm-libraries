@@ -330,6 +330,36 @@ def test_helpers_stay_real():
     assert rows["test_bwd"]["reason"] == "bwd always-decline fake"
 
 
+def test_engine_lists_are_recorded_only_for_a_direction_hipdnn_served(run, fake_sdpa):
+    fake_sdpa.engine_lists = {"fwd": ("ENG_A", "ENG_B"), "bwd": ("ENG_C",)}
+    result, rows = run(
+        PRELUDE
+        + """
+import torch
+def test_both():
+    hipdnn_sdpa.sdpa_fwd(None, None, None, o=torch.zeros(1), stats=None, scale=1.0)
+    hipdnn_sdpa.sdpa_bwd(None, None, None, None, None, None, dq=None, dk=None, dv=None, scale=1.0)
+
+def test_bwd_declined():
+    hipdnn_sdpa.sdpa_fwd(None, None, None, o=torch.zeros(1), stats=None, scale=1.0)
+    plug.record('bwd', 'declined', 'no engine')
+
+def test_nothing_planned():
+    pass
+"""
+    )
+    both, half, none = (
+        rows[n] for n in ("test_both", "test_bwd_declined", "test_nothing_planned")
+    )
+    assert (both["fwd_engines"], both["bwd_engines"]) == ("ENG_A;ENG_B", "ENG_C")
+    assert (half["outcome"], half["fwd_engines"], half["bwd_engines"]) == (
+        "declined",
+        "ENG_A;ENG_B",
+        "",
+    )
+    assert (none["fwd_engines"], none["bwd_engines"]) == ("", "")
+
+
 def test_autouse_device_fixture_is_a_noop_without_cuda(run, monkeypatch):
     """Cases without a `gpu_id` fixture still run: the plugin only asks for it when CUDA exists."""
     import torch
@@ -395,6 +425,26 @@ def test_shard_keeps_every_nth_sorted_node_id_and_shards_partition_the_suite(pyt
     assert shards[0] == ["test_a", "test_d", "test_g"]
     assert shards[1] == ["test_b", "test_e"] and shards[2] == ["test_c", "test_f"]
     assert sorted(sum(shards, [])) == [f"test_{c}" for c in "abcdefg"]
+
+
+def test_nodeids_file_keeps_exactly_the_listed_cases_before_sharding(
+    pytester, tmp_path
+):
+    pytester.makepyfile(SHARD_SOURCE)
+    listing = tmp_path / "ids.txt"
+    listing.write_text(
+        "test_nodeids_file_keeps_exactly_the_listed_cases_before_sharding.py::test_c\n"
+        "test_nodeids_file_keeps_exactly_the_listed_cases_before_sharding.py::test_e\n"
+        "gone.py::test_zz\n\n"
+    )
+    base = [*PLUGIN, f"--hipdnn-nodeids-file={listing}", "--collect-only", "-q"]
+
+    def names(*extra):
+        lines = pytester.runpytest(*base, *extra).stdout.lines
+        return [line.split("::")[-1] for line in lines if "::" in line]
+
+    assert names() == ["test_c", "test_e"]
+    assert names("--shard=2/2") == ["test_e"]  # shards the listed cases, not the suite
 
 
 @pytest.mark.parametrize("bad", ["0/3", "4/3", "x", "1/0", "1"])
