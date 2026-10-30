@@ -443,36 +443,54 @@ dense square atoms (`InterleavedStyle`); `c_transpose`, sparse, and MX remain re
 
 ## helpers/ placement
 
-**Default:** new kernel logic goes in `instances/`. Promote to `helpers/` only when
-justified. See `dsl_docs/architecture/helpers_classification.md` for the
-dual-engine vs Python-only split.
+This section is the one home of the helpers rule; other docs point here.
 
-### Add to helpers when ALL of:
+**Default: reuse, write, fix, all in the kernel's PR.** The `build_*()` body
+names what is special about the op (spec, tile shape, atom, descriptor) and
+calls helpers for the rest. Raw `IRBuilder` calls in the kernel body are for
+short, one-off glue between helper calls.
 
-1. Emits reusable kernel SSA (or is intentionally host-only / fusion-planner), AND
-2. At least one of:
-   - Used (or will be used) by ≥2 kernel families
-   - A specific emitter, primitive, or pipeline would potentially be used across
-     different kernel families (e.g. `SoftwarePipeline`, `CoalescedTileLoader`,
-     `mfma_gemm_inner` — even if only one family uses it today)
-   - CK-Tile-parity primitive (tensor view, distribution, sweep, transform DAG)
-   - Prevents a class of silent bugs if duplicated (lane maps, barriers, pipelining)
-   - Cuts instance authoring to a spec + callback skeleton (target: 60–80 line kernels)
-3. If it emits SSA: plan Python + C++ mirror + byte-identity in the same PR
+1. **Use what is there.** Check `helpers/` and the family modules
+   (`_<family>_*.py`) before writing new IR. Extend a helper rather than copy it.
+2. **Write what is missing, with a test.** IR that repeats, or hides index
+   math, lane maps, layout, masking, or a pipeline stage, becomes a named
+   helper in the same PR. A brand-new family, a single kernel, or addressing
+   specific to one op's layout is not a reason to stay in raw IR: the helper
+   goes in that family's module even if nothing else uses it yet. A host-only
+   helper gets a unit test (e.g. `tests/test_helpers_spec.py`,
+   `library/tests/test_attention_bwd_shared_helpers.py`); an SSA helper is
+   covered by the parity pair, golden, and numeric test of the kernel that
+   uses it.
+3. **Fix what is broken, with a regression test.** If a helper is wrong or
+   does not fit, fix the helper, not a workaround in the kernel. Add a test
+   that fails without the fix. A fix that changes emission is mirrored in C++
+   and re-blesses the affected goldens (KERNEL_AUTHORING.md Process F).
 
-### Keep in instances when ANY of:
+### Where a new helper goes
 
-- Single kernel or single family (`instances/common/_<family>_*.py` for family glue)
-- Descriptor/addressing logic specific to one op's layout
-- Launch orchestration or multi-kernel pipelines
-- Doesn't generalize cleanly — use raw `IRBuilder` in the instance
+| Scope | Home |
+|---|---|
+| One family today | A family helper module next to the kernel: `instances/common/_<family>_*.py`, or `library/kernels/common/_<family>_*.py` for a library kernel |
+| ≥2 families, a general emitter/primitive/pipeline (e.g. `SoftwarePipeline`, `CoalescedTileLoader`, `mfma_gemm_inner`), a CK-Tile-parity primitive, or a guard against a class of silent bugs (lane maps, barriers, pipelining) | `helpers/` |
 
-### Do NOT add to helpers:
+Move a family helper into `helpers/` when a second family needs it
+(KERNEL_AUTHORING.md Process G). Launch orchestration and multi-kernel
+pipelines stay in the instance.
 
-- One-off logic "for later reuse" with no plausible cross-family consumer
-- Instance-specific specs, manifests, or dispatch heuristics
-- Emitters without a C++ port path (extends the not-yet-ported cpp-backend gap;
-  see `helpers_classification.md`)
+### The C++ mirror is not a reason to inline
+
+Every emission change is mirrored in the C++ engine anyway (byte-identity), so
+inlined raw IR is mirrored too, once per copy. A helper is mirrored once, as one
+function (e.g. `library/kernels/common/_fmha_common.py` and
+`cpp/instances/common/_fmha_common.cpp`). If it emits SSA: Python + C++ mirror +
+byte-identity in the same PR, the same rule the kernel already follows.
+
+### Do NOT
+
+- Write a helper that only renames one builder call. A helper earns its place
+  by hiding detail that repeats or that a reader should not have to re-derive.
+- Put instance-specific specs, manifests, or dispatch heuristics in `helpers/`.
+- Add an SSA emitter to `helpers/` without its C++ port in the same PR.
 
 ## Key env flags
 
