@@ -90,6 +90,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(listing))
 
     monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "available_cpus", lambda: 3)
     monkeypatch.setattr(
         runner.sys,
         "argv",
@@ -136,6 +137,8 @@ def test_runner_passes_registered_fixture_to_both_backends(
         str(tmp_path),
         "--config",
         "Debug",
+        "--parallel",
+        "3",
     ]
     assert any(cmd[:3] == ["ctest", "-C", "Debug"] for cmd, _ in calls)
     # An explicit override skips the storage lookup; other binaries still resolve.

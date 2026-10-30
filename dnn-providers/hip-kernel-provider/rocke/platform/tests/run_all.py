@@ -46,6 +46,10 @@ TOOLS = ROCKE / "tools"
 # instead of restating them here and letting the two drift.
 if str(ROCKE / "python") not in sys.path:
     sys.path.insert(0, str(ROCKE / "python"))
+if str(TOOLS) not in sys.path:
+    sys.path.insert(0, str(TOOLS))
+
+from _hostcaps import available_cpus
 
 # Files that may reference an absolute repo path or a path that escapes rocke/platform/
 # break the verbatim-copy contract. Enforce on code/build files only (docs are
@@ -247,6 +251,8 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
                 str(build_root),
                 "--config",
                 config,
+                "--parallel",
+                str(available_cpus()),
             ],
             check=True,
         )
