@@ -463,6 +463,12 @@ const std::vector<ImplementedModeClass>& getNewlyImplementedModeClasses()
         {PointwiseMode::ERF, PointwiseErrorClass::TRANSCENDENTAL_FWD},
         {PointwiseMode::ELU_FWD, PointwiseErrorClass::TRANSCENDENTAL_FWD},
         {PointwiseMode::SOFTPLUS_FWD, PointwiseErrorClass::COMPOSITE_FWD},
+        {PointwiseMode::GEN_INDEX, PointwiseErrorClass::BITWISE},
+        {PointwiseMode::ELU_BWD, PointwiseErrorClass::TRANSCENDENTAL_BWD},
+        {PointwiseMode::GELU_BWD, PointwiseErrorClass::COMPOSITE_BWD},
+        {PointwiseMode::GELU_APPROX_TANH_BWD, PointwiseErrorClass::COMPOSITE_BWD},
+        {PointwiseMode::SWISH_BWD, PointwiseErrorClass::COMPOSITE_BWD},
+        {PointwiseMode::SOFTPLUS_BWD, PointwiseErrorClass::COMPOSITE_BWD},
     };
     return s_modes;
 }
@@ -518,6 +524,22 @@ TEST(TestNewlyImplementedPointwiseTolerance, ToleranceGrowsWithErrorClass)
     EXPECT_LT(tolerance(PointwiseMode::ADD_SQUARE), tolerance(PointwiseMode::DIV));
     EXPECT_LT(tolerance(PointwiseMode::DIV), tolerance(PointwiseMode::EXP));
     EXPECT_LT(tolerance(PointwiseMode::EXP), tolerance(PointwiseMode::SOFTPLUS_FWD));
+}
+
+// Each backward mode needs a larger tolerance than its forward counterpart (chain rule
+// amplification of the forward error).
+TEST(TestNewlyImplementedPointwiseTolerance, BackwardToleranceExceedsForwardCounterpart)
+{
+    const auto tolerance = [](PointwiseMode mode) {
+        return calculatePointwiseTolerance<float, float, float>(1.0, classifyPointwiseOp(mode));
+    };
+
+    EXPECT_GT(tolerance(PointwiseMode::ELU_BWD), tolerance(PointwiseMode::ELU_FWD));
+    EXPECT_GT(tolerance(PointwiseMode::GELU_BWD), tolerance(PointwiseMode::GELU_FWD));
+    EXPECT_GT(tolerance(PointwiseMode::GELU_APPROX_TANH_BWD),
+              tolerance(PointwiseMode::GELU_APPROX_TANH_FWD));
+    EXPECT_GT(tolerance(PointwiseMode::SWISH_BWD), tolerance(PointwiseMode::SWISH_FWD));
+    EXPECT_GT(tolerance(PointwiseMode::SOFTPLUS_BWD), tolerance(PointwiseMode::SOFTPLUS_FWD));
 }
 
 // The float reference for each new unary mode must agree with a double-precision evaluation
