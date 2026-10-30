@@ -47,6 +47,7 @@
 #include <thrust/system/hip/detail/util.h>
 #include <thrust/type_traits/is_trivially_relocatable.h>
 
+#include _THRUST_LIBCXX_INCLUDE(__functional/address_stability.h)
 #include _THRUST_STD_INCLUDE(__functional/identity.h)
 #include _THRUST_STD_INCLUDE(__iterator/distance.h)
 #include _THRUST_STD_INCLUDE(__iterator/next.h)
@@ -228,7 +229,8 @@ device_to_device(execution_policy<Derived>& policy, InputIt first, InputIt last,
   }
   else
   {
-    return hip_rocprim::transform(policy, first, last, result, _THRUST_STD::identity{});
+    return hip_rocprim::transform(
+      policy, first, last, result, _THRUST_LIBCXX::proclaim_copyable_arguments(_THRUST_STD::identity{}));
   }
 }
 #endif
