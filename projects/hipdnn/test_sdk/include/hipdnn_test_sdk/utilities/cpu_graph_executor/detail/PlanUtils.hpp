@@ -398,13 +398,18 @@ bool isSupportedSdpaDropout(const SdpaAttributesType& attrs, const TensorMap& te
         return false;
     }
     // A paged K's dim 2 is its block size; the mask spans the paged key extent.
-    int64_t seqKv = k->Get(2);
-    if constexpr(std::is_same_v<SdpaAttributesType,
-                                hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>)
-    {
-        const auto paged = sdpaPagedMaxSeqKv(attrs, tensorMap);
-        seqKv = paged > 0 ? paged : seqKv;
-    }
+    const int64_t seqKv = [&]() -> int64_t {
+        if constexpr(std::is_same_v<SdpaAttributesType,
+                                    hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>)
+        {
+            const auto paged = sdpaPagedMaxSeqKv(attrs, tensorMap);
+            if(paged > 0)
+            {
+                return paged;
+            }
+        }
+        return k->Get(2);
+    }();
     return scaleCount == 1 && (m->Get(0) == q->Get(0) || m->Get(0) == 1)
            && (m->Get(1) == q->Get(1) || m->Get(1) == 1) && m->Get(2) == q->Get(2)
            && m->Get(3) == seqKv;
