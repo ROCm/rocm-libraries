@@ -338,7 +338,7 @@ last two columns give the setup costs excluded from the compile times.
 | Triton 3.8.0 (a) | 45–52 | 229–346 | 488–729 (implicit GEMM) | 733–740 | About 390 | About 105 |
 
 Measured on a development machine for framing purposes: compile only, no GPU used, fp16
-unless noted. Host: AMD EPYC 7573X, one compile at a time. Each cell is the median of 5 to 20
+unless noted, one compile at a time. Each cell is the median of 5 to 20
 compiles in one process after a warm-up compile of an unrelated kernel (FlyDSL 5; hipRTC,
 rocKE and Triton 7; Loom 20). Caches were off: `AMD_COMGR_CACHE=0` for hipRTC and rocKE,
 `FLYDSL_RUNTIME_ENABLE_CACHE=0` for FlyDSL, and a fresh cache directory per compile for
