@@ -34,7 +34,9 @@
 
 #include "check_numerics_matrix.hpp"
 #include "handle.hpp"
+#include "int64_helpers.hpp"
 #include "logging.hpp"
+#include "utility.hpp"
 
 /*
  * ===========================================================================
@@ -199,6 +201,35 @@ rocblas_status rocblas_internal_gemm(rocblas_handle    handle,
 
 #endif // BUILD_WITH_TENSILE
 
+    const bool kernel_select_logging = handle->layer_mode & rocblas_layer_mode_log_kernel_select;
+#ifdef BUILD_WITH_TENSILE
+    const char* fallback_from
+        = kernel_select_logging ? rocblas_internal_take_kernel_select_fallback(handle) : "none";
+#else
+    const char* fallback_from = "none";
+#endif
+    auto log_kernel_select = [&](const char* kernel) {
+        if(kernel_select_logging)
+            rocblas_internal_log_kernel_select(handle,
+                                               rocblas_make_gemm_problem<BATCHED>(trans_a,
+                                                                                  trans_b,
+                                                                                  m,
+                                                                                  n,
+                                                                                  k,
+                                                                                  alpha,
+                                                                                  lda,
+                                                                                  stride_a,
+                                                                                  ldb,
+                                                                                  stride_b,
+                                                                                  beta,
+                                                                                  ldc,
+                                                                                  stride_c,
+                                                                                  batch_count),
+                                               "source",
+                                               kernel,
+                                               fallback_from);
+    };
+
     bool backend_logging = handle->layer_mode & rocblas_layer_mode_log_internal;
     if(backend_logging)
     {
@@ -223,8 +254,11 @@ rocblas_status rocblas_internal_gemm(rocblas_handle    handle,
 
     if(k == 0 || (alpha && *alpha == 0))
     {
-        return rocblas_gemm_scale_launcher_64(
+        status = rocblas_gemm_scale_launcher_64(
             handle, m, n, *beta, C, offset_c, ldc, stride_c, batch_count);
+        if(status == rocblas_status_success)
+            log_kernel_select("rocblas_gemm_scale_launcher_64");
+        return status;
     }
 
     status = rocblas_status_success;
@@ -263,6 +297,8 @@ rocblas_status rocblas_internal_gemm(rocblas_handle    handle,
         if(status != rocblas_status_success)
             return status;
     }
+
+    log_kernel_select("rocblas_gemm_source_solution_64");
 
     return status;
 }
