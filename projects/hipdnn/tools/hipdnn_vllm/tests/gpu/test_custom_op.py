@@ -147,46 +147,89 @@ def test_engine_untouched_unless_opted_in_h6(tmp_path):
     assert "hipkernel:Megakernel" not in text, [l for l in text.splitlines() if "hipkernel:Megakernel" in l][:5]
 
 
-def _megakernel_engine(C):
-    names = [e["name"] for e in C.engines(torch.cuda.current_device())]
-    return next((n for n in names if "megakernel" in n.lower()), None)
+# The engine's stand-in kernel (test content, not in the wheel): with
+# HIPDNN_DESCRIPTOR_DIR at the provider's packed integration set, op
+# megakernel.megakernel-standin-gfx942 writes glob[i] = (0x4D4B << 48) |
+# (nlayers << 32) | i for every thread i of the 304 x 256 grid and copies tab[0]
+# into glob[304 * 256]. No weights, so it can run anywhere on an MI300X.
+STANDIN_OP = "megakernel.megakernel-standin-gfx942"
+STANDIN_THREADS = 304 * 256
 
 
-def _mk_case():
-    """A runnable megakernel case: HIPDNN_VLLM_TEST_MK_CASE names a JSON file
-    {"op_id", "payload", "tab": [int64...], "glob": [int64...]} whose code
-    object is in the engine's catalog."""
-    import os
+def _standin_payload(nlayers):
+    return json.dumps(
+        {
+            "schema": 1,
+            "model": "megakernel-standin-gfx942",
+            "src": "0123456789abcdef",
+            "arch": "gfx942",
+            "cus": 304,
+            "kv": "ROCM_ATTN",
+            "block": 784,
+            "M": 1,
+            "tp": 1,
+            "rt": 0,
+            "lm_head": False,
+            "nlayers": nlayers,
+        }
+    )
 
-    path = os.environ.get("HIPDNN_VLLM_TEST_MK_CASE")
-    if not path:
-        pytest.skip("HIPDNN_VLLM_TEST_MK_CASE not set")
-    with open(path) as f:
-        return json.load(f)
+
+def _standin_expected(tab0, nlayers):
+    i = torch.arange(STANDIN_THREADS, dtype=torch.int64)
+    return torch.cat([(0x4D4B << 48) | (nlayers << 32) | i, torch.tensor([tab0], dtype=torch.int64)])
 
 
 def test_megakernel_capture_replays(enabled):
     C = enabled
-    if _megakernel_engine(C) is None:
-        pytest.skip("megakernel engine not in this build")
-    case = _mk_case()
-    tab = torch.tensor(case["tab"], dtype=torch.int64, device="cuda")
-    glob = torch.tensor(case["glob"], dtype=torch.int64, device="cuda")
-    op_id, payload = case["op_id"], case["payload"]
-    assert torch.ops.hipdnn_vllm.custom_op_prepare(op_id, payload, [tab, glob]) == ""
-    torch.ops.hipdnn_vllm.custom_op_exec(op_id, payload, [tab, glob], True)
+    if not any("megakernel_standin" in e["name"] for e in C.engines(torch.cuda.current_device())):
+        pytest.skip("megakernel stand-in not loaded (set HIPDNN_DESCRIPTOR_DIR to the integration set)")
+    tab = torch.zeros(16, dtype=torch.int64, device="cuda")
+    glob = torch.zeros(STANDIN_THREADS + 1, dtype=torch.int64, device="cuda")
+    payload = _standin_payload(64)
+    assert torch.ops.hipdnn_vllm.custom_op_prepare(STANDIN_OP, payload, [tab, glob]) == ""
+    tab[0] = 0x0123456789ABCDEF
+    torch.ops.hipdnn_vllm.custom_op_exec(STANDIN_OP, payload, [tab, glob], True)
     torch.cuda.synchronize()
-    eager = glob.clone()
+    assert torch.equal(glob.cpu(), _standin_expected(0x0123456789ABCDEF, 64))
 
+    # Capture with other buffers of the same shapes: the eager plan is reused
+    # (no build under capture) and bound to the new addresses.
+    tab2, glob2 = torch.zeros_like(tab), torch.zeros_like(glob)
+    torch.cuda.synchronize()
     stats.reset()
+    builds = C.stats_snapshot()["runtime"]["plan_builds"]
     g = torch.cuda.CUDAGraph()
-    glob.copy_(torch.tensor(case["glob"], dtype=torch.int64, device="cuda"))
     with torch.cuda.graph(g):
-        torch.ops.hipdnn_vllm.custom_op_exec(op_id, payload, [tab, glob], True)
-    captured = [r for r in C.stats_snapshot()["counters"] if r["op"] == "custom_op" and r["phase"] == "capture"]
-    assert captured and captured[0]["route"] == "hipdnn", captured
-    for _ in range(2):
-        glob.copy_(torch.tensor(case["glob"], dtype=torch.int64, device="cuda"))
+        torch.ops.hipdnn_vllm.custom_op_exec(STANDIN_OP, payload, [tab2, glob2], True)
+    snap = C.stats_snapshot()
+    captured = [r for r in snap["counters"] if r["op"] == "custom_op" and r["phase"] == "capture"]
+    assert [r["route"] for r in captured] == ["hipdnn"], captured
+    assert snap["runtime"]["plan_builds"] == builds
+    for tab0 in (7, -3):
+        glob2.zero_()
+        tab2[0] = tab0
         g.replay()
         torch.cuda.synchronize()
-        torch.testing.assert_close(glob, eager)
+        assert torch.equal(glob2.cpu(), _standin_expected(tab0, 64))
+    # nlayers is a launch argument, not a plan key field the engine matches on,
+    # but a different payload is still a different plan.
+    assert torch.ops.hipdnn_vllm.custom_op_prepare(STANDIN_OP, _standin_payload(2), [tab, glob]) == ""
+    torch.ops.hipdnn_vllm.custom_op_exec(STANDIN_OP, _standin_payload(2), [tab, glob], True)
+    torch.cuda.synchronize()
+    assert torch.equal(glob.cpu(), _standin_expected(int(tab[0]), 2))
+
+
+def test_megakernel_key_mismatch_declines(enabled):
+    C = enabled
+    if not any("megakernel_standin" in e["name"] for e in C.engines(torch.cuda.current_device())):
+        pytest.skip("megakernel stand-in not loaded (set HIPDNN_DESCRIPTOR_DIR to the integration set)")
+    tab = torch.zeros(16, dtype=torch.int64, device="cuda")
+    glob = torch.zeros(STANDIN_THREADS + 1, dtype=torch.int64, device="cuda")
+    bad = json.loads(_standin_payload(64))
+    bad["src"] = "fedcba9876543210"
+    reason = torch.ops.hipdnn_vllm.custom_op_prepare(STANDIN_OP, json.dumps(bad), [tab, glob])
+    assert reason, "a payload whose src matches no code object must decline"
+    with pytest.raises(RuntimeError) as ei:
+        torch.ops.hipdnn_vllm.custom_op_exec(STANDIN_OP, json.dumps(bad), [tab, glob], True)
+    assert parse_op_error(ei.value)[1].reason == reason
