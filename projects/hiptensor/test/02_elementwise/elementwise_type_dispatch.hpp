@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <cstring>
 #include <initializer_list>
 #include <ostream>
 #include <type_traits>
@@ -61,36 +62,53 @@ namespace hiptensor
         }
     }
 
+    // Whether the current device can run elementwise tests whose tensors have data type `type`.
+    inline bool isElementwiseTypeSupportedOnDevice(hiptensorDataType_t type)
+    {
+        return (isF16Supported() && (type == HIPTENSOR_R_16F || type == HIPTENSOR_R_16BF))
+               || (isF32Supported() && type == HIPTENSOR_R_32F)
+               || (isF64Supported() && type == HIPTENSOR_R_64F);
+    }
+
     // Stores `value` in `storage` with the representation of `type`. The 8-byte storage holds any
     // of the scalar types, so its address can be passed as the API's alpha/beta/gamma pointer.
+    // Uses memcpy to write the narrow value into the double slot, which avoids strict-aliasing UB.
     inline bool writeElementwiseScalar(double& storage, hiptensorDataType_t type, double value)
     {
+        storage = 0.0;
         return dispatchElementwiseType(type, [&](auto tag) {
             using T = decltype(tag);
+            T tmp;
             if constexpr(std::is_same_v<T, hip_bfloat16>)
             {
-                *reinterpret_cast<T*>(&storage) = static_cast<T>(static_cast<float>(value));
+                tmp = static_cast<T>(static_cast<float>(value));
             }
             else
             {
-                *reinterpret_cast<T*>(&storage) = static_cast<T>(value);
+                tmp = static_cast<T>(value);
             }
+            std::memcpy(&storage, &tmp, sizeof(T));
         });
     }
 
     // Compares the device output with the device copy of the CPU reference, elementwise.
-    // An unhandled type reports a failed comparison.
+    // An unhandled type logs a message and reports a failed comparison.
     inline std::pair<bool, double> compareElementwiseOutputWithReference(
         ElementwiseResource* resource, hiptensorDataType_t type, hiptensorDataType_t computeType)
     {
         std::pair<bool, double> result{false, 0.0};
-        dispatchElementwiseType(type, [&](auto tag) {
+        bool                    handled = dispatchElementwiseType(type, [&](auto tag) {
             using T = decltype(tag);
-            result  = compareEqualLaunchKernel<T>(static_cast<T*>(resource->deviceOutput().get()),
+            result = compareEqualLaunchKernel<T>(static_cast<T*>(resource->deviceOutput().get()),
                                                  static_cast<T*>(resource->deviceReference().get()),
                                                  resource->getCurrentMatrixElement(),
                                                  convertToComputeType(computeType));
         });
+        if(!handled)
+        {
+            std::cerr << "compareElementwiseOutputWithReference: unhandled data type "
+                      << static_cast<int>(type) << "\n";
+        }
         return result;
     }
 
