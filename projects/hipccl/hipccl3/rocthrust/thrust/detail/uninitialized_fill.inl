@@ -26,6 +26,7 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/nvtx_policy.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/generic/select_system.h>
 #include <thrust/uninitialized_fill.h>
@@ -71,9 +72,8 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_fill_n(
 template <typename ForwardIterator, typename T>
 void uninitialized_fill(ForwardIterator first, ForwardIterator last, const T& x)
 {
-  using thrust::system::detail::generic::select_system;
-
   using System = typename thrust::iterator_system<ForwardIterator>::type;
+  using thrust::system::detail::generic::select_system;
 
   System system;
 
@@ -83,9 +83,8 @@ void uninitialized_fill(ForwardIterator first, ForwardIterator last, const T& x)
 template <typename ForwardIterator, typename Size, typename T>
 ForwardIterator uninitialized_fill_n(ForwardIterator first, Size n, const T& x)
 {
-  using thrust::system::detail::generic::select_system;
-
   using System = typename thrust::iterator_system<ForwardIterator>::type;
+  using thrust::system::detail::generic::select_system;
 
   System system;
 

@@ -25,6 +25,7 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+#include <thrust/detail/nvtx_policy.h>
 #include <thrust/for_each.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/generic/select_system.h>
@@ -62,8 +63,8 @@ THRUST_HOST_DEVICE InputIterator for_each(
 template <typename InputIterator, typename UnaryFunction>
 InputIterator for_each(InputIterator first, InputIterator last, UnaryFunction f)
 {
-  using thrust::system::detail::generic::select_system;
   using System = typename thrust::iterator_system<InputIterator>::type;
+  using thrust::system::detail::generic::select_system;
 
   System system;
   return thrust::for_each(select_system(system), first, last, f);
@@ -82,9 +83,8 @@ THRUST_HOST_DEVICE InputIterator for_each_n(
 template <typename InputIterator, typename Size, typename UnaryFunction>
 InputIterator for_each_n(InputIterator first, Size n, UnaryFunction f)
 {
-  using thrust::system::detail::generic::select_system;
-
   using System = typename thrust::iterator_system<InputIterator>::type;
+  using thrust::system::detail::generic::select_system;
 
   System system;
   return thrust::for_each_n(select_system(system), first, n, f);

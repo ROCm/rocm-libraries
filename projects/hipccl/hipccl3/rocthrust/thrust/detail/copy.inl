@@ -26,6 +26,7 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/copy.h>
+#include <thrust/detail/nvtx_policy.h>
 #include <thrust/system/detail/generic/select_system.h>
 
 // Include all active backend system implementations (generic, sequential, host and device)

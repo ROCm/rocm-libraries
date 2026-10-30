@@ -26,6 +26,7 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/nvtx_policy.h>
 #include <thrust/generate.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/generic/select_system.h>
@@ -71,9 +72,8 @@ THRUST_HOST_DEVICE OutputIterator generate_n(
 template <typename ForwardIterator, typename Generator>
 void generate(ForwardIterator first, ForwardIterator last, Generator gen)
 {
-  using thrust::system::detail::generic::select_system;
-
   using System = typename thrust::iterator_system<ForwardIterator>::type;
+  using thrust::system::detail::generic::select_system;
 
   System system;
 
@@ -83,9 +83,8 @@ void generate(ForwardIterator first, ForwardIterator last, Generator gen)
 template <typename OutputIterator, typename Size, typename Generator>
 OutputIterator generate_n(OutputIterator first, Size n, Generator gen)
 {
-  using thrust::system::detail::generic::select_system;
-
   using System = typename thrust::iterator_system<OutputIterator>::type;
+  using thrust::system::detail::generic::select_system;
 
   System system;
 
