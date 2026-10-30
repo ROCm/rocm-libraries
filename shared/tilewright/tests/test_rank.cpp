@@ -16,6 +16,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <limits>
+#include <optional>
 #include <random>
 #include <set>
 #include <string>
@@ -1236,5 +1237,48 @@ TEST_CASE("alignment veto: a ranking it would empty ranks as without it", "[rank
           if (all && count_scored(got) > 0) ++emptied;
         }
     CHECK(emptied > 0);
+  }
+  // With CU budgets from a quarter of the device, a budget below them ranks
+  // at its scoring context, where the veto steps aside as in range; a
+  // prepared set ranks each problem twice in a row (the memo may answer the
+  // second), rank and rank_top alike.
+  ModelSpec quarter       = open;
+  quarter.min_cu_fraction = 0.25;
+  for (const ModelSpec& plain :
+       {quarter, whitelisting(quarter, nt_a, [](const tw::Config& c) { return c.mt.m == 64; })}) {
+    const tw::ModelPtr without = load_spec(plain), with = load_spec(with_veto(plain));
+    std::size_t emptied = 0, moved = 0;
+    for (const std::vector<tw::Config>* pool : {&nt_a, &nt_b}) {
+      const tw::CandidateSet ready(with, *pool);
+      ready.prepare();
+      for (const std::size_t budget : {std::size_t{1}, std::size_t{8}}) {
+        const tw::ExecutionContext low{budget, tw::Schedule::Default};
+        const std::optional<tw::ExecutionContext> at = tw::scoring_context(*with, low, hw);
+        REQUIRE(at);
+        REQUIRE(at->cu_budget == 16);
+        for (const tw::Problem& p : veto_problems()) {
+          INFO("budget " << budget << " m " << p.size.m << " k " << p.size.k << " layout "
+                         << static_cast<int>(p.a_transpose) << static_cast<int>(p.b_transpose)
+                         << " dtype " << static_cast<int>(p.a_dtype));
+          const auto ranked_at = [&](const tw::ExecutionContext& ctx) {
+            return expected_with_veto(p, *pool, [&](const std::vector<tw::Config>& configs) {
+              return tw::rank_configs(*without, p, hw, ctx, configs, 1);
+            });
+          };
+          const std::vector<tw::Result> want = ranked_at(*at);
+          CHECK(same_results(tw::rank_configs(*with, p, hw, low, *pool, 1), want));
+          for (int twice = 0; twice < 2; ++twice) {
+            CHECK(same_results(ready.rank(p, hw, low, 1), want));
+            CHECK(same_results(ready.rank_top(p, hw, low, 1), scored_prefix(want, 1)));
+          }
+          bool all = true;
+          for (const tw::Config& c : *pool) all = all && vetoed(p, c);
+          if (all && count_scored(want) > 0) ++emptied;
+          if (!same_results(want, ranked_at(tw::ExecutionContext{}))) ++moved;
+        }
+      }
+    }
+    CHECK(emptied > 0);
+    CHECK(moved > 0);
   }
 }
