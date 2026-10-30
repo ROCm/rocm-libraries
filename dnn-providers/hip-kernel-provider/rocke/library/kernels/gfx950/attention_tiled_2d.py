@@ -2989,9 +2989,10 @@ def build_unified_attention_2d_tiled(
         ``cvt_pk_f32_fp8`` + ``* k_scale`` + cast -- to the exact 8 bf16 the
         bf16 K_lds path would have held (bit-identical), then feed the
         standard bf16 MFMA. (Unfused cvt + explicit f32 multiply: the fused
-        ``cvt_scalef32`` truncates non-pow2 scales; see the 16x16 path.)
-        Otherwise read bf16 directly. Shared by the 16x16 and 32x32 QK
-        paths so both get the fp8 LDS-footprint win.
+        ``cvt_scalef32`` truncates non-pow2 scales; see
+        ``dequant_fp8x8_to_dtype``.) Otherwise read bf16 directly. Every QK
+        path (16x16, 32x32 and transposed 32x32) reads K through here, so
+        each reads K in the type and layout the K copy wrote.
         """
         if KQ_XOR_SWIZZLE:
             # Measurement-only vanilla XOR swizzle: permute the read column by
@@ -3903,6 +3904,9 @@ def build_unified_attention_2d_tiled(
                 # Non-transposed 32x32 QK: ``S32_n[n] = vec_f32(16)``,
                 # one 32x32x16 C tile per warp. Downstream softmax/PV
                 # consume this via the non-transposed mask block below.
+                # K goes through the shared K reader, like the transposed
+                # path: when K_lds holds raw fp8 bytes it reads them as fp8
+                # and dequantizes with k_scale before the bf16 MFMA.
                 S32_n = [None] * QK_N_TILES
                 for n in range(QK_N_TILES):
                     acc32 = b.zero_vec_f32(16)
@@ -3911,9 +3915,7 @@ def build_unified_attention_2d_tiled(
                         kc_off32 = b.add(
                             b.const_i32(k * 16), b.mul(lane_half, b.const_i32(8))
                         )
-                        B32_v = b.smem_load_vN(
-                            K_lds, cur_buf, k_row32, kc_off32, dtype=dtype, n=8
-                        )
+                        B32_v = _read_k8_mfma_operand(cur_buf, k_row32, kc_off32)
                         q32_op = _read_q32(k) if Q_REREAD else Q32_reg[k]
                         acc32 = _mfma_32x32x16(b, dtype, q32_op, B32_v, acc32)
                     S32_n[n] = acc32
@@ -3924,44 +3926,13 @@ def build_unified_attention_2d_tiled(
                 for k in range(QK_K_ITERS):
                     kc_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
                     k_row = b.add(b.const_i32(n * 16), lane_col)
-                    if K_FP8_MFMA:
-                        # K_lds holds raw fp8 bytes. Dequant in register to
-                        # bf16 (bit-identical to what the bf16 K_lds path
-                        # would have written) then run the standard bf16
-                        # MFMA.
-                        #
-                        # Uses gfx950's fused ``v_cvt_scalef32_pk_f32_fp8``
-                        # which folds the per-element scale multiply into
-                        # the cvt: 2 fused scaled cvts + 2 packed bf16
-                        # cvts = 4 instructions per 8-element load (vs the
-                        # old 2 cvt_pk_f32_fp8 + 8 fmul + 2 cvt_pk_bf16_f32
-                        # = 12 instructions). Triton uses the same fused
-                        # intrinsic in its long-prefill FP8 kernel.
-                        B_fp8 = b.smem_load_vN(
-                            K_lds,
-                            cur_buf,
-                            k_row,
-                            kc_off,
-                            dtype=FP8E4M3,
-                            n=8,
+                    # The shared K reader, as on the 32x32 paths: fp8 K in
+                    # K_lds is read as fp8 and dequantized with k_scale.
+                    B_v = _read_k8_mfma_operand(cur_buf, k_row, kc_off)
+                    for atom in range(M_ATOMS_PER_WARP):
+                        acc_per_atom[atom] = _mfma_16x16x32(
+                            b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
                         )
-                        # See FP8 dequant note in dequant_fp8x8_to_dtype:
-                        # cvt_scalef32_pk_f32_fp8 uses E8M0-only scale,
-                        # silently truncating non-pow2 scales. The helper uses
-                        # the unfused cvt_pk_f32_fp8 + explicit f32 multiply.
-                        B_v = dequant_fp8x8_to_dtype(b, B_fp8, k_scale_p, dtype)
-                        for atom in range(M_ATOMS_PER_WARP):
-                            acc_per_atom[atom] = _mfma_16x16x32(
-                                b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
-                            )
-                    else:
-                        B_v = b.smem_load_vN(
-                            K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=8
-                        )
-                        for atom in range(M_ATOMS_PER_WARP):
-                            acc_per_atom[atom] = _mfma_16x16x32(
-                                b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
-                            )
                 for atom in range(M_ATOMS_PER_WARP):
                     S_n[atom][n] = acc_per_atom[atom]
 

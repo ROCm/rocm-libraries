@@ -161,15 +161,6 @@ static rocke_value_t* fh_mfma_32x32x16(rocke_gfx950_attn2d_build_ctx_t* ctx,
     return rocke_mfma_attn_mfma_32x32x16_for_dtype(ctx->b, ctx->dtype, a, bv, c);
 }
 
-static rocke_value_t* fh_read_k8_mfma_operand(rocke_gfx950_attn2d_build_ctx_t* ctx,
-                                              rocke_value_t* buf,
-                                              rocke_value_t* k_row,
-                                              rocke_value_t* k_off)
-{
-    rocke_value_t* idx[3] = {buf, k_row, k_off};
-    return rocke_b_smem_load_vN(ctx->b, ctx->K_lds, idx, 3, ctx->dtype, 8);
-}
-
 static rocke_value_t* fh_apply_softcap(rocke_gfx950_attn2d_build_ctx_t* ctx, rocke_value_t* s)
 {
     return rocke_apply_softcap_log2(ctx->b, s, ctx->softcap_p);
@@ -643,7 +634,10 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 rocke_value_t* k_off_base = rocke_b_const_i32(b, k * 16);
                 rocke_value_t* k_off_t = rocke_b_add(
                     b, k_off_base, rocke_b_mul(b, lane_half, rocke_b_const_i32(b, 8)));
-                rocke_value_t* A_k_t = fh_read_k8_mfma_operand(ctx, ctx->cur_buf, k_row_t, k_off_t);
+                /* The shared K reader: when K_lds holds raw fp8 bytes it reads
+                 * them as fp8 and dequantizes with k_scale. */
+                rocke_value_t* A_k_t
+                    = rocke_gfx950_attn2d_read_k8_mfma_operand(ctx, ctx->cur_buf, k_row_t, k_off_t);
                 rocke_value_t* B_q_t = ctx->q32_regs[k];
                 acc32 = fh_mfma_32x32x16(ctx, A_k_t, B_q_t, acc32);
             }
@@ -665,8 +659,8 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                     rocke_value_t* k_off_base = rocke_b_const_i32(b, k * 16);
                     rocke_value_t* k_off_t = rocke_b_add(
                         b, k_off_base, rocke_b_mul(b, lane_half, rocke_b_const_i32(b, 8)));
-                    rocke_value_t* A_k_t
-                        = fh_read_k8_mfma_operand(ctx, ctx->nxt_buf_v, k_row_t, k_off_t);
+                    rocke_value_t* A_k_t = rocke_gfx950_attn2d_read_k8_mfma_operand(
+                        ctx, ctx->nxt_buf_v, k_row_t, k_off_t);
                     rocke_value_t* B_q_t = ctx->q32_regs[k];
                     acc32 = fh_mfma_32x32x16(ctx, A_k_t, B_q_t, acc32);
                 }
@@ -941,12 +935,10 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 rocke_value_t* kc_base = rocke_b_const_i32(b, k * 16);
                 rocke_value_t* kc_off32 = rocke_b_add(
                     b, kc_base, rocke_b_mul(b, lane_half_qg, rocke_b_const_i32(b, 8)));
-                rocke_value_t* idx[3];
-                rocke_value_t* B32_v;
-                idx[0] = ctx->cur_buf;
-                idx[1] = k_row32;
-                idx[2] = kc_off32;
-                B32_v = rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, 8);
+                /* The shared K reader: when K_lds holds raw fp8 bytes it reads
+                 * them as fp8 and dequantizes with k_scale. */
+                rocke_value_t* B32_v = rocke_gfx950_attn2d_read_k8_mfma_operand(
+                    ctx, ctx->cur_buf, k_row32, kc_off32);
                 acc32 = fh_mfma_32x32x16(ctx, ctx->q32_regs[k], B32_v, acc32);
             }
             S32_n[n] = acc32;
@@ -1113,21 +1105,10 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                     = rocke_b_add(b, kc_base, rocke_b_mul(b, lane_rg, rocke_b_const_i32(b, 8)));
                 rocke_value_t* kr_base = rocke_b_const_i32(b, n * 16);
                 rocke_value_t* k_row = rocke_b_add(b, kr_base, lane_col);
-                rocke_value_t* idx[3];
-                idx[0] = ctx->cur_buf;
-                idx[1] = k_row;
-                idx[2] = kc_off;
-                rocke_value_t* B_v;
-                if(ctx->FP8_MFMA_QK)
-                {
-                    rocke_value_t* B_fp8
-                        = rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, rocke_fp8e4m3(), 8);
-                    B_v = rocke_dequant_fp8x8_to_dtype(b, B_fp8, ctx->k_scale_p, ctx->dtype);
-                }
-                else
-                {
-                    B_v = rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, 8);
-                }
+                /* The shared K reader, as on the 32x32 paths: fp8 K in K_lds is
+                 * read as fp8 and dequantized with k_scale. */
+                rocke_value_t* B_v
+                    = rocke_gfx950_attn2d_read_k8_mfma_operand(ctx, ctx->cur_buf, k_row, kc_off);
                 for(int atom = 0; atom < M_ATOMS_PER_WARP; ++atom)
                 {
                     rocke_value_t* A_k = ctx->q_regs[atom * QK_K_ITERS + k];
