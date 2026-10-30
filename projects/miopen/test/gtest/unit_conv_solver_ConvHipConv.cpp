@@ -4,8 +4,9 @@
 // Unit tests for the ConvHipConv solver (hipconv-backed convolution).
 //
 // Restrictions enforced by ConvHipConv::IsApplicable:
-//   - 2D or 3D convolution: on gfx950 hipconv runs 3×3×3 dense (fprop, stride-1 dgrad) and
-//     grouped convolutions in 3D, and other 3D convolutions where they reduce to 2D
+//   - 2D or 3D convolution: on gfx950 hipconv runs 3×3×3 dense (fprop, stride-1 dgrad),
+//     grouped and depthwise convolutions in 3D, and other 3D convolutions where they reduce
+//     to 2D
 //   - packed tensors
 //   - fp16, bf16, or fp32 with tf32 compute enabled
 //   - NHWC/NDHWC, or 2D NCHW (served by transposing through NHWC scratch); 3D NCDHW is
@@ -337,6 +338,30 @@ auto GetConv3dGroupedTestCases(miopenDataType_t datatype, bool tf32_compute = fa
         TestCase{{datatype, layout, {2, 256, 3, 4,  8}}, {datatype, layout, {256, 32, 3, 3, 3}}, datatype, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1},  8, false, tf32_compute}}, // 32c
         // clang-format on
     };
+}
+
+// Depthwise 3D convolution (depthwise_1d_toeplitz, depthwise_wgrad_hankel, gfx950 only).
+//
+// With tf32_compute the list omits Kh(9) × Kw(9), which hipconv runs in tf32 only in wgrad.
+auto GetConv3dDepthwiseTestCases(miopenDataType_t datatype, bool tf32_compute = false)
+{
+    constexpr auto layout = miopenTensorNDHWC;
+    auto cases            = std::vector<TestCase>{
+        // clang-format off
+        TestCase{{datatype, layout, {2, 64, 4,  8,  8}}, {datatype, layout, {64, 1, 3, 3, 3}}, datatype, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 64, false, tf32_compute}}, // Kd(3) × Kh(3) × Kw(3)
+        TestCase{{datatype, layout, {2, 20, 5, 10, 10}}, {datatype, layout, {20, 1, 3, 3, 3}}, datatype, {{1, 1, 1}, {2, 2, 2}, {1, 1, 1}, 20, false, tf32_compute}}, // Kd(3) × Kh(3) × Kw(3), stride 2, C(20)
+        TestCase{{datatype, layout, {1, 16, 9, 13, 40}}, {datatype, layout, {16, 1, 3, 3, 3}}, datatype, {{2, 1, 1}, {1, 1, 1}, {2, 1, 1}, 16, false, tf32_compute}}, // Kd(3) × Kh(3) × Kw(3), depth dilation 2
+        TestCase{{datatype, layout, {2, 32, 6, 10, 10}}, {datatype, layout, {32, 1, 5, 5, 5}}, datatype, {{2, 2, 2}, {1, 1, 1}, {1, 1, 1}, 32, false, tf32_compute}}, // Kd(5) × Kh(5) × Kw(5)
+        TestCase{{datatype, layout, {2, 64, 4, 14, 14}}, {datatype, layout, {64, 1, 3, 7, 7}}, datatype, {{1, 3, 3}, {1, 1, 1}, {1, 1, 1}, 64, false, tf32_compute}}, // Kd(3) × Kh(7) × Kw(7)
+        // clang-format on
+    };
+    if(!tf32_compute)
+    {
+        // clang-format off
+        cases.push_back(TestCase{{datatype, layout, {2, 64, 6, 20, 20}}, {datatype, layout, {64, 1, 3, 9, 9}}, datatype, {{1, 4, 4}, {1, 1, 1}, {1, 1, 1}, 64}}); // Kd(3) × Kh(9) × Kw(9)
+        // clang-format on
+    }
+    return cases;
 }
 
 // Vertical 7×1, which gfx1250 runs (direct) and gfx950 does not.
@@ -1493,6 +1518,69 @@ INSTANTIATE_TEST_SUITE_P(SmokeConv3dGrouped,
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConv3dGroupedTestCases(miopenFloat,
                                                                                       true))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3dDepthwise,
+    GPU_UnitTestConvSolverConvHipConvFwdNhwc_FP16,
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dDepthwiseTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3dDepthwise,
+    GPU_UnitTestConvSolverConvHipConvBwdNhwc_FP16,
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dDepthwiseTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3dDepthwise,
+    GPU_UnitTestConvSolverConvHipConvWrwNhwc_FP16,
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dDepthwiseTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3dDepthwise,
+    GPU_UnitTestConvSolverConvHipConvFwdNhwc_BFP16,
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dDepthwiseTestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3dDepthwise,
+    GPU_UnitTestConvSolverConvHipConvBwdNhwc_BFP16,
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dDepthwiseTestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3dDepthwise,
+    GPU_UnitTestConvSolverConvHipConvWrwNhwc_BFP16,
+    testing::Combine(testing::Values(GetTestParamsGfx950()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dDepthwiseTestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(SmokeConv3dDepthwise,
+                         GPU_UnitTestConvSolverConvHipConvFwdNhwc_TF32,
+                         testing::Combine(testing::Values(GetTestParamsTF32()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConv3dDepthwiseTestCases(miopenFloat,
+                                                                                        true))));
+
+INSTANTIATE_TEST_SUITE_P(SmokeConv3dDepthwise,
+                         GPU_UnitTestConvSolverConvHipConvBwdNhwc_TF32,
+                         testing::Combine(testing::Values(GetTestParamsTF32()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConv3dDepthwiseTestCases(miopenFloat,
+                                                                                        true))));
+
+INSTANTIATE_TEST_SUITE_P(SmokeConv3dDepthwise,
+                         GPU_UnitTestConvSolverConvHipConvWrwNhwc_TF32,
+                         testing::Combine(testing::Values(GetTestParamsTF32()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConv3dDepthwiseTestCases(miopenFloat,
+                                                                                        true))));
 
 INSTANTIATE_TEST_SUITE_P(SmokeDense7x1,
                          GPU_UnitTestConvSolverConvHipConvFwdNhwc_FP16,
