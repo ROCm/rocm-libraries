@@ -1869,46 +1869,44 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         def ir_for(flavor):
             return f'target datalayout = "{_datalayout_for_flavor(flavor)}"\n'
 
-        orig_ver = comgr_mod.loaded_compiler_info
-        orig_path = comgr_mod.resolved_lib_path
-        comgr_mod.resolved_lib_path = lambda: "/fake/libamd_comgr.so"
-        try:
-            # Same generation on both sides (including the llvm22-IR/llvm23-comgr
-            # cross pair) must pass.
-            for lib_ver, flavor in (
-                ((20, 0, 0), "llvm20"),
-                ((22, 0, 0), "llvm22"),
-                ((23, 0, 0), "llvm23"),
-                ((23, 0, 0), "llvm22"),
-                ((22, 0, 0), "llvm23"),
-            ):
-                with self.subTest(lib=lib_ver, ir=flavor):
-                    comgr_mod.loaded_compiler_info = lambda v=lib_ver: (
-                        comgr_mod.CompilerInfo(
-                            v, "test", None, "/fake/libamd_comgr.so", "/fake/libLLVM.so"
-                        )
-                    )
-                    comgr_mod._assert_ir_flavor_matches_lib(ir_for(flavor))
-            # Crossing the generation boundary must raise either way.
-            for lib_ver, flavor in (((20, 0, 0), "llvm22"), ((23, 0, 0), "llvm20")):
-                with self.subTest(lib=lib_ver, ir=flavor, expect="raise"):
-                    comgr_mod.loaded_compiler_info = lambda v=lib_ver: (
-                        comgr_mod.CompilerInfo(
-                            v, "test", None, "/fake/libamd_comgr.so", "/fake/libLLVM.so"
-                        )
-                    )
-                    with self.assertRaises(comgr_mod.ComgrError) as cm:
-                        comgr_mod._assert_ir_flavor_matches_lib(ir_for(flavor))
-                    # The message must name both generations, not just "modern".
-                    self.assertIn("p8_", str(cm.exception))
-            # Unknown IR (no datalayout) never blocks compilation.
-            comgr_mod.loaded_compiler_info = lambda: comgr_mod.CompilerInfo(
-                (20, 0, 0), "test", None, "/fake/libamd_comgr.so", "/fake/libLLVM.so"
+        def mock_compiler_info(version):
+            def loaded_compiler_info(*, required):
+                self.assertTrue(required)
+                return comgr_mod.CompilerInfo(
+                    version, "test", None, "/fake/libamd_comgr.so", "/fake/libLLVM.so"
+                )
+
+            return patch.object(
+                comgr_mod, "_loaded_compiler_info", loaded_compiler_info
             )
+
+        # Same generation on both sides (including the llvm22-IR/llvm23-comgr
+        # cross pair) must pass.
+        for lib_ver, flavor in (
+            ((20, 0, 0), "llvm20"),
+            ((22, 0, 0), "llvm22"),
+            ((23, 0, 0), "llvm23"),
+            ((23, 0, 0), "llvm22"),
+            ((22, 0, 0), "llvm23"),
+        ):
+            with (
+                self.subTest(lib=lib_ver, ir=flavor),
+                mock_compiler_info(lib_ver),
+            ):
+                comgr_mod._assert_ir_flavor_matches_lib(ir_for(flavor))
+        # Crossing the generation boundary must raise either way.
+        for lib_ver, flavor in (((20, 0, 0), "llvm22"), ((23, 0, 0), "llvm20")):
+            with (
+                self.subTest(lib=lib_ver, ir=flavor, expect="raise"),
+                mock_compiler_info(lib_ver),
+            ):
+                with self.assertRaises(comgr_mod.ComgrError) as cm:
+                    comgr_mod._assert_ir_flavor_matches_lib(ir_for(flavor))
+                # The message must name both generations, not just "modern".
+                self.assertIn("p8_", str(cm.exception))
+        # Unknown IR (no datalayout) never blocks compilation with known evidence.
+        with mock_compiler_info((20, 0, 0)):
             comgr_mod._assert_ir_flavor_matches_lib("define void @k() {}")
-        finally:
-            comgr_mod.loaded_compiler_info = orig_ver
-            comgr_mod.resolved_lib_path = orig_path
 
     def test_comgr_load_failure_names_selected_candidate(self):
         """An unloadable selected compiler reports its path and loader error."""
