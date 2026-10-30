@@ -1505,35 +1505,6 @@ TEST(TestDescriptorLoader, CollapsesAnIdenticalDescriptorSetPresentInBothRoots)
     EXPECT_EQ(sets.front().engine.name, "test:mirrored");
 }
 
-/// The drop-in rule: a later root may add descriptors, never replace one. Two files
-/// disagreeing inside one root drop both, because nothing ranks them; across roots the
-/// installed tree is the answer, so the newcomer is refused and the incumbent survives
-/// intact -- an operator-controlled root that could delete a shipped engine would do it
-/// at a severity the default log level never shows.
-TEST(TestDescriptorLoader, RefusesADropInRedefiningAnInstalledId)
-{
-    auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("cross_root_conflict"));
-    const auto installed = dir.path() / "a";
-    const auto dropIn = dir.path() / "b";
-
-    auto documents = makeSetDocuments('1', "test:installed");
-    writeDocuments(installed, documents);
-
-    // Same UED id, different content, filed under the later root.
-    auto& engine = documentOfType(documents, ".ued.json");
-    engine["name"] = "test:redefined";
-    writeDocument(dropIn, TestDocument{".ued.json", engine});
-
-    const auto sets = loadFromRoots({installed, dropIn});
-
-    ASSERT_EQ(sets.size(), 1u);
-    EXPECT_EQ(sets.front().engine.name, "test:installed");
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "under an earlier root"))
-        << recorder.getRecordedLogsAsString();
-}
-
 /// The other half: a drop-in that claims no installed id is loaded like any other file,
 /// so the tree is genuinely additive rather than decorative.
 TEST(TestDescriptorLoader, LoadsAnEngineThatOnlyTheDropInRootDefines)
@@ -1694,73 +1665,327 @@ TEST(TestDescriptorLoader, DropsAnIdTwoFilesDisagreeAbout)
 namespace
 {
 
-/// One way the first of two same-id files stops being readable before the second arrives,
-/// and the ERROR that names it.
-struct RereadFailureCase
+/// What a catalog map holds after the walk: its entries, and how many of them two
+/// disagreeing files poisoned.
+struct Tally
 {
-    std::string name;
-    std::function<void(const std::filesystem::path&)> spoil;
-    std::string diagnostic;
+    size_t entries = 0;
+    size_t conflicted = 0;
 };
 
-class TestDescriptorLoaderRereadFailure : public ::testing::TestWithParam<RereadFailureCase>
+/// An id-keyed map's key is the id; a (id, arch) map's key carries it first.
+inline DescriptorId idPart(const DescriptorId& key)
 {
+    return key;
+}
+
+inline DescriptorId idPart(const ArchKey& key)
+{
+    return key.first;
+}
+
+/// Only the entries filed under @p id.
+template <typename Map>
+Tally tallyOf(const Map& map, const DescriptorId& id)
+{
+    Tally tally;
+    for(const auto& item : map)
+    {
+        if(idPart(item.first) == id)
+        {
+            ++tally.entries;
+            tally.conflicted += item.second.conflicted ? 1u : 0u;
+        }
+    }
+    return tally;
+}
+
+/// @p value with the members of every object in the reverse of nlohmann::json's sorted
+/// order, which no plain dump() of a nlohmann::json can produce.
+nlohmann::ordered_json reversedKeys(const nlohmann::json& value)
+{
+    if(value.is_object())
+    {
+        auto object = nlohmann::ordered_json::object();
+        for(auto it = value.rbegin(); it != value.rend(); ++it)
+        {
+            object[it.key()] = reversedKeys(it.value());
+        }
+        return object;
+    }
+    if(value.is_array())
+    {
+        auto array = nlohmann::ordered_json::array();
+        for(const auto& element : value)
+        {
+            array.push_back(reversedKeys(element));
+        }
+        return array;
+    }
+    nlohmann::ordered_json copy = value;
+    return copy;
+}
+
+/// @p document's twin that parses to the same descriptor but shares no bytes with what
+/// writeDocument() writes: a leading comment and every object's keys in reverse order.
+void writeCommentedAndReordered(const std::filesystem::path& directory,
+                                const TestDocument& document)
+{
+    std::filesystem::create_directories(directory);
+    std::ofstream file(
+        directory / (document.body.at("id").get<std::string>() + std::string(document.suffix)),
+        std::ios::binary);
+    file << "// the same descriptor, spelled differently\n"
+         << reversedKeys(document.body).dump(2) << '\n';
+}
+
+/// One descriptor file type, and what a collision on it looks like to a consumer.
+struct TypedCollisionCase
+{
+    std::string name;
+    std::string_view suffix; ///< the type under test; its first document in makeSetDocuments
+    /// Shapes the set so @c suffix exists as a file of its own, keyed the way the loader
+    /// keys it. The per-arch types get one arch, so both copies share a key.
+    std::function<void(Documents&)> prepare;
+    std::function<Tally(const DescriptorCatalog&, const DescriptorId&)> tally;
+    /// Whether losing this id takes the engine with it. A UHD is optional to an engine.
+    bool dropsEngine;
 };
+
+class TestDescriptorLoaderTypedCollision : public ::testing::TestWithParam<TypedCollisionCase>
+{
+protected:
+    /// A changed `name` keeps every type valid; a UED's stays scoped.
+    static TestDocument redefined(const Documents& documents, std::string_view suffix)
+    {
+        for(const auto& document : documents)
+        {
+            if(document.suffix == suffix)
+            {
+                auto body = document.body;
+                body["name"] = body.at("name").get<std::string>() + "_other";
+                return {suffix, std::move(body)};
+            }
+        }
+        throw std::runtime_error("no document of type " + std::string(suffix));
+    }
+
+    /// The catalog's entries for the id of @p documents' document under test: a set holds
+    /// other descriptors of the same type (two UMDs), which are not part of the collision.
+    static Tally collisionTally(const DescriptorCatalog& catalog, const Documents& documents)
+    {
+        for(const auto& document : documents)
+        {
+            if(document.suffix == GetParam().suffix)
+            {
+                return GetParam().tally(catalog,
+                                        hipdnn_flatbuffers_sdk::utilities::parseUuid(
+                                            document.body.at("id").get<std::string>()));
+            }
+        }
+        throw std::runtime_error("no document of type " + std::string(GetParam().suffix));
+    }
+};
+
+void useOneArch(Documents& documents)
+{
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+}
 
 } // namespace
 
-TEST_P(TestDescriptorLoaderRereadFailure, DropsAnIdWhoseEarlierFileCanNoLongerBeReRead)
+/// The collision compare sees the parsed descriptor, so a comment or a different key
+/// order never makes two copies of one descriptor collide -- a per-arch layout ships the
+/// same generic file in every shard, and each shard is free to format it.
+TEST_P(TestDescriptorLoaderTypedCollision, CollapsesCopiesThatDifferOnlyInBytes)
 {
-    // A collision is settled by re-reading both files, and a file that no longer reads cannot
-    // prove the two equal: even identical copies drop the id, under an ERROR that says the
-    // comparison failed rather than that the contents differ.
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
-        uniqueDirectory("reread_failure_" + GetParam().name));
-    auto documents = makeSetDocuments('1', "test:reread");
+        uniqueDirectory("typed_bytes_" + GetParam().name));
+    auto documents = makeSetDocuments('1', "test:typed_bytes");
+    GetParam().prepare(documents);
+    writeDocuments(dir.path() / "a", documents);
+
+    const auto& body = documentOfType(documents, GetParam().suffix);
+    ASSERT_NE(reversedKeys(body).dump(2), body.dump(2));
+    writeCommentedAndReordered(dir.path() / "b", TestDocument{GetParam().suffix, body});
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    EXPECT_EQ(collisionTally(catalog, documents).entries, 1u);
+    EXPECT_EQ(collisionTally(catalog, documents).conflicted, 0u);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
+        << recorder.getRecordedLogsAsString();
+    const auto sets = resolveDescriptorSets(catalog);
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:typed_bytes");
+}
+
+/// Differing content inside one root has no defensible order, so the id is poisoned and
+/// whatever needs it is dropped (RFC 0020 §13.2.1).
+TEST_P(TestDescriptorLoaderTypedCollision, DropsTheIdWhenTwoFilesInOneRootDiffer)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("typed_same_root_" + GetParam().name));
+    auto documents = makeSetDocuments('1', "test:typed_same_root");
+    GetParam().prepare(documents);
+    writeDocuments(dir.path() / "a", documents);
+    writeDocument(dir.path() / "b", redefined(documents, GetParam().suffix));
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    EXPECT_EQ(collisionTally(catalog, documents).entries, 1u);
+    EXPECT_EQ(collisionTally(catalog, documents).conflicted, 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "with different contents"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "under an earlier root"));
+    EXPECT_EQ(resolveDescriptorSets(catalog).size(), GetParam().dropsEngine ? 0u : 1u);
+}
+
+/// The drop-in rule: a later root may add descriptors, never replace one. Across roots the
+/// installed tree is the answer, so the newcomer is refused and the incumbent survives
+/// intact -- an operator-controlled root that could delete a shipped engine would do it
+/// at a severity the default log level never shows.
+TEST_P(TestDescriptorLoaderTypedCollision, KeepsTheEarlierRootsDescriptorOverALaterRedefinition)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("typed_earlier_root_" + GetParam().name));
+    auto documents = makeSetDocuments('1', "test:typed_earlier_root");
+    GetParam().prepare(documents);
+    writeDocuments(dir.path() / "a", documents);
+    writeDocument(dir.path() / "b", redefined(documents, GetParam().suffix));
+
+    const auto catalog = loadDescriptorCatalog(
+        std::vector<std::filesystem::path>{dir.path() / "a", dir.path() / "b"});
+
+    EXPECT_EQ(collisionTally(catalog, documents).entries, 1u);
+    EXPECT_EQ(collisionTally(catalog, documents).conflicted, 0u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "under an earlier root"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "with different contents"));
+    const auto sets = resolveDescriptorSets(catalog);
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:typed_earlier_root");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Descriptor,
+    TestDescriptorLoaderTypedCollision,
+    ::testing::Values(TypedCollisionCase{"Kmd",
+                                         ".kmd.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.schemas, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Uhd",
+                                         ".uhd.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.heuristics, id);
+                                         },
+                                         false},
+                      TypedCollisionCase{"Ued",
+                                         ".ued.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.engines, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Umd",
+                                         ".umd.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.matchers, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Udd",
+                                         ".udd.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.dispatches, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Kdp",
+                                         ".kdp.json",
+                                         useOneArch,
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.packs, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Ukd",
+                                         ".ukd.json",
+                                         [](Documents& documents) {
+                                             referenceLastKernel(documents);
+                                             useOneArch(documents);
+                                             documentOfType(documents, ".ukd.json")["arch"]
+                                                 = nlohmann::json::array({"gfx942"});
+                                         },
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.kernels, id);
+                                         },
+                                         true}),
+    [](const ::testing::TestParamInfo<TypedCollisionCase>& info) { return info.param.name; });
+
+/// The collision compare reads no file: both entries here name paths that never existed,
+/// so a compare that opened them again could not call the copies identical.
+TEST(TestDescriptorLoader, SettlesACollisionWithoutOpeningEitherFile)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    auto documents = makeSetDocuments('1', "test:no_io");
     const auto& body = documentOfType(documents, ".udd.json");
-    const auto first = dir.path() / "first.udd.json";
-    const auto second = dir.path() / "second.udd.json";
-    for(const auto& path : {first, second})
-    {
-        std::ofstream(path, std::ios::binary) << body.dump(2);
-    }
+    const auto missing = uniqueDirectory("no_io");
+    const auto first = missing / "first.udd.json";
+    const auto second = missing / "second.udd.json";
 
     DescriptorMap<DispatchDescriptor> dispatches;
     detail::insertCatalogEntry(
         dispatches, detail::parseDispatchDescriptor(body, first.string()), first);
-    GetParam().spoil(first);
     detail::insertCatalogEntry(
         dispatches, detail::parseDispatchDescriptor(body, second.string()), second);
 
     ASSERT_EQ(dispatches.size(), 1u);
     const auto& entry = dispatches.begin()->second;
-    EXPECT_TRUE(entry.conflicted);
-    EXPECT_EQ(detail::findDescriptor(dispatches, entry.descriptor.id), nullptr);
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, GetParam().diagnostic))
-        << recorder.getRecordedLogsAsString();
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "could not be compared"))
-        << recorder.getRecordedLogsAsString();
-    EXPECT_FALSE(recorder.hasLogContaining("with different contents"))
+    EXPECT_FALSE(entry.conflicted);
+    EXPECT_EQ(entry.path, first);
+    EXPECT_NE(detail::findDescriptor(dispatches, entry.descriptor.id), nullptr);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
         << recorder.getRecordedLogsAsString();
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Collision,
-    TestDescriptorLoaderRereadFailure,
-    ::testing::Values(RereadFailureCase{"deleted",
-                                        [](const std::filesystem::path& path) {
-                                            ASSERT_TRUE(std::filesystem::remove(path));
-                                        },
-                                        "failed to re-open"},
-                      RereadFailureCase{"unparsable",
-                                        [](const std::filesystem::path& path) {
-                                            std::ofstream(path, std::ios::binary | std::ios::trunc)
-                                                << "not json";
-                                        },
-                                        "failed to re-read"}),
-    [](const ::testing::TestParamInfo<RereadFailureCase>& info) { return info.param.name; });
+/// RFC 0020 §13.2.1's content-identical exception is over the parsed descriptor. Extension
+/// keys (`x-`, `_`) and `provenance` never reach it, so two UEDs that differ only there are
+/// one definition rather than a collision.
+TEST(TestDescriptorLoader, CollapsesCopiesDifferingOnlyInExtensionKeysAndProvenance)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("extension_keys"));
+    auto documents = makeSetDocuments('1', "test:extension_keys");
+    writeDocuments(dir.path() / "a", documents);
+
+    auto annotated = documentOfType(documents, ".ued.json");
+    annotated["x-note"] = "reviewed by hand";
+    annotated["_scratch"] = 7;
+    annotated["provenance"] = {{"packer", "descriptor-packer/1.0"}};
+    writeDocument(dir.path() / "b", TestDocument{".ued.json", std::move(annotated)});
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    EXPECT_EQ(catalog.engines.size(), 1u);
+    EXPECT_FALSE(catalog.engines.begin()->second.conflicted);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
+        << recorder.getRecordedLogsAsString();
+    const auto sets = resolveDescriptorSets(catalog);
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:extension_keys");
+}
 
 TEST(TestDescriptorLoader, LoadsNothingFromAnEmptyDirectory)
 {
@@ -1955,7 +2180,7 @@ INSTANTIATE_TEST_SUITE_P(
         // this build has no reader for.
         ViolationCase{"version_newer_minor",
                       [](Documents& documents) {
-                          documentOfType(documents, ".ued.json")["version"] = "1.1";
+                          documentOfType(documents, ".ued.json")["version"] = "1.2";
                       }},
         // RFC 0020 §11.1: a major mismatch is a hard break in either direction.
         ViolationCase{"version_newer_major",
@@ -2057,6 +2282,12 @@ INSTANTIATE_TEST_SUITE_P(
                       [](Documents& documents) {
                           auto& sources = spellAsMultiLaunch(documents).at("sources");
                           sources["2nd"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{"launch_name_starts_with_an_underscore",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["_x"] = sources.at("merge");
                           sources.erase("merge");
                       }},
         ViolationCase{
@@ -2314,6 +2545,30 @@ TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
               "model.bin");
 }
 
+/// The packer copies a shared model UHD and its artifact into every arch shard. Each copy
+/// resolves its artifact to a different absolute path, but they author the same relative
+/// path and digest the same bytes, so they are one definition and the model stays bound.
+TEST(TestDescriptorLoader, CollapsesPerArchCopiesOfAModelHeuristic)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_arch_dupes"));
+    for(const std::string arch : {"gfx942", "gfx950"})
+    {
+        writeModelHeuristicSet(dir.path() / arch, "test:model_sharded", "model.bin");
+        writeArtifact(dir.path() / arch / "model.bin");
+    }
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
+        << recorder.getRecordedLogsAsString();
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    EXPECT_EQ(sets.front().heuristic->adapter, UhdAdapter::TREE_DATA);
+}
+
 /// RFC 0019 §4: every header field changes what the heuristic computes, so each must
 /// survive the parse.
 TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
@@ -2552,9 +2807,10 @@ TEST(TestDescriptorLoader, AcceptsAModelArtifactInASubdirectoryOfTheDescriptor)
 
     ASSERT_EQ(sets.size(), 1u);
     ASSERT_TRUE(sets.front().heuristic.has_value());
-    EXPECT_EQ(
-        sets.front().heuristic->modelArtifactPath,
-        std::filesystem::absolute(dir.path() / "models" / "model.bin").lexically_normal().string());
+    // The parser resolves the artifact canonically, so the expectation is canonical too. On
+    // Windows that yields the on-disk case of each component, which %TEMP% need not match.
+    EXPECT_EQ(sets.front().heuristic->modelArtifactPath,
+              std::filesystem::weakly_canonical(dir.path() / "models" / "model.bin").string());
 }
 
 /// RFC 0019 §11.2: a `predict_engine` model gets the same artifact pre-flight as a ranker.
@@ -3121,7 +3377,7 @@ TEST(TestDescriptorLoader, DropsEveryEngineClaimingTheSameEngineId)
     writeDocuments(dir.path(), makeSetDocuments('1', "test:same_name"));
     writeDocuments(dir.path(), makeSetDocuments('2', "test:same_name"));
 
-    // RFC 0020 §10.2.1: not keep-the-first. Directory order decides which set is seen
+    // RFC 0020 §13.2.1: not keep-the-first. Directory order decides which set is seen
     // first, so keeping one would make the surviving definition a property of the
     // filesystem.
     EXPECT_TRUE(loadFrom(dir.path()).empty());
@@ -3719,7 +3975,7 @@ TEST(TestDescriptorLoader, RejectsANonUedDescriptorWithNoVersion)
     EXPECT_TRUE(loadFrom(dir.path()).empty());
 }
 
-/// RFC 0020 §10.2.1: the version check runs before duplicate detection, so a UED the
+/// RFC 0020 §13.2.1: the version check runs before duplicate detection, so a UED the
 /// runtime cannot read is dropped for its version alone and the descriptor it would have
 /// collided with is retained. Ordered the other way, an unreadable file would take a
 /// perfectly good engine down with it.
@@ -3765,7 +4021,7 @@ TEST(TestDescriptorLoader, AnUnsupportedVersionDropsBeforeItCanCollideById)
 }
 
 /// RFC 0020 §4.3: the authored form is JSONC. Comments are the parser's business only --
-/// they must not reach the duplicate check, which compares parsed documents, so the same
+/// they must not reach the duplicate check, which compares parsed descriptors, so the same
 /// descriptor commented and uncommented is one definition rather than a collision.
 TEST(TestDescriptorLoader, ReadsCommentedDescriptorsAndIgnoresCommentsWhenComparing)
 {
@@ -3775,7 +4031,7 @@ TEST(TestDescriptorLoader, ReadsCommentedDescriptorsAndIgnoresCommentsWhenCompar
     writeDocuments(dir.path(), documents);
 
     // The same set again under a second arch directory, this time with a comment on every
-    // file: RFC 0020 §10.2.1's content-identical exception has to see through it.
+    // file: RFC 0020 §13.2.1's content-identical exception has to see through it.
     const auto commented = dir.path() / "gfx950";
     std::filesystem::create_directories(commented);
     for(const auto& document : documents)
@@ -4984,7 +5240,7 @@ std::vector<OracleCase> oracleCases()
          skipped,
          [] {
              auto header = oracleHeaderWithout("version");
-             header.emplace_back("version", "1.1");
+             header.emplace_back("version", "1.2");
              return oraclePackText(header, nlohmann::json::array({oracleKernel(1)}));
          }},
         // Needs the repeated `version`: the kernels stream under 1.0, and the last value
@@ -5464,20 +5720,35 @@ TEST(TestDescriptorLoader, AcceptsTwoLaunchNamesNamingOneKernelInline)
 }
 
 /// The selector revision digests every launch's code object, so a pack whose launch is
-/// rebuilt does not keep a revision a ranker was trained against.
+/// rebuilt does not keep a revision a ranker was trained against. Each launch carries its
+/// own symbol, toc_key and sha256, and each of them counts on its own.
 TEST(TestDescriptorLoader, ChangingALaunchCodeObjectChangesTheEngineSelectorRevision)
 {
-    const auto revisionWith = [&](const std::string& mergeSymbol, const std::string& label) {
-        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(label));
-        auto documents = makeSetDocuments('1', "test:" + label);
-        spellAsMultiLaunch(documents).at("sources")["merge"]["symbol"] = mergeSymbol;
-        writeDocuments(dir.path(), documents);
-        return engineSelectorRevision(loadFrom(dir.path()).at(0));
-    };
+    const auto revisionWith
+        = [&](const std::string& launch, const std::string& field, const std::string& value) {
+              const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("revision_a"));
+              auto documents = makeSetDocuments('1', "test:revision_a");
+              spellAsMultiLaunch(documents).at("sources").at(launch)[field] = value;
+              writeDocuments(dir.path(), documents);
+              return engineSelectorRevision(loadFrom(dir.path()).at(0));
+          };
 
-    EXPECT_EQ(revisionWith("rocke_merge", "revision_a"), revisionWith("rocke_merge", "revision_a"));
-    EXPECT_NE(revisionWith("rocke_merge", "revision_a"),
-              revisionWith("rocke_merge_v2", "revision_a"));
+    // Setting a field to the value it already has leaves the pack as authored.
+    const std::string baseline = revisionWith("merge", "symbol", "merge_kernel");
+    EXPECT_EQ(baseline, revisionWith("decode", "symbol", "decode_kernel"));
+
+    const std::vector<std::pair<std::string, std::string>> edits
+        = {{"symbol", "rocke_changed"},
+           {"toc_key", "multi/changed"},
+           {"sha256", std::string(64, 'b')}};
+    for(const std::string launch : {"decode", "merge"})
+    {
+        for(const auto& [field, value] : edits)
+        {
+            SCOPED_TRACE(std::string(launch).append(".").append(field));
+            EXPECT_NE(revisionWith(launch, field, value), baseline);
+        }
+    }
 }
 
 /// A launch name is `^[a-z][a-z0-9_]*$`: underscores and digits after the first letter are
@@ -6030,5 +6301,918 @@ TEST(TestDescriptorLoader, SkipsAStandaloneKernelOnAnUnsupportedMajor)
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:valid");
 }
+
+namespace
+{
+
+const std::string SLOTTED_GRAPH_MATCH_SYMBOL = "descriptorloader.slotted_graph_match";
+
+std::string slotUuid(char tag, int n)
+{
+    static constexpr std::string_view HEX = "0123456789abcdef";
+    std::string id = testUuid(tag, '0');
+    id[2] = HEX[(n >> 4) & 15];
+    id[3] = HEX[n & 15];
+    return id;
+}
+
+constexpr int SLOT_KMD_PREP = 0x01;
+constexpr int SLOT_KMD_DKDV = 0x02;
+constexpr int SLOT_KMD_DQ = 0x03;
+constexpr int SLOT_UHD_DKDV = 0x04;
+constexpr int SLOT_UHD_DQ = 0x05;
+constexpr int SLOT_UED = 0x06;
+constexpr int SLOT_UMD_GRAPH = 0x07;
+constexpr int SLOT_UMD_KERNEL = 0x08;
+constexpr int SLOT_UDD = 0x09;
+constexpr int SLOT_PACK_PREP = 0x10;
+constexpr int SLOT_PACK_DKDV = 0x11;
+constexpr int SLOT_PACK_DQ = 0x12;
+constexpr int SLOT_KERNEL_PREP = 0x20; // two kernels: 0x20, 0x21
+constexpr int SLOT_KERNEL_DKDV = 0x22;
+constexpr int SLOT_KERNEL_DQ = 0x24;
+
+/// A valid split-backward-shaped engine: three slots (`prep`, `dkdv`, `dq`), one pack and two
+/// kernels each. `dkdv` and `dq` carry a metric-less ranker and the `block_size` knob; the
+/// `dkdv` KMD alone declares `variant`.
+Documents makeSlottedDocuments(char tag, const std::string& engineName)
+{
+    const auto id = [tag](int n) { return slotUuid(tag, n); };
+
+    const auto kmd = [&](int n, const std::string& name, bool withVariant) {
+        auto fields = nlohmann::json::array();
+        fields.push_back(
+            nlohmann::json{{"name", "block_size"}, {"type", "int"}, {"default_value", 64}});
+        if(withVariant)
+        {
+            fields.push_back(
+                nlohmann::json{{"name", "variant"}, {"type", "string"}, {"default_value", "a"}});
+        }
+        return TestDocument{
+            ".kmd.json",
+            nlohmann::json{{"version", "1.0"}, {"id", id(n)}, {"name", name}, {"fields", fields}}};
+    };
+    const auto ranker = [&](int n, const std::string& name) {
+        return TestDocument{".uhd.json",
+                            nlohmann::json{{"version", "1.0"},
+                                           {"id", id(n)},
+                                           {"name", name},
+                                           {"adapter", "native"},
+                                           {"objective", "max"},
+                                           {"native", {{"symbol", SCORE_SYMBOL}}}}};
+    };
+    const auto kernel = [&](int n, const std::string& name, int64_t blockSize) {
+        return nlohmann::json{{"version", "1.0"},
+                              {"id", id(n)},
+                              {"name", name},
+                              {"kernel_source",
+                               {{"kind", "embedded_source"},
+                                {"source_file", "Kernel.cpp"},
+                                {"entry_point", "Entry"}}},
+                              {"metadata", {{"block_size", blockSize}}},
+                              {"priority", 0}};
+    };
+    const auto pack = [&](int n, const std::string& slot, int firstKernel) {
+        auto kernels = nlohmann::json::array();
+        kernels.push_back(kernel(firstKernel, "kernel_" + slot + "_0", 64));
+        kernels.push_back(kernel(firstKernel + 1, "kernel_" + slot + "_1", 128));
+        return TestDocument{".kdp.json",
+                            nlohmann::json{{"version", "1.1"},
+                                           {"id", id(n)},
+                                           {"name", "pack " + slot},
+                                           {"slot", slot},
+                                           {"matchers", {id(SLOT_UMD_GRAPH), id(SLOT_UMD_KERNEL)}},
+                                           {"engine", id(SLOT_UED)},
+                                           {"dispatch", id(SLOT_UDD)},
+                                           {"kernelDescriptors", kernels}}};
+    };
+
+    auto slots = nlohmann::json::array();
+    slots.push_back(nlohmann::json{{"name", "prep"}, {"metadata", id(SLOT_KMD_PREP)}});
+    slots.push_back(nlohmann::json{{"name", "dkdv"},
+                                   {"metadata", id(SLOT_KMD_DKDV)},
+                                   {"sort_kernel_catalog", {{"default", id(SLOT_UHD_DKDV)}}},
+                                   {"knobs", {"block_size"}}});
+    slots.push_back(nlohmann::json{{"name", "dq"},
+                                   {"metadata", id(SLOT_KMD_DQ)},
+                                   {"sort_kernel_catalog", {{"default", id(SLOT_UHD_DQ)}}},
+                                   {"knobs", {"block_size"}}});
+
+    Documents documents;
+    documents.push_back(kmd(SLOT_KMD_PREP, "prep fields", false));
+    documents.push_back(kmd(SLOT_KMD_DKDV, "dkdv fields", true));
+    documents.push_back(kmd(SLOT_KMD_DQ, "dq fields", false));
+    documents.push_back(ranker(SLOT_UHD_DKDV, "dkdv ranker"));
+    documents.push_back(ranker(SLOT_UHD_DQ, "dq ranker"));
+    documents.push_back(
+        TestDocument{".ued.json",
+                     nlohmann::json{{"version", "1.1"},
+                                    {"id", id(SLOT_UED)},
+                                    {"name", engineName},
+                                    {"graph_match", {{"native", SLOTTED_GRAPH_MATCH_SYMBOL}}},
+                                    {"shared_workspace", "ws.bytes"},
+                                    {"slots", slots}}});
+    documents.push_back(TestDocument{".umd.json",
+                                     nlohmann::json{{"version", "1.0"},
+                                                    {"id", id(SLOT_UMD_GRAPH)},
+                                                    {"name", "graph shape"},
+                                                    {"scope", "graph"},
+                                                    {"match_symbol", GRAPH_SYMBOL}}});
+    documents.push_back(TestDocument{".umd.json",
+                                     nlohmann::json{{"version", "1.0"},
+                                                    {"id", id(SLOT_UMD_KERNEL)},
+                                                    {"name", "kernel block"},
+                                                    {"scope", "kernel"},
+                                                    {"match_symbol", KERNEL_SYMBOL}}});
+    documents.push_back(TestDocument{".udd.json",
+                                     nlohmann::json{{"version", "1.0"},
+                                                    {"id", id(SLOT_UDD)},
+                                                    {"name", "dispatch"},
+                                                    {"dispatch_symbol", DISPATCH_SYMBOL}}});
+    documents.push_back(pack(SLOT_PACK_PREP, "prep", SLOT_KERNEL_PREP));
+    documents.push_back(pack(SLOT_PACK_DKDV, "dkdv", SLOT_KERNEL_DKDV));
+    documents.push_back(pack(SLOT_PACK_DQ, "dq", SLOT_KERNEL_DQ));
+    return documents;
+}
+
+nlohmann::json& documentById(Documents& documents, std::string_view suffix, const std::string& id)
+{
+    for(auto& document : documents)
+    {
+        if(document.suffix == suffix && document.body.at("id").get<std::string>() == id)
+        {
+            return document.body;
+        }
+    }
+    throw std::runtime_error("no document of type " + std::string(suffix) + " with id " + id);
+}
+
+nlohmann::json& slotPack(Documents& documents, const std::string& slot)
+{
+    for(auto& document : documents)
+    {
+        if(document.suffix == ".kdp.json" && document.body.value("slot", std::string{}) == slot)
+        {
+            return document.body;
+        }
+    }
+    throw std::runtime_error("no pack serves slot " + slot);
+}
+
+void eraseSlotPack(Documents& documents, const std::string& slot)
+{
+    documents.erase(std::remove_if(documents.begin(),
+                                   documents.end(),
+                                   [&slot](const TestDocument& document) {
+                                       return document.suffix == ".kdp.json"
+                                              && document.body.value("slot", std::string{}) == slot;
+                                   }),
+                    documents.end());
+}
+
+nlohmann::json dependencyOf(const nlohmann::json& descriptor)
+{
+    return nlohmann::json{{"id", descriptor.at("id")},
+                          {"revision", descriptor.value("revision", std::string("1.0"))}};
+}
+
+/// `trained_against` naming the UED and every UMD, for a caller to add its KMD form to.
+nlohmann::json trainedAgainstWithoutKmd(Documents& documents)
+{
+    auto matchers = nlohmann::json::array();
+    for(const auto& document : documents)
+    {
+        if(document.suffix == ".umd.json")
+        {
+            matchers.push_back(dependencyOf(document.body));
+        }
+    }
+    return nlohmann::json{{"ued", dependencyOf(documentOfType(documents, ".ued.json"))},
+                          {"umd", matchers}};
+}
+
+nlohmann::json kmdsOf(Documents& documents, const std::vector<std::pair<std::string, int>>& slots)
+{
+    auto kmds = nlohmann::json::array();
+    for(const auto& [slot, kmdNumber] : slots)
+    {
+        auto entry = dependencyOf(documentById(documents, ".kmd.json", slotUuid('1', kmdNumber)));
+        entry["slot"] = slot;
+        kmds.push_back(std::move(entry));
+    }
+    return kmds;
+}
+
+} // namespace
+
+TEST(TestDescriptorLoader, LoadsAThreeSlotSetWithPerSlotState)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("three_slots"));
+    auto documents = makeSlottedDocuments('1', "test:three_slots");
+    // A field only the `dkdv` KMD declares: coerced against that slot's KMD, not another's.
+    slotPack(documents, "dkdv").at("kernelDescriptors")[0]["metadata"]["variant"] = "b";
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    ASSERT_EQ(set.slots.size(), 3u);
+    ASSERT_EQ(set.engine.slots.size(), 3u);
+
+    const std::array<std::string, 3> names{"prep", "dkdv", "dq"};
+    const std::array<int, 3> firstKernels{SLOT_KERNEL_PREP, SLOT_KERNEL_DKDV, SLOT_KERNEL_DQ};
+    for(size_t i = 0; i < names.size(); ++i)
+    {
+        ASSERT_EQ(set.slots[i].packs.size(), 1u) << names[i];
+        const auto& pack = set.slots[i].packs.front();
+        ASSERT_EQ(pack.kernels.size(), 2u) << names[i];
+        EXPECT_EQ(toString(pack.kernels[0].id), slotUuid('1', firstKernels[i]));
+        EXPECT_EQ(toString(pack.kernels[1].id), slotUuid('1', firstKernels[i] + 1));
+    }
+    EXPECT_EQ(std::get<std::string>(set.slots[1].packs.front().kernels[0].metadata.at("variant")),
+              "b");
+
+    EXPECT_FALSE(set.slots[0].heuristic.has_value());
+    EXPECT_TRUE(set.slots[0].heuristicsByMetric.empty());
+    EXPECT_EQ(set.slots[1].heuristicsByMetric.at("").count("default"), 1u);
+    EXPECT_TRUE(set.slots[2].heuristic.has_value());
+    EXPECT_EQ(set.engine.slots[1].knobs, std::vector<std::string>{"block_size"});
+    EXPECT_TRUE(set.engine.slots[0].knobs.empty());
+
+    EXPECT_TRUE(set.packs.empty());
+    EXPECT_FALSE(set.heuristic.has_value());
+    EXPECT_TRUE(set.heuristicsByMetric.empty());
+    EXPECT_EQ(set.matchers.size(), 2u);
+    EXPECT_EQ(set.dispatches.size(), 1u);
+}
+
+TEST(TestDescriptorLoader, UnslottedFilesLoadWithEmptySlotState)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unslotted_1_0"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:unslotted"));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    EXPECT_TRUE(set.slots.empty());
+    EXPECT_TRUE(set.engine.slots.empty());
+    EXPECT_TRUE(set.engine.sharedWorkspaceToken.empty());
+    ASSERT_EQ(set.packs.size(), 1u);
+    EXPECT_TRUE(set.heuristic.has_value());
+    EXPECT_EQ(set.engine.knobs, std::vector<std::string>{"block_size"});
+}
+
+TEST(TestDescriptorLoader, AcceptsFormat11OnAnUnslottedEngine)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unslotted_1_1"));
+    auto documents = makeSetDocuments('1', "test:unslotted_1_1");
+    for(const auto suffix : {".ued.json", ".kdp.json", ".uhd.json"})
+    {
+        documentOfType(documents, suffix)["version"] = "1.1";
+    }
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(sets.front().slots.empty());
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 3u);
+}
+
+TEST(TestDescriptorLoader, ASlottedKdpHoldsInlineKernelsAtTheirOwnUkdVersions)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("slot_ukd_versions"));
+    auto documents = makeSlottedDocuments('1', "test:slot_ukd_versions");
+    auto& kernels = slotPack(documents, "dkdv").at("kernelDescriptors");
+    kernels[0].erase("kernel_source");
+    kernels[0]["version"] = "1.1";
+    kernels[0]["sources"]
+        = {{"decode", launchSource("decode_kernel")}, {"merge", launchSource("merge_kernel")}};
+    ASSERT_EQ(kernels[1].at("version"), "1.0");
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& dkdv = sets.front().slots[1].packs.front().kernels;
+    ASSERT_EQ(dkdv.size(), 2u);
+    EXPECT_EQ(dkdv[0].sources.size(), 2u);
+    EXPECT_EQ(dkdv[0].sources.at("merge").symbol, "merge_kernel");
+    EXPECT_TRUE(dkdv[1].sources.empty());
+    EXPECT_EQ(dkdv[1].source.kind, KernelSourceKind::EMBEDDED_SOURCE);
+}
+
+TEST(TestDescriptorLoader, AnInlineUkdLabelled10IsRefusedItsSourcesInsideASlottedKdp)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("slot_ukd_mislabelled"));
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto documents = makeSlottedDocuments('1', "test:slot_ukd_mislabelled");
+    auto& kernel = slotPack(documents, "dkdv").at("kernelDescriptors")[0];
+    kernel.erase("kernel_source");
+    kernel["sources"]
+        = {{"decode", launchSource("decode_kernel")}, {"merge", launchSource("merge_kernel")}};
+    ASSERT_EQ(kernel.at("version"), "1.0");
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    // A slotted engine stays registered without the slot whose pack was refused (RFC 0021 §8).
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(sets.front().slots[1].packs.empty());
+    EXPECT_FALSE(sets.front().slots[0].packs.empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "carries 'sources', which needs UKD"));
+}
+
+namespace
+{
+/// gtest parameter names must be PascalCase; case names stay snake_case for directory names.
+std::string pascalCase(const std::string& snake)
+{
+    std::string result;
+    result.reserve(snake.size());
+    bool upper = true;
+    for(const char c : snake)
+    {
+        if(c == '_')
+        {
+            upper = true;
+            continue;
+        }
+        result += upper ? static_cast<char>(std::toupper(static_cast<unsigned char>(c))) : c;
+        upper = false;
+    }
+    return result;
+}
+} // namespace
+
+/// One RFC 0021 §8 rejection: the mutation that breaks the rule, the stable text the loader
+/// must log at ERROR, and how many engines survive.
+struct SlotRule
+{
+    std::string name;
+    bool unslottedBase;
+    std::function<void(Documents&)> mutate;
+    std::vector<std::string> messages;
+    size_t engines;
+};
+
+class TestDescriptorLoaderSlotRules : public ::testing::TestWithParam<SlotRule>
+{
+};
+
+TEST_P(TestDescriptorLoaderSlotRules, RejectsWithAStableMessage)
+{
+    const auto& rule = GetParam();
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("slot_rule_" + rule.name));
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto documents = rule.unslottedBase ? makeSetDocuments('1', "test:slot_rule")
+                                        : makeSlottedDocuments('1', "test:slot_rule");
+    rule.mutate(documents);
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    EXPECT_EQ(sets.size(), rule.engines);
+    for(const auto& message : rule.messages)
+    {
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, message)) << message;
+    }
+}
+
+namespace
+{
+nlohmann::json& slotOf(Documents& documents, size_t index)
+{
+    return documentOfType(documents, ".ued.json").at("slots")[index];
+}
+} // namespace
+
+INSTANTIATE_TEST_SUITE_P(
+    Slot,
+    TestDescriptorLoaderSlotRules,
+    ::testing::Values(
+        SlotRule{
+            "slots_empty",
+            false,
+            [](Documents& d) { documentOfType(d, ".ued.json")["slots"] = nlohmann::json::array(); },
+            {"must be a non-empty array of slots"},
+            0},
+        SlotRule{"slots_not_an_array",
+                 false,
+                 [](Documents& d) { documentOfType(d, ".ued.json")["slots"] = "prep"; },
+                 {"must be a non-empty array of slots"},
+                 0},
+        SlotRule{"slot_name_uppercase",
+                 false,
+                 [](Documents& d) { slotOf(d, 0)["name"] = "Prep"; },
+                 {"slot name 'Prep' in", "must match ^[a-z][a-z0-9_]*$"},
+                 0},
+        SlotRule{"slot_named_global",
+                 false,
+                 [](Documents& d) { slotOf(d, 0)["name"] = "global"; },
+                 {"slot name 'global' in", "is reserved for engine-wide knobs"},
+                 0},
+        SlotRule{"slot_name_duplicate",
+                 false,
+                 [](Documents& d) { slotOf(d, 2)["name"] = "dkdv"; },
+                 {"slot name 'dkdv' is declared more than once in"},
+                 0},
+        SlotRule{"slot_missing_metadata",
+                 false,
+                 [](Documents& d) { slotOf(d, 1).erase("metadata"); },
+                 {"missing required key 'metadata' in", "slot 'dkdv'"},
+                 0},
+        SlotRule{"slot_unknown_member",
+                 false,
+                 [](Documents& d) {
+                     slotOf(d, 1)["predict_applicable_kernels"]
+                         = nlohmann::json{{"default", slotUuid('1', SLOT_UHD_DKDV)}};
+                 },
+                 {"unknown key 'predict_applicable_kernels'"},
+                 0},
+        SlotRule{"metadata_beside_slots",
+                 false,
+                 [](Documents& d) {
+                     documentOfType(d, ".ued.json")["metadata"] = slotUuid('1', SLOT_KMD_PREP);
+                 },
+                 {"key 'metadata' in", "must not appear beside 'slots'; declare it per slot"},
+                 0},
+        SlotRule{
+            "sort_kernel_catalog_beside_slots",
+            false,
+            [](Documents& d) {
+                documentOfType(d, ".ued.json")["sort_kernel_catalog"]
+                    = nlohmann::json{{"default", slotUuid('1', SLOT_UHD_DKDV)}};
+            },
+            {"key 'sort_kernel_catalog' in", "must not appear beside 'slots'; declare it per slot"},
+            0},
+        SlotRule{"knobs_beside_slots",
+                 false,
+                 [](Documents& d) {
+                     documentOfType(d, ".ued.json")["knobs"]
+                         = nlohmann::json::array({"block_size"});
+                 },
+                 {"key 'knobs' in", "must not appear beside 'slots'; declare it per slot"},
+                 0},
+        SlotRule{"predict_applicable_kernels_beside_slots",
+                 false,
+                 [](Documents& d) {
+                     documentOfType(d, ".ued.json")["predict_applicable_kernels"]
+                         = nlohmann::json{{"default", slotUuid('1', SLOT_UHD_DKDV)}};
+                 },
+                 {"key 'predict_applicable_kernels' in",
+                  "must not appear beside 'slots'; declare it per slot"},
+                 0},
+        SlotRule{"shared_workspace_without_graph_match",
+                 false,
+                 [](Documents& d) { documentOfType(d, ".ued.json").erase("graph_match"); },
+                 {"key 'shared_workspace' in", "requires a native graph_match"},
+                 0},
+        SlotRule{"shared_workspace_on_unslotted_engine",
+                 true,
+                 [](Documents& d) {
+                     auto& ued = documentOfType(d, ".ued.json");
+                     ued["version"] = "1.1";
+                     ued["shared_workspace"] = "ws.bytes";
+                     ued["graph_match"] = nlohmann::json{{"native", SLOTTED_GRAPH_MATCH_SYMBOL}};
+                 },
+                 {"key 'shared_workspace' in", "requires 'slots'"},
+                 0},
+        SlotRule{"ued_1_0_with_slots",
+                 false,
+                 [](Documents& d) { documentOfType(d, ".ued.json")["version"] = "1.0"; },
+                 {"declares version 1.0 but uses slot member 'slots'; slot members require "
+                  "version 1.1"},
+                 0},
+        SlotRule{"ued_1_0_with_shared_workspace",
+                 true,
+                 [](Documents& d) {
+                     auto& ued = documentOfType(d, ".ued.json");
+                     ued["shared_workspace"] = "ws.bytes";
+                     ued["graph_match"] = nlohmann::json{{"native", SLOTTED_GRAPH_MATCH_SYMBOL}};
+                 },
+                 {"declares version 1.0 but uses slot member 'shared_workspace'; slot members "
+                  "require version 1.1"},
+                 0},
+        SlotRule{"kdp_1_0_with_slot",
+                 false,
+                 [](Documents& d) { slotPack(d, "dkdv")["version"] = "1.0"; },
+                 {"declares version 1.0 but uses slot member 'slot'; slot members require "
+                  "version 1.1"},
+                 1},
+        SlotRule{"kdp_slot_name_invalid",
+                 false,
+                 [](Documents& d) { slotPack(d, "dkdv")["slot"] = "Dkdv"; },
+                 {"slot name 'Dkdv' in", "must match ^[a-z][a-z0-9_]*$"},
+                 1},
+        SlotRule{"pack_of_slotted_engine_without_slot",
+                 false,
+                 [](Documents& d) { slotPack(d, "dkdv").erase("slot"); },
+                 {"declares no slot, which every pack of slotted engine", "must"},
+                 1},
+        SlotRule{"pack_names_unknown_slot",
+                 false,
+                 [](Documents& d) { slotPack(d, "dkdv")["slot"] = "nope"; },
+                 {"names slot 'nope', which engine", "does not declare"},
+                 1},
+        SlotRule{"pack_slot_on_unslotted_engine",
+                 true,
+                 [](Documents& d) {
+                     auto& pack = documentOfType(d, ".kdp.json");
+                     pack["version"] = "1.1";
+                     pack["slot"] = "prep";
+                 },
+                 {"declares slot 'prep', but engine", "declares no slots"},
+                 0},
+        SlotRule{"kernel_in_two_slots",
+                 false,
+                 [](Documents& d) {
+                     slotPack(d, "dq").at("kernelDescriptors")[0]["id"]
+                         = slotUuid('1', SLOT_KERNEL_DKDV);
+                 },
+                 {"which already serves slot 'dkdv' of engine", "a kernel serves at most one slot"},
+                 1},
+        SlotRule{"kernel_field_outside_its_slot_kmd",
+                 false,
+                 [](Documents& d) {
+                     slotPack(d, "prep").at("kernelDescriptors")[0]["metadata"]["variant"] = "b";
+                 },
+                 {"supplies metadata field 'variant', which schema 'prep fields' does not "
+                  "declare"},
+                 1},
+        SlotRule{"slot_ranker_declares_a_metric",
+                 false,
+                 [](Documents& d) {
+                     auto& ranker = documentById(d, ".uhd.json", slotUuid('1', SLOT_UHD_DKDV));
+                     ranker["score"] = nlohmann::json{{"metric", "tflops"}, {"calibrated", true}};
+                 },
+                 {"slot 'dkdv' ranker", "a slot ranker must be metric-less"},
+                 0},
+        SlotRule{"slot_knob_not_in_its_kmd",
+                 false,
+                 [](Documents& d) { slotOf(d, 1)["knobs"] = nlohmann::json::array({"nope"}); },
+                 {"slot 'dkdv' exposes knob 'nope'", "does not declare"},
+                 0},
+        SlotRule{"slot_kmd_missing",
+                 false,
+                 [](Documents& d) { slotOf(d, 2)["metadata"] = slotUuid('f', 0x3f); },
+                 {"slot 'dq' names metadata schema", "which no descriptor defines"},
+                 0}),
+    [](const ::testing::TestParamInfo<SlotRule>& info) { return pascalCase(info.param.name); });
+
+TEST(TestDescriptorLoader, SlottedEngineWithAnEmptySlotWarnsAndStaysRegistered)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("empty_slot"));
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto documents = makeSlottedDocuments('1', "test:empty_slot");
+    eraseSlotPack(documents, "dq");
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().slots.size(), 3u);
+    EXPECT_EQ(sets.front().slots[0].packs.size(), 1u);
+    EXPECT_EQ(sets.front().slots[1].packs.size(), 1u);
+    EXPECT_TRUE(sets.front().slots[2].packs.empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN,
+                                          "slot 'dq' has no loadable kernel pack; the engine "
+                                          "stays registered and declines every graph"));
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "has no loadable kernel pack"));
+}
+
+TEST(TestDescriptorLoader, SlottedEngineWhoseEverySlotIsEmptyStaysRegistered)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("all_slots_empty"));
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto documents = makeSlottedDocuments('1', "test:all_slots_empty");
+    for(const auto* slot : {"prep", "dkdv", "dq"})
+    {
+        eraseSlotPack(documents, slot);
+    }
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(countLogsContaining(recorder, "has no loadable kernel pack; the engine stays"), 3u);
+}
+
+TEST(TestDescriptorLoader, UnslottedEngineWithNoLoadablePackIsStillDropped)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unslotted_empty"));
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto documents = makeSetDocuments('1', "test:unslotted_empty");
+    documentOfType(documents, ".kdp.json")["dispatch"] = testUuid('f', 'f');
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    EXPECT_TRUE(sets.empty());
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_ERROR, "has no loadable kernel pack; dropping it"));
+}
+
+TEST(TestDescriptorLoader, LoadsASlotRankerRecordingItsSlotProvenance)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ranker_provenance"));
+    auto documents = makeSlottedDocuments('1', "test:ranker_provenance");
+    auto& ranker = documentById(documents, ".uhd.json", slotUuid('1', SLOT_UHD_DKDV));
+    ranker["version"] = "1.1";
+    auto trained = trainedAgainstWithoutKmd(documents);
+    trained["kmd"]
+        = dependencyOf(documentById(documents, ".kmd.json", slotUuid('1', SLOT_KMD_DKDV)));
+    trained["slot"] = "dkdv";
+    ranker["trained_against"] = trained;
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(sets.front().slots[1].heuristic.has_value());
+    EXPECT_EQ(sets.front().slots[1].heuristicsByMetric.at("").count("default"), 1u);
+}
+
+struct RankerProvenanceCase
+{
+    std::string name;
+    std::function<void(nlohmann::json& trained, Documents& documents)> mutate;
+    std::string message;
+};
+
+class TestDescriptorLoaderRankerProvenance : public ::testing::TestWithParam<RankerProvenanceCase>
+{
+};
+
+TEST_P(TestDescriptorLoaderRankerProvenance, DisablesTheRankerAndKeepsTheEngine)
+{
+    const auto& testCase = GetParam();
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("ranker_provenance_" + testCase.name));
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto documents = makeSlottedDocuments('1', "test:ranker_provenance_rule");
+    auto trained = trainedAgainstWithoutKmd(documents);
+    trained["kmd"]
+        = dependencyOf(documentById(documents, ".kmd.json", slotUuid('1', SLOT_KMD_DKDV)));
+    trained["slot"] = "dkdv";
+    testCase.mutate(trained, documents);
+    auto& ranker = documentById(documents, ".uhd.json", slotUuid('1', SLOT_UHD_DKDV));
+    ranker["version"] = "1.1";
+    ranker["trained_against"] = trained;
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, testCase.message)) << testCase.message;
+    EXPECT_TRUE(sets.front().slots[1].heuristicsByMetric.empty());
+    EXPECT_FALSE(sets.front().slots[1].heuristic.has_value());
+    EXPECT_EQ(sets.front().slots[1].unavailableHeuristicArches.at("").count("default"), 1u);
+    EXPECT_TRUE(sets.front().slots[2].heuristic.has_value());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Provenance,
+    TestDescriptorLoaderRankerProvenance,
+    ::testing::Values(
+        RankerProvenanceCase{"names_another_slot",
+                             [](nlohmann::json& trained, Documents&) { trained["slot"] = "dq"; },
+                             "trained_against names slot 'dq', but the ranker serves slot 'dkdv'"},
+        RankerProvenanceCase{"names_another_slots_kmd",
+                             [](nlohmann::json& trained, Documents& documents) {
+                                 trained["kmd"] = dependencyOf(documentById(
+                                     documents, ".kmd.json", slotUuid('1', SLOT_KMD_DQ)));
+                             },
+                             "incompatible KMD identity or semantic revision for slot 'dkdv'"},
+        RankerProvenanceCase{
+            "names_no_slot",
+            [](nlohmann::json& trained, Documents&) { trained.erase("slot"); },
+            "trained_against names no slot, but the ranker of slot 'dkdv' must name the slot it "
+            "was trained for"},
+        RankerProvenanceCase{
+            "names_kmds",
+            [](nlohmann::json& trained, Documents& documents) {
+                trained.erase("kmd");
+                trained.erase("slot");
+                trained["kmds"] = kmdsOf(documents, {{"dkdv", SLOT_KMD_DKDV}});
+            },
+            "trained_against names kmds, but the ranker of slot 'dkdv' must name its own "
+            "slot's kmd"},
+        RankerProvenanceCase{"names_another_ued",
+                             [](nlohmann::json& trained, Documents& documents) {
+                                 trained["ued"] = dependencyOf(documentById(
+                                     documents, ".kmd.json", slotUuid('1', SLOT_KMD_DKDV)));
+                             },
+                             "incompatible UED identity or semantic revision"},
+        RankerProvenanceCase{
+            "names_no_descriptor_set",
+            [](nlohmann::json& trained, Documents&) {
+                trained = {{"selector_revision", "test-provider/1.0"}};
+            },
+            "trained_against records no descriptor set, which a model bound to a UED must"},
+        // A matcher only the prep pack uses is not the dkdv ranker's: its UMD check covers the
+        // ranker's own slot alone.
+        RankerProvenanceCase{
+            "names_another_slots_matcher",
+            [](nlohmann::json& trained, Documents& documents) {
+                const auto matcher = slotUuid('1', 0x0A);
+                documents.push_back(TestDocument{".umd.json",
+                                                 nlohmann::json{{"version", "1.0"},
+                                                                {"id", matcher},
+                                                                {"name", "prep kernel block"},
+                                                                {"scope", "kernel"},
+                                                                {"match_symbol", KERNEL_SYMBOL}}});
+                slotPack(documents, "prep").at("matchers").push_back(matcher);
+                trained["umd"].push_back(nlohmann::json{{"id", matcher}, {"revision", "1.0"}});
+            },
+            "incompatible UMD identity or semantic revision"},
+        RankerProvenanceCase{
+            "reads_a_workspace_token",
+            [](nlohmann::json&, Documents& documents) {
+                auto& ranker = documentById(documents, ".uhd.json", slotUuid('1', SLOT_UHD_DKDV));
+                const auto signature = nlohmann::json::array({"$kernel.block_size", "$ws.bytes"});
+                ranker["features_signature"] = signature;
+                ranker["features_hash"]
+                    = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature);
+            },
+            "feature signature reads '$ws.bytes', a shared-workspace token a slotted engine "
+            "reserves"},
+        // The lexicographically first token is named, whatever order the signature lists them in.
+        RankerProvenanceCase{
+            "reads_several_workspace_tokens",
+            [](nlohmann::json&, Documents& documents) {
+                auto& ranker = documentById(documents, ".uhd.json", slotUuid('1', SLOT_UHD_DKDV));
+                const auto signature = nlohmann::json::array(
+                    {"$ws.m", "$kernel.block_size", "$ws.z", "$ws.a", "$ws.q"});
+                ranker["features_signature"] = signature;
+                ranker["features_hash"]
+                    = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature);
+            },
+            "feature signature reads '$ws.a', a shared-workspace token a slotted engine "
+            "reserves"}),
+    [](const ::testing::TestParamInfo<RankerProvenanceCase>& info) {
+        return pascalCase(info.param.name);
+    });
+
+TEST(TestDescriptorLoader, DisablesAnUnslottedEnginesRankerNamingASlot)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unslotted_slot_prov"));
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto documents = makeSetDocuments('1', "test:unslotted_slot_prov");
+    auto trained = provenanceOf(documents);
+    trained["slot"] = "prep";
+    auto& ranker = documentOfType(documents, ".uhd.json");
+    ranker["version"] = "1.1";
+    ranker["trained_against"] = trained;
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR,
+        "slot provenance ('slot' or 'kmds'), which an engine that declares no slots"));
+    EXPECT_TRUE(sets.front().heuristicsByMetric.empty());
+}
+
+/// The engine-level `predict_engine` model of a slotted engine models the whole program, so it
+/// names every slot's KMD in `kmds` (RFC 0021 §9).
+class TestDescriptorLoaderSlottedEstimate : public ::testing::Test
+{
+protected:
+    static std::vector<DescriptorSet>
+        load(const std::string& name, const std::function<void(nlohmann::json&, Documents&)>& edit)
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(name));
+        auto documents = makeSlottedDocuments('1', "test:" + name);
+        auto trained = trainedAgainstWithoutKmd(documents);
+        edit(trained, documents);
+        const auto modelId = slotUuid('1', 0x50);
+        documents.push_back(
+            TestDocument{".uhd.json",
+                         nlohmann::json{{"version", "1.1"},
+                                        {"id", modelId},
+                                        {"name", "slotted engine estimate"},
+                                        {"adapter", "native"},
+                                        {"native", {{"symbol", L1_SCORER_SYMBOL}}},
+                                        {"objective", "max"},
+                                        {"score", {{"metric", "tflops"}, {"calibrated", true}}},
+                                        {"trained_against", trained}}});
+        documentOfType(documents, ".ued.json")["predict_engine"]["default"]
+            = nlohmann::json::array({modelId});
+        writeDocuments(dir.path(), documents);
+        return loadFrom(dir.path());
+    }
+
+    const ScopedL1Scorer _scorer;
+};
+
+TEST_F(TestDescriptorLoaderSlottedEstimate, LoadsAModelNamingEverySlotsKmd)
+{
+    const auto sets = load("estimate_kmds", [](nlohmann::json& trained, Documents& documents) {
+        trained["kmds"] = kmdsOf(
+            documents, {{"prep", SLOT_KMD_PREP}, {"dkdv", SLOT_KMD_DKDV}, {"dq", SLOT_KMD_DQ}});
+    });
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().enginePredictionsByMetric.count("tflops"), 1u);
+}
+
+struct SlottedEstimateRefusal
+{
+    std::string name;
+    std::function<void(nlohmann::json& trained, Documents&)> edit;
+    std::string message;
+};
+
+/// The slotted engine's model must name exactly the slots the engine declares, each at a KMD
+/// identity and revision the slot's schema satisfies; every refusal disables the estimate.
+class TestDescriptorLoaderSlottedEstimateRefusal
+    : public TestDescriptorLoaderSlottedEstimate,
+      public ::testing::WithParamInterface<SlottedEstimateRefusal>
+{
+};
+
+TEST_P(TestDescriptorLoaderSlottedEstimateRefusal, DisablesTheEstimateAndKeepsTheEngine)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const auto sets = load("estimate_" + GetParam().name, GetParam().edit);
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, GetParam().message));
+    EXPECT_TRUE(sets.front().enginePredictionsByMetric.empty());
+    EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops").count("default"), 1u);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Refusal,
+    TestDescriptorLoaderSlottedEstimateRefusal,
+    ::testing::Values(
+        SlottedEstimateRefusal{
+            "RefusesTheSingleKmdForm",
+            [](nlohmann::json& trained, Documents& documents) {
+                trained["kmd"] = dependencyOf(
+                    documentById(documents, ".kmd.json", slotUuid('1', SLOT_KMD_PREP)));
+            },
+            "a slotted engine's predict_engine model must name every slot's KMD in kmds"},
+        SlottedEstimateRefusal{"RefusesAModelMissingASlot",
+                               [](nlohmann::json& trained, Documents& documents) {
+                                   trained["kmds"]
+                                       = kmdsOf(documents,
+                                                {{"prep", SLOT_KMD_PREP}, {"dkdv", SLOT_KMD_DKDV}});
+                               },
+                               "trained_against kmds does not name slot 'dq'"},
+        SlottedEstimateRefusal{
+            "RefusesAModelNamingAnUndeclaredSlot",
+            [](nlohmann::json& trained, Documents& documents) {
+                trained["kmds"] = kmdsOf(
+                    documents,
+                    {{"prep", SLOT_KMD_PREP}, {"dkdv", SLOT_KMD_DKDV}, {"dq", SLOT_KMD_DQ}});
+                auto extra = trained["kmds"][0];
+                extra["slot"] = "epilogue";
+                trained["kmds"].push_back(std::move(extra));
+            },
+            "trained_against kmds names slot 'epilogue', which the engine does not declare"},
+        SlottedEstimateRefusal{"RefusesASlotNamedWithAnotherSlotsKmd",
+                               [](nlohmann::json& trained, Documents& documents) {
+                                   trained["kmds"] = kmdsOf(documents,
+                                                            {{"prep", SLOT_KMD_PREP},
+                                                             {"dkdv", SLOT_KMD_DQ},
+                                                             {"dq", SLOT_KMD_DKDV}});
+                               },
+                               "incompatible KMD identity or semantic revision for slot 'dkdv'"},
+        SlottedEstimateRefusal{"RefusesASlotsKmdAtAnIncompatibleRevision",
+                               [](nlohmann::json& trained, Documents& documents) {
+                                   trained["kmds"] = kmdsOf(documents,
+                                                            {{"prep", SLOT_KMD_PREP},
+                                                             {"dkdv", SLOT_KMD_DKDV},
+                                                             {"dq", SLOT_KMD_DQ}});
+                                   trained["kmds"][1]["revision"] = "9.0";
+                               },
+                               "incompatible KMD identity or semantic revision for slot 'dkdv'"},
+        SlottedEstimateRefusal{
+            "RefusesASingleSlotBesideTheKmds",
+            [](nlohmann::json& trained, Documents& documents) {
+                // `slot` beside a `kmd` is a slot ranker's form; a slotted engine's model must
+                // use `kmds`.
+                trained["kmd"] = dependencyOf(
+                    documentById(documents, ".kmd.json", slotUuid('1', SLOT_KMD_DKDV)));
+                trained["slot"] = "dkdv";
+            },
+            "trained_against names a single slot, but a slotted engine's predict_engine model must "
+            "name every slot's KMD in kmds"}),
+    [](const ::testing::TestParamInfo<SlottedEstimateRefusal>& info) { return info.param.name; });
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

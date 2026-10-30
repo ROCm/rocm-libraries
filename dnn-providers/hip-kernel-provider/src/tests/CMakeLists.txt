@@ -143,7 +143,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
-        HIPKERNELPROVIDER_UNIT_KPACK_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
+        HIPKERNELPROVIDER_UNIT_KPACK_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}/${HIPKERNELPROVIDER_TEST_SET_SHARED}"
+        # The packed multi-launch set, which sits beside the unit root instead of under it:
+        # the Container never loads it, and the case that reads it builds its own descriptor
+        # tree around the archive. Binary-relative for the reason the defines above are.
+        HIPKERNELPROVIDER_MULTI_LAUNCH_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH}")
 
     # The same descriptor defines the ordinary binary carries, minus the kpack reldir, so
     # the shared main() resolves its root identically in both. The archive cases that read
@@ -236,6 +240,26 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         endif()
         target_compile_definitions(hip_kernel_provider_tests PRIVATE
             HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
+    endif()
+
+    # The multi-launch set is read by this binary alone, and by no census entry.
+    if(TARGET hkp_packaging_multi_launch)
+        add_dependencies(hip_kernel_provider_tests hkp_packaging_multi_launch)
+    endif()
+
+    # The packed-load test also reads the slotted fixtures' shards (RFC 0021), beside the
+    # unit tree. The fixed-arch roots pack only for their arch (_hkp_wire_fixed_arch_root);
+    # the test decides from the staged shards, so no define follows GPU_TARGETS. rocKE is
+    # the only thing it is told.
+    foreach(_hkp_slotted hkp_packaging_slotted hkp_packaging_slotted_hsaco
+                         hkp_packaging_slotted_multi_launch)
+        if(TARGET ${_hkp_slotted})
+            add_dependencies(hip_kernel_provider_tests ${_hkp_slotted})
+        endif()
+    endforeach()
+    if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+        target_compile_definitions(hip_kernel_provider_tests PRIVATE
+            HIPKERNELPROVIDER_ENABLE_ROCKE)
     endif()
 
     # The census binary additionally reads the production shard, which is wired only

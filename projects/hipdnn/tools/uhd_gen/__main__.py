@@ -959,7 +959,8 @@ def _run_train(args: argparse.Namespace) -> int:
     if not args.keep_lgbm:
         lgbm_path.unlink()
     descriptor = {
-        "version": "1.0",
+        # Slot provenance (`slot`, or `kmds` for a slotted engine's L1 model) is a 1.1 feature.
+        "version": "1.1" if {"slot", "kmds"} & set(trained_against) else "1.0",
         "id": uhd_id,
         "name": args.name,
         "adapter": "tree_data",

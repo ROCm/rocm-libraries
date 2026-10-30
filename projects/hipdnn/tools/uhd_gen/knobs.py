@@ -19,6 +19,7 @@ import pandas as pd
 from .catalog import candidate_density
 from .corpus_io import read_corpus_frame
 from .correctness import measured_rows
+from .dataset.training_table import slot_training_rows
 from .evaluate import regret_of, resolve_grouping
 
 __all__ = [
@@ -173,14 +174,17 @@ def analyse_knobs(
     knobs = []
     for name in knob_columns(usable):
         short = name[len(_KERNEL_PREFIX) :]
+        # A slotted engine's knob is `kernel.<slot>.<field>`; the problem column that twins
+        # it is named by the field alone.
+        bound = short.rsplit(".", 1)[-1]
         values = sorted(usable[name].dropna().unique().tolist(), key=repr)
         tunable = bool((within[name].nunique(dropna=False) > 1).any())
         ablation = KnobAblation(
             name=name,
             values=values,
             tunable=tunable,
-            graph_bound=short in graph_bound,
-            bound_as=graph_bound.get(short),
+            graph_bound=bound in graph_bound,
+            bound_as=graph_bound.get(bound),
         )
         if len(values) > 1 and tunable:
             for value in values:
@@ -447,6 +451,12 @@ def add_knob_arguments(parser: argparse.ArgumentParser) -> None:
         ".csv, or .json records -- the same three forms train takes",
     )
     parser.add_argument(
+        "--slot",
+        default=None,
+        help="a slotted engine's sweep: judge this slot's knobs on its reference rows "
+        "(the reference program and the candidates that vary only this slot)",
+    )
+    parser.add_argument(
         "--target", default="robustMeanMs", help="timing column to rank on"
     )
     parser.add_argument(
@@ -490,7 +500,12 @@ def run_knobs(args: argparse.Namespace) -> int:
     try:
         # The census sees the rows the ablation does, as `train`'s sees the rows it
         # trains on.
-        df, _ = measured_rows(read_corpus_frame(Path(args.input)), args.target)
+        frame = read_corpus_frame(Path(args.input))
+        if args.slot:
+            frame = pd.DataFrame(
+                slot_training_rows(frame.to_dict(orient="records"), args.slot)
+            )
+        df, _ = measured_rows(frame, args.target)
     except (OSError, ValueError, ImportError) as error:
         logger.error("cannot read corpus %s: %s", args.input, error)
         return 1
@@ -499,7 +514,7 @@ def run_knobs(args: argparse.Namespace) -> int:
     density = candidate_density(df, device_column=args.device_column)
     if density.deterministic:
         print(f"\nKnob value over {density.problems} problem(s)")
-        print(f"  {density.diagnosis()}")
+        print(f"  {density.diagnosis(slot=args.slot)}")
         return 0
     try:
         report = analyse_knobs(df, args.target, args.objective, args.device_column)

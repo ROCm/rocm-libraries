@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
@@ -37,6 +38,21 @@ struct RankedEntry
 /// fallback.
 using WinnerRecord = std::vector<RankedEntry>;
 
+/// One slot's chosen kernel within a ProgramRecord.
+struct ProgramPick
+{
+    std::string slot;
+    DescriptorId kernelId{};
+};
+
+/// The measured winning combination of per-slot kernels for a whole program. `picks`
+/// are in slot order; `timeMs` is diagnostic only, like `RankedEntry::timeMs`.
+struct ProgramRecord
+{
+    std::vector<ProgramPick> picks;
+    double timeMs = 0.0;
+};
+
 /// Graph content plus device. Knobs are absent: a knob filter narrows which candidates
 /// a run considers, never what the graph computes, so runs with different filters share
 /// a record, which is why the coverage gate exists.
@@ -44,10 +60,14 @@ struct WinnerKey
 {
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey graph;
     DeviceKey device;
+    /// Slot name for a per-slot record; empty for the unslotted (whole-graph) record. The
+    /// explicit initializer avoids -Wmissing-field-initializers on WinnerKey{graph, device}.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::string slot{};
 
     bool operator==(const WinnerKey& other) const
     {
-        return device == other.device && graph == other.graph;
+        return device == other.device && graph == other.graph && slot == other.slot;
     }
 
     bool operator!=(const WinnerKey& other) const
@@ -63,8 +83,15 @@ struct WinnerKeyHash
         const size_t graphHash
             = std::hash<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey>{}(key.graph);
         const size_t deviceHash = std::hash<DeviceKey>{}(key.device);
-        return graphHash
-               ^ (deviceHash + 0x9e3779b97f4a7c15ULL + (graphHash << 6) + (graphHash >> 2));
+        const size_t base
+            = graphHash
+              ^ (deviceHash + 0x9e3779b97f4a7c15ULL + (graphHash << 6) + (graphHash >> 2));
+        if(key.slot.empty())
+        {
+            return base;
+        }
+        const size_t slotHash = std::hash<std::string>{}(key.slot);
+        return base ^ (slotHash + 0x9e3779b97f4a7c15ULL + (base << 6) + (base >> 2));
     }
 };
 

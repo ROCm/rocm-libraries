@@ -229,7 +229,26 @@ def _source_key(source: dict, with_role: bool) -> str:
     """Identity of the compiled artifact one `kernel_source` names: a packed
     entry's symbol sha256, or, pre-build, the builder plus the spec as written,
     where an omitted key stays omitted. A launch of a multi-launch descriptor also
-    names its role, the kernel of the builder's module it takes."""
+    names its role, the kernel of the builder's module it takes. An authored hip
+    source is its source, entry and build, and an authored hsaco source its file
+    and symbol, so two launches of one translation unit or code object that name
+    different kernels stay distinct."""
+    kind = source.get("kind")
+    if kind == "hip":
+        return json.dumps(
+            {
+                "kind": kind,
+                "source": source.get("source"),
+                "entry": source.get("entry"),
+                "build": source.get("build") or {},
+            },
+            sort_keys=True,
+        )
+    if kind == "hsaco":
+        return json.dumps(
+            {"kind": kind, "file": source.get("file"), "symbol": source.get("symbol")},
+            sort_keys=True,
+        )
     if source.get("sha256") or source.get("symbol"):
         return json.dumps(
             {"sha256": source.get("sha256"), "symbol": source.get("symbol")},
@@ -476,7 +495,6 @@ def check(
     schemas = index.schemas()
     all_bundles = descriptor_context.resolve_bundles(index)
     bundles = select(all_bundles, manifest)
-    kmd = bundles[0].kmd
     engine_id = bundles[0].engine["id"]
     descriptors = [entry.ukd for b in bundles for entry in b.entries]
     for descriptor in descriptors:
@@ -497,21 +515,24 @@ def check(
     vocabulary_declared = manifest.vocabulary_declared
 
     # (2) Loader-tuple uniqueness, engine-wide because the loader assembles one
-    # catalog per engine per device, arch-aware because disjoint coverages
-    # never meet in that catalog, and canonicalised per declared KMD type since
-    # `1` and `1.0` on a float field are one entry.
+    # catalog per engine per device (per slot for a slotted engine, whose packs
+    # complete against their slot's KMD, RFC 0021 §4), arch-aware because
+    # disjoint coverages never meet in that catalog, and canonicalised per
+    # declared KMD type since `1` and `1.0` on a float field are one entry.
     completed: list = []
     for bundle in bundles:
         for entry in bundle.entries:
             try:
-                values = agreement.complete_metadata(entry.ukd["metadata"], kmd)
+                values = agreement.complete_metadata(entry.ukd["metadata"], bundle.kmd)
             except HkpPackError as exc:
                 failures.append(
                     f"{entry.ukd.get('name')}: metadata does not complete against "
                     f"the engine's KMD: {exc}"
                 )
                 continue
-            completed.append((entry, agreement.digest(values)))
+            completed.append(
+                (entry, (bundle.kdp_doc.get("slot"), agreement.digest(values)))
+            )
     collisions = []
     for i, (left, left_key) in enumerate(completed):
         for right, right_key in completed[i + 1 :]:

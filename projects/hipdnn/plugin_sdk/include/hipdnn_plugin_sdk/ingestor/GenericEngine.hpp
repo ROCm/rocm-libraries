@@ -35,14 +35,14 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// The first knob @p engine exposes that @p fields does not declare, or nullptr. RFC 0017
+/// The first of @p knobs that @p fields does not declare, or nullptr. RFC 0017
 /// §4 treats an undeclared knob as a load error, since the field supplies its type,
 /// default, and legal values. Shared with the descriptor loader so a bad engine is
 /// rejected while reading it, before its id is ever advertised.
-inline const std::string* findUndeclaredKnob(const EngineDescriptor& engine,
+inline const std::string* findUndeclaredKnob(const std::vector<std::string>& knobs,
                                              const std::vector<MetadataField>& fields)
 {
-    for(const auto& knob : engine.knobs)
+    for(const auto& knob : knobs)
     {
         const auto declared
             = std::any_of(fields.begin(), fields.end(), [&knob](const MetadataField& field) {
@@ -56,6 +56,13 @@ inline const std::string* findUndeclaredKnob(const EngineDescriptor& engine,
     return nullptr;
 }
 
+/// The first knob @p engine exposes that @p fields does not declare, or nullptr.
+inline const std::string* findUndeclaredKnob(const EngineDescriptor& engine,
+                                             const std::vector<MetadataField>& fields)
+{
+    return findUndeclaredKnob(engine.knobs, fields);
+}
+
 /// One hipDNN engine, defined entirely by a UED and the packs naming it. The
 /// engine's id is its UED name hashed into hipDNN's engine-id space.
 template <typename THandle, typename TSettings, typename TContext>
@@ -66,7 +73,8 @@ public:
     using IGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph;
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
 
-    /// @throws std::invalid_argument if a knob names no field in the metadata schema.
+    /// @throws std::invalid_argument if a knob names no field in the metadata schema, or, for a
+    ///         slotted engine, in its slot's schema.
     GenericEngine(
         EngineDescriptor engine,
         std::unique_ptr<KernelIngestorStateManager<THandle>> stateManager,
@@ -74,21 +82,46 @@ public:
         const std::map<std::string, std::map<std::string, HeuristicDescriptor>>& predictions = {},
         const std::map<std::string, std::set<std::string>>& unavailablePredictionArches = {},
         std::string selectorRevision = {},
-        nlohmann::json provenance = nlohmann::json::object())
+        nlohmann::json provenance = nlohmann::json::object(),
+        typename BenchmarkPlan<THandle>::Timer timer = {})
         : _engine(std::move(engine))
         , _stateManager(std::move(stateManager))
         , _id(hipdnn_data_sdk::utilities::engineNameToId(_engine.name))
-        , _planBuilder(_engine, *_stateManager, deviceResolver)
+        , _planBuilder(_engine, *_stateManager, deviceResolver, std::move(timer))
         , _selectorRevision(selectorRevision.empty() ? "generic-untuned-v1/" + toString(_engine.id)
                                                            + "/" + _engine.revision.str()
                                                      : std::move(selectorRevision))
         , _provenance(std::move(provenance))
     {
-        if(const auto* undeclared
-           = findUndeclaredKnob(_engine, _stateManager->metadataSchema().fields))
+        const auto check = [](const std::string& label,
+                              const std::vector<std::string>& knobs,
+                              const std::vector<MetadataField>& fields) {
+            if(const auto* undeclared = findUndeclaredKnob(knobs, fields))
+            {
+                throw std::invalid_argument(label + " exposes knob '" + *undeclared
+                                            + "', which its metadata schema does not declare");
+            }
+        };
+        const auto engineLabel = "engine '" + _engine.name + "'";
+        if(!_stateManager->isSlotted())
         {
-            throw std::invalid_argument("engine '" + _engine.name + "' exposes knob '" + *undeclared
-                                        + "', which its metadata schema does not declare");
+            check(engineLabel, _engine.knobs, _stateManager->metadataSchema().fields);
+        }
+        else
+        {
+            // RFC 0021 §8: each slot's knobs name fields of that slot's own KMD.
+            for(const auto& slot : _engine.slots)
+            {
+                const auto index = _stateManager->slotIndex(slot.name);
+                if(!index.has_value())
+                {
+                    throw std::invalid_argument(engineLabel + " declares slot '" + slot.name
+                                                + "', which its state manager does not hold");
+                }
+                check(engineLabel + " slot '" + slot.name + "'",
+                      slot.knobs,
+                      _stateManager->slotSchema(*index).fields);
+            }
         }
         // RFC 0019 §3.1: the UED role map is this engine's L1 binding, keyed by each UHD's metric.
         // §4.1 selector_revision is re-checked here because this engine's selector also covers

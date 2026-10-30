@@ -44,6 +44,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
+#include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/detail/TopLevelArraySax.hpp>
 
 /**
@@ -128,10 +129,10 @@ template <typename T>
 struct CatalogEntry
 {
     T descriptor;
-    /// First file that defined this id. A second file claiming the id is compared against
-    /// this one by re-parsing it: parsed JSON ignores key order/whitespace, unlike adding
-    /// operator== to all seven struct types, and keeping every file's DOM alive until the
-    /// catalog dies cost more than every parse put together.
+    /// First file that defined this id. Kept for diagnostics (a collision names both
+    /// files) and for KernelMatch, which resolves a kernel's relative paths against it.
+    /// Collisions are settled by comparing the parsed descriptors, not by reading this
+    /// file again.
     std::filesystem::path path;
     /// The root this file was found under. Stamped by settleCatalog when the root's pass
     /// finishes, since that is the one place that already knows both the root and which
@@ -368,7 +369,7 @@ inline void requireSha256Shape(const std::string& text, const std::string& where
 }
 
 /// RFC 0017 §4's accept rule, run for every descriptor before its body is parsed and
-/// ahead of the catalog insert: RFC 0020 §10.2.1 requires an unsupported-version UED to
+/// ahead of the catalog insert: RFC 0020 §13.2.1 requires an unsupported-version UED to
 /// drop for its version alone and leave the descriptors it would have collided with
 /// standing.
 ///
@@ -407,6 +408,35 @@ inline hipdnn_data_sdk::utilities::Version declaredRevisionOf(const nlohmann::js
     const auto parsed
         = parseDescriptorVersion(requireString(root, "revision", where), where + " revision");
     return {parsed.major, parsed.minor, 0};
+}
+
+/// RFC 0021 §9: the slot members (`slots`, `shared_workspace`, a pack's `slot`) exist from
+/// format 1.1. The loader accepts both versions, so a 1.0-labelled document carrying one is a
+/// mislabelled file, rejected here rather than read as if it were 1.1.
+inline void requireSlotVersion(const nlohmann::json& document,
+                               std::string_view member,
+                               const std::string& where)
+{
+    const auto text = requireString(document, "version", where);
+    if(parseDescriptorVersion(text, where).minor < 1)
+    {
+        fail(where + " declares version " + text + " but uses slot member '" + std::string(member)
+             + "'; slot members require version 1.1");
+    }
+}
+
+/// RFC 0021 §4: `^[a-z][a-z0-9_]*$`, and never `global`, which RFC 0004 reserves for
+/// engine-wide knobs.
+inline void requireSlotName(const std::string& name, const std::string& where)
+{
+    if(!uhd::parser_detail::hasSlotNameForm(name))
+    {
+        fail("slot name '" + name + "' in " + where + " must match ^[a-z][a-z0-9_]*$");
+    }
+    if(name == "global")
+    {
+        fail("slot name 'global' in " + where + " is reserved for engine-wide knobs");
+    }
 }
 
 inline DescriptorId
@@ -705,6 +735,7 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
     heuristic.score = {config.scoreMetric, config.scoreCalibrated, config.scoreTransform};
     heuristic.nativeSymbol = config.nativeSymbol;
     heuristic.modelArtifactPath = config.modelArtifactPath;
+    heuristic.authoredArtifactPath = config.authoredArtifactPath;
     heuristic.modelHash = config.modelHash;
     heuristic.customLibrarySymbol = config.customLibrarySymbol;
     heuristic.trainedAgainstJson = config.trainedAgainst;
@@ -726,7 +757,18 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
         };
         HeuristicProvenance provenance;
         provenance.ued = dependency(config.trainedAgainst.at("ued"));
-        provenance.kmd = dependency(config.trainedAgainst.at("kmd"));
+        if(config.trainedAgainst.contains("kmds"))
+        {
+            for(const auto& entry : config.trainedAgainst.at("kmds"))
+            {
+                provenance.kmds.push_back({entry.at("slot").get<std::string>(), dependency(entry)});
+            }
+        }
+        else
+        {
+            provenance.kmd = dependency(config.trainedAgainst.at("kmd"));
+        }
+        provenance.slot = config.trainedAgainst.value("slot", std::string{});
         for(const auto& matcher : config.trainedAgainst.at("umd"))
         {
             provenance.umd.push_back(dependency(matcher));
@@ -938,7 +980,9 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
                       "knobs",
                       "behavior_notes",
                       "numerical_notes",
-                      "graph_match"},
+                      "graph_match",
+                      "slots",
+                      "shared_workspace"},
                      where);
 
     EngineDescriptor engine;
@@ -946,39 +990,43 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
     engine.name = requireString(root, "name", where);
     requireScopedName(engine.name, where);
     engine.revision = declaredRevisionOf(root, where);
-    // Roles are independently optional, but an authored role is always an arch map.
-    const auto readRole = [&root, &where](const char* key, const auto& readValue) {
-        const auto found = root.find(key);
-        if(found == root.end())
+    // Roles are independently optional, but an authored role is always an arch map. @p label
+    // names where the role is authored: the engine, or one of its slots.
+    const auto readRole = [](const nlohmann::json& holder,
+                             const char* key,
+                             const std::string& label,
+                             const auto& readValue) {
+        const auto found = holder.find(key);
+        if(found == holder.end())
         {
             return;
         }
         if(!found->is_object() || found->empty())
         {
-            fail(std::string(where) + ": '" + key + "' must be a non-empty arch -> id map");
+            fail(label + ": '" + key + "' must be a non-empty arch -> id map");
         }
         for(const auto& entry : found->items())
         {
             if(entry.key() != "default" && !isPlausibleArchBaseId(entry.key()))
             {
-                fail(std::string(where) + ": '" + key + "' has an invalid architecture key '"
-                     + entry.key() + "'");
+                fail(label + ": '" + key + "' has an invalid architecture key '" + entry.key()
+                     + "'");
             }
             readValue(*found, entry.key());
         }
     };
     // RFC 0019 §3.1: a scoring role maps an arch to one UHD per metric, so the value is
     // a list; a single id reads as a one-element list.
-    const auto readList = [&where](const char* key,
-                                   std::map<std::string, std::vector<DescriptorId>>& into) {
-        return [key, &into, &where](const nlohmann::json& role, const std::string& arch) {
+    const auto readList = [](const char* key,
+                             std::map<std::string, std::vector<DescriptorId>>& into,
+                             const std::string& label) {
+        return [key, &into, &label](const nlohmann::json& role, const std::string& arch) {
             const auto& value = role.at(arch);
-            const std::string entryWhere
-                = std::string(where) + ": '" + key + "' entry for '" + arch + "'";
+            const std::string entryWhere = label + ": '" + key + "' entry for '" + arch + "'";
             auto& ids = into[arch];
             if(value.is_string())
             {
-                ids.push_back(requireId(role, arch, where));
+                ids.push_back(requireId(role, arch, label));
                 return;
             }
             if(!value.is_array() || value.empty())
@@ -1010,18 +1058,80 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
         };
     };
 
-    readRole("sort_kernel_catalog", readList("sort_kernel_catalog", engine.sortKernelCatalog));
-    readRole("predict_engine", readList("predict_engine", engine.predictEngine));
+    // RFC 0021 §4: with `slots` present the selection members move into the slots, so none
+    // of them may stay on the engine.
+    const bool slotted = root.contains("slots");
+    if(slotted)
+    {
+        requireSlotVersion(root, "slots", where);
+        for(const char* member :
+            {"metadata", "sort_kernel_catalog", "knobs", "predict_applicable_kernels"})
+        {
+            if(root.contains(member))
+            {
+                fail("key '" + std::string(member) + "' in " + where
+                     + " must not appear beside 'slots'; declare it per slot");
+            }
+        }
+    }
+
+    readRole(root,
+             "sort_kernel_catalog",
+             where,
+             readList("sort_kernel_catalog", engine.sortKernelCatalog, where));
+    readRole(
+        root, "predict_engine", where, readList("predict_engine", engine.predictEngine, where));
     // Single-valued: a candidate generator produces the set a ranker then scores, so it has
     // no metric to key a list on (RFC 0019 §3.1).
-    readRole("predict_applicable_kernels",
+    readRole(root,
+             "predict_applicable_kernels",
+             where,
              [&engine, &where](const nlohmann::json& role, const std::string& arch) {
                  engine.predictApplicableKernels.emplace(arch, requireId(role, arch, where));
              });
 
-    engine.metadataSchemaId = requireId(root, "metadata", where);
-    engine.knobs = optionalStringArray(root, "knobs", where);
-    requireNoDuplicates(engine.knobs, "knob", where);
+    if(slotted)
+    {
+        const auto& slots = root.at("slots");
+        if(!slots.is_array() || slots.empty())
+        {
+            fail("key 'slots' in " + where + " must be a non-empty array of slots");
+        }
+        for(size_t index = 0; index < slots.size(); ++index)
+        {
+            const auto& slotJson = slots[index];
+            const std::string entryWhere = "slots[" + std::to_string(index) + "] in " + where;
+            requireObject(slotJson, entryWhere);
+            requireKnownKeys(
+                slotJson, {"name", "metadata", "sort_kernel_catalog", "knobs"}, entryWhere);
+
+            SlotDescriptor slot;
+            slot.name = requireString(slotJson, "name", entryWhere);
+            requireSlotName(slot.name, where);
+            if(std::any_of(
+                   engine.slots.begin(),
+                   engine.slots.end(),
+                   [&slot](const SlotDescriptor& earlier) { return earlier.name == slot.name; }))
+            {
+                fail("slot name '" + slot.name + "' is declared more than once in " + where);
+            }
+            const std::string slotWhere = where + " slot '" + slot.name + "'";
+            slot.metadataSchemaId = requireId(slotJson, "metadata", slotWhere);
+            readRole(slotJson,
+                     "sort_kernel_catalog",
+                     slotWhere,
+                     readList("sort_kernel_catalog", slot.sortKernelCatalog, slotWhere));
+            slot.knobs = optionalStringArray(slotJson, "knobs", slotWhere);
+            requireNoDuplicates(slot.knobs, "knob", slotWhere);
+            engine.slots.push_back(std::move(slot));
+        }
+    }
+    else
+    {
+        engine.metadataSchemaId = requireId(root, "metadata", where);
+        engine.knobs = optionalStringArray(root, "knobs", where);
+        requireNoDuplicates(engine.knobs, "knob", where);
+    }
 
     const auto behaviorNotes = optionalStringArray(root, "behavior_notes", where);
     requireNoDuplicates(behaviorNotes, "behavior note", where);
@@ -1064,6 +1174,22 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
         requireObject(*it, graphMatchWhere);
         requireKnownKeys(*it, {"native"}, graphMatchWhere);
         engine.graphMatchNativeSymbol = requireString(*it, "native", graphMatchWhere);
+    }
+
+    // RFC 0021 §6: the bound token holding the shared workspace region's size. Only a slotted
+    // engine has a shared region, and only a native graph match can publish the token.
+    if(root.contains("shared_workspace"))
+    {
+        requireSlotVersion(root, "shared_workspace", where);
+        if(!slotted)
+        {
+            fail("key 'shared_workspace' in " + where + " requires 'slots'");
+        }
+        engine.sharedWorkspaceToken = requireString(root, "shared_workspace", where);
+        if(engine.graphMatchNativeSymbol.empty())
+        {
+            fail("key 'shared_workspace' in " + where + " requires a native graph_match");
+        }
     }
     return engine;
 }
@@ -1230,7 +1356,7 @@ inline bool isLaunchName(std::string_view name)
 /// mapped to a complete `kpack` kernel source. One entry says what `kernel_source` says, so
 /// it is refused rather than accepted as a second spelling of one fact. Entries may share a
 /// library and toc_key (one module, several kernels) and may even name the same symbol: a
-/// kernel launched twice, for example under two grid shapes, is one entry per launch.
+/// kernel run twice with different arguments is one entry per launch.
 ///
 /// A repeated key is not detected here: the DOM keeps the last value, as it does for every
 /// other descriptor object, and the packer never emits one.
@@ -1393,10 +1519,17 @@ inline DescriptorId
 inline KernelDescriptorPack parseKernelDescriptorPackHeader(const nlohmann::json& root,
                                                             const std::string& where)
 {
-    requireKnownKeys(
-        root,
-        {"version", "id", "name", "arch", "matchers", "engine", "dispatch", "kernelDescriptors"},
-        where);
+    requireKnownKeys(root,
+                     {"version",
+                      "id",
+                      "name",
+                      "arch",
+                      "matchers",
+                      "engine",
+                      "dispatch",
+                      "slot",
+                      "kernelDescriptors"},
+                     where);
 
     KernelDescriptorPack pack;
     pack.id = requireId(root, "id", where);
@@ -1404,6 +1537,14 @@ inline KernelDescriptorPack parseKernelDescriptorPackHeader(const nlohmann::json
     pack.engineId = requireId(root, "engine", where);
     pack.dispatchId = requireId(root, "dispatch", where);
     pack.arch = requireArchList(root, where);
+    // RFC 0021 §4: the slot this pack's kernels serve. Whether it is required depends on the
+    // engine, which only resolution can see.
+    if(root.contains("slot"))
+    {
+        requireSlotVersion(root, "slot", where);
+        pack.slot = requireString(root, "slot", where);
+        requireSlotName(pack.slot, where);
+    }
 
     const auto& matcherIds = requireKey(root, "matchers", where);
     if(!matcherIds.is_array())
@@ -1694,63 +1835,11 @@ inline std::string keyDescription(const ArchKey& key)
     return text + "]";
 }
 
-/// @p path parsed whole, read the way the walk reads it, or nullopt if it no longer opens
-/// or parses. The failure is logged here, naming its cause, so the caller's verdict about
-/// the collision is never mistaken for a statement about the file's contents.
-inline std::optional<nlohmann::json> reparseDescriptorFile(const std::filesystem::path& path)
-{
-    try
-    {
-        const auto filename = path.filename().string();
-        if(filename.size() > SUFFIX_UHD.size()
-           && filename.compare(filename.size() - SUFFIX_UHD.size(), SUFFIX_UHD.size(), SUFFIX_UHD)
-                  == 0)
-        {
-            return uhd::readUhdDocument(path);
-        }
-        std::ifstream file(path, std::ios::binary);
-        if(!file.is_open())
-        {
-            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: failed to re-open "
-                                    << path << " to compare it with a file sharing its id");
-            return std::nullopt;
-        }
-        return nlohmann::json::parse(file,
-                                     nullptr,
-                                     /*allow_exceptions=*/true,
-                                     /*ignore_comments=*/true);
-    }
-    catch(const std::exception& error)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: failed to re-read "
-                                << path
-                                << " to compare it with a file sharing its id: " << error.what());
-        return std::nullopt;
-    }
-}
-
-/// Whether two descriptor files parse to the same document, or nullopt when either could
-/// not be re-read.
-inline std::optional<bool> filesParseEqual(const std::filesystem::path& first,
-                                           const std::filesystem::path& second)
-{
-    const auto lhs = reparseDescriptorFile(first);
-    if(!lhs)
-    {
-        return std::nullopt;
-    }
-    const auto rhs = reparseDescriptorFile(second);
-    if(!rhs)
-    {
-        return std::nullopt;
-    }
-    return *lhs == *rhs;
-}
-
 /// Inserts a freshly parsed descriptor, resolving a repeated key against what is already
 /// held: identical content is a duplicate shard and is dropped, differing content from a
 /// later root is refused, and differing content from the same root poisons the entry so
-/// neither definition is used.
+/// neither definition is used. "Identical" is operator== on the parsed descriptors; no
+/// file is read again.
 template <typename Map, typename T>
 inline void insertCatalogEntry(Map& map, T descriptor, const std::filesystem::path& path)
 {
@@ -1758,27 +1847,30 @@ inline void insertCatalogEntry(Map& map, T descriptor, const std::filesystem::pa
     const auto description = keyDescription(key);
     const std::string name = descriptor.name;
 
-    auto [it, inserted] = map.try_emplace(
-        std::move(key), CatalogEntry<T>{std::move(descriptor), path, {}, false, false});
-    if(inserted)
+    // Looked up before inserting so the newcomer is still whole when it is compared.
+    const auto it = map.find(key);
+    if(it == map.end())
     {
+        map.emplace(std::move(key), CatalogEntry<T>{std::move(descriptor), path, {}, false, false});
         HIPDNN_PLUGIN_LOG_INFO("descriptor loader: loaded " << path << " " << description
                                                             << " name='" << name << "'");
         return;
     }
-    // Parsed-JSON equality, not byte equality: whitespace, key order, or int-vs-float
-    // spelling never survive into the parsed descriptor either, so treating them as a
-    // real collision would fail a duplicate shard over a formatting choice -- e.g. a
-    // per-arch layout shipping one shared UED. RFC 0020 §10.2.1's drop-all rule exists
-    // because keep-the-first leaves which definition won up to load order; with
-    // identical content there is no second definition to choose between. Both files are
-    // re-read rather than any DOM being retained -- a pack's is never whole in memory.
-    // The per-arch layout repeats every generic descriptor (UED, KMD, UMD, UDD, UHD) in
-    // each arch shard, so this runs once per generic per shard after the first; those
-    // are small files. A file that can no longer be re-read cannot prove the two equal,
-    // so it is treated as a disagreement, under a diagnostic that says so.
-    const auto same = filesParseEqual(it->second.path, path);
-    if(same.value_or(false))
+    // Equality of the parsed descriptors, not of bytes: whitespace, comments and key
+    // order never survive into the parsed descriptor, and neither does int-vs-float
+    // spelling of kernel metadata (numerically equal values compare equal), so treating
+    // them as a real collision would fail a duplicate shard over a formatting choice --
+    // e.g. a per-arch layout shipping one shared UED. Unknown `x-`/`_` keys and
+    // `provenance` are not part of the parsed descriptor and so not of the comparison.
+    // Fields stamped from where a file was found (directories, the tree root, a UHD's
+    // resolved artifact path) are left out too, so per-arch shard copies of one file still
+    // collapse; a UHD's authored artifact path and model digest are compared instead.
+    // RFC 0020 §13.2.1's drop-all rule exists because keep-the-first leaves which
+    // definition won up to load order; with identical content there is no second
+    // definition to choose between. Nothing is re-read or retained for this: the
+    // incumbent already holds its parsed descriptor.
+    const bool same = it->second.descriptor == descriptor;
+    if(same)
     {
         HIPDNN_PLUGIN_LOG_INFO("descriptor loader: duplicate identical descriptor "
                                << path << " " << description << " name='" << name
@@ -1796,16 +1888,13 @@ inline void insertCatalogEntry(Map& map, T descriptor, const std::filesystem::pa
         HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
                                 << path << " redefines " << description << " name='" << name
                                 << "' already loaded from " << it->second.path
-                                << " under an earlier root"
-                                << (same ? "" : ", and the two could not be compared")
-                                << "; ignoring the redefinition");
+                                << " under an earlier root; ignoring the redefinition");
         return;
     }
-    HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
-                            << path << " and " << it->second.path << " both define " << description
-                            << " name='" << name << "'"
-                            << (same ? " with different contents" : ", and could not be compared")
-                            << "; ignoring both");
+    HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: " << path << " and " << it->second.path
+                                                  << " both define " << description << " name='"
+                                                  << name << "' with different contents"
+                                                  << "; ignoring both");
     // Never cleared by a later file: once two files disagree about what an id means,
     // no third file can decide which of them was right. A later root does not repair it
     // either -- the refusal above keeps the poisoned entry, since the disagreement is
@@ -2026,7 +2115,7 @@ inline constexpr std::array FILE_TYPES{
              }},
     FileType{SUFFIX_UHD,
              1,
-             0,
+             1,
              false,
              [](DescriptorCatalog& c, const DescriptorFile& f) {
                  insertCatalogEntry(
@@ -2034,7 +2123,7 @@ inline constexpr std::array FILE_TYPES{
              }},
     FileType{SUFFIX_UED,
              1,
-             0,
+             1,
              false,
              [](DescriptorCatalog& c, const DescriptorFile& f) {
                  auto parsed = parseEngineDescriptor(f.document, f.path.string());
@@ -2058,7 +2147,7 @@ inline constexpr std::array FILE_TYPES{
              }},
     FileType{SUFFIX_KDP,
              1,
-             0,
+             1,
              true,
              [](DescriptorCatalog& c, const DescriptorFile& f) {
                  insertCatalogEntry(
@@ -2262,8 +2351,8 @@ inline void
             // `//` and `/* */` before validation, narrower than what "JSONC" commonly
             // implies (VS Code, tsconfig) -- a trailing comma is still a hard nlohmann
             // parse_error.101. Only the parser ever sees the comments --
-            // `insertCatalogEntry` compares the parsed documents, so a comment cannot
-            // make two copies of one descriptor look like a collision.
+            // `insertCatalogEntry` compares the parsed descriptors (RFC 0020 §13.2.1), so
+            // a comment cannot make two copies of one descriptor look like a collision.
             if(fileType->suffix == SUFFIX_UHD)
             {
                 // Size-bounded, and a repeated key is refused rather than resolved to its
@@ -2316,7 +2405,7 @@ inline void
             requireObject(document, "the document root");
             // Version before the insert: a file from a newer toolchain is rejected for the
             // version it names rather than for whatever its body does with keys this build
-            // has never heard of, and RFC 0020 §10.2.1's version-before-duplicate ordering
+            // has never heard of, and RFC 0020 §13.2.1's version-before-duplicate ordering
             // is unaffected.
             if(!versionIsSupported(document, fileType->major, fileType->minor, path.string()))
             {
@@ -2443,6 +2532,59 @@ inline EnvironmentDescriptorRoots environmentDescriptorRoots()
 namespace detail
 {
 
+inline bool dependencyCompatible(const DescriptorDependency& dependency,
+                                 const DescriptorId& id,
+                                 const hipdnn_data_sdk::utilities::Version& revision)
+{
+    return dependency.id == id && dependency.revision.major == revision.major
+           && dependency.revision.minor <= revision.minor;
+}
+
+/// The matcher half of RFC 0019 §8.1, shared by unslotted and slotted engines. Per bound arch:
+/// a recorded matcher owned by a pack serving @p arch must be loaded at a compatible
+/// revision; one owned only by other-arch packs is ignored; one no pack owns is a contract
+/// break on every arch.
+inline std::string umdProvenanceError(const HeuristicProvenance& trained,
+                                      const std::string& arch,
+                                      const std::vector<const KernelDescriptorPack*>& packs,
+                                      const std::vector<MatchDescriptor>& matchers)
+{
+    std::set<DescriptorId> relevant;
+    std::set<DescriptorId> owned;
+    for(const auto* pack : packs)
+    {
+        owned.insert(pack->matcherIds.begin(), pack->matcherIds.end());
+        if(arch == "default" || pack->arch.empty()
+           || std::find(pack->arch.begin(), pack->arch.end(), arch) != pack->arch.end())
+        {
+            relevant.insert(pack->matcherIds.begin(), pack->matcherIds.end());
+        }
+    }
+    for(const auto& dependency : trained.umd)
+    {
+        if(relevant.count(dependency.id) == 0 && owned.count(dependency.id) != 0)
+        {
+            continue;
+        }
+        const auto found
+            = std::find_if(matchers.begin(), matchers.end(), [&](const MatchDescriptor& matcher) {
+                  return matcher.id == dependency.id;
+              });
+        if(relevant.count(dependency.id) == 0 || found == matchers.end()
+           || !dependencyCompatible(dependency, found->id, found->revision))
+        {
+            return "incompatible UMD identity or semantic revision: " + toString(dependency.id);
+        }
+        relevant.erase(dependency.id);
+    }
+    if(!relevant.empty())
+    {
+        return "arch-relevant UMD is missing from training provenance: "
+               + toString(*relevant.begin());
+    }
+    return {};
+}
+
 /**
  * @brief Why @p model's recorded training provenance does not match what binds it, or "".
  *
@@ -2450,6 +2592,9 @@ namespace detail
  * A model bound to a UED that records provenance must record that set: a
  * `selector_revision` alone would leave the UED, KMD and UMDs it was trained on unchecked.
  * A model recording none reads no features, since UhdParser requires it of one that does.
+ *
+ * This is the unslotted form: a model naming slot provenance (`slot`, `kmds`) is refused,
+ * since the engine has no slots. See slottedProvenanceError() for a slotted engine.
  *
  * @param engine  The UED the model is bound to, or nullptr for an engine that ships no
  *                descriptor set; any recorded descriptor set is then incompatible.
@@ -2476,58 +2621,182 @@ inline std::string provenanceError(const HeuristicDescriptor& model,
         return "trained_against names a descriptor set, which an engine that ships none "
                "cannot satisfy";
     }
-    const auto compatible = [](const DescriptorDependency& dependency,
-                               const DescriptorId& id,
-                               const hipdnn_data_sdk::utilities::Version& revision) {
-        return dependency.id == id && dependency.revision.major == revision.major
-               && dependency.revision.minor <= revision.minor;
-    };
     const auto& trained = *model.trainedAgainst;
-    if(!compatible(trained.ued, engine->id, engine->revision))
+    if(!trained.slot.empty() || !trained.kmds.empty())
+    {
+        return "trained_against names slot provenance ('slot' or 'kmds'), which an engine "
+               "that declares no slots cannot satisfy";
+    }
+    if(!dependencyCompatible(trained.ued, engine->id, engine->revision))
     {
         return "incompatible UED identity or semantic revision";
     }
-    if(!compatible(trained.kmd, schema->id, schema->revision))
+    if(!dependencyCompatible(trained.kmd, schema->id, schema->revision))
     {
         return "incompatible KMD identity or semantic revision";
     }
-    // Per bound arch: a recorded matcher owned by a pack serving @p arch must be loaded at
-    // a compatible revision; one owned only by other-arch packs is ignored; one no pack
-    // owns is a contract break on every arch.
-    std::set<DescriptorId> relevant;
-    std::set<DescriptorId> owned;
+    std::vector<const KernelDescriptorPack*> packPointers;
+    packPointers.reserve(packs.size());
     for(const auto& pack : packs)
     {
-        owned.insert(pack.matcherIds.begin(), pack.matcherIds.end());
-        if(arch == "default" || pack.arch.empty()
-           || std::find(pack.arch.begin(), pack.arch.end(), arch) != pack.arch.end())
-        {
-            relevant.insert(pack.matcherIds.begin(), pack.matcherIds.end());
-        }
+        packPointers.push_back(&pack);
     }
-    for(const auto& dependency : trained.umd)
+    return umdProvenanceError(trained, arch, packPointers, matchers);
+}
+
+/**
+ * @brief The lexicographically first `ws.*` token @p extractor's signature reads, or empty when
+ *        it reads none; the order does not depend on the extractor's hash order.
+ */
+inline std::string firstWorkspaceReference(const uhd::FeatureExtractor& extractor)
+{
+    std::string first;
+    for(const auto& reference : extractor.getVariableRefs())
     {
-        if(relevant.count(dependency.id) == 0 && owned.count(dependency.id) != 0)
+        if(isWorkspaceToken(reference) && (first.empty() || reference < first))
         {
-            continue;
+            first = reference;
         }
-        const auto found
-            = std::find_if(matchers.begin(), matchers.end(), [&](const MatchDescriptor& matcher) {
-                  return matcher.id == dependency.id;
-              });
-        if(relevant.count(dependency.id) == 0 || found == matchers.end()
-           || !compatible(dependency, found->id, found->revision))
-        {
-            return "incompatible UMD identity or semantic revision: " + toString(dependency.id);
-        }
-        relevant.erase(dependency.id);
     }
-    if(!relevant.empty())
+    return first;
+}
+
+/**
+ * @brief The `ws.*` token a slot ranker's feature signature reads, or empty when it reads none.
+ *
+ * The root is reserved for the shared-workspace region and kept out of every slot ranker's
+ * feature row (RFC 0021 §6), so such a reference could never be bound. A signature that does
+ * not compile reads no token here; the model's own load reports it.
+ */
+inline std::string workspaceTokenRead(const HeuristicDescriptor& model)
+{
+    if(model.featuresSignature.empty())
     {
-        return "arch-relevant UMD is missing from training provenance: "
-               + toString(*relevant.begin());
+        return {};
     }
-    return {};
+    try
+    {
+        return firstWorkspaceReference(
+            uhd::FeatureExtractor(model.featuresSignature, model.categoricalEncoding));
+    }
+    catch(const std::exception&)
+    {
+        return {};
+    }
+}
+
+/**
+ * @brief The RFC 0021 §9 counterpart of provenanceError() for a slotted @p engine.
+ *
+ * @param rankerSlot The slot @p model ranks, or nullptr for an engine-level (`predict_engine`)
+ *                   model. A slot ranker names its own slot's KMD (`kmd`) and the `slot` it
+ *                   was trained for, and is checked against that slot's packs; an engine-level model
+ *                   names every slot's KMD in `kmds` and is checked against every pack.
+ */
+inline std::string slottedProvenanceError(const HeuristicDescriptor& model,
+                                          const std::string& arch,
+                                          const EngineDescriptor& engine,
+                                          const std::vector<SlotDescriptorSet>& slots,
+                                          const SlotDescriptorSet* rankerSlot,
+                                          const std::vector<MatchDescriptor>& matchers)
+{
+    if(rankerSlot != nullptr)
+    {
+        if(const auto token = workspaceTokenRead(model); !token.empty())
+        {
+            return "feature signature reads '" + token
+                   + "', a shared-workspace token a slotted "
+                     "engine reserves";
+        }
+    }
+    if(!model.trainedAgainst.has_value())
+    {
+        if(model.trainedAgainstJson.is_object())
+        {
+            return "trained_against records no descriptor set, which a model bound to a UED "
+                   "must";
+        }
+        return {};
+    }
+    const auto& trained = *model.trainedAgainst;
+    if(!dependencyCompatible(trained.ued, engine.id, engine.revision))
+    {
+        return "incompatible UED identity or semantic revision";
+    }
+    std::vector<const KernelDescriptorPack*> packPointers;
+    if(rankerSlot != nullptr)
+    {
+        if(!trained.kmds.empty())
+        {
+            return "trained_against names kmds, but the ranker of slot '" + rankerSlot->name
+                   + "' must name its own slot's kmd";
+        }
+        if(trained.slot.empty())
+        {
+            return "trained_against names no slot, but the ranker of slot '" + rankerSlot->name
+                   + "' must name the slot it was trained for";
+        }
+        if(trained.slot != rankerSlot->name)
+        {
+            return "trained_against names slot '" + trained.slot + "', but the ranker serves slot '"
+                   + rankerSlot->name + "'";
+        }
+        if(!dependencyCompatible(trained.kmd, rankerSlot->schema.id, rankerSlot->schema.revision))
+        {
+            return "incompatible KMD identity or semantic revision for slot '" + rankerSlot->name
+                   + "'";
+        }
+        for(const auto& pack : rankerSlot->packs)
+        {
+            packPointers.push_back(&pack);
+        }
+    }
+    else
+    {
+        if(!trained.slot.empty())
+        {
+            return "trained_against names a single slot, but a slotted engine's predict_engine "
+                   "model must name every slot's KMD in kmds";
+        }
+        if(trained.kmds.empty())
+        {
+            return "trained_against names kmd, but a slotted engine's predict_engine model must "
+                   "name every slot's KMD in kmds";
+        }
+        for(const auto& entry : trained.kmds)
+        {
+            const auto declared
+                = std::find_if(slots.begin(), slots.end(), [&entry](const SlotDescriptorSet& slot) {
+                      return slot.name == entry.slot;
+                  });
+            if(declared == slots.end())
+            {
+                return "trained_against kmds names slot '" + entry.slot
+                       + "', which the engine does not declare";
+            }
+            if(!dependencyCompatible(entry.kmd, declared->schema.id, declared->schema.revision))
+            {
+                return "incompatible KMD identity or semantic revision for slot '" + entry.slot
+                       + "'";
+            }
+        }
+        for(const auto& slot : slots)
+        {
+            const auto named = std::any_of(
+                trained.kmds.begin(), trained.kmds.end(), [&slot](const SlotDependency& entry) {
+                    return entry.slot == slot.name;
+                });
+            if(!named)
+            {
+                return "trained_against kmds does not name slot '" + slot.name + "'";
+            }
+            for(const auto& pack : slot.packs)
+            {
+                packPointers.push_back(&pack);
+            }
+        }
+    }
+    return umdProvenanceError(trained, arch, packPointers, matchers);
 }
 
 /**
@@ -2631,6 +2900,20 @@ inline void refreshDefaultRanker(DescriptorSet& set)
     }
 }
 
+/// The slot counterpart of refreshDefaultRanker: re-derives @p slot's default ranker from
+/// what survived resolution. A slot ranker is metric-less, so it is the `""` entry.
+inline void refreshSlotDefaultRanker(SlotDescriptorSet& slot)
+{
+    if(const auto* ranker = defaultRankerFor(slot.heuristicsByMetric, "default"))
+    {
+        slot.heuristic = *ranker;
+    }
+    else
+    {
+        slot.heuristic.reset();
+    }
+}
+
 } // namespace detail
 
 /**
@@ -2670,7 +2953,7 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
                                        }),
                         engineEntries.end());
 
-    // RFC 0020 §10.2.1: every UED in a name collision is dropped, not just the ones after
+    // RFC 0020 §13.2.1: every UED in a name collision is dropped, not just the ones after
     // the first. Load order is filesystem order, so keep-the-first would leave which
     // definition won up to the directory walk. Keyed by hash rather than by the name
     // itself because the hash is what the engine-id space collides in.
@@ -2709,25 +2992,60 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
             continue;
         }
 
-        const auto* schema = detail::findDescriptor(catalog.schemas, engine.metadataSchemaId);
-        if(schema == nullptr)
+        const bool slotted = !engine.slots.empty();
+        const MetadataSchema* schema = nullptr;
+        std::vector<const MetadataSchema*> slotSchemas;
+        // Rejected here rather than left to GenericEngine's constructor, which throws on an
+        // undeclared knob: by then copyEngineIds has already advertised the id, so the throw
+        // takes the whole provider down instead of costing one engine.
+        const auto resolveSchema
+            = [&](const std::string& label,
+                  const DescriptorId& schemaId,
+                  const std::vector<std::string>& knobs) -> const MetadataSchema* {
+            const auto* resolved = detail::findDescriptor(catalog.schemas, schemaId);
+            if(resolved == nullptr)
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
+                                        << label << " names metadata schema " << toString(schemaId)
+                                        << ", which no descriptor defines; dropping it");
+                return resolved;
+            }
+            if(const auto* undeclared = findUndeclaredKnob(knobs, resolved->fields))
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: "
+                                        << label << " exposes knob '" << *undeclared
+                                        << "', which metadata schema '" << resolved->name
+                                        << "' does not declare; dropping it");
+                return nullptr;
+            }
+            return resolved;
+        };
+        const std::string engineLabel = "engine '" + engine.name + "'";
+        if(!slotted)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
-                                    << engine.name << "' names metadata schema "
-                                    << toString(engine.metadataSchemaId)
-                                    << ", which no descriptor defines; dropping it");
-            continue;
+            schema = resolveSchema(engineLabel, engine.metadataSchemaId, engine.knobs);
+            if(schema == nullptr)
+            {
+                continue;
+            }
         }
-        if(const auto* undeclared = findUndeclaredKnob(engine, schema->fields))
+        else
         {
-            // Rejected here rather than left to GenericEngine's constructor, which throws
-            // on it: by then copyEngineIds has already advertised the id, so the throw
-            // takes the whole provider down instead of costing one engine.
-            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
-                                    << engine.name << "' exposes knob '" << *undeclared
-                                    << "', which metadata schema '" << schema->name
-                                    << "' does not declare; dropping it");
-            continue;
+            // RFC 0021 §8: the per-engine checks run per slot.
+            for(const auto& slot : engine.slots)
+            {
+                const auto* slotSchema = resolveSchema(
+                    engineLabel + " slot '" + slot.name + "'", slot.metadataSchemaId, slot.knobs);
+                if(slotSchema == nullptr)
+                {
+                    break;
+                }
+                slotSchemas.push_back(slotSchema);
+            }
+            if(slotSchemas.size() != engine.slots.size())
+            {
+                continue;
+            }
         }
 
         // The whole entry, not just its descriptor: the file a pack came from is what its
@@ -2743,7 +3061,21 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
 
         DescriptorSet set;
         set.engine = engine;
-        set.schema = *schema;
+        if(slotted)
+        {
+            for(size_t i = 0; i < engine.slots.size(); ++i)
+            {
+                auto& slotSet = set.slots.emplace_back();
+                slotSet.name = engine.slots[i].name;
+                slotSet.schema = *slotSchemas[i];
+            }
+        }
+        else
+        {
+            set.schema = *schema;
+        }
+        // Which slot first claimed each kernel id, for the one-slot-per-kernel rule below.
+        std::unordered_map<DescriptorId, size_t, DescriptorIdHash> kernelSlot;
 
         // Keyed by id: deduplicates descriptors two packs share and orders them in one
         // step.
@@ -2755,11 +3087,11 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
             // Failure granularity is the pack: a pack whose cross-references dangle or
             // whose kernels contradict the KMD is dropped while the engine keeps its other
             // packs. A duplicate kernel metadata tuple is the exception, for kernels that
-            // compete at the same arch tier -- the state manager's constructor throws on it,
-            // taking the whole engine. RFC 0017 §10
-            // wants only the colliding kernel dropped; the upgrade is making that
-            // constructor log and drop rather than throw, in one place, so hand-built packs
-            // get the same behavior.
+            // compete at the same arch tier: an unslotted engine's state manager constructor
+            // throws on it, taking the whole engine, and a slotted engine drops the offending
+            // pack (RFC 0021 §8). RFC 0017 §10 wants only the colliding kernel dropped; the
+            // upgrade is making that constructor log and drop rather than throw, in one place,
+            // so hand-built packs get the same behavior.
             // The kernels move; the rest of the pack is copied, because the orphan and
             // unreferenced-kernel diagnostics below still read ids and arch from the catalog.
             auto kernels = std::move(packEntry->descriptor.kernels);
@@ -2775,9 +3107,46 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
             }
             std::vector<const MatchDescriptor*> packMatchers;
             std::string reason;
+            // RFC 0021 §4: `slot` is required for a slotted engine's pack and forbidden for
+            // any other.
+            size_t slotIndex = 0;
+            if(slotted)
+            {
+                if(pack.slot.empty())
+                {
+                    reason = "declares no slot, which every pack of slotted engine '" + engine.name
+                             + "' must";
+                }
+                else
+                {
+                    const auto declared = std::find_if(
+                        engine.slots.begin(),
+                        engine.slots.end(),
+                        [&pack](const SlotDescriptor& slot) { return slot.name == pack.slot; });
+                    if(declared == engine.slots.end())
+                    {
+                        reason = "names slot '" + pack.slot + "', which engine '" + engine.name
+                                 + "' does not declare";
+                    }
+                    else
+                    {
+                        slotIndex = static_cast<size_t>(declared - engine.slots.begin());
+                    }
+                }
+            }
+            else if(!pack.slot.empty())
+            {
+                reason = "declares slot '" + pack.slot + "', but engine '" + engine.name
+                         + "' declares no slots";
+            }
+            const MetadataSchema& packSchema = slotted ? set.slots[slotIndex].schema : set.schema;
 
             for(const auto& matcherId : pack.matcherIds)
             {
+                if(!reason.empty())
+                {
+                    break;
+                }
                 const auto* matcher = detail::findDescriptor(catalog.matchers, matcherId);
                 if(matcher == nullptr)
                 {
@@ -2849,11 +3218,30 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
                 }
             }
 
+            // RFC 0021 §4: a kernel serves at most one slot of an engine, so logs and records
+            // can name it without its slot. Packs reach here in catalog order, so the first
+            // slot to claim a kernel keeps it and the later pack is the one dropped.
+            if(reason.empty() && slotted)
+            {
+                for(const auto& kernel : pack.kernels)
+                {
+                    const auto claim = kernelSlot.find(kernel.id);
+                    if(claim != kernelSlot.end() && claim->second != slotIndex)
+                    {
+                        reason = "names kernel " + toString(kernel.id)
+                                 + ", which already serves slot '"
+                                 + engine.slots[claim->second].name + "' of engine '" + engine.name
+                                 + "'; a kernel serves at most one slot";
+                        break;
+                    }
+                }
+            }
+
             if(reason.empty())
             {
                 for(auto& kernel : pack.kernels)
                 {
-                    if(!detail::coerceKernelMetadata(kernel, set.schema, reason))
+                    if(!detail::coerceKernelMetadata(kernel, packSchema, reason))
                     {
                         break;
                     }
@@ -2878,15 +3266,41 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
                 matchers.emplace(matcher->id, *matcher);
             }
             dispatches.emplace(dispatch->id, *dispatch);
-            set.packs.push_back(std::move(pack));
+            for(const auto& kernel : pack.kernels)
+            {
+                if(slotted)
+                {
+                    kernelSlot.emplace(kernel.id, slotIndex);
+                }
+            }
+            if(slotted)
+            {
+                set.slots[slotIndex].packs.push_back(std::move(pack));
+            }
+            else
+            {
+                set.packs.push_back(std::move(pack));
+            }
         }
 
-        if(set.packs.empty())
+        if(!slotted && set.packs.empty())
         {
             // An engine with no kernels can never match, so advertising it is noise.
             HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
                                     << engine.name << "' has no loadable kernel pack; dropping it");
             continue;
+        }
+        // RFC 0021 §8: an empty slot makes a slotted engine decline every graph, which is
+        // the engine's state to report, not a reason to withdraw it.
+        for(const auto& slot : set.slots)
+        {
+            if(slot.packs.empty())
+            {
+                HIPDNN_PLUGIN_LOG_WARN("descriptor loader: engine '"
+                                       << engine.name << "' slot '" << slot.name
+                                       << "' has no loadable kernel pack; the engine stays "
+                                          "registered and declines every graph");
+            }
         }
 
         for(auto& [key, matcher] : matchers)
@@ -2900,15 +3314,21 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
 
         // Every role and arch is checked now; artifacts load lazily at rank time. A model
         // whose features this build computes differently (FeatureSemantics.hpp) is refused.
+        // Set when a slot ranker declares a metric: RFC 0021 §8 rejects the engine.
+        bool slotMetricViolation = false;
+        // @p slot is the slot whose ranker @p model is, or nullptr for an engine-level model.
         const auto provenanceError = [&](const HeuristicDescriptor& model,
-                                         const std::string& arch) {
-            auto reason
-                = detail::provenanceError(model, arch, &engine, schema, set.packs, set.matchers);
+                                         const std::string& arch,
+                                         const SlotDescriptorSet* slot) {
+            auto reason = slotted ? detail::slottedProvenanceError(
+                                        model, arch, engine, set.slots, slot, set.matchers)
+                                  : detail::provenanceError(
+                                        model, arch, &engine, schema, set.packs, set.matchers);
             return reason.empty() ? uhd::featureSemanticsMismatch(model.featuresSignature,
                                                                   model.trainedAgainstJson)
                                   : reason;
         };
-        const auto disabled = [&](const char* roleName,
+        const auto disabled = [&](const std::string& roleName,
                                   const std::string& arch,
                                   const DescriptorId& id,
                                   const std::string& reason) {
@@ -2920,123 +3340,157 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
         // RFC 0019 §3.1: one UHD per (role, arch key, metric). Two claiming one metric disable
         // that metric on that key, and every refusal marks (metric, arch) unavailable so it
         // never falls back to the `default` key's model.
-        const auto resolveScoringRole
-            = [&](const char* roleName,
-                  const std::map<std::string, std::vector<DescriptorId>>& references,
-                  bool ranking,
-                  std::map<std::string, std::map<std::string, HeuristicDescriptor>>& byMetric,
-                  std::map<std::string, std::set<std::string>>& unavailable) {
-                  for(const auto& [arch, ids] : references)
-                  {
-                      std::map<std::string,
-                               std::vector<std::pair<DescriptorId, const HeuristicDescriptor*>>>
-                          declared;
-                      bool unidentified = false;
-                      for(const auto& id : ids)
-                      {
-                          const auto* model = detail::findDescriptor(catalog.heuristics, id);
-                          if(model == nullptr)
-                          {
-                              disabled(roleName, arch, id, "missing or invalid UHD descriptor");
-                              unidentified = true;
-                              continue;
-                          }
-                          // An estimate is compared across engines, so it needs a named metric
-                          // (RFC 0019 §11.1); a ranker may order its own catalog without one.
-                          if(!ranking && model->score.metric.empty())
-                          {
-                              disabled(roleName,
-                                       arch,
-                                       id,
-                                       "declares no score.metric, which every "
-                                           + std::string(roleName) + " UHD must");
-                              unidentified = true;
-                              continue;
-                          }
-                          declared[model->score.metric].emplace_back(id, model);
-                      }
-                      for(const auto& [metric, models] : declared)
-                      {
-                          if(models.size() > 1)
-                          {
-                              std::string named;
-                              for(const auto& entry : models)
-                              {
-                                  named += (named.empty() ? "" : ", ") + toString(entry.first);
-                              }
-                              HIPDNN_PLUGIN_LOG_ERROR(
-                                  "descriptor loader: engine '"
-                                  << engine.name << "' role=" << roleName << " arch='" << arch
-                                  << "' names more than one UHD for metric "
-                                  << detail::describeMetric(metric) << " (" << named
-                                  << "); disabling that metric on that architecture key, engine "
-                                     "remains available");
-                              unavailable[metric].insert(arch);
-                              continue;
-                          }
-                          const auto& [id, model] = models.front();
-                          if(const auto reason = provenanceError(*model, arch); !reason.empty())
-                          {
-                              disabled(roleName, arch, id, reason);
-                              unavailable[metric].insert(arch);
-                              continue;
-                          }
-                          auto& resolved = byMetric[metric].emplace(arch, *model).first->second;
-                          resolved.treeRoot = catalog.heuristics.at(id).treeRoot;
-                          if(!ranking)
-                          {
-                              // Backfilled by the loader, so the model agrees with its role map.
-                              resolved.engineName = engine.name;
-                              resolved.role = roleName;
-                              resolved.arch = arch;
-                          }
-                      }
-                      // A missing or metric-less entry may stand for any metric not otherwise
-                      // served here, so each is withheld on this key rather than falling back
-                      // across arches.
-                      if(unidentified)
-                      {
-                          std::vector<std::string> candidates;
-                          if(ranking)
-                          {
-                              candidates.emplace_back();
-                          }
-                          for(const auto& metric : hipdnn_data_sdk::utilities::RANKING_METRICS)
-                          {
-                              candidates.emplace_back(metric.name);
-                          }
-                          for(const auto& metric : candidates)
-                          {
-                              if(declared.count(metric) == 0)
-                              {
-                                  unavailable[metric].insert(arch);
-                              }
-                          }
-                      }
-                  }
-              };
+        const auto resolveScoringRole =
+            [&](const std::string& roleName,
+                const std::map<std::string, std::vector<DescriptorId>>& references,
+                bool ranking,
+                std::map<std::string, std::map<std::string, HeuristicDescriptor>>& byMetric,
+                std::map<std::string, std::set<std::string>>& unavailable,
+                const SlotDescriptorSet* slot) {
+                for(const auto& [arch, ids] : references)
+                {
+                    std::map<std::string,
+                             std::vector<std::pair<DescriptorId, const HeuristicDescriptor*>>>
+                        declared;
+                    bool unidentified = false;
+                    for(const auto& id : ids)
+                    {
+                        const auto* model = detail::findDescriptor(catalog.heuristics, id);
+                        if(model == nullptr)
+                        {
+                            disabled(roleName, arch, id, "missing or invalid UHD descriptor");
+                            unidentified = true;
+                            continue;
+                        }
+                        // RFC 0021 §7: a slot has no time of its own, so its ranker predicts
+                        // none; a metric would promise a comparable number it cannot give.
+                        if(slot != nullptr && !model->score.metric.empty())
+                        {
+                            HIPDNN_PLUGIN_LOG_ERROR(
+                                "descriptor loader: engine '"
+                                << engine.name << "' slot '" << slot->name << "' ranker "
+                                << toString(id) << " declares score.metric '" << model->score.metric
+                                << "'; a slot ranker must be metric-less; dropping the engine");
+                            slotMetricViolation = true;
+                            continue;
+                        }
+                        // An estimate is compared across engines, so it needs a named metric
+                        // (RFC 0019 §11.1); a ranker may order its own catalog without one.
+                        if(!ranking && model->score.metric.empty())
+                        {
+                            disabled(roleName,
+                                     arch,
+                                     id,
+                                     "declares no score.metric, which every "
+                                         + std::string(roleName) + " UHD must");
+                            unidentified = true;
+                            continue;
+                        }
+                        declared[model->score.metric].emplace_back(id, model);
+                    }
+                    for(const auto& [metric, models] : declared)
+                    {
+                        if(models.size() > 1)
+                        {
+                            std::string named;
+                            for(const auto& entry : models)
+                            {
+                                named += (named.empty() ? "" : ", ") + toString(entry.first);
+                            }
+                            HIPDNN_PLUGIN_LOG_ERROR(
+                                "descriptor loader: engine '"
+                                << engine.name << "' role=" << roleName << " arch='" << arch
+                                << "' names more than one UHD for metric "
+                                << detail::describeMetric(metric) << " (" << named
+                                << "); disabling that metric on that architecture key, engine "
+                                   "remains available");
+                            unavailable[metric].insert(arch);
+                            continue;
+                        }
+                        const auto& [id, model] = models.front();
+                        if(const auto reason = provenanceError(*model, arch, slot); !reason.empty())
+                        {
+                            disabled(roleName, arch, id, reason);
+                            unavailable[metric].insert(arch);
+                            continue;
+                        }
+                        auto& resolved = byMetric[metric].emplace(arch, *model).first->second;
+                        resolved.treeRoot = catalog.heuristics.at(id).treeRoot;
+                        if(!ranking)
+                        {
+                            // Backfilled by the loader, so the model agrees with its role map.
+                            resolved.engineName = engine.name;
+                            resolved.role = roleName;
+                            resolved.arch = arch;
+                        }
+                    }
+                    // A missing or metric-less entry may stand for any metric not otherwise
+                    // served here, so each is withheld on this key rather than falling back
+                    // across arches.
+                    if(unidentified)
+                    {
+                        std::vector<std::string> candidates;
+                        if(ranking)
+                        {
+                            candidates.emplace_back();
+                        }
+                        for(const auto& metric : hipdnn_data_sdk::utilities::RANKING_METRICS)
+                        {
+                            candidates.emplace_back(metric.name);
+                        }
+                        for(const auto& metric : candidates)
+                        {
+                            if(declared.count(metric) == 0)
+                            {
+                                unavailable[metric].insert(arch);
+                            }
+                        }
+                    }
+                }
+            };
         resolveScoringRole("sort_kernel_catalog",
                            engine.sortKernelCatalog,
                            true,
                            set.heuristicsByMetric,
-                           set.unavailableHeuristicArches);
+                           set.unavailableHeuristicArches,
+                           nullptr);
         resolveScoringRole("predict_engine",
                            engine.predictEngine,
                            false,
                            set.enginePredictionsByMetric,
-                           set.unavailableEnginePredictionArches);
+                           set.unavailableEnginePredictionArches,
+                           nullptr);
+        // RFC 0021 §4: each slot owns its ranker; resolved against that slot's KMD and packs.
+        for(size_t slotIndex = 0; slotIndex < set.slots.size(); ++slotIndex)
+        {
+            auto& slot = set.slots[slotIndex];
+            resolveScoringRole("sort_kernel_catalog slot='" + slot.name + "'",
+                               engine.slots[slotIndex].sortKernelCatalog,
+                               true,
+                               slot.heuristicsByMetric,
+                               slot.unavailableHeuristicArches,
+                               &slot);
+        }
+        if(slotMetricViolation)
+        {
+            continue;
+        }
         // Validated for its diagnostics only; nothing consumes a candidate generator yet.
         for(const auto& [arch, id] : engine.predictApplicableKernels)
         {
             const auto* model = detail::findDescriptor(catalog.heuristics, id);
             const auto reason = model == nullptr ? std::string("missing or invalid UHD descriptor")
-                                                 : provenanceError(*model, arch);
+                                                 : provenanceError(*model, arch, nullptr);
             if(!reason.empty())
             {
                 disabled("predict_applicable_kernels", arch, id, reason);
             }
         }
         detail::refreshDefaultRanker(set);
+        for(auto& slot : set.slots)
+        {
+            detail::refreshSlotDefaultRanker(slot);
+        }
 
         sets.push_back(std::move(set));
     }
@@ -3390,10 +3844,20 @@ inline std::vector<ValidatedSet<THandle>> loadValidatedDescriptorSets(Descriptor
               set.unavailableEnginePredictionArches,
               "the engine reports no prediction",
               /*uhdScorer=*/true);
+        for(auto& slot : set.slots)
+        {
+            // A slot ranker is pruned like an engine-level one, per slot (RFC 0021 §8: the
+            // RFC 0019 §6.3 checks run per slot).
+            prune(slot.heuristicsByMetric,
+                  slot.unavailableHeuristicArches,
+                  "kernels will rank by priority, then descriptor id",
+                  /*uhdScorer=*/false);
+            detail::refreshSlotDefaultRanker(slot);
+        }
         detail::refreshDefaultRanker(set);
 
         // A name hashing onto an engine someone else already registered is dropped and the
-        // incumbent stands (RFC 0020 §10.2.1's drop-all applies to UEDs in a collision, not
+        // incumbent stands (RFC 0020 §13.2.1's drop-all applies to UEDs in a collision, not
         // to a hand-written engine); skipped for a name this loader itself registered, so
         // reloading a directory is idempotent. Rarely reachable by design -- §4.2 requires
         // a scoped `namespace:local` name and every built-in is unscoped, so this needs an

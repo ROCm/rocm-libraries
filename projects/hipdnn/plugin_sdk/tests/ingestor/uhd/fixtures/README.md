@@ -59,3 +59,18 @@ The point of the test that reads them is that the *tool's own output* loads:
 that the descriptor the Python tool emits is the one `DescriptorLoader` parses,
 and that the `features_hash` Python computed is the one the C++
 `FeatureExtractor` recomputes. Rebuilding them from the C++ side under test would assert nothing.
+
+## `conformance/trained_against_slots.json`
+
+One corpus of RFC 0021 slot-provenance rows for `trained_against`, run by four implementations
+that must agree: the C++ parser (`TestUhdParser.ConformsToTheTrainedAgainstSlotCorpus`), the
+packaging JSON schema and the packer (HKP `test_hkp_pack_sidecars.py`), and `uhd_gen`
+(`test_provenance.py`).
+
+- `bases`: complete UHD documents (`slot`, `kmds`, `v10`) that every implementation accepts.
+- `rows`: `{name, base, patch, reject?, skip?, uhd_gen?}`. `patch` is an RFC 6902 patch
+  applied to the base; `reject: true` means every implementation must refuse the result.
+  `skip` lists implementations that cannot express the rule (`parser`, `schema`, `packer`,
+  `uhd_gen`), and `uhd_gen` is the regex its refusal message must match.
+
+Add a rule as a row here, not as a per-implementation table.

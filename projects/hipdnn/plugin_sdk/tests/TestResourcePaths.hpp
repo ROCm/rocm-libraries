@@ -36,7 +36,8 @@ inline std::filesystem::path testDataDir()
     return hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / HIPDNN_TEST_DATA_RELDIR;
 }
 
-/// The committed `uhd_gen` output from ingestor/uhd/fixtures that the runtime reads.
+/// The staged ingestor/uhd/fixtures files the tests read: committed `uhd_gen` output and the
+/// conformance corpus.
 inline std::filesystem::path uhdGeneratedFixtureDir()
 {
     return testDataDir() / HIPDNN_UHD_GENERATED_FIXTURE_SUBDIR;

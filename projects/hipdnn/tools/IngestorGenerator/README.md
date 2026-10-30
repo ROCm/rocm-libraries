@@ -117,7 +117,8 @@ arch over `reduction.aot_budget_per_arch` (checked before anything is written),
 `--check-placeholders` findings, an emitted file that cannot be read back, or a template
 error; `2` unusable input: a missing or invalid config, a non-existent `--emitted-root`, an
 `--output-dir` that is not a directory, a non-empty output directory without `--force`,
-a config the renderer rejects, an `--ids-from` or `--engine-ids-from` that does not exist,
+a config the renderer rejects, `--check-placeholders` on a slotted config (descriptors
+only: nothing to check), an `--ids-from` or `--engine-ids-from` that does not exist,
 is not a directory or does not yield usable ids (ambiguous, wrong bundle, missing KDP),
 `--new-ids` together with `--ids-from` or `--engine-ids-from`, or a bad flag (argparse).
 `--dry-run` resolves ids too, so it exits 2 for an unusable previous bundle. A default run
@@ -377,7 +378,8 @@ verbatim. `direct_load` emits under `test_descriptors/<set>/<slug>/`, `<set>` be
                                     # descriptors/<producer>/<bundle>/ (packaged)
     <slug>.kmd.json                 # KMD -- the engine's per-kernel metadata schema
     <slug>.ued.json                 # UED -- the engine descriptor
-    <slug>.udd.json                 # UDD -- dispatch symbol
+    <slug>.udd.json                 # UDD -- dispatch symbol (a slotted engine: one
+                                    # <slug>_<slot>.udd.json per slot)
     <slug>.uhd.json                 # UHD -- only when engine.heuristic != "none"
     kernel_dtype_matches_graph.umd.json   # the one shared kernel-scoped matcher
     <slug>.kdp.json                 # single-pack engine: one KDP named after the slug
@@ -663,18 +665,18 @@ on the verifying machine.
 
 | Tool | Answers | Invocation |
 |---|---|---|
-| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode. Checks every launch of a multi-launch (`sources`) descriptor: a binary's identity is its launches' `(name, builder, spec, role)` tuple, a failure names its launch, and a descriptor with `sources` never nests in a single-launch one | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--manifest MANIFEST] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--manifest` takes the engine manifest: the KDPs whose UED name equals its `engine.name` are the bundles to gate, and every pack of that engine is gated, and its `specialization.vocabulary` is the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2. Without `--kpack-python-dir`, full mode imports the installed `rocm_kpack`, then tries `/opt/rocm-kpack/python` (KpackPython.cmake's default); if neither imports it exits **3** with `ENVIRONMENT ERROR`, never a per-kernel gate failure |
+| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode. Checks every launch of a multi-launch (`sources`) descriptor: a binary's identity is its launches' `(name, builder, spec, role)` tuple (`(name, source, entry, build)` for `hip`, `(name, file, symbol)` for `hsaco`; on a packed tree each launch is keyed on `sha256` and `symbol`), a failure names its launch, and a descriptor with `sources` never nests in a single-launch one | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--manifest MANIFEST] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--manifest` takes the engine manifest: the KDPs whose UED name equals its `engine.name` are the bundles to gate, and every pack of that engine is gated, and its `specialization.vocabulary` is the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2. Without `--kpack-python-dir`, full mode imports the installed `rocm_kpack`, then tries `/opt/rocm-kpack/python` (KpackPython.cmake's default); if neither imports it exits **3** with `ENVIRONMENT ERROR`, never a per-kernel gate failure |
 | `tools/launch_surface.py` | Is every surface the C++ restates from the kernel's Python declared, guarded and tested? It never compares what the two halves compute | `launch_surface.py MANIFEST --check [--allow-unguarded]` |
 | `tools/coverage_gate.py` | Structural, loading and serving obligations, reported separately; an unmet required obligation cannot pass | `coverage_gate.py --tree T --mode {full,structural} [--provenance-root DIR] [--arch A] [--manifest MANIFEST] [--validator V] [--expect-engine E] [--min-served N]`; `--mode` is required and governs what rung 1 may claim. `--manifest` is forwarded to rung 1 as above. A missing `--validator` makes rung 2 `loads-not-run`, a failure rather than a skip; an offline result is not serving evidence. This tool cannot run rung 3, so `--min-served N` with N > 0 fails the gate (`serving-not-run`); `tools/sweep.py`'s `min_served` is the device gate. `--provenance-root` mirrors `--tree`, for an installed tree, and is forwarded to rung 1 |
 | `tools/registry_enumerator.py` | Which kernels does the rocKE registry offer this engine? Expands an engine manifest into a generator config; reports how a shape corpus falls on its cells (by cell axes; it does not check that a sequence length can be served); prints the space by knob with exact instance counts | `registry_enumerator.py --manifest M --out C [--shapes S] [--strict]`, or `--manifest M --plan-space [--strict]` (`--plan-space` with `--out` or `--shapes` is a usage error). Exit 2 is unusable input, naming the field: a malformed manifest, a duplicate key, a `ground_truth.value_map` whose keys differ from a cell field's values, or a builder value with no `specialization.vocabulary` mapping; `--strict` makes exit 1 mean an instance count over `aot_budget_per_arch` or a `--shapes` GAP; an over-budget build writes nothing |
 | `tools/factorise_config.py` | Compacts an enumerated config into the `variants` form, refusing output that does not re-expand to the input | `factorise_config.py --config C --out S --knobs K1,K2,... [--vocabulary 'field:from=to,...']` |
-| `tools/catalog_diff.py` | Is a regenerated catalog the shipped one? Order-blind; UUID-blind with `--ignore-ids` (needed only for output generated with `--new-ids` or with nothing to reuse); `--expect-ids` requires the shipped ids to be reused, as after a splice or a `generate.py` run that reused the installed bundle's ids; `--subset` requires only that every shipped kernel is present. An entry is its name, whole `kernel_source` (every key, the spec as below), `arch`, metadata, priority and version. Without `--strict-spec` (and with `--subset`) the spec comparison is keyed on the shipped fields: the header's `spec fields` line lists the regenerated-only fields it did not compare. A malformed entry or KMD exits 2, as does an `--expect-ids` name present in both catalogs used a different number of times | `catalog_diff.py --shipped K --regenerated K2 [--ignore-ids] [--expect-ids] [--strict-spec \| --subset] [--shipped-kmd M --regenerated-kmd M2]` |
+| `tools/catalog_diff.py` | Is a regenerated catalog the shipped one? Order-blind; UUID-blind with `--ignore-ids` (needed only for output generated with `--new-ids` or with nothing to reuse); `--expect-ids` requires the shipped ids to be reused, as after a splice or a `generate.py` run that reused the installed bundle's ids; `--subset` requires only that every shipped kernel is present. An entry is its name, whole `kernel_source` (every key, the spec as below) or, for a multi-launch entry, its `sources` map by launch name, `arch`, metadata, priority and version. Without `--strict-spec` (and with `--subset`) the spec comparison is keyed on the shipped fields: the header's `spec fields` line lists the regenerated-only fields it did not compare. A malformed entry or KMD exits 2, as does an `--expect-ids` name present in both catalogs used a different number of times | `catalog_diff.py --shipped K --regenerated K2 [--ignore-ids] [--expect-ids] [--strict-spec \| --subset] [--shipped-kmd M --regenerated-kmd M2]` |
 | `tools/variant_reduce.py` | Which variants of a selection do autotune rankings justify? Reports the ε curve and per-variant reasons and proposes knob-level rules. Rule ids (`R` and six hex digits) are derived from the rule text, so an id is stable while the text is; a `keep X=v only for <cells>` rule's cells, and so its id, can change with `--budget`; a rule no longer proposed exits 2. Exit 1: over budget, or the applied rules together lose more of some graph's best time than the rules' ε (the report names those graphs); 2: unusable input; 3: a failed correctness verdict, timing phases missing for some (round, corpus), or the reduced arm's sweep is incomplete (no `summary.json` or no usable `expected_phases`, no expected timing phase for the arm, an expected phase with no record, a timing phase with no winners). `--out` is never written on 1 or 3; the report is, except for an incomplete sweep, which writes nothing. A sweep of fewer than 2 rounds warns that its noise floor is assumed (`reduction.single_round_epsilon`) | `variant_reduce.py --selection S --kdp INSTALLED_KDP --sweep-output DIR [--arm A] --out S2 --report R [--budget N] [--apply-rules ID,ID]` |
 | `tools/ground_truth.py` | How does hipDNN compare with the kernel owner's numbers? | `ground_truth.py {ingest,graphs,compare}`; see RUNBOOK stages 2 and 6. `graphs` records each graph's semantic identity and its row's digest; `compare` exits 2 when a row or a swept graph no longer matches that record (rerun `graphs`), and otherwise 0 whatever it finds (the report is for review; an accepted exception is a normal outcome); `compare --strict` exits 1 unless every row is within `--margin`, not declined in any timing round, and has a passing correctness verdict (a timing-only sweep, or a row with no usable reference, refuses) |
 | `tools/mine_shapes.py` | Build the attention shape corpus, refusing categoricals it does not recognise. | see `--help` |
 | `tools/field_audit.py` | Which schema fields are never named as an accessor call in the native sources? A lexical inventory bounding the unchecked set | `field_audit.py SCHEMA.fbs SOURCE...`; prints `UNCHECKED: <field>` per unreferenced field and exits 1. Exits 2 on a schema that parses to zero fields, so an unparsed schema cannot read as a clean audit |
 | `tools/splice_additions.py` | Is a scratch render an addition-only change of the live engine, and what does it add? Applies only the additions | `splice_additions.py --scratch S --live L [--report R] [--check]`; see [Extending a live engine](#extending-a-live-engine). Exit 1 on any conflict, with nothing written |
-| `tools/inventory.py` | What does an installed (or authored) tree hold for one engine: kernels per KDP, source kinds, distinct metadata tuples, catalog digest, validator verdict? | `inventory.py ROOT --engine E [--group-by F1,F2] [--validator V] [--json J]`. Counts come from `kernelDescriptors`; a KDP without that key fails. The digest is RUNBOOK stage 8's recipe over the engine's bundle directory. Validator diagnostics are folded per message, so a warning repeated once per kernel is one line |
+| `tools/inventory.py` | What does an installed (or authored) tree hold for one engine: kernels per KDP, source kinds, distinct metadata tuples, catalog digest, validator verdict? | `inventory.py ROOT --engine E [--group-by F1,F2] [--validator V] [--json J]`. Counts come from `kernelDescriptors`; a KDP without that key fails. A multi-launch kernel counts once per launch under each launch's kind, so per-kind counts can exceed the kernel count. The digest is RUNBOOK stage 8's recipe over the engine's bundle directory. Validator diagnostics are folded per message, so a warning repeated once per kernel is one line |
 
 A green tool proves only the properties it checked: missing, unsupported or mismatched
 required evidence fails full agreement, and structural-only results satisfy no
@@ -958,19 +960,26 @@ processor (`gfx11-generic`, `gfx12-generic`), so one kernel set serves the whole
 Any other value is a `ConfigError`; the key is rejected for every other kind. See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
 
-A packaged `rocke` `kernel_source` (or `kernel_defaults`) may also set
+A packaged `rocke`, `hip` or `hsaco` `kernel_source` (or `kernel_defaults`) may also set
 `launches: {<name>: {<overrides>}}` to declare the launches of a multi-stage kernel
 ([RFC 0017 §15.1](../../docs/rfcs/0017_UniversalKernelDescriptor.md)). Each value is merged
 onto the base `kernel_source`: `{role: merge}` selects a companion kernel of the same
 builder's `KernelModule`, and a different `builder` and `spec` name another builder
-entirely. The generator then emits the authored descriptor with a `sources` map keyed by
-launch name, in place of `kernel_source`, and the descriptor declares UKD 1.1. Launch names
-are lowercase identifiers (`[a-z][a-z0-9_]*`), and at least two are required. Anything else
-is a `ConfigError`, and so is the key on any kind but `rocke`. Two launch names may name
-one kernel (a stage that runs one kernel twice with different arguments), so equal
-launches are valid config. A kernel's launches are part
-of its candidate identity, so two entries that differ only in their launches are not
-de-duplicated. A config with no `launches` key generates exactly what it did before.
+entirely. A launch has its base source's kind and an override never states `kind`, so one
+descriptor's launches never mix kinds. The override keys are per kind: `rocke` takes
+`source`, `builder`, `target`, `spec` and `role`; `hip` takes `source`, `entry` and `build`
+(an override `build` replaces the base `build`); `hsaco` takes `file` and `symbol`. Two
+`hip` launches sharing `source` and `build` compile once, and two `hsaco` launches sharing
+`file` share one code object. `role` on a `hip` or `hsaco` launch is a `ConfigError`, and a
+`hsaco` launch still needs the kernel or pack `arch`. The generator then emits the
+authored descriptor with a `sources` map keyed by launch name, in place of
+`kernel_source`, and the descriptor declares UKD 1.1. Launch names are lowercase
+identifiers (`[a-z][a-z0-9_]*`), and at least two are required. Anything else is a
+`ConfigError`, and so is the key on an `embedded_source`. Two launch names may name one
+kernel (a stage that runs one kernel twice with different arguments), so equal launches
+are valid config. A kernel's launches are part of its candidate identity, so two entries
+that differ only in their launches are not de-duplicated. A config with no `launches` key
+generates exactly what it did before.
 
 A launch's `spec` override **replaces** the spec for that launch and is never varied by
 `variants`, `axes` or `shape_axes`: it is the same static spec in every expanded kernel. It
@@ -985,8 +994,46 @@ names it launches and owns their order, and the provider drops a kernel whose la
 differ from the handler's when it builds its catalog. One engine has one handler, so every
 kernel of an engine must name the same set of launches: a config mixing single- and
 multi-launch kernels, or two different sets, is a `ConfigError` (split the kernels into
-engines by launch set). See the
+engines by launch set). In a slotted engine the rule holds per slot, because each slot has
+its own handler (see "Slotted engines"). An operation whose variants need different launch
+counts, such as a single-launch prefill and a two-launch decode of SDPA forward, is
+therefore split into separate engines, one per launch set. The generated native stub
+declares `launchNames()` from the config's launches and notes in `prepare()` that each
+launch is built with `launchKernelDefinition`; the generated census test checks each
+kernel's `sources` entries against the emitted source kind. See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#multi-launch-kernels-sources).
+
+## Slotted engines: `slots`
+
+A config with a `slots` list describes a slotted engine (RFC 0021): `engine.shared_workspace`
+names the shared-workspace token, each slot declares `name`, `kmd_fields`, `knobs`, `ranker`
+and `specialization`, and every pack names its `slot`. The loader refuses `kmd_fields`,
+`specialization`, `engine.knobs` and a non-`none` `engine.heuristic` beside `slots`, so a
+slotted config declares them per slot. `tests/fixtures/slotted_three_slot.yaml` is the
+reference. A slotted config generates descriptors only: no native stub, census, matcher test or fragments,
+and no provider splice (`generate.py` prints `Descriptors only: no provider splice for slotted
+engines`), and `--check-placeholders` is refused for it (exit 2). The slotted engine's runtime
+behavior, benchmarking and tooling are in the
+[RUNBOOK](../ai/skills/hipdnn-ingestor-engine/RUNBOOK.md#slotted-engines-rfc-0021).
+
+Each slot emits its own KMD, its own UDD (`<slug>_<slot>.udd.json`, dispatch symbol
+`<namespace>.<slot>_dispatch`) and, when it ranks, its own UHD; a slot's KDPs name the slot's
+UDD. Packs with different launch sets need different dispatch descriptors (RFC 0021 §4), so
+a single-launch `prep` slot can sit beside a multi-launch `dkdv` slot. In the packaged
+dialect a slotted `rocke`, `hip` or `hsaco` pack accepts `launches` exactly as an unslotted
+one does and emits the authored UKD with a `sources` map (UKD 1.1); the launch-set check
+runs per slot, and a slot mixing single- and multi-launch kernels is a `ConfigError`. For
+`hsaco`, `sources` is the default route to launches that live in one code object. The
+alternative is one single-launch UKD whose slot native handler launches the other kernels by
+symbol names its KMD records; it needs no launch set and no per-launch signature (RFC 0021
+§3). Regenerating into an existing tree keeps ids as for an unslotted
+engine ([Descriptor ids](#descriptor-ids)): each slot's KMD and UHD are matched by slot name,
+its kernels within the slot, and only a new slot or a retuned kernel gets a new id. A slotted
+engine is one bundle, so `--engine-ids-from` (sibling mode) is refused for it. Unslotted output
+is byte-identical to a generator without slots (`tests/test_slots.py` pins it against a golden).
+
+CI covers slots through the validator roots (`hipdnn_validate_descriptors_slotted_*`) and this
+suite; the `uhd_gen` slot tests run locally only (see the uhd_gen README).
 
 ## The five pre-mint config-loader checks
 

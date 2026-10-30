@@ -1,6 +1,6 @@
 # `hipdnn_validate_descriptors` mutation fixtures
 
-Each directory is a complete, standalone generic-kernel-ingestor descriptor bundle
+Each unslotted directory is a complete, standalone generic-kernel-ingestor descriptor bundle
 (KMD + UHD + UED + UMD + UDD + KDP with two inline kernels), modeled on the shipped
 `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/conv_fwd/`
 example. `valid/` is the unmutated baseline; every malformed directory below differs by
@@ -24,6 +24,22 @@ exit 0 with the engine loaded. The validator's stub handler declares the launch 
 its pack's kernels, so this proves load and keep for a multi-launch pack, not equality
 with a real handler. The `kpack` entries name an archive that is not shipped; the loader
 reads only the descriptors.
+
+## `multi_launch_mismatch/`
+
+`multi_launch/`'s bundle (engine `hipkernel:ValidateFixtureLaunchMismatch`, one pack
+targeting `gfx942`) with its two kernels naming different launch sets: `fixture.decode_merge_block64`
+carries `decode` and `merge`, `fixture.decode_reduce_block256` carries `decode` and `reduce`.
+Every UUID is distinct from the other fixtures; the launch-set disagreement is the only
+defect.
+
+Expected failure: the validator's stub handler declares the first kernel's launch set
+(`{decode, merge}`), so `KernelIngestorStateManager.hpp`'s `validateAndIndexPacks()` drops
+the second kernel with "carries the launches {decode, reduce}, but the dispatch handler ...
+launches {decode, merge}" and the run exits non-zero. Unlike the other malformed
+fixtures the engine still loads, on the kernel that matches, so the test asserts the
+diagnostic and the exit status rather than a missing engine; it is not in
+`MALFORMED_FIXTURES`.
 
 ## `bad_arch/`
 
@@ -98,5 +114,47 @@ GenericEngine evaluates it with (`uhd::prediction_detail::validateBinding` and `
   registry the L1 path uses, not the kernel comparator registry. `model_checks`:
   `sort_kernel_catalog` and `predict_engine` both succeed.
 
-`tests/test_round_trip.py` and the `hipdnn_validate_descriptors_<fixture>` CTest cases
-(`tools/CMakeLists.txt`; `multi_launch/` is `hipdnn_validate_descriptors_smoke_multi_launch`) assert these exit statuses and `model_checks` verdicts.
+## Slotted fixtures
+
+`slotted_valid/` is the RFC 0021 baseline for a slotted engine: a 1.1 UED
+(`hipkernel:ValidateFixture`) with `shared_workspace` `ws.bytes` and three slots, `prep`
+(no ranker), `dkdv` (knob `block_m`) and `dq` (knob `block_n`), each with its own KMD, UDD
+(`<slot>.udd.json`, dispatch symbol `hipkernel.fixture.<slot>_dispatch`) and KDP
+(`"slot"` names it), a metric-less ranker UHD on `dkdv` and `dq`, and an engine-level
+`predict_engine` UHD. The validator runs the per-engine checks per slot: a slot ranker is
+admitted against its own slot's KMD fields, knobs and packs, and `predict_engine` is checked at
+the engine. In `model_checks` a slot ranker carries a `slot` key, spelled `<role>@<slot>` in
+the expected verdicts below and in the CTest roleFixture list (for example
+`sort_kernel_catalog@dq`).
+
+`slotted_multi_launch/` overlays `dkdv.kdp.json` (a kpack `sources` map, launches `decode` and
+`merge`) on `slotted_valid/`. Expected: exit 0 with the engine loaded; a validator that harvested
+only `set.packs` or shared one dispatch stub between the slots would drop it.
+
+Every `slotted_*` directory but `slotted_valid/` holds only the file that changes: an overlay, or for
+`slotted_feature_samples_ws/` the `feature_samples.json` the case validates `slotted_valid/`
+against. The CTest driver copies `slotted_valid/` into the build tree, lays an overlay file
+over the copy and validates the copy (`-DHIPDNN_VALIDATE_DESCRIPTORS_OVERLAY`). The
+loader-side slot rules (an empty slot, a kernel in two slots, an estimate missing a slot's
+KMD, a ranker declaring a metric) are tested in `TestDescriptorLoader.cpp` and
+`test_hkp_pack_slots.py`, not here.
+
+| Fixture | Change | Exit | Failing `model_checks` | Diagnostic contains |
+|---|---|---|---|---|
+| `slotted_valid/` | none | 0 | none | |
+| `slotted_ranker_undeclared_field/` | `dq.uhd.json`: the `dq` ranker reads `$kernel.block_m`, a field of the `dkdv` KMD | 1 | `sort_kernel_catalog@dq` | `Feature references an undeclared KMD field` |
+| `slotted_ranker_unexposed_axis/` | `fixture.ued.json`: the `dq` slot drops `knobs`, so its ranker reads an axis the slot does not expose | 1 | `sort_kernel_catalog@dq` | `which its UED does not expose as knobs` |
+| `slotted_ranker_reads_workspace_token/` | `dq.uhd.json`: the `dq` ranker reads `$ws.bytes`; `ws.*` is reserved for a slotted engine | 1 | `sort_kernel_catalog@dq` | `a shared-workspace token a slotted engine reserves` |
+| `slotted_two_ws_tokens/` | `dq.uhd.json`: the `dq` ranker reads `$ws.a` and `$ws.b`; the validator names the lexicographically first, as the loader does | 1 | `sort_kernel_catalog@dq` | `Feature reads '$ws.a'` |
+| `slotted_ranker_names_other_slot/` | `dkdv.uhd.json`: the `dkdv` ranker's `trained_against.slot` is `dq` | 1 | `sort_kernel_catalog@dkdv` | `but the ranker serves slot` |
+| `slotted_feature_samples_ws/` | no overlay: `feature_samples.json` binds `ws.bytes` to an object, and the case validates `slotted_valid/` against it (`-DHIPDNN_VALIDATE_DESCRIPTORS_FEATURE_SAMPLES`) | 0 | none | |
+
+A slotted engine's ranker features never receive a `ws.*` binding, so the object in
+`slotted_feature_samples_ws/` is dropped; a binding the validator kept would fail with
+`require flattened scalar bindings`.
+
+The `hipdnn_validate_descriptors_<fixture>` CTest cases (`tools/CMakeLists.txt`; `multi_launch/` is
+`hipdnn_validate_descriptors_smoke_multi_launch`) assert these
+exit statuses and `model_checks` verdicts; each is an `<fixture>:<exit>:<checks>[:<diagnostic>]`
+entry in the CTest roleFixture list. `tests/test_round_trip.py` covers the non-slotted
+fixtures only.
