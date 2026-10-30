@@ -2603,6 +2603,7 @@ TEST_P(local_matrix_formats, writes_and_reads_rocsparseio_files)
         auto C = make_local_matrix(backend(), spd<T>(4));
         C->ReadFileRSIO(file, true);
         expect_matrix(*C, ref, csr_format, backend());
+        std::remove(file.c_str());
 
         if(backend() == Backend::Accelerator && !is(CSR))
         {
@@ -2610,7 +2611,6 @@ TEST_P(local_matrix_formats, writes_and_reads_rocsparseio_files)
         }
         EXPECT_EQ(log.find("conversion from CSR to") != std::string::npos, !is(CSR)) << log;
         expect_kept(*B, ref);
-        std::remove(file.c_str());
     });
 }
 

@@ -45,13 +45,14 @@ set(ROCALUTION_UNIT_TEST_SOURCES
   unit_test_matrix_csr.cpp
   unit_test_matrix_formats.cpp
   unit_test_matrix_kernels.cpp
+  unit_test_matrix_mcsr.cpp
   unit_test_multigrid.cpp
   unit_test_preconditioners.cpp
   unit_test_solvers.cpp
 )
 
 if(SUPPORT_HIP)
-  list(APPEND ROCALUTION_UNIT_TEST_SOURCES unit_test_backend_hip.cpp unit_test_hip_conversion.cpp unit_test_hip_matrix_csr.cpp unit_test_hip_sparse.cpp unit_test_matrix_mcsr.cpp)
+  list(APPEND ROCALUTION_UNIT_TEST_SOURCES unit_test_backend_hip.cpp unit_test_hip_conversion.cpp unit_test_hip_matrix_csr.cpp unit_test_hip_sparse.cpp)
 endif()
 
 add_executable(rocalution-unit-test ${ROCALUTION_UNIT_TEST_SOURCES})
@@ -82,7 +83,7 @@ set_target_properties(rocalution-unit-test PROPERTIES
 )
 
 add_test(NAME rocalution-unit-test COMMAND rocalution-unit-test)
-set_tests_properties(rocalution-unit-test PROPERTIES LABELS "quick")
+set_tests_properties(rocalution-unit-test PROPERTIES LABELS "quick" TIMEOUT 3600)
 
 rocm_install(TARGETS rocalution-unit-test COMPONENT tests)
 

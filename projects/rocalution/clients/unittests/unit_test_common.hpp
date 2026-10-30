@@ -338,7 +338,7 @@ namespace rocalution_unit
             {"Householder", dense_host_only},
 
             {"Gershgorin", csr_host_only},
-            {"ReplaceRowVector", csr_host_only},
+            {"ReplaceRowVector", {{CSR, DENSE}, {DENSE}}},
             {"ILUTFactorize", csr_host_only},
             {"ILUpFactorizeNumeric", csr_host_only},
             {"CMK", csr_host_only},
