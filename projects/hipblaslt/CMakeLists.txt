@@ -1,6 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# DO NOT MERGE: no-op touch used to exercise the gfx950 hipBLASLt presubmit
+# family override. Revert this hunk before the parent branch merges.
+
 cmake_minimum_required(VERSION 3.25.2)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
