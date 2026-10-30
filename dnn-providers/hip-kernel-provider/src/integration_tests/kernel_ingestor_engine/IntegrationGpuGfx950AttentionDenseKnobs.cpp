@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -417,11 +418,11 @@ std::vector<KnobSetting> knobSettingsFor(const Tile& tile)
 /// that is not exactly one.
 std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile& tile)
 {
+    // No head counts: the catalog carries one kernel per (dtype, head size, mask, tile),
+    // and the graph's head configuration reaches it as kernargs.
     const detail::MetadataKey key{
         {"dtype", detail::catalogDtypeName(shape.dataType)},
         {"head_size", shape.headSize},
-        {"num_query_heads", shape.queryHeads},
-        {"num_kv_heads", shape.kvHeads},
         {"causal", detail::catalogCausal(shape.mask)},
         {"ragged", int64_t{0}},
         {"sliding_window", int64_t{0}},
@@ -453,58 +454,54 @@ using IntegrationGpuGfx950AttentionDenseKnobCoverage
 /// knobCases() is a static table because its cases register before main() names the
 /// descriptor root. This keeps it honest: the (head_size, Hq, Hkv) configurations it covers
 /// must be exactly those the shipped catalog carries.
-TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogHeadConfiguration)
+/// The catalog no longer enumerates head configurations: the kernel reads
+/// num_query_heads / num_kv_heads as kernargs, so one entry per (dtype, head size, mask,
+/// tile) serves every one of them. Both halves below matter. A served kernel carrying a
+/// head field would mean the catalog had gone back to one entry per configuration, and a
+/// knob table that only ran one configuration per head size would
+/// never exercise the claim on the device, leaving the per-row numeric checks blind to a
+/// kernel that mis-reads the head kernargs.
+TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, ServesEveryHeadConfigurationFromOneKernel)
 {
     ASSERT_FALSE(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
         << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set, so there are no production descriptors to "
-           "read the catalog's head configurations from";
+           "read the catalog's metadata from";
 
-    using HeadConfig = std::tuple<int64_t, int64_t, int64_t>;
-
-    std::set<HeadConfig> tableConfigs;
-    for(const auto& knobCase : knobCases())
-    {
-        tableConfigs.emplace(
-            knobCase.shape.headSize, knobCase.shape.queryHeads, knobCase.shape.kvHeads);
-    }
-
-    std::set<HeadConfig> catalogConfigs;
     detail::forEachServedKernel(
-        ENGINE, [&catalogConfigs](const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
-            const auto intField = [&kernel](const char* field) -> const int64_t* {
-                const auto value = kernel.metadata.find(field);
-                return value == kernel.metadata.end() ? nullptr
-                                                      : std::get_if<int64_t>(&value->second);
-            };
-            const auto* headSize = intField("head_size");
-            const auto* queryHeads = intField("num_query_heads");
-            const auto* kvHeads = intField("num_kv_heads");
-            if(headSize == nullptr || queryHeads == nullptr || kvHeads == nullptr)
+        ENGINE, [](const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
+            for(const auto* field : {"num_query_heads", "num_kv_heads"})
             {
-                ADD_FAILURE() << "kernel " << hipdnn_plugin_sdk::ingestor::toString(kernel.id)
-                              << " carries no integer head_size, num_query_heads and num_kv_heads";
-                return;
+                EXPECT_EQ(kernel.metadata.count(field), 0U)
+                    << "kernel " << hipdnn_plugin_sdk::ingestor::toString(kernel.id) << " carries '"
+                    << field << "'; the head counts are kernargs, not catalog metadata";
             }
-            catalogConfigs.emplace(*headSize, *queryHeads, *kvHeads);
         });
 
-    const auto onlyIn = [](const std::set<HeadConfig>& from, const std::set<HeadConfig>& other) {
-        std::string text;
-        for(const auto& [headSize, queryHeads, kvHeads] : from)
-        {
-            if(other.count({headSize, queryHeads, kvHeads}) == 0)
-            {
-                text += " (D" + std::to_string(headSize) + ", Hq" + std::to_string(queryHeads)
-                        + ", Hkv" + std::to_string(kvHeads) + ")";
-            }
-        }
-        return text.empty() ? std::string(" none") : text;
-    };
-    EXPECT_EQ(tableConfigs, catalogConfigs)
-        << "in the catalog but not knobCases():" << onlyIn(catalogConfigs, tableConfigs)
-        << "\nin knobCases() but not the catalog:" << onlyIn(tableConfigs, catalogConfigs)
-        << "\nunder HIPDNN_DESCRIPTOR_RUNTIME_DIR='"
-        << hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR") << "'";
+    // Head configurations per head size, as the knob table runs them.
+    std::map<int64_t, std::set<std::pair<int64_t, int64_t>>> tableConfigs;
+    for(const auto& knobCase : knobCases())
+    {
+        tableConfigs[knobCase.shape.headSize].emplace(knobCase.shape.queryHeads,
+                                                      knobCase.shape.kvHeads);
+    }
+
+    ASSERT_FALSE(tableConfigs.empty()) << "knobCases() ran no shape";
+    for(const auto& [headSize, configs] : tableConfigs)
+    {
+        // Several configurations, and both GQA (Hq != Hkv) and MHA (Hq == Hkv): a kernel
+        // that baked either head count, or the GQA ratio derived from them, fails here.
+        EXPECT_GE(configs.size(), 4U)
+            << "D" << headSize << " runs only " << configs.size()
+            << " head configuration(s); one kernel serving every head count is then untested";
+        const bool hasGqa = std::any_of(configs.begin(), configs.end(), [](const auto& config) {
+            return config.first != config.second;
+        });
+        const bool hasMha = std::any_of(configs.begin(), configs.end(), [](const auto& config) {
+            return config.first == config.second;
+        });
+        EXPECT_TRUE(hasGqa) << "D" << headSize << " runs no GQA head configuration";
+        EXPECT_TRUE(hasMha) << "D" << headSize << " runs no MHA head configuration";
+    }
 }
 
 /// Every row runs one compiled kernel, and what the compiler specializes on is the head size,

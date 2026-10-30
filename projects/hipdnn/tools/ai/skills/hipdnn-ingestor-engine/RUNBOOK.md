@@ -1081,6 +1081,14 @@ For a set with trained models, choose one of these and record the choice in the 
    explicitly, and state that the engine now ranks with its `default` model or declared
    order.
 
+A fourth outcome is that the inventory comes back empty, which is a no-op rather than a
+choice. Record it anyway, with the evidence, so a reviewer can tell it apart from an
+inventory nobody took. `hipkernel:Gfx950AttentionDense` is the worked example: its UHD
+declares `"adapter": "native"`, its UED binds `sort_kernel_catalog` as `default` alone
+with no per-arch lists and no `predict_engine`, and no `heuristics/<ued-id>/` subtree is
+installed. Its ranking is native and tile-only, so regenerating the whole KDP for the
+head-count collapse left nothing to retain, retrain or drop.
+
 Never splice a scratch UED over a live one carrying role maps, and never edit
 `trained_against` to match: it records what the model was measured against, and
 rewriting it binds a model to a set it never saw.
