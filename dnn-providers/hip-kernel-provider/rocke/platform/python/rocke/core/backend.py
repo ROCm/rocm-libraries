@@ -955,6 +955,17 @@ def _conv_problem_to_dict(p: Any) -> Dict[str, Any]:
     return d
 
 
+def _conv_acc_epilogue_to_dict(epi: Any) -> Dict[str, Any]:
+    """:class:`ConvAccumulatorEpilogue` -> dict (clamp bounds None when unset)."""
+    return dict(
+        bias=float(epi.bias),
+        scale=float(epi.scale),
+        relu=bool(epi.relu),
+        clamp_min=None if epi.clamp_min is None else float(epi.clamp_min),
+        clamp_max=None if epi.clamp_max is None else float(epi.clamp_max),
+    )
+
+
 def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`ImplicitGemmConvSpec` -> flat dict (problem nested). Optional
     fields (lds_k_pad/waves_per_eu/vector_size_*) are forwarded when set; the
@@ -984,6 +995,16 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         # Changes the emitted kernel and its launch grid; dropped, the engine
         # would build an unmerged kernel under a merged spec's name and grid.
         group_merge=getattr(spec, "group_merge", 1),
+        # The split-K forward binary (its own ABI and epilogue) and its cluster
+        # form; dropped, the engine would build the plain kernel. Read
+        # directly: a spec without them is malformed, not unsplit.
+        split_k=spec.split_k,
+        split_k_cluster=spec.split_k_cluster,
+        # The wavelet load-wave count changes the launch block and the loaders.
+        num_load_waves=spec.num_load_waves,
+        # The fused accumulator epilogue changes the emitted epilogue (and
+        # split-K admission); dropped, the engine would build the identity.
+        acc_epilogue=_conv_acc_epilogue_to_dict(spec.acc_epilogue),
     )
     # dtype_* and the vector-size/optional knobs are merge-target additions
     # (#8624); forward them only when this branch's spec exposes them so the
@@ -1840,6 +1861,12 @@ def lower_conv_implicit_gemm(
             ir = serialize(k)
         return ll, ir
 
+    if spec.split_k == -1:
+        # Auto split-K is resolved on the Python side for both engines, so the
+        # C++ engine (explicit degrees only) builds the same kernel.
+        from kernels.common.conv_implicit_gemm import resolve_fwd_split_k_spec
+
+        spec = resolve_fwd_split_k_spec(spec, arch)
     eng = _import_engine()
     sd = conv_implicit_gemm_spec_to_dict(spec)
     return _lower_family(

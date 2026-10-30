@@ -606,6 +606,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_fwd_small_wmma.py"
         "tests/library/tests/test_direct_dgrad_wmma.py"
         "tests/library/tests/test_direct_fwd_wmma.py"
+        "tests/library/tests/test_conv_fwd_split_k.py"
         "tests/library/tests/test_conv_winograd_fwd_cpu.py"
         "tests/library/tests/test_conv_winograd_gemm_wmma.py"
         "tests/library/tests/test_conv_winograd_gen_cpu.py"
