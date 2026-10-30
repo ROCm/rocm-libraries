@@ -257,6 +257,18 @@ class SchedulerConfig:
     # pi+1 in the same MT; the final partition wraps to partition 0 of MT n+1.
     # This is intentionally independent of PGR's global-read lookahead.
     prefetchNextPartition: bool = False
+    # Emit one complete A/B epoch at the configured PGR distance instead of
+    # deriving the epoch from partition-ring wrap.  For PGR2 partition
+    # prefetch, the legacy ring produces a diagonal stream (non-wrapping
+    # partitions load n+1, wrapping partitions load n+2).  Uniform epoch mode
+    # makes every A/B GR in a body target n+2, while preserving the independent
+    # scale cadence.  The preloop correspondingly seeds a complete n+1 A/B
+    # epoch so the first steady-state wrap has a producer.
+    uniformPgrEpoch: bool = False
+    # Maximum number of atomic A/B VMEM requests in each non-frontier uniform
+    # epoch cohort.  The same policy controls the partition-zero overwrite
+    # cohort and the retained DTL cohort at the final-partition seam.
+    uniformEpochVmemCohortSize: int = 5
     # Physical traversal of the 2-D partition grid.  "m-major" preserves the
     # legacy order (M varies fastest).  "n-major" matches FlyDSL's
     # c00,c01,c10,c11 order (N varies fastest).
@@ -345,6 +357,20 @@ class SchedulerConfig:
 
     def __post_init__(self):
         assert self.pgr in (0, 1, 2), f"pgr must be 0, 1, or 2, got {self.pgr}"
+        if self.uniformPgrEpoch:
+            assert self.pgr == 2, \
+                "uniformPgrEpoch currently requires PrefetchGlobalRead=2"
+            assert self.prefetchNextPartition, \
+                "uniformPgrEpoch requires partition-directed prefetch"
+        assert self.uniformEpochVmemCohortSize >= 1, \
+            "uniformEpochVmemCohortSize must be >= 1"
+
+        assert self.scaleReuse >= 1, f"scaleReuse must be >= 1, got {self.scaleReuse}"
+        # Dual-period MXFP8: the scale epoch (256 K) spans scaleReuse data
+        # iterations.  The data K unroll (numSubIterK / numUnroll) must then be
+        # derived from the DATA tensors only; a scale gr.k > 1 must NOT expand
+        # the data K axis.  Scales carry their own epoch cadence (scaleReuse).
+        self.dualPeriodScale = self.hasScale and self.scaleReuse > 1
 
         assert self.scaleReuse >= 1, f"scaleReuse must be >= 1, got {self.scaleReuse}"
         # Dual-period MXFP8: the scale epoch (256 K) spans scaleReuse data
@@ -533,6 +559,7 @@ class LRPlacement(Emittable):
     subIterK_slot: int         # which subIterK this LR is placed in
     partition: int = 0         # which partition this LR belongs to
     targetPartition: int = 0   # partition that consumes the loaded operands
+    mustPrecedeP0Overwrite: bool = False  # hoisted read protecting p0 future write
     deps: List['Dep'] = field(default_factory=list)      # populated by annotate_deps()
     preOps: List['BaseOp'] = field(default_factory=list)     # populated by remove_cross_deps()
     postOps: List['BaseOp'] = field(default_factory=list)    # populated by insert_gr_lr_inc()
@@ -617,6 +644,11 @@ class BaseOp(Emittable):
 class WaitGROp(BaseOp):
     """Wait for global reads to complete. Optionally includes a sync barrier."""
     wait_gr_counts: Optional[WaitGRCounts] = None
+    # Some generated bodies intentionally omit requests (dual-period scales,
+    # for example).  Epoch-frontier waits therefore need a distinct count for
+    # each statically unrolled body; emitters that do not use this leave it
+    # unset and retain the legacy wait_gr_counts behavior.
+    wait_gr_counts_by_unroll: Optional[Tuple[WaitGRCounts, ...]] = None
     has_sync: bool = False
     adjustVmcnt: bool = True
     # When True the emitter ignores wait_gr_counts and forces a full vmcnt(0)
@@ -630,6 +662,10 @@ class WaitGROp(BaseOp):
         self.kind = 'wait_gr'
 
     def __str__(self):
+        if self.wait_gr_counts_by_unroll:
+            return (f"{self.kind}("
+                    + ",".join(str(c) for c in self.wait_gr_counts_by_unroll)
+                    + ")")
         if self.wait_gr_counts:
             return f"{self.kind}({self.wait_gr_counts})"
         return self.kind
@@ -782,12 +818,54 @@ class EmittedModule:
     """
     moduleId: int = -1
     instructions: list = field(default_factory=list)
+    # Optional per-instruction scheduler metadata populated by the concrete
+    # emitter. Entries stay aligned with ``instructions``.
+    instructionMetadata: list = field(default_factory=list)
     before: Optional[int] = None   # moduleId that must complete before this module
     source: Optional[Emittable] = None
 
     @property
     def opType(self) -> str:
         return self.source.kind if self.source else ""
+
+
+def _set_entry_wait_lr_count(em_list, count):
+    """Apply a prior-partition suffix only to each MFMA entry wait.
+
+    A cell can also contain an internal wait_lr that drains local reads before
+    an LDS overwrite barrier. Weakening that wait with the prior cell's safe
+    suffix would leave the youngest current-cell reads outstanding at the
+    overwrite boundary.
+    """
+    from rocisa.instruction import SWaitCnt
+
+    by_id = {em.moduleId: em for em in em_list}
+    entry_wait_ids = set()
+    for mfma_em in (em for em in em_list if em.opType == "mfma"):
+        current = mfma_em.before
+        seen = set()
+        while current is not None and current not in seen:
+            seen.add(current)
+            predecessor = by_id.get(current)
+            if predecessor is None:
+                break
+            if predecessor.opType == "wait_lr":
+                entry_wait_ids.add(predecessor.moduleId)
+                break
+            current = predecessor.before
+
+    for em in em_list:
+        if em.opType != "wait_lr" or em.moduleId not in entry_wait_ids:
+            continue
+        for inst in em.instructions:
+            if isinstance(inst, SWaitCnt) and inst.dscnt >= 0:
+                inst.dscnt = count
+                inst.comment = (
+                    "Wait for immediate LR; leave "
+                    f"{count} later-consumer reads in flight"
+                    if count
+                    else "Wait for all immediate LR"
+                )
 
 
 # ── Main scheduler class ───────────────────────────────────
@@ -893,8 +971,94 @@ class LogicalScheduler:
         if cfg.dualPeriodScale:
             self._place_scale_LRs_epoch(partitions)
 
+        if cfg.uniformPgrEpoch:
+            self._move_uniform_epoch_p0_overwrite_reads(partitions)
+
         self._partitions = partitions
         return partitions
+
+    def _move_uniform_epoch_p0_overwrite_reads(self, partitions):
+        """Make the first future-write cohort legal in partition zero.
+
+        Uniform epochs are ordered canonically as A then B.  The first
+        cohort is therefore the first configured number of atomic A/B requests.
+        Pull any current-epoch local-read placement overlapping that cohort
+        into partition zero.  The instruction scheduler can then issue those
+        reads, drain LDS, and place the overwrite barrier before the global
+        reads instead of deferring the whole cohort to partition one.
+
+        A logical LR may cover more than one atomic GR tile.  Split at the
+        selected GR boundaries and hoist only the overlapping segment.  VGPR
+        tiles have not been assigned at this pass, so the split is lossless;
+        moving the whole placement would issue unrelated reads too early and
+        can exhaust partition-zero scheduling capacity.
+        """
+        cfg = self.config
+        if len(partitions) < 2:
+            return
+
+        first_atoms = []
+        cohortSize = cfg.uniformEpochVmemCohortSize
+        for tensor, gran, num_tiles in (
+                ('A', cfg.grA, cfg.numMFMATilesM),
+                ('B', cfg.grB, cfg.numMFMATilesN)):
+            for tile in range(0, num_tiles, gran.mn):
+                first_atoms.append((tensor, tile, tile + gran.mn))
+                if len(first_atoms) == cohortSize:
+                    break
+            if len(first_atoms) == cohortSize:
+                break
+
+        selected = {}
+        for tensor, tile_start, tile_end in first_atoms:
+            selected.setdefault(tensor, []).append((tile_start, tile_end))
+
+        p0 = partitions[0][0]
+        for partition in partitions[1:]:
+            for slot in partition:
+                for index in range(len(slot.lrs) - 1, -1, -1):
+                    lr = slot.lrs[index]
+                    if lr.mtIteration != 0 or lr.tensor not in ('A', 'B'):
+                        continue
+                    target_ranges = selected.get(lr.tensor, [])
+                    if not any(
+                            lr.tiles.tileId_start < tile_end
+                            and tile_start < lr.tiles.tileId_end
+                            for tile_start, tile_end in target_ranges):
+                        continue
+
+                    cuts = {lr.tiles.tileId_start, lr.tiles.tileId_end}
+                    for tile_start, tile_end in target_ranges:
+                        if lr.tiles.tileId_start < tile_start < lr.tiles.tileId_end:
+                            cuts.add(tile_start)
+                        if lr.tiles.tileId_start < tile_end < lr.tiles.tileId_end:
+                            cuts.add(tile_end)
+
+                    remaining = []
+                    boundaries = sorted(cuts)
+                    for tile_start, tile_end in zip(boundaries, boundaries[1:]):
+                        segment = copy.copy(lr)
+                        segment.deps = []
+                        segment.preOps = []
+                        segment.postOps = []
+                        segment.vgpr_tile_map = []
+                        segment.tiles = MFMATileRange(
+                            lr.tiles.subIterK_start,
+                            lr.tiles.subIterK_end,
+                            tile_start,
+                            tile_end)
+                        is_selected = any(
+                            tile_start < target_end
+                            and target_start < tile_end
+                            for target_start, target_end in target_ranges)
+                        if is_selected:
+                            segment.partition = 0
+                            segment.subIterK_slot = 0
+                            segment.mustPrecedeP0Overwrite = True
+                            p0.lrs.append(segment)
+                        else:
+                            remaining.append(segment)
+                    slot.lrs[index:index + 1] = remaining
 
     def _place_scale_LRs_epoch(self, partitions):
         """Place the per-epoch scale LRs for the dual-period MXFP8 path.
@@ -1431,7 +1595,7 @@ class LogicalScheduler:
 
             target_pi = (pi + offsetPartition) % numP
             wraps = (pi + offsetPartition) >= numP
-            mt_val = offsetMT + (1 if wraps else 0)
+            ring_mt_val = offsetMT + (1 if wraps else 0)
 
             target_range = part_ranges[target_pi]
 
@@ -1445,6 +1609,10 @@ class LogicalScheduler:
                     items.append(('SB', target_range['B'], cfg.grSB))
 
                 for tensor, (t_start, t_end), gr_gran in items:
+                    mt_val = (self.config.pgr
+                              if self.config.uniformPgrEpoch
+                              and tensor in ('A', 'B')
+                              else ring_mt_val)
                     def _valid_k_for_unroll(k, uid):
                         nu = cfg.numUnroll.get(tensor, 1)
                         if uid >= nu:
@@ -1479,6 +1647,16 @@ class LogicalScheduler:
                    (entry[0], entry[2], entry[3], entry[4], entry[5])
                    not in n2_keys]
 
+        if cfg.uniformPgrEpoch:
+            # A complete epoch is not a partition-ring stream.  Canonicalize
+            # it so each tensor's tile-zero placement (and therefore GRInc)
+            # precedes every later tile for that tensor.
+            gr_list.sort(key=lambda entry: (
+                self._TENSOR_ORDER[entry[0]],
+                entry[1],
+                entry[4],
+                entry[2]))
+
         return gr_list
 
     def _build_gr_slot_bounds(self):
@@ -1512,6 +1690,26 @@ class LogicalScheduler:
                     if key not in upper or flat < upper[key]:
                         upper[key] = flat
         return lower, upper
+
+    def _uniform_epoch_frontier_slot(self) -> int:
+        """Return the first flat slot that consumes the next A/B epoch.
+
+        Uniform PGR2 issues a complete future epoch before this frontier.  A
+        single VMEM wait+barrier there can then publish that epoch for every
+        later consumer and, on the next body, for consumers in the prefix.
+        """
+        numK = self.config.numSubIterK
+        frontiers = [
+            pi * numK + slot.subIterK
+            for pi, partition_slots in enumerate(self._partitions)
+            for slot in partition_slots
+            for lr in slot.lrs
+            if lr.tensor in ('A', 'B') and lr.mtIteration > 0
+        ]
+        if not frontiers:
+            raise ValueError(
+                "uniformPgrEpoch requires an A/B next-epoch LR frontier")
+        return min(frontiers)
 
     @staticmethod
     def _has_lr_conflict(lr_lower, tensor, mt_val, flat,
@@ -1587,7 +1785,8 @@ class LogicalScheduler:
         mfma_per_partition = []
         for pi in range(numP):
             piM, piN = cfg.partition_coords(pi)
-            mfma_per_partition.append(cfg.partitionSizesM[piM] * cfg.partitionSizesN[piN])
+            mfma_per_partition.append(
+                cfg.partitionSizesM[piM] * cfg.partitionSizesN[piN])
 
         weight_prefix = [0]
         for s in dist_slots:
@@ -1599,6 +1798,17 @@ class LogicalScheduler:
             if cfg.grPlacement == GRPlacementStrategy.BUNCHED:
                 # TDM: pin every GR atom to partition 0, subIterK 0.
                 rel = 0
+            elif cfg.uniformPgrEpoch:
+                # Keep non-frontier cohorts bounded like the CMS schedule; the
+                # frontier receives the remainder immediately before its epoch
+                # wait.  Limit the chunk further for small partitions.
+                nonfrontier_chunk = max(
+                    1,
+                    min(cfg.uniformEpochVmemCohortSize, min(
+                        mfma_per_partition[s // numK]
+                        for s in dist_slots[:-1]
+                    ))) if len(dist_slots) > 1 else nAtoms
+                rel = min(i // nonfrontier_chunk, len(dist_slots) - 1)
             else:
                 rel = min(bisect_left(slot_boundaries, i * total_weight + 1),
                           len(dist_slots) - 1) if nAtoms else 0
@@ -1615,6 +1825,13 @@ class LogicalScheduler:
             if slot_idx >= len(dist_slots):
                 slot = min(last, dist_slots[-1])
             dest = collapse_slot if collapse_slot is not None else slot
+            if (cfg.uniformPgrEpoch
+                    and self._has_lr_conflict(
+                        lower, tensor, mt_val, dest, ts, te, ks, ke)):
+                raise ValueError(
+                    "uniformPgrEpoch cannot place the complete future epoch "
+                    f"before its LR frontier: {tensor} mt={mt_val} "
+                    f"tiles=[{ts},{te}) K=[{ks},{ke}) at flat slot {dest}")
             entry = ((slot, tensor, mt_val, ts, te, ks, ke)
                      if collapse_slot is not None
                      else (tensor, mt_val, ts, te, ks, ke))
@@ -1681,6 +1898,20 @@ class LogicalScheduler:
         maxUnroll = max(self.config.numUnroll.values())
         gr_slot_bounds = self._build_gr_slot_bounds()
         numK = self.config.numSubIterK
+        uniform_slots = None
+        if self.config.uniformPgrEpoch:
+            frontier = self._uniform_epoch_frontier_slot()
+            # Include the frontier slot itself.  Its future-epoch GR cohort is
+            # physically ordered before the epoch wait, and the wait's vmcnt
+            # post-adjustment accounts for those same-slot requests.  This is
+            # the CMS ordering: final future loads, vmcnt+barrier, then the
+            # first next-epoch LDS reads.
+            # The first configured future-write cohort and every overlapping
+            # current read are now co-located in partition zero.  Include that
+            # slot so its LR→GR dependency emits the overwrite barrier there,
+            # then retain the same cohort bound in later partitions.
+            epoch_start = 0
+            uniform_slots = list(range(epoch_start, frontier + 1))
         last_uid_slot = None
         if maxUnroll > 1 and pgr == 1:
             # Multi-DU shares one SRD: all uid=0 GRs must finish (and
@@ -1698,6 +1929,10 @@ class LogicalScheduler:
             if uid > 0 and last_uid_slot is not None:
                 self._distribute_grs(gr_list, gr_slot_bounds, unrollId=uid,
                                       allowed_slots=[last_uid_slot])
+            elif uniform_slots is not None:
+                self._distribute_grs(
+                    gr_list, gr_slot_bounds, unrollId=uid,
+                    allowed_slots=uniform_slots)
             else:
                 self._distribute_grs(gr_list, gr_slot_bounds, unrollId=uid)
 
@@ -2457,6 +2692,75 @@ class LogicalScheduler:
                         for d in same + cross)
                     gr.preOps = [WaitLROp(has_sync=True)] if has_lr_dep else []
 
+        if self.config.uniformPgrEpoch:
+            self._apply_uniform_epoch_wait()
+
+    def _apply_uniform_epoch_wait(self):
+        """Replace per-partition VMEM waits with one complete-epoch frontier.
+
+        All requests for the body's future A/B epoch have already been
+        constrained to the slots preceding the first next-epoch LR.  At that
+        LR, requests from the prior body are older in the VMEM FIFO than every
+        current-body future request.  Waiting with the number of those younger
+        requests therefore retires the complete producer epoch without
+        draining the prefetch epoch.
+
+        Dual-period scale requests are absent from unroll body C1, so retain a
+        per-body count instead of weakening C1 with C0's two extra requests.
+        LDS read-before-overwrite synchronization on GR placements is left
+        untouched; this only consolidates producer-completion waits.
+        """
+        cfg = self.config
+        frontier_flat = self._uniform_epoch_frontier_slot()
+        numK = cfg.numSubIterK
+        frontier_pi, frontier_si = divmod(frontier_flat, numK)
+        frontier_slot = self._partitions[frontier_pi][frontier_si]
+        consumers = [
+            lr for lr in frontier_slot.lrs
+            if lr.tensor in ('A', 'B') and lr.mtIteration > 0
+        ]
+        if not consumers:
+            raise ValueError(
+                "uniformPgrEpoch frontier has no next-epoch A/B consumer")
+
+        # Remove every partition-local producer wait.  Their LDS overwrite
+        # waits live on GR.preOps and are deliberately not modified.
+        for partition_slots in self._partitions:
+            for slot in partition_slots:
+                for lr in slot.lrs:
+                    lr.preOps = [
+                        op for op in lr.preOps
+                        if not isinstance(op, WaitGROp)
+                    ]
+
+        num_bodies = cfg.scaleReuse if cfg.dualPeriodScale else 1
+        counts_by_unroll = []
+        for unroll_iter in range(num_bodies):
+            counts = WaitGRCounts()
+            for flat in range(frontier_flat):
+                pi, si = divmod(flat, numK)
+                for gr in self._partitions[pi][si].grs:
+                    # Only future-epoch requests are younger than the producer
+                    # epoch consumed at the frontier.  A same-epoch request,
+                    # if a scale geometry ever produces one, must drain.
+                    if gr.mtIteration < cfg.pgr:
+                        continue
+                    if (gr.tensor in ('SA', 'SB')
+                            and cfg.dualPeriodScale
+                            and unroll_iter > 0):
+                        continue
+                    setattr(
+                        counts, gr.tensor,
+                        getattr(counts, gr.tensor)
+                        + self._count_gr_atoms(gr))
+            counts_by_unroll.append(counts)
+
+        consumers[0].preOps.append(WaitGROp(
+            wait_gr_counts=counts_by_unroll[0],
+            wait_gr_counts_by_unroll=tuple(counts_by_unroll),
+            has_sync=True,
+            adjustVmcnt=True))
+
 
     def _per_uid_k(self, tensor: str) -> int:
         """Number of subIterK slots per unrollId for a tensor."""
@@ -2487,8 +2791,10 @@ class LogicalScheduler:
         lr_inc_tensors = set()  # tensors that already received lr_inc via MT transition
 
         multiDU = self._is_multi_du() and self.config.pgr == 1
+        previous_partition_last_gr = None
 
         for pi, slots in enumerate(self._partitions):
+            this_partition_last_gr = None
             for slot in slots:
                 for lr in slot.lrs:
                     tensor = lr.tensor
@@ -2523,8 +2829,21 @@ class LogicalScheduler:
                             prev_mt = 0
                         if prev_mt != mt:
                             if gr.tiles.tileId_start == 0:
-                                gr.preOps.append(GRIncOp(tensor=tensor, unrollId=uid))
+                                inc = GRIncOp(tensor=tensor, unrollId=uid)
+                                if (self.config.uniformPgrEpoch
+                                        and previous_partition_last_gr is not None):
+                                    # Fill the preceding partition's scalar
+                                    # slots with the next tensor's SRD/LDS
+                                    # transition.  Canonical epoch order makes
+                                    # this both dependency-safe and guarantees
+                                    # the increment precedes tile zero.
+                                    previous_partition_last_gr.postOps.append(inc)
+                                else:
+                                    gr.preOps.append(inc)
                     last_gr_mt[key] = mt
+                    this_partition_last_gr = gr
+            if this_partition_last_gr is not None:
+                previous_partition_last_gr = this_partition_last_gr
 
         if multiDU:
             for (tensor, uid), gr in last_gr.items():
@@ -2681,7 +3000,18 @@ class LogicalScheduler:
             # vmcnt and re-introduce the wrap-LR race).
             merged_force_drain = any(
                 getattr(op, 'force_drain', False) for op, _ in wait_gr_by_lr)
+            dynamic_counts = [
+                op.wait_gr_counts_by_unroll
+                for op, _ in wait_gr_by_lr
+                if op.wait_gr_counts_by_unroll is not None
+            ]
+            if len(dynamic_counts) > 1:
+                raise ValueError(
+                    "cannot merge multiple body-specific wait_gr frontiers")
             result.append(WaitGROp(wait_gr_counts=merged_counts,
+                                   wait_gr_counts_by_unroll=(
+                                       dynamic_counts[0]
+                                       if dynamic_counts else None),
                                    has_sync=has_wait_gr_sync,
                                    adjustVmcnt=adjust,
                                    force_drain=merged_force_drain))
@@ -3111,6 +3441,7 @@ class LogicalScheduler:
                     elif em.opType == 'wait_gr':
                         if src.wait_gr_counts is not None:
                             src.wait_gr_counts = WaitGRCounts()
+                            src.wait_gr_counts_by_unroll = None
                 part_ngll.append(self._rewire_before(new_emitted, removed))
             ngll.append(part_ngll)
 
@@ -3162,6 +3493,7 @@ class LogicalScheduler:
                 for em in new_emitted:
                     if em.opType == 'wait_gr' and em.moduleId not in removed:
                         em.source.wait_gr_counts = WaitGRCounts()
+                        em.source.wait_gr_counts_by_unroll = None
 
                 # Find Sync modules paired with removed wait_gr
                 for em in new_emitted:
@@ -3426,8 +3758,10 @@ class LogicalScheduler:
     def _make_preloop_mt1_grs(self) -> List[GRPlacement]:
         """Create MT1 GRs for the PGR=2 preloop, ordered to match the mainloop.
 
-        Covers partitions 0..offsetPartition-1 with proper deduplication.
-        Each unique (tensor, uid, tile-range, k-range) appears exactly once.
+        Covers partitions 0..offsetPartition-1 in legacy mode.  Uniform PGR
+        epoch mode covers every partition for A/B (but retains the independent
+        scale range).  Each unique (tensor, uid, tile-range, k-range) appears
+        exactly once.
 
         For multi-DU data tensors (numUnroll > 1), each uid only emits GRs
         for the K slots that belong to it (uid u → k in [u*grGran.k, (u+1)*grGran.k)).
@@ -3438,8 +3772,13 @@ class LogicalScheduler:
         seen = set()
         result = []
         maxUnroll = max(cfg.numUnroll.values()) if cfg.numUnroll else 1
+        preloop_partitions = (
+            range(cfg.numPartitions)
+            if cfg.uniformPgrEpoch
+            else range(cfg.offsetPartition)
+        )
         for uid in range(maxUnroll):
-            for pi in range(cfg.offsetPartition):
+            for pi in preloop_partitions:
                 target_range = self._partition_tile_range(pi)
                 for slot in self._partitions[0]:
                     k = slot.mfma.subIterK
@@ -3449,6 +3788,10 @@ class LogicalScheduler:
                         items.append(('SA', target_range['A'], cfg.grSA))
                         items.append(('SB', target_range['B'], cfg.grSB))
                     for tensor, (t_start, t_end), gr_gran in items:
+                        if (cfg.uniformPgrEpoch
+                                and tensor in ('SA', 'SB')
+                                and pi >= cfg.offsetPartition):
+                            continue
                         nUnroll = cfg.numUnroll.get(tensor, 1)
                         if uid >= nUnroll:
                             continue
@@ -3484,7 +3827,12 @@ class LogicalScheduler:
 
         seen = set()
         result = []
-        for pi in range(cfg.offsetPartition):
+        preloop_partitions = (
+            range(cfg.numPartitions)
+            if cfg.uniformPgrEpoch
+            else range(cfg.offsetPartition)
+        )
+        for pi in preloop_partitions:
             target_range = self._partition_tile_range(pi)
             for slot in self._partitions[0]:
                 k = slot.mfma.subIterK
@@ -3494,6 +3842,10 @@ class LogicalScheduler:
                     items.append(('SA', target_range['A'], cfg.grSA))
                     items.append(('SB', target_range['B'], cfg.grSB))
                 for tensor, (t_start, t_end), gr_gran in items:
+                    if (cfg.uniformPgrEpoch
+                            and tensor in ('SA', 'SB')
+                            and pi >= cfg.offsetPartition):
+                        continue
                     nUnroll = cfg.numUnroll.get(tensor, 1)
                     if uid >= nUnroll:
                         continue
@@ -3533,6 +3885,41 @@ class LogicalScheduler:
                                        emitter.dtileInfo)
         return InlineModuleOp(build=_build_initC, label="initC_overlap")
 
+    def _wait_gr_counts_for_ops(self, ops) -> WaitGRCounts:
+        """Count GR atoms in an op sequence for a partial preloop wait."""
+        counts = WaitGRCounts()
+        for op in ops:
+            if not isinstance(op, GRPlacement):
+                continue
+            tensor = op.tensor
+            setattr(counts, tensor,
+                    getattr(counts, tensor) + self._count_gr_atoms(op))
+        return counts
+
+    @staticmethod
+    def _make_internal_label_op(name: str) -> InlineModuleOp:
+        """Create a local label used to join guarded preloop paths."""
+        def _build_label(_emitter):
+            from rocisa.code import Label, Module
+            module = Module()
+            module.add(Label(name, ""))
+            return module
+        return InlineModuleOp(build=_build_label, label=name)
+
+    @staticmethod
+    def _make_internal_branch_op(target: str) -> InlineModuleOp:
+        """Create an unconditional branch between guarded preloop paths."""
+        def _build_branch(_emitter):
+            from rocisa.code import Label, Module
+            from rocisa.instruction import SBranch
+            module = Module()
+            module.add(SBranch(
+                labelName=Label(target, "").getLabelName(),
+                comment="join guarded preloop wait paths"))
+            return module
+        return InlineModuleOp(build=_build_branch,
+                              label=f"branch_{target}")
+
     def build_preloop(self) -> EmittedSchedule:
         """Build preloop: pipeline initialization sequence before mainloop.
 
@@ -3547,7 +3934,7 @@ class LogicalScheduler:
           LR          — first partition, subIterK=0
           skip(LE 1, NLL)
 
-        PGR=2 sequence:
+        Legacy PGR=2 sequence:
           GR(MT 0)    — all tensors, all tiles (× numUnroll if unrolled)
           initC       — accumulator zeroing, overlapped with in-flight GR
           WaitGR      — wait for global reads to land in LDS
@@ -3555,6 +3942,18 @@ class LogicalScheduler:
           LR          — first partition, subIterK=0
           skip(LE 1, NLL)
           GR(MT 1)    — first partition tiles (× numUnroll if unrolled)
+          skip(LE 2, NGLL)
+
+        Uniform-epoch PGR=2 sequence (dual-period MXFP8 only):
+          GR(MT 0)    — all tensors, all tiles
+          initC       — accumulator zeroing, overlapped with in-flight GR
+          guard(LE 1) — skip speculative MT 1 loads on the NLL path
+          GR(MT 1)    — complete A/B epoch plus due scales
+          WaitGR      — partial wait; leave MT 1 loads in flight
+          cold WaitGR — full drain when the guard skipped MT 1
+          Sync        — barrier
+          LR          — first partition, subIterK=0
+          skip(LE 1, NLL)
           skip(LE 2, NGLL)
 
         Returns [1 partition][1 subIterK][EmittedModules] to match emit() shape.
@@ -3632,30 +4031,78 @@ class LogicalScheduler:
                 for uid in range(maxUnroll):
                     mt1_ops.extend(self._make_preloop_mt1_grs_uid(uid))
                     mt1_ops.extend(self._make_depops_uid(GRIncOp, uid))
-                emitted = self._to_emitted([
-                    *preloop_ops,
-                    initC_op,
-                    WaitGROp(wait_gr_counts=WaitGRCounts()),
-                    SyncOp(),
-                    *self._make_lr_all_tensors(lr_tiles),
-                    SkipOp(compare='LE', value=1, target='NLL'),
-                    *mt1_ops,
-                    *gl2_preloop_ops,
-                    SkipOp(compare='LE', value=2, target='NGLL'),
-                ])
+                if cfg.uniformPgrEpoch:
+                    mt1_counts = self._wait_gr_counts_for_ops(mt1_ops)
+                    no_mt1_label = "SubtilePreloopNoMT1"
+                    wait_done_label = "SubtilePreloopWaitDone"
+                    emitted = self._to_emitted([
+                        *preloop_ops,
+                        initC_op,
+                        SkipOp(compare='LE', value=1, target=no_mt1_label,
+                               rawLabel=True,
+                               branchComment="skip MT1 prefetch on NLL path"),
+                        *mt1_ops,
+                        WaitGROp(wait_gr_counts=mt1_counts),
+                        self._make_internal_branch_op(wait_done_label),
+                        self._make_internal_label_op(no_mt1_label),
+                        WaitGROp(wait_gr_counts=WaitGRCounts()),
+                        self._make_internal_label_op(wait_done_label),
+                        SyncOp(),
+                        *self._make_lr_all_tensors(lr_tiles),
+                        SkipOp(compare='LE', value=1, target='NLL'),
+                        *gl2_preloop_ops,
+                        SkipOp(compare='LE', value=2, target='NGLL'),
+                    ])
+                else:
+                    emitted = self._to_emitted([
+                        *preloop_ops,
+                        initC_op,
+                        WaitGROp(wait_gr_counts=WaitGRCounts()),
+                        SyncOp(),
+                        *self._make_lr_all_tensors(lr_tiles),
+                        SkipOp(compare='LE', value=1, target='NLL'),
+                        *mt1_ops,
+                        *gl2_preloop_ops,
+                        SkipOp(compare='LE', value=2, target='NGLL'),
+                    ])
             else:
-                emitted = self._to_emitted([
-                    *self._make_gr_all_tensors(0, all_tiles),
-                    *self._make_depops_all_tensors(GRIncOp),
-                    initC_op,
-                    WaitGROp(wait_gr_counts=WaitGRCounts()),
-                    SyncOp(),
-                    *self._make_lr_all_tensors(lr_tiles),
-                    SkipOp(compare='LE', value=1, target='NLL'),
-                    *self._make_preloop_mt1_grs(),
-                    *gl2_preloop_ops,
-                    SkipOp(compare='LE', value=2, target='NGLL'),
-                ])
+                mt1_ops = self._make_preloop_mt1_grs()
+                if cfg.uniformPgrEpoch:
+                    mt1_counts = self._wait_gr_counts_for_ops(mt1_ops)
+                    no_mt1_label = "SubtilePreloopNoMT1"
+                    wait_done_label = "SubtilePreloopWaitDone"
+                    emitted = self._to_emitted([
+                        *self._make_gr_all_tensors(0, all_tiles),
+                        *self._make_depops_all_tensors(GRIncOp),
+                        initC_op,
+                        SkipOp(compare='LE', value=1, target=no_mt1_label,
+                               rawLabel=True,
+                               branchComment="skip MT1 prefetch on NLL path"),
+                        *mt1_ops,
+                        WaitGROp(wait_gr_counts=mt1_counts),
+                        self._make_internal_branch_op(wait_done_label),
+                        self._make_internal_label_op(no_mt1_label),
+                        WaitGROp(wait_gr_counts=WaitGRCounts()),
+                        self._make_internal_label_op(wait_done_label),
+                        SyncOp(),
+                        *self._make_lr_all_tensors(lr_tiles),
+                        SkipOp(compare='LE', value=1, target='NLL'),
+                        *gl2_preloop_ops,
+                        SkipOp(compare='LE', value=2, target='NGLL'),
+                    ])
+                else:
+                    emitted = self._to_emitted([
+                        *self._make_gr_all_tensors(0, all_tiles),
+                        *self._make_depops_all_tensors(GRIncOp),
+                        initC_op,
+                        WaitGROp(wait_gr_counts=WaitGRCounts()),
+                        SyncOp(),
+                        *self._make_lr_all_tensors(lr_tiles),
+                        SkipOp(compare='LE', value=1, target='NLL'),
+                        *mt1_ops,
+                        *gl2_preloop_ops,
+                        SkipOp(compare='LE', value=2, target='NGLL'),
+                    ])
 
         self._preloop_emitted = [[emitted]]
         return self._preloop_emitted
@@ -3669,7 +4116,15 @@ class LogicalScheduler:
         for interleaving. When schedule=False, emits instructions sequentially.
         """
         from .InstructionScheduler import (
+            _DtlIntervalCapacityError,
+            _ADVANCE_FINAL_PARTITION_FOLLOWERS,
+            _DROP_REDUNDANT_FINAL_PARTITION_LGKM_WAIT,
+            _FINAL_ENTRY_ANCHOR_ADVANCE_MFMAS,
+            _RIGHT_ALIGN_PREVIOUS_DTL_BEFORE_ADVANCED_SUFFIX,
+            advancePartitionInterleave,
+            eliminateRedundantLgkmDrains,
             instructionSchedule,
+            safeOutstandingLocalReadSuffix,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
@@ -3677,7 +4132,8 @@ class LogicalScheduler:
             insertLRSwapRawWaitAlu, setMatrixReuse, insertLRSwapWarWaitAlu)
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
-        from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SCBranchSCC1, SMovB32
+        from rocisa.instruction import (
+            SCmpEQU32, SCBranchSCC0, SCBranchSCC1, SMovB32, SWaitCnt)
 
         # gfx1250 needs a larger ds_read->waitcnt gap.
         isGfx1250 = writer.states.archCaps.get("HasWmmaArbStallBit", False)
@@ -3696,17 +4152,80 @@ class LogicalScheduler:
         pap_merge_label = Label("SubtilePAPPreloopFirstGRMerge", "") if use_pap_preloop_skip else None
         skipping_first_gr_group = False
         first_gr_group_done = False
+        use_partial_lr_waits = (
+            schedule
+            and self.config.prefetchNextPartition
+            and self.config.numSubIterK == 1
+            and label.startswith("MAINLOOP")
+        )
+        previous_schedule = None
+        first_cell = None
+
+        def mfma_count(em_list):
+            return sum(
+                len(em.instructions)
+                for em in em_list
+                if em.opType == "mfma"
+            )
+
         for pi, partition_emitted in enumerate(emitted_3d):
             for k, em_list in enumerate(partition_emitted):
                 module.addComment0(f"partition={pi} subIterK={k}")
                 has_mfma = any(em.opType == 'mfma' for em in em_list)
 
                 if schedule and em_list and has_mfma:
-                    scheduled = instructionSchedule(
-                        em_list,
-                        multiDU=self._is_multi_du(),
-                        minGapDsReadToWait=minGapDsReadToWait)
+                    current_mfma_count = mfma_count(em_list)
+                    if use_partial_lr_waits and previous_schedule is not None:
+                        previous_scheduled, previous_em_list = previous_schedule
+                        safe_count = safeOutstandingLocalReadSuffix(
+                            previous_scheduled,
+                            previous_em_list,
+                            current_mfma_count,
+                        )
+                        _set_entry_wait_lr_count(em_list, safe_count)
+                    try:
+                        scheduled = instructionSchedule(
+                            em_list,
+                            multiDU=self._is_multi_du(),
+                            minGapDsReadToWait=minGapDsReadToWait,
+                            partitionPrefetch=self.config.prefetchNextPartition,
+                            limitDtlBundlesPerMfma=self.config.dualPeriodScale,
+                            uniformPgrEpoch=self.config.uniformPgrEpoch)
+                    except _DtlIntervalCapacityError:
+                        # Dependency windows can make the simple request-count
+                        # capacity check optimistic. Retry only this cell with
+                        # the prior legal density policy.
+                        scheduled = instructionSchedule(
+                            em_list,
+                            multiDU=self._is_multi_du(),
+                            minGapDsReadToWait=minGapDsReadToWait,
+                            partitionPrefetch=self.config.prefetchNextPartition,
+                            limitDtlBundlesPerMfma=False,
+                            uniformPgrEpoch=self.config.uniformPgrEpoch)
+                    if (
+                            self.config.uniformPgrEpoch
+                            and self.config.numSubIterK == 1
+                            and label.startswith("MAINLOOP")
+                            and pi == len(emitted_3d) - 1
+                            and k == 0
+                            and previous_schedule is not None):
+                        advancePartitionInterleave(
+                            previous_schedule[0],
+                            scheduled,
+                            _FINAL_ENTRY_ANCHOR_ADVANCE_MFMAS,
+                            rightAlignPreviousDtl=(
+                                _RIGHT_ALIGN_PREVIOUS_DTL_BEFORE_ADVANCED_SUFFIX),
+                            maxPreviousDtlLoads=(
+                                self.config.uniformEpochVmemCohortSize),
+                            dropRedundantFinalLgkm=(
+                                _DROP_REDUNDANT_FINAL_PARTITION_LGKM_WAIT),
+                            advanceFinalFollowers=(
+                                _ADVANCE_FINAL_PARTITION_FOLLOWERS))
                     module.add(scheduled)
+                    if use_partial_lr_waits:
+                        if first_cell is None:
+                            first_cell = (em_list, current_mfma_count)
+                        previous_schedule = (scheduled, em_list)
                 else:
                     for em in em_list:
                         if use_pap_preloop_skip and not first_gr_group_done:
@@ -3724,6 +4243,23 @@ class LogicalScheduler:
                                 first_gr_group_done = True
                         for inst in em.instructions:
                             module.add(inst)
+        if (use_partial_lr_waits
+                and previous_schedule is not None
+                and first_cell is not None):
+            previous_scheduled, previous_em_list = previous_schedule
+            first_em_list, first_mfma_count = first_cell
+            safe_count = safeOutstandingLocalReadSuffix(
+                previous_scheduled,
+                previous_em_list,
+                first_mfma_count,
+            )
+            _set_entry_wait_lr_count(first_em_list, safe_count)
+        if use_partial_lr_waits:
+            # Dependency lowering creates correctness waits independently.
+            # Once every partition has its final physical placement, remove a
+            # later full LGKM-only drain when an earlier full drain dominates
+            # it and no LDS/SMEM producer intervenes.
+            eliminateRedundantLgkmDrains(module)
         if use_pap_preloop_skip and skipping_first_gr_group and not first_gr_group_done:
             module.add(pap_merge_label)
             module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0,
@@ -4028,10 +4564,57 @@ class LogicalScheduler:
         # the mask vgprs (kReg, vDiff, …) that init allocates.
         for inst in self._emitter.emit_mask_k_init():
             module.add(inst)
-        self._emitter.populate(self._tailloop_emitted, unroll_iter=0)
-        module.add(self._emitLoop(writer, kernel, "TAILLOOP",
-                                  self._tailloop_emitted,
-                                  schedule=False))
+
+        if not self.config.dualPeriodScale:
+            self._emitter.populate(self._tailloop_emitted, unroll_iter=0)
+            module.add(self._emitLoop(writer, kernel, "TAILLOOP",
+                                      self._tailloop_emitted,
+                                      schedule=False))
+        else:
+            # The scale dword spans two DepthU=128 data phases.  A residual
+            # tail after an odd number of complete data iterations must select
+            # phase 1; always emitting unroll_iter=0 silently reuses phase 0
+            # for K in [129,255], [385,511], ... .  The tail belongs to the
+            # final global K interval under both GSU and StreamK, so derive the
+            # phase from global K rather than from a workgroup-local loop count.
+            assert self.config.scaleReuse == 2, \
+                "dual-period tail dispatch currently supports scaleReuse=2"
+            assert kernel["DepthU"] > 0 and \
+                kernel["DepthU"] & (kernel["DepthU"] - 1) == 0, \
+                "dual-period tail dispatch requires a power-of-two DepthU"
+
+            from rocisa.code import Label
+            from rocisa.container import sgpr
+            from rocisa.instruction import SCBranchSCC1, SBranch
+
+            phase1 = Label("SubtileTailPhase1", "")
+            phaseDone = Label("SubtileTailPhaseDone", "")
+            phaseBit = kernel["DepthU"].bit_length() - 1
+            unrollIdx = writer.states.unrollIdx
+
+            bodies = []
+            for phase in range(2):
+                emitted = copy.deepcopy(self._tailloop_emitted)
+                self._emitter.populate(
+                    emitted, unroll_iter=0, mfma_scale_phase=phase)
+                bodies.append(self._emitLoop(
+                    writer, kernel, f"TAILLOOP_PHASE{phase}", emitted,
+                    schedule=False))
+
+            module.add(SBitcmp1B32(
+                src0=sgpr(f"SizesSum+{unrollIdx}"), src1=phaseBit,
+                comment="dual-period tail: select completed-DepthU parity"))
+            module.add(SCBranchSCC1(
+                labelName=phase1.getLabelName(),
+                comment="odd completed DepthU count -> scale phase 1"))
+            module.add(bodies[0])
+            module.add(SBranch(
+                labelName=phaseDone.getLabelName(),
+                comment="skip scale phase 1 tail body"))
+            module.add(phase1)
+            module.add(bodies[1])
+            module.add(phaseDone)
+
         for inst in self._emitter.emit_mask_k_done():
             module.add(inst)
         return module

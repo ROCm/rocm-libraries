@@ -4,9 +4,9 @@
 # (HostPreSwizzle) engage the _DualPeriodMXFP8 gate, which auto-selects the
 # 2x2 next-partition PLR schedule (no environment variables required).
 #
-# Problem K values straddle the data-DU (128), epoch (256) and 3*DU (384)
-# boundaries (127/128/129, 255/256/257, 383/384/385) to exercise the
-# phase-aware tail and epoch/phase cadence, plus a deep-K throughput shape.
+# Supported residual-K values (multiples of MXBlock=32) exercise tails on
+# both sides of the data-DU (128), epoch (256), and 3*DU (384) boundaries,
+# including both scale-byte phases, plus a deep-K throughput shape.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict]
 
@@ -57,7 +57,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1, 1, 8, 4, 2, 4]
         - PrefetchGlobalRead: [2]
-        - PrefetchLocalRead: [1]
+        - PrefetchLocalRead: [0]
         - DepthU: [128]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
@@ -70,15 +70,16 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           # Single MT256x256 tile — isolate the K-loop / tail / epoch cadence.
-          - Exact: [256, 256, 1, 127]   # < 1 data-DU: tail only
+          - Exact: [256, 256, 1, 96]    # tail only, scale phase 0
           - Exact: [256, 256, 1, 128]   # exactly 1 data-DU (half an epoch)
-          - Exact: [256, 256, 1, 129]   # 1 data-DU + 1 tail
-          - Exact: [256, 256, 1, 255]   # 1 epoch - 1
+          - Exact: [256, 256, 1, 160]   # 1 data-DU + tail, scale phase 1
+          - Exact: [256, 256, 1, 224]   # late scale-phase-1 tail
           - Exact: [256, 256, 1, 256]   # exactly 1 scale epoch
-          - Exact: [256, 256, 1, 257]   # 1 epoch + 1
-          - Exact: [256, 256, 1, 383]   # 1 epoch + 1 data-DU - 1
+          - Exact: [256, 256, 1, 288]   # 1 epoch + tail, scale phase 0
+          - Exact: [256, 256, 1, 352]   # late scale-phase-0 tail
           - Exact: [256, 256, 1, 384]   # 1 epoch + 1 data-DU
-          - Exact: [256, 256, 1, 385]   # 1 epoch + 1 data-DU + 1
+          - Exact: [256, 256, 1, 416]   # 3 data-DUs + tail, scale phase 1
+          - Exact: [256, 256, 1, 480]   # late scale-phase-1 tail
           - Exact: [256, 256, 1, 512]   # 2 epochs
           - Exact: [256, 256, 1, 4096]  # deep K, single tile
           # Multi-tile shapes — exercise StreamK partial tiles with scales.
