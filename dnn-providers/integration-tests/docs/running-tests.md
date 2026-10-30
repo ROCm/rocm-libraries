@@ -441,6 +441,40 @@ over the spaces) until the budget ends, a `--samples` cap is hit, or you press C
 The current batch finishes and the report is still written. A crash is logged and the
 run continues.
 
+**One explicit sample (`--row`).** `--row <file>` runs exactly one sample whose axis values
+you give, instead of drawing any. It replays a finding at a modified axis, runs a size
+ladder of chosen shapes, and is what a shrunk finding's `replay.sh` calls. The file is
+JSON:
+
+```json
+{"space": "RMSNorm/Default",
+ "axes": {"dtype": "bfloat16", "x_dtype": "bfloat16", "layout": "nhwc", "ndim": 4, "n": 2,
+          "c": 115, "d3": 1, "h": 2, "w": 256, "k": 2, "domain": "constant",
+          "alignment": 128, "placement": "exact"},
+ "data_seed": 913377, "case_id": "s913377"}
+```
+
+`axes` names every axis of the space, `late` ones included (a late axis is just a value
+here), and nothing else; each value must be one the axis can draw (a listed value, or an
+integer inside its `range`; the `axis_values` of a failure's `repro.json` are such a set). `data_seed` becomes the case's `metadata.seed`. `case_id` is
+optional, letters, digits and `_` only, and defaults to `row`. It is the case's id and so the
+last part of the GTest name: give the id of the drawn sample (`s913377`) to get the name
+that run had. The driver derives the other values, checks the space's constraints again and
+renders the sample as a drawn one is rendered. A row that is not a legal sample (a missing
+or unknown axis, a value the axis cannot draw, a violated constraint) or a file that does not
+parse is a usage error: exit status 2, the reason on stderr, and nothing written.
+
+The case goes to the same layout as a drawn batch of one,
+`bundles/gauntlet/<Op>/<Space>/<tag>_cases/`, so the GTest name
+(`gauntlet_<Op>_<Space>_<tag>_cases.<case_id>`) and the engine TOML tolerances and skip
+globs that match it are those of a drawn sample with that id. The outcome, `outcomes.jsonl`,
+`summary.json` (with `"row"` holding the file's content and `"seed": null`) and the
+failure folder are written as in any run, with the axes in `repro.json` and `replay.txt`,
+and `replay.sh` replays with `--row failures/<case>/row.json`. `--row` cannot be combined
+with `--samples`, `--seed`, `--data-seed`, `--filter` or `--time-budget` (a usage error); the
+`HIPDNN_FUZZ_*` variables for them are ignored. The binary flags, `--spaces-dir`,
+`--work-dir` and `--case-timeout` apply as usual.
+
 **Every sample gets one outcome.**
 
 | What happened | Outcome |
@@ -474,7 +508,8 @@ the expanded graph (`<case>.json`, tensor UIDs in canonical order), its metadata
 and template, shape seed and axis values, data seed, host or device fill, engine, arch,
 ROCm and git versions, flags and `HIPDNN_*` environment), the outcome record, the
 binary's log tail, and `replay.sh`: one command that regenerates the same graph and the
-same input tensors. Device-filled inputs differ from the host fill's, so a replay uses
+same input tensors (for a [`--row`](#gauntlet-fuzz-runs) run, `row.json` holds the row it
+replays from). Device-filled inputs differ from the host fill's, so a replay uses
 the fill path of the original run. To turn a finding into a checked-in case, see
 [Freeze a fuzz finding](adding-tests.md#freeze-a-fuzz-finding).
 

@@ -18,6 +18,7 @@ import importlib.util
 import json
 import os
 import random
+import re
 import shlex
 import shutil
 import signal
@@ -2979,3 +2980,443 @@ def test_preflight_accepts_a_binary_that_has_no_compiled_in_tests(run):
     run.control(no_builtin=True)
     assert run.run("--samples", "2", "--batch-size", "2") == 0
     assert [o["outcome"] for o in run.outcome_list] == ["PASS", "PASS"]
+
+
+# --------------------------------------------------------------------------
+# --row: one explicit sample
+# --------------------------------------------------------------------------
+
+
+def _write_row(tmp_path, space="SdpaFwd/Default", name="row.json", **fields):
+    """A --row file for ``space``; ``fields`` replace or add keys (a None value drops one)."""
+    spec = {"space": space, "axes": {}, "data_seed": 7}
+    spec.update(fields)
+    path = tmp_path / name
+    path.write_text(json.dumps({k: v for k, v in spec.items() if v is not None}))
+    return path
+
+
+def _row_args(run, row_path, *extra):
+    return [
+        "--binary", str(STUB),
+        "--work-dir", str(run.work),
+        "--case-timeout", "30s",
+        "--row", str(row_path),
+        *extra,
+    ]  # fmt: skip
+
+
+def _run_row(run, row_path, *extra):
+    return fuzz.main(_row_args(run, row_path, *extra))
+
+
+def _row_of(sample, **fields):
+    return {
+        "space": sample.space.space_id,
+        "axes": sample.axis_values,
+        "data_seed": sample.data_seed,
+        **fields,
+    }
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_a_row_run_has_the_gtest_name_and_sweep_row_of_the_seeded_run_it_replays(
+    run, tmp_path, space_id
+):
+    # bug caught: a --row replay lands in another suite or under another case id, so the engine
+    # TOML's tolerance and skip globs grade it differently from the run that found the defect
+    seed = 4321
+    sample = sampler.sample(space_by_id(space_id), seed)
+    assert run.run("--samples", "1", seed=seed, space=space_id) == 0
+    drawn = run.outcome_list[0]["test"]
+    assert drawn == gtest(space_id, seed)
+    drawn_row = json.loads(
+        (sweep_dir(run.work, space_id, seed) / "sweep.json").read_text()
+    )["cases"][0]
+
+    (tmp_path / "row").mkdir()
+    row_run = Run(tmp_path / "row", run.monkeypatch)
+    row = _write_row(row_run.tmp, **_row_of(sample, case_id=f"s{seed}"))
+    assert _run_row(row_run, row) == 0
+    (outcome,) = row_run.outcome_list
+    assert outcome["test"] == drawn
+    written = json.loads(
+        (sweep_dir(row_run.work, space_id, seed) / "sweep.json").read_text()
+    )["cases"]
+    assert len(written) == 1
+    # the same case, but for the note that says how it was made
+    assert written[0]["metadata"].pop("notes") != drawn_row["metadata"].pop("notes")
+    assert json.dumps(written[0]) == json.dumps(drawn_row)
+    # the same layout under bundles/gauntlet/<Op>/<Space>[/<tag>_cases]
+    assert (sweep_dir(row_run.work, space_id, seed) / "graph.template.json").is_file()
+    # the binary was asked for exactly that test
+    modes = {i["mode"]: i["argv"] for i in row_run.invocations}
+    assert f"--gtest_filter={drawn}" in modes["run"]
+
+
+def test_a_row_without_a_case_id_is_named_row_and_a_given_case_id_is_used(
+    run, tmp_path
+):
+    sample = sampler.sample(space_by_id("SdpaFwd/Default"), 9)
+    assert _run_row(run, _write_row(tmp_path, **_row_of(sample))) == 0
+    suite = gtest("SdpaFwd/Default", 9).split(".")[0]
+    assert run.outcome_list[0]["test"] == f"{suite}.row"
+    assert run.outcome_list[0]["case"] == "row"
+    assert (
+        _run_row(run, _write_row(tmp_path, **_row_of(sample, case_id="ladder_3"))) == 0
+    )
+    assert run.outcome_list[0]["test"] == f"{suite}.ladder_3"
+    rows = json.loads(
+        (sweep_dir(run.work, "SdpaFwd/Default", 9) / "sweep.json").read_text()
+    )["cases"]
+    assert [r["id"] for r in rows] == [
+        "ladder_3"
+    ]  # one case: the old bundle is replaced
+
+
+def test_a_row_run_records_its_outcome_summary_and_failure_folder(run, tmp_path):
+    # bug caught: a one-case run that records nothing, or whose finding cannot be replayed
+    sample = sampler.sample(space_by_id("SdpaFwd/Default"), 31)
+    run.control(default="wrong")
+    row = _write_row(tmp_path, **_row_of(sample, case_id="s31"))
+    assert _run_row(run, row) == 1
+    (outcome,) = run.outcome_list
+    assert outcome["outcome"] == "WRONG" and outcome["case"] == "s31"
+    assert outcome["shape_seed"] is None and outcome["data_seed"] == sample.data_seed
+    summary = run.summary
+    assert summary["outcomes"]["WRONG"] == 1 and summary["samples"] == 1
+    assert summary["reconciled"] is True and summary["exit_code"] == 1
+    assert summary["stopped_because"] == "row" and summary["continuous"] is False
+    assert summary["seed"] is None and summary["data_seed"] == sample.data_seed
+    assert summary["row"] == json.loads(row.read_text()) | {"case_id": "s31"}
+    assert summary["findings"][0]["failure_dir"] == outcome["failure_dir"]
+    assert json.loads((run.work / "samples.jsonl").read_text()) == {
+        "space": "SdpaFwd/Default",
+        "case": "s31",
+        "shape_seed": None,
+        "data_seed": sample.data_seed,
+        "axes": sample.axis_values,
+    }
+
+    folder = run.failure_dir("s31")
+    repro = json.loads((folder / "repro.json").read_text())
+    assert repro["axis_values"] == sample.axis_values and repro["shape_seed"] is None
+    assert repro["row"] == {**_row_of(sample), "case_id": "s31"}
+    assert repro["gtest_name"] == outcome["test"]
+    assert json.loads((folder / "row.json").read_text()) == repro["row"]
+    replay = (folder / "replay.txt").read_text()
+    argv = repro["replay"]["argv"]
+    assert argv[argv.index("--row") + 1] == str(folder / "row.json")
+    assert "--seed" not in argv and "--filter" not in argv and "--samples" not in argv
+    assert "--row" in replay.splitlines()[0] and "--seed" not in replay.splitlines()[0]
+    assert f"axes: {json.dumps(sample.axis_values, sort_keys=True)}" in replay
+    script = (folder / "replay.sh").read_text()
+    assert '--row "$D/row.json"' in script and "--filter" not in script
+    assert "shape seed" not in (folder / "SdpaFwd_Default_s31.meta.json").read_text()
+    assert "explicit row" in (folder / "SdpaFwd_Default_s31.meta.json").read_text()
+
+    # the recorded replay command reproduces it: same GTest name, same row, same outcome
+    _, work, done = _replay(folder)
+    assert done.returncode == 1, done.stdout + done.stderr
+    again = json.loads((work / "outcomes.jsonl").read_text())
+    assert (again["test"], again["outcome"]) == (outcome["test"], "WRONG")
+    replayed = json.loads(
+        (sweep_dir(work, "SdpaFwd/Default", 31) / "sweep.json").read_text()
+    )["cases"]
+    assert json.dumps(replayed[0]) == json.dumps(repro["sweep_row"])
+
+
+@pytest.mark.skipif(shutil.which("sh") is None, reason="needs a POSIX shell")
+def test_a_row_failure_folder_replay_script_runs(run, tmp_path):
+    sample = sampler.sample(space_by_id("SdpaFwd/Default"), 31)
+    run.control(default="wrong")
+    assert _run_row(run, _write_row(tmp_path, **_row_of(sample, case_id="s31"))) == 1
+    folder = run.failure_dir("s31")
+    done = subprocess.run(
+        ["sh", str(folder / "replay.sh")], capture_output=True, text=True, timeout=120
+    )
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert (folder / "replay-work" / "summary.json").is_file()
+
+
+def test_the_stub_can_key_a_behaviour_on_a_rendered_value_not_the_case_id(
+    run, tmp_path
+):
+    # the dims of the sample's tensors are in the written row; the case ids here are all
+    # alike, so only the rendered value can tell the two runs apart
+    sp = space_by_id("SdpaFwd/Default")
+    sample = sampler.sample(sp, 12)
+    sq = sample.row["values"]["tensors"][0]["dims"][2]
+    run.control(
+        match=[
+            {
+                "where": [{"path": "values.tensors.0.dims.2", "op": ">=", "value": sq}],
+                "behaviour": "wrong",
+            }
+        ]
+    )
+    assert _run_row(run, _write_row(tmp_path, **_row_of(sample, case_id="same"))) == 1
+    assert run.outcome_list[0]["outcome"] == "WRONG"
+    run.control(
+        match=[
+            {
+                "where": [{"path": "values.tensors.0.dims.2", "op": ">", "value": sq}],
+                "behaviour": "wrong",
+            }
+        ]
+    )
+    assert _run_row(run, _write_row(tmp_path, **_row_of(sample, case_id="same"))) == 0
+    assert run.outcome_list[0]["outcome"] == "PASS"
+
+
+def test_a_stub_match_needs_every_condition_and_falls_back_to_case_then_default(
+    run, tmp_path
+):
+    sample = sampler.sample(space_by_id("SdpaFwd/Default"), 12)
+    sq = sample.row["values"]["tensors"][0]["dims"][2]
+    seed = sample.data_seed
+    rule = {
+        "where": [
+            {"path": "values.tensors.0.dims.2", "op": "==", "value": sq},
+            {"path": "metadata.seed", "op": "!=", "value": seed},
+        ],
+        "behaviour": "wrong",
+    }
+    row = _write_row(tmp_path, **_row_of(sample, case_id="c1"))
+    run.control(match=[rule])
+    assert _run_row(run, row) == 0  # the second condition fails
+    rule["where"][1]["value"] = seed + 1
+    run.control(match=[rule])
+    assert _run_row(run, row) == 1
+    run.control(match=[rule], cases={"c1": "declined"})
+    assert _run_row(run, row) == 0  # an explicit case entry comes first
+    assert run.outcome_list[0]["outcome"] == "DECLINED"
+    # a path the row lacks and operands that cannot be compared do not match
+    run.control(
+        match=[
+            {"where": [{"path": "node_patches.0.set", "op": "==", "value": 1}],
+             "behaviour": "wrong"},
+            {"where": [{"path": "metadata.notes", "op": "<", "value": 5}],
+             "behaviour": "wrong"},
+        ]
+    )  # fmt: skip
+    assert _run_row(run, row) == 0
+
+
+def test_a_row_that_violates_a_constraint_is_a_usage_error_that_writes_nothing(
+    run, tmp_path, capsys
+):
+    # bug caught: an illegal sample runs, and the engine's answer to it is read as a finding
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    write_space(spaces)  # constraint: n >= a
+    row = _write_row(
+        tmp_path, space="Toy/Default", axes={"a": 3, "n": 1}, case_id="bad"
+    )
+    assert _run_row(run, row, "--spaces-dir", str(spaces)) == 2
+    err = capsys.readouterr().err
+    assert "Toy/Default" in err and "n >= a" in err and "n must reach a" in err
+    assert not run.work.exists() and not run.log.exists()
+    # the same axes with the constraint met run
+    ok = _write_row(tmp_path, space="Toy/Default", axes={"a": 3, "n": 3})
+    assert _run_row(run, ok, "--spaces-dir", str(spaces)) == 0
+
+
+@pytest.mark.parametrize(
+    "axes, message",
+    [
+        ({"a": 3}, r"missing axes \['n'\]"),
+        ({"a": 3, "n": 3, "z": 1}, r"unknown axes \['z'\]"),
+        ({"a": 4, "n": 3}, r"axis 'a': 4 is not one of \[1, 2, 3\]"),
+        ({"a": "1", "n": 3}, r"axis 'a': '1' is not one of"),
+        ({"a": True, "n": 3}, r"axis 'a': True is not one of"),
+        ({"a": 1, "n": 101}, r"axis 'n': 101 is outside the range \[1, 100\]"),
+        ({"a": 1, "n": 2.5}, r"axis 'n': 2.5 is not an integer"),
+    ],
+)
+def test_a_row_whose_axis_values_the_space_cannot_draw_is_a_usage_error(
+    run, tmp_path, capsys, axes, message
+):
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    write_space(spaces)
+    row = _write_row(tmp_path, space="Toy/Default", axes=axes)
+    assert _run_row(run, row, "--spaces-dir", str(spaces)) == 2
+    assert re.search(f"Toy/Default.*{message}", capsys.readouterr().err)
+    assert not run.work.exists()
+
+
+def test_late_axes_are_plain_values_in_a_row(run, tmp_path):
+    # bug caught: a row cannot name a late axis, or rebuilds it from a stream and ignores it
+    spaces = tmp_path / "spaces"
+    spaces.mkdir()
+    write_space(
+        spaces,
+        axes={
+            "a": {"values": [1, 2, 3]},
+            "late_one": {"values": ["x", "y"], "late": True},
+        },
+        derive={},
+        constraints=[],
+        case={
+            "values": {"a": "${a}", "late": "${late_one}"},
+            "metadata": {"purpose": "probe"},
+        },
+    )
+    for value in ("x", "y"):
+        row = _write_row(
+            tmp_path, space="Toy/Default", axes={"a": 2, "late_one": value}
+        )
+        assert _run_row(run, row, "--spaces-dir", str(spaces)) == 0
+        written = json.loads(
+            (run.work / "bundles/gauntlet/Toy/Default/sweep.json").read_text()
+        )
+        assert written["cases"][0]["values"] == {"a": 2, "late": value}
+
+
+@pytest.mark.parametrize(
+    "fields, message",
+    [
+        ({"space": "NoSuch/Space"}, "no space 'NoSuch/Space'"),
+        ({"space": None}, r"missing keys \['space'\]"),
+        ({"axes": None}, r"missing keys \['axes'\]"),
+        ({"data_seed": None}, r"missing keys \['data_seed'\]"),
+        ({"axes": [1]}, "'axes' must be an object"),
+        ({"space": 3}, "'space' must be an <Op>/<Space> string"),
+        ({"data_seed": -1}, "data seed must be an integer in"),
+        ({"data_seed": 2**32}, "data seed must be an integer in"),
+        ({"data_seed": True}, "data seed must be an integer in"),
+        ({"case_id": "a b"}, "case id must be a non-empty string"),
+        ({"case_id": ""}, "case id must be a non-empty string"),
+        ({"shape_seed": 5}, r"unknown keys \['shape_seed'\]"),
+    ],
+)
+def test_a_malformed_row_file_is_a_usage_error(run, tmp_path, capsys, fields, message):
+    sample = sampler.sample(space_by_id("SdpaFwd/Default"), 3)
+    spec = {**_row_of(sample), **fields}
+    path = tmp_path / "bad.json"
+    path.write_text(json.dumps({k: v for k, v in spec.items() if v is not None}))
+    try:
+        code = _run_row(run, path)
+    except SystemExit as exit_:  # argparse's usage error
+        code = exit_.code
+    assert code == 2
+    assert re.search(message, capsys.readouterr().err)
+    assert not run.work.exists()
+
+
+def test_a_missing_or_unparsable_row_file_is_a_usage_error(run, tmp_path, capsys):
+    for path in (tmp_path / "absent.json", tmp_path / "text.json"):
+        if path.name == "text.json":
+            path.write_text("{not json")
+        with pytest.raises(SystemExit) as exit_:
+            _run_row(run, path)
+        assert exit_.value.code == 2
+        assert str(path) in capsys.readouterr().err
+    (tmp_path / "list.json").write_text("[1]")
+    with pytest.raises(SystemExit) as exit_:
+        _run_row(run, tmp_path / "list.json")
+    assert exit_.value.code == 2 and "expected a JSON object" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "flag, value",
+    [
+        ("--samples", "4"),
+        ("--seed", "5"),
+        ("--data-seed", "6"),
+        ("--filter", "^SdpaFwd/"),
+        ("--time-budget", "1m"),
+    ],
+)
+def test_row_cannot_be_combined_with_the_flags_that_draw_samples(
+    run, tmp_path, capsys, flag, value
+):
+    sample = sampler.sample(space_by_id("SdpaFwd/Default"), 3)
+    row = _write_row(tmp_path, **_row_of(sample))
+    with pytest.raises(SystemExit) as exit_:
+        _run_row(run, row, flag, value)
+    assert exit_.value.code == 2
+    err = capsys.readouterr().err
+    assert "--row" in err and flag in err
+    assert not run.work.exists() and not run.log.exists()
+
+
+def test_the_sampling_environment_variables_do_not_conflict_with_row(
+    run, tmp_path, monkeypatch
+):
+    # a variable left in the shell is a default, not a request to draw
+    for name, value in (
+        ("HIPDNN_FUZZ_SAMPLES", "9"),
+        ("HIPDNN_FUZZ_SEED", "5"),
+        ("HIPDNN_FUZZ_DATA_SEED", "6"),
+        ("HIPDNN_FUZZ_FILTER", "^RMSNorm/"),
+        ("HIPDNN_FUZZ_TIME_BUDGET", "1h"),
+    ):
+        monkeypatch.setenv(name, value)
+    sample = sampler.sample(space_by_id("SdpaFwd/Default"), 3)
+    assert _run_row(run, _write_row(tmp_path, **_row_of(sample))) == 0
+    assert run.summary["samples"] == 1 and run.summary["data_seed"] == sample.data_seed
+    assert run.summary["time_budget_seconds"] is None
+    assert [o["data_seed"] for o in run.outcome_list] == [sample.data_seed]
+
+
+def test_a_row_that_does_not_load_is_unexercised_like_any_other_case(run, tmp_path):
+    sample = sampler.sample(space_by_id("SdpaFwd/Default"), 3)
+    run.control(cases={"gone": "load_skip"})
+    assert _run_row(run, _write_row(tmp_path, **_row_of(sample, case_id="gone"))) == 0
+    (outcome,) = run.outcome_list
+    assert outcome["outcome"] == "UNEXERCISED" and outcome["reason"].startswith("load:")
+
+
+# --------------------------------------------------------------------------
+# sample_from_axes
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_sample_from_axes_renders_what_sample_renders_for_the_same_axis_values(
+    space_id,
+):
+    # bug caught: the explicit entry point renders another row than the drawing one, so a
+    # replayed or shrunk sample is a different test from the one that was drawn
+    sp = space_by_id(space_id)
+    drawn = sampler.sample(sp, 515)
+    row = sampler.sample_from_axes(
+        sp, drawn.axis_values, drawn.data_seed, drawn.case_id
+    )
+    assert row.shape_seed is None and row.case_id == "s515"
+    assert row.axis_values == drawn.axis_values
+    expected = copy.deepcopy(drawn.row)
+    got = copy.deepcopy(row.row)
+    assert got["metadata"].pop("notes") != expected["metadata"].pop("notes")
+    assert got == expected
+
+
+def test_sample_from_axes_does_not_share_the_callers_dict_or_lists(tmp_path):
+    sp = space_lib.load_space(write_space(tmp_path, axes={"a": {"values": [[1, 2]]}},
+        derive={}, constraints=[], case={"values": {"a": "${a}"}, "metadata": {}}))  # fmt: skip
+    axes = {"a": [1, 2]}
+    row = sampler.sample_from_axes(sp, axes, 3)
+    axes["a"].append(9)
+    assert row.axis_values == {"a": [1, 2]} and row.row["values"] == {"a": [1, 2]}
+
+
+@pytest.mark.parametrize("case_id", ["", "a b", "s-1", "x.y", 7, None])
+def test_sample_from_axes_rejects_a_case_id_that_is_not_a_test_name(tmp_path, case_id):
+    sp = space_lib.load_space(write_space(tmp_path))
+    with pytest.raises(sampler.InvalidRowError, match="case id"):
+        sampler.sample_from_axes(sp, {"a": 1, "n": 1}, 3, case_id)
+
+
+def test_sample_from_axes_names_the_violated_rule_and_its_reason(tmp_path):
+    sp = space_lib.load_space(write_space(tmp_path))
+    with pytest.raises(
+        sampler.InvalidRowError,
+        match=r"Toy/Default.*violates 'n >= a' \(n must reach a\)",
+    ):
+        sampler.sample_from_axes(sp, {"a": 3, "n": 2}, 3)
+    with pytest.raises(ValueError, match="data seed"):
+        sampler.sample_from_axes(sp, {"a": 1, "n": 2}, -3)
+    # sample() is untouched: a seed still draws the same legal sample
+    assert sampler.sample(sp, 5).axis_values == sampler.sample(sp, 5).axis_values

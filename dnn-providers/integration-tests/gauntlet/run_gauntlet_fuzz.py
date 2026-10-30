@@ -18,6 +18,7 @@ Synopsis::
         [--work-dir DIR] [--samples N] [--seed S] [--data-seed D] [--filter REGEX]
         [--time-budget 30m] [--case-timeout 10m] [--batch-size N] [--summary FILE]
         [--spaces-dir DIR] [--binary-arg ARG ...]
+    run_gauntlet_fuzz.py --binary BIN ... --row FILE        (one explicit sample, see below)
 
 Control (a flag overrides its environment variable)::
 
@@ -33,6 +34,18 @@ spaces. Without ``--samples`` and with ``--time-budget`` (or with ``--samples 0`
 continuous: fresh seeds every batch until the time budget ends, the sample cap is hit or
 SIGINT arrives (the current batch finishes, then the report is written). A crash costs one
 case, not the run.
+
+``--row FILE`` runs one explicit sample instead of drawing any. The file holds
+``{"space": "<Op>/<Space>", "axes": {<every axis of the space>: value}, "data_seed": N}`` and
+optionally ``"case_id"`` (letters, digits and ``_``; default ``row``). The sample is rendered
+from those axis values (late axes are values like any other), the space's constraints are
+checked again (a violation is a usage error), and the case is written to the same
+``bundles/gauntlet/<Op>/<Space>/<dtype>_cases/`` layout as a drawn one, so its GTest name and
+the engine TOML's grading are what a drawn sample with that case id gets. Give ``"case_id":
+"s123"`` to run the sample ``--seed 123`` drew under its own name. ``--row`` cannot be combined
+with ``--samples``, ``--seed``, ``--data-seed``, ``--filter`` or ``--time-budget`` (the
+``HIPDNN_FUZZ_*`` variables for them are ignored); one case runs and the outcome, summary and
+failure folder are those of any run. The failure folder's ``replay.sh`` replays with ``--row``.
 
 Outputs under the work directory: ``outcomes.jsonl`` (one record per sample),
 ``samples.jsonl``, ``summary.json``, ``reports/`` and ``logs/`` (per binary invocation) and
@@ -358,9 +371,11 @@ def parse_listing(text):
 class Fuzz:
     """One fuzz run: samples, batches, outcomes, fault artifacts, summary."""
 
-    def __init__(self, args, spaces):
+    def __init__(self, args, spaces, row_sample=None):
         self.args = args
         self.spaces = spaces
+        # The one sample of a --row run (rendered by main); None for a drawing run.
+        self.row_sample = row_sample
         self.binary_cmd = resolve_binary(args.binary)
         # Replays run from any directory, so a path to the binary is made absolute.
         self.binary_text = (
@@ -437,7 +452,10 @@ class Fuzz:
         try:
             self._print_header()
             self._preflight()
-            self._loop()
+            if self.row_sample is None:
+                self._loop()
+            else:
+                self._run_row()
         except BaseException as e:  # noqa: BLE001 - report what we have, then re-raise
             error = e
             self.stop_reason = f"error: {e}"
@@ -456,6 +474,15 @@ class Fuzz:
 
     def _print_header(self):
         a = self.args
+        if self.row_sample is not None:
+            print(
+                f"gauntlet fuzz: row {self.row_sample.case_id} of"
+                f" {self.spaces[0].space_id} (axes"
+                f" {json.dumps(self.row_sample.axis_values, sort_keys=True)}, data seed"
+                f" {self.row_sample.data_seed}); work dir {self.work}",
+                flush=True,
+            )
+            return
         limit = "unlimited" if not a.samples else str(a.samples)
         print(f"gauntlet fuzz: seed {a.seed} (replay with --seed {a.seed})", flush=True)
         print(f"  spaces: {', '.join(s.space_id for s in self.spaces)}", flush=True)
@@ -557,6 +584,30 @@ class Fuzz:
             if not ran:
                 self.stop_reason = self.stop_reason or "sample-cap"
                 return
+
+    def _run_row(self):
+        """The one explicit sample of ``--row``: through the same bundle, binary and outcome
+        path as a drawn batch of one."""
+        sp, s = self.spaces[0], self.row_sample
+        self.generated[sp.space_id] = 1
+        self._samples_file.write(
+            json.dumps(
+                {
+                    "space": sp.space_id,
+                    "case": s.case_id,
+                    "shape_seed": None,
+                    "data_seed": s.data_seed,
+                    "axes": s.axis_values,
+                }
+            )
+            + "\n"
+        )
+        self._samples_file.flush()
+        before = len(self.results)
+        self._execute(sp, [s])
+        self.stop_reason = self.stop_reason or "row"
+        (result,) = self.results[before:]
+        print(f"row {sp.space_id} {s.case_id}: {result['outcome']}", flush=True)
 
     # -- bundles ---------------------------------------------------------
 
@@ -929,15 +980,32 @@ class Fuzz:
             ]
         )
 
-    def _replay_argv(self, sp, sample, work_dir):
+    def _row_spec(self, sp, sample):
+        """The ``--row`` file content that renders ``sample`` again."""
+        return {
+            "space": sp.space_id,
+            "axes": sample.axis_values,
+            "data_seed": sample.data_seed,
+            "case_id": sample.case_id,
+        }
+
+    def _replay_argv(self, sp, sample, work_dir, row_path):
         a = self.args
+        # A drawn sample replays from its seeds; a --row sample has none, so it replays from
+        # the row file the failure folder keeps.
+        if self.row_sample is not None:
+            which = ["--row", str(row_path)]
+        else:
+            which = [
+                "--filter", f"^{sp.operation}/{sp.name}$",
+                "--seed", str(sample.shape_seed),
+                "--samples", "1",
+                "--data-seed", str(sample.data_seed),
+                "--time-budget", "0",
+            ]  # fmt: skip
         argv = [
             sys.executable, str(DRIVER_PATH),
-            "--filter", f"^{sp.operation}/{sp.name}$",
-            "--seed", str(sample.shape_seed),
-            "--samples", "1",
-            "--data-seed", str(sample.data_seed),
-            "--time-budget", "0",
+            *which,
             "--case-timeout", f"{a.case_timeout:g}s",
             "--binary", self.binary_text,
             "--work-dir", str(work_dir),
@@ -977,7 +1045,9 @@ class Fuzz:
         env_set, env_unset = self._replay_env()
         folder = self.failures / self._case_dir_name(sp, sample)
         return self._replay_command(
-            self._replay_argv(sp, sample, folder / "replay-work"), env_set, env_unset
+            self._replay_argv(sp, sample, folder / "replay-work", folder / "row.json"),
+            env_set,
+            env_unset,
         )
 
     @staticmethod
@@ -1000,8 +1070,10 @@ class Fuzz:
 
         meta = dict(sample.row["metadata"])
         meta["purpose"] = "regression"
-        meta["reference_source"] = (
-            f"gauntlet-fuzz: space {sp.space_id}, shape seed {sample.shape_seed}"
+        meta["reference_source"] = f"gauntlet-fuzz: space {sp.space_id}, " + (
+            f"explicit row (case {sample.case_id})"
+            if self.row_sample is not None
+            else f"shape seed {sample.shape_seed}"
         )
         meta["notes"] = (
             f"{result['outcome']} found by gauntlet-fuzz. {sample.row['metadata'].get('notes', '')}".strip()
@@ -1011,8 +1083,12 @@ class Fuzz:
 
         host_fill = host_input_fill()
         env_set, env_unset = self._replay_env()
-        argv = self._replay_argv(sp, sample, folder / "replay-work")
+        argv = self._replay_argv(
+            sp, sample, folder / "replay-work", folder / "row.json"
+        )
         command = self._replay_command(argv, env_set, env_unset)
+        if self.row_sample is not None:
+            json_dump(folder / "row.json", self._row_spec(sp, sample))
         engine = result["engine"] or self._run_engine()
         a = self.args
         repro = {
@@ -1027,6 +1103,7 @@ class Fuzz:
             "shape_seed": sample.shape_seed,
             "data_seed": sample.data_seed,
             "axis_values": sample.axis_values,
+            "row": self._row_spec(sp, sample) if self.row_sample is not None else None,
             "sweep_row": sample.row,
             "uids_canonical": all(k == v for k, v in uid_map.items()),
             "input_fill": {
@@ -1062,15 +1139,23 @@ class Fuzz:
         write_text(folder / "log_tail.txt", tail)
 
         script_argv = [
-            _Raw('"$D/replay-work"') if t == str(folder / "replay-work") else t
+            (
+                _Raw('"$D/replay-work"')
+                if t == str(folder / "replay-work")
+                else _Raw('"$D/row.json"') if t == str(folder / "row.json") else t
+            )
             for t in argv
         ]
         script_command = self._replay_command(script_argv, env_set, env_unset)
+        axes_text = json.dumps(sample.axis_values, sort_keys=True)
+        if self.row_sample is not None:
+            what = f"Renders the same explicit row (axes {axes_text}, data seed"
+        else:
+            what = f"Regenerates the same sweep row (shape seed {sample.shape_seed}, data seed"
         script = (
             "#!/bin/sh\n"
             f"# Replay {case}: {result['outcome']} on {engine or 'unknown engine'}.\n"
-            f"# Regenerates the same sweep row (shape seed {sample.shape_seed}, data seed"
-            f" {sample.data_seed}) and runs it alone.\n"
+            f"# {what} {sample.data_seed}) and runs it alone.\n"
             f"# Input fill path: {'host' if host_fill else 'device'} ({HOST_FILL_ENV}).\n"
             'D=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
             f"exec {script_command}\n"
@@ -1083,7 +1168,8 @@ class Fuzz:
         write_text(
             folder / "replay.txt",
             f"{command}\n"
-            f"input fill path: {'host' if host_fill else 'device'} ({HOST_FILL_ENV}="
+            + (f"axes: {axes_text}\n" if self.row_sample is not None else "")
+            + f"input fill path: {'host' if host_fill else 'device'} ({HOST_FILL_ENV}="
             f"{os.environ.get(HOST_FILL_ENV)!r})\n"
             f"freeze: {self._freeze_command(folder / (case + '.json'))}\n",
         )
@@ -1181,6 +1267,7 @@ class Fuzz:
         failed = bool(totals["WRONG"] or totals["CRASH"])
         return {
             "seed": a.seed,
+            "row": a.row_spec,
             "data_seed": a.data_seed,
             "samples_per_space": a.samples or None,
             "continuous": not a.samples,
@@ -1301,6 +1388,13 @@ def build_parser():
     )
     p.add_argument("--filter", help="regex on <Op>/<Space> (env HIPDNN_FUZZ_FILTER)")
     p.add_argument(
+        "--row",
+        metavar="FILE",
+        help="run one explicit sample from a JSON file holding space, axes, data_seed and"
+        " optionally case_id, instead of drawing samples (not with --samples, --seed,"
+        " --data-seed, --filter or --time-budget)",
+    )
+    p.add_argument(
         "--time-budget",
         help="wall-clock limit, e.g. 30m, 4h (env HIPDNN_FUZZ_TIME_BUDGET)",
     )
@@ -1320,9 +1414,80 @@ def build_parser():
     return p
 
 
+ROW_KEYS = ("space", "axes", "data_seed", "case_id")
+
+
+def load_row_file(path):
+    """The validated ``--row`` file: ``{"space", "axes", "data_seed", "case_id"}``, the case id
+    defaulting to ``sampler.DEFAULT_ROW_CASE_ID``. Whether the axes are a legal sample of the
+    space is checked later, against the space (``sampler.sample_from_axes``)."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as e:
+        raise DriverError(f"--row {path}: cannot read the file: {e}") from None
+    try:
+        spec = json.loads(text)
+    except ValueError as e:
+        raise DriverError(f"--row {path}: not valid JSON: {e}") from None
+    if not isinstance(spec, dict):
+        raise DriverError(
+            f"--row {path}: expected a JSON object, got {type(spec).__name__}"
+        )
+    unknown = sorted(set(spec) - set(ROW_KEYS))
+    missing = [k for k in ("space", "axes", "data_seed") if k not in spec]
+    if unknown or missing:
+        raise DriverError(
+            f"--row {path}: "
+            + "; ".join(
+                part
+                for part in (
+                    f"unknown keys {unknown}" if unknown else "",
+                    f"missing keys {missing}" if missing else "",
+                )
+                if part
+            )
+            + f" (the keys are {', '.join(ROW_KEYS)}; case_id is optional)"
+        )
+    if not isinstance(spec["space"], str) or not spec["space"]:
+        raise DriverError(f"--row {path}: 'space' must be an <Op>/<Space> string")
+    if not isinstance(spec["axes"], dict):
+        raise DriverError(f"--row {path}: 'axes' must be an object of axis values")
+    try:
+        sampler.check_data_seed(spec["data_seed"])
+    except ValueError as e:
+        raise DriverError(f"--row {path}: {e}") from None
+    spec.setdefault("case_id", sampler.DEFAULT_ROW_CASE_ID)
+    return spec
+
+
 def parse_args(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    args.row_spec = None
+    if args.row is not None:
+        # The flags, not the HIPDNN_FUZZ_* variables: a variable left in the shell is a default
+        # a one-case run has no use for, not a conflict.
+        clash = [
+            flag
+            for flag, value in (
+                ("--samples", args.samples),
+                ("--seed", args.seed),
+                ("--data-seed", args.data_seed),
+                ("--filter", args.filter),
+                ("--time-budget", args.time_budget),
+            )
+            if value is not None
+        ]
+        if clash:
+            parser.error(
+                f"--row runs one explicit sample and cannot be combined with {', '.join(clash)}"
+            )
+        try:
+            args.row_spec = load_row_file(args.row)
+        except DriverError as e:
+            parser.error(str(e))
+        args.samples = 1
+        args.data_seed = args.row_spec["data_seed"]
 
     def pick(flag_value, env_name, convert):
         return (
@@ -1331,16 +1496,19 @@ def parse_args(argv=None):
             else _env_default(env_name, convert, parser)
         )
 
-    args.samples = pick(args.samples, "HIPDNN_FUZZ_SAMPLES", int)
-    args.seed = pick(args.seed, "HIPDNN_FUZZ_SEED", int)
-    args.data_seed = pick(args.data_seed, "HIPDNN_FUZZ_DATA_SEED", int)
-    args.filter = pick(args.filter, "HIPDNN_FUZZ_FILTER", str)
+    if args.row_spec is None:
+        args.samples = pick(args.samples, "HIPDNN_FUZZ_SAMPLES", int)
+        args.seed = pick(args.seed, "HIPDNN_FUZZ_SEED", int)
+        args.data_seed = pick(args.data_seed, "HIPDNN_FUZZ_DATA_SEED", int)
+        args.filter = pick(args.filter, "HIPDNN_FUZZ_FILTER", str)
     try:
         budget = (
             args.time_budget
             if args.time_budget is not None
             else os.environ.get("HIPDNN_FUZZ_TIME_BUDGET")
         )
+        if args.row_spec is not None:
+            budget = None
         args.time_budget = parse_duration(budget) if budget else None
         timeout = (
             args.case_timeout
@@ -1352,6 +1520,10 @@ def parse_args(argv=None):
         parser.error(str(e))
     if args.case_timeout is None:
         parser.error("--case-timeout must be positive")
+    if args.row_spec is not None:
+        if args.batch_size < 1:
+            parser.error("--batch-size must be >= 1")
+        return args
     if args.samples is None:
         args.samples = 0 if args.time_budget else DEFAULT_SAMPLES
     if args.samples < 0:
@@ -1371,6 +1543,14 @@ def parse_args(argv=None):
 
 def select_spaces(args):
     spaces = space_lib.load_spaces(args.spaces_dir)
+    if args.row_spec is not None:
+        wanted = args.row_spec["space"]
+        spaces = [s for s in spaces if s.space_id == wanted]
+        if not spaces:
+            raise DriverError(
+                f"--row {args.row}: no space '{wanted}' in {args.spaces_dir}"
+            )
+        return spaces
     if args.filter:
         try:
             pattern = re.compile(args.filter)
@@ -1391,8 +1571,23 @@ def main(argv=None):
     args = parse_args(argv)
     try:
         spaces = select_spaces(args)
-        return Fuzz(args, spaces).run()
-    except (DriverError, space_lib.SpaceError, sampler.InfeasibleSpaceError) as e:
+        row_sample = None
+        if args.row_spec is not None:
+            # Rendered before anything is written, so a row that no sample could be is a usage
+            # error that leaves no work directory behind.
+            row_sample = sampler.sample_from_axes(
+                spaces[0],
+                args.row_spec["axes"],
+                args.row_spec["data_seed"],
+                args.row_spec["case_id"],
+            )
+        return Fuzz(args, spaces, row_sample).run()
+    except (
+        DriverError,
+        space_lib.SpaceError,
+        sampler.InfeasibleSpaceError,
+        sampler.InvalidRowError,
+    ) as e:
         print(f"run_gauntlet_fuzz.py: error: {e}", file=sys.stderr)
         return 2
 

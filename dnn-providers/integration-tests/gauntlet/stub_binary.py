@@ -21,11 +21,20 @@ What each case does comes from ``$HIPDNN_STUB_CONTROL``, a JSON file::
     {
       "default": "pass",
       "cases": {"s123": "crash"},                  # by case id
+      "match": [{"where": [{"path": "values.tensors.0.dims.1", "op": ">=", "value": 64}],
+                 "behaviour": "wrong"}],           # by a value of the written sweep row
       "seed_mod": {"m": 5, "map": {"0": "declined"}},  # by shape seed modulo m
       "engine": "STUB_ENGINE", "arch": "gfx950",
       "hang_seconds": 3600, "delay": 0.0,          # seconds each case takes
       "probe_path": "some/file", "log": "invocations.jsonl"
     }
+
+A ``match`` rule gates a behaviour on the sweep row the driver wrote, not on the case id: every
+condition of ``where`` must hold. ``path`` is dotted into the case object (``values.tensors.0.dims``,
+``metadata.seed``, ``node_patches.0.set.left_bound``; a list is indexed by an integer token), ``op``
+is one of ``== != < <= > >= in`` and ``value`` the operand. A path the row lacks, or operands
+that cannot be compared, make the condition false. The first rule that holds wins; an explicit
+``cases`` entry comes before ``match``, ``match`` before ``seed_mod`` and ``default``.
 
 Behaviours: ``pass``, ``unclaimed_pass``, ``declined``, ``wrong``, ``unexercised``,
 ``crash_engine`` (a ``finished`` CRASH record, as a build error gives), ``crash``
@@ -103,10 +112,50 @@ def load_control():
         return json.load(f)
 
 
-def behaviour_for(control, case_id):
+_MATCH_OPS = {
+    "==": lambda a, b: a == b,
+    "!=": lambda a, b: a != b,
+    "<": lambda a, b: a < b,
+    "<=": lambda a, b: a <= b,
+    ">": lambda a, b: a > b,
+    ">=": lambda a, b: a >= b,
+    "in": lambda a, b: a in b,
+}
+
+
+def row_value(case, path):
+    """The value at dotted ``path`` of the sweep case, or ``(False, None)`` when it is absent."""
+    node = case
+    for token in path.split("."):
+        if isinstance(node, dict) and token in node:
+            node = node[token]
+        elif isinstance(node, list) and token.isdigit() and int(token) < len(node):
+            node = node[int(token)]
+        else:
+            return False, None
+    return True, node
+
+
+def condition_holds(case, condition):
+    op = condition["op"]
+    if op not in _MATCH_OPS:
+        raise SystemExit(f"stub: unknown match op {op!r}")
+    found, value = row_value(case, condition["path"])
+    if not found:
+        return False
+    try:
+        return bool(_MATCH_OPS[op](value, condition["value"]))
+    except TypeError:
+        return False
+
+
+def behaviour_for(control, case_id, case):
     cases = control.get("cases", {})
     if case_id in cases:
         return cases[case_id]
+    for rule in control.get("match", []):
+        if all(condition_holds(case, c) for c in rule["where"]):
+            return rule["behaviour"]
     seed_mod = control.get("seed_mod")
     match = re.fullmatch(r"s(\d+)", case_id)
     if seed_mod and match:
@@ -117,7 +166,7 @@ def behaviour_for(control, case_id):
 
 
 def discover(golden):
-    """``[(suite, test, case_id, sweep_path, purpose)]`` for every sweep case."""
+    """``[(suite, test, case_id, sweep_path, purpose, case)]`` for every sweep case."""
     root = Path(golden)
     found = []
     for sweep in sorted(root.rglob("sweep.json")):
@@ -128,7 +177,9 @@ def discover(golden):
             cases = json.load(f)["cases"]
         for case in cases:
             purpose = case.get("metadata", {}).get("purpose")
-            found.append((suite, sanitize(case["id"]), case["id"], sweep, purpose))
+            found.append(
+                (suite, sanitize(case["id"]), case["id"], sweep, purpose, case)
+            )
     return found
 
 
@@ -176,8 +227,8 @@ def main(argv):
     cases = discover(opts["golden"]) if opts["golden"] else []
 
     registered = []
-    for suite, test, case_id, sweep, purpose in cases:
-        kind = behaviour_for(control, case_id)
+    for suite, test, case_id, sweep, purpose, case in cases:
+        kind = behaviour_for(control, case_id, case)
         if kind not in BEHAVIOURS:
             raise SystemExit(f"stub: unknown behaviour {kind!r} for case {case_id}")
         if kind == "reg_crash":
