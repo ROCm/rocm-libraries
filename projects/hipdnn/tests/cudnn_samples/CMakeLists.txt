@@ -83,6 +83,13 @@ add_test(NAME sample_probe_selftest
          COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_sample_probe.py")
 set_tests_properties(sample_probe_selftest PROPERTIES LABELS "cudnn_samples;compile;run")
 
+# The CI drivers configure with fetching on, so this is the only run of the E28 branches.
+add_test(NAME fetch_policy_selftest
+         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_fetch_policy.py"
+                 --cmake "${CMAKE_COMMAND}" --generator "${CMAKE_GENERATOR}"
+                 --cxx "${CMAKE_CXX_COMPILER}" --make-program "${CMAKE_MAKE_PROGRAM}")
+set_tests_properties(fetch_policy_selftest PROPERTIES LABELS "cudnn_samples;compile;run")
+
 # ---------------------------------------------------------------------------------------
 # Catch2
 # ---------------------------------------------------------------------------------------

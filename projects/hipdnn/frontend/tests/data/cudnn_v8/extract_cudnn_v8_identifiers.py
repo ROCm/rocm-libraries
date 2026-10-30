@@ -582,6 +582,10 @@ C_TYPES_PROLOGUE = """\
 //     Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 //   include/cudnn_frontend/knobs.h, which carries no notice of its own (repository LICENSE.txt)
 //     Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+//   samples/legacy_samples/conv_sample.cpp (CUDNN_TENSOR_NCHW, CUDNN_TENSOR_NHWC)
+//     Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+//   samples/legacy_samples/fusion_sample.cpp, helpers.cpp, norm_samples.cpp, test_list.cpp
+//     Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
 // License text and pinned upstream version: THIRD_PARTY_LICENSES.md
 // (installed to share/doc/hipdnn_frontend).
 

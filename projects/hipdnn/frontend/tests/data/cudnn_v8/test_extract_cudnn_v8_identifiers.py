@@ -149,9 +149,11 @@ class CheckInputsTest(unittest.TestCase):
     def test_checkout_at_another_commit_is_rejected(self):
         git = ["git", "-C", str(self.frontend), "-c", "core.autocrlf=false"]
         git += ["-c", "user.name=t", "-c", "user.email=t@t"]
+        # Signing and hooks from the user's global config must not fail the commit.
+        git += ["-c", "commit.gpgsign=false"]
         subprocess.run(git + ["init", "-q"], check=True)
         subprocess.run(git + ["add", "-A"], check=True)
-        subprocess.run(git + ["commit", "-q", "-m", "inputs"], check=True)
+        subprocess.run(git + ["commit", "-q", "--no-verify", "-m", "x"], check=True)
         head = subprocess.run(
             git + ["rev-parse", "HEAD"], check=True, capture_output=True, text=True
         ).stdout.strip()
