@@ -68,6 +68,9 @@ def _op_to_instr(op):
             "then": [_op_to_instr(o) for o in op.regions[0].ops],
         }
     if op.name == "scf.if_else":
+        from rocke.portable_ir.src.recording_builder import refuse_if_else_results
+
+        refuse_if_else_results(op)
         return {
             "op": "scf_if_else",
             "cond": _reg(op.operands[0]),

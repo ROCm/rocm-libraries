@@ -212,5 +212,4 @@ policies are maintained in hipDNN:
 
 ## License
 
-Copyright © Advanced Micro Devices, Inc., or its affiliates.
-SPDX-License-Identifier: MIT
+This project is licensed under the terms described in [LICENSE](./LICENSE).

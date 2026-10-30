@@ -251,6 +251,7 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"sched.group.barrier",
      "declare void @llvm.amdgcn.sched.group.barrier(i32 immarg, i32 immarg, i32 immarg)"},
     {"s.setprio", "declare void @llvm.amdgcn.s.setprio(i16 immarg)"},
+    {"trap", "declare void @llvm.trap()"},
     {"s.waitcnt", "declare void @llvm.amdgcn.s.waitcnt(i32 immarg)"},
     {"make.buffer.rsrc.p1",
      "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1(ptr addrspace(1) nocapture "
@@ -276,6 +277,13 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"raw.ptr.buffer.load.f16",
      "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16(ptr addrspace(8) nocapture readonly, i32, "
      "i32, i32 immarg)"},
+    /* 1-byte buffer load and store (Python _INTRINSIC_DECLS, same position). */
+    {"raw.ptr.buffer.load.i8",
+     "declare i8 @llvm.amdgcn.raw.ptr.buffer.load.i8(ptr addrspace(8) nocapture readonly, i32, "
+     "i32, i32 immarg)"},
+    {"raw.ptr.buffer.store.i8",
+     "declare void @llvm.amdgcn.raw.ptr.buffer.store.i8(i8, ptr addrspace(8) nocapture "
+     "writeonly, i32, i32, i32 immarg)"},
     {"raw.ptr.buffer.store.i32",
      "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32(i32, ptr addrspace(8) nocapture "
      "writeonly, i32, i32, i32 immarg)"},
