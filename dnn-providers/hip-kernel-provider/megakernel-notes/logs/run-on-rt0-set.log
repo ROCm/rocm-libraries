@@ -1,0 +1,29 @@
+srun: job 68219792 queued and waiting for resources
+srun: job 68219792 has been allocated resources
+py deps ok
+host=ctr-smc-s22-17.adc.amd.com nproc=32 date=2026-10-30T18:21:23+00:00
+source files updated: 10981
+cmake version 3.28.3
+HIP version: 7.17.26423-0000000
+MODE=ON configure_rc=0 s=39
+MODE=ON build_rc=0 s=1377
+MODE=ON clang_tidy_rc=0
+hip_kernel_provider_census_tests
+hip_kernel_provider_integration_tests
+hip_kernel_provider_tests
+/tmp/mkeng/build-ON/lib/hipdnn_plugins/engines/test_arch_content/hip-kernel-provider/integration/integration/gfx942/megakernel/megakernel_standin.kdp.json
+/tmp/mkeng/build-ON/lib/hipdnn_plugins/engines/arch_content/hip-kernel-provider/gfx942/megakernel/artifacts/megakernel.kdp.json
+/tmp/mkeng/build-ON/dnn-providers/hip-kernel-provider/descriptor-packaging/hkp-integration-intermediate/gfx942/megakernel/megakernel_standin.kdp.json
+/tmp/mkeng/build-ON/dnn-providers/hip-kernel-provider/descriptor-packaging/hkp-product-intermediate/gfx942/megakernel/artifacts/megakernel.kdp.json
+MODE=ON unit_rc=0
+[  PASSED  ] 1119 tests.
+[  SKIPPED ] 68 tests.
+MODE=ON megakernel_unit_rc=0
+[----------] Global test environment tear-down
+[==========] 10 tests from 1 test suite ran. (1 ms total)
+[  PASSED  ] 10 tests.
+packaging pytest:
+pytest_rc=0
+...........                                                              [100%]
+11 passed in 2.90s
+done 2026-10-30T19:03:03+00:00

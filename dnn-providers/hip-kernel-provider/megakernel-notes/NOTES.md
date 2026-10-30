@@ -30,11 +30,11 @@ CoExporter), args (tab addr i64, glob addr i64, nlayers i32) on the handle strea
 
 ## Decisions taken here
 
-- Fixture lock: until CoExporter's manifest lands, `manifest.json` holds the four spike
-  Qwen3.8 rt0 objects (spike rocm-libraries 102d947a342, vLLM geometry maxlen 4096, block 784,
-  x-packed KV). Their `src` is the first 32 hex of each object's sha256, NOT vLLM's
-  `compile_key`: these objects will not match a real vLLM payload. Replace with the
-  exporter's set (README "The megakernel family").
+- Lock: `manifest.json` is CoExporter's final set per design D4 (megakernels
+  `users/sareeder/co-export` 0cafc63, `common/results/co/rt2/final/`, manifest sha256
+  5b83b31430d7...): 16 objects, Qwen3.8 TP1 rt2, Qwen3.8 TP2 rt0, Qwen3.6 rt2, Gemma4 rt0,
+  M 1, 2, 4, 8; `src` is vLLM's `compile_key`. Before: the rt0 set (1f9108f, e689d054dfca,
+  built and tested below), and earlier the spike's four Qwen3.8 objects.
 - The pack step skips the lock check when `artifacts/` is absent (no `dvc pull`): configure
   already warns, as for rocKE, and nothing is packed.
 - `lm_head`, `cus`, ... are KMD fields of type bool/int, all `matcher_only_fields`.
@@ -67,6 +67,14 @@ Log: `logs/run-off-on.log` (job 68218157, head a90fe00804e).
 - DVC: `artifacts.dvc` round trip through a LOCAL remote (`/tmp/mk-dvc-remote`, scratch DVC
   repo): push 6 files, delete artifacts and cache, pull, `hkp_megakernel_lock.py verify` OK;
   the pointer is byte-identical after regenerating the KDP. Nothing was pushed to `ingestor`.
+
+With the exporter's 16-object rt0 lock (head af5a3559c2e, job 68219792,
+`logs/run-on-rt0-set.log`): ON build rc 0, lock verify passes in the pack step, product KDP
+packed for gfx942, 1119 passed / 68 skipped / 0 failed, clang-tidy rc 0, lock pytest 11 passed.
+
+With the rt2/rt0 final lock (0cafc63): `hkp_megakernel_lock.py verify` passes and the KDP
+was regenerated; the lock has the same entry shape and count as the rt0 set that built and
+passed above, so the ON build was not rerun for it.
 
 ## Not done
 
