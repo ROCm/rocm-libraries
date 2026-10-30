@@ -7079,11 +7079,22 @@ namespace TensileLite
                 // Solution validation already forces this for MX fp4 (duUnit =
                 // numSubIterK * MatrixInstK * LocalSplitU = 256) but admits
                 // DepthU=128 for MX fp8, so assert it here.
+                //
+                // What a cut has to land on is the K span StreamK treats as
+                // indivisible, not DepthU. skKGranularity() is the number of
+                // iterations in one scale epoch, and every host packer and
+                // device mapping site rounds its K chunk to it, so the cut
+                // quantum is DepthU * skKGranularity(). That is 256 for the
+                // dual-period MX fp8 kernels (DepthU=128, granularity 2) and
+                // DepthU itself everywhere else, which leaves an unquantised
+                // DepthU=128 MX solution refused exactly as before.
                 constexpr size_t mxScaleSwizzleGranuleK = 256; // lrSubtileShape[1](2) * instK(128)
-                if(sizeMapping.depthU % mxScaleSwizzleGranuleK != 0)
+                const size_t     skKCutQuantumK = sizeMapping.depthU * solution.skKGranularity();
+                if(skKCutQuantumK % mxScaleSwizzleGranuleK != 0)
                     return refuse("MXScaleSwizzleGranule",
-                                  "DepthU=" + std::to_string(sizeMapping.depthU)
-                                      + " is not a multiple of the MX scale swizzle granule (256 "
+                                  "StreamK K-cut quantum " + std::to_string(skKCutQuantumK)
+                                      + " (DepthU=" + std::to_string(sizeMapping.depthU)
+                                      + ") is not a multiple of the MX scale swizzle granule (256 "
                                         "K elements), so a StreamK K-cut can land inside a "
                                         "granule");
             }
