@@ -105,6 +105,12 @@ class TestBinaryAbiRefusal(unittest.TestCase):
             self._adopt(abi.BINARY_ABI - 1)
         self.assertIn(f"binary ABI v{abi.BINARY_ABI - 1}", str(cm.exception))
 
+    def test_pre_indexed_mma_library_is_refused(self):
+        """ABI 5 lacks the indexed MMA layout even with buffer-capable views."""
+        with self.assertRaises(RuntimeError) as cm:
+            self._adopt(5)
+        self.assertIn("binary ABI v5", str(cm.exception))
+
     def test_a_library_with_no_version_export_is_refused(self):
         """Predating the contract is itself the mismatch, not a reason to skip it."""
         with self.assertRaises(RuntimeError) as cm:

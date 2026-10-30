@@ -31,7 +31,7 @@
  * rocke/abi.h and update both numbers in the same change. 64-bit only, where
  * the pointer width that is part of the layout is known. */
 #if INTPTR_MAX == INT64_MAX
-static_assert(sizeof(rocke_mma_op_t) == 216 && ROCKE_ABI_VERSION == 5,
+static_assert(sizeof(rocke_mma_op_t) == 216 && ROCKE_ABI_VERSION == 6,
               "rocke_mma_op_t changed size: bump ROCKE_ABI_VERSION in rocke/abi.h, then "
               "update this pin");
 static_assert(offsetof(rocke_mma_op_t, srcs) == 8 && offsetof(rocke_mma_op_t, dst) == 152
