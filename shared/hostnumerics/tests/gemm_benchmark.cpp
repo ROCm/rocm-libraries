@@ -12,6 +12,7 @@
 #include <optional>
 #include <roc/hostnumerics/comparison.hpp>
 #include <roc/hostnumerics/gemm.hpp>
+#include <roc/hostnumerics/sampling.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
