@@ -201,16 +201,16 @@ trivial_copy_from_device(Type* dst, Type const* src, size_t count, hipStream_t s
 // hipMemcpyWithStream is only supported on rocm 3.1 and above
 #if HIP_VERSION_MAJOR >= 3
 #  if HIP_VERSION_MINOR >= 1 || HIP_VERSION_MAJOR >= 4
-  status = ::hipMemcpyWithStream(dst, src, sizeof(Type) * count, hipMemcpyDeviceToHost, stream);
-#  else
-  status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyDeviceToHost, stream);
+  status = ::hipMemcpyWithStream(dst, src, sizeof(Type) * count, hipMemcpyDefault, stream);
+#    else
+  status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyDefault, stream);
   if (status != hipSuccess)
   {
     return status;
   }
   status = hipStreamSynchronize(stream);
+#    endif
 #  endif
-#endif
   return status;
 }
 
@@ -226,16 +226,16 @@ THRUST_HIP_HOST_FUNCTION hipError_t trivial_copy_to_device(Type* dst, Type const
 // hipMemcpyWithStream is only supported on rocm 3.1 and above
 #if HIP_VERSION_MAJOR >= 3
 #  if HIP_VERSION_MINOR >= 1 || HIP_VERSION_MAJOR >= 4
-  status = ::hipMemcpyWithStream(dst, src, sizeof(Type) * count, hipMemcpyHostToDevice, stream);
-#  else
-  status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyHostToDevice, stream);
+  status = ::hipMemcpyWithStream(dst, src, sizeof(Type) * count, hipMemcpyDefault, stream);
+#    else
+  status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyDefault, stream);
   if (status != hipSuccess)
   {
     return status;
   }
   status = hipStreamSynchronize(stream);
+#    endif
 #  endif
-#endif
   return status;
 }
 
