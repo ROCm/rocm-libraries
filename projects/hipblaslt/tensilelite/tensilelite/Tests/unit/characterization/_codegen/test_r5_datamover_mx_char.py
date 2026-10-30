@@ -44,6 +44,10 @@ _CONFIG = os.path.join(
 # and one group deep, while the F6 data tile stays 128 * 3/4 = 96 by 16.
 _MXS_TILE0, _MXS_TILE1 = 64, 1
 _DATA_TILE0, _DATA_TILE1 = 96, 16
+# The same mxUnit scales the rest of the scale geometry: the free size and the
+# stride both shift left by log2(4), and the K size counts whole K groups,
+# ceil(SizeL / MatrixInstK), so it rounds up and shifts right by log2(128).
+_MX_UNIT_SHIFT, _MX_K_SHIFT = 2, 7
 
 
 @pytest.fixture(scope="module")
@@ -111,6 +115,86 @@ def test_r5_datamover_mx_scale_tile_geometry(emitted, tc):
     assert f"set tile1 to {_MXS_TILE1}" in writes, (
         f"kernel {base!r}: {tc} tile1 should be the {_MXS_TILE1} scale K group "
         f"the unroll holds; got:\n{writes}"
+    )
+
+
+_FREE_SIZE = {"MXSA": "SizeI", "MXSB": "SizeJ"}
+
+
+def _decode(line):
+    """An instruction line's mnemonic and operands, with the comment dropped."""
+    mnemonic, _, operands = line.split("//")[0].strip().partition(" ")
+    return mnemonic, [op.strip() for op in operands.split(",") if op.strip()]
+
+
+def _descriptor_setup(prologue, tc):
+    """``tc``'s descriptor setup, from its data_size reset to its stride write."""
+    setup = []
+    for line in prologue.splitlines():
+        dest = _decode(line)[1][:1]
+        if setup or (dest == [f"s[sgprtdm{tc}Group1]"] and "Reset data_size" in line):
+            setup.append(line)
+            if dest == [f"s[sgprtdm{tc}Group1+5]"]:
+                break
+    return setup
+
+
+def _first_read(code, at, reg):
+    """The first instruction after ``code[at]`` that reads ``reg``, if any."""
+    for mnemonic, operands in code[at + 1:]:
+        if reg in operands[1:]:
+            return mnemonic, operands
+        if operands[:1] == [reg]:
+            return None
+    return None
+
+
+@pytest.mark.parametrize("tc", ["MXSA", "MXSB"])
+def test_r5_datamover_mx_scale_dims_and_stride(emitted, tc):
+    """The scale's dims and stride count scales and K groups, not data elements.
+
+    dim0 is the remaining M/N times mxUnit, dim1 is ceil(SizeL / MatrixInstK),
+    and the stride is the free size times mxUnit. The allocator renumbers the
+    temporaries that carry dim0 and dim1, so each is followed from the
+    instruction that writes it to the first one that reads it.
+    """
+    base, src, _err = emitted[0]
+    size = _FREE_SIZE[tc]
+    setup = _descriptor_setup(_prologue(src), tc)
+    code = [_decode(line) for line in setup]
+    shown = "\n".join(setup)
+    unit_shift = hex(_MX_UNIT_SHIFT)
+
+    stride = ("s_lshl_b32", [f"s[sgprtdm{tc}Group1+5]", f"s[sgpr{size}]", unit_shift])
+    assert stride in code, (
+        f"kernel {base!r}: {tc}'s stride should be {size} << {_MX_UNIT_SHIFT}; "
+        f"got:\n{shown}"
+    )
+
+    clamps = [i for i, line in enumerate(setup) if "remaining M/N" in line]
+    assert [code[i][1][1] for i in clamps] == [f"s[sgpr{size}]"], (
+        f"kernel {base!r}: {tc}'s dim0 should start from one {size} - MT*wgId; "
+        f"got:\n{shown}"
+    )
+    remaining = code[clamps[0]][1][0]
+    read = _first_read(code, clamps[0], remaining)
+    assert read and read[0] == "s_lshl_b32" and read[1][1:] == [remaining, unit_shift], (
+        f"kernel {base!r}: {tc}'s dim0 should be the remaining M/N << "
+        f"{_MX_UNIT_SHIFT}; got:\n{shown}"
+    )
+
+    round_up = str((1 << _MX_K_SHIFT) - 1)
+    adds = [i for i, (mnemonic, operands) in enumerate(code)
+            if mnemonic == "s_add_u32" and operands[1:] == ["s[sgprSizeL]", round_up]]
+    assert len(adds) == 1, (
+        f"kernel {base!r}: {tc}'s dim1 should round SizeL up by {round_up} once; "
+        f"got:\n{shown}"
+    )
+    groups = code[adds[0]][1][0]
+    shift = ("s_lshr_b32", [groups, groups, hex(_MX_K_SHIFT)])
+    assert _first_read(code, adds[0], groups) == shift, (
+        f"kernel {base!r}: {tc}'s dim1 should be (SizeL + {round_up}) >> "
+        f"{_MX_K_SHIFT}; got:\n{shown}"
     )
 
 
