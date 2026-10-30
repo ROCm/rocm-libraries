@@ -12,7 +12,11 @@ import traceback
 from collections import Counter
 from pathlib import Path
 
-from rocke.core.ir_golden import GOLDEN_FLAVORS
+from rocke.core.ir_golden import (
+    GOLDEN_ALIASES,
+    GOLDEN_FLAVORS,
+    GOLDEN_PROFILE_FLAVORS,
+)
 from rocke.core.ir_golden import check_golden as _check_golden
 
 
@@ -25,9 +29,10 @@ def safe(name: str) -> str:
 
 
 def current_flavor() -> str:
-    """The llvm flavor this host would autodetect (llvm20 for ROCm < 7.2,
-    llvm22 for 7.2-7.12, llvm23 for 7.13+). Only the plain dump run (no
-    ``--check`` / ``--write``) uses it; the gate checks every flavor."""
+    """Return ROCKE_LLVM_FLAVOR when explicitly set, otherwise use loaded
+    COMGR compiler evidence. Only the plain dump run (no ``--check`` /
+    ``--write``) uses this selection; the gate checks every flavor.
+    """
     from rocke.core.lower_llvm import _resolve_llvm_flavor
 
     return _resolve_llvm_flavor()
@@ -38,7 +43,7 @@ def lower_case(case, flavor):
     # lower_kernel_to_llvm, whose default 'cpp' path silently falls back to
     # python) and an EXPLICIT llvm flavor. The recorded sha is then a function
     # of the committed IR alone -- independent of whether rocke_engine is built or
-    # which ROCm/comgr vintage the host happens to detect. (llvm20 vs llvm22
+    # which LLVM version the loaded COMGR compiler reports. (llvm20 vs llvm22
     # emit different datalayout/type encodings, so an unpinned flavor would make
     # the same code hash differently across hosts.)
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
@@ -70,6 +75,8 @@ def gemm_spec(
     epilogue,
     wave_size,
     cshuffle_no_alias=False,
+    dtype="fp16",
+    **trait,
 ):
     from rocke.instances.common.gemm_universal import (
         DataSpec,
@@ -95,12 +102,14 @@ def gemm_spec(
             pipeline=pipeline,
             scheduler="intrawave",
             epilogue=epilogue,
-            pad_m=True,
-            pad_n=True,
-            pad_k=True,
             cshuffle_no_alias=cshuffle_no_alias,
+            **{"pad_m": True, "pad_n": True, "pad_k": True, **trait},
         ),
-        data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
+        data=(
+            DataSpec("fp64", "fp64", "fp64", "fp64")
+            if dtype == "fp64"
+            else DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16")
+        ),
         wave_size=wave_size,
     )
 
@@ -1154,6 +1163,7 @@ def build_direct_depthwise(
     block_w=16,
     block_waves=2,
     wave_size=64,
+    cpl=1,
 ):
     def _build():
         from kernels.common.conv_direct_grouped import (
@@ -1179,6 +1189,7 @@ def build_direct_depthwise(
             block_w=block_w,
             block_waves=block_waves,
             wave_size=wave_size,
+            cpl=cpl,
         )
         return _build_dw(spec, arch=arch)
 
@@ -1910,6 +1921,53 @@ def cases():
         ),
     )
 
+    # fp64 GEMM on gfx942: 16x16x4 atom, plus the DTL + prefetch + swizzle path.
+    add(
+        "gemm",
+        "gemm/gfx942/f64_t64x64x16",
+        "gfx942",
+        build_gemm(
+            "irhash_gemm_942_f64",
+            "gfx942",
+            64,
+            64,
+            16,
+            2,
+            2,
+            16,
+            16,
+            4,
+            "compv4",
+            "default",
+            64,
+            dtype="fp64",
+        ),
+    )
+    add(
+        "gemm",
+        "gemm/gfx942/f64_t64x64x16/dtl_prefetch_swizzle",
+        "gfx942",
+        build_gemm(
+            "irhash_gemm_942_f64_dtl",
+            "gfx942",
+            64,
+            64,
+            16,
+            2,
+            2,
+            16,
+            16,
+            4,
+            "compv4",
+            "default",
+            64,
+            dtype="fp64",
+            direct_to_lds=True,
+            dtl_prefetch=True,
+            lds_swizzle=True,
+            pad_k=False,
+        ),
+    )
     # Homogeneous FP8/BF8 with E8M0 scales, shared by source and installed gates.
     for dtype in ("fp8e4m3", "bf8e5m2"):
         for matrix_path in ("wmma_scale", "wmma_scale16"):
@@ -2611,6 +2669,26 @@ def cases():
             tile_n=32,
             tile_k=32,
             dtype_d="fp32",
+        ),
+    )
+    # WMMA split-K: the packed bf16 atomic with a zero partner.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1250/n1h8c16k32r3_spk4",
+        "gfx1250",
+        build_conv_wgrad(
+            "irhash_wgrad_1250_spk4",
+            "gfx1250",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=32,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            split_k=4,
+            dtype_d="bf16",
         ),
     )
 
@@ -3366,6 +3444,27 @@ def cases():
             num_query_heads=4,
             num_kv_heads=2,
             dtype="bf16",
+        ),
+    )
+    # bf16 D128 decode on a paged cache past the i32 buffer range: i64 K/V
+    # addressing with four pages per tile and per-page buffer resources.
+    add(
+        "attention",
+        "attention/gfx942/2d_bf16_d128_b16_decode_i64",
+        "gfx942",
+        build_attention_2d(
+            "irhash_attn_942_2d_bf16_decode_i64",
+            "gfx942",
+            head_size=128,
+            block_size=16,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="bf16",
+            num_seqs=256,
+            waves_per_eu=2,
+            use_register_pv=True,
+            tile_size=64,
+            use_i64_kv_addr=True,
         ),
     )
     add(
@@ -4704,6 +4803,188 @@ def cases():
             ),
         )
 
+    # --- conv_dgrad_{patch,smallc}_wmma: wave32 WMMA stem dgrad (gfx1250) ---
+    # Patch embeddings as one GEMM with a pixel-shuffle TDM store, and small-C
+    # stems as a GEMM over the flattened filter plus an LDS overlap-add. Every
+    # case needs llvm23 (TDM), so the other flavors record them as expected
+    # failures. The C++ twins are gated by
+    # library/tests/parity/conv_dgrad_{patch,smallc}_wmma_emit.*.
+    def build_dgrad_stem_wmma_case(kind, dtype, K, S, PAD, C, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            if kind == "patch":
+                from kernels.common.conv_dgrad_patch_wmma import (
+                    DgradPatchWmmaSpec as Spec,
+                    build_dgrad_patch_wmma as build,
+                )
+            else:
+                from kernels.common.conv_dgrad_smallc_wmma import (
+                    DgradSmallcWmmaSpec as Spec,
+                    build_dgrad_smallc_wmma as build,
+                )
+            p = DirectConvProblem(
+                N=2,
+                H=64,
+                W=64,
+                groups=1,
+                cpg=C,
+                kpg=64,
+                KH=K,
+                KW=K,
+                PAD=PAD,
+                stride=S,
+                dtype=dtype,
+            )
+            return build(Spec(problem=p, **spec_kw), arch="gfx1250")
+
+        return _build
+
+    for _kind, _case_id, _dtype, _conv, _over in (
+        (
+            "patch",
+            "bf16_p16_rb8",
+            "bf16",
+            (16, 16, 0, 3),
+            dict(waves_c=4, waves_p=2, tiles_c=6, tiles_p=4, tile_w=16, r_blk=8),
+        ),
+        (
+            "patch",
+            "fp16_p4_pf",
+            "fp16",
+            (4, 4, 0, 3),
+            dict(
+                waves_c=3,
+                waves_p=1,
+                tiles_c=1,
+                tiles_p=8,
+                tile_w=16,
+                r_blk=4,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+        ),
+        (
+            "smallc",
+            "bf16_3x3s1_c4_pf",
+            "bf16",
+            (3, 1, 1, 4),
+            dict(
+                waves_c=1,
+                waves_p=3,
+                tiles_c=3,
+                tiles_p=8,
+                out_h=8,
+                out_w=32,
+                ck=64,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+        ),
+        (
+            "smallc",
+            "fp16_7x7s2_c3",
+            "fp16",
+            (7, 2, 3, 3),
+            dict(waves_c=2, waves_p=4, tiles_c=5, tiles_p=6, out_h=32, out_w=32),
+        ),
+    ):
+        _fam = f"conv_dgrad_{_kind}_wmma"
+        add(
+            _fam,
+            f"{_fam}/gfx1250/{_case_id}",
+            "gfx1250",
+            build_dgrad_stem_wmma_case(_kind, _dtype, *_conv, **_over),
+        )
+
+    # --- conv_direct_fwd_small{c,k}_wmma: wave32 WMMA forward of tiny channel
+    # counts (gfx1250). TDM window / channel-chunk staging; every case needs
+    # llvm23 (TDM), so the other flavors record them as expected failures. The
+    # C++ twin is gated by library/tests/parity/conv_fwd_small_wmma_emit.*.
+    def build_fwd_small_wmma_case(kind, prob_kw, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+            from kernels.common.conv_fwd_small_wmma import (
+                FwdSmallcWmmaSpec,
+                FwdSmallkWmmaSpec,
+                build_fwd_smallc_wmma,
+                build_fwd_smallk_wmma,
+            )
+
+            p = DirectConvProblem(N=2, H=32, W=40, groups=1, **prob_kw)
+            if kind == "smallc":
+                return build_fwd_smallc_wmma(
+                    FwdSmallcWmmaSpec(problem=p, **spec_kw), arch="gfx1250"
+                )
+            return build_fwd_smallk_wmma(
+                FwdSmallkWmmaSpec(problem=p, **spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    for _kind, _case_id, _prob, _over in (
+        (
+            "smallc",
+            "bf16_c3_default",
+            dict(cpg=3, kpg=64, dtype="bf16"),
+            {},
+        ),
+        (
+            "smallc",
+            "fp16_c3_s2_tb4_ts",
+            dict(cpg=3, kpg=64, stride=2, dtype="fp16"),
+            dict(
+                waves_p=2,
+                tiles_k=4,
+                out_h=8,
+                out_w=16,
+                tiles_per_block=4,
+                tdm_store=True,
+            ),
+        ),
+        (
+            "smallc",
+            "bf16_c3_k4s4_tb4_ts",
+            dict(cpg=3, kpg=64, KH=4, KW=4, PAD=0, stride=4, dtype="bf16"),
+            dict(
+                waves_p=2,
+                tiles_k=8,
+                out_h=4,
+                out_w=32,
+                tiles_per_block=4,
+                tdm_store=True,
+            ),
+        ),
+        (
+            "smallk",
+            "bf16_k4_pf",
+            dict(cpg=128, kpg=4, dtype="bf16"),
+            dict(tiles_c=3, tiles_p=3, out_h=6, out_w=16, ck=64, prefetch=True),
+        ),
+        (
+            "smallk",
+            "fp16_k4_st3_pf",
+            dict(cpg=128, kpg=4, dtype="fp16"),
+            dict(
+                waves_c=3,
+                waves_p=2,
+                tiles_c=1,
+                tiles_p=5,
+                out_h=10,
+                out_w=10,
+                ck=64,
+                stages=3,
+                prefetch=True,
+            ),
+        ),
+    ):
+        add(
+            f"conv_direct_fwd_{_kind}_wmma",
+            f"conv_direct_fwd_{_kind}_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_fwd_small_wmma_case(_kind, _prob, **_over),
+        )
+
     # --- conv_direct_dgrad_wmma: wave32 WMMA direct dgrad (gfx1250) ---
     # 3-D TDM halo and weight staging, transpose-on-read weights, TDM epilogue.
     # Every case needs llvm23 (TDM), so the other flavors record them as
@@ -4757,6 +5038,352 @@ def cases():
             f"conv_direct_dgrad_wmma/gfx1250/{_case_id}",
             "gfx1250",
             build_direct_dgrad_wmma_case(_dtype, **_over),
+        )
+
+    # --- conv_direct_fwd_wmma: wave32 WMMA direct forward (gfx1250) ---
+    # 3-D TDM halo and weight staging, shifted halo reads per tap, TDM
+    # epilogue. Every case needs llvm23 (TDM), so the other flavors record
+    # them as expected failures. The C++ twin is gated (every knob) by
+    # library/tests/parity/conv_direct_fwd_wmma_emit.*.
+    def build_direct_fwd_wmma_case(prob_kw, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_fwd_wmma import (
+                DirectFwdWmmaSpec,
+                build_direct_fwd_wmma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            shape = dict(
+                N=2,
+                H=20,
+                W=24,
+                groups=1,
+                cpg=64,
+                kpg=96,
+                KH=3,
+                KW=3,
+                PAD=1,
+                stride=1,
+                dtype="bf16",
+            )
+            shape.update(prob_kw)
+            return build_direct_fwd_wmma(
+                DirectFwdWmmaSpec(problem=DirectConvProblem(**shape), **spec_kw),
+                arch="gfx1250",
+            )
+
+        return _build
+
+    for _case_id, _prob, _over in (
+        ("bf16_default", {}, {}),
+        (
+            "fp16_tn2_sb_we_pf",
+            dict(dtype="fp16"),
+            dict(
+                waves_k=1,
+                tiles_k=4,
+                tiles_p=6,
+                tile_n=2,
+                split_barrier=True,
+                wave_epilogue=True,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+        ),
+        (
+            "bf16_s2_ps_pg4",
+            dict(stride=2, groups=4, cpg=8, kpg=8),
+            dict(
+                tiles_k=1,
+                tiles_p=2,
+                tile_w=32,
+                tile_n=2,
+                pack_groups=4,
+                phase_split=True,
+            ),
+        ),
+        (
+            "bf16_pp_pg3",
+            {},
+            dict(tiles_p=6, pingpong=True, pp_group=3, sched="iterative-ilp"),
+        ),
+        (
+            "bf16_tu_tsh_dil",
+            dict(PAD=2, dil_w=2),
+            dict(waves_k=1, tiles_k=2, tap_reuse=True, tap_shift=True),
+        ),
+    ):
+        add(
+            "conv_direct_fwd_wmma",
+            f"conv_direct_fwd_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_direct_fwd_wmma_case(_prob, **_over),
+        )
+
+    # --- conv_winograd_fwd: Winograd F(m x m_w, 3x3) forward transforms ---
+    # K2 input transform (register path, fused bf16 prescale), K4 output
+    # transform and the merged K2+K1 launch. The full matrix (and the C++
+    # twin) lives in library/tests/parity/conv_winograd_fwd_emit.*.
+    def build_winograd_fwd_case(stage, **spec_kw):
+        def _build():
+            from kernels.common._conv_implicit_gemm_common import ConvProblem
+            from kernels.common import conv_winograd_fwd as wf
+
+            p = ConvProblem(N=2, Hi=20, Wi=24, C=64, K=96, Y=3, X=3, pH=1, pW=1)
+            spec = wf.WinogradFwdSpec(problem=p, **spec_kw)
+            if isinstance(stage, tuple):
+                return wf.build_winograd_merged(
+                    wf.WinogradMergedSpec(spec, stage), arch="gfx1250"
+                )
+            build = {
+                "K2": wf.build_winograd_input_transform,
+                "K4": wf.build_winograd_output_transform,
+            }[stage]
+            return build(spec, arch="gfx1250")
+
+        return _build
+
+    for _case_id, _stage, _over in (
+        ("f4_k2", "K2", {}),
+        ("f4_bf16_prescale_k2", "K2", dict(io_dtype="bf16", prescale=True)),
+        ("f6x4_k4", "K4", dict(m=6, m_w=4)),
+        ("f4_merged_k2_k1", ("K2", "K1"), {}),
+    ):
+        add(
+            "conv_winograd_fwd",
+            f"conv_winograd_fwd/gfx1250/{_case_id}",
+            "gfx1250",
+            build_winograd_fwd_case(_stage, **_over),
+        )
+
+    # --- conv_winograd_gemm_wmma: the Winograd batched GEMM (K3, gfx1250) ---
+    # TDM operand ring + WMMA, TDM or per-lane epilogue, split-K slabs and
+    # their reduce. The full matrix (and the C++ twin) lives in
+    # library/tests/parity/conv_winograd_gemm_wmma_emit.*.
+    def build_winograd_gemm_case(**spec_kw):
+        def _build():
+            from kernels.common.conv_winograd_gemm_wmma import (
+                WinogradGemmWmmaSpec,
+                build_winograd_gemm_wmma,
+            )
+
+            return build_winograd_gemm_wmma(
+                WinogradGemmWmmaSpec(**spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    def build_winograd_gemm_reduce_case(dtype):
+        def _build():
+            from kernels.common.conv_winograd_gemm_wmma import (
+                WinogradGemmReduceSpec,
+                build_winograd_gemm_reduce,
+            )
+
+            return build_winograd_gemm_reduce(
+                WinogradGemmReduceSpec(dtype), arch="gfx1250"
+            )
+
+        return _build
+
+    for _case_id, _build_fn in (
+        ("fp16_default", build_winograd_gemm_case()),
+        (
+            "bf16_sk_direct_taps2",
+            build_winograd_gemm_case(
+                dtype="bf16", split_k=True, epilogue="direct", taps=2, tile_k=64
+            ),
+        ),
+        ("reduce_fp16", build_winograd_gemm_reduce_case("fp16")),
+    ):
+        add(
+            "conv_winograd_gemm_wmma",
+            f"conv_winograd_gemm_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            _build_fn,
+        )
+
+    # --- conv_winograd_gen: generalized Winograd forward transforms ---
+    # K1 filter / K2 input / K4 output transforms of a segmented 1-D filter,
+    # a grouped 5x5 one and the 1x5 / 5x1 F(4,5). The full matrix (and the
+    # C++ twin) lives in library/tests/parity/conv_winograd_gen_emit.*.
+    def build_winograd_gen_case(stage, prob, ay, ax, **spec_kw):
+        def _build():
+            from kernels.common import conv_winograd_gen as G
+            from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+            spec = G.WinogradGenSpec(
+                problem=ConvProblem(**prob),
+                ax_y=G.WinoAxis(*ay),
+                ax_x=G.WinoAxis(*ax),
+                **spec_kw,
+            )
+            build = {
+                "K1": G.build_filter_transform,
+                "K2": G.build_input_transform,
+                "K4": G.build_output_transform,
+            }[stage]
+            return build(spec, arch="gfx1250")
+
+        return _build
+
+    _wg_1x11 = dict(N=2, Hi=1, Wi=200, C=64, K=64, Y=1, X=11, pW=5)
+    _wg_5x5 = dict(N=1, Hi=20, Wi=20, C=64, K=64, Y=5, X=5, pH=2, pW=2, groups=2)
+    # F(4,5): the selector's only 1x5 / 5x1 variant. K1 / K2 / K4 pin its
+    # G / B^T / A^T respectively.
+    _wg_1x5 = dict(N=2, Hi=1, Wi=130, C=64, K=64, Y=1, X=5, pW=2)
+    _wg_5x1 = dict(N=1, Hi=60, Wi=3, C=32, K=64, Y=5, X=1, pH=4, dH=2)
+    for _case_id, _stage, _prob, _ay, _ax, _kw in (
+        ("1x11_6s2_k1", "K1", _wg_1x11, (1, 1), (6, 11, 2), {}),
+        ("1x11_6s2_k2", "K2", _wg_1x11, (1, 1), (6, 11, 2), {}),
+        ("5x5_f2_g2_bf16_k4", "K4", _wg_5x5, (2, 5), (2, 5), dict(io_dtype="bf16")),
+        ("1x5_f4_k1", "K1", _wg_1x5, (1, 1), (4, 5), {}),
+        ("1x5_f4_k2", "K2", _wg_1x5, (1, 1), (4, 5), {}),
+        ("1x5_f4_k4", "K4", _wg_1x5, (1, 1), (4, 5), {}),
+        ("5x1_f4_d2_bf16_k2", "K2", _wg_5x1, (4, 5), (1, 1), dict(io_dtype="bf16")),
+    ):
+        add(
+            "conv_winograd_gen",
+            f"conv_winograd_gen/gfx1250/{_case_id}",
+            "gfx1250",
+            build_winograd_gen_case(_stage, _prob, _ay, _ax, **_kw),
+        )
+
+    # --- conv_winograd_fused_1d_wmma: fused 1-D Winograd forward (gfx1250) ---
+    # Weight-stationary 1 x r Winograd with the WMMA input transform, async
+    # prefetch and merged phases (the selector's config), and the VALU
+    # transform without prefetch. The C++ twin is gated by
+    # library/tests/parity/conv_winograd_fused_1d_wmma_emit.*.
+    def build_winograd_fused_1d_case(C, K, ax, **spec_kw):
+        def _build():
+            from kernels.common._conv_implicit_gemm_common import ConvProblem
+            from kernels.common.conv_winograd_fused_1d_wmma import (
+                FusedWino1DSpec,
+                build_fused_wino_1d,
+            )
+            from kernels.common.conv_winograd_gen import WinoAxis
+
+            p = ConvProblem(N=1, Hi=1, Wi=600, C=C, K=K, Y=1, X=ax[1], pW=ax[1] // 2)
+            return build_fused_wino_1d(
+                FusedWino1DSpec(problem=p, ax=WinoAxis(*ax), **spec_kw),
+                arch="gfx1250",
+            )
+
+        return _build
+
+    for _case_id, _c, _k, _ax, _kw in (
+        (
+            "1x11_4s3_c128_sel",
+            128,
+            128,
+            (4, 11, 3),
+            dict(
+                q=2,
+                fk=4,
+                waves=4,
+                xf="wmma",
+                xf_batch=16,
+                prefetch=True,
+                m_f16=True,
+                merge=True,
+            ),
+        ),
+        ("1x7_4s2_c64_valu", 64, 64, (4, 7, 2), dict(q=2, fk=2)),
+    ):
+        add(
+            "conv_winograd_fused_1d_wmma",
+            f"conv_winograd_fused_1d_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_winograd_fused_1d_case(_c, _k, _ax, **_kw),
+        )
+
+    # Stride 2 (3x3 phases and the 2x2 patch merge), dilation, packed small
+    # groups, the split barrier with and without the per-wave epilogue, and
+    # tile widths that are not a power of two. Also llvm23-only.
+    def build_direct_dgrad_wmma_ext_case(prob_kw, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_dgrad_wmma import (
+                DirectDgradWmmaSpec,
+                build_direct_dgrad_wmma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            pk = dict(
+                N=2,
+                H=20,
+                W=24,
+                groups=1,
+                cpg=64,
+                kpg=96,
+                KH=3,
+                PAD=1,
+                stride=1,
+                dtype="bf16",
+            )
+            pk.update(prob_kw)
+            pk["KW"] = pk["KH"]
+            return build_direct_dgrad_wmma(
+                DirectDgradWmmaSpec(problem=DirectConvProblem(**pk), **spec_kw),
+                arch="gfx1250",
+            )
+
+        return _build
+
+    _dgw_pf = dict(prefetch=True, sched="iterative-ilp")
+    for _case_id, _prob, _over in (
+        (
+            "bf16_dil2x2_p2",
+            dict(PAD=2, dil_h=2, dil_w=2),
+            dict(waves_c=2, waves_p=4, tiles_c=4, tiles_p=8, **_dgw_pf),
+        ),
+        (
+            "bf16_pg4_c8k8",
+            dict(groups=8, cpg=8, kpg=8),
+            dict(waves_c=1, waves_p=8, tiles_c=2, tiles_p=4, tile_n=2, pack_groups=4),
+        ),
+        (
+            "bf16_s2_3x3",
+            dict(stride=2),
+            dict(waves_c=2, waves_p=4, tiles_c=2, tiles_p=4, tile_w=8, tile_n=2, ck=64),
+        ),
+        (
+            "bf16_s2_patch2",
+            dict(KH=2, PAD=0, stride=2),
+            dict(waves_c=2, waves_p=4, tiles_c=2, tiles_p=4, ck=64),
+        ),
+        (
+            "bf16_sb_tw56",
+            {},
+            dict(
+                waves_c=1,
+                waves_p=7,
+                tiles_c=4,
+                tiles_p=10,
+                tile_w=56,
+                split_barrier=True,
+            ),
+        ),
+        (
+            "bf16_sb_we_tw24",
+            {},
+            dict(
+                waves_c=1,
+                waves_p=8,
+                tiles_c=4,
+                tiles_p=6,
+                tile_w=24,
+                tile_n=4,
+                split_barrier=True,
+                wave_epilogue=True,
+                **_dgw_pf,
+            ),
+        ),
+    ):
+        add(
+            "conv_direct_dgrad_wmma",
+            f"conv_direct_dgrad_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_direct_dgrad_wmma_ext_case(_prob, **_over),
         )
 
     # --- conv_direct_wgrad: the direct wgrad kernels on gfx950 ---
@@ -4928,6 +5555,46 @@ def cases():
             block_h=2,
             block_waves=2,
             wave_size=32,
+        ),
+    )
+    # Channel-packed (cpl > 1) depthwise forward on the wave32 gfx1250:
+    # cpl-wide vector loads / stores and packed <2 x f32> FMAs. Mirrors
+    # library/tests/parity/conv_direct_grouped_emit.* (indices 171+).
+    add(
+        "conv_direct",
+        "conv_direct/gfx1250/dw_n4h16_cpl2_w32",
+        "gfx1250",
+        build_direct_depthwise(
+            "irhash_directdw_1250_cpl2",
+            "gfx1250",
+            N=4,
+            H=16,
+            W=16,
+            groups=64,
+            block_w=8,
+            block_waves=1,
+            wave_size=32,
+            cpl=2,
+        ),
+    )
+    add(
+        "conv_direct_depthwise_tiled",
+        "conv_direct_depthwise_tiled/gfx1250/bf16_k3_cpl4_w32",
+        "gfx1250",
+        build_direct_depthwise_tiled(
+            "irhash_direct_dw_tiled_1250_bf16_k3_cpl4",
+            "gfx1250",
+            N=2,
+            H=16,
+            W=16,
+            groups=96,
+            KH=3,
+            PAD=1,
+            block_w=8,
+            block_h=2,
+            block_waves=1,
+            wave_size=32,
+            cpl=4,
         ),
     )
 
@@ -5189,7 +5856,8 @@ def build_golden() -> dict:
     """Run every case under each golden flavor and return the flavor-keyed doc."""
     return {
         "schema": GOLDEN_SCHEMA,
-        "flavors": {fl: run(flavor=fl) for fl in GOLDEN_FLAVORS},
+        "aliases": GOLDEN_ALIASES,
+        "flavors": {fl: run(flavor=fl) for fl in GOLDEN_PROFILE_FLAVORS},
     }
 
 
@@ -5207,8 +5875,8 @@ def main():
     ap.add_argument(
         "--write",
         type=Path,
-        help="(re-)bless the flavor-keyed golden: run every case under each of "
-        f"{GOLDEN_FLAVORS} and write the result. Run only from a verified-good "
+        help="(re-)bless the profile-keyed golden: run every case under each of "
+        f"{GOLDEN_PROFILE_FLAVORS} and write lane aliases. Run only from a verified-good "
         "tree; re-blessing should accompany a reviewed, expected output change.",
     )
     ap.add_argument(

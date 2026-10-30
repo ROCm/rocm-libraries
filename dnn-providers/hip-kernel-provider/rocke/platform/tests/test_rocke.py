@@ -366,6 +366,44 @@ define amdgpu_kernel void @k() {
         self.assertEqual(res.sgpr_count, 48)
         self.assertEqual(res.lds_bytes, 32768)
 
+    def test_parse_isa_rdna_gfx12(self):
+        # Verbatim llvm-objdump lines from gfx1201/gfx1151 WMMA FMHA builds. RDNA
+        # spells LDS ops ds_load/ds_store, uses global_* memory ops, and gfx12
+        # splits barriers and memory waits into separate instructions.
+        asm = """
+\tv_wmma_f32_16x16x16_f16 v[32:39], v[40:43], v[91:94], 0    // 000000001D90: CC404020 1A02B728
+\tglobal_load_b128 v[40:43], v[0:1], off                     // 000000001C50: EE05C07C 00000028 00000000
+\tglobal_store_b16 v[46:47], v50, off                        // 000000002CE4: EE06407C 19000000 0000002E
+\tscratch_load_b128 v[154:157], off, off                     // 000000001F5C: DC5D0000 9A7C0000
+\tscratch_store_b128 off, v[2:5], off                        // 000000001DE0: DC750000 007C0200
+\tds_load_b128 v[84:87], v82                                 // 00000000297C: DBFC0000 54000052
+\tds_store_b128 v80, v[91:94] offset:512                     // 000000002864: DB7C0200 00005B50
+\ts_wait_loadcnt 0x0                                         // 000000001D8C: BFC00000
+\ts_wait_dscnt 0x0                                           // 000000001E6C: BFC60000
+\ts_wait_kmcnt 0x0                                           // 000000001A58: BFC70000
+\ts_wait_alu 0xfffe                                          // 000000001BBC: BF88FFFE
+\ts_barrier_signal -1                                        // 000000002974: BE804EC1
+\ts_barrier_wait 0xffff                                      // 000000002978: BF94FFFF
+\ts_mov_b32 s13, 0                                           // 000000001A90: BE8D0080
+"""
+        isa = parse_isa(asm)
+        self.assertEqual(isa.wmma, 1)
+        self.assertEqual(isa.mfma, 0)
+        self.assertEqual(isa.global_load, 1)
+        self.assertEqual(isa.global_store, 1)
+        self.assertEqual(isa.scratch_load, 1)
+        self.assertEqual(isa.scratch_store, 1)
+        self.assertEqual(isa.ds_read, 1)
+        self.assertEqual(isa.ds_write, 1)
+        # Three split memory waits; s_wait_alu is an ALU dependency hint.
+        self.assertEqual(isa.s_waitcnt, 3)
+        self.assertEqual(isa.s_wait_alu, 1)
+        # One split barrier (signal + wait) is one barrier.
+        self.assertEqual(isa.s_barrier, 1)
+        # WMMA is not VALU; waits/barriers are not SALU.
+        self.assertEqual(isa.valu, 0)
+        self.assertEqual(isa.salu, 1)
+
     def test_benchmark_summary_discards_first_and_reports_spread(self):
         s = summarize_runs(
             ms=[1.0, 0.5, 0.25],
@@ -403,6 +441,60 @@ define amdgpu_kernel void @k() {
         rows = compare_variant_reports([report])
         self.assertEqual(rows[0]["median_tflops"], 123.0)
         self.assertEqual(rows[0]["llvm_mfma"], 1)
+
+    def test_resources_and_report_expose_compiled_workgroup_bound(self):
+        # Verbatim llvm-readelf --notes lines from a one-wave (32-thread) gfx1201
+        # kernel whose flat-work-group-size range was invalid, so LLVM budgeted
+        # registers for its 1024-thread default.
+        notes = """
+    .max_flat_workgroup_size: 1024
+    .private_segment_fixed_size: 216
+    .vgpr_count:     192
+    .wavefront_size: 32
+"""
+        res = parse_resources(notes)
+        self.assertEqual(res.max_flat_workgroup_size, 1024)
+        self.assertEqual(res.as_dict()["max_flat_workgroup_size"], 1024)
+
+        b = IRBuilder("one_wave")
+        b.kernel.attrs["max_workgroup_size"] = 32
+        artifact = KernelArtifact(
+            kernel=b.kernel, ir_text="", llvm_text="", hsaco=b"", timings={}
+        )
+        report = VariantReport(
+            name="one_wave", spec={}, artifact=artifact, resources=res
+        )
+        row = compare_variant_reports([report])[0]
+        self.assertEqual(row["wg_bound"], 32)
+        self.assertEqual(row["wg_compiled"], 1024)
+        # The kernel records only a bound; without a launch size the row
+        # does not invent one.
+        self.assertIsNone(row["wg_launch"])
+
+    def test_report_compares_compiled_bound_with_actual_launch(self):
+        # A kernel left at the 256 default bound but launched with 64 threads:
+        # the compiler budgets for 256, four times the launch.
+        b = IRBuilder("default_bound")
+        artifact = KernelArtifact(
+            kernel=b.kernel, ir_text="", llvm_text="", hsaco=b"", timings={}
+        )
+        report = VariantReport(
+            name="default_bound",
+            spec={},
+            artifact=artifact,
+            resources=parse_resources("    .max_flat_workgroup_size: 256\n"),
+            launch_block_size=64,
+        )
+        row = compare_variant_reports([report])[0]
+        self.assertEqual(row["wg_bound"], 256)
+        self.assertEqual(row["wg_launch"], 64)
+        self.assertEqual(row["wg_compiled"], 256)
+        self.assertEqual(report.as_dict()["launch_block_size"], 64)
+        # from_artifact forwards the launch size the caller supplies.
+        forwarded = VariantReport.from_artifact(
+            name="default_bound", spec={}, artifact=artifact, launch_block_size=64
+        )
+        self.assertEqual(forwarded.launch_block_size, 64)
 
 
 # ---------------------------------------------------------------------
@@ -1260,6 +1352,44 @@ class TestBatchedGemmInstance(unittest.TestCase):
         # The batched form pulls in `block_id_z` for the batch index.
         self.assertIn("@llvm.amdgcn.workgroup.id.z", ll)
         self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.f16", ll)
+
+    def test_check_batched_offsets_fit_i32_dtl_byte_bound(self):
+        from rocke.instances.common.batched_gemm import (
+            check_batched_offsets_fit_i32,
+        )
+
+        # Without direct_to_lds the element bound applies: 2 * 1e9 fits i32.
+        check_batched_offsets_fit_i32(2, 1_000_000_000, 1, 1)
+
+        # With direct_to_lds the A/B loads are addressed with a byte offset,
+        # so A and B are bounded by 2 GiB of bytes -- stricter than the
+        # element bound for every dtype (f16: 2 * 1e9 elements = 4 GiB).
+        with self.assertRaises(ValueError):
+            check_batched_offsets_fit_i32(
+                2, 1_000_000_000, 1, 1, direct_to_lds=True, elem_bytes=2
+            )
+        # fp64: 2 * 300e6 * 8 bytes > 2 GiB.
+        with self.assertRaises(ValueError):
+            check_batched_offsets_fit_i32(
+                2, 300_000_000, 1, 1, direct_to_lds=True, elem_bytes=8
+            )
+        # fp64 within 2 GiB of bytes passes.
+        check_batched_offsets_fit_i32(
+            2, 100_000_000, 100_000_000, 1, direct_to_lds=True, elem_bytes=8
+        )
+        # C is written by the epilogue with element offsets: the element
+        # bound applies, not the byte bound.
+        check_batched_offsets_fit_i32(
+            2,
+            100_000_000,
+            100_000_000,
+            1_000_000_000,
+            direct_to_lds=True,
+            elem_bytes=8,
+        )
+        # direct_to_lds without an element size is a caller error.
+        with self.assertRaises(ValueError):
+            check_batched_offsets_fit_i32(2, 1, 1, 1, direct_to_lds=True)
 
 
 # ---------------------------------------------------------------------
@@ -3972,6 +4102,55 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                     )
                     self.assertIn(self._DPP_CALL.format(0x160 | mask), ll)
 
+    # ---- vop2_f32_dpp_xor (softmax row-reduce step) ----
+    def test_vop2_f32_dpp_xor_is_update_dpp_then_fmax_or_fadd(self):
+        """One reduce step is the in-row ``update.dpp`` shuffle (``row_xmask``
+        on gfx1250) followed by ``maxnum`` / ``fadd`` -- never inline asm,
+        which LLVM's gfx1250 WMMA co-execution hazard check cannot see. The
+        shuffled value is the first operand: DPP applies to ``src0``, so that
+        is the operand GCNDPPCombine folds into the fused DPP instruction."""
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        combine = {
+            "v_max_f32": r"call float @llvm\.maxnum\.f32\(float {s}, float ",
+            "v_add_f32": r"= fadd float {s}, ",
+        }
+        for mnemonic, pattern in combine.items():
+            for mask in (1, 2, 4, 8):
+                with self.subTest(mnemonic=mnemonic, mask=mask):
+                    # Assert on the Python lowering first: _lower would skip the
+                    # subtest before these checks when the C++ engine is absent.
+                    b = self._builder(f"vop2dpp_{mnemonic}_{mask}")
+                    b.vop2_f32_dpp_xor(b.const_f32(1.0), mask, mnemonic)
+                    ll = _lower_kernel_to_llvm_python(b.kernel, arch="gfx1250")
+                    self.assertNotIn(" asm ", ll)
+                    self.assertNotIn("_dpp $0", ll)
+                    calls = re.findall(
+                        r"(%[\w.]+) = call i32 @llvm\.amdgcn\.update\.dpp\.i32\("
+                        r"i32 [^,]+, i32 [^,]+, i32 (\d+), i32 15, i32 15, i1 true\)",
+                        ll,
+                    )
+                    self.assertEqual(len(calls), 1, ll)
+                    dpp, ctrl = calls[0]
+                    self.assertEqual(int(ctrl), 0x160 | mask)
+                    shuffled = re.search(
+                        rf"(%[\w.]+) = bitcast i32 {re.escape(dpp)} to float", ll
+                    )
+                    self.assertIsNotNone(shuffled, ll)
+                    self.assertRegex(ll, pattern.format(s=re.escape(shuffled.group(1))))
+                    _assert_ir_assembles(self, ll, b.kernel.name)
+                    _assert_engines_agree(self, b.kernel, ll, arch="gfx1250")
+
+    def test_vop2_f32_dpp_xor_rejects_bad_inputs(self):
+        b = self._builder("vop2dpp_bad")
+        with self.assertRaisesRegex(ValueError, "requires f32 data"):
+            b.vop2_f32_dpp_xor(b.const_i32(1), 1, "v_add_f32")
+        for mask in (0, 16):
+            with self.assertRaisesRegex(ValueError, "xor_mask must be 1..15"):
+                b.vop2_f32_dpp_xor(b.const_f32(1.0), mask, "v_add_f32")
+        with self.assertRaisesRegex(ValueError, "must be v_max_f32/v_add_f32"):
+            b.vop2_f32_dpp_xor(b.const_f32(1.0), 1, "v_min_f32")
+
     def test_warp_shuffle_xor_dpp_emits_hip_builtin(self):
         from rocke.core.ir import IRBuilder
         from rocke.core.lower_hip import lower_kernel_to_hip
@@ -4884,14 +5063,14 @@ class TestBothBackendDifferentialGate(unittest.TestCase):
     def test_flavor_rejection_is_never_swallowed(self):
         """One engine rejecting a flavor the other took is a defect, not a gap."""
         with self.assertRaises(ValueError):
-            self._run(ValueError("unknown LLVM flavor 'llvm24'"))
+            self._run(ValueError("unknown LLVM flavor 'llvm25'"))
         self.assertEqual(self.backend.cpp_fallbacks(), [])
 
     def test_flavor_rejection_is_not_excused_on_an_unported_arch(self):
         """Even on a listed arch a ValueError is a defect, not a coverage gap."""
         self._with_gap("gfxfuture")
         with self.assertRaises(ValueError):
-            self._run(ValueError("unknown LLVM flavor 'llvm24'"), arch="gfxfuture")
+            self._run(ValueError("unknown LLVM flavor 'llvm25'"), arch="gfxfuture")
 
 
 class TestFusionPlanner(unittest.TestCase):
@@ -8238,9 +8417,8 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         from rocke.runtime import runtime_coexistence as rc
 
         # TheRock torch's comgr lives in _rocm_sdk_core/lib, outside the torch
-        # package. Its version came from the /opt/rocm fallback instead of the
-        # wheel, so a ROCm 10.1 wheel on a 10.2 host picked the LLVM flavor and
-        # capability guards for a comgr that was not the one loaded.
+        # package. Release metadata must come from that wheel rather than a
+        # different system installation; it does not select the LLVM flavor.
         with tempfile.TemporaryDirectory() as tmp:
             site, core_lib, torch_stub = self._fake_torch_site(tmp)
             torch_stub.version = types.SimpleNamespace(hip="7.16.26332-0000000")

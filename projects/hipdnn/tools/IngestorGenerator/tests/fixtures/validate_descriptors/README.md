@@ -25,6 +25,22 @@ its pack's kernels, so this proves load and keep for a multi-launch pack, not eq
 with a real handler. The `kpack` entries name an archive that is not shipped; the loader
 reads only the descriptors.
 
+## `multi_launch_mismatch/`
+
+`multi_launch/`'s bundle (engine `hipkernel:ValidateFixtureLaunchMismatch`, one pack
+targeting `gfx942`) with its two kernels naming different launch sets: `fixture.decode_merge_block64`
+carries `decode` and `merge`, `fixture.decode_reduce_block256` carries `decode` and `reduce`.
+Every UUID is distinct from the other fixtures; the launch-set disagreement is the only
+defect.
+
+Expected failure: the validator's stub handler declares the first kernel's launch set
+(`{decode, merge}`), so `KernelIngestorStateManager.hpp`'s `validateAndIndexPacks()` drops
+the second kernel with "carries the launches {decode, reduce}, but the dispatch handler ...
+launches {decode, merge}" and the run exits non-zero. Unlike the other malformed
+fixtures the engine still loads, on the kernel that matches, so the test asserts the
+diagnostic and the exit status rather than a missing engine; it is not in
+`MALFORMED_FIXTURES`.
+
 ## `bad_arch/`
 
 The pack's `arch` list is `["GFX942"]` (uppercase) instead of `["gfx942"]`.
