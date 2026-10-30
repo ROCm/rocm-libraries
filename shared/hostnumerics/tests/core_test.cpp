@@ -525,14 +525,18 @@ TEST(ShapeVisitationCpp, RangeAndSetCoordinatesAndBounds) {
         shape.forEachCoordinate(invalid, order, [&](size_t, std::span<const size_t>) { ++calls; }),
         std::runtime_error);
     EXPECT_EQ(calls, 0);
-    const IndexRange clipped{6, 12, 2};
-    EXPECT_EQ(clipped.count(), 3);
-    shape.forEachCoordinate(clipped, order, [&](size_t index, std::span<const size_t> coordinates) {
-        EXPECT_EQ(index, 6);
-        EXPECT_EQ(std::vector<size_t>(coordinates.begin(), coordinates.end()),
-                  (std::vector<size_t>{1, 2}));
-        ++calls;
-    });
+    for (const IndexRange beyond : {IndexRange{6, 9, 2}, IndexRange{9, 9, 1}})
+        EXPECT_THROW(shape.forEachCoordinate(beyond, order,
+                                             [&](size_t, std::span<const size_t>) { ++calls; }),
+                     std::runtime_error);
+    EXPECT_EQ(calls, 0);
+    shape.forEachCoordinate(
+        IndexRange{6, 8, 2}, order, [&](size_t index, std::span<const size_t> coordinates) {
+            EXPECT_EQ(index, 6);
+            EXPECT_EQ(std::vector<size_t>(coordinates.begin(), coordinates.end()),
+                      (std::vector<size_t>{1, 2}));
+            ++calls;
+        });
     EXPECT_EQ(calls, 1);
     EXPECT_THROW(IndexRange(0, 3, 0), std::runtime_error);
 }
@@ -627,7 +631,7 @@ TEST(ShapeVisitationCpp, WholeShapesBracedOrdersAndCoordinateOnlyCallbacks) {
     EXPECT_EQ(firstFastest,
               (std::vector<std::vector<size_t>>{{0, 0}, {1, 0}, {0, 1}, {1, 1}, {0, 2}, {1, 2}}));
     std::vector<size_t> indices;
-    shape.forEachCoordinate(IndexRange(1, 9, 2), {1, 0},
+    shape.forEachCoordinate(IndexRange(1, 6, 2), {1, 0},
                             [&](size_t index, std::span<const size_t> coordinates) {
                                 indices.push_back(index);
                                 explicitOrder.emplace_back(coordinates.begin(), coordinates.end());

@@ -165,14 +165,17 @@ class Shape {
     // borrowed and reused, and remains valid only during the callback. No
     // flat-index list is allocated.
     //
-    // A range is clipped to elementCount(); a start beyond it yields no work.
+    // A range's stop must not exceed elementCount(). Clip it first with
+    // std::min to visit only the elements that exist.
     template <CoordinateVisitor Function>
     void forEachCoordinate(const IndexRange& range, std::span<const size_t> order,
                            Function&& function) const {
         validateOrder(order);
-        const IndexRange clipped(range.start(), std::min(range.stop(), elementCount()),
-                                 range.stride());
-        const size_t count = clipped.count();
+        if (range.stop() > elementCount())
+            throw std::runtime_error("Index range stop " + std::to_string(range.stop()) +
+                                     " exceeds the element count " +
+                                     std::to_string(elementCount()) + ".");
+        const size_t count = range.count();
         if (count == 0) return;
         std::vector<size_t> coordinates(rank());
         computeCoordinates(range.start(), order, coordinates);

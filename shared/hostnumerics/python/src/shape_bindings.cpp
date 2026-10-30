@@ -186,7 +186,8 @@ zero extent has no valid index; Shape().coordinates(0, []) returns [] for its sc
              "Return ascending axes, the order in which the last axis changes fastest.")
         .def("selected_coordinates", &selectedCoordinates<IndexRange>, "range"_a, "order"_a,
              R"doc(
-Return owning coordinate lists for the range clipped to element_count.
+Return owning coordinate lists for the range, whose stop must not exceed
+element_count.
 Order must be a complete slowest-to-fastest axis permutation, even for empty
 work. Each coordinate list uses the original axis order.
 )doc")
