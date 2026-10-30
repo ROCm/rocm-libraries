@@ -79,7 +79,10 @@ test -d "$ROCM_SDK_PATH/include" || { echo "rocm-sdk-devel not expanded at $ROCM
 COMGR_LIB=$(ls "$SITE/_rocm_sdk_core/lib/libamd_comgr.so".* | head -n1)
 export PATH="$TOOLS_VENV/bin:$ROCM_SDK_PATH/bin:$PATH"
 export ROCM_PATH=$ROCM_SDK_PATH ROCKE_COMGR_LIB=$COMGR_LIB HIPKERNELPROVIDER_ROCM_KPACK_DIR=$KPACK_PYTHON_DIR
-RTLIB="$SITE/_rocm_sdk_core/lib:$SITE/_rocm_sdk_libraries/lib"
+# rocm_sysdeps/lib: the pip install's bundled system libraries (librocm_sysdeps_elf and
+# others). Built against an expanded rocm-sdk-devel whose lib/ RUNPATH lacks it (the vLLM
+# ROCm image's site-packages), the backend's sysdeps NEEDED entries resolve only here.
+RTLIB="$SITE/_rocm_sdk_core/lib:$SITE/_rocm_sdk_core/lib/rocm_sysdeps/lib:$SITE/_rocm_sdk_libraries/lib"
 # Steps that write into the shared source tree run under this per-checkout lock,
 # so families built at once from one checkout do not race.
 LOCK=$(git -C "$SRC" rev-parse --absolute-git-dir)/hipdnn_vllm-build.lock
