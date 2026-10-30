@@ -473,20 +473,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return std::max(0,
                         getPassContext().getPassFeatureConfig().dagFeatures.wmmaQueueCoverCycles);
     }
-    // A barrier is preceded by a tail of kBarrierTailWmmas WMMAs issued back to back: the wave
-    // waits for the stage's last ds_loads while the tail runs, so the tail hides that much of the
-    // drain. 4 is the best batch size measured on gfx1250 (never above 8, the useful queue depth).
-    static constexpr int kBarrierTailWmmas = 4;
-    // Queued cover to hold for a barrier (0 = off); see DagFeatures::wmmaBarrierCoverCycles.
-    int wmmaBarrierCover(int wmmaLatency) const {
-        const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
-        if (wmmaQueueCover() <= 0 || f.wmmaBarrierCoverCycles == 0) return 0;
-        if (f.wmmaBarrierCoverCycles < 0 && !f.dsSpread) return 0;
-        const int fullQueue = wmmaQueueDepth() * std::max(1, wmmaLatency);
-        const int want = f.wmmaBarrierCoverCycles < 0 ? kBarrierTailWmmas * std::max(1, wmmaLatency)
-                                                      : f.wmmaBarrierCoverCycles;
-        return std::min(want, fullQueue);
-    }
     // WMMA refill (see PassFeatureConfig::DagFeatures::wmmaRefillMode). A refill starts when the
     // queued cover drops below the refill line (wmmaQueueCover()) with room in the queue, and
     // keeps issuing WMMAs ahead of other work until it is done: Fixed after wmmaBatchSize
@@ -496,7 +482,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
         if (wmmaQueueCover() <= 0) return false;
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
         const bool room = outstandingWmmas() < wmmaQueueDepth();
-        if (barrierWaitsForCover_) return true;
         if (wmmaRefilling_) {
             const int target = f.wmmaRefillToCycles > 0
                                    ? f.wmmaRefillToCycles
@@ -716,11 +701,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // The region's ds_loads cost more issue cycles than its WMMAs take, so they cannot all hide
     // under a co-issue window: a ds_load the pace has released may issue outside one.
     bool dsOverflow_ = false;
-    // decidePromote() held a ready barrier back: the queued WMMA cover is below the barrier cover.
-    bool barrierWaitsForCover_ = false;
-    // WMMA count at which a ready barrier was first held for its tail (the hold lasts
-    // kBarrierTailWmmas).
-    std::unordered_map<const DAGNode*, int> barrierCoverHoldStart_;
 
     BasicBlock* currentBB_ = nullptr;
     std::vector<Layer2BarrierOverlapCandidate> layer2BarrierOverlapCandidates_;
@@ -969,7 +949,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // new rule is a promoteDue*() function plus one row in decidePromote()'s rule
     // table at its level; a rule at an in-between level is a new enumerator.
     // A rule returns true once it has set promotedNode_.
-    enum class PlacementLevel { Barrier, LastDs, WmmaQueue, WmmaTail, Prefetch, DsPacer, Filler };
+    enum class PlacementLevel { Barrier, LastDs, WmmaQueue, Prefetch, DsPacer, Filler };
     void decidePromote();
     void promote(PromotePhase phase, DAGNode* node, int kind = -1);
     bool promoteDueBarrier();
@@ -1798,7 +1778,6 @@ void CDNA5ReadyQueue::noteBarrierPairIssue(const DAGNode* node) {
 void CDNA5ReadyQueue::decidePromote() {
     promotedPhase_ = PromotePhase::None;
     promotedNode_ = nullptr;
-    barrierWaitsForCover_ = false;
     promotedKind_ = -1;
 
     using Rule = bool (CDNA5ReadyQueue::*)();
@@ -1821,7 +1800,9 @@ void CDNA5ReadyQueue::promote(PromotePhase phase, DAGNode* node, int kind) {
     promotedKind_ = kind;
 }
 
-// A barrier whose WMMA-issued threshold is met, unless it is held for its WMMA tail.
+// A barrier whose WMMA threshold is met. The threshold already waits out the last
+// WMMA a feeding ds_load depends on, plus that load's drain, so a met barrier
+// issues on this pick.
 bool CDNA5ReadyQueue::promoteDueBarrier() {
     if (barrierQueue.empty() || barrierWmmaThresholds_.empty()) return false;
     for (DAGNode* node : barrierQueue) {
@@ -1829,19 +1810,6 @@ bool CDNA5ReadyQueue::promoteDueBarrier() {
         auto thIt = barrierWmmaThresholds_.find(node->inst);
         if (thIt == barrierWmmaThresholds_.end() || wmmaIssuedCountThisRegion_ < thIt->second)
             continue;
-        // The tail hold counts from the WMMA the threshold was met at, full queue or not.
-        const int heldSince =
-            barrierCoverHoldStart_.emplace(node, wmmaIssuedCountThisRegion_).first->second;
-        // The WMMAs queued behind the barrier hide its stall: refill first.
-        if (!wmmaQueue.empty() && outstandingWmmas() < wmmaQueueDepth()) {
-            const int latency = wmmaQueue.top()->inst->latencyCycles;
-            if (!isBarrierWait(*node->inst) &&
-                wmmaIssuedCountThisRegion_ - heldSince < kBarrierTailWmmas &&
-                queuedCoverCycles() < wmmaBarrierCover(latency)) {
-                barrierWaitsForCover_ = true;
-                continue;
-            }
-        }
         promote(PromotePhase::Barrier, node);
         PASS_DEBUG(std::cerr << "[CDNA5 decidePromote] promote barrier=" << node->inst
                              << " wmmaIssuedCountThisRegion_=" << wmmaIssuedCountThisRegion_
@@ -2922,8 +2890,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaIssuedCountThisRegion_ = 0;
     wmmaRefilling_ = false;
     wmmaRefillLeft_ = 0;
-    barrierWaitsForCover_ = false;
-    barrierCoverHoldStart_.clear();
     lastPickedNode_ = nullptr;
     // SCC chain locks are per-region: chain ids index the prior region's
     // DAGNodeList, and region boundaries are side-effect cuts no reordering

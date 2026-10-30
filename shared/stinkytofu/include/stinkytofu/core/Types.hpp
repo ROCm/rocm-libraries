@@ -121,12 +121,6 @@ struct PassFeatureConfig {
         /// (see DsSpreadPacer), and a load issues only while the ds queue has a free credit. Off =
         /// ds_loads issue as soon as they are ready and a credit is free.
         bool dsSpread = true;
-        /// Queued WMMA cover (cycles) to have in the pipe when a barrier issues, so the WMMAs hide
-        /// its stall. The WMMAs before the barrier's threshold are reserved for it: the queue is
-        /// refilled to this cover ahead of other work, and ds_loads the barrier waits on are
-        /// released that many WMMAs earlier. Applies with dsSpread (or when set > 0) and the
-        /// queue model; < 0 = automatic (72 cycles, at most a full queue), 0 = off.
-        int wmmaBarrierCoverCycles = -1;
         /// Cycles the LDS needs to return one ds_load (its return rate, the old throttle latency /
         /// queue depth). The windows the ds_loads in front of a barrier need are at least
         /// loads * cycles / WMMA window. 0 = off (the even-spread density only).
