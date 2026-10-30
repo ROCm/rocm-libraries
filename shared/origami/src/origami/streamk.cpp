@@ -431,7 +431,8 @@ size_t grid_k_split_aware(const problem_t& problem,
       const size_t maxSplitsForIters = iters_per_tile / MinItersPerCU;
 
       const size_t maxSplits = std::min(maxSplitsForTiles, maxSplitsForIters);
-      sk_grid                = tiles * maxSplits;
+      // Too few K iterations to split (including K = 0): keep one workgroup per tile.
+      if (maxSplits > 0) sk_grid = tiles * maxSplits;
     } else {
       const std::vector<size_t> tile_fractions = {16, 12, 8, 6, 4, 3, 2, 1};
       for (size_t frac : tile_fractions) {

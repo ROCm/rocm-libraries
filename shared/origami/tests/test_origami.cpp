@@ -1871,10 +1871,10 @@ TEST_CASE("Origami: ranking entry points rank empty problems as all rejected", "
     const char* name;
     size_t m, n, k, batch;
   };
-  const shape_t shapes[] = {{"M = 0", 0, 1024, 1024, 1},
-                            {"N = 0", 1024, 0, 1024, 1},
-                            {"batch = 0", 1024, 1024, 1024, 0},
-                            {"M = N = K = 0", 0, 0, 0, 1}};
+  const shape_t shapes[]    = {{"M = 0", 0, 1024, 1024, 1},
+                               {"N = 0", 1024, 0, 1024, 1},
+                               {"batch = 0", 1024, 1024, 1024, 0},
+                               {"M = N = K = 0", 0, 0, 0, 1}};
   constexpr double rejected = std::numeric_limits<double>::max();
 
   for (int gpu_arch : test_architectures) {
@@ -1955,6 +1955,16 @@ TEST_CASE("Origami: ranking entry points rank K = 0 problems", "[origami][empty]
       REQUIRE(origami::select_config(problem, hardware, configs).latency == ranked[0].latency);
       REQUIRE(origami::select_config_mnk(1024, 1024, 0, hardware, configs).latency <
               std::numeric_limits<double>::max());
+
+      // The reduction-cost-aware grid models fix-up peers from K iterations per
+      // tile, which is 0 here.
+      auto rca_configs = configs;
+      for (auto& config : rca_configs) {
+        config.grid_selection = origami::grid_selection_t::reduction_cost_aware;
+      }
+      auto rca_ranked = origami::rank_configs(problem, hardware, rca_configs);
+      REQUIRE(rca_ranked.size() == rca_configs.size());
+      REQUIRE(rca_ranked[0].latency < std::numeric_limits<double>::max());
     }
   }
 }
