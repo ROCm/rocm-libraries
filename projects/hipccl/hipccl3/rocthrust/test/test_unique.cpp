@@ -15,10 +15,15 @@
  *  limitations under the License.
  */
 
+#include <thrust/distance.h>
 #include <thrust/functional.h>
+#include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
+#include <thrust/iterator/transform_iterator.h>
 #include <thrust/unique.h>
+
+#include <cstdint>
 
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
@@ -446,5 +451,64 @@ TEST(UniqueTests, TestUniqueDevice)
 
       ASSERT_EQ(h_data, d_data);
     }
+  }
+}
+
+template <typename T>
+struct div_n_equality_op
+{
+  T div;
+  THRUST_HOST_DEVICE bool operator()(const T x, const T& y) const
+  {
+    return (x / div) == (y / div);
+  }
+};
+
+template <typename T>
+struct multiply_n
+{
+  T multiplier;
+  THRUST_HOST_DEVICE T operator()(T x)
+  {
+    return x * multiplier;
+  }
+};
+
+void TestUniqueWithMagnitude(int magnitude)
+{
+  using offset_t      = std::int64_t;
+  using equality_op_t = div_n_equality_op<offset_t>;
+
+  offset_t run_length_of_equal_items = offset_t{10};
+  equality_op_t equality_op          = equality_op_t{run_length_of_equal_items};
+
+  // Prepare input
+  offset_t num_items = offset_t{1ll} << magnitude;
+  thrust::counting_iterator<offset_t> begin(offset_t{0});
+  auto end = begin + num_items;
+  ASSERT_EQ(static_cast<offset_t>(thrust::distance(begin, end)), num_items);
+
+  offset_t expected_num_unique = (num_items + run_length_of_equal_items - 1) / run_length_of_equal_items;
+  thrust::device_vector<offset_t> unique_out(expected_num_unique);
+  auto unique_out_end = thrust::unique_copy(begin, end, unique_out.begin(), equality_op);
+
+  // Ensure number of selected items are correct
+  offset_t num_selected_out = static_cast<offset_t>(thrust::distance(unique_out.begin(), unique_out_end));
+  ASSERT_EQ(num_selected_out, expected_num_unique);
+  unique_out.resize(expected_num_unique);
+
+  // Ensure selected items are correct
+  auto expected_out_it     = thrust::make_transform_iterator(begin, multiply_n<offset_t>{run_length_of_equal_items});
+  bool all_results_correct = thrust::equal(unique_out.begin(), unique_out.end(), expected_out_it);
+  ASSERT_TRUE(all_results_correct);
+}
+
+TEST(UniqueTests, TestUniqueWithLargeNumberOfItems)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (int mag : {30, 31, 32, 33})
+  {
+    TestUniqueWithMagnitude(mag);
   }
 }
