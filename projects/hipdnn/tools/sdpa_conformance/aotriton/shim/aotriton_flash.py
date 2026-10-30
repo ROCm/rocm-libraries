@@ -15,8 +15,9 @@ The vendored suite reaches the GPU only through this module's ``attn_fwd``, ``at
   only ``ref:`` entries (``hipdnn_aotriton_plugin.record``) for the reference fallback.
 
 Engine pinning comes from ``HIPDNN_FWD_ENGINE`` / ``HIPDNN_BWD_ENGINE``. With
-``HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS`` set, the forward asks hipDNN for no Stats (the M buffer
-stays unwritten; ``test_forward.py`` compares only O); the reference fallback still fills it.
+``HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS`` set, the forward asks hipDNN for no Stats and fills the M buffer
+with zeros: AOTriton's wrapper rejects NaN in M under ``is_testing``, and ``test_forward.py`` compares
+only O. The reference fallback still fills M with the real LSE.
 """
 
 import os
@@ -274,13 +275,14 @@ def _forward(
     encoded_softmax,
 ):
     sdpa = _sdpa()
+    no_stats = _fwd_no_stats()
     try:
         sdpa.sdpa_fwd(
             q,
             k,
             v,
             o=o,
-            stats=None if _fwd_no_stats() else stats,
+            stats=None if no_stats else stats,
             scale=scale,
             bias=bias,
             mask=mask,
@@ -288,6 +290,8 @@ def _forward(
             varlen=varlen,
             engine=_engine("fwd"),
         )
+        if no_stats:
+            stats.zero_()
         ran_reference = False
     except sdpa.EngineDeclined as declined:
         _record("fwd", "ref", declined.reason)

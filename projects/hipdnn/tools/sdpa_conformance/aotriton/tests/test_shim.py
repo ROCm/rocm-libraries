@@ -170,8 +170,11 @@ def test_fwd_no_stats_env_var_drops_stats_from_the_forward_only(
     fwd(q, k, v, M, o)
     assert fake_sdpa.calls[-1][1]["stats"] is not None
     monkeypatch.setenv("HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS", "1")
+    M.fill_(float("nan"))
     fwd(q, k, v, M, o)
     assert fake_sdpa.calls[-1][1]["stats"] is None
+    # AOTriton's wrapper asserts M has no NaN under is_testing; the unwritten buffer must not trip it.
+    assert not torch.isnan(M).any()
     bwd(q, k, v, o, M)
     assert fake_sdpa.calls[-1][1]["stats"] is not None
 
