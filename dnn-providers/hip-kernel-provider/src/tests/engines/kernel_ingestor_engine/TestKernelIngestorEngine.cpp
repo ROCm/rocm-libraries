@@ -624,12 +624,17 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
     using hipdnn_plugin_sdk::ingestor::SavedKernelCode;
     using hipdnn_plugin_sdk::ingestor::SavedLaunchInputs;
 
-    constexpr std::array<std::string_view, 5> PACK_DISPATCH_SYMBOLS{
-        "hipkernel.pointwise.dispatch",
-        "hipkernel.conv_fwd.dispatch",
-        "hipkernel.gfx950_attention_dense.dispatch",
-        "hipkernel.gfx1151_wmma_attention.dispatch",
-        "hipkernel.gfx1151_wmma_attention_decode.dispatch"};
+    using namespace std::string_view_literals;
+    constexpr std::array PACK_DISPATCH_SYMBOLS{
+        "hipkernel.pointwise.dispatch"sv,
+        "hipkernel.conv_fwd.dispatch"sv,
+        "hipkernel.gfx950_attention_dense.dispatch"sv,
+        "hipkernel.gfx1151_wmma_attention.dispatch"sv,
+        "hipkernel.gfx1151_wmma_attention_decode.dispatch"sv,
+#ifdef ENABLE_MEGAKERNEL_ENGINE
+        "megakernel.dispatch"sv,
+#endif
+    };
     EXPECT_EQ(PACK_DISPATCH_SYMBOLS.size(), ingestorPacks().size())
         << "add the dispatch symbol of each new pack to this list";
 
