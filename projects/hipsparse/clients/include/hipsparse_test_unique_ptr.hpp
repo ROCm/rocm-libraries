@@ -34,19 +34,6 @@
 #include <memory>
 #include <stdexcept>
 
-#define PRINT_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK)                \
-    {                                                             \
-        hipError_t TMP_STATUS_FOR_CHECK = INPUT_STATUS_FOR_CHECK; \
-        if(TMP_STATUS_FOR_CHECK != hipSuccess)                    \
-        {                                                         \
-            fprintf(stderr,                                       \
-                    "hip error code: %d at %s:%d\n",              \
-                    TMP_STATUS_FOR_CHECK,                         \
-                    __FILE__,                                     \
-                    __LINE__);                                    \
-        }                                                         \
-    }
-
 namespace hipsparse_test
 {
 
@@ -99,25 +86,10 @@ namespace hipsparse_test
     // device_free wraps hipFree and provides same API as free
     static void device_free(void* ptr)
     {
-        PRINT_IF_HIP_ERROR(hipFree(ptr));
-    }
-
-    // Constructors throw so a failed create cannot be used by the rest of the test.
-    // Destructors record a failed destroy without throwing, so teardown stays safe
-    // while another exception is unwinding.
-    static void throw_if_hipsparse_error(hipsparseStatus_t status, const char* call)
-    {
-        if(status != HIPSPARSE_STATUS_SUCCESS)
+        const hipError_t status = hipFree(ptr);
+        if(status != hipSuccess)
         {
-            throw_hipsparse_error(call, status);
-        }
-    }
-
-    static void log_if_hipsparse_error(hipsparseStatus_t status, const char* call)
-    {
-        if(status != HIPSPARSE_STATUS_SUCCESS)
-        {
-            log_hipsparse_error(call, status);
+            log_hip_error("hipFree", status);
         }
     }
 
