@@ -93,5 +93,7 @@ The runner saves partial totals during execution. If the job is interrupted,
 cases also retain their individual results and logs.
 
 The runner's unit tests use a stand-in benchmark and emulator, so they need no
-build or GPU. No CI job runs them; run them after changing the sampler or runner
-with `python3 -m unittest discover -s .github/scripts/tests -p test_random_hipblaslt_gemms.py`.
+build or GPU. The CPU test job runs them before building rocjitsu, both nightly
+and in the per-PR smoke check whenever that check is enabled. Run them locally
+after changing the sampler or runner with
+`python3 -m unittest discover -s .github/scripts/tests -p test_random_hipblaslt_gemms.py`.
