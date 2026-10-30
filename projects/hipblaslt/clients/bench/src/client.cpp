@@ -507,6 +507,16 @@ try
          value<bool>(&ulp)->default_value(false),
          "Report ULP (unit in the last place) error vs CPU; reports max and average. Implies --verify.")
 
+        ("row_uniform_check",
+         value<int32_t>(&arg.row_uniform_check)->default_value(0),
+         "Nonzero makes the inputs uniform along M (every row of op(A), C, E, and the per-row "
+         "bias and scale vectors, equal to row 0) and checks after timing that every row of D "
+         "is bitwise equal to row 0. Adds the row_uniform (pass, FAIL or skip), "
+         "row_uniform_bad_cols and row_uniform_first_row result columns. A failure is reported "
+         "on stderr, does not stop the run and does not change the exit status. Inputs that sum "
+         "exactly in any order (rand_int, integer_exact, integer types, ...) report skip. "
+         "Also a YAML key.")
+
         ("iters,i",
          value<int32_t>(&arg.iters)->default_value(tuningEnv? 1000 : 10),
          "Iterations to run inside timing loop")
