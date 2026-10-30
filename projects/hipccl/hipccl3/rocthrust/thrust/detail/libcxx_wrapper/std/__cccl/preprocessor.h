@@ -27,6 +27,7 @@
 #  define THRUST_PP_INC(_X)               _CCCL_PP_INC(_X)
 #  define THRUST_PP_DEC(_X)               _CCCL_PP_DEC(_X)
 #  define THRUST_PP_SPLICE_WITH(SEP, ...) _CCCL_PP_SPLICE_WITH(SEP, __VA_ARGS__)
+#  define THRUST_PP_CAT(_Xp, ...)         _CCCL_PP_CAT(_Xp, __VA_ARGS__)
 
 #else
 
