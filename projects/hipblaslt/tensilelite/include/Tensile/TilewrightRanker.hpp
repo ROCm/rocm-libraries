@@ -359,8 +359,16 @@ namespace TensileLite
             return recorded == "hipblaslt:" + arch + ":1" ? 1 : ruleVersion(arch);
         }
 
+        // What the constructor throws for a rule version this class does not
+        // implement, naming the versions it implements. The training
+        // pipeline's preflight tells a TensileLite that plans launch rule
+        // version 2 by this text (run_orchestrator.py LAUNCH_RULE_MARKER):
+        // change both with RuleVersion.
+        static constexpr char const* RuleVersions = "tilewright launch: rule versions 1 and 2 only";
+
         // Under rule `version`, 0 for ruleVersion(arch); throws
-        // std::invalid_argument for a version this class does not implement.
+        // std::invalid_argument (RuleVersions) for a version this class does
+        // not implement.
         TilewrightLaunch(std::string                              arch,
                          std::vector<std::shared_ptr<MySolution>> solutions,
                          std::shared_ptr<Hardware const>          device  = nullptr,
@@ -371,8 +379,7 @@ namespace TensileLite
             , m_ruleVersion(version == 0 ? ruleVersion(m_arch) : version)
         {
             if(m_ruleVersion < 1 || m_ruleVersion > RuleVersion)
-                throw std::invalid_argument("tilewright launch: no launch rule version "
-                                            + std::to_string(m_ruleVersion));
+                throw std::invalid_argument(RuleVersions);
             m_kernels.reserve(m_solutions.size());
             for(auto const& solution : m_solutions)
                 m_kernels.push_back(kernelLaunch(*solution));

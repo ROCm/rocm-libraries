@@ -2461,7 +2461,10 @@ def test_stage07_needs_a_tensilelite_that_reads_blocklists(tmp_path):
     fh.write_fake_build(release, "gfx950", OSTEM)
     v3 = tmp_path / "v3"
     fh.write_fake_build(
-        v3, "gfx950", OSTEM, capabilities=("MLREC_v3", ro.CU_FLOOR_MARKER)
+        v3,
+        "gfx950",
+        OSTEM,
+        capabilities=("MLREC_v3", ro.CU_FLOOR_MARKER, ro.LAUNCH_RULE_MARKER),
     )
     cfg, _ = ro.load_config(
         make_config(tmp_path, **{"stage07.build_dir": str(v3), "train.catalog": "v3"})
@@ -2486,7 +2489,12 @@ def test_stage07_needs_a_tensilelite_that_reads_blocklists(tmp_path):
         v3,
         "gfx950",
         OSTEM,
-        capabilities=("MLREC_v3", ro.CU_FLOOR_MARKER, cx.SIDECAR_SUFFIX),
+        capabilities=(
+            "MLREC_v3",
+            ro.CU_FLOOR_MARKER,
+            ro.LAUNCH_RULE_MARKER,
+            cx.SIDECAR_SUFFIX,
+        ),
     )
     assert ro.stage07_build_errors(gated, paths) == []
     assert ro.stage07_build_errors(cfg, paths) == []

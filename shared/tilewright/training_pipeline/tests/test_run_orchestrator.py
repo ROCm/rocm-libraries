@@ -1129,7 +1129,7 @@ def test_preflight_checks_a_stage07_build_serves_the_alignment_veto(tmp_path):
         )
     )
     paths = ro.derive_paths(cfg)
-    floor = ("MLREC_v3", ro.CU_FLOOR_MARKER)
+    floor = ("MLREC_v3", ro.CU_FLOOR_MARKER, ro.LAUNCH_RULE_MARKER)
     fh.write_fake_build(v3, "gfx950", STEM, capabilities=floor)
     (err,) = ro.stage07_build_errors(cfg, paths)
     assert err.startswith(f"stage07.build_dir {v3}: its TensileLite")
@@ -4142,17 +4142,27 @@ def test_preflight_checks_what_the_stage07_build_serves(tmp_path):
         make_config(tmp_path, **{"stage07.build_dir": str(v3), "train.catalog": "v3"})
     )
     paths = ro.derive_paths(cfg)
-    err, _floor = ro.stage07_build_errors(cfg, paths)
+    err, _floor, _rule = ro.stage07_build_errors(cfg, paths)
     assert err.startswith(f"stage07.build_dir {v3}: its TensileLite")
     assert "cannot load MLREC_v3 models (train.catalog v3); no 'MLREC_v3'" in err
     # Every MLREC_v3 model stage05 writes declares a CU floor, which an
     # engine that predates it refuses.
-    fh.write_fake_build(v3, "gfx950", STEM, capabilities=("MLREC_v3",))
+    fh.write_fake_build(
+        v3, "gfx950", STEM, capabilities=("MLREC_v3", ro.LAUNCH_RULE_MARKER)
+    )
     (err,) = ro.stage07_build_errors(cfg, paths)
     assert err.startswith(f"stage07.build_dir {v3}: its TensileLite")
     assert "which declare a CU floor its engine predates" in err
     assert err.endswith(f"no {ro.CU_FLOOR_MARKER!r} in it")
-    v3_floor = ("MLREC_v3", ro.CU_FLOOR_MARKER)
+    # gfx950 models train on launch rule version 2, which a TensileLite that
+    # plans version 1 only refuses.
+    fh.write_fake_build(v3, "gfx950", STEM, capabilities=("MLREC_v3", "CU floor"))
+    (err,) = ro.stage07_build_errors(cfg, paths)
+    assert "plans no launch of rule version 2" in err
+    assert err.endswith(f"no {ro.LAUNCH_RULE_MARKER!r} in it")
+    gfx1250 = ro.stage07_capabilities(dict(cfg, arch="gfx1250"))
+    assert ro.CU_FLOOR_MARKER in gfx1250 and ro.LAUNCH_RULE_MARKER not in gfx1250
+    v3_floor = ("MLREC_v3", ro.CU_FLOOR_MARKER, ro.LAUNCH_RULE_MARKER)
     fh.write_fake_build(v3, "gfx950", STEM, capabilities=v3_floor)
     assert ro.stage07_build_errors(cfg, paths) == []
     v2 = dict(cfg, train=dict(cfg["train"], catalog="v2"))
@@ -4205,6 +4215,26 @@ def test_the_alignment_veto_marker_is_the_name_the_engines_loader_gives_its_k():
     engine's loader."""
     read = r"\.u32\(&\w+, " + re.escape(f'"{ro.ALIGNMENT_VETO_MARKER}"') + r"\)"
     assert re.search(read, FORMAT_CPP.read_text())
+
+
+RANKER_HPP = (
+    Path(ro.__file__).resolve().parents[3]
+    / "projects/hipblaslt/tensilelite/include/Tensile/TilewrightRanker.hpp"
+)
+
+
+@pytest.mark.skipif(not RANKER_HPP.is_file(), reason="no TensileLite sources")
+def test_the_launch_rule_marker_is_what_tensilelite_throws_for_another_version():
+    """The preflight tells a TensileLite that plans launch rule version 2 by
+    the C string its launch model throws for a version it does not
+    implement, which names the versions it does; std::invalid_argument
+    takes it as const char*, which every compiler stores whole."""
+    text = RANKER_HPP.read_text()
+    marker = r"static constexpr char const\* RuleVersions\s*=\s*"
+    assert re.search(marker + re.escape(f'"{ro.LAUNCH_RULE_MARKER}";'), text)
+    assert "throw std::invalid_argument(RuleVersions);" in text
+    assert re.search(r"static constexpr int RuleVersion = 2;", text)
+    assert ro.hllib.RULE_VERSION == 2
 
 
 def test_preflight_checks_the_stage08_datasets(tmp_path):

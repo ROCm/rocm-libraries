@@ -4232,6 +4232,11 @@ def stage07_build(cfg: Mapping[str, Any], paths: Paths) -> Optional[Stage07Build
 CU_FLOOR_MARKER = "CU floor"
 # The name the same loader gives the first field of the alignment veto.
 ALIGNMENT_VETO_MARKER = "alignment veto K"
+# What TensileLite's TilewrightLaunch throws for a launch rule version it does
+# not implement (its RuleVersions), naming those it does: a TensileLite that
+# holds it plans the models of launch rule version 2 (lib/hipblaslt_launch.py
+# RULE_VERSION) and of version 1.
+LAUNCH_RULE_MARKER = "tilewright launch: rule versions 1 and 2 only"
 # Files of a hipBLASLt build that hold TensileLite's host code: its shared
 # TensileLite library, else hipBLASLt's own library (a static TensileLite).
 TENSILELITE_LIBRARIES = (
@@ -4275,11 +4280,13 @@ def stage07_capabilities(
 ) -> Dict[str, str]:
     """{string a stage-7 TensileLite must hold: what it lacks without it}:
     the loader of the format train.catalog trains (for MLREC_v3, of the CU
-    floor every model declares too, and with deploy.alignment_veto of the
-    veto every staged model declares), with a bank the setting that serves
-    it and, when the run leaves kernels of the pool out (`blocks_pool`), the
-    reader of the blocklist sidecar stage06 ships, and with
-    correctness.guard_unguarded_custom the reader of its guards sidecar."""
+    floor every model declares too, the launch rule version the run's arch
+    trains on when it is version 2, and with deploy.alignment_veto of the
+    veto every staged model declares), with a bank the setting that
+    serves it and, when the run leaves kernels of the pool out
+    (`blocks_pool`), the reader of the blocklist sidecar stage06 ships, and
+    with correctness.guard_unguarded_custom the reader of its guards
+    sidecar."""
     catalog = str(cfg_get(cfg, "train.catalog") or "v2")
     out = {
         f"MLREC_{catalog}": f"cannot load MLREC_{catalog} models (train.catalog "
@@ -4291,6 +4298,13 @@ def stage07_capabilities(
             "floor its engine predates ('unknown serving flags'); build hipBLASLt "
             "from a checkout whose shared/tilewright has the CU floor"
         )
+        if hllib.rule_version(str(cfg.get("arch") or "")) == 2:
+            out[LAUNCH_RULE_MARKER] = (
+                f"plans no launch of rule version 2, which the MLREC_v3 models "
+                f"stage05 writes for {cfg.get('arch')} record, so it refuses them "
+                f"and the runtime would rank with Origami; build hipBLASLt from a "
+                f"checkout whose TensileLite plans launch rule version 2"
+            )
     if cfg_get(cfg, "deploy.alignment_veto") is not None:
         out[ALIGNMENT_VETO_MARKER] = (
             "cannot load the models stage06 stages with deploy.alignment_veto, "

@@ -188,8 +188,23 @@ TEST(TilewrightLaunchTest, IdNamesTheArchAndRuleVersion)
     EXPECT_EQ(Launch("gfx1250", {}).id(), "hipblaslt:gfx1250:1");
     EXPECT_EQ(Launch("gfx950", {}, nullptr, 1).id(), "hipblaslt:gfx950:1");
     EXPECT_EQ(Launch("gfx1250", {}, nullptr, 2).id(), "hipblaslt:gfx1250:2");
+    // The error names the versions this class implements, the text the
+    // pipeline's preflight looks for.
+    EXPECT_EQ(std::string(Launch::RuleVersions),
+              "tilewright launch: rule versions 1 and " + std::to_string(Launch::RuleVersion)
+                  + " only");
     for(int const bad : {-1, 3})
-        EXPECT_THROW(Launch("gfx950", {}, nullptr, bad), std::invalid_argument) << bad;
+    {
+        try
+        {
+            Launch("gfx950", {}, nullptr, bad);
+            ADD_FAILURE() << bad;
+        }
+        catch(std::invalid_argument const& e)
+        {
+            EXPECT_STREQ(e.what(), Launch::RuleVersions) << bad;
+        }
+    }
 }
 
 // rule_version() of hipblaslt_launch.py: the table its

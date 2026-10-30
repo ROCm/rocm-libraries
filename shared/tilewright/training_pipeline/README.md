@@ -186,7 +186,9 @@ ends with validation also checks what the enabled validation stages need:
 stage 7's build (its bench, and that its TensileLite holds `MLREC_v3`, or
 `MLREC_v2`, the format `train.catalog` trains, with `MLREC_v3` also
 `CU floor`, the name its engine's loader gives the CU floor every v3 model
-declares, when the kernel pool has a
+declares, and, when the arch trains on launch rule version 2,
+`tilewright launch: rule versions 1 and 2 only`, what its launch model
+throws for a version it does not implement, when the kernel pool has a
 bank `TENSILE_TILEWRIGHT_BANK`, the setting that serves it, and, when the
 correctness gate is on or `correctness.lists` names a kernel of the pool,
 `.tilewright.blocklist`, the reader of the blocklist sidecar) and every

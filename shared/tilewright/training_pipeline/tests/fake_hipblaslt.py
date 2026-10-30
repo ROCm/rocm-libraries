@@ -115,6 +115,7 @@ CAPABILITIES = (
     "MLREC_v3",
     "TENSILE_TILEWRIGHT_BANK",
     "CU floor",
+    "tilewright launch: rule versions 1 and 2 only",
 )
 
 
