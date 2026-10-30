@@ -424,7 +424,10 @@ key means whatever the default becomes. The weak-cell budget's keys
 (`seed.weak_cell_factor`, `strong_cell_factor`, `strong_cell_margin` and
 `large_k_factor`) are pinned only away from their defaults (1, 1, 0.03 and
 1), so that a run produced before them keeps its pin; an audit directory
-does not pin them. Stages
+does not pin them. The alignment veto's keys (`deploy.alignment_veto`) and
+the drift fallback's share (`deploy.drift_fallback`) are pinned only when
+set, and `correctness.guard_unguarded_custom` only when true, so that a run
+produced before them keeps its pin. Stages
 start from the files on disk, so the orchestrator compares the code and
 engine digests again before every stage starts and before it marks one
 complete: a change while it runs stops the run with 2, and the same command
@@ -3577,12 +3580,14 @@ catalog other than v3, and for a share the file cannot hold in whole
 millionths; a final-retrain recipe cannot set it. A model is never deployed
 degraded: before it measures or stages anything, stage06 refuses a model
 that the pool of the library it deploys into (`--library-dir`, else the
-config's bench library, less the kernels the config's blocklist names) would
-serve with a degraded cell, and names the cells; build the tier for that
-library first (`scripts/build_whitelist_tier.py`). `lib/evaluate.py`'s
-`evaluate_model` refuses a model with the fallback on a pool that serves a
-cell degraded, such as one built from a GEMM's measured candidates, unless
-`allow_drift=True`. The deploy gate, the audit, the per-cell gate and
+config's bench library, less the kernels the config's blocklist blocks
+whole; a kernel it guards stays, as TensileLite keeps it for a model trained
+with kernel guards) would serve with a degraded cell, and names the cells;
+build the tier for that library first (`scripts/build_whitelist_tier.py`).
+`lib/evaluate.py`'s `evaluate_model` refuses a model with the fallback on a
+pool that serves a cell degraded, such as one built from a GEMM's measured
+candidates, unless `allow_drift=True`. The deploy gate, the audit, the
+per-cell gate and
 collapse repair pass it, as they rank over the library pool: they measure
 the degraded rankings, such as a gate baseline's or those of an audit pool
 that leaves out more kernels, and name the cells
@@ -5617,10 +5622,10 @@ bundle's provenance as stage05 wrote it), `alignment_veto` (null: none;
 stages carries, for models served without the non-temporal rule, which
 the final retrain's decision scores and no decision of the rounds does;
 refused with another catalog, the non-temporal rule or a K-contiguous
-operand of a data type it does not count; see *Deployment*),
-`drift_fallback` (null: none; `{keep: <share in (0, 1]>}` in whole
+operand of a data type it does not count; see *Deployment*; pinned only when
+set), `drift_fallback` (null: none; `{keep: <share in (0, 1]>}` in whole
 millionths; MLREC_v3 with a view-key whitelist and a cascade only; see
-*Deployment (stage06)*).
+*Deployment (stage06)*; pinned only when set).
 
 **`stage07`**: `build_dir` (null: the deploy build; a hipBLASLt build
 whose TensileLite serves the trained format, see *Validation*), `cpus` (null;
@@ -5675,7 +5680,7 @@ harness process may print nothing), `devices` (null: `runtime.devices`),
 source the build was configured from; a directory holding the hand-written
 kernels' sources), `guard_unguarded_custom` (false: a kernel the static
 check finds unguarded is blocked whole; true: it gets guards and is checked
-and served where they admit a problem). `blocklist` is set by the orchestrator: the invocation's
+and served where they admit a problem; pinned only when true). `blocklist` is set by the orchestrator: the invocation's
 copy of the gate's blocklist (which holds the hazard canary's quarantine),
 or of the quarantine alone without the gate, which the stages apply; a
 config that sets it with the gate off (a run's snapshot with the gate turned

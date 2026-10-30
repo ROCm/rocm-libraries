@@ -88,6 +88,15 @@ tw.describe(model).drift_keep_ppm  # its share in millionths, 0 without the fall
 pool.degraded_cells()  # the degraded cells' indices, ascending
 ```
 
+`describe` reports the model's other serving options as well, among them an
+alignment veto and whether the model was trained with kernel guards (see the
+engine README):
+
+```python
+tw.describe(model).alignment_veto.on  # with k_min and align_bits; False without one
+tw.describe(model).kernel_guards  # True for a model trained with kernel guards
+```
+
 An MLREC_v3 model trained with a launch model records its id
 (`provenance.launch_model`); `CandidateSet` then raises `ValueError` unless
 `launch` has that `id` attribute:

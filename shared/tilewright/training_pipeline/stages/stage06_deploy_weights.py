@@ -721,7 +721,9 @@ def drift_preflight(
     """For a bundle packed with the drift fallback: `drift_record` over the
     pool of the library it deploys into (`lib.bank_pool.config_pool`, the
     pool the runtime serves: the table and the bank the config serves,
-    without the kernels the config's blocklist names), with `library_dir`.
+    without the kernels the config's blocklist blocks whole; a kernel it
+    guards stays, as TensileLite keeps it for a model trained with kernel
+    guards), with `library_dir`.
     DeployError when that pool degrades a cell, naming the cells: the model
     would be served degraded from the start, and its tier is to be built for
     that library first. None without the fallback."""

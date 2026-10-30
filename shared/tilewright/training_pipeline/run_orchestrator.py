@@ -2438,12 +2438,13 @@ PINNED_WHEN_SET = ("library", "planner.top_k_round0")
 # the runs and audit directories produced before them keep their pins: the
 # re-reads' offsets, the canaries' absolute floors (0: none), the
 # hand-written kernels' sources (none: the build's) and their guards (off:
-# an unguarded one is blocked whole), the held-out
-# lists (none) and the CU budget granule (32, lib/contexts.py's
-# PREDATING_GRANULE, not its default, which may change), the weak-cell
-# budget's keys at their defaults (factors of 1: every leaf draws
-# seed.shapes_per_cell), and the seeded targets' (no list; with a list its
-# every key and the digest of the file are pinned).
+# an unguarded one is blocked whole), the held-out lists (none), the drift
+# fallback's share (none: no fallback), the CU budget granule (32,
+# lib/contexts.py's PREDATING_GRANULE, not its default, which may change),
+# the weak-cell budget's keys at their defaults (factors of 1: every leaf
+# draws seed.shapes_per_cell), the alignment veto's keys (none: no veto)
+# and the seeded targets' (no list; with a list its every key and the
+# digest of the file are pinned).
 PINNED_UNLESS_NEUTRAL: Dict[str, Any] = {
     **{f"bench.rebench.{k}": v for k, v in rebenchlib.NEUTRAL_REREADS.items()},
     "bench.canary.tolerance_us": 0.0,

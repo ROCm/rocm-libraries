@@ -920,10 +920,11 @@ def write_model_v3(
     `clip` and per cell
     `feature_bounds` {q_lo, ..., x_hi} and `view_key_hashes`; `serving`
     holds small_batched_rule / dot2_rule / non_temporal_rule /
-    non_temporal_family_rule, launch_keys, bank and trained_key_gate
-    (default off), whitelist_tier (default on), cascade_keys (default
-    32), alignment_veto ({k_min, align_bits}, or absent or None for
-    none) and, for the drift fallback (serving flag bit 10), drift_keep_ppm
+    non_temporal_family_rule, launch_keys, bank, trained_key_gate and
+    kernel_guards (serving flag bit 11; default off), whitelist_tier
+    (default on), cascade_keys (default 32), alignment_veto ({k_min,
+    align_bits}, or absent or None for none) and, for the drift fallback
+    (serving flag bit 10), drift_keep_ppm
     (absent: none); with trained_key_gate, `trained_view_keys` lists the
     view-key hashes of the keys with training data. The arch's
     bandwidth coefficients are not written. `provenance` (else the bundle's

@@ -73,14 +73,19 @@ blocklist: per line a kernel name, a free size (`M`, the free size of A, or
 comment lines that start with `#`; a kernel and free size appear once, and
 names match as in the blocklist. For such a model TensileLite keeps a guarded
 kernel in its pools, also when the blocklist names it, and offers it only for
-problems whose free sizes reach every minimum of its guards; for any other
-problem it is left out of the ranking and of the analytical ranking that fills
-the remaining slots, as a listed kernel is, and a view key whose first member
-it is is served by its next member. A model without the flag never reads the
-guards, so the blocklist leaves those kernels out whole, and an engine that
-predates the flag refuses a flagged model. A flagged model whose guards file
-is missing, cannot be read or has a malformed line is unusable for the
-library: hipBLASLt ranks with Origami and warns.
+problems whose free sizes reach every minimum of its guards. For any other
+problem it passes over the kernel once the engine has ranked: it asks the
+engine for one more scored kernel per kernel the guards deny, leaves the
+denied kernels out of what it serves and of the analytical ranking that fills
+the remaining slots, and a view key whose first member is denied is served by
+its next member. Unlike a listed kernel, a denied kernel still counts toward
+the model's trained-key gate, whitelist tier and cascade, and the deeper
+request can score a further tier, so a problem below a guard can be served
+otherwise than with the kernel blocked whole. A model without the flag never
+reads the guards, so the blocklist leaves those kernels out whole, and an
+engine that predates the flag refuses a flagged model. A flagged model whose
+guards file is missing, cannot be read or has a malformed line is unusable
+for the library: hipBLASLt ranks with Origami and warns.
 
 ## Layout
 
@@ -408,7 +413,10 @@ and `with_alignment_veto(data, k_min, align_bits)` and
 retraining. An engine that predates the drift fallback refuses a file with
 bit 10 the same way, and `with_drift_fallback(data, keep_ppm)` and
 `without_drift_fallback(data)` of `mlrec.py` add and remove it without
-retraining.
+retraining. An engine that predates the kernel guards refuses a file with
+bit 11 the same way; `with_kernel_guards(data)` and
+`without_kernel_guards(data)` of `mlrec.py` set and clear that flag, and a
+model without it is served with its guarded kernels left out whole.
 
 `i_dim` is 8 plus the attribute features: one per identity, log2p1 and
 nonzero attribute (`x`, `log2(1 + max(x, 0))`, `x != 0`) and one per value of a

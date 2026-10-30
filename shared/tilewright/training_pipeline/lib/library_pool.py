@@ -1075,9 +1075,10 @@ def config_pool(
 ) -> LibraryPool:
     """The pool the config names (`pool_source`) for `library_stem` on its
     bench device `device_index` (read only for a pool with bok kernels),
-    without the kernels its blocklist names
-    (`lib.correctness.config_blocklist`) unless `apply_blocklist` is
-    false."""
+    without the kernels its blocklist blocks whole
+    (`lib.correctness.config_blocklist`; a kernel it guards stays, marked
+    with its guards, as TensileLite keeps it for a model trained with
+    kernel guards) unless `apply_blocklist` is false."""
     source = pool_source(cfg)
     device = None
     if source.reads_bok:
