@@ -319,6 +319,17 @@ into its `finished` record as `inputs`, `validator`, `placement` and `placement_
 pass that verified a rejection adds `"expected_status":"BAD_PARAM"`. The fields are
 described in [Finished-record fields](file-formats.md#finished-record-fields).
 
+The `finished` record of a case that built a plan also carries `"kernels"`: the distinct
+kernel names the engine reported while the case ran, sorted. The SDPA engines (ASM_SDPA,
+HIP_FLASH2, `hipkernel:Gfx950AttentionDense`, `hipkernel:Gfx1151WmmaAttention[Decode]`) write
+one `kernel: <engine> <kernel>` INFO line per built plan; HIP_MLOPS writes none. The harness
+collects the lines between the case's `started` and `finished` records without
+`HIPDNN_LOG_LEVEL` being set: it registers a log callback, raises the global log level to
+`info` for the case and puts the level back at the `finished` record. A level set by
+`HIPDNN_LOG_LEVEL` is restored exactly; with it at `warn` or above the backend's own console
+sink, which that variable creates, prints the engines' INFO lines during the cases. `kernels` is
+absent when the case reported none.
+
 | Outcome | Meaning |
 |---|---|
 | `PASS` | The engine accepted the graph and its output matched an oracle. For a case with `placement: "under"` it means instead that the backend rejected the misaligned pointer with `BAD_PARAM` (the record carries `expected_status`); see [reading a placement probe](#reading-an-alignment-or-placement-probe). |
@@ -571,6 +582,19 @@ one drawn, so an `under` that was rendered as `exact` at alignment 1 counts unde
 `range` axes (sizes such as `sq`, `skv`, `n`) have no entry: they draw many distinct integers.
 Read the `PASS` count of each feature value to see that a feature is exercised and passes, not
 only that the run is green. A space has an entry for the axes it declares and no others.
+
+**`summary.json` kernels.** Each engine entry under `engines` has `kernels`, a map from kernel
+name to the number of cases that ran it (a case that built more than one plan counts each
+distinct name once), and `kernel_unreported`: the cases that ran the engine's plan and whose
+`finished` record names no kernel. A case ran the plan when it is `PASS`, `UNCLAIMED_PASS` or
+`WRONG`, or `CRASH`/`UNEXERCISED` at stage `execute` or `compare`. `DECLINED` cases, cases that
+stopped before a plan existed (stage `graph`, `claim`, `query`, `build`, `oracle`, `setup`) and
+the `CRASH` results the driver wrote itself for a hang or a dead process are in neither count.
+An engine that does not log a kernel (HIP_MLOPS) shows all its executed cases as
+`kernel_unreported`; a non-zero `kernel_unreported` for ASM_SDPA, HIP_FLASH2 or a
+`hipkernel:Gfx*Attention*` engine means the engine's `kernel:` line is missing. The record of
+each case in `outcomes.jsonl` carries its `kernels`, so a feature value's PASS count (see
+`axis_outcomes`) can be read against the kernel that ran.
 
 ### Reading an alignment or placement probe
 

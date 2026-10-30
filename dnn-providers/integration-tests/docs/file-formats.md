@@ -436,6 +436,7 @@ asked to do:
 | `placement` | `"default"`, `"exact"` or `"under"`. |
 | `placement_uid` | Present when the metadata sets one. |
 | `expected_status` | `"BAD_PARAM"` on a pass that verified a rejection; absent otherwise. |
+| `kernels` | The distinct kernel names the engine reported while the case ran, sorted. From the engine's `kernel: <engine> <kernel>` INFO line, written once per built plan; see [`kernels` in the outcome report](running-tests.md#outcome-report). Absent when the case reported none (it never built a plan, or the engine logs no kernel). Not a metadata field: the harness fills it. |
 
 `validator`, `placement` and `placement_uid` are absent from the record of a bundle
 that failed to load, which has no parsed metadata.

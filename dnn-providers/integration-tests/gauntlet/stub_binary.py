@@ -37,7 +37,8 @@ that cannot be compared, make the condition false. The first rule that holds win
 ``cases`` entry comes before ``match``, ``match`` before ``seed_mod`` and ``default``.
 
 Behaviours: ``pass``, ``unclaimed_pass``, ``declined``, ``wrong``, ``unexercised``,
-``crash_engine`` (a ``finished`` CRASH record, as a build error gives), ``crash``
+``crash_engine`` (a ``finished`` CRASH record, as a build error gives), ``crash_execute`` (the
+same at the ``execute`` stage, after the plan was built), ``crash``
 (``os._exit`` after ``started``), ``hang`` (sleep after ``started``), ``probe_file`` (a
 ``PASS`` whose reason says whether ``probe_path`` exists when the case runs),
 ``load_skip`` (the case is not registered, so it is absent from ``--gtest_list_tests``),
@@ -47,7 +48,10 @@ Behaviours: ``pass``, ``unclaimed_pass``, ``declined``, ``wrong``, ``unexercised
 Top-level control keys, not per-case behaviours: ``startup_fail`` (every invocation exits 1 at
 startup, as a bad ``--test-engine`` does) and ``no_builtin`` (the binary has no compiled-in test,
 so a listing with no filter selects nothing and prints "Error: zero tests ran."), and
-``quiet_load`` (a case skipped at load logs nothing, as the real binary without HIPDNN_LOG_LEVEL).
+``quiet_load`` (a case skipped at load logs nothing, as the real binary without HIPDNN_LOG_LEVEL),
+``kernels`` (the kernel names every case that ran the plan puts in its ``finished`` record; none
+by default, as an engine that reports no kernel) and ``kernels_seed_mod`` (``{"m": 2, "map":
+{"0": ["k0"], "1": ["k1"]}}``: the kernels by shape seed modulo ``m``, before ``kernels``).
 """
 
 import fnmatch
@@ -62,8 +66,11 @@ BUILTIN_TEST = "StubBuiltin.Smoke"
 
 BEHAVIOURS = (
     "pass", "unclaimed_pass", "declined", "wrong", "unexercised",
-    "crash_engine", "crash", "hang", "load_skip", "reg_crash", "probe_file", "run_start_crash",
+    "crash_engine", "crash_execute", "crash", "hang", "load_skip", "reg_crash", "probe_file",
+    "run_start_crash",
 )  # fmt: skip
+# The behaviours that ran the engine's plan and so report kernels when the control names some.
+KERNEL_BEHAVIOURS = ("pass", "unclaimed_pass", "wrong", "crash_execute", "probe_file")
 
 
 def sanitize(text):
@@ -183,6 +190,21 @@ def discover(golden):
     return found
 
 
+def kernels_for(control, case_id, kind):
+    """The kernels a case reports: only a behaviour that built the plan (``KERNEL_BEHAVIOURS``)
+    reports any, from ``kernels`` (every such case) or ``kernels_seed_mod`` (by shape seed).
+    """
+    if kind not in KERNEL_BEHAVIOURS:
+        return None
+    seed_mod = control.get("kernels_seed_mod")
+    match = re.fullmatch(r"s(\d+)", case_id)
+    if seed_mod and match:
+        mapped = seed_mod.get("map", {}).get(str(int(match.group(1)) % seed_mod["m"]))
+        if mapped is not None:
+            return mapped
+    return control.get("kernels")
+
+
 class Report:
     def __init__(self, path):
         self._file = open(path, "a", encoding="utf-8", newline="\n") if path else None
@@ -207,6 +229,9 @@ FINISHED = {
     "unexercised": ("UNEXERCISED", "setup", "not-reached", "HARNESS", "none", "no oracle available"),
     "crash_engine": (
         "CRASH", "build", "not-reached", "ENGINE", "none", "engine plan build failed: stub error",
+    ),
+    "crash_execute": (
+        "CRASH", "execute", "not-reached", "ENGINE", "none", "engine execute failed: stub error",
     ),
 }  # fmt: skip
 
@@ -320,6 +345,9 @@ def main(argv):
         }
         if purpose is not None:
             record["purpose"] = purpose
+        kernels = kernels_for(control, case_id, kind)
+        if kernels:
+            record["kernels"] = kernels
         report.write(record)
         failed = failed or outcome in ("WRONG", "CRASH")
         print(f"[       {outcome} ] {name}", flush=True)

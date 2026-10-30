@@ -83,6 +83,10 @@ DRIVER_PATH = Path(__file__).resolve()
 
 OUTCOMES = ("PASS", "DECLINED", "WRONG", "CRASH", "UNCLAIMED_PASS", "UNEXERCISED")
 FAILING = ("WRONG", "CRASH")
+# What ``reached_execute`` reads: these outcomes ran the plan whatever the stage says, the other
+# outcomes only when they stopped at one of these stages, which come after plan creation.
+EXECUTED_OUTCOMES = ("PASS", "UNCLAIMED_PASS", "WRONG")
+EXECUTED_STAGES = ("execute", "compare")
 DEFAULT_SAMPLES = 32
 DEFAULT_BATCH_SIZE = 16
 DEFAULT_CASE_TIMEOUT = "10m"
@@ -239,6 +243,19 @@ def kill_tree(proc):
         proc.wait(timeout=30)
     except subprocess.TimeoutExpired:
         pass
+
+
+def reached_execute(result):
+    """Whether the binary's record says the case built the engine's plan and went on to run it.
+
+    PASS, UNCLAIMED_PASS and WRONG ran it. A CRASH or UNEXERCISED did only when its stage is
+    ``execute`` or ``compare``: one at ``build`` (no plan) or earlier never had a kernel to
+    report, and DECLINED never reached the engine. A result the driver made itself (a hang or
+    a process crash, no ``finished`` record) says nothing about the stage and is not counted.
+    """
+    if result["source"] != "binary" or result["outcome"] == "DECLINED":
+        return False
+    return result["outcome"] in EXECUTED_OUTCOMES or result["stage"] in EXECUTED_STAGES
 
 
 def log_tail(path):
@@ -937,6 +954,9 @@ class Fuzz:
             for key in ("purpose", "depth", "origin", "verifier", "platform"):
                 if key in record:
                     result[key] = record[key]
+            kernels = record.get("kernels")
+            if isinstance(kernels, list) and kernels:
+                result["kernels"] = [str(k) for k in kernels]
         if crash_kind:
             result["crash_kind"] = crash_kind
         if outcome in FAILING:
@@ -1200,7 +1220,13 @@ class Fuzz:
             engine = r["engine"] or run_engine
             e = engines.setdefault(
                 engine,
-                {"samples": 0, "outcomes": dict.fromkeys(OUTCOMES, 0), "spaces": {}},
+                {
+                    "samples": 0,
+                    "outcomes": dict.fromkeys(OUTCOMES, 0),
+                    "kernels": {},
+                    "kernel_unreported": 0,
+                    "spaces": {},
+                },
             )
             sp = e["spaces"].setdefault(
                 r["space"],
@@ -1218,6 +1244,10 @@ class Fuzz:
                 bucket["samples"] += 1
                 bucket["outcomes"][r["outcome"]] += 1
             totals[r["outcome"]] += 1
+            for kernel in r.get("kernels", ()):
+                e["kernels"][kernel] = e["kernels"].get(kernel, 0) + 1
+            if reached_execute(r) and not r.get("kernels"):
+                e["kernel_unreported"] += 1
             reason = self._reason_key(r["reason"])
             if r["outcome"] == "DECLINED":
                 sp["declined_reasons"][reason] = (
@@ -1299,6 +1329,15 @@ class Fuzz:
             f"gauntlet fuzz report (seed {summary['seed']}, stopped: {summary['stopped_because']})"
         )
         for engine, e in summary["engines"].items():
+            if e["kernels"] or e["kernel_unreported"]:
+                named = ", ".join(
+                    f"{name} x{n}"
+                    for name, n in sorted(e["kernels"].items(), key=lambda kv: -kv[1])
+                )
+                print(
+                    f"  {engine} kernels: {named or 'none'};"
+                    f" {e['kernel_unreported']} executed without a kernel line"
+                )
             for space_id, sp in e["spaces"].items():
                 o = sp["outcomes"]
                 print(

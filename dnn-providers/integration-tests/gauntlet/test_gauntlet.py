@@ -2425,6 +2425,90 @@ def test_summary_counts_a_values_axis_per_value_and_skips_range_axes(run, tmp_pa
     assert sum(sum(c.values()) for c in counts.values()) == 2
 
 
+KERNEL_RESIDUES = {
+    "0": "pass",
+    "1": "declined",
+    "2": "wrong",
+    "3": "unexercised",
+    "4": "crash_engine",
+    "5": "crash_execute",
+    "6": "crash",
+}
+KERNEL_RESIDUE_COUNT = 7
+KERNEL_SAMPLES = 14
+
+
+def test_summary_counts_the_kernels_each_engine_ran(run):
+    # bug caught: a record that names its kernels losing them on the way to the summary, a case
+    # counted under another case's kernel, or a kernel counted more than once for one case
+    run.control(
+        kernels_seed_mod={
+            "m": 2,
+            "map": {"0": ["k_even"], "1": ["k_odd", "k_both"]},
+        },
+    )
+    assert run.run("--samples", "10", "--batch-size", "10") == 0
+    seeds = range(1000, 1010)
+    even = sum(1 for s in seeds if s % 2 == 0)
+    engine = run.summary["engines"]["STUB_ENGINE"]
+    assert engine["kernels"] == {
+        "k_even": even,
+        "k_odd": 10 - even,
+        "k_both": 10 - even,
+    }
+    assert engine["kernel_unreported"] == 0
+    for record in run.outcome_list:
+        seed = int(record["case"].removeprefix("s"))
+        assert record["kernels"] == (
+            ["k_even"] if seed % 2 == 0 else ["k_odd", "k_both"]
+        )
+
+
+def test_a_case_that_reports_no_kernel_is_unreported_only_when_it_reached_execute(run):
+    # bug caught: a decline, a setup failure or a plan-build crash counted as "executed without
+    # a kernel line" (they never had a kernel to report), or a driver-made hang/death counted
+    # as an engine that is silent; and the other way, an engine that ran and reports nothing
+    # (HIP_MLOPS) not showing up
+    run.control(seed_mod={"m": KERNEL_RESIDUE_COUNT, "map": KERNEL_RESIDUES})
+    assert run.run("--samples", str(KERNEL_SAMPLES), "--batch-size", "7") == 1
+    seeds = range(1000, 1000 + KERNEL_SAMPLES)
+    ran = sum(1 for s in seeds if s % KERNEL_RESIDUE_COUNT in (0, 2, 5))
+    engine = run.summary["engines"]["STUB_ENGINE"]
+    assert engine["kernel_unreported"] == ran == 6
+    assert engine["kernels"] == {}
+    assert engine["samples"] == KERNEL_SAMPLES
+    by_outcome = {}
+    driver_made = 0
+    for record in run.outcome_list:
+        assert "kernels" not in record
+        if record["source"] == "driver":
+            driver_made += 1
+            continue
+        key = (record["outcome"], record["stage"])
+        by_outcome[key] = by_outcome.get(key, 0) + 1
+    assert by_outcome[("CRASH", "execute")] == 2
+    assert by_outcome[("CRASH", "build")] == 2
+    # the two process deaths are CRASH results the driver wrote without a finished record: they
+    # carry the execute stage and still do not count as engines that ran silently
+    assert driver_made == 2
+
+
+def test_only_cases_that_built_a_plan_name_kernels(run):
+    # bug caught: kernels credited to a decline, a setup failure or a plan-build crash, or
+    # kernels and unreported counting different sets of cases
+    run.control(
+        seed_mod={"m": KERNEL_RESIDUE_COUNT, "map": KERNEL_RESIDUES},
+        kernels=["k_main"],
+    )
+    assert run.run("--samples", str(KERNEL_SAMPLES), "--batch-size", "7") == 1
+    engine = run.summary["engines"]["STUB_ENGINE"]
+    assert engine["kernels"] == {"k_main": 6}
+    assert engine["kernel_unreported"] == 0
+    with_kernels = [r for r in run.outcome_list if "kernels" in r]
+    assert {r["outcome"] for r in with_kernels} == {"PASS", "WRONG", "CRASH"}
+    assert all(r["stage"] in ("compare", "execute") for r in with_kernels)
+
+
 def test_a_failure_folder_carries_the_alignment_placement_and_patches(run):
     # bug caught: the graph of a failure folder at the template's alignment 16 although the
     # case ran at another one, or a meta sidecar without the placement that made it fail
