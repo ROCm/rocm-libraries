@@ -77,6 +77,12 @@ static const cfg_t CONFIGS[] = {
     {"K1", "gfx1250", 4, 4, "fp16", "fp16", 8, 4, 256, 0, 1, 0, 0, 16, 1, 0}, /* 41: rejected: filter_rows does not divide n */
     {"K4", "gfx1250", 4, 4, "fp16", "fp16", 8, 1, 96, 0, 1, 0, 0, 16, 1, 0}, /* 42: rejected: block not a power of two */
     {"K2a", "gfx1250", 4, 4, "fp16", "fp16", 16, 1, 256, 0, 1, 0, 0, 16, 1, 0}, /* 43: rejected: K2a vec 16 */
+    {"K1", "gfx1250", 4, 4, "fp16", "fp16", 8, -1, 256, 0, 1, 0, 0, 16, 1, 0}, /* 44: rejected: filter_rows -1 */
+    {"K2", "gfx1250", 4, 4, "fp16", "fp16", 8, 1, 2048, 0, 1, 0, 0, 16, 1, 0}, /* 45: rejected: K2 block over 1024 */
+    {"K4", "gfx1250", 4, 4, "fp16", "fp16", 8, 1, 2048, 0, 1, 0, 0, 16, 1, 0}, /* 46: rejected: K4 block over 1024 */
+    {"K2", "gfx1250", 2, 2, "fp16", "fp16", 8, 1, 256, 0, 4, 4, 8, 3, 1, 0}, /* 47: rejected: LDS lanes not a power of two */
+    {"K2", "gfx1250", 2, 2, "fp16", "fp16", 8, 1, 256, 0, 4, 4, 8, 0, 1, 0}, /* 48: rejected: LDS lanes 0 */
+    {"K2", "gfx1250", 2, 2, "fp16", "fp16", 8, 1, 256, 0, 1, 4, 0, 16, 1, 0}, /* 49: rejected: LDS region of zero width */
 };
 /* clang-format on */
 

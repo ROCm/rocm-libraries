@@ -236,6 +236,17 @@ def _build_with_arch(fn, spec, arch):
 # ---------------------------------------------------------------------------
 
 
+def _plan_chunks(problem: ConvProblem, plan: WinogradPlan) -> int:
+    """The plan's batch split: a positive integer dividing N (refused, never
+    normalized, otherwise)."""
+    chunks = plan.chunks
+    if not isinstance(chunks, int) or chunks < 1:
+        raise ValueError(f"batch split must be a positive integer (got {chunks!r})")
+    if problem.N % chunks:
+        raise ValueError(f"batch split {chunks} does not divide N={problem.N}")
+    return chunks
+
+
 def _unfused2d(problem: ConvProblem, dtype: str, plan: WinogradPlan):
     from kernels.common import conv_winograd_fwd as W
     from kernels.common.conv_winograd_gemm_wmma import (
@@ -244,9 +255,7 @@ def _unfused2d(problem: ConvProblem, dtype: str, plan: WinogradPlan):
     )
 
     mh, mw = plan.tile
-    chunks = max(1, int(plan.chunks))
-    if problem.N % chunks:
-        raise ValueError(f"batch split {chunks} does not divide N={problem.N}")
+    chunks = _plan_chunks(problem, plan)
     prescale = dtype == "bf16" and max(mh, mw) >= 4
     operand = "bf16" if ((mh, mw) == (2, 2) and dtype == "bf16") else "fp16"
     xf = W.tuned_transform_options((mh, mw), prescale, problem)
@@ -343,9 +352,7 @@ def _unfused2d_rt(problem: ConvProblem, dtype: str, plan: WinogradPlan):
     )
 
     mh, mw = plan.tile
-    chunks = max(1, int(plan.chunks))
-    if problem.N % chunks:
-        raise ValueError(f"batch split {chunks} does not divide N={problem.N}")
+    chunks = _plan_chunks(problem, plan)
     sub = dataclasses.replace(problem, N=problem.N // chunks)
     geo = R.RtGeometry(sub, mh, mw)
     operand, prescale = R.pipeline_dtypes((mh, mw), dtype)

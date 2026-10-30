@@ -55,6 +55,12 @@
 #   41  rejected: filter_rows does not divide n [gfx1250]
 #   42  rejected: block not a power of two [gfx1250]
 #   43  rejected: K2a vec 16 [gfx1250]
+#   44  rejected: filter_rows -1 [gfx1250]
+#   45  rejected: K2 block over 1024 [gfx1250]
+#   46  rejected: K4 block over 1024 [gfx1250]
+#   47  rejected: LDS lanes not a power of two [gfx1250]
+#   48  rejected: LDS lanes 0 [gfx1250]
+#   49  rejected: LDS region of zero width [gfx1250]
 from _emit_common import run_emit
 from kernels.common.conv_winograd_fwd_rt import (
     RtFilterSpec,
@@ -110,6 +116,12 @@ CONFIGS = [
     ('K1', 'gfx1250', {'mh': 4, 'mw': 4, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 4, 'block': 256, 'ps': 0, 'tpt': 1, 'bh': 0, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0}),  # 41: rejected: filter_rows does not divide n
     ('K4', 'gfx1250', {'mh': 4, 'mw': 4, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 1, 'block': 96, 'ps': 0, 'tpt': 1, 'bh': 0, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0}),  # 42: rejected: block not a power of two
     ('K2a', 'gfx1250', {'mh': 4, 'mw': 4, 'io': 'fp16', 'op': 'fp16', 'vec': 16, 'fr': 1, 'block': 256, 'ps': 0, 'tpt': 1, 'bh': 0, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0}),  # 43: rejected: K2a vec 16
+    ('K1', 'gfx1250', {'mh': 4, 'mw': 4, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': -1, 'block': 256, 'ps': 0, 'tpt': 1, 'bh': 0, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0}),  # 44: rejected: filter_rows -1
+    ('K2', 'gfx1250', {'mh': 4, 'mw': 4, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 1, 'block': 2048, 'ps': 0, 'tpt': 1, 'bh': 0, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0}),  # 45: rejected: K2 block over 1024
+    ('K4', 'gfx1250', {'mh': 4, 'mw': 4, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 1, 'block': 2048, 'ps': 0, 'tpt': 1, 'bh': 0, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0}),  # 46: rejected: K4 block over 1024
+    ('K2', 'gfx1250', {'mh': 2, 'mw': 2, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 1, 'block': 256, 'ps': 0, 'tpt': 4, 'bh': 4, 'bw': 8, 'lanes': 3, 'nt': 1, 'fused': 0}),  # 47: rejected: LDS lanes not a power of two
+    ('K2', 'gfx1250', {'mh': 2, 'mw': 2, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 1, 'block': 256, 'ps': 0, 'tpt': 4, 'bh': 4, 'bw': 8, 'lanes': 0, 'nt': 1, 'fused': 0}),  # 48: rejected: LDS lanes 0
+    ('K2', 'gfx1250', {'mh': 2, 'mw': 2, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'fr': 1, 'block': 256, 'ps': 0, 'tpt': 1, 'bh': 4, 'bw': 0, 'lanes': 16, 'nt': 1, 'fused': 0}),  # 49: rejected: LDS region of zero width
 ]
 # fmt: on
 

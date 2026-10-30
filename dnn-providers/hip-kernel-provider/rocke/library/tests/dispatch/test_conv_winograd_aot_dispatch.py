@@ -168,6 +168,16 @@ def test_batch_split_relaunches_the_same_binaries():
     assert v["y"] == _PTRS["y"] + sz["y"] and v["y_bytes"] == sz["y"]
 
 
+@pytest.mark.parametrize("kind", ["unfused2d_rt", "unfused2d"])
+@pytest.mark.parametrize("chunks", [0, -2, 1.9])
+def test_invalid_batch_split_is_refused(kind, chunks):
+    plan = WinogradPlan(
+        kind=kind, tile=(2, 2), k3="128x128x128_w2x2_f4x4_s2_tdm", chunks=chunks
+    )
+    with pytest.raises(ValueError, match="positive integer"):
+        winograd_launch_plan(gc._conv_problem(_req(N=4)), "fp16", plan, _ARCH)
+
+
 def test_no_3x3_plan_is_refused():
     req = _pin(_req(Y=1, X=11, Hi=1, Wi=200, pad_h=0, pad_w=5))
     with pytest.raises(ValueError, match="has no AOT kernels"):

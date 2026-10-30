@@ -263,6 +263,11 @@ def _check_common(mh, mw, io, op, vec):
         raise ValueError(f"vec must be 1/2/4/8 (got {vec})")
 
 
+def _check_block(block_size):
+    if block_size < 32 or block_size > 1024 or block_size & (block_size - 1):
+        raise ValueError("block_size must be a power of two in [32, 1024]")
+
+
 def _tile_tag(mh, mw) -> str:
     return f"f{mh}" if mh == mw else f"f{mh}x{mw}"
 
@@ -280,7 +285,7 @@ class RtFilterSpec:
 
     def __post_init__(self):
         _check_common(self.mh, self.mw, self.io_dtype, self.operand_dtype, self.vec)
-        if (self.mh + 2) % self.filter_rows:
+        if self.filter_rows < 1 or (self.mh + 2) % self.filter_rows:
             raise ValueError("filter_rows must divide n")
 
     stage = "K1"
@@ -351,14 +356,17 @@ class RtInputSpec:
 
     def __post_init__(self):
         _check_common(self.mh, self.mw, self.io_dtype, self.operand_dtype, self.vec)
-        if self.block_size < 32 or self.block_size & (self.block_size - 1):
-            raise ValueError("block_size must be a power of two >= 32")
+        _check_block(self.block_size)
         if self.fused and (not self.prescale or self.input_lds):
             raise ValueError("fused needs the prescale and the register path")
         if self.tiles_per_thread < 1:
             raise ValueError("tiles_per_thread must be >= 1")
         if self.input_lds:
             bh, bw = self.lds
+            if bw < 1:
+                raise ValueError("lds must be (0, 0) or two positive extents")
+            if self.lds_lanes < 1 or self.lds_lanes & (self.lds_lanes - 1):
+                raise ValueError("lds_lanes must be a power of two >= 1")
             if (bh * bw) % self.tiles_per_thread:
                 raise ValueError("tiles_per_thread must divide bh * bw")
             if self.lds_block > 1024:
@@ -429,8 +437,7 @@ class RtOutputSpec:
 
     def __post_init__(self):
         _check_common(self.mh, self.mw, self.io_dtype, self.operand_dtype, self.vec)
-        if self.block_size < 32 or self.block_size & (self.block_size - 1):
-            raise ValueError("block_size must be a power of two >= 32")
+        _check_block(self.block_size)
 
     stage = "K4"
 
@@ -1374,8 +1381,10 @@ def stage_launch(
     spec, geo: RtGeometry
 ) -> Tuple[Tuple[int, int, int], int, Dict[str, int]]:
     """``(grid, block, scalar kernarg values)`` of one launch; the buffer
-    pointers and ``<buf>_bytes`` sizes are the caller's."""
-    why = spec.reason(geo)
+    pointers and ``<buf>_bytes`` sizes are the caller's. Refuses a problem
+    outside :meth:`RtGeometry.check` as well as one the spec does not fit."""
+    prescale = isinstance(spec, RtPrescaleSpec) or getattr(spec, "prescale", False)
+    why = geo.check(prescale) or spec.reason(geo)
     if why:
         raise ValueError(f"{spec.kernel_name()}: {why}")
     grid, block, vals = _STAGES[type(spec)][2](spec, geo)

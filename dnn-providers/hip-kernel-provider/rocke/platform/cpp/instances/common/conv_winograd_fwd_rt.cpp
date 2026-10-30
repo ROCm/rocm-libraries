@@ -91,9 +91,9 @@ bool check_common(const Spec* s, std::string* err)
 
 bool check_block(const Spec* s, std::string* err)
 {
-    if(s->block_size < 32 || (s->block_size & (s->block_size - 1)))
+    if(s->block_size < 32 || s->block_size > 1024 || (s->block_size & (s->block_size - 1)))
     {
-        *err = "block_size must be a power of two >= 32";
+        *err = "block_size must be a power of two in [32, 1024]";
         return false;
     }
     return true;
@@ -144,6 +144,16 @@ bool validate(const Spec* s, std::string* err)
         }
         if(input_lds(s))
         {
+            if(s->lds[1] < 1)
+            {
+                *err = "lds must be (0, 0) or two positive extents";
+                return false;
+            }
+            if(s->lds_lanes < 1 || (s->lds_lanes & (s->lds_lanes - 1)))
+            {
+                *err = "lds_lanes must be a power of two >= 1";
+                return false;
+            }
             if((s->lds[0] * s->lds[1]) % s->tiles_per_thread)
             {
                 *err = "tiles_per_thread must divide bh * bw";

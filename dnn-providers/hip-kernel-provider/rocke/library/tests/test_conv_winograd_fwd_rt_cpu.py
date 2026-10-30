@@ -59,11 +59,19 @@ def test_magic_div_rejects_zero():
         lambda: R.RtFilterSpec(mh=3),
         lambda: R.RtFilterSpec(io_dtype="bf16", operand_dtype="bf16"),
         lambda: R.RtFilterSpec(filter_rows=4),
+        lambda: R.RtFilterSpec(filter_rows=0),
+        lambda: R.RtFilterSpec(filter_rows=-1),
         lambda: R.RtOutputSpec(vec=3),
         lambda: R.RtOutputSpec(block_size=96),
+        lambda: R.RtOutputSpec(block_size=2048),
+        lambda: R.RtInputSpec(block_size=2048),
         lambda: R.RtInputSpec(fused=True),
         lambda: R.RtInputSpec(mh=2, mw=2, lds=(2, 3), tiles_per_thread=4),
         lambda: R.RtInputSpec(mh=2, mw=2, lds=(8, 8), lds_lanes=32),
+        lambda: R.RtInputSpec(mh=2, mw=2, lds=(4, 8), tiles_per_thread=4, lds_lanes=3),
+        lambda: R.RtInputSpec(mh=2, mw=2, lds=(4, 8), tiles_per_thread=4, lds_lanes=0),
+        lambda: R.RtInputSpec(mh=2, mw=2, lds=(4, 8), tiles_per_thread=4, lds_lanes=-4),
+        lambda: R.RtInputSpec(mh=2, mw=2, lds=(4, 0)),
         lambda: R.RtPrescaleSpec(vec=16),
     ],
 )
@@ -159,6 +167,22 @@ def test_stage_launch_refuses_unfit_problems():
             R.RtInputSpec(io_dtype="bf16", vec=1, prescale=True, fused=True),
             R.RtGeometry(wide, 4, 4),
         )
+
+
+def test_stage_launch_refuses_unsupported_geometry():
+    """``stage_launch`` runs :meth:`RtGeometry.check` itself: a matching-tile
+    problem outside the 3x3 stride-1 kernels or the 32-bit offsets is refused."""
+    p5 = ConvProblem(N=1, Hi=8, Wi=8, C=8, K=8, Y=5, X=5, pH=2, pW=2)
+    s2 = ConvProblem(N=1, Hi=8, Wi=8, C=8, K=8, Y=3, X=3, pH=1, pW=1, sH=2, sW=2)
+    big = ConvProblem(N=64, Hi=512, Wi=512, C=256, K=256, Y=3, X=3, pH=1, pW=1)
+    for p in (p5, s2):
+        for spec in (R.RtFilterSpec(), R.RtInputSpec(), R.RtOutputSpec()):
+            with pytest.raises(ValueError, match="3x3 stride-1"):
+                R.stage_launch(spec, R.RtGeometry(p, 4, 4))
+    with pytest.raises(ValueError, match="32-bit"):
+        R.stage_launch(R.RtInputSpec(), R.RtGeometry(big, 4, 4))
+    with pytest.raises(ValueError, match="32-bit"):
+        R.stage_launch(R.RtPrescaleSpec(), R.RtGeometry(big, 4, 4))
 
 
 def test_geometry_refuses_non_3x3_and_huge_buffers():
