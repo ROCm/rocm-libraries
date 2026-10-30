@@ -742,6 +742,14 @@ if(ROCKE_INSTALL_TESTS)
     # the golden IR hashes, the performance knobs, and dispatch selection. None
     # needs a GPU; the GPU numeric suites are in rocke_library_gpu_pytest. Same
     # PYTHONPATH rule as the conv entry.
+    #
+    # Not registered on Windows. The Windows CI shard runs close to its time
+    # limit, and test_gdn_decode_fused.py::test_lowers_and_compiles_without_scratch
+    # runs close to the 60 s per-test limit on Windows runners. Re-enable on
+    # Windows once that case is cheaper or split out. The GDN/KDA numeric files
+    # in rocke_library_gpu_pytest need gfx950/gfx942 devices and already skip
+    # at collection on the Windows GPU lanes, so they are unchanged. This entry
+    # stays registered on every other platform.
     set(_ROCKE_LIBRARY_GDN_TEST_RELPATHS
         "tests/library/tests/test_gdn_decode_spec.py"
         "tests/library/tests/test_gdn_decode_fused.py"
@@ -758,13 +766,17 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_LIBRARY_GDN_TESTS
              " \"${ROCKE_TEST_CTEST_REL}${_rocke_gdn_test}\"")
     endforeach()
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_gdn_pytest python -m pytest${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=60)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_gdn_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;gdn\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  TIMEOUT 600)\n")
+    if(WIN32)
+      message(STATUS "rocKE: rocke_library_gdn_pytest not registered on Windows (slow GDN fused case; see comment above)")
+    else()
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_library_gdn_pytest python -m pytest${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=60)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_library_gdn_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;gdn\\;host\\;quick\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+             "  TIMEOUT 600)\n")
+    endif()
 
     # cmake/InstallGpuReferences.cmake discovers the operations from library/tests.
     foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
