@@ -53,7 +53,8 @@
 # Every spec field below (a group's `spec_defaults` plus its shape rows and knob arms)
 # is a field of AttentionDenseSpec. The six without defaults (batch, seqlen_q,
 # seqlen_kv, num_query_heads, num_kv_heads, head_size) are MANDATORY: hkp_pack hydrates
-# with Spec(**fields), so a missing one is a TypeError at pack time.
+# with Spec(**fields), so a missing one is a TypeError at pack time. The head counts are
+# spec fields only (canonical 8 / 8): the kernel reads the real ones as kernargs.
 #
 # Verify the builder before packing, from the IngestorGenerator root so `codegen` is
 # importable, with the rocKE library on PYTHONPATH:
@@ -79,12 +80,8 @@ kmd_fields:
 - name: head_size
   type: int
   default_value: 128
-- name: num_query_heads
-  type: int
-  default_value: 8
-- name: num_kv_heads
-  type: int
-  default_value: 8
+# No head-count fields: the kernel reads num_query_heads / num_kv_heads as
+# kernargs taken from the graph, so one kernel serves every head configuration.
 - name: causal
   type: int
   default_value: 1
@@ -116,8 +113,6 @@ specialization:
   metadata_fields:
   - dtype
   - head_size
-  - num_query_heads
-  - num_kv_heads
   - causal
   - ragged
   - sliding_window
@@ -136,10 +131,6 @@ specialization:
       field: dtype
     head_size:
       field: head_size
-    num_query_heads:
-      field: num_query_heads
-    num_kv_heads:
-      field: num_kv_heads
     causal:
       field: causal
     ragged:
@@ -161,7 +152,7 @@ workspace_policy: none
 # A copy of the manifest's `reduction` block.
 reduction:
   fields:
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv]
+    feature: [dtype, head_size, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv]
     performance:
       - {name: block_m, divides: seqlen_q}
       - {name: block_n, divides: seqlen_kv}
@@ -195,21 +186,26 @@ packs:
     builder: build_attention_dense
   variants:
   # Each group crosses its shape rows with its knob set's tiles:
-  #   D64:  12 head configurations x {bf16, fp16} x {causal, non-causal} x 7 tiles = 336
-  #   D128: 21 head configurations x {bf16, fp16} x {causal, non-causal} x 6 tiles = 504
-  #   total 840
+  #   D64:  {bf16, fp16} x {causal, non-causal} x 7 tiles = 28
+  #   D128: {bf16, fp16} x {causal, non-causal} x 6 tiles = 24
+  #   total 52
+  # One kernel per head size: num_query_heads / num_kv_heads are runtime kernargs read
+  # from the graph, so they are not metadata. The spec still carries them (hkp_pack
+  # hydrates Spec(**fields)) at the canonical 8 / 8, set in spec_defaults.
   # Legal tiles: block_m in {128, 256}, block_n a positive multiple of 32,
   # block_m % block_n == 0 and block_n % (block_m / 32) == 0. D128 omits 256/256,
   # whose static LDS (1184 * block_n = 303,104 bytes) exceeds gfx950's 163,840.
   # Every entry is a runtime-shape instance built at the canonical B1/Sq512/Skv512;
   # the catalog is aligned-only (ragged 0 throughout).
-  - name: attention_dense.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_c{causal}_bm{block_m}_bn{block_n}.gfx950
-    metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, batch, seqlen_q, seqlen_kv, block_m, block_n]
+  - name: attention_dense.{dtype}_d{head_size}_c{causal}_bm{block_m}_bn{block_n}.gfx950
+    metadata: [dtype, head_size, causal, ragged, sliding_window, batch, seqlen_q, seqlen_kv, block_m, block_n]
     vocabulary:
       dtype: {bf16: BF16, fp16: FP16}
     spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
     spec_defaults:
       head_size: 64
+      num_query_heads: 8
+      num_kv_heads: 8
       batch: 1
       seqlen_q: 512
       seqlen_kv: 512
@@ -240,73 +236,19 @@ packs:
       - {block_m: 256, block_n: 128}
       - {block_m: 256, block_n: 256}
     shapes:
-    # Hq8 / Hkv1
-    - {dtype: bf16, num_query_heads: 8, num_kv_heads: 1, causal: true, knobs: d64_tiles}
-    - {dtype: bf16, num_query_heads: 8, num_kv_heads: 1, causal: false, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 8, num_kv_heads: 1, causal: true, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 8, num_kv_heads: 1, causal: false, knobs: d64_tiles}
-    # Hq8 / Hkv8
-    - {dtype: bf16, num_query_heads: 8, num_kv_heads: 8, causal: true, knobs: d64_tiles}
-    - {dtype: bf16, num_query_heads: 8, num_kv_heads: 8, causal: false, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 8, num_kv_heads: 8, causal: true, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 8, num_kv_heads: 8, causal: false, knobs: d64_tiles}
-    # Hq10 / Hkv10
-    - {dtype: bf16, num_query_heads: 10, num_kv_heads: 10, causal: true, knobs: d64_tiles}
-    - {dtype: bf16, num_query_heads: 10, num_kv_heads: 10, causal: false, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 10, num_kv_heads: 10, causal: true, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 10, num_kv_heads: 10, causal: false, knobs: d64_tiles}
-    # Hq12 / Hkv12
-    - {dtype: bf16, num_query_heads: 12, num_kv_heads: 12, causal: true, knobs: d64_tiles}
-    - {dtype: bf16, num_query_heads: 12, num_kv_heads: 12, causal: false, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 12, num_kv_heads: 12, causal: true, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 12, num_kv_heads: 12, causal: false, knobs: d64_tiles}
-    # Hq16 / Hkv2
-    - {dtype: bf16, num_query_heads: 16, num_kv_heads: 2, causal: true, knobs: d64_tiles}
-    - {dtype: bf16, num_query_heads: 16, num_kv_heads: 2, causal: false, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 16, num_kv_heads: 2, causal: true, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 16, num_kv_heads: 2, causal: false, knobs: d64_tiles}
-    # Hq16 / Hkv16
-    - {dtype: bf16, num_query_heads: 16, num_kv_heads: 16, causal: true, knobs: d64_tiles}
-    - {dtype: bf16, num_query_heads: 16, num_kv_heads: 16, causal: false, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 16, num_kv_heads: 16, causal: true, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 16, num_kv_heads: 16, causal: false, knobs: d64_tiles}
-    # Hq20 / Hkv20
-    - {dtype: bf16, num_query_heads: 20, num_kv_heads: 20, causal: true, knobs: d64_tiles}
-    - {dtype: bf16, num_query_heads: 20, num_kv_heads: 20, causal: false, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 20, num_kv_heads: 20, causal: true, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 20, num_kv_heads: 20, causal: false, knobs: d64_tiles}
-    # Hq32 / Hkv4
-    - {dtype: bf16, num_query_heads: 32, num_kv_heads: 4, causal: true, knobs: d64_tiles}
-    - {dtype: bf16, num_query_heads: 32, num_kv_heads: 4, causal: false, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 32, num_kv_heads: 4, causal: true, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 32, num_kv_heads: 4, causal: false, knobs: d64_tiles}
-    # Hq32 / Hkv8
-    - {dtype: bf16, num_query_heads: 32, num_kv_heads: 8, causal: true, knobs: d64_tiles}
-    - {dtype: bf16, num_query_heads: 32, num_kv_heads: 8, causal: false, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 32, num_kv_heads: 8, causal: true, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 32, num_kv_heads: 8, causal: false, knobs: d64_tiles}
-    # Hq32 / Hkv32
-    - {dtype: bf16, num_query_heads: 32, num_kv_heads: 32, causal: true, knobs: d64_tiles}
-    - {dtype: bf16, num_query_heads: 32, num_kv_heads: 32, causal: false, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 32, num_kv_heads: 32, causal: true, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 32, num_kv_heads: 32, causal: false, knobs: d64_tiles}
-    # Hq64 / Hkv8
-    - {dtype: bf16, num_query_heads: 64, num_kv_heads: 8, causal: true, knobs: d64_tiles}
-    - {dtype: bf16, num_query_heads: 64, num_kv_heads: 8, causal: false, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 64, num_kv_heads: 8, causal: true, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 64, num_kv_heads: 8, causal: false, knobs: d64_tiles}
-    # Hq128 / Hkv128
-    - {dtype: bf16, num_query_heads: 128, num_kv_heads: 128, causal: true, knobs: d64_tiles}
-    - {dtype: bf16, num_query_heads: 128, num_kv_heads: 128, causal: false, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 128, num_kv_heads: 128, causal: true, knobs: d64_tiles}
-    - {dtype: fp16, num_query_heads: 128, num_kv_heads: 128, causal: false, knobs: d64_tiles}
-  - name: attention_dense.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_c{causal}_bm{block_m}_bn{block_n}.gfx950
-    metadata: [dtype, head_size, num_query_heads, num_kv_heads, causal, ragged, sliding_window, batch, seqlen_q, seqlen_kv, block_m, block_n]
+    - {dtype: bf16, causal: true, knobs: d64_tiles}
+    - {dtype: bf16, causal: false, knobs: d64_tiles}
+    - {dtype: fp16, causal: true, knobs: d64_tiles}
+    - {dtype: fp16, causal: false, knobs: d64_tiles}
+  - name: attention_dense.{dtype}_d{head_size}_c{causal}_bm{block_m}_bn{block_n}.gfx950
+    metadata: [dtype, head_size, causal, ragged, sliding_window, batch, seqlen_q, seqlen_kv, block_m, block_n]
     vocabulary:
       dtype: {bf16: BF16, fp16: FP16}
     spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
     spec_defaults:
       head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
       batch: 1
       seqlen_q: 512
       seqlen_kv: 512
@@ -336,108 +278,7 @@ packs:
       - {block_m: 256, block_n: 32}
       - {block_m: 256, block_n: 128}
     shapes:
-    # Hq24 / Hkv24
-    - {dtype: bf16, num_query_heads: 24, num_kv_heads: 24, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 24, num_kv_heads: 24, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 24, num_kv_heads: 24, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 24, num_kv_heads: 24, causal: false, knobs: d128_tiles}
-    # Hq4 / Hkv4
-    - {dtype: bf16, num_query_heads: 4, num_kv_heads: 4, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 4, num_kv_heads: 4, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 4, num_kv_heads: 4, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 4, num_kv_heads: 4, causal: false, knobs: d128_tiles}
-    # Hq8 / Hkv1
-    - {dtype: bf16, num_query_heads: 8, num_kv_heads: 1, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 8, num_kv_heads: 1, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 8, num_kv_heads: 1, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 8, num_kv_heads: 1, causal: false, knobs: d128_tiles}
-    # Hq8 / Hkv2
-    - {dtype: bf16, num_query_heads: 8, num_kv_heads: 2, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 8, num_kv_heads: 2, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 8, num_kv_heads: 2, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 8, num_kv_heads: 2, causal: false, knobs: d128_tiles}
-    # Hq8 / Hkv8
-    - {dtype: bf16, num_query_heads: 8, num_kv_heads: 8, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 8, num_kv_heads: 8, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 8, num_kv_heads: 8, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 8, num_kv_heads: 8, causal: false, knobs: d128_tiles}
-    # Hq9 / Hkv9
-    - {dtype: bf16, num_query_heads: 9, num_kv_heads: 9, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 9, num_kv_heads: 9, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 9, num_kv_heads: 9, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 9, num_kv_heads: 9, causal: false, knobs: d128_tiles}
-    # Hq16 / Hkv2
-    - {dtype: bf16, num_query_heads: 16, num_kv_heads: 2, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 16, num_kv_heads: 2, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 16, num_kv_heads: 2, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 16, num_kv_heads: 2, causal: false, knobs: d128_tiles}
-    # Hq16 / Hkv16
-    - {dtype: bf16, num_query_heads: 16, num_kv_heads: 16, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 16, num_kv_heads: 16, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 16, num_kv_heads: 16, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 16, num_kv_heads: 16, causal: false, knobs: d128_tiles}
-    # Hq28 / Hkv4
-    - {dtype: bf16, num_query_heads: 28, num_kv_heads: 4, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 28, num_kv_heads: 4, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 28, num_kv_heads: 4, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 28, num_kv_heads: 4, causal: false, knobs: d128_tiles}
-    # Hq32 / Hkv4
-    - {dtype: bf16, num_query_heads: 32, num_kv_heads: 4, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 32, num_kv_heads: 4, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 32, num_kv_heads: 4, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 32, num_kv_heads: 4, causal: false, knobs: d128_tiles}
-    # Hq32 / Hkv8
-    - {dtype: bf16, num_query_heads: 32, num_kv_heads: 8, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 32, num_kv_heads: 8, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 32, num_kv_heads: 8, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 32, num_kv_heads: 8, causal: false, knobs: d128_tiles}
-    # Hq32 / Hkv32
-    - {dtype: bf16, num_query_heads: 32, num_kv_heads: 32, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 32, num_kv_heads: 32, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 32, num_kv_heads: 32, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 32, num_kv_heads: 32, causal: false, knobs: d128_tiles}
-    # Hq40 / Hkv8
-    - {dtype: bf16, num_query_heads: 40, num_kv_heads: 8, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 40, num_kv_heads: 8, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 40, num_kv_heads: 8, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 40, num_kv_heads: 8, causal: false, knobs: d128_tiles}
-    # Hq40 / Hkv10
-    - {dtype: bf16, num_query_heads: 40, num_kv_heads: 10, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 40, num_kv_heads: 10, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 40, num_kv_heads: 10, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 40, num_kv_heads: 10, causal: false, knobs: d128_tiles}
-    # Hq40 / Hkv40
-    - {dtype: bf16, num_query_heads: 40, num_kv_heads: 40, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 40, num_kv_heads: 40, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 40, num_kv_heads: 40, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 40, num_kv_heads: 40, causal: false, knobs: d128_tiles}
-    # Hq48 / Hkv8
-    - {dtype: bf16, num_query_heads: 48, num_kv_heads: 8, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 48, num_kv_heads: 8, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 48, num_kv_heads: 8, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 48, num_kv_heads: 8, causal: false, knobs: d128_tiles}
-    # Hq64 / Hkv4
-    - {dtype: bf16, num_query_heads: 64, num_kv_heads: 4, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 64, num_kv_heads: 4, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 64, num_kv_heads: 4, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 64, num_kv_heads: 4, causal: false, knobs: d128_tiles}
-    # Hq64 / Hkv8
-    - {dtype: bf16, num_query_heads: 64, num_kv_heads: 8, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 64, num_kv_heads: 8, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 64, num_kv_heads: 8, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 64, num_kv_heads: 8, causal: false, knobs: d128_tiles}
-    # Hq64 / Hkv64
-    - {dtype: bf16, num_query_heads: 64, num_kv_heads: 64, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 64, num_kv_heads: 64, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 64, num_kv_heads: 64, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 64, num_kv_heads: 64, causal: false, knobs: d128_tiles}
-    # Hq96 / Hkv8
-    - {dtype: bf16, num_query_heads: 96, num_kv_heads: 8, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 96, num_kv_heads: 8, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 96, num_kv_heads: 8, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 96, num_kv_heads: 8, causal: false, knobs: d128_tiles}
-    # Hq128 / Hkv8
-    - {dtype: bf16, num_query_heads: 128, num_kv_heads: 8, causal: true, knobs: d128_tiles}
-    - {dtype: bf16, num_query_heads: 128, num_kv_heads: 8, causal: false, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 128, num_kv_heads: 8, causal: true, knobs: d128_tiles}
-    - {dtype: fp16, num_query_heads: 128, num_kv_heads: 8, causal: false, knobs: d128_tiles}
+    - {dtype: bf16, causal: true, knobs: d128_tiles}
+    - {dtype: bf16, causal: false, knobs: d128_tiles}
+    - {dtype: fp16, causal: true, knobs: d128_tiles}
+    - {dtype: fp16, causal: false, knobs: d128_tiles}
