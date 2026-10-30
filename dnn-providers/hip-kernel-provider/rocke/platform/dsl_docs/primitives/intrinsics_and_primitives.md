@@ -454,6 +454,12 @@ dequant_i4_byte_to_bf8_pair(b, packed_byte, *, inv_scale)
 # (code 0 is the f32 subnormal ``2^-127``) and code 255 gives NaN.
 decode_mx_scale_e8m0(b, e8m0)
 apply_mx_scale(b, value_f32, scale_f32)
+# addend + value * 2^(ea + eb) for an A and a B scale byte, rounded once,
+# without forming the product of the two scales (it can leave f32 range).
+# The split comes from the element formats of the group's A and B values:
+# exact_mx_scale_split(a_format, b_format, group_size) -> MxScaleSplit,
+# with the formats FP8_E4M3_OCP, BF8_E5M2_OCP, FP8_E4M3_FNUZ, BF8_E5M2_FNUZ.
+fma_with_mx_scale_pair(b, value_f32xN, a_e8m0, b_e8m0, addend_f32xN, *, split)
 load_and_decode_mx_scale_byte(b, scale_ptr, scale_idx)
 
 # Preshuffled-B tile-major layout helper. The launcher uses
