@@ -8,7 +8,8 @@ A fact about an integer Value is stated in one of two places:
 1. A kernel parameter's declaration (``IRBuilder.param``), kept in
    ``Param.attrs``. The host checks it before every launch.
 2. An ``arith.assume_range`` marker, written only by a caller that checked or
-   proved its facts first.
+   proved its facts first, such as ``IRBuilder.gpu_checked_value``, whose
+   facts the GPU checks.
 
 :func:`stated_facts_of` reads both and nothing else: it never runs the IR
 range walk, so it returns exactly what was stated. A bound that names another
@@ -28,6 +29,7 @@ from .ir import (
     _checked_end,
     _param_interval_resolver,
     _stated_param_interval,
+    assume_range_bound_operands,
 )
 
 __all__ = ["StatedFacts", "stated_facts_of"]
@@ -84,13 +86,21 @@ def _declared_facts(value: Value) -> StatedFacts:
 
 def _marker_facts(op) -> StatedFacts:
     attrs = op.attrs
+    ge_operand, lt_operand = assume_range_bound_operands(op)
     words = []
-    if "ge" in attrs:
+    lower: int | None = None
+    if ge_operand is not None:
         words.append("ge")
+        start = stated_facts_of(ge_operand).lower
+        if start is not None:
+            lower = _checked_end(start + attrs.get("ge_plus", 0))
+    elif "ge" in attrs:
+        words.append("ge")
+        lower = attrs["ge"]
     upper: int | None = None
-    if len(op.operands) == 2:
+    if lt_operand is not None:
         words.append("lt")
-        end = stated_facts_of(op.operands[1]).upper
+        end = stated_facts_of(lt_operand).upper
         if end is not None:
             upper = _checked_end(end + attrs.get("lt_plus", 0) - 1)
     elif "lt" in attrs:
@@ -101,7 +111,7 @@ def _marker_facts(op) -> StatedFacts:
         words.append("multiple_of")
     return StatedFacts(
         tuple(words),
-        attrs.get("ge"),
+        lower,
         upper,
         multiple_of,
         attrs.get("residue", 0),

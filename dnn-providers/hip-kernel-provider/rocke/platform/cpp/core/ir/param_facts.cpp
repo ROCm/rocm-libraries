@@ -728,6 +728,41 @@ extern "C" void rocke_param_facts_print(const rocke_param_t* p, rocke_strbuf_t* 
     }
 }
 
+extern "C" void rocke_param_declaration_text(const rocke_param_t* p, rocke_strbuf_t* out)
+{
+    rocke_arena_t arena;
+    if(!p || rocke_arena_init(&arena, 0) != 0)
+        return;
+    std::string text = "b.param(\"" + std::string(p->name) + "\", " + upper(type_name(p->type));
+    for(const char* word : kFactWords)
+    {
+        const rocke_attr_value_t* v = rocke_attr_get(&p->attrs, word);
+        if(!v)
+            continue;
+        std::string bound = "?";
+        if(v->kind == ROCKE_ATTR_INT)
+            bound = fmt_int(v->u.i);
+        else if(v->kind == ROCKE_ATTR_STR)
+        {
+            const jd_val_t* tree = stored_relation(v->u.s, &arena);
+            bound = tree ? relation_text(tree, "") : v->u.s;
+        }
+        text += ", " + std::string(word) + "=" + bound;
+    }
+    rocke_arena_destroy(&arena);
+    rocke_strbuf_append(out, (text + ")").c_str());
+}
+
+extern "C" void rocke_relation_display(const char* text, rocke_strbuf_t* out)
+{
+    rocke_arena_t arena;
+    if(!text || rocke_arena_init(&arena, 0) != 0)
+        return;
+    const jd_val_t* tree = stored_relation(text, &arena);
+    rocke_strbuf_append(out, tree ? relation_text(tree, "").c_str() : text);
+    rocke_arena_destroy(&arena);
+}
+
 extern "C" char* rocke_relation_canonical(const char* text,
                                           rocke_arena_t* arena,
                                           const char* (*rename)(void* ctx, const char* name),

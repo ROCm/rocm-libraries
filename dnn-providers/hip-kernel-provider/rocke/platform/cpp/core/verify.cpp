@@ -361,70 +361,24 @@ static void check_sync_attrs(verifier_t* v, const rocke_op_t* op, const char* co
 }
 
 /* Python ir._assume_range_errors: every rule an arith.assume_range marker's
- * attrs break, in order, with the same texts. */
+ * attrs break, in order, with the same texts (one home:
+ * cpp/core/ir/range_marker.cpp). */
+struct marker_sink_t
+{
+    verifier_t* v;
+    const rocke_op_t* op;
+};
+
+static void report_marker_error(void* ctx, const char* message)
+{
+    marker_sink_t* sink = (marker_sink_t*)ctx;
+    v_errf(sink->v, sink->op, "%s", message);
+}
+
 static void check_assume_range_attrs(verifier_t* v, const rocke_op_t* op)
 {
-    /* ir._ASSUME_RANGE_INT_ATTRS: every present attr must be an integer before
-     * the value rules below compare it. */
-    static const char* const int_attrs[] = {"multiple_of", "residue", "ge", "lt", "lt_plus"};
-    bool typed = true;
-    for(const char* key : int_attrs)
-    {
-        const rocke_attr_value_t* value = rocke_attr_get(&op->attrs, key);
-        if(value && value->kind != ROCKE_ATTR_INT)
-        {
-            v_errf(v, op, "arith.assume_range: %s must be an integer", key);
-            typed = false;
-        }
-    }
-    if(!typed)
-    {
-        return;
-    }
-    int64_t multiple_of = 1;
-    int64_t residue = 0;
-    int64_t ge = 0;
-    int64_t lt = 0;
-    int64_t unused = 0;
-    rocke_attr_get_int(&op->attrs, "multiple_of", &multiple_of);
-    rocke_attr_get_int(&op->attrs, "residue", &residue);
-    if(multiple_of < 1)
-    {
-        v_errf(v,
-               op,
-               "arith.assume_range: multiple_of must be >= 1, got %lld",
-               (long long)multiple_of);
-    }
-    else if(!(residue >= 0 && residue < multiple_of))
-    {
-        v_errf(v,
-               op,
-               "arith.assume_range: residue must be in [0, %lld), got %lld",
-               (long long)multiple_of,
-               (long long)residue);
-    }
-    const bool has_lt_operand = op->num_operands == 2;
-    const bool has_ge = rocke_attr_get_int(&op->attrs, "ge", &ge);
-    const bool has_lt = rocke_attr_get_int(&op->attrs, "lt", &lt);
-    if(has_lt && has_lt_operand)
-    {
-        v_errf(v,
-               op,
-               "arith.assume_range: lt is given both as an attr and as an operand; "
-               "state one upper end");
-    }
-    if(rocke_attr_get_int(&op->attrs, "lt_plus", &unused) && !has_lt_operand)
-    {
-        v_errf(v, op, "arith.assume_range: lt_plus is given without an lt operand");
-    }
-    if(has_ge && has_lt && ge >= lt)
-    {
-        v_errf(v,
-               op,
-               "arith.assume_range: ge (%lld) must be below lt (%lld)",
-               (long long)ge,
-               (long long)lt);
-    }
+    marker_sink_t sink{v, op};
+    rocke_assume_range_errors(&op->attrs, op->num_operands, report_marker_error, &sink);
 }
 
 static void check_contract(verifier_t* v, const rocke_op_t* op)
@@ -531,11 +485,11 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
     }
     else if(o == ROCKE_OP_ARITH_ASSUME_RANGE)
     {
-        if((op->num_operands != 1 && op->num_operands != 2) || op->num_results != 1)
+        if(op->num_operands < 1 || op->num_operands > 3 || op->num_results != 1)
         {
             v_errf(v,
                    op,
-                   "%s: expected 1 or 2 operands / 1 result, got %d / %d",
+                   "%s: expected 1 to 3 operands / 1 result, got %d / %d",
                    name,
                    op->num_operands,
                    op->num_results);
@@ -551,14 +505,21 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                    tn(op->results[0]->type),
                    tn(t));
         }
-        if(op->num_operands == 2 && !rocke_type_eq(op->operands[1]->type, t))
+        rocke_value_t* ends[2];
+        rocke_assume_range_bound_operands(op, &ends[0], &ends[1]);
+        const char* const words[2] = {"ge", "lt"};
+        for(int i = 0; i < 2; i++)
         {
-            v_errf(v,
-                   op,
-                   "%s: lt operand type %s != operand type %s",
-                   name,
-                   tn(op->operands[1]->type),
-                   tn(t));
+            if(ends[i] != NULL && !rocke_type_eq(ends[i]->type, t))
+            {
+                v_errf(v,
+                       op,
+                       "%s: %s operand type %s != operand type %s",
+                       name,
+                       words[i],
+                       tn(ends[i]->type),
+                       tn(t));
+            }
         }
         check_assume_range_attrs(v, op);
     }

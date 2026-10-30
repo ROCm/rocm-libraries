@@ -57,12 +57,12 @@ rocke_param_opts_t no_opts()
 
 rocke_int_bound_t int_bound(int64_t value)
 {
-    return rocke_int_bound_t{true, value, nullptr};
+    return rocke_int_bound_t{true, value, nullptr, nullptr};
 }
 
 rocke_int_bound_t relation(const char* json)
 {
-    return rocke_int_bound_t{true, 0, json};
+    return rocke_int_bound_t{true, 0, json, nullptr};
 }
 
 /* The parameters every refusal case starts from: M with a lower bound and sb

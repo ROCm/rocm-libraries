@@ -349,10 +349,59 @@ bound computed in the kernel) with a `ValueError`; both verifiers apply the same
 takes the same facts in `rocke_param_opts_t.facts` (`rocke_int_facts_t`), a relation as its JSON
 text.
 
+A C++ caller may also pass a parameter's Value as a bound (`rocke_int_bound_t.value_bound`); it is
+stored as that parameter's relation.
+
+### Values only the GPU can see: `gpu_checked_value`
+
+```python
+gpu_checked_value(value, *, ge=None, gt=None, le=None, lt=None, multiple_of=None) -> Value
+```
+
+Always emitted: no build mode drops it; a false fact traps the kernel. It is for a value the host
+cannot check -- one computed from a memory load or a block id -- and returns `value` carrying the
+stated facts. The facts live only on the returned Value, so pass that Value on:
+
+```python
+T     = b.param("T", I32, ge=0, le=MAX_T)
+start = b.gpu_checked_value(b.readfirstlane(b.global_load(cu, s, I32)), ge=0, le=T)
+end   = b.gpu_checked_value(b.readfirstlane(b.global_load(cu, s1, I32)), ge=0, le=T)
+seqlen = b.gpu_checked_value(b.sub(end, start), ge=0, le=T)
+```
+
+A taken trap costs the whole process, not just the launch: the launch fails or the HIP runtime
+aborts the process, and either way the process cannot use the GPU afterwards. So the check is a
+last line of defence for a value the host cannot see, not a way to reject input; make bad input
+impossible upstream.
+
+The words are the parameter words without `eq`; at least one is required, and exactly the stated
+sides are checked. A bound is an int or one Value of the value's type whose facts are stated (a
+parameter, or a Value `gpu_checked_value` returned); `sum_of`, `product_of`, `quotient_of` and
+`difference_of` are host expressions and are refused. It is built from existing ops: one signed
+compare per stated side (one unsigned compare for `0 <= v < n` with an int `n`, by
+`one_unsigned_compare_checks`, the rule every emitted bound check follows: compare, never form a
+subtraction that can wrap), `scf.if` on the failure, `tile.trap`, and an `arith.assume_range`
+marker with `by = "gpu_checked_value"`.
+
+It refuses, naming the fix (`rocke.core.value_sources` holds the two walks):
+
+- a value the host already checks: a kernel parameter (state the fact on its declaration), a
+  value computed only from parameters and constants, or one computed from thread ids (state
+  `workgroup_size`). A value *depends on* a leaf through any operand, conditions and loop-carried
+  values included; one that depends on a load or a block id is GPU-only and accepted.
+- a value an unchecked load reaches through an `add`, `sub`, `mul`, `div` or `mod` on its data
+  path (every operand except a select's or branch's condition and a loop's upper bound): that
+  arithmetic can wrap, become poison or divide by zero before the check. Check the loaded value
+  first and compute with the returned Values. A load that only feeds a compare (the binary-search
+  shape) does not count.
+
+The C++ builder is `rocke_b_gpu_checked(b, value, &facts)` with a `rocke_int_facts_t`, giving the
+same IR and texts; `rocke_b_assume_range` builds the marker.
+
 `rocke.core.facts.stated_facts_of(value)` reads the facts stated for a Value -- by its parameter
-declaration or by the range marker that produced it -- and resolves each Value bound to numbers
-through that Value's own facts: `ldc ge N` with `N ge 1` gives `ldc >= 1`. It never runs the IR
-range walk.
+declaration or by the range marker that produced it, `gpu_checked_value`'s included -- and
+resolves each Value bound to numbers through that Value's own facts: `ldc ge N` with `N ge 1`
+gives `ldc >= 1`. It never runs the IR range walk.
 
 ## IR Printer
 

@@ -147,6 +147,7 @@ def test_installed_pytest_gets_distinct_artifact_environment_variables(tmp_path)
         "ROCKE_UNSIGNED_INT_OPS_CLI": f"../rocke_unsigned_int_ops{executable_suffix}",
         "ROCKE_INTEXPR_CLI": f"../rocke_intexpr{executable_suffix}",
         "ROCKE_PARAM_FACTS_CLI": f"../rocke_param_facts{executable_suffix}",
+        "ROCKE_GPU_CHECKED_VALUE_CLI": f"../rocke_gpu_checked_value{executable_suffix}",
         "ROCKE_ARCH_TARGET_TEST_EXE": (
             f"../rocke_arch_target_identity{executable_suffix}"
         ),

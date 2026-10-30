@@ -167,6 +167,11 @@ NATIVE_PARITY_TESTS = (
         "native parameter-fact print, verify and canonicalize parity",
     ),
     (
+        "ROCKE_GPU_CHECKED_VALUE_CLI",
+        "rocke_gpu_checked_value",
+        "native GPU check builder and range marker verifier parity",
+    ),
+    (
         "ROCKE_ARCH_TARGET_TEST_EXE",
         "rocke_arch_target_identity",
         "native target identity parity",

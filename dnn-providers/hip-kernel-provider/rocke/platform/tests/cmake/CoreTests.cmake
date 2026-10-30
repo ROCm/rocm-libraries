@@ -345,6 +345,21 @@ if(BUILD_TESTING)
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_intexpr)
   endif()
 
+  # The GPU check (cpp/core/ir/gpu_check.cpp) and the range marker builder. With
+  # --cases and --verify it is also the C++ side of tests/core/test_gpu_checked_value.py,
+  # which pins its emitted IR, refusal texts and marker verifier messages
+  # against the Python engine.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_gpu_checked_value.cpp")
+    add_executable(rocke_gpu_checked_value core/test_gpu_checked_value.cpp)
+    target_link_libraries(rocke_gpu_checked_value PRIVATE rocke_core)
+    add_test(NAME rocke_gpu_checked_value COMMAND rocke_gpu_checked_value)
+    set_tests_properties(rocke_gpu_checked_value PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_gpu_checked_value)
+    set_target_properties(rocke_gpu_checked_value PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_gpu_checked_value RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_gpu_checked_value)
+  endif()
+
   # Unsigned compare, no-unsigned-wrap add and range marker: C API builders,
   # both C++ lowerers, the verifier and the constant folder.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_unsigned_int_ops.cpp")

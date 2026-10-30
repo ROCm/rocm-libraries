@@ -885,7 +885,43 @@ static bool
                   {"eq", &facts->eq}};
     for(const auto& entry : bounds)
     {
-        if(entry.bound->relation != NULL)
+        if(entry.bound->value_bound != NULL)
+        {
+            /* Python IRBuilder._leaf_name: a Value bound is a parameter of this
+             * kernel, stored as its relation; the host evaluates nothing else. */
+            const rocke_value_t* bound = entry.bound->value_bound;
+            const char* shown = bound->name[0] == '%' ? bound->name + 1 : bound->name;
+            const char* leaf = NULL;
+            for(int i = 0; i < b->num_param_lookup; i++)
+            {
+                if(b->param_values[i] == bound)
+                {
+                    leaf = b->param_names[i];
+                }
+            }
+            if(leaf == NULL)
+            {
+                rocke_i_set_err(b,
+                                ROCKE_ERR_VALUE,
+                                "param %s: %s=%s uses %s, which %s",
+                                p->name,
+                                entry.word,
+                                shown,
+                                shown,
+                                bound->op == NULL
+                                    ? "is a parameter of another kernel -- the host can only "
+                                      "evaluate this kernel's parameters and ints"
+                                    : "is computed in the kernel -- the host can only "
+                                      "evaluate kernel parameters and ints");
+                return false;
+            }
+            std::string json = "{\"param\":\"";
+            json += leaf;
+            json += "\"}";
+            const char* canonical = rocke_relation_canonical(json.c_str(), &b->arena, NULL, NULL);
+            rocke_attr_set_str(b, &p->attrs, entry.word, canonical ? canonical : json.c_str());
+        }
+        else if(entry.bound->relation != NULL)
         {
             /* Stored canonical, as the Python builder stores it; a string that
              * holds no relation is kept as given and refused below. */

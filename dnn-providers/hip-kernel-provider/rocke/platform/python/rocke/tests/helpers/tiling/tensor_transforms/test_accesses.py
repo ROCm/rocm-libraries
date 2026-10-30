@@ -337,9 +337,9 @@ def test_the_package_door_exports_the_access_entry_and_no_internal_value():
 
 
 # The range marker states a fact the IR range walk trusts; only callers that checked (or proved)
-# it may state it. Those callers are the tiling layer's runtime_value, exit_if_tile_outside and
-# slice_tensor, plus the tests of core and of this package.
-_MARKER_CALLERS = {"runtime_value", "exit_if_tile_outside", "slice_tensor"}
+# it may state it. Those callers are core's gpu_checked_value, the tiling layer's
+# exit_if_tile_outside and slice_tensor, and the tests of core and of this package.
+_MARKER_CALLERS = {"gpu_checked_value", "exit_if_tile_outside", "slice_tensor"}
 
 
 def _unchecked_marker_calls(path: Path) -> list[str]:
