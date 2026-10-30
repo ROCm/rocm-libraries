@@ -192,6 +192,9 @@ private:
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD:
             policy.executeUnary(input, output, pointwise::SoftplusForward<ComputeType>{});
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::LOGICAL_NOT:
+            policy.executeUnary(input, output, pointwise::LogicalNot{});
+            break;
         default:
             throw std::runtime_error("Unsupported unary pointwise operation: "
                                      + std::to_string(static_cast<int>(operation)));
@@ -281,6 +284,39 @@ private:
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_GT:
             policy.executeBinaryBroadcast(
                 input1, input2, output, pointwise::CompareGreater<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_EQ:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::CompareEqual<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_NEQ:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::CompareNotEqual<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_GE:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::CompareGreaterEqual<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_LT:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::CompareLess<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_LE:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::CompareLessEqual<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::DIV:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::Divide<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD_SQUARE:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::AddSquare<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::LOGICAL_AND:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::LogicalAnd{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::LOGICAL_OR:
+            policy.executeBinaryBroadcast(input1, input2, output, pointwise::LogicalOr{});
             break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD:
             policy.executeBinaryBroadcast(

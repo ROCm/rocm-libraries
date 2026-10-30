@@ -787,6 +787,1999 @@ protected:
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
+    void testBinaryDivideOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<OutputType> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::DIV, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x / y;
+        };
+        Tensor<OutputType> expected({1, 1, 1, 4});
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(reference(TEST_VALUE_3, TEST_VALUE_1)), 0, 0, 0, 0);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(reference(TEST_VALUE_1, TEST_VALUE_3)), 0, 0, 0, 1);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(reference(TEST_VALUE_2, TEST_VALUE_2)), 0, 0, 0, 2);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(reference(-TEST_VALUE_1, TEST_VALUE_4)), 0, 0, 0, 3);
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::DIV, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBroadcast2Dx1DDivide()
+    {
+        Tensor<Input1Type> input1({3, 4}); // [M,N]
+        Tensor<Input2Type> input2({4}); // [N] broadcast along M
+        Tensor<OutputType> output({3, 4});
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>(m + n + 1)), m, n);
+            }
+        }
+
+        for(int n = 0; n < 4; ++n)
+        {
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>(n + 1)), n);
+        }
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::DIV, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x / y;
+        };
+        Tensor<OutputType> expected({3, 4});
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                auto referenceValue
+                    = reference(static_cast<float>(m + n + 1), static_cast<float>(n + 1));
+                expected.setHostValue(safeTestTypeCast<OutputType>(referenceValue), m, n);
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::DIV, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBinaryDivideStridedInputOperation()
+    {
+        // Channel-last strides for logical dims [1,2,2,2]; input2 and the output stay row-major.
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+        Tensor<Input1Type> input1({1, 2, 2, 2}, inputStrides);
+        Tensor<Input2Type> input2({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+        Tensor<OutputType> expected({1, 2, 2, 2});
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x / y;
+        };
+
+        float value = 1.0f;
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    const float other = (c == 0) ? TEST_VALUE_3 : TEST_VALUE_5;
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(value), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(other), 0, c, h, w);
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(reference(value, other)), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::DIV, output, input1, input2);
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::DIV, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBinaryAddSquareOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<OutputType> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::ADD_SQUARE, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x + y * y;
+        };
+        Tensor<OutputType> expected({1, 1, 1, 4});
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(reference(TEST_VALUE_3, TEST_VALUE_1)), 0, 0, 0, 0);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(reference(TEST_VALUE_1, TEST_VALUE_3)), 0, 0, 0, 1);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(reference(TEST_VALUE_2, TEST_VALUE_2)), 0, 0, 0, 2);
+        expected.setHostValue(
+            safeTestTypeCast<OutputType>(reference(-TEST_VALUE_1, TEST_VALUE_4)), 0, 0, 0, 3);
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD_SQUARE, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBroadcast2Dx1DAddSquare()
+    {
+        Tensor<Input1Type> input1({3, 4}); // [M,N]
+        Tensor<Input2Type> input2({4}); // [N] broadcast along M
+        Tensor<OutputType> output({3, 4});
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>(m + n + 1)), m, n);
+            }
+        }
+
+        for(int n = 0; n < 4; ++n)
+        {
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>(n + 1)), n);
+        }
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::ADD_SQUARE, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x + y * y;
+        };
+        Tensor<OutputType> expected({3, 4});
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                auto referenceValue
+                    = reference(static_cast<float>(m + n + 1), static_cast<float>(n + 1));
+                expected.setHostValue(safeTestTypeCast<OutputType>(referenceValue), m, n);
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD_SQUARE, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBinaryAddSquareStridedInputOperation()
+    {
+        // Channel-last strides for logical dims [1,2,2,2]; input2 and the output stay row-major.
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+        Tensor<Input1Type> input1({1, 2, 2, 2}, inputStrides);
+        Tensor<Input2Type> input2({1, 2, 2, 2});
+        Tensor<OutputType> output({1, 2, 2, 2});
+        Tensor<OutputType> expected({1, 2, 2, 2});
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x + y * y;
+        };
+
+        float value = 1.0f;
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    const float other = (c == 0) ? TEST_VALUE_3 : TEST_VALUE_5;
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(value), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(other), 0, c, h, w);
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(reference(value, other)), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::ADD_SQUARE, output, input1, input2);
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD_SQUARE, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBinaryCompareEqualOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<bool> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_EQ, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x == y;
+        };
+        Tensor<bool> expected({1, 1, 1, 4});
+        expected.setHostValue(reference(TEST_VALUE_3, TEST_VALUE_1), 0, 0, 0, 0);
+        expected.setHostValue(reference(TEST_VALUE_1, TEST_VALUE_3), 0, 0, 0, 1);
+        expected.setHostValue(reference(TEST_VALUE_2, TEST_VALUE_2), 0, 0, 0, 2);
+        expected.setHostValue(reference(-TEST_VALUE_1, TEST_VALUE_4), 0, 0, 0, 3);
+
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 0), expected.getHostValue(0, 0, 0, 0));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 1), expected.getHostValue(0, 0, 0, 1));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 2), expected.getHostValue(0, 0, 0, 2));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 3), expected.getHostValue(0, 0, 0, 3));
+    }
+
+    void testBroadcast2Dx1DCompareEqual()
+    {
+        Tensor<Input1Type> input1({3, 4}); // [M,N]
+        Tensor<Input2Type> input2({4}); // [N] broadcast along M
+        Tensor<bool> output({3, 4});
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>(m + n + 1)), m, n);
+            }
+        }
+
+        for(int n = 0; n < 4; ++n)
+        {
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>(n + 1)), n);
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_EQ, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x == y;
+        };
+        Tensor<bool> expected({3, 4});
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                auto referenceValue
+                    = reference(static_cast<float>(m + n + 1), static_cast<float>(n + 1));
+                expected.setHostValue(referenceValue, m, n);
+            }
+        }
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                EXPECT_EQ(output.getHostValue(m, n), expected.getHostValue(m, n));
+            }
+        }
+    }
+
+    void testBinaryCompareEqualStridedInputOperation()
+    {
+        // Channel-last strides for logical dims [1,2,2,2]; input2 and the output stay row-major.
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+        Tensor<Input1Type> input1({1, 2, 2, 2}, inputStrides);
+        Tensor<Input2Type> input2({1, 2, 2, 2});
+        Tensor<bool> output({1, 2, 2, 2});
+        Tensor<bool> expected({1, 2, 2, 2});
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x == y;
+        };
+
+        float value = 1.0f;
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    const float other = (c == 0) ? TEST_VALUE_3 : TEST_VALUE_5;
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(value), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(other), 0, c, h, w);
+                    expected.setHostValue(reference(value, other), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_EQ, output, input1, input2);
+
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    EXPECT_EQ(output.getHostValue(0, c, h, w), expected.getHostValue(0, c, h, w));
+                }
+            }
+        }
+    }
+
+    void testBinaryCompareNotEqualOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<bool> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_NEQ, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x != y;
+        };
+        Tensor<bool> expected({1, 1, 1, 4});
+        expected.setHostValue(reference(TEST_VALUE_3, TEST_VALUE_1), 0, 0, 0, 0);
+        expected.setHostValue(reference(TEST_VALUE_1, TEST_VALUE_3), 0, 0, 0, 1);
+        expected.setHostValue(reference(TEST_VALUE_2, TEST_VALUE_2), 0, 0, 0, 2);
+        expected.setHostValue(reference(-TEST_VALUE_1, TEST_VALUE_4), 0, 0, 0, 3);
+
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 0), expected.getHostValue(0, 0, 0, 0));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 1), expected.getHostValue(0, 0, 0, 1));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 2), expected.getHostValue(0, 0, 0, 2));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 3), expected.getHostValue(0, 0, 0, 3));
+    }
+
+    void testBroadcast2Dx1DCompareNotEqual()
+    {
+        Tensor<Input1Type> input1({3, 4}); // [M,N]
+        Tensor<Input2Type> input2({4}); // [N] broadcast along M
+        Tensor<bool> output({3, 4});
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>(m + n + 1)), m, n);
+            }
+        }
+
+        for(int n = 0; n < 4; ++n)
+        {
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>(n + 1)), n);
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_NEQ, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x != y;
+        };
+        Tensor<bool> expected({3, 4});
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                auto referenceValue
+                    = reference(static_cast<float>(m + n + 1), static_cast<float>(n + 1));
+                expected.setHostValue(referenceValue, m, n);
+            }
+        }
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                EXPECT_EQ(output.getHostValue(m, n), expected.getHostValue(m, n));
+            }
+        }
+    }
+
+    void testBinaryCompareNotEqualStridedInputOperation()
+    {
+        // Channel-last strides for logical dims [1,2,2,2]; input2 and the output stay row-major.
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+        Tensor<Input1Type> input1({1, 2, 2, 2}, inputStrides);
+        Tensor<Input2Type> input2({1, 2, 2, 2});
+        Tensor<bool> output({1, 2, 2, 2});
+        Tensor<bool> expected({1, 2, 2, 2});
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x != y;
+        };
+
+        float value = 1.0f;
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    const float other = (c == 0) ? TEST_VALUE_3 : TEST_VALUE_5;
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(value), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(other), 0, c, h, w);
+                    expected.setHostValue(reference(value, other), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_NEQ, output, input1, input2);
+
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    EXPECT_EQ(output.getHostValue(0, c, h, w), expected.getHostValue(0, c, h, w));
+                }
+            }
+        }
+    }
+
+    void testBinaryCompareGreaterEqualOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<bool> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_GE, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x >= y;
+        };
+        Tensor<bool> expected({1, 1, 1, 4});
+        expected.setHostValue(reference(TEST_VALUE_3, TEST_VALUE_1), 0, 0, 0, 0);
+        expected.setHostValue(reference(TEST_VALUE_1, TEST_VALUE_3), 0, 0, 0, 1);
+        expected.setHostValue(reference(TEST_VALUE_2, TEST_VALUE_2), 0, 0, 0, 2);
+        expected.setHostValue(reference(-TEST_VALUE_1, TEST_VALUE_4), 0, 0, 0, 3);
+
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 0), expected.getHostValue(0, 0, 0, 0));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 1), expected.getHostValue(0, 0, 0, 1));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 2), expected.getHostValue(0, 0, 0, 2));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 3), expected.getHostValue(0, 0, 0, 3));
+    }
+
+    void testBroadcast2Dx1DCompareGreaterEqual()
+    {
+        Tensor<Input1Type> input1({3, 4}); // [M,N]
+        Tensor<Input2Type> input2({4}); // [N] broadcast along M
+        Tensor<bool> output({3, 4});
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>(m + n + 1)), m, n);
+            }
+        }
+
+        for(int n = 0; n < 4; ++n)
+        {
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>(n + 1)), n);
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_GE, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x >= y;
+        };
+        Tensor<bool> expected({3, 4});
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                auto referenceValue
+                    = reference(static_cast<float>(m + n + 1), static_cast<float>(n + 1));
+                expected.setHostValue(referenceValue, m, n);
+            }
+        }
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                EXPECT_EQ(output.getHostValue(m, n), expected.getHostValue(m, n));
+            }
+        }
+    }
+
+    void testBinaryCompareGreaterEqualStridedInputOperation()
+    {
+        // Channel-last strides for logical dims [1,2,2,2]; input2 and the output stay row-major.
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+        Tensor<Input1Type> input1({1, 2, 2, 2}, inputStrides);
+        Tensor<Input2Type> input2({1, 2, 2, 2});
+        Tensor<bool> output({1, 2, 2, 2});
+        Tensor<bool> expected({1, 2, 2, 2});
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x >= y;
+        };
+
+        float value = 1.0f;
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    const float other = (c == 0) ? TEST_VALUE_3 : TEST_VALUE_5;
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(value), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(other), 0, c, h, w);
+                    expected.setHostValue(reference(value, other), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_GE, output, input1, input2);
+
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    EXPECT_EQ(output.getHostValue(0, c, h, w), expected.getHostValue(0, c, h, w));
+                }
+            }
+        }
+    }
+
+    void testBinaryCompareLessOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<bool> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_LT, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x < y;
+        };
+        Tensor<bool> expected({1, 1, 1, 4});
+        expected.setHostValue(reference(TEST_VALUE_3, TEST_VALUE_1), 0, 0, 0, 0);
+        expected.setHostValue(reference(TEST_VALUE_1, TEST_VALUE_3), 0, 0, 0, 1);
+        expected.setHostValue(reference(TEST_VALUE_2, TEST_VALUE_2), 0, 0, 0, 2);
+        expected.setHostValue(reference(-TEST_VALUE_1, TEST_VALUE_4), 0, 0, 0, 3);
+
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 0), expected.getHostValue(0, 0, 0, 0));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 1), expected.getHostValue(0, 0, 0, 1));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 2), expected.getHostValue(0, 0, 0, 2));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 3), expected.getHostValue(0, 0, 0, 3));
+    }
+
+    void testBroadcast2Dx1DCompareLess()
+    {
+        Tensor<Input1Type> input1({3, 4}); // [M,N]
+        Tensor<Input2Type> input2({4}); // [N] broadcast along M
+        Tensor<bool> output({3, 4});
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>(m + n + 1)), m, n);
+            }
+        }
+
+        for(int n = 0; n < 4; ++n)
+        {
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>(n + 1)), n);
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_LT, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x < y;
+        };
+        Tensor<bool> expected({3, 4});
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                auto referenceValue
+                    = reference(static_cast<float>(m + n + 1), static_cast<float>(n + 1));
+                expected.setHostValue(referenceValue, m, n);
+            }
+        }
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                EXPECT_EQ(output.getHostValue(m, n), expected.getHostValue(m, n));
+            }
+        }
+    }
+
+    void testBinaryCompareLessStridedInputOperation()
+    {
+        // Channel-last strides for logical dims [1,2,2,2]; input2 and the output stay row-major.
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+        Tensor<Input1Type> input1({1, 2, 2, 2}, inputStrides);
+        Tensor<Input2Type> input2({1, 2, 2, 2});
+        Tensor<bool> output({1, 2, 2, 2});
+        Tensor<bool> expected({1, 2, 2, 2});
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x < y;
+        };
+
+        float value = 1.0f;
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    const float other = (c == 0) ? TEST_VALUE_3 : TEST_VALUE_5;
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(value), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(other), 0, c, h, w);
+                    expected.setHostValue(reference(value, other), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_LT, output, input1, input2);
+
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    EXPECT_EQ(output.getHostValue(0, c, h, w), expected.getHostValue(0, c, h, w));
+                }
+            }
+        }
+    }
+
+    void testBinaryCompareLessEqualOperation()
+    {
+        Tensor<Input1Type> input1({1, 1, 1, 4});
+        Tensor<Input2Type> input2({1, 1, 1, 4});
+        Tensor<bool> output({1, 1, 1, 4});
+
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_3), 0, 0, 0, 0);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 1);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input1.setHostValue(safeTestTypeCast<Input1Type>(-TEST_VALUE_1), 0, 0, 0, 3);
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 0, 0, 1);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 0, 0, 2);
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_4), 0, 0, 0, 3);
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_LE, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x <= y;
+        };
+        Tensor<bool> expected({1, 1, 1, 4});
+        expected.setHostValue(reference(TEST_VALUE_3, TEST_VALUE_1), 0, 0, 0, 0);
+        expected.setHostValue(reference(TEST_VALUE_1, TEST_VALUE_3), 0, 0, 0, 1);
+        expected.setHostValue(reference(TEST_VALUE_2, TEST_VALUE_2), 0, 0, 0, 2);
+        expected.setHostValue(reference(-TEST_VALUE_1, TEST_VALUE_4), 0, 0, 0, 3);
+
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 0), expected.getHostValue(0, 0, 0, 0));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 1), expected.getHostValue(0, 0, 0, 1));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 2), expected.getHostValue(0, 0, 0, 2));
+        EXPECT_EQ(output.getHostValue(0, 0, 0, 3), expected.getHostValue(0, 0, 0, 3));
+    }
+
+    void testBroadcast2Dx1DCompareLessEqual()
+    {
+        Tensor<Input1Type> input1({3, 4}); // [M,N]
+        Tensor<Input2Type> input2({4}); // [N] broadcast along M
+        Tensor<bool> output({3, 4});
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>(m + n + 1)), m, n);
+            }
+        }
+
+        for(int n = 0; n < 4; ++n)
+        {
+            input2.setHostValue(safeTestTypeCast<Input2Type>(static_cast<float>(n + 1)), n);
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_LE, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x <= y;
+        };
+        Tensor<bool> expected({3, 4});
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                auto referenceValue
+                    = reference(static_cast<float>(m + n + 1), static_cast<float>(n + 1));
+                expected.setHostValue(referenceValue, m, n);
+            }
+        }
+
+        for(int m = 0; m < 3; ++m)
+        {
+            for(int n = 0; n < 4; ++n)
+            {
+                EXPECT_EQ(output.getHostValue(m, n), expected.getHostValue(m, n));
+            }
+        }
+    }
+
+    void testBinaryCompareLessEqualStridedInputOperation()
+    {
+        // Channel-last strides for logical dims [1,2,2,2]; input2 and the output stay row-major.
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+        Tensor<Input1Type> input1({1, 2, 2, 2}, inputStrides);
+        Tensor<Input2Type> input2({1, 2, 2, 2});
+        Tensor<bool> output({1, 2, 2, 2});
+        Tensor<bool> expected({1, 2, 2, 2});
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x <= y;
+        };
+
+        float value = 1.0f;
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    const float other = (c == 0) ? TEST_VALUE_3 : TEST_VALUE_5;
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(value), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(other), 0, c, h, w);
+                    expected.setHostValue(reference(value, other), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_LE, output, input1, input2);
+
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    EXPECT_EQ(output.getHostValue(0, c, h, w), expected.getHostValue(0, c, h, w));
+                }
+            }
+        }
+    }
+
+    void testBroadcast4Dx4DDivide()
+    {
+        Tensor<Input1Type> input1({2, 3, 2, 2}); // [N,C,H,W] = [2,3,2,2]
+        Tensor<Input2Type> input2({1, 3, 1, 1}); // [1,C,1,1] = [1,3,1,1]
+        Tensor<OutputType> output({2, 3, 2, 2}); // Output: [2,3,2,2]
+
+        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2));
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0); // Channel 0
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 1, 0, 0); // Channel 1
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 2, 0, 0); // Channel 2
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::DIV, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x / y;
+        };
+        Tensor<OutputType> expected({2, 3, 2, 2});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int h = 0; h < 2; ++h)
+                {
+                    for(int w = 0; w < 2; ++w)
+                    {
+                        const auto channelValue = static_cast<float>(c + 1);
+                        expected.setHostValue(
+                            safeTestTypeCast<OutputType>(reference(TEST_VALUE_2, channelValue)),
+                            n,
+                            c,
+                            h,
+                            w);
+                    }
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::DIV, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBroadcastComplexNDDivide()
+    {
+        Tensor<Input1Type> input1({2, 1, 3, 1});
+        Tensor<Input2Type> input2({1, 2, 1, 4});
+        Tensor<OutputType> output({2, 2, 3, 4});
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int h = 0; h < 3; ++h)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>((n * 3) + h + 1)), n, 0, h, 0);
+            }
+        }
+
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int w = 0; w < 4; ++w)
+            {
+                input2.setHostValue(
+                    safeTestTypeCast<Input2Type>(static_cast<float>((c * 4) + w + 1)), 0, c, 0, w);
+            }
+        }
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::DIV, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x / y;
+        };
+        Tensor<OutputType> expected({2, 2, 3, 4});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 2; ++c)
+            {
+                for(int h = 0; h < 3; ++h)
+                {
+                    for(int w = 0; w < 4; ++w)
+                    {
+                        const auto value1 = static_cast<float>((n * 3) + h + 1);
+                        const auto value2 = static_cast<float>((c * 4) + w + 1);
+                        expected.setHostValue(
+                            safeTestTypeCast<OutputType>(reference(value1, value2)), n, c, h, w);
+                    }
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::DIV, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBinaryDivideStridedSecondInputOperation()
+    {
+        // Channel-last strides for logical dims [1,2,2,2]; input1 and the output stay row-major.
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+        Tensor<Input1Type> input1({1, 2, 2, 2});
+        Tensor<Input2Type> input2({1, 2, 2, 2}, inputStrides);
+        Tensor<OutputType> output({1, 2, 2, 2});
+        Tensor<OutputType> expected({1, 2, 2, 2});
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x / y;
+        };
+
+        float value = 1.0f;
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    const float other = (c == 0) ? TEST_VALUE_3 : TEST_VALUE_5;
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(other), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(value), 0, c, h, w);
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(reference(other, value)), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::DIV, output, input1, input2);
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::DIV, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBroadcast4Dx4DAddSquare()
+    {
+        Tensor<Input1Type> input1({2, 3, 2, 2}); // [N,C,H,W] = [2,3,2,2]
+        Tensor<Input2Type> input2({1, 3, 1, 1}); // [1,C,1,1] = [1,3,1,1]
+        Tensor<OutputType> output({2, 3, 2, 2}); // Output: [2,3,2,2]
+
+        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2));
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0); // Channel 0
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 1, 0, 0); // Channel 1
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 2, 0, 0); // Channel 2
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::ADD_SQUARE, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x + y * y;
+        };
+        Tensor<OutputType> expected({2, 3, 2, 2});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int h = 0; h < 2; ++h)
+                {
+                    for(int w = 0; w < 2; ++w)
+                    {
+                        const auto channelValue = static_cast<float>(c + 1);
+                        expected.setHostValue(
+                            safeTestTypeCast<OutputType>(reference(TEST_VALUE_2, channelValue)),
+                            n,
+                            c,
+                            h,
+                            w);
+                    }
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD_SQUARE, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBroadcastComplexNDAddSquare()
+    {
+        Tensor<Input1Type> input1({2, 1, 3, 1});
+        Tensor<Input2Type> input2({1, 2, 1, 4});
+        Tensor<OutputType> output({2, 2, 3, 4});
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int h = 0; h < 3; ++h)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>((n * 3) + h + 1)), n, 0, h, 0);
+            }
+        }
+
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int w = 0; w < 4; ++w)
+            {
+                input2.setHostValue(
+                    safeTestTypeCast<Input2Type>(static_cast<float>((c * 4) + w + 1)), 0, c, 0, w);
+            }
+        }
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::ADD_SQUARE, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x + y * y;
+        };
+        Tensor<OutputType> expected({2, 2, 3, 4});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 2; ++c)
+            {
+                for(int h = 0; h < 3; ++h)
+                {
+                    for(int w = 0; w < 4; ++w)
+                    {
+                        const auto value1 = static_cast<float>((n * 3) + h + 1);
+                        const auto value2 = static_cast<float>((c * 4) + w + 1);
+                        expected.setHostValue(
+                            safeTestTypeCast<OutputType>(reference(value1, value2)), n, c, h, w);
+                    }
+                }
+            }
+        }
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD_SQUARE, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBinaryAddSquareStridedSecondInputOperation()
+    {
+        // Channel-last strides for logical dims [1,2,2,2]; input1 and the output stay row-major.
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+        Tensor<Input1Type> input1({1, 2, 2, 2});
+        Tensor<Input2Type> input2({1, 2, 2, 2}, inputStrides);
+        Tensor<OutputType> output({1, 2, 2, 2});
+        Tensor<OutputType> expected({1, 2, 2, 2});
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x + y * y;
+        };
+
+        float value = 1.0f;
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    const float other = (c == 0) ? TEST_VALUE_3 : TEST_VALUE_5;
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(other), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(value), 0, c, h, w);
+                    expected.setHostValue(
+                        safeTestTypeCast<OutputType>(reference(other, value)), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::ADD_SQUARE, output, input1, input2);
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD_SQUARE, TEST_VALUE_4);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
+    void testBroadcast4Dx4DCompareEqual()
+    {
+        Tensor<Input1Type> input1({2, 3, 2, 2}); // [N,C,H,W] = [2,3,2,2]
+        Tensor<Input2Type> input2({1, 3, 1, 1}); // [1,C,1,1] = [1,3,1,1]
+        Tensor<bool> output({2, 3, 2, 2}); // Output: [2,3,2,2]
+
+        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2));
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0); // Channel 0
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 1, 0, 0); // Channel 1
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 2, 0, 0); // Channel 2
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_EQ, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x == y;
+        };
+        Tensor<bool> expected({2, 3, 2, 2});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int h = 0; h < 2; ++h)
+                {
+                    for(int w = 0; w < 2; ++w)
+                    {
+                        const auto channelValue = static_cast<float>(c + 1);
+                        expected.setHostValue(reference(TEST_VALUE_2, channelValue), n, c, h, w);
+                    }
+                }
+            }
+        }
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int h = 0; h < 2; ++h)
+                {
+                    for(int w = 0; w < 2; ++w)
+                    {
+                        EXPECT_EQ(output.getHostValue(n, c, h, w),
+                                  expected.getHostValue(n, c, h, w));
+                    }
+                }
+            }
+        }
+    }
+
+    void testBroadcastComplexNDCompareEqual()
+    {
+        Tensor<Input1Type> input1({2, 1, 3, 1});
+        Tensor<Input2Type> input2({1, 2, 1, 4});
+        Tensor<bool> output({2, 2, 3, 4});
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int h = 0; h < 3; ++h)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>((n * 3) + h + 1)), n, 0, h, 0);
+            }
+        }
+
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int w = 0; w < 4; ++w)
+            {
+                input2.setHostValue(
+                    safeTestTypeCast<Input2Type>(static_cast<float>((c * 4) + w + 1)), 0, c, 0, w);
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_EQ, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x == y;
+        };
+        Tensor<bool> expected({2, 2, 3, 4});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 2; ++c)
+            {
+                for(int h = 0; h < 3; ++h)
+                {
+                    for(int w = 0; w < 4; ++w)
+                    {
+                        const auto value1 = static_cast<float>((n * 3) + h + 1);
+                        const auto value2 = static_cast<float>((c * 4) + w + 1);
+                        expected.setHostValue(reference(value1, value2), n, c, h, w);
+                    }
+                }
+            }
+        }
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 2; ++c)
+            {
+                for(int h = 0; h < 3; ++h)
+                {
+                    for(int w = 0; w < 4; ++w)
+                    {
+                        EXPECT_EQ(output.getHostValue(n, c, h, w),
+                                  expected.getHostValue(n, c, h, w));
+                    }
+                }
+            }
+        }
+    }
+
+    void testBinaryCompareEqualStridedSecondInputOperation()
+    {
+        // Channel-last strides for logical dims [1,2,2,2]; input1 and the output stay row-major.
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+        Tensor<Input1Type> input1({1, 2, 2, 2});
+        Tensor<Input2Type> input2({1, 2, 2, 2}, inputStrides);
+        Tensor<bool> output({1, 2, 2, 2});
+        Tensor<bool> expected({1, 2, 2, 2});
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x == y;
+        };
+
+        float value = 1.0f;
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    const float other = (c == 0) ? TEST_VALUE_3 : TEST_VALUE_5;
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(other), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(value), 0, c, h, w);
+                    expected.setHostValue(reference(other, value), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_EQ, output, input1, input2);
+
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    EXPECT_EQ(output.getHostValue(0, c, h, w), expected.getHostValue(0, c, h, w));
+                }
+            }
+        }
+    }
+
+    void testBroadcast4Dx4DCompareNotEqual()
+    {
+        Tensor<Input1Type> input1({2, 3, 2, 2}); // [N,C,H,W] = [2,3,2,2]
+        Tensor<Input2Type> input2({1, 3, 1, 1}); // [1,C,1,1] = [1,3,1,1]
+        Tensor<bool> output({2, 3, 2, 2}); // Output: [2,3,2,2]
+
+        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2));
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0); // Channel 0
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 1, 0, 0); // Channel 1
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 2, 0, 0); // Channel 2
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_NEQ, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x != y;
+        };
+        Tensor<bool> expected({2, 3, 2, 2});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int h = 0; h < 2; ++h)
+                {
+                    for(int w = 0; w < 2; ++w)
+                    {
+                        const auto channelValue = static_cast<float>(c + 1);
+                        expected.setHostValue(reference(TEST_VALUE_2, channelValue), n, c, h, w);
+                    }
+                }
+            }
+        }
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int h = 0; h < 2; ++h)
+                {
+                    for(int w = 0; w < 2; ++w)
+                    {
+                        EXPECT_EQ(output.getHostValue(n, c, h, w),
+                                  expected.getHostValue(n, c, h, w));
+                    }
+                }
+            }
+        }
+    }
+
+    void testBroadcastComplexNDCompareNotEqual()
+    {
+        Tensor<Input1Type> input1({2, 1, 3, 1});
+        Tensor<Input2Type> input2({1, 2, 1, 4});
+        Tensor<bool> output({2, 2, 3, 4});
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int h = 0; h < 3; ++h)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>((n * 3) + h + 1)), n, 0, h, 0);
+            }
+        }
+
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int w = 0; w < 4; ++w)
+            {
+                input2.setHostValue(
+                    safeTestTypeCast<Input2Type>(static_cast<float>((c * 4) + w + 1)), 0, c, 0, w);
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_NEQ, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x != y;
+        };
+        Tensor<bool> expected({2, 2, 3, 4});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 2; ++c)
+            {
+                for(int h = 0; h < 3; ++h)
+                {
+                    for(int w = 0; w < 4; ++w)
+                    {
+                        const auto value1 = static_cast<float>((n * 3) + h + 1);
+                        const auto value2 = static_cast<float>((c * 4) + w + 1);
+                        expected.setHostValue(reference(value1, value2), n, c, h, w);
+                    }
+                }
+            }
+        }
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 2; ++c)
+            {
+                for(int h = 0; h < 3; ++h)
+                {
+                    for(int w = 0; w < 4; ++w)
+                    {
+                        EXPECT_EQ(output.getHostValue(n, c, h, w),
+                                  expected.getHostValue(n, c, h, w));
+                    }
+                }
+            }
+        }
+    }
+
+    void testBinaryCompareNotEqualStridedSecondInputOperation()
+    {
+        // Channel-last strides for logical dims [1,2,2,2]; input1 and the output stay row-major.
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+        Tensor<Input1Type> input1({1, 2, 2, 2});
+        Tensor<Input2Type> input2({1, 2, 2, 2}, inputStrides);
+        Tensor<bool> output({1, 2, 2, 2});
+        Tensor<bool> expected({1, 2, 2, 2});
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x != y;
+        };
+
+        float value = 1.0f;
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    const float other = (c == 0) ? TEST_VALUE_3 : TEST_VALUE_5;
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(other), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(value), 0, c, h, w);
+                    expected.setHostValue(reference(other, value), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_NEQ, output, input1, input2);
+
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    EXPECT_EQ(output.getHostValue(0, c, h, w), expected.getHostValue(0, c, h, w));
+                }
+            }
+        }
+    }
+
+    void testBroadcast4Dx4DCompareGreaterEqual()
+    {
+        Tensor<Input1Type> input1({2, 3, 2, 2}); // [N,C,H,W] = [2,3,2,2]
+        Tensor<Input2Type> input2({1, 3, 1, 1}); // [1,C,1,1] = [1,3,1,1]
+        Tensor<bool> output({2, 3, 2, 2}); // Output: [2,3,2,2]
+
+        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2));
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0); // Channel 0
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 1, 0, 0); // Channel 1
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 2, 0, 0); // Channel 2
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_GE, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x >= y;
+        };
+        Tensor<bool> expected({2, 3, 2, 2});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int h = 0; h < 2; ++h)
+                {
+                    for(int w = 0; w < 2; ++w)
+                    {
+                        const auto channelValue = static_cast<float>(c + 1);
+                        expected.setHostValue(reference(TEST_VALUE_2, channelValue), n, c, h, w);
+                    }
+                }
+            }
+        }
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int h = 0; h < 2; ++h)
+                {
+                    for(int w = 0; w < 2; ++w)
+                    {
+                        EXPECT_EQ(output.getHostValue(n, c, h, w),
+                                  expected.getHostValue(n, c, h, w));
+                    }
+                }
+            }
+        }
+    }
+
+    void testBroadcastComplexNDCompareGreaterEqual()
+    {
+        Tensor<Input1Type> input1({2, 1, 3, 1});
+        Tensor<Input2Type> input2({1, 2, 1, 4});
+        Tensor<bool> output({2, 2, 3, 4});
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int h = 0; h < 3; ++h)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>((n * 3) + h + 1)), n, 0, h, 0);
+            }
+        }
+
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int w = 0; w < 4; ++w)
+            {
+                input2.setHostValue(
+                    safeTestTypeCast<Input2Type>(static_cast<float>((c * 4) + w + 1)), 0, c, 0, w);
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_GE, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x >= y;
+        };
+        Tensor<bool> expected({2, 2, 3, 4});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 2; ++c)
+            {
+                for(int h = 0; h < 3; ++h)
+                {
+                    for(int w = 0; w < 4; ++w)
+                    {
+                        const auto value1 = static_cast<float>((n * 3) + h + 1);
+                        const auto value2 = static_cast<float>((c * 4) + w + 1);
+                        expected.setHostValue(reference(value1, value2), n, c, h, w);
+                    }
+                }
+            }
+        }
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 2; ++c)
+            {
+                for(int h = 0; h < 3; ++h)
+                {
+                    for(int w = 0; w < 4; ++w)
+                    {
+                        EXPECT_EQ(output.getHostValue(n, c, h, w),
+                                  expected.getHostValue(n, c, h, w));
+                    }
+                }
+            }
+        }
+    }
+
+    void testBinaryCompareGreaterEqualStridedSecondInputOperation()
+    {
+        // Channel-last strides for logical dims [1,2,2,2]; input1 and the output stay row-major.
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+        Tensor<Input1Type> input1({1, 2, 2, 2});
+        Tensor<Input2Type> input2({1, 2, 2, 2}, inputStrides);
+        Tensor<bool> output({1, 2, 2, 2});
+        Tensor<bool> expected({1, 2, 2, 2});
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x >= y;
+        };
+
+        float value = 1.0f;
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    const float other = (c == 0) ? TEST_VALUE_3 : TEST_VALUE_5;
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(other), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(value), 0, c, h, w);
+                    expected.setHostValue(reference(other, value), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_GE, output, input1, input2);
+
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    EXPECT_EQ(output.getHostValue(0, c, h, w), expected.getHostValue(0, c, h, w));
+                }
+            }
+        }
+    }
+
+    void testBroadcast4Dx4DCompareLess()
+    {
+        Tensor<Input1Type> input1({2, 3, 2, 2}); // [N,C,H,W] = [2,3,2,2]
+        Tensor<Input2Type> input2({1, 3, 1, 1}); // [1,C,1,1] = [1,3,1,1]
+        Tensor<bool> output({2, 3, 2, 2}); // Output: [2,3,2,2]
+
+        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2));
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0); // Channel 0
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 1, 0, 0); // Channel 1
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 2, 0, 0); // Channel 2
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_LT, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x < y;
+        };
+        Tensor<bool> expected({2, 3, 2, 2});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int h = 0; h < 2; ++h)
+                {
+                    for(int w = 0; w < 2; ++w)
+                    {
+                        const auto channelValue = static_cast<float>(c + 1);
+                        expected.setHostValue(reference(TEST_VALUE_2, channelValue), n, c, h, w);
+                    }
+                }
+            }
+        }
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int h = 0; h < 2; ++h)
+                {
+                    for(int w = 0; w < 2; ++w)
+                    {
+                        EXPECT_EQ(output.getHostValue(n, c, h, w),
+                                  expected.getHostValue(n, c, h, w));
+                    }
+                }
+            }
+        }
+    }
+
+    void testBroadcastComplexNDCompareLess()
+    {
+        Tensor<Input1Type> input1({2, 1, 3, 1});
+        Tensor<Input2Type> input2({1, 2, 1, 4});
+        Tensor<bool> output({2, 2, 3, 4});
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int h = 0; h < 3; ++h)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>((n * 3) + h + 1)), n, 0, h, 0);
+            }
+        }
+
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int w = 0; w < 4; ++w)
+            {
+                input2.setHostValue(
+                    safeTestTypeCast<Input2Type>(static_cast<float>((c * 4) + w + 1)), 0, c, 0, w);
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_LT, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x < y;
+        };
+        Tensor<bool> expected({2, 2, 3, 4});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 2; ++c)
+            {
+                for(int h = 0; h < 3; ++h)
+                {
+                    for(int w = 0; w < 4; ++w)
+                    {
+                        const auto value1 = static_cast<float>((n * 3) + h + 1);
+                        const auto value2 = static_cast<float>((c * 4) + w + 1);
+                        expected.setHostValue(reference(value1, value2), n, c, h, w);
+                    }
+                }
+            }
+        }
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 2; ++c)
+            {
+                for(int h = 0; h < 3; ++h)
+                {
+                    for(int w = 0; w < 4; ++w)
+                    {
+                        EXPECT_EQ(output.getHostValue(n, c, h, w),
+                                  expected.getHostValue(n, c, h, w));
+                    }
+                }
+            }
+        }
+    }
+
+    void testBinaryCompareLessStridedSecondInputOperation()
+    {
+        // Channel-last strides for logical dims [1,2,2,2]; input1 and the output stay row-major.
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+        Tensor<Input1Type> input1({1, 2, 2, 2});
+        Tensor<Input2Type> input2({1, 2, 2, 2}, inputStrides);
+        Tensor<bool> output({1, 2, 2, 2});
+        Tensor<bool> expected({1, 2, 2, 2});
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x < y;
+        };
+
+        float value = 1.0f;
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    const float other = (c == 0) ? TEST_VALUE_3 : TEST_VALUE_5;
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(other), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(value), 0, c, h, w);
+                    expected.setHostValue(reference(other, value), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_LT, output, input1, input2);
+
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    EXPECT_EQ(output.getHostValue(0, c, h, w), expected.getHostValue(0, c, h, w));
+                }
+            }
+        }
+    }
+
+    void testBroadcast4Dx4DCompareLessEqual()
+    {
+        Tensor<Input1Type> input1({2, 3, 2, 2}); // [N,C,H,W] = [2,3,2,2]
+        Tensor<Input2Type> input2({1, 3, 1, 1}); // [1,C,1,1] = [1,3,1,1]
+        Tensor<bool> output({2, 3, 2, 2}); // Output: [2,3,2,2]
+
+        input1.fillWithValue(safeTestTypeCast<Input1Type>(TEST_VALUE_2));
+
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1), 0, 0, 0, 0); // Channel 0
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_2), 0, 1, 0, 0); // Channel 1
+        input2.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 2, 0, 0); // Channel 2
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_LE, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x <= y;
+        };
+        Tensor<bool> expected({2, 3, 2, 2});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int h = 0; h < 2; ++h)
+                {
+                    for(int w = 0; w < 2; ++w)
+                    {
+                        const auto channelValue = static_cast<float>(c + 1);
+                        expected.setHostValue(reference(TEST_VALUE_2, channelValue), n, c, h, w);
+                    }
+                }
+            }
+        }
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 3; ++c)
+            {
+                for(int h = 0; h < 2; ++h)
+                {
+                    for(int w = 0; w < 2; ++w)
+                    {
+                        EXPECT_EQ(output.getHostValue(n, c, h, w),
+                                  expected.getHostValue(n, c, h, w));
+                    }
+                }
+            }
+        }
+    }
+
+    void testBroadcastComplexNDCompareLessEqual()
+    {
+        Tensor<Input1Type> input1({2, 1, 3, 1});
+        Tensor<Input2Type> input2({1, 2, 1, 4});
+        Tensor<bool> output({2, 2, 3, 4});
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int h = 0; h < 3; ++h)
+            {
+                input1.setHostValue(
+                    safeTestTypeCast<Input1Type>(static_cast<float>((n * 3) + h + 1)), n, 0, h, 0);
+            }
+        }
+
+        for(int c = 0; c < 2; ++c)
+        {
+            for(int w = 0; w < 4; ++w)
+            {
+                input2.setHostValue(
+                    safeTestTypeCast<Input2Type>(static_cast<float>((c * 4) + w + 1)), 0, c, 0, w);
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_LE, output, input1, input2);
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x <= y;
+        };
+        Tensor<bool> expected({2, 2, 3, 4});
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 2; ++c)
+            {
+                for(int h = 0; h < 3; ++h)
+                {
+                    for(int w = 0; w < 4; ++w)
+                    {
+                        const auto value1 = static_cast<float>((n * 3) + h + 1);
+                        const auto value2 = static_cast<float>((c * 4) + w + 1);
+                        expected.setHostValue(reference(value1, value2), n, c, h, w);
+                    }
+                }
+            }
+        }
+
+        for(int n = 0; n < 2; ++n)
+        {
+            for(int c = 0; c < 2; ++c)
+            {
+                for(int h = 0; h < 3; ++h)
+                {
+                    for(int w = 0; w < 4; ++w)
+                    {
+                        EXPECT_EQ(output.getHostValue(n, c, h, w),
+                                  expected.getHostValue(n, c, h, w));
+                    }
+                }
+            }
+        }
+    }
+
+    void testBinaryCompareLessEqualStridedSecondInputOperation()
+    {
+        // Channel-last strides for logical dims [1,2,2,2]; input1 and the output stay row-major.
+        const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+        Tensor<Input1Type> input1({1, 2, 2, 2});
+        Tensor<Input2Type> input2({1, 2, 2, 2}, inputStrides);
+        Tensor<bool> output({1, 2, 2, 2});
+        Tensor<bool> expected({1, 2, 2, 2});
+
+        auto reference = [](float a, float b) {
+            auto x = static_cast<ComputeType>(safeTestTypeCast<Input1Type>(a));
+            auto y = static_cast<ComputeType>(safeTestTypeCast<Input2Type>(b));
+            return x <= y;
+        };
+
+        float value = 1.0f;
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    const float other = (c == 0) ? TEST_VALUE_3 : TEST_VALUE_5;
+                    input1.setHostValue(safeTestTypeCast<Input1Type>(other), 0, c, h, w);
+                    input2.setHostValue(safeTestTypeCast<Input2Type>(value), 0, c, h, w);
+                    expected.setHostValue(reference(other, value), 0, c, h, w);
+                    value += 1.0f;
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<bool, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::CMP_LE, output, input1, input2);
+
+        for(int64_t c = 0; c < 2; ++c)
+        {
+            for(int64_t h = 0; h < 2; ++h)
+            {
+                for(int64_t w = 0; w < 2; ++w)
+                {
+                    EXPECT_EQ(output.getHostValue(0, c, h, w), expected.getHostValue(0, c, h, w));
+                }
+            }
+        }
+    }
+
     // ======================= UNARY OPERATIONS =======================
 
     void testReluForwardOperation()
@@ -2929,6 +4922,216 @@ TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcast5D)
     this->testBroadcast5D();
 }
 
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryDivide)
+{
+    this->testBinaryDivideOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryDivideBroadcast2Dx1D)
+{
+    this->testBroadcast2Dx1DDivide();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryDivideStridedInput)
+{
+    this->testBinaryDivideStridedInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryAddSquare)
+{
+    this->testBinaryAddSquareOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryAddSquareBroadcast2Dx1D)
+{
+    this->testBroadcast2Dx1DAddSquare();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryAddSquareStridedInput)
+{
+    this->testBinaryAddSquareStridedInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareEqual)
+{
+    this->testBinaryCompareEqualOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareEqualBroadcast2Dx1D)
+{
+    this->testBroadcast2Dx1DCompareEqual();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareEqualStridedInput)
+{
+    this->testBinaryCompareEqualStridedInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareNotEqual)
+{
+    this->testBinaryCompareNotEqualOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareNotEqualBroadcast2Dx1D)
+{
+    this->testBroadcast2Dx1DCompareNotEqual();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareNotEqualStridedInput)
+{
+    this->testBinaryCompareNotEqualStridedInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareGreaterEqual)
+{
+    this->testBinaryCompareGreaterEqualOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareGreaterEqualBroadcast2Dx1D)
+{
+    this->testBroadcast2Dx1DCompareGreaterEqual();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareGreaterEqualStridedInput)
+{
+    this->testBinaryCompareGreaterEqualStridedInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareLess)
+{
+    this->testBinaryCompareLessOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareLessBroadcast2Dx1D)
+{
+    this->testBroadcast2Dx1DCompareLess();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareLessStridedInput)
+{
+    this->testBinaryCompareLessStridedInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareLessEqual)
+{
+    this->testBinaryCompareLessEqualOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareLessEqualBroadcast2Dx1D)
+{
+    this->testBroadcast2Dx1DCompareLessEqual();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareLessEqualStridedInput)
+{
+    this->testBinaryCompareLessEqualStridedInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryDivideBroadcast4Dx4D)
+{
+    this->testBroadcast4Dx4DDivide();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryDivideBroadcastComplexND)
+{
+    this->testBroadcastComplexNDDivide();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryDivideStridedSecondInput)
+{
+    this->testBinaryDivideStridedSecondInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryAddSquareBroadcast4Dx4D)
+{
+    this->testBroadcast4Dx4DAddSquare();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryAddSquareBroadcastComplexND)
+{
+    this->testBroadcastComplexNDAddSquare();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryAddSquareStridedSecondInput)
+{
+    this->testBinaryAddSquareStridedSecondInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareEqualBroadcast4Dx4D)
+{
+    this->testBroadcast4Dx4DCompareEqual();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareEqualBroadcastComplexND)
+{
+    this->testBroadcastComplexNDCompareEqual();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareEqualStridedSecondInput)
+{
+    this->testBinaryCompareEqualStridedSecondInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareNotEqualBroadcast4Dx4D)
+{
+    this->testBroadcast4Dx4DCompareNotEqual();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareNotEqualBroadcastComplexND)
+{
+    this->testBroadcastComplexNDCompareNotEqual();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareNotEqualStridedSecondInput)
+{
+    this->testBinaryCompareNotEqualStridedSecondInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareGreaterEqualBroadcast4Dx4D)
+{
+    this->testBroadcast4Dx4DCompareGreaterEqual();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareGreaterEqualBroadcastComplexND)
+{
+    this->testBroadcastComplexNDCompareGreaterEqual();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareGreaterEqualStridedSecondInput)
+{
+    this->testBinaryCompareGreaterEqualStridedSecondInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareLessBroadcast4Dx4D)
+{
+    this->testBroadcast4Dx4DCompareLess();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareLessBroadcastComplexND)
+{
+    this->testBroadcastComplexNDCompareLess();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareLessStridedSecondInput)
+{
+    this->testBinaryCompareLessStridedSecondInputOperation();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareLessEqualBroadcast4Dx4D)
+{
+    this->testBroadcast4Dx4DCompareLessEqual();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareLessEqualBroadcastComplexND)
+{
+    this->testBroadcastComplexNDCompareLessEqual();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryCompareLessEqualStridedSecondInput)
+{
+    this->testBinaryCompareLessEqualStridedSecondInputOperation();
+}
+
 // Unary operation tests
 TYPED_TEST(CpuReferencePointwiseFixture, UnaryReluForward)
 {
@@ -3249,6 +5452,251 @@ TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp32, BinaryMixedTypeAddOperation)
 TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp32, BinaryMixedTypeSubtractOperation)
 {
     this->testBinarySubtractOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Bfp16, BinaryMixedTypeDivide)
+{
+    this->testBinaryDivideOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Bfp16, BinaryMixedTypeAddSquare)
+{
+    this->testBinaryAddSquareOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp32, BinaryMixedTypeCompareEqual)
+{
+    this->testBinaryCompareEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp32, BinaryMixedTypeCompareLess)
+{
+    this->testBinaryCompareLessOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp16, BinaryMixedTypeCompareNotEqual)
+{
+    this->testBinaryCompareNotEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp16, BinaryMixedTypeCompareGreaterEqual)
+{
+    this->testBinaryCompareGreaterEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp16, BinaryMixedTypeCompareLessEqual)
+{
+    this->testBinaryCompareLessEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Bfp16, BinaryMixedTypeCompareEqual)
+{
+    this->testBinaryCompareEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Bfp16, BinaryMixedTypeCompareNotEqual)
+{
+    this->testBinaryCompareNotEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Bfp16, BinaryMixedTypeCompareGreaterEqual)
+{
+    this->testBinaryCompareGreaterEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Bfp16, BinaryMixedTypeCompareLess)
+{
+    this->testBinaryCompareLessOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Bfp16, BinaryMixedTypeCompareLessEqual)
+{
+    this->testBinaryCompareLessEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Bfp16, BinaryMixedTypeDivide)
+{
+    this->testBinaryDivideOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Bfp16, BinaryMixedTypeAddSquare)
+{
+    this->testBinaryAddSquareOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Bfp16, BinaryMixedTypeCompareEqual)
+{
+    this->testBinaryCompareEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Bfp16, BinaryMixedTypeCompareNotEqual)
+{
+    this->testBinaryCompareNotEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Bfp16, BinaryMixedTypeCompareGreaterEqual)
+{
+    this->testBinaryCompareGreaterEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Bfp16, BinaryMixedTypeCompareLess)
+{
+    this->testBinaryCompareLessOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Bfp16, BinaryMixedTypeCompareLessEqual)
+{
+    this->testBinaryCompareLessEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp16, BinaryMixedTypeDivide)
+{
+    this->testBinaryDivideOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp16, BinaryMixedTypeAddSquare)
+{
+    this->testBinaryAddSquareOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp16, BinaryMixedTypeCompareEqual)
+{
+    this->testBinaryCompareEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp16, BinaryMixedTypeCompareNotEqual)
+{
+    this->testBinaryCompareNotEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp16, BinaryMixedTypeCompareGreaterEqual)
+{
+    this->testBinaryCompareGreaterEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp16, BinaryMixedTypeCompareLess)
+{
+    this->testBinaryCompareLessOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp16, BinaryMixedTypeCompareLessEqual)
+{
+    this->testBinaryCompareLessEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp16, BinaryMixedTypeDivide)
+{
+    this->testBinaryDivideOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp16, BinaryMixedTypeAddSquare)
+{
+    this->testBinaryAddSquareOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp16, BinaryMixedTypeCompareEqual)
+{
+    this->testBinaryCompareEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp16, BinaryMixedTypeCompareLess)
+{
+    this->testBinaryCompareLessOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp32, BinaryMixedTypeDivide)
+{
+    this->testBinaryDivideOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp32, BinaryMixedTypeAddSquare)
+{
+    this->testBinaryAddSquareOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp32, BinaryMixedTypeCompareNotEqual)
+{
+    this->testBinaryCompareNotEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp32, BinaryMixedTypeCompareGreaterEqual)
+{
+    this->testBinaryCompareGreaterEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed1Fp32, BinaryMixedTypeCompareLessEqual)
+{
+    this->testBinaryCompareLessEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed3Fp16, BinaryMixedTypeDivide)
+{
+    this->testBinaryDivideOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed3Fp16, BinaryMixedTypeAddSquare)
+{
+    this->testBinaryAddSquareOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed3Fp16, BinaryMixedTypeCompareEqual)
+{
+    this->testBinaryCompareEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed3Fp16, BinaryMixedTypeCompareNotEqual)
+{
+    this->testBinaryCompareNotEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed3Fp16, BinaryMixedTypeCompareGreaterEqual)
+{
+    this->testBinaryCompareGreaterEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed3Fp16, BinaryMixedTypeCompareLess)
+{
+    this->testBinaryCompareLessOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed3Fp16, BinaryMixedTypeCompareLessEqual)
+{
+    this->testBinaryCompareLessEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp32, BinaryMixedTypeDivide)
+{
+    this->testBinaryDivideOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp32, BinaryMixedTypeAddSquare)
+{
+    this->testBinaryAddSquareOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp32, BinaryMixedTypeCompareEqual)
+{
+    this->testBinaryCompareEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp32, BinaryMixedTypeCompareNotEqual)
+{
+    this->testBinaryCompareNotEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp32, BinaryMixedTypeCompareGreaterEqual)
+{
+    this->testBinaryCompareGreaterEqualOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp32, BinaryMixedTypeCompareLess)
+{
+    this->testBinaryCompareLessOperation();
+}
+
+TEST_F(TestCpuReferencePointwiseBinaryMixed2Fp32, BinaryMixedTypeCompareLessEqual)
+{
+    this->testBinaryCompareLessEqualOperation();
 }
 
 // Mixed-type unary test instantiations
@@ -3595,4 +6043,311 @@ TYPED_TEST(CpuReferencePointwiseNaNFixture, MinNaNSecondOperandReturnsFirst)
 
     EXPECT_FALSE(isnan(output.getHostValue(0, 0, 0, 0)));
     EXPECT_EQ(output.getHostValue(0, 0, 0, 0), input1.getHostValue(0, 0, 0, 0));
+}
+
+TYPED_TEST(CpuReferencePointwiseNaNFixture, DivideByZeroProducesInfinity)
+{
+    using hipdnn_data_sdk::types::isinf;
+
+    Tensor<TypeParam> input1({1, 1, 1, 2});
+    Tensor<TypeParam> input2({1, 1, 1, 2});
+    Tensor<TypeParam> output({1, 1, 1, 2});
+
+    input1.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_1), 0, 0, 0, 0);
+    input1.setHostValue(safeTestTypeCast<TypeParam>(-TEST_VALUE_1), 0, 0, 0, 1);
+    input2.fillWithValue(safeTestTypeCast<TypeParam>(0.0f));
+
+    CpuReferencePointwiseImpl<TypeParam, TypeParam, TypeParam>::pointwiseCompute(
+        PointwiseMode::DIV, output, input1, input2);
+
+    EXPECT_TRUE(isinf(output.getHostValue(0, 0, 0, 0)));
+    EXPECT_GT(static_cast<float>(output.getHostValue(0, 0, 0, 0)), 0.0f);
+    EXPECT_TRUE(isinf(output.getHostValue(0, 0, 0, 1)));
+    EXPECT_LT(static_cast<float>(output.getHostValue(0, 0, 0, 1)), 0.0f);
+}
+
+TYPED_TEST(CpuReferencePointwiseNaNFixture, DivideZeroByZeroProducesNaN)
+{
+    using hipdnn_data_sdk::types::isnan;
+
+    Tensor<TypeParam> input1({1, 1, 1, 1});
+    Tensor<TypeParam> input2({1, 1, 1, 1});
+    Tensor<TypeParam> output({1, 1, 1, 1});
+
+    input1.fillWithValue(safeTestTypeCast<TypeParam>(0.0f));
+    input2.fillWithValue(safeTestTypeCast<TypeParam>(0.0f));
+
+    CpuReferencePointwiseImpl<TypeParam, TypeParam, TypeParam>::pointwiseCompute(
+        PointwiseMode::DIV, output, input1, input2);
+
+    EXPECT_TRUE(isnan(output.getHostValue(0, 0, 0, 0)));
+}
+
+TYPED_TEST(CpuReferencePointwiseNaNFixture, AddSquareNaNFirstOperandPropagates)
+{
+    using hipdnn_data_sdk::types::isnan;
+
+    Tensor<TypeParam> input1({1, 1, 1, 1});
+    Tensor<TypeParam> input2({1, 1, 1, 1});
+    Tensor<TypeParam> output({1, 1, 1, 1});
+
+    input1.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0, 0, 0);
+    input2.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_2), 0, 0, 0, 0);
+
+    CpuReferencePointwiseImpl<TypeParam, TypeParam, TypeParam>::pointwiseCompute(
+        PointwiseMode::ADD_SQUARE, output, input1, input2);
+
+    EXPECT_TRUE(isnan(output.getHostValue(0, 0, 0, 0)));
+}
+
+// Every ordered comparison against NaN is false; only NEQ is true (IEEE 754 semantics).
+TYPED_TEST(CpuReferencePointwiseNaNFixture, ComparisonsWithNaNFollowIeeeSemantics)
+{
+    Tensor<TypeParam> input1({1, 1, 1, 1});
+    Tensor<TypeParam> input2({1, 1, 1, 1});
+    Tensor<bool> output({1, 1, 1, 1});
+
+    input1.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0, 0, 0);
+    input2.setHostValue(safeTestTypeCast<TypeParam>(TEST_VALUE_2), 0, 0, 0, 0);
+
+    const auto compare = [&](PointwiseMode mode) {
+        CpuReferencePointwiseImpl<bool, TypeParam, TypeParam>::pointwiseCompute(
+            mode, output, input1, input2);
+        return output.getHostValue(0, 0, 0, 0);
+    };
+
+    EXPECT_FALSE(compare(PointwiseMode::CMP_EQ));
+    EXPECT_TRUE(compare(PointwiseMode::CMP_NEQ));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_GT));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_GE));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_LT));
+    EXPECT_FALSE(compare(PointwiseMode::CMP_LE));
+}
+
+// Logical operations are BOOLEAN in / BOOLEAN out
+TEST(TestCpuReferencePointwiseLogical, LogicalAndOperation)
+{
+    Tensor<bool> input1({1, 1, 1, 4});
+    Tensor<bool> input2({1, 1, 1, 4});
+    Tensor<bool> output({1, 1, 1, 4});
+
+    const std::vector<bool> values1 = {true, true, false, false};
+    const std::vector<bool> values2 = {true, false, true, false};
+    for(int64_t i = 0; i < 4; ++i)
+    {
+        input1.setHostValue(values1[static_cast<size_t>(i)], 0, 0, 0, i);
+        input2.setHostValue(values2[static_cast<size_t>(i)], 0, 0, 0, i);
+    }
+
+    CpuReferencePointwiseImpl<bool, bool, bool>::pointwiseCompute(
+        PointwiseMode::LOGICAL_AND, output, input1, input2);
+
+    EXPECT_TRUE(output.getHostValue(0, 0, 0, 0));
+    EXPECT_FALSE(output.getHostValue(0, 0, 0, 1));
+    EXPECT_FALSE(output.getHostValue(0, 0, 0, 2));
+    EXPECT_FALSE(output.getHostValue(0, 0, 0, 3));
+}
+
+TEST(TestCpuReferencePointwiseLogical, LogicalOrOperation)
+{
+    Tensor<bool> input1({1, 1, 1, 4});
+    Tensor<bool> input2({1, 1, 1, 4});
+    Tensor<bool> output({1, 1, 1, 4});
+
+    const std::vector<bool> values1 = {true, true, false, false};
+    const std::vector<bool> values2 = {true, false, true, false};
+    for(int64_t i = 0; i < 4; ++i)
+    {
+        input1.setHostValue(values1[static_cast<size_t>(i)], 0, 0, 0, i);
+        input2.setHostValue(values2[static_cast<size_t>(i)], 0, 0, 0, i);
+    }
+
+    CpuReferencePointwiseImpl<bool, bool, bool>::pointwiseCompute(
+        PointwiseMode::LOGICAL_OR, output, input1, input2);
+
+    EXPECT_TRUE(output.getHostValue(0, 0, 0, 0));
+    EXPECT_TRUE(output.getHostValue(0, 0, 0, 1));
+    EXPECT_TRUE(output.getHostValue(0, 0, 0, 2));
+    EXPECT_FALSE(output.getHostValue(0, 0, 0, 3));
+}
+
+TEST(TestCpuReferencePointwiseLogical, LogicalNotOperation)
+{
+    Tensor<bool> input({1, 1, 1, 2});
+    Tensor<bool> output({1, 1, 1, 2});
+
+    input.setHostValue(true, 0, 0, 0, 0);
+    input.setHostValue(false, 0, 0, 0, 1);
+
+    CpuReferencePointwiseImpl<bool, bool>::pointwiseCompute(
+        PointwiseMode::LOGICAL_NOT, output, input);
+
+    EXPECT_FALSE(output.getHostValue(0, 0, 0, 0));
+    EXPECT_TRUE(output.getHostValue(0, 0, 0, 1));
+}
+
+TEST(TestCpuReferencePointwiseLogical, BroadcastLogicalAnd2Dx1D)
+{
+    Tensor<bool> input1({3, 4}); // [M,N]
+    Tensor<bool> input2({4}); // [N] broadcast along M
+    Tensor<bool> output({3, 4});
+
+    for(int m = 0; m < 3; ++m)
+    {
+        for(int n = 0; n < 4; ++n)
+        {
+            input1.setHostValue(((m + n) % 2) == 0, m, n);
+        }
+    }
+    for(int n = 0; n < 4; ++n)
+    {
+        input2.setHostValue(n < 2, n);
+    }
+
+    CpuReferencePointwiseImpl<bool, bool, bool>::pointwiseCompute(
+        PointwiseMode::LOGICAL_AND, output, input1, input2);
+
+    for(int m = 0; m < 3; ++m)
+    {
+        for(int n = 0; n < 4; ++n)
+        {
+            EXPECT_EQ(output.getHostValue(m, n), (((m + n) % 2) == 0) && (n < 2));
+        }
+    }
+}
+
+TEST(TestCpuReferencePointwiseLogical, BroadcastLogicalOr2Dx1D)
+{
+    Tensor<bool> input1({3, 4}); // [M,N]
+    Tensor<bool> input2({4}); // [N] broadcast along M
+    Tensor<bool> output({3, 4});
+
+    for(int m = 0; m < 3; ++m)
+    {
+        for(int n = 0; n < 4; ++n)
+        {
+            input1.setHostValue(((m + n) % 2) == 0, m, n);
+        }
+    }
+    for(int n = 0; n < 4; ++n)
+    {
+        input2.setHostValue(n < 2, n);
+    }
+
+    CpuReferencePointwiseImpl<bool, bool, bool>::pointwiseCompute(
+        PointwiseMode::LOGICAL_OR, output, input1, input2);
+
+    for(int m = 0; m < 3; ++m)
+    {
+        for(int n = 0; n < 4; ++n)
+        {
+            EXPECT_EQ(output.getHostValue(m, n), (((m + n) % 2) == 0) || (n < 2));
+        }
+    }
+}
+
+TEST(TestCpuReferencePointwiseLogical, StridedInputLogicalAnd)
+{
+    // Channel-last strides for logical dims [1,2,2,2]; input2 and the output stay row-major.
+    const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+    Tensor<bool> input1({1, 2, 2, 2}, inputStrides);
+    Tensor<bool> input2({1, 2, 2, 2});
+    Tensor<bool> output({1, 2, 2, 2});
+
+    for(int64_t c = 0; c < 2; ++c)
+    {
+        for(int64_t h = 0; h < 2; ++h)
+        {
+            for(int64_t w = 0; w < 2; ++w)
+            {
+                input1.setHostValue(((c + h + w) % 2) == 0, 0, c, h, w);
+                input2.setHostValue(c == 0, 0, c, h, w);
+            }
+        }
+    }
+
+    CpuReferencePointwiseImpl<bool, bool, bool>::pointwiseCompute(
+        PointwiseMode::LOGICAL_AND, output, input1, input2);
+
+    for(int64_t c = 0; c < 2; ++c)
+    {
+        for(int64_t h = 0; h < 2; ++h)
+        {
+            for(int64_t w = 0; w < 2; ++w)
+            {
+                EXPECT_EQ(output.getHostValue(0, c, h, w), (((c + h + w) % 2) == 0) && (c == 0));
+            }
+        }
+    }
+}
+
+TEST(TestCpuReferencePointwiseLogical, StridedInputLogicalNot)
+{
+    // Channel-last strides for logical dims [1,2,2,2]; the output stays row-major.
+    const std::vector<int64_t> inputStrides = {8, 1, 4, 2};
+    Tensor<bool> input({1, 2, 2, 2}, inputStrides);
+    Tensor<bool> output({1, 2, 2, 2});
+
+    for(int64_t c = 0; c < 2; ++c)
+    {
+        for(int64_t h = 0; h < 2; ++h)
+        {
+            for(int64_t w = 0; w < 2; ++w)
+            {
+                input.setHostValue(((c + h + w) % 2) == 0, 0, c, h, w);
+            }
+        }
+    }
+
+    CpuReferencePointwiseImpl<bool, bool>::pointwiseCompute(
+        PointwiseMode::LOGICAL_NOT, output, input);
+
+    for(int64_t c = 0; c < 2; ++c)
+    {
+        for(int64_t h = 0; h < 2; ++h)
+        {
+            for(int64_t w = 0; w < 2; ++w)
+            {
+                EXPECT_EQ(output.getHostValue(0, c, h, w), ((c + h + w) % 2) != 0);
+            }
+        }
+    }
+}
+
+TEST(TestCpuReferencePointwiseLogical, MixedTypeLogicalAndHalfInputs)
+{
+    Tensor<half> input1({1, 1, 1, 4});
+    Tensor<half> input2({1, 1, 1, 4});
+    Tensor<bool> output({1, 1, 1, 4});
+
+    const std::vector<float> values1 = {0.0f, 1.0f, 2.0f, 0.0f};
+    const std::vector<float> values2 = {1.0f, 1.0f, 0.0f, 0.0f};
+    for(int64_t i = 0; i < 4; ++i)
+    {
+        input1.setHostValue(safeTestTypeCast<half>(values1[static_cast<size_t>(i)]), 0, 0, 0, i);
+        input2.setHostValue(safeTestTypeCast<half>(values2[static_cast<size_t>(i)]), 0, 0, 0, i);
+    }
+
+    CpuReferencePointwiseImpl<bool, half, half>::pointwiseCompute(
+        PointwiseMode::LOGICAL_AND, output, input1, input2);
+
+    EXPECT_FALSE(output.getHostValue(0, 0, 0, 0));
+    EXPECT_TRUE(output.getHostValue(0, 0, 0, 1));
+    EXPECT_FALSE(output.getHostValue(0, 0, 0, 2));
+    EXPECT_FALSE(output.getHostValue(0, 0, 0, 3));
+}
+
+TEST(TestCpuReferencePointwiseLogical, MixedTypeLogicalNotBfloat16Input)
+{
+    Tensor<bfloat16> input({1, 1, 1, 2});
+    Tensor<bool> output({1, 1, 1, 2});
+
+    input.setHostValue(safeTestTypeCast<bfloat16>(0.0f), 0, 0, 0, 0);
+    input.setHostValue(safeTestTypeCast<bfloat16>(3.0f), 0, 0, 0, 1);
+
+    CpuReferencePointwiseImpl<bool, bfloat16>::pointwiseCompute(
+        PointwiseMode::LOGICAL_NOT, output, input);
+
+    EXPECT_TRUE(output.getHostValue(0, 0, 0, 0));
+    EXPECT_FALSE(output.getHostValue(0, 0, 0, 1));
 }

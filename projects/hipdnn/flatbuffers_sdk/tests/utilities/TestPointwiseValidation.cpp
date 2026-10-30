@@ -164,7 +164,8 @@ TEST(TestPointwiseValidation, KnownImplementedUnaryOperations)
                                                               PointwiseMode::CEIL,
                                                               PointwiseMode::FLOOR,
                                                               PointwiseMode::ELU_FWD,
-                                                              PointwiseMode::SOFTPLUS_FWD};
+                                                              PointwiseMode::SOFTPLUS_FWD,
+                                                              PointwiseMode::LOGICAL_NOT};
 
     // Check all unary modes
     for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
@@ -192,6 +193,15 @@ TEST(TestPointwiseValidation, KnownImplementedBinaryOperations)
                                                                PointwiseMode::SUB,
                                                                PointwiseMode::MUL,
                                                                PointwiseMode::CMP_GT,
+                                                               PointwiseMode::CMP_EQ,
+                                                               PointwiseMode::CMP_NEQ,
+                                                               PointwiseMode::CMP_GE,
+                                                               PointwiseMode::CMP_LT,
+                                                               PointwiseMode::CMP_LE,
+                                                               PointwiseMode::DIV,
+                                                               PointwiseMode::ADD_SQUARE,
+                                                               PointwiseMode::LOGICAL_AND,
+                                                               PointwiseMode::LOGICAL_OR,
                                                                PointwiseMode::RELU_BWD,
                                                                PointwiseMode::SIGMOID_BWD,
                                                                PointwiseMode::TANH_BWD,
