@@ -274,7 +274,8 @@ endif()
 
 include(CTest)
 
-# C++ test targets are registered in the by-layer tests/ tree (tests/CMakeLists.txt).
+# C++ test targets are orchestrated from tests/CMakeLists.txt and registered in
+# concern-owned tests/cmake/*.cmake fragments.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
   add_subdirectory(tests)
 endif()
@@ -415,11 +416,11 @@ if(ROCKE_INSTALL_TESTS)
     # Install the full pytest suite for installed/artifact test execution.
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
     # the differential harness (needs compiler + source; its Python-only golden
-    # check is installed separately above), the WaveScope sidecar
-    # and LDS analyzer tests (load tools from the adjacent dsl_docs source tree),
-    # and the arch-domain artifact unit tests. The latter remain source-only
-    # units, while the full regeneration sweep is installed below as its own
-    # CTest with an independent timeout and resource policy.
+    # check is installed separately above), the WaveScope sidecar,
+    # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_doc
+    # source tree), and the arch-domain artifact unit tests. The latter remain
+    # source-only units, while the full regeneration sweep is installed below as
+    # its own CTest with an independent timeout and resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
     # Linux detector fixtures link a stdin wrapper against the production archive.
     # Keep it with the pytest assets so TheRock's test artifact captures it even
@@ -440,6 +441,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_engine_linkage.py" EXCLUDE
               PATTERN "test_wavescope_sidecar.py" EXCLUDE
               PATTERN "test_lds_analyzer.py" EXCLUDE
+              PATTERN "test_dsl_probes.py" EXCLUDE
               PATTERN "test_arch_domain_artifact.py" EXCLUDE
               PATTERN "test_gpu_references.py" EXCLUDE)
 
@@ -514,7 +516,7 @@ if(ROCKE_INSTALL_TESTS)
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
 
     # Reproduce the committed host-flavor column from the relocated artifact.
-    # This mirrors the build-tree CTest in tests/CMakeLists.txt, but deliberately
+    # This mirrors the build-tree CTest in tests/cmake/CoreTests.cmake, but deliberately
     # uses the installed package data that downstream/provider CI consumes.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_arch_domain_reproducibility python -u \"${ROCKE_TEST_CTEST_REL}tests/arch_domain/gen_arch_domain.py\" --check --unvalidated-exit-code 77)\n")
@@ -601,9 +603,11 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
         "tests/library/tests/test_conv_aot_grid_limits.py"
+        "tests/library/tests/test_dgrad_stem_wmma.py"
         "tests/library/tests/test_fwd_small_wmma.py"
         "tests/library/tests/test_direct_dgrad_wmma.py"
         "tests/library/tests/test_direct_fwd_wmma.py"
+        "tests/library/tests/test_conv_fwd_split_k.py"
         "tests/library/tests/test_conv_winograd_fwd_cpu.py"
         "tests/library/tests/test_conv_winograd_gemm_wmma.py"
         "tests/library/tests/test_conv_winograd_gen_cpu.py"
@@ -613,7 +617,12 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_direct_depthwise_fwd_cpl.py"
         "tests/library/tests/test_conv_gradient_contract.py"
         "tests/library/tests/test_builder_signature_contract.py"
-        "tests/library/tests/test_library_layering.py")
+        "tests/library/tests/test_library_layering.py"
+        "tests/library/tests/test_aot_launch_zeroing.py"
+        "tests/library/tests/test_batched_timing.py"
+        "tests/library/tests/test_capability_keys.py"
+        "tests/library/tests/test_module_cache.py"
+        "tests/library/tests/test_run_conv_shards.py")
     set(_ROCKE_LIBRARY_CONV_TESTS "")
     foreach(_rocke_conv_test ${_ROCKE_LIBRARY_CONV_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_CONV_TESTS
@@ -742,6 +751,14 @@ if(ROCKE_INSTALL_TESTS)
     # the golden IR hashes, the performance knobs, and dispatch selection. None
     # needs a GPU; the GPU numeric suites are in rocke_library_gpu_pytest. Same
     # PYTHONPATH rule as the conv entry.
+    #
+    # Not registered on Windows. The Windows CI shard runs close to its time
+    # limit, and test_gdn_decode_fused.py::test_lowers_and_compiles_without_scratch
+    # runs close to the 60 s per-test limit on Windows runners. Re-enable on
+    # Windows once that case is cheaper or split out. The GDN/KDA numeric files
+    # in rocke_library_gpu_pytest need gfx950/gfx942 devices and already skip
+    # at collection on the Windows GPU lanes, so they are unchanged. This entry
+    # stays registered on every other platform.
     set(_ROCKE_LIBRARY_GDN_TEST_RELPATHS
         "tests/library/tests/test_gdn_decode_spec.py"
         "tests/library/tests/test_gdn_decode_fused.py"
@@ -758,13 +775,17 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_LIBRARY_GDN_TESTS
              " \"${ROCKE_TEST_CTEST_REL}${_rocke_gdn_test}\"")
     endforeach()
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_gdn_pytest python -m pytest${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=60)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_gdn_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;gdn\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  TIMEOUT 600)\n")
+    if(WIN32)
+      message(STATUS "rocKE: rocke_library_gdn_pytest not registered on Windows (slow GDN fused case; see comment above)")
+    else()
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_library_gdn_pytest python -m pytest${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=60)\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_library_gdn_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;gdn\\;host\\;quick\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+             "  TIMEOUT 600)\n")
+    endif()
 
     # cmake/InstallGpuReferences.cmake discovers the operations from library/tests.
     foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
