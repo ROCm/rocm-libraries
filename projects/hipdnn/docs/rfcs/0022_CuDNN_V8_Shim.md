@@ -418,7 +418,7 @@ runs no heuristics and needs no GPU.
 | `hipdnn_frontend` internals change | Same tree and version; GPU-free lowering tests catch breakage |
 | Maintenance of ~7.7k ported lines and ~7k of core and type mapping | Same owner as the RFC 0012 shim |
 | PyTorch compile check passes on empty files (PyTorch's ROCm build compiles the cuDNN code out) | The probe forces `AT_CUDNN_ENABLED()` on in the PyTorch tree's own hipified files, and every compiled file must define a canary, so a body preprocessed out fails |
-| Corpus failures surface in two CI lanes | TheRock builds hipDNN with the shim on and runs the v9 and legacy corpus on its test families. The superbuild CI Linux job compiles the corpus on every run, runs it only where `/dev/kfd` is readable, and fails if the installed hipDNN lacks the `cudnn_compatibility` component |
+| Corpus failures surface only in TheRock CI | TheRock builds hipDNN with the shim on and runs the v9 and legacy corpus on its test families; the superbuild CI does not run the corpus |
 | PyTorch compile check needs a PyTorch ROCm build | The check is local; the PyTorch-surface unit test also compiles as C++20 in CI (`hipdnn_frontend_cudnn_v8_tu_cpp20`) |
 
 ## 6. Execution Plan
