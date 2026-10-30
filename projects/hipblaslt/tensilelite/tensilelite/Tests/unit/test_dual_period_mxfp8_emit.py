@@ -21,21 +21,20 @@ import shutil
 import pytest
 
 
-def _emit_dual_period_kernel(plr=0):
+def _emit_dual_period_kernel():
     """Build the real dual-period MXFP8 solution and return its assembly text.
 
     Partition-directed PLR (next-partition prefetch, n-major traversal, 2x2
     partition grid) is selected automatically from the dual-period MXFP8 solution
-    parameters -- no environment knobs are required.  ``plr`` only reaches the
-    solution; the schedule pins its own base, so it cannot change the assembly.
+    parameters -- no environment knobs are required.
     """
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
-    from Tensile.Common.GlobalParameters import assignGlobalParameters
-    from Tensile.SolutionStructs.Solution import Solution
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Common.GlobalParameters import assignGlobalParameters
+    from tensilelite.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
@@ -56,7 +55,7 @@ def _emit_dual_period_kernel(plr=0):
           "Batched": True, "StridedBatched": True, "MXBlockA": 32, "MXBlockB": 32}
     params = {"ProblemType": pt, "ISA": isa, "MatrixInstruction": mi,
         "WorkGroup": [16, 16, 1], "WavefrontSize": 64, "DepthU": 128,
-        "KernelLanguage": "Assembly", "PrefetchGlobalRead": 2, "PrefetchLocalRead": plr,
+        "KernelLanguage": "Assembly", "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
         "ScheduleIterAlg": 3, "StaggerU": 0, "GlobalSplitU": 1, "InnerUnroll": 1,
         "LdsPadA": -1, "LdsPadB": -1, "LdsBlockSizePerPadA": -1, "LdsBlockSizePerPadB": -1,
         "1LDSBuffer": 0, "VectorWidthA": -1, "VectorWidthB": -1, "StoreVectorWidth": -1,
@@ -73,10 +72,10 @@ def _emit_dual_period_kernel(plr=0):
     assert sol.get("Valid"), "dual-period MXFP8 solution did not validate"
     assert sol.get("_DualPeriodMXFP8"), "solution did not take the dual-period path"
 
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelObjectsFromSolutions, processKernelSource)
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.Common.Types import DebugConfig
     import rocisa
 
     kernels = generateKernelObjectsFromSolutions([sol])
@@ -121,17 +120,20 @@ def dual_src():
 
 def test_six_scale_reads_per_epoch(dual_src):
     body = _mainloop_lines(dual_src)
-    reads = [ln for ln in body if re.search(r"scaleMXS.*load 4B", ln)]
+    reads = [
+        ln for ln in body
+        if re.search(r"^\s*ds_read_b32\b.*// S[AB] MT=", ln)
+    ]
     assert len(reads) == 6, (
         "expected exactly six scale ds_reads per 256-K epoch, got %d:\n%s"
         % (len(reads), "\n".join(reads)))
-    # 4 SA groups (group0..3) + 2 SB groups (group0..1).
-    sa = sorted(re.search(r"group(\d+)", r).group(1)
-                for r in reads if "MXSA" in r)
-    sb = sorted(re.search(r"group(\d+)", r).group(1)
-                for r in reads if "MXSB" in r)
-    assert sa == ["0", "1", "2", "3"], "scale-A groups: %s" % sa
-    assert sb == ["0", "1"], "scale-B groups: %s" % sb
+    # LR granularity is two MFMA tiles: four SA groups and two SB groups.
+    sa = sorted(int(re.search(r"// SA MT=.* tile=(\d+)", r).group(1))
+                for r in reads if "// SA MT=" in r)
+    sb = sorted(int(re.search(r"// SB MT=.* tile=(\d+)", r).group(1))
+                for r in reads if "// SB MT=" in r)
+    assert sa == [0, 2, 4, 6], "scale-A tile groups: %s" % sa
+    assert sb == [0, 2], "scale-B tile groups: %s" % sb
 
 
 def test_both_scale_phases_consumed(dual_src):
@@ -151,12 +153,87 @@ def test_both_scale_phases_consumed(dual_src):
             assert "op_sel_hi:[1,1]" in ln, "phase-1 MFMA missing hi byte-sel: %s" % ln
 
 
+def test_tail_dispatches_to_the_completed_depthu_scale_phase(dual_src):
+    dispatch = next(
+        ln for ln in dual_src.splitlines()
+        if "dual-period tail: select completed-DepthU parity" in ln)
+    assert dispatch.lstrip().startswith("s_bitcmp1_b32")
+    assert re.search(r",\s*7(?:\s|//)", dispatch), dispatch
+
+    p0_start = dual_src.index("/* TAILLOOP_PHASE0 start */")
+    p0_end = dual_src.index("/* TAILLOOP_PHASE0 end */", p0_start)
+    p1_start = dual_src.index("/* TAILLOOP_PHASE1 start */", p0_end)
+    p1_end = dual_src.index("/* TAILLOOP_PHASE1 end */", p1_start)
+    phase0 = dual_src[p0_start:p0_end]
+    phase1 = dual_src[p1_start:p1_end]
+    phase0_mfmas = [ln for ln in phase0.splitlines() if "v_mfma_scale" in ln]
+    phase1_mfmas = [ln for ln in phase1.splitlines() if "v_mfma_scale" in ln]
+    assert phase0_mfmas and phase1_mfmas
+    assert all("K=0]" in ln for ln in phase0_mfmas)
+    assert all("K=1]" in ln for ln in phase1_mfmas)
+    assert all("op_sel_hi:[1,1]" in ln for ln in phase1_mfmas)
+
+    # The phase override must affect only MFMA byte selection.  Both standalone
+    # tail bodies still need the complete PGR0 scale load/read cadence.
+    for phase_body in (phase0, phase1):
+        assert len(re.findall(
+            r"^\s*ds_read_b32\b.*// S[AB] MT=", phase_body,
+            flags=re.MULTILINE)) == 6
+        assert len([
+            ln for ln in phase_body.splitlines()
+            if re.search(r"^\s*buffer_load_dwordx4\b", ln)
+            and ("sgprSrdMXSA" in ln or "sgprSrdMXSB" in ln)
+            and re.search(r"\blds\b", ln)
+        ]) == 2
+
+
+def test_odd_phase_tail_rewinds_scale_srds_with_their_bounds(dual_src):
+    align_start = dual_src.index(
+        "dual-period tail: test completed-DepthU parity for scale SRDs")
+    align_end = dual_src.index("label_SubtileTailScaleSrdAligned:", align_start)
+    tail_start = dual_src.index("/* TAILLOOP */", align_end)
+    alignment = dual_src[align_start:align_end]
+
+    parity_test = next(
+        ln for ln in dual_src.splitlines()
+        if "dual-period tail: test completed-DepthU parity for scale SRDs" in ln)
+    assert parity_test.lstrip().startswith("s_bitcmp1_b32")
+    assert re.search(r",\s*7(?:\s|//)", parity_test), parity_test
+    assert "s_cbranch_scc0 label_SubtileTailScaleSrdAligned" in alignment
+
+    for tc in ("MXSA", "MXSB"):
+        rewind = next(
+            ln for ln in alignment.splitlines()
+            if f"{tc}: rewind to odd-DU scale epoch" in ln)
+        borrow = next(
+            ln for ln in alignment.splitlines()
+            if f"{tc}: scale SRD rewind borrow" in ln)
+        restore = next(
+            ln for ln in alignment.splitlines()
+            if f"{tc}: restore rewound num_records" in ln)
+        assert rewind.lstrip().startswith("s_sub_u32")
+        assert "256" in rewind
+        assert borrow.lstrip().startswith("s_subb_u32")
+        assert restore.lstrip().startswith("s_add_u32")
+        assert "256" in restore
+
+    assert align_start < align_end < tail_start
+
+
 def test_scale_cadence_once_per_epoch(dual_src):
     body = "\n".join(_mainloop_lines(dual_src))
     # One SRD advance, one DTL load, one GR write-half swap and one LR read-half
     # swap for EACH of the two scale tensors (MXSA, MXSB) per 256-K epoch.
     assert body.count("Scale SRD update") == 2
-    assert body.count("DTL b128 load") == 2
+    scale_dtl = [
+        ln for ln in body.splitlines()
+        if re.search(r"^\s*buffer_load_dwordx4\b", ln)
+        and ("sgprSrdMXSA" in ln or "sgprSrdMXSB" in ln)
+        and re.search(r"\blds\b", ln)
+    ]
+    assert len(scale_dtl) == 2, "scale DTL loads: %s" % scale_dtl
+    assert sum("sgprSrdMXSA" in ln for ln in scale_dtl) == 1
+    assert sum("sgprSrdMXSB" in ln for ln in scale_dtl) == 1
     assert len(re.findall(r"swap MXS\w+ GR m0", body)) == 2
     assert len(re.findall(r"swap MXS\w+ LR vgpr", body)) == 2
 
@@ -167,21 +244,6 @@ def test_vgpr_within_two_wave_slot_budget(dual_src):
     vgpr = int(m.group(1))
     assert vgpr <= 128, (
         "architectural VGPR %d exceeds the two-wave-slot budget (128)" % vgpr)
-
-
-def test_prefetch_local_read_is_name_only(dual_src):
-    """PrefetchLocalRead never reaches the dual-period schedule.
-
-    The partition-directed prefetch pins its own plr=0 base, the same way
-    ForceUnrollSubIter pins numItersPLR/numVgprBuffer for non-subtile kernels,
-    so the declared value survives only in the kernel name.  Comments are
-    stripped because they quote scheduler state that is allowed to mention the
-    declared value.
-    """
-    def instructions(src):
-        return [ln.split("//")[0].rstrip() for ln in _mainloop_lines(src)]
-
-    assert instructions(_emit_dual_period_kernel(plr=1)) == instructions(dual_src)
 
 
 def test_no_scale_local_read_in_preloop(dual_src):
@@ -201,5 +263,8 @@ def test_no_scale_local_read_in_preloop(dual_src):
     scale_lr = [l for l in preloop if "ds_read" in l and "scaleMXS" in l]
     assert not scale_lr, "pre-loop re-reads scales the mainloop reloads: %s" % scale_lr
 
-    data_lr = [l for l in preloop if "ds_read" in l and "Subtile" in l]
+    data_lr = [
+        l for l in preloop
+        if re.search(r"^\s*ds_read_\w+\b.*// [AB](?: MT=)?", l)
+    ]
     assert data_lr, "pre-loop lost its data operand prefetch"

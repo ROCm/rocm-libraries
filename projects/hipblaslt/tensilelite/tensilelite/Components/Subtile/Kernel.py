@@ -50,6 +50,7 @@ from rocisa.instruction import (
   Instruction, MacroInstruction,
   MFMAInstruction, MXMFMAInstruction, SMFMAInstruction,
   SAddCU32, SAddU32, SBarrier, SBranch,
+  SBitcmp1B32,
   SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ,
   SCmpEQU32, SCmpLeU32, SCSelectB32, SLShiftLeftB32, SLongBranchPositive,
   SMovB32, SMovB64, SMulI32, SNop,
@@ -1341,6 +1342,55 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
   return module
 
 
+def _emitDualPeriodTailScaleSrdAlignment(kernel, unrollIdx, scaleTiA, scaleTiB):
+  """Align dual-period scale SRDs with the residual data-DU.
+
+  A dual-period scale epoch spans two data DepthU iterations.  Its PGR2
+  prefetch advances each scale SRD at the start of the epoch and shrinks
+  Srd+2 by the same amount.  Consequently, a residual tail after an odd
+  number of complete data-DUs still belongs to the previous scale epoch,
+  while the scale SRDs already name the next epoch.  Rewind one scale
+  increment and restore its num_records window in that case.  After an even
+  number of complete data-DUs the residual starts a new epoch and the SRDs
+  are already aligned.
+
+  The completed-DepthU parity is bit log2(DepthU) of global K.  The tail is
+  the final global K interval under both data-parallel and StreamK execution,
+  so global K is the authoritative phase source.
+  """
+  assert kernel["DepthU"] > 0 and \
+      kernel["DepthU"] & (kernel["DepthU"] - 1) == 0, \
+      "dual-period tail scale alignment requires a power-of-two DepthU"
+
+  module = Module("Dual-period tail scale SRD alignment")
+  aligned = Label("SubtileTailScaleSrdAligned", "")
+  phaseBit = kernel["DepthU"].bit_length() - 1
+  module.add(SBitcmp1B32(
+      src0=sgpr(f"SizesSum+{unrollIdx}"),
+      src1=phaseBit,
+      comment="dual-period tail: test completed-DepthU parity for scale SRDs"))
+  module.add(SCBranchSCC0(
+      labelName=aligned.getLabelName(),
+      comment="even completed DepthU count: scale SRDs already aligned"))
+
+  for tc, ti in (("MXSA", scaleTiA), ("MXSB", scaleTiB)):
+    if ti is None:
+      continue
+    inc = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
+    module.add(SSubU32(
+        dst=sgpr(f"Srd{tc}+0"), src0=sgpr(f"Srd{tc}+0"), src1=inc,
+        comment=f"{tc}: rewind to odd-DU scale epoch"))
+    module.add(SSubBU32(
+        dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+        comment=f"{tc}: scale SRD rewind borrow"))
+    module.add(SAddU32(
+        dst=sgpr(f"Srd{tc}+2"), src0=sgpr(f"Srd{tc}+2"), src1=inc,
+        comment=f"{tc}: restore rewound num_records"))
+
+  module.add(aligned)
+  return module
+
+
 def mainLoop(writer, kernel):
   module = Module()
   tensorParametersA = writer.tPA
@@ -1409,6 +1459,8 @@ def mainLoop(writer, kernel):
   schedulerPartitionOrder = "m-major"
   forcedPartition = None
   if schedulerPartitionPrefetch:
+      assert kernel["PrefetchLocalRead"] == 0, \
+          "dual-period MXFP8 subtile kernel requires PrefetchLocalRead=0"
       schedulerPartitionOrder = "n-major"
       schedulerDoubleBuffer = ('A', 'B')
       # Split the wave's MFMA-tile grid in half along each dim -> a 2x2 partition
@@ -1454,6 +1506,8 @@ def mainLoop(writer, kernel):
           plr=schedulerPlr,
           doubleBufferTensors=schedulerDoubleBuffer,
           prefetchNextPartition=schedulerPartitionPrefetch,
+          uniformPgrEpoch=(schedulerPartitionPrefetch and schedulerPgr == 2),
+          uniformEpochVmemCohortSize=5,
           partitionOrder=schedulerPartitionOrder,
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
@@ -1551,6 +1605,9 @@ def mainLoop(writer, kernel):
         mxScaleTPs.append(tensorParametersB["MX"])
       if mxScaleTPs:
         module.add(writer.computeTailLoopSrdLimit(kernel, mxScaleTPs))
+      if kernel.get("_DualPeriodMXFP8"):
+        module.add(_emitDualPeriodTailScaleSrdAlignment(
+            kernel, writer.states.unrollIdx, scaleTiA, scaleTiB))
       if needTailSrdRewind:
         module.add(_emitMultiDUTailSrdRewind(
             writer, kernel, scheduler.config.numUnroll, tiA, tiB, scaleTiA, scaleTiB,

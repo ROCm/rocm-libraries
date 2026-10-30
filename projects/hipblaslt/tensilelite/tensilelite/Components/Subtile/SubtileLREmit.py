@@ -718,7 +718,13 @@ def localReadResetOffsetsSubtile(writer, kernel):
   return module
 
 
-def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
+def _mt_suffix(mt):
+  if mt is None:
+    return ""
+  return " MT=n" if int(mt) == 0 else " MT=n+%d" % int(mt)
+
+
+def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True, mt=None, k_index=None):
   """Emit DSLoadB128 instruction(s) for one MMA tile within a subtile.
 
   For wave32 tiles with 8 VGPRs, emits two DSLoadB128 instructions
@@ -784,7 +790,9 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
           dst=vgpr(dstVgpr + readIdx * REGS_PER_TR, REGS_PER_TR),
           src=vgpr(addrVgpr),
           ds=DSModifiers(offset=offset),
-          comment="TrSubtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, subIterK, readIdx)))
+          comment="%s%s tile=%u K=%s read=%u" % (
+              tileInfo.tc, _mt_suffix(mt), sId0,
+              subIterK if k_index is None else k_index, readIdx)))
     return module
 
   if swizzled:
@@ -817,7 +825,9 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
         dst=vgpr(dstVgpr + readIdx * REGS_PER_DS_READ, REGS_PER_DS_READ),
         src=vgpr(addrVgpr),
         ds=DSModifiers(offset=offset),
-        comment="Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, subIterK, readIdx)))
+        comment="%s%s tile=%u K=%s read=%u" % (
+            tileInfo.tc, _mt_suffix(mt), sId0,
+            subIterK if k_index is None else k_index, readIdx)))
   return module
 
 
@@ -848,7 +858,7 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
           dst=vgpr(dstVgpr + readIdx * REGS_PER_DS_READ, REGS_PER_DS_READ),
           src=vgpr(addrVgpr),
           ds=DSModifiers(offset=offset),
-          comment="Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, du, readIdx)))
+          comment="%s tile=%u K=%u read=%u" % (tileInfo.tc, sId0, du, readIdx)))
       lrOffsetIdx += 1
 
   return module

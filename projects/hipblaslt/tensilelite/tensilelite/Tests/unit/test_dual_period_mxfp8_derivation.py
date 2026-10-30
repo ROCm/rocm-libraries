@@ -23,9 +23,9 @@ import copy
 
 import pytest
 
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.SolutionStructs.Solution import Solution
-from Tensile.Common.Utilities import isSubtileMultiDU
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.SolutionStructs.Solution import Solution
+from tensilelite.Common.Utilities import isSubtileMultiDU
 
 pytestmark = pytest.mark.unit
 
@@ -38,9 +38,9 @@ _PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def gfx950_iim():
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     cxx = validateToolchain("amdclang++")
     isa = gfxToIsa("gfx950")
@@ -52,8 +52,8 @@ def gfx950_iim():
 
 @pytest.fixture(scope="module")
 def assembler():
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     cxx = validateToolchain("amdclang++")
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
@@ -63,8 +63,8 @@ def assembler():
 @pytest.fixture(scope="module")
 def _gp_gfx950(gfx950_iim):
     """Assign process-global parameters for gfx950; restore after module."""
-    from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -82,8 +82,8 @@ def _gp_gfx950(gfx950_iim):
 
 
 def _make_params(gfx950_iim, mi, depth_u, pgr, plr, **overrides):
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
@@ -160,6 +160,8 @@ def _derive(gfx950_iim, assembler, capsys, mi, depth_u, pgr, plr, **overrides):
 
 # MT256x256, MIWT 8x4, MIWG 2x4 — the winning non-scale geometry.
 _MI_8WAVE = [16, 16, 128, 1, 1, 8, 4, 2, 4]
+# MIWT 2x2 / MIWG 1x1 normalizes to one scheduler partition.
+_MI_SINGLE_PARTITION = [16, 16, 128, 1, 1, 2, 2, 1, 1]
 # MT256x256, MIWT 8x8, MIWG 2x2 — the shipped DU256/PGR1 MXFP8 geometry.
 _MI_PGR1 = [16, 16, 128, 1, 1, 8, 8, 2, 2]
 
@@ -178,6 +180,22 @@ def test_dual_period_accepts_pgr2_du128(_gp_gfx950, gfx950_iim, assembler, capsy
     assert sol["_DepthUMXSA"] == 8 and sol["_DepthUMXSB"] == 8
     # single-DU: data per-uid DepthU equals loop DepthU -> PGR2 legal.
     assert isSubtileMultiDU(sol) is False
+
+
+def test_dual_period_rejects_plr1(_gp_gfx950, gfx950_iim, assembler, capsys):
+    sol, out = _derive(gfx950_iim, assembler, capsys, _MI_8WAVE, 128, 2, 1)
+    assert sol.get("Valid") is False
+    assert "dual-period MXFP8 requires PrefetchLocalRead=0" in out
+    assert sol.get("_DualPeriodMXFP8") is False
+
+
+def test_dual_period_rejects_single_partition_geometry(
+        _gp_gfx950, gfx950_iim, assembler, capsys):
+    sol, out = _derive(
+        gfx950_iim, assembler, capsys, _MI_SINGLE_PARTITION, 128, 2, 0)
+    assert sol.get("Valid") is False
+    assert "dual-period MXFP8 requires at least two normalized partitions" in out
+    assert sol.get("_DualPeriodMXFP8") is False
 
 
 # ---------------------------------------------------------------------------

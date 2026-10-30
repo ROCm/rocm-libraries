@@ -3913,6 +3913,32 @@ class Solution(collections.abc.Mapping):
                          and depthU > 0
                          and SCALE_SWIZZLE_K % depthU == 0
                          and SCALE_SWIZZLE_K // depthU >= 2)
+
+      # These constraints belong after the scale period has confirmed this is
+      # truly dual-period.  The provisional gate above also covers DU256 while
+      # selecting geometry, but DU256 has ScaleReuse=1 and must retain its
+      # existing PLR/partition eligibility.
+      if dualPeriodMXFP8 and state["PrefetchLocalRead"] != 0:
+        reject(state, printRejectionReason,
+               "dual-period MXFP8 requires PrefetchLocalRead=0")
+        state["_DualPeriodMXFP8"] = False
+        return
+
+      if dualPeriodMXFP8:
+        # Kernel.mainLoop splits each even MIWaveTile axis at the scale-LR
+        # granularity (2 MFMA tiles), rounding the half upward.  An axis of
+        # length 2 therefore stays whole; any larger supported even axis
+        # becomes two normalized partitions.  Partition-directed prefetch
+        # needs at least two partitions to have a distinct next partition.
+        miwtM, miwtN = state["MIWaveTile"]
+        numPartitionsM = 1 if miwtM <= 2 else 2
+        numPartitionsN = 1 if miwtN <= 2 else 2
+        if numPartitionsM * numPartitionsN < 2:
+          reject(state, printRejectionReason,
+                 "dual-period MXFP8 requires at least two normalized partitions")
+          state["_DualPeriodMXFP8"] = False
+          return
+
       state["_DualPeriodMXFP8"] = dualPeriodMXFP8
 
       # Scale epoch period, in K.  The dual-period path decouples the scale
@@ -3928,7 +3954,6 @@ class Solution(collections.abc.Mapping):
       scaleReuse = scalePeriod // depthU if depthU > 0 else 1
       state["_ScaleReuseA"] = scaleReuse
       state["_ScaleReuseB"] = scaleReuse
-
       if state["MXScaleFormat"] == "HostPreSwizzle":
         mxBlock = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
         # MXFP8 subtile (AB_B8): 256B K swizzle tiles → dataDU=128 < DepthU=256.

@@ -429,6 +429,19 @@ def _grComputeSubtileOffsets(writer, module, tileInfo):
         module.add(VAddU32(dst=vgpr(reg), src0=vgpr(tileInfo.sharedVgprGROffset[i]), src1=sgpr(stmp)))
         writer.sgprPool.checkIn(stmp)
 
+def _emitWavePartitionMapping(module, tc, waveId, localRow, partitionRow, wavesPerPartition):
+  """Map waveId to (row-within-partition, partition) for both emit paths."""
+  if wavesPerPartition == 1:
+    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s: one wave per partition"%tc))
+    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s: partition = waveId"%tc))
+  else:
+    shift = wavesPerPartition.bit_length() - 1
+    module.add(VAndB32(dst=vgpr(localRow), src0=hex(wavesPerPartition - 1), src1=vgpr(waveId),
+                      comment="%s: waveId %% %u"%(tc, wavesPerPartition)))
+    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(shift), src=vgpr(waveId),
+                              comment="%s: waveId / %u"%(tc, wavesPerPartition)))
+
+
 # Compute wave partition offset for a single tile (A or B)
 #
 def _grComputeRowPartition(module, kernel, writer, tileInfo, waveId, rowOffset):
@@ -451,15 +464,8 @@ def _grComputeRowPartition(module, kernel, writer, tileInfo, waveId, rowOffset):
   # partition: 0.5 -> 1, 1.0 -> 2, 2.0 -> 4.  Express the old three special
   # cases as a single quotient/remainder mapping so eight-wave asymmetric
   # groups do not send the upper waves past the end of LDS.
-  if wavesPerPartition == 1:
-    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s: one wave per partition"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s: partition = waveId"%tc))
-  else:
-    shift = wavesPerPartition.bit_length() - 1
-    module.add(VAndB32(dst=vgpr(localRow), src0=hex(wavesPerPartition - 1), src1=vgpr(waveId),
-                      comment="%s: waveId %% %u"%(tc, wavesPerPartition)))
-    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(shift), src=vgpr(waveId),
-                              comment="%s: waveId / %u"%(tc, wavesPerPartition)))
+  _emitWavePartitionMapping(
+      module, tc, waveId, localRow, partitionRow, wavesPerPartition)
 
   module.add(VLShiftLeftB32(dst=vgpr(localRow), shiftHex=hex(numRowsPerWave.bit_length()-1), src=vgpr(localRow), comment="%s: local row offset"%tc))
   module.add(VMulLOU32(dst=vgpr(partitionRow), src0=sgpr(tmpSgpr), src1=vgpr(partitionRow), comment="%s: wave row offset"%tc))
@@ -561,15 +567,8 @@ def _grComputeRowPartition_legacy(module, kernel, writer, tileInfo, waveId, rowO
   wavesPerPartition = int(2 * tileInfo.loadRatioGR)
   if tileInfo.loadRatioGR not in (0.5, 1.0, 2.0):
     raise NotImplementedError("Unsupported loadRatioGR for wave partition: %s"%str(tileInfo.loadRatioGR))
-  if wavesPerPartition == 1:
-    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s: one wave per partition"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s: partition = waveId"%tc))
-  else:
-    shift = wavesPerPartition.bit_length() - 1
-    module.add(VAndB32(dst=vgpr(localRow), src0=hex(wavesPerPartition - 1), src1=vgpr(waveId),
-                      comment="%s: waveId %% %u"%(tc, wavesPerPartition)))
-    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(shift), src=vgpr(waveId),
-                              comment="%s: waveId / %u"%(tc, wavesPerPartition)))
+  _emitWavePartitionMapping(
+      module, tc, waveId, localRow, partitionRow, wavesPerPartition)
   module.add(VLShiftLeftB32(dst=vgpr(localRow), shiftHex=hex(numRowsPerWave.bit_length()-1), src=vgpr(localRow), comment="%s: local row offset"%tc))
   module.add(VMulLOU32(dst=vgpr(partitionRow), src0=sgpr(tmpSgpr), src1=vgpr(partitionRow), comment="%s: wave row offset"%tc))
   module.add(VAddU32(dst=vgpr(rowOffset), src0=vgpr(localRow), src1=vgpr(partitionRow), comment="%s: row offset"%tc))
@@ -1326,7 +1325,7 @@ def _grComputeSubtileOffsets_tlu(writer, module, tileInfo):
 ##################################################
 # Subroutine to generate GR load code
 #
-def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
+def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None, mt=None):
   """Emit buffer_load instructions for a single subtile (sId0, sId1).
 
   When loadRatioGR > 1, multiple local subtiles share the same global read.
@@ -1445,7 +1444,8 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
       mubuf = MUBUFModifiers(offen=True, offset12=offsetK, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
       soffset = baseSoffset
     voff = tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0 else regList.indices[i]
-    module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment="grBaseId = %u, i= %u"%(grBaseId , i)))
+    mt_s = "" if mt is None else (" MT=n" if int(mt) == 0 else " MT=n+%d" % int(mt))
+    module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment="%s%s tile=%u K=%u i=%u" % (tc, mt_s, sId0, sId1, i)))
 
   if kWindowSoffset is not None:
     writer.sgprPool.checkIn(kWindowSoffset)

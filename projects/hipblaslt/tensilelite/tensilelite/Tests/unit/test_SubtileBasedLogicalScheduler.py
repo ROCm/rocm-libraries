@@ -14,9 +14,12 @@ Organized by pass:
   11. BuildPreloop / BuildNGLL / BuildNLL — Loop variant construction
   12. Integration    — Full pipeline with real instructions
 """
+from dataclasses import replace
+
 import pytest
 from tensilelite.Components.Subtile.Kernel import (
-    TileInfo, AB_B8, AB_B16, AB_B16_W32, AB_B4, MXSA_B4, MXSB_B4, CD_F32, CD_F32_W32,
+    TileInfo, AB_B8, AB_B16, AB_B16_W32, AB_B4, MXSA_B4, MXSB_B4,
+    MXSA_B8, MXSB_B8, CD_F32, CD_F32_W32,
 )
 from tensilelite.Components.Subtile.LogicalScheduler import (
     GRPlacementStrategy,
@@ -29,6 +32,7 @@ from tensilelite.Components.Subtile.LogicalScheduler import (
     LRPlacement,
     GRPlacement,
     Dep,
+    WaitGROp,
     WaitGRCounts,
     fmt_mt,
 )
@@ -38,15 +42,19 @@ from rocisa.code import Module
 
 def makeTileInfo(tc, kernel):
     """Compatibility wrapper: select geometry from kernel config and return TileInfo."""
-    fp4 = kernel["ProblemType"].get("MXBlockA", 0) > 0
+    has_mx = kernel["ProblemType"].get("MXBlockA", 0) > 0
+    is_mxfp8 = (
+        has_mx
+        and kernel["ProblemType"]["DataTypeA"].is8bitFloat()
+    )
     wave32 = kernel.get("WavefrontSize", 64) == 32
     ab_bf16 = AB_B16_W32 if wave32 else AB_B16
     cd_f32 = CD_F32_W32 if wave32 else CD_F32
     _geo = {
-        'A': AB_B4 if fp4 else ab_bf16,
-        'B': AB_B4 if fp4 else ab_bf16,
-        'MXSA': MXSA_B4,
-        'MXSB': MXSB_B4,
+        'A': AB_B8 if is_mxfp8 else AB_B4 if has_mx else ab_bf16,
+        'B': AB_B8 if is_mxfp8 else AB_B4 if has_mx else ab_bf16,
+        'MXSA': MXSA_B8 if is_mxfp8 else MXSA_B4,
+        'MXSB': MXSB_B8 if is_mxfp8 else MXSB_B4,
         'D': cd_f32,
     }
     # TDM path queries writer.states.subtileLdsSwizzle in TileInfo.__init__.
@@ -129,6 +137,30 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
     if fp4:
         kernel["_DepthUMXSA"] = depthU // mxblock
         kernel["_DepthUMXSB"] = depthU // mxblock
+    return kernel
+
+
+def create_kernel_mxfp8(MT0=256, MT1=256, depthU=128,
+                         miWaveGroup=None):
+    """Create the production dual-period MXFP8 PGR2 kernel fixture."""
+    kernel = create_kernel(
+        MT0, MT1, fp4=True, depthU=depthU,
+        miWaveGroup=miWaveGroup or [2, 2])
+    dtype = _mock_dtype(1)
+    kernel["ProblemType"]["DataTypeA"] = dtype
+    kernel["ProblemType"]["DataTypeB"] = dtype
+    kernel.update({
+        "MatrixInstK": 128,
+        "MIInputPerThreadA": 32,
+        "MIInputPerThreadB": 32,
+        "_DualPeriodMXFP8": True,
+        "_ScalePeriodUA": 2 * depthU,
+        "_ScalePeriodUB": 2 * depthU,
+        "_ScaleReuseA": 2,
+        "_ScaleReuseB": 2,
+        "_DepthUMXSA": 2 * depthU // 32,
+        "_DepthUMXSB": 2 * depthU // 32,
+    })
     return kernel
 
 
@@ -288,6 +320,31 @@ def make_cfg_fp8(MT0, MT1, waveGroup, depthU=128, pgr=2,
     )
 
 
+def make_cfg_du128_4wave():
+    """Target dual-period MXFP8 kernel: MIWT 8x8 and four 4x4 partitions."""
+    return SchedulerConfig(
+        numMFMATilesM=8,
+        numMFMATilesN=8,
+        numSubIterK=1,
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=1, k=1),
+        grB=ReadGranularity(mn=1, k=1),
+        lrSA=ReadGranularity(mn=2, k=1),
+        lrSB=ReadGranularity(mn=2, k=1),
+        grSA=ReadGranularity(mn=8, k=2),
+        grSB=ReadGranularity(mn=8, k=2),
+        partitionSizeM=4,
+        partitionSizeN=4,
+        pgr=2,
+        plr=0,
+        doubleBufferTensors=('A', 'B'),
+        prefetchNextPartition=True,
+        partitionOrder="n-major",
+        scaleReuse=2,
+    )
+
+
 def make_example_granularities_1():
     """Example Granularities 1 from the design doc: LR A,B=1x1, LR SA,SB=2x2."""
     return SchedulerConfig(
@@ -378,6 +435,37 @@ def make_writer_and_tileinfos(kernel, fp4=False):
         scaleTiB.allocOffsetRegisters(writer, kernel)
 
     return writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo
+
+
+def _emit_mainloops(kernel, fixture, cfg):
+    """Emit both concrete main-loop copies from a scheduler fixture."""
+    writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = fixture
+    sched = LogicalScheduler(cfg)
+    sched.build()
+    sched.allocVgprTiles(
+        writer, tiA, tiB,
+        scaleTileInfoA=scaleTiA,
+        scaleTileInfoB=scaleTiB)
+    try:
+        sched.populate_instructions(
+            writer, kernel,
+            tileInfoA=tiA,
+            tileInfoB=tiB,
+            dtileInfo=dTileInfo,
+            scaleTileInfoA=scaleTiA,
+            scaleTileInfoB=scaleTiB)
+        return str(sched.emitMainAndExitLoops(writer, kernel))
+    finally:
+        sched.deallocVgprTiles(writer)
+
+
+def _emit_du128_mxfp8_mainloops(cfg=None):
+    """Emit the MT256x256 production-style main-loop copies for tests."""
+    kernel = create_kernel_mxfp8()
+    fixture = make_writer_and_tileinfos(kernel, fp4=True)
+    if cfg is None:
+        cfg = replace(make_cfg_du128_4wave(), uniformPgrEpoch=True)
+    return _emit_mainloops(kernel, fixture, cfg)
 
 
 # ── Assertion helpers ─────────────────────────────────────────
@@ -1288,6 +1376,32 @@ class TestAssignVgprTiles:
 # ══════════════════════════════════════════════════════════════
 
 class TestPlaceGRs:
+
+    def test_nonuniform_gr_placement_does_not_rewrite_lr_geometry(self):
+        """The generic non-uniform path keeps the LR placement pass intact."""
+        cfg = make_cfg_du128_4wave()
+
+        def lr_geometry(stop_after):
+            parts = LogicalScheduler(cfg).build(stop_after=stop_after)
+            return [
+                (
+                    pi, slot.subIterK, lr.tensor, lr.mtIteration,
+                    lr.targetPartition, lr.tiles.subIterK_start,
+                    lr.tiles.subIterK_end, lr.tiles.tileId_start,
+                    lr.tiles.tileId_end,
+                )
+                for pi, partition in enumerate(parts)
+                for slot in partition
+                for lr in slot.lrs
+            ]
+
+        before_gr = lr_geometry(Pass.LR)
+        after_gr = lr_geometry(Pass.GR)
+        assert after_gr == before_gr
+        assert [
+            item for item in after_gr
+            if item[2] == 'A' and item[3] == 1
+        ] == [(3, 0, 'A', 1, 0, 0, 1, 0, 4)]
 
     def test_1x1_k1_DU256(self):
         """256x256, DU256, FP4. GR order: A, B, SA, SB.
@@ -2247,6 +2361,471 @@ class TestRemoveUnnecessaryWaitLrSync:
                                         'wait_gr', 'wait_gr', 'wait_lr', 'skip')
 
 
+class TestUniformPgrEpoch:
+    """CMS-style complete future epochs with partitioned MFMA scheduling."""
+
+    @staticmethod
+    def _cfg(**changes):
+        return replace(
+            make_cfg_du128_4wave(),
+            uniformPgrEpoch=True,
+            **changes)
+
+    @staticmethod
+    def _grs(sched, tensors=None):
+        result = [
+            gr
+            for partition in sched._partitions
+            for slot in partition
+            for gr in slot.grs
+        ]
+        if tensors is not None:
+            result = [gr for gr in result if gr.tensor in tensors]
+        return result
+
+    @staticmethod
+    def _tile_atoms(grs, tensor, granularity):
+        return [
+            tile
+            for gr in grs if gr.tensor == tensor
+            for tile in range(
+                gr.tiles.tileId_start,
+                gr.tiles.tileId_end,
+                granularity.mn)
+        ]
+
+    @staticmethod
+    def _production_fixture(mt_m=256, mt_n=256):
+        import importlib
+
+        kernel_module = importlib.import_module(
+            "tensilelite.Components.Subtile.Kernel")
+        kernel = create_kernel_mxfp8(mt_m, mt_n)
+        kernel["PrefetchGlobalRead"] = 2
+        kernel["PrefetchLocalRead"] = 0
+        fixture = make_writer_and_tileinfos(kernel, fp4=True)
+        writer = fixture[0]
+        writer.tPA = None
+        writer.tPB = None
+
+        selected = {}
+
+        class SelectionCaptured(Exception):
+            pass
+
+        def capture_config(**kwargs):
+            selected.update(kwargs)
+            raise SelectionCaptured
+
+        original_config = kernel_module.MFMASchedulerConfig
+        # mainLoop consults these class helpers before constructing the config.
+        # Keep them available while replacing only the constructor with our
+        # capture hook.
+        capture_config._even_split_size = original_config._even_split_size
+        capture_config.get_partition_candidates = (
+            original_config.get_partition_candidates)
+        kernel_module.MFMASchedulerConfig = capture_config
+        try:
+            with pytest.raises(SelectionCaptured):
+                kernel_module.mainLoop(writer, kernel)
+        finally:
+            kernel_module.MFMASchedulerConfig = original_config
+        return kernel, fixture, SchedulerConfig(**selected)
+
+    def test_production_dual_period_pgr2_selects_uniform_epoch(self):
+        _kernel, _fixture, selected = self._production_fixture()
+
+        assert selected.pgr == 2
+        assert selected.prefetchNextPartition
+        assert selected.uniformPgrEpoch
+        assert selected.uniformEpochVmemCohortSize == 5
+
+    @pytest.mark.parametrize(
+        "mt_m,mt_n", [(256, 256), (256, 320), (320, 256)])
+    def test_production_geometries_use_three_phase_p0_for_c0_c1(
+            self, monkeypatch, mt_m, mt_n):
+        import importlib
+
+        instruction_scheduler = importlib.import_module(
+            "tensilelite.Components.Subtile.InstructionScheduler")
+        kernel, fixture, cfg = self._production_fixture(mt_m, mt_n)
+        writer, ti_a, ti_b, ti_sa, ti_sb, dest = fixture
+        scheduler = LogicalScheduler(cfg)
+        scheduler.build()
+        scheduler.allocVgprTiles(
+            writer, ti_a, ti_b,
+            scaleTileInfoA=ti_sa, scaleTileInfoB=ti_sb)
+
+        split_results = []
+        split_p0 = instruction_scheduler._splitPartitionZeroPrefetch
+
+        def record_split(*args, **kwargs):
+            result = split_p0(*args, **kwargs)
+            split_results.append(result is not None)
+            return result
+
+        monkeypatch.setattr(
+            instruction_scheduler,
+            "_splitPartitionZeroPrefetch",
+            record_split)
+        assert not hasattr(instruction_scheduler, "_splitItemsAfterHalf")
+        try:
+            scheduler.populate_instructions(
+                writer, kernel,
+                tileInfoA=ti_a,
+                tileInfoB=ti_b,
+                dtileInfo=dest,
+                scaleTileInfoA=ti_sa,
+                scaleTileInfoB=ti_sb)
+            assert len(scheduler._emitted_per_unroll) == 2
+            for body, emitted in enumerate(scheduler._emitted_per_unroll):
+                begin = len(split_results)
+                scheduler._emitLoop(
+                    writer, kernel, f"MAINLOOP_C{body}", emitted)
+                # Exactly the partition-zero cell in each body has a
+                # successful split, so production takes three-phase placement.
+                assert split_results[begin:].count(True) == 1
+        finally:
+            scheduler.deallocVgprTiles(writer)
+
+    @pytest.mark.parametrize(
+        "mt_m,mt_n,expected_counts",
+        [
+            (256, 256, [5, 5, 5, 1]),
+            (256, 320, [5, 5, 5, 3]),
+            (320, 256, [5, 5, 5, 3]),
+        ])
+    def test_production_geometries_publish_one_complete_uniform_epoch(
+            self, mt_m, mt_n, expected_counts):
+        _kernel, _fixture, cfg = self._production_fixture(mt_m, mt_n)
+        scheduler = LogicalScheduler(cfg)
+        scheduler.build()
+
+        ab_atoms = []
+        partition_counts = []
+        for partition in scheduler._partitions:
+            count = 0
+            for slot in partition:
+                for gr in slot.grs:
+                    if gr.tensor not in ("A", "B"):
+                        continue
+                    granularity = getattr(cfg, f"gr{gr.tensor}")
+                    atoms = list(range(
+                        gr.tiles.tileId_start,
+                        gr.tiles.tileId_end,
+                        granularity.mn))
+                    ab_atoms.extend(
+                        (gr.tensor, tile, gr.mtIteration)
+                        for tile in atoms)
+                    count += len(atoms)
+            partition_counts.append(count)
+
+        expected_atoms = [
+            ("A", tile, 2) for tile in range(cfg.numMFMATilesM)
+        ] + [
+            ("B", tile, 2) for tile in range(cfg.numMFMATilesN)
+        ]
+        assert ab_atoms == expected_atoms
+        assert partition_counts == expected_counts
+        assert sum(
+            isinstance(op, WaitGROp)
+            for partition in scheduler._partitions
+            for slot in partition
+            for lr in slot.lrs
+            for op in lr.preOps
+        ) == 1
+
+    def test_complete_n2_epoch_precedes_first_n1_consumer(self):
+        cfg = self._cfg()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+
+        ab_grs = self._grs(sched, ('A', 'B'))
+        assert ab_grs
+        assert all(gr.mtIteration == 2 for gr in ab_grs)
+        assert sorted(self._tile_atoms(ab_grs, 'A', cfg.grA)) == list(range(8))
+        assert sorted(self._tile_atoms(ab_grs, 'B', cfg.grB)) == list(range(8))
+
+        frontier = sched._uniform_epoch_frontier_slot()
+        assert frontier == 3
+        for pi, partition in enumerate(sched._partitions):
+            for slot in partition:
+                if slot.grs:
+                    assert pi * cfg.numSubIterK + slot.subIterK <= frontier
+
+    def test_cohort_size_must_be_positive(self):
+        with pytest.raises(
+                AssertionError,
+                match="uniformEpochVmemCohortSize must be >= 1"):
+            self._cfg(uniformEpochVmemCohortSize=0)
+
+    def test_three_request_cohort_reaches_all_policy_consumers(
+            self, monkeypatch):
+        # A two-tile GR atom makes the third request overlap the next
+        # partition, so the partition-zero overwrite selector must split and
+        # hoist exactly that configured boundary.
+        logical_cfg = self._cfg(
+            grA=ReadGranularity(mn=2, k=1),
+            uniformEpochVmemCohortSize=3)
+        sched = LogicalScheduler(logical_cfg)
+        sched.build(stop_after=Pass.LR)
+        hoisted = [
+            (lr.tensor, lr.tiles.tileId_start, lr.tiles.tileId_end)
+            for slot in sched._partitions[0]
+            for lr in slot.lrs
+            if lr.mustPrecedeP0Overwrite
+        ]
+        assert hoisted == [("A", 4, 6)]
+
+        sched = LogicalScheduler(logical_cfg)
+        sched.build(stop_after=Pass.GR)
+        counts = [
+            sum(
+                sched._count_gr_atoms(gr)
+                for slot in partition
+                for gr in slot.grs
+                if gr.tensor in ("A", "B")
+            )
+            for partition in sched._partitions
+        ]
+        assert counts == [3, 3, 3, 3]
+
+        # The physical P2/P3 seam must consume the same field rather than an
+        # independent literal.
+        from tensilelite.Components.Subtile import InstructionScheduler
+
+        observed_caps = []
+        advance = InstructionScheduler.advancePartitionInterleave
+
+        def capture_cap(*args, **kwargs):
+            observed_caps.append(kwargs["maxPreviousDtlLoads"])
+            return advance(*args, **kwargs)
+
+        monkeypatch.setattr(
+            InstructionScheduler, "advancePartitionInterleave", capture_cap)
+        physical_cfg = self._cfg(uniformEpochVmemCohortSize=3)
+        _emit_du128_mxfp8_mainloops(physical_cfg)
+        assert observed_caps == [3, 3]
+
+    def test_partition_zero_gets_five_writes_and_only_required_hoisted_read(self):
+        cfg = self._cfg()
+        sched = LogicalScheduler(cfg)
+        sched.build(stop_after=Pass.LR)
+
+        hoisted = [
+            lr
+            for slot in sched._partitions[0]
+            for lr in slot.lrs
+            if lr.mustPrecedeP0Overwrite
+        ]
+        assert len(hoisted) == 1
+        assert hoisted[0].tensor == "A"
+        assert (
+            hoisted[0].tiles.tileId_start,
+            hoisted[0].tiles.tileId_end,
+        ) == (4, 5)
+
+        remaining = [
+            lr
+            for partition in sched._partitions[1:]
+            for slot in partition
+            for lr in slot.lrs
+            if (lr.tensor == "A"
+                and lr.mtIteration == 0
+                and lr.tiles.tileId_start <= 5 < lr.tiles.tileId_end)
+        ]
+        assert len(remaining) == 1
+        assert (
+            remaining[0].tiles.tileId_start,
+            remaining[0].tiles.tileId_end,
+        ) == (5, 8)
+
+        sched = LogicalScheduler(cfg)
+        sched.build(stop_after=Pass.GR)
+        counts = []
+        for partition in sched._partitions:
+            counts.append(sum(
+                sched._count_gr_atoms(gr)
+                for slot in partition
+                for gr in slot.grs
+                if gr.tensor in ("A", "B")
+            ))
+        assert counts == [5, 5, 5, 1]
+
+        p0_atoms = [
+            (gr.tensor, tile)
+            for slot in sched._partitions[0]
+            for gr in slot.grs
+            if gr.tensor in ("A", "B")
+            for tile in range(
+                gr.tiles.tileId_start,
+                gr.tiles.tileId_end,
+                getattr(cfg, f"gr{gr.tensor}").mn)
+        ]
+        assert p0_atoms == [("A", tile) for tile in range(5)]
+
+    def test_preloop_seeds_complete_n1_epoch(self):
+        cfg = self._cfg()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.build_preloop()
+
+        mt1 = [
+            em.source
+            for partition in sched._preloop_emitted
+            for group in partition
+            for em in group
+            if isinstance(em.source, GRPlacement)
+            and em.source.mtIteration == 1
+        ]
+        assert sorted(self._tile_atoms(mt1, 'A', cfg.grA)) == list(range(8))
+        assert sorted(self._tile_atoms(mt1, 'B', cfg.grB)) == list(range(8))
+        assert sum(gr.tensor == 'SA' for gr in mt1) == 1
+        assert sum(gr.tensor == 'SB' for gr in mt1) == 1
+
+    def test_n2_overwrites_depend_on_overlapping_old_buffer_reads(self):
+        sched = LogicalScheduler(self._cfg())
+        sched.build(stop_after=Pass.DEPS)
+
+        for gr in self._grs(sched, ('A', 'B')):
+            lr_deps = [
+                dep for dep in gr.deps
+                if isinstance(dep.ref, LRPlacement)
+                and dep.ref.tensor == gr.tensor
+                and dep.ref.tiles.tileId_start < gr.tiles.tileId_end
+                and gr.tiles.tileId_start < dep.ref.tiles.tileId_end
+            ]
+            assert lr_deps, f"{gr} has no overlapping read-before-overwrite dep"
+            assert all(
+                dep.ref.mtIteration + dep.mt_offset == gr.mtIteration - 2
+                for dep in lr_deps)
+
+    def test_one_epoch_wait_has_exact_c0_c1_younger_request_counts(self):
+        sched = LogicalScheduler(self._cfg())
+        sched.build()
+        waits = [
+            op
+            for partition in sched._partitions
+            for slot in partition
+            for lr in slot.lrs
+            for op in lr.preOps
+            if isinstance(op, WaitGROp)
+        ]
+
+        assert len(waits) == 1
+        counts = waits[0].wait_gr_counts_by_unroll
+        assert counts is not None and len(counts) == 2
+        frontier = sched._uniform_epoch_frontier_slot()
+        frontier_grs = [
+            gr
+            for pi, partition in enumerate(sched._partitions)
+            for slot in partition
+            if pi * sched.config.numSubIterK + slot.subIterK == frontier
+            for gr in slot.grs
+        ]
+        adjusted = []
+        for body, base in enumerate(counts):
+            values = [base.A, base.B, base.SA, base.SB]
+            for gr in frontier_grs:
+                if gr.tensor in ('SA', 'SB') and body % 2:
+                    continue
+                values[('A', 'B', 'SA', 'SB').index(gr.tensor)] \
+                    += sched._count_gr_atoms(gr)
+            adjusted.append(tuple(values))
+        assert adjusted[0] \
+            == (8, 8, 1, 1)
+        assert adjusted[1] \
+            == (8, 8, 0, 0)
+
+    def test_eight_body_c0_c1_fifo_ledger_has_no_unsafe_ab_consumer(self):
+        """The frontier wait publishes each complete A/B producer epoch."""
+        sched = LogicalScheduler(self._cfg())
+        sched.build()
+        grs = self._grs(sched)
+        wait = next(
+            op
+            for partition in sched._partitions
+            for slot in partition
+            for lr in slot.lrs
+            for op in lr.preOps
+            if isinstance(op, WaitGROp))
+        frontier = sched._uniform_epoch_frontier_slot()
+        frontier_grs = [
+            gr
+            for pi, partition in enumerate(sched._partitions)
+            for slot in partition
+            if pi * sched.config.numSubIterK + slot.subIterK == frontier
+            for gr in slot.grs
+        ]
+
+        # The preloop wait publishes epoch 0 and leaves complete epoch 1
+        # requests in flight.  Model VMEM completion as an ordered request
+        # ledger; vmcnt(N) retires every request older than the youngest N.
+        queue = [(1, gr.tensor)
+                 for gr in grs
+                 if not (gr.tensor in ('SA', 'SB') and gr.mtIteration < 2)
+                 for _ in range(sched._count_gr_atoms(gr))]
+        guaranteed_ab_epochs = {0}
+        for body in range(8):
+            # Prefix consumers read body n, published by the prior frontier.
+            assert body in guaranteed_ab_epochs
+
+            for gr in grs:
+                if gr.tensor in ('SA', 'SB') and body % 2:
+                    continue
+                queue.extend(
+                    [(body + gr.mtIteration, gr.tensor)]
+                    * sched._count_gr_atoms(gr))
+
+            counts = wait.wait_gr_counts_by_unroll[body % 2]
+            target = counts.A + counts.B + counts.SA + counts.SB
+            target += sum(
+                sched._count_gr_atoms(gr)
+                for gr in frontier_grs
+                if not (gr.tensor in ('SA', 'SB') and body % 2))
+            del queue[:max(0, len(queue) - target)]
+
+            consumed_epoch = body + 1
+            assert not any(
+                epoch == consumed_epoch and tensor in ('A', 'B')
+                for epoch, tensor in queue)
+            guaranteed_ab_epochs.add(consumed_epoch)
+
+    @pytest.mark.parametrize(
+        "m,n,pm,pn",
+        [(8, 4, 4, 2), (6, 8, 4, 4), (4, 4, 2, 2), (4, 2, 2, 2)])
+    def test_representative_partition_geometries(self, m, n, pm, pn):
+        cfg = self._cfg(
+            numMFMATilesM=m,
+            numMFMATilesN=n,
+            partitionSizeM=pm,
+            partitionSizeN=pn)
+        sched = LogicalScheduler(cfg)
+        sched.build()
+
+        ab_grs = self._grs(sched, ('A', 'B'))
+        assert sorted(self._tile_atoms(ab_grs, 'A', cfg.grA)) == list(range(m))
+        assert sorted(self._tile_atoms(ab_grs, 'B', cfg.grB)) == list(range(n))
+        assert all(gr.mtIteration == 2 for gr in ab_grs)
+        assert sum(
+            isinstance(op, WaitGROp)
+            for partition in sched._partitions
+            for slot in partition
+            for lr in slot.lrs
+            for op in lr.preOps) == 1
+
+    def test_legacy_policy_and_pgr1_default_remain_unchanged(self):
+        legacy = make_cfg_du128_4wave()
+        assert not legacy.uniformPgrEpoch
+        sched = LogicalScheduler(legacy)
+        sched.build()
+        assert {gr.mtIteration for gr in self._grs(sched, ('A', 'B'))} == {1, 2}
+
+        pgr1 = make_cfg_fp8(256, 256, [4, 1], pgr=1)
+        assert not pgr1.uniformPgrEpoch
+        LogicalScheduler(pgr1).build()
+
+
 # ══════════════════════════════════════════════════════════════
 # Step 10: Emit
 # ══════════════════════════════════════════════════════════════
@@ -2315,6 +2894,70 @@ class TestBuildPreloop:
         # Preloop has gr_inc for the n→n+1 transition but not lr_inc
         # (LR data is loaded fresh, not from a previous MT iteration)
         assert 'lr_inc' not in all_ops
+
+    def test_pgr2_mt1_precedes_partial_wait_with_guarded_full_wait(self):
+        """PGR2 overlaps MT1 GR with the first wait without weakening NLL."""
+        cfg = make_cfg_256x256_fp4()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.build_preloop()
+
+        emitted = sched._preloop_emitted[0][0]
+        sources = [em.source for em in emitted]
+
+        init_idx = next(i for i, src in enumerate(sources)
+                        if getattr(src, 'label', None) == 'initC_overlap')
+        guard_idx = next(i for i, src in enumerate(sources)
+                         if getattr(src, 'kind', None) == 'skip'
+                         and src.rawLabel
+                         and src.target == 'SubtilePreloopNoMT1')
+        mt1_indices = [
+            i for i, src in enumerate(sources)
+            if isinstance(src, GRPlacement) and src.mtIteration == 1
+        ]
+        wait_indices = [
+            i for i, src in enumerate(sources)
+            if getattr(src, 'kind', None) == 'wait_gr'
+        ]
+        sync_idx = next(i for i, src in enumerate(sources)
+                        if getattr(src, 'kind', None) == 'sync')
+        first_lr_idx = next(i for i, src in enumerate(sources)
+                            if isinstance(src, LRPlacement))
+
+        assert init_idx < guard_idx < min(mt1_indices)
+        assert len(wait_indices) == 2
+        partial_idx, full_idx = wait_indices
+        assert max(mt1_indices) < partial_idx < full_idx < sync_idx < first_lr_idx
+
+        partial_counts = sources[partial_idx].wait_gr_counts
+        expected = WaitGRCounts()
+        for i in mt1_indices:
+            gr = sources[i]
+            setattr(expected, gr.tensor,
+                    getattr(expected, gr.tensor) + sched._count_gr_atoms(gr))
+        assert partial_counts == expected
+        assert sum(vars(partial_counts).values()) > 0
+        assert sources[full_idx].wait_gr_counts == WaitGRCounts()
+
+        labels = [getattr(src, 'label', None) for src in sources]
+        assert 'branch_SubtilePreloopWaitDone' in labels
+        assert 'SubtilePreloopNoMT1' in labels
+        assert 'SubtilePreloopWaitDone' in labels
+
+    def test_pgr1_preloop_keeps_single_full_wait(self):
+        """The guarded partial-wait path is exclusive to PGR2."""
+        cfg = make_cfg_256x256_fp4(pgr=1)
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.build_preloop()
+
+        emitted = sched._preloop_emitted[0][0]
+        waits = [em.source for em in emitted if em.opType == 'wait_gr']
+        labels = [getattr(em.source, 'label', None) for em in emitted]
+
+        assert len(waits) == 1
+        assert waits[0].wait_gr_counts == WaitGRCounts()
+        assert 'SubtilePreloopNoMT1' not in labels
 
     def test_multi_du_preloop(self):
         """Multi-DU: PGR=1 preloop loads per-uid with GRIncOps between uids."""
@@ -2982,6 +3625,1442 @@ class TestGetNumVgpr:
 # ══════════════════════════════════════════════════════════════
 # Integration tests
 # ══════════════════════════════════════════════════════════════
+
+class TestDualPeriodMXFP8ScheduleFingerprint:
+    """Pin Experiment 36's complete MT256x256 C0/C1 instruction order.
+
+    Searchable baseline text is retained at:
+    /home/muzasyed/Journey/Workspace/MXFP8VsFP8/du128-pgr2-scheduling/
+    exp36-productization-2026-10-29/baseline/mainloop-c{0,1}.s
+    """
+
+    _EXPECTED = {
+        0: (180, "ca4f07114f874f89cc6fd8802f837240fc8be0278f377ba574cab1e35e07ab56"),
+        1: (150, "93518cec9c744055c8c49aae5f23e8a9cf5f71216d5c0ea1b5f514f52e99da91"),
+    }
+
+    @staticmethod
+    def _normalize(assembly, copy_index):
+        """Retain partition boundaries, opcodes, operands, and issue order."""
+        import re
+
+        begin = f"/* MAINLOOP_C{copy_index} start */"
+        end = f"/* MAINLOOP_C{copy_index} end */"
+        region = assembly[
+            assembly.index(begin) + len(begin):assembly.index(end)
+        ]
+        normalized = []
+        for raw in region.splitlines():
+            line = raw.strip()
+            marker = re.fullmatch(
+                r"/\* partition=(\d+) subIterK=(\d+) \*/", line)
+            if marker:
+                normalized.append(
+                    f"partition={marker.group(1)} subIterK={marker.group(2)}")
+                continue
+            line = line.split("//", 1)[0].strip()
+            if not line or line.startswith("/*"):
+                continue
+            normalized.append(" ".join(line.split()))
+        return "\n".join(normalized) + "\n"
+
+    @staticmethod
+    def _partition_instructions(assembly, copy_index):
+        """Return comment-free instructions grouped by physical partition."""
+        import re
+
+        begin = f"/* MAINLOOP_C{copy_index} start */"
+        end = f"/* MAINLOOP_C{copy_index} end */"
+        region = assembly[
+            assembly.index(begin) + len(begin):assembly.index(end)
+        ]
+        partitions = []
+        for raw in region.splitlines():
+            line = raw.strip()
+            marker = re.fullmatch(
+                r"/\* partition=(\d+) subIterK=(\d+) \*/", line)
+            if marker:
+                partition = int(marker.group(1))
+                assert partition == len(partitions)
+                partitions.append([])
+                continue
+            line = line.split("//", 1)[0].strip()
+            if not line or line.startswith("/*"):
+                continue
+            assert partitions, f"instruction precedes first partition: {line}"
+            partitions[-1].append(" ".join(line.split()))
+        return partitions
+
+    @staticmethod
+    def _dtl_tensor(line):
+        for tensor in ("MXSA", "MXSB", "A", "B"):
+            if (f"LocalWriteBaseAddr{tensor}" in line
+                    or f"sgprSrd{tensor}:" in line):
+                return tensor
+        raise AssertionError(f"unrecognized DTL instruction: {line}")
+
+    @classmethod
+    def _assert_dtl_pairs_and_mfma_shadows(cls, partitions):
+        """Check DTL pairing and interleaving, allowing P3's remainder."""
+        for partition_index, instructions in enumerate(partitions):
+            pending_setup = None
+            seen_mfma = False
+            loads_since_mfma = 0
+            for line in instructions:
+                is_setup = line.startswith(
+                    ("s_add_u32 m0,", "s_mov_b32 m0,"))
+                is_load = line.startswith("buffer_load")
+                is_mfma = line.startswith("v_mfma")
+
+                if is_setup:
+                    assert pending_setup is None, (
+                        f"P{partition_index}: m0 setup overwritten before "
+                        f"its load: {pending_setup} -> {line}")
+                    pending_setup = (cls._dtl_tensor(line), line)
+                elif is_load:
+                    assert pending_setup is not None, (
+                        f"P{partition_index}: buffer load has no m0 setup: "
+                        f"{line}")
+                    assert cls._dtl_tensor(line) == pending_setup[0], (
+                        f"P{partition_index}: setup/load tensor mismatch: "
+                        f"{pending_setup[1]} -> {line}")
+                    pending_setup = None
+
+                if is_mfma:
+                    if not seen_mfma:
+                        assert loads_since_mfma == 0
+                    elif partition_index < 3:
+                        assert loads_since_mfma <= 1, (
+                            f"P{partition_index}: {loads_since_mfma} buffer "
+                            "loads share one MFMA interval")
+                    seen_mfma = True
+                    loads_since_mfma = 0
+                elif is_load:
+                    assert seen_mfma, (
+                        f"P{partition_index}: buffer load precedes first MFMA")
+                    loads_since_mfma += 1
+
+            assert pending_setup is None, (
+                f"P{partition_index}: m0 setup has no buffer load: "
+                f"{pending_setup}")
+            assert seen_mfma
+            assert loads_since_mfma == 0, (
+                f"P{partition_index}: buffer load follows final MFMA")
+
+    def test_mt256x256_c0_c1_match_clean_baseline(self):
+        import hashlib
+
+        assembly = _emit_du128_mxfp8_mainloops()
+        for copy_index, (expected_lines, expected_hash) in \
+                self._EXPECTED.items():
+            normalized = self._normalize(assembly, copy_index)
+            lines = normalized.splitlines()
+            assert len(lines) == expected_lines
+            assert hashlib.sha256(
+                normalized.encode()).hexdigest() == expected_hash
+            assert sum(
+                line.startswith("partition=") for line in lines) == 4
+
+            instructions = [
+                line for line in lines
+                if not line.startswith("partition=")
+            ]
+            pending_m0_setup = False
+            for line in instructions:
+                if line.startswith(("s_add_u32 m0,", "s_mov_b32 m0,")):
+                    assert not pending_m0_setup
+                    pending_m0_setup = True
+                elif line.startswith("buffer_load"):
+                    assert pending_m0_setup
+                    pending_m0_setup = False
+            assert not pending_m0_setup
+
+    @pytest.mark.parametrize(
+        "mt_m,mt_n,expected_ab_counts",
+        [
+            (256, 256, [5, 5, 5, 1]),
+            (256, 320, [5, 5, 5, 3]),
+            (320, 256, [5, 5, 5, 3]),
+        ])
+    def test_supported_geometries_keep_productized_schedule_invariants(
+            self, mt_m, mt_n, expected_ab_counts):
+        kernel, fixture, cfg = \
+            TestUniformPgrEpoch._production_fixture(mt_m, mt_n)
+        assembly = _emit_mainloops(kernel, fixture, cfg)
+
+        for copy_index in range(2):
+            partitions = self._partition_instructions(
+                assembly, copy_index)
+            assert len(partitions) == 4
+            self._assert_dtl_pairs_and_mfma_shadows(partitions)
+
+            ab_counts = [
+                sum(
+                    line.startswith("buffer_load")
+                    and self._dtl_tensor(line) in ("A", "B")
+                    for line in instructions)
+                for instructions in partitions
+            ]
+            assert ab_counts == expected_ab_counts
+
+            vmcnt_partitions = [
+                partition
+                for partition, instructions in enumerate(partitions)
+                for line in instructions
+                if line.startswith("s_waitcnt vmcnt")
+            ]
+            assert vmcnt_partitions == [3]
+
+            barrier_partitions = [
+                partition
+                for partition, instructions in enumerate(partitions)
+                for line in instructions
+                if line.startswith("s_barrier")
+            ]
+            assert barrier_partitions == [0, 1, 3]
+            assert not any(
+                line.startswith("s_waitcnt lgkmcnt")
+                for line in partitions[2])
+
+
+class TestInstructionSchedulerWrapPrefetch:
+    """Partition-prefetch LRs must not delay independent MFMAs."""
+
+    @staticmethod
+    def _schedule():
+        import shutil
+        from types import SimpleNamespace
+        from rocisa import rocIsa
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            DSLoadB128, MFMAInstruction, SBarrier, SWaitCnt, VXorB32)
+        from tensilelite.Components.Subtile.InstructionEmitter import SWaitCntEx
+        from tensilelite.Components.Subtile.InstructionScheduler import instructionSchedule
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        def source(kind, **kwargs):
+            return SimpleNamespace(kind=kind, **kwargs)
+
+        def emitted(module_id, kind, instructions, before=None, **kwargs):
+            return EmittedModule(
+                moduleId=module_id,
+                instructions=instructions,
+                before=before,
+                source=source(kind, **kwargs))
+
+        def mfma(index):
+            return MFMAInstruction(
+                InstType.INST_F32, InstType.INST_F32, [16, 16, 4],
+                False, vgpr(0, 4), vgpr(4), vgpr(5), 0,
+                comment=f"mfma{index}")
+
+        def ds_read(index):
+            return DSLoadB128(
+                dst=vgpr(8, 4), src=vgpr(1),
+                ds=DSModifiers(offset=index * 16),
+                comment=f"ds{index}")
+
+        modules = [
+            emitted(0, 'mfma', [mfma(i) for i in range(16)], before=6),
+            emitted(1, 'lr', [ds_read(i) for i in range(8)],
+                    before=10, mtIteration=1),
+            emitted(2, 'lr', [ds_read(i) for i in range(8, 16)],
+                    before=1, mtIteration=1),
+            emitted(6, 'wait_lr', [SWaitCnt(dscnt=0, comment="wait_lr")]),
+            emitted(7, 'wait_gr', [
+                SWaitCntEx(vlcnt=16, dscnt=-1, comment="wait_gr")]),
+            emitted(8, 'sync', [SBarrier(comment="barrier")], before=7),
+            emitted(9, 'lr_inc', [
+                VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3))
+                for _ in range(2)
+            ], before=8),
+            emitted(10, 'lr_inc', [
+                VXorB32(dst=vgpr(4), src0=vgpr(4), src1=vgpr(5))
+                for _ in range(2)
+            ], before=9),
+        ]
+        return modules, list(instructionSchedule(modules).flatitems())
+
+    def test_wrap_payload_starts_after_second_mfma(self):
+        from rocisa.instruction import (
+            LocalReadInstruction, MFMAInstruction, SBarrier)
+        from tensilelite.Components.Subtile.InstructionEmitter import SWaitCntEx
+
+        modules, items = self._schedule()
+        mfma_positions = [
+            i for i, inst in enumerate(items)
+            if isinstance(inst, MFMAInstruction)
+        ]
+        between_first_two = items[mfma_positions[0] + 1:mfma_positions[1]]
+
+        assert [type(inst) for inst in between_first_two] == [
+            SWaitCntEx, SBarrier]
+        assert not any(
+            isinstance(inst, LocalReadInstruction)
+            for inst in items[:mfma_positions[1]])
+
+        # The 16 wrap reads are spread one per covered MFMA interval; only
+        # unavoidable overflow is left after the final MFMA.
+        for begin, end in zip(mfma_positions[1:], mfma_positions[2:]):
+            assert sum(
+                isinstance(inst, LocalReadInstruction)
+                for inst in items[begin + 1:end]
+            ) <= 1
+        assert [
+            inst.comment for inst in items
+            if isinstance(inst, LocalReadInstruction)
+        ] == [f"ds{i}" for i in range(16)]
+        assert sum(len(em.instructions) for em in modules) == len(items)
+
+    def test_dense_epoch_frontier_ignores_text_and_caps_followers_at_three(self):
+        from rocisa.code import TextBlock
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128, SBarrier, VXorB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SchedulingRules, _SlotPlacer)
+
+        # Initialize rocISA through the shared fixture helper.
+        self._schedule()
+
+        rules = _SchedulingRules(totalSlots=7 * 3)
+        placer = _SlotPlacer(
+            intervals=7,
+            numModules=1,
+            pathOrders=[],
+            validators=[
+                rules.oneDsReadPerInterval,
+                rules.noDsReadOrValuInFirstSlot,
+            ],
+            onPlace=rules.trackPlacement,
+            slotsPerInterval=3,
+            maxInstructionsPerInterval=3)
+        placer.place(0, (0, SBarrier(comment="barrier")))
+
+        payload = [
+            (0, TextBlock("// zero-width marker\n")),
+            *[
+                (0, VXorB32(dst=vgpr(index), src0=vgpr(index),
+                            src1=vgpr(index + 1)))
+                for index in range(4)
+            ],
+            *[
+                (0, DSLoadB128(
+                    dst=vgpr(8, 4),
+                    src=vgpr(1),
+                    ds=DSModifiers(offset=index * 16),
+                    comment=f"ds{index}"))
+                for index in range(16)
+            ],
+        ]
+        placer.denseToFit = True
+        placer.placePath(payload, startLimit=1)
+
+        physical_counts = [
+            sum(
+                not isinstance(item[1], TextBlock)
+                for slot in placer._placed[begin:begin + 3]
+                for item in slot)
+            for begin in range(0, placer.totalSlots, 3)
+        ]
+        assert physical_counts == [3] * 7
+        assert not placer.leftovers
+
+    def test_partition_zero_wait_precedes_interleaved_prefetch_reads(self):
+        import shutil
+        from types import SimpleNamespace
+        from rocisa import rocIsa
+        from rocisa.container import DSModifiers, accvgpr, mgpr, sgpr, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            BufferLoadB128, DSLoadB128, MXMFMAInstruction, SAddU32,
+            SBarrier, SWaitCnt)
+        from tensilelite.Components.Subtile.InstructionEmitter import SWaitCntEx
+        from tensilelite.Components.Subtile.InstructionScheduler import instructionSchedule
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        def source(kind, **kwargs):
+            return SimpleNamespace(kind=kind, **kwargs)
+
+        def emitted(module_id, kind, instructions, before=None, **kwargs):
+            return EmittedModule(
+                moduleId=module_id,
+                instructions=instructions,
+                before=before,
+                source=source(kind, **kwargs))
+
+        def mfma(index):
+            return MXMFMAInstruction(
+                instType=InstType.INST_F8,
+                accType=InstType.INST_F32,
+                variant=[16, 16, 128, 1],
+                acc=accvgpr(0, 4),
+                a=vgpr(0, 8),
+                b=vgpr(8, 8),
+                acc2=accvgpr(0, 4),
+                mxsa=vgpr(16),
+                mxsb=vgpr(17),
+                block=32,
+                comment=f"mfma{index}")
+
+        def reads(begin, end):
+            return [
+                DSLoadB128(
+                    dst=vgpr(8, 4), src=vgpr(1),
+                    ds=DSModifiers(offset=index * 16),
+                    comment=f"ds{index}")
+                for index in range(begin, end)
+            ]
+
+        def global_reads(count):
+            instructions = []
+            for index in range(count):
+                instructions.extend([
+                    SAddU32(
+                        dst=mgpr(0), src0=sgpr(20), src1=index,
+                        comment=f"m0-{index}"),
+                    BufferLoadB128(
+                        dst=None, vaddr=vgpr(0), saddr=sgpr(24, 4),
+                        soffset=0, comment=f"gr-{index}"),
+                ])
+            return instructions
+
+        modules = [
+            emitted(0, 'mfma', [mfma(i) for i in range(16)], before=6),
+            emitted(1, 'lr', reads(0, 8), before=8, tensor='B',
+                    partition=0, targetPartition=1, mtIteration=0),
+            emitted(2, 'lr', reads(8, 12), before=1, tensor='SA',
+                    partition=0, targetPartition=0, mtIteration=0),
+            emitted(3, 'lr', reads(12, 16), before=2, tensor='SB',
+                    partition=0, targetPartition=0, mtIteration=0),
+            emitted(6, 'wait_lr', [
+                SWaitCnt(dscnt=0, comment="wait_lr")], before=3),
+            emitted(7, 'wait_gr', [
+                SWaitCntEx(vlcnt=13, dscnt=-1, comment="wait_gr")]),
+            emitted(8, 'sync', [
+                SBarrier(comment="barrier")], before=7),
+            emitted(9, 'gr', global_reads(4)),
+        ]
+
+        # Semantic ranks mirror an 8x8 tile grid split into four 4x4
+        # partitions. Data reads are two-instruction atomic groups; scale reads
+        # are one-instruction groups. The scheduler must use these deadlines,
+        # not the module/tensor names or a fixed read count.
+        rank_by_index = {
+            0: 0, 1: 0, 2: 1, 3: 1, 4: 2, 5: 2, 6: 3, 7: 3,
+            8: 0, 9: 8, 10: 16, 11: 24,
+            12: 16, 13: 18, 14: 0, 15: 2,
+        }
+        for em in modules[1:4]:
+            em.instructionMetadata = []
+            for inst in em.instructions:
+                index = int(inst.comment[2:])
+                em.instructionMetadata.append(
+                    (rank_by_index[index], 2 if index < 8 else 1))
+
+        items = list(instructionSchedule(
+            modules, limitDtlBundlesPerMfma=True).flatitems())
+        mfma_positions = [
+            i for i, inst in enumerate(items)
+            if isinstance(inst, MXMFMAInstruction)
+        ]
+        wait = next(
+            inst for inst in items
+            if isinstance(inst, SWaitCnt) and inst.dscnt >= 0
+        )
+
+        assert [type(inst) for inst in items[:4]] == [
+            SWaitCntEx, SWaitCnt, MXMFMAInstruction, SBarrier]
+        barrier_position = next(
+            index for index, inst in enumerate(items)
+            if isinstance(inst, SBarrier))
+        assert mfma_positions[0] < barrier_position < mfma_positions[1]
+        assert wait.dscnt == 0
+        assert wait.comment == "Wait for preloop LR before p0 MFMA"
+        assert not any(
+            isinstance(inst, DSLoadB128)
+            for inst in items[:mfma_positions[0]]
+        )
+
+        # Finish the earliest-consumer LDS cohort before writing the future
+        # LDS epoch.  Then issue exactly one m0/load bundle per MFMA interval;
+        # remaining LDS reads follow.
+        assert next(
+            inst.comment for inst in items[mfma_positions[0] + 1:]
+            if isinstance(inst, DSLoadB128)
+        ) == "ds8"
+        expected_reads = [
+            "ds8", "ds14", "ds0", "ds1", "ds2", "ds3", "ds15", "ds4",
+            "ds5", "ds6", "ds7", "ds9", "ds10", "ds12", "ds13", "ds11",
+        ]
+        clustered = [
+            inst.comment for inst in items
+            if getattr(inst, "comment", "").startswith(
+                ("m0-", "gr-", "ds"))
+        ]
+        assert clustered == [
+            *expected_reads[:4],
+            "m0-0", "gr-0",
+            "m0-1", "gr-1",
+            "m0-2", "gr-2",
+            "m0-3", "gr-3",
+            *expected_reads[4:],
+        ]
+        assert [
+            inst.comment for inst in items
+            if isinstance(inst, BufferLoadB128)
+        ] == [f"gr-{i}" for i in range(4)]
+        assert [
+            inst.comment for inst in items
+            if isinstance(inst, DSLoadB128)
+        ] == expected_reads
+        reads_per_interval = [
+            sum(isinstance(inst, DSLoadB128)
+                for inst in items[begin + 1:end])
+            for begin, end in zip(mfma_positions, mfma_positions[1:])
+        ]
+        global_reads_per_interval = [
+            sum(isinstance(inst, BufferLoadB128)
+                for inst in items[begin + 1:end])
+            for begin, end in zip(mfma_positions, mfma_positions[1:])
+        ]
+        instructions_per_interval = [
+            end - begin - 1
+            for begin, end in zip(mfma_positions, mfma_positions[1:])
+        ]
+        assert sum(count > 0 for count in reads_per_interval) >= 8
+        assert max(reads_per_interval) <= 2
+        assert max(global_reads_per_interval) <= 1
+        assert max(instructions_per_interval) <= 3
+        assert next(
+            i for i, inst in reversed(list(enumerate(items)))
+            if isinstance(inst, DSLoadB128)
+        ) < mfma_positions[-1]
+        assert sum(len(em.instructions) for em in modules) == len(items)
+
+    @pytest.mark.parametrize(
+        "cfg,partition,mt_iteration,tensor,tile_id,expected",
+        [
+            (make_cfg_du128_4wave(), 0, 0, "SA", 0, 0),
+            (make_cfg_du128_4wave(), 0, 0, "B", 5, 1),
+            (make_cfg_du128_4wave(), 0, 0, "SA", 2, 8),
+            (make_cfg_du128_4wave(), 0, 0, "SB", 2, 18),
+            (make_cfg_du128_4wave(), 2, 1, "A", 0, 16),
+            (make_cfg_du128_4wave(), 3, 1, "B", 3, 3),
+            (make_cfg_du128_4wave(), 0, 2, "A", 0, 112),
+        ],
+    )
+    def test_first_consumer_rank_uses_partition_geometry(
+            self, cfg, partition, mt_iteration, tensor, tile_id, expected):
+        from types import SimpleNamespace
+        from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
+
+        emitter = object.__new__(InstructionEmitter)
+        emitter.config = cfg
+        emitter.writer = SimpleNamespace(
+            states=SimpleNamespace(asmCaps={}))
+        gran = {
+            "A": cfg.lrA, "B": cfg.lrB,
+            "SA": cfg.lrSA, "SB": cfg.lrSB,
+        }[tensor]
+        placement = LRPlacement(
+            tensor=tensor,
+            mtIteration=mt_iteration,
+            tiles=MFMATileRange(0, 1, tile_id, tile_id + gran.mn),
+            subIterK_slot=0,
+            partition=partition,
+            targetPartition=(partition + 1) % cfg.numPartitions,
+        )
+
+        assert emitter._first_consumer_rank(placement, tile_id) == expected
+
+    def test_first_consumer_rank_supports_non_square_partition_grid(self):
+        from types import SimpleNamespace
+        from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
+
+        cfg = SchedulerConfig(
+            numMFMATilesM=8, numMFMATilesN=4, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(1, 1),
+            lrSA=ReadGranularity(2, 1), lrSB=ReadGranularity(2, 1),
+            grSA=ReadGranularity(8, 2), grSB=ReadGranularity(4, 2),
+            partitionSizeM=4, partitionSizeN=2,
+            pgr=2, plr=0, doubleBufferTensors=("A", "B"),
+            prefetchNextPartition=True, partitionOrder="n-major",
+            scaleReuse=2,
+        )
+        emitter = object.__new__(InstructionEmitter)
+        emitter.config = cfg
+        emitter.writer = SimpleNamespace(
+            states=SimpleNamespace(asmCaps={}))
+        placement = LRPlacement(
+            tensor="SA", mtIteration=0,
+            tiles=MFMATileRange(0, 1, 2, 4),
+            subIterK_slot=0, partition=0, targetPartition=1)
+
+        # Partition 1 is 4x2. A2 is first consumed after A0/A1 (four MFMAs).
+        assert emitter._first_consumer_rank(placement, 2) == 4
+
+    def test_partial_lgkmcnt_uses_only_safe_final_issue_suffix(self):
+        import shutil
+        from types import SimpleNamespace
+        from rocisa import rocIsa
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            safeOutstandingLocalReadSuffix)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        reads = [
+            DSLoadB128(
+                dst=vgpr(8, 4), src=vgpr(1),
+                ds=DSModifiers(offset=index * 16),
+                comment=f"ds{index}")
+            for index in range(4)
+        ]
+        emitted = [
+            EmittedModule(
+                moduleId=0,
+                instructions=reads,
+                instructionMetadata=[
+                    (0, 1), (1, 1), (5, 1), (6, 1)],
+                source=SimpleNamespace(kind="lr")),
+        ]
+        scheduled = Module()
+        for read in reads:
+            scheduled.add(read)
+        assert safeOutstandingLocalReadSuffix(
+            scheduled, emitted, immediateMfmaCount=4) == 2
+
+        unsafe_tail = Module()
+        for read in (reads[0], reads[2], reads[3], reads[1]):
+            unsafe_tail.add(read)
+        assert safeOutstandingLocalReadSuffix(
+            unsafe_tail, emitted, immediateMfmaCount=4) == 0
+
+    @pytest.mark.parametrize("advance", [1, 2, 3])
+    @pytest.mark.parametrize("advance_followers", [True, False])
+    def test_final_partition_interleave_advances_across_empty_seam(
+            self, advance, advance_followers):
+        from rocisa.code import Module
+        from rocisa.container import vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            MFMAInstruction, SBarrier, SWaitCnt)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            advancePartitionInterleave)
+
+        # Initialize rocISA through the shared fixture helper.
+        self._schedule()
+
+        def mfma(name):
+            return MFMAInstruction(
+                InstType.INST_F32, InstType.INST_F32, [16, 16, 4],
+                False, vgpr(0, 4), vgpr(4), vgpr(5), 0,
+                comment=name)
+
+        previous = Module()
+        previous_mfmas = [mfma(f"p{index}") for index in range(4)]
+        previous.addItems(previous_mfmas)
+
+        final = Module()
+        final.add(SWaitCnt(dscnt=0, comment="entry"))
+        final_mfmas = [mfma(f"f{index}") for index in range(4)]
+        cohorts = [
+            SBarrier(comment=f"cohort{index}") for index in range(3)
+        ]
+        for index, inst in enumerate(final_mfmas):
+            final.add(inst)
+            if index < len(cohorts):
+                final.add(cohorts[index])
+
+        assert advancePartitionInterleave(
+            previous,
+            final,
+            advance,
+            advanceFinalFollowers=advance_followers)
+        items = [
+            *previous.flatitems(),
+            *final.flatitems(),
+        ]
+        preceding_mfma = {}
+        current_mfma = None
+        for inst in items:
+            if isinstance(inst, MFMAInstruction):
+                current_mfma = inst.comment
+            else:
+                preceding_mfma[inst.comment] = current_mfma
+
+        def target_name(index):
+            return f"p{index}" if index < 4 else f"f{index - 4}"
+
+        assert preceding_mfma["entry"] == target_name(3 - advance)
+        assert [
+            preceding_mfma[f"cohort{index}"] for index in range(3)
+        ] == (
+            [
+                target_name(4 + index - advance) for index in range(3)
+            ]
+            if advance_followers
+            else [f"f{index}" for index in range(3)]
+        )
+        assert [
+            inst.comment for inst in items
+            if not isinstance(inst, MFMAInstruction)
+        ] == ["entry", "cohort0", "cohort1", "cohort2"]
+
+    def test_final_partition_advance_right_aligns_previous_dtl_bundles(self):
+        from rocisa.code import Module
+        from rocisa.container import mgpr, sgpr, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            BufferLoadB128, MFMAInstruction, SAddU32, SBarrier, SWaitCnt)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            advancePartitionInterleave)
+
+        self._schedule()
+
+        def mfma(name):
+            return MFMAInstruction(
+                InstType.INST_F32, InstType.INST_F32, [16, 16, 4],
+                False, vgpr(0, 4), vgpr(4), vgpr(5), 0,
+                comment=name)
+
+        previous = Module()
+        for index in range(8):
+            previous.add(mfma(f"p{index}"))
+            if index < 3:
+                previous.add(SAddU32(
+                    dst=mgpr(0), src0=sgpr(20), src1=index * 128,
+                    comment=f"m0-{index}"))
+                previous.add(BufferLoadB128(
+                    dst=None, vaddr=vgpr(0), saddr=sgpr(24, 4),
+                    soffset=0, comment=f"gr-{index}"))
+            elif index in (3, 4):
+                previous.add(SAddU32(
+                    dst=sgpr(40 + index), src0=sgpr(40 + index), src1=1,
+                    comment=f"residual-{index}"))
+
+        final = Module()
+        final.add(SWaitCnt(dscnt=0, comment="entry"))
+        for index in range(4):
+            final.add(mfma(f"f{index}"))
+            if index < 2:
+                final.add(SBarrier(comment=f"cohort{index}"))
+
+        assert advancePartitionInterleave(
+            previous, final, 2, rightAlignPreviousDtl=True)
+
+        items = [*previous.flatitems(), *final.flatitems()]
+        preceding_mfma = {}
+        current_mfma = None
+        for inst in items:
+            if isinstance(inst, MFMAInstruction):
+                current_mfma = inst.comment
+            else:
+                preceding_mfma[inst.comment] = current_mfma
+
+        assert [
+            preceding_mfma[f"gr-{index}"] for index in range(3)
+        ] == ["p2", "p3", "p4"]
+        for index in range(3):
+            setup = next(
+                pos for pos, inst in enumerate(items)
+                if inst.comment == f"m0-{index}")
+            load = next(
+                pos for pos, inst in enumerate(items)
+                if inst.comment == f"gr-{index}")
+            assert load == setup + 1
+        assert preceding_mfma["entry"] == "p5"
+        assert preceding_mfma["cohort0"] == "p6"
+        assert preceding_mfma["cohort1"] == "p7"
+
+    def test_final_partition_advance_caps_previous_dtl_loads(self):
+        from rocisa.code import Module
+        from rocisa.container import mgpr, sgpr, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            BufferLoadB128, MFMAInstruction, SAddU32, SBarrier, SWaitCnt)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            advancePartitionInterleave)
+
+        self._schedule()
+
+        def mfma(name):
+            return MFMAInstruction(
+                InstType.INST_F32, InstType.INST_F32, [16, 16, 4],
+                False, vgpr(0, 4), vgpr(4), vgpr(5), 0,
+                comment=name)
+
+        previous = Module()
+        previous.add(SWaitCnt(dscnt=0, comment="previous-drain"))
+        for index in range(10):
+            previous.add(mfma(f"p{index}"))
+            if index < 5:
+                previous.add(SAddU32(
+                    dst=mgpr(0), src0=sgpr(20), src1=index * 128,
+                    comment=f"previous-m0-{index}"))
+                previous.add(BufferLoadB128(
+                    dst=None, vaddr=vgpr(0), saddr=sgpr(24, 4),
+                    soffset=0, comment=f"previous-gr-{index}"))
+
+        final = Module()
+        final.add(SWaitCnt(dscnt=0, comment="entry"))
+        for index in range(4):
+            final.add(mfma(f"f{index}"))
+            if index == 0:
+                final.add(SAddU32(
+                    dst=mgpr(0), src0=sgpr(28), src1=0,
+                    comment="final-m0"))
+                final.add(BufferLoadB128(
+                    dst=None, vaddr=vgpr(0), saddr=sgpr(32, 4),
+                    soffset=0, comment="final-gr"))
+            elif index == 1:
+                final.add(SBarrier(comment="suffix"))
+
+        assert advancePartitionInterleave(
+            previous,
+            final,
+            3,
+            rightAlignPreviousDtl=True,
+            maxPreviousDtlLoads=5,
+            dropRedundantFinalLgkm=True)
+
+        previous_items = [*previous.flatitems()]
+        final_items = [*final.flatitems()]
+        assert all(inst.comment != "entry" for inst in previous_items)
+        assert all(inst.comment != "entry" for inst in final_items)
+        assert sum(
+            isinstance(inst, BufferLoadB128)
+            for inst in previous_items
+        ) == 5
+        assert sum(
+            isinstance(inst, BufferLoadB128)
+            for inst in final_items
+        ) == 1
+
+        items = previous_items + final_items
+        preceding_mfma = {}
+        current_mfma = None
+        for inst in items:
+            if isinstance(inst, MFMAInstruction):
+                current_mfma = inst.comment
+            else:
+                preceding_mfma[inst.comment] = current_mfma
+
+        assert preceding_mfma["previous-drain"] is None
+        assert [
+            preceding_mfma[f"previous-gr-{index}"] for index in range(5)
+        ] == ["p1", "p2", "p3", "p4", "p5"]
+        assert preceding_mfma["final-gr"] == "f0"
+        assert preceding_mfma["suffix"] == "f1"
+
+        for prefix in ("previous", "final"):
+            indices = (
+                range(5) if prefix == "previous" else (None,)
+            )
+            for index in indices:
+                suffix = f"-{index}" if index is not None else ""
+                setup = next(
+                    pos for pos, inst in enumerate(items)
+                    if inst.comment == f"{prefix}-m0{suffix}")
+                load = next(
+                    pos for pos, inst in enumerate(items)
+                    if inst.comment == f"{prefix}-gr{suffix}")
+                assert load == setup + 1
+
+    def test_lgkm_drain_elimination_crosses_partition_modules(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, sgpr, vgpr
+        from rocisa.instruction import (
+            BufferLoadB128, DSLoadB128, SBarrier, SWaitCnt)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            eliminateRedundantLgkmDrains)
+
+        self._schedule()
+
+        body = Module()
+        partition_one = Module()
+        partition_one.add(DSLoadB128(
+            dst=vgpr(0, 4), src=vgpr(1), ds=DSModifiers(offset=0),
+            comment="p1-read"))
+        partition_one.add(SWaitCnt(
+            dscnt=0, comment="p1-overwrite-drain"))
+        partition_one.add(SBarrier(comment="p1-barrier"))
+        partition_one.add(BufferLoadB128(
+            dst=None, vaddr=vgpr(2), saddr=sgpr(0, 4), soffset=0,
+            comment="future-dtl-load"))
+        body.add(partition_one)
+
+        partition_two = Module()
+        partition_two.add(SWaitCnt(
+            dscnt=0, comment="p2-consumer-drain"))
+        body.add(partition_two)
+
+        assert eliminateRedundantLgkmDrains(body) == 1
+        assert [
+            inst.comment for inst in body.flatitems()
+            if isinstance(inst, SWaitCnt)
+        ] == ["p1-overwrite-drain"]
+
+    def test_lgkm_producer_prevents_drain_elimination(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            eliminateRedundantLgkmDrains)
+
+        self._schedule()
+
+        body = Module()
+        body.add(SWaitCnt(dscnt=0, comment="first-drain"))
+        body.add(DSLoadB128(
+            dst=vgpr(0, 4), src=vgpr(1), ds=DSModifiers(offset=0),
+            comment="younger-read"))
+        body.add(SWaitCnt(dscnt=0, comment="required-drain"))
+
+        assert eliminateRedundantLgkmDrains(body) == 0
+        assert [
+            inst.comment for inst in body.flatitems()
+            if isinstance(inst, SWaitCnt)
+        ] == ["first-drain", "required-drain"]
+
+    def test_combined_wait_is_preserved_but_establishes_lgkm_drain(self):
+        from rocisa.code import Module
+        from rocisa.instruction import SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            eliminateRedundantLgkmDrains)
+
+        self._schedule()
+
+        body = Module()
+        body.add(SWaitCnt(
+            dscnt=0, vlcnt=0, comment="combined-drain"))
+        body.add(SWaitCnt(
+            dscnt=0, comment="redundant-lgkm-only-drain"))
+
+        assert eliminateRedundantLgkmDrains(body) == 1
+        waits = [
+            inst for inst in body.flatitems()
+            if isinstance(inst, SWaitCnt)
+        ]
+        assert len(waits) == 1
+        assert waits[0].comment == "combined-drain"
+        assert waits[0].vlcnt == 0
+
+    def test_data_only_partition_zero_prefetch_is_recognized(self):
+        import shutil
+        from types import SimpleNamespace
+        from rocisa import rocIsa
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128, SBarrier
+        from tensilelite.Components.Subtile.InstructionEmitter import SWaitCntEx
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _findPartitionZeroPrefetchOrder)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        def emitted(module_id, kind, instructions, before=None, **kwargs):
+            return EmittedModule(
+                moduleId=module_id, instructions=instructions, before=before,
+                source=SimpleNamespace(kind=kind, **kwargs))
+
+        modules = [
+            emitted(0, "wait_gr", [SWaitCntEx(vlcnt=7)]),
+            emitted(1, "sync", [SBarrier()], before=0),
+            emitted(2, "lr", [
+                DSLoadB128(
+                    dst=vgpr(8, 4), src=vgpr(1),
+                    ds=DSModifiers(offset=index * 16))
+                for index in range(3)
+            ], before=1, tensor="B", partition=0,
+                    targetPartition=1, mtIteration=0),
+        ]
+
+        assert _findPartitionZeroPrefetchOrder(
+            [[0, 1, 2]], modules) == [0, 1, 2]
+
+    def test_uniform_epoch_partition_zero_reads_interleave_without_wait_gr(self):
+        import shutil
+        from types import SimpleNamespace
+        from rocisa import rocIsa
+        from rocisa.container import DSModifiers, accvgpr, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            DSLoadB128, MXMFMAInstruction, SWaitCnt)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            instructionSchedule)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        mfmas = [
+            MXMFMAInstruction(
+                instType=InstType.INST_F8,
+                accType=InstType.INST_F32,
+                variant=[16, 16, 128, 1],
+                acc=accvgpr(0, 4),
+                a=vgpr(0, 8),
+                b=vgpr(8, 8),
+                acc2=accvgpr(0, 4),
+                mxsa=vgpr(16),
+                mxsb=vgpr(17),
+                block=32,
+                comment=f"mfma{index}")
+            for index in range(4)
+        ]
+        reads = [
+            DSLoadB128(
+                dst=vgpr(24, 4),
+                src=vgpr(1),
+                ds=DSModifiers(offset=index * 16),
+                comment=f"p0-prefetch-{index}")
+            for index in range(4)
+        ]
+        modules = [
+            EmittedModule(
+                moduleId=0,
+                instructions=mfmas,
+                before=2,
+                source=SimpleNamespace(kind="mfma")),
+            EmittedModule(
+                moduleId=1,
+                instructions=reads,
+                instructionMetadata=[
+                    (0, 2), (0, 2), (1, 2), (1, 2)],
+                source=SimpleNamespace(
+                    kind="lr", tensor="B", partition=0,
+                    targetPartition=1, mtIteration=0)),
+            EmittedModule(
+                moduleId=2,
+                instructions=[SWaitCnt(dscnt=0, comment="wait_lr")],
+                before=1,
+                source=SimpleNamespace(kind="wait_lr")),
+        ]
+
+        items = list(instructionSchedule(
+            modules,
+            partitionPrefetch=True,
+            limitDtlBundlesPerMfma=True,
+            uniformPgrEpoch=True,
+        ).flatitems())
+        first_mfma = next(
+            index for index, inst in enumerate(items)
+            if isinstance(inst, MXMFMAInstruction)
+        )
+        read_positions = [
+            index for index, inst in enumerate(items)
+            if isinstance(inst, DSLoadB128)
+        ]
+
+        assert first_mfma == 1
+        assert isinstance(items[0], SWaitCnt)
+        assert items[0].comment == "Wait for preloop LR before p0 MFMA"
+        assert all(position > first_mfma for position in read_positions)
+        assert read_positions[-1] < next(
+            index for index, inst in reversed(list(enumerate(items)))
+            if isinstance(inst, MXMFMAInstruction)
+        )
+
+    def test_partial_entry_wait_does_not_weaken_internal_lds_drain(self):
+        from types import SimpleNamespace
+        from rocisa.instruction import SWaitCnt
+        from tensilelite.Components.Subtile.LogicalScheduler import (
+            _set_entry_wait_lr_count)
+
+        entry_wait = SWaitCnt(dscnt=0, comment="entry")
+        overwrite_wait = SWaitCnt(dscnt=0, comment="overwrite")
+        modules = [
+            EmittedModule(
+                moduleId=0, instructions=[], before=1,
+                source=SimpleNamespace(kind="mfma")),
+            EmittedModule(
+                moduleId=1, instructions=[entry_wait],
+                source=SimpleNamespace(kind="wait_lr")),
+            EmittedModule(
+                moduleId=2, instructions=[],
+                source=SimpleNamespace(kind="lr")),
+            EmittedModule(
+                moduleId=3, instructions=[overwrite_wait], before=2,
+                source=SimpleNamespace(kind="wait_lr")),
+            EmittedModule(
+                moduleId=4, instructions=[], before=3,
+                source=SimpleNamespace(kind="sync")),
+        ]
+
+        _set_entry_wait_lr_count(modules, 4)
+
+        assert entry_wait.dscnt == 4
+        assert "leave 4 later-consumer reads" in entry_wait.comment
+        assert overwrite_wait.dscnt == 0
+        assert overwrite_wait.comment == "overwrite"
+
+    def test_partition_without_leading_reads_right_aligns_vmem(self):
+        import shutil
+        from types import SimpleNamespace
+        from rocisa import rocIsa
+        from rocisa.container import accvgpr, mgpr, sgpr, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            BufferLoadB128, MXMFMAInstruction, SAddU32)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            instructionSchedule)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        mfmas = [
+            MXMFMAInstruction(
+                instType=InstType.INST_F8, accType=InstType.INST_F32,
+                variant=[16, 16, 128, 1], acc=accvgpr(0, 4),
+                a=vgpr(0, 8), b=vgpr(8, 8), acc2=accvgpr(0, 4),
+                mxsa=vgpr(16), mxsb=vgpr(17), block=32,
+                comment=f"mfma{index}")
+            for index in range(4)
+        ]
+        modules = [
+            EmittedModule(
+                moduleId=0, instructions=mfmas,
+                source=SimpleNamespace(kind="mfma")),
+            EmittedModule(
+                moduleId=1,
+                instructions=[
+                    SAddU32(
+                        dst=mgpr(0), src0=sgpr(20), src1=0,
+                        comment="m0"),
+                    BufferLoadB128(
+                        dst=None, vaddr=vgpr(0), saddr=sgpr(24, 4),
+                        soffset=0, comment="gr"),
+                ],
+                source=SimpleNamespace(kind="gr")),
+        ]
+
+        items = list(instructionSchedule(
+            modules, partitionPrefetch=True).flatitems())
+        mfma_positions = [
+            index for index, inst in enumerate(items)
+            if isinstance(inst, MXMFMAInstruction)
+        ]
+        gr_position = next(
+            index for index, inst in enumerate(items)
+            if isinstance(inst, BufferLoadB128))
+
+        assert mfma_positions[-2] < gr_position < mfma_positions[-1]
+
+    def test_partition_dtl_setup_and_load_share_mfma_interval(self):
+        import shutil
+        from types import SimpleNamespace
+        from rocisa import rocIsa
+        from rocisa.container import (
+            MUBUFModifiers, accvgpr, mgpr, sgpr, vgpr)
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            BufferLoadB128, MXMFMAInstruction, SAddU32)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            instructionSchedule)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        mfmas = [
+            MXMFMAInstruction(
+                instType=InstType.INST_F8, accType=InstType.INST_F32,
+                variant=[16, 16, 128, 1], acc=accvgpr(0, 4),
+                a=vgpr(0, 8), b=vgpr(8, 8), acc2=accvgpr(0, 4),
+                mxsa=vgpr(16), mxsb=vgpr(17), block=32,
+                comment=f"mfma{index}")
+            for index in range(5)
+        ]
+        dtl = MUBUFModifiers(offen=True, lds=True)
+        gr_instructions = []
+        for index in range(2):
+            gr_instructions.extend([
+                SAddU32(
+                    dst=mgpr(0), src0=sgpr(20), src1=index * 128,
+                    comment=f"m0-{index}"),
+                BufferLoadB128(
+                    dst=None, vaddr=vgpr(0), saddr=sgpr(24, 4),
+                    soffset=0, mubuf=dtl, comment=f"gr-{index}"),
+            ])
+        modules = [
+            EmittedModule(
+                moduleId=0, instructions=mfmas,
+                source=SimpleNamespace(kind="mfma")),
+            EmittedModule(
+                moduleId=1, instructions=gr_instructions,
+                source=SimpleNamespace(kind="gr")),
+        ]
+
+        items = list(instructionSchedule(
+            modules, partitionPrefetch=True).flatitems())
+        for index in range(2):
+            setup_position = next(
+                pos for pos, inst in enumerate(items)
+                if inst.comment == f"m0-{index}")
+            load_position = next(
+                pos for pos, inst in enumerate(items)
+                if inst.comment == f"gr-{index}")
+            assert setup_position < load_position
+            assert not any(
+                isinstance(inst, MXMFMAInstruction)
+                for inst in items[setup_position + 1:load_position])
+
+    def test_dtl_density_falls_back_when_geometry_has_too_few_intervals(self):
+        import shutil
+        from types import SimpleNamespace
+        from rocisa import rocIsa
+        from rocisa.container import accvgpr, mgpr, sgpr, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            BufferLoadB128, MXMFMAInstruction, SAddU32)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            instructionSchedule)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        mfmas = [
+            MXMFMAInstruction(
+                instType=InstType.INST_F8, accType=InstType.INST_F32,
+                variant=[16, 16, 128, 1], acc=accvgpr(0, 4),
+                a=vgpr(0, 8), b=vgpr(8, 8), acc2=accvgpr(0, 4),
+                mxsa=vgpr(16), mxsb=vgpr(17), block=32,
+                comment=f"mfma{index}")
+            for index in range(4)
+        ]
+        requests = []
+        for index in range(6):
+            requests.extend([
+                SAddU32(
+                    dst=mgpr(0), src0=sgpr(20), src1=index * 128,
+                    comment=f"m0-{index}"),
+                BufferLoadB128(
+                    dst=None, vaddr=vgpr(0), saddr=sgpr(24, 4),
+                    soffset=0, comment=f"gr-{index}"),
+            ])
+        modules = [
+            EmittedModule(
+                moduleId=0, instructions=mfmas,
+                source=SimpleNamespace(kind="mfma")),
+            EmittedModule(
+                moduleId=1, instructions=requests,
+                source=SimpleNamespace(kind="gr")),
+        ]
+
+        items = list(instructionSchedule(
+            modules,
+            partitionPrefetch=True,
+            limitDtlBundlesPerMfma=True,
+        ).flatitems())
+
+        assert [
+            inst.comment for inst in items
+            if isinstance(inst, BufferLoadB128)
+        ] == [f"gr-{index}" for index in range(6)]
+        assert sum(
+            isinstance(inst, MXMFMAInstruction) for inst in items
+        ) == len(mfmas)
+
+    def test_vmem_bundles_follow_first_consumer_rank(self):
+        import shutil
+        from types import SimpleNamespace
+        from rocisa import rocIsa
+        from rocisa.container import accvgpr, mgpr, sgpr, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            BufferLoadB128, MXMFMAInstruction, SAddU32)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            instructionSchedule)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        mfmas = [
+            MXMFMAInstruction(
+                instType=InstType.INST_F8, accType=InstType.INST_F32,
+                variant=[16, 16, 128, 1], acc=accvgpr(0, 4),
+                a=vgpr(0, 8), b=vgpr(8, 8), acc2=accvgpr(0, 4),
+                mxsa=vgpr(16), mxsb=vgpr(17), block=32,
+                comment=f"mfma{index}")
+            for index in range(5)
+        ]
+
+        def request(name):
+            return [
+                SAddU32(
+                    dst=mgpr(0), src0=sgpr(20), src1=0,
+                    comment=f"m0-{name}"),
+                BufferLoadB128(
+                    dst=None, vaddr=vgpr(0), saddr=sgpr(24, 4),
+                    soffset=0, comment=f"gr-{name}"),
+            ]
+
+        late = request("late")
+        early = request("early")
+        modules = [
+            EmittedModule(
+                moduleId=0, instructions=mfmas,
+                source=SimpleNamespace(kind="mfma")),
+            EmittedModule(
+                moduleId=1, instructions=late,
+                instructionMetadata=[(8, 2), (8, 2)],
+                source=SimpleNamespace(kind="gr")),
+            EmittedModule(
+                moduleId=2, instructions=early,
+                instructionMetadata=[(2, 2), (2, 2)],
+                source=SimpleNamespace(kind="gr")),
+            EmittedModule(
+                moduleId=3,
+                instructions=[
+                    SAddU32(
+                        dst=sgpr(24), src0=sgpr(24), src1=128,
+                        comment="srd-tail"),
+                ],
+                before=1,
+                source=SimpleNamespace(kind="gr_inc")),
+        ]
+
+        items = list(instructionSchedule(
+            modules, partitionPrefetch=True).flatitems())
+        positions = {
+            inst.comment: index for index, inst in enumerate(items)
+            if inst.comment in ("gr-early", "gr-late", "srd-tail")
+        }
+        assert positions["gr-early"] < positions["gr-late"]
+        assert positions["gr-late"] < positions["srd-tail"]
+
+    def test_partition_wait_and_barrier_straddle_independent_mfma(self):
+        import shutil
+        from types import SimpleNamespace
+        from rocisa import rocIsa
+        from rocisa.container import (
+            DSModifiers, accvgpr, sgpr, vgpr)
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            DSLoadB128, MXMFMAInstruction, SBarrier)
+        from tensilelite.Components.Subtile.InstructionEmitter import SWaitCntEx
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            instructionSchedule)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        mfmas = [
+            MXMFMAInstruction(
+                instType=InstType.INST_F8, accType=InstType.INST_F32,
+                variant=[16, 16, 128, 1], acc=accvgpr(0, 4),
+                a=vgpr(0, 8), b=vgpr(8, 8), acc2=accvgpr(0, 4),
+                mxsa=vgpr(16), mxsb=vgpr(17), block=32,
+                comment=f"mfma{index}")
+            for index in range(5)
+        ]
+        reads = [
+            DSLoadB128(
+                dst=vgpr(8, 4), src=vgpr(1),
+                ds=DSModifiers(offset=index * 16),
+                comment=f"ds{index}")
+            for index in range(2)
+        ]
+        modules = [
+            EmittedModule(
+                moduleId=0, instructions=mfmas,
+                source=SimpleNamespace(kind="mfma")),
+            EmittedModule(
+                moduleId=1,
+                instructions=[SWaitCntEx(vlcnt=3, dscnt=-1)],
+                source=SimpleNamespace(kind="wait_gr")),
+            EmittedModule(
+                moduleId=2, instructions=[SBarrier(comment="barrier")],
+                before=1, source=SimpleNamespace(kind="sync")),
+            EmittedModule(
+                moduleId=3, instructions=reads,
+                instructionMetadata=[(0, 1), (1, 1)],
+                before=2,
+                source=SimpleNamespace(
+                    kind="lr", partition=1, targetPartition=2,
+                    mtIteration=0)),
+        ]
+
+        items = list(instructionSchedule(
+            modules, partitionPrefetch=True).flatitems())
+        wait_position = next(
+            index for index, inst in enumerate(items)
+            if isinstance(inst, SWaitCntEx))
+        barrier_position = next(
+            index for index, inst in enumerate(items)
+            if isinstance(inst, SBarrier))
+        assert any(
+            isinstance(inst, MXMFMAInstruction)
+            for inst in items[wait_position + 1:barrier_position])
+        assert all(
+            not isinstance(inst, DSLoadB128)
+            for inst in items[:barrier_position])
+
+    def test_p0_reserves_first_slot_from_ds_and_valu(self):
+        import shutil
+        from rocisa import rocIsa
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128, VXorB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SchedulingRules, _SlotPlacer)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        ds_read = DSLoadB128(
+            dst=vgpr(8, 4), src=vgpr(1),
+            ds=DSModifiers(offset=0))
+        valu = VXorB32(
+            dst=vgpr(2), src0=vgpr(2), src1=vgpr(3))
+        rules = _SchedulingRules(totalSlots=4)
+        placer = _SlotPlacer(
+            intervals=2,
+            numModules=2,
+            pathOrders=[[0], [1]],
+            validators=[rules.noDsReadOrValuInFirstSlot],
+            slotsPerInterval=2)
+
+        placer.placePath([(0, ds_read)])
+        placer.placePath([(1, valu)])
+
+        positions = {
+            id(inst): pos
+            for pos, slot in enumerate(placer._placed)
+            for _, inst in slot
+        }
+        assert positions[id(ds_read)] % 2 != 0
+        assert positions[id(valu)] % 2 != 0
+
 
 class TestIntegration:
 

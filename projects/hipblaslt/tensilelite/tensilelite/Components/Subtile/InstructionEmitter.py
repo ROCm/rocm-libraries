@@ -126,9 +126,9 @@ class InstructionEmitter:
         # Dispatch table — unroll_iter is passed for mfma/lr
         self._dispatch = {
             'mfma':         lambda em, ui: self.emit_mfma(em.source, ui),
-            'lr':           lambda em, ui: self.emit_lr(em.source, ui),
-            'gr':           lambda em, ui: self.emit_gr(em.source, ui),
-            'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source),
+            'lr':           lambda em, ui: self.emit_lr(em.source, ui, em),
+            'gr':           lambda em, ui: self.emit_gr(em.source, ui, em),
+            'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source, ui),
             'wait_lr':      lambda em, ui: self.emit_wait_lr(),
             'sync':         lambda em, ui: self.emit_sync(),
             'lr_inc':       lambda em, ui: self.emit_lr_inc(em.source, ui),
@@ -144,8 +144,94 @@ class InstructionEmitter:
         # emit_mask_k_init, consumed by every emit_mask_k call in the tail body.
         self._tail_vDiff = None
 
-    def emit_mfma(self, placement, unroll_iter=0):
-        """Emit MFMA instructions from MFMAPlacement."""
+    def _first_consumer_rank(self, placement, tile_id):
+        """Return an LR or GR atom's next MFMA-use ordinal.
+
+        Partition-prefetch local reads execute after the current partition's
+        MFMA block.  Rank their destination tile by scanning the *actual*
+        configured partition traversal from that point.  A rank is relative to
+        the end of the producer partition, so it is comparable for every LR in
+        the same scheduling cell without baking in a macrotile, tile id, or
+        partition count.
+
+        The current partition-prefetch implementation requires numSubIterK=1,
+        which makes a partition the scheduling cell.  Return None outside that
+        path so unrelated kernels remain byte-identical.
+        """
+        cfg = self.config
+        if not getattr(cfg, "prefetchNextPartition", False) \
+                or cfg.numSubIterK != 1:
+            return None
+
+        tensor = placement.tensor
+        if tensor not in ("A", "B", "SA", "SB"):
+            return None
+        gran = {
+            "A": cfg.lrA, "B": cfg.lrB,
+            "SA": cfg.lrSA, "SB": cfg.lrSB,
+        }[tensor]
+        if gran is None:
+            return None
+
+        target_epoch = placement.mtIteration
+        rank = 0
+        num_partitions = cfg.numPartitions
+        has_wmma_source_cache = self.writer.states.asmCaps.get(
+            "HasWMMA_V3", False)
+
+        # LR prefetch normally targets the next partition or next MT. PGR2
+        # requests may target two MTs ahead, so scan as many complete
+        # partition traversals as the semantic target epoch requires.
+        max_steps = max(
+            num_partitions,
+            (max(0, target_epoch) + 1) * num_partitions,
+        )
+        for step in range(1, max_steps + 1):
+            linear_partition = placement.partition + step
+            epoch = linear_partition // num_partitions
+            pi = linear_partition % num_partitions
+            pm, pn = cfg.partition_coords(pi)
+            a_tiles = list(range(cfg._prefixM[pm], cfg._prefixM[pm + 1]))
+            b_tiles = list(range(cfg._prefixN[pn], cfg._prefixN[pn + 1]))
+
+            if has_wmma_source_cache and len(a_tiles) > 1 and len(b_tiles) > 1:
+                if len(a_tiles) >= len(b_tiles):
+                    ab_pairs = [
+                        (a_tiles[c], b_tiles[r])
+                        for r, c in _zigzag_order(len(b_tiles), len(a_tiles))
+                    ]
+                else:
+                    ab_pairs = [
+                        (a_tiles[r], b_tiles[c])
+                        for r, c in _zigzag_order(len(a_tiles), len(b_tiles))
+                    ]
+            else:
+                ab_pairs = [(a, b) for a in a_tiles for b in b_tiles]
+
+            if epoch == target_epoch:
+                tile_end = tile_id + gran.mn
+                for local_rank, (a, b) in enumerate(ab_pairs):
+                    consumed_tile = a if tensor in ("A", "SA") else b
+                    if tile_id <= consumed_tile < tile_end:
+                        return rank + local_rank
+            rank += len(ab_pairs)
+
+        return None
+
+    def _local_read_group_metadata(self, instructions, placement, tile_id):
+        """Return scheduler metadata aligned with one atomic LR group."""
+        instructions = list(instructions)
+        first_consumer = self._first_consumer_rank(placement, tile_id)
+        group_span = len(instructions)
+        return [(first_consumer, group_span)] * group_span
+
+    def emit_mfma(self, placement, unroll_iter=0, scale_phase=None):
+        """Emit MFMAs, optionally selecting a scale phase independently.
+
+        ``unroll_iter`` continues to select the operand VGPR tile map.  The
+        separate scale-phase override is used by the flat tail loop, whose one
+        physical operand layout must serve either dual-period scale byte.
+        """
         module = Module()
         subIterK = placement.subIterK
         # Dual-period MXFP8: the data body is unrolled scaleReuse times per
@@ -154,7 +240,11 @@ class InstructionEmitter:
         # K-phase that selects the scale byte within the shared 4B dword is the
         # data-iteration parity, i.e. unroll_iter, NOT subIterK (always 0).
         dualPeriodScale = self.hasScale and getattr(self.config, 'dualPeriodScale', False)
-        scalePhase = (unroll_iter % self.config.scaleReuse) if dualPeriodScale else subIterK
+        if dualPeriodScale:
+            phase = unroll_iter if scale_phase is None else scale_phase
+            scalePhase = phase % self.config.scaleReuse
+        else:
+            scalePhase = subIterK
         tile_maps = {t: placement.vgpr_tile_maps[t][unroll_iter]
                      for t in placement.vgpr_tile_maps}
 
@@ -205,9 +295,12 @@ class InstructionEmitter:
                 comment=f"MFMA C[{a},{b}] += A[{a},K={scalePhase}] * B[{b},K={scalePhase}]"))
         return list(module.flatitems())
 
-    def emit_lr(self, placement, unroll_iter=0):
+    def emit_lr(self, placement, unroll_iter=0, emitted_module=None):
         """Emit LR (ds_read) instructions from LRPlacement."""
         module = Module()
+        instruction_metadata = []
+        if emitted_module is not None:
+            emitted_module.instructionMetadata = instruction_metadata
         tensor = placement.tensor
         tile_map = placement.vgpr_tile_map[unroll_iter] if placement.vgpr_tile_map else {}
 
@@ -236,8 +329,13 @@ class InstructionEmitter:
                     subIterK_within = local_k % subtileShapeK
                     dstTile = vgprTiles[tile_map[tileId]]
                     swizzled = self.writer.states.subtileLdsSwizzle
-                    module.add(emitSingleDsRead(
-                        ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
+                    reads = emitSingleDsRead(
+                        ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled,
+                        mt=placement.mtIteration, k_index=k)
+                    instruction_metadata.extend(
+                        self._local_read_group_metadata(
+                            reads.flatitems(), placement, tileId))
+                    module.add(reads)
         elif tensor in ('SA', 'SB'):
             # Dual-period MXFP8: one scale dword covers both K phases of the
             # epoch and lives in a globally-colored VGPR that survives across
@@ -258,16 +356,28 @@ class InstructionEmitter:
                 numKGroups = ti.lrLocalSubtileGrid[1]
                 dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
-                module.add(DSLoadB32(
+                read = DSLoadB32(
                     dst=vgpr(vdst),
                     src=vgpr(ti.sharedVgprLROffset[0]),
                     ds=DSModifiers(offset=dsOffset),
-                    comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS"))
-        return list(module.flatitems())
+                    comment="%s MT=%s tile=%u K=%u" % (
+                        tensor,
+                        "n" if placement.mtIteration == 0 else "n+%d" % placement.mtIteration,
+                        tileId, placement.tiles.subIterK_start))
+                instruction_metadata.extend(
+                    self._local_read_group_metadata(
+                        [read], placement, tileId))
+                module.add(read)
+        instructions = list(module.flatitems())
+        assert len(instruction_metadata) == len(instructions)
+        return instructions
 
-    def emit_gr(self, placement, unroll_iter=0):
+    def emit_gr(self, placement, unroll_iter=0, emitted_module=None):
         """Emit GR (buffer_load) instructions from GRPlacement."""
         module = Module()
+        instruction_metadata = []
+        if emitted_module is not None:
+            emitted_module.instructionMetadata = instruction_metadata
         tensor = placement.tensor
         if tensor in ('A', 'B'):
             ti = self.tileInfoMap[tensor]
@@ -277,8 +387,16 @@ class InstructionEmitter:
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
                     subtileK = (k - uid_k_base) // subtileShapeK
-                    module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK,
-                                                    writer=self.writer))
+                    request = emitSingleBufferLoad(
+                        ti, self.kernel, tileId, subtileK,
+                        writer=self.writer, mt=placement.mtIteration)
+                    request_instructions = list(request.flatitems())
+                    first_consumer = self._first_consumer_rank(
+                        placement, tileId)
+                    instruction_metadata.extend(
+                        [(first_consumer, len(request_instructions))]
+                        * len(request_instructions))
+                    module.add(request)
         elif tensor in ('SA', 'SB'):
             # Dual-period MXFP8: one scale epoch (256 K) feeds scaleReuse data
             # iterations.  Prefetch the next epoch's scales (SRD advance + DTL
@@ -287,12 +405,24 @@ class InstructionEmitter:
             if getattr(self.config, 'dualPeriodScale', False) and unroll_iter > 0:
                 return []
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
-            module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
+            request = globalReadDoScaleSubtile(
+                tc, self.writer, self.kernel, mt=placement.mtIteration)
+            request_instructions = list(request.flatitems())
+            first_consumer = self._first_consumer_rank(
+                placement, placement.tiles.tileId_start)
+            instruction_metadata.extend(
+                [(first_consumer, len(request_instructions))]
+                * len(request_instructions))
+            module.add(request)
         return list(module.flatitems())
 
-    def emit_wait_gr(self, source):
+    def emit_wait_gr(self, source, unroll_iter=0):
         """Emit SWaitCnt for wait_gr from BaseOp with wait_gr_counts."""
-        counts = source.wait_gr_counts
+        counts_by_unroll = getattr(source, 'wait_gr_counts_by_unroll', None)
+        if counts_by_unroll:
+            counts = counts_by_unroll[unroll_iter % len(counts_by_unroll)]
+        else:
+            counts = source.wait_gr_counts
         if counts is None:
             return []
 
@@ -719,11 +849,20 @@ class InstructionEmitter:
             self._tail_boundaryMask = None
         return []
 
-    def populate(self, emitted, unroll_iter=0):
-        """Walk emitted partitions and fill em.instructions."""
+    def populate(self, emitted, unroll_iter=0, mfma_scale_phase=None):
+        """Walk emitted partitions and fill ``em.instructions``.
+
+        ``mfma_scale_phase`` changes only the scale-byte selector.  GR/LR
+        cadence and operand tile-map selection remain tied to ``unroll_iter``.
+        """
         for partition_emitted in emitted:
             for emitted_group in partition_emitted:
                 for em in emitted_group:
+                    if em.opType == 'mfma' and mfma_scale_phase is not None:
+                        em.instructions = self.emit_mfma(
+                            em.source, unroll_iter,
+                            scale_phase=mfma_scale_phase)
+                        continue
                     handler = self._dispatch.get(em.opType)
                     if handler:
                         em.instructions = handler(em, unroll_iter)
