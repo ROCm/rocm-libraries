@@ -141,7 +141,11 @@ class SwInstructionPrefetchAbsStaticPassTest : public ::testing::Test {
         gemmConfig.NumGRM = 1;
     }
 
-    PassManager makePm(int baseSgpr = 64, bool afterSgprCompact = false, bool xnackReplay = false) {
+    // xnackReplay defaults to the shipping mode. Before this PR the drain was
+    // unconditional, so a default of false would have moved every pre-existing
+    // case in this file to the xnack- configuration and left the mode that
+    // ships covered by the two XnackDrain_* cases alone.
+    PassManager makePm(int baseSgpr = 64, bool afterSgprCompact = false, bool xnackReplay = true) {
         PassManager pm;
         registerAllAnalyses(pm.getAnalysisManager());
         pm.setGemmTileConfig(gemmConfig);
