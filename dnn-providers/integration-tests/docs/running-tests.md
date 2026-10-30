@@ -375,6 +375,37 @@ reports `DECLINED`, not a failure.
 The engine column is informational (the space's `engine` key). A space's `description`
 says what it draws, why each constraint exists and which tensor each axis touches.
 
+**Per-engine recipes.** Every SDPA engine runs through the same driver; only the engine name, the
+config, the build and the environment differ. `<build>` is the CMake build directory. All of them
+live in the one `hip_kernel_provider` plugin, so `--test-article` is the same file for all of them
+(relative to `<build>`; the CTest lanes pass `$<TARGET_FILE:hip_kernel_provider>`, see
+`HipdnnIntegrationTestHelpers.cmake`). On Windows plugins sit under `bin/` instead of `lib/`
+(`bin/hipdnn_plugins/engines/hip_kernel_provider.dll`).
+
+| Engine | Spaces | `--test-article` | `--test-engine` | `--test-config` | Required build flags | Arch | Extra env |
+|---|---|---|---|---|---|---|---|
+| ASM_SDPA forward | `SdpaFwd/Default` | `lib/hipdnn_plugins/engines/libhip_kernel_provider.so` | `ASM_SDPA_ENGINE` | `dnn-providers/hip-kernel-provider/config/ASM_SDPA_ENGINE.toml` | `-DHIPDNN_ENABLE_SDPA=ON` (`ENABLE_ASM_SDPA_ENGINE` is ON by default) | gfx942, gfx950 | none |
+| ASM_SDPA backward | none yet | same | `ASM_SDPA_ENGINE` | same | same | gfx942 (the engine also ships gfx950 backward kernels) | none |
+| HIP_FLASH2 | `SdpaFwd/Flash2` | same | `HIP_FLASH2_ENGINE` | `dnn-providers/hip-kernel-provider/src/engines/hip_flash2_engine/config/HIP_FLASH2_ENGINE.toml` | `-DENABLE_HIP_FLASH2_ENGINE=ON -DHIPDNN_ENABLE_SDPA=ON` | gfx942 (fp16; the engine declines gfx950) | `HIP_FLASH2_KERNEL_DIR=<build>/dnn-providers/hip-kernel-provider/src/hip_flash2_kernels`, the directory CMake copies the shipped `.co` files to (its path is the cache variable `HIP_FLASH2_KERNEL_DIR_BUILD`). No CTest sets it, and without it every case fails in `hipModuleLoad` |
+| `hipkernel:Gfx950AttentionDense` | `SdpaFwd/Gfx950Dense` | same | `hipkernel:Gfx950AttentionDense` | `dnn-providers/hip-kernel-provider/config/hipkernel_Gfx950AttentionDense.toml` | `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DHIPDNN_ENABLE_SDPA=ON -DGPU_TARGETS=gfx950`, and the rocKE descriptors pulled (`dvc pull -r ingestor`; add `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` to fail configure on a missing one) | gfx950 | none |
+| `hipkernel:Gfx1151WmmaAttention` (prefill) | none yet | same | `hipkernel:Gfx1151WmmaAttention` | `dnn-providers/hip-kernel-provider/config/hipkernel_Gfx1151WmmaAttention.toml` | as Gfx950, with `-DGPU_TARGETS=gfx1151` | gfx1151 (the descriptors list gfx1100 to gfx1153 and gfx1200/gfx1201) | none |
+| `hipkernel:Gfx1151WmmaAttentionDecode` | none yet | same | `hipkernel:Gfx1151WmmaAttentionDecode` | `dnn-providers/hip-kernel-provider/config/hipkernel_Gfx1151WmmaAttentionDecode.toml` | as Gfx950, with `-DGPU_TARGETS=gfx1151` | gfx1151 (as above) | none |
+
+Only `ASM_SDPA_ENGINE`, `HIP_MLOPS_ENGINE` and `hipkernel:Gfx950AttentionDense` have a CTest lane
+(`hip-kernel-provider/src/CMakeLists.txt`); HIP_FLASH2 and the two Gfx1151 engines have none, so their
+TOMLs reach a run only through an explicit `--test-config`. The two Gfx1151 TOMLs name no tolerance
+override or skip: nothing has been run on a gfx1151 device. A fuzz run on FLASH2 therefore reads:
+
+```bash
+HIP_FLASH2_KERNEL_DIR=build/dnn-providers/hip-kernel-provider/src/hip_flash2_kernels \
+python3 dnn-providers/integration-tests/gauntlet/run_gauntlet_fuzz.py \
+    --binary build/bin/hipdnn_integration_tests \
+    --test-article build/lib/hipdnn_plugins/engines/libhip_kernel_provider.so \
+    --test-engine  HIP_FLASH2_ENGINE \
+    --test-config  dnn-providers/hip-kernel-provider/src/engines/hip_flash2_engine/config/HIP_FLASH2_ENGINE.toml \
+    --filter '^SdpaFwd/Flash2$' --samples 64 --work-dir gauntlet-runs/flash2
+```
+
 **Input-value, alignment and placement axes.** Every space except `Matmul/Align` and `SdpaFwd/Flash2` has a
 `domain` axis, and every space has an `alignment` and a `placement` axis. They render
 case metadata and `tensor_patches` rather than shape values:

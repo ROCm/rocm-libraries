@@ -1,0 +1,20 @@
+# Integration test configuration for hipkernel:Gfx1151WmmaAttentionDecode
+# Filters use GTest-style globs: * matches any sequence of characters
+
+[meta]
+version = 1
+
+# The engine is the rocKE RDNA WMMA split-KV, GQA-packed decode SDPA forward
+# (kernels/gfx1151/wmma_fmha_decode.py; see packs/Gfx1151WmmaAttentionNative.cpp). It serves
+# exactly the problems the rocKE dispatcher sends to decode, and its sibling
+# hipkernel:Gfx1151WmmaAttention declines those, so a bundle pinned to this engine that is not a
+# decode problem declines. The prefill engine has its own config.
+# No tolerance overrides: the forward pass uses the common SdpaAttributes tolerance
+# (tol::sdpa::getToleranceFwd<T>()), and nothing has been run on a device to justify a
+# different one.
+#
+# No [[test_skips]] entry: the shipped descriptors name the gfx11 and gfx12 architectures they
+# serve, and the engine's packs arch-prune before the matcher, so another device declines
+# through the ordinary path. An entry cannot express "skip everywhere except gfx1151" -- the
+# schema has no negation, and an empty `archs` list means EVERY arch (TestSettings.hpp:
+# `entry.archs.empty() || ...`), so a skip written that way would silence gfx1151 too.
