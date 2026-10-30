@@ -1,0 +1,87 @@
+{
+  "version": "1.0",
+  "id": "ab9032c2-7a6b-4b2b-879a-b1585ac77f86",
+  "name": "hipkernel:flydsl_rmsnorm (gfx1100, 200 contribution(s))",
+  "adapter": "tree_data",
+  "features_signature": [
+    "$flydsl_rmsnorm.columns",
+    "$flydsl_rmsnorm.rows",
+    "$graph.arithmetic_intensity",
+    "$graph.flops",
+    "$graph.flops_by_type.RMSNormAttributes",
+    "$graph.logical_bytes",
+    "$graph.nodes[0].flops",
+    "$graph.nodes[0].forward_phase",
+    "$graph.nodes[0].scale.data_type",
+    "$graph.nodes[0].scale.dims[2]",
+    "$graph.nodes[0].scale.numel",
+    "$graph.nodes[0].scale.rank",
+    "$graph.nodes[0].scale.strides[0]",
+    "$graph.nodes[0].scale.strides[1]",
+    "$graph.nodes[0].x.data_type",
+    "$graph.nodes[0].x.dims[0]",
+    "$graph.nodes[0].x.dims[1]",
+    "$graph.nodes[0].x.dims[2]",
+    "$graph.nodes[0].x.numel",
+    "$graph.nodes[0].x.rank",
+    "$graph.nodes[0].x.strides[0]",
+    "$graph.nodes[0].x.strides[1]",
+    "$graph.nodes[0].y.data_type",
+    "$graph.nodes[0].y.dims[0]",
+    "$graph.nodes[0].y.dims[1]",
+    "$graph.nodes[0].y.dims[2]",
+    "$graph.nodes[0].y.numel",
+    "$graph.nodes[0].y.rank",
+    "$graph.nodes[0].y.strides[0]",
+    "$graph.nodes[0].y.strides[1]",
+    "$graph.tensor_count",
+    "$graph.tensors[0].data_type",
+    "$graph.tensors[0].dims[0]",
+    "$graph.tensors[0].dims[1]",
+    "$graph.tensors[0].dims[2]",
+    "$graph.tensors[0].rank",
+    "$graph.tensors[0].strides[0]",
+    "$graph.tensors[0].strides[1]",
+    "$graph.tensors[1].data_type",
+    "$graph.tensors[1].dims[2]",
+    "$graph.tensors[1].rank",
+    "$graph.tensors[1].strides[0]",
+    "$graph.tensors[1].strides[1]",
+    "$graph.tensors[3].data_type",
+    "$graph.tensors[3].dims[0]",
+    "$graph.tensors[3].dims[1]",
+    "$graph.tensors[3].dims[2]",
+    "$graph.tensors[3].rank",
+    "$graph.tensors[3].strides[0]",
+    "$graph.tensors[3].strides[1]"
+  ],
+  "features_hash": "sha256:3cee2376fb2327d1",
+  "trained_against": {
+    "ued": {
+      "id": "43c4a81e-f427-56ec-b01f-688019b91f85",
+      "revision": "1.0"
+    },
+    "kmd": {
+      "id": "50b317c4-05a1-5d32-a5ba-08ce1d39ae62",
+      "revision": "1.0"
+    },
+    "umd": [
+      {
+        "id": "dd69ba28-01e1-52e7-acbf-b22a64603271",
+        "revision": "1.0"
+      }
+    ],
+    "selector_revision": "generic-untuned-v1/054dd06930ed63be7849dee9c1fe1f818df29fa5be025d456bbbc9f888fec216",
+    "feature_semantics_revision": 1
+  },
+  "objective": "max",
+  "score": {
+    "metric": "tflops",
+    "calibrated": true,
+    "transform": "log"
+  },
+  "tree_data": {
+    "artifact": "model.bin",
+    "hash": "3f31882b860fec06b0342768dcaceae35bc578e8a09b95ff04d17e1d22c83499"
+  }
+}

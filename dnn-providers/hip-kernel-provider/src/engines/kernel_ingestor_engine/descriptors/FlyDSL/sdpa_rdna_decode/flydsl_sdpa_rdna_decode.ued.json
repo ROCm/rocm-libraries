@@ -11,6 +11,7 @@
   },
   "predict_engine": {
     "default": "d9ea0851-b585-536e-8e0f-8ea0d00971c2",
+    "gfx1100": "ab6a85d2-965c-4dd7-a4e0-514f4128535f",
     "gfx1201": "7a9b02d9-27fe-41ee-b7ba-ae2b0ef81ca9"
   },
   "metadata": "8dc88fc8-9501-5c69-b49c-1a45e312639e",
