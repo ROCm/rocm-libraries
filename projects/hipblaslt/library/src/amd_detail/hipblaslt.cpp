@@ -31,6 +31,7 @@
 #include "handle.h"
 #include "hipblaslt/hipblaslt-ext-op.h"
 #include "hipblaslt_internal.hpp"
+#include "rocblaslt_mat_utils.hpp"
 
 #include <hip/hip_runtime_api.h>
 #include <iostream>
@@ -107,14 +108,57 @@ hipblasStatus_t refuse_row_order(const char*             caller,
                                  rocblaslt_matrix_layout matC,
                                  rocblaslt_matrix_layout matD)
 {
-    // A grouped layout sends the call to the grouped path, which refuses every order but COL.
+    // A null layout is reported by the caller's own validation, and a grouped layout sends the
+    // call to the grouped path, which refuses every order but COL.
     for(auto mat : {matA, matB, matC, matD})
-        if(mat && mat->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED)
+        if(!mat || mat->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED)
             return HIPBLAS_STATUS_SUCCESS;
 
-    auto order = [](rocblaslt_matrix_layout mat) { return mat ? mat->order : HIPBLASLT_ORDER_COL; };
-    return refuse_row_order(caller, order(matA), order(matB), order(matC), order(matD));
+    return refuse_row_order(caller, matA->order, matB->order, matC->order, matD->order);
 }
+
+namespace
+{
+    // The arguments rocblaslt_matmul checks before anything else. A missing one keeps its
+    // usual status rather than being reported as an unsupported order.
+    bool matmul_arguments_present(hipblasLtHandle_t       handle,
+                                  hipblasLtMatmulDesc_t   matmulDesc,
+                                  const void*             alpha,
+                                  const void*             A,
+                                  hipblasLtMatrixLayout_t matA,
+                                  const void*             B,
+                                  hipblasLtMatrixLayout_t matB,
+                                  const void*             beta,
+                                  const void*             C,
+                                  hipblasLtMatrixLayout_t matC,
+                                  void*                   D,
+                                  hipblasLtMatrixLayout_t matD,
+                                  void*                   workspace,
+                                  size_t                  workspaceSizeInBytes)
+    {
+        if(!handle || !matmulDesc || !matA || !matB || !matC || !matD || !alpha || !beta || !C || !D
+           || (!workspace && workspaceSizeInBytes > 0))
+            return false;
+        auto desc = (rocblaslt_matmul_desc)matmulDesc;
+        return !alphaForbidsNullAB(alphaBetaScalarType(desc->scale_type,
+                                                       desc->compute_type,
+                                                       ((rocblaslt_matrix_layout)matA)->type),
+                                   desc->pointermode,
+                                   alpha,
+                                   A,
+                                   B);
+    }
+
+    // The arguments rocblaslt_matmul_algo_get_heuristic checks before anything else.
+    bool heuristic_arguments_present(hipblasLtHandle_t           handle,
+                                     hipblasLtMatmulDesc_t       matmulDesc,
+                                     hipblasLtMatmulPreference_t pref,
+                                     int                         requestedAlgoCount,
+                                     int*                        returnAlgoCount)
+    {
+        return handle && matmulDesc && pref && returnAlgoCount && requestedAlgoCount >= 1;
+    }
+} // namespace
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 /********************************************************************************
@@ -1215,15 +1259,17 @@ try
     }
 #endif
 
-    if(auto order_status = refuse_row_order(__func__,
-                                            (rocblaslt_matrix_layout)Adesc,
-                                            (rocblaslt_matrix_layout)Bdesc,
-                                            (rocblaslt_matrix_layout)Cdesc,
-                                            (rocblaslt_matrix_layout)Ddesc);
+    if(auto order_status
+       = heuristic_arguments_present(handle, matmulDesc, pref, requestedAlgoCount, returnAlgoCount)
+             ? refuse_row_order(__func__,
+                                (rocblaslt_matrix_layout)Adesc,
+                                (rocblaslt_matrix_layout)Bdesc,
+                                (rocblaslt_matrix_layout)Cdesc,
+                                (rocblaslt_matrix_layout)Ddesc)
+             : HIPBLAS_STATUS_SUCCESS;
        order_status != HIPBLAS_STATUS_SUCCESS)
     {
-        if(returnAlgoCount)
-            *returnAlgoCount = 0;
+        *returnAlgoCount = 0;
         rocblaslt::Debug::Instance().markerStop();
         return order_status;
     }
@@ -1277,11 +1323,25 @@ try
     }
 #endif
 
-    return_status = refuse_row_order(__func__,
-                                     (rocblaslt_matrix_layout)matA,
-                                     (rocblaslt_matrix_layout)matB,
-                                     (rocblaslt_matrix_layout)matC,
-                                     (rocblaslt_matrix_layout)matD);
+    if(matmul_arguments_present(handle,
+                                matmul_descr,
+                                alpha,
+                                A,
+                                matA,
+                                B,
+                                matB,
+                                beta,
+                                C,
+                                matC,
+                                D,
+                                matD,
+                                workspace,
+                                workspaceSizeInBytes))
+        return_status = refuse_row_order(__func__,
+                                         (rocblaslt_matrix_layout)matA,
+                                         (rocblaslt_matrix_layout)matB,
+                                         (rocblaslt_matrix_layout)matC,
+                                         (rocblaslt_matrix_layout)matD);
     if(return_status != HIPBLAS_STATUS_SUCCESS)
     {
         rocblaslt::Debug::Instance().markerStop();
