@@ -54,11 +54,11 @@ inline bool norm_check(double normError, roc::hostnumerics::ScalarType type)
     return tolerance > 0.0 && normError < tolerance;
 }
 
-inline bool norm_check(double                                       normError,
-                       roc::hostnumerics::ScalarType                outputType,
-                       hipblasComputeType_t                         computeType,
-                       std::optional<roc::hostnumerics::ScalarType> inputTypeA,
-                       std::optional<roc::hostnumerics::ScalarType> inputTypeB)
+// The norm limit for a GEMM, widened for lower-precision inputs and compute.
+inline double norm_tolerance(roc::hostnumerics::ScalarType                outputType,
+                             hipblasComputeType_t                         computeType,
+                             std::optional<roc::hostnumerics::ScalarType> inputTypeA,
+                             std::optional<roc::hostnumerics::ScalarType> inputTypeB)
 {
     double tolerance = norm_tolerance(outputType);
     if(computeType == HIPBLAS_COMPUTE_32F_FAST_16BF
@@ -68,5 +68,15 @@ inline bool norm_check(double                                       normError,
         tolerance = std::max(tolerance, norm_tolerance(*inputTypeA));
     if(inputTypeB)
         tolerance = std::max(tolerance, norm_tolerance(*inputTypeB));
+    return tolerance;
+}
+
+inline bool norm_check(double                                       normError,
+                       roc::hostnumerics::ScalarType                outputType,
+                       hipblasComputeType_t                         computeType,
+                       std::optional<roc::hostnumerics::ScalarType> inputTypeA,
+                       std::optional<roc::hostnumerics::ScalarType> inputTypeB)
+{
+    const double tolerance = norm_tolerance(outputType, computeType, inputTypeA, inputTypeB);
     return tolerance > 0.0 && normError < tolerance;
 }

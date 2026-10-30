@@ -1935,9 +1935,9 @@ void testing_aux_f16_alpha_null_a_b_ext(const Arguments& arg)
     const int64_t k           = arg.K[0];
     const int64_t batch_count = 1;
 
-    hipblasLtHalf alpha_one(1.0f);
-    hipblasLtHalf alpha_zero(0.0f);
-    hipblasLtHalf beta(1.0f);
+    hipblasLtHalf            alpha_one(1.0f);
+    hipblasLtHalf            alpha_zero(0.0f);
+    hipblasLtHalf            beta(1.0f);
     alignas(4) unsigned char zero_half_poison[4] = {0x00, 0x00, 0x00, 0x3c};
 
     hipblasLtHandle_t handle;
@@ -1949,7 +1949,7 @@ void testing_aux_f16_alpha_null_a_b_ext(const Arguments& arg)
     CHECK_HIP_ERROR(hipMalloc(&d_d, m * n * batch_count * sizeof(hipblasLtHalf)));
 
     auto set_problem = [&](const void* alpha) {
-        hipblaslt_ext::Gemm gemm(handle,
+        hipblaslt_ext::Gemm         gemm(handle,
                                  HIPBLAS_OP_N,
                                  HIPBLAS_OP_T,
                                  HIP_R_16F,
@@ -2000,7 +2000,7 @@ void testing_aux_c32_alpha_null_a_b_ext(const Arguments& arg)
     CHECK_HIP_ERROR(hipMalloc(&d_d, m * n * batch_count * sizeof(hipblaslt_complex_float)));
 
     auto set_problem = [&](const void* alpha) {
-        hipblaslt_ext::Gemm gemm(handle,
+        hipblaslt_ext::Gemm         gemm(handle,
                                  HIPBLAS_OP_N,
                                  HIPBLAS_OP_N,
                                  HIP_C_32F,

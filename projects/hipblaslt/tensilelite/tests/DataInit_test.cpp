@@ -1542,6 +1542,74 @@ TEST(TensileMxGenerationTranslation, NonMxSwitchUsesCoordinatedBytesForBothOpera
     }
 }
 
+// 2D MX tiles: each operand's canonical scales are the generated per-row scales tiled along
+// the free dimension, with their exponents varied because data and scales are random.
+TEST(TensileMxGenerationTranslation, FreeTileScalesAreTiledAndVaried)
+{
+    using namespace TensileLite::Client;
+    using namespace roc::hostnumerics;
+    constexpr size_t mxBlock     = 32;
+    constexpr size_t mxBlockFree = 32;
+
+    auto args = makeMinimalClientArgs(0);
+    setOption(args, "problem-size", std::vector<std::vector<size_t>>{{80, 64, 1, 64}});
+    setOption(args, "mx-data-generator", 1);
+    setOption(args, "init-seed", 17u);
+    for(const char* name : {"mx-a-block", "mx-b-block"})
+        setOption(args, name, static_cast<int>(mxBlock));
+    for(const char* name : {"mx-a-free-block", "mx-b-free-block"})
+        setOption(args, name, static_cast<int>(mxBlockFree));
+    for(const char* name : {"init-a", "init-b", "init-mx-a", "init-mx-b"})
+        setOption(args, name, InitMode::Random);
+    ClientProblemFactory factory(args);
+    const auto& problem = dynamic_cast<const ContractionProblemGemm&>(*factory.problems().front());
+    ASSERT_EQ(problem.mxBlockFreeA(), mxBlockFree);
+    DataInitialization dataInit(args, factory);
+    const auto         inputs = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+        dataInit.prepareCPUInputs(problem));
+    ASSERT_NE(inputs, nullptr);
+
+    for(bool matrixA : {true, false})
+    {
+        const auto&  descriptor      = matrixA ? problem.a() : problem.b();
+        const auto&  scaleDescriptor = matrixA ? problem.mxsa() : problem.mxsb();
+        const size_t boundIndex
+            = matrixA ? problem.boundIndices()[0].a : problem.boundIndices()[0].b;
+        const size_t freeIndex
+            = matrixA ? problem.freeIndicesA()[0].i : problem.freeIndicesB()[0].i;
+        const bool   kFast    = boundIndex == 0;
+        const size_t freeAxis = kFast ? 0 : 1;
+        const auto   generated
+            = dt::generateMxData(rocisa::DataType::Float8,
+                                 rocisa::DataType::E8,
+                                 Shape{descriptor.sizes()[0], descriptor.sizes()[1]},
+                                 descriptor.strides()[1],
+                                 kFast ? 0 : 1,
+                                 mxBlock,
+                                 InitMode::Random,
+                                 InitMode::Random,
+                                 17 + stableDataInitializationStream(descriptor.getName()),
+                                 false);
+        const auto tiled
+            = dt::tileMxScalesAlongFreeDimension(generated.scales, freeAxis, mxBlockFree);
+        const auto expected = dt::varyMxScaleTiles(tiled, freeAxis);
+        ASSERT_NE(mxScaleBytes(expected), mxScaleBytes(tiled));
+        const Shape paddedShape{
+            kFast ? scaleDescriptor.sizes()[freeIndex] : scaleDescriptor.sizes()[boundIndex],
+            kFast ? scaleDescriptor.sizes()[boundIndex] : scaleDescriptor.sizes()[freeIndex]};
+        ASSERT_EQ(expected.shape()[freeAxis], paddedShape[freeAxis]);
+        const auto observed = Tensor::copyEncodedBackingStorage(
+            toHostNumericsScalarType(rocisa::DataType::E8),
+            Layout::contiguousLastDimensionFastest(paddedShape),
+            std::span<const std::byte>(
+                static_cast<const std::byte*>(matrixA ? inputs->mxsa : inputs->mxsb),
+                scaleDescriptor.totalAllocatedBytes()));
+        const auto unpadded = observed.shareStorageWithLayout(
+            Layout(expected.shape(), {static_cast<ptrdiff_t>(paddedShape[1]), 1}, 0));
+        EXPECT_EQ(mxScaleBytes(expected), mxScaleBytes(unpadded)) << (matrixA ? "A" : "B");
+    }
+}
+
 TEST(TensileMxGenerationTranslation, IndependentSwitchPreservesDataScalePatternsAndPadding)
 {
     using namespace TensileLite::Client;

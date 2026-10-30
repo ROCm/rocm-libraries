@@ -209,6 +209,15 @@ void swizzle_tensor_type(HipHostBuffer&       dst,
     }
 }
 
+// -1 inherits the handle. A value on the test argument is this problem's request
+// and wins over the bench-wide CLI knob.
+inline int32_t resolved_uniform_summation_order(const Arguments& arg)
+{
+    if(arg.uniform_summation_order >= 0)
+        return arg.uniform_summation_order;
+    return hipblaslt_bench_options::uniform_summation_order();
+}
+
 void testing_matmul_bad_arg(const Arguments& arg)
 {
     const int64_t M = 128;
@@ -4074,6 +4083,20 @@ void testing_matmul_with_bias(const Arguments&                                  
         const auto validationCases = makeValidationCases(allCloseTolerances);
         auto       summary
             = hipblaslt::hostnumerics::validateMatmulOutputs(validationOptions, validationCases);
+        // Each failed check of D counts toward hipblaslt-bench --verify_strict.
+        for(const auto& failure : summary.outputCheckFailures)
+        {
+            using Kind = hipblaslt::hostnumerics::MatmulOutputCheckFailure::Kind;
+            hipblaslt_bench_options::verification_failures()++;
+            if(failure.kind == Kind::Norm)
+                hipblaslt_cerr << "norm check failed for D of gemm " << failure.gemm << ": batch "
+                               << failure.batch << " has norm_error " << failure.error
+                               << ", at or above the GEMM limit of " << failure.limit << std::endl;
+            else if(failure.kind == Kind::NormUnavailable)
+                hipblaslt_cerr << "norm check of D of gemm " << failure.gemm
+                               << " not done: no norm limit for " << hip_datatype_to_string(To)
+                               << ", so D was not verified" << std::endl;
+        }
         if(summary.allCloseFailure)
             hipblaslt_cerr << "Allclose check failed: "
                            << hipblaslt::hostnumerics::formatAllCloseFailure(
@@ -4766,6 +4789,8 @@ void testing_matmul_with_bias(const Arguments&                                  
             if(placedWorkspace)
                 workspacePtr
                     = placedWorkspace->straddle(heuristicResult[sol].workspaceSize, workspace_size);
+            if(verifiesOutputs && !firstProblem.cEqualsD)
+                fillOutputsWithSentinel();
             if((arg.unit_check || arg.norm_check || arg.allclose_check) && firstProblem.cEqualsD)
             {
                 if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
