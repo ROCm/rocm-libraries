@@ -143,10 +143,8 @@ cuDNN backend descriptor C API that upstream's builders call is not provided (se
 NVIDIA's legacy samples and PyTorch's v0.x consumers name are declared, less that API; code that names
 any other cuDNN C identifier does not compile. The legacy v7-style C API (`cudnnConvolutionForward`,
 `cudnnSetTensorNdDescriptor`, …) is not provided. PyTorch's `ATen/cudnn/Descriptors.h` wraps that API,
-and PyTorch's `Conv_v8.cpp` and quantized convolution include it, so they do not compile unmodified. The
-[PyTorch compile probe](../tests/cudnn_pytorch_compile/pytorch_compile_probe.py) compiles PyTorch's v0.x
-consumers against a copy of `Descriptors.h` cut before its v7 wrappers, with `ATen/cudnn/Handle.h`
-replaced by the hipDNN integration header.
+and PyTorch's `Conv_v8.cpp` and quantized convolution include it, so they do not compile unmodified.
+Building PyTorch against the shim is tested in TheRock's PyTorch CI, not in this repository.
 
 ### Backend descriptor C API
 

@@ -71,7 +71,6 @@ test_categories:
       # Build tree only, with HIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON; see
       # frontend/tests/CMakeLists.txt.
       - "hipdnn_cudnn_v8_extractor_tests"
-      - "hipdnn_pytorch_compile_probe_tests"
 
   integration:
     description: "Current hipDNN integration-check coverage"

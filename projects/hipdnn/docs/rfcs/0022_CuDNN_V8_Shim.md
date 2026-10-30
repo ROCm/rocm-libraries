@@ -4,10 +4,10 @@
 - **Status**: In progress
 - **Status notes**: The v0.x builders, their `detail/v8` core and the C types, `cudnnBackendExecute`
   and `cudnnGetLastErrorString` ship in `frontend/include/hipdnn_compatibility/cudnn/` behind
-  `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` (default `OFF`, #13970), with v8 GPU samples, the legacy-sample
-  corpus and a local PyTorch compile probe. The backend descriptor C API is not provided, no PyTorch
-  build runs on the shim end to end, and CI does not yet run the matmul, layer-norm and resample
-  samples numerically (see the Roadmap).
+  `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` (default `OFF`, #13970), with v8 GPU samples and the
+  legacy-sample corpus. The backend descriptor C API is not provided. Building PyTorch against the shim
+  is left to TheRock's PyTorch CI, and CI does not yet run the matmul, layer-norm and resample samples
+  numerically (see the Roadmap).
 - **Last verified**: 2026-10-30 against `develop` (d730d16216b)
 - **Follows**: [RFC 0012: cuDNN shim for hipDNN](./0012_CuDNN_Shim.md) §9
 - **Amends**: RFC 0012 §1 ("Not"), §4.2 (v9-only translation units), §4.3 (aliasing of
@@ -417,9 +417,8 @@ runs no heuristics and needs no GPU.
 | Upstream drift | Pin `static_assert`; re-diff in RFC 0012 §6.1's quarterly upstream review, guided by the Reference §2.6 member list |
 | `hipdnn_frontend` internals change | Same tree and version; GPU-free lowering tests catch breakage |
 | Maintenance of ~7.7k ported lines and ~7k of core and type mapping | Same owner as the RFC 0012 shim |
-| PyTorch compile check passes on empty files (PyTorch's ROCm build compiles the cuDNN code out) | The probe forces `AT_CUDNN_ENABLED()` on in the PyTorch tree's own hipified files, and every compiled file must define a canary, so a body preprocessed out fails |
+| PyTorch's v0.x consumers stop compiling against the shim | TheRock's PyTorch CI builds PyTorch against the shim; this repository pins the PyTorch-facing surface with compile-only unit tests (`TestCudnnShimV8Tu`, also as C++20 in `hipdnn_frontend_cudnn_v8_tu_cpp20`) |
 | Corpus failures surface only in TheRock CI | TheRock builds hipDNN with the shim on and runs the v9 and legacy corpus on its test families; the superbuild CI does not run the corpus |
-| PyTorch compile check needs a PyTorch ROCm build | The check is local; the PyTorch-surface unit test also compiles as C++20 in CI (`hipdnn_frontend_cudnn_v8_tu_cpp20`) |
 
 ## 6. Execution Plan
 
@@ -437,7 +436,7 @@ Each phase builds and is tested on its own. Each adds its own `KNOWN_DIVERGENCES
 | 7 | Builders: heuristics, plans, filters, errata, cache, find / get plan |
 | 8 | GPU samples and overhead measurement |
 | 9 | Legacy-samples corpus harness |
-| 10 | PyTorch compile check |
+| 10 | PyTorch compile check (later removed: TheRock's PyTorch CI covers it) |
 | 11 | Docs and final validation |
 | 12 | Core extracted from the emulated C API into `detail/v8`, no behavior change |
 | 13 | Builder-level tests for every rule, passing on the emulated C API |
@@ -459,7 +458,7 @@ Each phase builds and is tested on its own. Each adds its own `KNOWN_DIVERGENCES
 | GPU samples (`samples/cudnn_shim/*V8.cpp`; MIOpen, hipBLASLt, hip-kernel) | Numerical results against a CPU reference for conv fprop / dgrad / wgrad, conv + bias + ReLU, pointwise ReLU, matmul + bias + activation, batch norm forward training and backward, layer norm forward and backward, and resample forward and backward. Each test fails when fewer variants run than its `--require-ran` floor or when a variant named by `--require-variant` (the fp32 NCHW variants of every sample with a non-zero floor) does not run. Variants with no engine are skipped: matmul (hipBLASLt only; none on gfx115x under Windows), layer norm and resample (hip-kernel-provider only), `CUDNN_CONVOLUTION` mode and asymmetric padding (MIOpen rejects them). The reduction sample is built but no provider runs reduction, so it always reports Skipped. TheRock's hipdnn-samples job loads only the MIOpen provider, so CI skips matmul, layer norm and resample (their floors are 0) until a TheRock change that loads the hipBLASLt and hip-kernel providers reaches this repository's pin; until then manual gfx942 runs cover them. Overhead (§2) is reported under ctest label `perf`. The v8 samples reject `--engine-id` and `--engine-name` |
 | v9 sample corpus | Existing v9 behavior unchanged |
 | NVIDIA legacy samples | Source compatibility; each case is judged against its manifest tier: `RUN_CLEAN`, `XFAIL_RUN`, or `VACUOUS`, which must run without crashing and is reported as skipped ([Reference §5](./0022_CuDNN_V8_Shim_Reference.md#5-legacy-sample-catalogue)). The corpus is pinned by commit: configure fails with E22 when a git checkout is at any other commit; a supplied corpus that is not a readable git checkout only warns, and the E20 version check still applies |
-| PyTorch compile check | `Conv_v8.cpp` and the quantized cuDNN files compile with the PyTorch tree's flags, `AT_CUDNN_ENABLED()` forced on and two header substitutions: `ATen/cudnn/Descriptors.h` truncated before its v7 descriptor wrappers (they need the v7 C API the shim lacks) and `ATen/cudnn/Handle.h` replaced by the hipDNN integration header |
+| PyTorch | Not tested here: TheRock's PyTorch CI builds PyTorch against the shim. The PyTorch-facing surface is pinned by the compile-only `TestCudnnShimV8Tu` |
 
 ## 8. Future Considerations
 
