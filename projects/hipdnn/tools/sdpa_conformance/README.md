@@ -66,6 +66,30 @@ backward or varlen cases, whose backward consumes the forward's Stats.
 | `pair/<fwd>__<bwd>/` | both | backward cases: every stats-capable forward that did not serve the case against every backward engine |
 | `refwd/discovery/`, `refwd/<bwd>/` | `HIPDNN_FWD_ENGINE=reference` | backward cases whose forward failed or crashed in any pass: the backward unpinned, then each backward engine; the pair passes then cover them too |
 
+`--exhaustive` tests every kernel (candidate) of an engine, not only the one it picks. Candidates come from
+`hipdnn_bench enumerate --graph <json> --engine-name <engine> --plugin-dir <prefix>/lib/hipdnn_plugins/engines`
+(`<prefix>/bin/hipdnn_bench`, paged, cached per problem and engine; no hipDNN API is added). Pass 1 records,
+per case and engine, the candidate count in `fwd_candidate` / `bwd_candidate` (a JSON object `{engine: count |
+reason}`; the reason is hipDNN's message for an engine that cannot enumerate: ASM and any other non-ingestor
+engine, or an ingestor engine whose catalog has ambiguous knob tuples). Under `<out>/cand/`:
+
+| Pass directory | Pins | Cases |
+|---|---|---|
+| `<fwd\|bwd>/<engine>/<k>/` | the engine and `HIPDNN_FWD_CANDIDATE` / `HIPDNN_BWD_CANDIDATE` = `k` | every case whose count exceeds `k`; one pass per `k` up to the largest count any case reported |
+| `<fwd\|bwd>/<engine>/not-enumerable/` | none (no pytest run) | each case where the engine could not enumerate: a `not-enumerable` row with the message |
+
+The runtime builds candidate `k` with `create_execution_plan_ext(engine_id, knob_settings)`; the kernel id the
+backend logs must be the candidate's (a slotted engine's `prep=..|dkdv=..|dq=..` compares by slot), otherwise
+the case is `declined` with `candidate_not_honored`. In a candidate pass the candidate columns hold the pinned
+index. A case whose worker died in pass 1 has no counts and gets no candidate pass; the backward on the
+reference forward is not enumerated.
+With `--all-engines` too (EXTREME) the runner also adds `cand/pair/<fwd>__<bwd>/<i>x<j>/` for backward cases:
+every forward engine against every backward engine of the case (winners included), over every pair of
+candidate indices, and `cand/pair/<fwd>__<bwd>/not-enumerable/` when either engine could not enumerate. The
+cost is the product of the two candidate counts per pair. `--exhaustive` refuses `--fake` and pre-set pins;
+`reconcile.py --engines` reads `cand/` too (`source` `candidate` or `candidate-pair`, plus `fwd_candidate`,
+`bwd_candidate`).
+
 It composes with `--suite`, `--shard`, `--release`, `--workers` and (forward sweep)
 `--fwd-no-stats`; it refuses `--fake` and pre-set engine pins.
 `--nodeids-file PATH` limits pass 1 to the listed node ids; the pinned passes keep their own listings.
@@ -93,7 +117,7 @@ AOTriton's calibration and backend knobs (`USE_ADIFFS_TXT`, `RECORD_ADIFFS_TO`, 
 
 Outputs, in `<out>/` (default `./sdpa_conformance_results/<arch>/<run>/shard-<I>of<N>/`):
 `collected.txt` (every collected node id) and `results.csv` (`nodeid,outcome,mode,fwd,bwd,reason,
-fwd_engines,bwd_engines,fwd_kernel,bwd_kernel,fail_side,stage,repro`, flushed per row; the engine
+fwd_engines,bwd_engines,fwd_kernel,bwd_kernel,fail_side,stage,repro,fwd_candidate,bwd_candidate`, flushed per row; the engine
 lists hold the applicable engines in heuristic rank order, `;`-joined, for a direction hipDNN planned
 unpinned; `*_kernel` is the ingestor kernel id; `fail_side` is `fwd` or `bwd` for a `fail` (the vendored
 forward comparison, a forward case or a backward that never ran count as `fwd`) and the direction in
@@ -108,9 +132,9 @@ python aotriton/reconcile.py <arch>/<run> --out <arch>/<run>/reconciled.csv
 backward). A `ref-fwd` pass proves the backward only.
 
 For an `--all-engines` run, `reconcile.py <arch>/<run> --engines <out>` writes `<out>/engines.csv`
-(`nodeid,direction,engine,source,outcome,reason,pin_fwd,pin_bwd,kernel,stage`; `source` is `heuristic`
+(`nodeid,direction,engine,source,outcome,reason,pin_fwd,pin_bwd,kernel,stage,fwd_candidate,bwd_candidate`; `source` is `heuristic`
 for the engine that served (or, for a crash, was in flight in) the case in the normal run, then `pinned`,
-`pair`, `refwd` or `discovery` per pass). A case a pass listed but never recorded is a `not-run` row of
+`pair`, `refwd`, `discovery`, `candidate` or `candidate-pair` per pass). A case a pass listed but never recorded is a `not-run` row of
 that pass. It prints counts per direction and engine, per pass the cases expected against recorded, and
 every engine of `<out>/engine-inventory.txt` (written by the job, one name per line) with its counts,
 zeros included, and for an engine no case reached the first decline reasons the workers logged under
