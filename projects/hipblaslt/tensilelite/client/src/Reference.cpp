@@ -2191,12 +2191,11 @@ namespace TensileLite
                                          actArgs);
                 }
 
-                omp_set_num_threads(MAX_OMP_THREADS);
-#pragma omp critical
+                if constexpr(notCmplxAmaxD)
                 {
-                    if constexpr(notCmplxAmaxD)
+                    if(problem.outputAmaxD())
                     {
-                        if(problem.outputAmaxD())
+#pragma omp critical
                         {
                             Accumulator absResultD
                                 = (resultD > zero) ? resultD : resultD * negOne;
