@@ -414,7 +414,7 @@ public:
 
 private:
     /// H5: every one of the grid's `cus` workgroups must be resident at once, so the
-    /// loaded function must fit at least one workgroup per CU. Declines (NOT_SUPPORTED)
+    /// loaded function must fit at least one workgroup per CU. Declines (NOT_APPLICABLE)
     /// rather than launching a grid that would hang on its barrier.
     static void requireCoResident(const IngestorKernelCode& code,
                                   const MatchContext& context,
@@ -437,7 +437,7 @@ private:
         if(status != hipSuccess || blocksPerCu < 1)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_NOT_SUPPORTED,
+                HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
                 std::string(MEGAKERNEL_ENGINE_NAME) + " declined kernel '" + kernel.name
                     + "' [occupancy]: " + std::to_string(blocksPerCu) + " workgroup(s) of "
                     + std::to_string(threads) + " threads and " + std::to_string(lds)
