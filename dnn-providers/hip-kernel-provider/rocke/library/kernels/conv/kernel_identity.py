@@ -767,6 +767,7 @@ DIRECT_PROBLEM_CAPABILITY_ATTRS = (
     "dil_h",
     "dil_w",
     "PAD",
+    "pad_w",
     "pH",
     "pW",
 )
