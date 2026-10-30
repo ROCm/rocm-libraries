@@ -38,47 +38,55 @@ namespace rocwmma
 {
     namespace detail
     {
-        using WmmaGfx11Ops = wmma_op_list<wmma_f16_16x16x16_f16_gfx11,
-                                          wmma_f32_16x16x16_f16_gfx11,
-                                          wmma_f32_16x16x16_bf16_gfx11,
-                                          wmma_bf16_16x16x16_bf16_gfx11,
-                                          wmma_i32_16x16x16_i8_gfx11>;
+        // clang-format off
+        using WmmaGfx11Ops = wmma_op_list<
+            wmma_f16_16x16x16_f16_gfx11,
+            wmma_f32_16x16x16_f16_gfx11,
+            wmma_f32_16x16x16_bf16_gfx11,
+            wmma_bf16_16x16x16_bf16_gfx11,
+            wmma_i32_16x16x16_i8_gfx11
+            >;
 
         // gfx117x and gfx12
-        using WmmaGfx12Ops = wmma_op_list<wmma_f32_16x16x16_f16_gfx12,
-                                          wmma_i32_16x16x16_u8_gfx12,
-                                          wmma_f16_16x16x16_f16_gfx12,
-                                          wmma_f32_16x16x16_bf16_gfx12,
-                                          wmma_bf16_16x16x16_bf16_gfx12,
-                                          wmma_i32_16x16x16_i8_gfx12,
-                                          wmma_f32_16x16x16_fp8_fp8_gfx12,
-                                          wmma_f32_16x16x16_bf8_bf8_gfx12,
-                                          wmma_f32_16x16x16_fp8_bf8_gfx12,
-                                          wmma_f32_16x16x16_bf8_fp8_gfx12>;
+        using WmmaGfx12Ops = wmma_op_list<
+            wmma_f32_16x16x16_f16_gfx12,
+            wmma_i32_16x16x16_u8_gfx12,
+            wmma_f16_16x16x16_f16_gfx12,
+            wmma_f32_16x16x16_bf16_gfx12,
+            wmma_bf16_16x16x16_bf16_gfx12,
+            wmma_i32_16x16x16_i8_gfx12,
+            wmma_f32_16x16x16_fp8_fp8_gfx12,
+            wmma_f32_16x16x16_bf8_bf8_gfx12,
+            wmma_f32_16x16x16_fp8_bf8_gfx12,
+            wmma_f32_16x16x16_bf8_fp8_gfx12
+            >;
 
-        using WmmaGfx1250Ops = wmma_op_list<wmma_f32_16x16x32_f16_gfx1250,
-                                            wmma_bf16_16x16x32_bf16_gfx1250,
-                                            wmma_f16_16x16x32_f16_gfx1250,
-                                            wmma_f32_16x16x32_bf16_gfx1250,
-                                            wmma_i32_16x16x64_i8_gfx1250,
-                                            wmma_i32_16x16x64_u8_gfx1250,
-                                            wmma_f32_16x16x4_f32_gfx1250,
-                                            wmma_f32_16x16x64_fp8_fp8_gfx1250,
-                                            wmma_f32_16x16x128_fp8_fp8_gfx1250,
-                                            wmma_f16_16x16x64_fp8_fp8_gfx1250,
-                                            wmma_f16_16x16x128_fp8_fp8_gfx1250,
-                                            wmma_f32_16x16x64_bf8_bf8_gfx1250,
-                                            wmma_f32_16x16x128_bf8_bf8_gfx1250,
-                                            wmma_f16_16x16x64_bf8_bf8_gfx1250,
-                                            wmma_f16_16x16x128_bf8_bf8_gfx1250,
-                                            wmma_f32_16x16x64_fp8_bf8_gfx1250,
-                                            wmma_f32_16x16x128_fp8_bf8_gfx1250,
-                                            wmma_f16_16x16x64_fp8_bf8_gfx1250,
-                                            wmma_f16_16x16x128_fp8_bf8_gfx1250,
-                                            wmma_f32_16x16x64_bf8_fp8_gfx1250,
-                                            wmma_f32_16x16x128_bf8_fp8_gfx1250,
-                                            wmma_f16_16x16x64_bf8_fp8_gfx1250,
-                                            wmma_f16_16x16x128_bf8_fp8_gfx1250>;
+        using WmmaGfx1250Ops = wmma_op_list<
+            wmma_f32_16x16x32_f16_gfx1250,
+            wmma_bf16_16x16x32_bf16_gfx1250,
+            wmma_f16_16x16x32_f16_gfx1250,
+            wmma_f32_16x16x32_bf16_gfx1250,
+            wmma_i32_16x16x64_i8_gfx1250,
+            wmma_i32_16x16x64_u8_gfx1250,
+            wmma_f32_16x16x4_f32_gfx1250,
+            wmma_f32_16x16x64_fp8_fp8_gfx1250,
+            wmma_f32_16x16x128_fp8_fp8_gfx1250,
+            wmma_f16_16x16x64_fp8_fp8_gfx1250,
+            wmma_f16_16x16x128_fp8_fp8_gfx1250,
+            wmma_f32_16x16x64_bf8_bf8_gfx1250,
+            wmma_f32_16x16x128_bf8_bf8_gfx1250,
+            wmma_f16_16x16x64_bf8_bf8_gfx1250,
+            wmma_f16_16x16x128_bf8_bf8_gfx1250,
+            wmma_f32_16x16x64_fp8_bf8_gfx1250,
+            wmma_f32_16x16x128_fp8_bf8_gfx1250,
+            wmma_f16_16x16x64_fp8_bf8_gfx1250,
+            wmma_f16_16x16x128_fp8_bf8_gfx1250,
+            wmma_f32_16x16x64_bf8_fp8_gfx1250,
+            wmma_f32_16x16x128_bf8_fp8_gfx1250,
+            wmma_f16_16x16x64_bf8_fp8_gfx1250,
+            wmma_f16_16x16x128_bf8_fp8_gfx1250
+            >;
+        // clang-format on
 
         template <uint32_t TargetId>
         struct wmma_target_ops
