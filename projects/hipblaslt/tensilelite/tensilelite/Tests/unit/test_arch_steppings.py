@@ -4410,9 +4410,51 @@ def test_config_rejects_two_entries_settling_the_detected_arch_differently():
     # Order decided the mode before: one spelling tuned with replay on, the
     # reverse with it off, and neither said so.
     for cfg in (f"{GFX1250}:xnack-;{GFX1250}", f"{GFX1250};{GFX1250}:xnack-"):
-        with pytest.raises(ValueError, match="settle its capabilities differently"):
+        with pytest.raises(ValueError, match="different xnack modes"):
             archNamesFromConfig(cfg, isaList, [GFX1250])
     # Two spellings of one mode are not a conflict; a predicate is not a mode.
     assert archNamesFromConfig(
         f"{GFX1250}:xnack-;{GFX1250}:xnack-[cu=64]", isaList, [GFX1250]
     ) == [GFX1250 + ":xnack-[cu=64]"]
+
+
+def test_all_absorbs_a_qualifier_that_changes_nothing():
+    """`all` already covers the architecture; a mode it does not alter is noise."""
+    base = expandAllArchitectures(["all"])
+    for spec in ("gfx942:xnack+", "gfx942:xnack-", GFX1250_STRICT):
+        assert expandAllArchitectures(["all", spec]) == base, spec
+
+
+def test_all_keeps_a_qualifier_that_selects_an_override():
+    """...and one that does alter it is a different build, not a spelling.
+
+    Absorbed, `all;gfx1250:xnack-` quietly built gfx1250 with replay on -- the
+    opposite of what the second entry asked for. Kept, it reaches the guard that
+    refuses one architecture under two capability sets.
+    """
+    expanded = expandAllArchitectures(["all", GFX1250 + ":xnack-"])
+    assert GFX1250 + ":xnack-" in expanded
+    assert GFX1250 in expanded
+
+    iim = {ISA_GFX1250: IsaInfo({}, {"EnableXnackReplay": True}, {}, {})}
+    with pytest.raises(ValueError, match="share ISA"):
+        applyArchCapOverrides(iim, [a for a in expanded if a.startswith(GFX1250)])
+
+
+def test_config_allows_two_entries_with_the_same_effective_capabilities():
+    """Only a differing xnack *mode* is a conflict, not a differing spelling.
+
+    gfx942:xnack+ and gfx942:xnack- select no capability override at all, so a
+    capability comparison would call them equivalent -- but the compiler takes
+    them as distinct target IDs and the helper kernels differ, so picking one by
+    position is the thing being refused.
+    """
+    from tensilelite.Tensile import archNamesFromConfig
+
+    isa942 = [gfxToIsa("gfx942")]
+    with pytest.raises(ValueError, match="different xnack modes"):
+        archNamesFromConfig("gfx942:xnack+;gfx942:xnack-", isa942, ["gfx942"])
+    # One mode named twice is not a conflict, however it is spelled.
+    assert archNamesFromConfig(
+        "gfx942:xnack+;gfx942:xnack+[cu=64]", isa942, ["gfx942"]
+    ) == ["gfx942:xnack+[cu=64]"]
