@@ -75,6 +75,14 @@ mode 5/tm5r experiment remains disabled unless `CK_TILE_FMHA_PAIRED_XCC_ORDER`
 is explicitly defined to a nonzero value. Its eight-XCC mapping assumptions
 must be checked on the target hardware before enabling it.
 
+The same batch-local order applies to generic `qr_tdm`. The
+`test_ck_tile_fmha_qr_tdm_bhsd_window_bf16` and `_fp16` suites check every output
+element and requested LSE row for square BHSD finite-left windows. They cover
+generic D32/D64/D96/D128/D160/D192, scheduled D64 with N64 and N128, and scheduled
+D128 with N128, with multiple window sizes, LSE states, and input seeds. This
+order changes workgroup traversal, so its timing benefit depends on launch
+supply and cache reuse.
+
 The implementation separates tile selection, data operations, and placement:
 
 ```text
