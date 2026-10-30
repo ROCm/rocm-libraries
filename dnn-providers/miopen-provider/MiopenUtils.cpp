@@ -3,8 +3,7 @@
 
 #include "MiopenUtils.hpp"
 
-#include <algorithm>
-#include <cctype>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace miopen_plugin::miopen_utils
 {
@@ -205,12 +204,10 @@ void setBenchmarkingFindMode(miopenConvolutionDescriptor_t convDescriptor, bool 
 
 bool envFindEnforceIsSet()
 {
-    std::string value = hipdnn_data_sdk::utilities::getEnv("MIOPEN_FIND_ENFORCE");
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-        return static_cast<char>(std::toupper(c));
-    });
-    if(value == "DB_UPDATE" || value == "SEARCH" || value == "SEARCH_DB_UPDATE"
-       || value == "DB_CLEAN")
+    const std::string value = hipdnn_data_sdk::utilities::toLower(
+        hipdnn_data_sdk::utilities::getEnv("MIOPEN_FIND_ENFORCE"));
+    if(value == "db_update" || value == "search" || value == "search_db_update"
+       || value == "db_clean")
     {
         return true;
     }
