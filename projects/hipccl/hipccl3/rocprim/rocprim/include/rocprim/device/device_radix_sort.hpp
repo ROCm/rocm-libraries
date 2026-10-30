@@ -798,7 +798,7 @@ hipError_t
     {
         return hipErrorInvalidValue;
     }
-    if constexpr(std::is_signed<Size>::value)
+    if constexpr(::rocprim::is_signed<Size>::value)
     {
         if(size < 0)
         {
