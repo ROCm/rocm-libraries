@@ -421,7 +421,15 @@ class FmhaFwdApiTrait:
             if self.skpad == "t":
                 return "true"
             else:
-                return f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
+                cumulative_q_check = (
+                    "(a.cu_seqlen_q_ptr == nullptr) && "
+                    if self.pipeline_tag == "qr_tdm_sched" and self.bn0 == 128
+                    else ""
+                )
+                return (
+                    cumulative_q_check
+                    + f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
+                )
         elif self.pipeline_tag in [
             "qr_async_trload",
             "qr_async_trload_v3",
@@ -993,6 +1001,8 @@ class FmhaFwdKernel:
             and self.F_tile.F_bn0 == 128
         ):
             constraint = constraint & GFX125_D64_N128_CONSTRAINT
+            if self.F_pipeline.F_mask == "causal":
+                constraint = constraint & GFX125_D64_N128_GENERIC_CAUSAL_CONSTRAINT
         return constraint
 
 
@@ -1596,27 +1606,41 @@ GFX125_QR_TDM_PINGPONG_RANGE = (
     " && a.batch * a.nhead_q >= 2 * static_cast<ck_tile::index_t>(num_cus)"
 )
 
-# D64 N128 qr_tdm_sched is measured for FP16/BF16 batch BSHD only: square lengths that
-# are multiples of 256, contiguous Q/K/V/O (row, head and batch strides), no
-# logical-length pointers, dense or full causal. It is attached to every D64 N128
-# scheduled trait in FmhaFwdKernel.api_trait, so a custom-tune tile cannot bypass it.
+# Paired gfx1250 FP16/BF16 measurements cover both layouts, supported padded strides,
+# rectangular/partial Q and heterogeneous lengths. Keep measured N64 crossovers:
+# K tails, short high-supply BHSD, small Q-only masked BHSD, and narrow/local windows.
+# Group K is a physical total; compare its average with 64-bit multiplication.
+# These are tuning thresholds, not ISA restrictions. Attach them to every N128
+# API trait so custom-tune tiles cannot bypass the same fallback decisions.
 _LL = "static_cast<long long>"
 GFX125_D64_N128_CONSTRAINT = CppConstraint(
-    "!t.is_group_mode && a.seqlen_q == a.seqlen_k && a.seqlen_q % 256 == 0"
-    " && a.seqlen_q_ptr == nullptr && a.cu_seqlen_q_ptr == nullptr"
-    " && a.seqlen_k_ptr == nullptr && a.cu_seqlen_k_ptr == nullptr"
-    f" && {_LL}(a.stride_q) == {_LL}(a.nhead_q) * a.hdim_q && a.nhead_stride_q == a.hdim_q"
-    f" && {_LL}(a.stride_k) == {_LL}(a.nhead_k) * a.hdim_q && a.nhead_stride_k == a.hdim_q"
-    f" && {_LL}(a.stride_v) == {_LL}(a.nhead_k) * a.hdim_v && a.nhead_stride_v == a.hdim_v"
-    f" && {_LL}(a.stride_o) == {_LL}(a.nhead_q) * a.hdim_v && a.nhead_stride_o == a.hdim_v"
-    f" && {_LL}(a.batch_stride_q) == {_LL}(a.seqlen_q) * a.nhead_q * a.hdim_q"
-    f" && {_LL}(a.batch_stride_k) == {_LL}(a.seqlen_k) * a.nhead_k * a.hdim_q"
-    f" && {_LL}(a.batch_stride_v) == {_LL}(a.seqlen_k) * a.nhead_k * a.hdim_v"
-    f" && {_LL}(a.batch_stride_o) == {_LL}(a.seqlen_q) * a.nhead_q * a.hdim_v"
+    "(t.is_group_mode ?"
+    f" (a.batch > 0 && {_LL}(a.seqlen_k) >= {_LL}(1024) * a.batch) :"
+    " (a.seqlen_k > 0 && a.seqlen_k % 128 == 0"
+    " && a.seqlen_q_ptr == nullptr && a.seqlen_k_ptr == nullptr))"
+    " && (!(a.stride_q == a.hdim_q && a.nhead_stride_q > a.hdim_q) ||"
+    " ((t.mask_type == mask_enum::no_mask ?"
+    f" ({_LL}(a.seqlen_k) >= {_LL}(2048) * (t.is_group_mode ? a.batch : 1)"
+    f" || {_LL}(get_num_blocks(128)) <= {_LL}(2) * num_cus) :"
+    " (a.max_seqlen_q >= 2048 || get_num_blocks(128) < num_cus))"
+    " && (t.mask_type == mask_enum::no_mask || a.cu_seqlen_q_ptr == nullptr"
+    " || a.cu_seqlen_k_ptr != nullptr || a.seqlen_k >= 1024)))"
     " && (t.mask_type == mask_enum::no_mask ||"
     " ((t.mask_type == mask_enum::mask_top_left ||"
-    " t.mask_type == mask_enum::mask_bottom_right)"
-    " && a.window_size_left < 0 && a.window_size_right == 0))"
+    " t.mask_type == mask_enum::mask_bottom_right) && a.window_size_right == 0"
+    " && (a.window_size_left < 0 ||"
+    " (!t.is_group_mode && a.seqlen_q == a.seqlen_k && a.window_size_left >= 127"
+    " && a.seqlen_q_ptr == nullptr && a.seqlen_k_ptr == nullptr"
+    " && a.cu_seqlen_q_ptr == nullptr && a.cu_seqlen_k_ptr == nullptr))))"
+)
+
+# GenericAttentionMask causal has a different measured crossover from the
+# simplified mask. Its non-local specialization must not accept finite windows.
+GFX125_D64_N128_GENERIC_CAUSAL_CONSTRAINT = CppConstraint(
+    "a.window_size_left < 0 && a.window_size_right == 0"
+    " && (a.max_seqlen_q >= 8192 ||"
+    " (a.max_seqlen_q >= 4096"
+    f" && {_LL}(get_num_blocks(128)) <= {_LL}(8) * num_cus))"
 )
 
 
@@ -2439,9 +2463,9 @@ def get_fwd_blobs(
             if optdim_list != [-1] and hdim not in optdim_list:
                 continue
             for tile, next_tile in zip(tiles, tiles[1:]):
-                assert next_tile.F_bm0 >= tile.F_bm0, (
-                    "Tiles must be ordered by increasing bm0"
-                )
+                assert (
+                    next_tile.F_bm0 >= tile.F_bm0
+                ), "Tiles must be ordered by increasing bm0"
 
             for tile, pipeline in itertools.product(
                 tiles, factory.get_pipelines(dtype, hdim, hdim_v, receipt, mask_impl)

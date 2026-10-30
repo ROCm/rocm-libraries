@@ -49,15 +49,31 @@ logit uses the existing `qr_tdm` fallback. This runtime pointer is independent
 of the compile-time sink-token flag.
 
 The generated API tries matching scheduled traits first. D64/V64 tries a
-128-by-128 Q/K sequence tile for FP16/BF16 batch attention with contiguous BSHD
-Q/K/V/O, square sequence lengths divisible by 256, no logical sequence-length
-pointers, and dense or full causal masks. This N128 variant uses WMMA-first
-placement. Other D64/V64 configurations retain the 128-by-64 tile and read-first
-placement. Both D64 variants use a compiler minimum-waves-per-EU hint of three.
-The launch API retains the historical `MinBlockPerCu` name; this hint does not
-establish achieved workgroup residency. Aligned batch K lengths use unpadded
-sequence traits; tails and group mode use padded traits. Both D64 widths emit
-these sequence specializations for simplified masks and generic dense/causal masks.
+128-by-128 Q/K sequence tile for FP16/BF16 dense and full causal attention in
+BSHD or BHSD, including rectangular/partial Q and supported padded strides.
+Batch physical K must be positive and divisible by 128; per-sequence batch
+length pointers remain unsupported by this selection, while cumulative Q/K
+metadata selects the padded N128 specialization. Group mode uses padded traits
+and requires average physical K of at least 1024. These are measured tuning
+thresholds rather than ISA restrictions; the runtime contract is enforced on
+every N128 trait, including custom-tune tiles.
+
+BHSD is identified from Q with `stride_q == hdim_q && nhead_stride_q > hdim_q`.
+Short, high-supply BHSD retains N64: dense K below 2048 with more than twice the
+CU count in Q workgroups, or masked Q below 2048 with at least the CU count.
+Masked Q-only cumulative BHSD also retains N64 for K below 1024. Simplified
+finite-left causal can use N128 for square inputs, left at least 127, right zero,
+and no logical-length metadata; narrower or rectangular local windows retain
+N64. Generic causal keeps finite windows on N64 and uses its separately measured
+crossover: max Q at least 8192, or max Q at least 4096 with no more than eight
+times the CU count in Q workgroups. On gfx1250, 256 CUs correspond to 128 WGPs.
+
+N128 uses WMMA-first placement; N64 uses read-first placement. Both D64 variants
+use a compiler minimum-waves-per-EU hint of three. The launch API retains the
+historical `MinBlockPerCu` name; this hint does not establish achieved workgroup
+residency. Both widths emit aligned/padded batch and padded group specializations
+for simplified masks and generic dense/causal masks. N128 cumulative Q explicitly
+rejects unpadded sequence traits; the existing N64 padding contract is retained.
 Generic finite-window N128 candidates are excluded because paired measurements
 regress; their N64 candidates remain available. D64 uses compiler-scheduled
 softmax maximum chains, preserving read counts and stage-tail waits. Generated D64/D128/D192
