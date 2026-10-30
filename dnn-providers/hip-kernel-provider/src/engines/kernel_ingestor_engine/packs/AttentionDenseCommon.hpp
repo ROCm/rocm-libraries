@@ -178,9 +178,6 @@ struct AttentionDenseArch
     /// The engine name its decline lines carry.
     std::string_view engineName;
     AttentionDenseTokens tokens;
-    /// Whether kernelMatches compares the candidate's num_query_heads/num_kv_heads with the
-    /// graph's: true where the catalog lists each head configuration as its own entry.
-    bool matchesHeadCounts = false;
     /// Whether (blockM, blockN) is a tile the kernel is built with at headSize. Total over
     /// every int64 triple.
     bool (*isSupportedTile)(int64_t headSize, int64_t blockM, int64_t blockN) = nullptr;

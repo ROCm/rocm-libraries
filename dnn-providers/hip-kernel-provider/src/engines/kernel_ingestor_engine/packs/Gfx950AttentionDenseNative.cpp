@@ -82,7 +82,6 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     // asks for one. Bound anyway, so a variant built with a window is never matched.
     arch.tokens.slidingWindow = "gfx950_attention_dense.sliding_window";
     arch.tokens.scaleBits = "gfx950_attention_dense.scale_bits";
-    arch.matchesHeadCounts = true;
     arch.isSupportedTile = &isSupportedGfx950AttentionDenseTile;
     arch.geometry = &gfx950Geometry;
     // No catalog variant carries a non-zero sliding_window, so a windowed mask has no
