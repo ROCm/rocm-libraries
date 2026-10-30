@@ -13,10 +13,13 @@ import pytest
 from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 
 ARCH = "gfx950"
+# Every KDA auto case: (state_dtype, fused, spec_id, tile). Each case runs one
+# configuration at every batch, so one batch per case is enough.
 CASES = (
-    (1, "kda_nw4_wtk16_bpv4", (4, 16, 4)),
-    (8, "kda_nw1_wtk16_bpv4", (1, 16, 4)),
-    (32, "kda_nw2_wtk16_bpv1", (2, 16, 1)),
+    ("bf16", False, "kda_nw1_wtk16_bpv8", (1, 16, 8)),
+    ("f32", False, "kda_nw1_wtk16_bpv16", (1, 16, 16)),
+    ("bf16", True, "kda_nw4_wtk8_bpv1", (4, 8, 1)),
+    ("f32", True, "kda_nw4_wtk8_bpv1", (4, 8, 1)),
 )
 
 
@@ -60,18 +63,23 @@ def test_scratch_gate_rejects_nonzero_metadata():
         )
 
 
-@pytest.mark.parametrize("batch,expected_spec_id,expected_tile", CASES)
-def test_dispatched_kda_tile_is_scratch_free(batch, expected_spec_id, expected_tile):
-    """Compile each production candidate and reject register spills."""
+@pytest.mark.parametrize("state_dtype,fused,expected_spec_id,expected_tile", CASES)
+def test_dispatched_kda_tile_is_scratch_free(
+    state_dtype, fused, expected_spec_id, expected_tile
+):
+    """Compile each production configuration and reject register spills."""
     result = dispatch_gdn_decode(
         GdnDecodeRequest(
-            batch=batch,
+            batch=8,
             arch=ARCH,
             gate_kind="kda",
             num_k_heads=32,
             num_v_heads=32,
             head_k_dim=128,
             head_v_dim=128,
+            state_dtype=state_dtype,
+            fuse_conv=fused,
+            fuse_out_norm=fused,
         )
     )
     spec = result.spec.kernel_spec

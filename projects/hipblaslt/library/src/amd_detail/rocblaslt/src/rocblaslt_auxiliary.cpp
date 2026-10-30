@@ -2199,7 +2199,7 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                 {
                     int32_t requested = 0;
                     memcpy(&requested, buf, sizeof(int32_t));
-                    if(requested < 0 || requested > 1)
+                    if(requested < -1 || requested > 1)
                     {
                         log_error(__func__,
                                   "invalid uniform_summation_order value",
@@ -3376,7 +3376,7 @@ rocblaslt_status
                                      std::shared_ptr<void>  gemmData,
                                      const size_t           maxWorkspaceBytes,
                                      const int32_t          streamKTileSchedulingMode,
-                                     const bool             uniformSummationOrder,
+                                     const int32_t          uniformSummationOrder,
                                      const int              requestedAlgoCount,
                                      std::vector<rocblaslt_matmul_heuristic_result>& results)
 {
@@ -3399,10 +3399,10 @@ rocblaslt_status
     // tensile_host.cpp (its body needs the TensileDataGemm /
     // TensileDataGroupedGemm types).
     applyStreamKTileSchedulingMode(gemmData, gemmType, streamKTileSchedulingMode);
-    applyUniformSummationOrder(gemmData,
-                               gemmType,
-                               uniformSummationOrder
-                                   || (handle && handle->uniform_summation_order));
+    int32_t uniformSummationOrderEnabled = handle ? handle->uniform_summation_order : 1;
+    if(uniformSummationOrder != -1)
+        uniformSummationOrderEnabled = uniformSummationOrder;
+    applyUniformSummationOrder(gemmData, gemmType, uniformSummationOrderEnabled);
     rocblaslt_status status = rocblaslt_status_success;
     try
     {
