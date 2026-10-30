@@ -384,7 +384,7 @@ struct KernelSpec
     /// The launch names the record's `sources` carries; the engine needs exactly `segment`
     /// and `reduce`. Empty is a single-launch record.
     std::vector<std::string> launches = {"segment", "reduce"};
-    /// The descriptor id's final byte. Only the ranking cases vary it.
+    /// The descriptor id's final byte. No case varies it; the ranking cases vary numSegments.
     unsigned idByte = 0xa1;
 };
 

@@ -128,9 +128,8 @@ enumerate:
   candidates: dispatch.attention:attention_candidates
   request: dispatch.attention.common:AttentionRequest
   # Three KV split counts at a one-page KV tile, one pinned candidate each: 16 (the cell's
-  # default, as on the branch's first catalog), then 32 and 64 in `also`. A count only
-  # splits the KV loop, so any computes the same output; variant reduction across
-  # num_segments picks per cell (agreed at the knob checkpoint, 2026-10-22).
+  # default), then 32 and 64 in `also`. A count only splits the KV loop, so every count
+  # computes the same output; variant reduction across num_segments picks per cell.
   pin: {algorithm: unified_tuning, spec_id: gfx950_u3d_splitkv_seg16_t1xb}
   # Request fields every cell shares. seqlen_q 1 is what makes these decode-grid kernels;
   # batch and seqlen_k are a reference shape only (they bake num_seqs 1, which the decode

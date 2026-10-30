@@ -211,22 +211,22 @@ TEST(TestGfx950AttentionUnified3DMatchers, DeclinesOperandsThatDisagreeInShapeOr
 /// The kernels are built with 32-bit K/V byte addressing and bound their buffer loads at
 /// 0x7FFF0000 bytes: past that, loads return zeros. The default decode graph's Sq is 1, so only
 /// K/V (not Q/O) can reach the bound; batch 1, Hkv 8, D128 matches Unified2D's boundary case.
-/// 1048592 keys is 2147516416 bytes, over the bound; 1048576 keys is 2^31 bytes, still over;
-/// 1048000 is 2146304000, under.
+/// 1048544 keys of 8 heads x 128 x 2 bytes is exactly 0x7FFF0000 bytes, served; one more
+/// 16-key block, 1048560 keys (2147450880 bytes), is over the bound.
 TEST(TestGfx950AttentionUnified3DMatchers, DeclinesACacheBeyondThirtyTwoBitAddressing)
 {
-    GraphSpec over;
-    over.batch = 1;
-    over.numQueryHeads = 8;
-    over.numKvHeads = 8;
-    over.seqLenKv = 1048592;
-    EXPECT_FALSE(matchGraph(over).has_value());
+    GraphSpec atCap;
+    atCap.batch = 1;
+    atCap.numQueryHeads = 8;
+    atCap.numKvHeads = 8;
+    atCap.seqLenKv = 1048544; // 2147418112 bytes
+    EXPECT_TRUE(matchGraph(atCap).has_value());
 
-    GraphSpec under = over;
-    under.seqLenKv = 1048576; // 2147483648 bytes
-    EXPECT_FALSE(matchGraph(under).has_value());
-    under.seqLenKv = 1048000; // 2146304000 bytes
-    EXPECT_TRUE(matchGraph(under).has_value());
+    GraphSpec over = atCap;
+    over.seqLenKv = 1048560; // 2147450880 bytes
+    EXPECT_FALSE(matchGraph(over).has_value());
+    over.seqLenKv = 1048576; // 2^31 bytes
+    EXPECT_FALSE(matchGraph(over).has_value());
 }
 
 /// This copy of Unified2D's catch-all feature decline: no ALiBi, no padding mask, an
