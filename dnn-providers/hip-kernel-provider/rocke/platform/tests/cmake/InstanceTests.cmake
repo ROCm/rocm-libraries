@@ -114,6 +114,46 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/wgrad_streamk_host.cpp")
                rocke_wgrad_streamk_host)
 endif()
 
+# Shared dense attention spec (validator, preflight, kernel name): the reject
+# reasons never reach the emitted IR, so the byte-identity gate cannot see a
+# divergence in them. Both engines are pinned to one vectors file. It is the C
+# ABI's contract, so platform owns it (tests/golden/); the library test
+# test_attention_dense_spec_vectors.py regenerates it and checks the Python
+# against it (library -> platform, the allowed direction). The file is embedded
+# into this binary at configure time so the installed test needs no data path.
+set(_rocke_dense_spec_vectors "${CMAKE_CURRENT_SOURCE_DIR}/golden/attention_dense_spec_vectors.json")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_attention_dense_spec.cpp")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_rocke_dense_spec_vectors}")
+  file(READ "${_rocke_dense_spec_vectors}" _rocke_dense_spec_hex HEX)
+  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _rocke_dense_spec_bytes
+                       "${_rocke_dense_spec_hex}")
+  string(REGEX REPLACE "(0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,)"
+                       "\\1\n" _rocke_dense_spec_bytes "${_rocke_dense_spec_bytes}")
+  # configure_file rewrites the .inc only when the bytes change, so a
+  # reconfigure does not force a recompile.
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_spec_vectors.inc.tmp"
+       "${_rocke_dense_spec_bytes}\n")
+  configure_file("${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_spec_vectors.inc.tmp"
+                 "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_spec_vectors.inc"
+                 COPYONLY)
+  add_executable(rocke_attention_dense_spec instances/test_attention_dense_spec.cpp)
+  target_include_directories(rocke_attention_dense_spec
+                             PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+  target_link_libraries(rocke_attention_dense_spec PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_attention_dense_spec PRIVATE m)
+  endif()
+  add_test(NAME rocke_attention_dense_spec COMMAND rocke_attention_dense_spec)
+  set_tests_properties(rocke_attention_dense_spec PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_attention_dense_spec)
+  set_target_properties(rocke_attention_dense_spec
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_attention_dense_spec
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_attention_dense_spec)
+endif()
+
 # RDNA split-KV WMMA decode host helpers (split count, pack groups, row
 # tiles, grids, workspace layout, spec resolution, kernel names, LDS budget):
 # the C API mirrors the Python launch plan for C callers, and the
