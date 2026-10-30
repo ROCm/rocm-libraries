@@ -178,7 +178,7 @@ def test_global_wb_non_dev_scope_emits_to_stinkytofu(scope_enum, scope_text):
 def test_typed_instruction_matches_legacy_macro_str(typed, legacy_text):
     """Lock the rocisa __str__ output of the new typed instructions to the
     exact text the previous `MacroInstruction(name=..., args=[])` calls in
-    `Tensile/Components/StreamK.py` produced. If this fails, the StreamK
+    `tensilelite/Components/StreamK.py` produced. If this fails, the StreamK
     consumer change has drifted from the byte-for-byte invariant and the
     generated kernels will differ.
     """

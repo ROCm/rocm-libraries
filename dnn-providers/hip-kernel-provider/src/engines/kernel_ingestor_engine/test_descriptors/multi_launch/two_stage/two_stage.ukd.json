@@ -1,0 +1,40 @@
+{
+  "version": "1.1",
+  "id": "8acc1edb-8d0a-4aae-a912-a370661b18af",
+  "name": "two_stage.f32",
+  "sources": {
+    "produce": {
+      "kind": "hip",
+      "source": "TwoStage.cpp",
+      "entry": "MultiLaunchProduce",
+      "build": {}
+    },
+    "consume": {
+      "kind": "hip",
+      "source": "TwoStage.cpp",
+      "entry": "MultiLaunchConsume",
+      "build": {}
+    }
+  },
+  "metadata": {
+    "dtype": "FLOAT"
+  },
+  "priority": 0,
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "8d6e99f0-a31a-424b-9892-e5c1cca8ec4d",
+          "kmd_id": "2f9909df-cc5b-493f-b127-73f9bf75167e",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  }
+}
