@@ -1097,6 +1097,33 @@ def test_gfx950_origami_configs_take_the_non_temporal_rule_where_the_layout_serv
     assert ro.cfg_get(cfg, "train.non_temporal_family_rule") is both
 
 
+def test_only_the_gfx950_tt_and_nn_configs_deploy_the_alignment_veto(config_env):
+    """deploy.alignment_veto, with gfx950's K and line, in the configs whose
+    layout has exactly one K-contiguous operand (TT: A, NN: B) and which
+    serve without the non-temporal rule; no other config sets it, and every
+    one that does validates."""
+    from lib import feasibility as fz
+
+    carrying = set()
+    for path in CONFIGS:
+        raw = yaml.safe_load(path.read_text())
+        veto = (raw.get("deploy") or {}).get("alignment_veto")
+        if veto is None:
+            continue
+        carrying.add(path.name)
+        assert veto == {"k_min": 512, "align_bytes": 128}, path.name
+        cfg = _load(path)
+        assert ro.validate_config(cfg)[0] == []
+        assert fz.deployed_alignment_veto(cfg) == {"k_min": 512, "align_bits": 1024}
+        h = cfg["hipblaslt"]
+        assert (h["transA"] == "T") != (h["transB"] == "N"), path.name
+        assert not ro.cfg_get(cfg, "train.non_temporal_rule")
+    assert carrying == {
+        f"gfx950_{lib}_origami_v3.yaml"
+        for lib in ("bbs_tt", "tf32_tt", "bbs_nn", "tf32_nn")
+    }
+
+
 @pytest.mark.parametrize("path", GFX950_ORIGAMI_CONFIGS, ids=lambda p: p.name)
 def test_gfx950_origami_configs_keep_the_recipe_of_their_models(path, config_env):
     """The production recipe's sizing, contexts and audit set as the runs

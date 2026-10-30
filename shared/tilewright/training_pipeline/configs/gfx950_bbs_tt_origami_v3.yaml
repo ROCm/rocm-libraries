@@ -217,6 +217,16 @@ deploy:
   apply_patch: false
   build_after_apply: false
   build_jobs: null
+  # The deployed model ranks no kernel whose cache hint on the K-contiguous
+  # operand is the non-temporal one for K above k_min that leaves that
+  # operand short of whole lines of align_bytes bytes, unless no other
+  # kernel would rank (the engine README's alignment veto): gfx950's values.
+  # It is a serving rule of the staged model file: no round's bundle,
+  # decision or plan sees it, so the data a run collects are as without it,
+  # and the final retrain's decision scores it.
+  alignment_veto:
+    k_min: 512
+    align_bytes: 128
 
 correctness:
   # Every kernel of the pool through the exact harness (tools/errmap.cpp)
