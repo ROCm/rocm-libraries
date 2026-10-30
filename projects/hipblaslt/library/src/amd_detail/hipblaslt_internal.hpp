@@ -35,3 +35,18 @@
 #include <Debug.hpp>
 
 hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status);
+
+// Matmul reads every layout as column-major or swizzled; only hipblasLtMatrixTransform reads
+// HIPBLASLT_ORDER_ROW. Returns HIPBLAS_STATUS_NOT_SUPPORTED when any order is ROW. A null layout
+// is skipped so the caller's own validation reports it, and grouped layouts are left to the
+// grouped path's own order check.
+hipblasStatus_t refuse_row_order(const char*      caller,
+                                 hipblasLtOrder_t orderA,
+                                 hipblasLtOrder_t orderB,
+                                 hipblasLtOrder_t orderC = HIPBLASLT_ORDER_COL,
+                                 hipblasLtOrder_t orderD = HIPBLASLT_ORDER_COL);
+hipblasStatus_t refuse_row_order(const char*             caller,
+                                 rocblaslt_matrix_layout matA,
+                                 rocblaslt_matrix_layout matB,
+                                 rocblaslt_matrix_layout matC,
+                                 rocblaslt_matrix_layout matD);
