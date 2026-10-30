@@ -190,7 +190,9 @@ std::optional<BoundTokens> matchCustomOp(const MatchContext& context)
     }
     // From here on the graph is ours, so each decline says why.
     const auto decline = [&](std::string_view field, const auto& detail) {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"custom op '" + std::string(opId) + "'", field} << detail);
+        // Named: a braced initializer's comma would split the macro argument.
+        const Declined head{"custom op '" + std::string(opId) + "'", field};
+        HIPDNN_PLUGIN_LOG_INFO(head << detail);
         return std::nullopt;
     };
 
@@ -304,9 +306,9 @@ bool kernelMatches(const MatchContext& /*context*/,
         }
         if(field != "model")
         {
-            HIPDNN_PLUGIN_LOG_INFO(Declined{"kernel '" + kernel.name + "'", field}
-                                   << "payload " << name << " " << toText(want) << ", kernel "
-                                   << (have.has_value() ? toText(*have) : "<none>"));
+            const Declined head{"kernel '" + kernel.name + "'", field};
+            HIPDNN_PLUGIN_LOG_INFO(head << "payload " << name << " " << toText(want) << ", kernel "
+                                        << (have.has_value() ? toText(*have) : "<none>"));
         }
         return false;
     }
