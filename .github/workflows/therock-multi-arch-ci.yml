@@ -117,6 +117,26 @@ jobs:
       test_projects: ${{ steps.configure.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
       test_type: ${{ steps.configure.outputs.test_type }}
+      # TEMPORARY: hipBLASLt gfx950 presubmit trial. Remove once TheRock#8985
+      # lands the formal mechanism for per-family presubmit test selection.
+      #
+      # Per-family CI overrides forwarded to TheRock through external_repo.
+      # gfx950 has no presubmit test slot by default, so only a PR touching the
+      # projects/hipblaslt path attaches the test:hipblaslt label to that
+      # family and opts it into a quick presubmit run. The substring match
+      # covers nested subtrees (projects/hipblaslt/tensilelite) while excluding
+      # dnn-providers/hipblaslt-provider. Every other PR, plus all push and
+      # workflow_dispatch runs, send {} so gfx950 keeps TheRock's default
+      # schedule and unrelated PRs do not consume gfx950 test hardware.
+      family_overrides: >-
+        ${{
+          (
+            github.event_name == 'pull_request' &&
+            contains(steps.configure.outputs.changed_projects, 'projects/hipblaslt')
+          ) &&
+          '{"gfx950":{"linux":{"tests_on_trigger":["presubmit"],"test_labels_for_family":["test:hipblaslt"],"test_type_for_family":"quick"}}}' ||
+          '{}'
+        }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -210,11 +230,7 @@ jobs:
           "pr_number": ${{ github.event.pull_request.number || 'null' }},
           "event_name": "${{ github.event_name }}",
           "skip_ci_config": ".github/skip-ci-config.toml",
-          "family_overrides": ${{
-            github.event_name == 'pull_request' &&
-            '{"gfx950":{"linux":{"tests_on_trigger":["presubmit"],"test_labels_for_family":["test:hipblaslt"],"test_type_for_family":"quick"}}}' ||
-            '{}'
-          }},
+          "family_overrides": ${{ needs.configure.outputs.family_overrides }},
           "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
 
