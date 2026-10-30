@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 
 #include <cuda_runtime_api.h>
 
-#include <thrust/detail/util/align.h>
+#include <cuda/std/memory>
 
 #include <unittest/unittest.h>
 
@@ -28,6 +28,6 @@ void TestCudaMallocResultAligned(const std::size_t n)
   cudaMalloc(&ptr, n * sizeof(T));
   cudaFree(ptr);
 
-  ASSERT_EQUAL(true, thrust::detail::util::is_aligned(ptr));
+  ASSERT_EQUAL(true, ::cuda::std::is_sufficiently_aligned<alignof(T)>(ptr));
 }
 DECLARE_VARIABLE_UNITTEST(TestCudaMallocResultAligned);
