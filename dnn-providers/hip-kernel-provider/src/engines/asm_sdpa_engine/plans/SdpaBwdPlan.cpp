@@ -368,7 +368,7 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
     a.nhead_stride_dv = p.dvStrideHead;
     a.batch_stride_dv = p.dvStrideBatch;
 
-    // LSE/D strides (from stats tensor strides)
+    // LSE/D strides: packed [B, H_q, S_q], derived from Q's dims by buildPlan
     a.nhead_stride_lsed = p.statsStrideHead;
     a.batch_stride_lsed = p.statsStrideBatch;
 
