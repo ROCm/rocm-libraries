@@ -36,8 +36,8 @@
 
 hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status);
 
-// The extension API reads every layout as column-major or swizzled; hipblasLtMatmul rewrites
-// HIPBLASLT_ORDER_ROW itself. Returns HIPBLAS_STATUS_NOT_SUPPORTED when any order is ROW. Callers
+// The extension API reads every layout as column-major or swizzled; hipblasLtMatmul rewrites a
+// row-major A or B itself. Returns HIPBLAS_STATUS_NOT_SUPPORTED when any order is ROW. Callers
 // check order only after the arguments their own validation checks first are present, so a
 // missing handle, descriptor, or pointer keeps its usual status. The layout form returns SUCCESS
 // when any layout is null or grouped; the grouped path has its own order check.

@@ -252,8 +252,8 @@ typedef enum {
 
   /** Memory order of the data. See ``hipblasLtOrder_t``.
    *
-   * ``hipblasLtMatmul`` and ``hipblasLtMatmulAlgoGetHeuristic`` accept ``HIPBLASLT_ORDER_ROW``; see
-   * ``hipblasLtOrder_t`` for the combinations they support. The ``hipblaslt_ext`` ``Gemm`` and
+   * ``hipblasLtMatmul`` and ``hipblasLtMatmulAlgoGetHeuristic`` accept ``HIPBLASLT_ORDER_ROW`` for A
+   * and B; see ``hipblasLtOrder_t`` for the limits. The ``hipblaslt_ext`` ``Gemm`` and
    * ``GroupedGemm`` APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED`` when any of A, B, C, or D uses
    * ``HIPBLASLT_ORDER_ROW``. Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only
    * ``HIPBLASLT_ORDER_COL`` and return ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
@@ -488,26 +488,15 @@ typedef enum {
    * Leading dimension is the stride (in elements) to the beginning of the next row in memory.
    *
    * Supported by ``hipblasLtMatrixTransform``, and by ``hipblasLtMatmul`` and
-   * ``hipblasLtMatmulAlgoGetHeuristic`` for any of A, B, and C with D. Matmul computes a row-major
-   * matrix as its column-major transpose, and a row-major D as ``D^T = op(B)^T * op(A)^T``. C and D
-   * must have the same order. Matmul returns ``HIPBLAS_STATUS_NOT_SUPPORTED`` for a row-major
-   * layout combined with an operation other than ``HIPBLAS_OP_N`` or ``HIPBLAS_OP_T``, a block or
-   * vector scale mode, or an ``HIP_R_4I`` matrix. It also returns it for a row-major D combined
-   * with a bias, aux, or gradient epilogue, with
-   * ``HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST``, with A and B of different types or
-   * compute input types, or with a mixed FP8 compute type such as
-   * ``HIPBLAS_COMPUTE_32F_FAST_8F8BF_FNUZ``.
-   *
-   * A row-major D is also refused while uniform summation order is in effect, which it is by
-   * default (see ``hipblasLtSetUniformSummationOrder``). That guarantee holds across the M
-   * dimension of D, and computing ``D^T`` would move it to N. Set
-   * ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT`` to ``0`` on the descriptor, or disable
-   * it on the handle, to use a row-major D.
+   * ``hipblasLtMatmulAlgoGetHeuristic`` for A and B. Matmul computes a row-major A or B as its
+   * column-major transpose. C and D must be column-major: a row-major C or D returns
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED``. Matmul also returns it for a row-major A or B combined with
+   * an operation other than ``HIPBLAS_OP_N`` or ``HIPBLAS_OP_T``, a block or vector scale mode, or
+   * an ``HIP_R_4I`` matrix.
    *
    * Argument errors such as a null handle, descriptor, layout, or data pointer keep their usual
-   * status, and so does ``HIPBLASLT_OPERATION_INVALID``. A fused all-to-all epilogue still
-   * requires a column-major D and returns ``HIPBLAS_STATUS_INVALID_VALUE`` for a row-major one.
-   * The ``hipblaslt_ext`` APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED`` for this order.
+   * status, and so does ``HIPBLASLT_OPERATION_INVALID``. The ``hipblaslt_ext`` APIs return
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED`` for this order.
    */
   HIPBLASLT_ORDER_ROW = 1,
   
