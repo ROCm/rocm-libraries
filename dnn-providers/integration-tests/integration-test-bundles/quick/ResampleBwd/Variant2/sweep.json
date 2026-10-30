@@ -1,0 +1,2753 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "2_3_7_5_bfp16_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              35,
+              5,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              14,
+              5
+            ],
+            "strides": [
+              210,
+              70,
+              5,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1
+          ],
+          "pre_padding": [
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            1
+          ],
+          "window": [
+            3,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardBfp16.Correctness/1",
+        "operation": "Smoke/IntegrationGpuResampleBackwardBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardBfp16.Correctness_1"
+      }
+    },
+    {
+      "id": "2_3_7_5_bfp16_nhwc_postpad0x0_prepad0x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              1,
+              15,
+              3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              13,
+              14
+            ],
+            "strides": [
+              546,
+              1,
+              42,
+              3
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            3
+          ],
+          "window": [
+            1,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardBfp16.Correctness/11",
+        "operation": "Smoke/IntegrationGpuResampleBackwardBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardBfp16.Correctness_11"
+      }
+    },
+    {
+      "id": "1_2_8_6_bfp16_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              8,
+              6
+            ],
+            "strides": [
+              96,
+              48,
+              6,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              16,
+              6
+            ],
+            "strides": [
+              192,
+              96,
+              6,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1
+          ],
+          "pre_padding": [
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            1
+          ],
+          "window": [
+            3,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardBfp16.Correctness/13",
+        "operation": "Smoke/IntegrationGpuResampleBackwardBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardBfp16.Correctness_13"
+      }
+    },
+    {
+      "id": "1_2_8_6_bfp16_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              8,
+              6
+            ],
+            "strides": [
+              96,
+              48,
+              6,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              8,
+              12
+            ],
+            "strides": [
+              192,
+              96,
+              12,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0
+          ],
+          "pre_padding": [
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2
+          ],
+          "window": [
+            2,
+            3
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardBfp16.Correctness/14",
+        "operation": "Smoke/IntegrationGpuResampleBackwardBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardBfp16.Correctness_14"
+      }
+    },
+    {
+      "id": "1_2_8_6_bfp16_nchw_postpad0x0_prepad0x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              8,
+              6
+            ],
+            "strides": [
+              96,
+              48,
+              6,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              15,
+              17
+            ],
+            "strides": [
+              510,
+              255,
+              17,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            3
+          ],
+          "window": [
+            1,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardBfp16.Correctness/17",
+        "operation": "Smoke/IntegrationGpuResampleBackwardBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardBfp16.Correctness_17"
+      }
+    },
+    {
+      "id": "1_2_4_5_3_bfp16_ncdhw_postpad1x0x1_prepad0x1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              4,
+              5,
+              3
+            ],
+            "strides": [
+              120,
+              60,
+              15,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              4,
+              9,
+              3
+            ],
+            "strides": [
+              216,
+              108,
+              27,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0,
+            1
+          ],
+          "pre_padding": [
+            0,
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            1,
+            2,
+            1
+          ],
+          "window": [
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardBfp16.Correctness/19",
+        "operation": "Smoke/IntegrationGpuResampleBackwardBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardBfp16.Correctness_19"
+      }
+    },
+    {
+      "id": "2_3_7_5_bfp16_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              35,
+              5,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              7,
+              10
+            ],
+            "strides": [
+              210,
+              70,
+              10,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0
+          ],
+          "pre_padding": [
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2
+          ],
+          "window": [
+            2,
+            3
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardBfp16.Correctness/2",
+        "operation": "Smoke/IntegrationGpuResampleBackwardBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardBfp16.Correctness_2"
+      }
+    },
+    {
+      "id": "1_2_4_5_3_bfp16_ncdhw_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              4,
+              5,
+              3
+            ],
+            "strides": [
+              120,
+              60,
+              15,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              4,
+              9,
+              3
+            ],
+            "strides": [
+              216,
+              108,
+              27,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1,
+            0
+          ],
+          "pre_padding": [
+            1,
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2,
+            1
+          ],
+          "window": [
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardBfp16.Correctness/20",
+        "operation": "Smoke/IntegrationGpuResampleBackwardBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardBfp16.Correctness_20"
+      }
+    },
+    {
+      "id": "1_2_4_5_3_bfp16_ndhwc_postpad1x0x1_prepad0x1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              4,
+              5,
+              3
+            ],
+            "strides": [
+              120,
+              1,
+              30,
+              6,
+              2
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              4,
+              9,
+              3
+            ],
+            "strides": [
+              216,
+              1,
+              54,
+              6,
+              2
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0,
+            1
+          ],
+          "pre_padding": [
+            0,
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            1,
+            2,
+            1
+          ],
+          "window": [
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardBfp16.Correctness/23",
+        "operation": "Smoke/IntegrationGpuResampleBackwardBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardBfp16.Correctness_23"
+      }
+    },
+    {
+      "id": "1_2_4_5_3_bfp16_ndhwc_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              4,
+              5,
+              3
+            ],
+            "strides": [
+              120,
+              1,
+              30,
+              6,
+              2
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              4,
+              9,
+              3
+            ],
+            "strides": [
+              216,
+              1,
+              54,
+              6,
+              2
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1,
+            0
+          ],
+          "pre_padding": [
+            1,
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2,
+            1
+          ],
+          "window": [
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardBfp16.Correctness/24",
+        "operation": "Smoke/IntegrationGpuResampleBackwardBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardBfp16.Correctness_24"
+      }
+    },
+    {
+      "id": "2_3_7_5_bfp16_nchw_postpad0x0_prepad0x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              35,
+              5,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              13,
+              14
+            ],
+            "strides": [
+              546,
+              182,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            3
+          ],
+          "window": [
+            1,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardBfp16.Correctness/5",
+        "operation": "Smoke/IntegrationGpuResampleBackwardBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardBfp16.Correctness_5"
+      }
+    },
+    {
+      "id": "2_3_7_5_bfp16_nhwc_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              1,
+              15,
+              3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              14,
+              5
+            ],
+            "strides": [
+              210,
+              1,
+              15,
+              3
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1
+          ],
+          "pre_padding": [
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            1
+          ],
+          "window": [
+            3,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardBfp16.Correctness/7",
+        "operation": "Smoke/IntegrationGpuResampleBackwardBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardBfp16.Correctness_7"
+      }
+    },
+    {
+      "id": "2_3_7_5_bfp16_nhwc_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              1,
+              15,
+              3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              7,
+              10
+            ],
+            "strides": [
+              210,
+              1,
+              30,
+              3
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0
+          ],
+          "pre_padding": [
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2
+          ],
+          "window": [
+            2,
+            3
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardBfp16.Correctness/8",
+        "operation": "Smoke/IntegrationGpuResampleBackwardBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardBfp16.Correctness_8"
+      }
+    },
+    {
+      "id": "2_3_7_5_fp16_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              35,
+              5,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              14,
+              5
+            ],
+            "strides": [
+              210,
+              70,
+              5,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1
+          ],
+          "pre_padding": [
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            1
+          ],
+          "window": [
+            3,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp16.Correctness/1",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp16.Correctness_1"
+      }
+    },
+    {
+      "id": "2_3_7_5_fp16_nhwc_postpad0x0_prepad0x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              1,
+              15,
+              3
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              13,
+              14
+            ],
+            "strides": [
+              546,
+              1,
+              42,
+              3
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            3
+          ],
+          "window": [
+            1,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp16.Correctness/11",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp16.Correctness_11"
+      }
+    },
+    {
+      "id": "1_2_8_6_fp16_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              8,
+              6
+            ],
+            "strides": [
+              96,
+              48,
+              6,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              16,
+              6
+            ],
+            "strides": [
+              192,
+              96,
+              6,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1
+          ],
+          "pre_padding": [
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            1
+          ],
+          "window": [
+            3,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp16.Correctness/13",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp16.Correctness_13"
+      }
+    },
+    {
+      "id": "1_2_8_6_fp16_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              8,
+              6
+            ],
+            "strides": [
+              96,
+              48,
+              6,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              8,
+              12
+            ],
+            "strides": [
+              192,
+              96,
+              12,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0
+          ],
+          "pre_padding": [
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2
+          ],
+          "window": [
+            2,
+            3
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp16.Correctness/14",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp16.Correctness_14"
+      }
+    },
+    {
+      "id": "1_2_8_6_fp16_nchw_postpad0x0_prepad0x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              8,
+              6
+            ],
+            "strides": [
+              96,
+              48,
+              6,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              15,
+              17
+            ],
+            "strides": [
+              510,
+              255,
+              17,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            3
+          ],
+          "window": [
+            1,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp16.Correctness/17",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp16.Correctness_17"
+      }
+    },
+    {
+      "id": "1_2_4_5_3_fp16_ncdhw_postpad1x0x1_prepad0x1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              4,
+              5,
+              3
+            ],
+            "strides": [
+              120,
+              60,
+              15,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              4,
+              9,
+              3
+            ],
+            "strides": [
+              216,
+              108,
+              27,
+              3,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0,
+            1
+          ],
+          "pre_padding": [
+            0,
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            1,
+            2,
+            1
+          ],
+          "window": [
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp16.Correctness/19",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp16.Correctness_19"
+      }
+    },
+    {
+      "id": "2_3_7_5_fp16_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              35,
+              5,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              7,
+              10
+            ],
+            "strides": [
+              210,
+              70,
+              10,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0
+          ],
+          "pre_padding": [
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2
+          ],
+          "window": [
+            2,
+            3
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp16.Correctness/2",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp16.Correctness_2"
+      }
+    },
+    {
+      "id": "1_2_4_5_3_fp16_ncdhw_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              4,
+              5,
+              3
+            ],
+            "strides": [
+              120,
+              60,
+              15,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              4,
+              9,
+              3
+            ],
+            "strides": [
+              216,
+              108,
+              27,
+              3,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1,
+            0
+          ],
+          "pre_padding": [
+            1,
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2,
+            1
+          ],
+          "window": [
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp16.Correctness/20",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp16.Correctness_20"
+      }
+    },
+    {
+      "id": "1_2_4_5_3_fp16_ndhwc_postpad1x0x1_prepad0x1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              4,
+              5,
+              3
+            ],
+            "strides": [
+              120,
+              1,
+              30,
+              6,
+              2
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              4,
+              9,
+              3
+            ],
+            "strides": [
+              216,
+              1,
+              54,
+              6,
+              2
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0,
+            1
+          ],
+          "pre_padding": [
+            0,
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            1,
+            2,
+            1
+          ],
+          "window": [
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp16.Correctness/23",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp16.Correctness_23"
+      }
+    },
+    {
+      "id": "1_2_4_5_3_fp16_ndhwc_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              4,
+              5,
+              3
+            ],
+            "strides": [
+              120,
+              1,
+              30,
+              6,
+              2
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              4,
+              9,
+              3
+            ],
+            "strides": [
+              216,
+              1,
+              54,
+              6,
+              2
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1,
+            0
+          ],
+          "pre_padding": [
+            1,
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2,
+            1
+          ],
+          "window": [
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp16.Correctness/24",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp16.Correctness_24"
+      }
+    },
+    {
+      "id": "2_3_7_5_fp16_nchw_postpad0x0_prepad0x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              35,
+              5,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              13,
+              14
+            ],
+            "strides": [
+              546,
+              182,
+              14,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            3
+          ],
+          "window": [
+            1,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp16.Correctness/5",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp16.Correctness_5"
+      }
+    },
+    {
+      "id": "2_3_7_5_fp16_nhwc_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              1,
+              15,
+              3
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              14,
+              5
+            ],
+            "strides": [
+              210,
+              1,
+              15,
+              3
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1
+          ],
+          "pre_padding": [
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            1
+          ],
+          "window": [
+            3,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp16.Correctness/7",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp16.Correctness_7"
+      }
+    },
+    {
+      "id": "2_3_7_5_fp16_nhwc_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              1,
+              15,
+              3
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              7,
+              10
+            ],
+            "strides": [
+              210,
+              1,
+              30,
+              3
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0
+          ],
+          "pre_padding": [
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2
+          ],
+          "window": [
+            2,
+            3
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp16.Correctness/8",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp16.Correctness_8"
+      }
+    },
+    {
+      "id": "2_3_7_5_fp32_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              35,
+              5,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              14,
+              5
+            ],
+            "strides": [
+              210,
+              70,
+              5,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1
+          ],
+          "pre_padding": [
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            1
+          ],
+          "window": [
+            3,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp32.Correctness/1",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp32.Correctness_1"
+      }
+    },
+    {
+      "id": "2_3_7_5_fp32_nhwc_postpad0x0_prepad0x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              1,
+              15,
+              3
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              13,
+              14
+            ],
+            "strides": [
+              546,
+              1,
+              42,
+              3
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            3
+          ],
+          "window": [
+            1,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp32.Correctness/11",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp32.Correctness_11"
+      }
+    },
+    {
+      "id": "1_2_8_6_fp32_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              8,
+              6
+            ],
+            "strides": [
+              96,
+              48,
+              6,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              16,
+              6
+            ],
+            "strides": [
+              192,
+              96,
+              6,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1
+          ],
+          "pre_padding": [
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            1
+          ],
+          "window": [
+            3,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp32.Correctness/13",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp32.Correctness_13"
+      }
+    },
+    {
+      "id": "1_2_8_6_fp32_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              8,
+              6
+            ],
+            "strides": [
+              96,
+              48,
+              6,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              8,
+              12
+            ],
+            "strides": [
+              192,
+              96,
+              12,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0
+          ],
+          "pre_padding": [
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2
+          ],
+          "window": [
+            2,
+            3
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp32.Correctness/14",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp32.Correctness_14"
+      }
+    },
+    {
+      "id": "1_2_8_6_fp32_nchw_postpad0x0_prepad0x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              8,
+              6
+            ],
+            "strides": [
+              96,
+              48,
+              6,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              15,
+              17
+            ],
+            "strides": [
+              510,
+              255,
+              17,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            3
+          ],
+          "window": [
+            1,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp32.Correctness/17",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp32.Correctness_17"
+      }
+    },
+    {
+      "id": "1_2_4_5_3_fp32_ncdhw_postpad1x0x1_prepad0x1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              4,
+              5,
+              3
+            ],
+            "strides": [
+              120,
+              60,
+              15,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              4,
+              9,
+              3
+            ],
+            "strides": [
+              216,
+              108,
+              27,
+              3,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0,
+            1
+          ],
+          "pre_padding": [
+            0,
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            1,
+            2,
+            1
+          ],
+          "window": [
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp32.Correctness/19",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp32.Correctness_19"
+      }
+    },
+    {
+      "id": "2_3_7_5_fp32_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              35,
+              5,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              7,
+              10
+            ],
+            "strides": [
+              210,
+              70,
+              10,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0
+          ],
+          "pre_padding": [
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2
+          ],
+          "window": [
+            2,
+            3
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp32.Correctness/2",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp32.Correctness_2"
+      }
+    },
+    {
+      "id": "1_2_4_5_3_fp32_ncdhw_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              4,
+              5,
+              3
+            ],
+            "strides": [
+              120,
+              60,
+              15,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              4,
+              9,
+              3
+            ],
+            "strides": [
+              216,
+              108,
+              27,
+              3,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1,
+            0
+          ],
+          "pre_padding": [
+            1,
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2,
+            1
+          ],
+          "window": [
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp32.Correctness/20",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp32.Correctness_20"
+      }
+    },
+    {
+      "id": "1_2_4_5_3_fp32_ndhwc_postpad1x0x1_prepad0x1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              4,
+              5,
+              3
+            ],
+            "strides": [
+              120,
+              1,
+              30,
+              6,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              4,
+              9,
+              3
+            ],
+            "strides": [
+              216,
+              1,
+              54,
+              6,
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0,
+            1
+          ],
+          "pre_padding": [
+            0,
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            1,
+            2,
+            1
+          ],
+          "window": [
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp32.Correctness/23",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp32.Correctness_23"
+      }
+    },
+    {
+      "id": "1_2_4_5_3_fp32_ndhwc_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              4,
+              5,
+              3
+            ],
+            "strides": [
+              120,
+              1,
+              30,
+              6,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              4,
+              9,
+              3
+            ],
+            "strides": [
+              216,
+              1,
+              54,
+              6,
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1,
+            0
+          ],
+          "pre_padding": [
+            1,
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2,
+            1
+          ],
+          "window": [
+            2,
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp32.Correctness/24",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp32.Correctness_24"
+      }
+    },
+    {
+      "id": "2_3_7_5_fp32_nchw_postpad0x0_prepad0x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              35,
+              5,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              13,
+              14
+            ],
+            "strides": [
+              546,
+              182,
+              14,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            3
+          ],
+          "window": [
+            1,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp32.Correctness/5",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp32.Correctness_5"
+      }
+    },
+    {
+      "id": "2_3_7_5_fp32_nhwc_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              1,
+              15,
+              3
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              14,
+              5
+            ],
+            "strides": [
+              210,
+              1,
+              15,
+              3
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            0,
+            1
+          ],
+          "pre_padding": [
+            1,
+            0
+          ],
+          "resample_mode": "avgpool_exclude_padding",
+          "stride": [
+            2,
+            1
+          ],
+          "window": [
+            3,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp32.Correctness/7",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp32.Correctness_7"
+      }
+    },
+    {
+      "id": "2_3_7_5_fp32_nhwc_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              7,
+              5
+            ],
+            "strides": [
+              105,
+              1,
+              15,
+              3
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              7,
+              10
+            ],
+            "strides": [
+              210,
+              1,
+              30,
+              3
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "post_padding": [
+            1,
+            0
+          ],
+          "pre_padding": [
+            0,
+            1
+          ],
+          "resample_mode": "avgpool_include_padding",
+          "stride": [
+            1,
+            2
+          ],
+          "window": [
+            2,
+            3
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuResampleBackwardFp32.Correctness/8",
+        "operation": "Smoke/IntegrationGpuResampleBackwardFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuResampleBackwardFp32.Correctness_8"
+      }
+    }
+  ]
+}
