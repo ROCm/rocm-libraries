@@ -638,6 +638,10 @@ class SweepTests(unittest.TestCase):
             },
         }
         plan.validate_profile(config, "gfx950")
+        # A product can enable fewer CUs than its topology has slots.
+        partial = copy.deepcopy(config)
+        partial["vm"]["gpu"]["device"]["simd_count"] = 4
+        plan.validate_profile(partial, "gfx950")
         for field, value in (
             ("gfx_target_version", 90402),
             ("simd_count", 9),

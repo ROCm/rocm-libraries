@@ -28,7 +28,11 @@ CHIP_FALLBACKS = {
 
 
 def validate_profile(config, target):
-    """Check that an explicitly supplied profile describes one device consistently."""
+    """Check that an explicitly supplied profile describes one device consistently.
+
+    The topology lists every CU slot; a product can enable fewer of them. For
+    example, MI300X has 304 active CUs in 8 XCDs of 40 slots.
+    """
     device = config["vm"]["gpu"]["device"]
     if device["gfx_target_version"] != {"gfx942": 90402, "gfx950": 90500}[target]:
         raise ValueError("Profile architecture does not match the requested target")
@@ -41,8 +45,8 @@ def validate_profile(config, target):
         * device["num_shader_arrays_per_engine"]
         * device["num_cu_per_sh"]
     )
-    if per_partition <= 0 or cus % per_partition:
-        raise ValueError("Profile CU count disagrees with shader resources")
+    if per_partition <= 0:
+        raise ValueError("Profile shader resources must be positive")
     if target == "gfx950" and device["device_id"] not in (0x75A0, *CHIP_FALLBACKS):
         raise ValueError("Unregistered gfx950 PCI chip ID in profile")
 
@@ -54,8 +58,11 @@ def validate_profile(config, target):
         children = sum(topology_cus(n) for n in node.get("children", []))
         return repetitions * (1 if node["type"] == "compute_unit" else children)
 
-    if topology_cus(config["topology"]["root"]) != cus:
-        raise ValueError("Profile topology CU count disagrees with device resources")
+    slots = topology_cus(config["topology"]["root"])
+    if slots % per_partition:
+        raise ValueError("Profile topology CU slots disagree with shader resources")
+    if cus > slots:
+        raise ValueError("Profile has more active CUs than topology CU slots")
 
 
 def regular_problem(solution, directory, target, *, reduction_blocks=8, alpha=1, beta=0):
