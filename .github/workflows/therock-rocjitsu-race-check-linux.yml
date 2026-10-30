@@ -107,9 +107,12 @@ jobs:
       ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
       ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
       RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
-      # Leave emulated GEMMs effectively unlimited. The step timeout bounds the
-      # workload and still leaves time to upload reports.
-      RACE_TIMEOUT_SECONDS: "10000"
+      # Each emulated command (the smoke hipblaslt-bench run, or one sampled
+      # GEMM) gets at most this long. Hosted cases take seconds, so this only
+      # stops a hang: a hung sampled GEMM is recorded as timed out and the other
+      # cases still run, and a hung smoke bench leaves time for the TensileLite
+      # check within the 75-minute step.
+      RACE_TIMEOUT_SECONDS: "900"
       TENSILELITE_TIMEOUT_SECONDS: "420"
     steps:
       # The job needs three inputs in one workspace:
