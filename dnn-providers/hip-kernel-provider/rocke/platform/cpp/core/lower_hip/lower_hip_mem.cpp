@@ -17,6 +17,7 @@
  */
 #include "rocke/dtypes.h"
 #include "rocke/lower_hip_internal.h"
+#include "rocke/lower_llvm_internal.h" /* rocke_ll_backend_for: the target's buffer word3 */
 
 #include <stdint.h>
 #include <string.h>
@@ -1028,14 +1029,24 @@ static rocke_status_t _op_tile_buffer_rsrc(rocke_h_lowerer_t* lw, const rocke_op
     }
     ptr = op->operands[0];
     num_bytes = op->operands[1];
+    /* The flags word is the rsrc DWORD3, whose format / out-of-bounds encoding
+     * is ISA-specific. Take it from the target's ISA backend, the same source
+     * the LLVM lowerer's tile.buffer_rsrc reads, so both routes agree. */
+    rocke_status_t backend_status = ROCKE_OK;
+    const rocke_isa_backend_t* backend = rocke_ll_backend_for(lw->arch.gfx, &backend_status);
+    if(backend == NULL)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "no ISA backend registered for '%s'", lw->arch.gfx);
+    }
     rocke_h_emitf(lw,
                   "rsrc_t %s = __builtin_amdgcn_make_buffer_rsrc("
                   "(void*)%s, /*stride=*/(short)0, "
                   "/*num_records=*/(int)%s, "
-                  "/*flags=*/(int)0x00027000);",
+                  "/*flags=*/(int)0x%08X);",
                   rocke_h_name(lw, op->results[0]),
                   rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, num_bytes));
+                  rocke_h_name(lw, num_bytes),
+                  (unsigned)backend->buffer_rsrc_word3);
     return lw->status;
 }
 
@@ -1213,6 +1224,54 @@ static rocke_status_t _op_tile_buffer_load_vN(rocke_h_lowerer_t* lw, const rocke
                   res,
                   tmp,
                   (long long)dwords * 4);
+    return lw->status;
+}
+
+/* Python _op_tile_buffer_load (dtype-generic scalar): 2-byte elements (f16,
+ * bf16) through the b16 builtin, 4-byte ones (f32, i32) through the b32 one,
+ * memcpy into the scalar result. */
+static rocke_status_t _op_tile_buffer_load(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    rocke_value_t *rsrc, *voffset, *soffset;
+    const char *res, *tmp, *elem, *hip_t;
+    bool narrow;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 3 || op->num_results < 1)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_load: bad operand/result count");
+    }
+    rsrc = op->operands[0];
+    voffset = op->operands[1];
+    soffset = op->operands[2];
+    elem = mem_attr_str(op, "elem_type", "");
+    if(strcmp(elem, "f16") != 0 && strcmp(elem, "bf16") != 0 && strcmp(elem, "f32") != 0
+       && strcmp(elem, "i32") != 0)
+    {
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "tile.buffer_load: unsupported elem_type '%s'", elem);
+    }
+    hip_t = rocke_h_require_hip_scalar(lw, elem);
+    if(!hip_t)
+    {
+        return lw->status;
+    }
+    narrow = strcmp(elem, "f16") == 0 || strcmp(elem, "bf16") == 0;
+    res = rocke_h_name(lw, op->results[0]);
+    tmp = rocke_arena_printf(&lw->b->arena, "_bl_%s", res);
+    rocke_h_emitf(lw,
+                  "%s %s = (%s)__builtin_amdgcn_raw_buffer_load_%s(%s, %s, %s, 0);",
+                  narrow ? "unsigned short" : "unsigned int",
+                  tmp,
+                  narrow ? "unsigned short" : "unsigned int",
+                  narrow ? "b16" : "b32",
+                  rocke_h_name(lw, rsrc),
+                  rocke_h_name(lw, voffset),
+                  rocke_h_name(lw, soffset));
+    rocke_h_emitf(
+        lw, "%s %s; __builtin_memcpy(&%s, &%s, %d);", hip_t, res, res, tmp, narrow ? 2 : 4);
     return lw->status;
 }
 
@@ -1709,6 +1768,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_TILE_BUFFER_LOAD_F16, _op_tile_buffer_load_f16},
            {ROCKE_OP_TILE_BUFFER_LOAD_VN_F16, _op_tile_buffer_load_vN_f16},
            {ROCKE_OP_TILE_BUFFER_LOAD_VN, _op_tile_buffer_load_vN},
+           {ROCKE_OP_TILE_BUFFER_LOAD, _op_tile_buffer_load},
            {ROCKE_OP_TILE_BUFFER_STORE_F16, _op_tile_buffer_store_f16},
            {ROCKE_OP_TILE_BUFFER_STORE_VN_F16, _op_tile_buffer_store_vN_f16},
            {ROCKE_OP_TILE_BUFFER_LOAD_BF16, _op_tile_buffer_load_bf16},
