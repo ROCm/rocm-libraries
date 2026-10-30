@@ -418,6 +418,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
         p_drop > 0.0f,
         s_randval,
         deterministic,
+        sink_grad,
     });
     const auto t1_launcher = std::chrono::high_resolution_clock::now();
     const double launcher_ctor_ms =
