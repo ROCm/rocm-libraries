@@ -25,6 +25,8 @@
 #include <array>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <memory>
+#include <random>
 #include <vector>
 
 #if __has_include(<filesystem>)
@@ -241,6 +243,8 @@ TEST(rocfft_internal, rtc_cache_serialize_round_trip)
         source.store_code_object(name, arch, sum, code);
         ASSERT_EQ(source.serialize(&buffer, &buffer_len), rocfft_status_success);
     }
+    std::unique_ptr<void, decltype(&RTCCache::serialize_free)> owner(buffer,
+                                                                     &RTCCache::serialize_free);
     ASSERT_NE(buffer, nullptr);
     ASSERT_GT(buffer_len, 0u);
 
@@ -248,26 +252,40 @@ TEST(rocfft_internal, rtc_cache_serialize_round_trip)
     EXPECT_TRUE(destination.get_code_object(name, arch, sum).empty());
     ASSERT_EQ(destination.deserialize(buffer, buffer_len), rocfft_status_success);
     EXPECT_EQ(destination.get_code_object(name, arch, sum), code);
-
-    RTCCache::serialize_free(buffer);
 }
 
 TEST(rocfft_internal, rtc_cache_corrupt_file_is_survivable)
 {
-    const auto path = fs::temp_directory_path() / "rocfft_internal_test_corrupt_cache.db";
+    const auto path = fs::temp_directory_path()
+                      / ("rocfft_internal_test_corrupt_cache_"
+                         + std::to_string(std::random_device{}()) + ".db");
+    // remove the file however the test exits
+    struct remove_on_exit
+    {
+        fs::path p;
+        ~remove_on_exit()
+        {
+            std::error_code ec;
+            fs::remove(p, ec);
+        }
+    } cleanup{path};
     {
         std::ofstream out(path, std::ios::binary);
         out << "this is not a sqlite database";
+        out.close();
+        ASSERT_TRUE(out) << "failed to write " << path;
     }
 
     EnvironmentSetTemp env_path("ROCFFT_RTC_CACHE_PATH", path.string().c_str());
     EnvironmentSetTemp env_sys("ROCFFT_RTC_SYS_CACHE_PATH", ":memory:");
 
-    std::array<char, 32> sum{};
+    std::array<char, 32>    sum{};
+    const std::vector<char> code = {'o', 'k'};
     EXPECT_NO_THROW({
         RTCCache cache;
         EXPECT_TRUE(cache.get_code_object("internal_test_corrupt", "gfx942", sum).empty());
+        // the corrupt file was skipped in favour of the in-memory fallback, which still works
+        cache.store_code_object("internal_test_corrupt", "gfx942", sum, code);
+        EXPECT_EQ(cache.get_code_object("internal_test_corrupt", "gfx942", sum), code);
     });
-
-    fs::remove(path);
 }

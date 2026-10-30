@@ -101,7 +101,6 @@ try
         return rocfft_status_success;
 
     rocfft_ostream::setup();
-    RTCCache::single = std::make_unique<RTCCache>();
 
     // set layer_mode from value of environment variable ROCFFT_LAYER
     auto str_layer_mode = rocfft_getenv("ROCFFT_LAYER");
@@ -144,6 +143,9 @@ try
         if(layer_mode & rocfft_layer_mode_log_graph)
             open_log_stream("ROCFFT_LOG_GRAPH_PATH", log_graph_fd);
     }
+
+    // after logging setup, so problems opening the cache can be logged
+    RTCCache::single = std::make_unique<RTCCache>();
 
     // setup solution map once in program at the start of library use
     int devcount = 0;
