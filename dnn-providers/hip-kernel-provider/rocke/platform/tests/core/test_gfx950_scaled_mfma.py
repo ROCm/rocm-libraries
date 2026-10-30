@@ -26,6 +26,10 @@ from rocke.instances.gfx950.block_scaled_gemm import (
     build_block_scaled_gemm,
     is_valid_spec,
 )
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
 FORMATS = ("fp8", "bf8", "fp6", "bf6", "fp4")
 
@@ -158,14 +162,13 @@ def test_native_lowering_preserves_diagnostic(tmp_path):
     # A loadable, unqueryable fixture prevents fallback to an installed COMGR.
     # A fresh process also avoids a previously cached compiler masking failure.
     child = subprocess.run(
-        [
-            sys.executable,
+        rocke_python_command(
             "-c",
             "import rocke_engine; "
             "rocke_engine.gfx950_block_scaled_gemm_lower_llvm("
             "{'name': 'diagnostic', 'M': 32, 'N': 32, 'K': 64}, 'gfx950')",
-        ],
-        env=env,
+        ),
+        env=rocke_subprocess_env(env),
         capture_output=True,
         text=True,
         timeout=30,
