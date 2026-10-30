@@ -617,6 +617,32 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesOverrideShapeGraphs)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
+// The graph's left_bound follows cuDNN (L keys ending at the diagonal, diagonal
+// included); the kernel's window_left follows FlashAttention (keys before the
+// diagonal), so the same window binds as L - 1. left_bound = 0 is declined.
+TEST(TestGfx1151WmmaAttentionMatchers, BindsCudnnLeftBoundAsFlashAttentionWindowLeft)
+{
+    using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
+    GraphSpec spec;
+    spec.leftBound = 7;
+    spec.rightBound = 3;
+    const auto bound = matchGraph(spec);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.mask"), 2); // window
+    EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.window_left"), 6);
+    EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.window_right"), 3);
+
+    spec.leftBound = 1;
+    spec.rightBound = 0;
+    const auto diagonalOnly = matchGraph(spec);
+    ASSERT_TRUE(diagonalOnly.has_value());
+    EXPECT_EQ(tryGetBoundInt(*diagonalOnly, "gfx1151_wmma_attention.mask"), 2); // window
+    EXPECT_EQ(tryGetBoundInt(*diagonalOnly, "gfx1151_wmma_attention.window_left"), 0);
+
+    spec.leftBound = 0;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
 // The deprecated causal flags override the bounds and alignment, as in the
 // hipDNN reference; otherwise a left bound would drop the causal limit.
 TEST(TestGfx1151WmmaAttentionMatchers, DeprecatedCausalFlagsOverrideBounds)
@@ -1141,7 +1167,7 @@ TEST(TestGfx1151WmmaAttentionMatchers, DecodeObjectServesTheDispatcherDecodeRule
     window.kvHeads = 8;
     EXPECT_TRUE(matchesKernel(window, decodeKernel(128), gfx12));
     window.bottomRight = true;
-    window.leftBound = 1023;
+    window.leftBound = 1024; // 1024 keys including the diagonal: window_left 1023
     window.rightBound = 0;
     EXPECT_FALSE(matchesKernel(window, decodeKernel(128), gfx12));
 }
@@ -1203,7 +1229,7 @@ TEST(TestGfx1151WmmaAttentionMatchers, DecodeWorkspaceMirrorsTheDispatcherPlan)
     // A bottom-right 1024-key window: 2 splits (still merged by the merge kernel).
     GraphSpec window = decodeGraph();
     window.bottomRight = true;
-    window.leftBound = 1023;
+    window.leftBound = 1024; // 1024 keys including the diagonal: window_left 1023
     window.rightBound = 0;
     EXPECT_EQ(workspaceOf(window, decodeKernel(128), gfx1201), 33024U);
     // Batch 4: 2 splits.

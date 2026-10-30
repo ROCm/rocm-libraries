@@ -24,6 +24,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "harness/BenchmarkReport.hpp"
 #include "harness/BundleMetadata.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
@@ -304,6 +305,12 @@ private:
         // Before the disposition, which returns: a pass must say what it was compared
         // against, or "auto" landing on a reference is indistinguishable from a skip.
         _deps.reporter->recordVerifier(_bundlePath.string(), outcome.verifier);
+        // A benchmark exists only for a verified pass. Its failure fails the test but
+        // leaves the claim verdict above alone: the claim is about correctness.
+        if(_benchmark.has_value())
+        {
+            reportBenchmark(*_benchmark);
+        }
         // Before the disposition for the same reason. HasFailure() sees what the test
         // recorded itself; `complained` is what this body raised, which a fake reporter
         // in a unit test would otherwise swallow.
@@ -617,6 +624,12 @@ private:
                                               OutputTensors& refOutputs);
     void markOutputsModified(OutputTensors& outputs) const;
 
+    // Under --benchmark, times the engine on the outputs `outcome` just verified and
+    // keeps the result for TestBody() to report. Does nothing for any other outcome.
+    void benchmarkIfVerified(GraphSession& session,
+                             OutputTensors& engineOutputs,
+                             const VerificationOutcome& outcome);
+
     // Golden data is loaded on the host, so under --validator auto it is compared there.
     VerificationOutcome compareAgainstGolden(OutputTensors& engineOutputs);
     VerificationOutcome compareOutputs(OutputTensors& engineOutputs,
@@ -673,6 +686,8 @@ private:
     TensorMap _inputs;
     // Set when this SetUp() cycle has published its `finished` record.
     bool _caseFinished = false;
+    // Set by benchmarkIfVerified(); reported at the end of runBody().
+    std::optional<hipdnn_frontend::AutotuneResult> _benchmark;
 };
 
 } // namespace hipdnn_integration_tests::bundle
