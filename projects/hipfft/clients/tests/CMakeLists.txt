@@ -161,6 +161,10 @@ set( BUILD_WITH_LIB "ROCM" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
 
+if( HIPFFT_MPI_ENABLE AND NOT MPI_FOUND )
+  find_package( MPI REQUIRED )
+endif()
+
 # MPI worker for MPI tests
 if( HIPFFT_MPI_ENABLE )
   # build MPI worker to support the tests

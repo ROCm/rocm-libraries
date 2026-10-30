@@ -24,5 +24,8 @@
 # presented in the superbuild GUI, but then passed into the ExternalProject as -D
 # parameters, which would already define them.
 
-option( ALLOW_FETCH_DEPS  "Allow using default URLs to fetch external dependencies" ON )
-option( ALLOW_BUILD_DEPS  "Allow building of external dependencies" ON )
+option( ALLOW_FETCH_DEPS "Allow using default URLs to fetch external dependencies" ON )
+option( ALLOW_BUILD_DEPS "Allow building of external dependencies" ON )
+option( USE_HIPRAND "Use hipRAND to provide device-side input generation" ON )
+option( ROCFFT_MPI_ENABLE "Enable MPI" OFF )
+option( ROCFFT_CRAY_MPI_ENABLE "Cray MPI" OFF )

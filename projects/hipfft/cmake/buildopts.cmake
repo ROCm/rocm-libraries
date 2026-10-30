@@ -26,3 +26,5 @@
 
 option( ALLOW_FETCH_DEPS  "Allow using default URLs to fetch external dependencies" ON )
 option( ALLOW_BUILD_DEPS  "Allow building of external dependencies" ON )
+option( HIPFFT_MPI_ENABLE "Enable MPI" OFF )
+option( HIPFFT_CRAY_MPI_ENABLE "Cray MPI" OFF )

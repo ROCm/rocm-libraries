@@ -57,7 +57,6 @@ include( cmake/buildopts.cmake )
 # Build options
 option( BUILD_SHARED_LIBS "Build ${PROJECT_NAME} as a shared library" ON )
 option( BUILD_VERBOSE "Output additional build information" OFF )
-option( HIPFFT_MPI_ENABLE "Build with MPI support for distributed transforms" OFF )
 
 set( BUILD_WITH_COMPILER "HOST-default" CACHE INTERNAL
      "Build ${PROJECT_NAME} with compiler HIP-clang, HIP-nvcc, or just the host default compiler, eg g++")

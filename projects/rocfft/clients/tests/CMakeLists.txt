@@ -355,6 +355,7 @@ if ( USE_HIPRAND )
 endif()
 
 if( ROCFFT_MPI_ENABLE )
+
   target_link_libraries( rocfft-test
     PRIVATE
     MPI::MPI_CXX
@@ -476,6 +477,11 @@ if (WIN32)
 endif()
 
 if( ROCFFT_MPI_ENABLE )
+
+  if( NOT MPI_FOUND )
+    find_package( MPI REQUIRED )
+  endif()
+  
   # normal and dynamic-loading MPI worker processes
   foreach(worker rocfft_mpi_worker dyna_rocfft_mpi_worker)
     add_executable(

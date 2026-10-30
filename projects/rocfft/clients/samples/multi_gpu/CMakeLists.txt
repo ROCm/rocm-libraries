@@ -20,7 +20,7 @@
 # THE SOFTWARE.
 # #############################################################################
 
-cmake_minimum_required( VERSION 3.16 )
+cmake_minimum_required( VERSION 3.25 )
 
 # This should appear before the project command, because it does not
 # use FORCE
@@ -54,10 +54,6 @@ if( NOT HIP_FOUND )
   find_package( hip REQUIRED PATHS /opt/rocm/lib/cmake/hip/ )
 endif()
 
-if( USE_HIPRAND AND NOT hiprand_FOUND )
-  find_package( hiprand REQUIRED )
-endif()
-
 set( sample_list mgpu_complex)
 
 foreach( sample ${sample_list} )
@@ -76,15 +72,6 @@ foreach( sample ${sample_list} )
     hip::device
     )
 
-  if( USE_HIPRAND )
-    target_link_libraries(
-      ${sample}
-      PRIVATE
-      hip::hiprand
-    )
-    target_compile_definitions( ${sample} PRIVATE USE_HIPRAND )
-  endif()
-
   target_compile_options( ${sample} PRIVATE ${WARNING_FLAGS} -Wno-cpp )
 
   set_target_properties( ${sample} PROPERTIES
@@ -100,9 +87,10 @@ foreach( sample ${sample_list} )
   string( CONCAT SAMPLES_ROCFFT_OUT_DIR "${PROJECT_BINARY_DIR}" ${SAMPLES_ROCFFT_OUT_DIR} )
 
   set_target_properties(${sample}
-                        PROPERTIES 
-                        RUNTIME_OUTPUT_DIRECTORY 
-                        ${SAMPLES_ROCFFT_OUT_DIR})
+    PROPERTIES 
+    RUNTIME_OUTPUT_DIRECTORY 
+    ${SAMPLES_ROCFFT_OUT_DIR}
+  )
 
   target_link_libraries( ${sample} PRIVATE hip::host hip::device )
 
