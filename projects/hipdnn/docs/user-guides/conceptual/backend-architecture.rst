@@ -119,13 +119,17 @@ Frontend API control flow
               [No engine details are loaded here; see get_knobs_for_engine()]
         e. initializeEngineConfig() [selects best engine config from heuristic results]
      4. graph.check_support()         [validates descriptors exist]
-     5. graph.build_plans()
+     5. graph.build_plans()          [finalizes the active plan; on failure tries the other ranked plans]
         a. Backend: hipdnnBackendSetAttribute(execPlan, ENGINE_CONFIG, engineConfig)
         b. Backend: hipdnnBackendFinalize(execPlan)
            -> ExecutionPlanDescriptor::finalize()
               -> Plugin: hipdnnEnginePluginCreateExecutionContext()
               -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
               -> Record the device of the graph handle's stream
+        c. If finalize fails (any error), log a warning and repeat a-b for another
+           ranked plan (the list is scanned from the top) until one finalizes. If none
+           does, build_plans() returns GRAPH_EXECUTION_PLAN_CREATION_FAILED listing
+           every attempted engine's failure.
 
 
 ``graph.get_workspace_size()``
@@ -193,7 +197,7 @@ Handle destruction (implicit via RAII)
          -> Backend: hipdnnBackendSetAttribute(engine, GRAPH, graphDesc)
          -> Backend: hipdnnBackendSetAttribute(engine, ENGINE_ID, engineId)
          -> Backend: hipdnnBackendFinalize(engine)
-            -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
+            -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [only the plugin that owns the engine; its error is returned]
       -> detail::unpackKnobsFromDescriptors(engineDesc, knobs)
          -> Backend: hipdnnBackendGetAttribute(engine, KNOB_INFO, ...)
             -> Plugin: hipdnnEnginePluginGetEngineDetails(handle, engineId, graph, details*)
@@ -260,7 +264,7 @@ normal selector, ranking its kernels by the same metric, with
            -> Backend: hipdnnBackendSetAttribute(engine, GRAPH, graphDesc)
            -> Backend: hipdnnBackendSetAttribute(engine, ENGINE_ID, engineId)
            -> Backend: hipdnnBackendFinalize(engine)
-              -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
+              -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [only the plugin that owns the engine; its error is returned]
         2. Backend: hipdnnBackendCreateDescriptor(ENGINECFG)
            -> Backend: hipdnnBackendSetAttribute(engineConfig, ENGINE, engineDesc)
            -> Backend: hipdnnBackendSetAttribute(engineConfig, RANKING_METRIC_EXT, metric)

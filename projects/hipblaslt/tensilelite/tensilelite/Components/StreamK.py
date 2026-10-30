@@ -30,7 +30,7 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, vectorS
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
 from ..Common import IsaVersion, print2, ceilDivide, log2
-from ..Common.Utilities import isMxf4SubtilePath
+from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor
 from ..Component import Component
 from .TileProcessingStrategy import TileProcessingStrategy, TileWork
 from .WorkAssignment import QueuePartition, StaticPartition
@@ -437,6 +437,28 @@ class StreamK(TileProcessingStrategy):
             if key in kernel:
                 return kernel[key]
         return kernel["DepthU"]
+
+    @staticmethod
+    def _preShuffleRows(kernel, tc):
+        """Rows a host pre-swizzled block interleaves into one K step, else 1.
+
+        A pre-shuffled tensor stores a whole 16-row block before moving along K,
+        so stepping one DepthU window consumes that many rows' worth of K.  The
+        unroll loop already advances the SRD by the scaled amount; a workgroup
+        whose StreamK range starts mid-tile has to start from the same scale or
+        it reads a K position 16x too close to the tile.
+
+        Only the subtile global read walks blocks this way.  The classic swizzle
+        path steps one row per K window, so scaling its start would move the
+        workgroup off its own range.
+        """
+        if tc not in ("A", "B"):
+            return 1
+        if not kernel["ProblemType"].get("SwizzleTensor%s" % tc):
+            return 1
+        if not isSubtileSwizzledTensor(kernel):
+            return 1
+        return kernel["MatrixInstM"] if tc == "A" else kernel["MatrixInstN"]
 
     def shiftSrd(self, writer, srdIdx) -> Module:
       module = Module("shiftSrd")
@@ -908,7 +930,9 @@ class StreamK(TileProcessingStrategy):
         tc = tP["tensorChar"]
         depthU = self._depthUForTc(kernel, tc)
         # StreamK partial tile - offset to tile start index
-        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("StreamKLocalStart"), src1=depthU, comment="StreamK tile start offset"))
+        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("StreamKLocalStart"),
+                           src1=depthU * self._preShuffleRows(kernel, tc),
+                           comment="StreamK tile start offset"))
         strideL = self._summationStride(writer, kernel, tc)
         module.add(writer.s_mul_u64_u32(sgpr(sTmp), sgpr(sTmp+1), sgpr(sTmp), strideL, comment="StreamK tile start offset"))
         # Overflow check removed
@@ -991,7 +1015,9 @@ class StreamK(TileProcessingStrategy):
         depthU = self._depthUForTc(kernel, tc)
         # StreamK partial tile - offset to tile start index
         tmpOffset = writer.sgprPool.checkOut(2, "skStartOffset")
-        module.add(SMulI32(dst=sgpr(tmpOffset), src0=sgpr("StreamKLocalStart"), src1=int(depthU * tP["bpe"]), comment="StreamK tile start offset"))
+        module.add(SMulI32(dst=sgpr(tmpOffset), src0=sgpr("StreamKLocalStart"),
+                           src1=int(depthU * tP["bpe"]) * self._preShuffleRows(kernel, tc),
+                           comment="StreamK tile start offset"))
         strideL = self._summationStride(writer, kernel, tc)
         module.add(writer.s_mul_u64_u32(sgpr(tmpOffset), sgpr(tmpOffset+1), sgpr(tmpOffset), strideL, comment="StreamK tile start offset"))
         # Overflow check removed

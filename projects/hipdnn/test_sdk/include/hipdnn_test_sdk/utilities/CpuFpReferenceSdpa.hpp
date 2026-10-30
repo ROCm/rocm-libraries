@@ -42,8 +42,8 @@ public:
     /// @param attnScaleValue   Optional scale factor; 1.0 (no scaling) when unset, as in cuDNN
     /// @param attnMask         Optional additive attention mask with dims right-aligned
     ///                         to [B, H, Sq, Skv] (rank 1–4), with broadcasting on size-1 dims
-    /// @param leftBound        Number of sequence elements to the left that are unmasked
-    ///                         -1 is no mask to the left
+    /// @param leftBound        Number of unmasked sequence elements ending at the diagonal,
+    ///                         diagonal included (cuDNN semantics). -1 is no mask to the left
     /// @param rightBound        Number of sequence elements to the right that are unmasked
     ///                         -1 is no mask to the right
     /// @param topLeftAlignment If true, diagonal is measured from top left
@@ -428,7 +428,8 @@ public:
     ///                         When provided, enables efficient softmax recomputation.
     ///                         When nullptr, recomputes softmax from scratch.
     /// @param attnMask         Optional additive attention mask (same as forward)
-    /// @param leftBound        Number of KV positions to the left that are unmasked (-1 = no mask)
+    /// @param leftBound        Number of unmasked KV positions ending at the diagonal, diagonal
+    ///                         included (cuDNN semantics; -1 = no mask)
     /// @param rightBound       Number of KV positions to the right that are unmasked (-1 = no mask)
     /// @param topLeftAlignment If true, diagonal at skv==sq; if false, at skv==sq+(seqKv-seqQ)
     ///
@@ -880,6 +881,8 @@ private:
     /// leftBound = -1 means no left mask; rightBound = -1 means no right mask.
     /// topLeftAlignment: if true, diagonal at skv==sq; if false, diagonal at
     /// skv==sq+(seqKv-seqQ).
+    /// Follows cuDNN: leftBound = L keeps the L keys ending at the diagonal (diagonal
+    /// included), and rightBound = R keeps R keys past it.
     static bool isMasked(int64_t sq,
                          int64_t skv,
                          int64_t seqQ,
@@ -893,7 +896,7 @@ private:
         {
             return true;
         }
-        if(leftBound >= 0 && skv < sq + offset - leftBound)
+        if(leftBound >= 0 && skv <= sq + offset - leftBound)
         {
             return true;
         }
