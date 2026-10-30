@@ -230,10 +230,18 @@ void RTCCache::db_file::connect_db(const fs::path& path, bool readonly)
     // another
     sqlite3_busy_timeout(db.get(), 5000);
 
-    // create the default table
-    if(!readonly)
+    static const char* get_stmt_text = "SELECT code "
+                                       "FROM cache_v1 "
+                                       "WHERE"
+                                       "  kernel_name = :kernel_name "
+                                       "  AND arch = :arch "
+                                       "  AND hip_version = :hip_version "
+                                       "  AND generator_sum = :generator_sum ";
+
+    try
     {
-        try
+        // create the default table
+        if(!readonly)
         {
             auto create = prepare_stmt(db.get(),
                                        "CREATE TABLE IF NOT EXISTS cache_v1 ("
@@ -249,29 +257,16 @@ void RTCCache::db_file::connect_db(const fs::path& path, bool readonly)
             if(sqlite3_step(create.get()) != SQLITE_DONE)
                 throw std::runtime_error(sqlite3_errmsg(db.get()));
         }
-        catch(std::exception&)
-        {
-            // connection is not usable
-            db.reset();
-            return;
-        }
-    }
-
-    static const char* get_stmt_text = "SELECT code "
-                                       "FROM cache_v1 "
-                                       "WHERE"
-                                       "  kernel_name = :kernel_name "
-                                       "  AND arch = :arch "
-                                       "  AND hip_version = :hip_version "
-                                       "  AND generator_sum = :generator_sum ";
-
-    try
-    {
         get_stmt = prepare_stmt(db.get(), get_stmt_text);
     }
-    catch(std::exception&)
+    catch(std::exception& e)
     {
-        // connection is not usable
+        // connection is not usable, e.g. the file is not a database
+        if(LOG_RTC_ENABLED())
+            (*LogSingleton::GetInstance().GetRTCOS())
+                << "// skipping unusable RTC cache "
+                << (path.empty() ? std::string(":memory:") : path.string()) << ": " << e.what()
+                << std::endl;
         db.reset();
         return;
     }
