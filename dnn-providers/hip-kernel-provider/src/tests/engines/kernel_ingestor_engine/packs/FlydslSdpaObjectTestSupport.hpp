@@ -88,6 +88,51 @@ public:
         return overwritten;
     }
 
+    /// When @p zeroBias, fills the workspace itself with the canary, so the zero bias the
+    /// launch must write at its end cannot read as written by chance. Call before the launch.
+    void poisonForTheZeroBias(bool zeroBias) const
+    {
+        if(zeroBias && _base != nullptr)
+        {
+            EXPECT_EQ(hipSuccess, hipMemset(_base, CANARY, _bytes));
+            EXPECT_EQ(hipSuccess, hipDeviceSynchronize());
+        }
+    }
+
+    /// When @p zeroBias, that the launch zeroed the workspace's last @p tailBytes: the zero
+    /// bias an engine stages at the workspace's end (FlydslSdpaShared.hpp zeroBiasBytes),
+    /// after what it writes itself. Call after the launch has finished.
+    void expectTheZeroBiasAtTheEnd(bool zeroBias, size_t tailBytes) const
+    {
+        if(zeroBias)
+        {
+            EXPECT_EQ(nonZeroTailBytes(tailBytes), 0U)
+                << "the zero bias is not at the end of the " << _bytes << "-byte workspace";
+        }
+    }
+
+    /// The bytes of the workspace's last @p tailBytes that are not zero. Call after the launch
+    /// has finished.
+    size_t nonZeroTailBytes(size_t tailBytes) const
+    {
+        if(_base == nullptr || tailBytes > _bytes)
+        {
+            return tailBytes;
+        }
+        std::vector<unsigned char> tail(tailBytes);
+        EXPECT_EQ(hipSuccess,
+                  hipMemcpy(tail.data(),
+                            static_cast<const char*>(_base) + (_bytes - tailBytes),
+                            tailBytes,
+                            hipMemcpyDeviceToHost));
+        size_t nonZero = 0;
+        for(const auto byte : tail)
+        {
+            nonZero += byte == 0 ? 0 : 1;
+        }
+        return nonZero;
+    }
+
 private:
     size_t _bytes = 0;
     void* _base = nullptr;

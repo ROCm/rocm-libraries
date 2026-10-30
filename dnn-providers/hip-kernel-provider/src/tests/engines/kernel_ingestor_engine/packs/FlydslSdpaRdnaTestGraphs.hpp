@@ -5,6 +5,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -81,6 +82,7 @@ constexpr const char* FLYDSL_SDPA_RDNA_LEFT_BOUND_TOKEN = "flydsl_sdpa_rdna.left
 constexpr const char* FLYDSL_SDPA_RDNA_ALIGN_BOTTOM_RIGHT_TOKEN
     = "flydsl_sdpa_rdna.align_bottom_right";
 constexpr const char* FLYDSL_SDPA_RDNA_STATS_TOKEN = "flydsl_sdpa_rdna.stats.uid";
+constexpr const char* FLYDSL_SDPA_RDNA_ZERO_BIAS_TOKEN = "flydsl_sdpa_rdna.bias.zero";
 constexpr const char* FLYDSL_SDPA_RDNA_SCALE_SOURCE_TOKEN = "flydsl_sdpa_rdna.scale_source";
 constexpr const char* FLYDSL_SDPA_RDNA_SCALE_TOKEN = "flydsl_sdpa_rdna.scale";
 constexpr const char* FLYDSL_SDPA_RDNA_SEQ_LEN_Q_TOKEN = "flydsl_sdpa_rdna.seq_len_q.uid";
@@ -1343,7 +1345,7 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
         [](SdpaGraphSpec& s) { s.stats = SdpaStats::LSE_WRONG_SHAPE; },
         withStats);
 
-    // The scale: one positive finite host scalar, given one way.
+    // The scale: one finite host scalar at most 2^20 in magnitude, given one way.
     edit("ScaleOnTheDevice", [](SdpaGraphSpec& s) { s.scaleKind = SdpaScale::DEVICE_TENSOR; });
     const auto constantScale = [](SdpaGraphSpec& s) { s.scaleKind = SdpaScale::CONSTANT_TENSOR; };
     const auto runtimeScale = [](SdpaGraphSpec& s) { s.scaleKind = SdpaScale::RUNTIME_TENSOR; };
@@ -1375,12 +1377,14 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
             s.scaleDataType = data_objects::DataType::INT32;
         },
         runtimeScale);
-    for(const auto& [name, value] : {std::pair{"Negative", -0.125F},
-                                     std::pair{"Zero", 0.0F},
-                                     std::pair{"NaN", std::numeric_limits<float>::quiet_NaN()},
-                                     std::pair{"Infinite", std::numeric_limits<float>::infinity()},
-                                     // Past the shared bound every family serves (2^20).
-                                     std::pair{"AboveTheBound", 2097152.0F}})
+    // Zero and negative scales are taken (sdpaScaleAccepts); NaN and either infinity are not.
+    for(const auto& [name, value] :
+        {std::pair{"NaN", std::numeric_limits<float>::quiet_NaN()},
+         std::pair{"Infinite", std::numeric_limits<float>::infinity()},
+         std::pair{"MinusInfinite", -std::numeric_limits<float>::infinity()},
+         // Past the shared bound every family serves (2^20), either side of zero.
+         std::pair{"AboveTheBound", 2097152.0F},
+         std::pair{"BelowMinusTheBound", -2097152.0F}})
     {
         const float scale = value;
         edit(std::string("ScaleValue") + name, [scale](SdpaGraphSpec& s) {
@@ -1495,6 +1499,58 @@ inline std::vector<SdpaFieldDecline> sdpaPassByValueDeclines()
         s.sinkDataType = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
     });
     return cases;
+}
+
+/// A softmax scale every FlyDSL SDPA engine takes (any finite one up to 2^20 in magnitude, as
+/// PyTorch and AOTriton take any), stated as a value or a constant tensor, and whether it needs
+/// scaled scores (FlydslSdpaShared.hpp needsScaledScores): the engines whose plain objects keep
+/// raw scores then run a graph without a bias on their bias objects with a zero bias.
+struct SdpaScaleAccept
+{
+    std::string name;
+    SdpaScale kind = SdpaScale::VALUE;
+    float scale = 0.0F;
+    bool scaledScores = false;
+};
+
+inline std::vector<SdpaScaleAccept> sdpaScaleAccepts()
+{
+    std::vector<SdpaScaleAccept> cases;
+    for(const auto& [name, value, scaled] :
+        {std::tuple{"Zero", 0.0F, true},
+         std::tuple{"NegativeZero", -0.0F, true},
+         std::tuple{"Negative", -0.125F, true},
+         std::tuple{"MinusTheBound", -1048576.0F, true},
+         // Subnormal: its product with log2(e) may flush to zero, as zero's does.
+         std::tuple{"Subnormal", 1.0e-40F, true},
+         // The least normal scale the plain objects take, and the bound.
+         std::tuple{"LeastNormal", std::numeric_limits<float>::min(), false},
+         std::tuple{"TheBound", 1048576.0F, false}})
+    {
+        cases.push_back({std::string("Value") + name, SdpaScale::VALUE, value, scaled});
+        cases.push_back(
+            {std::string("ConstantTensor") + name, SdpaScale::CONSTANT_TENSOR, value, scaled});
+    }
+    return cases;
+}
+
+/// Whether @p spec states a scale, fixed in the graph, that needs scaled scores: zero,
+/// negative or subnormal (FlydslSdpaShared.hpp needsScaledScores). A runtime scale is not known
+/// at match, and an absent one is 1.
+inline bool sdpaSpecNeedsScaledScores(const SdpaGraphSpec& spec)
+{
+    if(spec.scaleKind != SdpaScale::VALUE && spec.scaleKind != SdpaScale::CONSTANT_TENSOR)
+    {
+        return false;
+    }
+    return std::isfinite(spec.scale) && !(spec.scale >= std::numeric_limits<float>::min());
+}
+
+/// Whether the engines whose plain objects keep raw scores run @p spec on their bias objects
+/// with a zero bias (FlydslSdpaShared.hpp runsOnAZeroBias).
+inline bool sdpaSpecRunsOnAZeroBias(const SdpaGraphSpec& spec)
+{
+    return !spec.withBias && sdpaSpecNeedsScaledScores(spec);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

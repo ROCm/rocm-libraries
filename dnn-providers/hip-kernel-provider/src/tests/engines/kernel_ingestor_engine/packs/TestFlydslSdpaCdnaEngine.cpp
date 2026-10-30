@@ -45,6 +45,7 @@
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDump.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDumpTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
 
 /**
  * @file TestFlydslSdpaCdnaEngine.cpp
@@ -1044,10 +1045,6 @@ std::vector<CdnaCase> declinedCases()
     auto deviceScale = cdnaSpec();
     deviceScale.scaleKind = SdpaScale::DEVICE_TENSOR;
     cases.push_back({"DeviceScaleTensor", deviceScale});
-    auto negativeScale = cdnaSpec();
-    negativeScale.scaleKind = SdpaScale::VALUE;
-    negativeScale.scale = -0.125F;
-    cases.push_back({"NegativeScale", negativeScale});
     // Past the shared bound every family serves (2^20).
     auto hugeScale = cdnaSpec();
     hugeScale.scaleKind = SdpaScale::VALUE;
@@ -1498,6 +1495,155 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsABiasTheVectorizedObjectsCannotReadOnThe
     }
     // A strided object is a bias object: it serves no graph without a bias.
     EXPECT_FALSE(cdnaAdmits(cdnaSpec(), kstrided));
+}
+
+// ---------------------------------------------------------------------------
+// The softmax scale: any finite one up to 2^20 in magnitude, zero and negative included. The
+// CDNA objects without a bias keep raw scores, so a scale that needs scaled scores runs on the
+// bias objects with a zero bias, where a [1, 1, 1, Skv] bias in the query's dtype would.
+// ---------------------------------------------------------------------------
+
+constexpr const char* CDNA_ZERO_BIAS_TOKEN = "flydsl_sdpa_cdna.bias.zero";
+constexpr const char* CDNA_BIAS_VECTORIZED_TOKEN = "flydsl_sdpa_cdna.bias.vectorized";
+
+class TestFlydslSdpaCdnaScale : public ::testing::TestWithParam<SdpaScaleAccept>
+{
+};
+
+TEST_P(TestFlydslSdpaCdnaScale, TakesTheScaleAndSaysWhetherItRunsOnTheZeroBias)
+{
+    auto spec = cdnaSpec();
+    spec.scaleKind = GetParam().kind;
+    spec.scale = GetParam().scale;
+    const auto bound = cdnaGraphMatch(spec);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_ZERO_BIAS_TOKEN), GetParam().scaledScores ? 1 : 0);
+    spec.withBias = true;
+    spec.biasDataType = DataType::BFLOAT16;
+    const auto biased = cdnaGraphMatch(spec);
+    ASSERT_TRUE(biased.has_value());
+    EXPECT_EQ(tryGetBoundInt(*biased, CDNA_ZERO_BIAS_TOKEN), 0);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestFlydslSdpaCdnaScale,
+                         ::testing::ValuesIn(sdpaScaleAccepts()),
+                         [](const auto& info) { return info.param.name; });
+
+TEST(TestFlydslSdpaCdnaScaleBinding, ARuntimeScaleIsNotKnownAtMatchAndRunsOnThePlainObjects)
+{
+    auto spec = cdnaSpec();
+    spec.scaleKind = SdpaScale::RUNTIME_TENSOR;
+    spec.scale = -0.5F;
+    const auto bound = cdnaGraphMatch(spec);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_ZERO_BIAS_TOKEN), 0);
+    EXPECT_TRUE(cdnaAdmits(spec, makeCdnaKernel("generic", 128, 0, "bf16", 128)));
+}
+
+TEST(TestFlydslSdpaCdnaScaleGraphMatch, DeclinesAZeroBiasWhereAGraphsOwnBiasDeclines)
+{
+    // The f32 objects have no bias twins, and packed sequences take no bias: each declines a
+    // scale that needs scaled scores, and takes a positive one (the control).
+    auto f32 = cdnaSpec();
+    f32.dataType = DataType::FLOAT;
+    f32.scaleKind = SdpaScale::VALUE;
+    ASSERT_TRUE(cdnaGraphMatch(f32).has_value());
+    f32.scale = -0.125F;
+    EXPECT_FALSE(cdnaGraphMatch(f32).has_value());
+    auto packed = cdnaPackedSpec();
+    packed.scaleKind = SdpaScale::VALUE;
+    ASSERT_TRUE(cdnaGraphMatch(packed).has_value());
+    packed.scale = 0.0F;
+    EXPECT_FALSE(cdnaGraphMatch(packed).has_value());
+}
+
+TEST(TestFlydslSdpaCdnaScaleGraphMatch, SaysWhetherTheVectorizedObjectsReadTheZeroBias)
+{
+    // As for a [1, 1, 1, Skv] bias: keys in runs of 4.
+    auto spec = cdnaSpec();
+    spec.scaleKind = SdpaScale::VALUE;
+    spec.scale = -0.125F;
+    auto bound = cdnaGraphMatch(spec);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_BIAS_VECTORIZED_TOKEN), 1);
+    spec.seqLenKv = 334;
+    bound = cdnaGraphMatch(spec);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_BIAS_VECTORIZED_TOKEN), 0);
+}
+
+TEST(TestFlydslSdpaCdnaScaleKernelMatch, RunsANonPositiveScaleOnTheBiasObjects)
+{
+    const auto kstrided = [] {
+        auto kernel = makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 1, int64_t{128}, 1);
+        kernel.metadata[CDNA_BIAS_KSTRIDED_FIELD] = int64_t{1};
+        return kernel;
+    }();
+    const auto plain = makeCdnaKernel("generic", 128, 0, "bf16", 128);
+    const auto vectorExact = makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 1);
+    const auto dualwave = makeCdnaKernel("dualwave", 128, 0, "bf16", 256, 0, 1, 1);
+    const auto dualwavePlain = makeCdnaKernel("dualwave", 128, 0, "bf16", 256);
+    const auto decode = makeCdnaKernel("decode", 128, 0, "bf16", 64);
+    for(const float scale : {0.0F, -0.0F, -0.125F, 1.0e-40F})
+    {
+        SCOPED_TRACE(scale);
+        auto spec = cdnaSpec();
+        spec.scaleKind = SdpaScale::VALUE;
+        spec.scale = scale;
+        EXPECT_FALSE(cdnaAdmits(spec, plain));
+        EXPECT_FALSE(cdnaAdmits(spec, dualwavePlain));
+        EXPECT_TRUE(cdnaAdmits(spec, vectorExact));
+        EXPECT_TRUE(cdnaAdmits(spec, dualwave));
+        EXPECT_TRUE(cdnaAdmits(spec, kstrided));
+        // The split decode objects have no bias twins.
+        auto decoding = spec;
+        decoding.seqLenQ = 1;
+        decoding.seqLenKv = 4096;
+        EXPECT_FALSE(cdnaAdmits(decoding, decode));
+        // A key length the vectorized objects do not read: the strided ones only.
+        spec.seqLenKv = 334;
+        EXPECT_FALSE(cdnaAdmits(spec, vectorExact));
+        EXPECT_FALSE(cdnaAdmits(spec, dualwave));
+        EXPECT_TRUE(cdnaAdmits(spec, kstrided));
+    }
+    // The control: a normal positive scale stays on the plain objects.
+    auto spec = cdnaSpec();
+    spec.scaleKind = SdpaScale::VALUE;
+    spec.scale = std::numeric_limits<float>::min();
+    EXPECT_TRUE(cdnaAdmits(spec, plain));
+    EXPECT_TRUE(cdnaAdmits(spec, dualwavePlain));
+    EXPECT_FALSE(cdnaAdmits(spec, vectorExact));
+    EXPECT_FALSE(cdnaAdmits(spec, kstrided));
+    auto decoding = spec;
+    decoding.seqLenQ = 1;
+    decoding.seqLenKv = 4096;
+    EXPECT_TRUE(cdnaAdmits(decoding, decode));
+}
+
+TEST(TestFlydslSdpaCdnaScaleWorkspace, HoldsTheZeroBiasAfterWhatTheLaunchTakesAlready)
+{
+    namespace sdpa = hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa;
+    auto spec = cdnaSpec();
+    spec.scaleKind = SdpaScale::VALUE;
+    spec.scale = -0.125F;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto& handler = dispatchHandler(FLYDSL_SDPA_CDNA);
+    const auto vectorExact = makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 1);
+    EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, vectorExact),
+              sdpa::zeroBiasBytes(spec.seqLenKv));
+    // With a dropout seed given by value, after its 16 bytes.
+    setDropout(spec, 0.25F);
+    spec.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID);
+    const GraphFixture dropping(buildFlydslSdpaRdnaGraph(spec));
+    const auto droppingBound = matchesGraph(FLYDSL_SDPA_CDNA, dropping.context());
+    ASSERT_TRUE(droppingBound.has_value());
+    auto dropoutBias = vectorExact;
+    dropoutBias.metadata[CDNA_HAS_DROPOUT_FIELD] = int64_t{1};
+    EXPECT_EQ(handler.workspaceBytes(dropping.context(), *droppingBound, dropoutBias),
+              16U + sdpa::zeroBiasBytes(spec.seqLenKv));
 }
 
 TEST(TestFlydslSdpaCdnaKernelMatch, AddsABiasAtABucketHeadDim)
@@ -2919,6 +3065,14 @@ bool cdnaPaddedRowIsExact(const SdpaGraphSpec& spec,
 /// BSHD, BHSD, or Q, K and V as views into one packed buffer. The inputs and the reference
 /// are computed once and shared by every kernel: the reference is the costly part, and the
 /// kernels a shape admits are often a dozen tile variants.
+/// Whether @p kernel, run for @p spec, reads the zero bias its launch stages in the workspace: a
+/// bias object for a graph without a bias (a scale that needs scaled scores).
+bool cdnaReadsZeroBias(const SdpaGraphSpec& spec, const KernelDefinition& kernel)
+{
+    const auto* hasBias = tryGetMetadataField<int64_t>(kernel.metadata, CDNA_HAS_BIAS_FIELD);
+    return !spec.withBias && hasBias != nullptr && *hasBias == 1;
+}
+
 template <typename T>
 void expectCandidatesMatchReference(const MatchContext& context,
                                     const BoundTokens& bound,
@@ -3601,6 +3755,10 @@ void expectCandidatesMatchReference(const MatchContext& context,
         // size the engine reports, so a launch that writes past it fails the case.
         const auto workspaceBytes = handler.workspaceBytes(context, bound, kernel);
         const GuardedWorkspace workspace(workspaceBytes);
+        // A bias object run for a graph without a bias reads the zero bias the launch writes
+        // at the workspace's end, past what it writes itself: the canary there must be gone.
+        const bool readsZeroBias = cdnaReadsZeroBias(spec, kernel);
+        workspace.poisonForTheZeroBias(readsZeroBias);
         const Handle handle;
         handler.launch(handle,
                        *prepared,
@@ -3610,6 +3768,9 @@ void expectCandidatesMatchReference(const MatchContext& context,
         ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
         EXPECT_EQ(workspace.overwrittenGuardBytes(), 0U)
             << "the launch wrote past the " << workspaceBytes << "-byte workspace it reported";
+        workspace.expectTheZeroBiasAtTheEnd(
+            readsZeroBias,
+            hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa::zeroBiasBytes(skv));
         ASSERT_EQ(hipSuccess,
                   hipMemcpy(o.data(), oDevice, oCount * sizeof(T), hipMemcpyDeviceToHost));
         if(withStats)
@@ -3758,11 +3919,12 @@ void expectCandidatesMatchReference(const MatchContext& context,
             << "padded rows not O = 0 and LSE = -inf, last at " << wherePadded;
 
         // A sink, against hipDNN's CPU reference as well (FLOAT [1, Hq, 1, 1], SEM-022): with
-        // the bias, the band and padding the graph has; and a bias under padding
-        // (vendored-kernel modification 37), sink or not. Not packed, dropped or NaN: the
-        // reference's packed form, dropout and NaN rows are checked above.
-        if((spec.withSink || (padded && spec.withBias)) && !packed && !drops
-           && !spec.queryNanPosition && !spec.keyNanPosition && !spec.biasNanRows)
+        // the bias, the band and padding the graph has; a bias under padding (vendored-kernel
+        // modification 37), sink or not; and a scale that needs scaled scores. Not packed,
+        // dropped or NaN: the reference's packed form, dropout and NaN rows are checked above.
+        if((spec.withSink || (padded && spec.withBias) || sdpaSpecNeedsScaledScores(spec))
+           && !packed && !drops && !spec.queryNanPosition && !spec.keyNanPosition
+           && !spec.biasNanRows)
         {
             SdpaCpuReferenceProblem reference{b,
                                               h,
@@ -3914,6 +4076,63 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ReadsARuntimeScaleAtExecute)
     spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
     spec.scaleKind = SdpaScale::RUNTIME_TENSOR;
     spec.scale = 0.2F;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+// Zero and negative softmax scales on the CDNA objects (the bias objects, reading a zero bias;
+// the plain ones keep raw scores), every candidate the matcher admits, against the harness's
+// reference and hipDNN's CPU reference: at zero every kept key weighs the same (O the mean of
+// V over them, the LSE the log of their count), a negative scale reverses the scores' order.
+// One small shape per behavior: causal at zero, padding under a bottom-right mask at a key
+// length off the vectorized objects' runs, and a sink, at -0.3. The sweep (both scales on
+// every case, the dual-wave objects, a band, a bias, dropout, a decode shape, -2, a subnormal
+// scale and a constant tensor) is Full/TestGpuFlydslSdpaCdnaFullTier.
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesZeroAndNegativeScales)
+{
+    SdpaGraphSpec base;
+    base.headDim = 64;
+    base.heads = 2;
+    base.kvHeads = 1;
+    base.seqLenQ = 64;
+    base.seqLenKv = 64;
+    base.stats = SdpaStats::LSE;
+    {
+        SCOPED_TRACE("causal at scale 0");
+        auto spec = base;
+        spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+        spec.scale = 0.0F;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("padded, bottom-right, keys off the vector runs, at scale -0.3");
+        auto spec = base;
+        spec.batch = 2;
+        spec.seqLenKv = 67;
+        spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+        setPadding(spec, {64, 20}, {67, 33});
+        spec.scale = -0.3F;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("a sink at scale -0.3");
+        auto spec = base;
+        spec.withSink = true;
+        spec.scale = -0.3F;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ABiasObjectTakesANegativeRuntimeScale)
+{
+    // A runtime scale is read after the object is chosen: a bias object (the graph's own bias
+    // here) scales first, so it takes a negative one; the plain ones refuse it
+    // (RefusesANonPositiveRuntimeScaleAtLaunch).
+    auto spec = cdnaSpec();
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    spec.withBias = true;
+    spec.scaleKind = SdpaScale::RUNTIME_TENSOR;
+    spec.scale = -0.3F;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
@@ -4772,8 +4991,8 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasInsideASlidingWindow)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
-// The runtime scale is read from host memory at launch; one the kernels cannot take (not
-// positive, not finite, or past the shared 2^20 bound) is refused there. Every operand is
+// The runtime scale is read from host memory at launch; one a plain object cannot take (not
+// positive and normal, not finite, or past the shared 2^20 bound) is refused there. Every operand is
 // bound to real device memory, so the scale is the only thing a launch can refuse, and a
 // servable scale with the same buffers launches.
 TEST(TestGpuFlydslSdpaCdnaDispatch, RefusesANonPositiveRuntimeScaleAtLaunch)
@@ -4828,11 +5047,17 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, RefusesANonPositiveRuntimeScaleAtLaunch)
     };
 
     const Handle handle;
+    // Zero, negative and subnormal: a plain object keeps raw scores (rawScoresServe), and a
+    // runtime scale arrives after it was chosen. The rest no object takes.
     for(float scale : {0.0F,
+                       -0.0F,
                        -0.125F,
+                       1.0e-40F,
                        std::numeric_limits<float>::quiet_NaN(),
                        std::numeric_limits<float>::infinity(),
-                       2097152.0F /* 2^21, past the 2^20 bound */})
+                       -std::numeric_limits<float>::infinity(),
+                       2097152.0F /* 2^21, past the 2^20 bound */,
+                       -2097152.0F})
     {
         const auto buffers = buffersWith(scale);
         EXPECT_THROW(handler.launch(handle,
@@ -6436,6 +6661,97 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32InPaddedSlotsAndAtAnEveryKeyDiago
     everyKey.rightBound = 300;
     everyKey.stats = SdpaStats::LSE;
     expectCdnaMatchesReference(everyKey, F32_TOLERANCE);
+}
+
+// The zero- and negative-scale sweep (TestGpuFlydslSdpaCdnaDispatch.ServesZeroAndNegativeScales
+// is its quick case): every candidate the matcher admits, at 0 and -0.3, for causal (the
+// dual-wave objects too, where they ship), a key length off the vectorized objects' runs, a
+// band, the graph's own bias, a sink, padding, dropout (its keep mask bit for bit through the
+// RNG dump) and a decode-shaped graph, which the generic objects run (the split decode objects
+// have no bias twins); then -2, a subnormal scale and a constant scale tensor.
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, ServesZeroAndNegativeScales)
+{
+    struct Case
+    {
+        std::string name;
+        SdpaGraphSpec spec;
+        const PackSymbols* family;
+    };
+    std::vector<Case> cases;
+    auto causal = cdnaSpec();
+    causal.scaleKind = SdpaScale::VALUE;
+    causal.heads = 8;
+    causal.kvHeads = 2;
+    causal.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    causal.stats = SdpaStats::LSE;
+    cases.push_back({"Causal", causal, &FLYDSL_SDPA_CDNA_DUALWAVE});
+    SdpaGraphSpec base;
+    base.headDim = 128;
+    base.heads = 4;
+    base.kvHeads = 2;
+    base.seqLenQ = 200;
+    base.seqLenKv = 200;
+    base.stats = SdpaStats::LSE;
+    auto offRuns = base;
+    offRuns.seqLenKv = 203;
+    offRuns.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    cases.push_back({"KeysOffTheVectorRuns", offRuns, &FLYDSL_SDPA_CDNA});
+    auto band = base;
+    band.mask = SdpaMask::SLIDING_WINDOW;
+    band.leftBound = 32;
+    cases.push_back({"Band", band, &FLYDSL_SDPA_CDNA});
+    auto biased = base;
+    biased.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    biased.withBias = true;
+    cases.push_back({"ItsOwnBias", biased, &FLYDSL_SDPA_CDNA});
+    auto sink = base;
+    sink.headDim = 64;
+    sink.heads = 8;
+    sink.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    sink.withSink = true;
+    cases.push_back({"Sink", sink, &FLYDSL_SDPA_CDNA});
+    auto padded = base;
+    padded.batch = 3;
+    setPadding(padded, {200, 30, 0}, {200, 50, 20});
+    cases.push_back({"Padded", padded, &FLYDSL_SDPA_CDNA});
+    SdpaGraphSpec dropout;
+    dropout.dataType = DataType::HALF;
+    dropout.heads = 4;
+    dropout.kvHeads = 2;
+    dropout.seqLenQ = 40;
+    dropout.seqLenKv = 72;
+    dropout.stats = SdpaStats::LSE;
+    setDropoutWithRngDump(dropout, 0.25F, 0x0123456789ABCDEFULL, 99U);
+    cases.push_back({"DropoutWithItsRngDump", dropout, &FLYDSL_SDPA_CDNA});
+    auto decode = base;
+    decode.batch = 1;
+    decode.heads = 8;
+    decode.seqLenQ = 1;
+    decode.seqLenKv = 1024;
+    decode.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    cases.push_back({"DecodeShaped", decode, &FLYDSL_SDPA_CDNA});
+    for(auto c : cases)
+    {
+        for(const float scale : {0.0F, -0.3F})
+        {
+            SCOPED_TRACE(c.name + " at scale " + std::to_string(scale));
+            c.spec.scale = scale;
+            expectCdnaMatchesReference(c.spec, BF16_TOLERANCE, *c.family);
+        }
+    }
+    // A scale far enough below zero to reverse the order sharply, a subnormal one (which a
+    // raw-score object would flush to zero), and a constant scale tensor.
+    auto spec = cases[1].spec;
+    for(const float scale : {-2.0F, 1.0e-40F})
+    {
+        SCOPED_TRACE("keys off the vector runs at scale " + std::to_string(scale));
+        spec.scale = scale;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    spec.scaleKind = SdpaScale::CONSTANT_TENSOR;
+    spec.scale = -0.5F;
+    SCOPED_TRACE("keys off the vector runs at a constant scale tensor of -0.5");
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
 INSTANTIATE_TEST_SUITE_P(Full,
