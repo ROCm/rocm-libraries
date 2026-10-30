@@ -10,6 +10,7 @@ import os
 import runpy
 import site
 import sys
+import types
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
@@ -123,15 +124,12 @@ def _run(arguments: list[str]) -> None:
     _set_import_path(natural, explicit)
 
     if mode == "-c":
-        namespace = {
-            "__name__": "__main__",
-            "__doc__": None,
-            "__package__": None,
-            "__loader__": None,
-            "__spec__": None,
-            "__annotations__": {},
-        }
-        exec(compile(code, "<string>", "exec", dont_inherit=True), namespace)
+        main_module = types.ModuleType("__main__")
+        sys.modules["__main__"] = main_module
+        exec(
+            compile(code, "<string>", "exec", dont_inherit=True),
+            main_module.__dict__,
+        )
         return
     if mode == "-m":
         runpy.run_module(module, run_name="__main__", alter_sys=True)

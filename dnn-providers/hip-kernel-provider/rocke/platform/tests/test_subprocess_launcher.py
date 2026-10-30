@@ -71,6 +71,44 @@ def test_launcher_preserves_code_arguments(tmp_path):
     assert child.stdout.strip() == "-c|a|b"
 
 
+def test_code_executes_in_registered_main_module(tmp_path):
+    code = (
+        "import pickle, sys, unittest\n"
+        "class Payload: pass\n"
+        "class MainModuleTest(unittest.TestCase):\n"
+        "    def test_registered_main(self):\n"
+        "        self.assertIs(sys.modules['__main__'].Payload, Payload)\n"
+        "        restored = pickle.loads(pickle.dumps(Payload()))\n"
+        "        self.assertIsInstance(restored, Payload)\n"
+        "unittest.main()\n"
+    )
+
+    child = subprocess.run(
+        rocke_python_command("-c", code),
+        cwd=tmp_path,
+        env=rocke_subprocess_env(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "Ran 1 test" in child.stderr
+
+
+def test_code_does_not_inherit_launcher_future_flags(tmp_path):
+    code = (
+        "def identity(value: int) -> int: return value\n"
+        "assert identity.__annotations__ == {'value': int, 'return': int}\n"
+    )
+
+    subprocess.run(
+        rocke_python_command("-c", code),
+        cwd=tmp_path,
+        env=rocke_subprocess_env(),
+        check=True,
+    )
+
+
 def test_module_execution_preserves_cwd_imports_and_arguments(tmp_path):
     (tmp_path / "rocke").mkdir()
     (tmp_path / "rocke" / "__init__.py").write_text(
