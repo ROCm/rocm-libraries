@@ -66,11 +66,6 @@ if(HIP_COMPILER STREQUAL "nvcc")
       PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION})
   endif()
 else()
-  set(
-    ROCPRIM_FETCH_METHOD "MONOREPO"
-    CACHE STRING
-    "The method used to fetch ${arg_fetch_PACKAGE}"
-  )
   fetch_monorepo_dep(
     PACKAGE rocprim
     VERSION ${MIN_ROCPRIM_PACKAGE_VERSION}
