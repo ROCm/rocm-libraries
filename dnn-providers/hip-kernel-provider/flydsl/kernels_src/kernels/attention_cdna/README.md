@@ -239,8 +239,10 @@ diff against upstream plus the modifications below.
     scales its scores first and adds the bias to them, modification 28), and
     the max is scaled once after the loop for the sink, the stores and the split-K
     combine. A row with no key yet is floored at -1e30 rather than -3e38, so the
-    scaled floor stays finite. The scale must be positive, which the engine already
-    requires. Only the dual-wave objects change; the generic kernel's are
+    scaled floor stays finite. The scale must be positive (and normal), which the engine
+    requires of the objects without a bias; a zero, negative or subnormal one runs on the
+    bias objects, which scale first (modification 28), with a zero bias (COVERAGE.md
+    section 7, the scale row). Only the dual-wave objects change; the generic kernel's are
     byte-identical. Its cost is COVERAGE.md section 7.5 item 12. Not yet upstream.
 
 22. **A finite floor for a row no key reaches** (`flash_attn_utils.py`). The generic
