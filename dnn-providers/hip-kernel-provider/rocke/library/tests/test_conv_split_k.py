@@ -622,3 +622,16 @@ def test_explicit_atomic_that_cannot_be_built_raises():
     with pytest.raises(ValueError, match="packed atomic"):
         resolve_conv_split_k("wgrad", STEM, split_k=8, **kw)
     assert resolve_conv_split_k("wgrad", STEM, split_k=1, **kw).split_k == 1
+
+
+def test_fwd_wave_filling_split_ks():
+    from kernels.common.conv_split_k import fwd_wave_filling_split_ks
+
+    # MI300A, 228 CUs. s10 fwd on 256x128 tiles: 32 tiles -> 7 (224 WGs).
+    assert fwd_wave_filling_split_ks(32, 228)[0] == 7
+    # s8 fwd on 128x256 tiles: 128 tiles -> 3, 5, 7, 8, 10, 12, 14.
+    assert fwd_wave_filling_split_ks(128, 228) == (3, 5, 7, 8, 10, 12, 14)
+    # A grid already over a wave offers nothing for n = 1.
+    assert fwd_wave_filling_split_ks(512, 228) == (2, 3)
+    assert fwd_wave_filling_split_ks(0, 228) == ()
+    assert fwd_wave_filling_split_ks(32, 0) == ()

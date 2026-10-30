@@ -81,6 +81,8 @@ from kernels.common.conv_implicit_gemm_wgrad_two_stage import wgrad_workspace_nb
 
 __all__ = [
     "ATOMIC_16BIT_MAX_SPLIT_K",
+    "FWD_SPLIT_FILL_WAVES",
+    "fwd_wave_filling_split_ks",
     "MAX_WGRAD_WS_BYTES",
     "ConvSplitK",
     "parse_split_k_override",
@@ -405,6 +407,36 @@ def _resolve_dgrad(
         allow_unsplit=allow_unsplit,
     )
     return ConvSplitK(plan.split_k, False, plan.split_k, plan.reason)
+
+
+# Forward split-K: how many full waves of workgroups over the device's CUs
+# :func:`fwd_wave_filling_split_ks` offers degrees for.
+FWD_SPLIT_FILL_WAVES = 8
+
+
+def fwd_wave_filling_split_ks(
+    tiles: int, num_cus: int, max_waves: int = FWD_SPLIT_FILL_WAVES
+) -> tuple:
+    """Forward split-K degrees whose grid fills whole waves of the device.
+
+    For ``n = 1..max_waves``, the largest degree ``floor(n * num_cus / tiles)``
+    (> 1) whose ``tiles * degree`` workgroups fit ``n`` waves of one workgroup
+    per CU. A power of two rarely fills a part whose CU count is not one
+    (MI300A: 228 CUs): 32 output tiles x 7 = 224 workgroups is one wave where
+    x 8 = 256 makes two. Ascending, no duplicates. The caller still applies
+    its own limits (slice length, grid size, gridDim.z).
+    """
+    if tiles <= 0 or not num_cus:
+        return ()
+    return tuple(
+        sorted(
+            {
+                (n * num_cus) // tiles
+                for n in range(1, max_waves + 1)
+                if (n * num_cus) // tiles > 1
+            }
+        )
+    )
 
 
 def resolve_conv_split_k(

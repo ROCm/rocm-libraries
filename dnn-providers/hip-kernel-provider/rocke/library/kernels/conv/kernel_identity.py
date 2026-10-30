@@ -158,6 +158,10 @@ class KernelIdentity:
     # fwd only (ImplicitGemmConvSpec.lds_xor): XOR-swizzled, unpadded A/B LDS
     # tiles. Left out of the hash while False.
     lds_xor: bool = False
+    # fwd only (ImplicitGemmConvSpec.a_direct). Left out of the hash while False.
+    a_direct: bool = False
+    # fwd only (ImplicitGemmConvSpec.uk_tap_fast). Left out of the hash while False.
+    uk_tap_fast: bool = False
     # dgrad only (DgradConvSpec.patch): a patch embedding as one GEMM over the
     # filter's (y, x, c). Changes the store and the problems served (see
     # identity_supports_problem). Left out of the hash while False.
@@ -182,6 +186,35 @@ class KernelIdentity:
     # whose cpg is a multiple of tile_k (see identity_supports_problem). Left
     # out of the hash while False.
     split_addr_k_decode: bool = False
+    # fwd split-K binaries only (ImplicitGemmConvSpec.split_tail): split only
+    # the tiles past the ``full_tiles`` kernarg. Left out of the hash at False.
+    split_tail: bool = False
+    # fwd only (ImplicitGemmConvSpec.uk_nopad): binaries without the per-tap
+    # bounds checks serve unpadded problems only. Left out of the hash at False.
+    uk_nopad: bool = False
+    # fwd only (ImplicitGemmConvSpec.defer_mfma_per_write). Out of the hash at 0.
+    defer_mfma_per_write: int = 0
+    # fwd only (ImplicitGemmConvSpec.lds_ahead / defer_mfma /
+    # vmem_interleave): K-loop instruction scheduling of the reg_prefetch /
+    # prefetch_regs loops. Left out of the hash at False / 0.
+    lds_ahead: bool = False
+    defer_mfma: int = 0
+    vmem_interleave: int = 0
+    # fwd only (ImplicitGemmConvSpec.lds_kpack_read). Left out of the hash
+    # while False.
+    lds_kpack_read: bool = False
+    # fwd only (ImplicitGemmConvSpec.uk_chunk_group). Left out of the hash at 0.
+    uk_chunk_group: int = 0
+    # fwd only (ImplicitGemmConvSpec.rpf_lds_barrier). Left out of the hash while False.
+    rpf_lds_barrier: bool = False
+    # fwd only (ImplicitGemmConvSpec.rpf_fetch_late). Left out of the hash while False.
+    rpf_fetch_late: bool = False
+    # fwd only (ImplicitGemmConvSpec.uk_xhalo). Left out of the hash at 0.
+    uk_xhalo: int = 0
+    # fwd only (ImplicitGemmConvSpec.xh_dpp). Left out of the hash while False.
+    xh_dpp: bool = False
+    # fwd only (ImplicitGemmConvSpec.rpf_setprio). Left out of the hash at 0.
+    rpf_setprio: int = 0
     # dgrad only (DgradConvSpec.dy_halo / dy_halo_setprio /
     # dy_halo_kouter_pad): the dY halo mode of the tap-outer K loop and its
     # knobs. A halo binary also bakes its filter (filter_h/w) and the widest
@@ -279,6 +312,10 @@ class KernelIdentity:
             del fields["reg_prefetch"]
         if not fields["lds_xor"]:
             del fields["lds_xor"]
+        if not fields["a_direct"]:
+            del fields["a_direct"]
+        if not fields["uk_tap_fast"]:
+            del fields["uk_tap_fast"]
         if not fields["patch"]:
             del fields["patch"]
         if not fields["tap_outer_k"]:
@@ -291,6 +328,14 @@ class KernelIdentity:
             del fields["b_kpack"]
         if not fields["split_addr_k_decode"]:
             del fields["split_addr_k_decode"]
+        for name in (
+            "lds_ahead", "defer_mfma", "vmem_interleave", "split_tail", "uk_nopad",
+            "defer_mfma_per_write",
+            "lds_kpack_read", "uk_chunk_group", "rpf_lds_barrier", "rpf_fetch_late",
+            "uk_xhalo", "xh_dpp", "rpf_setprio",
+        ):
+            if not fields[name]:
+                del fields[name]
         for name in ("dy_halo", "dy_halo_setprio", "dy_halo_kouter_pad", "halo_max_wo"):
             if not fields[name]:
                 del fields[name]
@@ -599,6 +644,14 @@ def identity_supports_problem(
     ):
         return False, f"fwd split-K with a 16-bit D needs even kpg (kpg={problem.kpg})"
 
+    # uk_nopad drops the per-tap bounds checks: unpadded problems only.
+    if (
+        identity.direction == "fwd"
+        and identity.uk_nopad
+        and any(int(getattr(problem, a, 0) or 0) for a in ("pH", "pW", "pD"))
+    ):
+        return False, "uk_nopad serves unpadded problems only"
+
     # The split-addressing per-tile reduction decode has no fallback: a K
     # tile must lie inside one filter tap, i.e. cpg % tile_k == 0. (The
     # uniform_k_decode loop keeps the plain loop for the rest.)
@@ -801,6 +854,7 @@ IDENTITY_CAPABILITY_FIELDS = (
     "dy_halo",
     "halo_max_wo",
     "split_addr_k_decode",
+    "uk_nopad",
 )
 
 #: Problem attributes the predicate reads when the identity is a *direct* one.

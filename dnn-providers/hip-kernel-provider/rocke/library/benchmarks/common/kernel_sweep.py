@@ -847,7 +847,12 @@ def _launch_values_for(direction, problem, identity, ptrs, sizes, extras):
         if extras.get("split_k", 1) > 1:
             return ConvArgs.from_problem(
                 problem, tile_m=tm, tile_n=tn, tile_k=tk
-            ).to_launch_values(*ptrs, *sizes, split_k=extras["split_k"])
+            ).to_launch_values(
+                *ptrs,
+                *sizes,
+                split_k=extras["split_k"],
+                full_tiles=extras.get("full_tiles"),
+            )
         return ConvArgs.from_problem(problem, tile_m=tm, tile_n=tn).to_launch_values(
             *ptrs, *sizes
         )

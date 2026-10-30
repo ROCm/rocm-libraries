@@ -703,6 +703,12 @@ class TestConvFwdDoubleBufferedOddTiles(unittest.TestCase):
         self._sweep(uniform_k_decode=True, reg_prefetch=1, lds_xor=True)
         self._sweep(reg_prefetch=2, lds_xor=True)
 
+    def test_a_direct(self):
+        # A straight into the MFMA registers; 9 tiles run the x2-unrolled
+        # loop's odd tail, C=16 the plain fallback loop.
+        self._sweep(uniform_k_decode=True, reg_prefetch=1, a_direct=True)
+        self._sweep(uniform_k_decode=True, reg_prefetch=1, a_direct=True, lds_xor=True)
+
     def test_xcd_remap(self):
         self._sweep(xcd_remap=6)
         self._sweep(xcd_remap=8, uniform_k_decode=True, reg_prefetch=2)

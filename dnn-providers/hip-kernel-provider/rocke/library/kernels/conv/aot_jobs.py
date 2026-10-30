@@ -124,6 +124,7 @@ K-outer one, since that layout takes its stride from the builder.
 from __future__ import annotations
 
 import itertools
+import re
 from dataclasses import dataclass
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
@@ -600,6 +601,20 @@ def _fwd_k_loops(pipeline: str, arch: Optional[str] = None) -> List[dict]:
             )
         )
         for xcds in CACHE_FWD_XCD_REMAP.get(arch, ()):
+            for lx in (False, True):
+                k_loops.append(
+                    dict(
+                        unroll_k=False,
+                        async_dma=False,
+                        uniform_k_decode=True,
+                        reg_prefetch=1,
+                        xcd_remap=xcds,
+                        lds_xor=lx,
+                    )
+                )
+        # The tap-fastest order of the same loops (uk_tap_fast; 3-D only, the
+        # validator drops it for 2-D): lds_xor, launch and XCD orders.
+        for xcds in (0,) + tuple(CACHE_FWD_XCD_REMAP.get(arch, ())):
             k_loops.append(
                 dict(
                     unroll_k=False,
@@ -607,9 +622,238 @@ def _fwd_k_loops(pipeline: str, arch: Optional[str] = None) -> List[dict]:
                     uniform_k_decode=True,
                     reg_prefetch=1,
                     xcd_remap=xcds,
+                    lds_xor=True,
+                    uk_tap_fast=True,
                 )
             )
-    return k_loops
+        # Opt-in (ROCKE_AOT_FWD_ADIR=1): the same loop with the A operand
+        # loaded straight into the MFMA registers (a_direct), on padded and
+        # XOR-swizzled B tiles, in launch and XCD-contiguous orders.
+        if _os.environ.get("ROCKE_AOT_FWD_ADIR", "0") not in ("", "0"):
+            for xcds in (0,) + tuple(CACHE_FWD_XCD_REMAP.get(arch, ())):
+                for lx in (False, True):
+                    k_loops.append(
+                        dict(
+                            unroll_k=False,
+                            async_dma=False,
+                            uniform_k_decode=True,
+                            reg_prefetch=1,
+                            lds_xor=lx,
+                            xcd_remap=xcds,
+                            a_direct=True,
+                        )
+                    )
+    return _fwd_sched_k_loops(k_loops)
+
+
+# Opt-in forward K-loop scheduling variants (ImplicitGemmConvSpec.lds_ahead /
+# defer_mfma / vmem_interleave / rpf_setprio), as
+# comma-separated ``a<ahead>d<defer>v<interleave>[p<prio>]`` tokens (ahead: 0
+# off, 1 lds_ahead), e.g. ``ROCKE_AOT_FWD_SCHED=a1d1v2,a1d1v4p1``: each
+# triple is built, besides the unscheduled loop, on every reg_prefetch=1 loop
+# and (when it defers nothing) every single-buffer prefetch_regs and
+# uniform_k_decode + reg_prefetch=2 (ping-pong) loop; the
+# validator drops the combinations a loop or pipeline does not implement
+# (vmem_interleave needs compv3/compv4). Unset: none (the default grid).
+# ROCKE_AOT_FWD_LXOR=1 adds the XOR-swizzled unpadded LDS tiles (lds_xor) to
+# the single-buffer prefetch_regs loops (the small-spatial split-K family)
+# and the uniform_k_decode ping-pong loop (two 16 KB tile_k=32 buffers).
+_FWD_SCHED_RE = re.compile(r"^a([01])d(\d+)v(\d+)(?:p([0-3]))?$")
+
+
+def _fwd_sched_variants() -> Tuple[dict, ...]:
+    out = []
+    for tok in _os.environ.get("ROCKE_AOT_FWD_SCHED", "").split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        m = _FWD_SCHED_RE.match(tok)
+        if m is None:
+            raise ValueError(
+                f"ROCKE_AOT_FWD_SCHED: {tok!r} is not a<0|1>d<n>v<n>[p<1-3>] "
+                f"(e.g. a1d1v2, a1d1v4p1)"
+            )
+        lah, dfr, vmi = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        prio = int(m.group(4) or 0)
+        v = {}
+        if lah == 1:
+            v["lds_ahead"] = True
+        if prio:
+            v["rpf_setprio"] = prio
+        if dfr:
+            v["defer_mfma"] = dfr
+        if vmi:
+            v["vmem_interleave"] = vmi
+        if v and v not in out:
+            out.append(v)
+    return tuple(out)
+
+
+# The opt-in K-loop knobs below (x-halo, k-packed reads, chunk groups, LDS-only
+# barriers, late fetch, DPP shift, occupancy target): with
+# ROCKE_AOT_FWD_R2_SCOPE="<M>x<N>x<K>[w<wm>x<wn>][a<atom>],..." (e.g.
+# "256x64x32w4x1a16") a K loop carrying any of them is only built on those
+# geometries, and with ROCKE_AOT_FWD_R2_XCD="6" only in those tile orders, so a
+# cache can carry them where they win without multiplying the whole grid.
+_FWD_R2_KNOBS = ("uk_xhalo", "lds_kpack_read", "uk_chunk_group", "rpf_lds_barrier",
+                 "rpf_fetch_late", "xh_dpp", "waves_per_eu", "rpf_setprio")
+_FWD_R2_SCOPE_RE = re.compile(r"^(\d+)x(\d+)x(\d+)(?:w(\d+)x(\d+))?(?:a(\d+))?$")
+
+
+def _fwd_r2_scope() -> Optional[List[Tuple[int, ...]]]:
+    raw = _os.environ.get("ROCKE_AOT_FWD_R2_SCOPE", "").strip()
+    if not raw:
+        return None
+    out = []
+    for tok in raw.split(","):
+        m = _FWD_R2_SCOPE_RE.match(tok.strip())
+        if m is None:
+            raise ValueError(f"ROCKE_AOT_FWD_R2_SCOPE: {tok!r} is not MxNxK[wAxB][aT]")
+        out.append(tuple(int(g) if g else 0 for g in m.groups()))
+    return out
+
+
+# The opt-in K-loop knobs ROCKE_AOT_FWD_R2_SCOPE confines: opt-fwdl's, plus
+# the scheduling knobs (ROCKE_AOT_FWD_SCHED) and uk_nopad. (ukd split-K and
+# split_tail are confined by _fwd_job_variants on the same scope.)
+_FWD_SCOPED_KNOBS = _FWD_R2_KNOBS + (
+    "lds_ahead", "defer_mfma", "vmem_interleave", "uk_nopad", "defer_mfma_per_write",
+)
+
+
+def _fwd_r2_in_scope(kloop: dict, tm: int, tn: int, tk: int, wm: int, wn: int, wt: int) -> bool:
+    if not any(kloop.get(k) for k in _FWD_SCOPED_KNOBS):
+        return True
+    return _fwd_r2_geometry_in_scope(tm, tn, tk, wm, wn, wt)
+
+
+def _fwd_r2_geometry_in_scope(tm: int, tn: int, tk: int, wm: int, wn: int, wt: int) -> bool:
+    """Whether a geometry is in ROCKE_AOT_FWD_R2_SCOPE (unset: every one)."""
+    scope = _fwd_r2_scope()
+    if scope is None:
+        return True
+    for m_, n_, k_, wm_, wn_, a_ in scope:
+        if (m_, n_, k_) == (tm, tn, tk) and (not wm_ or (wm_, wn_) == (wm, wn)) and (
+            not a_ or a_ == wt
+        ):
+            return True
+    return False
+
+
+def _fwd_sched_k_loops(k_loops: List[dict]) -> List[dict]:
+    """``k_loops`` plus the opt-in lds_xor and scheduling variants (see
+    :func:`_fwd_sched_variants`)."""
+    def pfr_single(kl: dict) -> bool:
+        return bool(kl.get("prefetch_regs")) and not kl.get("unroll_k")
+
+    def ukd_rpf2(kl: dict) -> bool:
+        return bool(kl.get("uniform_k_decode")) and kl.get("reg_prefetch") == 2
+
+    if _os.environ.get("ROCKE_AOT_FWD_LXOR", "0") not in ("", "0"):
+        k_loops = k_loops + [
+            dict(kl, lds_xor=True)
+            for kl in k_loops
+            if (pfr_single(kl) or ukd_rpf2(kl)) and not kl.get("lds_xor")
+        ]
+    # ROCKE_AOT_FWD_CG=2[,4]: the tap-fastest loops with the channel chunks
+    # grouped (uk_chunk_group).
+    for g in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_CG", "").split(",") if t.strip()):
+        k_loops = k_loops + [
+            dict(kl, uk_chunk_group=g) for kl in k_loops
+            if kl.get("uk_tap_fast") and not kl.get("uk_chunk_group")
+        ]
+    # ROCKE_AOT_FWD_LBAR=1: LDS-only barriers (rpf_lds_barrier) on the
+    # reg_prefetch=1 loops.
+    if _os.environ.get("ROCKE_AOT_FWD_LBAR", "0") not in ("", "0"):
+        k_loops = k_loops + [
+            dict(kl, rpf_lds_barrier=True) for kl in k_loops if kl.get("reg_prefetch") == 1
+        ]
+    # ROCKE_AOT_FWD_FLATE=1: the next tile's global reads behind the first LDS
+    # fragment reads (rpf_fetch_late) on the reg_prefetch=1 loops.
+    if _os.environ.get("ROCKE_AOT_FWD_FLATE", "0") not in ("", "0"):
+        k_loops = k_loops + [
+            dict(kl, rpf_fetch_late=True) for kl in k_loops if kl.get("reg_prefetch") == 1
+        ]
+    # ROCKE_AOT_FWD_XHALO=4[,8]: the x-halo input reuse (uk_xhalo = the
+    # staged range's rows past tile_m) on the 3-D lds_xor uniform_k_decode +
+    # reg_prefetch=1 loops.
+    for xh in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_XHALO", "").split(",") if t.strip()):
+        k_loops = k_loops + [
+            dict(kl, uk_xhalo=xh) for kl in k_loops
+            if kl.get("lds_xor") and kl.get("uniform_k_decode") and kl.get("reg_prefetch") == 1
+            and not kl.get("a_direct") and not kl.get("uk_xhalo")
+            and not kl.get("rpf_fetch_late")
+        ]
+    # ROCKE_AOT_FWD_XDPP=1: the x-halo loops with DPP-shifted A fragments
+    # (xh_dpp).
+    if _os.environ.get("ROCKE_AOT_FWD_XDPP", "0") not in ("", "0"):
+        k_loops = k_loops + [dict(kl, xh_dpp=True) for kl in k_loops if kl.get("uk_xhalo")]
+    # ROCKE_AOT_FWD_PRIO=1[,2]: s_setprio over the load issue + MFMA phase of
+    # the reg_prefetch=1 loops (rpf_setprio).
+    for pr in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_PRIO", "").split(",") if t.strip()):
+        k_loops = k_loops + [
+            dict(kl, rpf_setprio=pr) for kl in k_loops
+            if kl.get("reg_prefetch") == 1 and not kl.get("rpf_setprio") and not kl.get("a_direct")
+        ]
+    # ROCKE_AOT_FWD_KPRD=1: k-packed 16-byte LDS fragment reads
+    # (lds_kpack_read) on every lds_xor uniform_k_decode / reg_prefetch loop.
+    if _os.environ.get("ROCKE_AOT_FWD_KPRD", "0") not in ("", "0"):
+        k_loops = k_loops + [
+            dict(kl, lds_kpack_read=True)
+            for kl in k_loops
+            if kl.get("lds_xor")
+            and (kl.get("uniform_k_decode") or kl.get("reg_prefetch"))
+            and not kl.get("a_direct")
+        ]
+    # ROCKE_AOT_FWD_WPE=3[,4]: the reg_prefetch=1 lds_xor loops with an
+    # occupancy target (waves_per_eu), e.g. to hold a 126-VGPR 8-wave tile
+    # at 4 waves/SIMD once k-packed reads add registers.
+    for w in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_WPE", "").split(",") if t.strip()):
+        k_loops = k_loops + [
+            dict(kl, waves_per_eu=w) for kl in k_loops
+            if kl.get("reg_prefetch") == 1 and kl.get("lds_xor") and not kl.get("waves_per_eu")
+        ]
+    xcds = _os.environ.get("ROCKE_AOT_FWD_R2_XCD", "").strip()
+    if xcds:
+        keep = {int(t) for t in xcds.split(",") if t.strip()}
+        k_loops = [
+            kl for kl in k_loops
+            if not any(kl.get(k) for k in _FWD_R2_KNOBS) or kl.get("xcd_remap", 0) in keep
+        ]
+    sched = _fwd_sched_variants()
+    if not sched:
+        return _fwd_nopad_k_loops(k_loops)
+    extra = []
+    for kl in k_loops:
+        rpf1 = kl.get("reg_prefetch") == 1
+        if not (rpf1 or pfr_single(kl) or ukd_rpf2(kl)):
+            continue
+        for v in sched:
+            if v.get("defer_mfma") and not rpf1:
+                continue
+            extra.append(dict(kl, **v))
+    # ROCKE_AOT_FWD_DPW=1[,3]: the defer_mfma loops also with that many MFMAs
+    # per deferred ds_write (defer_mfma_per_write; rpf1, not x-halo).
+    for dpw in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_DPW", "").split(",") if t.strip()):
+        extra = extra + [
+            dict(kl, defer_mfma_per_write=dpw)
+            for kl in extra
+            if kl.get("defer_mfma") and kl.get("reg_prefetch") == 1
+            and not kl.get("uk_xhalo") and not kl.get("defer_mfma_per_write")
+        ]
+    return _fwd_nopad_k_loops(k_loops + extra)
+
+
+def _fwd_nopad_k_loops(k_loops: List[dict]) -> List[dict]:
+    """``ROCKE_AOT_FWD_NOPAD=1``: every uniform_k_decode loop also without
+    its per-tap bounds checks (``uk_nopad``; serves unpadded problems)."""
+    if _os.environ.get("ROCKE_AOT_FWD_NOPAD", "0") in ("", "0"):
+        return k_loops
+    return k_loops + [
+        dict(kl, uk_nopad=True)
+        for kl in k_loops
+        if kl.get("uniform_k_decode") and not kl.get("a_direct")
+    ]
 
 
 def _fwd_split_addr_k_decodes(caps: dict, async_dma: bool) -> Tuple[bool, ...]:
@@ -627,11 +871,20 @@ def _fwd_small_spatial_variants(
 ) -> List[Tuple[int, bool]]:
     """``(split_k, split_addr_k_decode)`` pairs built on one forward K loop.
 
-    Only the plain and ``prefetch_regs`` loops take them; the
-    ``uniform_k_decode`` / ``reg_prefetch`` loops are a K-loop family of
-    their own (the spec rejects the combination).
+    The plain and ``prefetch_regs`` loops take both. The ``uniform_k_decode``
+    + ``reg_prefetch=1`` loop also takes split-K when
+    ``ROCKE_AOT_FWD_UKD_SPLIT=1`` (opt-in: the small-spatial grids that need
+    it, s7/s8/s10-like, are a corner of the problem space); the other
+    ``uniform_k_decode`` / ``reg_prefetch`` loops take neither.
     """
     if kloop.get("uniform_k_decode") or kloop.get("reg_prefetch"):
+        if (
+            kloop.get("uniform_k_decode")
+            and kloop.get("reg_prefetch") == 1
+            and not kloop.get("a_direct")
+            and _os.environ.get("ROCKE_AOT_FWD_UKD_SPLIT", "0") not in ("", "0")
+        ):
+            return [(sk, False) for sk in _fwd_split_ks(epilogue, False, False)]
         return [(1, False)]
     unroll_k = kloop.get("unroll_k", False)
     async_dma = kloop.get("async_dma", False)
@@ -641,6 +894,41 @@ def _fwd_small_spatial_variants(
             _fwd_split_addr_k_decodes(caps, async_dma),
         )
     )
+
+
+def _fwd_job_variants(
+    kloop: dict, geo: Tuple[int, ...], epilogue: str, caps: dict
+) -> List[Tuple[int, bool, bool]]:
+    """``(split_k, split_addr_k_decode, split_tail)`` built on one forward K
+    loop of one geometry ``(tile_m, tile_n, tile_k, warp_m, warp_n,
+    warp_tile)``; split-K on the uniform_k_decode loops and split_tail only
+    on the geometries of ``ROCKE_AOT_FWD_R2_SCOPE`` (when set)."""
+    in_scope = _fwd_r2_geometry_in_scope(*geo)
+    ukd = bool(kloop.get("uniform_k_decode") or kloop.get("reg_prefetch"))
+    out = []
+    for sk, sd in _fwd_small_spatial_variants(kloop, epilogue, caps):
+        if sk > 1 and ukd and not in_scope:
+            continue
+        for spt in _fwd_split_tails(kloop, sk):
+            if spt and not in_scope:
+                continue
+            out.append((sk, sd, spt))
+    return out
+
+
+def _fwd_split_tails(kloop: dict, split_k: int) -> Tuple[bool, ...]:
+    """``split_tail`` values built for one forward split variant: the
+    tail-only split (ImplicitGemmConvSpec.split_tail) is opt-in
+    (``ROCKE_AOT_FWD_SPLIT_TAIL=1``), on the uniform_k_decode + reg_prefetch=1
+    split binaries -- the loop the few-wave grids (s5/s6-like) run on."""
+    if (
+        split_k > 1
+        and kloop.get("uniform_k_decode")
+        and kloop.get("reg_prefetch") == 1
+        and _os.environ.get("ROCKE_AOT_FWD_SPLIT_TAIL", "0") not in ("", "0")
+    ):
+        return (False, True)
+    return (False,)
 
 
 def _fwd_split_ks(epilogue: str, unroll_k: bool, async_dma: bool) -> Tuple[int, ...]:
@@ -818,11 +1106,21 @@ def _fwd_jobs(
         if not _aot_pipeline("fwd", pipeline):
             continue
         # fwd's A (X) and B (W) are both contiguous along cpg, so they share
-        # one width; D (Y) runs along kpg.
-        for vec_ab, vec_c in itertools.product(_VECS, _VECS):
+        # one width; D (Y) runs along kpg. The default epilogue stores scalar
+        # (c = 1 is its only width), so a cache narrowed by ROCKE_AOT_VECS
+        # still builds it at c = 1 -- on the lds_xor loops only, where dropping
+        # the cshuffle C tile is what lets a tile run one more workgroup per CU
+        # (e.g. 256x64x32: 20 KB instead of the 32 KB C tile -> 3 WG/CU).
+        narrowed = 1 not in _VECS
+        vec_cs = (1,) if (epilogue == "default" and narrowed) else _VECS
+        for vec_ab, vec_c in itertools.product(_VECS, vec_cs):
             for kloop, caps in itertools.product(
                 _fwd_k_loops(pipeline, arch), _layout_caps()
             ):
+                if narrowed and epilogue == "default" and not kloop.get("lds_xor"):
+                    continue
+                if not _fwd_r2_in_scope(kloop, tile_m, tile_n, tile_k, warp_m, warp_n, wt):
+                    continue
                 grouped = caps["grouped"]
                 cfg = dict(
                     tile_m=tile_m,
@@ -841,10 +1139,14 @@ def _fwd_jobs(
                     vector_size_c=vec_c,
                     **kloop,
                 )
-                for split_k, sakd in _fwd_small_spatial_variants(kloop, epilogue, caps):
+                for split_k, sakd, spt in _fwd_job_variants(
+                    kloop, (tile_m, tile_n, tile_k, warp_m, warp_n, wt), epilogue, caps
+                ):
                     job_cfg = dict(cfg, split_k=split_k) if split_k > 1 else cfg
                     if sakd:
                         job_cfg = dict(job_cfg, split_addr_k_decode=True)
+                    if spt:
+                        job_cfg = dict(job_cfg, split_tail=True)
                     # The identity's prefetch_regs is an int shared with
                     # wgrad (fwd's bool True is 1).
                     id_cfg = (
@@ -1785,9 +2087,14 @@ def count_jobs(
             if not _aot_pipeline(direction, pipeline):
                 continue
             if direction == "fwd":
-                total += vecs * sum(
-                    len(_fwd_small_spatial_variants(kl, geo[7], caps))
+                # As _fwd_jobs: a narrowed cache builds the default epilogue
+                # at c = 1, on the lds_xor loops only.
+                lean = geo[7] == "default" and 1 not in _VECS
+                g6 = geo[:6]
+                total += (len(_VECS) if lean else vecs) * sum(
+                    len(_fwd_job_variants(kl, g6, geo[7], caps))
                     for kl in _fwd_k_loops(pipeline, target.gfx)
+                    if (not lean or kl.get("lds_xor")) and _fwd_r2_in_scope(kl, *g6)
                     for caps in _layout_caps()
                 )
                 if _fwd_merged_geometry(geo):

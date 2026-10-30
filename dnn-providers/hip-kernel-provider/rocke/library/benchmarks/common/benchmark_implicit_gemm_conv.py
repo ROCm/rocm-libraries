@@ -5568,7 +5568,10 @@ def _widest_vector_sizes(candidates):
     # wgrad keeps them: its default epilogue needs no LDS C tile, which on the
     # wgrad tiles is larger than the A/B tiles and caps the resident
     # workgroups per CU, so the scalar-store kernel can win even where a
-    # cshuffle one stores wider.
+    # cshuffle one stores wider. So do the lds_xor K loops: there the default
+    # epilogue's point is the LDS the cshuffle C tile would take (one more
+    # workgroup per CU), not the store width, and it measured faster (MI300A
+    # 3-D fwd, 256x64x32).
     candidates = [
         c
         for c in candidates
@@ -5576,6 +5579,7 @@ def _widest_vector_sizes(candidates):
             c[0].epilogue == "default"
             and c[0].direction != "wgrad"
             and widest_store[store_kind(c[0])] > 1
+            and not getattr(c[0], "lds_xor", False)
         )
     ]
 
@@ -5627,7 +5631,12 @@ def _signature_for_identity(ident, dtype):
         )
     if ident.direction == "dgrad":
         return conv_args_signature(dtype, direction="dgrad", is_3d=ident.is_3d)
-    return conv_args_signature(dtype, is_3d=ident.is_3d, split_k=ident.split_k > 1)
+    return conv_args_signature(
+        dtype,
+        is_3d=ident.is_3d,
+        split_k=ident.split_k > 1,
+        split_tail=bool(getattr(ident, "split_tail", False)),
+    )
 
 
 def _ws_replicas_of(ident) -> int:
@@ -5985,9 +5994,15 @@ def _runtime_split_ks(
     else:
         swept, include_resolved = (requested,), False
     if ident.direction == "fwd":
-        return _fwd_split_k_degrees(
-            problem, ident, degrees if requested in (0, -1) else swept
+        fwd_degrees = _fwd_split_k_degrees(
+            problem,
+            ident,
+            degrees if requested in (0, -1) else swept,
+            wave_fill=requested in (0, -1),
         )
+        if getattr(ident, "split_tail", False):
+            return _fwd_split_tail_launches(problem, ident) if requested in (0, -1) else ()
+        return fwd_degrees
     return _split_k_degrees(
         problem,
         arch=ident.arch,
@@ -6014,14 +6029,16 @@ _FWD_SPLIT_MAX_CTAS = 4096
 _FWD_SPLIT_MIN_TILES_PER_SLICE = 4
 
 
-def _fwd_split_k_degrees(problem, ident, degrees) -> tuple:
+def _fwd_split_k_degrees(problem, ident, degrees, wave_fill: bool = True) -> tuple:
     """Degrees to launch a cached forward split-K binary at, largest first.
 
     There is no forward split-K cost model yet, so this is ``degrees``
     (``--split-k-degrees``, or the one ``--split-k`` pins) cut to the
     degrees that keep the grid under :data:`_FWD_SPLIT_MAX_CTAS` workgroups
     and every slice at least :data:`_FWD_SPLIT_MIN_TILES_PER_SLICE` K tiles
-    (and gridDim.z in range).
+    (and gridDim.z in range). ``wave_fill`` adds the degrees whose grid fills
+    whole waves of the device's CUs
+    (:func:`~kernels.common.conv_split_k.fwd_wave_filling_split_ks`).
     """
     from kernels.common.conv_args import ConvArgs
 
@@ -6031,6 +6048,13 @@ def _fwd_split_k_degrees(problem, ident, degrees) -> tuple:
     k_tiles = -(-args_.gemm_k // ident.tile_k)
     groups = max(1, problem.groups)
     tiles = args_.num_pid_m * args_.num_pid_n * groups
+    # Plus the degrees whose grid fills whole waves of the device's CUs (a
+    # power of two rarely does on a 228-CU MI300A: s10 fwd 32 tiles x 7).
+    num_cus = _device_num_cus() if wave_fill else None
+    if num_cus:
+        from kernels.common.conv_split_k import fwd_wave_filling_split_ks
+
+        degrees = tuple(degrees) + fwd_wave_filling_split_ks(tiles, num_cus)
     return tuple(
         sk
         for sk in sorted(set(degrees), reverse=True)
@@ -6039,6 +6063,59 @@ def _fwd_split_k_degrees(problem, ident, degrees) -> tuple:
         and tiles * sk <= _FWD_SPLIT_MAX_CTAS
         and groups * sk <= _MAX_GRID_DIM_Z
     )
+
+
+class TailSplit(int):
+    """A ``split_tail`` launch: the split-K degree (the int itself) of the
+    tail tiles, and ``full_tiles``, the tiles (in launch order) that run the
+    whole reduction unsplit. Prints as ``<degree>/tail<full_tiles>``."""
+
+    def __new__(cls, degree: int, full_tiles: int):
+        obj = super().__new__(cls, degree)
+        obj.full_tiles = int(full_tiles)
+        return obj
+
+    def __str__(self) -> str:
+        return f"{int(self)}/full{self.full_tiles}"
+
+    __repr__ = __str__
+
+    def __format__(self, spec: str) -> str:
+        return str(self) if not spec else format(int(self), spec)
+
+
+# Tail-split degrees tried per full-tile count; a few: the tail is short.
+_FWD_SPLIT_TAIL_DEGREES = (2, 3, 4, 6)
+
+
+def _fwd_split_tail_launches(problem, ident) -> tuple:
+    """Launches of a ``split_tail`` binary: for each workgroup-slot count
+    ``R = n * CUs`` (n = 1..4, i.e. 1-4 resident workgroups per CU) that does
+    not divide the tile count, the full tiles are the whole waves
+    ``T - T % R`` and the remainder is split at each degree of
+    :data:`_FWD_SPLIT_TAIL_DEGREES` that keeps a few K tiles per slice."""
+    from kernels.common.conv_args import ConvArgs
+
+    num_cus = _device_num_cus()
+    if not num_cus:
+        return ()
+    args_ = ConvArgs.from_problem(
+        problem, tile_m=ident.tile_m, tile_n=ident.tile_n, tile_k=ident.tile_k
+    )
+    tiles = args_.num_pid_m * args_.num_pid_n
+    k_tiles = -(-args_.gemm_k // ident.tile_k)
+    out = []
+    for n in range(1, 5):
+        slots = n * num_cus
+        full = tiles - tiles % slots
+        if full <= 0 or full == tiles:
+            continue
+        for sk in _FWD_SPLIT_TAIL_DEGREES:
+            if sk * _FWD_SPLIT_MIN_TILES_PER_SLICE <= k_tiles and (
+                max(1, problem.groups) * sk <= _MAX_GRID_DIM_Z
+            ):
+                out.append(TailSplit(sk, full))
+    return tuple(out)
 
 
 _INT32_MAX = 2**31 - 1
@@ -6194,11 +6271,30 @@ def _cached_bind(
 
     elif direction == "fwd" and ident.split_k > 1:
         # The forward split-K epilogue atomic-adds every K slice into D, so
-        # each launch zeroes D first -- part of the algorithm's cost.
+        # each launch zeroes D first -- part of the algorithm's cost. A
+        # split_tail launch zeroes only the rows of its split tail.
         _launch = run
+        d_off = 0
+        if getattr(ident, "split_tail", False) and extras.get("full_tiles"):
+            from kernels.common.conv_args import ConvArgs
+            from kernels.common.conv_implicit_gemm import fwd_split_tail_zero_rows
 
-        def run(_launch=_launch, d_ptr=ptrs[2], d_bytes=sizes[2], stream=stream):
-            rt.memset_async(d_ptr, 0, d_bytes, stream)
+            _a = ConvArgs.from_problem(
+                problem, tile_m=ident.tile_m, tile_n=ident.tile_n, tile_k=ident.tile_k
+            )
+            row0 = fwd_split_tail_zero_rows(
+                _a.gemm_m, ident.tile_m, _a.num_pid_n, extras["full_tiles"]
+            )
+            d_off = (sizes[2] // max(1, _a.gemm_m)) * row0
+
+        def run(
+            _launch=_launch,
+            d_ptr=ptrs[2] + d_off,
+            d_bytes=sizes[2] - d_off,
+            stream=stream,
+        ):
+            if d_bytes > 0:
+                rt.memset_async(d_ptr, 0, d_bytes, stream)
             _launch()
 
     elif direction == "wgrad" and ident.two_stage:
@@ -6315,7 +6411,10 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
         # A forward split-K binary: the degree rides in ks/ks_count and on z.
         if split_k is None:
             split_k = max(1, ident.split_k)
-        extras["split_k"] = split_k
+        extras["split_k"] = int(split_k)
+        if getattr(ident, "split_tail", False):
+            # The tiles that run unsplit (TailSplit); 0 = split every tile.
+            extras["full_tiles"] = getattr(split_k, "full_tiles", 0)
         gx, gy, gz = _grid_for(direction, problem, ident)
         return extras, (gx, gy, gz * split_k)
 
