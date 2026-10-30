@@ -195,6 +195,62 @@ def test_ctest_readiness_and_failure_propagation(
         assert "ctest: SKIPPED" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("gate_rc", "only_ir", "expect_complete"),
+    [(0, "", True), (0, "gemm/gfx950/base", False), (1, "", False)],
+)
+def test_only_a_successful_unfiltered_arch_domain_gate_suppresses_pytest_delegation(
+    runner, monkeypatch, tmp_path, gate_rc, only_ir, expect_complete
+):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        rc = gate_rc if Path(command[1]).name == "check_arch_domain.py" else 0
+        return subprocess.CompletedProcess(command, rc)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "configure_pytest_build", lambda *_args: None)
+    monkeypatch.setattr(
+        runner,
+        "native_pytest_env",
+        lambda *_args: {},
+    )
+    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    argv = [
+        "run_all.py",
+        "--no-guard",
+        "--no-gate",
+        "--no-ir-validity",
+        "--no-both",
+        "--build-root",
+        str(tmp_path),
+    ]
+    if only_ir:
+        argv += ["--only-ir", only_ir]
+    monkeypatch.setattr(runner.sys, "argv", argv)
+
+    assert runner.main() == gate_rc
+    pytest_env = next(
+        kwargs["env"]
+        for command, kwargs in calls
+        if command[:3] == [runner.sys.executable, "-m", "pytest"]
+    )
+    if expect_complete:
+        assert pytest_env[runner._ARCH_DOMAIN_COMPLETE_ENV] == "1"
+    else:
+        assert runner._ARCH_DOMAIN_COMPLETE_ENV not in pytest_env
+
+
+def test_native_pytest_env_discards_ambient_arch_domain_completion(
+    runner, monkeypatch, tmp_path
+):
+    monkeypatch.setenv(runner._ARCH_DOMAIN_COMPLETE_ENV, "1")
+    assert runner._ARCH_DOMAIN_COMPLETE_ENV not in runner.native_pytest_env(
+        tmp_path, "Release"
+    )
+
+
 def test_source_script_alone_does_not_claim_the_native_suite_is_ready(
     runner, monkeypatch, tmp_path, capsys
 ):
