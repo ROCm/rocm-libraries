@@ -1284,8 +1284,8 @@ their audit sets, one per class.
 | 3.5 | `stage03c_bench_contexts.py` | per execution context: `<label>/` with its bench wrapper and stage03 outputs, `holdout/stage04/`, `contexts.json`; only with `contexts` |
 | 3.7 | `stage03d_sustained_finalists.py` | `runs/run_<r>/`: the sustained re-measurement of the finalists of power-capped GEMMs, `sustained.json`, `sustained_summary.json`; only with `bench.sustained.enabled` |
 | 4 | `stage04_convert_to_enriched_dataset.py` | `chunk_*.csv`: one row per (GEMM, measured solution of the library); `kernels.json`: the solutions' kernel attributes |
-| 4.5 | `stage04b_iterate_active_learning.py` | `decisions.json`, `retrain_cells.txt`, `splits.json`, the gate slice `gate/` and `train/` (active rounds); `rebench_misses.json` and `rebench/` with `validate.rebench_misses` |
-| 5 | `stage05_train.py` | `models.pt`, `cells.json`, `metrics.json`, `model_options.json`; `whitelist_tier.json` with `train.whitelist_tier_k` |
+| 4.5 | `stage04b_iterate_active_learning.py` | `decisions.json`, `retrain_cells.txt`, `splits.json`, the gate slice `gate/` and `train/` (active rounds); `rebench_misses.json` and `rebench/` with `validate.rebench_misses`; `readings.json` (report only) |
+| 5 | `stage05_train.py` | `models.pt`, `cells.json`, `metrics.json`, `model_options.json`; `whitelist_tier.json` with `train.whitelist_tier_k`; `readings.json` and `metrics.json` `readings` (report only) |
 | 6 | `stage06_deploy_weights.py` | model file, index, `gate.json` and `deploy_record.json` (`rebench/` when the gate re-benches its misses) |
 | 7 | `stage07_optional_validate_selection_time.py` | selection time, C++/Python pick parity and the production route, `platform.json` |
 | 8 | `stage08_optional_validate_selection_efficiency.py` | selection efficiency on external datasets |
@@ -1629,6 +1629,9 @@ default, 0 off; `lib/whitelist_tier.py` `guard`) runs after the greedy:
   of the held-out picks' geomean (the training side's when the cell holds
   none out), so that the keys of a cell keep these bounds together; at
   most the configured number of keys per cell join.
+
+The gfx950 configs (see *gfx950 configs*) build their tiers without the
+guard: they turn `train.whitelist_tier_guard_keys` off.
 
 Guard keys follow a cell's greedy keys in its tier. The tier record names
 the guard (`guard`: its keys, floors, the held-out GEMMs it read, the
@@ -2939,7 +2942,7 @@ every held-out GEMM on its own:
   `retrain_cells.txt` and `cells_collapse_retrain`; the cell's decision
   stays `pass`, so it counts as no retrain attempt toward a split). The
   retrain trains on the GEMMs it collapsed on, and its new tier's tail
-  guard sees them among the cell's own GEMMs.
+  guard, where the config keeps one, sees them among the cell's own GEMMs.
 
 Once every decision is made, stage04b reads the bundle's held-out GEMMs
 once more for the report (`stage04b/readings.json`, lib/run_readings.py):
@@ -3574,8 +3577,10 @@ cell, in this order (`lib/cell_merge.py`, `scripts/repair_bundle.py`, in
    leaf with its network, tier keys and feature statistics, from the
    incumbent: the bundle the run ships, which the gate compared with. The
    incumbent is found by content, as the bundle whose stage06 deployed the
-   model the gate scored (by its sha256) and whose `stage05/models.pt` is
-   the one that deploy packed (`deploy_record.json` `models_sha256`), never
+   model the gate scored (by its sha256: the deploy record's `sha256`, or
+   its `veto_free_sha256` when the gates scored the staged file without
+   its alignment veto) and whose `stage05/models.pt` is the one that
+   deploy packed (`deploy_record.json` `models_sha256`), never
    by its directory (a final retrain a later one replaced moves to
    `stale/`), and the repair refuses a `models.pt` of other content. The
    audit set must score that same model for the incumbent when it judges
@@ -3705,7 +3710,10 @@ Origami, so port the engine to the deploy checkout and the stage-7 build
 before such a model ships: preflight refuses a tilewright module and a
 stage-7 TensileLite without it. `mlrec.with_alignment_veto` and
 `without_alignment_veto` add it to a model file or remove it without
-retraining. With
+retraining. With the veto, `deploy_record.json` names it (`alignment_veto`),
+the staged file's sha256 without it (`veto_free_sha256`, by which a round's
+repair finds its incumbent) and whether the gates scored without it
+(`scored_without_alignment_veto`). With
 `deploy.apply_patch` it installs the model into the `Tilewright` directory of
 every subtree `t` of `deploy.targets`, `<arch>/<t>/Tilewright/` of hipBLASLt's
 library logic (`projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full`;
