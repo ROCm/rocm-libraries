@@ -45,6 +45,11 @@
  *  (21-30 carry a CTA pool, but it is a launch parameter and leaves the IR as is.)
  *  31-48  prefetch_addr=true on a base config (pfa_base below); 45-47 pair it
  *         with async_dma / unroll_k / WMMA and must be rejected by both engines
+ *  49  N8H56W56C64_K64Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250, split_k=4 bf16 out
+ *  50  N8H56W56C64_K64Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250, split_k=4 fp32 out, lds_k_outer
+ *  51  N4H12W12C24_K32Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250, split_k=2 fp16 out
+ *  52-54  WMMA split-K both engines must reject: gfx1201 bf16 out, gfx1250 bf16 out
+ *         with cshuffle, gfx1151 fp32 out. Must match the Python emitter's 52-54.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -353,6 +358,59 @@ static int make_base_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
         streamk_cfg(26, spec, arch);
         spec->streamk_ctas = 7;
         spec->lds_k_outer = true;
+        return 0;
+    case 49:
+    case 50:
+    case 51:
+        /* gfx1250 wave32 WMMA split-K through the WMMA atomic epilogue: a
+         * packed 16-bit atomic per element (zero partner) or a scalar fp32
+         * atomic. Must match the Python emitter's 49-51. */
+        if(idx == 51)
+            spec->problem = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
+        else
+            spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = idx == 49 ? "bf16" : idx == 50 ? "fp32" : "fp16";
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "default";
+        spec->split_k = idx == 51 ? 2 : 4;
+        spec->lds_k_outer = idx == 50;
+        *arch = "gfx1250";
+        return 0;
+    case 52:
+    case 53:
+    case 54:
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = idx == 54 ? "fp32" : "bf16";
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = idx == 53 ? 32 : 16;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = idx == 53 ? "cshuffle" : "default";
+        spec->split_k = 4;
+        *arch = idx == 52 ? "gfx1201" : idx == 53 ? "gfx1250" : "gfx1151";
         return 0;
     default:
         return -1;

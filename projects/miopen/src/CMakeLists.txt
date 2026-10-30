@@ -41,6 +41,67 @@ endif()
 # This is incremented when the ABI to the library changes
 set( MIOpen_SOVERSION 1.0 )
 
+# Embed a Windows VERSIONINFO resource into a DLL target. No resource-compiler
+# availability guard is needed here: cmake/ResourceCompiler.cmake already fails configuration if no
+# usable resource compiler was found, so by the time this runs CMAKE_RC_COMPILER is guaranteed good.
+#
+#   target            DLL target to attach the resource to.
+#   file_description  VERSIONINFO FileDescription field.
+#   internal_name     VERSIONINFO InternalName; also names the generated .rc and is used verbatim
+#                     for OriginalFilename as "${internal_name}.dll". Callers that override a
+#                     target's OUTPUT_NAME must pass a matching internal_name or the recorded
+#                     OriginalFilename will be wrong.
+#
+# Callable from any directory: add_custom_command(TARGET) below resolves in the caller's scope,
+# which is where ${target} is defined.
+function(miopen_embed_version_resource target file_description internal_name)
+    # Shared libraries only. ${_MIOPEN_IMPL_TARGET} is declared without an explicit SHARED, so it
+    # follows BUILD_SHARED_LIBS and becomes a static archive under -DBUILD_SHARED_LIBS=OFF or
+    # -DMIOPEN_EMBED_BUILD=ON (which forces it off). A VERSIONINFO resource in a static archive is
+    # meaningless -- the linker does not propagate it into the consuming binary -- and the
+    # POST_BUILD check below would be handed a .lib, which has no version resource to read, and
+    # would fail the build. Executables are skipped for a different reason: MIOpen.rc.in hardcodes
+    # FILETYPE VFT_DLL, so the resource would be wrong for one.
+    get_target_property(_type ${target} TYPE)
+    if(NOT WIN32 OR NOT _type MATCHES "^(SHARED|MODULE)_LIBRARY$")
+        return()
+    endif()
+    # Derived here rather than at directory scope so the function is self-contained and renders the
+    # same copyright year regardless of which directory calls it.
+    string(TIMESTAMP MIOPEN_COPYRIGHT_YEAR "%Y")
+    # rocm_setup_version leaves MIOpen_VERSION_TWEAK as "<short-sha>[-dirty]". Carrying the commit
+    # hash in the StringFileInfo strings is deliberate and matches hipDNN (RFC 0005); the binary
+    # FILEVERSION/PRODUCTVERSION fields are four 16-bit integers and keep 0. The "-dirty" marker is
+    # dropped so the DLL's bytes do not depend on working-tree cleanliness, which would make builds
+    # non-reproducible and could ship "-dirty" in a release artifact's metadata.
+    string(REGEX REPLACE "-dirty$" "" MIOPEN_RC_VERSION_TWEAK "${MIOpen_VERSION_TWEAK}")
+    set(MIOPEN_RC_FILE_DESCRIPTION "${file_description}")
+    set(MIOPEN_RC_INTERNAL_NAME "${internal_name}")
+    set(MIOPEN_RC_ORIGINAL_FILENAME "${internal_name}.dll")
+    configure_file(
+        "${PROJECT_SOURCE_DIR}/src/MIOpen.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/${internal_name}.rc"
+        @ONLY
+    )
+    target_sources(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/${internal_name}.rc")
+
+    # Verify the resource actually landed in the linked DLL. Done at build time rather than as a
+    # test so it also covers BUILD_TESTING=OFF release builds and rides along on the existing
+    # Windows build job without needing a GPU test machine. The target only exists when
+    # MIOPEN_VALIDATE_VERSIONINFO is ON and we are not cross-compiling (see the top-level
+    # CMakeLists.txt), so this guard carries that gating without repeating it.
+    if(TARGET win_versioninfo_check)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND win_versioninfo_check
+                    "${MIOpen_VERSION_MAJOR}.${MIOpen_VERSION_MINOR}.${MIOpen_VERSION_PATCH}"
+                    "$<TARGET_FILE:${target}>"
+            COMMENT "Verifying VERSIONINFO in $<TARGET_FILE_NAME:${target}>"
+            VERBATIM
+        )
+        add_dependencies(${target} win_versioninfo_check)
+    endif()
+endfunction()
+
 # Generate source that embeds the given kernel files as initializer data.
 function(add_kernels FILE_NAME VAR_PREFIX VAR_SUFFIX KERNEL_FILES)
     set(INIT_KERNELS_LIST)
@@ -207,6 +268,7 @@ set( MIOpen_Source
     solver/conv/conv_asm_implicit_gemm_wrw_v4r1_dynamic.cpp
     solver/conv/conv_bin_wino3x3U.cpp
     solver/conv/conv_bin_winoRxS.cpp
+    solver/conv/conv_direct_depthwise_fwd_2d.cpp
     solver/conv/conv_direct_naive_conv.cpp
     solver/conv/conv_direct_naive_conv_bwd.cpp
     solver/conv/conv_direct_naive_conv_fwd.cpp
@@ -551,6 +613,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         ${GPU_REFERENCE_KERNEL_ASM}
         ${GPU_BATCHED_TRANSPOSE_KERNEL_HIP}
         ${GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE}
+        kernels/miopen_conv2d_depthwise_fwd.cpp
         kernels/miopen_conv3d_depthwise_fwd.cpp
         kernels/MIOpenAdam.cpp
         kernels/MIOpenAddLayerNorm.cpp
@@ -893,6 +956,8 @@ else()
         )
 endif()
 
+miopen_embed_version_resource(${_MIOPEN_IMPL_TARGET} "MIOpen Library" "${_MIOPEN_IMPL_TARGET}")
+
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     # Rename the private library's public C entry points to their _impl form by
     # force-including the redefinition header into every private source. The
@@ -917,6 +982,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp
         ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
     target_link_libraries(MIOpen PUBLIC ${_MIOPEN_IMPL_TARGET})
+    miopen_embed_version_resource(MIOpen "MIOpen Public Wrapper" MIOpen)
 
     # The hipDNN side of the seam. hipdnn_frontend_dynamic is the header-only
     # frontend configured to dlopen the backend at first use, so libMIOpen.so

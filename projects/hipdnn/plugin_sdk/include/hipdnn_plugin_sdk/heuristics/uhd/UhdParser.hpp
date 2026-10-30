@@ -591,6 +591,7 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
                  + "directory, got '" + relativePath + "' in " + where);
         }
         result.modelArtifactPath = containedArtifactPath(path, relativePath).string();
+        result.authoredArtifactPath = relativePath;
         // Model identity is its content digest (versions the winner cache). A library must
         // declare its expected bytes, but a descriptor-supplied digest is not authentication:
         // whoever can replace both files can replace the digest too. Other artifacts without
