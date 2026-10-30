@@ -111,8 +111,8 @@ are not built on Windows yet.
 
 | Binary | Contents | CTest |
 |---|---|---|
-| `rocalution-unit-test` | All unit-test suites. A global environment initializes the platform once, on the device given by `--device <id>` (default 0), and stops it at the end. | One test, `rocalution-unit-test`, label `quick` |
-| `rocalution-unit-test-lifecycle` | `init_rocalution` and `stop_rocalution`, device selection, thread affinity, and the host fallback without an accelerator. On Linux with HIP it also tests the error paths of the HIP backend initialization through fault injection: `hip_fault_injection.cpp` overrides the HIP, rocBLAS and rocSPARSE calls that `librocalution_hip` makes. There is no global environment, so every test starts and ends with an uninitialized platform. | One test per GoogleTest case (`lifecycle.*`, `lifecycle_hip_fault.*`), each in its own process, label `quick` |
+| `rocalution-unit-test` | All unit-test suites. A global environment initializes the platform once, on the device given by `--device <id>` (default 0), and stops it at the end. | One test, `rocalution-unit-test`, labels `quick`, `standard`, `comprehensive` and `full` |
+| `rocalution-unit-test-lifecycle` | `init_rocalution` and `stop_rocalution`, device selection, thread affinity, and the host fallback without an accelerator. On Linux with HIP it also tests the error paths of the HIP backend initialization through fault injection: `hip_fault_injection.cpp` overrides the HIP, rocBLAS and rocSPARSE calls that `librocalution_hip` makes. There is no global environment, so every test starts and ends with an uninitialized platform. | In a build tree, one test per GoogleTest case (`lifecycle.*`, `lifecycle_hip_fault.*`), each in its own process. In the install tree, one test, `rocalution-unit-test-lifecycle`, that runs the whole binary. Labels `quick`, `standard`, `comprehensive` and `full` |
 
 **How to run:**
 
@@ -267,7 +267,8 @@ transfers and multi-node communication behave as expected.
 Unlike rocSPARSE/hipSPARSE, rocALUTION does **not** encode the tier in the GTest suite name — most
 CTest suites use `test_patterns: ["*"]` and the subset is selected inside the binary by the emulation
 env vars. The legacy `*checkin*` / `*nightly*` filters in `rtest.xml` and Jenkins do not match any
-current test names.
+current test names. The unit-test binaries are in every category and run whole; the emulation
+variables do not apply to them.
 
 **What requires GPU hardware:** the HIP-backend runs of every suite and the `local_*` structure
 suites.
@@ -365,7 +366,7 @@ HIP+OpenMP), host (`--host`), and MPI (`--host --mpi=on --no-openmp`).
 | Validation Area | Required Before Merge | Owner | Notes |
 |---|---|---|---|
 | Build (HIP, host, static; MPI variant) | Yes | CI / DevOps | TheRock CI; Jenkins `precheckin`/`debug`/`staticlibrary` (legacy) |
-| Unit / host-backend tests | Yes (host-backend runs); No (unit tests) | Component team | The host-backend runs of `rocalution-test` are in the CTest `standard` category (regression subset). The unit-test binaries are registered with CTest (label `quick`) and run in the Jenkins coverage job, but are not yet wired into the TheRock CTest categories |
+| Unit / host-backend tests | Yes | Component team | The host-backend runs of `rocalution-test` are in the CTest `standard` category (regression subset). The installed `CTestTestfile.cmake` runs both unit-test binaries in every category; the emulation variables do not apply to them |
 | Integration tests | Yes | Component team | TheRock `standard` = regression subset (`ROCALUTION_EMULATION_REGRESSION=1`); legacy Jenkins runs the full suite (filter commented out) |
 | Formatting | Yes | CI / DevOps | Repo-wide `pre-commit` |
 | Static analysis | No (informational) | CI / DevOps | `clang-tidy`, `codeql`, Jenkins `staticanalysis.groovy` |
@@ -521,7 +522,6 @@ device configurations are not ASAN-covered.
 | No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo output files only |
 | Tier not encoded in test names; legacy `*checkin*`/`*nightly*` filters match nothing | Medium | Medium | Tiering works via `ROCALUTION_EMULATION_*`; Jenkins runs full suite |
 | No `known_bugs.yaml` / quarantine mechanism for `rocalution-test` | Medium | Medium | The unit tests skip known bugs with `KNOWN_BUG`; flaky tests handled ad-hoc |
-| Unit tests not wired into the TheRock CI categories | Medium | Medium | CTest label `quick`; they run in the Jenkins coverage job |
 | `rocalution-test` structure suites duplicate unit tests (see Integration Testing Strategy) | Low | Low | Both run; each suite is deleted once a review confirms that the unit tests cover it |
 | Unit tests not built on Windows (they use POSIX calls such as `alarm`, and some helpers do not compile there) | Medium | Medium | Windows runs `rocalution-test` only |
 | Device-code coverage not captured | Medium | Medium | Host-only LLVM coverage |

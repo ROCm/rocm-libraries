@@ -82,8 +82,10 @@ set_target_properties(rocalution-unit-test PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
 )
 
+set(ROCALUTION_UNIT_TEST_LABELS "quick;standard;comprehensive;full")
+
 add_test(NAME rocalution-unit-test COMMAND rocalution-unit-test)
-set_tests_properties(rocalution-unit-test PROPERTIES LABELS "quick" TIMEOUT 3600)
+set_tests_properties(rocalution-unit-test PROPERTIES LABELS "${ROCALUTION_UNIT_TEST_LABELS}" TIMEOUT 3600)
 
 rocm_install(TARGETS rocalution-unit-test COMPONENT tests)
 
@@ -135,7 +137,18 @@ endif()
 include(GoogleTest)
 gtest_discover_tests(rocalution-unit-test-lifecycle
   DISCOVERY_MODE PRE_TEST
-  PROPERTIES LABELS "quick"
+  PROPERTIES LABELS "${ROCALUTION_UNIT_TEST_LABELS}"
 )
 
 rocm_install(TARGETS rocalution-unit-test-lifecycle COMPONENT tests)
+
+# The installed CTestTestfile.cmake is in bin/rocalution, and the binaries are in bin.
+# The lifecycle test names are only known after the build, so that binary runs as one test.
+if(ROCALUTION_CTEST_INSTALL_FILE)
+  file(APPEND "${ROCALUTION_CTEST_INSTALL_FILE}"
+    "add_test(rocalution-unit-test \"../rocalution-unit-test\")\n"
+    "set_tests_properties(rocalution-unit-test PROPERTIES LABELS \"${ROCALUTION_UNIT_TEST_LABELS}\" TIMEOUT 3600)\n"
+    "add_test(rocalution-unit-test-lifecycle \"../rocalution-unit-test-lifecycle\")\n"
+    "set_tests_properties(rocalution-unit-test-lifecycle PROPERTIES LABELS \"${ROCALUTION_UNIT_TEST_LABELS}\" TIMEOUT 600)\n"
+  )
+endif()
