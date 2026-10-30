@@ -3,6 +3,7 @@
 
 import ctypes
 import itertools
+import sys
 import unittest
 
 import numpy as np
@@ -163,6 +164,16 @@ class ShapeVisitationTests(unittest.TestCase):
         self.assertNotEqual(interval, hn.IndexRange(1, 9, 3))
         self.assertEqual(len({interval, hn.IndexRange(1, 8, 3)}), 1)
         self.assertEqual(list(hn.IndexRange(SIZE_MAX - 2, SIZE_MAX, 2)), [SIZE_MAX - 2])
+
+    def test_len_is_limited_like_python_range(self):
+        self.assertEqual(len(hn.IndexRange.all(sys.maxsize)), sys.maxsize)
+        for stop in (sys.maxsize + 1, SIZE_MAX):
+            with self.assertRaises(OverflowError):
+                len(range(stop))
+            interval = hn.IndexRange.all(stop)
+            with self.assertRaises(OverflowError):
+                len(interval)
+            self.assertEqual(interval.count(), stop)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,8 @@ Flat indices start + ordinal * stride, all less than the exclusive stop, as in
 range(start, stop, stride). All three constructor arguments are required, and
 stride must be nonzero. A start at or beyond stop yields an empty range.
 Ranges compare and hash by value, support len() and iterate over their indices.
+As for Python's range, len() fails with OverflowError above sys.maxsize;
+count() returns the exact number of entries for any range.
 )doc")
         .def(nb::init<size_t, size_t, size_t>(), "start"_a, "stop"_a, "stride"_a)
         .def_prop_ro("start", &IndexRange::start)
