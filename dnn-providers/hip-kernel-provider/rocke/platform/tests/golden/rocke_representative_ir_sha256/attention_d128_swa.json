@@ -1,0 +1,47 @@
+{
+  "aliases": {
+    "llvm24": "llvm23"
+  },
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "attention_d128_swa/gfx942/4warp_gqa_fold": {
+          "arch": "gfx942",
+          "bytes": 425510,
+          "family": "attention_d128_swa",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
+          "sha256": "5b664f6f882636e7ef850b1b440d1732e34c010c56efbe5b744d53f4ebbd89c3",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm22": {
+      "cases": {
+        "attention_d128_swa/gfx942/4warp_gqa_fold": {
+          "arch": "gfx942",
+          "bytes": 425517,
+          "family": "attention_d128_swa",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
+          "sha256": "3dbe8f4b01b5f1043de5c85c56b44e1940ba4c5ee297bfbaa42bba4d89d117a6",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm23": {
+      "cases": {
+        "attention_d128_swa/gfx942/4warp_gqa_fold": {
+          "arch": "gfx942",
+          "bytes": 425581,
+          "family": "attention_d128_swa",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
+          "sha256": "f844c4fce452295ea8563418895e0575ad6cae94c85fb5c5385eae86e24b841f",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    }
+  },
+  "schema": "ck.dsl.ir_golden_sha256/v2"
+}
