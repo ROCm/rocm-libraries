@@ -8,6 +8,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
+#include "TestWorkarounds.hpp"
 #include "engines/plans/HipblasltMatmulPlanBuilder.hpp"
 
 using namespace hipblaslt_plugin;
@@ -21,6 +22,7 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+        SKIP_IF_WORKAROUND_ISSUE_9962(_handle);
         ASSERT_EQ(hipblasLtCreate(&_handle.hipblasltHandle), HIPBLAS_STATUS_SUCCESS);
     }
 
@@ -226,6 +228,61 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
+    }
+
+    // Supported graph with matmul + activation (ReLU with no clip or slope set)
+    {
+        auto builder = createValidMatmulBiasActivGraph(
+            {4, 8},
+            {8, 1},
+            {8, 5},
+            {5, 1},
+            {4, 5},
+            {5, 1},
+            false,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
+        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
+    }
+
+    // Supported graph with matmul + bias + activation (ReLU6: upper clip only)
+    {
+        auto builder = createValidMatmulBiasActivGraph(
+            {4, 8},
+            {8, 1},
+            {8, 5},
+            {5, 1},
+            {4, 5},
+            {5, 1},
+            true,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+            std::nullopt,
+            6.f);
+        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
+    }
+
+    // Unsupported leaky ReLU (no hipBLASLt epilogue), even with an explicit zero lower clip
+    {
+        auto builder = createValidMatmulBiasActivGraph(
+            {4, 8},
+            {8, 1},
+            {8, 5},
+            {5, 1},
+            {4, 5},
+            {5, 1},
+            false,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+            0.f,
+            std::nullopt,
+            std::nullopt,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            0.01f);
+        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
     }
 
     // Unsupported compute data type on activation node

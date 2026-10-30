@@ -28,16 +28,84 @@
 
 namespace stinkytofu {
 class Pass;
-class StinkyAsmModule;
+class ModulePass;
+class PassContext;
+struct StinkyInstruction;
+
+/// Pass policy.
+///
+/// Baseline is the per-pipe / per-FIFO count alone; each refinement is enabled per arch.
+struct InsertWaitAluOptions {
+    /// Stamp VALU source operands as well as dests, for the src-operand WAR hazard.
+    bool enableESM2TrackValuVsrc = false;
+    /// Count a CSMACC producer's followers across the VA order, and retire it at the shared floor.
+    bool sharedOrderCountFollowers = false;
+    /// Count an XDL producer's followers from the nearest anchor rather than its own ticket.
+    bool xdlCountFromNextWmma = false;
+};
 
 /// Insert s_wait_alu instructions for SCHED_MODE 2 (VA_VDST + VM_VSRC).
 ///
-/// The module overload reaches callee Functions for their conservative entry
-/// drain. The no-argument overload (stinkytofu-opt single-pass mode, unit tests)
-/// processes just the Function it is given and skips callee iteration.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(
-    StinkyAsmModule& module, bool enableESM2TrackValuVsrc = false);
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(
-    bool enableESM2TrackValuVsrc = false);
+/// Function pass: full scoreboard analysis when run on the entry, conservative
+/// entry drain when run on a callable function. Used by stinkytofu-opt single-pass
+/// mode and unit tests.
+/// The options the gfx1250 pipeline runs InsertWaitAlu with. A scheduler querying
+/// WaitAluTracker must use the same ones to predict the waits the pass will emit.
+inline InsertWaitAluOptions gfx1250InsertWaitAluOptions(bool enableESM2TrackValuVsrc) {
+    return {enableESM2TrackValuVsrc, /*sharedOrderCountFollowers=*/true,
+            /*xdlCountFromNextWmma=*/true};
+}
+
+/// The s_wait_alu InsertWaitAlu would emit before an instruction; -1 = no wait on that
+/// counter.
+struct WaitAluNeed {
+    int vaVdst = -1;
+    int vmVsrc = -1;
+    bool any() const {
+        return vaVdst >= 0 || vmVsrc >= 0;
+    }
+};
+
+/// An op the scoreboard counts toward hiding a wait: a WMMA hides a va_vdst, an op in the LDS
+/// or TEX FIFO hides a vm_vsrc (a flat_* is in both).
+enum class WaitAluHideOp { Wmma, Lds, Tex, Flat };
+
+/// InsertWaitAlu's scoreboard stepped one instruction at a time, so a scheduler can ask
+/// what s_wait_alu a candidate would need at the current point of its schedule. Uses the
+/// pass's own walk; it starts from an empty state, where the pass seeds a BB from its
+/// predecessors.
+class STINKYTOFU_EXPORT WaitAluTracker {
+   public:
+    WaitAluTracker(const PassContext& passCtx, InsertWaitAluOptions opts);
+    ~WaitAluTracker();
+    WaitAluTracker(const WaitAluTracker&) = delete;
+    WaitAluTracker& operator=(const WaitAluTracker&) = delete;
+
+    /// The wait `inst` would need if it were issued next.
+    WaitAluNeed query(const StinkyInstruction& inst) const;
+    /// How many more `op`s must issue before `inst` no longer needs the wait `op` hides
+    /// (va_vdst for Wmma, vm_vsrc otherwise). 0: it needs no wait on that counter now; -1: no
+    /// number of `op`s hides it, only a wait drains it. The WMMA form the va_vdst hide counts is
+    /// the one already issued, else `formWmma`'s (an XDL WMMA).
+    int untilFree(const StinkyInstruction& inst, WaitAluHideOp op,
+                  const StinkyInstruction* formWmma = nullptr) const;
+    /// untilFree() for `consumer` right after `producer`, with nothing else in flight.
+    int requiredGap(const StinkyInstruction& producer, const StinkyInstruction& consumer,
+                    WaitAluHideOp op, const StinkyInstruction* formWmma = nullptr) const;
+    /// Issue `inst`: apply the wait it needs, then record what it produces.
+    void commit(const StinkyInstruction& inst);
+
+   private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(InsertWaitAluOptions opts = {});
+
+/// Whole-kernel driver: full analysis on the entry function, then the conservative
+/// call-boundary drain on every callee. Reserves a seam for future caller<->callee
+/// analysis.
+STINKYTOFU_EXPORT std::unique_ptr<ModulePass> createInsertWaitAluModulePass(
+    InsertWaitAluOptions opts = {});
 
 }  // namespace stinkytofu

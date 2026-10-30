@@ -13,7 +13,7 @@
  *   build_unified_attention_2d               rocke_build_unified_attention_2d_scalar
  *   UnifiedAttention2DSpec.kernel_name       rocke_unified_attention_2d_scalar_kernel_name
  *   (block_id grid of build_..._2d)          rocke_unified_attention_2d_scalar_grid
- *   _attn_signature(include_bt_stride=False) rocke_unified_attention_2d_scalar_signature
+ *   _attn_signature(include_bt_stride=True)  rocke_unified_attention_2d_scalar_signature
  *   build_unified_attention_3d               rocke_build_unified_attention_3d_scalar
  *   UnifiedAttention3DSpec.kernel_name       rocke_unified_attention_3d_scalar_kernel_name
  *   (block_id grid of build_..._3d)          rocke_unified_attention_3d_scalar_grid
@@ -64,7 +64,7 @@ extern "C" {
  *
  * Only the fields the scalar reference kernels (and their name/grid/signature)
  * actually read are carried with semantic meaning; the remaining AITER selector
- * knobs (num_sms, waves_per_eu, compile_backend, ...) are kept for ABI/field
+ * knobs (num_cus, waves_per_eu, compile_backend, ...) are kept for ABI/field
  * parity but unused by the scalar path. `q_dtype` mirrors the Optional[str]
  * (NULL == Python None). The Python @property helpers used by the scalar
  * builders are exposed as free functions below. */
@@ -86,7 +86,7 @@ typedef struct rocke_unified_attention_problem
     bool use_alibi; /* default false                                      */
     bool use_qq_bias; /* default false                                      */
     bool use_fp8; /* default false                                      */
-    int num_sms; /* default 120 (selector only; unused by scalar)      */
+    int num_cus; /* default 120 (selector only; unused by scalar)      */
     int waves_per_eu; /* Optional[int]; <0 == None                          */
     bool waves_per_eu_set;
     const char* compile_backend; /* Optional[str]; NULL == None               */
@@ -123,7 +123,7 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_scalar(
  * extents = (total_q, num_query_heads, head_size). Writes out[0..2]. */
 void rocke_unified_attention_2d_scalar_grid(const rocke_unified_attention_problem_t* p, int out[3]);
 
-/* _attn_signature(dtype, include_bt_stride=False): the 2D scalar kernel ABI.
+/* _attn_signature(dtype, include_bt_stride=True): the 2D scalar kernel ABI.
  * On ROCKE_OK *out_items / *out_count hold the arena-owned array. */
 rocke_status_t
     rocke_unified_attention_2d_scalar_signature(const rocke_unified_attention_problem_t* p,

@@ -47,6 +47,13 @@ namespace hipdnn_frontend::graph
  *              .set_mode(PointwiseMode::ADD));
  * @endcode
  *
+ * **ReLU parameters (RELU_FWD / RELU_BWD):**
+ * y = x for lower_clip <= x <= upper_clip, y = upper_clip above, and below
+ * lower_clip y = lower_clip + slope * (x - lower_clip). An unset lower clip
+ * means 0, an unset upper clip means no upper bound, and an unset slope or a
+ * slope of exactly 0 means no leaky slope, so equivalent encodings select the
+ * same operation.
+ *
  * **Tensor Shapes:**
  * Pointwise operations are dimension-agnostic — input tensors can have any shape.
  * For binary and ternary operations, inputs are broadcast using NumPy-style rules
@@ -65,19 +72,19 @@ public:
     {
         return mode;
     }
-    /// @brief Get ReLU lower clipping bound
+    /// @brief Get ReLU lower clipping bound (unset means 0)
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<float> get_relu_lower_clip() const
     {
         return relu_lower_clip;
     }
-    /// @brief Get ReLU upper clipping bound
+    /// @brief Get ReLU upper clipping bound (unset means no upper bound)
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<float> get_relu_upper_clip() const
     {
         return relu_upper_clip;
     }
-    /// @brief Get slope for Leaky ReLU (negative region)
+    /// @brief Get slope for Leaky ReLU (negative region); unset or 0 means no slope
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::optional<float> get_relu_lower_clip_slope() const
     {
@@ -143,18 +150,21 @@ public:
         mode = value;
         return *this;
     }
+    /// @brief Set ReLU lower clipping bound; leaving it unset is the same as 0
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_relu_lower_clip(float value)
     {
         relu_lower_clip = value;
         return *this;
     }
+    /// @brief Set ReLU upper clipping bound; leaving it unset means no upper bound
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_relu_upper_clip(float value)
     {
         relu_upper_clip = value;
         return *this;
     }
+    /// @brief Set Leaky ReLU slope below the lower clip; leaving it unset is the same as 0
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseAttributes& set_relu_lower_clip_slope(float value)
     {
@@ -255,6 +265,30 @@ public:
     std::optional<float> elu_alpha = std::nullopt; ///< ELU alpha parameter
     std::optional<float> softplus_beta = std::nullopt; ///< Softplus beta parameter
     // NOLINTEND(readability-identifier-naming)
+
+    /**
+     * @brief Custom equality hook for pointwise-specific attributes
+     *
+     * Compares the operation mode and its associated numeric parameters
+     * (clip bounds, slope, axis, and activation-specific constants) — all
+     * of which define the mathematical semantics of the pointwise op rather
+     * than tensor layout, so logical and strict equality coincide here.
+     */
+    bool logicallyEqualsImpl(const PointwiseAttributes& other) const
+    {
+        return mode == other.mode && relu_lower_clip == other.relu_lower_clip
+               && relu_upper_clip == other.relu_upper_clip
+               && relu_lower_clip_slope == other.relu_lower_clip_slope && axis == other.axis
+               && swish_beta == other.swish_beta && elu_alpha == other.elu_alpha
+               && softplus_beta == other.softplus_beta;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const PointwiseAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
 };
 typedef PointwiseAttributes Pointwise_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

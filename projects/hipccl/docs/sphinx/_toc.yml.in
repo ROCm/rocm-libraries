@@ -1,0 +1,26 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+root: index
+subtrees:
+
+  - caption: Install
+    entries:
+    - file: install/install
+      title: Install hipCCL
+    - file: install/build
+      title: Build from source
+  - caption: Concepts
+    entries:
+    - file: conceptual/hipccl-layout
+      title: hipCCL project layout
+  - caption: Related content
+    entries:
+    - url: https://rocm.docs.amd.com/projects/rocPRIM/en/latest/index.html
+      title: rocPRIM
+    - url: https://rocm.docs.amd.com/projects/rocThrust/en/latest/index.html
+      title: rocThrust
+    - url: https://rocm.docs.amd.com/projects/hipCUB/en/latest/index.html
+      title: hipCUB
+  - caption: About
+    entries:
+    - file: license

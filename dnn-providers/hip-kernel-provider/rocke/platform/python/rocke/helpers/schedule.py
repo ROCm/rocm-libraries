@@ -48,6 +48,7 @@ _DTYPE_BYTES = {
     "fp4": 1,  # nibble-packed; CK treats the packed storage element as 1 byte
     "fp6": 1,
     "f32": 4,
+    "fp64": 8,
 }
 
 
@@ -450,6 +451,17 @@ class SchedulePolicy:
             # WMMA intrawave schedule: ds_read/wmma interleave in the compute
             # region (no MFMA-cycle model; see :class:`WmmaHotLoopInstList`).
             return cls(name="wmma_v1", emit_hints=True, mode="intrawave")
+        if pipeline == "wavelet":
+            # WAVELET pipeline — load/math wave specialization (gfx1250).
+            # Load waves handle DRAM→LDS (VMEM) and math waves handle
+            # LDS reads + WMMA. Hardware concurrency comes from separate VMEM
+            # and WMMA issue slots on gfx1250; sched_group_barrier hints are
+            # suppressed since the roles are already physically separated.
+            return cls(name="wavelet", emit_hints=False, mode="default")
+        if pipeline == "basic":
+            # CK pipeline_basic: naive single-buffer pipeline with global-read/
+            # compute overlap. No scheduling hints (lowest resource pressure).
+            return cls(name="basic", emit_hints=False)
         raise ValueError(f"unknown schedule policy {pipeline!r}")
 
     def emit_prologue(self, b: IRBuilder) -> None:

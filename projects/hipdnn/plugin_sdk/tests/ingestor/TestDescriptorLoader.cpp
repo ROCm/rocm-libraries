@@ -1,0 +1,6305 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iterator>
+#include <map>
+#include <memory>
+#include <optional>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+#include <nlohmann/json.hpp>
+
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
+#include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
+
+#include "KernelIngestorTestFixtures.hpp"
+/**
+ * @file TestDescriptorLoader.cpp
+ * @brief The descriptor loader against real files on disk.
+ *
+ * Every case writes its own descriptor files into a scoped directory and loads them, so
+ * what is under test is the path from bytes to DescriptorSet -- not descriptor structs
+ * built in memory, which is what KernelIngestorTestFixtures.hpp already covers.
+ */
+namespace
+{
+
+using namespace hipdnn_plugin_sdk::ingestor;
+
+/// Distinct from TestKernelIngestor.cpp's `int` handle: DispatchRegistry is keyed on the
+/// handle type, so a private one keeps these registrations out of that suite's registry.
+struct LoaderHandle
+{
+};
+
+const std::string GRAPH_SYMBOL = "descriptorloader.graph_match";
+const std::string KERNEL_SYMBOL = "descriptorloader.kernel_match";
+const std::string SCORE_SYMBOL = "descriptorloader.score";
+const std::string DISPATCH_SYMBOL = "descriptorloader.dispatch";
+
+bool matchGraph(const MatchContext& /*context*/, const BoundTokens& /*bound*/)
+{
+    return true;
+}
+
+bool matchKernel(const MatchContext& /*context*/,
+                 const BoundTokens& /*bound*/,
+                 const KernelDefinition& /*kernel*/)
+{
+    return true;
+}
+
+double score(const MatchContext& /*context*/,
+             const BoundTokens& /*bound*/,
+             const KernelDefinition& kernel)
+{
+    return static_cast<double>(kernel.getIntMetadata("block_size"));
+}
+
+class NoopDispatchHandler : public IKernelDispatchHandler<LoaderHandle>
+{
+public:
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& /*kernel*/) const override
+    {
+        return 0;
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& /*kernel*/) const override
+    {
+        return std::make_unique<PreparedDispatch>();
+    }
+
+    void launch(const LoaderHandle& /*handle*/,
+                const PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+};
+
+/// Registers this suite's native symbols for one test's duration. NativeRegistry has
+/// unregisterSymbol() for exactly this: the registry is process-wide, so a test that left
+/// its symbols behind would decide the next test's answer.
+class ScopedSymbols
+{
+public:
+    ScopedSymbols()
+    {
+        GraphCriterionRegistry::registerSymbol(GRAPH_SYMBOL, &matchGraph);
+        KernelMatcherRegistry::registerSymbol(KERNEL_SYMBOL, &matchKernel);
+        ScoreRegistry::registerSymbol(SCORE_SYMBOL, &score);
+        DispatchRegistry<LoaderHandle>::registerSymbol(DISPATCH_SYMBOL, &_handler);
+    }
+
+    ~ScopedSymbols()
+    {
+        GraphCriterionRegistry::unregisterSymbol(GRAPH_SYMBOL);
+        KernelMatcherRegistry::unregisterSymbol(KERNEL_SYMBOL);
+        ScoreRegistry::unregisterSymbol(SCORE_SYMBOL);
+        DispatchRegistry<LoaderHandle>::unregisterSymbol(DISPATCH_SYMBOL);
+    }
+
+    ScopedSymbols(const ScopedSymbols&) = delete;
+    ScopedSymbols& operator=(const ScopedSymbols&) = delete;
+
+private:
+    NoopDispatchHandler _handler;
+};
+
+/// A well-formed UUID per (set, role) pair. The loader only cares that ids differ and
+/// parse, so generating them beats pasting a page of literals.
+std::string testUuid(char setTag, char roleTag)
+{
+    std::string id = "00000000-0000-4000-8000-000000000000";
+    id[0] = setTag;
+    id[1] = roleTag;
+    return id;
+}
+
+constexpr char ROLE_SCHEMA = '1';
+constexpr char ROLE_HEURISTIC = '2';
+constexpr char ROLE_ENGINE = '3';
+constexpr char ROLE_GRAPH_MATCHER = '4';
+constexpr char ROLE_KERNEL_MATCHER = '5';
+constexpr char ROLE_DISPATCH = '6';
+constexpr char ROLE_PACK = '7';
+constexpr char ROLE_STANDALONE_KERNEL = 'd';
+
+/// A document plus the type the loader will read it as. The type is no longer inside the
+/// body: it comes from the filename writeDocument() builds from `suffix`.
+struct TestDocument
+{
+    std::string_view suffix; ///< ".ued.json" etc; selects the type the loader will read
+    nlohmann::json body;
+};
+using Documents = std::vector<TestDocument>;
+
+/// The complete seven-file set one engine needs: a KMD, a UHD, a UED, two UMDs, a UDD,
+/// and one KDP over three kernels.
+Documents makeSetDocuments(char tag, const std::string& engineName)
+{
+    const auto schemaId = testUuid(tag, ROLE_SCHEMA);
+    const auto heuristicId = testUuid(tag, ROLE_HEURISTIC);
+    const auto engineId = testUuid(tag, ROLE_ENGINE);
+    const auto graphMatcherId = testUuid(tag, ROLE_GRAPH_MATCHER);
+    const auto kernelMatcherId = testUuid(tag, ROLE_KERNEL_MATCHER);
+    const auto dispatchId = testUuid(tag, ROLE_DISPATCH);
+
+    const auto kernel = [tag](char slot, int64_t blockSize, const std::string& dtype) {
+        return nlohmann::json{{"version", "1.0"},
+                              {"id", testUuid(tag, slot)},
+                              {"name", std::string("kernel_") + slot},
+                              {"kernel_source",
+                               {{"kind", "embedded_source"},
+                                {"source_file", "Kernel.cpp"},
+                                {"entry_point", "Entry"}}},
+                              {"metadata", {{"block_size", blockSize}, {"dtype", dtype}}},
+                              {"priority", 0}};
+    };
+
+    return {
+        {".kmd.json",
+         {{"version", "1.0"},
+          {"id", schemaId},
+          {"name", "variant fields"},
+          {"fields",
+           {{{"name", "block_size"}, {"type", "int"}, {"default_value", 64}},
+            {{"name", "dtype"}, {"type", "string"}}}}}},
+        {".uhd.json",
+         {{"version", "1.0"},
+          {"id", heuristicId},
+          {"name", "selector"},
+          {"adapter", "native"},
+          {"objective", "max"},
+          {"native", {{"symbol", SCORE_SYMBOL}}}}},
+        {".ued.json",
+         {{"version", "1.0"},
+          {"id", engineId},
+          {"name", engineName},
+          {"sort_kernel_catalog", {{"default", heuristicId}}},
+          {"metadata", schemaId},
+          {"knobs", {"block_size"}},
+          {"behavior_notes", {"runtime_compilation"}}}},
+        {".umd.json",
+         {{"version", "1.0"},
+          {"id", graphMatcherId},
+          {"name", "graph shape"},
+          {"scope", "graph"},
+          {"match_symbol", GRAPH_SYMBOL}}},
+        {".umd.json",
+         {{"version", "1.0"},
+          {"id", kernelMatcherId},
+          {"name", "kernel dtype"},
+          {"scope", "kernel"},
+          {"match_symbol", KERNEL_SYMBOL}}},
+        {".udd.json",
+         {{"version", "1.0"},
+          {"id", dispatchId},
+          {"name", "dispatch"},
+          {"dispatch_symbol", DISPATCH_SYMBOL}}},
+        {".kdp.json",
+         {{"version", "1.0"},
+          {"id", testUuid(tag, ROLE_PACK)},
+          {"name", "pack"},
+          {"matchers", {graphMatcherId, kernelMatcherId}},
+          {"engine", engineId},
+          {"dispatch", dispatchId},
+          {"kernelDescriptors",
+           {kernel('8', 64, "FLOAT"), kernel('9', 256, "FLOAT"), kernel('a', 64, "HALF")}}}},
+    };
+}
+
+/// A document's top-level members, in the order a file states them. A repeated key is two
+/// members: nlohmann::json can hold neither that nor an order of its own choosing.
+using Members = std::vector<std::pair<std::string, nlohmann::json>>;
+
+std::string membersText(const Members& members)
+{
+    std::string text = "{";
+    for(const auto& [key, value] : members)
+    {
+        text += (text.size() == 1 ? "" : ",") + nlohmann::json(key).dump() + ":" + value.dump();
+    }
+    return text + "}";
+}
+
+/// @p pack's members as the packer writes them: every header key, then `kernelDescriptors`
+/// last. nlohmann::json sorts keys, which would put `matchers`, `name` and `version` after
+/// the kernels and send every pack through the loader's second pass instead of the single
+/// pass a packed tree takes.
+Members packerLayout(const nlohmann::json& pack)
+{
+    Members members;
+    for(auto it = pack.begin(); it != pack.end(); ++it)
+    {
+        if(it.key() != "kernelDescriptors")
+        {
+            members.emplace_back(it.key(), it.value());
+        }
+    }
+    members.emplace_back("kernelDescriptors", pack.at("kernelDescriptors"));
+    return members;
+}
+
+void writeDocument(const std::filesystem::path& directory, const TestDocument& document)
+{
+    std::filesystem::create_directories(directory);
+    // Stem is the id purely to keep names unique here. The loader never parses the stem,
+    // which is what makes an arbitrary one the right choice for a fixture.
+    std::ofstream file(
+        directory / (document.body.at("id").get<std::string>() + std::string(document.suffix)),
+        std::ios::binary);
+    const bool packed
+        = document.suffix == ".kdp.json" && document.body.contains("kernelDescriptors");
+    file << (packed ? membersText(packerLayout(document.body)) : document.body.dump(2)) << '\n';
+}
+
+void writeDocuments(const std::filesystem::path& directory, const Documents& documents)
+{
+    for(const auto& document : documents)
+    {
+        writeDocument(directory, document);
+    }
+}
+
+/// The body of the first document in @p documents of type @p suffix, for a case that
+/// corrupts it.
+nlohmann::json& documentOfType(Documents& documents, std::string_view suffix)
+{
+    for(auto& document : documents)
+    {
+        if(document.suffix == suffix)
+        {
+            return document.body;
+        }
+    }
+    throw std::runtime_error("no document of type " + std::string(suffix));
+}
+
+/// Moves the pack's last inline kernel into its own `.ukd.json`, leaving a bare-id
+/// reference behind: the same corpus, authored the other way.
+void referenceLastKernel(Documents& documents)
+{
+    auto& kernels = documentOfType(documents, ".kdp.json").at("kernelDescriptors");
+    // Scans from the end rather than trusting kernels.back(): a second call (building an
+    // all-references pack) must find the next remaining inline entry, not a string left
+    // behind by the first call.
+    for(auto i = kernels.size(); i-- > 0;)
+    {
+        if(kernels[i].is_object())
+        {
+            nlohmann::json kernel = kernels[i];
+            kernel["version"] = "1.0";
+            kernels[i] = kernel.at("id").get<std::string>();
+            documents.push_back(TestDocument{".ukd.json", std::move(kernel)});
+            return;
+        }
+    }
+    throw std::runtime_error("no inline kernel left to reference");
+}
+
+/// The body of the *second* document in @p documents of type @p suffix. makeSetDocuments
+/// emits two `.umd.json` documents -- graph scope, then kernel scope -- and
+/// documentOfType always returns the first, so this is the only way to corrupt the
+/// kernel-scope matcher specifically.
+nlohmann::json& secondDocumentOfType(Documents& documents, std::string_view suffix)
+{
+    bool sawFirst = false;
+    for(auto& document : documents)
+    {
+        if(document.suffix == suffix)
+        {
+            if(sawFirst)
+            {
+                return document.body;
+            }
+            sawFirst = true;
+        }
+    }
+    throw std::runtime_error("no second document of type " + std::string(suffix));
+}
+
+/// Distinct per call, so ScopedDirectory below -- which creates the directory atomically
+/// and throws if the name is taken -- always has a free one. The per-process stamp keeps
+/// two suites running this binary at once out of each other's tree, and remove_all clears
+/// a leftover from a killed run. std::filesystem only: mkdtemp is POSIX, and MSVC ships
+/// no <unistd.h>.
+std::filesystem::path uniqueDirectory(const std::string& name)
+{
+    static const std::string s_session
+        = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    static unsigned s_counter = 0;
+    const auto path
+        = std::filesystem::temp_directory_path()
+          / ("descriptor_loader_" + name + "_" + s_session + "_" + std::to_string(s_counter++));
+    std::filesystem::remove_all(path);
+    return path;
+}
+
+std::vector<DescriptorSet> loadFrom(const std::filesystem::path& root)
+{
+    return resolveDescriptorSets(loadDescriptorCatalog(root));
+}
+
+/// The sets validation kept under @p root, without the state managers it built for them.
+std::vector<DescriptorSet> validatedSetsFrom(const std::filesystem::path& root)
+{
+    std::vector<DescriptorSet> sets;
+    for(auto& validated : loadValidatedDescriptorSets<LoaderHandle>(root))
+    {
+        sets.push_back(std::move(validated.set));
+    }
+    return sets;
+}
+
+std::vector<DescriptorSet> loadFromRoots(const std::vector<std::filesystem::path>& roots)
+{
+    return resolveDescriptorSets(loadDescriptorCatalog(roots));
+}
+
+nlohmann::json provenanceOf(Documents& documents)
+{
+    const auto dependency = [](const nlohmann::json& descriptor) {
+        return nlohmann::json{{"id", descriptor.at("id")},
+                              {"revision", descriptor.value("revision", "1.0")}};
+    };
+    auto matchers = nlohmann::json::array();
+    for(const auto& document : documents)
+    {
+        if(document.suffix == ".umd.json")
+        {
+            matchers.push_back(dependency(document.body));
+        }
+    }
+    return {{"ued", dependency(documentOfType(documents, ".ued.json"))},
+            {"kmd", dependency(documentOfType(documents, ".kmd.json"))},
+            {"umd", std::move(matchers)}};
+}
+
+int64_t firstBlockSize(const DescriptorSet& set, const std::string& arch = "gfx942")
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disableCache(
+        "HIPDNN_DISABLE_CACHE", "1");
+    const hipdnn_plugin_sdk::ingestor::testing::TestGraph graph;
+    auto device = hipdnn_plugin_sdk::ingestor::testing::testDeviceProperties();
+    device.gcnArchName = arch;
+    const MatchContext context{graph, 0, device};
+    const auto manager = makeStateManager<LoaderHandle>(set, {});
+    const auto ranked = manager->sortedDefinitions(context);
+    if(ranked.empty())
+    {
+        throw std::runtime_error("Loaded descriptor set yielded no applicable candidates");
+    }
+    return ranked.front()->getIntMetadata("block_size");
+}
+
+/// `predict_engine` scorers resolve through uhd::NativeScorerRegistry, not the ScoreRegistry
+/// that ScopedSymbols fills.
+const std::string L1_SCORER_SYMBOL = "descriptorloader.l1_scorer";
+
+double l1Score(const double* values, size_t count)
+{
+    return count == 0 ? 0.0 : values[0];
+}
+
+class ScopedL1Scorer
+{
+public:
+    ScopedL1Scorer()
+    {
+        hipdnn_plugin_sdk::uhd::NativeScorerRegistry::registerSymbol(L1_SCORER_SYMBOL, &l1Score);
+    }
+
+    ~ScopedL1Scorer()
+    {
+        hipdnn_plugin_sdk::uhd::NativeScorerRegistry::unregisterSymbol(L1_SCORER_SYMBOL);
+    }
+
+    ScopedL1Scorer(const ScopedL1Scorer&) = delete;
+    ScopedL1Scorer& operator=(const ScopedL1Scorer&) = delete;
+};
+
+/// The `objective` the registry fixes for @p metric; the parser refuses any other pairing.
+std::string objectiveFor(const std::string& metric)
+{
+    return std::string(hipdnn_data_sdk::utilities::objectiveOf(
+        *hipdnn_data_sdk::utilities::findRankingMetric(metric)));
+}
+
+/// The provider build an opaque engine's model must record exactly
+/// (RFC 0019 §4.1 `trained_against.selector_revision`).
+const std::string L1_SELECTOR_REVISION = "test-provider/1.2.3/opaque-untuned-v1/library-4.5";
+
+/// An L1 UHD with only RFC 0019 §4.1 fields: it cannot name an engine, role or arch, so only
+/// the engine's declaration binds it.
+///
+/// @param selectorRevision The provider build this model claims to have been measured on.
+/// @param metric The registered metric the model predicts in.
+nlohmann::json declaredL1Document(const std::string& id,
+                                  const std::string& selectorRevision = L1_SELECTOR_REVISION,
+                                  const std::string& metric = "tflops")
+{
+    const std::vector<nlohmann::json> signature = {"$graph.flops"};
+    return {{"version", "1.0"},
+            {"id", id},
+            {"name", "engine " + metric},
+            {"adapter", "native"},
+            {"native", {{"symbol", L1_SCORER_SYMBOL}}},
+            {"features_signature", signature},
+            {"features_hash", hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature)},
+            {"objective", objectiveFor(metric)},
+            {"score", {{"metric", metric}, {"calibrated", true}, {"transform", "log1p"}}},
+            {"trained_against", {{"selector_revision", selectorRevision}}}};
+}
+
+/// An opaque engine's compiled-in declaration. A repeated arch lists a second id, one per
+/// metric (RFC 0019 §11.4).
+std::map<std::string, std::vector<DescriptorId>>
+    declaration(const std::vector<std::pair<std::string, std::string>>& entries)
+{
+    std::map<std::string, std::vector<DescriptorId>> declared;
+    for(const auto& [arch, id] : entries)
+    {
+        declared[arch].push_back(hipdnn_flatbuffers_sdk::utilities::parseUuid(id));
+    }
+    return declared;
+}
+
+/// The set's native UHD under @p id, declaring @p metric, calibrated. Native and
+/// signature-less, so it resolves from the catalog alone.
+nlohmann::json metricUhd(Documents& documents, const std::string& id, const std::string& metric)
+{
+    auto uhd = documentOfType(documents, ".uhd.json");
+    uhd["id"] = id;
+    uhd["objective"] = objectiveFor(metric);
+    uhd["score"] = {{"metric", metric}, {"calibrated", true}};
+    return uhd;
+}
+
+size_t countLogsContaining(const hipdnn_test_sdk::utilities::SharedLogRecorder& recorder,
+                           const std::string& text)
+{
+    const auto logs = recorder.getRecordedLogs();
+    return static_cast<size_t>(std::count_if(logs.begin(), logs.end(), [&text](const auto& log) {
+        return log.message.find(text) != std::string::npos;
+    }));
+}
+
+} // namespace
+
+TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("complete"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:complete"));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    EXPECT_EQ(set.engine.name, "test:complete");
+    EXPECT_EQ(set.schema.fields.size(), 2u);
+    ASSERT_TRUE(set.heuristic.has_value());
+    EXPECT_EQ(set.heuristic->nativeSymbol, SCORE_SYMBOL);
+    // A model artifact path is relative to its .uhd.json, so the descriptor must carry
+    // that directory.
+    EXPECT_EQ(set.heuristic->baseDir, dir.path());
+    EXPECT_EQ(set.matchers.size(), 2u);
+    EXPECT_EQ(set.dispatches.size(), 1u);
+    ASSERT_EQ(set.packs.size(), 1u);
+    EXPECT_EQ(set.packs.front().kernels.size(), 3u);
+    ASSERT_EQ(set.engine.behaviorNotes.size(), 1u);
+    EXPECT_EQ(set.engine.behaviorNotes.front(), HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION);
+}
+
+TEST(TestDescriptorLoader, SemanticRevisionsAreIndependentOfFormatAndDescriptorKind)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("semantic_revisions"));
+    auto documents = makeSetDocuments('1', "test:semantic_revisions");
+    auto& engine = documentOfType(documents, ".ued.json");
+    auto& schema = documentOfType(documents, ".kmd.json");
+    // Equal UUIDs are legal across kinds. Their revisions must never alias.
+    schema["id"] = engine["id"];
+    engine["metadata"] = schema["id"];
+    engine["revision"] = "3.2";
+    schema["revision"] = "7.4";
+    documentOfType(documents, ".uhd.json")["trained_against"] = provenanceOf(documents);
+    schema["revision"] = "7.5"; // Additive semantic change, format remains 1.0.
+    writeDocuments(dir.path(), documents);
+    const auto sets = loadFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(firstBlockSize(sets.front()), 256);
+}
+
+TEST(TestDescriptorLoader, AModelRequiringANewerRevisionFallsBackWithoutDroppingTheEngine)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("newer_revision"));
+    auto documents = makeSetDocuments('1', "test:newer_revision");
+    auto provenance = provenanceOf(documents);
+    provenance["ued"]["revision"] = "1.7";
+    documentOfType(documents, ".uhd.json")["trained_against"] = std::move(provenance);
+    writeDocuments(dir.path(), documents);
+    const auto sets = loadFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(firstBlockSize(sets.front()), 64);
+}
+
+TEST(TestDescriptorLoader, ChangedKernelMatcherDisablesOnlyTheAffectedArchitectureModel)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("matcher_revision"));
+    auto documents = makeSetDocuments('1', "test:matcher_revision");
+    auto archModel = documentOfType(documents, ".uhd.json");
+    archModel["id"] = testUuid('1', 'c');
+    archModel["trained_against"] = provenanceOf(documents);
+    documentOfType(documents, ".ued.json")["sort_kernel_catalog"]["gfx942"] = archModel["id"];
+    secondDocumentOfType(documents, ".umd.json")["revision"] = "2.0";
+    documents.push_back({".uhd.json", std::move(archModel)});
+    writeDocuments(dir.path(), documents);
+    const auto sets = loadFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(firstBlockSize(sets.front(), "gfx942"), 64);
+    EXPECT_EQ(firstBlockSize(sets.front(), "gfx950"), 256);
+}
+
+namespace
+{
+
+/// makeSetDocuments split into gfx942 and gfx950 packs, each with its own kernel matcher,
+/// plus one `predict_engine` model bound under both arches that records every pack's
+/// matchers. The model is the last document, so a case can amend it.
+Documents twoArchPackDocuments(const std::string& engineName, const std::string& modelId)
+{
+    auto documents = makeSetDocuments('1', engineName);
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+    auto gfx950Pack = documentOfType(documents, ".kdp.json");
+    auto gfx950Matcher = secondDocumentOfType(documents, ".umd.json");
+    gfx950Matcher["id"] = testUuid('2', ROLE_KERNEL_MATCHER);
+    gfx950Matcher["name"] = "gfx950 kernel dtype";
+    gfx950Pack["id"] = testUuid('1', 'e');
+    gfx950Pack["name"] = "gfx950 pack";
+    gfx950Pack["arch"] = nlohmann::json::array({"gfx950"});
+    gfx950Pack["matchers"] = {testUuid('1', ROLE_GRAPH_MATCHER), gfx950Matcher["id"]};
+    documents.push_back({".umd.json", std::move(gfx950Matcher)});
+    documents.push_back({".kdp.json", std::move(gfx950Pack)});
+
+    auto model = metricUhd(documents, modelId, "tflops");
+    model["trained_against"] = provenanceOf(documents);
+    documentOfType(documents, ".ued.json")["predict_engine"]
+        = {{"gfx942", modelId}, {"gfx950", modelId}};
+    documents.push_back({".uhd.json", std::move(model)});
+    return documents;
+}
+
+} // namespace
+
+/// Each arch key checks only the matchers its own packs use; the other arch's recorded
+/// matcher is ignored there, not refused.
+TEST(TestDescriptorLoader, AMultiArchModelRecordingEveryPacksMatchersIsValidOnEachBoundArch)
+{
+    const auto modelId = testUuid('1', 'c');
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("multi_arch_umd"));
+    writeDocuments(dir.path(), twoArchPackDocuments("test:multi_arch_umd", modelId));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 2u);
+    EXPECT_TRUE(sets.front().unavailableEnginePredictionArches.empty());
+    ASSERT_EQ(sets.front().enginePredictionsByMetric.count("tflops"), 1u);
+    const auto& bound = sets.front().enginePredictionsByMetric.at("tflops");
+    ASSERT_EQ(bound.size(), 2u);
+    EXPECT_EQ(toString(bound.at("gfx942").id), modelId);
+    EXPECT_EQ(toString(bound.at("gfx950").id), modelId);
+}
+
+/// A bumped matcher the arch uses refuses the model on that arch only; a recorded matcher no
+/// pack uses any more refuses it on every arch.
+TEST(TestDescriptorLoader, ArchScopedMatcherProvenanceStillRefusesWhatTheBoundArchUses)
+{
+    const auto modelId = testUuid('1', 'c');
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("umd_bumped"));
+        auto documents = twoArchPackDocuments("test:umd_bumped", modelId);
+        // gfx942's own kernel matcher; the model recorded it at 1.0.
+        secondDocumentOfType(documents, ".umd.json")["revision"] = "2.0";
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        const auto& bound = sets.front().enginePredictionsByMetric.at("tflops");
+        EXPECT_EQ(bound.count("gfx942"), 0u);
+        EXPECT_EQ(bound.count("gfx950"), 1u);
+        EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops"),
+                  std::set<std::string>{"gfx942"});
+    }
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("umd_retired"));
+        auto documents = twoArchPackDocuments("test:umd_retired", modelId);
+        documents.back().body["trained_against"]["umd"].push_back(
+            {{"id", testUuid('3', ROLE_KERNEL_MATCHER)}, {"revision", "1.0"}});
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        EXPECT_TRUE(sets.front().enginePredictionsByMetric.empty());
+        EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops"),
+                  (std::set<std::string>{"gfx942", "gfx950"}));
+    }
+}
+
+TEST(TestDescriptorLoader, AnUnrecordedMatcherRefusesOnlyTheArchitectureThatUsesIt)
+{
+    const auto modelId = testUuid('1', 'c');
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("umd_unrecorded"));
+    auto documents = twoArchPackDocuments("test:umd_unrecorded", modelId);
+    auto& recorded = documents.back().body["trained_against"]["umd"];
+    const auto missingId = testUuid('1', ROLE_KERNEL_MATCHER);
+    recorded.erase(std::remove_if(recorded.begin(),
+                                  recorded.end(),
+                                  [&](const auto& entry) { return entry.at("id") == missingId; }),
+                   recorded.end());
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& bound = sets.front().enginePredictionsByMetric.at("tflops");
+    EXPECT_EQ(bound.count("gfx942"), 0u);
+    EXPECT_EQ(bound.count("gfx950"), 1u);
+    EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops"),
+              std::set<std::string>{"gfx942"});
+}
+
+TEST(TestDescriptorLoader, AModelTrainedAgainstAnotherMetadataIdentityCannotRank)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("metadata_identity"));
+    auto documents = makeSetDocuments('1', "test:metadata_identity");
+    auto provenance = provenanceOf(documents);
+    provenance["kmd"]["id"] = testUuid('2', ROLE_SCHEMA);
+    documentOfType(documents, ".uhd.json")["trained_against"] = std::move(provenance);
+    writeDocuments(dir.path(), documents);
+    const auto sets = loadFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(firstBlockSize(sets.front()), 64);
+}
+
+TEST(TestDescriptorLoader, MalformedProvenanceCannotSilentlyEnableAModel)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("malformed_provenance"));
+    auto documents = makeSetDocuments('1', "test:malformed_provenance");
+    auto provenance = provenanceOf(documents);
+    provenance["kdp"] = {{"id", testUuid('1', ROLE_PACK)}, {"revision", "1.0"}};
+    documentOfType(documents, ".uhd.json")["trained_against"] = std::move(provenance);
+    writeDocuments(dir.path(), documents);
+    const auto sets = loadFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(firstBlockSize(sets.front()), 64);
+}
+
+/// RFC 0019 §8.1: a model bound to a UED records the descriptor set it was trained on. A
+/// `selector_revision` alone leaves that set unchecked, so the model is refused; recording
+/// both forms, as an engine estimate of a descriptor engine does, is accepted.
+TEST(TestDescriptorLoader, AUedBoundModelRecordingOnlyASelectorRevisionCannotRank)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("selector_only"));
+    auto documents = makeSetDocuments('1', "test:selector_only");
+    auto& model = documentOfType(documents, ".uhd.json");
+    model["trained_against"] = {{"selector_revision", "test-provider/1.0"}};
+    writeDocuments(dir.path(), documents);
+
+    const auto refused = loadFrom(dir.path());
+    ASSERT_EQ(refused.size(), 1u);
+    EXPECT_EQ(firstBlockSize(refused.front()), 64);
+
+    model["trained_against"].update(provenanceOf(documents));
+    writeDocuments(dir.path(), documents);
+
+    const auto accepted = loadFrom(dir.path());
+    ASSERT_EQ(accepted.size(), 1u);
+    EXPECT_EQ(firstBlockSize(accepted.front()), 256);
+}
+
+/// The multiple-reference form: roles are independently optional and each is an arch map.
+TEST(TestDescriptorLoader, LoadsRoleScopedHeuristicsMappedByArchitecture)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("role_scoped"));
+    auto documents = makeSetDocuments('1', "test:roles");
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    const auto uhdId = engineDocument.at("sort_kernel_catalog").at("default").get<std::string>();
+
+    // Same ranker under two arches; a `predict_engine` model must declare a metric.
+    const auto predictionId = testUuid('1', 'c');
+    engineDocument["sort_kernel_catalog"] = {{"gfx942", uhdId}, {"default", uhdId}};
+    engineDocument["predict_engine"] = {{"default", predictionId}};
+    documents.push_back({".uhd.json", metricUhd(documents, predictionId, "tflops")});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& engine = sets.front().engine;
+    EXPECT_EQ(engine.sortKernelCatalog.size(), 2u);
+    EXPECT_EQ(engine.predictEngine.size(), 1u);
+    ASSERT_EQ(sets.front().enginePredictionsByMetric.count("tflops"), 1u);
+    EXPECT_EQ(sets.front().enginePredictionsByMetric.at("tflops").count("default"), 1u);
+    // heuristicId is the default entry's ranker, never the prediction model.
+    ASSERT_TRUE(engine.heuristicId.has_value());
+    EXPECT_EQ(engine.sortKernelCatalog.at("default").front(), *engine.heuristicId);
+}
+
+/// RFC 0019 §8.3: an arch-named entry applies only to that arch, so a lone one must not
+/// become the engine's default; it stays in heuristicsByMetric for rank() to resolve.
+TEST(TestDescriptorLoader, ASingleArchScopedHeuristicDoesNotBecomeTheDefault)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("single_arch"));
+    auto documents = makeSetDocuments('1', "test:single_arch");
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    const auto uhdId = engineDocument.at("sort_kernel_catalog").at("default").get<std::string>();
+
+    engineDocument["sort_kernel_catalog"] = {{"gfx950", uhdId}};
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& engine = sets.front().engine;
+    EXPECT_EQ(engine.sortKernelCatalog.size(), 1u);
+    EXPECT_FALSE(engine.heuristicId.has_value())
+        << "a model named only for gfx950 was promoted to the engine's default";
+
+    // Still reachable, so gfx950 keeps its model.
+    ASSERT_EQ(sets.front().heuristicsByMetric.count(""), 1u);
+    EXPECT_EQ(sets.front().heuristicsByMetric.at("").count("gfx950"), 1u);
+}
+
+/// RFC 0019 §3.1: each listed UHD lands under the metric it declares, whatever its position.
+/// With no metric-less ranker, the `tflops` one is the default ranker, never `time`.
+TEST(TestDescriptorLoader, ResolvesOneUhdPerMetricFromOneArchEntry)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("per_metric"));
+    auto documents = makeSetDocuments('1', "test:per_metric");
+    const auto tflopsId = testUuid('1', 'c');
+    const auto timeId = testUuid('1', 'e');
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    engineDocument["sort_kernel_catalog"]
+        = {{"default", nlohmann::json::array({tflopsId, timeId})}};
+    // Listed the other way round, so neither role can be read by position.
+    engineDocument["predict_engine"] = {{"default", nlohmann::json::array({timeId, tflopsId})}};
+    documents.push_back({".uhd.json", metricUhd(documents, tflopsId, "tflops")});
+    documents.push_back({".uhd.json", metricUhd(documents, timeId, "time")});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    EXPECT_EQ(set.engine.sortKernelCatalog.at("default").size(), 2u);
+    EXPECT_EQ(set.engine.predictEngine.at("default").size(), 2u);
+    const std::vector<std::pair<std::string, std::string>> expected
+        = {{"tflops", tflopsId}, {"time", timeId}};
+    for(const auto& [metric, id] : expected)
+    {
+        ASSERT_EQ(set.heuristicsByMetric.count(metric), 1u) << metric;
+        ASSERT_EQ(set.heuristicsByMetric.at(metric).count("default"), 1u) << metric;
+        EXPECT_EQ(toString(set.heuristicsByMetric.at(metric).at("default").id), id);
+        ASSERT_EQ(set.enginePredictionsByMetric.count(metric), 1u) << metric;
+        ASSERT_EQ(set.enginePredictionsByMetric.at(metric).count("default"), 1u) << metric;
+        const auto& prediction = set.enginePredictionsByMetric.at(metric).at("default");
+        EXPECT_EQ(toString(prediction.id), id);
+        EXPECT_EQ(prediction.role, "predict_engine");
+    }
+    EXPECT_EQ(set.heuristicsByMetric.count(""), 0u);
+    EXPECT_TRUE(set.unavailableHeuristicArches.empty());
+    EXPECT_TRUE(set.unavailableEnginePredictionArches.empty());
+    ASSERT_TRUE(set.engine.heuristicId.has_value());
+    EXPECT_EQ(toString(*set.engine.heuristicId), tflopsId);
+}
+
+/// Two UHDs claiming one metric on one arch disable that metric there only: the metric-less
+/// ranker beside them still picks its winner (256), not the declared-order head (64).
+TEST(TestDescriptorLoader, DisablesAMetricTwoRankersClaimOnOneArch)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ranker_collision"));
+    auto documents = makeSetDocuments('1', "test:ranker_collision");
+    const auto rankerId = testUuid('1', ROLE_HEURISTIC);
+    const auto firstId = testUuid('1', 'c');
+    const auto secondId = testUuid('1', 'e');
+    documentOfType(documents, ".ued.json")["sort_kernel_catalog"]
+        = {{"default", nlohmann::json::array({rankerId, firstId, secondId})}};
+    documents.push_back({".uhd.json", metricUhd(documents, firstId, "tflops")});
+    documents.push_back({".uhd.json", metricUhd(documents, secondId, "tflops")});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    EXPECT_EQ(set.heuristicsByMetric.count("tflops"), 0u);
+    ASSERT_EQ(set.unavailableHeuristicArches.count("tflops"), 1u);
+    EXPECT_EQ(set.unavailableHeuristicArches.at("tflops").count("default"), 1u);
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_ERROR, "names more than one UHD for metric 'tflops'"))
+        << recorder.getRecordedLogsAsString();
+    ASSERT_TRUE(set.engine.heuristicId.has_value());
+    EXPECT_EQ(toString(*set.engine.heuristicId), rankerId);
+    EXPECT_EQ(firstBlockSize(set), 256);
+}
+
+/// Same rule for `predict_engine`: neither colliding model answers for that metric, and the
+/// engine stays loaded.
+TEST(TestDescriptorLoader, DisablesAMetricTwoEnginePredictionsClaimOnOneArch)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("prediction_collision"));
+    auto documents = makeSetDocuments('1', "test:prediction_collision");
+    const auto firstId = testUuid('1', 'c');
+    const auto secondId = testUuid('1', 'e');
+    documentOfType(documents, ".ued.json")["predict_engine"]
+        = {{"default", nlohmann::json::array({firstId, secondId})}};
+    documents.push_back({".uhd.json", metricUhd(documents, firstId, "tflops")});
+    documents.push_back({".uhd.json", metricUhd(documents, secondId, "tflops")});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    EXPECT_TRUE(set.enginePredictionsByMetric.empty());
+    ASSERT_EQ(set.unavailableEnginePredictionArches.count("tflops"), 1u);
+    EXPECT_EQ(set.unavailableEnginePredictionArches.at("tflops").count("default"), 1u);
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_ERROR, "names more than one UHD for metric 'tflops'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// An arch entry naming a metric-less estimate is refused rather than falling back to the
+/// `default` key's model: what it was meant to estimate is unknown, so every metric is
+/// withheld on that arch.
+TEST(TestDescriptorLoader, AMetricLessEnginePredictionWithholdsItsArchitecture)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("metricless_prediction"));
+    auto documents = makeSetDocuments('1', "test:metricless_prediction");
+    const auto defaultId = testUuid('1', 'c');
+    const auto metricLessId = testUuid('1', 'e');
+    auto metricLess = documentOfType(documents, ".uhd.json");
+    metricLess["id"] = metricLessId;
+    documentOfType(documents, ".ued.json")["predict_engine"]
+        = {{"default", defaultId}, {"gfx942", metricLessId}};
+    documents.push_back({".uhd.json", metricUhd(documents, defaultId, "tflops")});
+    documents.push_back({".uhd.json", std::move(metricLess)});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    ASSERT_EQ(set.enginePredictionsByMetric.count("tflops"), 1u);
+    EXPECT_EQ(set.enginePredictionsByMetric.at("tflops").count("default"), 1u);
+    EXPECT_EQ(set.enginePredictionsByMetric.at("tflops").count("gfx942"), 0u);
+    for(const auto& metric : hipdnn_data_sdk::utilities::RANKING_METRICS)
+    {
+        const auto withheld = set.unavailableEnginePredictionArches.find(std::string(metric.name));
+        ASSERT_NE(withheld, set.unavailableEnginePredictionArches.end()) << metric.name;
+        EXPECT_EQ(withheld->second.count("gfx942"), 1u) << metric.name;
+    }
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "declares no score.metric"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// RFC 0020 §4.6: a scoring role is one UUID or a list of distinct ones. A repeated id
+/// refuses the UED; a bare string is a one-element list.
+TEST(TestDescriptorLoader, ReadsAScoringRoleAsAListOfDistinctIds)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("role_list"));
+    // makeSetDocuments spells its role as a bare string.
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    const auto repeatedId = testUuid('2', ROLE_HEURISTIC);
+    documentOfType(broken, ".ued.json")["sort_kernel_catalog"]
+        = {{"default", nlohmann::json::array({repeatedId, repeatedId})}};
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& engine = sets.front().engine;
+    EXPECT_EQ(engine.name, "test:valid");
+    ASSERT_EQ(engine.sortKernelCatalog.count("default"), 1u);
+    ASSERT_EQ(engine.sortKernelCatalog.at("default").size(), 1u);
+    EXPECT_EQ(toString(engine.sortKernelCatalog.at("default").front()),
+              testUuid('1', ROLE_HEURISTIC));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "lists " + repeatedId + " twice"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// A metric-suffixed L1 role key (`predict_engine_tflops`) is refused as unknown, not loaded
+/// with its model silently unbound.
+TEST(TestDescriptorLoader, RejectsAnEngineSpellingAMetricSuffixedPredictionRole)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("suffixed_role"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    documentOfType(broken, ".ued.json")["predict_engine_tflops"]
+        = {{"default", testUuid('2', ROLE_HEURISTIC)}};
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "unknown key 'predict_engine_tflops'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// RFC 0019 §4.4: the score block names a registered `metric`. A `units` field is refused,
+/// and the engine falls back to declared order.
+TEST(TestDescriptorLoader, RejectsAUhdScoreCarryingUnits)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("score_units"));
+    auto documents = makeSetDocuments('1', "test:score_units");
+    documentOfType(documents, ".uhd.json")["score"] = {{"units", "tflops"}};
+    writeDocuments(dir.path(), documents);
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+    EXPECT_TRUE(catalog.heuristics.empty());
+    const auto sets = resolveDescriptorSets(catalog);
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_FALSE(sets.front().heuristic.has_value());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "unknown key 'units'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// static_order always ranks by UKD priority, then descriptor id, so an `order` body asks
+/// for criteria nothing implements.
+TEST(TestDescriptorLoader, RejectsAStaticOrderBodyDeclaringCriteria)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("static_order_order"));
+    auto documents = makeSetDocuments('1', "test:static_order");
+    auto& uhd = documentOfType(documents, ".uhd.json");
+    uhd["adapter"] = "static_order";
+    uhd.erase("native");
+    uhd.erase("objective");
+    uhd["static_order"] = {{"order", nlohmann::json::array({"id", "priority"})}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadDescriptorCatalog(dir.path()).heuristics.empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "static_order.order is not supported"))
+        << recorder.getRecordedLogsAsString();
+
+    // The control: the same UHD with an empty body loads, so the refusal is about `order`.
+    uhd["static_order"] = nlohmann::json::object();
+    writeDocuments(dir.path(), documents);
+    EXPECT_EQ(loadDescriptorCatalog(dir.path()).heuristics.size(), 1u);
+}
+
+TEST(TestDescriptorLoader, MissingArchitectureModelFallsBackWithoutUsingTheDefaultModel)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("dangling_arch"));
+    auto documents = makeSetDocuments('1', "test:dangling");
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    const auto uhdId = engineDocument.at("sort_kernel_catalog").at("default").get<std::string>();
+
+    engineDocument["sort_kernel_catalog"]
+        = {{"default", uhdId}, {"gfx942", testUuid('9', ROLE_HEURISTIC)}};
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(firstBlockSize(sets.front(), "gfx942"), 64);
+    EXPECT_EQ(firstBlockSize(sets.front(), "gfx950"), 256);
+}
+
+TEST(TestDescriptorLoader, RefusesTheObsoleteSingleHeuristicSpelling)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("role_twice"));
+    auto documents = makeSetDocuments('1', "test:twice");
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    engineDocument["heuristic"] = engineDocument.at("sort_kernel_catalog").at("default");
+    engineDocument.erase("sort_kernel_catalog");
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// A UED naming no UHD ranks on priority then id instead of failing, so the SDK can adopt a
+/// model later without the engine being unloadable until it does. The UHD is removed with
+/// the reference: a descriptor no engine names is the orphan case, tested separately.
+TEST(TestDescriptorLoader, LoadsAnEngineThatShipsNoHeuristic)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("no_heuristic"));
+    auto documents = makeSetDocuments('1', "test:orderly");
+    documentOfType(documents, ".ued.json").erase("sort_kernel_catalog");
+    documents.erase(
+        std::remove_if(documents.begin(),
+                       documents.end(),
+                       [](const TestDocument& document) { return document.suffix == ".uhd.json"; }),
+        documents.end());
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_FALSE(sets.front().engine.heuristicId.has_value());
+    EXPECT_FALSE(sets.front().heuristic.has_value());
+}
+
+TEST(TestDescriptorLoader, CollapsesIdenticalDuplicatesAcrossArchDirectories)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_dupes"));
+    const auto documents = makeSetDocuments('1', "test:duplicated");
+    writeDocuments(dir.path() / "gfx942", documents);
+    writeDocuments(dir.path() / "gfx950", documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:duplicated");
+}
+
+/// The headline per-arch case: a real two-shard install ships one KDP id per arch, each
+/// stamped with its own arch and built against its own shard's kernels. Keyed by id alone
+/// these collide on content and both drop, taking the engine with them.
+TEST(TestDescriptorLoader, KeepsPerArchPacksSharingOneIdAcrossArchDirectories)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_packs"));
+    for(const std::string arch : {"gfx90a", "gfx942"})
+    {
+        auto documents = makeSetDocuments('1', "test:sharded");
+        auto& pack = documentOfType(documents, ".kdp.json");
+        pack["arch"] = nlohmann::json::array({arch});
+        pack.at("kernelDescriptors")[0]["kernel_source"]["source_file"] = "Kernel_" + arch + ".cpp";
+        writeDocuments(dir.path() / arch, documents);
+    }
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& packs = sets.front().packs;
+    ASSERT_EQ(packs.size(), 2u);
+    EXPECT_EQ(packs[0].arch, std::vector<std::string>{"gfx90a"});
+    EXPECT_EQ(packs[1].arch, std::vector<std::string>{"gfx942"});
+    EXPECT_EQ(packs[0].kernels.front().source.sourceFile, "Kernel_gfx90a.cpp");
+    EXPECT_EQ(packs[1].kernels.front().source.sourceFile, "Kernel_gfx942.cpp");
+}
+
+/// Same shape one file down: each shard's `.ukd.json` carries that shard's arch, so a
+/// pack resolves the copy built for its own arch rather than whichever file loaded first.
+TEST(TestDescriptorLoader, KeepsPerArchStandaloneKernelsSharingOneId)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_kernels"));
+    for(const std::string arch : {"gfx90a", "gfx942"})
+    {
+        auto documents = makeSetDocuments('1', "test:sharded_kernel");
+        referenceLastKernel(documents);
+        documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({arch});
+        auto& kernel = documentOfType(documents, ".ukd.json");
+        kernel["arch"] = nlohmann::json::array({arch});
+        kernel["kernel_source"]["source_file"] = "Kernel_" + arch + ".cpp";
+        writeDocuments(dir.path() / arch, documents);
+    }
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& packs = sets.front().packs;
+    ASSERT_EQ(packs.size(), 2u);
+    // Referenced kernels are appended after the inline ones, so the shard's own UKD is
+    // last in each pack.
+    ASSERT_EQ(packs[0].kernels.size(), 3u);
+    ASSERT_EQ(packs[1].kernels.size(), 3u);
+    EXPECT_EQ(packs[0].kernels.back().source.sourceFile, "Kernel_gfx90a.cpp");
+    EXPECT_EQ(packs[1].kernels.back().source.sourceFile, "Kernel_gfx942.cpp");
+}
+
+/// The composition the provider actually runs, and the only place both halves of the
+/// per-arch change meet: the two tests above stop at resolveDescriptorSets, and the
+/// state manager's own suite builds its packs by hand. Two shards of one pack are the
+/// same kernel built twice, so they complete to identical tuples; engine-wide tuple
+/// uniqueness throws on the second, and the catch in loadValidatedDescriptorSets turns
+/// that into a dropped engine rather than a dropped pack -- with every test above green.
+TEST(TestDescriptorLoader, KeepsPerArchShardsSharingAMetadataTupleThroughTheStateManagerProbe)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_probe"));
+    for(const std::string arch : {"gfx90a", "gfx942"})
+    {
+        auto documents = makeSetDocuments('1', "test:sharded_probe");
+        auto& pack = documentOfType(documents, ".kdp.json");
+        pack["arch"] = nlohmann::json::array({arch});
+        pack.at("kernelDescriptors")[0]["kernel_source"]["source_file"] = "Kernel_" + arch + ".cpp";
+        writeDocuments(dir.path() / arch, documents);
+    }
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().packs.size(), 2u);
+}
+
+/// The empty-arch fallback: a UKD declaring no arch is the shared definition every pack
+/// reaches, which is how one kernel file serves packs of several engines.
+TEST(TestDescriptorLoader, ResolvesAnArchIndependentKernelFromAnArchSpecificPack)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("shared_arch_kernel"));
+    auto documents = makeSetDocuments('1', "test:shared_kernel");
+    referenceLastKernel(documents);
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 3u);
+}
+
+/// Arch widens the key; it does not weaken the collision rule. Two files claiming one id
+/// *and* one arch with different contents still poison each other.
+TEST(TestDescriptorLoader, DropsBothWhenOneIdAndArchIsDefinedTwiceWithDifferentContents)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_conflict"));
+    auto documents = makeSetDocuments('1', "test:arch_conflict");
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+    writeDocuments(dir.path(), documents);
+
+    auto second = documentOfType(documents, ".kdp.json");
+    second["name"] = "a different pack with the same id and arch";
+    std::ofstream(dir.path() / "second-claim.kdp.json", std::ios::binary) << second.dump(2);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "both define"));
+}
+
+/// The key sorts arch, so two spellings of one target list are one identity -- and then
+/// collide on content like any other repeated key. Unsorted, these would be two packs.
+TEST(TestDescriptorLoader, TreatsArchOrderAsOneKey)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_order"));
+    auto documents = makeSetDocuments('1', "test:arch_order");
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942", "gfx950"});
+    writeDocuments(dir.path(), documents);
+
+    auto reordered = documentOfType(documents, ".kdp.json");
+    reordered["arch"] = nlohmann::json::array({"gfx950", "gfx942"});
+    reordered["name"] = "the same pack, targets listed the other way";
+    std::ofstream(dir.path() / "reordered.kdp.json", std::ios::binary) << reordered.dump(2);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    // Named rather than inferred from the empty result: two entries under two keys would
+    // also leave nothing loadable, for an entirely different reason.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "arch=[gfx942,gfx950]"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "both define"));
+}
+
+/// A kernel may cover part of what its pack claims: the pack advertises the union, the
+/// kernel serves its slice, and the arch gate picks at match time. This is the shape a
+/// pack holding one implementation per capability takes -- an MFMA build beside a
+/// portable one -- and the exact-key lookup this replaced dropped the pack for it.
+TEST(TestDescriptorLoader, ResolvesAStandaloneKernelCoveringPartOfThePacksArch)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_subset"));
+    auto documents = makeSetDocuments('1', "test:subset");
+    referenceLastKernel(documents);
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx90a", "gfx942"});
+    documentOfType(documents, ".ukd.json")["arch"] = nlohmann::json::array({"gfx942"});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    const auto& kernels = sets.front().packs.front().kernels;
+    ASSERT_EQ(kernels.size(), 3u);
+    EXPECT_EQ(kernels.back().arch, std::vector<std::string>{"gfx942"});
+}
+
+/// The other direction is an authoring error, not a narrowing: the kernel claims a device
+/// its pack never offers it to, so nothing would ever dispatch it there. Reported as its
+/// own failure because "defined only for another arch" reads as a missing shard, and this
+/// file is present and wrong.
+TEST(TestDescriptorLoader, DropsAPackWhoseKernelReachesPastItsArch)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_reaching"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    documentOfType(broken, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+    documentOfType(broken, ".ukd.json")["arch"] = nlohmann::json::array({"gfx90a", "gfx942"});
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "declares arch [gfx90a, gfx942] reaching past the "
+                                          "pack's [gfx942]"));
+}
+
+/// Both spellings of one kernel id within reach of one pack. Nothing in the format ranks
+/// them, so binding either would make dispatch depend on catalog order, and letting the
+/// arch-specific one win is the silent shadowing the drop-in rule refuses elsewhere. The
+/// shapes are not supposed to mix: a kernel ships arch-independent, or per arch.
+TEST(TestDescriptorLoader, RejectsAKernelDefinedBothArchIndependentlyAndPerArch)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_ambiguous"));
+    auto documents = makeSetDocuments('1', "test:ambiguous");
+    referenceLastKernel(documents);
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+
+    // The referenced kernel a second time, stamped for this pack's arch, so both the bare
+    // and the stamped spelling resolve for it. In a sibling directory because a fixture
+    // file is named for its id: written beside the first it would simply replace it, and
+    // the case under test needs both present at once.
+    auto pinned = documentOfType(documents, ".ukd.json");
+    pinned["arch"] = nlohmann::json::array({"gfx942"});
+    pinned["name"] = "the gfx942 build";
+    writeDocuments(dir.path(), documents);
+    writeDocuments(dir.path() / "gfx942", {TestDocument{".ukd.json", pinned}});
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR, "which several descriptors define within the pack's arch"));
+}
+
+/// An inline kernel carries the same `arch` as a standalone one, and means the same
+/// thing: the devices this kernel runs on, within what the pack claims. Absent, which is
+/// every shipped kernel today, it inherits the pack.
+TEST(TestDescriptorLoader, NarrowsAnInlineKernelToPartOfItsPacksArch)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_arch"));
+    auto documents = makeSetDocuments('1', "test:inline_arch");
+    auto& pack = documentOfType(documents, ".kdp.json");
+    pack["arch"] = nlohmann::json::array({"gfx90a", "gfx942"});
+    pack.at("kernelDescriptors")[0]["arch"] = nlohmann::json::array({"gfx942"});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    const auto& kernels = sets.front().packs.front().kernels;
+    ASSERT_EQ(kernels.size(), 3u);
+    EXPECT_EQ(kernels.front().arch, std::vector<std::string>{"gfx942"});
+    EXPECT_TRUE(kernels.back().arch.empty()) << "an unstamped inline kernel inherits the pack";
+}
+
+/// Caught while parsing rather than at resolution: an inline kernel has exactly one
+/// parent and it is already in hand, so reaching past it is a property of this file alone
+/// and fails the file, not every pack that might have bound it.
+TEST(TestDescriptorLoader, RejectsAnInlineKernelReachingPastItsPacksArch)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_arch_past"));
+    auto documents = makeSetDocuments('1', "test:inline_past");
+    auto& pack = documentOfType(documents, ".kdp.json");
+    pack["arch"] = nlohmann::json::array({"gfx942"});
+    pack.at("kernelDescriptors")[0]["arch"] = nlohmann::json::array({"gfx90a"});
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR, "declares arch [gfx90a], which reaches past the pack's [gfx942]"));
+}
+
+/// Coverage is asymmetric: a kernel may claim fewer arches than the pack that binds it,
+/// never more. Spelled with bare ids, since that is all an authored list may carry.
+TEST(TestDescriptorLoader, TreatsAShorterArchListAsNarrowerThanTheOneContainingIt)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_narrows"));
+        auto documents = makeSetDocuments('1', "test:arch_narrows");
+        auto& pack = documentOfType(documents, ".kdp.json");
+        pack["arch"] = nlohmann::json::array({"gfx942", "gfx950"});
+        pack.at("kernelDescriptors")[0]["arch"] = nlohmann::json::array({"gfx942"});
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u) << "a kernel serving one of the pack's two targets is within it";
+        ASSERT_EQ(sets.front().packs.size(), 1u);
+        EXPECT_EQ(sets.front().packs.front().kernels.front().arch,
+                  std::vector<std::string>{"gfx942"});
+    }
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_widens"));
+        auto documents = makeSetDocuments('2', "test:arch_widens");
+        auto& pack = documentOfType(documents, ".kdp.json");
+        pack["arch"] = nlohmann::json::array({"gfx942"});
+        pack.at("kernelDescriptors")[0]["arch"] = nlohmann::json::array({"gfx942", "gfx950"});
+        writeDocuments(dir.path(), documents);
+
+        EXPECT_TRUE(loadFrom(dir.path()).empty())
+            << "the kernel claims a target the pack never advertises";
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                              "declares arch [gfx942, gfx950], which reaches past "
+                                              "the pack's [gfx942]"));
+    }
+}
+
+/// A partial target id is the one malformed arch that reads as deliberate: ROCm's own
+/// supported-target lists spell `gfx942:xnack-`, and matching here is text, so it would
+/// match no device while looking correct. The message has to name the fix.
+TEST(TestDescriptorLoader, RejectsAnArchCarryingAFeatureSuffix)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_suffix"));
+    auto documents = makeSetDocuments('1', "test:arch_suffix");
+    documentOfType(documents, ".kdp.json")["arch"]
+        = nlohmann::json::array({"gfx942:sramecc+:xnack-"});
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR, "carries a feature suffix; name the base target (e.g. 'gfx942')"));
+}
+
+/// A shard's pack names a kernel that exists -- just not under any arch it claims, which
+/// is what a shard whose kernels never got stamped looks like. Reporting that as "no
+/// descriptor defines it" sends the reader hunting for a missing file. Disjoint, not
+/// merely different: a kernel inside the pack's arch is a narrowing and resolves.
+TEST(TestDescriptorLoader, DropsAPackWhoseKernelIsDefinedOnlyForAnotherArch)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("kernel_other_arch"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    documentOfType(broken, ".kdp.json")["arch"] = nlohmann::json::array({"gfx90a"});
+    documentOfType(broken, ".ukd.json")["arch"] = nlohmann::json::array({"gfx942"});
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "names kernel " + testUuid('2', 'a')
+                                              + ", which is defined only for another arch"));
+}
+
+/// The whole point of the multi-root change: a set's seven files split across two roots
+/// still resolve as cross-root id references into one catalog.
+TEST(TestDescriptorLoader, ResolvesADescriptorSetSplitAcrossTwoRootsIntoOneEngine)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("split_roots"));
+    auto documents = makeSetDocuments('1', "test:split");
+    Documents rootADocuments;
+    Documents rootBDocuments;
+    for(auto& document : documents)
+    {
+        // UED/UHD/KMD in root A, the rest -- both UMDs, the UDD, and the KDP -- in root
+        // B: the engine can only be assembled by resolving ids across both roots.
+        auto& target = (document.suffix == ".ued.json" || document.suffix == ".uhd.json"
+                        || document.suffix == ".kmd.json")
+                           ? rootADocuments
+                           : rootBDocuments;
+        target.push_back(std::move(document));
+    }
+    const auto rootA = dir.path() / "a";
+    const auto rootB = dir.path() / "b";
+    writeDocuments(rootA, rootADocuments);
+    writeDocuments(rootB, rootBDocuments);
+
+    const auto sets = loadFromRoots({rootA, rootB});
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    EXPECT_EQ(set.engine.name, "test:split");
+    EXPECT_EQ(set.matchers.size(), 2u);
+    EXPECT_EQ(set.dispatches.size(), 1u);
+    ASSERT_EQ(set.packs.size(), 1u);
+    EXPECT_EQ(set.packs.front().kernels.size(), 3u);
+}
+
+TEST(TestDescriptorLoader, CollapsesAnIdenticalDescriptorSetPresentInBothRoots)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("identical_roots"));
+    const auto documents = makeSetDocuments('1', "test:mirrored");
+    writeDocuments(dir.path() / "a", documents);
+    writeDocuments(dir.path() / "b", documents);
+
+    const auto sets = loadFromRoots({dir.path() / "a", dir.path() / "b"});
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:mirrored");
+}
+
+/// The other half: a drop-in that claims no installed id is loaded like any other file,
+/// so the tree is genuinely additive rather than decorative.
+TEST(TestDescriptorLoader, LoadsAnEngineThatOnlyTheDropInRootDefines)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("cross_root_add"));
+    const auto installed = dir.path() / "a";
+    const auto dropIn = dir.path() / "b";
+
+    writeDocuments(installed, makeSetDocuments('1', "test:installed"));
+    writeDocuments(dropIn, makeSetDocuments('2', "test:dropped_in"));
+
+    const auto sets = loadFromRoots({installed, dropIn});
+
+    ASSERT_EQ(sets.size(), 2u);
+    EXPECT_EQ(sets.front().engine.name, "test:installed");
+    EXPECT_EQ(sets.back().engine.name, "test:dropped_in");
+}
+
+/// The multi-root overload the provider actually calls, rather than the catalog helper
+/// the tests above use: a drop-in descriptor has to survive symbol validation, the
+/// engine-name claim, and the state-manager probe before it is an engine anyone can
+/// serve. Registering the engine name is process-wide, so the names here are unique to
+/// this test.
+TEST(TestDescriptorLoader, ValidatesAnEngineComingOnlyFromTheDropInRoot)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("cross_root_validated"));
+    const auto installed = dir.path() / "a";
+    const auto dropIn = dir.path() / "b";
+
+    writeDocuments(installed, makeSetDocuments('1', "test:validated_installed"));
+    writeDocuments(dropIn, makeSetDocuments('2', "test:validated_drop_in"));
+
+    const auto validated = loadValidatedDescriptorSets<LoaderHandle>(
+        std::vector<std::filesystem::path>{installed, dropIn});
+
+    ASSERT_EQ(validated.size(), 2u);
+    EXPECT_EQ(validated.front().set.engine.name, "test:validated_installed");
+    EXPECT_EQ(validated.back().set.engine.name, "test:validated_drop_in");
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO, "2 descriptor-backed engine(s) loaded from"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "; 0 dropped during validation"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining("descriptor set(s) dropped"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestDescriptorLoader, AMissingRootContributesNothingButTheOtherRootStillLoads)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("missing_root"));
+    const auto goodRoot = dir.path() / "good";
+    writeDocuments(goodRoot, makeSetDocuments('1', "test:present"));
+
+    const auto sets = loadFromRoots({dir.path() / "does-not-exist", goodRoot});
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:present");
+}
+
+namespace
+{
+
+/// Clears the three descriptor-root variables for one test, so an inherited value cannot
+/// answer, and restores them afterwards.
+struct ScopedDescriptorEnvironment
+{
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter replacement{
+        "HIPDNN_DESCRIPTOR_DIR"};
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter runtime{
+        "HIPDNN_DESCRIPTOR_RUNTIME_DIR"};
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter searchPath{
+        "HIPDNN_DESCRIPTOR_PATH"};
+};
+
+#ifdef _WIN32
+constexpr char DESCRIPTOR_PATH_SEPARATOR = ';';
+#else
+constexpr char DESCRIPTOR_PATH_SEPARATOR = ':';
+#endif
+
+} // namespace
+
+/// HIPDNN_DESCRIPTOR_DIR names the replacement tree; HIPDNN_DESCRIPTOR_RUNTIME_DIR, then
+/// each HIPDNN_DESCRIPTOR_PATH entry in order, are additive. Search-path entries are not
+/// existence-checked, and empty ones are skipped.
+TEST(TestDescriptorLoader, ReadsTheDescriptorRootsTheEnvironmentNames)
+{
+    ScopedDescriptorEnvironment environment;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("environment_roots"));
+    const auto replacement = dir.path() / "replacement";
+    const auto runtime = dir.path() / "runtime";
+    const auto vendor = dir.path() / "vendor";
+    const auto notInstalled = dir.path() / "not-installed";
+    for(const auto& root : {replacement, runtime, vendor})
+    {
+        std::filesystem::create_directories(root);
+    }
+    environment.replacement.setValue(replacement.string());
+    environment.runtime.setValue(runtime.string());
+    environment.searchPath.setValue(vendor.string() + DESCRIPTOR_PATH_SEPARATOR
+                                    + DESCRIPTOR_PATH_SEPARATOR + notInstalled.string()
+                                    + DESCRIPTOR_PATH_SEPARATOR);
+
+    const auto roots = environmentDescriptorRoots();
+
+    EXPECT_EQ(roots.replacement, replacement);
+    EXPECT_EQ(roots.additional,
+              (std::vector<std::filesystem::path>{runtime, vendor, notInstalled}));
+}
+
+/// A replacement or runtime root that is not a directory is dropped with a warning naming
+/// the variable, rather than loading nothing silently.
+TEST(TestDescriptorLoader, IgnoresAnEnvironmentRootThatIsNotADirectory)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    ScopedDescriptorEnvironment environment;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("environment_unusable"));
+    const auto file = dir.path() / "descriptors.txt";
+    std::ofstream(file, std::ios::binary) << "not a directory\n";
+    environment.replacement.setValue(file.string());
+    environment.runtime.setValue((dir.path() / "missing").string());
+
+    const auto roots = environmentDescriptorRoots();
+
+    EXPECT_TRUE(roots.replacement.empty());
+    EXPECT_TRUE(roots.additional.empty());
+    for(const auto* variable : {"HIPDNN_DESCRIPTOR_DIR", "HIPDNN_DESCRIPTOR_RUNTIME_DIR"})
+    {
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, variable))
+            << variable << "\n"
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+TEST(TestDescriptorLoader, DropsAnIdTwoFilesDisagreeAbout)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("conflict"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:survivor"));
+
+    auto conflicted = makeSetDocuments('2', "test:conflicted");
+    writeDocuments(dir.path(), conflicted);
+    // Same id, different content, different filename: the file's own id is what claims
+    // the entry, so this is a second definition rather than a second descriptor.
+    auto& engine = documentOfType(conflicted, ".ued.json");
+    engine["name"] = "test:conflicted_other";
+    std::ofstream(dir.path() / "second-claim.ued.json", std::ios::binary) << engine.dump(2);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:survivor");
+}
+
+namespace
+{
+
+/// What a catalog map holds after the walk: its entries, and how many of them two
+/// disagreeing files poisoned.
+struct Tally
+{
+    size_t entries = 0;
+    size_t conflicted = 0;
+};
+
+/// An id-keyed map's key is the id; a (id, arch) map's key carries it first.
+inline DescriptorId idPart(const DescriptorId& key)
+{
+    return key;
+}
+
+inline DescriptorId idPart(const ArchKey& key)
+{
+    return key.first;
+}
+
+/// Only the entries filed under @p id.
+template <typename Map>
+Tally tallyOf(const Map& map, const DescriptorId& id)
+{
+    Tally tally;
+    for(const auto& item : map)
+    {
+        if(idPart(item.first) == id)
+        {
+            ++tally.entries;
+            tally.conflicted += item.second.conflicted ? 1u : 0u;
+        }
+    }
+    return tally;
+}
+
+/// @p value with the members of every object in the reverse of nlohmann::json's sorted
+/// order, which no plain dump() of a nlohmann::json can produce.
+nlohmann::ordered_json reversedKeys(const nlohmann::json& value)
+{
+    if(value.is_object())
+    {
+        auto object = nlohmann::ordered_json::object();
+        for(auto it = value.rbegin(); it != value.rend(); ++it)
+        {
+            object[it.key()] = reversedKeys(it.value());
+        }
+        return object;
+    }
+    if(value.is_array())
+    {
+        auto array = nlohmann::ordered_json::array();
+        for(const auto& element : value)
+        {
+            array.push_back(reversedKeys(element));
+        }
+        return array;
+    }
+    nlohmann::ordered_json copy = value;
+    return copy;
+}
+
+/// @p document's twin that parses to the same descriptor but shares no bytes with what
+/// writeDocument() writes: a leading comment and every object's keys in reverse order.
+void writeCommentedAndReordered(const std::filesystem::path& directory,
+                                const TestDocument& document)
+{
+    std::filesystem::create_directories(directory);
+    std::ofstream file(
+        directory / (document.body.at("id").get<std::string>() + std::string(document.suffix)),
+        std::ios::binary);
+    file << "// the same descriptor, spelled differently\n"
+         << reversedKeys(document.body).dump(2) << '\n';
+}
+
+/// One descriptor file type, and what a collision on it looks like to a consumer.
+struct TypedCollisionCase
+{
+    std::string name;
+    std::string_view suffix; ///< the type under test; its first document in makeSetDocuments
+    /// Shapes the set so @c suffix exists as a file of its own, keyed the way the loader
+    /// keys it. The per-arch types get one arch, so both copies share a key.
+    std::function<void(Documents&)> prepare;
+    std::function<Tally(const DescriptorCatalog&, const DescriptorId&)> tally;
+    /// Whether losing this id takes the engine with it. A UHD is optional to an engine.
+    bool dropsEngine;
+};
+
+class TestDescriptorLoaderTypedCollision : public ::testing::TestWithParam<TypedCollisionCase>
+{
+protected:
+    /// A changed `name` keeps every type valid; a UED's stays scoped.
+    static TestDocument redefined(const Documents& documents, std::string_view suffix)
+    {
+        for(const auto& document : documents)
+        {
+            if(document.suffix == suffix)
+            {
+                auto body = document.body;
+                body["name"] = body.at("name").get<std::string>() + "_other";
+                return {suffix, std::move(body)};
+            }
+        }
+        throw std::runtime_error("no document of type " + std::string(suffix));
+    }
+
+    /// The catalog's entries for the id of @p documents' document under test: a set holds
+    /// other descriptors of the same type (two UMDs), which are not part of the collision.
+    static Tally collisionTally(const DescriptorCatalog& catalog, const Documents& documents)
+    {
+        for(const auto& document : documents)
+        {
+            if(document.suffix == GetParam().suffix)
+            {
+                return GetParam().tally(catalog,
+                                        hipdnn_flatbuffers_sdk::utilities::parseUuid(
+                                            document.body.at("id").get<std::string>()));
+            }
+        }
+        throw std::runtime_error("no document of type " + std::string(GetParam().suffix));
+    }
+};
+
+void useOneArch(Documents& documents)
+{
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+}
+
+} // namespace
+
+/// The collision compare sees the parsed descriptor, so a comment or a different key
+/// order never makes two copies of one descriptor collide -- a per-arch layout ships the
+/// same generic file in every shard, and each shard is free to format it.
+TEST_P(TestDescriptorLoaderTypedCollision, CollapsesCopiesThatDifferOnlyInBytes)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("typed_bytes_" + GetParam().name));
+    auto documents = makeSetDocuments('1', "test:typed_bytes");
+    GetParam().prepare(documents);
+    writeDocuments(dir.path() / "a", documents);
+
+    const auto& body = documentOfType(documents, GetParam().suffix);
+    ASSERT_NE(reversedKeys(body).dump(2), body.dump(2));
+    writeCommentedAndReordered(dir.path() / "b", TestDocument{GetParam().suffix, body});
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    EXPECT_EQ(collisionTally(catalog, documents).entries, 1u);
+    EXPECT_EQ(collisionTally(catalog, documents).conflicted, 0u);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
+        << recorder.getRecordedLogsAsString();
+    const auto sets = resolveDescriptorSets(catalog);
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:typed_bytes");
+}
+
+/// Differing content inside one root has no defensible order, so the id is poisoned and
+/// whatever needs it is dropped (RFC 0020 §13.2.1).
+TEST_P(TestDescriptorLoaderTypedCollision, DropsTheIdWhenTwoFilesInOneRootDiffer)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("typed_same_root_" + GetParam().name));
+    auto documents = makeSetDocuments('1', "test:typed_same_root");
+    GetParam().prepare(documents);
+    writeDocuments(dir.path() / "a", documents);
+    writeDocument(dir.path() / "b", redefined(documents, GetParam().suffix));
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    EXPECT_EQ(collisionTally(catalog, documents).entries, 1u);
+    EXPECT_EQ(collisionTally(catalog, documents).conflicted, 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "with different contents"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "under an earlier root"));
+    EXPECT_EQ(resolveDescriptorSets(catalog).size(), GetParam().dropsEngine ? 0u : 1u);
+}
+
+/// The drop-in rule: a later root may add descriptors, never replace one. Across roots the
+/// installed tree is the answer, so the newcomer is refused and the incumbent survives
+/// intact -- an operator-controlled root that could delete a shipped engine would do it
+/// at a severity the default log level never shows.
+TEST_P(TestDescriptorLoaderTypedCollision, KeepsTheEarlierRootsDescriptorOverALaterRedefinition)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("typed_earlier_root_" + GetParam().name));
+    auto documents = makeSetDocuments('1', "test:typed_earlier_root");
+    GetParam().prepare(documents);
+    writeDocuments(dir.path() / "a", documents);
+    writeDocument(dir.path() / "b", redefined(documents, GetParam().suffix));
+
+    const auto catalog = loadDescriptorCatalog(
+        std::vector<std::filesystem::path>{dir.path() / "a", dir.path() / "b"});
+
+    EXPECT_EQ(collisionTally(catalog, documents).entries, 1u);
+    EXPECT_EQ(collisionTally(catalog, documents).conflicted, 0u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "under an earlier root"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "with different contents"));
+    const auto sets = resolveDescriptorSets(catalog);
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:typed_earlier_root");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Descriptor,
+    TestDescriptorLoaderTypedCollision,
+    ::testing::Values(TypedCollisionCase{"Kmd",
+                                         ".kmd.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.schemas, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Uhd",
+                                         ".uhd.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.heuristics, id);
+                                         },
+                                         false},
+                      TypedCollisionCase{"Ued",
+                                         ".ued.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.engines, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Umd",
+                                         ".umd.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.matchers, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Udd",
+                                         ".udd.json",
+                                         [](Documents&) {},
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.dispatches, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Kdp",
+                                         ".kdp.json",
+                                         useOneArch,
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.packs, id);
+                                         },
+                                         true},
+                      TypedCollisionCase{"Ukd",
+                                         ".ukd.json",
+                                         [](Documents& documents) {
+                                             referenceLastKernel(documents);
+                                             useOneArch(documents);
+                                             documentOfType(documents, ".ukd.json")["arch"]
+                                                 = nlohmann::json::array({"gfx942"});
+                                         },
+                                         [](const DescriptorCatalog& c, const DescriptorId& id) {
+                                             return tallyOf(c.kernels, id);
+                                         },
+                                         true}),
+    [](const ::testing::TestParamInfo<TypedCollisionCase>& info) { return info.param.name; });
+
+/// The collision compare reads no file: both entries here name paths that never existed,
+/// so a compare that opened them again could not call the copies identical.
+TEST(TestDescriptorLoader, SettlesACollisionWithoutOpeningEitherFile)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    auto documents = makeSetDocuments('1', "test:no_io");
+    const auto& body = documentOfType(documents, ".udd.json");
+    const auto missing = uniqueDirectory("no_io");
+    const auto first = missing / "first.udd.json";
+    const auto second = missing / "second.udd.json";
+
+    DescriptorMap<DispatchDescriptor> dispatches;
+    detail::insertCatalogEntry(
+        dispatches, detail::parseDispatchDescriptor(body, first.string()), first);
+    detail::insertCatalogEntry(
+        dispatches, detail::parseDispatchDescriptor(body, second.string()), second);
+
+    ASSERT_EQ(dispatches.size(), 1u);
+    const auto& entry = dispatches.begin()->second;
+    EXPECT_FALSE(entry.conflicted);
+    EXPECT_EQ(entry.path, first);
+    EXPECT_NE(detail::findDescriptor(dispatches, entry.descriptor.id), nullptr);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
+        << recorder.getRecordedLogsAsString();
+}
+
+/// RFC 0020 §13.2.1's content-identical exception is over the parsed descriptor. Extension
+/// keys (`x-`, `_`) and `provenance` never reach it, so two UEDs that differ only there are
+/// one definition rather than a collision.
+TEST(TestDescriptorLoader, CollapsesCopiesDifferingOnlyInExtensionKeysAndProvenance)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("extension_keys"));
+    auto documents = makeSetDocuments('1', "test:extension_keys");
+    writeDocuments(dir.path() / "a", documents);
+
+    auto annotated = documentOfType(documents, ".ued.json");
+    annotated["x-note"] = "reviewed by hand";
+    annotated["_scratch"] = 7;
+    annotated["provenance"] = {{"packer", "descriptor-packer/1.0"}};
+    writeDocument(dir.path() / "b", TestDocument{".ued.json", std::move(annotated)});
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    EXPECT_EQ(catalog.engines.size(), 1u);
+    EXPECT_FALSE(catalog.engines.begin()->second.conflicted);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
+        << recorder.getRecordedLogsAsString();
+    const auto sets = resolveDescriptorSets(catalog);
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:extension_keys");
+}
+
+TEST(TestDescriptorLoader, LoadsNothingFromAnEmptyDirectory)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("empty"));
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+TEST(TestDescriptorLoader, LoadsNothingFromAMissingDirectory)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("missing"));
+
+    EXPECT_TRUE(loadFrom(dir.path() / "not-there").empty());
+}
+
+TEST(TestDescriptorLoader, MalformedJsonDoesNotCostTheOtherEngine)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("malformed"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    // Named with a real suffix so it reaches the parser: a bare `broken.json` would be
+    // skipped at the filename stage and prove nothing about malformed bodies.
+    std::ofstream(dir.path() / "broken.ued.json", std::ios::binary) << "not json";
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+}
+
+TEST(TestDescriptorLoader, IgnoresANonJsonFile)
+{
+    // A file whose name matches no descriptor suffix and has no `.json`/`.jsonc`
+    // extension costs nothing -- distinct from SkipsAJsonFileThatNamesNoDescriptorType,
+    // which is a near-miss that does warn.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("non_json"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    std::ofstream(dir.path() / "README.txt", std::ios::binary) << "not a descriptor";
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+}
+
+TEST(TestDescriptorLoader, RejectsADescriptorWhoseRootIsNotAnObject)
+{
+    // Valid JSON, so this reaches requireObject rather than nlohmann::json::parse --
+    // a different rejection path than MalformedJsonDoesNotCostTheOtherEngine above.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("non_object_root"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    std::ofstream(dir.path() / "not-an-object.ued.json", std::ios::binary)
+        << nlohmann::json::array({1, 2, 3}).dump();
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+}
+
+TEST(TestDescriptorLoader, RejectsAPackTruncatedAsItsKernelsOpenAndKeepsTheSibling)
+{
+    // The header fails (it has no id) before the text does, and the syntax error still wins,
+    // as it does for a whole-document parse. Every other unreadable spelling is an oracle
+    // row, which derives the parser's wording at runtime.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unreadable_pack"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    std::ofstream(dir.path() / "unreadable.kdp.json", std::ios::binary)
+        << R"({"version": "1.0", "kernelDescriptors": [)";
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+    EXPECT_EQ(sets.front().packs.size(), 1u);
+    const auto logs = recorder.getRecordedLogs();
+    EXPECT_TRUE(std::any_of(logs.begin(), logs.end(), [](const auto& log) {
+        return log.severity == HIPDNN_SEV_ERROR
+               && log.message.find("failed to parse") != std::string::npos
+               && log.message.find("unreadable.kdp.json") != std::string::npos;
+    })) << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining("missing required key"))
+        << recorder.getRecordedLogsAsString();
+}
+
+namespace
+{
+
+struct ViolationCase
+{
+    std::string name;
+    std::function<void(Documents&)> corrupt;
+};
+
+nlohmann::json launchSource(const std::string& symbol)
+{
+    return {{"kind", "kpack"},
+            {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+            {"toc_key", "multi/module"},
+            {"symbol", symbol},
+            {"sha256", std::string(64, 'a')},
+            {"signature",
+             nlohmann::json::array({{{"kind", "global_buffer"}, {"size", 8}, {"offset", 0}}})}};
+}
+
+/// Rewrites the first inline kernel of the pack from `kernel_source` to a valid two-launch
+/// `sources` map under UKD 1.1, so a row below breaks exactly one thing about it.
+nlohmann::json& spellAsMultiLaunch(Documents& documents)
+{
+    auto& kernel = documentOfType(documents, ".kdp.json").at("kernelDescriptors")[0];
+    kernel.erase("kernel_source");
+    kernel["version"] = "1.1";
+    kernel["sources"]
+        = {{"decode", launchSource("decode_kernel")}, {"merge", launchSource("merge_kernel")}};
+    return kernel;
+}
+
+class TestDescriptorLoaderViolation : public ::testing::TestWithParam<ViolationCase>
+{
+};
+
+} // namespace
+
+/// Every authored-format violation is rejected file by file: the engine whose descriptor
+/// broke is dropped, and the valid engine sharing the directory still loads.
+TEST_P(TestDescriptorLoaderViolation, RejectsTheOffenderAndKeepsTheSibling)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(GetParam().name));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    GetParam().corrupt(broken);
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Format,
+    TestDescriptorLoaderViolation,
+    ::testing::Values(
+        // `metadata`, not `heuristic`: a UED may now omit its UHD and rank by declared
+        // order, so erasing that one no longer violates anything. Every engine still
+        // names a KMD, because a pack's kernels are checked against its field list.
+        ViolationCase{
+            "missing_required_key",
+            [](Documents& documents) { documentOfType(documents, ".ued.json").erase("metadata"); }},
+        // RFC 0017 §4 names fields Descriptors.hpp does not model yet, so an authored one
+        // is either a typo or a field arriving before its parsed form -- both are load
+        // errors rather than something to ignore, unless they carry an extension prefix
+        // (LoadsADescriptorCarryingTrackingFields covers that half).
+        ViolationCase{"unknown_key",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["features_signature"]
+                              = nlohmann::json::array({"tensor_core"});
+                      }},
+        // A file's type comes from its filename alone. A `schema` member would be a second
+        // spelling of that fact, so it is rejected outright rather than tolerated: two
+        // sources of truth have no correct reading when they disagree.
+        ViolationCase{"schema_key_is_not_a_member",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["schema"] = "hipdnn.ued/v1";
+                      }},
+        ViolationCase{"unknown_behavior_note",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["behavior_notes"]
+                              = nlohmann::json::array({"teleportation"});
+                      }},
+        ViolationCase{"default_value_contradicts_type",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kmd.json").at("fields")[1]["default_value"]
+                              = 5;
+                      }},
+        ViolationCase{"unparsable_id",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["id"] = "not-a-uuid";
+                      }},
+        // Required on every type, with no absence-safe default: a type carrying no
+        // version cannot be gated by the RFC 0020 §11.1 accept rule at all.
+        ViolationCase{
+            "ued_missing_version",
+            [](Documents& documents) { documentOfType(documents, ".ued.json").erase("version"); }},
+        // Pinned as per-type rather than UED-only.
+        ViolationCase{
+            "udd_missing_version",
+            [](Documents& documents) { documentOfType(documents, ".udd.json").erase("version"); }},
+        // RFC 0020 §11.1: `file.minor <= provider.minor`. A newer minor may carry fields
+        // this build has no reader for.
+        ViolationCase{"version_newer_minor",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["version"] = "1.1";
+                      }},
+        // RFC 0020 §11.1: a major mismatch is a hard break in either direction.
+        ViolationCase{"version_newer_major",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["version"] = "2.0";
+                      }},
+        ViolationCase{"version_older_major",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["version"] = "0.9";
+                      }},
+        // `major.minor`, exactly two numeric halves: a three-part version is the SDK's
+        // `Version` spelling, not this field's, and reading it as 1.0 would accept a file
+        // stamped for a generation this build never saw.
+        ViolationCase{"version_three_components",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["version"] = "1.0.0";
+                      }},
+        ViolationCase{"version_not_numeric",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["version"] = "1.x";
+                      }},
+        // The gate is per file type, not UED-only: a KMD this build cannot read is
+        // skipped, and the engine whose `metadata` named it drops with it.
+        ViolationCase{"non_ued_newer_minor",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kmd.json")["version"] = "1.1";
+                      }},
+        // A JSON number where `version` must be a string.
+        ViolationCase{
+            "version_is_a_number",
+            [](Documents& documents) { documentOfType(documents, ".ued.json")["version"] = 1.0; }},
+        // `arch` must be an array; a bare string is rejected rather than treated as a
+        // one-element list.
+        ViolationCase{"arch_is_not_an_array",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kdp.json")["arch"] = "gfx942";
+                      }},
+        // Every `arch` entry must be a string, not just the field as a whole.
+        ViolationCase{"arch_holds_a_non_string",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kdp.json")["arch"]
+                              = nlohmann::json::array({123});
+                      }},
+        // Empty means arch-independent only as the whole list; an empty entry inside it
+        // is an authoring mistake, not a value.
+        ViolationCase{"arch_holds_an_empty_string",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kdp.json")["arch"]
+                              = nlohmann::json::array({""});
+                      }},
+        // archSupports (DeviceProperties.hpp) is a case-sensitive exact compare, so a
+        // typo here would otherwise silently disable the pack everywhere.
+        ViolationCase{"arch_holds_a_malformed_id",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kdp.json")["arch"]
+                              = nlohmann::json::array({"x86_64"});
+                      }},
+        // A partial target id is what ROCm's supported-target lists spell, and matching
+        // here is text: it would match no device at all.
+        ViolationCase{"arch_holds_a_feature_suffix",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kdp.json")["arch"]
+                              = nlohmann::json::array({"gfx942:xnack-"});
+                      }},
+        // Only 'embedded_source' has an implementation the dispatch handler can call; any
+        // other kind would pass validation and only throw inside getKernelSrc("") at
+        // plan-build time, after applicability already promised the graph.
+        ViolationCase{"kernel_source_kind_not_dispatchable",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kdp.json")
+                              .at("kernelDescriptors")[0]["kernel_source"]["kind"]
+                              = "hsaco_file";
+                      }},
+        // RFC 0017 §15.1: a kernel is one launch (`kernel_source`) or several (`sources`),
+        // never both and never neither, and `sources` is a UKD 1.1 key.
+        ViolationCase{"sources_beside_kernel_source",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents)["kernel_source"] = launchSource("single");
+                      }},
+        ViolationCase{"neither_kernel_source_nor_sources",
+                      [](Documents& documents) { spellAsMultiLaunch(documents).erase("sources"); }},
+        // One entry says what `kernel_source` says: two spellings of one fact drift.
+        ViolationCase{"sources_holds_a_single_launch",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents).at("sources").erase("merge");
+                      }},
+        ViolationCase{"sources_is_not_an_object",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents)["sources"]
+                              = nlohmann::json::array({launchSource("a"), launchSource("b")});
+                      }},
+        ViolationCase{"launch_name_is_uppercase",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["Merge"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{"launch_name_starts_with_a_digit",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["2nd"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{"launch_name_starts_with_an_underscore",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["_x"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{
+            "sources_under_version_1_0",
+            [](Documents& documents) { spellAsMultiLaunch(documents)["version"] = "1.0"; }},
+        ViolationCase{"launch_name_has_interior_uppercase",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["segMent"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{"launch_name_has_a_hyphen",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["seg-1"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{"launch_name_is_empty",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources[""] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
+        ViolationCase{"launch_is_an_embedded_source",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents).at("sources")["merge"]
+                              = {{"kind", "embedded_source"},
+                                 {"source_file", "Kernel.cpp"},
+                                 {"entry_point", "Entry"}};
+                      }},
+        ViolationCase{"launch_signature_is_missing",
+                      [](Documents& documents) {
+                          spellAsMultiLaunch(documents).at("sources").at("merge").erase(
+                              "signature");
+                      }},
+        ViolationCase{"arch_has_duplicate_entries",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kdp.json")["arch"]
+                              = nlohmann::json::array({"gfx942", "gfx942"});
+                      }}),
+    [](const ::testing::TestParamInfo<ViolationCase>& info) { return info.param.name; });
+
+TEST(TestDescriptorLoader, DropsOnlyThePackWhoseMatcherIsMissing)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("dangling_matcher"));
+    auto documents = makeSetDocuments('1', "test:two_packs");
+
+    auto danglingPack = documentOfType(documents, ".kdp.json");
+    danglingPack["id"] = testUuid('1', 'b');
+    danglingPack["name"] = "pack with a dangling matcher";
+    danglingPack["matchers"] = nlohmann::json::array({testUuid('f', 'f')});
+    documents.push_back(TestDocument{".kdp.json", danglingPack});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().packs.size(), 1u);
+}
+
+TEST(TestDescriptorLoader, DropsAnEngineWhoseOnlyPackIsUnresolvable)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("no_pack"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:packless");
+    documentOfType(broken, ".kdp.json")["dispatch"] = testUuid('f', 'f');
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+}
+
+TEST(TestDescriptorLoader, DropsAnEngineWhoseOnlyPackDeclaresNoKernels)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("empty_pack"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:empty_pack");
+    documentOfType(broken, ".kdp.json")["kernelDescriptors"] = nlohmann::json::array();
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+}
+
+TEST(TestDescriptorLoader, DropsAPackWhoseEngineIdNamesNoLoadedEngine)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("orphan_pack"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    // Reached by no per-engine scan at all, since nothing in the catalog claims this id --
+    // the one place resolveDescriptorSets logs a pack rather than losing it with no trace.
+    // test:orphaned's own UED is left with no pack of its own and is dropped along with it.
+    auto orphaned = makeSetDocuments('2', "test:orphaned");
+    documentOfType(orphaned, ".kdp.json")["engine"] = testUuid('f', 'f');
+    writeDocuments(dir.path(), orphaned);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    for(const auto& set : sets)
+    {
+        EXPECT_TRUE(std::none_of(set.packs.begin(), set.packs.end(), [](const auto& pack) {
+            return toString(pack.id) == testUuid('2', ROLE_PACK);
+        }));
+    }
+    // The logging block is diagnostics-only: an orphan pack is absent from every set
+    // whether or not it exists, so the assertions above hold either way. This is what
+    // actually pins it -- without the block, the pack vanishes with nothing to say why.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, testUuid('2', ROLE_PACK)));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "no descriptor defines"));
+}
+
+/// findDescriptor's third outcome, distinct from missing: an id present but conflicted.
+/// Losing the `|| it->second.conflicted` check there would hand the engine back
+/// whichever of the two disagreeing KMDs the walk happened to insert first, so the
+/// engine loads and runs against an arbitrary schema instead of dropping.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseMetadataSchemaIsConflicted)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("conflicted_schema"));
+    auto documents = makeSetDocuments('1', "test:conflicted_schema");
+    auto schema = documentOfType(documents, ".kmd.json");
+    writeDocuments(dir.path(), documents);
+
+    // Same id, different content, different filename -- a second KMD claiming the id
+    // conflicts it rather than colliding on filename.
+    schema["name"] = "a different schema name";
+    std::ofstream(dir.path() / "second-claim.kmd.json", std::ios::binary) << schema.dump(2);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// The same findDescriptor outcome, reached through the pack loop's matcher lookup
+/// instead of the engine's schema lookup, so a regression to that check's other call
+/// site is covered too.
+TEST(TestDescriptorLoader, DropsAPackWhoseMatcherIsConflicted)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("conflicted_matcher"));
+    auto documents = makeSetDocuments('1', "test:conflicted_matcher");
+    auto matcher = documentOfType(documents, ".umd.json");
+    writeDocuments(dir.path(), documents);
+
+    matcher["name"] = "a different matcher name";
+    std::ofstream(dir.path() / "second-claim.umd.json", std::ios::binary) << matcher.dump(2);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// The nameClaims loop behind the drop-all-on-shared-name rule skips conflicted entries
+/// before counting; DropsAnIdTwoFilesDisagreeAbout never puts a shared name in play,
+/// since its two engines are named differently. Without that skip, a healthy engine is
+/// silently taken down for merely sharing a name with a broken shard.
+TEST(TestDescriptorLoader, ConflictedEngineDoesNotClaimANameItsHealthySiblingUses)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("conflicted_name_claim"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:shared_name"));
+
+    // Two files disagree about tag '2''s UED id, so it is conflicted -- but both copies
+    // also claim the same name as tag '1''s healthy engine, which is what the nameClaims
+    // guard has to see through.
+    auto conflicted = makeSetDocuments('2', "test:shared_name");
+    writeDocuments(dir.path(), conflicted);
+    auto& engine = documentOfType(conflicted, ".ued.json");
+    engine["sort_kernel_catalog"]["default"] = testUuid('1', ROLE_HEURISTIC);
+    std::ofstream(dir.path() / "second-claim.ued.json", std::ios::binary) << engine.dump(2);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(toString(sets.front().engine.id), testUuid('1', ROLE_ENGINE));
+}
+
+TEST(TestDescriptorLoader, DropsAnEngineWhoseMetadataSchemaIsMissing)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("dangling_schema"));
+    auto documents = makeSetDocuments('1', "test:schemaless");
+    documentOfType(documents, ".ued.json")["metadata"] = testUuid('f', 'f');
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+TEST(TestDescriptorLoader, MissingDefaultModelPreservesDeclaredOrderSelection)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("dangling_heuristic"));
+    auto documents = makeSetDocuments('1', "test:heuristicless");
+    documentOfType(documents, ".ued.json")["sort_kernel_catalog"]["default"] = testUuid('f', 'f');
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(firstBlockSize(sets.front()), 64);
+}
+
+namespace
+{
+
+/// Turns the set's UHD into a tree_data one naming @p artifact and writes the tree; the
+/// artifact itself is left to the caller.
+std::filesystem::path writeModelHeuristicSet(const std::filesystem::path& root,
+                                             const std::string& engineName,
+                                             const std::string& artifact)
+{
+    auto documents = makeSetDocuments('1', engineName);
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({"$kernel.block_size"});
+    heuristic["features_hash"]
+        = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$kernel.block_size"});
+    heuristic["trained_against"] = provenanceOf(documents);
+    heuristic["objective"] = "max";
+    heuristic["tree_data"] = {{"artifact", artifact}};
+    writeDocuments(root, documents);
+    return root;
+}
+
+/// What writeArtifact() writes. Contents are irrelevant to the loader, which only checks that
+/// the path is a file; a declared `hash` is the digest of these bytes.
+constexpr const char* ARTIFACT_BYTES = "not a real model";
+
+void writeArtifact(const std::filesystem::path& path)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream(path, std::ios::binary) << ARTIFACT_BYTES;
+}
+
+} // namespace
+
+/// Baseline for the failure cases: a present artifact loads the model, not just the engine.
+TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_present"));
+    writeModelHeuristicSet(dir.path(), "test:model_present", "model.bin");
+    writeArtifact(dir.path() / "model.bin");
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    EXPECT_EQ(sets.front().heuristic->adapter, UhdAdapter::TREE_DATA);
+    // UhdParser resolves the artifact against the declaring `.uhd.json`, so the path is
+    // absolute.
+    EXPECT_EQ(std::filesystem::path(sets.front().heuristic->modelArtifactPath).filename().string(),
+              "model.bin");
+}
+
+/// The packer copies a shared model UHD and its artifact into every arch shard. Each copy
+/// resolves its artifact to a different absolute path, but they author the same relative
+/// path and digest the same bytes, so they are one definition and the model stays bound.
+TEST(TestDescriptorLoader, CollapsesPerArchCopiesOfAModelHeuristic)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_arch_dupes"));
+    for(const std::string arch : {"gfx942", "gfx950"})
+    {
+        writeModelHeuristicSet(dir.path() / arch, "test:model_sharded", "model.bin");
+        writeArtifact(dir.path() / arch / "model.bin");
+    }
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
+        << recorder.getRecordedLogsAsString();
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    EXPECT_EQ(sets.front().heuristic->adapter, UhdAdapter::TREE_DATA);
+}
+
+/// RFC 0019 §4: every header field changes what the heuristic computes, so each must
+/// survive the parse.
+TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_header"));
+
+    const std::vector<nlohmann::json> signature
+        = {"$kernel.block_size",
+           nlohmann::json::parse(R"({"ceil_div":["$q.M","$kernel.block_size"]})"),
+           "$q.dtype"};
+    // Keyed on a `$q.*` token so the encoding adds no `$kernel.*` axis for RFC 0019 §6.3
+    // check 2.
+    const hipdnn_plugin_sdk::uhd::CategoricalEncoding encoding
+        = {{"$q.dtype", {{"fp16", 0}, {"bf16", 1}}}};
+
+    auto documents = makeSetDocuments('1', "test:model_header");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = signature;
+    heuristic["categorical_encoding"] = {{"$q.dtype", {{"fp16", 0}, {"bf16", 1}}}};
+    heuristic["features_hash"]
+        = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature, encoding);
+    heuristic["trained_against"] = provenanceOf(documents);
+    // `calibrated: true` is not the default, so this proves the boolean is parsed.
+    heuristic["objective"] = "max";
+    heuristic["score"] = {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    const auto modelHash = hipdnn_plugin_sdk::uhd::sha256(std::string(ARTIFACT_BYTES));
+    heuristic["tree_data"] = {{"artifact", "model.bin"}, {"hash", modelHash}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    const auto& parsed = *sets.front().heuristic;
+
+    EXPECT_EQ(parsed.objective, "max");
+    ASSERT_EQ(parsed.featuresSignature.size(), 3u);
+    EXPECT_EQ(parsed.featuresSignature[1],
+              nlohmann::json::parse(R"({"ceil_div":["$q.M","$kernel.block_size"]})"));
+    EXPECT_EQ(parsed.featuresHash,
+              hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature, encoding));
+    EXPECT_EQ(parsed.score.metric, "tflops");
+    EXPECT_TRUE(parsed.score.calibrated);
+    EXPECT_EQ(parsed.score.transform, "log1p");
+    EXPECT_EQ(parsed.modelHash, modelHash);
+    ASSERT_EQ(parsed.categoricalEncoding.count("$q.dtype"), 1u);
+    EXPECT_EQ(parsed.categoricalEncoding.at("$q.dtype").at("bf16"), 1);
+}
+
+/// The metric fixes the direction: dropping `min` would invert every time model's ranking.
+TEST(TestDescriptorLoader, KeepsAMinimisingObjectiveOnAnUncalibratedScore)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("objective_min"));
+
+    auto documents = makeSetDocuments('1', "test:objective_min");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({"$kernel.block_size"});
+    heuristic["features_hash"]
+        = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$kernel.block_size"});
+    heuristic["trained_against"] = provenanceOf(documents);
+    heuristic["objective"] = "min";
+    heuristic["score"] = {{"metric", "time"}, {"calibrated", false}, {"transform", "log1p"}};
+    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().heuristicsByMetric.count("time"), 1u);
+    ASSERT_EQ(sets.front().heuristicsByMetric.at("time").count("default"), 1u);
+    const auto& parsed = sets.front().heuristicsByMetric.at("time").at("default");
+    EXPECT_EQ(parsed.objective, "min");
+    EXPECT_EQ(parsed.score.metric, "time");
+    EXPECT_FALSE(parsed.score.calibrated);
+    // The default ranker is the metric-less one, else `tflops`, never `time`.
+    EXPECT_FALSE(sets.front().heuristic.has_value());
+}
+
+/// RFC 0019 §4.4: the metric fixes the direction and `objective` only restates it. A
+/// contradiction is caught at parse; at comparison time it would silently invert engine
+/// selection.
+TEST(TestDescriptorLoader, RejectsAnObjectiveContradictingTheScoreMetric)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("objective_clash"));
+
+    auto documents = makeSetDocuments('1', "test:objective_clash");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({"$kernel.block_size"});
+    heuristic["features_hash"]
+        = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$kernel.block_size"});
+    heuristic["trained_against"] = provenanceOf(documents);
+    heuristic["objective"] = "min";
+    heuristic["score"] = {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const auto sets = validatedSetsFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_FALSE(sets.front().heuristic.has_value());
+    EXPECT_EQ(firstBlockSize(sets.front()), 64);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "requires objective max"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestDescriptorLoader, RejectsStringifiedFeatureExpressions)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("string_expression"));
+
+    auto documents = makeSetDocuments('1', "test:string_expression");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({R"({"log2":["$kernel.block_size"]})"});
+    heuristic["features_hash"] = "sha256:0000000000000000";
+    heuristic["trained_against"] = provenanceOf(documents);
+    heuristic["objective"] = "max";
+    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const auto sets = validatedSetsFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_FALSE(sets.front().heuristic.has_value());
+    EXPECT_EQ(firstBlockSize(sets.front()), 64);
+}
+
+/// RFC 0019 §5: the engine keeps selecting by declared order; the warning says why.
+TEST(TestDescriptorLoader, WarnsWhenAModelArtifactIsAbsentAndKeepsTheEngine)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_absent"));
+    writeModelHeuristicSet(dir.path(), "test:model_absent", "never_packaged.bin");
+
+    EXPECT_EQ(loadValidatedDescriptorSets<LoaderHandle>(dir.path()).size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "never_packaged.bin"));
+}
+
+/// With no declared hash, the artifact bytes at load are the model identity. With no
+/// artifact deployed the persistent cache is declined; a native ranker keeps its descriptor
+/// identity.
+TEST(TestDescriptorLoader, ReplacingUndeclaredWeightsChangesTheEngineModelIdentity)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("undeclared_weights"));
+    writeModelHeuristicSet(dir.path(), "test:undeclared_weights", "model.bin");
+    const auto loadWith = [&](const std::string& weights) {
+        std::ofstream(dir.path() / "model.bin", std::ios::binary) << weights;
+        return loadFrom(dir.path()).at(0);
+    };
+
+    const auto original = loadWith("weights, first training");
+    const auto retrained = loadWith("weights, second training");
+    EXPECT_EQ(original.heuristic->modelHash,
+              hipdnn_plugin_sdk::uhd::sha256(std::string("weights, first training")));
+    EXPECT_TRUE(engineIdentity(original).contentIdentified);
+    EXPECT_TRUE(engineIdentity(retrained).contentIdentified);
+    EXPECT_NE(engineIdentity(original).modelHash, engineIdentity(retrained).modelHash);
+    EXPECT_NE(engineSelectorRevision(original), engineSelectorRevision(retrained));
+
+    ASSERT_TRUE(std::filesystem::remove(dir.path() / "model.bin"));
+    EXPECT_FALSE(engineIdentity(loadFrom(dir.path()).at(0)).contentIdentified);
+
+    const hipdnn_test_sdk::utilities::ScopedDirectory nativeDir(uniqueDirectory("native_identity"));
+    writeDocuments(nativeDir.path(), makeSetDocuments('1', "test:native_identity"));
+    const auto native = engineIdentity(loadFrom(nativeDir.path()).at(0));
+    EXPECT_TRUE(native.contentIdentified);
+    EXPECT_FALSE(native.modelHash.empty());
+}
+
+/// RFC 0019 §4.1: a model ships inside its descriptor's directory. One named outside it is
+/// refused at parse, which disables the model and keeps the engine.
+TEST(TestDescriptorLoader, EscapingModelArtifactIsDisabledWithoutDroppingTheEngine)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_escapes"));
+    const auto tree = dir.path() / "tree";
+    writeModelHeuristicSet(tree, "test:model_escapes", "../outside.bin");
+    // Present, so only containment, not existence, can reject it.
+    writeArtifact(dir.path() / "outside.bin");
+
+    const auto sets = validatedSetsFrom(tree);
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_FALSE(sets.front().heuristic.has_value());
+    EXPECT_EQ(firstBlockSize(sets.front()), 64);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "inside the descriptor's directory"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The boundary is the descriptor's own directory, not the tree: a nested descriptor cannot
+/// reach a shared artifact above it, even one inside the tree.
+TEST(TestDescriptorLoader, RefusesAModelArtifactAboveTheDescriptorButInsideTheTree)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_nested"));
+    writeModelHeuristicSet(dir.path() / "pack", "test:model_nested", "../shared/model.bin");
+    writeArtifact(dir.path() / "shared" / "model.bin");
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:model_nested");
+    EXPECT_FALSE(sets.front().heuristic.has_value());
+}
+
+TEST(TestDescriptorLoader, AcceptsAModelArtifactInASubdirectoryOfTheDescriptor)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_subdir"));
+    writeModelHeuristicSet(dir.path(), "test:model_subdir", "models/model.bin");
+    writeArtifact(dir.path() / "models" / "model.bin");
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    // The parser resolves the artifact canonically, so the expectation is canonical too. On
+    // Windows that yields the on-disk case of each component, which %TEMP% need not match.
+    EXPECT_EQ(sets.front().heuristic->modelArtifactPath,
+              std::filesystem::weakly_canonical(dir.path() / "models" / "model.bin").string());
+}
+
+/// RFC 0019 §11.2: a `predict_engine` model gets the same artifact pre-flight as a ranker.
+TEST(TestDescriptorLoader, DisablesAPredictionModelWhoseArtifactEscapesTheTree)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("l1_escapes"));
+    const auto tree = dir.path() / "tree";
+
+    auto documents = makeSetDocuments('1', "test:l1_escapes");
+    const auto predictionId = testUuid('1', 'c');
+    auto prediction = documentOfType(documents, ".uhd.json");
+    prediction["id"] = predictionId;
+    prediction["name"] = "engine throughput";
+    prediction["adapter"] = "tree_data";
+    prediction.erase("native");
+    prediction["features_signature"] = nlohmann::json::array({"$graph.flops"});
+    prediction["features_hash"]
+        = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$graph.flops"});
+    prediction["trained_against"] = provenanceOf(documents);
+    prediction["objective"] = "max";
+    prediction["score"] = {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    prediction["tree_data"] = {{"artifact", "../outside.bin"}};
+    documentOfType(documents, ".ued.json")["predict_engine"] = {{"default", predictionId}};
+    documents.push_back({".uhd.json", std::move(prediction)});
+    writeDocuments(tree, documents);
+    // Present, so only containment, not existence, can reject it.
+    writeArtifact(dir.path() / "outside.bin");
+
+    const auto sets = validatedSetsFrom(tree);
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(sets.front().enginePredictionsByMetric.empty());
+    ASSERT_EQ(sets.front().unavailableEnginePredictionArches.count("tflops"), 1u);
+    EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops").count("default"), 1u);
+    // The ranking UHD still loads and picks its winner (256), not the declared-order head.
+    EXPECT_TRUE(sets.front().heuristic.has_value());
+    EXPECT_EQ(firstBlockSize(sets.front()), 256);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "inside the descriptor's directory"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// RFC 0019 Open Question 7: an engine with no UED declares its L1 model's UUID in code.
+/// Checked end to end, through a calibrated score in the requested metric.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionResolvesAndScores)
+{
+    const ScopedL1Scorer scorer;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1"));
+    const auto modelId = testUuid('e', '1');
+    writeDocument(dir.path(), {".uhd.json", declaredL1Document(modelId)});
+
+    const auto resolved = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                                           "test:opaque",
+                                                           L1_SELECTOR_REVISION,
+                                                           declaration({{"default", modelId}}));
+
+    ASSERT_EQ(resolved.byMetric.size(), 1u);
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    ASSERT_EQ(resolved.byMetric.at("tflops").size(), 1u);
+    EXPECT_TRUE(resolved.refused.empty());
+    // Backfilled from the declaration; the document names no engine, role or arch.
+    const auto& model = resolved.byMetric.at("tflops").at("default");
+    EXPECT_EQ(model.engineName, "test:opaque");
+    EXPECT_EQ(model.role, "predict_engine");
+    EXPECT_EQ(model.arch, "default");
+    EXPECT_EQ(model.trainedAgainstSelectorRevision, L1_SELECTOR_REVISION);
+
+    hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    binding.bind("tflops", "default", UhdKernelHeuristic::configFrom(model));
+    hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
+    features.bind("graph.flops", std::log1p(42.0));
+    const auto prediction = binding.predict(7,
+                                            "test:opaque",
+                                            L1_SELECTOR_REVISION,
+                                            "tflops",
+                                            "gfx942:sramecc+:xnack-",
+                                            features,
+                                            /*evaluate=*/true);
+
+    ASSERT_EQ(prediction.status, hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE);
+    EXPECT_EQ(prediction.metric, "tflops");
+    EXPECT_NEAR(prediction.value, 42.0, 1e-12);
+    EXPECT_EQ(prediction.uhd_id, modelId);
+}
+
+/// RFC 0019 §8.1: an opaque engine has no UED, KMD or UMD, so a model recording one is
+/// refused. Only that model is refused; the engine keeps the others.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionNamingADescriptorSetIsRefused)
+{
+    const ScopedL1Scorer scorer;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_prov"));
+    const auto refusedId = testUuid('e', '2');
+    const auto cleanId = testUuid('e', '3');
+    auto refused = declaredL1Document(refusedId);
+    refused["trained_against"] = {{"ued", {{"id", testUuid('e', '4')}, {"revision", "1.0"}}},
+                                  {"kmd", {{"id", testUuid('e', '5')}, {"revision", "1.0"}}},
+                                  {"umd", nlohmann::json::array()}};
+    writeDocument(dir.path(), {".uhd.json", std::move(refused)});
+    writeDocument(dir.path(), {".uhd.json", declaredL1Document(cleanId)});
+
+    const auto resolved = resolveDeclaredEnginePredictions(
+        loadDescriptorCatalog(dir.path()),
+        "test:opaque",
+        L1_SELECTOR_REVISION,
+        declaration({{"gfx942", refusedId}, {"gfx950", cleanId}}));
+
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    const auto& bound = resolved.byMetric.at("tflops");
+    EXPECT_EQ(bound.count("gfx942"), 0u);
+    EXPECT_EQ(bound.count("gfx950"), 1u);
+    ASSERT_EQ(resolved.refused.count("tflops"), 1u);
+    const auto& refusals = resolved.refused.at("tflops");
+    EXPECT_EQ(refusals.count("gfx950"), 0u);
+    ASSERT_EQ(refusals.count("gfx942"), 1u);
+    // A present model that failed its contract is INVALID, not the UNAVAILABLE of an absent
+    // one (RFC 0019 §11.2).
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    EXPECT_EQ(refusals.at("gfx942").status, PredictionStatus::INVALID);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "cannot satisfy"));
+
+    hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    binding.bind("tflops", "gfx950", UhdKernelHeuristic::configFrom(bound.at("gfx950")));
+    for(const auto& [metric, byArch] : resolved.refused)
+    {
+        for(const auto& [arch, refusal] : byArch)
+        {
+            binding.markUnusable(metric, arch, refusal.status, refusal.reason);
+        }
+    }
+    hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
+    features.bind("graph.flops", std::log1p(42.0));
+    EXPECT_EQ(
+        binding.predict(7, "test:opaque", L1_SELECTOR_REVISION, "tflops", "gfx942", features, true)
+            .status,
+        PredictionStatus::INVALID);
+    EXPECT_EQ(
+        binding.predict(7, "test:opaque", L1_SELECTOR_REVISION, "tflops", "gfx950", features, true)
+            .status,
+        PredictionStatus::AVAILABLE);
+}
+
+/// RFC 0019 §4.1: a mismatched `trained_against.selector_revision` is refused, since L1
+/// scores decide between engines. Two engines over one catalog each own their model.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedAgainstAnotherBuildIsRefused)
+{
+    const ScopedL1Scorer scorer;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_stale"));
+    const std::string revisionA = "test-provider/1.2.3/engine-a-untuned-v1/library-4.5";
+    const std::string revisionB = "test-provider/1.2.3/engine-b-untuned-v1/library-4.5";
+    const auto modelA = testUuid('e', '8');
+    const auto modelB = testUuid('e', '9');
+    writeDocument(dir.path(), {".uhd.json", declaredL1Document(modelA, revisionA)});
+    // Recorded against engine A's build; engine B declares it anyway.
+    writeDocument(dir.path(), {".uhd.json", declaredL1Document(modelB, revisionA)});
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    const auto engineA = resolveDeclaredEnginePredictions(
+        catalog, "test:opaqueA", revisionA, declaration({{"default", modelA}}));
+    const auto engineB = resolveDeclaredEnginePredictions(
+        catalog, "test:opaqueB", revisionB, declaration({{"default", modelB}}));
+
+    ASSERT_EQ(engineA.byMetric.count("tflops"), 1u);
+    EXPECT_EQ(engineA.byMetric.at("tflops").count("default"), 1u);
+    EXPECT_TRUE(engineA.refused.empty());
+    EXPECT_TRUE(engineB.byMetric.empty());
+    ASSERT_EQ(engineB.refused.count("tflops"), 1u);
+    ASSERT_EQ(engineB.refused.at("tflops").count("default"), 1u);
+
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    const auto& refusal = engineB.refused.at("tflops").at("default");
+    // Silence, not a claim: the model is not bad, it is not this build's.
+    EXPECT_EQ(refusal.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_NE(refusal.reason.find(revisionA), std::string::npos) << refusal.reason;
+    EXPECT_NE(refusal.reason.find(revisionB), std::string::npos) << refusal.reason;
+
+    hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    binding.markUnusable("tflops", "default", refusal.status, refusal.reason);
+    hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
+    features.bind("graph.flops", std::log1p(42.0));
+    const auto prediction = binding.predict(
+        8, "test:opaqueB", revisionB, "tflops", "gfx942", features, /*evaluate=*/true);
+    EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(prediction.reason, refusal.reason);
+}
+
+/// A model recording no revision matches no build: INVALID and logged, not UNAVAILABLE.
+/// Only a signature-less native model can omit `trained_against` and still parse.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionWithoutASelectorRevisionIsRefused)
+{
+    const ScopedL1Scorer scorer;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("declared_l1_unqualified"));
+    const auto modelId = testUuid('e', 'a');
+    writeDocument(
+        dir.path(),
+        {".uhd.json",
+         {{"version", "1.0"},
+          {"id", modelId},
+          {"name", "engine throughput"},
+          {"adapter", "native"},
+          {"native", {{"symbol", L1_SCORER_SYMBOL}}},
+          {"objective", "max"},
+          {"score", {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log1p"}}}}});
+
+    const auto resolved = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                                           "test:opaque",
+                                                           L1_SELECTOR_REVISION,
+                                                           declaration({{"default", modelId}}));
+
+    EXPECT_TRUE(resolved.byMetric.empty());
+    ASSERT_EQ(resolved.refused.count("tflops"), 1u);
+    ASSERT_EQ(resolved.refused.at("tflops").count("default"), 1u);
+    EXPECT_EQ(resolved.refused.at("tflops").at("default").status,
+              hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::INVALID);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "records no trained_against.selector_revision"));
+}
+
+/// FeatureSemantics.hpp: a declared model trained on another feature-semantics revision is
+/// UNAVAILABLE, with both revisions in the reason. An absent revision means 1.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedOnOtherFeatureSemanticsIsUnavailable)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    using hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION;
+    const ScopedL1Scorer scorer;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_fsr"));
+    const auto newer = FEATURE_SEMANTICS_REVISION + 1;
+    const auto recording = [](const std::string& id, std::optional<int64_t> revision) {
+        auto document = declaredL1Document(id);
+        if(revision.has_value())
+        {
+            document["trained_against"]["feature_semantics_revision"] = *revision;
+        }
+        return document;
+    };
+    const auto currentId = testUuid('f', '1');
+    const auto staleId = testUuid('f', '2');
+    const auto absentId = testUuid('f', '3');
+    const auto oneId = testUuid('f', '4');
+    writeDocument(dir.path(), {".uhd.json", recording(currentId, FEATURE_SEMANTICS_REVISION)});
+    writeDocument(dir.path(), {".uhd.json", recording(staleId, newer)});
+    writeDocument(dir.path(), {".uhd.json", recording(absentId, std::nullopt)});
+    writeDocument(dir.path(), {".uhd.json", recording(oneId, 1)});
+
+    const auto resolved = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                                           "test:opaque",
+                                                           L1_SELECTOR_REVISION,
+                                                           declaration({{"default", currentId},
+                                                                        {"gfx950", staleId},
+                                                                        {"gfx942", absentId},
+                                                                        {"gfx90a", oneId}}));
+
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    EXPECT_EQ(resolved.byMetric.at("tflops").count("default"), 1u);
+    // Absent and an explicit 1 are one claim, so they bind or refuse together.
+    const auto boundOrRefusal = [&](const std::string& arch) {
+        const auto refused = resolved.refused.find("tflops");
+        return refused != resolved.refused.end() && refused->second.count(arch) != 0
+                   ? refused->second.at(arch).reason
+                   : std::string("bound");
+    };
+    EXPECT_EQ(boundOrRefusal("gfx942"), boundOrRefusal("gfx90a"));
+
+    ASSERT_EQ(resolved.refused.count("tflops"), 1u);
+    ASSERT_EQ(resolved.refused.at("tflops").count("gfx950"), 1u);
+    const auto& refusal = resolved.refused.at("tflops").at("gfx950");
+    EXPECT_EQ(refusal.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_NE(refusal.reason.find("revision " + std::to_string(newer)), std::string::npos)
+        << refusal.reason;
+    EXPECT_NE(refusal.reason.find("revision " + std::to_string(FEATURE_SEMANTICS_REVISION)),
+              std::string::npos)
+        << refusal.reason;
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, refusal.reason));
+}
+
+namespace
+{
+
+/// makeSetDocuments with a feature-reading tree_data ranker and `predict_engine` model, both
+/// recording @p revision (none when nullopt). Neither artifact exists; only resolution is
+/// tested.
+Documents featureSemanticsDocuments(const std::string& engineName, std::optional<int64_t> revision)
+{
+    auto documents = makeSetDocuments('1', engineName);
+    auto provenance = provenanceOf(documents);
+    if(revision.has_value())
+    {
+        provenance["feature_semantics_revision"] = *revision;
+    }
+    auto& ranker = documentOfType(documents, ".uhd.json");
+    ranker["adapter"] = "tree_data";
+    ranker.erase("native");
+    ranker["features_signature"] = nlohmann::json::array({"$kernel.block_size"});
+    ranker["features_hash"]
+        = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$kernel.block_size"});
+    ranker["trained_against"] = provenance;
+    ranker["objective"] = "max";
+    ranker["tree_data"] = {{"artifact", "ranker.bin"}};
+
+    const auto predictionId = testUuid('1', 'c');
+    auto prediction = ranker;
+    prediction["id"] = predictionId;
+    prediction["name"] = "engine throughput";
+    prediction["features_signature"] = nlohmann::json::array({"$graph.flops"});
+    prediction["features_hash"]
+        = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$graph.flops"});
+    prediction["score"] = {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    prediction["tree_data"] = {{"artifact", "prediction.bin"}};
+    documentOfType(documents, ".ued.json")["predict_engine"] = {{"default", predictionId}};
+    documents.push_back({".uhd.json", std::move(prediction)});
+    return documents;
+}
+
+} // namespace
+
+/// FeatureSemantics.hpp: both scoring roles read the same features, so both are refused on a
+/// revision mismatch and the engine falls back to declared order. Absent means revision 1.
+TEST(TestDescriptorLoader, AModelTrainedOnOtherFeatureSemanticsIsRefusedForEveryScoringRole)
+{
+    using hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION;
+    const ScopedSymbols symbols;
+    const auto load = [](const std::string& name, std::optional<int64_t> revision) {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(name));
+        writeDocuments(dir.path(), featureSemanticsDocuments("test:" + name, revision));
+        auto sets = loadFrom(dir.path());
+        if(sets.size() != 1u)
+        {
+            throw std::runtime_error("expected exactly one engine from " + name);
+        }
+        return std::move(sets.front());
+    };
+    const auto bound = [](const DescriptorSet& set) {
+        return std::make_pair(set.heuristicsByMetric.count("") == 1u,
+                              set.enginePredictionsByMetric.count("tflops") == 1u);
+    };
+
+    EXPECT_EQ(bound(load("fsr_current", FEATURE_SEMANTICS_REVISION)), std::make_pair(true, true));
+    EXPECT_EQ(bound(load("fsr_absent", std::nullopt)), bound(load("fsr_one", 1)));
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const auto newer = FEATURE_SEMANTICS_REVISION + 1;
+    // Kept alive through the ranking below, which reads the tree the set was loaded from.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("fsr_newer"));
+    writeDocuments(dir.path(), featureSemanticsDocuments("test:fsr_newer", newer));
+    const auto sets = loadFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& stale = sets.front();
+    EXPECT_EQ(bound(stale), std::make_pair(false, false));
+    ASSERT_EQ(stale.unavailableHeuristicArches.count(""), 1u);
+    EXPECT_EQ(stale.unavailableHeuristicArches.at("").count("default"), 1u);
+    ASSERT_EQ(stale.unavailableEnginePredictionArches.count("tflops"), 1u);
+    EXPECT_EQ(stale.unavailableEnginePredictionArches.at("tflops").count("default"), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "revision " + std::to_string(newer)
+                                              + ", this build computes revision "
+                                              + std::to_string(FEATURE_SEMANTICS_REVISION)))
+        << recorder.getRecordedLogsAsString();
+    // Refusing the ranker never costs the engine: it ranks in declared order (64 first).
+    EXPECT_EQ(firstBlockSize(stale), 64);
+}
+
+/// The revision governs published feature values, so a ranker reading none is never
+/// refused by it, whatever it records.
+TEST(TestDescriptorLoader, ASignatureLessRankerIsNotRefusedByFeatureSemantics)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("fsr_signature_less"));
+    auto documents = makeSetDocuments('1', "test:fsr_signature_less");
+    auto provenance = provenanceOf(documents);
+    provenance["feature_semantics_revision"]
+        = hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION + 1;
+    documentOfType(documents, ".uhd.json")["trained_against"] = std::move(provenance);
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(firstBlockSize(sets.front()), 256);
+}
+
+/// No tree installed is normal before deployment: an unresolved declared id is silence, not
+/// an error or a refusal (RFC 0019 §5).
+TEST(TestDescriptorLoader, DeclaredEnginePredictionWithNoTreeInstalledResolvesNothing)
+{
+    const ScopedL1Scorer scorer;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_empty"));
+
+    const auto resolved
+        = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                           "test:opaque",
+                                           L1_SELECTOR_REVISION,
+                                           declaration({{"default", testUuid('e', '6')}}));
+
+    EXPECT_TRUE(resolved.byMetric.empty());
+    EXPECT_TRUE(resolved.refused.empty());
+
+    const hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
+    features.bind("graph.flops", std::log1p(42.0));
+    const auto prediction = binding.predict(
+        7, "test:opaque", L1_SELECTOR_REVISION, "tflops", "gfx942", features, /*evaluate=*/true);
+    EXPECT_EQ(prediction.status,
+              hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE);
+}
+
+/// Only the engine's declaration binds a UHD. `trained_against.selector_revision` names a
+/// provider build, never an engine.
+TEST(TestDescriptorLoader, AUhdCannotClaimAnEngineRoleOrArch)
+{
+    const ScopedL1Scorer scorer;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    for(const auto* claim : {"engine", "role", "arch"})
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+            uniqueDirectory(std::string("declared_l1_claims_") + claim));
+        const auto modelId = testUuid('e', '7');
+        auto document = declaredL1Document(modelId);
+        document[claim] = "test:opaque";
+        writeDocument(dir.path(), {".uhd.json", std::move(document)});
+
+        const auto catalog = loadDescriptorCatalog(dir.path());
+        EXPECT_TRUE(catalog.heuristics.empty()) << "a UHD claiming '" << claim << "' loaded";
+        EXPECT_TRUE(
+            resolveDeclaredEnginePredictions(
+                catalog, "test:opaque", L1_SELECTOR_REVISION, declaration({{"default", modelId}}))
+                .byMetric.empty());
+    }
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "unknown key"));
+}
+
+/// RFC 0019 §11.4: a declared model's metric is read off its UHD. One naming no metric is
+/// dropped with an error, not recorded as a refusal.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionsResolvePerMetric)
+{
+    const ScopedL1Scorer scorer;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_metrics"));
+    const auto tflopsId = testUuid('e', 'b');
+    const auto timeId = testUuid('e', 'c');
+    const auto metriclessId = testUuid('e', 'd');
+    writeDocument(dir.path(), {".uhd.json", declaredL1Document(tflopsId)});
+    writeDocument(dir.path(),
+                  {".uhd.json", declaredL1Document(timeId, L1_SELECTOR_REVISION, "time")});
+    auto metricless = declaredL1Document(metriclessId);
+    // Drop the whole block: a calibrated score without a metric would not parse.
+    metricless.erase("score");
+    writeDocument(dir.path(), {".uhd.json", std::move(metricless)});
+
+    const auto resolved = resolveDeclaredEnginePredictions(
+        loadDescriptorCatalog(dir.path()),
+        "test:opaque",
+        L1_SELECTOR_REVISION,
+        declaration({{"default", tflopsId}, {"default", timeId}, {"gfx942", metriclessId}}));
+
+    EXPECT_TRUE(resolved.refused.empty());
+    ASSERT_EQ(resolved.byMetric.size(), 2u);
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    ASSERT_EQ(resolved.byMetric.count("time"), 1u);
+    // One `default` model each: the metric-less gfx942 declaration went nowhere.
+    ASSERT_EQ(resolved.byMetric.at("tflops").size(), 1u);
+    ASSERT_EQ(resolved.byMetric.at("time").size(), 1u);
+    EXPECT_EQ(toString(resolved.byMetric.at("tflops").at("default").id), tflopsId);
+    EXPECT_EQ(toString(resolved.byMetric.at("time").at("default").id), timeId);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "names no registered score.metric"))
+        << recorder.getRecordedLogsAsString();
+
+    // Bound per metric, a request in either metric reaches that metric's model and no other.
+    hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    for(const auto& [metric, byArch] : resolved.byMetric)
+    {
+        for(const auto& [arch, model] : byArch)
+        {
+            binding.bind(metric, arch, UhdKernelHeuristic::configFrom(model));
+        }
+    }
+    hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
+    features.bind("graph.flops", std::log1p(42.0));
+    const std::vector<std::pair<std::string, std::string>> expected
+        = {{"tflops", tflopsId}, {"time", timeId}};
+    for(const auto& [metric, id] : expected)
+    {
+        const auto prediction = binding.predict(
+            7, "test:opaque", L1_SELECTOR_REVISION, metric, "gfx942", features, /*evaluate=*/true);
+        ASSERT_EQ(prediction.status,
+                  hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE)
+            << metric << ": " << prediction.reason;
+        EXPECT_EQ(prediction.metric, metric);
+        EXPECT_EQ(prediction.uhd_id, id);
+        EXPECT_NEAR(prediction.value, 42.0, 1e-12) << metric;
+    }
+}
+
+/// One UUID declared for two arches is one model with one content identity; its
+/// `training_arches` limits where it answers.
+TEST(TestDescriptorLoader, ADeclaredModelBoundForTwoArchesAnswersOnlyWhereItWasTrained)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_d2"));
+    const auto modelId = testUuid('e', 'e');
+    auto document = declaredL1Document(modelId);
+    document["adapter"] = "tree_data";
+    document.erase("native");
+    document["tree_data"] = {{"artifact", "l1.bin"}};
+    ASSERT_TRUE(hipdnn_test_sdk::utilities::GbdtModelTestBuilder()
+                    .setNumFeatures(1)
+                    .setFeaturesHash(document.at("features_hash").get<std::string>())
+                    .setBaseScore(std::log1p(42.0))
+                    .setTrainingArches({"gfx942"})
+                    .buildToFile((dir.path() / "l1.bin").string()));
+    writeDocument(dir.path(), {".uhd.json", std::move(document)});
+
+    const auto resolved
+        = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                           "test:opaque",
+                                           L1_SELECTOR_REVISION,
+                                           declaration({{"gfx942", modelId}, {"gfx950", modelId}}));
+
+    EXPECT_TRUE(resolved.refused.empty());
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    const auto& bound = resolved.byMetric.at("tflops");
+    ASSERT_EQ(bound.size(), 2u);
+    EXPECT_FALSE(bound.at("gfx942").modelHash.empty());
+    EXPECT_EQ(bound.at("gfx942").modelHash, bound.at("gfx950").modelHash);
+
+    hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    for(const auto& [arch, model] : bound)
+    {
+        binding.bind("tflops", arch, UhdKernelHeuristic::configFrom(model));
+    }
+    hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
+    features.bind("graph.flops", std::log1p(42.0));
+    const auto ask = [&](const std::string& arch) {
+        return binding.predict(
+            7, "test:opaque", L1_SELECTOR_REVISION, "tflops", arch, features, /*evaluate=*/true);
+    };
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    const auto trained = ask("gfx942:sramecc+:xnack-");
+    ASSERT_EQ(trained.status, PredictionStatus::AVAILABLE) << trained.reason;
+    EXPECT_NEAR(trained.value, 42.0, 1e-12);
+    const auto untrained = ask("gfx950");
+    EXPECT_EQ(untrained.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(untrained.reason, "UHD model has no coverage for this architecture");
+}
+
+TEST(TestDescriptorLoader, DropsEveryEngineClaimingTheSameEngineId)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("id_collision"));
+    // Two independent descriptor sets whose engine names hash to the same hipDNN engine
+    // id. Two distinct names colliding under FNV-1a is not something a test can
+    // construct, so the same name in two sets stands in: the check is on the hashed id,
+    // and both reach it the same way.
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:same_name"));
+    writeDocuments(dir.path(), makeSetDocuments('2', "test:same_name"));
+
+    // RFC 0020 §13.2.1: not keep-the-first. Directory order decides which set is seen
+    // first, so keeping one would make the surviving definition a property of the
+    // filesystem.
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+TEST(TestDescriptorLoader, DisablingOneOfTwoCollidingEnginesLetsTheOtherLoad)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("collision_recovery"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:same_name"));
+    writeDocuments(dir.path(), makeSetDocuments('2', "test:same_name"));
+
+    // The disabled UED is skipped before it claims the name, which frees it for the
+    // survivor -- the recovery lever RFC 0020 §12 names for the drop-all rule above.
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disabled(
+        "HIPDNN_DISABLE_ENGINES", testUuid('2', ROLE_ENGINE));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(toString(sets.front().engine.id), testUuid('1', ROLE_ENGINE));
+}
+
+TEST(TestDescriptorLoader, CoercesAnIntegerValueForAFloatField)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("float_coercion"));
+    auto documents = makeSetDocuments('1', "test:coerced");
+    documentOfType(documents, ".kmd.json")
+        .at("fields")
+        .push_back({{"name", "scale"}, {"type", "float"}, {"default_value", 1}});
+    for(auto& kernel : documentOfType(documents, ".kdp.json").at("kernelDescriptors"))
+    {
+        kernel["metadata"]["scale"] = 2;
+    }
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& schemaFields = sets.front().schema.fields;
+    ASSERT_EQ(schemaFields.size(), 3u);
+    ASSERT_TRUE(schemaFields[2].defaultValue.has_value());
+    EXPECT_DOUBLE_EQ(std::get<double>(*schemaFields[2].defaultValue), 1.0);
+
+    const auto& metadata = sets.front().packs.front().kernels.front().metadata;
+    EXPECT_DOUBLE_EQ(std::get<double>(metadata.at("scale")), 2.0);
+}
+
+TEST(TestDescriptorLoader, DropsAPackWhoseMetadataContradictsTheSchema)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("bad_metadata"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:bad_metadata");
+    for(auto& kernel : documentOfType(broken, ".kdp.json").at("kernelDescriptors"))
+    {
+        kernel["metadata"]["block_size"] = "sixty-four";
+    }
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+}
+
+/// coerceKernelMetadata's omit arm, at engine scope so a regression there is
+/// distinguishable from the wrong-type arm the test above covers: without it, the
+/// incomplete kernel is not caught here at all, and instead reaches the probe in
+/// loadValidatedDescriptorSets, where KernelIngestorStateManager::completeMetadata throws
+/// -- which costs the WHOLE engine via that catch, not just the one pack that named it.
+TEST(TestDescriptorLoader, DropsAPackWhoseKernelOmitsAnUndefaultedMetadataField)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("missing_metadata_field"));
+    auto documents = makeSetDocuments('1', "test:omitted_field");
+
+    auto brokenPack = documentOfType(documents, ".kdp.json");
+    brokenPack["id"] = testUuid('1', 'b');
+    brokenPack["name"] = "pack whose kernel omits dtype";
+    for(auto& kernel : brokenPack.at("kernelDescriptors"))
+    {
+        kernel["metadata"].erase("dtype"); // declares no default_value in the KMD
+    }
+    documents.push_back(TestDocument{".kdp.json", brokenPack});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().packs.size(), 1u);
+}
+
+/// coerceKernelMetadata's other arm: an undeclared key must drop the pack rather than
+/// survive into the completed tuple, where it would make two otherwise-identical kernels
+/// present as distinct catalog entries -- a silent selection change, not a drop, so
+/// nothing here throws either with or without the guard.
+TEST(TestDescriptorLoader, DropsAPackWhoseKernelSuppliesAnUndeclaredMetadataField)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("undeclared_metadata_field"));
+    auto documents = makeSetDocuments('1', "test:undeclared_field");
+
+    auto brokenPack = documentOfType(documents, ".kdp.json");
+    brokenPack["id"] = testUuid('1', 'b');
+    brokenPack["name"] = "pack whose kernel supplies an undeclared field";
+    for(auto& kernel : brokenPack.at("kernelDescriptors"))
+    {
+        kernel["metadata"]["undeclared_flag"] = true;
+    }
+    documents.push_back(TestDocument{".kdp.json", brokenPack});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().packs.size(), 1u);
+}
+
+/// GenericEngine's constructor throws on this, and by then copyEngineIds has advertised
+/// the id -- so the engine has to be gone before it is ever counted.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseKnobNamesNoSchemaField)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("bad_knob"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:bad_knob");
+    documentOfType(broken, ".ued.json")["knobs"] = {"block_sizes"};
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+}
+
+TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredSymbol)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unregistered"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:symbol_check_sibling"));
+
+    auto unregistered = makeSetDocuments('2', "test:unregistered");
+    documentOfType(unregistered, ".umd.json")["match_symbol"] = "descriptorloader.absent";
+    writeDocuments(dir.path(), unregistered);
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:symbol_check_sibling");
+}
+
+namespace
+{
+
+/// One way validation drops the middle of three descriptor sets, and the ERROR text that shows
+/// which check dropped it.
+struct MiddleSetDropCase
+{
+    std::string name;
+    std::function<void(Documents&)> corrupt;
+    std::vector<std::string> reasons;
+};
+
+class TestDescriptorLoaderStateManagerOrder : public ::testing::TestWithParam<MiddleSetDropCase>
+{
+};
+
+} // namespace
+
+TEST_P(TestDescriptorLoaderStateManagerOrder, HandsBackOneStateManagerPerValidatedSetInTheSameOrder)
+{
+    // Engine i is built over state manager i: off by one, an engine serves its neighbor's
+    // kernels while every id it advertises is still correct.
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("state_managers_" + GetParam().name));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:first_valid"));
+    auto dropped = makeSetDocuments('2', "test:dropped_middle");
+    GetParam().corrupt(dropped);
+    writeDocuments(dir.path(), dropped);
+    writeDocuments(dir.path(), makeSetDocuments('3', "test:second_valid"));
+
+    const auto validated
+        = loadValidatedDescriptorSets<LoaderHandle>(std::vector<std::filesystem::path>{dir.path()});
+
+    for(const auto& reason : GetParam().reasons)
+    {
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, reason))
+            << reason << "\n"
+            << recorder.getRecordedLogsAsString();
+    }
+    ASSERT_EQ(validated.size(), 2u);
+    EXPECT_EQ(validated[0].set.engine.name, "test:first_valid");
+    EXPECT_EQ(validated[1].set.engine.name, "test:second_valid");
+    for(const auto& entry : validated)
+    {
+        ASSERT_NE(entry.stateManager, nullptr) << entry.set.engine.name;
+        EXPECT_EQ(toString(entry.stateManager->metadataSchema().id), toString(entry.set.schema.id))
+            << entry.set.engine.name;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MiddleSetDrop,
+    TestDescriptorLoaderStateManagerOrder,
+    ::testing::Values(MiddleSetDropCase{"symbol_pre_flight",
+                                        [](Documents& documents) {
+                                            documentOfType(documents, ".umd.json")["match_symbol"]
+                                                = "descriptorloader.absent";
+                                        },
+                                        {"names unregistered match symbol"}},
+                      // Passes every check the loader makes itself; only building the state manager
+                      // rejects it: two kernels of one pack complete to the same metadata tuple.
+                      MiddleSetDropCase{
+                          "construction_failure",
+                          [](Documents& documents) {
+                              documentOfType(
+                                  documents,
+                                  ".kdp.json")["kernelDescriptors"][2]["metadata"]["dtype"]
+                                  = "FLOAT";
+                          },
+                          {"does not validate", "duplicates the metadata tuple"}}),
+    [](const ::testing::TestParamInfo<MiddleSetDropCase>& info) { return info.param.name; });
+
+/// The graph_match arm of the same pre-flight. An engine naming a graph match this build
+/// does not ship is dropped while it is read, rather than constructing and then throwing
+/// from the state manager after its id has been advertised.
+TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredGraphMatchSymbol)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("unregistered_graph_match"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:graph_match_sibling"));
+
+    auto unregistered = makeSetDocuments('2', "test:unregistered_graph_match");
+    documentOfType(unregistered, ".ued.json")["graph_match"]
+        = nlohmann::json{{"native", "descriptorloader.absent_graph_match"}};
+    writeDocuments(dir.path(), unregistered);
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:graph_match_sibling");
+}
+
+/// The kernel-scope arm of the match-symbol pre-flight: the test above only corrupts the
+/// first `.umd.json`, always the graph-scope matcher, so KernelMatcherRegistry's branch
+/// was never taken. Pointing the kernel-scope matcher at a symbol registered only for
+/// graph scope still gets the engine dropped even with the ternary collapsed onto one
+/// registry for both scopes -- the state manager's constructor would also reject it --
+/// so the pre-flight's specific diagnostic is the only thing that distinguishes the two.
+TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAGraphSymbolAsItsKernelScopeMatcher)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("kernel_scope_wrong_registry"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:kernel_scope_check_sibling"));
+
+    auto misrouted = makeSetDocuments('2', "test:kernel_scope_misrouted");
+    secondDocumentOfType(misrouted, ".umd.json")["match_symbol"] = GRAPH_SYMBOL;
+    writeDocuments(dir.path(), misrouted);
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:kernel_scope_check_sibling");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "names unregistered match symbol"));
+}
+
+/// The dispatch-symbol pre-flight, independent of the match-symbol arm above and until
+/// now untested. The state manager's constructor also rejects an unregistered dispatch
+/// symbol, but with a different, generic message -- that difference is what pins this
+/// loop rather than the probe's fallback catching it instead.
+TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredDispatchSymbol)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unregistered_dispatch"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:dispatch_check_sibling"));
+
+    auto unregistered = makeSetDocuments('2', "test:unregistered_dispatch");
+    documentOfType(unregistered, ".udd.json")["dispatch_symbol"] = "descriptorloader.absent";
+    writeDocuments(dir.path(), unregistered);
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:dispatch_check_sibling");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "names unregistered dispatch symbol"));
+}
+
+TEST(TestDescriptorLoader, UnregisteredScorerDoesNotDisableAnOtherwiseValidEngine)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unregistered_score"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:score_check_sibling"));
+
+    auto unregistered = makeSetDocuments('2', "test:unregistered_score");
+    documentOfType(unregistered, ".uhd.json")["native"]["symbol"] = "descriptorloader.absent";
+    writeDocuments(dir.path(), unregistered);
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 2u);
+    EXPECT_EQ(firstBlockSize(sets.front()), 256);
+    EXPECT_EQ(firstBlockSize(sets.back()), 64);
+}
+
+/// The summary line carries a count of dropped sets, not of ERROR lines. The first bad
+/// set below names two unregistered symbols, so it logs twice and still costs the count
+/// one; a count of lines would read 3 here.
+TEST(TestDescriptorLoader, ReportsHowManyDescriptorSetsWereDropped)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("drop_count"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:drop_count_survivor"));
+
+    auto twoUnregistered = makeSetDocuments('2', "test:drop_count_two_symbols");
+    documentOfType(twoUnregistered, ".umd.json")["match_symbol"] = "descriptorloader.absent";
+    documentOfType(twoUnregistered, ".udd.json")["dispatch_symbol"] = "descriptorloader.absent";
+    writeDocuments(dir.path(), twoUnregistered);
+
+    auto misrouted = makeSetDocuments('3', "test:drop_count_misrouted");
+    secondDocumentOfType(misrouted, ".umd.json")["match_symbol"] = GRAPH_SYMBOL;
+    writeDocuments(dir.path(), misrouted);
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    EXPECT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "2 descriptor set(s) dropped during validation; 1 "
+                                          "descriptor-backed engine(s) loaded from"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO, "descriptor-backed engine(s) loaded from"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The probe's catch: two kernels completing to the same metadata tuple make the state
+/// manager's constructor throw, which must cost that engine and nothing else.
+TEST(TestDescriptorLoader, ValidationDropsAnEngineWhoseKernelsShareAMetadataTuple)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("duplicate_tuple"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:tuple_check_sibling"));
+
+    auto duplicated = makeSetDocuments('2', "test:duplicate_tuple");
+    auto& kernels = documentOfType(duplicated, ".kdp.json").at("kernelDescriptors");
+    kernels[1]["metadata"] = kernels[0]["metadata"];
+    writeDocuments(dir.path(), duplicated);
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:tuple_check_sibling");
+}
+
+/// A name hashing onto an engine registered elsewhere in the process: EngineManager would
+/// emplace-drop the loser while its id stayed advertised.
+TEST(TestDescriptorLoader, ValidationDropsAnEngineCollidingWithARegisteredName)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("collision"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:collision_check_sibling"));
+
+    static const std::string s_claimed = "test:already_claimed";
+    static const hipdnn_data_sdk::utilities::EngineRegistrar s_registrar{s_claimed};
+    writeDocuments(dir.path(), makeSetDocuments('2', s_claimed));
+
+    const auto sets = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:collision_check_sibling");
+}
+
+/// The loader registers the names it accepts, so a second load of the same directory has
+/// to recognise its own registrations rather than reject them as collisions.
+TEST(TestDescriptorLoader, ValidationIsIdempotentAcrossReloads)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("reload"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:reloaded"));
+
+    ASSERT_EQ(validatedSetsFrom(dir.path()).size(), 1u);
+
+    const auto reloaded = validatedSetsFrom(dir.path());
+
+    ASSERT_EQ(reloaded.size(), 1u);
+    EXPECT_EQ(reloaded.front().engine.name, "test:reloaded");
+}
+
+// ---------------------------------------------------------------------------
+// RFC 0020: UED format, collision handling, disable lever
+// ---------------------------------------------------------------------------
+
+/// The suffix is the only thing consulted. Nothing infers a type from a file's contents,
+/// and the stem is free-form documentation, so renaming every stem changes nothing.
+TEST(TestDescriptorLoader, ReadsTheTypeFromTheSuffixNotTheStem)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("stem_ignored"));
+    auto documents = makeSetDocuments('1', "test:stems");
+    referenceLastKernel(documents); // proves .ukd.json is read by suffix too
+
+    // Deliberately not the id, and deliberately not descriptive: a stem carrying no
+    // information at all must still load.
+    int index = 0;
+    for(const auto& document : documents)
+    {
+        std::ofstream file(
+            dir.path() / ("descriptor" + std::to_string(index++) + std::string(document.suffix)),
+            std::ios::binary);
+        file << document.body.dump(2) << '\n';
+    }
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:stems");
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 3u);
+}
+
+/// The name is hashed into a global id space, so an unscoped one is the name two vendors
+/// both pick. Rejected at parse rather than left to collide at registration.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseNameIsNotScoped)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unscoped_name"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "unscoped"));
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// Optional per RFC 0020 §4.2 and mapped to no hipDNN enum, so what is under test is that
+/// a conforming UED carrying them still loads -- the field used to be an unknown key.
+TEST(TestDescriptorLoader, AcceptsAnEngineDeclaringNumericalNotes)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("numerical_notes"));
+    auto documents = makeSetDocuments('1', "test:numerical");
+    documentOfType(documents, ".ued.json")["numerical_notes"]
+        = nlohmann::json::array({"tensor_core", "reduced_precision_reduction"});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.numericalNotes,
+              (std::vector<std::string>{"tensor_core", "reduced_precision_reduction"}));
+}
+
+/// A note repeated is reported twice downstream, so it is an authoring mistake rather
+/// than a redundancy the loader should quietly collapse.
+TEST(TestDescriptorLoader, DropsAnEngineRepeatingANumericalNote)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("repeated_note"));
+    auto documents = makeSetDocuments('1', "test:repeated");
+    documentOfType(documents, ".ued.json")["numerical_notes"]
+        = nlohmann::json::array({"tensor_core", "tensor_core"});
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+const std::string DISABLED_ENGINE_NAME = "test:disabled";
+const int64_t DISABLED_ENGINE_ID = hipdnn_data_sdk::utilities::engineNameToId(DISABLED_ENGINE_NAME);
+
+/// All three spellings RFC 0020 §12 admits reach the same engine. Parameterised over the
+/// identifier rather than repeated, since the matcher is one list walk for all three.
+class TestDisabledEngineIdentifier : public ::testing::TestWithParam<std::string>
+{
+};
+
+TEST_P(TestDisabledEngineIdentifier, SkipsTheEngineBeforeItIsRegistered)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("disabled"));
+    writeDocuments(dir.path(), makeSetDocuments('a', DISABLED_ENGINE_NAME));
+
+    // Surrounded by an unmatched entry and stray whitespace: one list is meant to span
+    // providers, so entries naming someone else's engine are skipped, not errors.
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disabled(
+        "HIPDNN_DISABLE_ENGINES", "other:engine, " + GetParam() + " ,");
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+// Declared out here because the preprocessor splits macro arguments on every comma it
+// sees, including the ones inside a braced initializer.
+const std::array<std::string, 6> DISABLED_SPELLINGS{
+    "ByName", "ByUuid", "ByHexId", "ByDecimalId", "ByLowercaseHexId", "ByUppercaseUuid"};
+
+INSTANTIATE_TEST_SUITE_P(
+    Spelling,
+    TestDisabledEngineIdentifier,
+    ::testing::Values(
+        DISABLED_ENGINE_NAME,
+        testUuid('a', ROLE_ENGINE),
+        hipdnn_data_sdk::utilities::formatEngineIdHex(DISABLED_ENGINE_ID),
+        std::to_string(DISABLED_ENGINE_ID),
+        // formatEngineIdHex's canonical spelling is uppercase; only equalsIgnoringCase,
+        // not ==, accepts this one.
+        [] {
+            auto hex = hipdnn_data_sdk::utilities::formatEngineIdHex(DISABLED_ENGINE_ID);
+            std::transform(hex.begin(), hex.end(), hex.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            return hex;
+        }(),
+        // testUuid's canonical spelling is lowercase; same reason in the other direction.
+        [] {
+            auto uuid = testUuid('a', ROLE_ENGINE);
+            std::transform(uuid.begin(), uuid.end(), uuid.begin(), [](unsigned char c) {
+                return static_cast<char>(std::toupper(c));
+            });
+            return uuid;
+        }()),
+    [](const ::testing::TestParamInfo<std::string>& info) {
+        return DISABLED_SPELLINGS.at(info.index);
+    });
+
+/// An entry naming nothing must not disable everything -- the shared-list case again,
+/// from the other side.
+TEST(TestDescriptorLoader, IgnoresADisableEntryThatNamesNoLoadedEngine)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("disabled_other"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:kept"));
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disabled(
+        "HIPDNN_DISABLE_ENGINES", "somebody:else");
+
+    EXPECT_EQ(loadFrom(dir.path()).size(), 1u);
+}
+
+/// Absent leaves the baseline the struct defaults to, which is what keeps a UED authored
+/// before the field existed loading unchanged.
+TEST(TestDescriptorLoader, DefaultsAnEngineWithNoSdkVersionToTheBaseline)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("no_sdk_version"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:baseline"));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.sdkVersion,
+              hipdnn_data_sdk::utilities::Version{
+                  hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE});
+}
+
+/// Carried as authored: the loader does not gate on it, since the floor it is compared
+/// against is a property of each graph and only known at match time.
+TEST(TestDescriptorLoader, CarriesTheEnginesDeclaredSdkVersion)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sdk_version"));
+    auto documents = makeSetDocuments('1', "test:versioned");
+    documentOfType(documents, ".ued.json")["sdk_version"] = "1.2.3";
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.sdkVersion, (hipdnn_data_sdk::utilities::Version{1, 2, 3}));
+}
+
+/// A version that cannot be parsed is an authoring mistake, not a zero: silently reading
+/// it as the baseline would let an engine claim a schema it does not understand.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseSdkVersionIsMalformed)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("bad_sdk_version"));
+    auto documents = makeSetDocuments('1', "test:bad_version");
+    documentOfType(documents, ".ued.json")["sdk_version"] = "1.2";
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// The inverse of the UED case: `version` is required on every type, with no absence-safe
+/// default. A KMD with no version drops, and the engine whose `metadata` named it goes
+/// with it -- which is what makes the rule enforceable rather than advisory.
+TEST(TestDescriptorLoader, RejectsANonUedDescriptorWithNoVersion)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("version_all"));
+    auto documents = makeSetDocuments('1', "test:versioned");
+    documentOfType(documents, ".kmd.json").erase("version");
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// RFC 0020 §13.2.1: the version check runs before duplicate detection, so a UED the
+/// runtime cannot read is dropped for its version alone and the descriptor it would have
+/// collided with is retained. Ordered the other way, an unreadable file would take a
+/// perfectly good engine down with it.
+TEST(TestDescriptorLoader, AnUnsupportedVersionDropsBeforeItCanCollideByName)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("version_first"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:contested"));
+
+    auto newer = makeSetDocuments('2', "test:contested");
+    documentOfType(newer, ".ued.json")["version"] = "2.0";
+    writeDocuments(dir.path(), newer);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:contested");
+    EXPECT_EQ(toString(sets.front().engine.id), testUuid('1', ROLE_ENGINE));
+}
+
+/// The same ordering for the `id` invariant: two UEDs share an id and differ in content,
+/// which is normally a drop-all collision, but one is unreadable so it never participates.
+TEST(TestDescriptorLoader, AnUnsupportedVersionDropsBeforeItCanCollideById)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("version_first_id"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:survivor"));
+
+    // Written to a second directory rather than beside the first: files are named for the
+    // id they carry, so writing this into one directory would overwrite the descriptor it
+    // is supposed to collide with and prove nothing. Without the version bump this is the
+    // drop-all case DropsAnIdTwoFilesDisagreeAbout covers.
+    auto casualtySet = makeSetDocuments('2', "test:casualty");
+    auto casualty = documentOfType(casualtySet, ".ued.json");
+    casualty["id"] = testUuid('1', ROLE_ENGINE);
+    casualty["version"] = "2.0";
+    writeDocument(dir.path() / "gfx950", TestDocument{".ued.json", casualty});
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:survivor");
+}
+
+/// RFC 0020 §4.3: the authored form is JSONC. Comments are the parser's business only --
+/// they must not reach the duplicate check, which compares parsed descriptors, so the same
+/// descriptor commented and uncommented is one definition rather than a collision.
+TEST(TestDescriptorLoader, ReadsCommentedDescriptorsAndIgnoresCommentsWhenComparing)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("jsonc"));
+    const auto documents = makeSetDocuments('1', "test:commented");
+    writeDocuments(dir.path(), documents);
+
+    // The same set again under a second arch directory, this time with a comment on every
+    // file: RFC 0020 §13.2.1's content-identical exception has to see through it.
+    const auto commented = dir.path() / "gfx950";
+    std::filesystem::create_directories(commented);
+    for(const auto& document : documents)
+    {
+        std::ofstream file(
+            commented / (document.body.at("id").get<std::string>() + std::string(document.suffix)),
+            std::ios::binary);
+        file << "// authored with a comment, per RFC 0020 §4.3\n" << document.body.dump(2) << "\n";
+    }
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:commented");
+}
+
+/// A UHD is read with uhd::readUhdDocument: a repeated key refuses the file instead of
+/// letting its last spelling win, and the engine keeps declared-order ranking.
+TEST(TestDescriptorLoader, RefusesAUhdRepeatingAKey)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_repeated_key"));
+    auto documents = makeSetDocuments('1', "test:uhd_repeated_key");
+    writeDocuments(dir.path(), documents);
+    const auto& model = documentOfType(documents, ".uhd.json");
+    auto text = model.dump(2);
+    text.insert(1, R"("name": "shadowed",)");
+    std::ofstream(dir.path() / (model.at("id").get<std::string>() + ".uhd.json"), std::ios::binary)
+        << text;
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+    EXPECT_TRUE(catalog.heuristics.empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "duplicate UHD key"))
+        << recorder.getRecordedLogsAsString();
+    const auto sets = resolveDescriptorSets(catalog);
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(firstBlockSize(sets.front()), 64);
+}
+
+/// RFC 0020 §4.3's authored form strips comments only; a trailing comma is a hard
+/// nlohmann parse_error.101, not the broader "permit trailing commas" many mean by
+/// "JSONC" (VS Code, tsconfig). The rejection is right -- pinned here so the label
+/// staying wrong in a docblock doesn't quietly become the behavior.
+TEST(TestDescriptorLoader, RejectsATrailingComma)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trailing_comma"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    std::ofstream(dir.path() / "broken.ued.json", std::ios::binary)
+        << R"({"version": "1.0", "id": "x",})";
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+}
+
+/// A `.json` naming no descriptor type is skipped before it is opened, so an unrelated
+/// JSON file under the descriptor root costs nothing. Distinct from IgnoresANonJsonFile,
+/// which never had a `.json` extension to begin with; the WARN is what distinguishes
+/// "skipped before opening" from "opened and rejected as malformed".
+TEST(TestDescriptorLoader, SkipsAJsonFileThatNamesNoDescriptorType)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("stray_json"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    std::ofstream(dir.path() / "notes.json", std::ios::binary) << R"({"id":"x"})";
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "notes.json"));
+}
+
+/// findFileType() requires a non-empty stem; a filename that is nothing but the suffix
+/// has none, so it names no type despite ending in one.
+TEST(TestDescriptorLoader, IgnoresAFileWhoseWholeNameIsASuffix)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("bare_suffix"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    std::ofstream(dir.path() / ".ued.json", std::ios::binary) << "{}";
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+    // The mechanism, not just the outcome: widening the stem guard types this file as a
+    // UED, which opens it and rejects `{}` with a per-file ERROR instead. The sibling
+    // engine survives either way, so only this WARN separates them.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "is not a descriptor filename"));
+}
+
+/// findFileType() is case-sensitive on purpose; an uppercased suffix must still warn
+/// instead of vanishing the way it did before the WARN check was widened to catch it.
+TEST(TestDescriptorLoader, IgnoresAnUppercasedSuffix)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uppercase_suffix"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    std::ofstream(dir.path() / "pointwise.KDP.JSON", std::ios::binary) << "{}";
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "pointwise.KDP.JSON"));
+}
+
+/// `arch` is optional and empty means arch-independent, but it has to survive the parse:
+/// KernelIngestorStateManager drops a pack whose arch excludes the calling device, so a
+/// field the loader silently discarded would leave that gate permanently open, and one
+/// the allow-list omitted would reject the whole pack as an unknown key.
+TEST(TestDescriptorLoader, CarriesAPacksDeclaredArchitectures)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("pack_arch"));
+    auto documents = makeSetDocuments('1', "test:arch");
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx90a", "gfx942"});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().arch, (std::vector<std::string>{"gfx90a", "gfx942"}));
+}
+
+namespace
+{
+
+const std::vector<std::string> INTACT_ONLY{"test:intact"};
+const std::vector<std::string> BOTH{"test:candidate", "test:intact"};
+
+nlohmann::json arch(std::initializer_list<std::string> entries)
+{
+    const nlohmann::json list = std::vector<std::string>(entries);
+    return list;
+}
+
+Documents candidateWithKernelArch(const nlohmann::json& packArch,
+                                  const nlohmann::json& kernelArch,
+                                  bool standalone)
+{
+    auto documents = makeSetDocuments('2', "test:candidate");
+    if(standalone)
+    {
+        referenceLastKernel(documents);
+        documentOfType(documents, ".ukd.json")["arch"] = kernelArch;
+        documentOfType(documents, ".kdp.json")["arch"] = packArch;
+        return documents;
+    }
+    auto& pack = documentOfType(documents, ".kdp.json");
+    pack["arch"] = packArch;
+    pack.at("kernelDescriptors")[0]["arch"] = kernelArch;
+    return documents;
+}
+
+/// Sorted names of the engines that load when @p candidate sits beside an intact engine.
+std::vector<std::string> engineNames(const Documents& candidate)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("generic_arch_rule"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    writeDocuments(dir.path(), candidate);
+
+    std::vector<std::string> names;
+    for(const auto& set : loadFrom(dir.path()))
+    {
+        names.push_back(set.engine.name);
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+} // namespace
+
+/// A generic-shaped name the table does not list matches no device, so its file is dropped.
+TEST(TestDescriptorLoader, DropsAPackNamingAGenericAbsentFromTheTable)
+{
+    EXPECT_EQ(engineNames(candidateWithKernelArch(arch({"gfx99-generic"}), arch({}), false)),
+              INTACT_ONLY);
+}
+
+TEST(TestDescriptorLoader, DropsAPackListingAGenericAndOneOfItsMembers)
+{
+    EXPECT_EQ(
+        engineNames(candidateWithKernelArch(arch({"gfx11-generic", "gfx1151"}), arch({}), false)),
+        INTACT_ONLY);
+    EXPECT_EQ(
+        engineNames(candidateWithKernelArch(arch({"gfx1151", "gfx11-generic"}), arch({}), false)),
+        INTACT_ONLY);
+    EXPECT_EQ(engineNames(candidateWithKernelArch(
+                  arch({"gfx11-generic", "gfx12-generic", "gfx942"}), arch({}), false)),
+              BOTH);
+}
+
+/// A kernel names a generic only when its pack lists that generic itself.
+TEST(TestDescriptorLoader, DropsAPackWhoseKernelNamesAGenericThePackDoesNotList)
+{
+    nlohmann::json members = nlohmann::json::array();
+    for(std::size_t i = 0; i < hipdnn_plugin_sdk::findGenericTarget("gfx11-generic")->memberCount;
+        ++i)
+    {
+        members.push_back(
+            std::string(hipdnn_plugin_sdk::findGenericTarget("gfx11-generic")->members[i]));
+    }
+    for(const bool standalone : {false, true})
+    {
+        EXPECT_EQ(
+            engineNames(candidateWithKernelArch(members, arch({"gfx11-generic"}), standalone)),
+            INTACT_ONLY)
+            << (standalone ? "standalone" : "inline");
+    }
+}
+
+TEST(TestDescriptorLoader, DropsAPackWhoseKernelOmitsOrExceedsTheGenericPackArch)
+{
+    for(const bool standalone : {false, true})
+    {
+        EXPECT_EQ(engineNames(candidateWithKernelArch(
+                      arch({"gfx11-generic", "gfx942"}), arch({"gfx942"}), standalone)),
+                  INTACT_ONLY)
+            << (standalone ? "standalone" : "inline");
+        EXPECT_EQ(engineNames(candidateWithKernelArch(
+                      arch({"gfx11-generic"}), arch({"gfx1151"}), standalone)),
+                  INTACT_ONLY)
+            << (standalone ? "standalone" : "inline");
+        EXPECT_EQ(engineNames(candidateWithKernelArch(
+                      arch({"gfx11-generic", "gfx942"}), arch({"gfx11-generic"}), standalone)),
+                  BOTH)
+            << (standalone ? "standalone" : "inline");
+    }
+    EXPECT_EQ(engineNames(candidateWithKernelArch(arch({"gfx11-generic"}), arch({}), false)), BOTH);
+}
+
+/// The default: a pack naming no architecture applies everywhere, so absence must parse
+/// as empty rather than as a constraint nothing satisfies.
+TEST(TestDescriptorLoader, APackWithNoDeclaredArchIsArchIndependent)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("pack_no_arch"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:no_arch"));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_TRUE(sets.front().packs.front().arch.empty());
+}
+
+/// Explicit `"arch": []` and an absent `arch` key both mean arch-independent; the
+/// validation added for arch entries must not reject the empty list itself.
+TEST(TestDescriptorLoader, AnExplicitlyEmptyArchIsArchIndependent)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("pack_arch_explicit_empty"));
+    auto documents = makeSetDocuments('1', "test:explicit_empty_arch");
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array();
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_TRUE(sets.front().packs.front().arch.empty());
+}
+
+/// Folders are organizational only: the walk is recursive and a file's directory means
+/// nothing to the loader, so a set split across a subdirectory resolves as one engine.
+TEST(TestDescriptorLoader, LoadsDescriptorsFromNestedFolders)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("nested"));
+    auto documents = makeSetDocuments('1', "test:nested");
+
+    // One descriptor a level down, the rest at the root: the cross-references that bind
+    // them carry ids, not paths.
+    writeDocument(dir.path() / "pointwise", documents.front());
+    documents.erase(documents.begin());
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:nested");
+}
+
+// ---------------------------------------------------------------------------
+// UKD: standalone kernel files and by-id references from a KDP
+// ---------------------------------------------------------------------------
+
+TEST(TestDescriptorLoader, LoadsAPackMixingInlineAndReferencedKernels)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_mixed"));
+    auto documents = makeSetDocuments('1', "test:mixed");
+    referenceLastKernel(documents);
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    const auto& kernels = sets.front().packs.front().kernels;
+    ASSERT_EQ(kernels.size(), 3u);
+    const auto referencedId = testUuid('1', 'a');
+    const auto it = std::find_if(kernels.begin(), kernels.end(), [&](const auto& kernel) {
+        return toString(kernel.id) == referencedId;
+    });
+    ASSERT_NE(it, kernels.end());
+    EXPECT_EQ(std::get<std::string>(it->metadata.at("dtype")), "HALF");
+}
+
+/// Guards resolveDescriptorSets' ordering: kernelIds must resolve into `kernels` before
+/// the "declares no kernels" check runs, or an all-references pack reads as empty.
+TEST(TestDescriptorLoader, LoadsAPackWhoseKernelsAreAllReferences)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_all_refs"));
+    auto documents = makeSetDocuments('1', "test:all_refs");
+    referenceLastKernel(documents);
+    referenceLastKernel(documents);
+    referenceLastKernel(documents);
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 3u);
+}
+
+TEST(TestDescriptorLoader, DropsAPackReferencingAKernelNoFileDefines)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_dangling"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    documentOfType(broken, ".kdp.json")["kernelDescriptors"].push_back(testUuid('f', 'f'));
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR,
+        "descriptor loader: pack 'pack' id=" + testUuid('2', ROLE_PACK) + " names kernel "
+            + testUuid('f', 'f') + ", which no descriptor defines; dropping the pack"));
+}
+
+TEST(TestDescriptorLoader, DropsAPackNamingTheSameKernelTwice)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_duplicate_ref"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    auto& kernelRefs = documentOfType(broken, ".kdp.json").at("kernelDescriptors");
+    const nlohmann::json duplicateRef = kernelRefs.back();
+    kernelRefs.push_back(duplicateRef);
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR,
+        "descriptor loader: pack 'pack' id=" + testUuid('2', ROLE_PACK) + " names kernel "
+            + testUuid('2', 'a') + " more than once; dropping the pack"));
+}
+
+/// The inline+reference spelling of the same duplicate, rather than ref+ref above.
+TEST(TestDescriptorLoader, DropsAPackWhoseReferencedKernelIsAlsoInline)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_ref_and_inline"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    // The standalone document drops in verbatim, `version` and all: one schema in two
+    // spellings, so whatever a `.ukd.json` may say, an inline entry may say too.
+    auto inlineAgain = documentOfType(broken, ".ukd.json");
+    documentOfType(broken, ".kdp.json")["kernelDescriptors"].push_back(inlineAgain);
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR,
+        "descriptor loader: pack 'pack' id=" + testUuid('2', ROLE_PACK) + " names kernel "
+            + testUuid('2', 'a') + " more than once; dropping the pack"));
+}
+
+TEST(TestDescriptorLoader, WarnsAboutAStandaloneKernelNoPackReferences)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_orphan"));
+    auto documents = makeSetDocuments('1', "test:orphan_kernel");
+    documents.push_back(TestDocument{".ukd.json",
+                                     {{"version", "1.0"},
+                                      {"id", testUuid('1', ROLE_STANDALONE_KERNEL)},
+                                      {"name", "unreferenced kernel"},
+                                      {"kernel_source",
+                                       {{"kind", "embedded_source"},
+                                        {"source_file", "Kernel.cpp"},
+                                        {"entry_point", "Entry"}}}}});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:orphan_kernel");
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 3u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, testUuid('1', ROLE_STANDALONE_KERNEL)));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "no pack references it"));
+}
+
+TEST(TestDescriptorLoader, SharesAStandaloneKernelBetweenTwoEngines)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_shared"));
+    auto first = makeSetDocuments('1', "test:first");
+    referenceLastKernel(first);
+    const auto sharedId = testUuid('1', 'a');
+
+    // A second, unrelated engine names the same standalone kernel: the two-packs-of-one-
+    // -engine collision is pre-existing behavior for identical metadata tuples, not this.
+    auto second = makeSetDocuments('2', "test:second");
+    documentOfType(second, ".kdp.json")["kernelDescriptors"].push_back(sharedId);
+
+    writeDocuments(dir.path(), first);
+    writeDocuments(dir.path(), second);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 2u);
+    for(const auto& set : sets)
+    {
+        ASSERT_EQ(set.packs.size(), 1u);
+        const auto& kernels = set.packs.front().kernels;
+        EXPECT_TRUE(std::any_of(kernels.begin(), kernels.end(), [&](const auto& kernel) {
+            return toString(kernel.id) == sharedId;
+        }));
+    }
+}
+
+/// Two files claiming the same kernel id are both ignored (DropsAnIdTwoFilesDisagreeAbout's
+/// pattern, one catalog map over), so the pack naming that id sees a dangling reference.
+TEST(TestDescriptorLoader, DropsAPackWhoseReferencedKernelConflicts)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_conflict"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    writeDocuments(dir.path(), broken);
+    auto& conflicting = documentOfType(broken, ".ukd.json");
+    conflicting["name"] = "a different kernel with the same id";
+    std::ofstream(dir.path() / "second-claim.ukd.json", std::ios::binary) << conflicting.dump(2);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR,
+        "descriptor loader: pack 'pack' id=" + testUuid('2', ROLE_PACK) + " names kernel "
+            + testUuid('2', 'a') + ", which no descriptor defines; dropping the pack"));
+}
+
+TEST(TestDescriptorLoader, RejectsAStandaloneKernelWithNoVersion)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_missing_version"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    documentOfType(broken, ".ukd.json").erase("version");
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "missing required key 'version'"));
+}
+
+/// The inline half of RejectsAStandaloneKernelWithNoVersion above: one rule, both
+/// spellings. A KDP's own `version` does not stand in for its kernels'.
+TEST(TestDescriptorLoader, RejectsAnInlineKernelWithNoVersion)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_no_version"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    documentOfType(broken, ".kdp.json").at("kernelDescriptors").front().erase("version");
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    // The locator is the point: "a 'kernelDescriptors' entry" alone names no file, and a
+    // shard layout ships the same filename under every arch.
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR, "missing required key 'version' in a 'kernelDescriptors' entry in "))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, ".kdp.json"));
+}
+
+/// Refused on its own rather than with its pack, per RFC 0017 §4. The pack stays at 1.0
+/// and loads while a kernel inside it is declined, which is the two versions being
+/// independent.
+TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_newer_version"));
+    auto documents = makeSetDocuments('1', "test:valid");
+    documentOfType(documents, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.2";
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    const auto& kernels = sets.front().packs.front().kernels;
+    ASSERT_EQ(kernels.size(), 2u);
+    // Which two, not merely how many: the gate has to drop the entry that declared 1.2.
+    EXPECT_EQ(toString(kernels[0].id), testUuid('1', '9'));
+    EXPECT_EQ(toString(kernels[1].id), testUuid('1', 'a'));
+    // The locator names the pack file; "a 'kernelDescriptors' entry" alone names nothing,
+    // and a shard layout ships the same filename under every arch.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, ".kdp.json"));
+}
+
+/// The gate runs before the body, so a skewed entry is not also judged for what its
+/// unreadable fields say. This one declares both 1.2 and an arch reaching past its pack:
+/// it is skipped for the version, and the arch violation -- which would otherwise fail
+/// the whole file -- is never reached. The file path orders it the same way, gating in
+/// the walk before any parser sees the document.
+TEST(TestDescriptorLoader, SkewOnAnInlineKernelSupersedesItsOtherViolations)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_skew_first"));
+    auto documents = makeSetDocuments('1', "test:valid");
+    auto& pack = documentOfType(documents, ".kdp.json");
+    pack["arch"] = nlohmann::json::array({"gfx942"});
+    auto& skewed = pack.at("kernelDescriptors").front();
+    skewed["version"] = "1.2";
+    skewed["arch"] = nlohmann::json::array({"gfx90a"});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    // The arch violation fails the whole file, so the pack surviving with its other two
+    // kernels is what proves the version gate ran first.
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 2u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "declares version 1.2"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The pack goes only once nothing is left to dispatch, through the existing no-kernels
+/// path rather than a second rule written for version skew.
+TEST(TestDescriptorLoader, DropsAPackWhoseInlineKernelsAllDeclareANewerUkdVersion)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_all_newer"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    for(auto& kernel : documentOfType(broken, ".kdp.json").at("kernelDescriptors"))
+    {
+        kernel["version"] = "2.0";
+    }
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_ERROR, "declares no kernels; dropping the pack"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The `.ukd.json` spelling of the same skew, gated by the walk against the same UKD row.
+/// The pack drops whole here, because a reference the walk skipped is a kernel nothing
+/// defines -- where an inline skew leaves the pack its readable kernels.
+TEST(TestDescriptorLoader, DropsAPackReferencingAStandaloneKernelOfANewerUkdVersion)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_newer_version"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    documentOfType(broken, ".ukd.json")["version"] = "1.2";
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "which no descriptor defines"))
+        << recorder.getRecordedLogsAsString();
+}
+
+namespace
+{
+
+/// Replaces the `.kdp.json` writeDocuments() wrote for @p documents with @p text: a layout
+/// the packer never writes, or text no packer could write at all.
+void overwritePack(const std::filesystem::path& directory,
+                   Documents& documents,
+                   const std::string& text)
+{
+    const auto id = documentOfType(documents, ".kdp.json").at("id").get<std::string>();
+    std::ofstream(directory / (id + ".kdp.json"), std::ios::binary | std::ios::trunc)
+        << text << '\n';
+}
+
+/// One spelling of a pack's top-level keys, and how many times the loader reads that pack's
+/// header and kernels for it: exactly, or at least where the exact count is not the point.
+struct PackReadingsCase
+{
+    std::string name;
+    std::function<std::string(const nlohmann::json& pack)> spell;
+    size_t readings;
+    bool exactly;
+};
+
+class TestDescriptorLoaderPackReadings : public ::testing::TestWithParam<PackReadingsCase>
+{
+};
+
+} // namespace
+
+TEST_P(TestDescriptorLoaderPackReadings, WarnsOncePerReadingOfThePack)
+{
+    // Each reading of the pack logs each WARN once, so the count tells kernels parsed while
+    // streaming (one reading) from kernels parsed again in a second pass (two).
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("pack_readings_" + GetParam().name));
+    auto documents = makeSetDocuments('1', "test:pack_readings");
+    auto& pack = documentOfType(documents, ".kdp.json");
+    pack["x-pack-note"] = "header";
+    auto& kernels = pack.at("kernelDescriptors");
+    kernels[0]["version"] = "1.2";
+    kernels[1]["x-kernel-note"] = "kernel";
+    writeDocuments(dir.path(), documents);
+    overwritePack(dir.path(), documents, GetParam().spell(pack));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 2u);
+    const auto& param = GetParam();
+    for(const std::string warning :
+        {"extension key 'x-pack-note'", "declares version 1.2", "extension key 'x-kernel-note'"})
+    {
+        const auto count = countLogsContaining(recorder, warning);
+        if(param.exactly)
+        {
+            EXPECT_EQ(count, param.readings) << warning << "\n"
+                                             << recorder.getRecordedLogsAsString();
+        }
+        else
+        {
+            EXPECT_GE(count, param.readings) << warning << "\n"
+                                             << recorder.getRecordedLogsAsString();
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Layout,
+    TestDescriptorLoaderPackReadings,
+    ::testing::Values(
+        PackReadingsCase{"packers_layout",
+                         [](const nlohmann::json& pack) { return membersText(packerLayout(pack)); },
+                         1,
+                         true},
+        // Streamed, then read again by the second pass the trailing key forces. A floor, so
+        // that logging those WARNs only once would not have to touch this row.
+        PackReadingsCase{"key_after_the_kernels",
+                         [](const nlohmann::json& pack) {
+                             auto members = packerLayout(pack);
+                             members.emplace_back("x-trailing-note", "after the kernels");
+                             return membersText(members);
+                         },
+                         1,
+                         false},
+        // The header is complete but for its version when the kernels open, and nothing
+        // streams before the version is known, so the second pass is the only reading.
+        PackReadingsCase{"version_after_the_kernels",
+                         [](const nlohmann::json& pack) {
+                             auto members = packerLayout(pack);
+                             const auto version = std::find_if(
+                                 members.begin(), members.end(), [](const auto& member) {
+                                     return member.first == "version";
+                                 });
+                             auto moved = *version;
+                             members.erase(version);
+                             members.push_back(std::move(moved));
+                             return membersText(members);
+                         },
+                         1,
+                         true}),
+    [](const ::testing::TestParamInfo<PackReadingsCase>& info) { return info.param.name; });
+
+namespace
+{
+
+/// One reading of a `.kdp.json`: the pack, the stage and reason that refused it, or neither
+/// when the version gate declined it.
+struct PackReading
+{
+    std::optional<KernelDescriptorPack> pack;
+    std::string stage; ///< "failed to parse" or "is not a valid descriptor"
+    std::string reason;
+};
+
+enum class PackOutcome
+{
+    LOADS,
+    SKIPPED,
+    REJECTED,
+};
+
+PackOutcome outcomeOf(const PackReading& reading)
+{
+    if(reading.pack)
+    {
+        return PackOutcome::LOADS;
+    }
+    return reading.reason.empty() ? PackOutcome::SKIPPED : PackOutcome::REJECTED;
+}
+
+/// Reads a `.kdp.json` as one DOM. It shares four production functions with the walk --
+/// requireObject, versionIsSupported, parseKernelDescriptorPackHeader and addPackKernelEntry
+/// -- so it is a streaming-equivalence oracle rather than a second reading of the rules: on a
+/// row that breaks one of them, both readings raise the same error by construction.
+PackReading readPackAsOneDocument(const std::string& text, const std::string& where)
+{
+    static const auto* const s_kdp = detail::findFileType("pack.kdp.json");
+    PackReading reading;
+    nlohmann::json document;
+    try
+    {
+        document = nlohmann::json::parse(
+            text, nullptr, /*allow_exceptions=*/true, /*ignore_comments=*/true);
+    }
+    catch(const std::exception& error)
+    {
+        reading.stage = "failed to parse";
+        reading.reason = error.what();
+        return reading;
+    }
+    try
+    {
+        detail::requireObject(document, "the document root");
+        if(!detail::versionIsSupported(document, s_kdp->major, s_kdp->minor, where))
+        {
+            return reading;
+        }
+        auto pack = detail::parseKernelDescriptorPackHeader(document, where);
+        for(const auto& entry : document.at("kernelDescriptors"))
+        {
+            detail::addPackKernelEntry(pack, entry, where);
+        }
+        reading.pack = std::move(pack);
+    }
+    catch(const std::exception& error)
+    {
+        reading.stage = "is not a valid descriptor";
+        reading.reason = error.what();
+    }
+    return reading;
+}
+
+void expectSameKernel(const KernelDescriptor& actual, const KernelDescriptor& expected)
+{
+    SCOPED_TRACE("kernel '" + expected.name + "'");
+    EXPECT_EQ(toString(actual.id), toString(expected.id));
+    EXPECT_EQ(actual.name, expected.name);
+    EXPECT_EQ(actual.source.kind, expected.source.kind);
+    EXPECT_EQ(actual.source.sourceFile, expected.source.sourceFile);
+    EXPECT_EQ(actual.source.entryPoint, expected.source.entryPoint);
+    EXPECT_EQ(actual.source.library, expected.source.library);
+    EXPECT_EQ(actual.source.tocKey, expected.source.tocKey);
+    EXPECT_EQ(actual.source.symbol, expected.source.symbol);
+    EXPECT_EQ(actual.source.sha256, expected.source.sha256);
+    ASSERT_EQ(actual.source.signature.size(), expected.source.signature.size());
+    for(size_t i = 0; i < expected.source.signature.size(); ++i)
+    {
+        EXPECT_EQ(actual.source.signature[i].kind, expected.source.signature[i].kind);
+        EXPECT_EQ(actual.source.signature[i].size, expected.source.signature[i].size);
+        EXPECT_EQ(actual.source.signature[i].offset, expected.source.signature[i].offset);
+        EXPECT_EQ(actual.source.signature[i].name, expected.source.signature[i].name);
+    }
+    // Launches by name: a reading that dropped or re-bound one would otherwise load equal.
+    ASSERT_EQ(actual.sources.size(), expected.sources.size());
+    for(const auto& [launch, source] : expected.sources)
+    {
+        const auto found = actual.sources.find(launch);
+        ASSERT_NE(found, actual.sources.end()) << "launch '" << launch << "'";
+        EXPECT_EQ(found->second.library, source.library);
+        EXPECT_EQ(found->second.tocKey, source.tocKey);
+        EXPECT_EQ(found->second.symbol, source.symbol);
+        EXPECT_EQ(found->second.sha256, source.sha256);
+        EXPECT_EQ(found->second.signature.size(), source.signature.size());
+    }
+    EXPECT_TRUE(actual.metadata == expected.metadata);
+    EXPECT_EQ(actual.priority, expected.priority);
+    EXPECT_EQ(actual.arch, expected.arch);
+    EXPECT_EQ(actual.originDirectory, expected.originDirectory);
+    EXPECT_EQ(actual.treeRoot, expected.treeRoot);
+}
+
+void expectSamePack(const KernelDescriptorPack& actual, const KernelDescriptorPack& expected)
+{
+    EXPECT_EQ(toString(actual.id), toString(expected.id));
+    EXPECT_EQ(actual.name, expected.name);
+    EXPECT_EQ(actual.matcherIds, expected.matcherIds);
+    EXPECT_EQ(toString(actual.engineId), toString(expected.engineId));
+    EXPECT_EQ(toString(actual.dispatchId), toString(expected.dispatchId));
+    EXPECT_EQ(actual.arch, expected.arch);
+    EXPECT_EQ(actual.kernelIds, expected.kernelIds);
+    ASSERT_EQ(actual.kernels.size(), expected.kernels.size());
+    for(size_t i = 0; i < expected.kernels.size(); ++i)
+    {
+        expectSameKernel(actual.kernels[i], expected.kernels[i]);
+    }
+}
+
+bool endsWith(const std::string& text, const std::string& suffix)
+{
+    return text.size() >= suffix.size()
+           && text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+void replaceAll(std::string& text, std::string_view token, const std::string& value)
+{
+    for(auto at = text.find(token); at != std::string::npos;
+        at = text.find(token, at + value.size()))
+    {
+        text.replace(at, token.size(), value);
+    }
+}
+
+/// A well-formed UUID per index, for a pack holding more kernels than testUuid has tags.
+std::string indexedUuid(size_t index)
+{
+    std::string id = "00000000-0000-4000-8000-000000000000";
+    const auto digits = std::to_string(index);
+    id.replace(id.size() - digits.size(), digits.size(), digits);
+    return id;
+}
+
+/// The oracle pack's header, every key valid. Its ids name nothing: the oracle compares
+/// catalog entries, before any cross-reference is resolved.
+Members oracleHeader()
+{
+    return {{"version", "1.0"},
+            {"id", testUuid('e', ROLE_PACK)},
+            {"name", "oracle pack"},
+            {"matchers",
+             nlohmann::json::array(
+                 {testUuid('e', ROLE_GRAPH_MATCHER), testUuid('e', ROLE_KERNEL_MATCHER)})},
+            {"engine", testUuid('e', ROLE_ENGINE)},
+            {"dispatch", testUuid('e', ROLE_DISPATCH)}};
+}
+
+Members oracleHeaderWithArch(const std::vector<std::string>& arch)
+{
+    auto header = oracleHeader();
+    header.emplace_back("arch", arch);
+    return header;
+}
+
+/// The oracle header without its @p key, for a row that spells that key itself.
+Members oracleHeaderWithout(const std::string& key)
+{
+    auto header = oracleHeader();
+    header.erase(std::find_if(
+        header.begin(), header.end(), [&key](const auto& member) { return member.first == key; }));
+    return header;
+}
+
+nlohmann::json oracleKernel(size_t index)
+{
+    return {
+        {"version", "1.0"},
+        {"id", indexedUuid(index)},
+        {"name", "kernel_" + std::to_string(index)},
+        {"kernel_source",
+         {{"kind", "embedded_source"}, {"source_file", "Kernel.cpp"}, {"entry_point", "Entry"}}},
+        {"metadata", {{"block_size", index}}},
+        {"priority", 0}};
+}
+
+/// @p header, then @p kernels as `kernelDescriptors`, then @p after.
+std::string oraclePackText(Members header, nlohmann::json kernels, const Members& after = {})
+{
+    header.emplace_back("kernelDescriptors", std::move(kernels));
+    header.insert(header.end(), after.begin(), after.end());
+    return membersText(header);
+}
+
+/// @p text with `$HEADER` standing for the oracle header's members, `$KERNEL` and
+/// `$KERNEL2` for two valid kernels, and `$KERNEL_BODY` for the first kernel's members
+/// without its `metadata` and `priority` -- so a row spells only the bytes it is about.
+std::string spell(std::string text)
+{
+    const auto inner
+        = [](const std::string& object) { return object.substr(1, object.size() - 2); };
+    auto body = oracleKernel(1);
+    body.erase("metadata");
+    body.erase("priority");
+    replaceAll(text, "$HEADER", inner(membersText(oracleHeader())));
+    replaceAll(text, "$KERNEL_BODY", inner(body.dump()));
+    replaceAll(text, "$KERNEL2", oracleKernel(2).dump());
+    replaceAll(text, "$KERNEL", oracleKernel(1).dump());
+    return text;
+}
+
+std::string packersLayoutText()
+{
+    return spell(R"({$HEADER,"kernelDescriptors":[$KERNEL,$KERNEL2]})");
+}
+
+/// nlohmann::json's own layout: keys sorted, so `version` follows `kernelDescriptors`.
+std::string sortedPackText()
+{
+    auto document = nlohmann::json::object();
+    for(const auto& [key, value] : oracleHeader())
+    {
+        document[key] = value;
+    }
+    document["kernelDescriptors"] = nlohmann::json::array({oracleKernel(1), oracleKernel(2)});
+    return document.dump();
+}
+
+/// The oracle pack with a comment in every position RFC 0020 §4.3's authored form allows
+/// one: around the root, around each key and value, and between and inside the kernels.
+std::string commentedPackText()
+{
+    auto members = oracleHeader();
+    members.emplace_back("kernelDescriptors",
+                         nlohmann::json::array({oracleKernel(1), oracleKernel(2)}));
+    std::string text = "// a leading line comment\n/* and a block */ {";
+    for(size_t i = 0; i < members.size(); ++i)
+    {
+        const auto& [key, value] = members[i];
+        text += std::string(i == 0 ? "" : ",") + " /* before a key */ " + nlohmann::json(key).dump()
+                + " // after a key\n : /* before a value */ ";
+        if(key != "kernelDescriptors")
+        {
+            text += value.dump();
+            continue;
+        }
+        text += "[ // the kernels\n";
+        for(size_t k = 0; k < value.size(); ++k)
+        {
+            text += std::string(k == 0 ? "" : ", /* between kernels */ ")
+                    + "{ /* inside a kernel */ " + value[k].dump().substr(1);
+        }
+        text += " /* after the last kernel */ ]";
+    }
+    return text + " } // a trailing line comment";
+}
+
+/// A pack of several hundred KiB, with a header value longer than 64 KiB ahead of the
+/// kernels, so no reader can take it in one buffer.
+std::string largePackText(bool keyAfterTheKernels)
+{
+    auto header = oracleHeader();
+    header.emplace_back("x-padding", std::string(size_t{70} * 1024, 'p'));
+    auto kernels = nlohmann::json::array();
+    for(size_t index = 1; index <= 1500; ++index)
+    {
+        kernels.push_back(oracleKernel(index));
+    }
+    Members after;
+    if(keyAfterTheKernels)
+    {
+        after.emplace_back("x-after", true);
+    }
+    return oraclePackText(std::move(header), std::move(kernels), after);
+}
+
+/// One oracle row. The whole-document reading shares the rules' code, so a row pins that
+/// streaming reads the pack as a DOM does, not which rule refused it; @c rule does that, as
+/// substrings of the streamed ERROR, for a REJECTED row whose rule no other test pins.
+struct OracleCase
+{
+    OracleCase(std::string caseName,
+               PackOutcome outcome,
+               std::function<std::string()> makeText,
+               std::vector<std::string> ruleText = {})
+        : name(std::move(caseName))
+        , expected(outcome)
+        , text(std::move(makeText))
+        , rule(std::move(ruleText))
+    {
+    }
+
+    std::string name;
+    PackOutcome expected;
+    std::function<std::string()> text;
+    std::vector<std::string> rule;
+};
+
+class TestDescriptorLoaderStreamingOracle : public ::testing::TestWithParam<OracleCase>
+{
+};
+
+std::function<std::string()> spelled(std::string text)
+{
+    return [text = std::move(text)] { return spell(text); };
+}
+
+std::vector<OracleCase> oracleCases()
+{
+    const auto loads = PackOutcome::LOADS;
+    const auto skipped = PackOutcome::SKIPPED;
+    const auto rejected = PackOutcome::REJECTED;
+    return {
+        // Layouts: the single pass, and the second pass behind each thing that forces it.
+        {"packers_layout", loads, packersLayoutText},
+        {"kernels_first", loads, spelled(R"({"kernelDescriptors":[$KERNEL,$KERNEL2],$HEADER})")},
+        {"key_after_kernels",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[$KERNEL,$KERNEL2],"x-after":true})")},
+        {"sorted_keys", loads, sortedPackText},
+        {"no_kernels", loads, spelled(R"({$HEADER,"kernelDescriptors":[]})")},
+        {"referenced_kernels",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":["00000000-0000-4000-8000-000000000007",)"
+                 R"($KERNEL,"00000000-0000-4000-8000-000000000008"]})")},
+        {"packaged_kernel",
+         loads,
+         [] {
+             auto kernel = oracleKernel(1);
+             kernel["kernel_source"]
+                 = {{"kind", "kpack"},
+                    {"library", "kpack/oracle.kpack"},
+                    {"toc_key", "oracle/1"},
+                    {"symbol", "oracle_kernel"},
+                    {"sha256", std::string(64, 'a')},
+                    {"signature",
+                     nlohmann::json::array(
+                         {{{"kind", "global_buffer"}, {"size", 8}, {"offset", 0}, {"name", "x"}},
+                          {{"kind", "by_value"}, {"size", 4}, {"offset", 8}}})}};
+             kernel["provenance"] = {{"tool", "hkp_pack"}, {"inputs", {1, 2.5, nullptr, true}}};
+             return oraclePackText(oracleHeader(), nlohmann::json::array({kernel}));
+         }},
+        {"multi_launch_kernel",
+         loads,
+         [] {
+             auto kernel = oracleKernel(1);
+             kernel.erase("kernel_source");
+             kernel["version"] = "1.1";
+             kernel["sources"] = {{"decode", launchSource("oracle_decode")},
+                                  {"merge", launchSource("oracle_merge")}};
+             return oraclePackText(oracleHeader(), nlohmann::json::array({kernel}));
+         }},
+        {"multi_launch_kernel_under_version_1_0",
+         rejected,
+         [] {
+             auto kernel = oracleKernel(1);
+             kernel.erase("kernel_source");
+             kernel["sources"] = {{"decode", launchSource("oracle_decode")},
+                                  {"merge", launchSource("oracle_merge")}};
+             return oraclePackText(oracleHeader(), nlohmann::json::array({kernel}));
+         }},
+        {"kernel_arch_within_pack",
+         loads,
+         [] {
+             auto kernel = oracleKernel(1);
+             kernel["arch"] = nlohmann::json::array({"gfx950"});
+             return oraclePackText(oracleHeaderWithArch({"gfx942", "gfx950"}),
+                                   nlohmann::json::array({kernel}));
+         }},
+        {"inline_kernel_newer_version",
+         loads,
+         [] {
+             auto skewed = oracleKernel(2);
+             skewed["version"] = "1.2";
+             return oraclePackText(oracleHeader(),
+                                   nlohmann::json::array({oracleKernel(1), skewed}));
+         }},
+        {"large_packers_layout", loads, [] { return largePackText(false); }},
+        {"large_key_after_kernels", loads, [] { return largePackText(true); }},
+        // Values of every JSON kind, as the lexer reports them.
+        {"floats",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"a":0.1,)"
+                 R"("b":-2.5e-300,"c":1.7976931348623157e308,"d":-0.0,"e":1E+2,)"
+                 R"("f":123456789.123456789,"g":4.9e-324}}]})")},
+        {"negatives",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"a":-1,)"
+                 R"("b":-9223372036854775808,"c":[-1,0,-7]},"priority":-3}]})")},
+        {"int64_max",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":)"
+                 R"({"a":9223372036854775807,"b":[9223372036854775807]},)"
+                 R"("priority":9223372036854775807}]})")},
+        // Past uint64, the lexer stops reporting an integer and reports a float.
+        {"beyond_uint64",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":)"
+                 R"({"a":18446744073709551616}}]})")},
+        {"booleans",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":)"
+                 R"({"a":true,"b":false}}]})")},
+        {"nulls_under_extension_keys",
+         loads,
+         spelled(R"({$HEADER,"x-null":null,"x-deep":{"a":[null,true,false,1.5,-2,{"b":null}]},)"
+                 R"("kernelDescriptors":[{$KERNEL_BODY,"x-null":null,"x-deep":[null,{"c":[]}],)"
+                 R"("metadata":{}}]})")},
+        {"string_escapes",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{)"
+                 R"("s":"\"q\" \\ \/ \b\f\n\r\t \u0041\u00e9\u4e2d\ud83d\ude00",)"
+                 R"("k\u00e9y\n":"a\u0000b"}}]})")},
+        {"escaped_header_key",
+         loads,
+         [] {
+             const auto text = oraclePackText(oracleHeaderWithout("name"),
+                                              nlohmann::json::array({oracleKernel(1)}));
+             return R"({"\u006eame":"escaped key",)" + text.substr(1);
+         }},
+        {"raw_utf8",
+         loads,
+         spelled(std::string(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"s":")")
+                 + "\xc3\xa9\xe4\xb8\xad\xf0\x9f\x98\x80" + R"("}}]})")},
+        {"utf8_bom", loads, [] { return "\xEF\xBB\xBF" + packersLayoutText(); }},
+        {"comments", loads, commentedPackText},
+        // A repeated key: a whole-document nlohmann parse keeps the last value, and streaming
+        // must agree, wherever the repeat falls relative to the kernels -- a bad earlier
+        // `kernelDescriptors` is ignored, and a bad later one replaces a good one
+        // (repeated_kernels_last_bad). Inherited behaviour, not format policy: if the format
+        // ever refuses duplicates, these rows flip to rejected.
+        {"repeated_header_key",
+         loads,
+         spelled(R"({$HEADER,"name":"renamed","kernelDescriptors":[$KERNEL]})")},
+        {"repeated_version_newer_first",
+         loads,
+         spelled(R"({"version":"2.0",$HEADER,"kernelDescriptors":[$KERNEL]})")},
+        {"repeated_kernel_keys",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"block_size":1},)"
+                 R"("metadata":{"block_size":2,"block_size":3},"priority":1,"priority":2}]})")},
+        {"repeated_kernels_last_good",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[42],"kernelDescriptors":[$KERNEL]})")},
+        // `kernelDescriptors` anywhere but the top level is not the pack's kernels.
+        {"nested_kernels_key_before",
+         loads,
+         spelled(R"({"x-note":{"kernelDescriptors":[42]},$HEADER,"kernelDescriptors":[$KERNEL]})")},
+        {"nested_kernels_key_after",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[$KERNEL],"x-note":{"kernelDescriptors":[42]}})")},
+        {"nested_kernels_key_in_a_kernel",
+         loads,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,)"
+                 R"("x-note":{"kernelDescriptors":[{"id":42}]},"metadata":{"block_size":1}}]})")},
+        // Declined by the version gate: no pack, and no error.
+        {"version_newer",
+         skipped,
+         [] {
+             auto header = oracleHeaderWithout("version");
+             header.emplace_back("version", "1.1");
+             return oraclePackText(header, nlohmann::json::array({oracleKernel(1)}));
+         }},
+        // Needs the repeated `version`: the kernels stream under 1.0, and the last value
+        // then declines the pack.
+        {"version_newer_after_a_streamed_kernel_error",
+         skipped,
+         spelled(R"({$HEADER,"kernelDescriptors":[{"version":"1.0"}],"version":"2.0"})")},
+        // Well-formed text that is not a valid pack.
+        {"root_array",
+         rejected,
+         [] { return "[" + packersLayoutText() + "]"; },
+         {"the document root must be a JSON object"}},
+        {"root_empty_array", rejected, spelled("[]"), {"the document root must be a JSON object"}},
+        {"root_string",
+         rejected,
+         spelled(R"("pack")"),
+         {"the document root must be a JSON object"}},
+        {"missing_version",
+         rejected,
+         [] {
+             return oraclePackText(oracleHeaderWithout("version"),
+                                   nlohmann::json::array({oracleKernel(1)}));
+         }},
+        {"version_not_a_string",
+         rejected,
+         [] {
+             auto header = oracleHeaderWithout("version");
+             header.emplace_back("version", 1.0);
+             return oraclePackText(header, nlohmann::json::array({oracleKernel(1)}));
+         },
+         {"key 'version' in ", " must be a string"}},
+        {"missing_kernel_descriptors",
+         rejected,
+         spelled(R"({$HEADER})"),
+         {"missing required key 'kernelDescriptors'"}},
+        {"nested_kernels_key_only",
+         rejected,
+         spelled(R"({$HEADER,"x-note":{"kernelDescriptors":[$KERNEL]}})"),
+         {"missing required key 'kernelDescriptors'"}},
+        {"kernel_descriptors_object",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":{"a":$KERNEL}})"),
+         {"key 'kernelDescriptors' in ", " must be an array"}},
+        {"kernel_descriptors_string",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":"kernels"})"),
+         {"key 'kernelDescriptors' in ", " must be an array"}},
+        {"kernel_entry_number",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[42]})"),
+         {"a 'kernelDescriptors' entry in ", " must be a JSON object"}},
+        {"kernel_entry_array",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[[$KERNEL]]})"),
+         {"a 'kernelDescriptors' entry in ", " must be a JSON object"}},
+        {"kernel_entry_bad_uuid",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":["not-a-uuid"]})"),
+         {"key 'kernelDescriptors' in ", "holds a value that is not a UUID"}},
+        {"first_bad_kernel_wins",
+         rejected,
+         [] {
+             auto missingId = oracleKernel(2);
+             missingId.erase("id");
+             auto unknownKey = oracleKernel(3);
+             unknownKey["zzz"] = 1;
+             return oraclePackText(oracleHeader(),
+                                   nlohmann::json::array({oracleKernel(1), missingId, unknownKey}));
+         },
+         {"missing required key 'id' in a 'kernelDescriptors' entry"}},
+        {"null_metadata_value",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"a":null}}]})"),
+         {"metadata 'a' must be a boolean, a number, a string, or an array of integers"}},
+        {"float_list_metadata",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"a":[1.5]}}]})"),
+         {"metadata 'a' must be an array of integers"}},
+        {"metadata_above_int64_max",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":)"
+                 R"({"a":9223372036854775808}}]})"),
+         {"metadata 'a' is too large for a 64-bit signed integer"}},
+        {"priority_uint64_max",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,)"
+                 R"("priority":18446744073709551615}]})"),
+         {"priority is too large for a 64-bit signed integer"}},
+        {"priority_float",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"priority":1.5}]})"),
+         {"priority must be an integer"}},
+        {"header_unknown_key_before_kernels",
+         rejected,
+         spelled(R"({$HEADER,"bogus":1,"kernelDescriptors":[{"version":"1.0"}]})")},
+        {"header_unknown_key_after_kernels",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{"version":"1.0"}],"bogus":1})")},
+        // The repeated-key rule above, the other way round.
+        {"repeated_kernels_last_bad",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[$KERNEL],"kernelDescriptors":[42]})")},
+        {"pack_arch_after_kernels",
+         rejected,
+         [] {
+             auto kernel = oracleKernel(1);
+             kernel["arch"] = nlohmann::json::array({"gfx942"});
+             return oraclePackText(oracleHeader(),
+                                   nlohmann::json::array({kernel}),
+                                   {{"arch", nlohmann::json::array({"gfx90a"})}});
+         }},
+        // Text a JSON parser refuses, with the error in every position relative to the
+        // kernels and to the errors a valid-looking pack would raise.
+        {"empty", rejected, spelled("")},
+        {"whitespace_only", rejected, spelled(" \n\t ")},
+        {"comment_only", rejected, spelled("// nothing but a comment\n")},
+        {"not_json", rejected, spelled("not json")},
+        {"missing_colon", rejected, spelled(R"({"version" "1.0"})")},
+        {"bad_literal",
+         rejected,
+         spelled(R"({$HEADER,"x-flag":tru,"kernelDescriptors":[$KERNEL]})")},
+        {"leading_zero",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"a":01}}]})")},
+        {"float_overflow",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"a":1e400}}]})")},
+        {"truncated",
+         rejected,
+         [] {
+             auto text = packersLayoutText();
+             text.pop_back();
+             return text;
+         }},
+        {"truncated_inside_a_kernel",
+         rejected,
+         [] {
+             const auto text = packersLayoutText();
+             return text.substr(0, text.find("kernel_source"));
+         }},
+        {"trailing_comma_in_kernels",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[$KERNEL,]})")},
+        {"trailing_comma_after_kernels",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[$KERNEL],})")},
+        {"trailing_garbage", rejected, [] { return packersLayoutText() + "x"; }},
+        {"two_documents", rejected, [] { return packersLayoutText() + packersLayoutText(); }},
+        {"invalid_utf8",
+         rejected,
+         spelled(std::string(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"s":")")
+                 + "\xff" + R"("}}]})")},
+        {"control_character",
+         rejected,
+         spelled(std::string(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"s":")")
+                 + "\x01" + R"("}}]})")},
+        {"lone_surrogate",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"s":"\ud800"}}]})")},
+        {"bad_escape",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{$KERNEL_BODY,"metadata":{"s":"\x"}}]})")},
+        {"partial_bom", rejected, [] { return "\xEF\xBB" + packersLayoutText(); }},
+        {"unterminated_block_comment",
+         rejected,
+         [] { return packersLayoutText() + "/* never closed"; }},
+        {"kernel_error_then_syntax_error",
+         rejected,
+         spelled(R"({$HEADER,"kernelDescriptors":[{"version":"1.0"}])")},
+        {"header_error_then_syntax_error",
+         rejected,
+         spelled(R"({$HEADER,"bogus":1,"kernelDescriptors":[$KERNEL])")},
+    };
+}
+
+} // namespace
+
+TEST_P(TestDescriptorLoaderStreamingOracle, ReadsAPackAsTheWholeDocumentReadingDoes)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("oracle_" + GetParam().name));
+    const auto path = dir.path() / "pack.kdp.json";
+    const auto text = GetParam().text();
+    std::ofstream(path, std::ios::binary) << text;
+
+    std::optional<KernelDescriptorPack> streamed;
+    std::vector<std::string> errors;
+    {
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const auto catalog = loadDescriptorCatalog(dir.path());
+        ASSERT_LE(catalog.packs.size(), 1u);
+        if(!catalog.packs.empty())
+        {
+            streamed = catalog.packs.begin()->second.descriptor;
+        }
+        for(const auto& log : recorder.getRecordedLogs())
+        {
+            if(log.severity == HIPDNN_SEV_ERROR)
+            {
+                errors.push_back(log.message);
+            }
+        }
+    }
+    // Read once the recorder is closed: this reading warns as the walk does, and those
+    // lines are not the walk's.
+    const auto whole = readPackAsOneDocument(text, path.string());
+    std::string logged;
+    for(const auto& error : errors)
+    {
+        logged += error + "\n";
+    }
+
+    // Pinning the expected outcome keeps a row honest: a typo that turned a value row into
+    // a syntax error would otherwise agree with itself and pass.
+    ASSERT_EQ(outcomeOf(whole), GetParam().expected) << whole.reason;
+    ASSERT_EQ(streamed.has_value(), whole.pack.has_value()) << logged;
+    if(whole.pack)
+    {
+        expectSamePack(*streamed, *whole.pack);
+    }
+    if(whole.reason.empty())
+    {
+        EXPECT_TRUE(errors.empty()) << logged;
+        return;
+    }
+    ASSERT_EQ(errors.size(), 1u) << logged;
+    EXPECT_NE(errors.front().find(whole.stage), std::string::npos) << logged;
+    EXPECT_NE(errors.front().find("pack.kdp.json"), std::string::npos) << logged;
+    EXPECT_TRUE(endsWith(errors.front(), whole.reason))
+        << "streamed: " << errors.front() << "\nwhole document: " << whole.reason;
+    for(const auto& part : GetParam().rule)
+    {
+        EXPECT_NE(errors.front().find(part), std::string::npos)
+            << "rule '" << part << "' not in: " << errors.front();
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(Kdp,
+                         TestDescriptorLoaderStreamingOracle,
+                         ::testing::ValuesIn(oracleCases()),
+                         [](const ::testing::TestParamInfo<OracleCase>& info) {
+                             return info.param.name;
+                         });
+
+TEST(TestDescriptorLoader, ScansAPackInThePackersLayoutInOnePass)
+{
+    // The single pass's defining property: the header is whole when the kernels open, so
+    // they are parsed as they stream past and nothing is left for a second pass.
+    const auto* const kdp = detail::findFileType("pack.kdp.json");
+    ASSERT_NE(kdp, nullptr);
+    const std::string where = "pack.kdp.json";
+    nlohmann::json header;
+    detail::PackScan scan;
+    detail::scanKernelDescriptorPack(
+        packersLayoutText(), header, scan, where, kdp->major, kdp->minor);
+
+    EXPECT_EQ(scan.kernelArrays, 1u);
+    EXPECT_FALSE(scan.keysAfterKernels);
+    EXPECT_FALSE(scan.headerError);
+    EXPECT_FALSE(scan.kernelError);
+    ASSERT_TRUE(scan.pack.has_value());
+    ASSERT_EQ(scan.pack->kernels.size(), 2u);
+    EXPECT_EQ(scan.pack->kernels[0].name, "kernel_1");
+    EXPECT_EQ(scan.pack->kernels[1].name, "kernel_2");
+}
+
+namespace
+{
+
+std::string readText(const std::filesystem::path& path)
+{
+    std::ifstream file(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
+/// What resolveDescriptorSets must make of the pack @p documents wrote under @p root: its
+/// inline kernels, then its referenced kernels, each stamped with the file it came from.
+KernelDescriptorPack resolvedPackAsOneDocument(const std::filesystem::path& root,
+                                               Documents& documents)
+{
+    const auto packPath
+        = root / (documentOfType(documents, ".kdp.json").at("id").get<std::string>() + ".kdp.json");
+    auto reading = readPackAsOneDocument(readText(packPath), packPath.string());
+    if(!reading.pack)
+    {
+        throw std::runtime_error(packPath.string() + " does not read as a pack: " + reading.reason);
+    }
+    auto pack = std::move(*reading.pack);
+    for(auto& kernel : pack.kernels)
+    {
+        kernel.originDirectory = packPath.parent_path();
+        kernel.treeRoot = root;
+    }
+    for(const auto& kernelId : pack.kernelIds)
+    {
+        const auto kernelPath = root / (toString(kernelId) + ".ukd.json");
+        auto kernel = detail::parseKernelDescriptor(
+            nlohmann::json::parse(readText(kernelPath), nullptr, true, /*ignore_comments=*/true),
+            kernelPath.string());
+        kernel.originDirectory = kernelPath.parent_path();
+        kernel.treeRoot = root;
+        pack.kernels.push_back(std::move(kernel));
+    }
+    return pack;
+}
+
+} // namespace
+
+TEST(TestDescriptorLoader, ResolvesEachPackToItsWholeDocumentReading)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("resolve_oracle"));
+    auto first = makeSetDocuments('1', "test:resolve_first");
+    referenceLastKernel(first);
+    auto second = makeSetDocuments('2', "test:resolve_second");
+    // The second pack references the first engine's standalone kernel, so one catalog
+    // kernel lands in two packs, and is written in nlohmann's sorted layout, so it takes
+    // the second pass.
+    documentOfType(second, ".kdp.json")["kernelDescriptors"].push_back(testUuid('1', 'a'));
+    writeDocuments(dir.path(), first);
+    writeDocuments(dir.path(), second);
+    overwritePack(dir.path(), second, documentOfType(second, ".kdp.json").dump(2));
+
+    const auto sets = resolveDescriptorSets(loadDescriptorCatalog(dir.path()));
+
+    const std::array<KernelDescriptorPack, 2> expected{
+        resolvedPackAsOneDocument(dir.path(), first),
+        resolvedPackAsOneDocument(dir.path(), second)};
+    ASSERT_EQ(sets.size(), expected.size());
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        SCOPED_TRACE(sets[i].engine.name);
+        ASSERT_EQ(sets[i].packs.size(), 1u);
+        expectSamePack(sets[i].packs.front(), expected[i]);
+    }
+}
+
+namespace
+{
+
+/// The argument list the packager reads out of a hipcc-compiled kernel: three device
+/// pointers, no `name` key, because clang records no argument names for HIP.
+nlohmann::json packagedSignature()
+{
+    return nlohmann::json::array({{{"kind", "global_buffer"}, {"size", 8}, {"offset", 0}},
+                                  {{"kind", "global_buffer"}, {"size", 8}, {"offset", 8}},
+                                  {{"kind", "global_buffer"}, {"size", 8}, {"offset", 16}}});
+}
+
+} // namespace
+
+/// The shape the build-time descriptor packager emits: `kpack` kind, the archive
+/// coordinates beside it, and a `provenance` block on the kernel entry. It loads, and all
+/// five coordinates survive parsing -- an adapter needs every one of them to name a single
+/// code object and vouch for it, so dropping any of them silently would only surface at
+/// dispatch.
+TEST(TestDescriptorLoader, AcceptsAPackagedKernelAndCarriesItsCoordinates)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("packaged_kernel"));
+    auto packaged = makeSetDocuments('1', "test:packaged");
+    auto& kernel = documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front();
+    kernel["kernel_source"] = {{"kind", "kpack"},
+                               {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+                               {"toc_key", "PointwiseAdd/block64"},
+                               {"symbol", "PointwiseAdd"},
+                               {"sha256", std::string(64, 'a')},
+                               {"signature", packagedSignature()}};
+    kernel["provenance"] = {{"origin_kind", "hip"}, {"entry", "PointwiseAdd"}};
+    writeDocuments(dir.path(), packaged);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:packaged");
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    ASSERT_EQ(sets.front().packs.front().kernels.size(), 3u);
+    const auto& source = sets.front().packs.front().kernels.front().source;
+    EXPECT_EQ(source.kind, KernelSourceKind::KPACK);
+    EXPECT_EQ(source.library, "kpack/hip_kernel_provider_gfx942.kpack");
+    EXPECT_EQ(source.tocKey, "PointwiseAdd/block64");
+    EXPECT_EQ(source.symbol, "PointwiseAdd");
+    EXPECT_EQ(source.sha256, std::string(64, 'a'));
+    ASSERT_EQ(source.signature.size(), 3u);
+    EXPECT_EQ(source.signature[2].kind, "global_buffer");
+    EXPECT_EQ(source.signature[2].size, 8u);
+    EXPECT_EQ(source.signature[2].offset, 16u);
+    // An absent `name` parses to empty rather than to anything a comparison could disagree
+    // with -- the HIP producer emits none.
+    EXPECT_TRUE(source.signature[2].name.empty());
+    // Each kind fills only its own fields, so a consumer may read them under the tag alone.
+    EXPECT_TRUE(source.sourceFile.empty());
+    EXPECT_TRUE(source.entryPoint.empty());
+}
+
+/// The shape the packer emits for a multi-launch kernel: `sources` under UKD 1.1, one
+/// complete kpack source per launch. Both launches live in one module, so they share a
+/// library and a toc_key and differ in symbol -- and `source`, which a multi-launch kernel
+/// does not have, stays default.
+TEST(TestDescriptorLoader, AcceptsAMultiLaunchKernelAndCarriesEachLaunchByName)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("multi_launch_kernel"));
+    auto documents = makeSetDocuments('1', "test:multi_launch");
+    spellAsMultiLaunch(documents);
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& kernel = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(kernel.sources.size(), 2u);
+    EXPECT_EQ(kernel.sources.at("decode").symbol, "decode_kernel");
+    EXPECT_EQ(kernel.sources.at("merge").symbol, "merge_kernel");
+    EXPECT_EQ(kernel.sources.at("decode").tocKey, kernel.sources.at("merge").tocKey);
+    EXPECT_EQ(kernel.sources.at("merge").sha256, std::string(64, 'a'));
+    EXPECT_EQ(kernel.sources.at("merge").signature.size(), 1u);
+    EXPECT_TRUE(kernel.source.sourceFile.empty());
+    EXPECT_TRUE(kernel.source.symbol.empty());
+}
+
+/// Same shape in a standalone `.ukd.json`, whose version the FILE_TYPES gate reads: UKD 1.1
+/// is within what this build reads, where a 1.0 runtime skips it as a newer minor.
+TEST(TestDescriptorLoader, AcceptsAMultiLaunchKernelInAStandaloneUkd)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("multi_launch_ukd"));
+    auto documents = makeSetDocuments('1', "test:multi_launch_ukd");
+    auto inlineKernel = spellAsMultiLaunch(documents);
+    documentOfType(documents, ".kdp.json")["kernelDescriptors"]
+        = nlohmann::json::array({inlineKernel["id"]});
+    documents.push_back(TestDocument{".ukd.json", inlineKernel});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.front().kernels.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.front().sources.size(), 2u);
+}
+
+/// One kernel may be launched under two launch names (the same grid-shape-independent kernel
+/// run twice with different arguments): the loader keeps both entries, whichever spelling
+/// carries them.
+TEST(TestDescriptorLoader, AcceptsTwoLaunchNamesNamingOneKernelInAStandaloneUkd)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("same_kernel_ukd"));
+    auto documents = makeSetDocuments('1', "test:same_kernel_ukd");
+    auto inlineKernel = spellAsMultiLaunch(documents);
+    inlineKernel["sources"]["merge"]["symbol"] = inlineKernel["sources"]["decode"]["symbol"];
+    documentOfType(documents, ".kdp.json")["kernelDescriptors"]
+        = nlohmann::json::array({inlineKernel["id"]});
+    documents.push_back(TestDocument{".ukd.json", inlineKernel});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& kernel = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(kernel.sources.size(), 2u);
+    EXPECT_EQ(kernel.sources.at("merge").symbol, "decode_kernel");
+    EXPECT_EQ(kernel.sources.at("decode").symbol, "decode_kernel");
+}
+
+TEST(TestDescriptorLoader, AcceptsTwoLaunchNamesNamingOneKernelInline)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("same_kernel_inline"));
+    auto documents = makeSetDocuments('1', "test:same_kernel_inline");
+    auto& sources = spellAsMultiLaunch(documents).at("sources");
+    sources["merge"]["symbol"] = sources.at("decode").at("symbol");
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& kernel = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(kernel.sources.size(), 2u);
+    EXPECT_EQ(kernel.sources.at("merge").symbol, kernel.sources.at("decode").symbol);
+    EXPECT_EQ(kernel.sources.at("merge").tocKey, kernel.sources.at("decode").tocKey);
+}
+
+/// The selector revision digests every launch's code object, so a pack whose launch is
+/// rebuilt does not keep a revision a ranker was trained against. Each launch carries its
+/// own symbol, toc_key and sha256, and each of them counts on its own.
+TEST(TestDescriptorLoader, ChangingALaunchCodeObjectChangesTheEngineSelectorRevision)
+{
+    const auto revisionWith
+        = [&](const std::string& launch, const std::string& field, const std::string& value) {
+              const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("revision_a"));
+              auto documents = makeSetDocuments('1', "test:revision_a");
+              spellAsMultiLaunch(documents).at("sources").at(launch)[field] = value;
+              writeDocuments(dir.path(), documents);
+              return engineSelectorRevision(loadFrom(dir.path()).at(0));
+          };
+
+    // Setting a field to the value it already has leaves the pack as authored.
+    const std::string baseline = revisionWith("merge", "symbol", "merge_kernel");
+    EXPECT_EQ(baseline, revisionWith("decode", "symbol", "decode_kernel"));
+
+    const std::vector<std::pair<std::string, std::string>> edits
+        = {{"symbol", "rocke_changed"},
+           {"toc_key", "multi/changed"},
+           {"sha256", std::string(64, 'b')}};
+    for(const std::string launch : {"decode", "merge"})
+    {
+        for(const auto& [field, value] : edits)
+        {
+            SCOPED_TRACE(std::string(launch).append(".").append(field));
+            EXPECT_NE(revisionWith(launch, field, value), baseline);
+        }
+    }
+}
+
+/// A launch name is `^[a-z][a-z0-9_]*$`: underscores and digits after the first letter are
+/// part of the name.
+TEST(TestDescriptorLoader, AcceptsLaunchNamesWithUnderscoresAndDigits)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("launch_name_chars"));
+    auto documents = makeSetDocuments('1', "test:launch_name_chars");
+    auto& sources = spellAsMultiLaunch(documents).at("sources");
+    sources["seg_1"] = sources.at("decode");
+    sources["seg_2"] = sources.at("merge");
+    sources.erase("decode");
+    sources.erase("merge");
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& kernel = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(kernel.sources.size(), 2u);
+    EXPECT_TRUE(kernel.sources.count("seg_1"));
+    EXPECT_TRUE(kernel.sources.count("seg_2"));
+}
+
+/// Both spellings of the exactly-one rule are refused with the rule's own message. The
+/// violation rows above only see that the engine was dropped, which a missing `kernel_source`
+/// would also cause by another route, so the message is what tells the rule from its absence.
+TEST(TestDescriptorLoader, RefusesAKernelWithBothOrNeitherOfKernelSourceAndSources)
+{
+    for(const bool both : {true, false})
+    {
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+            uniqueDirectory(both ? "both_source_spellings" : "no_source_spelling"));
+        auto documents = makeSetDocuments('1', "test:one_spelling");
+        auto& kernel = spellAsMultiLaunch(documents);
+        if(both)
+        {
+            kernel["kernel_source"] = launchSource("single");
+        }
+        else
+        {
+            kernel.erase("sources");
+        }
+        writeDocuments(dir.path(), documents);
+
+        EXPECT_TRUE(loadFrom(dir.path()).empty());
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                              "must carry exactly one of 'kernel_source'"))
+            << (both ? "both: " : "neither: ") << recorder.getRecordedLogsAsString();
+    }
+}
+
+namespace
+{
+
+/// Writes a packaged kernel whose only departure from the shape above is `sha256`, so a
+/// rejection can only be the digest and not some other part of the document.
+void writePackagedKernelWithSha256(const std::filesystem::path& where, const std::string& digest)
+{
+    auto packaged = makeSetDocuments('1', "test:sha256");
+    documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
+        = {{"kind", "kpack"},
+           {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+           {"toc_key", "PointwiseAdd/block64"},
+           {"symbol", "PointwiseAdd"},
+           {"sha256", digest},
+           {"signature", packagedSignature()}};
+    writeDocuments(where, packaged);
+}
+
+/// Asserts the digest is refused and that the message can be acted on: it names the key, the
+/// locator, and the text that was wrong. A rejection whose message carries none of the three
+/// sends the reader to grep the loader rather than to their own descriptor.
+void expectSha256Rejected(const std::string& digest, const std::string& scratchLabel)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(scratchLabel));
+    writePackagedKernelWithSha256(dir.path(), digest);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key 'sha256' in"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel_source"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "'" + digest + "'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+} // namespace
+
+TEST(TestDescriptorLoader, RejectsASha256ThatIsTooShort)
+{
+    // One character short is what a truncated copy-paste produces, and it is the case a plain
+    // non-empty check cannot see.
+    expectSha256Rejected(std::string(63, 'a'), "sha256_short");
+}
+
+TEST(TestDescriptorLoader, RejectsASha256ThatIsTooLong)
+{
+    expectSha256Rejected(std::string(65, 'a'), "sha256_long");
+}
+
+TEST(TestDescriptorLoader, RejectsASha256WithUppercaseHex)
+{
+    // Rejected rather than folded: the packer emits `hexdigest()` and nothing else, and two
+    // spellings of one digest compare unequal wherever the field is compared as text.
+    expectSha256Rejected(std::string(64, 'A'), "sha256_upper");
+}
+
+TEST(TestDescriptorLoader, RejectsASha256WithANonHexCharacter)
+{
+    expectSha256Rejected(std::string(63, 'a') + "z", "sha256_nonhex");
+}
+
+TEST(TestDescriptorLoader, RejectsASha256ThatIsEmpty)
+{
+    // requireString already refuses an empty value; the length rule must own the case anyway,
+    // in case requireString ever softens.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_empty"));
+    writePackagedKernelWithSha256(dir.path(), "");
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "sha256"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestDescriptorLoader, AcceptsAConformingSha256)
+{
+    // A real hexdigest rather than 64 repeated characters, so the case still holds if the rule
+    // is ever tightened past "64 of [0-9a-f]".
+    const std::string digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_ok"));
+    writePackagedKernelWithSha256(dir.path(), digest);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    ASSERT_FALSE(sets.front().packs.front().kernels.empty());
+    EXPECT_EQ(sets.front().packs.front().kernels.front().source.sha256, digest);
+}
+
+namespace
+{
+
+/// Writes a packaged kernel whose only departure from the conforming shape is `signature`,
+/// so a rejection can only be the argument list.
+void writePackagedKernelWithSignature(const std::filesystem::path& where,
+                                      const nlohmann::json& signature)
+{
+    auto packaged = makeSetDocuments('1', "test:signature");
+    documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
+        = {{"kind", "kpack"},
+           {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+           {"toc_key", "PointwiseAdd/block64"},
+           {"symbol", "PointwiseAdd"},
+           {"sha256", std::string(64, 'a')},
+           {"signature", signature}};
+    writeDocuments(where, packaged);
+}
+
+/// Asserts the argument list is refused with a message that can be acted on: the key, the
+/// locator, and -- because arguments have no names to be called by on the HIP path -- the
+/// position of the offending one.
+void expectSignatureRejected(const nlohmann::json& signature,
+                             const std::string& scratchLabel,
+                             const std::string& expectedText)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(scratchLabel));
+    writePackagedKernelWithSignature(dir.path(), signature);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, expectedText))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel_source"))
+        << recorder.getRecordedLogsAsString();
+}
+
+} // namespace
+
+TEST(TestDescriptorLoader, RejectsAPackagedKernelWithNoSignature)
+{
+    // The key is required rather than defaulted because an empty list is a real answer --
+    // a kernel that takes no arguments -- and absence must not silently become it.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("signature_absent"));
+    auto packaged = makeSetDocuments('1', "test:signature");
+    documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
+        = {{"kind", "kpack"},
+           {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+           {"toc_key", "PointwiseAdd/block64"},
+           {"symbol", "PointwiseAdd"},
+           {"sha256", std::string(64, 'a')}};
+    writeDocuments(dir.path(), packaged);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "missing required key 'signature'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestDescriptorLoader, RejectsASignatureThatIsNotAnArray)
+{
+    expectSignatureRejected(nlohmann::json::object(), "signature_object", "must be an array");
+}
+
+TEST(TestDescriptorLoader, RejectsASignatureEntryThatIsNotAnObject)
+{
+    expectSignatureRejected(
+        nlohmann::json::array({"global_buffer"}), "signature_scalar", "signature[0]");
+}
+
+TEST(TestDescriptorLoader, RejectsASignatureEntryMissingItsKind)
+{
+    expectSignatureRejected(nlohmann::json::array({{{"size", 8}, {"offset", 0}}}),
+                            "signature_no_kind",
+                            "missing required key 'kind'");
+}
+
+TEST(TestDescriptorLoader, RejectsASignatureEntryWithANegativeSize)
+{
+    // A kernarg width is unsigned, so a negative one is a broken producer rather than a
+    // value to clamp. Caught here because get<uint32_t>() would wrap it into a huge one.
+    expectSignatureRejected(
+        nlohmann::json::array({{{"kind", "by_value"}, {"size", -4}, {"offset", 0}}}),
+        "signature_negative",
+        "must be a non-negative integer");
+}
+
+TEST(TestDescriptorLoader, RejectsASignatureEntryWithAnUnknownKey)
+{
+    // The known-key gate applies inside an argument as it does everywhere else: a misspelled
+    // `value_kind` that merely got ignored would leave the argument silently kindless.
+    expectSignatureRejected(
+        nlohmann::json::array(
+            {{{"kind", "global_buffer"}, {"size", 8}, {"offset", 0}, {"value_kind", "x"}}}),
+        "signature_unknown_key",
+        "unknown key 'value_kind'");
+}
+
+TEST(TestDescriptorLoader, RejectsASignatureEntryWithAnEmptyName)
+{
+    // Empty already means "this producer records no names", so spelling the key with an
+    // empty value would collapse the two.
+    expectSignatureRejected(
+        nlohmann::json::array(
+            {{{"kind", "global_buffer"}, {"size", 8}, {"offset", 0}, {"name", ""}}}),
+        "signature_empty_name",
+        "must not be empty");
+}
+
+TEST(TestDescriptorLoader, AcceptsAnEmptySignatureAsAKernelTakingNoArguments)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("signature_empty"));
+    writePackagedKernelWithSignature(dir.path(), nlohmann::json::array());
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    ASSERT_FALSE(sets.front().packs.front().kernels.empty());
+    EXPECT_TRUE(sets.front().packs.front().kernels.front().source.signature.empty());
+}
+
+TEST(TestDescriptorLoader, CarriesTheArgumentNamesAProducerDoesEmit)
+{
+    // The assembly producers record names, and they are the only thing that distinguishes an
+    // operand permutation from the list it permutes, so they have to survive parsing.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("signature_named"));
+    writePackagedKernelWithSignature(
+        dir.path(),
+        nlohmann::json::array(
+            {{{"kind", "global_buffer"}, {"size", 8}, {"offset", 0}, {"name", "inputA"}},
+             {{"kind", "by_value"}, {"size", 4}, {"offset", 8}, {"name", "count"}}}));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& signature = sets.front().packs.front().kernels.front().source.signature;
+    ASSERT_EQ(signature.size(), 2u);
+    EXPECT_EQ(signature[0].name, "inputA");
+    EXPECT_EQ(signature[1].kind, "by_value");
+    EXPECT_EQ(signature[1].size, 4u);
+    EXPECT_EQ(signature[1].name, "count");
+}
+
+/// The packaged kernel entry key for key, copied from
+/// `descriptor-packaging/python/hkp_pack/pipeline.py::_rewrite_ukd_kpack`. The keys the
+/// loader has no reader for (`provenance` and everything under it) must pass the known-key
+/// gate, and the shard `arch` the packager stamps must survive onto the kernel.
+TEST(TestDescriptorLoader, ParsesTheShapeTheDescriptorPackagerEmits)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("packager_shape"));
+    auto documents = makeSetDocuments('1', "test:packager");
+    auto& pack = documentOfType(documents, ".kdp.json");
+    pack["arch"] = nlohmann::json::array({"gfx942"});
+    pack.at("kernelDescriptors")[0] = nlohmann::json{
+        {"version", "1.0"},
+        {"id", testUuid('1', '8')},
+        {"name", "pointwise_add"},
+        {"kernel_source",
+         {{"kind", "kpack"},
+          {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+          {"toc_key", "9a1c0e5f7b2d43869a1c0e5f7b2d4386"},
+          {"symbol", "pointwise_add_kernel"},
+          {"sha256", std::string(64, 'b')},
+          {"signature", packagedSignature()}}},
+        {"metadata", {{"block_size", 64}, {"dtype", "FLOAT"}}},
+        {"priority", 0},
+        {"provenance",
+         {{"origin_kind", "hip"},
+          {"source", "PointwiseAdd.cpp"},
+          {"entry", "pointwise_add_kernel"},
+          {"build", {{"arch", "gfx942"}, {"flags", nlohmann::json::array({"-O3"})}}}}},
+        {"arch", nlohmann::json::array({"gfx942"})}};
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    const auto& kernels = sets.front().packs.front().kernels;
+    ASSERT_EQ(kernels.size(), 3u);
+    EXPECT_EQ(kernels.front().name, "pointwise_add");
+    EXPECT_EQ(kernels.front().arch, (std::vector<std::string>{"gfx942"}));
+    EXPECT_EQ(kernels.front().source.kind, KernelSourceKind::KPACK);
+    EXPECT_EQ(kernels.front().source.symbol, "pointwise_add_kernel");
+    EXPECT_EQ(kernels.front().source.sha256, std::string(64, 'b'));
+}
+
+/// The gate widened to `kpack`, not to anything: `hsaco_file` names a real kind with no
+/// adapter behind it, and the message must say so, because the reader's action is to wait
+/// for the adapter rather than to edit the descriptor.
+TEST(TestDescriptorLoader, RejectsAnHsacoKernelForTheMissingAdapter)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("hsaco_kernel"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:hsaco");
+    documentOfType(broken, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
+        = {{"kind", "hsaco_file"}};
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel source kind 'hsaco_file'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "has no implementation yet"));
+}
+
+/// The other unimplemented kind, kept separate from the hsaco case so that implementing
+/// one adapter cannot quietly retire the assertion covering the other.
+TEST(TestDescriptorLoader, RejectsARockeBuilderKernelForTheMissingAdapter)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("rocke_kernel"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:rocke");
+    documentOfType(broken, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
+        = {{"kind", "rocke_builder"}};
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel source kind 'rocke_builder'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "has no implementation yet"));
+}
+
+/// A kpack `library` is relative, so a kernel is only resolvable beside the file that
+/// declared it. An inline kernel's file is the pack's own, wherever the install put it --
+/// anchoring on a loader root instead would break the moment a root holds two shards.
+TEST(TestDescriptorLoader, ResolvesTheOriginDirectoryOfAnInlineKernel)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_origin"));
+    writeDocuments(dir.path() / "gfx942", makeSetDocuments('1', "test:inline_origin"));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    ASSERT_EQ(sets.front().packs.front().kernels.size(), 3u);
+    for(const auto& kernel : sets.front().packs.front().kernels)
+    {
+        EXPECT_EQ(kernel.originDirectory, dir.path() / "gfx942");
+    }
+}
+
+/// A referenced kernel anchors on its own file, not on the pack's: a per-arch shard ships
+/// the standalone UKD beside the archive it names while the pack sits elsewhere, so the two
+/// origins are written into different directories here to keep them from agreeing by
+/// construction.
+TEST(TestDescriptorLoader, ResolvesTheOriginDirectoryOfAReferencedKernel)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("referenced_origin"));
+    auto documents = makeSetDocuments('1', "test:referenced_origin");
+    referenceLastKernel(documents);
+    const Documents standalone{documents.back()};
+    documents.pop_back();
+    writeDocuments(dir.path() / "packs", documents);
+    writeDocuments(dir.path() / "gfx942", standalone);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    const auto& kernels = sets.front().packs.front().kernels;
+    ASSERT_EQ(kernels.size(), 3u);
+    EXPECT_EQ(kernels.front().originDirectory, dir.path() / "packs");
+    // Appended last by the resolver, and the only one whose defining file is the UKD.
+    EXPECT_EQ(kernels.back().originDirectory, dir.path() / "gfx942");
+}
+
+/// The two cases above prove `originDirectory` is *stamped*; neither performs the join that
+/// makes it useful. This one reproduces the tree `pipeline.py` emits -- a per-arch shard
+/// directory holding the descriptors, with the archive in a `kpack/` subdirectory beside
+/// them, and `library` written relative to the declaring descriptor -- and asserts that
+/// `originDirectory / library` names the archive on disk.
+///
+/// The resolution under test is a pure path operation, which is why this belongs here and
+/// not behind a device: a staged tree is indistinguishable from an installed one, so no
+/// install, no archive contents, and no GPU are needed. Only the path has to be real, so
+/// the file is created empty -- weakly_canonical resolves an existing path without reading
+/// a byte of it.
+TEST(TestDescriptorLoader, JoinsARelativeLibraryAgainstThePackagerLayout)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("packager_layout"));
+    const auto shard = dir.path() / "gfx942";
+    const auto archive = shard / "kpack" / "hip_kernel_provider_gfx942.kpack";
+    std::filesystem::create_directories(archive.parent_path());
+    {
+        const std::ofstream file(archive, std::ios::binary);
+    }
+    ASSERT_TRUE(std::filesystem::exists(archive));
+
+    auto documents = makeSetDocuments('1', "test:packager_layout");
+    auto& kernel = documentOfType(documents, ".kdp.json").at("kernelDescriptors").front();
+    kernel["kernel_source"] = {{"kind", "kpack"},
+                               {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+                               {"toc_key", "PointwiseAdd/block64"},
+                               {"symbol", "PointwiseAdd"},
+                               {"sha256", std::string(64, 'a')},
+                               {"signature", packagedSignature()}};
+    writeDocuments(shard, documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    ASSERT_FALSE(sets.front().packs.front().kernels.empty());
+    const auto& packaged = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(packaged.source.kind, KernelSourceKind::KPACK);
+
+    // The join an adapter performs, spelled out here rather than called through one: the
+    // adapter lives in a provider, and this file's subject is what the loader hands it.
+    const auto resolved
+        = std::filesystem::weakly_canonical(packaged.originDirectory / packaged.source.library);
+    EXPECT_EQ(resolved, std::filesystem::weakly_canonical(archive));
+    EXPECT_TRUE(std::filesystem::exists(resolved));
+}
+
+/// A typo in an OPTIONAL key is the case the extension rule exists to catch: `heuristik`
+/// leaves a UED with no heuristic at all, which is legal, so warning about it would let
+/// the engine load and rank by the fallback forever with the default log level off.
+TEST(TestDescriptorLoader, RejectsAMisspelledOptionalKey)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("misspelled_optional"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    auto& engine = documentOfType(broken, ".ued.json");
+    engine["heuristik"] = engine.at("sort_kernel_catalog");
+    engine.erase("sort_kernel_catalog");
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "unknown key 'heuristik'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The point of the policy: a descriptor may carry tracking fields the loader has no
+/// reader for -- what the build-time packager stamps onto its output -- and still load,
+/// as long as they announce themselves. `provenance` is the packager's one unprefixed
+/// block; anything else has to wear the `x-`/`_` prefix.
+///
+/// Prefixed keys warn. `provenance` does not: the packager stamps it on every packed KDP
+/// and every kernel entry, so a warning per occurrence (841 on the shipped gfx950 bundle)
+/// would bury every real diagnostic in hipdnn_validate_descriptors' report.
+TEST(TestDescriptorLoader, LoadsADescriptorCarryingTrackingFields)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("tracking_fields"));
+    auto documents = makeSetDocuments('1', "test:tracked");
+    auto& engine = documentOfType(documents, ".ued.json");
+    engine["provenance"] = {{"origin_kind", "hip"}};
+    engine["x-build-id"] = "abc123";
+    engine["_internal"] = 7;
+    auto& pack = documentOfType(documents, ".kdp.json");
+    pack["provenance"] = {{"origin_kind", "hip"}};
+    for(auto& kernel : pack.at("kernelDescriptors"))
+    {
+        kernel["provenance"] = {{"origin_kind", "hip"}};
+    }
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:tracked");
+    EXPECT_FALSE(recorder.hasLogContaining("'provenance'")) << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "extension key 'x-build-id'"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "extension key '_internal'"));
+}
+
+/// Follows AnUnsupportedVersionDropsBeforeItCanCollideByName's shape: an unreadable file
+/// is skipped, not treated as absent-and-defaulted -- the seventh type is gated the same.
+TEST(TestDescriptorLoader, SkipsAStandaloneKernelOnAnUnsupportedMajor)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_bad_major"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    documentOfType(broken, ".ukd.json")["version"] = "2.0";
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+}
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

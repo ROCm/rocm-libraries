@@ -20,8 +20,10 @@ Functions:
         Load all YAML libraries in a folder into a collection.
     merge_solutions(input_dir) -> LibraryCollection
         Merge optimized solutions from multiple build directories into single libraries.
-    extract_solutions(df, match_table_path) -> LibraryCollection
+    extract_solutions(df, match_table_path, hipblaslt_path=None, fill_perf=False) -> LibraryCollection
         Build library from DataFrame with GEMMs and solution indices.
+        Same-name libraries with different default solutions are merged with
+        TensileMergeLibrary when hipblaslt_path is given.
     merge(hipblaslt_path, orig_dir, inc_dir, output_dir) -> None
         Merge incremental library into original using TensileMergeLibrary.
     create(hipblaslt_path, input_dir, output_dir) -> None
@@ -43,12 +45,14 @@ import logging
 import copy
 import pandas as pd
 import glob
+import tempfile
 
 from pathlib import Path
 from typing import List, Tuple, Sequence
 from threading import Lock
 
 from geko.utils import run_silent_command, parse_devices
+from geko.bench.utils import ensure_scale_columns
 from geko.concurrency import parallel_for
 from geko.concurrency.runner import Runner, Worker
 from geko.library import Library, LibraryCollection
@@ -58,12 +62,12 @@ from geko.library import _bank
 logger = logging.getLogger("GEKO")
 
 try:
-    DEFAULT_YAML_LOADER = yaml.CSafeLoader
+    SafeLoader = yaml.CSafeLoader
 except (ModuleNotFoundError, AttributeError):
     logger.warning("yaml.CSafeLoader not found, using yaml.SafeLoader")
     logger.warning("Please update the yaml package to the latest version")
     logger.warning("You can do this by running: pip install --upgrade pyyaml")
-    DEFAULT_YAML_LOADER = yaml.SafeLoader
+    SafeLoader = yaml.SafeLoader
 
 
 __all__ = [
@@ -75,6 +79,7 @@ __all__ = [
     "create",
     "normalize",
     "from_dataframe",
+    "from_full_dataframe",
     "prune_library",
 ]
 
@@ -90,7 +95,7 @@ def load_library(path: str | Path) -> Library:
     """
     logger.debug(f"Loading library file: {path}")
     with open(path) as f:
-        data = yaml.load(f, Loader=DEFAULT_YAML_LOADER)
+        data = yaml.load(f, Loader=SafeLoader)
     return Library(data, Path(path).name)
 
 
@@ -117,9 +122,10 @@ def load_collection(lib_dir: str | Path) -> LibraryCollection:
 
 
 def _library_supports_epilogues(lib: Library) -> bool:
-    """Return False for f64 (DGEMM) libraries; Tensile epilogues are not supported."""
+    """Return False for f64 and complex libraries; epilogues are not supported."""
+    _NO_EPILOGUE_TYPES = ("f64_r", "f32_c", "f64_c")
     data_type = lib.problem.get("DataType")
-    return INDEX_TYPE_MAP.get(data_type) != "f64_r"
+    return INDEX_TYPE_MAP.get(data_type) not in _NO_EPILOGUE_TYPES
 
 
 def merge_solutions(
@@ -212,7 +218,85 @@ def merge_solutions(
     return merged
 
 
-def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> LibraryCollection:
+def _merge_extracted_libraries(
+    hipblaslt_path: str | Path,
+    original: Library,
+    incremental: Library,
+) -> Library:
+    """Merge two extracted same-name libraries with TensileMergeLibrary.
+
+    Args:
+        hipblaslt_path (str | Path): Path to the hipBLASLt checkout.
+        original (Library): Accumulated extracted library.
+        incremental (Library): Next extracted library with the same filename.
+
+    Returns:
+        Library: Merged library loaded from TensileMergeLibrary output.
+
+    Raises:
+        FileNotFoundError: If TensileMergeLibrary does not produce the expected file.
+    """
+    with tempfile.TemporaryDirectory(prefix="geko-extract-merge-") as tmp:
+        tmp_path = Path(tmp)
+        original_dir = tmp_path / "original"
+        incremental_dir = tmp_path / "incremental"
+        output_dir = tmp_path / "output"
+        original.dump(original_dir)
+        incremental.dump(incremental_dir)
+        merge(
+            hipblaslt_path,
+            original_dir,
+            incremental_dir,
+            output_dir,
+            eff=False,
+            force=True,
+        )
+
+        merged_path = output_dir / original.name
+        if not merged_path.is_file():
+            raise FileNotFoundError(
+                f"TensileMergeLibrary did not produce expected library '{merged_path}'"
+            )
+        return load_library(merged_path)
+
+
+def _reindex_and_append(base: Library, incoming: Library) -> None:
+    """Append an extracted library, continuing solution indexes.
+
+    ``incoming`` has solution indexes that restart at 0. Each solution is
+    copied onto ``base`` at the next free index, and the exact-logic rows
+    that selected it are copied with that new index.
+
+    Args:
+        base (Library): Library that already holds extracted solutions.
+        incoming (Library): Library to append. Must use the same filename
+            as ``base``.
+
+    Returns:
+        None: ``base.solutions`` and ``base.sizes`` are extended in place.
+
+    Raises:
+        None.
+    """
+    for solution in incoming.solutions:
+        solution = copy.deepcopy(solution)
+        old_index = solution["SolutionIndex"]
+        solution["SolutionIndex"] = len(base.solutions)
+        base.solutions.append(solution)
+        for size in incoming.sizes:
+            if size[1][0] != old_index:
+                continue
+            size = copy.deepcopy(size)
+            size[1][0] = solution["SolutionIndex"]
+            base.sizes.append(size)
+
+
+def extract_solutions(
+    df: pd.DataFrame,
+    match_table_path: str | Path,
+    hipblaslt_path: str | Path | None = None,
+    fill_perf: bool = False,
+) -> LibraryCollection:
     """Extract solutions by solution index from a DataFrame.
 
     Processes all GEMMs and their corresponding 'winning' solutions,
@@ -221,12 +305,20 @@ def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> Library
     Args:
         df (DataFrame): DataFrame containing GEMM and winning solution index pairs.
         match_table_path (str | Path): Path to MatchTable.yaml to extract the solutions.
+        hipblaslt_path (str | Path | None, optional): Path to the hipBLASLt
+            checkout. When provided, libraries with the same filename but
+            different default solutions are merged with TensileMergeLibrary.
+            Defaults to None.
+        fill_perf (bool, optional): Whether to fill performance data for the extracted solutions.
+            Defaults to False.
 
     Returns:
-        LibraryCollection: LibraryCollection with all exctractes solutions.
+        LibraryCollection: LibraryCollection with all extracted solutions.
 
     Raises:
         ValueError: If no valid YAML library logic files found.
+        NotImplementedError: If default solutions differ and hipblaslt_path
+            was not provided.
 
     Note:
         All new libraries are exported as 'Equality'.
@@ -239,7 +331,7 @@ def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> Library
     df = df.sort_values(["m", "n", "batch_count", "k"])
 
     with open(match_table_path) as f:
-        match_table = yaml.load(f, Loader=DEFAULT_YAML_LOADER)
+        match_table = yaml.load(f, Loader=SafeLoader)
 
     lib_paths = set()
     for idx in df["solutionIdx"]:
@@ -251,31 +343,26 @@ def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> Library
     for lib, lib_path in zip(parallel_for(load_library, lib_paths), lib_paths):
         mapping = {}
         for _, row in df.iterrows():
-            if match_table[row["solutionIdx"]][0] != lib_path:
+            solution_idx = int(row["solutionIdx"])
+            if match_table[solution_idx][0] != lib_path:
                 continue
-            kidx = match_table[row["solutionIdx"]][1]
+            kidx = match_table[solution_idx][1]
             if kidx not in mapping:
                 mapping[kidx] = []
-            mapping[kidx].append([row["m"], row["n"], row["batch_count"], row["k"]])
+            mapping[kidx].append(
+                [int(row["m"]), int(row["n"]), int(row["batch_count"]), int(row["k"]), row.get("hipblaslt-Gflops", 0.0)]
+            )
 
-        if lib.name not in libs:  # First library for the given GEMM type
-            libs[lib.name] = lib
-            lib.order = [2, 3, 0, 1]
-            lib.metric = "DeviceEfficiency"
-            lib.type = "Equality"
-            new_sols = []
-            new_sizes = []
-        else:
-            if libs[lib.name].default_solution != lib.default_solution:
-                raise NotImplementedError(f"Default solution mismatch for library '{lib.name}'. "
-                                          f"Use TensileMergeLibrary instead.")
-            new_sols = libs[lib.name].solutions
-            new_sizes = libs[lib.name].sizes
+        lib.order = [2, 3, 0, 1]
+        lib.metric = "DeviceEfficiency"
+        lib.type = "Equality"
+        new_sols = []
+        new_sizes = []
 
         for kidx, sizes in mapping.items():
             sol = copy.deepcopy(lib.solutions[kidx])
             sol["SolutionIndex"] = len(new_sols)
-            sizes = [[size, [sol["SolutionIndex"], 0.0]] for size in sizes]
+            sizes = [[size[:4], [sol["SolutionIndex"], size[4] if fill_perf else 0.0]] for size in sizes]
             new_sols.append(sol)
             new_sizes.extend(sizes)
         logger.debug(
@@ -285,6 +372,24 @@ def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> Library
 
         lib.solutions = new_sols
         lib.sizes = new_sizes
+
+        if lib.name not in libs:  # First library for the given GEMM type
+            libs[lib.name] = lib
+        elif libs[lib.name].default_solution != lib.default_solution:
+            if hipblaslt_path is None:
+                raise NotImplementedError(
+                    f"Default solution mismatch for library '{lib.name}'. "
+                    f"Pass hipblaslt_path to use TensileMergeLibrary."
+                )
+            logger.info(
+                f"Default solution mismatch for library '{lib.name}'; "
+                "falling back to TensileMergeLibrary"
+            )
+            libs[lib.name] = _merge_extracted_libraries(
+                hipblaslt_path, libs[lib.name], lib
+            )
+        else:
+            _reindex_and_append(libs[lib.name], lib)
 
     return LibraryCollection(list(libs.values()))
 
@@ -317,7 +422,7 @@ def merge(
         raise FileNotFoundError(f"hipBLASLt path not found: '{hipblaslt_path}'")
 
     logger.info(f"Calling TensileMergeLibrary on '{inc_dir}'")
-    cmd = [str(hipblaslt_path / "tensilelite/Tensile/bin/TensileMergeLibrary")]
+    cmd = [str(hipblaslt_path / "tensilelite/tensilelite/bin/TensileMergeLibrary")]
     if not eff:
         cmd += ["--no_eff"]
     cmd += ["--force_merge", str(force), orig_dir, inc_dir, output_dir]
@@ -346,12 +451,12 @@ def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str 
     if len(lib_paths) == 0:
         raise ValueError(f"No valid libraries found in '{library_dir}'")
 
-    arch = load_library(lib_paths[0]).arch
+    arch = load_library(lib_paths[0]).schedule
 
     logger.info(f"Calling TensileCreateLibrary on '{library_dir}'")
     run_silent_command(
         [
-            str(hipblaslt_path / "tensilelite/Tensile/bin/TensileCreateLibrary"),
+            str(hipblaslt_path / "tensilelite/tensilelite/bin/TensileCreateLibrary"),
             "--code-object-version",
             version,
             "--library-format",
@@ -388,13 +493,13 @@ def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path:
         sys.path.append(str(hipblaslt_path / "tensilelite"))
 
     try:
-        from Tensile import LibraryIO
-        from Tensile.CustomYamlLoader import load_yaml_stream
-        from Tensile.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
+        from tensilelite import LibraryIO
+        from tensilelite.CustomYamlLoader import load_yaml_stream
+        from tensilelite.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
     except ImportError as e:
-        raise ImportError(f"Failed to import Tensile. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
+        raise ImportError(f"Failed to import tensilelite. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
     
-    data = load_yaml_stream(library_path, DEFAULT_YAML_LOADER)
+    data = load_yaml_stream(library_path, SafeLoader)
     if not isinstance(data, list):
         raise ValueError(f"Library file '{library_path}' is not in list format.")
 
@@ -438,7 +543,7 @@ def from_dataframe(
     if "lib" not in df.columns:
         raise ValueError(f"Each GEMM must contain the lib (file) it belongs to")
 
-    df = df.rename({"m": "M", "n": "N", "k": "K"}, axis=1)
+    df = ensure_scale_columns(df.rename({"m": "M", "n": "N", "k": "K"}, axis=1))
     if not all(c in df.columns for c in GEMM_LOG_FIELDS):
         raise ValueError(f"Input DataFrame has missing fields")
 
@@ -450,6 +555,7 @@ def from_dataframe(
         lib = None
         sols = []
         sizes = []
+        tuned_sols = {}
         for _, row in group.iterrows():  # Each size
             lib_path = lib_dir / row["lib"]  # We need the lib.name to load the lib
 
@@ -462,13 +568,16 @@ def from_dataframe(
                 raise ValueError(f"{size_} not found in '{lib_path}'")
 
             size = copy.deepcopy(size[0])
-            sol = copy.deepcopy(lib.solutions[size[1][0]])
-
-            kidx = len(sols)
-            sol["SolutionIndex"] = kidx
+            src_kidx = size[1][0]
+            if src_kidx in tuned_sols:
+                kidx = tuned_sols[src_kidx]
+            else:
+                sol = copy.deepcopy(lib.solutions[src_kidx])
+                kidx = len(sols)
+                sol["SolutionIndex"] = kidx
+                sols.append(sol)
+                tuned_sols[src_kidx] = kidx
             size[1][0] = kidx
-
-            sols.append(sol)
             sizes.append(size)
 
         lib.solutions = sols
@@ -487,6 +596,117 @@ def from_dataframe(
 
     return libs
 
+
+def from_full_dataframe(
+    df: pd.DataFrame,
+    lib_dir: str | Path,
+    match_table_path: str | Path,
+    type_override: str = None,
+) -> LibraryCollection:
+    """Create full libraries from a DataFrame of solutions.
+    Args:
+        df (pd.DataFrame): DataFrame with solution selection results, must include 'lib' column.
+        lib_dir (str | Path): Directory containing source library files.
+        match_table_path (str | Path): Path to the MatchTable.yaml file.
+        type_override (str, optional): Library type to override (e.g., "Equality").
+            Defaults to None.
+    Raises:
+        ValueError: If DataFrame missing necessary columns or solution count mismatch.
+    Returns:
+        LibraryCollection: LibraryCollection with all solutions / sizes in the DataFrame.
+    Note:
+        Groups solutions by GEMM type and creates separate library files
+        with the best of tuned, reference solutions and their corresponding sizes.
+    """
+    if "lib" not in df.columns:
+        raise ValueError(f"Each GEMM must contain the lib (file) it belongs to")
+
+    if "solutionIdx_reference" not in df.columns:
+        raise ValueError(f"Each GEMM must contain the solutionIdx_reference column")
+
+    df = ensure_scale_columns(df.rename({"m": "M", "n": "N", "k": "K"}, axis=1))
+    if not all(c in df.columns for c in GEMM_LOG_FIELDS):
+        raise ValueError(f"Input DataFrame has missing fields")
+
+    with open(match_table_path) as f:
+        match_table = yaml.load(f, Loader=SafeLoader)
+
+    lib_dir = Path(lib_dir)
+    n_sols = len(df)
+
+    ref_libs = {}
+    libs = LibraryCollection()
+    for _, group in df.groupby("lib"):  # Each library
+        lib = None
+        sols = []
+        sizes = []
+        tuned_sols = {}
+        ref_sols = {}
+        for _, row in group.iterrows():  # Each size
+            lib_path = lib_dir / row["lib"]  # We need the lib.name to load the lib
+
+            if lib is None:
+                lib = load_library(lib_path)
+
+            size_ = [row["M"], row["N"], row["batch_count"], row["K"]]
+            kidx = len(sols)
+            if row["winner"] == "tuned":
+                size = [size for size in lib.sizes if size[0] == size_]
+                if len(size) == 0:
+                    raise ValueError(f"{size_} not found in '{lib_path}'")
+
+                size = copy.deepcopy(size[0])
+                src_kidx = size[1][0]
+                if src_kidx in tuned_sols:
+                    kidx = tuned_sols[src_kidx]
+                else:
+                    kidx = len(sols)
+                    tuned_sols[src_kidx] = kidx
+                    sol = copy.deepcopy(lib.solutions[src_kidx])
+                    sol["SolutionIndex"] = kidx
+                    sols.append(sol)
+            elif row["winner"] == "reference":
+                ref_gsi = int(row["solutionIdx_reference"])
+                if ref_gsi not in match_table:
+                    raise ValueError(f"Reference solution index {ref_gsi} not found in MatchTable")
+
+                size = [copy.copy(size_), [0, 0.0]]
+                if ref_gsi not in ref_sols:  # New solution, add to the list
+                    kidx = len(sols)
+                    ref_sols[ref_gsi] = kidx
+
+                    ref_lib_path, ref_sol_idx = match_table[ref_gsi]
+                    if ref_lib_path not in ref_libs:
+                        ref_libs[ref_lib_path] = load_library(ref_lib_path)
+                    ref_lib = ref_libs[ref_lib_path]
+
+                    sol = copy.deepcopy(ref_lib.solutions[ref_sol_idx])
+                    sol["SolutionIndex"] = kidx
+
+                    sols.append(sol)
+                else:  # Existing solution, retrieve its index
+                    kidx = ref_sols[ref_gsi]
+            else:
+                raise ValueError(f"Unknown winner type '{row['winner']}' for size {size_}")
+
+            size[1][0] = kidx
+            sizes.append(size)
+
+        lib.solutions = sols
+        lib.sizes = sizes
+
+        if type_override:
+            lib.type = type_override
+
+        libs.append(lib)
+        logger.info(f"Processed {len(sols)} solutions and {len(sizes)} sizes for '{lib.name}'")
+
+    processed = sum(len(lib.sizes) for lib in libs)
+    if processed != n_sols:
+        raise ValueError(f"Number of processed solutions mismatch: {n_sols} vs {processed}")
+
+    return libs
+    
 
 def prune_library(
     hipblaslt_path: str | Path,

@@ -151,6 +151,36 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForNon
     EXPECT_FALSE(applicable);
 }
 
+TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsTrueForReluWithZeroSlope)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        true,
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        {588, 196, 14, 1},
+        {1, 3, 14, 14},
+        /*reluLowerClipSlope=*/0.0f);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForLeakyRelu)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        true,
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        {588, 196, 14, 1},
+        {1, 3, 14, 14},
+        /*reluLowerClipSlope=*/0.01f);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForWrongNodeOrder)
 {
     // Create a graph with 2 nodes but in wrong order (activation -> batchnorm)
@@ -980,7 +1010,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForMix
 
     const std::vector<int64_t> stridesNCHW = {588, 196, 14, 1}; // NCHW
     const std::vector<int64_t> dimsNCHW = {1, 3, 14, 14};
-    const std::vector<int64_t> stridesNHWC = {3, 14L * 14L * 3L, 14L * 3L, 3}; // NHWC
+    const std::vector<int64_t> stridesNHWC = {3, int64_t{14} * 14 * 3, int64_t{14} * 3, 3}; // NHWC
     const std::vector<int64_t> dimsNHWC = {1, 3, 14, 14};
     const std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
     const std::vector<int64_t> derivedDims = {1, 3, 1, 1};

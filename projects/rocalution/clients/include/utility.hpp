@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -362,6 +362,7 @@ public:
     std::string smoother            = "";
     std::string matrix              = "";
     std::string coarsening_strategy = "";
+    std::string interpolation_type  = "";
     std::string matrix_type         = "";
 
     int pre_smooth     = 2;
@@ -369,6 +370,11 @@ public:
     int ordering       = 1;
     int cycle          = 0;
     int rebuildnumeric = 0;
+    int max_levels     = 0;
+
+    // Interpolation truncation
+    float trunc_factor = 0.0f;
+    int   p_max_elmts  = 0;
 
     unsigned int format;
 
@@ -406,8 +412,13 @@ public:
         this->ordering       = rhs.ordering;
         this->cycle          = rhs.cycle;
         this->rebuildnumeric = rhs.rebuildnumeric;
+        this->max_levels     = rhs.max_levels;
 
         this->coarsening_strategy = rhs.coarsening_strategy;
+        this->interpolation_type  = rhs.interpolation_type;
+
+        this->trunc_factor = rhs.trunc_factor;
+        this->p_max_elmts  = rhs.p_max_elmts;
 
         this->format = rhs.format;
 

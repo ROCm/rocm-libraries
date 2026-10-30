@@ -40,6 +40,8 @@ namespace TensileLite
     namespace Client
     {
 
+        std::vector<int> resolveHybridAssignmentPolicies(po::variables_map const& args);
+
         class ClientProblemFactory
         {
         public:
@@ -69,10 +71,12 @@ namespace TensileLite
             std::vector<double>           m_constantValues;
 
             bool        m_stridedBatched;
+            int         m_batchMode;
             bool        m_groupedGemm;
             bool        m_highPrecisionAccumulate;
             bool        m_deterministicMode;
             bool        m_cEqualsD;
+            int         m_uniformSummationOrder;
             int         m_useBias;
             int         m_biasSrc;
             std::string m_useScaleAB;
@@ -110,6 +114,7 @@ namespace TensileLite
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;
+            bool                             m_fusedGemmA2A;
             int                              m_metadataLayout;
             int                              m_mxBlockA;
             int                              m_mxBlockB;

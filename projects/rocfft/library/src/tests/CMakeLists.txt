@@ -21,9 +21,19 @@
 include( ../../../cmake/sqlite.cmake )
 
 add_executable( rocfft-internal-test
+  data_layout_test.cpp
   function_pool_test.cpp
+  internal_test_main.cpp
   rtc_test.cpp
+  solution_map_test.cpp
+  ../data_layout.cpp
+  ../enum_printer.cpp
   ../rocfft_stub.cpp
+)
+
+# solution_map_test reads the solution maps that ship with the library.
+target_compile_definitions( rocfft-internal-test PRIVATE
+  ROCFFT_TEST_SOLUTION_MAP_DIR="${ROCFFT_SOLUTION_MAP_DIR}"
 )
 
 target_include_directories( rocfft-internal-test PRIVATE
@@ -47,7 +57,11 @@ target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-rtc-cache
   rocfft-rtc-common
   rocfft-rtc-compile
+  rocfft-rtc-gen
+  rocfft-rtc-launch
   rocfft-rtc-subprocess
+  rocfft-solution-map
+  generator
   hip::host
   ${ROCFFT_SQLITE_LIB}
 )
@@ -57,7 +71,7 @@ if( NOT BUILD_GTEST )
   find_package( GTest QUIET )
 endif()
 if( GTest_FOUND )
-  target_link_libraries( rocfft-internal-test PRIVATE GTest::gtest GTest::gtest_main )
+  target_link_libraries( rocfft-internal-test PRIVATE GTest::gtest )
 else()
   include( ${PROJECT_SOURCE_DIR}/cmake/build-gtest.cmake )
   add_dependencies( rocfft-internal-test gtest )

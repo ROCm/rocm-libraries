@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "Handle.hpp"
+#include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <spdlog/fmt/fmt.h>
 
 using namespace hipdnn_backend::plugin;
@@ -23,6 +24,11 @@ hipStream_t hipdnnHandle::getStream() const
     return _stream;
 }
 
+hipError_t hipdnnHandle::getDevice(int* deviceId) const
+{
+    return hipdnn_plugin_sdk::getDeviceFromStream(getStream(), deviceId);
+}
+
 std::shared_ptr<EnginePluginResourceManager> hipdnnHandle::getPluginResourceManager() const
 {
     return _pluginResourceManager;
@@ -42,6 +48,16 @@ size_t hipdnnHandle::getEngineCount() const
 std::vector<EngineInfo> hipdnnHandle::getEngineInfos() const
 {
     return _pluginResourceManager->getEngineInfos();
+}
+
+std::optional<int64_t> hipdnnHandle::findEngineIdByName(std::string_view engineName) const
+{
+    return _pluginResourceManager->findEngineIdByName(engineName);
+}
+
+std::optional<std::string> hipdnnHandle::findEngineNameById(int64_t engineId) const
+{
+    return _pluginResourceManager->findEngineNameById(engineId);
 }
 
 std::string hipdnnHandle::toString() const

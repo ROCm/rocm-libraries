@@ -4,9 +4,10 @@ name: "Component CI: TensileLite coverage"
 #
 # This is a lightweight (CPU-only, ~7 min), from-source coverage generator for
 # the TensileLite Python suite. It is deliberately separate from the functional
-# test jobs (which answer "does it work"). This lane only measures coverage: it
+# test jobs (which answer "does it work"). This lane measures coverage - it
 # enforces the whole-project floor and the per-file ratchet and renders the
-# characterization-vs-unit migration card.
+# characterization-vs-unit migration card - and, on pull_request runs only, also
+# guards against blanket `.ambr` golden regeneration.
 #
 # It exists to support the characterization-to-unit refactor and is expected to
 # retire once that conversion is done, so it is intentionally a small, standalone
@@ -36,6 +37,33 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Numeric 0 is falsy in GitHub Actions expressions, so a bare
+          # `cond && 0 || 1` always collapses to 1 regardless of `cond`. Quoting
+          # both branches as non-empty strings ('0'/'1') keeps them truthy so the
+          # && / || short-circuiting actually works; actions/checkout parses this
+          # input as a string either way.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+
+      # The authoritative CI guard against blanket `.ambr` golden regeneration.
+      # Runs first and needs no ROCm/rocisa/build, so a blanket regeneration
+      # fails in seconds instead of waiting on the ~7 min coverage run below.
+      # Unlike the opt-in local pre-commit hook, this cannot be bypassed with
+      # `git commit --no-verify`: it inspects the PR's actual diff in CI.
+      #
+      # --repo-root is `.` (the step's default working directory, i.e. the
+      # checkout) rather than `${{ github.workspace }}`: in a container job that
+      # expression expands to the runner host's path, which does not exist
+      # inside the container.
+      - name: Guard against blanket .ambr snapshot regeneration
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          python3 projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/tools/check_snapshot_diff.py \
+            --repo-root . \
+            --characterization-dir projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}"
 
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm-linux
@@ -47,12 +75,11 @@ jobs:
         run: pip install tox
 
       # Runs the characterization suite and the pure unit suite under coverage
-      # (once each), unions them, and enforces two gates on the combined result
-      # (AIHPBLAS-3877 / AIHPBLAS-3878): the whole-project floor (fail_under in
-      # pyproject.toml, enforced by `coverage report` on the combined data) and
-      # the per-file ratchet (coverage_ratchet.py, wired into the tox env's
-      # commands_post). As a byproduct it emits per-suite reports (char.json /
-      # unit.json) that feed the split-summary card below - no duplicate runs.
+      # (once each) and unions them, producing the combined coverage.json /
+      # coverage.xml the next two steps consume. As a byproduct it emits
+      # per-suite reports (char.json / unit.json) that feed the split-summary
+      # card below - no duplicate runs. This step measures only; the floors are
+      # enforced by the coverage-gate step that follows.
       # No GPU or client build is needed - coverage-unit skips the client build;
       # the compiler env below is only so rocisa builds during the tox run.
       #
@@ -62,7 +89,7 @@ jobs:
       # process-wide rocisa singleton with a bogus compiler, which caches
       # all-false gfx942 capabilities and cascades into ~200 Solution/codegen
       # failures across the xdist workers (AIHPBLAS-3877).
-      - name: Run coverage-unit (floor + ratchet)
+      - name: Run coverage-unit (measure)
         shell: bash
         working-directory: projects/hipblaslt/tensilelite
         env:
@@ -74,6 +101,22 @@ jobs:
         run: |
           export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
           tox -e coverage-unit
+
+      # This job owns the two coverage gates (AIHPBLAS-3877 / AIHPBLAS-3878), so
+      # it names them explicitly here rather than having them fire inside
+      # coverage-unit. The Math CI Jenkins job tensilelite-unit-codecov runs the
+      # same coverage-unit env to produce its Codecov upload and must not be
+      # failed by a gate it does not own; keeping enforcement in its own env is
+      # what decouples the two. It also means removing this gate requires
+      # deleting a visible step, rather than dropping a variable and going
+      # quietly green.
+      #
+      # Judges the artifacts the step above wrote, so it needs no ROCm, no
+      # rocisa build and no test run: it takes seconds.
+      - name: Enforce coverage floors (whole-project + per-file ratchet)
+        shell: bash
+        working-directory: projects/hipblaslt/tensilelite
+        run: tox -e coverage-gate
 
       # Informational (non-gating): attribute coverage to the two suites that
       # make up the unit lane - characterization tests (the characterization/
@@ -90,7 +133,7 @@ jobs:
         working-directory: projects/hipblaslt/tensilelite
         run: |
           PY=.tox/coverage-unit/bin/python
-          "$PY" Tensile/Tests/unit/characterization/tools/coverage_split_summary.py \
+          "$PY" tensilelite/Tests/unit/characterization/tools/coverage_split_summary.py \
             --characterization char.json --unit unit.json --combined coverage.json \
             --characterization-junit char_tests.xml --unit-junit unit_tests.xml || true
           exit 0

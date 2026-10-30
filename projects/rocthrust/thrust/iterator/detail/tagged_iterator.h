@@ -18,13 +18,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/use_default.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traits.h>
@@ -33,40 +26,48 @@
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
+
 template <typename, typename>
 class tagged_iterator;
 
 template <typename Iterator, typename Tag>
-using make_tagged_iterator_base =
-  iterator_adaptor<tagged_iterator<Iterator, Tag>,
-                   Iterator,
-                   it_value_t<Iterator>,
-                   Tag,
-                   typename iterator_traversal<Iterator>::type,
-                   it_reference_t<Iterator>,
-                   it_difference_t<Iterator>>;
+struct tagged_iterator_base
+{
+  using type =
+    thrust::iterator_adaptor<tagged_iterator<Iterator, Tag>,
+                             Iterator,
+                             typename thrust::iterator_value<Iterator>::type,
+                             Tag,
+                             typename thrust::iterator_traversal<Iterator>::type,
+                             typename thrust::iterator_reference<Iterator>::type,
+                             typename thrust::iterator_difference<Iterator>::type>;
+}; // end tagged_iterator_base
 
 template <typename Iterator, typename Tag>
-class tagged_iterator : public make_tagged_iterator_base<Iterator, Tag>
+class tagged_iterator : public tagged_iterator_base<Iterator, Tag>::type
 {
-  using super_t = make_tagged_iterator_base<Iterator, Tag>;
+private:
+  using super_t = typename tagged_iterator_base<Iterator, Tag>::type;
 
 public:
-  tagged_iterator() = default;
+  THRUST_HOST_DEVICE tagged_iterator() {}
 
   THRUST_HOST_DEVICE explicit tagged_iterator(Iterator x)
       : super_t(x)
   {}
-};
+}; // end tagged_iterator
 
-//! \p make_tagged_iterator creates a \p tagged_iterator from a \c Iterator with system tag \c Tag.
-//!
-//! \tparam Tag Any system tag.
-//! \tparam Iterator Any iterator type.
-//! \param iter The iterator of interest.
-//! \return An iterator whose system tag is \p Tag and whose behavior is otherwise equivalent to \p iter.
+/*! \p make_tagged_iterator creates a \p tagged_iterator
+ *  from a \c Iterator with system tag \c Tag.
+ *
+ *  \tparam Tag Any system tag.
+ *  \tparam Iterator Any iterator type.
+ *  \param iter The iterator of interest.
+ *  \return An iterator whose system tag is \p Tag and whose behavior is otherwise
+ *          equivalent to \p iter.
+ */
 template <typename Tag, typename Iterator>
-auto make_tagged_iterator(Iterator iter) -> tagged_iterator<Iterator, Tag>
+inline auto make_tagged_iterator(Iterator iter) -> tagged_iterator<Iterator, Tag>
 {
   return tagged_iterator<Iterator, Tag>(iter);
 }

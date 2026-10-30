@@ -59,7 +59,19 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #Set Clang C++ flags.
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O2") # clang++ crashes without -O2
 set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -O2 -DNDEBUG") # clang++ failed to build the project with the default -Os
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --driver-mode=g++ -Xclang -fallow-half-arguments-and-returns -D__HIP_HCC_COMPAT_MODE__=1 -Wno-format-nonliteral -parallel-jobs=4 -fclang-abi-compat=17")
+# Parallel offload compilation is spelled --offload-jobs= from LLVM 21 on and -parallel-jobs= before it.
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("--offload-jobs=4" CXX_COMPILER_SUPPORTS_OFFLOAD_JOBS)
+if(CXX_COMPILER_SUPPORTS_OFFLOAD_JOBS)
+  set(ROCWMMA_OFFLOAD_JOBS_FLAG "--offload-jobs=4")
+else()
+  check_cxx_compiler_flag("-parallel-jobs=4" CXX_COMPILER_SUPPORTS_PARALLEL_JOBS)
+  if(CXX_COMPILER_SUPPORTS_PARALLEL_JOBS)
+    set(ROCWMMA_OFFLOAD_JOBS_FLAG "-parallel-jobs=4")
+  endif()
+endif()
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --driver-mode=g++ -D__HIP_HCC_COMPAT_MODE__=1 -Wno-format-nonliteral ${ROCWMMA_OFFLOAD_JOBS_FLAG} -fclang-abi-compat=17")
 
 # Top level configs
 if( CMAKE_PROJECT_NAME STREQUAL "rocwmma" )
@@ -94,7 +106,7 @@ include(ROCMCheckTargetIds)
 include(ROCMClients)
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "2.2.1" )
+set ( VERSION_STRING "2.2.2" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # configure a header file to pass the CMake version settings to the source
@@ -117,7 +129,7 @@ if (ADDRESS_SANITIZER_ENABLED)
         TARGETS "gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+" )
 else()
     rocm_check_target_ids(DEFAULT_GPU_TARGETS
-        TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250" )
+        TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171;gfx1200;gfx1201;gfx1250" )
 endif()
 
 # check if ROCm supports `__hip_fp8_e5m2` and `__hip_fp8_e4m3`
@@ -168,20 +180,24 @@ message(STATUS "GPU_TARGETS=${GPU_TARGETS}")
 
 find_package( hip REQUIRED )
 find_package( hiprtc REQUIRED )
-find_package( OpenMP CONFIG QUIET PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
-if(NOT OpenMP_FOUND OR NOT DEFINED openmp_LIB_DIR)
-   # Fall-back to module mode.
-   find_package(OpenMP MODULE REQUIRED)
-endif()
 
-if(TARGET OpenMP::omp)
-  set(ROCWMMA_OPENMP_LIBRARY OpenMP::omp)
-  set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/${openmp_LIB_DIR}")
-  set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}")
-else()
-  set(ROCWMMA_OPENMP_LIBRARY OpenMP::OpenMP_CXX)
-  set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/lib")
-  set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/lib")
+# OpenMP is used by client-side reference implementations, not the public headers.
+if(ROCWMMA_BUILD_SAMPLES OR ROCWMMA_BUILD_TESTS OR ROCWMMA_BUILD_COMMUNITY_SAMPLES)
+  find_package( OpenMP CONFIG QUIET PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
+  if(NOT OpenMP_FOUND OR NOT DEFINED openmp_LIB_DIR)
+     # Fall-back to module mode.
+     find_package(OpenMP MODULE REQUIRED)
+  endif()
+
+  if(TARGET OpenMP::omp)
+    set(ROCWMMA_OPENMP_LIBRARY OpenMP::omp)
+    set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/${openmp_LIB_DIR}")
+    set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}")
+  else()
+    set(ROCWMMA_OPENMP_LIBRARY OpenMP::OpenMP_CXX)
+    set(ROCWMMA_OPENMP_INSTALL_RPATH "\$ORIGIN/../llvm/lib")
+    set(ROCWMMA_OPENMP_BUILD_RPATH "${HIP_CLANG_ROOT}/lib")
+  endif()
 endif()
 
 if (ROCWMMA_BUILD_BENCHMARK_TESTS)
@@ -197,29 +213,48 @@ if (ROCWMMA_BUILD_BENCHMARK_TESTS)
 endif()
 
 add_library(rocwmma INTERFACE)
-target_link_libraries(rocwmma INTERFACE hip::device hip::host ${ROCWMMA_OPENMP_LIBRARY} ${AMD_SMI_LIBRARY})
+target_link_libraries(rocwmma INTERFACE hip::device hip::host ${AMD_SMI_LIBRARY})
 
 rocm_install_targets(
   TARGETS rocwmma
   INCLUDE library/include
 )
 
-if(ROCWMMA_BUILD_SAMPLES OR ROCWMMA_BUILD_TESTS)
+if(ROCWMMA_BUILD_SAMPLES OR ROCWMMA_BUILD_TESTS OR ROCWMMA_BUILD_COMMUNITY_SAMPLES)
   enable_testing()
   rocm_package_setup_component(clients)
+endif()
+
+if(ROCWMMA_BUILD_COMMUNITY_SAMPLES)
+  rocm_package_setup_component(community-samples PARENT clients)
 endif()
 
 if(ROCWMMA_BUILD_SAMPLES)
   rocm_package_setup_component(samples PARENT clients)
   add_subdirectory(samples)
 elseif(ROCWMMA_BUILD_COMMUNITY_SAMPLES)
-  rocm_package_setup_component(community_samples PARENT clients)
   add_subdirectory(samples/community)
 endif()
 
 
 if(ROCWMMA_BUILD_TESTS)
   rocm_package_setup_component(tests PARENT clients)
+  # Install consumer test sources for downstream validation of the packaged SDK.
+  rocm_install(
+    DIRECTORY test/cmake/package_consumer
+    DESTINATION share/rocwmma/tests
+    COMPONENT tests
+    FILES_MATCHING
+      PATTERN "CMakeLists.txt"
+      PATTERN "*.hip"
+      PATTERN "*.cpp"
+      PATTERN "*.json"
+      PATTERN "*.cmake"
+      PATTERN "*.h"
+      PATTERN "*.hpp"
+      PATTERN "*.in"
+      PATTERN "README.md"
+  )
   add_subdirectory(test)
 endif()
 
@@ -229,14 +264,24 @@ if(BUILD_ADDRESS_SANITIZER)
 else()
   set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
 endif()
-rocm_package_add_dependencies("${DEPENDS_HIP_RUNTIME} >= 4.5.0")
-rocm_package_add_deb_dependencies("libomp-dev")
-rocm_package_add_rpm_dependencies("libomp-devel")
+rocm_package_add_dependencies(DEPENDS "${DEPENDS_HIP_RUNTIME} >= 4.5.0")
+# Client packages can be installed individually, without the clients aggregate.
+# Component-specific dependencies override the global list, so retain HIP too.
+foreach(_rocwmma_client_component clients samples tests community-samples)
+  if(_rocwmma_client_component IN_LIST ROCM_PACKAGE_COMPONENTS)
+    rocm_package_add_dependencies(COMPONENT ${_rocwmma_client_component} DEPENDS "${DEPENDS_HIP_RUNTIME} >= 4.5.0")
+    rocm_package_add_deb_dependencies(COMPONENT ${_rocwmma_client_component} DEPENDS "libomp-dev")
+    rocm_package_add_rpm_dependencies(COMPONENT ${_rocwmma_client_component} DEPENDS "libomp-devel")
+  endif()
+endforeach()
+unset(_rocwmma_client_component)
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
 rocm_export_targets(
   TARGETS roc::rocwmma
   NAMESPACE roc::
+  DEPENDS
+    PACKAGE hip
 )
 
 rocm_create_package(

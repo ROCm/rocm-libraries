@@ -73,6 +73,7 @@ including the gfx908, gfx90a, gfx942, and gfx950 GPUs (collectively labeled as g
 
 Additionally, hipTensor is supported on AMD RDNA GPUs:
  - gfx11-generic: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152 and gfx1153.
+ - gfx11-7-generic: gfx1170 and gfx1171.
  - gfx12-generic: gfx1200, gfx1201 and gfx1250.
 
 .. note::
@@ -180,7 +181,7 @@ Here are the available options to build the hipTensor library, with or without c
         -   **Default value**
     *   -   ``GPU_TARGETS``
         -   Build the code for specific GPU target(s)
-        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1103``; ``gfx1150``; ``gfx1151``; ``gfx1152``; ``gfx1153``; ``gfx11-generic``; ``gfx1200``; ``gfx1201``; ``gfx1250``; ``gfx12-generic``
+        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1103``; ``gfx1150``; ``gfx1151``; ``gfx1152``; ``gfx1153``; ``gfx11-generic``; ``gfx1170``; ``gfx1171``; ``gfx11-7-generic``; ``gfx1200``; ``gfx1201``; ``gfx1250``; ``gfx1250-strict``; ``gfx12-generic``
     *   -   ``HIPTENSOR_BUILD_TESTS``
         -   Build the tests
         -   ``ON``
@@ -195,9 +196,6 @@ Here are the available options to build the hipTensor library, with or without c
         -   ``ON``
     *   -   ``HIPTENSOR_INLINE_UNARY_OPS``
         -   Inline all contraction unary ops for best runtime performance (slower compilation)
-        -   ``OFF``
-    *   -   ``HIPTENSOR_DISABLE_DEVICE``
-        -   Build a host-only stub library without the device backend (see `Building a stub library`_). This is enabled automatically when ``GPU_TARGETS`` resolves to an empty target list.
         -   ``OFF``
     *   -   ``CREATE_TEST_APP_LOCAL_DEPLOY``
         -   Copy ROCm runtime DLLs next to test binaries so they take precedence over System32 (Windows only)
@@ -343,21 +341,21 @@ Executable name                                  Description
 ``complex_scale_contraction_test_m4n4k4``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 8
 ``complex_scale_contraction_test_m5n5k5``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 10
 ``complex_scale_contraction_test_m6n6k6``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 12
-``rank2_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 2
-``rank3_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 3
-``rank4_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 4
-``rank5_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 5
-``rank6_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 6
-``rank2_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 2
-``rank3_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 3
-``rank4_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 4
-``rank5_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 5
-``rank6_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 6
-``rank2_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 2
-``rank3_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 3
-``rank4_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 4
-``rank5_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 5
-``rank6_elementwise_trinary_op_test``            Element-wise trinary operation test with half, single, and double precision datatypes of rank 6
+``rank2_elementwise_permute_test``               Permutation test with half, bfloat16, single and double precision datatypes of rank 2
+``rank3_elementwise_permute_test``               Permutation test with half, bfloat16, single and double precision datatypes of rank 3
+``rank4_elementwise_permute_test``               Permutation test with half, bfloat16, single and double precision datatypes of rank 4
+``rank5_elementwise_permute_test``               Permutation test with half, bfloat16, single and double precision datatypes of rank 5
+``rank6_elementwise_permute_test``               Permutation test with half, bfloat16, single and double precision datatypes of rank 6
+``rank2_elementwise_binary_op_test``             Element-wise binary operation test with half, bfloat16, single, and double precision datatypes of rank 2
+``rank3_elementwise_binary_op_test``             Element-wise binary operation test with half, bfloat16, single, and double precision datatypes of rank 3
+``rank4_elementwise_binary_op_test``             Element-wise binary operation test with half, bfloat16, single, and double precision datatypes of rank 4
+``rank5_elementwise_binary_op_test``             Element-wise binary operation test with half, bfloat16, single, and double precision datatypes of rank 5
+``rank6_elementwise_binary_op_test``             Element-wise binary operation test with half, bfloat16, single, and double precision datatypes of rank 6
+``rank2_elementwise_trinary_op_test``            Element-wise trinary operation test with half, bfloat16, single, and double precision datatypes of rank 2
+``rank3_elementwise_trinary_op_test``            Element-wise trinary operation test with half, bfloat16, single, and double precision datatypes of rank 3
+``rank4_elementwise_trinary_op_test``            Element-wise trinary operation test with half, bfloat16, single, and double precision datatypes of rank 4
+``rank5_elementwise_trinary_op_test``            Element-wise trinary operation test with half, bfloat16, single, and double precision datatypes of rank 5
+``rank6_elementwise_trinary_op_test``            Element-wise trinary operation test with half, bfloat16, single, and double precision datatypes of rank 6
 ``rank1_reduction_test``                         Reduction test with half, single, and double precision datatypes of rank 1
 ``rank2_reduction_test``                         Reduction test with half, single, and double precision datatypes of rank 2
 ``rank3_reduction_test``                         Reduction test with half, single, and double precision datatypes of rank 3
@@ -519,21 +517,6 @@ The following table highlights the relationships between high-level grouped targ
 |                                   +---------------------------------------------------------------------------------+
 |                                   |``rank6_reduction_test``                                                         |
 +-----------------------------------+---------------------------------------------------------------------------------+
-
-Building a stub library
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-When ``GPU_TARGETS`` resolves to an empty list, the Composable Kernel device backend cannot be
-built. In this case hipTensor builds a host-only stub ``libhiptensor`` that implements the full
-public API but returns ``HIPTENSOR_STATUS_NOT_SUPPORTED`` for every call, so the package,
-headers, and CMake config stay available for downstream consumers.
-
-The stub is selected automatically when ``GPU_TARGETS`` is empty, or explicitly with
-``-DHIPTENSOR_DISABLE_DEVICE=ON``:
-
-.. code-block:: bash
-
-   CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B <build_dir> . -DGPU_TARGETS=""
 
 Building on Windows
 -------------------------------------------

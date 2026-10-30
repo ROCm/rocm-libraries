@@ -49,10 +49,18 @@ class STINKYTOFU_EXPORT DebugPrintInstrumentation : public PassInstrumentation {
     void beforePass(const std::string& passName, Function& F, PassContext& ctx) override;
     void afterPass(const std::string& passName, Function& F, PassContext& ctx) override;
 
+    void beforeModulePass(const std::string& passName, StinkyAsmModule& M,
+                          PassContext& ctx) override;
+    void afterModulePass(const std::string& passName, StinkyAsmModule& M,
+                         PassContext& ctx) override;
+
    private:
     /// Dump F to out; if a module is set and F is its entry Function,
     /// also dump each callee Function under a labeled header.
     void dumpWithCallees(Function& F, std::ostream& out) const;
+
+    /// Dump every function of M (entry + callees) to out.
+    void dumpModule(StinkyAsmModule& M, std::ostream& out) const;
 
     std::unique_ptr<PassManagerDebugConfig> dbgCfg;
     const StinkyAsmModule* module_ = nullptr;

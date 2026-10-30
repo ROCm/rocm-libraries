@@ -36,9 +36,9 @@
 #include "../../shared/hip_object_wrapper.h"
 #include "device/generator/stockham_gen.h"
 #include "rtc_compile.h"
+#include "rtc_kernel.h"
 #include "rtc_stockham_gen.h"
 #include "rtc_stockham_kernel.h"
-
 #include <iostream>
 #include <iterator>
 #include <map>
@@ -158,7 +158,8 @@ std::string test_kernel_src(const std::string&               kernel_name,
                             bool                             half_lds,
                             bool                             direct_to_from_reg)
 {
-    StockhamGeneratorSpecs specs{factorization,
+    StockhamGeneratorSpecs specs{KIntType::U32,
+                                 factorization,
                                  {},
                                  static_cast<unsigned int>(rocfft_precision_single),
                                  get_curr_gcn_arch_name(),
@@ -239,7 +240,7 @@ float launch_kernel(RTCKernel&             kernel,
     kargs.append_size_t(data.batch);
     kargs.append_ptr(nullptr);
     kargs.append_ptr(nullptr);
-    kargs.append_unsigned_int(0);
+    kargs.append_kint(0, KIntType::U32);
     kargs.append_ptr(nullptr);
     kargs.append_ptr(nullptr);
     kargs.append_ptr(data.input_buf.data());
@@ -499,7 +500,7 @@ int main(int argc, char** argv)
                                     = module_promise.get_future();
                                 module_promise.set_value(std::move(module));
 
-                                RTCKernelStockham kernel(kernel_name, module_future);
+                                RTCKernelStockham kernel(kernel_name, KIntType::U32, module_future);
 
                                 float time = launch_kernel(
                                     kernel,
@@ -622,7 +623,7 @@ int main(int argc, char** argv)
             std::promise<hipModule_wrapper_t>       module_promise;
             std::shared_future<hipModule_wrapper_t> module_future = module_promise.get_future();
             module_promise.set_value(std::move(module));
-            RTCKernelStockham kernel(kernel_name, module_future);
+            RTCKernelStockham kernel(kernel_name, KIntType::U32, module_future);
 
             float time
                 = launch_kernel(kernel,

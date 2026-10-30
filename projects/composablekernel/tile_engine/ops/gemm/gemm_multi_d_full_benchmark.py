@@ -37,7 +37,6 @@ import csv
 import json
 import os
 import queue
-import re
 import subprocess
 import sys
 import threading
@@ -45,11 +44,16 @@ import time
 from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
+_COMMON_DIR = _THIS_DIR.parent / "common"
 _DISPATCHER_ROOT = _THIS_DIR.parents[2] / "dispatcher"
 sys.path.insert(0, str(_DISPATCHER_ROOT / "python"))
+sys.path.insert(0, str(_DISPATCHER_ROOT / "codegen"))
+sys.path.insert(0, str(_COMMON_DIR))
 sys.path.insert(0, str(_THIS_DIR))
 
 from gemm_utils import setup_multiple_gemm_dispatchers, expand_sweep  # noqa: E402
+from smi_utils import detect_gpu_ids  # noqa: E402
+from gemm_vector_fallback import VectorFallback, add_vector_fallback_arg  # noqa: E402
 
 # Multi-D is a single variant; its sweep configs live in gemm_multi_d/configs/.
 DEFAULT_CONFIG = _THIS_DIR / "gemm_multi_d" / "configs" / "default_config.json"
@@ -78,32 +82,7 @@ SUPPORTED_LAYOUTS = ("rcrr", "rrrr", "ccrr", "crrr")
 
 def detect_devices():
     """Return a list of visible GPU id strings (best-effort)."""
-    env = os.environ.get("HIP_VISIBLE_DEVICES") or os.environ.get(
-        "CUDA_VISIBLE_DEVICES"
-    )
-    if env:
-        ids = [d.strip() for d in env.split(",") if d.strip() != ""]
-        if ids:
-            return ids
-    try:
-        out = subprocess.check_output(
-            ["rocm-smi", "--showid"], stderr=subprocess.DEVNULL, text=True
-        )
-        ids = sorted(set(re.findall(r"GPU\[(\d+)\]", out)), key=int)
-        if ids:
-            return ids
-    except Exception:
-        pass
-    try:
-        out = subprocess.check_output(
-            ["amd-smi", "list"], stderr=subprocess.DEVNULL, text=True
-        )
-        ids = re.findall(r"^GPU:\s*(\d+)", out, re.MULTILINE)
-        if ids:
-            return ids
-    except Exception:
-        pass
-    return ["0"]
+    return detect_gpu_ids()
 
 
 def resolve_devices(spec):
@@ -268,8 +247,9 @@ def main():
     parser.add_argument(
         "--arch",
         default=None,
-        help="GPU arch (gfx90a/gfx942/gfx950); default: auto-detect via rocminfo "
-        "(no silent gfx942 default). Flows into expand_sweep, which resolves None.",
+        help="GPU arch (gfx90a/gfx942/gfx950/gfx1250); default: auto-detect via "
+        "rocminfo (no silent gfx942 default). Flows into expand_sweep, which "
+        "resolves None.",
     )
     parser.add_argument(
         "--dtype",
@@ -303,7 +283,10 @@ def main():
         "--kernel-timeout", type=int, default=30, help="Per-kernel timeout (s)"
     )
     parser.add_argument(
-        "--max-kernels", type=int, default=0, help="Limit to first N kernels (0=all)"
+        "--max-kernels",
+        type=int,
+        default=0,
+        help="Limit to first N kernels plus their vector-width variants (0=all)",
     )
     parser.add_argument(
         "--verify",
@@ -319,6 +302,7 @@ def main():
         "products amplify fp16 rounding vs MultiDAdd, so the reported max_rel is "
         "larger for Multiply/num_d=2; measured combos stay well under this gate.",
     )
+    add_vector_fallback_arg(parser)
     args = parser.parse_args()
 
     config_paths = resolve_configs(args)
@@ -332,6 +316,11 @@ def main():
     print(f"{'=' * 80}")
     print(f"  Configs: {', '.join(config_paths)}")
 
+    problems = load_problems(args.problems)
+    vfb = VectorFallback(
+        problems, args.layout, args.dtype, "multi_d", args.no_vector_fallback,
+        args.tune_c_vector_width,
+    )
     all_configs = []
     for cfg_path in config_paths:
         all_configs.extend(
@@ -341,11 +330,12 @@ def main():
                 dtype=args.dtype,
                 layout=args.layout,
                 variant="multi_d",
+                **vfb.expand_kwargs,
             )
         )
+    vfb.report_rejects()
 
-    if args.max_kernels > 0:
-        all_configs = all_configs[: args.max_kernels]
+    all_configs = vfb.limit_base_kernels(all_configs, args.max_kernels)
 
     print(f"  Expanded configs: {len(all_configs)}")
     print(f"  Build workers: {args.workers}")
@@ -356,6 +346,7 @@ def main():
         all_configs, verbose=True, max_workers=args.workers
     )
     build_time = time.perf_counter() - t0
+    vfb.report_builds(all_configs, lib_paths)
 
     built_kernels = [
         (cfg, lib) for cfg, lib in zip(all_configs, lib_paths) if lib is not None
@@ -390,12 +381,7 @@ def main():
     print("Phase 2: Load test problems")
     print(f"{'=' * 80}")
 
-    problems = load_problems(args.problems)
-    print(f"  Problems: {len(problems)}")
-    print(
-        f"  Total measurements: {len(built_kernels)} x {len(problems)} = "
-        f"{len(built_kernels) * len(problems)}"
-    )
+    pairs = vfb.pairs(problems, built_kernels)
 
     # ========================================================================
     # Phase 3: Benchmark across all visible GPUs (subprocess isolation, batched)
@@ -434,14 +420,10 @@ def main():
     # Build a single work queue of (prob_idx, prob_dict, kernel-batch) units and
     # fan them out across device-pinned worker threads.
     work_q = queue.Queue()
-    for prob_idx, prob in enumerate(problems):
+    for prob_idx, (prob, idx) in enumerate(zip(problems, pairs)):
         prob_dict = {"M": int(prob["M"]), "N": int(prob["N"]), "K": int(prob["K"])}
-        for start in range(0, len(built_kernels), args.batch_size):
-            end = min(start + args.batch_size, len(built_kernels))
-            batch = [
-                (start + j, cfg, lib)
-                for j, (cfg, lib) in enumerate(built_kernels[start:end])
-            ]
+        for start in range(0, len(idx), args.batch_size):
+            batch = [(i, *built_kernels[i]) for i in idx[start : start + args.batch_size]]
             work_q.put((prob_idx, prob_dict, batch))
 
     io_lock = threading.Lock()
@@ -491,7 +473,7 @@ def main():
     print(f"  Successful measurements: {stats['measurements']}")
     print(f"  Failed measurements: {stats['failures']}")
     print(f"  Output: {csv_path}")
-    return 0
+    return 1 if stats["failures"] else 0
 
 
 if __name__ == "__main__":

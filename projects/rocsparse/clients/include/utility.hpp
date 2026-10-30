@@ -247,6 +247,14 @@ public:
 
         CHECK_HIP_ERROR(hipStreamCreate(&this->graph_stream));
         CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(*this, &this->old_stream));
+
+        // Flush any pending pre-capture work on the current stream before capturing
+        // on the fresh graph stream. A preprocess/analysis phase (e.g. SpMM/SpMV)
+        // runs on this stream and produces data the captured compute reads; since
+        // the graph is launched on a different stream, without this sync that setup
+        // work would race the graph and can be read stale/uninitialized.
+        CHECK_HIP_ERROR(hipStreamSynchronize(this->old_stream));
+
         CHECK_ROCSPARSE_ERROR(rocsparse_set_stream(*this, this->graph_stream));
 
         // BEGIN GRAPH CAPTURE
@@ -436,7 +444,7 @@ struct test_hyb
     rocsparse_int           m;
     rocsparse_int           n;
     rocsparse_hyb_partition partition;
-    rocsparse_int           ell_nnz;
+    rocsparse_int           ell_nnz_legacy;
     rocsparse_int           ell_width;
     rocsparse_int*          ell_col_ind;
     void*                   ell_val;
@@ -444,6 +452,8 @@ struct test_hyb
     rocsparse_int*          coo_row_ind;
     rocsparse_int*          coo_col_ind;
     void*                   coo_val;
+    rocsparse_datatype      data_type_T;
+    int64_t                 ell_nnz;
 };
 
 /*! \brief  local hyb matrix structure which is automatically created and destroyed  */
@@ -762,11 +772,14 @@ public:
 
     template <memory_mode::value_t MODE, typename T, typename I = rocsparse_int>
     explicit rocsparse_local_spmat(bell_matrix<MODE, T, I>& h)
+        // bell_matrix stores scalar rows/cols and a scalar ell_cols, which are exactly what
+        // rocsparse_create_bell_descr expects (value array of length m*ell_cols, column index
+        // array of length (m/bdim)*(ell_cols/bdim)).
         : rocsparse_local_spmat(h.m,
                                 h.n,
-                                h.bdir,
+                                rocsparse_direction_row,
                                 h.bdim,
-                                h.width,
+                                h.ell_cols,
                                 h.ind,
                                 h.val,
                                 get_indextype<I>(),
@@ -948,8 +961,14 @@ public:
         }
     }
 
-    template <memory_mode::value_t MODE, typename T>
-    explicit rocsparse_local_dnmat(dense_matrix<MODE, T>& h)
+    template <memory_mode::value_t MODE, typename T, typename I>
+    explicit rocsparse_local_dnmat(dense_matrix<MODE, T, I>& h)
+        : rocsparse_local_dnmat(h.m, h.n, h.ld, (T*)h, get_datatype<T>(), h.order)
+    {
+    }
+
+    template <memory_mode::value_t MODE, typename T, typename I>
+    explicit rocsparse_local_dnmat(dense_matrix_view<MODE, T, I>& h)
         : rocsparse_local_dnmat(h.m, h.n, h.ld, (T*)h, get_datatype<T>(), h.order)
     {
     }

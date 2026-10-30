@@ -1,150 +1,82 @@
 // SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
-// SPDX-FileCopyrightText: Modifications Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Benchmark utils
-#include "../../bench_utils/bench_utils.hpp"
+#include "bench_utils.hpp"
 
 // rocThrust
 #include <thrust/device_vector.h>
 #include <thrust/equal.h>
 #include <thrust/execution_policy.h>
 
-// Google Benchmark
-#include <benchmark/benchmark.h>
-
-// STL
-#include <algorithm>
-#include <cstddef>
-#include <string>
-#include <vector>
-
-struct basic
+template <typename T>
+struct equal_benchmark : public primbench::benchmark_interface
 {
-  template <typename T, typename Policy>
-  float64_t run(thrust::device_vector<T>& a, thrust::device_vector<T>& b, Policy policy)
+  equal_benchmark(size_t items, double common_prefix_ratio)
+      : m_items(items)
+      , common_prefix_ratio(common_prefix_ratio)
+  {}
+
+  primbench::json meta() const override
   {
-    bench_utils::do_not_optimize(thrust::equal(policy, a.begin(), a.end(), b.begin()));
-
-    bench_utils::gpu_timer d_timer;
-
-    d_timer.start(0);
-    bench_utils::do_not_optimize(thrust::equal(policy, a.begin(), a.end(), b.begin()));
-    d_timer.stop(0);
-
-    return d_timer.get_duration();
+    return primbench::json{}
+      .add("algo", "equal")
+      .add("subalgo", "basic")
+      .add("input_type", primbench::name<T>())
+      .add("elements", m_items)
+      .add("common_prefix_ratio", common_prefix_ratio);
   }
+
+  void run(primbench::state& state) override
+  {
+    bench_utils::caching_allocator_t alloc{};
+    thrust::detail::device_t policy{};
+
+    thrust::device_vector<T> in(m_items, T{1});
+    thrust::device_vector<T> out(m_items, T{1});
+
+    const auto same_elements = std::min(static_cast<size_t>(m_items * common_prefix_ratio), m_items);
+
+    thrust::fill(policy(alloc).on(state.stream), out.begin() + same_elements, out.end(), T{2});
+
+    state.set_items(std::max(same_elements, size_t(1)));
+    state.add_reads<T>(std::max(same_elements, size_t(1)));
+    state.add_writes<T>(std::max(same_elements, size_t(1)));
+
+    state.run([&] {
+      thrust::equal(policy(alloc).on(state.stream), in.begin(), in.end(), out.begin());
+    });
+  }
+
+private:
+  size_t m_items;
+  double common_prefix_ratio;
 };
 
-template <class Benchmark, class T>
-void run_benchmark(benchmark::State& state,
-                   const std::size_t elements,
-                   const std::string, /*seed_type*/
-                   const float64_t common_prefix_ratio)
-{
-  // Benchmark object
-  Benchmark benchmark{};
-
-  // GPU times
-  std::vector<double> gpu_times;
-
-  thrust::device_vector<T> a(elements, T{1});
-  thrust::device_vector<T> b(elements, T{1});
-
-  const auto same_elements = std::min(static_cast<std::size_t>(elements * common_prefix_ratio), elements);
-
-  bench_utils::caching_allocator_t alloc;
-  thrust::detail::device_t policy{};
-
-  thrust::fill(policy(alloc), b.begin() + same_elements, b.end(), T{2});
-
-  for (auto _ : state)
-  {
-    float64_t duration = benchmark.template run<T>(a, b, policy(alloc));
-    state.SetIterationTime(duration);
-    gpu_times.push_back(duration);
+#define QUEUE(T)                                        \
+  for (size_t size : bench_utils::sizes(2 * sizeof(T))) \
+  {                                                     \
+    executor.queue<equal_benchmark<T>>(size, 1.0);      \
+    executor.queue<equal_benchmark<T>>(size, 0.5);      \
+    executor.queue<equal_benchmark<T>>(size, 0.0);      \
   }
-
-  // BytesProcessed include read and written bytes, so when the BytesProcessed/s are reported
-  // it will actually be the global memory bandwidth gotten.
-  // using `same_elements` instead of `elements` corresponds to the
-  // actual elements read in an early exit
-  state.SetBytesProcessed(state.iterations() * 2 * std::max(same_elements, std::size_t(1)) * sizeof(T));
-  state.SetItemsProcessed(state.iterations() * std::max(same_elements, std::size_t(1)));
-
-  const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
-  state.counters["gpu_noise"] = gpu_cv;
-}
-
-#define CREATE_BENCHMARK(T, Elements, CommonPrefixRatio)                                                    \
-  benchmark::RegisterBenchmark(                                                                             \
-    bench_utils::bench_naming::format_name(                                                                 \
-      "{algo:equal,subalgo:" + name + ",input_type:" #T + ",elements:" + bench_utils::format_pow2(Elements) \
-      + ", common_prefix_ratio:" #CommonPrefixRatio)                                                        \
-      .c_str(),                                                                                             \
-    run_benchmark<Benchmark, T>,                                                                            \
-    Elements,                                                                                               \
-    seed_type,                                                                                              \
-    CommonPrefixRatio)
-
-#define BENCHMARK_ELEMENTS(type, elements)             \
-  bs.push_back(CREATE_BENCHMARK(type, elements, 1.0)); \
-  bs.push_back(CREATE_BENCHMARK(type, elements, 0.5)); \
-  bs.push_back(CREATE_BENCHMARK(type, elements, 0.0));
-
-#define BENCHMARK_TYPE(type)                                               \
-  for (size_t size : bench_utils::sizes)                                   \
-  {                                                                        \
-    if (sizeof(type) * size <= bench_utils::system.devProp.totalGlobalMem) \
-      BENCHMARK_ELEMENTS(type, size)                                       \
-  }
-
-template <class Benchmark>
-void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
-{
-  std::vector<benchmark::Benchmark*> bs;
-  BENCHMARK_TYPE(int8_t)
-  BENCHMARK_TYPE(int16_t)
-  BENCHMARK_TYPE(int32_t)
-  BENCHMARK_TYPE(uint32_t)
-  BENCHMARK_TYPE(int64_t)
-  BENCHMARK_TYPE(uint64_t)
-
-  benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-}
 
 int main(int argc, char* argv[])
 {
-  cli::Parser parser(argc, argv);
-  parser.set_optional<std::string>("name_format", "name_format", "human", "either: json,human,txt");
-  parser.set_optional<std::string>("seed", "seed", "random", bench_utils::get_seed_message());
-  parser.run_and_exit_if_error();
+  primbench::settings settings;
+  settings.size                 = 1; // bench_utils::sizes() calculates it later.
+  settings.min_gpu_ms_per_batch = 100;
+  settings.batch_window_size    = 3;
+  primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
-  // Parse argv
-  benchmark::Initialize(&argc, argv);
-  bench_utils::bench_naming::set_format(parser.get<std::string>("name_format")); /* either: json,human,txt */
-  const std::string seed_type = parser.get<std::string>("seed");
+  QUEUE(int8_t)
+  QUEUE(int16_t)
+  QUEUE(int32_t)
+  QUEUE(int64_t)
 
-  // Benchmark info
-  bench_utils::add_common_benchmark_info();
-  benchmark::AddCustomContext("seed", seed_type);
+  QUEUE(uint32_t)
+  QUEUE(uint64_t)
 
-  // Add benchmark
-  std::vector<benchmark::Benchmark*> benchmarks;
-  add_benchmarks<basic>("basic", benchmarks, seed_type);
-
-  // Use manual timing
-  for (auto& b : benchmarks)
-  {
-    b->UseManualTime();
-    b->Unit(benchmark::kMicrosecond);
-    b->MinTime(0.4); // in seconds
-  }
-
-  // Run benchmarks
-  benchmark::RunSpecifiedBenchmarks(bench_utils::ChooseCustomReporter());
-
-  // Finish
-  benchmark::Shutdown();
-  return 0;
+  executor.run();
 }

@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/variant.h>
@@ -34,10 +35,12 @@
 #include <functional>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <typeinfo>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "AllHwMappings.hpp"
@@ -49,9 +52,12 @@
 #include "instruction/cvt.hpp"
 #include "instruction/mem.hpp"
 #include "instruction/mfma.hpp"
+#include "stinkytofu/Config/Config.h"
+#include "stinkytofu/Version.h"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HwRegHelpers.hpp"
+#include "stinkytofu/ir/asm/ReadWriteOperands.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
@@ -59,12 +65,32 @@
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterAllocationConfig.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
+
+#ifdef ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN
+#include "HelloWorldPass.hpp"  // declares stinkytofu::registerHelloWorldPassPlugin()
+#endif
 
 namespace nb = nanobind;
 
 namespace {
 using namespace rocisa;
 using namespace stinkytofu;
+
+// Module options of the removed cap / throttle ds_load pacing. Still accepted, no longer read.
+bool isRemovedDsPacingOption(const std::string& key) {
+    static const std::unordered_set<std::string> removed = {"DsReadPerCap",
+                                                            "DsReadPerWmma",
+                                                            "DsIssueCapSpanCycles",
+                                                            "DsIssueCapMode",
+                                                            "DsReadThrottleLatency",
+                                                            "DsReadThrottleTransitionFactor",
+                                                            "DsReadThrottleTransitionEntries",
+                                                            "DsSlotFirst",
+                                                            "BarrierHalfSlack"};
+    return removed.count(key) > 0;
+}
 
 StinkyRegister toStinkyRegister(const Container* container, bool hasVgprMsb, GfxArchID arch);
 StinkyRegister toStinkyRegister(const InstructionInput& input, bool hasVgprMsb, GfxArchID arch);
@@ -205,9 +231,21 @@ stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocM
                                      rocMod.offset, hasSCOPEModifier);
 }
 
-stinkytofu::GLOBALModifiers convertGLOBALModifiers(const rocisa::GLOBALModifiers& rocMod) {
+stinkytofu::GLOBALModifiers convertGLOBALModifiers(const rocisa::GLOBALModifiers& rocMod,
+                                                   const std::map<std::string, int>& asmCaps) {
+    bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
+    bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
+    bool hasDLCModifier = asmCaps.count("HasDLCModifier") && asmCaps.at("HasDLCModifier");
     return stinkytofu::GLOBALModifiers(rocMod.offset, convertTemporalHint(rocMod.th),
-                                       convertMUBUFScope(rocMod.scope));
+                                       convertMUBUFScope(rocMod.scope), rocMod.glc, rocMod.slc,
+                                       rocMod.dlc, rocMod.lds, rocMod.isStore, hasGLCModifier,
+                                       hasSC0Modifier, hasDLCModifier);
+}
+
+stinkytofu::TENSORModifiers convertTENSORModifiers(const rocisa::TENSORModifiers& rocMod) {
+    return stinkytofu::TENSORModifiers(convertMUBUFScope(rocMod.scope),
+                                       convertTemporalHint(rocMod.th),
+                                       convertNonVolatile(rocMod.nv), rocMod.isStore);
 }
 
 stinkytofu::SDelayAluData convertSDelayAluData(const rocisa::SDelayAlu* delayAluInst) {
@@ -281,6 +319,8 @@ stinkytofu::DPPModifiers convertDPPModifiers(const rocisa::DPPModifiers& rocMod)
     } else if (rocMod.quad_perm.size() == 4) {
         ctrl = stinkytofu::dppQuadPerm(rocMod.quad_perm[0], rocMod.quad_perm[1],
                                        rocMod.quad_perm[2], rocMod.quad_perm[3]);
+    } else if (rocMod.row_xmask != kUnset) {
+        ctrl = stinkytofu::dppRowXmask(rocMod.row_xmask);
     }
 
     // bound_ctrl is {0, 1}. Anything else (unset -1, or stray) -> default 0.
@@ -297,6 +337,45 @@ stinkytofu::SDWAModifiers convertSDWAModifiers(const rocisa::SDWAModifiers& rocM
         static_cast<stinkytofu::SDWAModifiers::SelectBit>(rocMod.src1_sel));
 }
 
+#ifndef NDEBUG
+/// Every destination that reads itself must appear on both sides.
+///
+/// legalizeReadWriteSources puts the source there, so a failure means the
+/// destination the field describes never reached destRegs at all.
+void assertReadWriteSourcesPresent(const StinkyInstruction* inst) {
+    const HwInstDesc* desc = inst->getHwInstDesc();
+    if (desc == nullptr) return;
+
+    const std::vector<StinkyRegister>& destRegs = inst->getDestRegs();
+    const std::vector<StinkyRegister>& srcRegs = inst->getSrcRegs();
+    size_t destIdx = 0;
+    for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
+        if (!field.isDest) continue;
+        const size_t slot = destIdx++;
+        if (!readsDestination(*inst, slot)) continue;
+
+        if (slot >= destRegs.size()) {
+            std::cerr << "Read-write operand missing from destRegs\n"
+                      << "  Instruction: " << desc->mnemonic << ": ";
+            inst->dump(std::cerr);
+            assert(false && "Read-write operand missing from destRegs");
+            continue;
+        }
+
+        const StinkyRegister& reg = destRegs[slot];
+        if (!reg.isRegister()) continue;
+        if (std::find(srcRegs.begin(), srcRegs.end(), reg) == srcRegs.end()) {
+            std::cerr << "Read-write operand missing from srcRegs\n"
+                      << "  Instruction: " << desc->mnemonic << ": ";
+            inst->dump(std::cerr);
+            std::cerr << "  Register: ";
+            reg.dump(std::cerr);
+            assert(false && "Read-write operand missing from srcRegs");
+        }
+    }
+}
+#endif
+
 Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* rocisaInst,
                               AsmIRBuilder& irBuilder, GfxArchID archId,
                               const std::map<std::string, int>& asmCaps,
@@ -304,6 +383,14 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
     // Attach implicit special registers (SCC/VCC/`EXEC) declared by HW flags
     // (Flags.def) to the instruction.
     legalizeImplicitSpecialRegisters(inst, getWaveFrontSize(archId));
+
+    // A destination that keeps part of its old value is also a read, and not
+    // every rocisa class lists it in getSrcParams(). This runs after
+    // addModifiersToInstruction, which op_sel being half of the answer requires.
+    legalizeReadWriteSources(inst);
+#ifndef NDEBUG
+    assertReadWriteSourcesPresent(inst);
+#endif
 
     if (auto* swappc = dynamic_cast<rocisa::SSwapPCB64*>(rocisaInst)) {
         assert(isCall(*inst) && "SSwapPCB64 must lower to an IF_Call instruction");
@@ -341,10 +428,13 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
             return legalizeVNop(inst, irBuilder, archId);
 
         case GFX::ds_load_b192:
-            return legalizeDSLoadB192(inst, irBuilder, archId, hasVgprMsb);
+            return legalizeDSLoadB192(inst, irBuilder, archId);
 
         case GFX::ds_store_b192:
-            return legalizeDSStoreB192(inst, irBuilder, archId, hasVgprMsb);
+            return legalizeDSStoreB192(inst, irBuilder, archId);
+
+        case GFX::ds_store_b256:
+            return legalizeDSStoreB256(inst, irBuilder, archId);
 
         case GFX::s_waitcnt:
             return legalizeWaitCnt(inst, irBuilder, archId);
@@ -441,52 +531,6 @@ void addRegistersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             stinkyInst->addSrcReg(reg);
         }
     }
-
-#ifndef NDEBUG
-    // Verify: read-write operands must exist in both destRegs and srcRegs.
-    {
-        const auto& fields = stinkyInst->getHwInstDesc()->operandFields;
-        for (const auto& field : fields) {
-            if (!field.isReadWrite) continue;
-
-            const auto& destRegs = stinkyInst->getDestRegs();
-            const auto& srcRegs = stinkyInst->getSrcRegs();
-            unsigned dIdx = 0, sIdx = 0;
-            for (const auto& f : fields) {
-                if (&f == &field) break;
-                if (f.isDest || f.isReadWrite)
-                    dIdx++;
-                else
-                    sIdx++;
-            }
-
-            const StinkyRegister* reg = nullptr;
-            if (field.isDest && dIdx < destRegs.size())
-                reg = &destRegs[dIdx];
-            else if (sIdx < srcRegs.size())
-                reg = &srcRegs[sIdx];
-
-            if (reg && reg->dataType == StinkyRegister::Type::Register) {
-                if (std::find(destRegs.begin(), destRegs.end(), *reg) == destRegs.end()) {
-                    std::cerr << "Read-write operand missing from destRegs\n"
-                              << "  Instruction: " << stinkyInst->getHwInstDesc()->mnemonic << ": ";
-                    stinkyInst->dump(std::cerr);
-                    std::cerr << "  Register: ";
-                    reg->dump(std::cerr);
-                    assert(false && "Read-write operand missing from destRegs");
-                }
-                if (std::find(srcRegs.begin(), srcRegs.end(), *reg) == srcRegs.end()) {
-                    std::cerr << "Read-write operand missing from srcRegs\n"
-                              << "  Instruction: " << stinkyInst->getHwInstDesc()->mnemonic << ": ";
-                    stinkyInst->dump(std::cerr);
-                    std::cerr << "  Register: ";
-                    reg->dump(std::cerr);
-                    assert(false && "Read-write operand missing from srcRegs");
-                }
-            }
-        }
-    }
-#endif
 }
 
 /// Helper to extract neg_lo/neg_hi modifiers from instruction string
@@ -649,41 +693,49 @@ void handleSWaitLoadcntModifiers(StinkyInstruction* stinkyInst,
     }
 }
 
-/// Helper to handle VCvt instruction True16 modifiers
-void handleVCvtTrue16Modifiers(StinkyInstruction* stinkyInst,
-                               const rocisa::VCvtInstruction* vcvtInst) {
-    if (vcvtInst->true16.empty()) {
+/// Derive true16 ".l"/".h" selects from operand halfSelect and attach a
+/// True16Modifiers so the suffixes survive lowering.
+void attachTrue16ModifiersFromOperands(StinkyInstruction* stinkyInst,
+                                       const std::shared_ptr<rocisa::Container>& dst,
+                                       const std::shared_ptr<rocisa::Container>& dst1,
+                                       const std::vector<InstructionInput>& srcs) {
+    // rocisa and stinkytofu share the same HighBitSel values (NONE=-1, LOW=0, HIGH=1).
+    auto regHalf = [](const rocisa::Container* cont) -> stinkytofu::HighBitSel {
+        auto* reg = dynamic_cast<const rocisa::RegisterContainer*>(cont);
+        if (reg && reg->halfSelect.has_value()) {
+            return static_cast<stinkytofu::HighBitSel>(static_cast<int>(*reg->halfSelect));
+        }
+        return stinkytofu::HighBitSel::NONE;
+    };
+    auto inputHalf = [&](const InstructionInput& in) -> stinkytofu::HighBitSel {
+        if (auto pptr = std::get_if<std::shared_ptr<rocisa::Container>>(&in)) {
+            return regHalf(pptr->get());
+        }
+        return stinkytofu::HighBitSel::NONE;
+    };
+
+    stinkytofu::HighBitSel dst0 = regHalf(dst.get());
+    stinkytofu::HighBitSel dstHi = regHalf(dst1.get());
+    std::vector<stinkytofu::HighBitSel> srcSels;
+    for (const auto& src : srcs) {
+        srcSels.push_back(inputHalf(src));
+    }
+
+    // No operand tagged -> legacy / non-true16 op; emit no true16 modifier.
+    bool any = dst0 != stinkytofu::HighBitSel::NONE || dstHi != stinkytofu::HighBitSel::NONE;
+    for (auto s : srcSels) {
+        any = any || s != stinkytofu::HighBitSel::NONE;
+    }
+    if (!any) {
         return;
     }
 
-    // Convert rocisa::True16Modifiers to stinkytofu True16Modifiers
-    // rocisa uses indices: DST=0, DST1=1, SRC0=2, SRC1=3, ...
-    stinkytofu::HighBitSel dst0 = stinkytofu::HighBitSel::NONE;
-    stinkytofu::HighBitSel dst1 = stinkytofu::HighBitSel::NONE;
-    std::vector<stinkytofu::HighBitSel> srcs;
-
-    for (size_t i = 0; i < vcvtInst->true16.size(); ++i) {
-        stinkytofu::HighBitSel highBit =
-            static_cast<stinkytofu::HighBitSel>(static_cast<int>(vcvtInst->true16[i].high_bit));
-
-        if (i == 0)  // DST
-        {
-            dst0 = highBit;
-        } else if (i == 1)  // DST1
-        {
-            dst1 = highBit;
-        } else  // SRC0, SRC1, ...
-        {
-            srcs.push_back(highBit);
-        }
-    }
-
     // Assert that source count is within the 2-bit encoding limit (max 6 sources)
-    assert(srcs.size() <= 6 &&
+    assert(srcSels.size() <= 6 &&
            "True16Modifiers: source count must be <= 6 for uint16_t 2-bit encoding");
 
     stinkyInst->addModifier<stinkytofu::True16Modifiers>(
-        stinkytofu::True16Modifiers(dst0, dst1, srcs));
+        stinkytofu::True16Modifiers(dst0, dstHi, srcSels));
 }
 
 /// Add modifiers to StinkyInstruction (DS, FLAT, MUBUF, SMEM, WaitCnt, DelayAlu)
@@ -709,7 +761,9 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
         else TRY_ADD_MOD(FLATStoreInstruction, flat, stinkytofu::FLATModifiers,
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
-        else TRY_ADD_MOD(GLOBALLoadInstruction, modifier, stinkytofu::GLOBALModifiers, convertGLOBALModifiers)
+        else TRY_ADD_MOD(GLOBALLoadInstruction, modifier, stinkytofu::GLOBALModifiers,
+            [&](const auto& mod) { return convertGLOBALModifiers(mod, asmCaps); })
+        else TRY_ADD_MOD(rocisa::TensorLoadToLds, tensor, stinkytofu::TENSORModifiers, convertTENSORModifiers)
         else if (auto typed = dynamic_cast<const MUBUFReadInstruction*>(inst)) {
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));
@@ -726,8 +780,8 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             // whose modifier handling must not change here.
             if (typed->modifier.has_value()) {
                 const auto& gm = typed->modifier.value();
-                stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(stinkytofu::GLOBALModifiers(
-                    gm.offset, convertTemporalHint(gm.th), convertMUBUFScope(gm.scope)));
+                stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(
+                    convertGLOBALModifiers(gm, asmCaps));
             }
         }
         else TRY_ADD_MOD(SMemLoadInstruction, smem, stinkytofu::SMEMModifiers,
@@ -743,11 +797,17 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             TRY_ADD_MOD(CommonInstruction, sdwa, stinkytofu::SDWAModifiers, convertSDWAModifiers)
             TRY_ADD_MOD(CommonInstruction, dpp, stinkytofu::DPPModifiers, convertDPPModifiers)
 
+            // true16: 16-bit operands carry their half-word select as a .l/.h suffix
+            // on the register. Attach generically; no-op when no operand is tagged,
+            // so packed (v_pk_*) and 32-bit ops are unaffected.
+            HANDLE_INST_TYPE(rocisa::CommonInstruction,
+                             attachTrue16ModifiersFromOperands(stinkyInst, typedInst->dst,
+                                                               typedInst->dst1, typedInst->srcs))
+
             // VOP/SOP instructions - these can overlap with CommonInstruction base class
             HANDLE_INST_TYPE(rocisa::MXMFMAInstruction, handleMXMFMAModifiers(stinkyInst, itemToString(inst)))
             else HANDLE_INST_TYPE(rocisa::MFMAInstruction, handleMFMAModifiers(stinkyInst, itemToString(inst)))
             else HANDLE_INST_TYPE(rocisa::SMFMAInstruction, handleSMFMAModifiers(stinkyInst, itemToString(inst)))
-            else HANDLE_INST_TYPE(rocisa::VCvtInstruction, handleVCvtTrue16Modifiers(stinkyInst, typedInst))
 
             // Control/Synchronization instructions, separate from VOP/SOP
             else HANDLE_INST_TYPE(rocisa::SDelayAlu,
@@ -785,17 +845,6 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
     }
 }
 
-/// Get MSB value from StinkyRegister if it's a VGPR. Returns -1 for non-VGPR.
-int getMsbFromStinkyVgpr(const StinkyRegister& reg) {
-    if (reg.dataType != StinkyRegister::Type::Register || reg.reg.type != RegType::V) return -1;
-    return static_cast<int>(reg.reg.idx) / 256;
-}
-
-int getMsbOffsetFromStinkyVgpr(const StinkyRegister& reg) {
-    if (reg.dataType != StinkyRegister::Type::Register || reg.reg.type != RegType::V) return 0;
-    return getMsbFromStinkyVgpr(reg) * (-256);
-}
-
 /// Convert a rocisa::Container to StinkyRegister
 ///
 /// This function takes a rocisa::Container pointer and converts it to a
@@ -829,9 +878,8 @@ StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgpr
         reg.reg.isMinus = regCont->isMinus ? 1 : 0;
         reg.reg.isAbs = regCont->isAbs ? 1 : 0;
 
-        // TODO: This is a hack to set the offset of the register for use case such as msb, etc.
-        // Set offset for VGPR MSB when supported (use case: vgpr > 255)
-        if (hasVgprMsb) reg.reg.offset = static_cast<int16_t>(getMsbOffsetFromStinkyVgpr(reg));
+        // No bank bias in reg.offset here: it is derived from the index, which
+        // allocation rewrites. InsertVgprMsbPass derives it from the final index.
 
         // Capture symbolic register name if available
         // In rocisa, the symbolic name includes the type prefix and all offsets
@@ -997,8 +1045,15 @@ namespace stinkytofu {
 static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     const rocisa::Module& module, std::array<int, 3> arch, const std::string& moduleName,
     const StinkyAsmModule::ModuleOptions& moduleOptions) {
-    // Get GfxArchID from architecture array
-    GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+    // Resolve the GfxArchID from this kernel's ISA triple. Steppings that share a triple (e.g.
+    // gfx1250 v0/v1 on {12,5,0}) are indistinguishable by triple alone, so the lookup returns the
+    // first-registered stepping. ModuleOptions.ArchName carries the concrete stepping to pick
+    // instead -- but only to disambiguate *within the same triple*. In a multi-arch build (e.g.
+    // gfx942;gfx1250v0) ArchName is set build-wide, so we must not retag a kernel of a different
+    // arch: honor the name only when the named arch's triple matches this kernel's triple.
+    // resolveArchId() is shared with the logical-IR path (ToStinkyAsmPass) so both select the same
+    // per-arch cost table.
+    GfxArchID archId = resolveArchId(arch, moduleOptions.ArchName);
 
     // VgprMsbMode is auto-probed by Backend::configurePassManager() when it
     // sees VgprMsbMode::None, so no need to read it from rocisa caps here.
@@ -1253,18 +1308,6 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     const bool hasPGR = (pgrStartIdx != -1 && loopBodyIdx != -1 && pgrStartIdx <= loopBodyIdx);
     static const std::string kPGR = "loopWithPrefetch";
 
-    // Recursively check whether an item's subtree contains a Label with \p name.
-    std::function<bool(const rocisa::Item*, const std::string&)> containsLabel =
-        [&](const rocisa::Item* item, const std::string& name) -> bool {
-        if (const auto* lbl = dynamic_cast<const rocisa::Label*>(item))
-            return lbl->getLabelName() == name;
-        if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
-            for (const auto& child : mod->itemList)
-                if (containsLabel(child.get(), name)) return true;
-        }
-        return false;
-    };
-
     // Recursively check whether an item is, or contains, a Module named \p name.
     std::function<bool(const rocisa::Item*, const std::string&)> containsModule =
         [&](const rocisa::Item* item, const std::string& name) -> bool {
@@ -1276,39 +1319,20 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         return false;
     };
 
-    // Auto-detect the expertScheduleMode2 region: from the top-level item whose
-    // subtree contains label_Preload_Offset_Start (kernel-body entry, before the
-    // first VGPR producer) through Module("noLoadLoopBody"). This is the region
-    // the wait-alu / mode2 ScopeAdaptor operates on — it deliberately excludes
-    // the epilogue (Global Write), where all activation calls live and which must
-    // stay in mode0.
-    // Anchor the region start at label_ASM_Start, the main-body entry. It
-    // precedes label_Preload_Offset_Start in program order, so starting here
-    // keeps BOTH entry labels inside the region: the non-preload path enters at
-    // label_ASM_Start and falls through; the kernarg-preload path jumps to
-    // label_Preload_Offset_Start (further in). InsertWaitAluPass then enables
-    // mode2 at each entry label it finds, covering both paths. Fall back to
-    // label_Preload_Offset_Start if label_ASM_Start is somehow absent.
-    int scopeStartIdx = -1;
-    int scopeEndIdx = -1;
+    // Tag every top-level item whose subtree holds Module("GlobalWriteElements"),
+    // from the first such item through the last. Covers both the main store
+    // epilogue and the separate GSU-split OptNLL store.
+    int epilogueStartIdx = -1;
+    int epilogueEndIdx = -1;
     for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
-        const auto& item = module.itemList[i];
-        if (scopeStartIdx == -1 && containsLabel(item.get(), "label_ASM_Start")) {
-            scopeStartIdx = i;
-        }
-        if (containsModule(item.get(), "noLoadLoopBody")) scopeEndIdx = i;
-    }
-    if (scopeStartIdx == -1) {
-        for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
-            if (containsLabel(module.itemList[i].get(), "label_Preload_Offset_Start")) {
-                scopeStartIdx = i;
-                break;
-            }
+        if (containsModule(module.itemList[i].get(), "GlobalWriteElements")) {
+            if (epilogueStartIdx == -1) epilogueStartIdx = i;
+            epilogueEndIdx = i;
         }
     }
-    const bool hasScope =
-        (scopeStartIdx != -1 && scopeEndIdx != -1 && scopeStartIdx <= scopeEndIdx);
-    static const std::string kScope = "expertScheduleMode2";
+    const bool hasEpilogue =
+        (epilogueStartIdx != -1 && epilogueEndIdx != -1 && epilogueStartIdx <= epilogueEndIdx);
+    static const std::string kEpilogue = "globalWriteEpilogue";
 
     // Traverse top-level items, injecting the loopWithPrefetch group name
     // for items in the detected prefetch region [pgrStartIdx, loopBodyIdx]
@@ -1316,10 +1340,10 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
         const auto& item = module.itemList[i];
         const bool inPGR = hasPGR && (i >= pgrStartIdx && i <= loopBodyIdx);
-        const bool inScope = hasScope && (i >= scopeStartIdx && i <= scopeEndIdx);
+        const bool inEpilogue = hasEpilogue && (i >= epilogueStartIdx && i <= epilogueEndIdx);
 
         std::vector<const std::string*> base;
-        if (inScope) base.push_back(&kScope);
+        if (inEpilogue) base.push_back(&kEpilogue);
         if (inPGR) base.push_back(&kPGR);
         base.push_back(&module.name);
 
@@ -1369,6 +1393,22 @@ std::array<int, 3> convertArch(nb::object arch_obj) {
 ///
 /// \param m The nanobind module to add bindings to
 void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
+    // rocisa was compiled against whichever stinkytofu/Version.h it saw at build
+    // time (STINKYTOFU_FULL_VERSION, a compile-time macro expansion in this TU).
+    // stinkytofu::getRuntimeVersion() instead reports the truth about whatever
+    // stinkytofu is actually loaded/linked right now — a separately-installed
+    // shared lib, a vendored copy, or (in a static build) the same binary this
+    // function itself lives in. A mismatch means a different stinkytofu build
+    // than the one rocisa was compiled against is present at runtime; rocisa
+    // does not support running against a different stinkytofu build, so fail
+    // loudly at import time rather than risk silent ABI/behavior drift.
+    if (!stinkytofu::versionsMatch(STINKYTOFU_FULL_VERSION, stinkytofu::getRuntimeVersion())) {
+        throw std::runtime_error(
+            std::string("rocisa was built against stinkytofu ") + STINKYTOFU_FULL_VERSION +
+            " but " + stinkytofu::getRuntimeVersion() +
+            " is loaded at runtime — rebuild rocisa against a matching stinkytofu.");
+    }
+
     // Pipeline extension point enum
     nb::enum_<PipelineExtensionPoint>(m, "PipelineExtensionPoint")
         .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
@@ -1384,6 +1424,13 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
           "Absolute path to StinkyTofu's bundled example plugin, or \"\" if it was not built. "
           "For tests/demos; consumers with their own plugins pass their path to loadPlugin().");
 
+#ifdef ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN
+    m.def("registerExamplePlugin", &stinkytofu::registerHelloWorldPassPlugin,
+          "Register StinkyTofu's built-in example HelloWorldPass, compiled directly into "
+          "rocisa (LLVM-style static-plugin pattern). Only available when rocisa was built "
+          "with ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN=ON.");
+#endif
+
     // Bind isSupportedByStinkyTofu to check if the architecture is supported by StinkyTofu
     m.def(
         "isSupportedByStinkyTofu",
@@ -1392,9 +1439,43 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return BackendRegistry::getArchPipeline(archArray) != nullptr;
         },
         nb::arg("arch"), "Check if the architecture is supported by StinkyTofu");
+    m.def(
+        "parseRegisterAllocationConfig",
+        [](nb::object value) -> std::pair<std::string, int> {
+            std::string text;
+            if (nb::isinstance<nb::str>(value))
+                text = nb::cast<std::string>(value);
+            else if (nb::isinstance<nb::int_>(value))
+                text = std::to_string(nb::cast<long long>(value));
+            else
+                throw nb::type_error(
+                    "a register allocation config is a mode 0..3 or a comma-separated string");
+            Expected<RegisterAllocationConfig> config =
+                parseRegisterAllocationConfig(text, RegisterAllocationDialect::Kernel);
+            if (config.hasError()) throw nb::value_error(config.getError().c_str());
+            return {canonicalRegisterAllocationConfig(*config), static_cast<int>(config->mode)};
+        },
+        nb::arg("value"),
+        "Parse a StinkyTofuRegisterAllocation value: a mode 0..3, or a comma-separated "
+        "string such as 'apply,classes=vs'. Returns (canonical, mode), where canonical is the "
+        "shortest spelling of the same configuration -- the mode alone for a mode-only "
+        "config, '0' for mode off. Raises ValueError naming what does not parse.");
     m.def("getRegisteredArchKeys", &BackendRegistry::getRegisteredArchKeys,
           "Return a list of arch name strings for all registered StinkyTofu backends (e.g. "
           "[\"gfx1250\"]).");
+    m.def(
+        "isMnemonicSupportedByStinkyTofu",
+        [](const std::string& mnemonic, nb::object arch_obj) {
+            std::array<int, 3> archArray = convertArch(arch_obj);
+            const auto* info =
+                ArchHelper::getInstance().getArchInfo(archArray[0], archArray[1], archArray[2]);
+            if (!info) return false;
+            const auto& map = info->getMnemonicToIsaOpcodeMap();
+            return map.find(mnemonic) != map.end();
+        },
+        nb::arg("mnemonic"), nb::arg("arch"),
+        "Check if StinkyTofu has a hardware instruction definition for the mnemonic on this "
+        "architecture. Lets rocisa ask before emitting an instruction StinkyTofu cannot lower.");
     // Wrapper class to add signature support to StinkyAsmModule
     class StinkyAsmModuleWithSignature {
        private:
@@ -1447,16 +1528,120 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return module_->getFunction(name) != nullptr;
         }
 
-        // Override emitAssembly to include signature
+        // Override emitAssembly to include signature.
+        // KeepSignatureOnEmit: a pre-pipeline dump also calls this. refreshSgprCount
+        // only ever lowers the declared count, so that dump would drop SGPRs the
+        // later pipeline still needs. The plugin flag emits the same text, then
+        // puts the declaration back.
         std::string emitAssembly() const {
+            const bool keepSignature = module_->getPluginDataI64("KeepSignatureOnEmit", 0) != 0;
+            int savedVgprs = 0;
+            int savedAgprs = 0;
+            int savedSgprs = 0;
+            int64_t savedBytes = -1;
+            if (keepSignature && signature_) {
+                const stinkytofu::SignatureKernelDescriptor& kd = signature_->kernelDescriptor;
+                savedVgprs = kd.originalTotalVgprs;
+                savedAgprs = kd.totalAgprs;
+                savedSgprs = kd.totalSgprs;
+                savedBytes = kd.totalInstructionBytes;
+            }
             std::string result;
             if (signature_) {
                 int64_t totalBytes = module_->getTotalInstructionBytes();
                 if (totalBytes >= 0) signature_->setTotalInstructionBytes(totalBytes);
+                refreshSgprCount();
+                refreshVgprCount();
                 result = signature_->toString();
             }
             result += module_->emitAssembly();
+            if (keepSignature && signature_) {
+                signature_->setGprs(savedVgprs, savedAgprs, savedSgprs);
+                signature_->setTotalInstructionBytes(savedBytes);
+            }
             return result;
+        }
+
+        /// A pass that rewrites operands invalidates the declared SGPR count, so
+        /// it is taken from the final code here rather than trusted from the
+        /// producer. Prefetch can also add SGPRs after compact, so the count is
+        /// both lowered and raised to match what the emitted code uses.
+        void refreshSgprCount() const {
+            stinkytofu::SignatureKernelDescriptor& kd = signature_->kernelDescriptor;
+            uint32_t required = 0;
+            for (const auto* function : module_->getFunctions()) {
+                if (function == nullptr) continue;
+                required = std::max(required, stinkytofu::requiredSgprCount(
+                                                  *function, kd.numSgprPreload, kd.sgprWorkGroup));
+            }
+            if (required == 0 || static_cast<int>(required) == kd.totalSgprs) return;
+            signature_->setGprs(kd.totalVgprs, kd.totalAgprs, static_cast<int>(required));
+        }
+
+        /// The same for VGPRs: allocation rewrites operands, so the producer's
+        /// pool stops describing the code, and the hardware reserves what the
+        /// descriptor declares. Both directions, since a colouring may need
+        /// more than was reserved. A requirement past the addressable limit
+        /// throws rather than being clamped, since no descriptor expresses it.
+        void refreshVgprCount() const {
+            const stinkytofu::SignatureKernelDescriptor& kd = signature_->kernelDescriptor;
+            // How many registers the enabled workitem-id dimensions occupy is
+            // the target's convention, not the field's. False on a target this
+            // build does not know, which over-declares rather than under.
+            const auto* info = archInfo();
+            const bool packedWorkitemId = info != nullptr && info->packedWorkitemId != 0;
+            uint32_t required = 0;
+            for (const auto* function : module_->getFunctions()) {
+                if (function == nullptr) continue;
+                required = std::max(required, stinkytofu::requiredVgprCount(
+                                                  *function, kd.vgprWorkItem, packedWorkitemId));
+            }
+            if (required == 0) return;
+
+            // An architecture this build does not know has no limit to check
+            // against, rather than a limit of zero.
+            if (info != nullptr && required > info->maxVGPR) {
+                throw std::runtime_error(
+                    "kernel needs " + std::to_string(required) +
+                    " VGPRs after register allocation but the architecture addresses only " +
+                    std::to_string(info->maxVGPR));
+            }
+            signature_->setDeclaredVgprs(static_cast<int>(required));
+        }
+
+        /// The architecture this module was lifted for, or null when it is not
+        /// one this build knows. Looked up by triple, which returns null on an
+        /// unknown target instead of asserting the way GfxArchID resolution does.
+        const stinkytofu::ArchHelper::ArchInfo* archInfo() const {
+            for (const auto* function : module_->getFunctions()) {
+                if (function == nullptr) continue;
+                const std::array<int, 3>& isa = function->getGemmTileConfig().arch;
+                const auto* info = stinkytofu::ArchHelper::getInstance().getArchInfo(
+                    static_cast<uint32_t>(isa[0]), static_cast<uint32_t>(isa[1]),
+                    static_cast<uint32_t>(isa[2]));
+                if (info != nullptr) return info;
+            }
+            return nullptr;
+        }
+
+        /// SGPRs the descriptor declares, as `.amdhsa_next_free_sgpr`.
+        ///
+        /// The producer's estimate before emitAssembly(), which is then set to
+        /// what the emitted code actually uses. Ask afterwards to find out
+        /// whether a re-allocated kernel fits its budget.
+        int getDeclaredSgprCount() const {
+            return signature_ ? signature_->kernelDescriptor.getNextFreeSgpr() : 0;
+        }
+
+        /// VGPRs the descriptor declares, as `.amdhsa_next_free_vgpr`.
+        ///
+        /// The counterpart of getDeclaredSgprCount(), with one caveat a caller
+        /// judging an occupancy from it has to know: where AGPRs share the
+        /// register file this field covers both classes, and setDeclaredVgprs
+        /// declines to touch it, so the answer there is the producer's own
+        /// number rather than anything allocation arrived at.
+        int getDeclaredVgprCount() const {
+            return signature_ ? signature_->kernelDescriptor.getNextFreeVgpr() : 0;
         }
 
         // Plugin data forwarding
@@ -1499,6 +1684,14 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     nb::class_<StinkyAsmModuleWithSignature>(m, "StinkyAsmModule")
         .def("runOptimizationPipeline", &StinkyAsmModuleWithSignature::runOptimizationPipeline)
         .def("emitAssembly", &StinkyAsmModuleWithSignature::emitAssembly)
+        .def("getDeclaredSgprCount", &StinkyAsmModuleWithSignature::getDeclaredSgprCount,
+             "SGPRs the descriptor declares (.amdhsa_next_free_sgpr). Ask after emitAssembly() "
+             "for the count the emitted code uses rather than the producer's estimate")
+        .def("getDeclaredVgprCount", &StinkyAsmModuleWithSignature::getDeclaredVgprCount,
+             "VGPRs the descriptor declares (.amdhsa_next_free_vgpr). Ask after emitAssembly() "
+             "for the count the emitted code uses rather than the producer's estimate; where "
+             "AGPRs share the register file the field covers both and is left as the producer "
+             "set it")
         .def("getName", &StinkyAsmModuleWithSignature::getName)
         .def("setOutputName", &StinkyAsmModuleWithSignature::setOutputName,
              "Set full kernel name for output files (e.g. cost file); should match .o basename")
@@ -1536,21 +1729,29 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 
             // Override with options dict if provided
             StinkyAsmModule::ModuleOptions moduleOptions{};
-            // Sentinel: <0 means use CDNA5's built-in dsReadPerWmma/dsReadOrder defaults, since 0
-            // is itself a valid (if extreme) value for the former and a valid enumerator for the
-            // latter (ProgramOrder), so 0 can't double as "not provided" the way it does for the
-            // other DAG-scheduler knobs below.
-            moduleOptions.DsReadPerWmma = -1;
+            // Sentinels: DsReadOrder / Rule3 lead default to -1 (= unset) via ModuleOptions;
+            // Gfx1250Backend resolves an unset Rule3 lead through
+            // SchedulingKnobHeuristics. DsReadOrder keeps an explicit -1 here because 0 is
+            // a valid enumerator (ProgramOrder) and must not mean "not provided".
             moduleOptions.DsReadOrder = -1;
             if (nb::isinstance<nb::dict>(options_obj)) {
                 nb::dict options = nb::cast<nb::dict>(options_obj);
 
                 bool hasSetOptions = false;
+                std::unordered_set<std::string> knownOptions;
 
             // Set stinky module options from valid options in the options dict
-#define SET_MODULE_OPTION(name, type) \
-    hasSetOptions |=                  \
-        (options.contains(#name) && nb::try_cast<type>(options[#name], moduleOptions.name));
+// A key that is unknown or has the wrong type is reported instead of silently ignored: a
+// stale build or a typo would otherwise run an experiment without the requested option.
+#define SET_MODULE_OPTION(name, type)                                  \
+    knownOptions.insert(#name);                                        \
+    if (options.contains(#name)) {                                     \
+        if (nb::try_cast<type>(options[#name], moduleOptions.name))    \
+            hasSetOptions = true;                                      \
+        else                                                           \
+            std::cerr << "[StinkyTofu] WARNING: module option '" #name \
+                         "' has the wrong type and is ignored\n";      \
+    }
 
 #define DEBUG_SET_MODULE_OPTION(name, type)                                                  \
     if (options.contains(#name) && nb::try_cast<type>(options[#name], moduleOptions.name)) { \
@@ -1559,8 +1760,21 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     }
 
                 MODULE_OPTIONS_LIST(SET_MODULE_OPTION)
+#define SET_MODULE_OPTION_WITH_DEFAULT(name, type, value) SET_MODULE_OPTION(name, type)
+                MODULE_OPTIONS_WITH_DEFAULTS_LIST(SET_MODULE_OPTION_WITH_DEFAULT)
+#undef SET_MODULE_OPTION_WITH_DEFAULT
 #undef SET_MODULE_OPTION
 #undef DEBUG_SET_MODULE_OPTION
+                for (auto kv : options) {
+                    const std::string key = nb::cast<std::string>(kv.first);
+                    if (isRemovedDsPacingOption(key))
+                        std::cerr
+                            << "[StinkyTofu] WARNING: module option '" << key
+                            << "' was removed with the legacy ds_load pacing and is ignored\n";
+                    else if (!knownOptions.count(key))
+                        std::cerr << "[StinkyTofu] WARNING: unknown module option '" << key
+                                  << "' is ignored (stale build or typo?)\n";
+                }
             }
 
             auto stinkyModule =
@@ -1573,6 +1787,18 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             stinkyModule->getFunction().setMetaData(
                 kSigTotalVgprsMetaKey,
                 static_cast<uint64_t>(stinkySig->kernelDescriptor.totalVgprs));
+
+            // And where the dispatch stops filling scalars, which tells a live-in
+            // the hardware wrote from one merely read early. Absent when the
+            // descriptor does not settle the line, which keeps every live-in
+            // pinned.
+            if (const std::optional<uint32_t> dispatchFilled =
+                    stinkytofu::settledDispatchFilledSgprCount(
+                        stinkySig->kernelDescriptor.numSgprPreload,
+                        stinkySig->kernelDescriptor.sgprWorkGroup)) {
+                stinkyModule->getFunction().setMetaData(kSigDispatchFilledSgprsMetaKey,
+                                                        static_cast<uint64_t>(*dispatchFilled));
+            }
 
             // Set optimization config
             std::array<int, 2> tt = {moduleOptions.TileA0, moduleOptions.TileB0};

@@ -29,6 +29,12 @@ or directly with the atom-venv python::
     /workspace/atom-venv/bin/python \\
         rocke/library/benchmarks/gfx950/attention/prefill/benchmark_dense_prefill_live.py \\
         --mode causal --iterations 5 --warmup 2
+
+``--emit-shapes PATH`` writes every shape this benchmark measures as JSONL in the
+rocKE benchmark-trace schema that
+``projects/hipdnn/tools/IngestorGenerator/tools/mine_shapes.py --rocke-bench``
+reads, then exits. It needs neither a GPU nor torch: torch is imported only on
+the paths that build inputs and launch kernels.
 """
 from __future__ import annotations
 
@@ -47,17 +53,16 @@ _RK = os.path.abspath(os.path.join(_HERE, "../../../../.."))
 sys.path.insert(0, _RK + "/platform/python")
 sys.path.insert(0, _RK + "/library")
 
-import torch  # noqa: E402
-
 from kernels.gfx950.attention_dense import (  # noqa: E402
     AttentionDenseSpec,
+    _has_shape_params,
     attention_dense_block,
     attention_dense_grid,
+    attention_dense_signature,
     build_attention_dense,
     supports_attention_dense,
 )
 from rocke.helpers.compile import compile_kernel  # noqa: E402
-from rocke.helpers.spec import SignatureBuilder  # noqa: E402
 from rocke.runtime import (  # noqa: E402
     KernelLauncher,
     LaunchConfig,
@@ -65,7 +70,6 @@ from rocke.runtime import (  # noqa: E402
     time_launches,
 )
 
-_TORCH_DT = {"bf16": torch.bfloat16, "fp16": torch.float16}
 _TOL = 2e-2
 
 
@@ -92,6 +96,8 @@ def _gm(vals) -> float:
 
 
 def _bench_stream_handle() -> int:
+    import torch
+
     return int(torch.cuda.current_stream().cuda_stream)
 
 
@@ -102,7 +108,13 @@ _LAUNCHER_CACHE: dict = {}
 
 
 def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
-    key = spec.kernel_name()
+    # `batch` and `waves_per_eu` are baked into the kernel -- batch through the
+    # K/V buffer extents, waves_per_eu through the amdgpu-waves-per-eu attribute
+    # -- but neither is part of kernel_name(), so both have to be part of the
+    # cache key. Keying on the name alone collides here in practice: the varlen
+    # sweep runs B=4 and B=6 at the same max_s, which share a name but lower to
+    # different IR, so the second silently reuses the first binary.
+    key = (spec.kernel_name(), spec.batch, spec.waves_per_eu)
     lch = _LAUNCHER_CACHE.get(key)
     if lch is not None:
         return lch
@@ -115,18 +127,13 @@ def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
         backend="python",
         capture_ir_text=False,
     )
-    sb = (
-        SignatureBuilder()
-        .ptr("q_ptr", spec.dtype)
-        .ptr("k_ptr", spec.dtype)
-        .ptr("v_ptr", spec.dtype)
-        .ptr("o_ptr", spec.dtype)
-        .scalar("scale", "f32")
-    )
-    if spec.varlen:
-        sb = sb.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
+    # The kernel module owns the ABI. A hand-rolled copy here gated the shape
+    # scalars on runtime_shape, which is narrower than _has_shape_params
+    # (varlen/ragged/paged/SWA), so those launches packed misaligned kernargs.
     lch = KernelLauncher(
-        hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sb.build()
+        hsaco=art.hsaco,
+        kernel_name=art.kernel_name,
+        signature=attention_dense_signature(spec),
     )
     _LAUNCHER_CACHE[key] = lch
     return lch
@@ -145,6 +152,7 @@ def bench_dense(
     dtype: str,
     block_n: int,
     waves_per_eu: int,
+    lds_k_group_pad: int,
     num_persistent: int,
     persistent: bool,
     warmup: int,
@@ -152,8 +160,10 @@ def bench_dense(
     seed: int,
 ):
     """Returns (dense_ms, tflops, max_abs, kernel_name)."""
+    import torch
+
     dev = "cuda"
-    dt = _TORCH_DT[dtype]
+    dt = {"bf16": torch.bfloat16, "fp16": torch.float16}[dtype]
     B = len(seqlens)
     max_s = max(seqlens)
     total = sum(seqlens)
@@ -182,6 +192,7 @@ def bench_dense(
             dtype=dtype,
             block_n=block_n,
             waves_per_eu=waves_per_eu,
+            lds_k_group_pad=lds_k_group_pad,
             sliding_window=W,
             varlen=True,
         )
@@ -218,6 +229,7 @@ def bench_dense(
             dtype=dtype,
             block_n=block_n,
             waves_per_eu=waves_per_eu,
+            lds_k_group_pad=lds_k_group_pad,
             sliding_window=W,
             persistent=persistent,
             num_persistent=num_persistent,
@@ -229,6 +241,10 @@ def bench_dense(
             stream=stream,
         )
         vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
+    if _has_shape_params(spec):
+        vals["batch"] = int(spec.batch)
+        vals["seqlen_q"] = int(spec.seqlen_q)
+        vals["seqlen_kv"] = int(spec.seqlen_kv)
 
     def call():
         lch(vals, config=cfg)
@@ -323,26 +339,11 @@ def _configs(mode: str, Hq: int, Hkv: int, D: int):
     return cfgs
 
 
-def _record(mode, variant, label, seqlens, Hq, Hkv, D, W, res, err_note=None):
-    if res is None:
-        return {
-            "label": label,
-            "mode": mode,
-            "variant": variant,
-            "seqlens": list(seqlens),
-            "Hq": Hq,
-            "Hkv": Hkv,
-            "D": D,
-            "sliding_window": W,
-            "dense_ms": None,
-            "tflops": None,
-            "max_abs": None,
-            "ok": False,
-            "kernel_name": None,
-            "error": err_note,
-        }
-    ms, tf, err, kname = res
-    return {
+def _record(mode, variant, label, seqlens, Hq, Hkv, D, W, knobs, res, err_note=None):
+    """One sweep row. ``knobs`` carries the tuning values the row was measured at
+    so the report is self-describing: kernel_name() omits some of them, and the
+    ones it does carry are positional rather than labelled."""
+    rec = {
         "label": label,
         "mode": mode,
         "variant": variant,
@@ -351,12 +352,66 @@ def _record(mode, variant, label, seqlens, Hq, Hkv, D, W, res, err_note=None):
         "Hkv": Hkv,
         "D": D,
         "sliding_window": W,
-        "dense_ms": ms,
-        "tflops": tf,
-        "max_abs": err,
-        "ok": bool(err < _TOL),
-        "kernel_name": kname,
+        **knobs,
     }
+    if res is None:
+        rec.update(
+            {
+                "dense_ms": None,
+                "tflops": None,
+                "max_abs": None,
+                "ok": False,
+                "kernel_name": None,
+                "error": err_note,
+            }
+        )
+        return rec
+    ms, tf, err, kname = res
+    rec.update(
+        {
+            "dense_ms": ms,
+            "tflops": tf,
+            "max_abs": err,
+            "ok": bool(err < _TOL),
+            "kernel_name": kname,
+        }
+    )
+    return rec
+
+
+def shape_records(dtype: str, Hq: int, Hkv: int, D: int) -> list[dict]:
+    """Every shape the benchmark measures (``--mode all``), as rocKE
+    benchmark-trace records: the schema ``mine_shapes.py --rocke-bench`` reads.
+
+    Every mode here is causal (``bench_dense`` builds ``causal=True``), so
+    ``window_size`` is ``[-1, 0]`` or ``[W - 1, 0]`` for a W-token window. A
+    packed ragged batch (more than one sequence) is flagged ``varlen`` with its
+    ``seqlens``; it is not a dense request. The persistent mode re-measures the
+    causal cohort on another grid, so its rows repeat request shapes.
+    """
+    records = []
+    for mode, variant, label, seqlens, hq, hkv, W, _ in _configs("all", Hq, Hkv, D):
+        record = {
+            "model": "benchmark_dense_prefill_live",
+            "variant": f"{mode}/{variant}",
+            "label": label,
+            "num_seqs": len(seqlens),
+            "max_seqlen_q": max(seqlens),
+            "max_seqlen_k": max(seqlens),
+            "num_query_heads": hq,
+            "num_kv_heads": hkv,
+            "head_size": D,
+            "q_dtype": dtype,
+            "causal": True,
+            "window_size": [W - 1, 0] if W else [-1, 0],
+            "has_sinks": False,
+        }
+        # bench_dense's own rule for the packed path.
+        if len(seqlens) > 1 or sum(seqlens) != len(seqlens) * max(seqlens):
+            record["varlen"] = True
+            record["seqlens"] = list(seqlens)
+        records.append(record)
+    return records
 
 
 def main() -> int:
@@ -373,6 +428,14 @@ def main() -> int:
     ap.add_argument("--bn", type=int, default=64, help="block_n (KV tile)")
     ap.add_argument("--waves-per-eu", type=int, default=2, help="occupancy hint")
     ap.add_argument(
+        "--lds-k-group-pad",
+        type=int,
+        default=8,
+        help="K LDS pad between DMA row-groups, in elements; live only at D=64 "
+        "(at D=128 one DMA fills one row and the per-row pad applies instead). "
+        "Must be a multiple of 8; 0 reproduces the unpadded layout",
+    )
+    ap.add_argument(
         "--num-persistent", type=int, default=256, help="CTAs for persistent variant"
     )
     ap.add_argument("--iterations", type=int, default=50)
@@ -380,7 +443,22 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--output-json", type=str, default="/tmp/dense_prefill_live.json")
     ap.add_argument("--output-csv", type=str, default=None)
+    ap.add_argument(
+        "--emit-shapes",
+        metavar="PATH",
+        help="write every shape of --mode all as JSONL for mine_shapes.py "
+        "--rocke-bench and exit (no GPU, no torch)",
+    )
     args = ap.parse_args()
+
+    if args.emit_shapes:
+        records = shape_records(args.dtype, args.hq, args.hkv, args.d)
+        with open(args.emit_shapes, "w") as fh:
+            fh.write("".join(json.dumps(r) + "\n" for r in records))
+        print(f"wrote {args.emit_shapes}  ({len(records)} shapes)")
+        return 0
+
+    import torch
 
     if not torch.cuda.is_available():
         print("no GPU", file=sys.stderr)
@@ -389,10 +467,16 @@ def main() -> int:
     print(f"device: {torch.cuda.get_device_name(0)}")
     print(
         f"mode={args.mode} dtype={args.dtype} Hq={args.hq} Hkv={args.hkv} D={args.d} "
-        f"bn={args.bn} wpe={args.waves_per_eu} np={args.num_persistent} "
-        f"warmup={args.warmup} iters={args.iterations}"
+        f"bn={args.bn} wpe={args.waves_per_eu} kpad={args.lds_k_group_pad} "
+        f"np={args.num_persistent} warmup={args.warmup} iters={args.iterations}"
     )
 
+    knobs = {
+        "dtype": args.dtype,
+        "block_n": args.bn,
+        "waves_per_eu": args.waves_per_eu,
+        "lds_k_group_pad": args.lds_k_group_pad,
+    }
     cfgs = _configs(args.mode, args.hq, args.hkv, args.d)
     results = []
     for mode, variant, label, seqlens, Hq, Hkv, W, persistent in cfgs:
@@ -407,6 +491,7 @@ def main() -> int:
                 dtype=args.dtype,
                 block_n=args.bn,
                 waves_per_eu=args.waves_per_eu,
+                lds_k_group_pad=args.lds_k_group_pad,
                 num_persistent=args.num_persistent,
                 persistent=persistent,
                 warmup=args.warmup,
@@ -418,13 +503,23 @@ def main() -> int:
 
             traceback.print_exc()
             rec = _record(
-                mode, variant, label, seqlens, Hq, Hkv, args.d, W, None, repr(exc)
+                mode,
+                variant,
+                label,
+                seqlens,
+                Hq,
+                Hkv,
+                args.d,
+                W,
+                knobs,
+                None,
+                repr(exc),
             )
             results.append(rec)
             print(f"{tag}  FAILED ({exc!r})")
             continue
 
-        rec = _record(mode, variant, label, seqlens, Hq, Hkv, args.d, W, res)
+        rec = _record(mode, variant, label, seqlens, Hq, Hkv, args.d, W, knobs, res)
         results.append(rec)
         status = "PASS" if rec["ok"] else "FAIL"
         print(

@@ -24,9 +24,149 @@ from .enum import SignatureValueKind as _SVK
 from .instruction import (
     Instruction as _Instruction,
     MacroInstruction as _MacroInstruction,
+    GlobalReadInstruction as _GlobalReadInstruction,
+    TensorLoadToLds as _TensorLoadToLds,
 )
 
 _P = "rocisa.code"
+
+
+def _forward_memtoken(rocisa_item: Any, logical: Any) -> None:
+    """Copy the rocisa memory token onto lowered logical instruction(s).
+
+    Mirrors the native converter (``ToStinkyTofuUtils.cpp``) which unconditionally
+    forwards ``inst->getMemToken()`` as a ``MemTokenData`` modifier. The token
+    drives LDS dependency tracking in ``StinkyBuildImplicitDependencyPass``; if it
+    is dropped, the DAG scheduler cannot see LDS store->load / barrier ordering and
+    may reorder ``tensor_load_to_lds``, corrupting the tensor descriptor.
+    """
+    getter = getattr(rocisa_item, "getMemToken", None)
+    if not callable(getter):
+        return
+    mt = getter()
+    if mt is None:
+        return
+    tokens = getattr(mt, "tokens", None)
+    if tokens is None:
+        return
+    targets = logical if isinstance(logical, list) else (logical,)
+    for inst in targets:
+        setter = getattr(inst, "set_memtoken", None)
+        if callable(setter):
+            setter(tokens)
+
+
+def _forward_true16(rocisa_item: Any, logical: Any) -> None:
+    from .instruction import _apply_true16  # noqa: WPS433
+
+    if isinstance(logical, list):
+        return
+    _apply_true16(
+        logical,
+        getattr(rocisa_item, "dst", None),
+        getattr(rocisa_item, "srcs", None) or [],
+        getattr(rocisa_item, "dst1", None),
+    )
+
+
+def _forward_modifiers(rocisa_item: Any, logical: Any) -> None:
+    """Apply the shim's existing modifier set, then the module-level true16 pass.
+
+    ``to_stinky_logical()`` already calls ``_apply_modifiers`` so a direct call
+    keeps today's modifiers. This second call writes the same values; the
+    true16 pass still supplies ``dst1``, which that earlier call does not.
+    """
+    from .instruction import _apply_modifiers  # noqa: WPS433
+
+    _apply_modifiers(rocisa_item, logical)
+    _forward_true16(rocisa_item, logical)
+
+
+# Synthetic instruction-group name that marks the DAG-scheduler region spanning
+# the persistent prefetch prologue + main loop. Must match the registered gfx125x
+# group name (see Gfx1250Backend.cpp) and native's kPGR literal.
+_PGR_GROUP = "loopWithPrefetch"
+# Synthetic region EpilogueStoreSinkPass runs on. Must match Gfx1250Backend's
+# "globalWriteEpilogue" adaptor and native's kEpilogue literal. The anchor is
+# the Tensile submodule name, not the group name the pipeline looks up.
+_EPILOGUE_GROUP = "globalWriteEpilogue"
+_EPILOGUE_ANCHOR = "GlobalWriteElements"
+
+
+def _contains_prefetch_load(item: Any) -> bool:
+    """True if *item* is, or recursively contains, a prefetch global/tensor load.
+
+    Mirrors native ``ToStinkyTofuUtils.cpp`` (isPrefetchLoadInst / containsPrefetchLoad):
+    MUBUF / GLOBAL / FLAT reads and ``tensor_load_to_lds``.
+    """
+    if isinstance(item, (_GlobalReadInstruction, _TensorLoadToLds)):
+        return True
+    sub = getattr(item, "itemList", None)
+    if sub:
+        for child in sub:
+            if _contains_prefetch_load(child):
+                return True
+    return False
+
+
+def _detect_pgr_range(items: Sequence[Any]) -> Optional[tuple]:
+    """Positional ``loopWithPrefetch`` range over top-level *items*.
+
+    Returns ``(pgrStartIdx, loopBodyIdx)`` = [first item whose subtree contains a
+    prefetch load, last direct ``Module("loopBody")``], or ``None`` when absent.
+
+    Mirrors native's positional group injection (ToStinkyTofuUtils.cpp): the
+    adaptor's structural ``begin_group``/``end_group`` only tags the submodule
+    literally named ``loopWithPrefetch``, missing sibling prologue/prefetch/stagger
+    blocks that native folds into the same DAG-scheduler region. Without this the
+    O3 pipeline optimizes a smaller region and mis-schedules the prefetch loads.
+    """
+    pgr_start = -1
+    loop_body_idx = -1
+    for i, it in enumerate(items):
+        if pgr_start == -1 and _contains_prefetch_load(it):
+            pgr_start = i
+        if isinstance(it, Module) and getattr(it, "name", "") == "loopBody":
+            loop_body_idx = i
+    if pgr_start != -1 and loop_body_idx != -1 and pgr_start <= loop_body_idx:
+        return (pgr_start, loop_body_idx)
+    return None
+
+
+def _contains_named_module(item: Any, name: str) -> bool:
+    """True if *item* is, or recursively contains, a ``Module`` named *name*.
+
+    Mirrors native ``containsModule`` in ``ToStinkyTofuUtils.cpp``.
+    """
+    if isinstance(item, Module) and getattr(item, "name", "") == name:
+        return True
+    sub = getattr(item, "itemList", None)
+    if sub:
+        for child in sub:
+            if _contains_named_module(child, name):
+                return True
+    return False
+
+
+def _detect_epilogue_range(items: Sequence[Any]) -> Optional[tuple]:
+    """Positional ``globalWriteEpilogue`` range over top-level *items*.
+
+    Returns ``(start, end)`` = [first item whose subtree contains
+    ``Module("GlobalWriteElements")``, last such item], or ``None`` when
+    absent. Items between those two endpoints are included, matching native:
+    both the main store epilogue and a later GSU-split OptNLL store stay in
+    one region so ``EpilogueStoreSinkPass`` sees the same stores as
+    ``toStinkyTofuModule``.
+    """
+    start = end = -1
+    for i, it in enumerate(items):
+        if _contains_named_module(it, _EPILOGUE_ANCHOR):
+            if start == -1:
+                start = i
+            end = i
+    if start != -1 and start <= end:
+        return (start, end)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +388,6 @@ class _PostProcessModule:
         asm = _postprocess_vcmpx(asm)
         asm = _postprocess_sbarrier(asm)
         asm = _postprocess_carry(asm)
-        asm = asm.replace("+-", "-")
         return asm
 
     def getSetDirectives(self) -> str:
@@ -272,6 +411,9 @@ class _PostProcessModule:
 
     def getMetaDataU64(self, *args: Any, **kwargs: Any) -> Any:
         return self._inner.getMetaDataU64(*args, **kwargs)
+
+    def setMetaDataU64(self, *args: Any, **kwargs: Any) -> Any:
+        return self._inner.setMetaDataU64(*args, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -411,32 +553,6 @@ def _block_3line(comment: str) -> str:
     return out
 
 
-def _format_endif_str(instr: str, comment: str) -> str:
-    """Format an instruction line with an optional trailing comment.
-
-    Used by ``ValueEndif.toString`` for the ``.endif [// <comment>]``
-    rendering. Layout rules:
-
-      * ``comment`` empty OR ``_outputNoComment()`` returns True ->
-        ``"{instr}\\n"`` with no padding.
-      * Otherwise: ``instr`` is right-padded with spaces to width 50
-        (``max(0, 50 - len(instr))`` spaces), then ``" // {comment}\\n"``
-        is appended. Padding width 50 matches the column where rocisa
-        instruction lines align their trailing ``// ...`` notes.
-
-    Currently used only by ``ValueEndif``; Phase 5 (assembly emit)
-    will need the full surface (including an ``outputInlineAsm``
-    branch that wraps the instruction string in ``"...\\n\\t"`` for
-    inline-asm output). When that lands, lift this into a public
-    ``format.py`` module; for now keeping it private to ``code.py``
-    keeps the surface area minimal.
-    """
-    if not comment or _outputNoComment():
-        return instr + "\n"
-    padding = " " * max(0, 50 - len(instr))
-    return f"{instr}{padding} // {comment}\n"
-
-
 def _to_hex_parity(num: int) -> str:
     """Lowercase hex (no ``0x`` prefix) mirroring rocisa's ``std::hex``
     cast over an ``int64_t``.
@@ -460,12 +576,9 @@ def _to_hex_parity(num: int) -> str:
 # Preprocessor conditional blocks -- ValueIf / ValueElseIf / ValueEndif.
 # ---------------------------------------------------------------------------
 #
-# Mirror of rocisa's ``ValueIf`` / ``ValueElseIf`` / ``ValueEndif``.
-# These produce the GNU assembler preprocessor directives ``.if`` /
-# ``.elseif`` / ``.endif`` that KernelWriter uses to gate macro /
-# kernel-text sections at assemble time (CustomSchedule.py:448-508
-# chains them; KernelWriterAssembly.py:1827 uses a single ValueEndif
-# for the "overflowed resources" guard).
+# These nodes carry assembler conditional metadata in the adaptor Module tree.
+# ``_populate_one_item`` forwards ValueIf / ValueEndif to PyLogicalModule
+# sidecars; StinkyAsmEmitter owns their final assembly formatting.
 #
 # Parity notes:
 #   * ``Item.name`` is set to the CLASS NAME ("ValueIf" / ... ) rather
@@ -474,16 +587,8 @@ def _to_hex_parity(num: int) -> str:
 #     ``findNamedItem("ValueIf")`` matches every ValueIf node in a
 #     Module; KernelWriter doesn't rely on that today but the parity
 #     keeps any future searcher behaviour identical.
-#   * Subclasses of ``Item`` -- ``__str__`` / ``prettyPrint`` /
-#     ``countType`` / ``countExactType`` / 7 cap-proxy methods all
-#     come from Item's defaults. We override only ``toString``,
-#     ``__deepcopy__``, ``__getstate__``, ``__setstate__`` -- the
-#     same four overrides rocisa's nanobind binding wires up
-#     explicitly.
 #   * ValueIf / ValueElseIf store a ``value`` (the condition
-#     expression); ValueEndif stores a ``comment`` and uses
-#     ``_format_endif_str`` to byte-match rocisa's ``formatStr``
-#     padding semantics.
+#     expression); ValueEndif stores a ``comment``.
 
 class ValueIf(Item):
     """``.if <value>`` directive; mirror of ``rocisa::ValueIf``."""
@@ -495,12 +600,6 @@ class ValueIf(Item):
         # condition expression -- matches rocisa's ctor.
         super().__init__(name="ValueIf")
         self.value: str = value
-
-    def toString(self) -> str:
-        # Raw ``.if`` + value + newline; no padding / comment support
-        # (the condition expression IS the trailing payload on this
-        # line).
-        return f".if {self.value}\n"
 
     def __deepcopy__(self, memo):
         # Copy ctor -- a fresh ValueIf with the same value.
@@ -557,14 +656,7 @@ class ValueElseIf(Item):
 
 
 class ValueEndif(Item):
-    """``.endif [// <comment>]`` directive; mirror of
-    ``rocisa::ValueEndif``.
-
-    The comment is padding-aligned to column 50 to match how rocisa
-    instruction lines align their trailing ``// ...`` notes, and is
-    suppressed entirely when ``outputNoComment`` is set (see
-    ``_format_endif_str`` for the exact rules).
-    """
+    """Carries a ``.endif`` directive's optional comment."""
 
     __slots__ = ("comment",)
 
@@ -575,12 +667,6 @@ class ValueEndif(Item):
         # ctor.
         super().__init__(name="ValueEndif")
         self.comment: str = comment
-
-    def toString(self) -> str:
-        # ``.endif`` + optional ``// <comment>`` padded to column 50;
-        # gated by ``outputNoComment``. See ``_format_endif_str`` for
-        # the byte-level rules.
-        return _format_endif_str(".endif", self.comment)
 
     def __deepcopy__(self, memo):
         clone = ValueEndif(self.comment)
@@ -1038,7 +1124,7 @@ class Module(Item):
     Left-path entry point::
 
         asm_module = code_module.to_stinky_asm([12, 5, 0])
-        # Or with Tensile-style kernel label:
+        # Or with TensileLite-style kernel label:
         # asm_module = code_module.to_stinky_asm([12, 5, 0], logical_name="my_kernel")
         print(asm_module.emitAssembly())
 
@@ -1389,11 +1475,15 @@ class Module(Item):
 
         lm_label = logical_name if logical_name is not None else (self.name or "kernel")
         lm = _st.LogicalModule(lm_label)
-        self._populate_logical_module(lm)
+        pgr_range = _detect_pgr_range(self.itemList)
+        epilogue_range = _detect_epilogue_range(self.itemList)
+        self._populate_logical_module(lm, pgr_range, epilogue_range)
 
         return _PostProcessModule(_st.lower_logical_module(lm, list(arch), options))
 
-    def _populate_logical_module(self, lm: Any) -> None:
+    def _populate_logical_module(
+        self, lm: Any, pgr_range: Any = None, epilogue_range: Any = None
+    ) -> None:
         """In-order walk adding instructions and .set directives to *lm*.
 
         Preserves source ordering: when a ``ValueSet`` appears between two
@@ -1405,54 +1495,108 @@ class Module(Item):
         Named sub-Modules emit begin_group/end_group markers so the C++
         lowering pipeline can reconstruct instruction-group ranges (used by
         ScopeAdaptor passes like ESM2, RegionClone, DAG scheduler).
+
+        ``pgr_range`` / ``epilogue_range`` (root call only): inclusive index
+        pairs over ``self.itemList``. Those spans are wrapped in synthetic
+        ``loopWithPrefetch`` and ``globalWriteEpilogue`` groups, replicating
+        native's positional injection. Open epilogue before PGR and close PGR
+        before epilogue so a shared boundary matches native's push order
+        (``kEpilogue`` then ``kPGR``). Recursive walks pass neither range.
+
+        The epilogue span is bracketed by empty text blocks. Group endpoints
+        are recorded on the logical IR, and ``ToStinkyAsmPass`` then unlinks
+        every Python-owned logical (``safeErase`` only removes it). A group
+        whose first node was that logical starts ``ScopeAdaptor`` on a
+        detached ``LogicalInstruction``, which is neither a
+        ``StinkyInstruction`` nor an ``AsmDirective``. An empty
+        ``TEXTBLOCK`` stays linked and emits no bytes, so it can be the
+        endpoint instead. A later ``noLoadLoopBody`` copy can extend the
+        earlier multi-region extract past that opening anchor; the extract
+        deletes the comment and retargets any group still pointing at it
+        onto the neighboring instruction before ``EpilogueStoreSinkPass``.
         """
-        for it in self.itemList:
-            if isinstance(it, Module):
-                if it.name:
-                    lm.begin_group(it.name)
+        for idx, it in enumerate(self.itemList):
+            if epilogue_range is not None and idx == epilogue_range[0]:
+                lm.begin_group(_EPILOGUE_GROUP)
+                lm.add_textblock("")
+            if pgr_range is not None and idx == pgr_range[0]:
+                lm.begin_group(_PGR_GROUP)
+            self._populate_one_item(lm, it)
+            if pgr_range is not None and idx == pgr_range[1]:
+                lm.end_group(_PGR_GROUP)
+            if epilogue_range is not None and idx == epilogue_range[1]:
+                lm.add_textblock("")
+                lm.end_group(_EPILOGUE_GROUP)
+
+    def _populate_one_item(self, lm: Any, it: Any) -> None:
+        """Emit a single ``itemList`` entry into *lm* (see ``_populate_logical_module``)."""
+        if isinstance(it, Module):
+            if it.isCallable:
+                fn_name = it.callableName or it.name
+                lm.begin_callable(fn_name)
                 it._populate_logical_module(lm)
-                if it.name:
-                    lm.end_group(it.name)
-                continue
-            if isinstance(it, ValueSet):
-                text = it.toString().strip()  # ".set <sym>, <val>"
-                prefix = ".set "
-                if text.startswith(prefix):
-                    rest = text[len(prefix):]
-                    comma = rest.find(", ")
-                    if comma != -1:
-                        sym = rest[:comma]
-                        val = rest[comma + 2:]
-                        lm.add_set_directive(sym, val)
-                continue
-            if isinstance(it, Label):
-                lm.add_label(it.getLabelName(), it.alignment, it.comment or "")
-                continue
-            if isinstance(it, TextBlock):
-                lm.add_textblock(it.text)
-                continue
-            # Skip SDelayAlu instructions — the optimization pipeline handles
-            # all hazard insertion (InsertWaitAluPass for ESM2, InsertDelayAluPass
-            # for non-ESM2 regions).  The adaptor previously emitted these as
-            # s_nop 0 placeholders that survived the pipeline unrecognized.
-            if getattr(it, "instStr", "") == "s_delay_alu":
-                continue
-            handle = getattr(it, "to_stinky_logical", None)
-            if not callable(handle):
-                continue
-            logical = handle()
-            if logical is None:
-                continue
-            comment = getattr(it, "comment", None) or ""
-            if isinstance(logical, list):
-                for inst in logical:
-                    if comment and not inst.comment:
-                        inst.comment = comment
-                    lm.add(inst)
-            else:
-                if comment and not logical.comment:
-                    logical.comment = comment
-                lm.add(logical)
+                lm.end_callable(fn_name)
+                return
+            if it.name:
+                lm.begin_group(it.name)
+            it._populate_logical_module(lm)
+            if it.name:
+                lm.end_group(it.name)
+            return
+        if isinstance(it, ValueIf):
+            lm.add_if_directive(it.value)
+            return
+        if isinstance(it, ValueEndif):
+            # Match rocisa ValueEndif::toString / native toStinkyTofuModule:
+            # formatStr drops the comment when outputNoComment (DisableAsmComments).
+            comment = "" if _outputNoComment() else it.comment
+            lm.add_endif_directive(comment)
+            return
+        if isinstance(it, ValueSet):
+            text = it.toString().strip()  # ".set <sym>, <val>"
+            prefix = ".set "
+            if text.startswith(prefix):
+                rest = text[len(prefix):]
+                comma = rest.find(", ")
+                if comma != -1:
+                    sym = rest[:comma]
+                    val = rest[comma + 2:]
+                    lm.add_set_directive(sym, val)
+            return
+        if isinstance(it, Label):
+            lm.add_label(it.getLabelName(), it.alignment, it.comment or "")
+            return
+        if isinstance(it, TextBlock):
+            lm.add_textblock(it.text)
+            return
+        # SDelayAlu now lowers to a real stinkytofu SDelayAlu (with the
+        # SDelayAluData modifier) via to_stinky_logical, matching the native
+        # ToStinkyTofuUtils path. This keeps the pipeline-input identical to
+        # rocisa -- required at OptLevel 0, where RemoveDelayAlu is gated off
+        # and the incoming s_delay_alu feeds the downstream wait/hazard passes.
+        handle = getattr(it, "to_stinky_logical", None)
+        if not callable(handle):
+            return
+        logical = handle()
+        if logical is None:
+            return
+        comment = getattr(it, "comment", None) or ""
+        # Forward the rocisa memory token (LDS dependency tracking) onto the
+        # lowered logical instruction(s), mirroring the native converter
+        # (ToStinkyTofuUtils.cpp: inst->getMemToken() -> MemTokenData). Without
+        # this the DAG scheduler cannot see LDS store->load / barrier ordering
+        # and may reorder tensor_load_to_lds, corrupting the tensor descriptor.
+        _forward_memtoken(it, logical)
+        _forward_modifiers(it, logical)
+        if isinstance(logical, list):
+            for inst in logical:
+                if comment and not inst.comment:
+                    inst.comment = comment
+                lm.add(inst)
+        else:
+            if comment and not logical.comment:
+                logical.comment = comment
+            lm.add(logical)
 
     def _collect_logical_insts(self) -> List[Any]:
         """Legacy helper for tests: collect logical instructions in-order."""
@@ -1467,6 +1611,8 @@ class Module(Item):
             logical = handle()
             if logical is None:
                 continue
+            _forward_memtoken(it, logical)
+            _forward_modifiers(it, logical)
             if isinstance(logical, list):
                 out.extend(logical)
             else:
@@ -1501,7 +1647,7 @@ class Module(Item):
 #     str(sm)  # emits header + middle + footer (in that order)
 #
 # Why this exists:
-#   The Tensile SIA (Scheduling Iterations Ahead) pass needs to
+#   The TensileLite SIA (Scheduling Iterations Ahead) pass needs to
 #   distinguish "load issue" (header), "decomposable middle body"
 #   (the chunk it can reorder for latency hiding), and "guard /
 #   bookkeeping tail" (footer). By giving each chunk its own named
@@ -1899,6 +2045,11 @@ class _SignatureKernelDescriptor(Item):
         "totalVgprs", "totalAgprs", "totalSgprs", "originalTotalVgprs",
         "accumOffset", "groupSegSize", "sgprWorkGroup", "vgprWorkItem",
         "numSgprPreload",
+        "threadTile", "subGroup", "waveGroup",
+        "vectorWidthA", "vectorWidthB",
+        "globalReadVectorWidthA", "globalReadVectorWidthB",
+        "directToLdsA", "directToLdsB", "useSgprForGRO",
+        "totalInstructionBytes",
     )
 
     def __init__(
@@ -1920,6 +2071,19 @@ class _SignatureKernelDescriptor(Item):
         self.totalSgprs = int(totalSgprs)
         self.originalTotalVgprs = int(totalVgprs)
         self.numSgprPreload = int(numSgprPreload)
+        self.threadTile = (0, 0)
+        self.subGroup = (0, 0)
+        self.waveGroup = (0, 0)
+        self.vectorWidthA = 0
+        self.vectorWidthB = 0
+        self.globalReadVectorWidthA = 0
+        self.globalReadVectorWidthB = 0
+        self.directToLdsA = False
+        self.directToLdsB = False
+        self.useSgprForGRO = 0
+        # -1 until AccumulateInstructionSizePass fills the module total and
+        # emit copies it here. Matches C++ SignatureKernelDescriptor.
+        self.totalInstructionBytes = -1
         self._apply_gpr_layout(int(totalVgprs), int(totalAgprs))
 
     def _apply_gpr_layout(self, total_vgprs: int, total_agprs: int) -> None:
@@ -1947,12 +2111,50 @@ class _SignatureKernelDescriptor(Item):
     def getNextFreeSgpr(self) -> int:
         return self.totalSgprs
 
+    def setOptimizationConfig(
+        self,
+        tt: Sequence[int],
+        sg: Sequence[int],
+        wg: Sequence[int],
+        vwA: int,
+        vwB: int,
+        glvwA: int,
+        glvwB: int,
+        d2lA: bool,
+        d2lB: bool,
+        useSgprForGRO: int,
+    ) -> None:
+        """Store tiling knobs that ``toString`` prints after Num SGPR.
+
+        Port of C++ ``SignatureKernelDescriptor::setOptimizationConfig``.
+        Native ``toStinkyTofuModule`` fills these from ModuleOptions and
+        emits them as raw comment text, not as ``TextBlock``s.
+        """
+        self.threadTile = (int(tt[0]), int(tt[1]))
+        self.subGroup = (int(sg[0]), int(sg[1]))
+        self.waveGroup = (int(wg[0]), int(wg[1]))
+        self.vectorWidthA = int(vwA)
+        self.vectorWidthB = int(vwB)
+        self.globalReadVectorWidthA = int(glvwA)
+        self.globalReadVectorWidthB = int(glvwB)
+        self.directToLdsA = bool(d2lA)
+        self.directToLdsB = bool(d2lB)
+        self.useSgprForGRO = int(useSgprForGRO)
+
+    def setTotalInstructionBytes(self, totalBytes: int) -> None:
+        self.totalInstructionBytes = int(totalBytes)
+
     def toString(self) -> str:
         kd_indent = "  "
         isa = self.kernel().isa
         if isa is None:
             raise RuntimeError("kernel ISA is not set")
         out = _sig_block3line("Begin Kernel")
+        if self.totalInstructionBytes >= 0:
+            out += (
+                "/* STINKY_TOTAL_INST_BYTES: "
+                f"{self.totalInstructionBytes} */\n"
+            )
         out += f'.amdgcn_target "amdgcn-amd-amdhsa--{_isa_to_gfx(isa)}"\n'
         out += ".text\n"
         out += f".protected {self.name}\n"
@@ -1980,7 +2182,7 @@ class _SignatureKernelDescriptor(Item):
             f"{kd_indent}.amdhsa_group_segment_fixed_size {self.groupSegSize}"
             " // lds bytes\n"
         )
-        if self.getArchCaps()["HasWave32"]:
+        if self.getArchCaps()["HasWavefrontSize32Directive"]:
             wavefront = self.kernel().wavefrontSize
             if wavefront == 32:
                 out += (
@@ -2011,6 +2213,9 @@ class _SignatureKernelDescriptor(Item):
         )
         out += f"{kd_indent}.amdhsa_float_denorm_mode_32 3\n"
         out += f"{kd_indent}.amdhsa_float_denorm_mode_16_64 3\n"
+        if self.totalInstructionBytes >= 0:
+            pref = min(self.totalInstructionBytes // 128, 255)
+            out += f"{kd_indent}.amdhsa_inst_pref_size {pref}\n"
         if self.numSgprPreload:
             # kernArg ptr (2 sgprs) is preloaded in user sgpr, but not counted
             # in preload_length (rocisa code.hpp SignatureKernelDescriptor).
@@ -2030,6 +2235,32 @@ class _SignatureKernelDescriptor(Item):
         out += _sig_block(f"Num VGPR   ={self.originalTotalVgprs}")
         out += _sig_block(f"Num AccVGPR={self.totalAgprs}")
         out += _sig_block(f"Num SGPR   ={self.totalSgprs}")
+        # Same placement as C++ SignatureKernelDescriptor::toString: raw
+        # comment text after the GPR counts, not gated by outputNoComment.
+        out += _sig_block3line("Optimizations and Config:")
+        out += _sig_block(
+            f"ThreadTile= {self.threadTile[0]} x {self.threadTile[1]}"
+        )
+        out += _sig_block(
+            f"SubGroup= {self.subGroup[0]} x {self.subGroup[1]}"
+        )
+        out += _sig_block(f"VectorWidthA={self.vectorWidthA}")
+        out += _sig_block(f"VectorWidthB={self.vectorWidthB}")
+        out += _sig_block(
+            "GlobalReadVectorWidthA="
+            f"{self.globalReadVectorWidthA}, "
+            f"GlobalReadVectorWidthB={self.globalReadVectorWidthB}"
+        )
+        out += _sig_block(
+            f"DirectToLdsA={'True' if self.directToLdsA else 'False'}"
+        )
+        out += _sig_block(
+            f"DirectToLdsB={'True' if self.directToLdsB else 'False'}"
+        )
+        out += _sig_block(
+            "UseSgprForGRO="
+            f"{'True' if self.useSgprForGRO else 'False'}"
+        )
         return out
 
     def prettyPrint(self, indent: str = "") -> str:
@@ -2181,6 +2412,48 @@ class SignatureBase(Item):
     def setGprs(self, totalVgprs: int, totalAgprs: int, totalSgprs: int) -> None:
         self.kernelDescriptor.setGprs(totalVgprs, totalAgprs, totalSgprs)
         self.codeMeta.setGprs(totalVgprs, totalSgprs)
+
+    def setDeclaredVgprs(self, totalVgprs: int) -> None:
+        """Write the VGPR count the emitted code actually names.
+
+        Port of C++ ``SignatureBase::setDeclaredVgprs``. Updates
+        ``.amdhsa_next_free_vgpr`` and ``.vgpr_count`` only.
+        ``originalTotalVgprs`` stays the producer's pool size, which is what
+        the ``Num VGPR`` comment prints. Does nothing when AGPRs share the
+        register file, where the count is ``accumOffset + totalAgprs``.
+        """
+        kd = self.kernelDescriptor
+        if kd.accumOffset != -1:
+            return
+        count = int(totalVgprs)
+        if count <= 0 or count == kd.totalVgprs:
+            return
+        kd.totalVgprs = count
+        self.codeMeta.totalVgprs = count
+
+    def setTotalInstructionBytes(self, totalBytes: int) -> None:
+        self.kernelDescriptor.setTotalInstructionBytes(totalBytes)
+
+    def setOptimizationConfig(
+        self,
+        tt: Sequence[int],
+        sg: Sequence[int],
+        wg: Sequence[int],
+        vwA: int,
+        vwB: int,
+        glvwA: int,
+        glvwB: int,
+        d2lA: bool,
+        d2lB: bool,
+        useSgprForGRO: int,
+    ) -> None:
+        self.kernelDescriptor.setOptimizationConfig(
+            tt, sg, wg, vwA, vwB, glvwA, glvwB, d2lA, d2lB, useSgprForGRO
+        )
+
+    @property
+    def offset(self) -> int:
+        return self.codeMeta.offset
 
     def addArg(
         self,
@@ -2362,7 +2635,7 @@ def SrdUpperValue(isa):  # noqa: N802 (matches rocisa public API)
     if hasattr(isa, "major"):
         major = int(isa.major)
         minor = int(isa.minor)
-        stepping = int(isa.stepping)
+        stepping = int(getattr(isa, "stepping", None) or getattr(isa, "patch", 0))
     else:
         major = int(isa[0])
         minor = int(isa[1])

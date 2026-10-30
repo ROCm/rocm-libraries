@@ -18,14 +18,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 THRUST_NAMESPACE_BEGIN
 
 namespace random
@@ -42,7 +34,7 @@ struct static_mod
 
   THRUST_HOST_DEVICE T operator()(T x) const
   {
-    if constexpr (a == 1)
+    THRUST_IF_CONSTEXPR (a == 1)
     {
       x %= m;
     }
@@ -60,7 +52,7 @@ struct static_mod
       }
     }
 
-    if constexpr (c != 0)
+    THRUST_IF_CONSTEXPR (c != 0)
     {
       const T d = m - x;
       if (d > c)

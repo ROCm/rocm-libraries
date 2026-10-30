@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,30 +20,40 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_benchmark_header.hpp"
+#include "benchmark_utils.hpp"
 
-// HIP API
 #include <hipcub/block/block_reduce.hpp>
+#include <hipcub/thread/thread_operators.hpp>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
-#endif
+constexpr unsigned int Trials = 100;
 
-template<class Runner,
-         class T,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         unsigned int Trials>
-__global__ __launch_bounds__(BlockSize) void kernel(const T* input, T* output)
+template<class Runner, class T, unsigned int BlockSize, unsigned int ItemsPerThread>
+__global__ __launch_bounds__(BlockSize)
+void kernel(const T* input, T* output)
 {
-    Runner::template run<T, BlockSize, ItemsPerThread, Trials>(input, output);
+    Runner::template run<T, BlockSize, ItemsPerThread>(input, output);
 }
 
 template<hipcub::BlockReduceAlgorithm algorithm>
 struct reduce
 {
-    template<class T, unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int Trials>
-    __device__ static void run(const T* input, T* output)
+    static const char* get_algorithm_name()
+    {
+        switch(algorithm)
+        {
+            case hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING: return "block_reduce_raking";
+            case hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY:
+                return "block_reduce_raking_commutative_only";
+            case hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_WARP_REDUCTIONS:
+                return "block_reduce_warp_reductions";
+        }
+
+        return "unknown algorithm";
+    }
+
+    template<class T, unsigned int BlockSize, unsigned int ItemsPerThread>
+    __device__
+    static void run(const T* input, T* output)
     {
         const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
@@ -57,10 +67,10 @@ struct reduce
         using breduce_t = hipcub::BlockReduce<T, BlockSize, algorithm>;
         __shared__ typename breduce_t::TempStorage storage;
 
-        _CCCL_PRAGMA_NOUNROLL()
+#pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            reduced_value = breduce_t(storage).Reduce(values, benchmark_utils::plus{});
+            reduced_value = breduce_t(storage).Reduce(values, hipcub::Sum());
             values[0]     = reduced_value;
         }
 
@@ -71,60 +81,60 @@ struct reduce
     }
 };
 
-template<class Benchmark,
-         class T,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         unsigned int Trials = 100>
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
+template<class Benchmark, class T, unsigned int BlockSize, unsigned int ItemsPerThread>
+class block_reduce_benchmark : public primbench::benchmark_interface
 {
-    // Make sure size is a multiple of BlockSize
-    constexpr auto items_per_block = BlockSize * ItemsPerThread;
-    const auto     size = items_per_block * ((N + items_per_block - 1) / items_per_block);
-    // Allocate and fill memory
-    std::vector<T> input(size, T(1));
-    T*             d_input;
-    T*             d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    for(auto _ : state)
+    primbench::json meta() const override
     {
-        auto start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>),
-                           dim3(size / items_per_block),
-                           dim3(BlockSize),
-                           0,
-                           stream,
-                           d_input,
-                           d_output);
-        HIP_CHECK(hipPeekAtLastError());
+        return primbench::json{}
+            .add("algo", "block_reduce")
+            .add("subalgo", Benchmark::get_algorithm_name())
+            .add("lvl", "block")
+            .add("data_type", primbench::name<T>())
+            .add("block_size", BlockSize)
+            .add("items_per_thread", ItemsPerThread);
+    }
+
+    void run(primbench::state& state) override
+    {
+        const size_t input_items = state.size;
+        const auto&  stream      = state.stream;
+
+        // Make sure size is a multiple of BlockSize
+        constexpr auto items_per_block = BlockSize * ItemsPerThread;
+        const auto     items
+            = items_per_block * ((input_items + items_per_block - 1) / items_per_block);
+
+        // Allocate and fill memory
+        std::vector<T> input(items, T(1));
+        T*             d_input;
+        T*             d_output;
+        HIP_CHECK(hipMalloc(&d_input, items * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_output, items * sizeof(T)));
+        HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
         HIP_CHECK(hipDeviceSynchronize());
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        state.set_items(Trials * items);
+        state.add_writes<T>(Trials * items);
 
-        state.SetIterationTime(elapsed_seconds.count());
+        state.run(
+            [&]
+            {
+                hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread>),
+                                   dim3(items / items_per_block),
+                                   dim3(BlockSize),
+                                   0,
+                                   stream,
+                                   d_input,
+                                   d_output);
+            });
+
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
     }
-    state.SetBytesProcessed(state.iterations() * size * sizeof(T) * Trials);
-    state.SetItemsProcessed(state.iterations() * size * Trials);
+};
 
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-}
-
-// IPT - items per thread
-#define CREATE_BENCHMARK(T, BS, IPT)                                                            \
-    benchmark::RegisterBenchmark(std::string("block_reduce<data_type:" #T ",block_size:" #BS    \
-                                             ",items_per_thread:" #IPT ",sub_algorithm_name:"   \
-                                             + algorithm_name + ">.method_name:" + method_name) \
-                                     .c_str(),                                                  \
-                                 &run_benchmark<Benchmark, T, BS, IPT>,                         \
-                                 stream,                                                        \
-                                 size)
+#define CREATE_BENCHMARK(T, BS, IPT) executor.queue<block_reduce_benchmark<Benchmark, T, BS, IPT>>()
 
 #define BENCHMARK_TYPE(type, block)                                          \
     CREATE_BENCHMARK(type, block, 1), CREATE_BENCHMARK(type, block, 2),      \
@@ -133,90 +143,42 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
         CREATE_BENCHMARK(type, block, 16)
 
 template<class Benchmark>
-void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    const std::string&                            method_name,
-                    const std::string&                            algorithm_name,
-                    hipStream_t                                   stream,
-                    size_t                                        size)
+void add_benchmarks(primbench::executor& executor)
 {
+    BENCHMARK_TYPE(int, 64);
+    BENCHMARK_TYPE(float, 64);
+    BENCHMARK_TYPE(double, 64);
+    BENCHMARK_TYPE(int8_t, 64);
+    BENCHMARK_TYPE(uint8_t, 64);
 
-    std::vector<benchmark::internal::Benchmark*> new_benchmarks = {
-        // When block size is less than or equal to warp size
-        BENCHMARK_TYPE(int, 64),
-        BENCHMARK_TYPE(float, 64),
-        BENCHMARK_TYPE(double, 64),
-        BENCHMARK_TYPE(int8_t, 64),
-        BENCHMARK_TYPE(uint8_t, 64),
-
-        BENCHMARK_TYPE(int, 256),
-        BENCHMARK_TYPE(float, 256),
-        BENCHMARK_TYPE(double, 256),
-        BENCHMARK_TYPE(int8_t, 256),
-        BENCHMARK_TYPE(uint8_t, 256),
-    };
-    benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
+    BENCHMARK_TYPE(int, 256);
+    BENCHMARK_TYPE(float, 256);
+    BENCHMARK_TYPE(double, 256);
+    BENCHMARK_TYPE(int8_t, 256);
+    BENCHMARK_TYPE(uint8_t, 256);
 }
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.run_and_exit_if_error();
+    primbench::settings settings;
+    settings.size                    = 32 * primbench::MiB; // In items
+    settings.min_gpu_ms_per_batch    = 100;
+    settings.noise_tolerance_percent = 2;
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
+    primbench::executor executor(argc, argv, settings);
 
-    std::cout << "benchmark_block_reduce" << std::endl;
-
-    // HIP
-    hipStream_t     stream = 0; // default
-    hipDeviceProp_t devProp;
-    int             device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
     // using_warp_scan
     using reduce_uwr_t = reduce<hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_WARP_REDUCTIONS>;
-    add_benchmarks<reduce_uwr_t>(benchmarks,
-                                 "reduce",
-                                 "BLOCK_REDUCE_WARP_REDUCTIONS",
-                                 stream,
-                                 size);
+    add_benchmarks<reduce_uwr_t>(executor);
+
     // raking reduce
     using reduce_rr_t = reduce<hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>;
-    add_benchmarks<reduce_rr_t>(benchmarks, "reduce", "BLOCK_REDUCE_RAKING", stream, size);
+    add_benchmarks<reduce_rr_t>(executor);
+
     // raking reduce commutative only
     using reduce_rrco_t
         = reduce<hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>;
-    add_benchmarks<reduce_rrco_t>(benchmarks,
-                                  "reduce",
-                                  "BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY",
-                                  stream,
-                                  size);
+    add_benchmarks<reduce_rrco_t>(executor);
 
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }

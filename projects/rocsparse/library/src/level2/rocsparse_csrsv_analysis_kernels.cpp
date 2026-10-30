@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -106,13 +106,17 @@ template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename
 static csrsv_analysis_kernel_t find_mode(rocsparse_fill_mode mode, rocsparse_operation operation)
 {
 
-    return (operation == rocsparse_operation_none)
-               ? ((mode == rocsparse_fill_mode_lower)
-                      ? launch_csrsv_analysis_lower_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>
-                      : launch_csrsv_analysis_upper_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>)
-               : ((mode == rocsparse_fill_mode_lower)
-                      ? launch_csrsv_analysis_upper_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>
-                      : launch_csrsv_analysis_lower_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>);
+    const bool transpose = (operation != rocsparse_operation_none);
+    switch(mode)
+    {
+    case rocsparse_fill_mode_lower:
+        return transpose ? launch_csrsv_analysis_upper_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>
+                         : launch_csrsv_analysis_lower_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>;
+    case rocsparse_fill_mode_upper:
+        return transpose ? launch_csrsv_analysis_lower_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>
+                         : launch_csrsv_analysis_upper_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>;
+    }
+    return nullptr;
 }
 
 template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename... P>
@@ -175,7 +179,7 @@ rocsparse_status rocsparse::launch_csrsv_analysis_kernel(rocsparse_handle    han
 {
     // Determine archid and ASIC revision
     const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
-    const bool SLEEP = ((gcn_arch_name == rocpsarse_arch_names::gfx908) && (handle->asic_rev < 2));
+    const bool SLEEP = ((gcn_arch_name == rocsparse_arch_names::gfx908) && (handle->asic_rev < 2));
     csrsv_analysis_kernel_t launch = find_csrsv_analysis_kernel(1024,
                                                                 handle->wavefront_size,
                                                                 SLEEP,

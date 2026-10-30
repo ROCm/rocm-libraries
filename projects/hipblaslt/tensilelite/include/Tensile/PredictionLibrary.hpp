@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <iostream>
 #include <set>
@@ -33,6 +34,7 @@
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
+#include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/UtilsOrigami.hpp>
 
 #include <tensilelitehost/export.h>
@@ -170,9 +172,20 @@ namespace TensileLite
             const bool debug = Debug::Instance().printPropertyEvaluation();
 
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
-                const bool hwMatch   = (*(solution->hardwarePredicate))(hardware);
-                const bool probMatch = (*(solution->problemPredicate))(problem);
-                const bool predicateMatch = hwMatch && probMatch;
+                Task task(hardware, problem, *solution);
+                const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
+                // With uniform summation order off, the filter stays
+                // hardwarePredicate && problemPredicate. The extra conjuncts in
+                // softwarePredicate() (taskPredicate, StreamK dynamic queue) are
+                // real filters, so they stay behind the check.
+                const bool swMatch = problem.getParams().uniformSummationOrder() != 0
+                                         ? softwarePredicate(SolutionLibrarySearchType::DEFAULT,
+                                                             task,
+                                                             hardware,
+                                                             *solution,
+                                                             problem)
+                                         : (*(solution->problemPredicate))(problem);
+                const bool predicateMatch = hwMatch && swMatch;
 
                 if(debug)
                 {
@@ -180,6 +193,7 @@ namespace TensileLite
                         std::cout, "Prediction: " + solution->name());
                     solution->hardwarePredicate->debugEval(hardware, std::cout);
                     solution->problemPredicate->debugEval(problem, std::cout);
+                    solution->taskPredicate->debugEval(task, std::cout);
                     PredicateDebugger::printFooter(std::cout, predicateMatch);
                 }
 
@@ -213,6 +227,19 @@ namespace TensileLite
 
                 auto prediction_result = origami::rank_configs(
                     origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+
+                // Origami currently models individual output tiles. A spatial
+                // StreamK block also launches its padded edge peers; charge for
+                // that footprint before truncating the analytical candidate list.
+                // Index lookup and measured/exact libraries do not use this path.
+                for(auto& r : prediction_result)
+                {
+                    if(r.config.index < solution_list.size())
+                        r.latency /= solution_list[r.config.index].second
+                                         ->streamKClusterUtilization(problem);
+                }
+                std::stable_sort(prediction_result.begin(), prediction_result.end(),
+                                 [](auto const& a, auto const& b) { return a.latency < b.latency; });
 
                 for(const auto& r : prediction_result)
                 {

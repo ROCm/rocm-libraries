@@ -9,6 +9,7 @@ target_sources(hipsparse PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_scatter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_sddmm.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_sparse2dense.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_spgeam.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_spgemm.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_spgemm_reuse.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_spmm.cpp"

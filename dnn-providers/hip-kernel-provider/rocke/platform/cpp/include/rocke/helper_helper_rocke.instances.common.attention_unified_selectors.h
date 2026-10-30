@@ -79,7 +79,7 @@ typedef struct rocke_unified_attn_problem
     bool use_alibi; /* default false */
     bool use_qq_bias; /* default false */
     bool use_fp8; /* default false */
-    int num_sms; /* default 120 */
+    int num_cus; /* default 120 */
     /* waves_per_eu / compile_backend are not read by the ported selectors. */
     int num_kv_blocks; /* default 0 ("unknown") */
 } rocke_unified_attn_problem_t;
@@ -190,6 +190,19 @@ bool rocke_unified_attn_enable_v_double_buffer(const rocke_unified_attn_problem_
 /* Python: _enable_early_v_schedule(problem) -- long single-batch combo prefill. */
 bool rocke_unified_attn_enable_early_v_schedule(const rocke_unified_attn_problem_t* p);
 
+/* Python: _tiled_spec_from_problem(problem) -> rocke_attention_tiled_2d_spec_t.
+ * Assembles the full tiled-2D spec for gfx950 by running every selector and gate
+ * predicate exactly as attention_spec_builder._tiled_spec_from_problem does.
+ * Returns the filled spec; on a non-gfx950 arch or an unresolvable LDS budget the
+ * caller should check rocke_unified_attn_resolve_lds_budget separately.
+ *
+ * The ``arch`` string is passed to rocke_unified_attn_set_resolved_arch before
+ * selection so all gate predicates see the right arch (the caller's set_resolved_arch
+ * state is restored on return). Pass "gfx950" for the primary production path. */
+rocke_attention_tiled_2d_spec_t
+    rocke_unified_attn_tiled_spec_from_problem(const rocke_unified_attn_problem_t* p,
+                                               const char* arch);
+
 /* ----------------------------------------------------------- magic div */
 
 /* Python: _magic_div(b, dividend, divisor) -> Value.
@@ -254,22 +267,24 @@ bool rocke_unified_attn_segm_descriptors(rocke_ir_builder_t* b,
 
 /* ------------------------------------------------------- IR emit helpers */
 
-/* Python: _physical_block_and_token(b, p, block_tables, seq_idx, kpos)
+/* Python: _physical_block_and_token(b, p, block_tables, bt_stride, seq_idx, kpos)
  *   -> (physical, token_in_block).
  * (block_idx, token_in_block) = magic_div_mod(kpos, block_size);
- * max_blocks = ceil(max_seqlen_k / block_size);
- * physical = global_load_i32(block_tables, seq_idx*max_blocks + block_idx).
+ * physical = global_load_i32(block_tables, seq_idx*bt_stride + block_idx).
+ * bt_stride is the block_table_stride kernarg (the table's row stride).
  * Writes *out_physical and *out_token_in_block; returns true on success. */
 bool rocke_unified_attn_physical_block_and_token(rocke_ir_builder_t* b,
                                                  const rocke_unified_attn_problem_t* p,
                                                  rocke_value_t* block_tables,
+                                                 rocke_value_t* bt_stride,
                                                  rocke_value_t* seq_idx,
                                                  rocke_value_t* kpos,
                                                  rocke_value_t** out_physical,
                                                  rocke_value_t** out_token_in_block);
 
-/* Python: _emit_qk_score(b, p, dtype, query, key, block_tables, seq_idx, q_tok,
- *                        q_head, kv_head, kpos, scale, rcp_ln2) -> Value.
+/* Python: _emit_qk_score(b, p, dtype, query, key, block_tables, bt_stride,
+ *                        seq_idx, q_tok, q_head, kv_head, kpos, scale,
+ *                        rcp_ln2) -> Value.
  * Per-(query_token, query_head) QK dot product for the scalar kernels (vec8 main
  * fold + scalar tail), scaled by scale*rcp_ln2. `dtype` is the IR element type
  * (the Python passes a Type). */
@@ -279,6 +294,7 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
                                                 rocke_value_t* query,
                                                 rocke_value_t* key,
                                                 rocke_value_t* block_tables,
+                                                rocke_value_t* bt_stride,
                                                 rocke_value_t* seq_idx,
                                                 rocke_value_t* q_tok,
                                                 rocke_value_t* q_head,
@@ -287,14 +303,15 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
                                                 rocke_value_t* scale,
                                                 rocke_value_t* rcp_ln2);
 
-/* Python: _emit_v_load(b, p, dtype, value, block_tables, seq_idx, kv_head, kpos,
- *                      dim) -> Value.
+/* Python: _emit_v_load(b, p, dtype, value, block_tables, bt_stride, seq_idx,
+ *                      kv_head, kpos, dim) -> Value.
  * Loads V[physical, token_in_block, kv_head, dim] and casts to f32. */
 rocke_value_t* rocke_unified_attn_emit_v_load(rocke_ir_builder_t* b,
                                               const rocke_unified_attn_problem_t* p,
                                               const rocke_type_t* dtype,
                                               rocke_value_t* value,
                                               rocke_value_t* block_tables,
+                                              rocke_value_t* bt_stride,
                                               rocke_value_t* seq_idx,
                                               rocke_value_t* kv_head,
                                               rocke_value_t* kpos,

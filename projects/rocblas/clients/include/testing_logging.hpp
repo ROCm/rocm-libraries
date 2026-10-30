@@ -61,13 +61,18 @@ inline constexpr auto precision_letter<rocblas_float_complex> = "c";
 template <>
 inline constexpr auto precision_letter<rocblas_double_complex> = "z";
 
-#ifdef WIN32
+// In-process file comparison. Reads both files and returns 0 when their
+// contents are identical (non-zero otherwise), mirroring the exit code of
+// "diff". This avoids invoking a shell via system(), which would be
+// vulnerable to command injection through environment-derived paths.
 int diff_files(std::string path1, std::string path2)
 {
+#ifdef WIN32
     std::replace(path1.begin(), path1.end(), '/', '\\');
     std::replace(path2.begin(), path2.end(), '/', '\\');
-    std::ifstream actual(path1);
-    std::ifstream expected(path2);
+#endif
+    std::ifstream actual(path1, std::ios::binary);
+    std::ifstream expected(path2, std::ios::binary);
     std::string   test((std::istreambuf_iterator<char>(actual)), std::istreambuf_iterator<char>());
     std::string gold((std::istreambuf_iterator<char>(expected)), std::istreambuf_iterator<char>());
     actual.close();
@@ -75,7 +80,6 @@ int diff_files(std::string path1, std::string path2)
     int cmp = test != gold;
     return cmp;
 }
-#endif
 
 void erase_letter(std::string& str, char letter)
 {
@@ -650,6 +654,45 @@ void testing_logging(const Arguments& arg)
     }
 
 #endif // BUILD_WITH_HIPBLASLT
+
+    // Smoke check for ROCBLAS_LAYER=0x10 (rocblas_layer_mode_log_kernel_select). We don't
+    // golden-file the line because the selected kernel name varies by GPU arch and backend
+    // build — just assert at least one bench-style record with the expected schema was emitted.
+    // Only source=/parent_api= are always present; kernel= is emitted for the Tensile backend
+    // only, so it is intentionally not required here (hipBLASLt-routed GEMMs omit it).
+    if constexpr(!rocblas_is_complex<T>)
+    {
+        const fs::path kernel_select_fspath
+            = tmp_dir + std::string("kernel_select_") + test_run + std::string(".txt");
+        const std::string kernel_select_path = kernel_select_fspath.generic_string();
+
+        setenv_status = setenv("ROCBLAS_LAYER", "0x10", true);
+        ASSERT_EQ(setenv_status, 0);
+        setenv_status = setenv("ROCBLAS_LOG_TRACE_PATH", kernel_select_path.c_str(), true);
+        ASSERT_EQ(setenv_status, 0);
+
+        {
+            rocblas_local_handle handle_ks;
+            rocblas_set_pointer_mode(handle_ks, test_pointer_mode);
+            CHECK_ROCBLAS_ERROR(rocblas_gemm<T>(
+                handle_ks, transA, transB, m, n, k, alpha, da, lda, db, ldb, beta, dc, ldc));
+        } // handle dtor flushes the stream
+
+        std::ifstream ks_ifs(kernel_select_path);
+        ASSERT_TRUE(ks_ifs.good()) << "could not open " << kernel_select_path;
+        bool found = false;
+        for(std::string line; std::getline(ks_ifs, line);)
+        {
+            if(line.find("-f gemm_ex ") != std::string::npos
+               && line.find("# source=") != std::string::npos
+               && line.find("parent_api=") != std::string::npos)
+            {
+                found = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(found) << "ROCBLAS_LAYER=0x10 did not emit a kernel-select line";
+    }
 
     setenv_status = setenv("ROCBLAS_LAYER", "0", true);
     ASSERT_EQ(setenv_status, 0);
@@ -1283,12 +1326,9 @@ void testing_logging(const Arguments& arg)
 #ifdef WIN32
     // need all file descriptors closed to allow file removal on windows before process exits
     rocblas_internal_ostream::clear_workers();
+#endif
 
     int trace_cmp = diff_files(trace_path1, trace_path2);
-//int trace_cmp = system(("fc.exe \"" + trace_path1 + "\" \"" + trace_path2 + "\" | findstr *****").c_str());
-#else
-    int trace_cmp = system(("/usr/bin/diff " + trace_path1 + " " + trace_path2).c_str());
-#endif
     ASSERT_EQ(trace_cmp, 0);
 
     if(!trace_cmp)
@@ -1297,12 +1337,7 @@ void testing_logging(const Arguments& arg)
         fs::remove(trace_fspath2);
     }
 
-#ifdef WIN32
     int bench_cmp = diff_files(bench_path1, bench_path2);
-//int bench_cmp = system(("fc.exe \"" + bench_path1 + "\" \"" + bench_path2 + "\" | findstr *****").c_str());
-#else
-    int bench_cmp = system(("/usr/bin/diff " + bench_path1 + " " + bench_path2).c_str());
-#endif
     ASSERT_EQ(bench_cmp, 0);
 
     if(!bench_cmp)

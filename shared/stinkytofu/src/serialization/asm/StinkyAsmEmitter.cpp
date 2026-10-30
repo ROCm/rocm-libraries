@@ -71,6 +71,11 @@ inline std::ostream& operator<<(std::ostream& os, const SWaitTensorCntData& wait
     return os;
 }
 
+inline std::ostream& operator<<(std::ostream& os, const SWaitAsyncCntData& waitAsyncCntData) {
+    os << "asynccnt=" << (int)waitAsyncCntData.asynccnt;
+    return os;
+}
+
 inline std::ostream& operator<<(std::ostream& os, const SDelayAluData& delayAluData) {
     auto typeToString = [](SDelayAluData::InstType type) -> const char* {
         switch (type) {
@@ -240,9 +245,38 @@ inline std::ostream& operator<<(std::ostream& os, const CacheScopeModifiers& mod
     return os;
 }
 
+// Match rocisa TENSORModifiers::toString() and the LLVM printer: th, scope, nv.
+inline std::ostream& operator<<(std::ostream& os, const TENSORModifiers& mod) {
+    if (hasTemporalHint(mod.th)) {
+        os << " th:" << toString(mod.th, mod.isStore);
+    }
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(mod.scope);
+    }
+    if (mod.nv != NonVolatile::NV_NONE) {
+        os << " " << toString(mod.nv);
+    }
+    return os;
+}
+
 inline std::ostream& operator<<(std::ostream& os, const GLOBALModifiers& mod) {
     if (mod.offset != 0) {
         os << " offset:" << mod.offset;
+    }
+    if (mod.glc) {
+        if (mod.hasGLCModifier)
+            os << " glc";
+        else if (mod.hasSC0Modifier)
+            os << " sc0";
+    }
+    if (mod.slc) {
+        if (mod.hasGLCModifier)
+            os << " slc";
+        else if (mod.hasSC0Modifier)
+            os << " sc1";
+    }
+    if (mod.hasDLCModifier && mod.dlc) {
+        os << " dlc";
     }
     // Temporal hint / cache scope for global_prefetch_b8 (gl2-prefetch). Match
     // rocisa GLOBALModifiers::toString(): emit only non-default fields, temporal
@@ -252,6 +286,9 @@ inline std::ostream& operator<<(std::ostream& os, const GLOBALModifiers& mod) {
     }
     if (mod.scope != MUBUFScope::SCOPE_NONE) {
         os << " scope:" << toString(mod.scope);
+    }
+    if (mod.lds) {
+        os << " lds";
     }
     return os;
 }
@@ -788,6 +825,7 @@ static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& ins
             EMIT_TRAILING_MODIFIER(MUBUF, MUBUF);
             EMIT_TRAILING_MODIFIER(CACHE_SCOPE, CacheScope);
             EMIT_TRAILING_MODIFIER(GLOBAL, GLOBAL);
+            EMIT_TRAILING_MODIFIER(TENSOR, TENSOR);
             EMIT_TRAILING_MODIFIER(SMEM, SMEM);
             EMIT_TRAILING_MODIFIER(SDWA, SDWA);
             EMIT_TRAILING_MODIFIER(DPP, DPP);
@@ -869,9 +907,23 @@ static void emitDirective(std::ostream& os, const AsmDirective& directive,
         // Output raw text as-is (no newline added since text may already have it)
         os << directive.value;
         return;
-    } else if (directive.kind == AsmDirectiveKind::IF ||
-               directive.kind == AsmDirectiveKind::ENDIF) {
-        os << directive.value;
+    } else if (directive.kind == AsmDirectiveKind::IF) {
+        if (!directive.value.empty()) {
+            os << directive.value;
+        } else {
+            os << ".if " << directive.condition << "\n";
+        }
+        return;
+    } else if (directive.kind == AsmDirectiveKind::ENDIF) {
+        if (!directive.value.empty()) {
+            os << directive.value;
+        } else {
+            os << ".endif";
+            if (options.emitComments && !directive.comment.empty()) {
+                os << std::string(44, ' ') << " // " << directive.comment;
+            }
+            os << "\n";
+        }
         return;
     }
 

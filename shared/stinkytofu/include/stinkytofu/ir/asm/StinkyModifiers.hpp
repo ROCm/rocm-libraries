@@ -302,6 +302,7 @@ struct Modifier {
         VCC,
         SWAITCNT_DATA,
         SWAITTENSORCNT_DATA,
+        SWAITASYNCCNT_DATA,
         SWAITSTORECNT_DATA,
         SDELAYALU_DATA,
         SWAITALU_DATA,
@@ -313,6 +314,7 @@ struct Modifier {
         WMMA_POOL_INDEX,
         CALL_TARGETS,
         EXEC_GROUP,
+        TENSOR,
     };
 
     Modifier(Type type) : type(type) {}
@@ -400,20 +402,40 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
     TemporalHint th;
 };
 
-// Modifiers for global_* memory ops. Carries the immediate offset (offset:N)
-// plus the temporal hint and cache scope used by global_prefetch_b8 (gfx1250
-// gl2-prefetch). The hint/scope mirror rocisa's GLOBALModifiers defaults
-// (TH_NONE / SCOPE_NONE are not printed); offset-only ops leave them default.
+// Modifiers for global_* memory ops. Mirrors rocisa's GLOBALModifiers,
+// including cache-control bits and gfx12+ temporal hint / cache scope.
 struct GLOBALModifiers : public TypedModifier<GLOBALModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::GLOBAL;
 
     GLOBALModifiers(int offset = 0, TemporalHint th = TemporalHint::TH_NONE,
-                    MUBUFScope scope = MUBUFScope::SCOPE_NONE)
-        : TypedModifier<GLOBALModifiers>(), offset(offset), th(th), scope(scope) {}
+                    MUBUFScope scope = MUBUFScope::SCOPE_NONE, bool glc = false, bool slc = false,
+                    bool dlc = false, bool lds = false, bool isStore = false,
+                    bool hasGLCModifier = false, bool hasSC0Modifier = false,
+                    bool hasDLCModifier = false)
+        : TypedModifier<GLOBALModifiers>(),
+          offset(offset),
+          th(th),
+          scope(scope),
+          glc(glc),
+          slc(slc),
+          dlc(dlc),
+          lds(lds),
+          isStore(isStore),
+          hasGLCModifier(hasGLCModifier),
+          hasSC0Modifier(hasSC0Modifier),
+          hasDLCModifier(hasDLCModifier) {}
 
     int offset;
     TemporalHint th;
     MUBUFScope scope;
+    uint32_t glc : 1;
+    uint32_t slc : 1;
+    uint32_t dlc : 1;
+    uint32_t lds : 1;
+    uint32_t isStore : 1;
+    uint32_t hasGLCModifier : 1;
+    uint32_t hasSC0Modifier : 1;
+    uint32_t hasDLCModifier : 1;
 };
 
 struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
@@ -465,6 +487,22 @@ struct CacheScopeModifiers : public TypedModifier<CacheScopeModifiers> {
         : TypedModifier<CacheScopeModifiers>(), scope(scope) {}
 
     MUBUFScope scope;
+};
+
+// Cache-policy fields of the gfx1250 tensor ops (tensor_load_to_lds), mirroring rocisa's
+// TENSORModifiers. Default (TH_NONE / SCOPE_NONE / NV_NONE) fields are not emitted.
+struct TENSORModifiers : public TypedModifier<TENSORModifiers> {
+    static constexpr Modifier::Type Type = Modifier::Type::TENSOR;
+
+    TENSORModifiers(MUBUFScope scope = MUBUFScope::SCOPE_NONE,
+                    TemporalHint th = TemporalHint::TH_NONE, NonVolatile nv = NonVolatile::NV_NONE,
+                    bool isStore = false)
+        : TypedModifier<TENSORModifiers>(), scope(scope), th(th), nv(nv), isStore(isStore) {}
+
+    MUBUFScope scope;
+    TemporalHint th;
+    NonVolatile nv;
+    bool isStore;
 };
 
 struct SMEMModifiers : public TypedModifier<SMEMModifiers> {
@@ -814,6 +852,15 @@ struct SWaitTensorCntData : public TypedModifier<SWaitTensorCntData> {
     SWaitTensorCntData(int8_t tlcnt = -1) : TypedModifier<SWaitTensorCntData>(), tlcnt(tlcnt) {}
 
     int8_t tlcnt;
+};
+
+struct SWaitAsyncCntData : public TypedModifier<SWaitAsyncCntData> {
+    static constexpr Modifier::Type Type = Modifier::Type::SWAITASYNCCNT_DATA;
+
+    SWaitAsyncCntData(int8_t asynccnt = -1)
+        : TypedModifier<SWaitAsyncCntData>(), asynccnt(asynccnt) {}
+
+    int8_t asynccnt;
 };
 
 struct SWaitStoreCntData : public TypedModifier<SWaitStoreCntData> {

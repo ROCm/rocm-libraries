@@ -26,153 +26,75 @@
  *
  ******************************************************************************/
 
-// Benchmark utils
-#include "../../bench_utils/bench_utils.hpp"
-
-// rocThrust
 #include <thrust/adjacent_difference.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 
-// Google Benchmark
-#include <benchmark/benchmark.h>
+#include "bench_utils.hpp"
 
-// STL
-#include <cstddef>
-#include <string>
-#include <vector>
+#define VAL 42
 
 template <typename T>
-struct custom_op
+struct adjacent_difference_benchmark : public primbench::benchmark_interface
 {
-  T val;
-
-  custom_op() = delete;
-
-  explicit custom_op(T val)
-      : val(val)
+  adjacent_difference_benchmark(size_t items)
+      : m_items(items)
   {}
 
-  __device__ T operator()(const T& lhs, const T& rhs)
+  primbench::json meta() const override
   {
-    return lhs * rhs + val; // Hope to gen mad
+    return primbench::json{}
+      .add("algo", "adjacent_difference")
+      .add("subalgo", "custom")
+      .add("input_type", primbench::name<T>())
+      .add("elements", m_items);
   }
+
+  void run(primbench::state& state) override
+  {
+    auto custom_op = [] __device__(const T& lhs, const T& rhs) {
+      return lhs * rhs + VAL;
+    };
+
+    bench_utils::caching_allocator_t alloc{};
+    thrust::detail::device_t policy{};
+
+    thrust::device_vector<T> in = bench_utils::generate(m_items, state.seed);
+
+    thrust::device_vector<T> out(m_items);
+
+    state.set_items(m_items);
+    state.add_reads<T>(m_items);
+    state.add_writes<T>(m_items);
+
+    state.run([&] {
+      thrust::adjacent_difference(policy(alloc).on(state.stream), in.cbegin(), in.cend(), out.begin(), custom_op);
+    });
+  }
+
+private:
+  size_t m_items;
 };
 
-template <int Val>
-struct custom
-{
-  template <typename T, typename Policy>
-  float64_t run(thrust::device_vector<T>& input, thrust::device_vector<T>& output, Policy policy)
-  {
-    thrust::adjacent_difference(policy, input.cbegin(), input.cend(), output.begin(), custom_op<T>{Val});
-
-    bench_utils::gpu_timer d_timer;
-
-    d_timer.start(0);
-    thrust::adjacent_difference(policy, input.cbegin(), input.cend(), output.begin(), custom_op<T>{Val});
-    d_timer.stop(0);
-
-    return d_timer.get_duration();
-  }
-};
-
-template <class Benchmark, class T>
-void run_benchmark(benchmark::State& state, const std::size_t elements, const std::string seed_type)
-{
-  // Benchmark object
-  Benchmark benchmark{};
-
-  // GPU times
-  std::vector<double> gpu_times;
-
-  // Generate input
-  thrust::device_vector<T> input = bench_utils::generate(elements, seed_type);
-
-  // Output
-  thrust::device_vector<T> output(elements);
-
-  bench_utils::caching_allocator_t alloc{};
-  thrust::detail::device_t policy{};
-
-  for (auto _ : state)
-  {
-    float64_t duration = benchmark.template run<T>(input, output, policy(alloc));
-    state.SetIterationTime(duration);
-    gpu_times.push_back(duration);
-  }
-
-  // BytesProcessed include read and written bytes, so when the BytesProcessed/s are reported
-  // it will actually be the global memory bandwidth gotten.
-  state.SetBytesProcessed(state.iterations() * 2 * elements * sizeof(T));
-  state.SetItemsProcessed(state.iterations() * elements);
-
-  const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
-  state.counters["gpu_noise"] = gpu_cv;
-}
-
-#define CREATE_BENCHMARK(T, Elements)                                                                      \
-  benchmark::RegisterBenchmark(                                                                            \
-    bench_utils::bench_naming::format_name("{algo:adjacent_difference,subalgo:" + name + ",input_type:" #T \
-                                           + ",elements:" + bench_utils::format_pow2(Elements))            \
-      .c_str(),                                                                                            \
-    run_benchmark<Benchmark<Val>, T>,                                                                      \
-    Elements,                                                                                              \
-    seed_type)
-
-#define BENCHMARK_TYPE(type)                                               \
-  for (size_t size : bench_utils::sizes)                                   \
-  {                                                                        \
-    if (sizeof(type) * size <= bench_utils::system.devProp.totalGlobalMem) \
-      bs.push_back(CREATE_BENCHMARK(type, size));                          \
-  }
-
-template <template <int> class Benchmark, int Val = 42 /*magic number in Thrust's benchmark*/>
-void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
-{
-  std::vector<benchmark::Benchmark*> bs;
-  BENCHMARK_TYPE(int8_t)
-  BENCHMARK_TYPE(int16_t)
-  BENCHMARK_TYPE(int32_t)
-  BENCHMARK_TYPE(int64_t)
-  BENCHMARK_TYPE(float32_t)
-  BENCHMARK_TYPE(float64_t)
-
-  benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-}
+#define QUEUE(T)                                        \
+  for (size_t size : bench_utils::sizes(2 * sizeof(T))) \
+    executor.queue<adjacent_difference_benchmark<T>>(size);
 
 int main(int argc, char* argv[])
 {
-  cli::Parser parser(argc, argv);
-  parser.set_optional<std::string>("name_format", "name_format", "human", "either: json,human,txt");
-  parser.set_optional<std::string>("seed", "seed", "random", bench_utils::get_seed_message());
-  parser.run_and_exit_if_error();
+  primbench::settings settings;
+  settings.size                 = 1; // bench_utils::sizes() calculates it later.
+  settings.min_gpu_ms_per_batch = 75;
+  settings.batch_window_size    = 3;
+  primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
-  // Parse argv
-  benchmark::Initialize(&argc, argv);
-  bench_utils::bench_naming::set_format(parser.get<std::string>("name_format")); /* either: json,human,txt */
-  const std::string seed_type = parser.get<std::string>("seed");
+  QUEUE(int8_t)
+  QUEUE(int16_t)
+  QUEUE(int32_t)
+  QUEUE(int64_t)
 
-  // Benchmark info
-  bench_utils::add_common_benchmark_info();
-  benchmark::AddCustomContext("seed", seed_type);
+  QUEUE(float)
+  QUEUE(double)
 
-  // Add benchmark
-  std::vector<benchmark::Benchmark*> benchmarks;
-  add_benchmarks<custom>("custom", benchmarks, seed_type);
-
-  // Use manual timing
-  for (auto& b : benchmarks)
-  {
-    b->UseManualTime();
-    b->Unit(benchmark::kMicrosecond);
-    b->MinTime(0.4); // in seconds
-  }
-
-  // Run benchmarks
-  benchmark::RunSpecifiedBenchmarks(bench_utils::ChooseCustomReporter());
-
-  // Finish
-  benchmark::Shutdown();
-  return 0;
+  executor.run();
 }

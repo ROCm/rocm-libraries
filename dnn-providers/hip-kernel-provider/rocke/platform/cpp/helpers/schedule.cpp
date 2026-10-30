@@ -43,6 +43,8 @@ int rocke_schedule_dtype_bytes(const char* dtype)
         return 1;
     if(strcmp(dtype, "f32") == 0)
         return 4;
+    if(strcmp(dtype, "fp64") == 0)
+        return 8;
     return -1; /* Python: raise ValueError(...) */
 }
 
@@ -282,6 +284,14 @@ rocke_schedule_policy_t rocke_schedule_policy_for_pipeline(rocke_ir_builder_t* b
         p.emit_hints = true;
         p.setprio_level = 1;
         p.mode = "intrawave";
+        return p;
+    }
+    else if(strcmp(pipeline, "basic") == 0)
+    {
+        /* CK pipeline_basic: naive single-buffer pipeline with global-read/
+         * compute overlap. No scheduling hints (lowest resource pressure). */
+        p.name = "basic";
+        p.emit_hints = false;
         return p;
     }
 

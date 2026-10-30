@@ -1323,9 +1323,9 @@ int main(int argc, char** argv) {
                     startCpuTime = clock();
                     if (BitDepthTestMode == U8_TO_U8 || BitDepthTestMode == F16_TO_F16 ||
                         BitDepthTestMode == F32_TO_F32 || BitDepthTestMode == I8_TO_I8)
-                        errorCodeCapture =
-                            rppt_erode_host(input, srcDescPtr, output, dstDescPtr, kernelSize,
-                                            roiTensorPtrSrc, roiTypeSrc, handle);
+                        errorCodeCapture = rppt_erode(input, srcDescPtr, output, dstDescPtr,
+                                                      kernelSize, roiTensorPtrSrc, roiTypeSrc,
+                                                      handle, RppBackend::RPP_HOST_BACKEND);
                     else
                         missingFuncFlag = 1;
 
@@ -1339,9 +1339,9 @@ int main(int argc, char** argv) {
                     startCpuTime = clock();
                     if (BitDepthTestMode == U8_TO_U8 || BitDepthTestMode == F16_TO_F16 ||
                         BitDepthTestMode == F32_TO_F32 || BitDepthTestMode == I8_TO_I8)
-                        errorCodeCapture =
-                            rppt_dilate_host(input, srcDescPtr, output, dstDescPtr, kernelSize,
-                                             roiTensorPtrSrc, roiTypeSrc, handle);
+                        errorCodeCapture = rppt_dilate(input, srcDescPtr, output, dstDescPtr,
+                                                       kernelSize, roiTensorPtrSrc, roiTypeSrc,
+                                                       handle, RppBackend::RPP_HOST_BACKEND);
                     else
                         missingFuncFlag = 1;
 
@@ -2124,6 +2124,24 @@ int main(int argc, char** argv) {
 
                     break;
                 }
+                case TONE_MAP: {
+                    testCaseName = "tone_map";
+
+                    Rpp32f gamma[batchSize];
+                    for (i = 0; i < batchSize; i++) gamma[i] = 2.2;
+
+                    startWallTime = omp_get_wtime();
+                    startCpuTime = clock();
+                    if (BitDepthTestMode == U8_TO_U8 || BitDepthTestMode == F16_TO_F16 ||
+                        BitDepthTestMode == F32_TO_F32 || BitDepthTestMode == I8_TO_I8)
+                        errorCodeCapture =
+                            rppt_tone_map(input, srcDescPtr, output, dstDescPtr, gamma,
+                                          roiTensorPtrSrc, roiTypeSrc, handle, RPP_HOST_BACKEND);
+                    else
+                        missingFuncFlag = 1;
+
+                    break;
+                }
                 default: {
                     missingFuncFlag = 1;
                     break;
@@ -2140,8 +2158,8 @@ int main(int argc, char** argv) {
             }
             if (errorCodeCapture != RPP_SUCCESS) {
                 cout << "\nThe functionality " << func << " returned an error status "
-                     << rppStatusToString[errorCodeCapture] << " on run number " << perfRunCount + 1
-                     << " of " << numRuns << " runs.\n";
+                     << rppGetStatusString(errorCodeCapture) << " on run number "
+                     << perfRunCount + 1 << " of " << numRuns << " runs.\n";
                 return errorCodeCapture;
             }
 

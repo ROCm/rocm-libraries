@@ -34,6 +34,14 @@
 
 namespace
 {
+#if HIP_FP8_TYPE_FNUZ
+    // Compile-time regression coverage: this conversion must be callable from
+    // device code on architectures with native FNUZ support, including gfx942.
+    __global__ void hipblaslt_bf8_fnuz_to_half(hipblaslt_bf8_fnuz value, _Float16* output)
+    {
+        *output = static_cast<_Float16>(value);
+    }
+#endif
 
     // ----------------------------------------------------------------------------
     // aux
@@ -79,6 +87,8 @@ namespace
                 testing_aux_matmul_sm_count_target(arg);
             else if(!strcmp(arg.function, "aux_matmul_streamk_tile_scheduling_ext"))
                 testing_aux_matmul_streamk_tile_scheduling_ext(arg);
+            else if(!strcmp(arg.function, "aux_matmul_uniform_summation_order_ext"))
+                testing_aux_matmul_uniform_summation_order_ext(arg);
             else if(!strcmp(arg.function, "aux_matmul_pref_sm_count_target"))
                 testing_aux_matmul_pref_sm_count_target(arg);
             else if(!strcmp(arg.function, "aux_matmul_alg_init_bad_arg"))
@@ -91,6 +101,12 @@ namespace
                 testing_aux_get_sol_with_zero_alpha_null_a_b(arg);
             else if(!strcmp(arg.function, "aux_get_sol_with_zero_alpha_null_a_b_ext"))
                 testing_aux_get_sol_with_zero_alpha_null_a_b_ext(arg);
+            else if(!strcmp(arg.function, "aux_f16_alpha_null_a_b"))
+                testing_aux_f16_alpha_null_a_b(arg);
+            else if(!strcmp(arg.function, "aux_f16_alpha_null_a_b_ext"))
+                testing_aux_f16_alpha_null_a_b_ext(arg);
+            else if(!strcmp(arg.function, "aux_c32_alpha_null_a_b_ext"))
+                testing_aux_c32_alpha_null_a_b_ext(arg);
             else if(!strcmp(arg.function, "aux_matmul_alg_get_attr_bad_arg"))
                 testing_aux_matmul_alg_get_attr_bad_arg(arg);
             else if(!strcmp(arg.function, "aux_matmul_plan_init_bad_arg"))
@@ -164,6 +180,9 @@ namespace
                    || !strcmp(arg.function, "aux_get_sol_with_null_biasaddr")
                    || !strcmp(arg.function, "aux_get_sol_with_zero_alpha_null_a_b")
                    || !strcmp(arg.function, "aux_get_sol_with_zero_alpha_null_a_b_ext")
+                   || !strcmp(arg.function, "aux_f16_alpha_null_a_b")
+                   || !strcmp(arg.function, "aux_f16_alpha_null_a_b_ext")
+                   || !strcmp(arg.function, "aux_c32_alpha_null_a_b_ext")
                    || !strcmp(arg.function, "aux_matmul_alg_get_attr_bad_arg")
                    || !strcmp(arg.function, "aux_matmul_plan_init_bad_arg")
                    || !strcmp(arg.function, "aux_matmul_plan_init")
@@ -173,6 +192,7 @@ namespace
                    || !strcmp(arg.function, "aux_matmul_pref_get_attr")
                    || !strcmp(arg.function, "aux_matmul_sm_count_target")
                    || !strcmp(arg.function, "aux_matmul_streamk_tile_scheduling_ext")
+                   || !strcmp(arg.function, "aux_matmul_uniform_summation_order_ext")
                    || !strcmp(arg.function, "aux_matmul_pref_sm_count_target")
 #ifdef CODE_COVERAGE
                    || !strcmp(arg.function, "aux_auxiliary_func")
@@ -205,7 +225,6 @@ namespace
 
     TEST_P(aux_test, conversion)
     {
-        SKIP_IF_KNOWN_BUG_FOR_PLATFORM();
         RUN_TEST_ON_THREADS_STREAMS(aux_testing{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(aux_test);

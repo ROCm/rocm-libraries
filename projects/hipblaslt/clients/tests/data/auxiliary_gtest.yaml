@@ -89,6 +89,11 @@ Tests:
   function:
     - aux_matmul_streamk_tile_scheduling_ext: *hpa_half_precision
 
+- name: aux_matmul_uniform_summation_order_ext
+  category: pre_checkin
+  function:
+    - aux_matmul_uniform_summation_order_ext: *hpa_half_precision
+
 - name: aux_matmul_pref_sm_count_target
   category: pre_checkin
   function:
@@ -122,6 +127,25 @@ Tests:
     - aux_get_sol_with_zero_alpha_null_a_b_ext: *hpa_half_precision
   alpha: 0
   beta: 1
+
+# HIP_R_16F alpha is 2 bytes. The test hardcodes compute/scale f16; the
+# precision anchor only fills the required datatype fields.
+- name: aux_f16_alpha_null_a_b
+  category: pre_checkin
+  function:
+    - aux_f16_alpha_null_a_b: *hpa_half_precision
+
+- name: aux_f16_alpha_null_a_b_ext
+  category: pre_checkin
+  function:
+    - aux_f16_alpha_null_a_b_ext: *hpa_half_precision
+
+# Ext API has no scale type. The test hardcodes C_32F; a 0+1i alpha must
+# still reject null A/B.
+- name: aux_c32_alpha_null_a_b_ext
+  category: pre_checkin
+  function:
+    - aux_c32_alpha_null_a_b_ext: *hpa_half_precision
 
 - name: aux_matmul_alg_get_attr_bad_arg
   category: pre_checkin

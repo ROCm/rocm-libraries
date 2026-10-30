@@ -17,16 +17,8 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-#include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/generic/distance.h>
+#include <thrust/iterator/iterator_traits.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -38,14 +30,16 @@ namespace generic
 namespace detail
 {
 
-THRUST_EXEC_CHECK_DISABLE
-template <typename InputIterator>
-inline THRUST_HOST_DEVICE thrust::detail::it_difference_t<InputIterator>
-distance(InputIterator first, InputIterator last, thrust::incrementable_traversal_tag)
-{
-  thrust::detail::it_difference_t<InputIterator> result(0);
 
-  while (first != last)
+THRUST_EXEC_CHECK_DISABLE
+template<typename InputIterator>
+inline THRUST_HOST_DEVICE
+  typename thrust::iterator_traits<InputIterator>::difference_type
+    distance(InputIterator first, InputIterator last, thrust::incrementable_traversal_tag)
+{
+  typename thrust::iterator_traits<InputIterator>::difference_type result(0);
+
+  while(first != last)
   {
     ++first;
     ++result;
@@ -54,24 +48,30 @@ distance(InputIterator first, InputIterator last, thrust::incrementable_traversa
   return result;
 } // end advance()
 
+
 THRUST_EXEC_CHECK_DISABLE
-template <typename InputIterator>
-inline THRUST_HOST_DEVICE thrust::detail::it_difference_t<InputIterator>
-distance(InputIterator first, InputIterator last, thrust::random_access_traversal_tag)
+template<typename InputIterator>
+inline THRUST_HOST_DEVICE
+  typename thrust::iterator_traits<InputIterator>::difference_type
+    distance(InputIterator first, InputIterator last, thrust::random_access_traversal_tag)
 {
   return last - first;
 } // end distance()
 
-} // namespace detail
+
+} // end detail
 
 THRUST_EXEC_CHECK_DISABLE
-template <typename InputIterator>
-inline THRUST_HOST_DEVICE thrust::detail::it_difference_t<InputIterator> distance(InputIterator first, InputIterator last)
+template<typename InputIterator>
+inline THRUST_HOST_DEVICE
+  typename thrust::iterator_traits<InputIterator>::difference_type
+    distance(InputIterator first, InputIterator last)
 {
   // dispatch on iterator traversal
-  return thrust::system::detail::generic::detail::distance(
-    first, last, typename thrust::iterator_traversal<InputIterator>::type());
+  return thrust::system::detail::generic::detail::distance(first, last,
+    typename thrust::iterator_traversal<InputIterator>::type());
 } // end advance()
+
 
 } // end namespace generic
 } // end namespace detail

@@ -57,13 +57,23 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/SwPrefetchRelCommon.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 namespace stinkytofu {
 
 namespace {
+// True when \p it points at a real instruction in \p bb with unified opcode \p uop.
+// False at end(), or on an asm directive (non-StinkyTofu node).
+bool isUnifiedOpcodeAt(BasicBlock& bb, IRList::iterator it, uint16_t uop) {
+    if (it == bb.end()) return false;
+    IRBase* node = it.getNodePtr();
+    if (node->getType() != IRBase::IRType::StinkyTofu) return false;
+    return static_cast<const StinkyInstruction*>(node)->getUnifiedOpcode() == uop;
+}
+
 // Return {BB, iterator} for the entry prefetch-burst insertion point: immediately AFTER the
-// gfx1250 hardware-entrypoint prologue (`global_prefetch_b8` [+ following `v_nop`], inserted by
-// InsertInitialUnclausedVmemPass) so the prologue stays the kernel's first executed
+// gfx1250 hardware-entrypoint prologue (`s_mov_b64 s[64:65], 0` + `v_nop` + `global_prefetch_b8`,
+// inserted by InsertInitialUnclausedVmemPass) so the prologue stays the kernel's first executed
 // instruction(s). The prologue is the function's first real (non label/phi/directive) instruction
 // and may sit in a later BB than getEntryBlock() (e.g. after an empty preamble + label_ASM_Start),
 // so we scan the whole function. Falls back to {entryBB, begin()} when no prologue is present
@@ -79,17 +89,18 @@ std::pair<BasicBlock*, IRList::iterator> entryBurstInsertPoint(Function& func) {
             // find the "first real instruction" (LABEL/PHI/FENCE/placement marker), so both passes
             // agree on where the prologue sits.
             if (isPseudoInst(inst)) continue;
-            // First real instruction of the function.
-            if (inst->getUnifiedOpcode() == GFX::global_prefetch_b8) {
+            // First real instruction of the function. Walk the prologue shape
+            //   s_mov_b64 s[64:65], 0 ; v_nop ; global_prefetch_b8 v0, s[64:65]
+            // leading pieces are tolerated as absent (isolated unit tests), but the
+            // global_prefetch_b8 must be there for this to be the prologue.
+            {
                 IRList::iterator after = it;
-                ++after;  // past global_prefetch_b8
-                if (after != bb.end()) {
-                    IRBase* n2 = after.getNodePtr();
-                    if (n2->getType() == IRBase::IRType::StinkyTofu &&
-                        static_cast<const StinkyInstruction*>(n2)->getUnifiedOpcode() == GFX::v_nop)
-                        ++after;  // past v_nop
+                if (isUnifiedOpcodeAt(bb, after, GFX::s_mov_b64)) ++after;
+                if (isUnifiedOpcodeAt(bb, after, GFX::v_nop)) ++after;
+                if (isUnifiedOpcodeAt(bb, after, GFX::global_prefetch_b8)) {
+                    ++after;  // past global_prefetch_b8
+                    return {&bb, after};
                 }
-                return {&bb, after};
             }
             // First real insn isn't the prologue -> no prologue; fall back to entry begin().
             BasicBlock* entry = func.getEntryBlock();
@@ -122,6 +133,10 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
 
     void setBaseSgpr(int baseSgpr) {
         m_baseSgpr = baseSgpr;
+    }
+
+    void setAfterSgprCompact(bool on) {
+        m_afterSgprCompact = on;
     }
 
     int getBaseSgpr() const {
@@ -191,8 +206,19 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
             return PreservedAnalyses::all();
         }
 
-        // Gate 2: base SGPR pair must be reserved.
-        if (m_baseSgpr < 0) {
+        // Gate 2: a base SGPR pair must be available. Compact rewrites the
+        // producer's numbering, so the Tensile-reserved triple may now hold other
+        // values; this burst sits at kernel entry, so it takes a block from inside
+        // the final numbering instead. Kept in a local: the reservation Tensile
+        // passed in stays the pass's configuration.
+        int baseSgpr = m_baseSgpr;
+        if (m_afterSgprCompact && baseSgpr >= 0) {
+            baseSgpr = static_cast<int>(absPrefetchEntrySgprBase(func));
+            if (m_debug)
+                *m_debugStream << "[" << getName() << "] baseSgpr " << m_baseSgpr << " -> "
+                               << baseSgpr << " (entry block after compact)\n";
+        }
+        if (baseSgpr < 0) {
             if (m_debug)
                 *m_debugStream << "[" << getName()
                                << "] no-op: baseSgpr not configured (pass -1)\n";
@@ -254,16 +280,17 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
 
         if (m_debug) {
             *m_debugStream << "[" << getName() << "] Phase 2 abs-static insert: totalLayoutBytes="
-                           << phase1.totalLayoutBytes << " baseSgpr=" << m_baseSgpr
+                           << phase1.totalLayoutBytes << " baseSgpr=" << baseSgpr
                            << " N_prefetches=" << N << "\n";
         }
 
         const std::string targetLabelName = std::string(kSwPrefetchAbsTargetLabelBase) + "0";
 
         // Resolve the burst site: AFTER the gfx1250 hardware-entrypoint prologue
-        // (global_prefetch_b8 + v_nop) wherever it lives in the function, so the prologue stays the
-        // kernel's first executed instruction(s). May be a later BB than getEntryBlock() (empty
-        // preamble + label_ASM_Start). Falls back to entry begin() when no prologue is present.
+        // (s_mov_b64 + v_nop + global_prefetch_b8) wherever it lives in the function, so the
+        // prologue stays the kernel's first executed instruction(s). May be a later BB than
+        // getEntryBlock() (empty preamble + label_ASM_Start). Falls back to entry begin() when
+        // no prologue is present.
         auto [burstBB, insertAt] = entryBurstInsertPoint(func);
         if (burstBB == nullptr) {
             if (m_debug)
@@ -279,14 +306,14 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
         // the final order is: [prologue] siteLabel, getpc, add*, pf_0..pf_{N-1}, [original body].
         {
             AsmIRBuilder builder(*burstBB, archId);
-            const uint32_t baseLo = static_cast<uint32_t>(m_baseSgpr);
-            const uint32_t baseHi = static_cast<uint32_t>(m_baseSgpr + 1);
+            const uint32_t baseLo = static_cast<uint32_t>(baseSgpr);
+            const uint32_t baseHi = static_cast<uint32_t>(baseSgpr + 1);
             // Scratch SGPR (base+2): holds the PC-relative offset for the address computation
             // (rocisa long-branch idiom). Dead after s_add_u32. klength uses the simm5 immediate
             // (0x1f), so no separate length register is needed.
             // To drop this scratch entirely (2 SGPRs total) switch the two adds to the
             // @rel32@lo+4 / @rel32@hi+12 relocation form (offset encoded in the instruction).
-            const uint32_t tmp = static_cast<uint32_t>(m_baseSgpr + 2);
+            const uint32_t tmp = static_cast<uint32_t>(baseSgpr + 2);
 
             // label_Do_SW_PrefetchAbs_entry
             StinkyInstruction* siteLabel =
@@ -451,6 +478,7 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
     }
 
     int m_baseSgpr = -1;
+    bool m_afterSgprCompact = false;
     int m_totalPrefetchInserted = 0;
     int64_t m_totalBytes = 0;
     int64_t m_byteOffsetBase = 0;
@@ -465,9 +493,11 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
 char SwInstructionPrefetchAbsStaticPass::ID = 0;
 
 std::unique_ptr<Pass> createSwInstructionPrefetchAbsStaticPass(int baseSgpr,
-                                                               const std::string& debugOutputPath) {
+                                                               const std::string& debugOutputPath,
+                                                               bool afterSgprCompact) {
     auto p = std::make_unique<SwInstructionPrefetchAbsStaticPass>();
     p->setBaseSgpr(baseSgpr);
+    p->setAfterSgprCompact(afterSgprCompact);
     p->setDebugOutputPath(debugOutputPath);
     if (!debugOutputPath.empty()) p->setDebug(true);
     return p;
@@ -475,9 +505,11 @@ std::unique_ptr<Pass> createSwInstructionPrefetchAbsStaticPass(int baseSgpr,
 
 std::unique_ptr<Pass> createSwInstructionPrefetchAbsStaticPass(StinkyAsmModule& module) {
     auto p = std::make_unique<SwInstructionPrefetchAbsStaticPass>();
-    // Base SGPR pair is auto-allocated in Tensile (KernelWriter._initKernel) and passed
-    // via the module option SwInstructionPrefetchAbsBaseSgpr (-1 = off → pass no-ops).
+    // Tensile reserves a 3-SGPR triple and passes the base here (-1 = off).
+    // After SGPR compact that triple may already hold other values, so the pass
+    // then takes an entry block from the final numbering instead.
     p->setBaseSgpr(module.getModuleOptions().SwInstructionPrefetchAbsBaseSgpr);
+    p->setAfterSgprCompact(module.getModuleOptions().sgprsCompacted());
     if (!module.getOutputDir().empty()) {
         const std::string costBasename =
             module.getOutputName().empty() ? module.getName() : module.getOutputName();

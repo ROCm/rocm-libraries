@@ -20,6 +20,8 @@ from geko.schemas import GemmConfig, GemmType, RunState
         ("B", "B", "S"),
         ("H", "H", "S"),
         ("X", "S", "S"),
+        ("C", "C", "C"),
+        ("Z", "Z", "Z"),
     ],
 )
 def test_tensile_roundtrip_through_hipblaslt(dt, dd, cd):
@@ -33,11 +35,35 @@ def test_tensile_triple_mixed_bh():
     assert a_t == "bf16_r" and b_t == "f16_r" and c_t == "bf16_r" and comp == "f32_r"
 
 
+def test_tensile_triple_xf32():
+    """Test XF32 (TensorFloat32) dtype mapping: a_type should be f32_r, not xf32_r."""
+    a_t, b_t, c_t, comp = GemmType._tensile_triple_to_hipblaslt("X", "S", "S")
+    assert a_t == "f32_r", f"a_type should be f32_r, got {a_t}"
+    assert b_t == "f32_r"
+    assert c_t == "f32_r"
+    assert comp == "xf32_r", f"compute_type should be xf32_r, got {comp}"
+
+
 def test_workload_log_rows_keys_and_sample_values():
     gt = GemmType.from_tensile("N", "T", "B", "B", "S")
     row = GemmConfig(gt, [[1024, 1024, 1, 1024]]).workload_log_rows()[0]
     assert set(row) == set(GEMM_LOG_FIELDS)
     assert row["M"] == 1024 and row["transB"] == "T"
+
+
+def test_workload_log_rows_non_mx_scale_defaults_to_zero():
+    """Non-MX GemmConfig should default scaleA/scaleB to 0, not 1."""
+    gt = GemmType.from_tensile("N", "T", "B", "B", "S")
+    row = GemmConfig(gt, [[1024, 1024, 1, 1024]]).workload_log_rows()[0]
+    assert row["scaleA"] == 0
+    assert row["scaleB"] == 0
+
+
+def test_workload_log_rows_mx_uses_mx_scale_value():
+    gt = GemmType.from_tensile("T", "N", "F4", "S", "S")
+    row = GemmConfig(gt, [[256, 256, 1, 256]]).workload_log_rows(mx_scale=1001)[0]
+    assert row["scaleA"] == 1001
+    assert row["scaleB"] == 1001
 
 
 def test_single_gemm_workload_parseable(tmp_path: Path):
@@ -112,10 +138,10 @@ def test_gemmtype_validation_errors() -> None:
 
 
 def test_tensile_mapper_error_paths() -> None:
-    with pytest.raises(ValueError, match="Unknown Tensile DataType letter"):
+    with pytest.raises(ValueError, match="Cannot resolve Tensile DataType"):
         GemmType._tensile_triple_to_hipblaslt("Q", "B", "S")
 
-    with pytest.raises(ValueError, match="must be 1 or 2 letters"):
+    with pytest.raises(ValueError, match="Cannot resolve Tensile DataType"):
         GemmType._tensile_triple_to_hipblaslt("ABC", "B", "S")
 
     with pytest.raises(ValueError, match="Unknown Tensile DestDataType letter"):
@@ -123,6 +149,17 @@ def test_tensile_mapper_error_paths() -> None:
 
     with pytest.raises(ValueError, match="Unknown Tensile ComputeDataType letter"):
         GemmType._tensile_triple_to_hipblaslt("B", "B", "Q")
+
+
+def test_tensile_mapper_rejects_ambiguous_split(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If a future DTYPE key set makes a DataType string splittable more than
+    one way, resolution must raise instead of silently picking the first."""
+    ambiguous_map = dict(GemmType._TENSILE_LETTER_TO_HIPBLASLT)
+    ambiguous_map.update({"P": "p_r", "Q": "q_r", "R": "r_r", "PQ": "pq_r", "QR": "qr_r"})
+    monkeypatch.setattr(GemmType, "_TENSILE_LETTER_TO_HIPBLASLT", ambiguous_map)
+
+    with pytest.raises(ValueError, match="Ambiguous Tensile DataType"):
+        GemmType._tensile_triple_to_hipblaslt("PQR", "B", "S")
 
 
 def test_hipblaslt_to_tensile_tf32_invalid_combo_raises() -> None:
@@ -167,3 +204,39 @@ def test_runstate_dump_load_and_verify_failures(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="hash mismatch"):
         bad.verify(input_file)
+
+
+def test_cgemm_conjugate_transpose_accepted() -> None:
+    gt = GemmType.from_tensile("N", "C", "C", "C", "C")
+    assert gt.transA == "N" and gt.transB == "C"
+    assert gt.gemm_name == "CCC_NC"
+
+
+def test_zgemm_both_conjugate_transpose() -> None:
+    gt = GemmType.from_tensile("C", "C", "Z", "Z", "Z")
+    assert gt.transA == "C" and gt.transB == "C"
+    assert gt.gemm_name == "ZZZ_CC"
+
+
+def test_conjugate_transpose_rejected_for_real_types() -> None:
+    with pytest.raises(ValueError, match="conjugate-transpose"):
+        GemmType.from_tensile("C", "N", "B", "B", "S")
+
+
+def test_conjugate_transpose_rejected_transB_real() -> None:
+    with pytest.raises(ValueError, match="conjugate-transpose"):
+        GemmType.from_tensile("N", "C", "S", "S", "S")
+
+
+def test_cgemm_hipblaslt_roundtrip() -> None:
+    a_t, b_t, c_t, comp = GemmType._tensile_triple_to_hipblaslt("C", "C", "C")
+    assert a_t == "f32_c" and b_t == "f32_c" and c_t == "f32_c" and comp == "f32_r"
+    gt = GemmType.from_hipblaslt("T", "N", a_t, b_t, c_t, comp)
+    assert (gt.data_type, gt.dest_data_type, gt.compute_data_type) == ("C", "C", "C")
+
+
+def test_zgemm_hipblaslt_roundtrip() -> None:
+    a_t, b_t, c_t, comp = GemmType._tensile_triple_to_hipblaslt("Z", "Z", "Z")
+    assert a_t == "f64_c" and b_t == "f64_c" and c_t == "f64_c" and comp == "f64_r"
+    gt = GemmType.from_hipblaslt("N", "N", a_t, b_t, c_t, comp)
+    assert (gt.data_type, gt.dest_data_type, gt.compute_data_type) == ("Z", "Z", "Z")

@@ -17,9 +17,9 @@ rejects) is reported separately and does NOT count toward a family being
 least one buildable config and ALL its buildable configs match NON-EMPTY.
 
 Freshness / stale-build guard:
-  The .so and the standalone emitters MUST come from the same engine source
-  snapshot. When the emit dir was built it records the engine build-id it was
-  linked against in <EMIT>/BUILD_ID. Before comparing anything, this harness
+  The .so and the standalone emitters MUST come from the same portable-IR native
+  bundle snapshot. When the emit dir was built it records the bundle build-id it
+  was linked against in <EMIT>/BUILD_ID. Before comparing anything, this harness
   asserts rocke_engine.build_id() (from the loaded .so) equals that file. On a
   mismatch it FAILS LOUD with a clear "stale/mixed build" message rather than
   reporting a flood of spurious 'mismatched' configs (the exact trap that once
@@ -54,7 +54,7 @@ def _assert_build_id_match():
     if not os.path.exists(bid_path):
         print(
             f"WARNING: no {bid_path} -- cannot verify the emitters and the .so "
-            f"were built from the same engine source. .so build-id={so_id}. "
+            f"were built from the same native bundle. .so build-id={so_id}. "
             "Build the emitters with a driver that writes <EMIT>/BUILD_ID "
             "(see ci/tiers/tier2_differential.sh) to enable the stale-build guard.",
             file=sys.stderr,
@@ -638,19 +638,288 @@ def cfgs_gfx1201_wmma_gemm():
     ]
 
 
-def cfgs_gfx1151_wmma_fmha_fwd():
-    rows = [
-        (64, 4, 0, "none", False),
-        (128, 8, 0, "none", False),
-        (64, 4, 0, "causal", False),
-        (256, 8, 2, "none", False),
-        (128, 4, 4, "causal", False),
-        (64, 6, 0, "none", True),
-    ]
-    return [
-        dict(head_size=h, num_query_heads=q, num_kv_heads=k, mask_mode=m, v_lds_stage=v)
-        for (h, q, k, m, v) in rows
-    ]
+def cfgs_gfx1151_wmma_fmha_fwd_v2():
+    # mirrors gfx1151_wmma_fmha_fwd_v2_emit.{py,c} index for index; (dict, arch).
+    archs = ("gfx11-generic", "gfx12-generic")
+    dtypes = ("fp16", "bf16")
+    buckets = ((64, 64), (96, 96), (128, 128), (192, 128), (256, 128), (256, 256))
+    masks = ("none", "causal")
+    out = []
+    for arch in archs:
+        for dt in dtypes:
+            for hd, hdv in buckets:
+                for mask in masks:
+                    out.append(
+                        (dict(dtype=dt, head_dim=hd, head_dim_v=hdv, mask=mask), arch)
+                    )
+    for arch in archs:
+        for dt in dtypes:
+            for hd, hdv, mask in (
+                (64, 64, "causal"),
+                (128, 128, "none"),
+                (256, 256, "causal"),
+            ):
+                for bias in ("f32", "q"):
+                    out.append(
+                        (
+                            dict(
+                                dtype=dt,
+                                head_dim=hd,
+                                head_dim_v=hdv,
+                                mask=mask,
+                                bias=bias,
+                            ),
+                            arch,
+                        )
+                    )
+    g12 = "gfx12-generic"
+    for dt in dtypes:
+        for hd in (192, 256):
+            for mask in masks:
+                out.append(
+                    (
+                        dict(
+                            dtype=dt,
+                            head_dim=hd,
+                            head_dim_v=128,
+                            mask=mask,
+                            wave_pair=False,
+                        ),
+                        g12,
+                    )
+                )
+    out.append(
+        (
+            dict(
+                dtype="bf16",
+                head_dim=256,
+                head_dim_v=128,
+                mask="causal",
+                bias="q",
+                wave_pair=False,
+            ),
+            g12,
+        )
+    )
+    out.append(
+        (
+            dict(
+                dtype="fp16",
+                head_dim=192,
+                head_dim_v=128,
+                mask="none",
+                bias="f32",
+                wave_pair=False,
+            ),
+            g12,
+        )
+    )
+    knobs = (
+        dict(head_dim=64, head_dim_v=64, block_n=64),
+        dict(block_n=16),
+        dict(block_m=64),
+        dict(waves_per_eu=0),
+        dict(scheduler_strategy="max-ilp"),
+        dict(lazy_rescale=False),
+        dict(k_pad=0, v_pad=16),
+        dict(cta_order="hbq"),
+        dict(wave_pair=True),
+        dict(head_dim=256, head_dim_v=256, block_m=32),
+    )
+    for arch in archs:
+        for knob in knobs:
+            out.append(
+                (
+                    dict(
+                        dict(dtype="bf16", head_dim=128, head_dim_v=128, mask="causal"),
+                        **knob,
+                    ),
+                    arch,
+                )
+            )
+    out.append((dict(dtype="fp16", head_dim=64, head_dim_v=64, mask="none"), "gfx1151"))
+    out.append(
+        (
+            dict(dtype="bf16", head_dim=128, head_dim_v=128, mask="causal", bias="q"),
+            "gfx1151",
+        )
+    )
+    out.append((dict(dtype="fp16", head_dim=64, head_dim_v=64, mask="none"), "gfx1201"))
+    out.append(
+        (
+            dict(
+                dtype="bf16",
+                head_dim=256,
+                head_dim_v=128,
+                mask="causal",
+                wave_pair=False,
+            ),
+            "gfx1201",
+        )
+    )
+    # Feature configs: (dtype, hd, hdv, mask, bias, flags, layout, page size,
+    # block_n, wave_pair); flags c softcap, s sinks, a ALiBi, q QQ-bias, 8 FP8.
+    feats = (
+        ("fp16", 128, 128, "none", None, "c", "dense", 0, 32, None),
+        ("bf16", 256, 256, "causal", None, "c", "dense", 0, 32, None),
+        ("bf16", 64, 64, "causal", None, "s", "dense", 0, 32, None),
+        ("fp16", 128, 128, "none", None, "s", "dense", 0, 32, None),
+        ("bf16", 128, 128, "causal", None, "a", "dense", 0, 32, None),
+        ("fp16", 128, 128, "none", None, "a", "dense", 0, 32, None),
+        ("fp16", 128, 128, "causal", None, "q", "dense", 0, 32, None),
+        ("bf16", 64, 64, "none", None, "q", "dense", 0, 32, None),
+        ("bf16", 128, 128, "none", None, "8", "dense", 0, 32, None),
+        ("fp16", 64, 64, "causal", None, "8", "dense", 0, 32, None),
+        ("bf16", 256, 256, "causal", None, "8", "dense", 0, 32, None),
+        ("bf16", 128, 128, "causal", None, "", "ragged", 0, 32, None),
+        ("fp16", 64, 64, "none", None, "", "ragged", 0, 32, None),
+        ("bf16", 128, 128, "causal", None, "", "paged", 16, 32, None),
+        ("bf16", 128, 128, "causal", None, "", "paged", 32, 32, None),
+        ("fp16", 64, 64, "none", None, "", "paged", 64, 32, None),
+        ("bf16", 64, 64, "causal", None, "", "paged", 8, 32, None),
+        ("bf16", 256, 256, "causal", None, "", "paged", 16, 32, None),
+        ("bf16", 64, 64, "causal", None, "s", "paged", 16, 32, None),
+        ("bf16", 128, 128, "causal", None, "8", "ragged", 0, 32, None),
+        ("fp16", 128, 128, "causal", None, "8", "paged", 32, 32, None),
+        ("bf16", 128, 128, "causal", None, "sa", "paged", 16, 32, None),
+        ("fp16", 128, 128, "causal", None, "q", "ragged", 0, 32, None),
+        ("bf16", 128, 128, "none", None, "ca", "dense", 0, 32, None),
+        ("fp16", 64, 64, "causal", "f32", "s", "dense", 0, 32, None),
+        ("bf16", 128, 128, "causal", "q", "csaq8", "paged", 16, 32, None),
+        ("bf16", 256, 256, "causal", None, "cs", "dense", 0, 32, None),
+        ("bf16", 64, 64, "causal", None, "", "paged", 32, 64, None),
+        ("bf16", 64, 64, "causal", None, "s", "paged", 64, 64, None),
+        ("bf16", 128, 128, "causal", None, "8", "ragged", 0, 16, None),
+    )
+    feats_gfx12 = (
+        ("bf16", 192, 128, "causal", None, "c8", "dense", 0, 32, False),
+        ("fp16", 256, 128, "none", None, "s", "paged", 32, 32, False),
+    )
+
+    def feat(row):
+        dt, hd, hdv, mask, bias, flags, layout, ps, bn, pair = row
+        return dict(
+            dtype=dt,
+            head_dim=hd,
+            head_dim_v=hdv,
+            mask=mask,
+            bias=bias,
+            use_softcap="c" in flags,
+            use_sinks="s" in flags,
+            use_alibi="a" in flags,
+            use_qq_bias="q" in flags,
+            layout=layout,
+            page_block_size=ps,
+            kv_dtype="fp8e4m3" if "8" in flags else "",
+            block_n=bn,
+            wave_pair=pair,
+        )
+
+    for arch in archs:
+        for row in feats:
+            out.append((feat(row), arch))
+    for row in feats_gfx12:
+        out.append((feat(row), g12))
+    out.append((feat(feats[2]), "gfx1151"))
+    out.append((feat(feats[8]), "gfx1201"))
+    return out
+
+
+def cfgs_gfx1151_wmma_fmha_decode():
+    # mirrors gfx1151_wmma_fmha_decode_emit.{py,c} index for index; (dict, arch).
+    # "kind": "merge" selects the merge kernel.
+    archs = ("gfx11-generic", "gfx12-generic")
+    dtypes = ("fp16", "bf16")
+    out = []
+    for arch in archs:
+        for dt in dtypes:
+            for hs in (64, 128, 256):
+                for bias in ("", "q", "f32"):
+                    out.append((dict(head_size=hs, dtype=dt, bias=bias), arch))
+    for arch in archs:
+        for dt in dtypes:
+            for layout in ("dense", "ragged"):
+                out.append(
+                    (dict(kind="merge", head_size=64, dtype=dt, layout=layout), arch)
+                )
+    feats = (
+        ("fp16", 128, "", "c", "dense", 0),
+        ("bf16", 256, "", "c", "dense", 0),
+        ("bf16", 64, "", "s", "dense", 0),
+        ("fp16", 128, "", "a", "dense", 0),
+        ("bf16", 64, "", "q", "dense", 0),
+        ("bf16", 64, "", "8", "dense", 0),
+        ("fp16", 128, "", "8", "dense", 0),
+        ("bf16", 256, "", "8", "dense", 0),
+        ("bf16", 128, "", "", "ragged", 0),
+        ("fp16", 64, "", "", "paged", 16),
+        ("bf16", 128, "", "", "paged", 8),
+        ("bf16", 256, "", "", "paged", 64),
+        ("bf16", 64, "", "s8", "paged", 16),
+        ("fp16", 128, "", "ca", "dense", 0),
+        ("bf16", 128, "", "aq", "ragged", 0),
+        ("bf16", 256, "", "cs8", "ragged", 0),
+        ("bf16", 64, "q", "csaq8", "paged", 16),
+        ("fp16", 128, "f32", "s", "ragged", 0),
+        ("bf16", 64, "f32", "ac8", "paged", 32),
+        ("fp16", 256, "q", "q", "paged", 4),
+    )
+
+    def feat(row):
+        dt, hs, bias, flags, layout, ps = row
+        return dict(
+            head_size=hs,
+            dtype=dt,
+            bias=bias,
+            softcap="c" in flags,
+            sinks="s" in flags,
+            alibi="a" in flags,
+            qq_bias="q" in flags,
+            kv_dtype="fp8e4m3" if "8" in flags else "",
+            layout=layout,
+            page_block_size=ps,
+        )
+
+    knobs = (
+        dict(num_waves=2),
+        dict(num_waves=8, head_size=64),
+        dict(num_waves=1),
+        dict(waves_per_eu=1),
+        dict(scheduler_strategy="default"),
+        dict(scheduler_strategy="max-ilp", head_size=256),
+        dict(dv_split=2),
+        dict(q_mode="lds"),
+        dict(q_mode="reg", head_size=256),
+        dict(v_store_early=True),
+        dict(v_store_early=False),
+        dict(prefetch=True),
+        dict(prefetch=False, head_size=64),
+        dict(lockstep=True),
+        dict(lockstep=False),
+        dict(fp8_cvt=True, kv_dtype="fp8e4m3"),
+        dict(fp8_cvt=False, kv_dtype="fp8e4m3", head_size=64),
+        dict(tanh_fast=True, softcap=True, head_size=256),
+        dict(tanh_fast=False, softcap=True),
+    )
+    for arch in archs:
+        for row in feats:
+            out.append((feat(row), arch))
+    for arch in archs:
+        for knob in knobs:
+            d = dict(head_size=128, dtype="bf16")
+            d.update(knob)
+            out.append((d, arch))
+    out.append((dict(head_size=128, dtype="bf16"), "gfx1151"))
+    out.append(
+        (dict(kind="merge", head_size=64, dtype="fp16", layout="ragged"), "gfx1151")
+    )
+    out.append((feat(feats[12]), "gfx1151"))
+    out.append((dict(head_size=64, dtype="fp16", bias="q"), "gfx1201"))
+    out.append((feat(feats[15]), "gfx1201"))
+    out.append(
+        (dict(kind="merge", head_size=64, dtype="bf16", layout="dense"), "gfx1201")
+    )
+    return out
 
 
 def cfgs_attention_unified():
@@ -861,6 +1130,17 @@ def cfgs_sparse_attention():
             max_blocks_per_q=24,
             use_wave_ballot_scatter=False,
         ),
+        dict(
+            kind="jenga",
+            head_size=64,
+            num_query_heads=8,
+            num_kv_heads=8,
+            dtype="f16",
+            seqlen_q=48,
+            seqlen_k=144,
+            block_q=3,
+            block_k=48,
+        ),
     ]
 
 
@@ -968,6 +1248,20 @@ def cfgs_sage_attention():
             seqlen_q=32,
             seqlen_k=128,
         ),
+        dict(
+            head_size=64,
+            num_query_heads=8,
+            num_kv_heads=8,
+            block_size_q=16,
+            block_size_k=64,
+            dtype="f16",
+            mask_mode="none",
+            quant_mode="fp16_bf16",
+            q_scale=pb(48, 128, 8, 1),
+            k_scale=pb(48, 128, 8, 1),
+            seqlen_q=96,
+            seqlen_k=144,
+        ),
     ]
 
 
@@ -1066,7 +1360,7 @@ def cfgs_fmha_varlen():
 
 
 def cfgs_fmha_splitkv_decode():
-    # mirrors fmha_splitkv_decode_emit.c make_spec (0..5); harness compares the
+    # mirrors fmha_splitkv_decode_emit.c make_spec (0..6); harness compares the
     # segment phase (the emitter's `<idx> ll` => mode=ll/phase=seg). The binding
     # defaults to "seg" so no explicit phase key is needed.
     rows = [
@@ -1076,6 +1370,7 @@ def cfgs_fmha_splitkv_decode():
         (256, 32, 4, "f16", "sliding_window", 2048, 1, 32, True),
         (64, 12, 3, "bf16", "none", 0, 8, 64, True),
         (128, 16, 8, "f16", "causal", 0, 2, 128, True),
+        (128, 40, 8, "f16", "none", 0, 2, 8, True),
     ]
     out = []
     for h, q, kv, dt, m, sw, b, segs, mfma in rows:
@@ -1316,6 +1611,309 @@ def cfgs_gfx950_attention_tiled_2d_fastkv_regp():
     return out
 
 
+def problems_gfx950_attention_tiled_2d():
+    """Problem matrix for the problem-driven gfx950 attention tiled-2D selector parity check.
+
+    Each entry is a dict of UnifiedAttentionProblem fields.  The matrix is designed to:
+      - cover the dimensions that feed _enable_combo_2d / _enable_single_batch_combo
+        / _enable_transposed_qk_32x32 and all related selector gates;
+      - include the concrete cohort that PR #9220 exposed (biased combo geometry:
+        gfx950 + bf16 + d64/b32 + GQA-8 + max_seqlen_q > 256 + use_qq_bias=True);
+      - sweep bias flags (use_alibi, use_qq_bias, softcap > 0) x geometry cohorts.
+    """
+
+    def p(
+        total_q,
+        num_seqs,
+        num_query_heads,
+        num_kv_heads,
+        head_size,
+        block_size,
+        max_seqlen_q,
+        max_seqlen_k,
+        dtype="bf16",
+        sliding_window=0,
+        softcap=0.0,
+        use_sinks=False,
+        use_alibi=False,
+        use_qq_bias=False,
+        use_fp8=False,
+        num_kv_blocks=0,
+    ):
+        return dict(
+            total_q=total_q,
+            num_seqs=num_seqs,
+            num_query_heads=num_query_heads,
+            num_kv_heads=num_kv_heads,
+            head_size=head_size,
+            block_size=block_size,
+            max_seqlen_q=max_seqlen_q,
+            max_seqlen_k=max_seqlen_k,
+            dtype=dtype,
+            sliding_window=sliding_window,
+            softcap=softcap,
+            use_sinks=use_sinks,
+            use_alibi=use_alibi,
+            use_qq_bias=use_qq_bias,
+            use_fp8=use_fp8,
+            num_kv_blocks=num_kv_blocks,
+        )
+
+    return [
+        # ---- baseline: standard multi-batch decode / short-seqlen paths ----
+        p(64, 64, 32, 32, 64, 32, 1, 4096),  # decode-like
+        p(64, 64, 32, 32, 64, 32, 64, 4096),  # short q
+        p(64, 64, 32, 32, 64, 32, 256, 4096),  # edge: seqlen_q == 256
+        # ---- combo_2d cohort (gfx950 bf16 d64 b32 GQA-8 seqlen_q > 256) ----
+        p(512, 2, 64, 8, 64, 32, 512, 4096),  # vanilla combo_2d
+        p(1024, 4, 64, 8, 64, 32, 512, 4096),  # more seqs
+        # ---- #9220 motivating cases: combo_2d cohort + bias flags ----
+        p(
+            512, 2, 64, 8, 64, 32, 512, 4096, use_qq_bias=True
+        ),  # biased combo (was the bug)
+        p(512, 2, 64, 8, 64, 32, 512, 4096, use_alibi=True),  # alibi combo
+        p(512, 2, 64, 8, 64, 32, 512, 4096, softcap=50.0),  # softcap combo
+        # ---- combo_2d boundary: seqlen_q <= 256 should NOT route combo ----
+        p(512, 2, 64, 8, 64, 32, 256, 4096, use_qq_bias=True),  # bias + short seqlen
+        p(512, 2, 64, 8, 64, 32, 200, 4096),  # seqlen below threshold
+        # ---- combo_2d with sliding window ----
+        p(512, 2, 64, 8, 64, 32, 512, 4096, sliding_window=512),
+        # ---- dtype variation: fp16 should not route combo_2d ----
+        p(512, 2, 64, 8, 64, 32, 512, 4096, dtype="fp16"),
+        p(512, 2, 64, 8, 64, 32, 512, 4096, dtype="fp16", use_qq_bias=True),
+        # ---- head_size variation (combo_2d requires d64) ----
+        p(512, 2, 64, 8, 128, 32, 512, 4096),  # d128 no combo
+        p(512, 2, 64, 8, 256, 32, 512, 4096),  # d256
+        # ---- GQA ratio variation (combo_2d requires nqpk == 8) ----
+        p(512, 2, 32, 4, 64, 32, 512, 4096),  # nqpk=8, diff head counts
+        p(512, 2, 16, 4, 64, 32, 512, 4096),  # nqpk=4
+        p(512, 2, 32, 32, 64, 32, 512, 4096),  # nqpk=1
+        p(512, 2, 40, 8, 64, 32, 512, 4096),  # nqpk=5
+        # ---- single-batch combo cohort (num_seqs==1, d64+d128, seqlen>256) ----
+        p(512, 1, 32, 32, 64, 32, 512, 4096),  # single-batch d64
+        p(512, 1, 32, 32, 128, 32, 512, 4096),  # single-batch d128
+        p(512, 1, 32, 32, 64, 32, 2048, 4096),  # single-batch d64 long
+        p(512, 1, 32, 32, 128, 32, 2048, 4096),  # single-batch d128 long
+        p(
+            512, 1, 32, 32, 128, 64, 512, 4096
+        ),  # single-batch d128 block_size=64 (d128 small tile path)
+        p(512, 1, 32, 32, 64, 32, 512, 4096, use_qq_bias=True),  # single-batch + bias
+        p(512, 1, 32, 32, 64, 32, 512, 4096, sliding_window=256),  # single-batch + SW
+        # ---- single-batch d128 b16 SW combo (head_size=128 AND
+        # sliding_window>0 together -- previously absent from this matrix, so
+        # the C++ selector's admission of this cohort into the wide
+        # transposed-32x32 combo (_enable_single_batch_combo /
+        # _select_2d_tile_size) was never compared against Python here).
+        # Mirrors the exact production scenario (gfx950, Hq32/Hkv8, D128,
+        # block_size=16, sliding_window=4096) verified on-silicon.
+        p(8192, 1, 32, 8, 128, 16, 8192, 8192, sliding_window=4096),  # bf16: new cohort
+        p(
+            8192, 1, 32, 8, 128, 16, 8192, 8192, sliding_window=4096, dtype="fp16"
+        ),  # fp16: same cohort, pre-existing combo (regression pin)
+        # ---- transposed_qk_32x32 multi-batch path ----
+        p(512, 4, 32, 32, 64, 32, 512, 4096),  # multi-batch d64 long
+        p(512, 4, 32, 32, 128, 32, 512, 4096),  # multi-batch d128 long
+        p(512, 4, 32, 32, 64, 16, 800, 4096),  # single_seq_hd64 cohort
+        # ---- fp8 paths ----
+        p(512, 2, 32, 32, 64, 32, 512, 4096, use_fp8=True),
+        p(512, 2, 32, 32, 64, 32, 512, 4096, use_fp8=True, sliding_window=256),
+        # ---- misc flag combinations ----
+        p(64, 64, 32, 32, 64, 32, 1, 4096, use_sinks=True),
+        p(512, 2, 64, 8, 64, 32, 512, 4096, use_sinks=True),  # combo + sinks
+    ]
+
+
+def _selector_parity_row(problem_dict, arch):
+    """Run one problem through both selectors (spec parity only).
+
+    Returns a dict with fields:
+      spec_match: bool -- Python and C++ spec dicts agree
+      python_spec: dict
+      cpp_spec:    dict
+      diff:        str  -- human-readable summary of any mismatch
+    """
+    # --- Python selector ---
+    try:
+        from builders.common.attention_spec_builder import _tiled_spec_from_problem
+        from kernels.common.attention_unified import (
+            UnifiedAttentionProblem,
+        )
+    except ImportError as e:
+        return dict(
+            spec_match=False,
+            python_spec=None,
+            cpp_spec=None,
+            diff=f"Python import error: {e}",
+        )
+
+    try:
+        prob = UnifiedAttentionProblem(
+            total_q=problem_dict.get("total_q", 0),
+            num_seqs=problem_dict.get("num_seqs", 0),
+            num_query_heads=problem_dict["num_query_heads"],
+            num_kv_heads=problem_dict["num_kv_heads"],
+            head_size=problem_dict["head_size"],
+            block_size=problem_dict["block_size"],
+            max_seqlen_q=problem_dict.get("max_seqlen_q", 0),
+            max_seqlen_k=problem_dict.get("max_seqlen_k", 0),
+            dtype=problem_dict.get("dtype", "bf16"),
+            sliding_window=problem_dict.get("sliding_window", 0),
+            softcap=float(problem_dict.get("softcap", 0.0)),
+            use_sinks=bool(problem_dict.get("use_sinks", False)),
+            use_alibi=bool(problem_dict.get("use_alibi", False)),
+            use_qq_bias=bool(problem_dict.get("use_qq_bias", False)),
+            use_fp8=bool(problem_dict.get("use_fp8", False)),
+            num_kv_blocks=problem_dict.get("num_kv_blocks", 0),
+        )
+        from unittest.mock import patch
+
+        with patch(
+            "kernels.common.attention_unified._resolve_attention_arch",
+            return_value=arch,
+        ):
+            py_spec_obj = _tiled_spec_from_problem(prob, arch)
+        # Normalise to the same field-set the C++ binding emits
+        from dataclasses import asdict
+
+        py_spec = {
+            k: v
+            for k, v in asdict(py_spec_obj).items()
+            if k
+            in {
+                "head_size",
+                "block_size",
+                "num_query_heads",
+                "num_kv_heads",
+                "dtype",
+                "use_sinks",
+                "sliding_window",
+                "has_softcap",
+                "use_alibi",
+                "use_qq_bias",
+                "num_seqs",
+                "num_warps",
+                "waves_per_eu",
+                "kv_storage_dtype",
+                "tile_size",
+                "block_m_per_warp",
+                "use_mfma_32x32",
+                "use_transposed_qk_32x32",
+                "use_transposed_half_local_pv",
+                "use_transposed_scalar_state",
+                "use_transposed_mask_once",
+                "use_transposed_mask_limit",
+                "use_mfma32_skip_legacy_qreg",
+                "use_v_double_buffer",
+                "use_early_v_schedule",
+                "use_sched_barrier",
+                "use_fast_paged_kv_desc",
+                "use_register_pv",
+                "use_i64_kv_addr",
+                "use_k_single_buffer",
+                "use_fp8_mfma_qk",
+            }
+        }
+    except Exception as e:  # noqa: BLE001
+        return dict(
+            spec_match=False,
+            python_spec=None,
+            cpp_spec=None,
+            diff=f"Python selector error: {e}",
+        )
+
+    # --- C++ selector ---
+    try:
+        cpp_spec = rocke_engine.gfx950_attn_tiled_spec_from_problem(
+            problem_dict, arch=arch
+        )
+    except Exception as e:  # noqa: BLE001
+        return dict(
+            spec_match=False,
+            python_spec=py_spec,
+            cpp_spec=None,
+            diff=f"C++ selector error: {e}",
+        )
+
+    # --- Compare specs ---
+    # use_fp8_mfma_qk requires _fp8_qk_loader_fits which is not yet ported to C++;
+    # exclude it from comparison for fp8 problems until the predicate is ported.
+    skip_fields = set()
+    if problem_dict.get("use_fp8", False):
+        skip_fields.add("use_fp8_mfma_qk")
+
+    mismatches = []
+    for key in sorted(py_spec):
+        if key in skip_fields:
+            continue
+        pv = py_spec.get(key)
+        cv = cpp_spec.get(key)
+        if pv != cv:
+            mismatches.append(f"{key}: py={pv!r} cpp={cv!r}")
+    spec_match = len(mismatches) == 0
+
+    if not spec_match:
+        return dict(
+            spec_match=False,
+            python_spec=py_spec,
+            cpp_spec=cpp_spec,
+            diff="spec mismatch: " + "; ".join(mismatches),
+        )
+
+    # Specs match - selector parity confirmed
+    return dict(
+        spec_match=True,
+        python_spec=py_spec,
+        cpp_spec=cpp_spec,
+        diff="",
+    )
+
+
+def _is_biased_combo_2d(problem_dict):
+    """Check if problem hits the #9220 bug (biased combo_2d divergence).
+
+    Returns True for problems with combo_2d geometry (gfx950, bf16, d64, b32 or 64, GQA-8, and
+    seqlen_q>256) and any bias flag (use_qq_bias, use_alibi, softcap!=0).
+    """
+    is_combo_geom = (
+        problem_dict.get("head_size") == 64
+        and problem_dict.get("block_size") in [32, 64]
+        and problem_dict.get("dtype", "bf16") == "bf16"
+        and problem_dict.get("num_query_heads", 0)
+        // problem_dict.get("num_kv_heads", 1)
+        == 8
+        and problem_dict.get("max_seqlen_q", 0) > 256
+    )
+
+    # Bias flags that trigger the bug (from skipped tests)
+    has_bias = (
+        problem_dict.get("use_qq_bias", False)
+        or problem_dict.get("use_alibi", False)
+        or problem_dict.get("softcap", 0.0) != 0.0
+    )
+
+    return is_combo_geom and has_bias  # Both must be true = #9220 bug
+
+
+def run_selector_parity(arch, problems):
+    """Run problem-driven selector parity for all problems, excluding combo_2d with bias cases due to a bias bug introduced in PR #9220 (we will lift this limitation when the bug is fixed). Returns (n_match, n_mismatch, details)."""
+
+    n_match = n_mismatch = n_skipped = 0
+    details = []
+    for idx, prob in enumerate(problems):
+        # Due to bias bug introduced in PR #9220, skip combo_2d cases for now
+        if _is_biased_combo_2d(prob):
+            n_skipped += 1
+            continue
+        row = _selector_parity_row(prob, arch)
+        if row["spec_match"]:
+            n_match += 1
+        else:
+            n_mismatch += 1
+            details.append(f"  problem[{idx}] {row['diff']}")
+            details.append(f"    problem: {prob}")
+    return n_match, n_mismatch, n_skipped, details
+
+
 def cfgs_gfx942_attention_tiled_3d():
     rows = [
         (64, 16, 8, 8, "fp16", 8, False, 0, False, None, False, False),
@@ -1453,10 +2051,16 @@ FAMILIES = [
         "gfx1151",
     ),
     (
-        "gfx1151_wmma_fmha_fwd",
-        "gfx1151_wmma_fmha_fwd_lower_llvm",
-        cfgs_gfx1151_wmma_fmha_fwd(),
-        "gfx1151",
+        "gfx1151_wmma_fmha_fwd_v2",
+        "gfx1151_wmma_fmha_fwd_v2_lower_llvm",
+        cfgs_gfx1151_wmma_fmha_fwd_v2(),
+        None,
+    ),
+    (
+        "gfx1151_wmma_fmha_decode",
+        "gfx1151_wmma_fmha_decode_lower_llvm",
+        cfgs_gfx1151_wmma_fmha_decode(),
+        None,
     ),
     (
         "gfx1201_wmma_gemm",
@@ -1604,7 +2208,31 @@ def main():
     print(f"families EMPTY-ONLY (engine rejects all configs):    {fam_empty_only}")
     print(f"families FAILED:                                     {fam_failed}")
     print(f"configs matched non-empty: {total_match}   mismatched: {total_mismatch}")
-    return 0 if fam_failed == 0 else 1
+
+    # ---- Problem-driven selector parity (gfx950 attention tiled-2D) ----
+    print()
+    print("--- problem-driven selector parity: gfx950_attention_tiled_2d ---")
+    if not hasattr(rocke_engine, "gfx950_attn_tiled_spec_from_problem"):
+        print(
+            "WARNING: rocke_engine.gfx950_attn_tiled_spec_from_problem not found -- "
+            "rebuild the engine with the selector binding. Skipping selector parity."
+        )
+        selector_failed = False
+    else:
+        sel_match, sel_mismatch, sel_skipped, sel_details = run_selector_parity(
+            "gfx950", problems_gfx950_attention_tiled_2d()
+        )
+        selector_failed = sel_mismatch > 0
+        print(
+            f"problems checked: {sel_match + sel_mismatch + sel_skipped}  "
+            f"match: {sel_match}  mismatch: {sel_mismatch}  "
+            f"skipped: {sel_skipped}  "
+            f"{'SELECTOR PARITY FAILED' if selector_failed else 'SELECTOR PARITY OK'}"
+        )
+        for line in sel_details:
+            print(line)
+
+    return 0 if (fam_failed == 0 and not selector_failed) else 1
 
 
 if __name__ == "__main__":

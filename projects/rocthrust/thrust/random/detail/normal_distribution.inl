@@ -26,6 +26,7 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/integer_traits.h>
 #include <thrust/random/normal_distribution.h>
 #include <thrust/random/uniform_real_distribution.h>
 

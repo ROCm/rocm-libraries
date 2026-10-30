@@ -7,6 +7,8 @@ Tests exercise the full pipeline from config loading through template rendering,
 covering generator.py render methods and generate.py's _preview_files function.
 """
 
+import re
+
 import pytest
 from pathlib import Path
 
@@ -27,12 +29,14 @@ FRONTEND_CAPABLE_CONFIGS = [
     "pointwise.yaml",
     "batchnorm_inference.yaml",
     "sdpa.yaml",
+    "moe_grouped_matmul.yaml",
 ]
 
 # Configs that generate mode enum files (has enum_def, not shared)
 MODE_ENUM_CONFIGS = [
     "convolution_fwd.yaml",
     "pointwise.yaml",
+    "moe_grouped_matmul.yaml",
 ]
 
 # Copyright header present in all generated C++ files
@@ -739,6 +743,199 @@ class TestTemplateOutputContent:
         assert "TEST" in content
         assert config.frontend.attributes_class in content
 
+    def test_member_access_data_fields_render_as_assignments(
+        self, sdpa_config, generator, tmp_path
+    ):
+        """Handwritten public attribute members are assigned, never invoked."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(sdpa_config, output_dir, "full")
+
+        attributes_content = (
+            output_dir / "frontend" / "tests" / sdpa_config.test_attributes_filename
+        ).read_text()
+        graph_content = (
+            output_dir / "frontend" / "tests" / sdpa_config.test_frontend_graph_filename
+        ).read_text()
+        lowering_content = (
+            output_dir / "tests" / "frontend" / sdpa_config.test_integration_filename
+        ).read_text()
+        lifting_content = (
+            output_dir
+            / "tests"
+            / "frontend"
+            / sdpa_config.test_integration_lifting_filename
+        ).read_text()
+
+        for content in (
+            attributes_content,
+            graph_content,
+            lowering_content,
+            lifting_content,
+        ):
+            assert "dropout_probability = " in content
+            assert "dropout_probability(" not in content
+            assert "diagonal_alignment = " in content
+            assert "diagonal_alignment(" not in content
+
+    def test_optional_scalar_defaults_render_as_empty_optionals(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """Optional scalar defaults must remain unset rather than compare equal to zero."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(pointwise_config, output_dir, "frontend")
+
+        content = (
+            output_dir
+            / "frontend"
+            / "tests"
+            / pointwise_config.test_attributes_filename
+        ).read_text()
+        assert "EXPECT_FALSE(attrs.get_relu_lower_clip().has_value());" in content
+        assert "EXPECT_FALSE(attrs.get_axis().has_value());" in content
+
+    def test_mode_integration_scenarios_render_lowering_and_lifting_coverage(
+        self, load_test_config, generator, tmp_path
+    ):
+        """Configured executable modes generate valid optional-input scenarios."""
+        config = load_test_config("moe_grouped_matmul.yaml")
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "full")
+
+        lowering_content = (
+            output_dir / "tests" / "frontend" / config.test_integration_filename
+        ).read_text()
+        lifting_content = (
+            output_dir / "tests" / "frontend" / config.test_integration_lifting_filename
+        ).read_text()
+
+        for scenario in config.mode_integration_scenarios:
+            suffix = scenario.pascal_name
+            assert f"ModeScenario{suffix}" in lowering_content
+            assert f"ModeScenario{suffix}" in lifting_content
+
+        assert "OperationComputeDataTypeOverride" in lowering_content
+        assert "OperationComputeDataTypeSurvivesLifting" in lifting_content
+        assert "AutoAssignedUidsPreservedInRoundTrip" in lowering_content
+        assert "includeTokenIndex" in lowering_content
+        assert "includeTokenKs" in lowering_content
+        assert (
+            "ModeScenarioGatherCanonicalizesIgnoredScatterAttributes"
+            in lowering_content
+        )
+        assert (
+            "EXPECT_FALSE(opNode->token_ks_tensor_uid.has_value());" in lowering_content
+        )
+        assert "ModeScenarioScatterPreservesRouting" in lifting_content
+        assert (
+            "ASSERT_NE(opNode->attributes.get_token_ks(), nullptr);" in lifting_content
+        )
+        assert "JsonRoundTripsAllModeScenarios" in lifting_content
+
+        from_node_content = (
+            output_dir
+            / "backend"
+            / "tests"
+            / "descriptors"
+            / config.test_from_node_filename
+        ).read_text()
+        descriptor_content = (
+            output_dir
+            / "backend"
+            / "tests"
+            / "descriptors"
+            / config.test_descriptor_filename
+        ).read_text()
+        assert "RejectsMissingTokenIndexInGATHERMode" in from_node_content
+        assert "RejectsTokenKsInGATHERMode" in from_node_content
+        assert "RejectsNoncanonicalTopKInGATHERMode" in from_node_content
+        assert "RejectsBelowMinimumTopKInSCATTERMode" in from_node_content
+        assert "RejectsAboveMaximumTopKInSCATTERMode" in from_node_content
+        assert "const auto tensors = desc->getTensorDescriptors();" in from_node_content
+        assert "ASSERT_TRUE(getDescriptor()->isFinalized());" in descriptor_content
+
+    def test_optional_tensor_expected_data_type_renders_guarded_validation(
+        self, generator
+    ):
+        """Present optional tensors honor expected_data_type without mode rules."""
+        from tests.helpers import make_minimal_config, make_tensor_field
+
+        config = make_minimal_config(
+            tensor_fields=[
+                make_tensor_field(name="x", fbs_field="x_tensor_uid", attr_suffix="X"),
+                make_tensor_field(
+                    name="bias",
+                    fbs_field="bias_tensor_uid",
+                    attr_suffix="BIAS",
+                    required=False,
+                    expected_data_type="FLOAT",
+                ),
+            ]
+        )
+
+        descriptor = generator._render_template("descriptor.cpp.j2", config)
+
+        assert "if(_biasDesc != nullptr)" in descriptor
+        assert "_biasDesc->getData().data_type" in descriptor
+        assert "BIAS tensor must" in descriptor
+        assert "have FLOAT data type" in descriptor
+
+    def test_mode_rules_render_descriptor_contract(
+        self, load_test_config, generator, tmp_path
+    ):
+        """Mode rules render configured descriptor validation behavior."""
+        config = load_test_config("moe_grouped_matmul.yaml")
+        output_dir = tmp_path / "output"
+        generator.render(config, output_dir, "full")
+
+        descriptor = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        ).read_text()
+
+        assert "NONE mode forbids" in descriptor
+        assert "GATHER mode " in descriptor
+        assert "requires TOKEN_INDEX_DESC tensor" in descriptor
+        assert "SCATTER mode " in descriptor
+        assert "requires TOKEN_KS_DESC tensor" in descriptor
+        assert "dims.empty()" in descriptor
+
+    def test_moe_preserves_handwritten_node_and_node_tests(
+        self, load_test_config, generator, tmp_path
+    ):
+        """Frontend generation skips operation-specific handwritten artifacts."""
+        config = load_test_config("moe_grouped_matmul.yaml")
+        assert config.frontend.generate_node is False
+
+        output_dir = tmp_path / "output"
+        result = generator.render_frontend(config, output_dir)
+
+        node_path = (
+            output_dir
+            / "frontend"
+            / "include"
+            / "hipdnn_frontend"
+            / "node"
+            / config.node_header_filename
+        )
+        node_test_path = output_dir / "frontend" / "tests" / config.test_node_filename
+        assert not node_path.exists()
+        assert not node_test_path.exists()
+        assert str(node_path.relative_to(output_dir)) not in result
+        assert str(node_test_path.relative_to(output_dir)) not in result
+
+    def test_member_access_scalars_do_not_render_colliding_accessors(
+        self, sdpa_config, generator
+    ):
+        """Bare member getters must not produce same-named accessor methods."""
+        rendered = generator._render_template("attributes.hpp.j2", sdpa_config)
+
+        assert "std::optional<int32_t> max_seq_len_kv" in rendered
+        assert "max_seq_len_kv() const" not in rendered
+        assert "std::optional<int64_t> left_bound" in rendered
+        assert "left_bound() const" not in rendered
+
     def test_frontend_test_node_content(
         self, convolution_fwd_config, generator, tmp_path
     ):
@@ -994,6 +1191,18 @@ class TestDirectRenderMethods:
         assert len(self._FRONTEND_FILE_TEMPLATE_BASENAMES) == len(
             expected_file_basenames
         )
+
+    def test_render_frontend_skips_handwritten_node_files(
+        self, load_test_config, generator, tmp_path
+    ):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        result = generator.render_frontend(config, tmp_path / "output")
+        basenames = {Path(path).name for path in result}
+
+        assert config.node_header_filename not in basenames
+        assert config.test_node_filename not in basenames
+        assert config.attributes_header_filename in basenames
+        assert config.test_attributes_filename in basenames
 
     def test_render_frontend_honors_attributes_filename_override(
         self, convolution_fwd_config, generator, tmp_path
@@ -2274,3 +2483,269 @@ class TestExtraDataTypeFieldsPacker:
         assert (
             "HIPDNN_ATTR_SDPA_FWD_MMA_CORE_MODE_EXT" in rendered
         ), "packer must reference the correct attribute identifier"
+
+
+class TestMissingRequiredInputTestsAreParameterized:
+    """The two missing-required-input error families must render as TEST_P suites.
+
+    A template that emits one TEST_F per required input invites a hand
+    refactor into TEST_P downstream, which the next regeneration would
+    silently undo. These assertions pin the parameterized shape for both the
+    mode-rule branch (``moe_grouped_matmul``) and the plain branch
+    (``matmul``).
+    """
+
+    def test_descriptor_finalize_failures_use_test_p(self, matmul_config, generator):
+        """A config without mode rules renders FinalizeFailsWithout as TEST_P."""
+        rendered = generator._render_template("test_descriptor.cpp.j2", matmul_config)
+
+        assert (
+            "TEST_P(TestMatmulOperationDescriptorFinalizeFailsWithout, "
+            "FinalizeFailsWithout)" in rendered
+        ), "finalize-failure cases must be a TEST_P suite"
+        assert (
+            "INSTANTIATE_TEST_SUITE_P(\n    RequiredAttributes," in rendered
+        ), "the TEST_P suite must be instantiated under RequiredAttributes"
+        assert (
+            "        HIPDNN_ATTR_OPERATION_MATMUL_ADESC,\n" in rendered
+        ), "each required tensor must contribute a case"
+        assert "FinalizeFailsWithoutATensor" not in rendered, (
+            "the template must not also emit a TEST_F per tensor -- that is the "
+            "unparameterized form this suite replaces"
+        )
+
+    def test_descriptor_mode_rule_config_also_uses_test_p(
+        self, load_test_config, generator
+    ):
+        """A config with mode rules renders the same TEST_P shape."""
+        config = load_test_config("moe_grouped_matmul.yaml")
+        rendered = generator._render_template("test_descriptor.cpp.j2", config)
+
+        assert (
+            "TEST_P(TestMoeGroupedMatmulOperationDescriptorFinalizeFailsWithout, "
+            "FinalizeFailsWithout)" in rendered
+        ), "finalize-failure cases must be a TEST_P suite"
+        assert (
+            "setModeRuleAttributes(HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER, GetParam())"
+            in rendered
+        ), "the mode-rule branch must forward the excluded attribute"
+        assert (
+            "        HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC,\n" in rendered
+        ), "each required tensor must contribute a case"
+
+    def test_descriptor_fixture_setters_accept_excluded_attribute(
+        self, matmul_config, generator
+    ):
+        """The TEST_P body needs setters that can skip one attribute."""
+        rendered = generator._render_template("test_descriptor.cpp.j2", matmul_config)
+
+        assert (
+            "void setTensors(std::optional<hipdnnBackendAttributeName_t> excluded "
+            "= std::nullopt) const" in rendered
+        ), "setTensors must accept an optional excluded attribute"
+        assert (
+            "setTensors(excluded);" in rendered
+        ), "setRequiredAttributes must forward the excluded attribute to setTensors"
+        assert (
+            "if(!excluded || *excluded != HIPDNN_ATTR_OPERATION_MATMUL_ADESC)"
+            in rendered
+        ), "each tensor's setAttribute call must be guarded by the exclusion check"
+
+    def test_descriptor_compute_type_joins_the_parameterized_suite(
+        self, matmul_config, generator
+    ):
+        """Compute type is a required attribute, so it is a case, not a TEST_F."""
+        rendered = generator._render_template("test_descriptor.cpp.j2", matmul_config)
+
+        assert (
+            "        HIPDNN_ATTR_MATMUL_COMP_TYPE\n" in rendered
+        ), "compute type must contribute a case"
+        assert (
+            "if(!excluded || *excluded != HIPDNN_ATTR_MATMUL_COMP_TYPE)" in rendered
+        ), "the compute-type setAttribute call must be guarded by the exclusion check"
+        assert "FinalizeFailsWithoutComputeType" not in rendered, (
+            "compute type must not also get a standalone TEST_F -- it belongs in "
+            "the RequiredAttributes suite"
+        )
+
+    def test_from_node_missing_tensor_uses_test_p(self, matmul_config, generator):
+        """fromNode missing-tensor cases render as a TEST_P suite."""
+        rendered = generator._render_template("test_from_node.cpp.j2", matmul_config)
+
+        assert (
+            "TEST_P(TestMatmulOperationFromNodeMissingTensor, FailsWithMissingTensor)"
+            in rendered
+        ), "missing-tensor cases must be a TEST_P suite"
+        assert (
+            "INSTANTIATE_TEST_SUITE_P(\n    RequiredTensors," in rendered
+        ), "the TEST_P suite must be instantiated under RequiredTensors"
+        assert (
+            "        K_MATMUL_TENSOR_A_UID,\n" in rendered
+        ), "each required tensor must contribute a case"
+        assert "FailsWithMissingATensor" not in rendered, (
+            "the template must not also emit a TEST_F per tensor -- that is the "
+            "unparameterized form this suite replaces"
+        )
+
+    def test_test_p_suites_take_a_bare_parameter(self, matmul_config, generator):
+        """Cases are the attribute enumerator or tensor UID, not a wrapper struct."""
+        descriptor = generator._render_template("test_descriptor.cpp.j2", matmul_config)
+        assert (
+            "public ::testing::WithParamInterface<hipdnnBackendAttributeName_t>"
+            in descriptor
+        )
+        assert "MissingAttributeCase" not in descriptor
+
+        from_node = generator._render_template("test_from_node.cpp.j2", matmul_config)
+        assert "public ::testing::WithParamInterface<int64_t>" in from_node
+        assert "MissingTensorCase" not in from_node
+
+
+# ---------------------------------------------------------------------------
+# Work model: schema annotations and FLOP fragments
+# ---------------------------------------------------------------------------
+
+HIPDNN_SCHEMAS_DIR = Path(__file__).resolve().parents[3] / "flatbuffers_sdk" / "schemas"
+# Every config on disk, not only ALL_CONFIG_NAMES: a stale annotation in any of them
+# would be copied into a new op modelled on it.
+ON_DISK_CONFIG_NAMES = sorted(
+    p.name for p in (Path(__file__).resolve().parents[1] / "configs").glob("*.yaml")
+)
+
+
+def _schema_declarations(schema_text: str) -> dict[str, str]:
+    """Map each field of a .fbs file to its whitespace-normalized declaration."""
+    declarations = {}
+    for line in schema_text.splitlines():
+        code = line.split("//", 1)[0]
+        match = re.match(r"\s*(\w+)\s*:([^;]*);", code)
+        if match:
+            body = " ".join(match.group(2).split())
+            declarations[match.group(1)] = f"{match.group(1)}: {body}"
+    return declarations
+
+
+class TestWorkModelFragments:
+    """The backend run emits the work-model fragments a new op needs: the
+    annotated schema fields, a ``nodeFlops`` stub, a ``logicalFlops`` case and
+    the per-op entry of TestEngineFeatures' every-node-type test."""
+
+    def test_backend_run_writes_the_work_model_fragments(
+        self, convolution_fwd_config, generator, tmp_path
+    ):
+        written = generator.render_backend(convolution_fwd_config, tmp_path)
+        for name in (
+            "fbs_tensor_fields.txt",
+            "node_flops_overload.txt",
+            "logical_flops_case.txt",
+            "work_model_test_case.txt",
+        ):
+            assert f"fragments/{name}" in written
+            assert (tmp_path / "fragments" / name).read_text().strip()
+
+    def test_node_flops_stub_is_visibly_uncounted(
+        self, convolution_fwd_config, generator
+    ):
+        rendered = generator._render_template(
+            "fragments/node_flops_overload.j2", convolution_fwd_config
+        )
+        assert (
+            "    nodeFlops([[maybe_unused]] const Graph& graph,\n"
+            "              [[maybe_unused]] const hipdnn_flatbuffers_sdk::data_objects::"
+            "ConvolutionFwdAttributes& op)\n"
+        ) in rendered
+        body = rendered.split("{", 1)[1]
+        assert "// TODO" in body
+        assert "    return std::nullopt;\n}" in body
+
+    def test_logical_flops_case_dispatches_to_the_overload(
+        self, convolution_fwd_config, generator
+    ):
+        rendered = generator._render_template(
+            "fragments/logical_flops_case.j2", convolution_fwd_config
+        )
+        assert (
+            "    case NodeAttributes::ConvolutionFwdAttributes:\n"
+            "        return flopsOf(graph, "
+            "node.attributes_as_ConvolutionFwdAttributes());\n"
+        ) in rendered
+        # The alternative decision: a NO_COUNTING_CONVENTION entry with a reason.
+        assert "NO_COUNTING_CONVENTION" in rendered
+        assert "    NodeAttributes::ConvolutionFwdAttributes,\n" in rendered
+
+    def test_work_model_test_entry_builds_a_one_node_graph(
+        self, convolution_fwd_config, generator
+    ):
+        rendered = generator._render_template(
+            "fragments/work_model_test_case.j2", convolution_fwd_config
+        )
+        assert "EveryNodeTypeHasDeclaredWorkOrNoCountingConvention" in rendered
+        assert (
+            "             ConvolutionFwdAttributesT op;\n"
+            "             op.x_tensor_uid = 1;\n"
+            "             op.w_tensor_uid = 2;\n"
+            "             op.y_tensor_uid = 3;\n"
+            "             return single({{1, 3, 32, 32}, {64, 3, 3, 3}, "
+            "{1, 64, 32, 32}}, op);\n"
+        ) in rendered
+        # Work is never published as 0, so the unfilled entry fails the test.
+        assert "         0.0 /* TODO: expected FLOPs */},\n" in rendered
+
+    def test_work_model_test_entry_sets_only_required_tensors(
+        self, batchnorm_config, generator
+    ):
+        rendered = generator._render_template(
+            "fragments/work_model_test_case.j2", batchnorm_config
+        )
+        assert "op.y_tensor_uid = 5;" in rendered
+        assert "prev_running_mean_tensor_uid" not in rendered
+
+    def test_schema_fragment_annotates_work_data_dependent_fields(
+        self, load_test_config, generator
+    ):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        rendered = generator._render_template("fragments/fbs_tensor_fields.j2", config)
+        assert 'attribute "work_data_dependent";' in rendered
+        assert (
+            "    first_token_offset_tensor_uid: long (cache_uid, work_data_dependent);\n"
+            in rendered
+        )
+        assert "    token_index_tensor_uid: long = null (cache_uid);\n" in rendered
+
+    def test_schema_fragment_omits_the_annotation_when_no_field_needs_it(
+        self, convolution_fwd_config, generator
+    ):
+        rendered = generator._render_template(
+            "fragments/fbs_tensor_fields.j2", convolution_fwd_config
+        )
+        assert "work_data_dependent;" not in rendered
+        assert "(cache_uid, work_data_dependent)" not in rendered
+        assert "    x_tensor_uid: long (cache_uid);\n" in rendered
+
+    def test_node_flops_stub_names_work_data_dependent_operands(
+        self, load_test_config, generator
+    ):
+        config = load_test_config("sdpa.yaml")
+        rendered = generator._render_template(
+            "fragments/node_flops_overload.j2", config
+        )
+        assert (
+            "// Work-data-dependent operands: seq_len_q_tensor_uid, "
+            "seq_len_kv_tensor_uid, page_table_k_tensor_uid, "
+            "page_table_v_tensor_uid, block_mask_tensor_uid.\n"
+        ) in rendered
+
+    @pytest.mark.parametrize("config_name", ON_DISK_CONFIG_NAMES)
+    def test_tensor_declarations_match_the_in_tree_schema(
+        self, config_name, load_test_config
+    ):
+        """Each config's emitted tensor declarations, annotations included, match
+        its schema, so a schema field annotated ``work_data_dependent`` that the
+        YAML does not flag (or the reverse) fails here."""
+        config = load_test_config(config_name)
+        schema = HIPDNN_SCHEMAS_DIR / config.fbs_schema_filename
+        declared = _schema_declarations(schema.read_text(encoding="utf-8"))
+        for field in [*config.tensor_fields, *config.tensor_array_fields]:
+            assert (
+                declared.get(field.fbs_field) == field.fbs_declaration
+            ), f"{config_name}: {field.fbs_field}"

@@ -71,16 +71,7 @@ endfunction()
 # We'll use this small program to detect available GPUs and build the resource JSON file.
 set(GEN_RES_SPEC_PATH ${CMAKE_SOURCE_DIR}/test/generate_resource_spec.cpp)
 add_executable(generate_resource_spec ${GEN_RES_SPEC_PATH})
-set_target_properties(generate_resource_spec
-    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
-)
-
-if(HIP_COMPILER STREQUAL "nvcc")
-    set_source_files_properties(${GEN_RES_SPEC_PATH}
-        PROPERTIES LANGUAGE CUDA)
-endif()
-
-target_compile_options(generate_resource_spec PRIVATE -Wno-unused-command-line-argument)
+set_target_properties(generate_resource_spec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_link_libraries(generate_resource_spec PRIVATE hip::host)
 # This test may still get the offload-compress flag passed. Since it does not include any kernel
 # code it will give an unused-command-line-argument warning.
@@ -116,13 +107,18 @@ if(BUILD_CODE_COVERAGE)
 
   get_property(LLVM_COV_OBJECT_ARGS GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS)
   add_custom_target(
-    coverage
-    DEPENDS coverage_analysis
+    coverage_summary
     COMMAND ${LLVM_PROFDATA} merge -sparse ${PROFILE_DIR}/profraw/hipcub-coverage_*.profraw -o ${PROFILE_DIR}/hipcub.profdata
     COMMAND ${LLVM_COV} report ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${PROFILE_DIR}/hipcub.profdata
     COMMAND ${LLVM_COV} show ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${PROFILE_DIR}/hipcub.profdata -format=html -output-dir=${PROFILE_DIR}
     COMMAND ${LLVM_COV} export ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/hipcub.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+
+  add_custom_target(
+    coverage
+    DEPENDS coverage_analysis
+    DEPENDS coverage_summary
   )
 endif()
 

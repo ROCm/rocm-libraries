@@ -22,6 +22,8 @@
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
+#include <hipdnn_frontend/node/MoeGroupedMatmulBwdNode.hpp>
+#include <hipdnn_frontend/node/MoeGroupedMatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
@@ -522,4 +524,24 @@ TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)
     EXPECT_TRUE(err.get_message().find("Unsupported operation type") != std::string::npos);
     EXPECT_TRUE(err.get_message().find("999") != std::string::npos)
         << "Error should include the unsupported type id, got: " << err.get_message();
+}
+
+TEST(TestOperationUnpacker, CreateNodeForTypeCreatesMoeGroupedMatmulNode)
+{
+    const GraphAttributes graphAttrs;
+    const auto [node, error]
+        = createNodeForType(HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_EXT, graphAttrs);
+    EXPECT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getNodeType(), NodeType::MOE_GROUPED_MATMUL);
+}
+
+TEST(TestOperationUnpacker, CreateNodeForTypeCreatesMoeGroupedMatmulBwdNode)
+{
+    const GraphAttributes graphAttrs;
+    const auto [node, error]
+        = createNodeForType(HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_BWD_EXT, graphAttrs);
+    EXPECT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getNodeType(), NodeType::MOE_GROUPED_MATMUL_BWD);
 }

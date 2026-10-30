@@ -8,16 +8,20 @@ subtrees:
 
 - caption: Install
   entries:
-  - file: install/rpp-prerequisites.rst
-    title: RPP prerequisites
   - file: install/rpp-install.rst
     title: Install RPP
-  - file: install/rpp-install-with-installer.rst
-    title: Install RPP with package installer
-  - file: install/rpp-build-and-install.rst
-    title: Build and install RPP from source
-  - file: install/rpp-verify-install.rst
-    title: Verify the RPP installation
+  - file: install/rpp-build.rst
+    title: Build from source
+
+- caption: How to
+  entries:
+  - file: how-to/rpp-run-tensor-augmentation.rst
+    title: Run a tensor augmentation
+
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/rocm-examples/tree/amd-staging/Libraries/RPP
+    title: RPP examples
 
 - caption: Reference
   entries:
@@ -28,16 +32,33 @@ subtrees:
   - file: reference/rpp-supported-func-and-var-examples.rst
     title: Functionality and variant example outputs
   - file: reference/rpp-api-reference.rst
-    title: RPP API reference
+    title: RPP API reference guide
     subtrees:
     - entries:
-      - file: doxygen/html/files
-        title: RPP header files
-      - file: doxygen/html/group__group__rppdefs
-        title: RPP Common definitions
-      - file: doxygen/html/annotated
-        title: RPP data structures
-
+      - file: reference/rpp-api-handle.rst
+        title: Handle API
+      - file: reference/rpp-api-common-definitions.rst
+        title: Common definitions
+      - file: reference/rpp-api-tensor-arithmetic-operations.rst
+        title: Arithmetic operations
+      - file: reference/rpp-api-tensor-audio-augmentations.rst
+        title: Audio augmentations
+      - file: reference/rpp-api-tensor-bitwise-operations.rst
+        title: Bitwise operations
+      - file: reference/rpp-api-tensor-color-augmentations.rst
+        title: Color augmentations
+      - file: reference/rpp-api-tensor-data-exchange-operations.rst
+        title: Data exchange operations
+      - file: reference/rpp-api-tensor-effects-augmentations.rst
+        title: Effects augmentations
+      - file: reference/rpp-api-tensor-filter-augmentations.rst
+        title: Filter augmentations
+      - file: reference/rpp-api-tensor-geometric-augmentations.rst
+        title: Geometric augmentations
+      - file: reference/rpp-api-tensor-morphological-operations.rst
+        title: Morphological operations
+      - file: reference/rpp-api-tensor-statistical-operations.rst
+        title: Statistical operations
 
 - caption: About
   entries:

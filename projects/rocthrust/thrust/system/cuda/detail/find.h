@@ -36,9 +36,10 @@
 #  pragma system_header
 #endif // no system header
 
-#if _CCCL_HAS_CUDA_COMPILER()
+#if _CCCL_HAS_CUDA_COMPILER
 #  include <thrust/system/cuda/config.h>
 
+#  include <thrust/detail/minmax.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/counting_iterator.h>
 #  include <thrust/iterator/transform_iterator.h>
@@ -80,7 +81,7 @@ struct functor
     // select the smallest index among true results
     if (thrust::get<0>(lhs) && thrust::get<0>(rhs))
     {
-      return TupleType(true, (::cuda::std::min)(thrust::get<1>(lhs), thrust::get<1>(rhs)));
+      return TupleType(true, (thrust::min)(thrust::get<1>(lhs), thrust::get<1>(rhs)));
     }
     else if (thrust::get<0>(lhs))
     {
@@ -97,7 +98,7 @@ template <class ValueType, class InputIt, class UnaryOp>
 struct transform_input_iterator_t
 {
   using self_t            = transform_input_iterator_t;
-  using difference_type   = thrust::detail::it_difference_t<InputIt>;
+  using difference_type   = typename iterator_traits<InputIt>::difference_type;
   using value_type        = ValueType;
   using pointer           = void;
   using reference         = value_type;
@@ -136,13 +137,13 @@ struct transform_input_iterator_t
 
   _CCCL_HOST_DEVICE _CCCL_FORCEINLINE reference operator*() const
   {
-    thrust::detail::it_value_t<InputIt> x = *input;
+    typename thrust::iterator_value<InputIt>::type x = *input;
     return op(x);
   }
 
   _CCCL_HOST_DEVICE _CCCL_FORCEINLINE reference operator*()
   {
-    thrust::detail::it_value_t<InputIt> x = *input;
+    typename thrust::iterator_value<InputIt>::type x = *input;
     return op(x);
   }
 
@@ -210,7 +211,7 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
 
   // TODO incorporate sizeof(InputType) into interval_threshold and round to multiple of 32
   const Size interval_threshold = 1 << 20;
-  const Size interval_size      = (::cuda::std::min)(interval_threshold, num_items);
+  const Size interval_size      = (thrust::min)(interval_threshold, num_items);
 
   // FIXME(bgruber): we should also be able to use transform_iterator here, but it makes nvc++ hang. See:
   // https://github.com/NVIDIA/cccl/issues/3594. The problem does not occur with nvcc, so we could not add a test :/

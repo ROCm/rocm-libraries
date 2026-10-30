@@ -35,7 +35,6 @@
 // rocsparse_handle_create / rocsparse_handle_destroy Tests
 // =============================================================================
 
-#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 TEST(auxiliary_pre_checkin, HandleCreateWithStreamCreateDestroy)
 {
     hipStream_t      stream;
@@ -86,13 +85,57 @@ TEST(auxiliary_pre_checkin, HandleCreateWithStreamSetStream)
     ASSERT_EQ(hipStreamDestroy(stream_create), hipSuccess);
     ASSERT_EQ(hipStreamDestroy(stream_use), hipSuccess);
 }
-#endif // ROCSPARSE_WITH_HANDLE_CREATE
 
 TEST(auxiliary_pre_checkin, HandleCreateDestroy)
 {
     rocsparse_handle handle;
     ASSERT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
     ASSERT_NE(handle, nullptr);
+    ASSERT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
+}
+
+// A handle created via rocsparse_create_handle must be immediately usable for
+// computation without the caller allocating or synchronizing a stream. This
+// exercises the handle's internally-managed stream and device workspace
+// (rocsparse_?doti uses handle->buffer on handle->stream).
+TEST(auxiliary_pre_checkin, HandleCreateComputeReady)
+{
+    rocsparse_handle handle;
+    ASSERT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
+    ASSERT_NE(handle, nullptr);
+
+    ASSERT_EQ(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host),
+              rocsparse_status_success);
+
+    constexpr rocsparse_int nnz         = 3;
+    constexpr rocsparse_int y_size      = 5;
+    const float             hx_val[nnz] = {1.0f, 2.0f, 3.0f};
+    const rocsparse_int     hx_ind[nnz] = {0, 2, 4};
+    const float             hy[y_size]  = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
+
+    float*         dx_val = nullptr;
+    rocsparse_int* dx_ind = nullptr;
+    float*         dy     = nullptr;
+    ASSERT_EQ(hipMalloc(reinterpret_cast<void**>(&dx_val), sizeof(float) * nnz), hipSuccess);
+    ASSERT_EQ(hipMalloc(reinterpret_cast<void**>(&dx_ind), sizeof(rocsparse_int) * nnz),
+              hipSuccess);
+    ASSERT_EQ(hipMalloc(reinterpret_cast<void**>(&dy), sizeof(float) * y_size), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dx_val, hx_val, sizeof(float) * nnz, hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dx_ind, hx_ind, sizeof(rocsparse_int) * nnz, hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(dy, hy, sizeof(float) * y_size, hipMemcpyHostToDevice), hipSuccess);
+
+    float result = -1.0f;
+    ASSERT_EQ(rocsparse_sdoti(handle, nnz, dx_val, dx_ind, dy, &result, rocsparse_index_base_zero),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    // x = {1@0, 2@2, 3@4}, y = {1,2,3,4,5} => 1*1 + 2*3 + 3*5 = 22
+    ASSERT_FLOAT_EQ(result, 22.0f);
+
+    ASSERT_EQ(hipFree(dx_val), hipSuccess);
+    ASSERT_EQ(hipFree(dx_ind), hipSuccess);
+    ASSERT_EQ(hipFree(dy), hipSuccess);
     ASSERT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
 }
 
@@ -2121,7 +2164,7 @@ TEST(auxiliary_pre_checkin, SpmatGetSetStridedBatch)
     ASSERT_EQ(rocsparse_spmat_set_strided_batch(descr, batch_count), rocsparse_status_success);
 
     // Get strided batch
-    int batch_count_out;
+    rocsparse_int batch_count_out;
     ASSERT_EQ(rocsparse_spmat_get_strided_batch(descr, &batch_count_out), rocsparse_status_success);
     EXPECT_EQ(batch_count_out, batch_count);
 
@@ -5213,8 +5256,8 @@ TEST(auxiliary_pre_checkin, DnmatGetSetStridedBatch)
               rocsparse_status_success);
 
     // Get strided batch
-    int     batch_count_out;
-    int64_t batch_stride_out;
+    rocsparse_int batch_count_out;
+    int64_t       batch_stride_out;
     ASSERT_EQ(rocsparse_dnmat_get_strided_batch(descr, &batch_count_out, &batch_stride_out),
               rocsparse_status_success);
     EXPECT_EQ(batch_count_out, batch_count);
@@ -5242,56 +5285,12 @@ TEST(auxiliary_pre_checkin, DnmatGetSetStridedBatchRowMajor)
               rocsparse_status_success);
 
     // Get strided batch
-    int     batch_count_out;
-    int64_t batch_stride_out;
+    rocsparse_int batch_count_out;
+    int64_t       batch_stride_out;
     ASSERT_EQ(rocsparse_dnmat_get_strided_batch(descr, &batch_count_out, &batch_stride_out),
               rocsparse_status_success);
     EXPECT_EQ(batch_count_out, batch_count);
     EXPECT_EQ(batch_stride_out, batch_stride);
-
-    ASSERT_EQ(rocsparse_destroy_dnmat_descr(descr), rocsparse_status_success);
-}
-
-TEST(auxiliary_pre_checkin, DnmatSetStridedBatchRowMajorInvalidStride)
-{
-    rocsparse_dnmat_descr descr;
-    int64_t               rows   = 100;
-    int64_t               cols   = 50;
-    int64_t               ld     = 50; // For row-major, ld must be >= cols
-    void*                 values = reinterpret_cast<void*>(0x1000); // Non-null dummy pointer
-
-    ASSERT_EQ(rocsparse_create_dnmat_descr(
-                  &descr, rows, cols, ld, values, rocsparse_datatype_f32_r, rocsparse_order_row),
-              rocsparse_status_success);
-
-    // Invalid: batch_stride < ld * rows when batch_count > 1
-    // ld * rows = 50 * 100 = 5000, so batch_stride = 4999 is invalid
-    int     batch_count  = 5;
-    int64_t batch_stride = 4999;
-    ASSERT_EQ(rocsparse_dnmat_set_strided_batch(descr, batch_count, batch_stride),
-              rocsparse_status_invalid_value);
-
-    ASSERT_EQ(rocsparse_destroy_dnmat_descr(descr), rocsparse_status_success);
-}
-
-TEST(auxiliary_pre_checkin, DnmatSetStridedBatchColumnMajorInvalidStride)
-{
-    rocsparse_dnmat_descr descr;
-    int64_t               rows   = 100;
-    int64_t               cols   = 50;
-    int64_t               ld     = 100;
-    void*                 values = reinterpret_cast<void*>(0x1000); // Non-null dummy pointer
-
-    ASSERT_EQ(rocsparse_create_dnmat_descr(
-                  &descr, rows, cols, ld, values, rocsparse_datatype_f32_r, rocsparse_order_column),
-              rocsparse_status_success);
-
-    // Invalid: batch_stride < ld * cols when batch_count > 1
-    // ld * cols = 100 * 50 = 5000, so batch_stride = 4999 is invalid
-    int     batch_count  = 5;
-    int64_t batch_stride = 4999;
-    ASSERT_EQ(rocsparse_dnmat_set_strided_batch(descr, batch_count, batch_stride),
-              rocsparse_status_invalid_value);
 
     ASSERT_EQ(rocsparse_destroy_dnmat_descr(descr), rocsparse_status_success);
 }

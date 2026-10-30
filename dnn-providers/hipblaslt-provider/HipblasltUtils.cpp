@@ -22,25 +22,27 @@ EpilogueParams mapPointwiseModeToHipblasLtEpilogue(
     {
     case PM::RELU_FWD:
     {
-        if(attrs->relu_lower_clip() && attrs->relu_upper_clip())
+        // hipBLASLt has no leaky-ReLU epilogue; a slope of 0 is the same as no slope.
+        const auto slope = attrs->relu_lower_clip_slope();
+        if(slope.has_value() && *slope != 0.f)
         {
-            if(attrs->relu_lower_clip_slope().has_value())
-            {
-                throw hipdnn_plugin_sdk::HipdnnPluginException(
-                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                    "Incorrect configuration of Clamp (Relu with lower and upper clips). "
-                    "Both lower and upper clips are set, but relu_lower_clip_slope is also set.");
-            }
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Leaky relu (non-zero relu_lower_clip_slope) is not supported");
+        }
 
+        const auto lowerClip = attrs->relu_lower_clip().value_or(0.f);
+        const auto upperClip = attrs->relu_upper_clip();
+        if(upperClip.has_value())
+        {
             // CLAMP
             // act(x) = max(\alpha, min(\beta, x))
             return EpilogueParams{withBias ? HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT
                                            : HIPBLASLT_EPILOGUE_CLAMP_EXT,
-                                  static_cast<float>(*attrs->relu_lower_clip()),
-                                  static_cast<float>(*attrs->relu_upper_clip())};
+                                  lowerClip,
+                                  *upperClip};
         }
-        if(attrs->relu_lower_clip().has_value() && attrs->relu_lower_clip().value() == 0.f
-           && !attrs->relu_upper_clip().has_value())
+        if(lowerClip == 0.f)
         {
             // Standard ReLU
             return EpilogueParams{
@@ -88,6 +90,12 @@ hipDataType
         return HIP_R_8F_E4M3;
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2:
         return HIP_R_8F_E5M2;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1:
+        return HIP_R_4F_E2M1;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3:
+        return HIP_R_6F_E2M3;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2:
+        return HIP_R_6F_E3M2;
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -117,6 +125,18 @@ bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType
 {
     return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3
            || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2;
+}
+
+bool isTypeFp6Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType)
+{
+    return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3
+           || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2;
+}
+
+bool isTypeMxOcp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType)
+{
+    return isTypeFp8Ocp(dataType) || isTypeFp6Ocp(dataType)
+           || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1;
 }
 
 } // namespace hipblaslt_plugin::hipblaslt_utils
