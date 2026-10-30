@@ -165,7 +165,8 @@ TEST(TestPointwiseValidation, KnownImplementedUnaryOperations)
                                                               PointwiseMode::FLOOR,
                                                               PointwiseMode::ELU_FWD,
                                                               PointwiseMode::SOFTPLUS_FWD,
-                                                              PointwiseMode::LOGICAL_NOT};
+                                                              PointwiseMode::LOGICAL_NOT,
+                                                              PointwiseMode::GEN_INDEX};
 
     // Check all unary modes
     for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
@@ -189,24 +190,15 @@ TEST(TestPointwiseValidation, KnownImplementedUnaryOperations)
 TEST(TestPointwiseValidation, KnownImplementedBinaryOperations)
 {
     // Define which binary operations are currently implemented
-    const std::set<PointwiseMode> expectedImplementedBinary = {PointwiseMode::ADD,
-                                                               PointwiseMode::SUB,
-                                                               PointwiseMode::MUL,
-                                                               PointwiseMode::CMP_GT,
-                                                               PointwiseMode::CMP_EQ,
-                                                               PointwiseMode::CMP_NEQ,
-                                                               PointwiseMode::CMP_GE,
-                                                               PointwiseMode::CMP_LT,
-                                                               PointwiseMode::CMP_LE,
-                                                               PointwiseMode::DIV,
-                                                               PointwiseMode::ADD_SQUARE,
-                                                               PointwiseMode::LOGICAL_AND,
-                                                               PointwiseMode::LOGICAL_OR,
-                                                               PointwiseMode::RELU_BWD,
-                                                               PointwiseMode::SIGMOID_BWD,
-                                                               PointwiseMode::TANH_BWD,
-                                                               PointwiseMode::MAX_OP,
-                                                               PointwiseMode::MIN_OP};
+    const std::set<PointwiseMode> expectedImplementedBinary = {
+        PointwiseMode::ADD,        PointwiseMode::SUB,        PointwiseMode::MUL,
+        PointwiseMode::CMP_GT,     PointwiseMode::CMP_EQ,     PointwiseMode::CMP_NEQ,
+        PointwiseMode::CMP_GE,     PointwiseMode::CMP_LT,     PointwiseMode::CMP_LE,
+        PointwiseMode::DIV,        PointwiseMode::ADD_SQUARE, PointwiseMode::LOGICAL_AND,
+        PointwiseMode::LOGICAL_OR, PointwiseMode::RELU_BWD,   PointwiseMode::SIGMOID_BWD,
+        PointwiseMode::TANH_BWD,   PointwiseMode::GELU_BWD,   PointwiseMode::GELU_APPROX_TANH_BWD,
+        PointwiseMode::SWISH_BWD,  PointwiseMode::ELU_BWD,    PointwiseMode::SOFTPLUS_BWD,
+        PointwiseMode::MAX_OP,     PointwiseMode::MIN_OP};
 
     // Check all binary modes
     for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
