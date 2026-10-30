@@ -59,8 +59,9 @@ For every lane in ``[0, L)``, ``lo <= lane + s < hi`` exactly when ``a <= lane <
 touches is proven inside i32; otherwise each end is pre-clamped once in i64 per distinct
 (per-wave side, end) over the call and finished per access in i32, so no subtraction can wrap
 whatever the per-wave values hold. One case takes a single compare instead: a lone i32 per-wave
-value ``u`` with no constant and no per-lane part against ``[0, hi)``, ``hi`` below ``2^31``,
-is ``u u< hi`` (a negative ``u`` reads as ``>= 2^31``).
+value ``u`` with no constant and no per-lane part against ``[0, hi)``, ``hi`` in ``[0, 2^31)``,
+is ``u u< hi`` (a negative ``u`` reads as ``>= 2^31``). That rule is core's
+``one_unsigned_compare_checks``, which ``IRBuilder.gpu_checked_value`` follows too.
 
 A vector (``vector_width = w > 1`` along graph input ``vector_axis``) is addressed by its first
 element, which must be contiguous in memory. ``valid`` says every element is valid: nothing when
@@ -78,7 +79,7 @@ from math import prod
 from typing import TYPE_CHECKING
 
 from rocke.core.dtypes import dtype_info
-from rocke.core.ir import I32, I64, Type, Value
+from rocke.core.ir import I32, I64, Type, Value, one_unsigned_compare_checks
 from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
 
 from .address import _require_nonnegative_strides
@@ -1269,8 +1270,8 @@ def _check_value(
 def _single_compare(coord: _TableCoord, lo: End, hi: End) -> Value | None:
     """``u`` when the check is ``u u< hi``: one i32 per-wave part ``u``, no constant, no
     per-lane part, a lower end of 0 (the int 0, or no lower end because ``u``'s range starts at
-    0 or above) and ``hi`` an int in ``[1, 2^31)`` or a runtime length whose stated range lies in
-    ``[0, 2^31)``. A negative ``u`` reads as ``>= 2^31`` unsigned."""
+    0 or above) and an end ``hi`` (an int, or a runtime length with no offset) for which
+    ``one_unsigned_compare_checks`` holds."""
     parts = [part for term in coord.terms for part in term.parts]
     if coord.lane is not None or coord.const != 0 or len(parts) != 1:
         return None
@@ -1281,8 +1282,15 @@ def _single_compare(coord: _TableCoord, lo: End, hi: End) -> Value | None:
     if u.type != I32 or not (lower_is_zero or lower_proven):
         return None
     if isinstance(hi, RuntimeValue):
-        return u if hi._plus == 0 and hi._envelope.within(0, _I32_END) else None
-    return u if hi is not None and 1 <= hi < _I32_END else None
+        envelope = hi._envelope
+        if hi._plus != 0 or envelope.lo is None or envelope.hi is None:
+            return None
+        least, most = envelope.lo, envelope.hi - 1
+    elif hi is None:
+        return None
+    else:
+        least = most = hi
+    return u if one_unsigned_compare_checks(least, most, u.type) else None
 
 
 def _fold_check(

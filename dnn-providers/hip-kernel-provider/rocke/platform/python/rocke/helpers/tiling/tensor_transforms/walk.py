@@ -46,7 +46,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from rocke.core.ir import I32, Op, Value
+from rocke.core.ir import I32, Op, Value, assume_range_bound_operands
 
 from .ranges import (
     UNBOUNDED,
@@ -274,7 +274,7 @@ class _FactWalk:
     def runtime_end(self, marker: Op) -> RuntimeValue:
         """A marker's runtime end ``lt + lt_plus`` (its ``lt`` operand), rebuilt from that
         operand's marker."""
-        lt = marker.operands[1]
+        _, lt = assume_range_bound_operands(marker)
         end = runtime_value_of(lt)
         if end is None:
             raise ValueError(
@@ -373,7 +373,9 @@ class _FactWalk:
         """An ``assume_range`` marker: the operand's facts narrowed by the stated ones."""
         x_range, x_congruence = self.facts(op.operands[0])
         attrs = op.attrs
-        hi = self.runtime_end(op) if len(op.operands) == 2 else attrs.get("lt")
+        # A ``ge`` operand is not read: dropping a stated lower end only loosens the range.
+        _, lt_operand = assume_range_bound_operands(op)
+        hi = attrs.get("lt") if lt_operand is None else self.runtime_end(op)
         stated = Interval(attrs.get("ge"), hi)
         multiple_of, residue = attrs.get("multiple_of", 1), attrs.get("residue", 0)
         congruence = (

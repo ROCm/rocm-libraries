@@ -41,6 +41,7 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     _assume_range_errors,
+    assume_range_bound_operands,
     param_fact_errors,
     _buffer_op_bytes,
     _if_else_branch_yield,
@@ -386,9 +387,9 @@ class _Verifier:
                 if pred_error:
                     self.err(pred_error, op)
         elif name == "arith.assume_range":
-            if len(op.operands) not in (1, 2) or len(op.results) != 1:
+            if len(op.operands) not in (1, 2, 3) or len(op.results) != 1:
                 self.err(
-                    f"{name}: expected 1 or 2 operands / 1 result, got "
+                    f"{name}: expected 1 to 3 operands / 1 result, got "
                     f"{len(op.operands)} / {len(op.results)}",
                     op,
                 )
@@ -400,12 +401,13 @@ class _Verifier:
                     f"operand type {v.type.name}",
                     op,
                 )
-            if len(op.operands) == 2 and op.operands[1].type != v.type:
-                self.err(
-                    f"{name}: lt operand type {op.operands[1].type.name} != "
-                    f"operand type {v.type.name}",
-                    op,
-                )
+            for word, end in zip(("ge", "lt"), assume_range_bound_operands(op)):
+                if end is not None and end.type != v.type:
+                    self.err(
+                        f"{name}: {word} operand type {end.type.name} != "
+                        f"operand type {v.type.name}",
+                        op,
+                    )
             for message in _assume_range_errors(op.attrs, len(op.operands)):
                 self.err(message, op)
         elif name == "arith.select":

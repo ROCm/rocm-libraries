@@ -532,14 +532,18 @@ typedef struct rocke_region
     int cap_ops;
 } rocke_region_t;
 
-/* One bound of an integer fact: an int, or a relation over earlier parameters
+/* One bound of an integer fact: an int, a relation over earlier parameters
  * (the intexpr JSON tree rocke.core.intexpr builds, e.g. {"param":"N"} or
- * {"mul":[{"param":"M"},{"param":"ldc"}]}). `relation` wins when non-NULL. */
+ * {"mul":[{"param":"M"},{"param":"ldc"}]}), or a Value. `value` wins when
+ * non-NULL, then `relation`. A Value bound is a parameter of this kernel on
+ * rocke_b_param (stored as its relation), and one Value with stated facts on
+ * rocke_b_gpu_checked. */
 typedef struct rocke_int_bound
 {
     bool set;
     int64_t value;
     const char* relation;
+    rocke_value_t* value_bound;
 } rocke_int_bound_t;
 
 /* The integer facts a declaration states (Python IRBuilder.param's ge / gt / le /
@@ -556,6 +560,30 @@ typedef struct rocke_int_facts
     int64_t multiple_of;
     bool multiple_of_set;
 } rocke_int_facts_t;
+
+/* One end of an arith.assume_range marker (Python IRBuilder._assume_range's ge /
+ * lt and ge_plus / lt_plus): an int when `set`, or the Value `end` plus `plus`
+ * for an end only known at run time. */
+typedef struct rocke_range_end
+{
+    bool set;
+    int64_t value;
+    rocke_value_t* end;
+    int64_t plus;
+} rocke_range_end_t;
+
+/* The facts an arith.assume_range marker records (Python _assume_range's
+ * keywords): ge + ge_plus <= v < lt + lt_plus, v == residue (mod multiple_of;
+ * 1 when unset), and `by`, the writer that checked them (NULL for none). */
+typedef struct rocke_assume_range_opts
+{
+    rocke_range_end_t ge;
+    rocke_range_end_t lt;
+    int64_t multiple_of;
+    bool multiple_of_set;
+    int64_t residue;
+    const char* by;
+} rocke_assume_range_opts_t;
 
 /* Kernel parameter options (the Python keywords of IRBuilder.param). A field
  * is "unset" via the *_set companion flag so defaults match Python (absent key).
@@ -922,6 +950,21 @@ rocke_value_t* rocke_b_cmp_ne(rocke_ir_builder_t* b, rocke_value_t* a, rocke_val
 /* Python cmp_ult: unsigned a < c ("icmp ult"). Operands are two i32 or two i64
  * values. */
 rocke_value_t* rocke_b_cmp_ult(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Python IRBuilder._assume_range: return `v` marked with facts its caller has
+ * checked or proved (an arith.assume_range marker, which emits nothing). Private
+ * in spirit: a fact stated here is never checked, so only a caller that checked
+ * it first may state it. Refuses bad facts with the verifier's texts. */
+rocke_value_t* rocke_b_assume_range(rocke_ir_builder_t* b,
+                                    rocke_value_t* v,
+                                    const rocke_assume_range_opts_t* opts);
+/* Python IRBuilder.gpu_checked_value: always emitted; a false fact traps the
+ * kernel. Checks `v` against the facts' ge / gt / le / lt (an int or one Value
+ * with stated facts) and multiple_of on the GPU (compare, scf.if, tile.trap) and
+ * returns `v` marked with them (by = "gpu_checked_value"). eq and relations are
+ * refused, as are a value the host already checks and arithmetic on an
+ * unchecked load before the check, with the Python texts. */
+rocke_value_t*
+    rocke_b_gpu_checked(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_int_facts_t* facts);
 /* pred in {olt,ole,ogt,oge,oeq,one,ord,uno} */
 rocke_value_t*
     rocke_b_fcmp(rocke_ir_builder_t* b, const char* pred, rocke_value_t* a, rocke_value_t* c);

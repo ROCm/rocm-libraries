@@ -356,6 +356,37 @@ char* rocke_relation_canonical(const char* text,
                                const char* (*rename)(void* ctx, const char* name),
                                void* ctx);
 
+/* Mirrors ir._declaration_text: `p`'s declaration as the author writes it,
+ * b.param("M", I32, ge=1, le=1048576), appended to `out`. */
+void rocke_param_declaration_text(const rocke_param_t* p, rocke_strbuf_t* out);
+
+/* Mirrors intexpr.relation_text with plain leaf names: the relation stored in
+ * `text` as the author writes it (product_of(M, ldc)), or `text` itself when it
+ * holds no relation, appended to `out`. */
+void rocke_relation_display(const char* text, rocke_strbuf_t* out);
+
+/* ------------------------------------------------------- range marker */
+
+/* Mirrors ir._assume_range_errors: hands `sink` every rule an arith.assume_range
+ * marker's attrs break, in order, with the Python texts, and returns their
+ * count. `num_operands` counts the marked value and its Value ends.
+ * (cpp/core/ir/range_marker.cpp) */
+int rocke_assume_range_errors(const rocke_attr_map_t* attrs,
+                              int num_operands,
+                              rocke_param_fact_sink_t sink,
+                              void* ctx);
+
+/* Mirrors ir.assume_range_bound_operands: the marker's ge and lt operands, NULL
+ * for an end it does not state as a Value. */
+void rocke_assume_range_bound_operands(const rocke_op_t* op,
+                                       rocke_value_t** ge,
+                                       rocke_value_t** lt);
+
+/* Mirrors ir.one_unsigned_compare_checks: whether 0 <= v < end is exactly
+ * v u< end for an i32 or i64 `t` and an end known to lie in [least, most].
+ * (cpp/core/ir/gpu_check.cpp) */
+bool rocke_i_one_unsigned_compare_checks(int64_t least, int64_t most, const rocke_type_t* t);
+
 /* ------------------------------------------------------------- DPP helpers */
 
 /* DPP control word that lowers tile.dpp_xor with `xor_mask` (Python
