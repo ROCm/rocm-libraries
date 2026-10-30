@@ -14,7 +14,8 @@ import pytest
 import torch
 
 import hipdnn_sdpa
-from hipdnn_sdpa import EngineDeclined, _kernel_log, _problem, _runtime
+from hipdnn_sdpa import EngineDeclined, _candidates, _kernel_log, _problem, _runtime
+from test_candidates import FakeBench, entry
 
 contract = _runtime.contract
 
@@ -73,6 +74,7 @@ class _FakeGraph:
     def __init__(self, serves):
         self.serves = serves
         self.pinned = None
+        self.knobs = None  # knob settings of the last create_execution_plan_ext
 
     def build_operation_graph(self, handle):
         return _Ok()
@@ -89,8 +91,9 @@ class _FakeGraph:
     def create_execution_plans(self, modes):
         return _Ok()
 
-    def create_execution_plan_ext(self, engine_id):
+    def create_execution_plan_ext(self, engine_id, knob_settings=None):
         self.pinned = engine_id
+        self.knobs = knob_settings
         return _Ok()
 
     def check_support(self):
@@ -244,12 +247,17 @@ def rt(monkeypatch, tmp_path):
         contract.PLAN_CACHE_ENV,
         contract.TEST_CRASH_ENV,
         contract.REPRO_CAPTURE_ENV,
+        contract.EXHAUSTIVE_ENV,
+        *contract.CANDIDATE_ENV.values(),
         "HIPDNN_FWD_ENGINE",
         "HIPDNN_BWD_ENGINE",
     ):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(_candidates, "_CACHE", {})
+    monkeypatch.setenv(contract.PREFIX_ENV, "/opt/hipdnn")
     frontend = types.SimpleNamespace(
-        HeuristicMode=types.SimpleNamespace(FALLBACK="fallback")
+        HeuristicMode=types.SimpleNamespace(FALLBACK="fallback"),
+        KnobSetting=lambda name, value: (name, value),
     )
     monkeypatch.setattr(_runtime._graph, "frontend", lambda: frontend)
 
@@ -496,3 +504,137 @@ def test_a_cache_hit_is_captured_too(rt, capture_root):
     _runtime.run(fwd_problem(), None)
     assert rt.builds == 1
     assert (capture_root / "fwd.graph.json").read_text() == '{"graph": "fake"}'
+
+
+# ----------------------------------------------------------------- candidate pins (exhaustive)
+
+NOT_SUPPORTED = "Engine does not support matched-catalog enumeration"
+
+
+def pin_candidate(monkeypatch, direction, engine, index, catalog):
+    """Pin ``engine`` and its ``index``-th candidate for ``direction``; ``catalog`` maps an
+    engine name to its entries (or failure message) in the fake ``hipdnn_bench``."""
+    monkeypatch.setattr(_candidates, "_run", FakeBench(catalog))
+    monkeypatch.setenv(f"HIPDNN_{direction.upper()}_ENGINE", engine)
+    monkeypatch.setenv(contract.CANDIDATE_ENV[direction], str(index))
+
+
+def three_candidates():
+    return {
+        "ENG_A": [
+            entry("other-0", block=64),
+            entry(KERNEL, block=128),
+            entry("other-2", block=256),
+        ]
+    }
+
+
+def test_a_pinned_candidate_is_built_from_its_knob_settings_and_executed(
+    rt, monkeypatch
+):
+    pin_candidate(monkeypatch, "fwd", "ENG_A", 1, three_candidates())
+    assert _runtime.run(fwd_problem(), "ENG_A") == ENGINE
+    (graph,) = rt.graphs
+    assert graph.pinned == 1 and graph.knobs == [("block", 128)]
+    assert graph.executed == 1
+    assert _runtime.last_call("fwd").kernel == KERNEL
+
+
+def test_a_candidate_whose_kernel_is_not_the_one_built_is_declined_not_honored(
+    rt, monkeypatch
+):
+    pin_candidate(monkeypatch, "fwd", "ENG_A", 0, three_candidates())
+    with pytest.raises(EngineDeclined) as declined:
+        _runtime.run(fwd_problem(), "ENG_A")
+    reason = declined.value.reason
+    assert reason.startswith(contract.CANDIDATE_NOT_HONORED)
+    assert "other-0" in reason and KERNEL in reason
+    assert rt.graphs[0].executed == 0 and _runtime.last_call("fwd") is None
+
+
+def test_the_slots_of_a_composite_kernel_compare_whatever_their_order(rt, monkeypatch):
+    pin_candidate(
+        monkeypatch,
+        "bwd",
+        "ENG_A",
+        0,
+        {"ENG_A": [entry("dq=U3|prep=U1|dkdv=U2", block=64)]},
+    )
+
+    class Slotted(_RunGraph):
+        def build_plans(self):
+            for slot, kernel in (("prep", "U1"), ("dkdv", "U2"), ("dq", "U3")):
+                _kernel_log.on_line(
+                    f"ingestor: engine 'flydsl_sdpa_cdna' slot '{slot}' selected kernel "
+                    f"{kernel} at rank 0 from 1 candidate(s)"
+                )
+            return _Ok()
+
+    monkeypatch.setattr(
+        _runtime._graph, "build", lambda prob: (Slotted(lambda p: None), prob.uids())
+    )
+    assert _runtime.run(bwd_problem(), "ENG_A") == ENGINE
+    assert _runtime.last_call("bwd").kernel == "prep=U1|dkdv=U2|dq=U3"
+
+
+def test_an_engine_that_cannot_enumerate_declines_with_its_message(rt, monkeypatch):
+    pin_candidate(monkeypatch, "fwd", "ENG_A", 0, {"ENG_A": NOT_SUPPORTED})
+    with pytest.raises(EngineDeclined) as declined:
+        _runtime.run(fwd_problem(), "ENG_A")
+    assert declined.value.reason == f"not_enumerable: {NOT_SUPPORTED}"
+    assert rt.graphs[0].executed == 0
+
+
+def test_an_index_past_the_catalog_declines_out_of_range(rt, monkeypatch):
+    pin_candidate(monkeypatch, "fwd", "ENG_A", 3, three_candidates())
+    with pytest.raises(EngineDeclined) as declined:
+        _runtime.run(fwd_problem(), "ENG_A")
+    assert declined.value.reason.startswith("candidate_out_of_range")
+    assert "3" in declined.value.reason
+
+
+def test_a_candidate_pin_without_an_engine_pin_is_not_honored(rt, monkeypatch):
+    monkeypatch.setenv(contract.CANDIDATE_ENV["fwd"], "0")
+    with pytest.raises(EngineDeclined) as declined:
+        _runtime.run(fwd_problem(), None)
+    assert declined.value.reason.startswith(contract.CANDIDATE_NOT_HONORED)
+    assert rt.graphs[0].executed == 0
+
+
+def test_a_candidate_pin_binds_only_its_own_direction(rt, monkeypatch):
+    pin_candidate(monkeypatch, "bwd", "ENG_A", 1, three_candidates())
+    monkeypatch.delenv("HIPDNN_FWD_ENGINE", raising=False)
+    assert _runtime.run(fwd_problem(), None) == ENGINE  # forward stays on the heuristic
+    assert rt.graphs[0].knobs is None
+
+
+def test_each_candidate_of_a_problem_is_its_own_plan(rt, monkeypatch):
+    pin_candidate(monkeypatch, "fwd", "ENG_A", 1, three_candidates())
+    prob = fwd_problem()
+    _runtime.run(prob, "ENG_A")
+    _runtime.run(prob, "ENG_A")
+    assert rt.builds == 1
+    monkeypatch.setenv(contract.CANDIDATE_ENV["fwd"], "0")
+    with pytest.raises(EngineDeclined):
+        _runtime.run(prob, "ENG_A")
+    assert rt.builds == 2
+
+
+def test_the_first_unpinned_call_counts_every_ranked_engines_candidates(
+    rt, monkeypatch
+):
+    monkeypatch.setenv(contract.EXHAUSTIVE_ENV, "1")
+    monkeypatch.setattr(
+        _candidates,
+        "_run",
+        FakeBench({"ENG_A": three_candidates()["ENG_A"], "ENG_B": NOT_SUPPORTED}),
+    )
+    _runtime.run(fwd_problem(), None)
+    assert _runtime.last_call("fwd").candidates == {"ENG_A": 3, "ENG_B": NOT_SUPPORTED}
+
+
+def test_calls_count_no_candidates_unless_exhaustive_is_set(rt, monkeypatch):
+    fake = FakeBench({"ENG_A": [], "ENG_B": []})
+    monkeypatch.setattr(_candidates, "_run", fake)
+    _runtime.run(fwd_problem(), None)
+    assert _runtime.last_call("fwd").candidates == {} and fake.calls == []
