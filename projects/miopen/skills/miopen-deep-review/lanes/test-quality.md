@@ -33,6 +33,12 @@ Judge whether each added or changed test, and each change to test configuration,
     the nightly exposure `ROCK` reports.
 - **Determinism and isolation.** Fixed seeds, no timing dependence, no shared global state, no reliance on test order, on a warm
   user database or kernel cache (`MIOPEN_USER_DB_PATH`, `MIOPEN_CUSTOM_CACHE_DIR`), or on the developer's machine.
+- **What the expected value depends on.** For a check that compares stored or shipped data with a value the test computes (DBSync
+  workspace sizes, golden files, find-db records), list everything the computed value reads: build options (`MIOPEN_USE_*`, so the
+  same data passes or fails by binary), optional plugins and libraries (a missing or mismatched CK library can make a size 0),
+  device properties (CU count, memory caps) that the runner may emulate, and environment variables that are not part of the data's
+  key (determinism and TF32 overrides). For each, say whether the runner pins it or the test asserts it. An unpinned input is a
+  `test-gap`: the same data passes in one configuration and fails in another.
 - **Tolerances and references.** Each tolerance is justified by data type and reduction size; the reference is independent of the
   code under test (the CPU reference under `projects/miopen/test/cpu_*.hpp` or the GPU reference kernel, not the solver itself).
 - **Conventions.** Names pass `projects/miopen/test/gtest/check_names.py` (`<Smoke|Standard|Full|Perf|Unit>/<CPU|GPU>_<Suite>_<datatype>`, no `GPU` with `NONE`, unique across `miopen_gtest`)

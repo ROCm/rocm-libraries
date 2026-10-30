@@ -159,6 +159,9 @@ its trigger holds, else mark it `N/A`; when unsure, run it.
 | `DUP` | [dedup](lanes/dedup.md) | Reuse of existing code; repetition within the change | Code is added |
 | `DOCS` | [docs](lanes/docs.md) | Accuracy and concision of docs and comments, including edited public headers | A documentation or source file changes |
 | `DRIFT` | [drift](lanes/drift.md) | The change merged onto the target's current tip: conflicts, broken target-side contracts, tests on the merge | `drift.txt` says `Trigger: yes` |
+| `SIBLING` | [sibling](lanes/sibling.md) | Whether the change reached every counterpart that shares its contract (fwd/bwd/wrw, 2D/3D, backends, data types, test twins) | A solver, kernel, primitive or test file with counterparts changes |
+| `ARCH` | [arch](lanes/arch.md) | Architecture gates, lists and data for gfx targets, and whether a test executed on each targeted arch | An arch or device-name gate, a `GPU_TARGETS` or arch list, a kernel or database named by arch, or a new arch changes |
+| `PERF` | [perf](lanes/perf.md) | Performance evidence against risk; files approval requests, never runs GPU work | Solver selection, applicability, kernels, perf-config spaces, heuristics, find modes, find or perf data, workspace reporting or per-call host work changes |
 | `RUN` | [build-validate](lanes/build-validate.md) | Building the head and running the relevant tests | Always |
 
 `ORCH` (process findings you file), `SCOUT<k>`, `SYNTH` ([orient](lanes/orient.md)) and `VER`
@@ -196,6 +199,15 @@ correctness lane (or by `DOCS`), every owned path is in `numstat.txt` and the ow
 to the total (it prints `unowned:`, `owned twice:`, `not in numstat:` or `owned <n> of <m>
 lines` otherwise, and `<n> files, <m> lines` always), and `packets` and `seed` exited 0.
 
+## Facts
+
+`FACTS` ([lanes/facts.md](lanes/facts.md)) runs once per round, beside Orient and after *Pin and intake*, as its own fresh agent with
+the dispatch of *Fan out*. It writes `facts.md`: the CI state at `$HEAD`, which added tests PR CI selects, where the description
+disagrees with the commits, the live head and related PRs. Lanes read it and cite facts by ID instead of re-deriving them.
+
+**Gate:** `$EVIDENCE/r<N>/facts.md` exists, every fact has a `Source:` and every cited evidence file exists. Dispatch no lane before
+it holds; a `FACTS` agent that fails twice leaves `facts.md` with the line `FACTS failed: <reason>` and the lanes derive facts themselves.
+
 ## Fan out
 
 Write `$EVIDENCE/r<N>/dispatch-context.md` once per round, before the first dispatch: the block
@@ -225,11 +237,11 @@ longest lanes (largest `CORR<k>`, then `TESTQ`), `DUP` and `DOCS` last. `RUN`, `
 split `Cores:` between them while they overlap, `RUN` taking the larger share.
 
 ```markdown
-Role:      <LANE> | SCOUT<k> | SYNTH | VER-<batch> | WRITER; round <N>; follow-up f<k> if any
+Role:      <LANE> | FACTS | SCOUT<k> | SYNTH | VER-<batch> | WRITER; round <N>; follow-up f<k> if any
 Context:   read $EVIDENCE/r<N>/dispatch-context.md first (Env, Approved, Builds, Agents, Cores, GPU, Mutation, Scope)
 Read:      lanes, verifiers: $SKILL/lanes/common.md, findings.md, policy.md, then <brief path>.
            Scouts, SYNTH: lanes/common.md, lanes/orient.md. WRITER: report.md *REPORT.md*, policy.md
-Inputs:    under $EVIDENCE/r<N>/: PIN.md; pr/body.md or intent.md; CONTEXT.md and the area
+Inputs:    under $EVIDENCE/r<N>/: PIN.md; facts.md; pr/body.md or intent.md; CONTEXT.md and the area
            files for its areas (verifier: the areas of its findings' Where paths);
            packets/<LANE>.md; LEDGER.md rows in scope (round 2 on).
            Scout: area, slug, changed paths, prior area file or none. SYNTH: orient/*.md.
@@ -284,7 +296,8 @@ or a grouped row) and why. Re-dispatch a non-conforming report once, naming the 
    wins; an `N/A` owner lane is a vacuous `PASS`), a `file ORCH process ...` line for each
    `FAIL` (`BLOCKING`) and `UNVERIFIED` (the tier [policy.md](policy.md) *M-rules* implies), and
    exits 1 when a lane that owns a rule has no such line (non-conforming). Write those filings,
-   each `FAILED` lane's `ORCH` finding and each `STOP:` row into `$EVIDENCE/r<N>/lanes/ORCH.md` in the lane
+   each `FAILED` lane's `ORCH` finding, each fact of `facts.md` whose `Proposed:` line names a finding (kind, tier; the
+   fact's `Source:` is its Proof) and each `STOP:` row into `$EVIDENCE/r<N>/lanes/ORCH.md` in the lane
    report format (`ORCH-p<n>`, Kind `process`).
 2. `ledger.py ids "$EVIDENCE" <N>` assigns final `<LANE>-<n>` IDs (all `CORR<k>` share
    `CORR-<n>`), writes `ID-MAP.md` ([report.md](report.md) *Final IDs*) and adds a candidate

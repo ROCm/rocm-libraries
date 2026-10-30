@@ -42,7 +42,7 @@ one to `IMPORTANT` or above, also run step 3.
      binary, run the mutant under that configuration or return `UNVERIFIED`. If none does, run no mutant: return
      `CONFIRMED` only on that link-graph evidence plus the absence of any registered test that exercises the path, and say
      in **Proof** that no mutant ran.
-4. Set the verdict and the tier you can defend; `PARTIAL` states the narrower claim.
+4. Set the verdict and the tier you can defend (a magnitude claim you cannot measure stays `UNVERIFIED` at its reported tier: [../findings.md](../findings.md) *Verdicts*); `PARTIAL` states the narrower claim.
 
 ## Handoffs
 
