@@ -597,3 +597,27 @@ def test_the_run_analysis_soft_level_honours_the_alignment_veto():
                 if ta == tb == "T" and any(vetoed):
                     assert s1.tolist() == h1.tolist()
     assert applied > 0
+
+
+# ── kernel guards (TensileLite's TilewrightRanker mirror) ────────────────────
+
+
+def test_guard_bounds_take_the_largest_minimum_per_free_size():
+    from lib.correctness import Guard
+
+    assert fz.guard_bounds([]) == (0, 0)
+    assert fz.guard_bounds([Guard("M", 4)]) == (4, 0)
+    assert fz.guard_bounds(
+        [{"free": "N", "minimum": 2}, Guard("M", 4), {"free": "N", "minimum": 8}]
+    ) == (4, 8)
+
+
+@pytest.mark.parametrize("bounds", [(4, 0), (0, 4), (4, 4), (2, 8), (0, 0)])
+def test_the_guard_mirror_denies_exactly_below_a_minimum(bounds):
+    """The truth table TilewrightRanker::guardDenies gives for M and N of 1
+    to 8 (the TensileLite test TilewrightOffersAGuardedKernelOnlyAtOrAbove
+    ItsGuard checks the same table on its side)."""
+    for m in range(1, 9):
+        for n in range(1, 9):
+            want = m < bounds[0] or n < bounds[1]
+            assert fz.guard_denies(m, n, bounds) is want, (m, n)

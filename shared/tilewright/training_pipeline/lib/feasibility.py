@@ -33,6 +33,13 @@ the element widths of the data types that rule lists by name
 (`ALIGNMENT_VETO_DTYPES`); a configuration whose K-contiguous operand has
 another data type cannot set it.
 
+Kernel guards (lib/correctness.py `Guard`) are no rule of the engine's: an
+integration serving a model trained with them leaves a guarded kernel out of
+a problem its guards deny, before the engine ranks and in the analytical
+ranking that fills the remaining slots. `guard_bounds` and `guard_denies`
+mirror TensileLite's TilewrightRanker (its GuardBounds and guardDenies), so
+that picks derived offline leave such a kernel out where it would.
+
 Dtypes are catalog names (`lib.features.normalize_dtype_name`).
 """
 from __future__ import annotations
@@ -84,6 +91,31 @@ _LDS_BITS = {
 }
 
 NON_TEMPORAL = 4
+
+
+# The free sizes a kernel guard reads, by index: M (of A) and N (of B).
+GUARD_FREE_SIZES: Tuple[str, ...] = ("M", "N")
+
+
+def guard_bounds(guards: Iterable[Any]) -> Tuple[int, int]:
+    """(least M, least N) that the guards of one kernel admit, 0 for a free
+    size none of them reads: per free size the largest minimum, as
+    TilewrightRanker merges a kernel's guards. A guard is an object with
+    `free` and `minimum` or a mapping of them."""
+    bounds = [0, 0]
+    for g in guards or ():
+        free = g.get("free") if isinstance(g, Mapping) else getattr(g, "free")
+        minimum = g.get("minimum") if isinstance(g, Mapping) else getattr(g, "minimum")
+        i = GUARD_FREE_SIZES.index(str(free))
+        bounds[i] = max(bounds[i], int(minimum))
+    return bounds[0], bounds[1]
+
+
+def guard_denies(m: int, n: int, bounds: Tuple[int, int]) -> bool:
+    """Whether guards of bounds `bounds` (`guard_bounds`) deny a problem
+    whose free sizes are `m` (of A) and `n` (of B): TilewrightRanker's
+    guardDenies."""
+    return int(m) < int(bounds[0]) or int(n) < int(bounds[1])
 
 
 def rule_bits(dtype: Any) -> int:

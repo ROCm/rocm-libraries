@@ -300,7 +300,7 @@ def test_alignment_veto_defects_and_unknown_bits_are_rejected():
     rule."""
     from test_v3 import LARGE, v3_bundle, write
 
-    assert mlrec._V3_SERVING_FLAGS_KNOWN == 0x7FF
+    assert mlrec._V3_SERVING_FLAGS_KNOWN == 0xFFF
     assert mlrec.V3_ALIGNMENT_VETO == 0x200
     data = write(v3_bundle(labels=[LARGE], serving={"alignment_veto": VETO}))
     h = mlrec._v3_header(data, len(data))

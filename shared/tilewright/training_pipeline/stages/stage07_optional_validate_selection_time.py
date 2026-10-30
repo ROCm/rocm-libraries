@@ -83,9 +83,15 @@ Pick parity (one run per yaml, `requested_solution_num: 1`, with
     the run's stage04 data), against the fastest timed kernel; a pick with
     only a skip row is a miss under --pick-measurement timed (lib/evaluate.py),
     a pick without any row is counted apart (the runtime then ran a later
-    kernel whose predicates pass). Timings enriched with another hipBLASLt
-    build are read with their solution indices mapped to this library's by
-    the kernel ids their kernels.json records (lib/kernel_identity.py).
+    kernel whose predicates pass). The pick log names the engine's top-1
+    before TensileLite passes over a kernel the guards of a model trained
+    with kernel guards deny, so such a pick costs the position the runtime
+    served, the next one the engine ranks that the guards admit
+    (`passed_over`). The pool of a model the deploy did not flag leaves the
+    guarded kernels out whole, as the runtime does. Timings enriched with
+    another hipBLASLt build are read with their solution indices mapped to
+    this library's by the kernel ids their kernels.json records
+    (lib/kernel_identity.py).
 
 Order parity (one more run per yaml with `requested_solution_num:
 stage07.parity_top_k`, 8 by default): the runtime's top-1 at that request
@@ -858,6 +864,39 @@ def compare_orders(
     }
 
 
+def passed_over(
+    pool: Sequence[Mapping[str, Any]],
+    cpp: Sequence[Mapping[str, Any]],
+    rank: Any,
+) -> Dict[Key, Optional[int]]:
+    """{problem: the pool position the runtime served} of the pick-log
+    lines (`cpp`) whose top-1 is a kernel of `pool` its guards deny for the
+    problem (`POOL_GUARDS`, a model trained with kernel guards): the pick
+    log names the engine's top-1 before TensileLite's ranker passes over the
+    denied kernels, asking the engine for one more scored kernel per denied
+    one, and serves the first that remains. `rank(keys, depth)` gives, per
+    problem of `keys`, the engine's ranking (pool positions of the scored
+    kernels) of a request of `depth`; None when the guards deny every one,
+    and the analytical ranking serves the problem."""
+    guarded = ev.guarded_positions(pool)
+    if not guarded:
+        return {}
+    denied_of: Dict[Key, set] = {}
+    for p in cpp:
+        key = tuple(p["key"])
+        denied = ev.denied_positions(guarded, key[0], key[1])
+        if key not in denied_of and int(p["top1_index"]) in denied:
+            denied_of[key] = denied
+    by_depth: Dict[int, List[Key]] = defaultdict(list)
+    for key, denied in denied_of.items():
+        by_depth[1 + len(denied)].append(key)
+    out: Dict[Key, Optional[int]] = {}
+    for depth, keys in sorted(by_depth.items()):
+        for key, ranked in zip(keys, rank(keys, depth)):
+            out[key] = next((i for i in ranked if i not in denied_of[key]), None)
+    return out
+
+
 def runtime_selection(
     problems: Sequence[Mapping[str, Any]],
     cpp: Sequence[Mapping[str, Any]],
@@ -865,10 +904,14 @@ def runtime_selection(
     timings: Mapping[Key, Mapping[str, Any]],
     pick_measurement: str,
     bootstrap: int = 0,
+    served: Optional[Mapping[Key, Optional[int]]] = None,
 ) -> Dict[str, Any]:
     """Selection efficiency of the runtime's top-1 picks (pick-log
     `top1_index`, a pool position) against the bench timings of the same
-    problems (`lib.evaluate.load_timings`)."""
+    problems (`lib.evaluate.load_timings`). A problem of `served`
+    (`passed_over`: its top-1 is below its guards) costs the position the
+    runtime served instead (`n_passed_over`), and is counted apart when the
+    analytical ranking served it (`n_passed_over_to_origami`)."""
     by_key: Dict[Key, Mapping[str, Any]] = {}
     for p in cpp:
         by_key.setdefault(tuple(p["key"]), p)
@@ -886,6 +929,13 @@ def runtime_selection(
             continue
         g = timings.get(key)
         idx = int(pick["top1_index"])
+        if served is not None and key in served:
+            counts["n_passed_over"] += 1
+            at = served[key]
+            if at is None:
+                counts["n_passed_over_to_origami"] += 1
+                continue
+            idx = int(at)
         if g is None:
             counts["n_without_timings"] += 1
             continue
@@ -917,6 +967,8 @@ def runtime_selection(
         "n_without_timings": counts.get("n_without_timings", 0),
         "n_top1_without_row": counts.get("n_top1_without_row", 0),
         "n_outside_the_pool": counts.get("n_outside_the_pool", 0),
+        "n_passed_over": counts.get("n_passed_over", 0),
+        "n_passed_over_to_origami": counts.get("n_passed_over_to_origami", 0),
         "sel_eff": ev.geomean(ratios),
         "sel_eff_ci95": None if ci is None else [math.exp(ci[0]), math.exp(ci[1])],
         "percentiles": {
@@ -934,10 +986,12 @@ def paired_selection(
     timings: Mapping[Key, Mapping[str, Any]],
     pick_measurement: str,
     bootstrap: int = 0,
+    served: Optional[Mapping[Key, Optional[int]]] = None,
 ) -> Dict[str, Any]:
     """[reference] The runtime's ML-on top-1 picks (pick-log `top1_index`, a
-    pool position) and its picks with tilewright off (`origami`: problem ->
-    solution index), each costed against the bench timings of its problem as
+    pool position, or the position of `served`, as `runtime_selection` reads
+    it) and its picks with tilewright off (`origami`: problem -> solution
+    index), each costed against the bench timings of its problem as
     `runtime_selection` costs a pick, and paired problem by problem by
     lib/evaluate.py `summarize` (`paired`: the problems where both picks have
     a cost). `per_problem` names both picks by signature."""
@@ -968,8 +1022,11 @@ def paired_selection(
             continue
         timed, screened = ev.measurements(g)
         on: Optional[int] = None
-        if pick is not None and 0 <= int(pick["top1_index"]) < len(pool):
-            on = int(pool[int(pick["top1_index"])]["sol_idx_global"])
+        at = None if pick is None else int(pick["top1_index"])
+        if at is not None and served is not None and key in served:
+            at = served[key]
+        if at is not None and 0 <= at < len(pool):
+            on = int(pool[at]["sol_idx_global"])
         on_runs, on_us, miss = (
             ev.pick_cost(on, timed, screened, None, pick_measurement)
             if on is not None
@@ -1492,6 +1549,9 @@ class Context:
     )
     cells: Dict[str, Dict[Key, str]] = field(default_factory=dict)
     picks: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    # Per yaml, the positions the runtime served for picks below their
+    # guards (`passed_over`).
+    served: Dict[str, Dict[Key, Optional[int]]] = field(default_factory=dict)
     _pool: Optional[List[Dict[str, Any]]] = None
     n_blocked: int = 0
     _identity: Optional[Any] = None
@@ -1507,10 +1567,15 @@ class Context:
     def served_blocklist(self) -> Optional[Any]:
         """The kernels the runtime leaves out: those of the validated bundle's
         own blocklist (`blocklist`, from its deploy record), else of the
-        config's (a deploy record from before blocklist sidecars)."""
-        if self.blocklist is not None:
-            return self.blocklist
-        return config_blocklist(self.cfg)
+        config's (a deploy record from before blocklist sidecars); a model
+        the deploy did not flag as trained with kernel guards is served
+        without the guarded kernels, whole."""
+        found = (
+            self.blocklist if self.blocklist is not None else config_blocklist(self.cfg)
+        )
+        if found is not None and not self.record.get("kernel_guards"):
+            return found.whole()
+        return found
 
     def pool(self) -> List[Dict[str, Any]]:
         """The library's kernel pool, in the order the runtime ranks it,
@@ -1994,6 +2059,17 @@ def run_parity(
         ctx.fail(f"{tag}: {p}")
     try:
         py = _offline_picks(ctx, entries)
+        by_key = {entry_key(e): e for e in entries}
+
+        def rank(keys: Sequence[Key], depth: int) -> List[List[int]]:
+            got = _offline_picks(
+                ctx, [by_key[k] for k in keys], min_scored=depth, with_ranking=True
+            )
+            return [list(p.get("ranked") or []) for p in got]
+
+        ctx.served[tag] = passed_over(
+            ctx.pool(), [p for p in log.picks if tuple(p["key"]) in by_key], rank
+        )
     except Exception as e:
         ctx.fail(f"{tag}: offline ranking failed: {e!r}")
         return {"ok": False, "diag_ok": diag_ok, "error": repr(e)}
@@ -2015,6 +2091,7 @@ def run_parity(
         ctx.timings(keys),
         ctx.pick_measurement,
         ctx.bootstrap,
+        ctx.served.get(tag),
     )
     result["runtime_selection"] = sel
     rate = result["match_rate"]
@@ -2209,6 +2286,7 @@ def run_origami_picks(
         ctx.timings(keys),
         ctx.pick_measurement,
         ctx.bootstrap,
+        ctx.served.get(tag),
     )
     rows = ctx.serving_rows()
     kinds: Dict[str, int] = defaultdict(int)

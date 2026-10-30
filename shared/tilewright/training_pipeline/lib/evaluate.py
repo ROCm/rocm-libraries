@@ -48,6 +48,18 @@ see `attach_plan`), which the runtime may run.
     that column use the tested row with the lowest bench rank);
   * a GEMM with neither is not evaluable and is only counted.
 
+A pool kernel with guards (lib/correctness.py, `POOL_GUARDS`) is served as
+TensileLite serves it (`served_pool`). A model trained with kernel guards
+(MLREC_v3 serving flag `kernel_guards`, `serves_kernel_guards`) is served it
+only where its guards admit the problem's free sizes: it takes no part in
+the pick of a GEMM its guards deny, the ranking asks for as many more scored
+configs as it leaves out and walks past it, as TensileLite's ranker does
+(lib/feasibility.py `guard_denies`), and the Origami fallback passes over
+its rows there. Any other model never reads the guards: the blocklist
+sidecar leaves the kernel out of its pool whole, and of its fallback.
+`top1_picks` reports the engine's own ranking, which the engine's pick log
+records, without the guards' step.
+
 Per-GEMM selection efficiency is winner_us / pick_us with winner_us the
 fastest tested solution; aggregates are geometric means. Paired statistics
 compare the deployed pick with the Origami pick on the GEMMs that have both;
@@ -82,12 +94,14 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import (
     Any,
+    Collection,
     Dict,
     Iterable,
     List,
     Mapping,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Union,
 )
@@ -99,6 +113,8 @@ from . import hipblaslt_launch, mlrec, ui
 from . import kernel_identity as ki
 from . import repeats
 from .grid import cell_key
+from .correctness import POOL_GUARDS
+from .feasibility import guard_bounds, guard_denies
 from .hardware import DATATYPE_NAME, DATATYPE_VALUE, ArchConstants, DeviceHardware
 from .subcells import (
     assign_subcell,
@@ -447,7 +463,49 @@ def _kernel(c: Mapping[str, Any]) -> Dict[str, Any]:
         kw["attributes"] = dict(c["attributes"])
     if c.get("kernel_name"):
         kw["kernel_id"] = ki.kernel_id(c)
+    if c.get(POOL_GUARDS):
+        kw[POOL_GUARDS] = [dict(g) for g in c[POOL_GUARDS]]
     return kw
+
+
+def guarded_positions(pool: Sequence[Mapping[str, Any]]) -> Dict[int, Tuple[int, int]]:
+    """{pool position: guard bounds (lib/feasibility.py `guard_bounds`)}
+    of the pool's kernels with guards (`POOL_GUARDS`)."""
+    return {
+        i: guard_bounds(k[POOL_GUARDS])
+        for i, k in enumerate(pool)
+        if k.get(POOL_GUARDS)
+    }
+
+
+def denied_positions(
+    guarded: Mapping[int, Tuple[int, int]], m: int, n: int
+) -> Set[int]:
+    """The positions of `guarded` (`guarded_positions`) whose guards deny
+    free sizes `m` and `n`."""
+    return {i for i, b in guarded.items() if guard_denies(m, n, b)}
+
+
+def serves_kernel_guards(header: Mapping[str, Any]) -> bool:
+    """Whether a model (its `mlrec.read_header`) is served with the kernel
+    guards of its library: an MLREC_v3 model trained with them (serving flag
+    `kernel_guards`), the only model TensileLite reads the guards sidecar
+    for."""
+    return bool((header.get("serving") or {}).get("kernel_guards"))
+
+
+def served_pool(
+    pool: Sequence[Mapping[str, Any]], guards: bool
+) -> List[Mapping[str, Any]]:
+    """`pool` as TensileLite ranks it for a model: with `guards` (a model
+    trained with kernel guards, `serves_kernel_guards`) every kernel, its
+    guarded ones (`POOL_GUARDS`) left out per problem where their guards
+    deny it; without, the guarded kernels left out whole, as the blocklist
+    sidecar names them (lib/correctness.py `Blocklist.whole`). Positions
+    are those of the result."""
+    if guards:
+        return list(pool)
+    return [k for k in pool if not k.get(POOL_GUARDS)]
 
 
 def build_pools(
@@ -973,11 +1031,19 @@ class GemmResult:
         return d
 
 
-def origami_candidate(gemm: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
+def origami_candidate(
+    gemm: Mapping[str, Any], excluded: Collection[int] = ()
+) -> Optional[Mapping[str, Any]]:
     """The candidate Origami picks at runtime (see the module docstring).
     `is_origami_pick` is None on candidates read from CSVs without the
-    column."""
-    cands = list(gemm.get("candidates", ()))
+    column. The rows of the solutions `excluded` count as absent, as the
+    rows of a blocked kernel are: the integration leaves those kernels out
+    of the Origami ranking it falls back to."""
+    cands = [
+        c
+        for c in gemm.get("candidates", ())
+        if int(c.get("sol_idx_global", -1)) not in excluded
+    ]
     flagged = [c for c in cands if c.get("is_origami_pick")]
     if flagged:
         return flagged[0]
@@ -1085,12 +1151,14 @@ def evaluate_model(
     measurement of a solution is its timed rows of that solution index,
     else its skip rows, merged by the median (`measurements`; the loader
     merged them by the run's rule already); `off_list_sel_eff` as in
-    `pick_cost`, or per GEMM context (`OffListCharge`). A model served with
-    the drift fallback (lib/drift_fallback.py) is refused (ValueError, naming
-    the cells) on a pool that serves a cell degraded, such as one built from
-    a GEMM's measured candidates rather than the library's pool, whose
-    rankings would not be the deployed ones; an evaluation over a library
-    pool passes `allow_drift` to measure the degraded rankings, and
+    `pick_cost`, or per GEMM context (`OffListCharge`). Each pool is served
+    as TensileLite serves it to the model (`served_pool`), so positions are
+    those of the served pool. A model served with the drift fallback
+    (lib/drift_fallback.py) is refused (ValueError, naming the cells) on a
+    pool that serves a cell degraded, such as one built from a GEMM's
+    measured candidates rather than the library's pool, whose rankings
+    would not be the deployed ones; an evaluation over a library pool
+    passes `allow_drift` to measure the degraded rankings, and
     `Evaluation.degraded_cells` names the cells."""
     if pick_measurement not in EVALUATION_PICK_MEASUREMENTS:
         raise ValueError(
@@ -1106,7 +1174,19 @@ def evaluate_model(
     tree = split_tree_from_labels(labels)
     label_set = set(labels)
     pools = build_pools(gemms) if pools is None else pools
-    poolset = PoolSet(tw, model, pools, hardware)
+    with_guards = serves_kernel_guards(header)
+    # The guarded kernels a model without guards is served without, whole.
+    left_out = {
+        key: {int(k["sol_idx_global"]) for k in pool if k.get(POOL_GUARDS)}
+        for key, pool in pools.items()
+        if not with_guards
+    }
+    poolset = PoolSet(
+        tw,
+        model,
+        {key: served_pool(pool, with_guards) for key, pool in pools.items()},
+        hardware,
+    )
     degraded: Dict[str, List[str]] = {}
     if "drift_keep_ppm" in header["serving"]:
         for key in poolset.pools:
@@ -1130,6 +1210,7 @@ def evaluate_model(
     }
     hw = make_hardware(tw, hardware)
     trained = {key: trained_mask(pool, header) for key, pool in poolset.pools.items()}
+    guards = {key: guarded_positions(pool) for key, pool in poolset.pools.items()}
     results: List[GemmResult] = []
     n_mismatch = 0
     for gi, g in enumerate(gemms):
@@ -1161,6 +1242,11 @@ def evaluate_model(
         )
         key = pool_key(g)
         pos_of = positions.get(key, {})
+        pool = poolset.pools.get(key) or []
+        denied = denied_positions(guards.get(key) or {}, m, n)
+        excluded = {int(pool[i]["sol_idx_global"]) for i in denied}
+        excluded |= left_out.get(key, set())
+        # Origami's own pick, which reads no sidecar.
         oc = origami_candidate(g)
         if oc is not None:
             res.origami_sol_idx = int(oc.get("sol_idx_global", -1))
@@ -1168,13 +1254,17 @@ def evaluate_model(
             res.origami_index = pos_of.get(res.origami_sol_idx)
         cs = poolset.candidate_set(key)
         if cs is not None:
-            pool = poolset.pools[key]
             ranked = cs.rank(
-                problem_obj, hw, int(min_scored), make_context(tw, context_of(g))
+                problem_obj,
+                hw,
+                int(min_scored) + len(denied),
+                make_context(tw, context_of(g)),
             )
             for rank, r in enumerate(ranked):
                 if not r.scored:
                     break
+                if int(r.config_index) in denied:
+                    continue
                 res.n_scored += 1
                 if res.served_by is not None:
                     continue
@@ -1196,10 +1286,13 @@ def evaluate_model(
                     mask = trained.get(key)
                     if mask is not None:
                         res.pick_untrained = not mask[res.pick_index]
-        if res.served_by is None and res.origami_us is not None:
-            res.pick_sol_idx, res.pick_us = res.origami_sol_idx, res.origami_us
-            res.pick_index = res.origami_index
-            res.served_by = "origami_fallback"
+        if res.served_by is None:
+            fallback = origami_candidate(g, excluded) if excluded else oc
+            if fallback is not None:
+                res.pick_sol_idx = int(fallback.get("sol_idx_global", -1))
+                res.pick_us = float(fallback["us"])
+                res.pick_index = pos_of.get(res.pick_sol_idx)
+                res.served_by = "origami_fallback"
         results.append(res)
     return Evaluation(
         results=results,
@@ -1367,13 +1460,17 @@ def top1_picks(
     with_ranking: bool = False,
 ) -> List[Dict[str, Any]]:
     """Top-1 config of each problem (dicts with m, n, k, batch_count, the
-    hipBLASLt type strings and transA/transB) over one library pool, as the
-    engine ranks it. `top1_index` is its pool position (`top1_index=` of the
+    hipBLASLt type strings and transA/transB) over one library pool, served
+    to the model as TensileLite serves it (`served_pool`), as the engine
+    ranks it. `top1_index` is its position in that pool (`top1_index=` of the
     engine's pick log), `cell` the serving cell label (`leaf=`), `n_configs`
     the pool size; `top1_sig` and `sol_idx_global` describe the kernel. With
     `with_ranking`, `ranked` lists the pool positions of every scored config
-    in rank order."""
+    in rank order. The guards of a model trained with them play no further
+    part: this is the engine's ranking, as its pick log records it, not the
+    integration's served pick."""
     tw = tw or tilewright_module()
+    pool = served_pool(pool, serves_kernel_guards(mlrec.read_header(data)))
     model = load_model_bytes(data, tw)
     cs = candidate_set(tw, model, pool, hardware)
     hw = make_hardware(tw, hardware)

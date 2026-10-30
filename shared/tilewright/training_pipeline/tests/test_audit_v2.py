@@ -1903,3 +1903,39 @@ def test_the_canary_floor_keeps_a_reading_a_few_microseconds_off(tmp_path):
     old = {"settings": {"repetitions": 5}, "bench": {}}
     assert v2.settings_of(old)["canary_tolerance_us"] == 0.0
     assert audit_v2_script.SETTING_FLAGS["canary_tolerance_us"] is float
+
+
+def test_a_set_holds_a_guarded_kernel_only_on_gemms_its_guards_admit(tmp_path):
+    """protocol v2 plans no set with a guarded kernel (lib/correctness.py)
+    on a GEMM whose free sizes its guards deny, whatever its rows or the
+    picks say, and keeps it on the others."""
+    from lib import correctness as cx
+
+    low, high = (2, 64, 64, 1), (8, 64, 64, 1)
+    gemms = {
+        (al.EXCLUSIVE, s): _g(s, [(1, 10.0), (2, 10.2), (3, 20.0)]) for s in (low, high)
+    }
+    lines = {
+        s: f"- {{M: {s[0]}, N: {s[1]}, K: {s[2]}, batch_count: {s[3]}}}"
+        for s in (low, high)
+    }
+    parts = {al.EXCLUSIVE: [[low, high]]}
+    picks = v2.Model(
+        "m1", "1" * 64, "x", {(al.EXCLUSIVE, low): 2, (al.EXCLUSIVE, high): 2}
+    )
+    v2.plan(
+        tmp_path,
+        gemms=gemms,
+        lines=lines,
+        parts=parts,
+        new_models=[picks],
+        guarded={2: (cx.Guard("M", 4),)},
+    )
+    sets = v2.current_sets(tmp_path)
+    assert sets[(al.EXCLUSIVE, low)] == [1] and sets[(al.EXCLUSIVE, high)] == [1, 2]
+    p0 = json.loads((tmp_path / "gen_000" / "plan.json").read_text())
+    by_shape = {
+        tuple(e["shape"]): e for part in p0["groups"][al.EXCLUSIVE] for e in part
+    }
+    assert 2 not in line_solution_list(by_shape[low]["line"])
+    assert by_shape[low]["picks"] == {} and by_shape[high]["picks"] == {"m1": 2}

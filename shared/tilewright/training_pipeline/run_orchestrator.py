@@ -1042,6 +1042,7 @@ SCHEMA = _section(
                 "blocklist": _str(nullable=True),
                 "static_check": _bool(default=True),
                 "custom_kernels": _str(nullable=True),
+                "guard_unguarded_custom": _bool(default=False),
             }
         ),
         "hazards": _section(
@@ -2429,7 +2430,8 @@ PINNED_WHEN_SET = ("library", "planner.top_k_round0")
 # nothing, which is what a pin written before they existed means, so that
 # the runs and audit directories produced before them keep their pins: the
 # re-reads' offsets, the canaries' absolute floors (0: none), the
-# hand-written kernels' sources (none: the build's), the held-out
+# hand-written kernels' sources (none: the build's) and their guards (off:
+# an unguarded one is blocked whole), the held-out
 # lists (none) and the CU budget granule (32, lib/contexts.py's
 # PREDATING_GRANULE, not its default, which may change), and the weak-cell
 # budget's keys at their defaults (factors of 1: every leaf draws
@@ -2439,6 +2441,7 @@ PINNED_UNLESS_NEUTRAL: Dict[str, Any] = {
     "bench.canary.tolerance_us": 0.0,
     "audit.canary_tolerance_us": 0.0,
     "correctness.custom_kernels": None,
+    "correctness.guard_unguarded_custom": False,
     "audit.held_out": [],
     "deploy.drift_fallback.keep": None,
     "contexts.granule": ctxlib.PREDATING_GRANULE,
@@ -2655,6 +2658,26 @@ def _executable_errors(path: Path, what: str) -> List[str]:
     if not os.access(path, os.X_OK):
         return [f"{what} is not executable: {path}"]
     return []
+
+
+def _guard_module_errors() -> List[str]:
+    """A tilewright module that predates the kernel guards flag, which the
+    models of a run with correctness.guard_unguarded_custom declare and it
+    refuses ('unknown serving flags')."""
+    try:
+        from lib import evaluate
+
+        tilewright = evaluate.tilewright_module()
+    except Exception:
+        return []
+    if hasattr(getattr(tilewright, "ModelInfo", None), "kernel_guards"):
+        return []
+    return [
+        "correctness.guard_unguarded_custom: the tilewright module predates the "
+        "kernel guards flag (its ModelInfo has no kernel_guards), so it refuses "
+        "the models stage06 flags; reinstall it with `pip install "
+        "shared/tilewright/python`"
+    ]
 
 
 def _tilewright_errors(catalog: str = "v2", alignment_veto: bool = False) -> List[str]:
@@ -3407,6 +3430,13 @@ def _correctness_config_checks(
     sources = cfg_get(cfg, "correctness.custom_kernels")
     if sources and not Path(sources).is_dir():
         errors.append(f"correctness.custom_kernels: {sources} is no directory")
+    if cfg_get(cfg, "correctness.guard_unguarded_custom") and not cfg_get(
+        cfg, "correctness.static_check"
+    ):
+        errors.append(
+            "correctness.guard_unguarded_custom: the guards come from the static "
+            "check; turn correctness.static_check on"
+        )
     devices = cfg_get(cfg, "correctness.devices") or []
     if len(set(devices)) != len(devices):
         errors.append("correctness.devices: duplicate device indices")
@@ -4146,7 +4176,8 @@ def stage07_capabilities(
     floor every model declares too, and with deploy.alignment_veto of the
     veto every staged model declares), with a bank the setting that serves
     it and, when the run leaves kernels of the pool out (`blocks_pool`), the
-    reader of the blocklist sidecar stage06 ships."""
+    reader of the blocklist sidecar stage06 ships, and with
+    correctness.guard_unguarded_custom the reader of its guards sidecar."""
     catalog = str(cfg_get(cfg, "train.catalog") or "v2")
     out = {
         f"MLREC_{catalog}": f"cannot load MLREC_{catalog} models (train.catalog "
@@ -4174,6 +4205,12 @@ def stage07_capabilities(
         out[cxlib.SIDECAR_SUFFIX] = (
             "does not read the blocklist sidecar of a model: the runtime would "
             "rank the kernels the run leaves out of the pool"
+        )
+    if cfg_get(cfg, "correctness.guard_unguarded_custom"):
+        out[cxlib.GUARDS_SUFFIX] = (
+            "does not read the guards sidecar of a model trained with kernel "
+            "guards (correctness.guard_unguarded_custom), which it refuses: the "
+            "runtime would rank with Origami"
         )
     return out
 
@@ -4561,6 +4598,8 @@ def preflight(
         str(cfg_get(cfg, "train.catalog") or "v2"),
         cfg_get(cfg, "deploy.alignment_veto") is not None,
     )
+    if cfg_get(cfg, "correctness.guard_unguarded_custom"):
+        errs += _guard_module_errors()
     return list(dict.fromkeys(errs))
 
 
@@ -6541,6 +6580,24 @@ class Pipeline:
         )
         blocked = known_blocklist(self.cfg)
         return {int(k["sol_idx_global"]) for k in pool.kernels if blocked.blocks(k)}
+
+    def guarded_indices(self) -> Dict[int, Tuple[cxlib.Guard, ...]]:
+        """{solution: guards} of the pool's kernels (library and bank) that
+        the invocation's blocklist guards (`known_blocklist`): kernels no
+        bench runs on a shape their guards deny."""
+        pool = bank_pool.config_pool(
+            self.cfg,
+            self.paths.library_dir,
+            self.stem,
+            self.devices[0],
+            apply_blocklist=False,
+        )
+        blocked = known_blocklist(self.cfg)
+        return {
+            int(k["sol_idx_global"]): blocked.guards(k)
+            for k in pool.kernels
+            if blocked.guards(k)
+        }
 
     def bank_stems(self) -> List[str]:
         """Library files of the planner's bank besides the pool's own
@@ -8550,9 +8607,10 @@ class Pipeline:
     def build_stage07_library(self, vdir: Path, record: Path) -> Path:
         """`stage07_library_dir`: links to the bench library's files with the
         staged model of the deploy record `record` in place of the
-        library stem's weights and the blocklist sidecar staged with it in
-        place of the stem's (lib/pool_libdir.py `build_serving_libdir`), so
-        its kernels, solution indices and pool are the run's own."""
+        library stem's weights and the blocklist and guards sidecars staged
+        with it in place of the stem's (lib/pool_libdir.py
+        `build_serving_libdir`), so its kernels, solution indices and pool
+        are the run's own."""
         from lib.pool_libdir import build_serving_libdir
 
         rec = _read_json(record) or {}
@@ -8571,6 +8629,12 @@ class Pipeline:
                 f"{record} names the blocklist sidecar {sidecar.name}, which is "
                 f"not next to the staged model {model}"
             )
+        guards = model.parent / str(target["guards"]) if target.get("guards") else None
+        if guards is not None and not guards.is_file():
+            raise ValueError(
+                f"{record} names the guards sidecar {guards.name}, which is not "
+                f"next to the staged model {model}"
+            )
         dst = self.stage07_library_dir(vdir)
         summary = build_serving_libdir(
             self.paths.library_dir,
@@ -8580,6 +8644,7 @@ class Pipeline:
             model,
             rec.get("sha256"),
             blocklist=sidecar,
+            guards=guards,
         )
         for line in summary["malformed_rows"]:
             ui.warn(
@@ -9410,6 +9475,7 @@ class AuditRun:
         self.started = time.time()
         self.shapes_this_run = 0
         self._blocked: Optional[Set[int]] = None
+        self._guarded: Optional[Dict[int, Tuple[cxlib.Guard, ...]]] = None
 
     # ── bookkeeping ──
 
@@ -9448,6 +9514,17 @@ class AuditRun:
             self._blocked = self.p.blocked_indices()
         return self._blocked
 
+    def denied(self, shape: Tuple[int, ...]) -> Set[int]:
+        """The solutions of the pool whose guards (its blocklist's) deny
+        `shape` ((M, N, ...)); the guards read once."""
+        if self._guarded is None:
+            self._guarded = self.p.guarded_indices()
+        return {
+            s
+            for s, guards in self._guarded.items()
+            if not cxlib.guards_admit(guards, shape[0], shape[1])
+        }
+
     def record_blocklist(self, m: Dict[str, Any]) -> None:
         """Name the blocklist of this invocation in the manifest `m`: its
         latest (`blocklist`) and every one applied (`blocklists`), by
@@ -9479,10 +9556,11 @@ class AuditRun:
         self, root: Path, units: Mapping[str, Any], planned: Mapping[str, str]
     ) -> Dict[str, str]:
         """The kernels of `planned` ({solution: digest}) that every line of
-        every part of `units` under `root` listed: those a blocklist left out
-        of a part (one it named after the part was planned) are not benched
-        on its GEMMs, so no generation records them."""
-        from lib.bench_yaml import line_solution_list, read_bench_lines
+        every part of `units` under `root` listed, but where their guards deny
+        the line's shape (`denied`): those a blocklist left out of a part (one
+        it named after the part was planned) are not benched on its GEMMs, so
+        no generation records them."""
+        from lib.bench_yaml import line_solution_list, read_bench_lines, shape_of_line
 
         keep = {int(s) for s in planned}
         for label, unit in units.items():
@@ -9491,7 +9569,9 @@ class AuditRun:
                 for ln in read_bench_lines(own) if own.is_file() else []:
                     listed = line_solution_list(ln)
                     if listed is not None:
-                        keep &= set(listed)
+                        shape = shape_of_line(ln)
+                        out = self.denied(shape) if shape is not None else set()
+                        keep &= set(listed) | out
         return {s: d for s, d in planned.items() if int(s) in keep}
 
     def current_identity(self) -> Optional["ki.LibraryIdentity"]:
@@ -9810,7 +9890,10 @@ class AuditRun:
                     continue
                 ui.banner(f"audit {what}  {label}  part {i + 1}/{len(unit['parts'])}")
                 lines = [
-                    without_kernels(line_of(label, i, tuple(s)), self.blocked())
+                    without_kernels(
+                        line_of(label, i, tuple(s)),
+                        self.blocked() | self.denied(tuple(s)),
+                    )
                     for s in shapes
                 ]
                 rc = self.bench_part(part, lines, wrapper)

@@ -774,3 +774,212 @@ def test_library_pools_carry_the_kernel_attributes(tmp_path):
             f: info[f] for f in ev.CONFIG_FIELDS
         }
     assert [k["attributes"]["workgroup_mapping"] for k in pool] == [8, 4]
+
+
+GUARDED_LABEL = "Tiny|Large|LargeK|Bnone"
+M_GUARD = [{"free": "M", "minimum": 4}]
+
+
+def timed_gemm(m, origami=None):
+    """A GEMM of the guard tests: every kernel of POOL timed, Origami's pick
+    `origami` (default the first)."""
+    first = POOL[0]["sol_idx_global"] if origami is None else origami
+    cands = [dict(k, us=10.0 + i, rank=i, is_skip=False) for i, k in enumerate(POOL)]
+    for c in cands:
+        c["is_origami_pick"] = c["sol_idx_global"] == first
+    return gemm(m, 1024, 2048, cands)
+
+
+def guarding(pool, sid):
+    """`pool` with kernel `sid` marked with a guard of M >= 4, as a pool built
+    with a guarded blocklist carries it."""
+    return [dict(k, guards=M_GUARD) if k["sol_idx_global"] == sid else k for k in pool]
+
+
+def v3_model(guards, view_keys=None):
+    """An MLREC_v3 model of GUARDED_LABEL, flagged as trained with kernel
+    guards when `guards`; `view_keys` its cell's whitelist."""
+    from test_v3 import v3_bundle, write
+
+    bundle = v3_bundle(labels=[GUARDED_LABEL])
+    if view_keys is not None:
+        bundle["models"][GUARDED_LABEL]["view_key_hashes"] = list(view_keys)
+    data = write(bundle)
+    return mlrec.with_kernel_guards(data) if guards else data
+
+
+def served_ranking(tw, model, g, min_scored=1, pool=POOL):
+    """The solutions the engine scores for `g`, best first, over `pool` with
+    the launch plans an evaluation hands it."""
+    cs = ev.candidate_set(tw, model, pool, HW)
+    prob = ev.make_problem(tw, fs.problem_kwargs_from_row(g))
+    ctx = ev.make_context(tw, ev.context_of(g))
+    ranked = cs.rank(prob, ev.make_hardware(tw, HW), min_scored, ctx)
+    return [pool[r.config_index]["sol_idx_global"] for r in ranked if r.scored]
+
+
+def test_a_pick_passes_over_a_guarded_kernel_below_its_guard():
+    """For a model trained with kernel guards a pool kernel with guards is
+    no pick of a GEMM its guards deny: the walk passes over it, asking for
+    one more scored config, as TensileLite's ranker does. Above its guard
+    the evaluation is the unguarded pool's."""
+    tw = pytest.importorskip("tilewright")
+    data = v3_model(guards=True)
+    assert ev.serves_kernel_guards(mlrec.read_header(data))
+    model = tw.load_model_from_memory(data)
+    gemms = [timed_gemm(m) for m in (1, 2, 3, 4, 5, 8)]
+    top = served_ranking(tw, model, gemms[1])[0]
+    guarded = guarding(POOL, top)
+    assert ev.guarded_positions(guarded) == {
+        next(i for i, k in enumerate(POOL) if k["sol_idx_global"] == top): (4, 0)
+    }
+    key = ev.pool_key(gemms[0])
+    out = ev.evaluate_model(
+        data, gemms, hardware=HW, pools={key: guarded}, pick_measurement="timed"
+    )
+    plain = ev.evaluate_model(
+        data, gemms, hardware=HW, pools={key: POOL}, pick_measurement="timed"
+    )
+    assert out.n_pool_configs == {"|".join(key): len(POOL)}
+    for g, r, p in zip(gemms, out.results, plain.results):
+        below = g["m"] < 4
+        ranked = served_ranking(tw, model, g, 1 + below)
+        assert r.pick_sol_idx == next(s for s in ranked if not (below and s == top))
+        if below:
+            assert r.pick_sol_idx != top and r.served_by == "model"
+        else:
+            assert (r.pick_sol_idx, r.pick_us, r.n_scored) == (
+                p.pick_sol_idx,
+                p.pick_us,
+                p.n_scored,
+            )
+    assert any(r.pick_sol_idx == top for r in plain.results if r.m < 4)
+    # top1_picks is the engine's own ranking, the guards play no part.
+    picks = ev.top1_picks(data, gemms, guarded, hardware=HW)
+    assert [p["sol_idx_global"] for p in picks] == [
+        r.pick_sol_idx for r in plain.results
+    ]
+
+
+def test_a_guard_on_a_whitelist_of_one_kernel_reaches_the_second_tier():
+    """The one more scored config a denied one asks for is what reaches the
+    engine's second tier: when the cell's whitelist keeps only the guarded
+    kernel, a top-1 request below its guard is served by the model's best
+    other config, not by the Origami fallback."""
+    tw = pytest.importorskip("tilewright")
+    below, above = timed_gemm(2), timed_gemm(8)
+    for k in POOL:
+        view = fs.v3_view_key(k, k.get("attributes"), fs.DEFAULT_ATTRIBUTE_SPEC)
+        data = v3_model(guards=True, view_keys=[fs.view_key_hash(view)])
+        model = tw.load_model_from_memory(data)
+        one = [k["sol_idx_global"]]
+        if served_ranking(tw, model, below) == one == served_ranking(tw, model, above):
+            break
+    else:
+        pytest.fail("no kernel of POOL makes a whitelist of one feasible kernel")
+    sid = k["sol_idx_global"]
+    tiers = served_ranking(tw, model, below, 2)
+    assert tiers[0] == sid and len(tiers) > 1
+    out = ev.evaluate_model(
+        data,
+        [below, above],
+        hardware=HW,
+        pools={ev.pool_key(below): guarding(POOL, sid)},
+        pick_measurement="timed",
+    )
+    low, high = out.results
+    assert (low.served_by, low.pick_sol_idx) == ("model", tiers[1])
+    assert (high.served_by, high.pick_sol_idx) == ("model", sid)
+
+
+@pytest.mark.parametrize("version", [2, 3])
+def test_a_model_without_kernel_guards_is_served_without_the_guarded_kernel(
+    version,
+):
+    """TensileLite reads the guards sidecar only for a model trained with
+    kernel guards; the blocklist sidecar, which names a guarded kernel too,
+    leaves it out of any other model's pools whole. Such a model evaluated
+    with a pool that keeps the kernel, marked with its guards, picks what it
+    picks with the pool and the data without the kernel, above the guard as
+    below it, its top-1 picks and the Origami fallback included; Origami's
+    own pick, which reads no sidecar, stays."""
+    tw = pytest.importorskip("tilewright")
+    if version == 2:
+        data = model_bytes([GUARDED_LABEL])[1]
+        unscored = {"m": 64, "n": 64, "k": 256}
+    else:
+        data = v3_model(guards=False)
+        # A schedule the model does not list: a CU budget outside its range
+        # is ranked at the nearest budget in it, so it never leaves a GEMM
+        # unscored.
+        unscored = {"schedule": "auto"}
+    assert not ev.serves_kernel_guards(mlrec.read_header(data))
+    model = tw.load_model_from_memory(data)
+    top = served_ranking(tw, model, timed_gemm(8))[0]
+    other = next(k["sol_idx_global"] for k in POOL if k["sol_idx_global"] != top)
+    gemms = [timed_gemm(m) for m in (1, 2, 3, 4, 5, 8)]
+    gemms.append(dict(timed_gemm(8, origami=top), **unscored))
+    gemms.append(dict(timed_gemm(8, origami=other), **unscored))
+    without = [k for k in POOL if k["sol_idx_global"] != top]
+    rows_without = [
+        dict(g, candidates=[c for c in g["candidates"] if c["sol_idx_global"] != top])
+        for g in gemms
+    ]
+    key = ev.pool_key(gemms[0])
+
+    def served(e):
+        return [
+            (r.pick_sol_idx, r.pick_us, r.pick_index, r.pick_rank, r.served_by)
+            + (r.n_scored, r.miss, r.model_cell)
+            for r in e.results
+        ]
+
+    def evaluated(d, rows, pool):
+        return ev.evaluate_model(
+            d, rows, hardware=HW, pools={key: pool}, pick_measurement="timed"
+        )
+
+    out = evaluated(data, gemms, guarding(POOL, top))
+    alone = evaluated(data, rows_without, without)
+    assert served(out) == served(alone)
+    assert out.n_pool_configs == alone.n_pool_configs == {"|".join(key): len(without)}
+    assert all(r.pick_sol_idx != top for r in out.results)
+    assert top in [r.pick_sol_idx for r in evaluated(data, gemms, POOL).results]
+    *_, origami_picks_it, origami_other = out.results
+    assert origami_picks_it.origami_sol_idx == top
+    assert origami_picks_it.served_by is None
+    assert (origami_other.served_by, origami_other.pick_sol_idx) == (
+        "origami_fallback",
+        other,
+    )
+    assert ev.top1_picks(data, gemms, guarding(POOL, top), hardware=HW) == (
+        ev.top1_picks(data, gemms, without, hardware=HW)
+    )
+    if version == 3:
+        # The same model flagged serves the kernel above its guard, from its
+        # own ranking and from the Origami fallback.
+        res = evaluated(mlrec.with_kernel_guards(data), gemms, guarding(POOL, top))
+        assert res.results[5].pick_sol_idx == top
+        assert all(r.pick_sol_idx != top for r in res.results[:3])
+        assert (res.results[6].served_by, res.results[6].pick_sol_idx) == (
+            "origami_fallback",
+            top,
+        )
+
+
+def test_origami_candidate_passes_over_the_rows_it_is_told_to():
+    """Rows of excluded solutions count as absent, as a blocked kernel's
+    dropped rows do: a flagged pick of one leaves the GEMM without Origami's
+    pick, and without the column the next tested row by rank stands in."""
+    cands = [
+        dict(POOL[0], us=5.0, rank=0, is_skip=False, is_origami_pick=True),
+        dict(POOL[3], us=4.0, rank=1, is_skip=False, is_origami_pick=False),
+    ]
+    first, other = POOL[0]["sol_idx_global"], POOL[3]["sol_idx_global"]
+    flagged = gemm(64, 64, 256, cands)
+    assert ev.origami_candidate(flagged)["sol_idx_global"] == first
+    assert ev.origami_candidate(flagged, {other})["sol_idx_global"] == first
+    assert ev.origami_candidate(flagged, {first}) is None
+    column_free = gemm(64, 64, 256, [dict(c, is_origami_pick=None) for c in cands])
+    assert ev.origami_candidate(column_free)["sol_idx_global"] == first
+    assert ev.origami_candidate(column_free, {first})["sol_idx_global"] == other

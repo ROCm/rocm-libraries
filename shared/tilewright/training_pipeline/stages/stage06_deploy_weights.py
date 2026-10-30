@@ -30,6 +30,21 @@ filtered the bundle's labels (`blocklist.trained_with`, stage05's record,
 which is warned about when it differs) and each target's sidecar
 (`targets[].blocklist_sha256`).
 
+When the blocklist guards some of those kernels (lib/correctness.py
+`Entry.guards`: blocked only below their guards, which the run trained them
+above), the sidecar still names them, so that no integration or model
+without guards serves them, and the guards sidecar
+`<library stem>.tilewright.guards` (`served_guards`) is staged, installed and
+removed beside it, and the model file is flagged as trained with kernel
+guards (MLREC_v3 serving flag, lib/mlrec.py `with_kernel_guards`) before
+anything scores it: an engine without guard support refuses it, and
+TensileLite serves it with the guards only (`targets[].guards_sha256`,
+`kernel_guards`). A model deploys with the flag exactly when the guards
+sidecar ships with it; stage05 records the flag in the bundle when its pool
+kept a guarded kernel, so that its evaluations served the model as
+TensileLite serves it, and a bundle whose record disagrees with the deploy
+is warned about.
+
 Installing is all-or-nothing: every file is written under a temporary name,
 synced and renamed into place, indexes last; a failure at any point,
 including a failed build or a copy the build placed wrongly, restores the
@@ -876,6 +891,7 @@ def install_md(
     n_splits: int,
     file_format: str = "MLREC_v2",
     blocked: Sequence[str] = (),
+    guarded: bool = False,
 ) -> str:
     files = "\n".join(
         f"    {weights_rel(t.dir) / t.weights_name}\n"
@@ -885,6 +901,10 @@ def install_md(
     if blocked:
         files += "\n" + "\n".join(
             f"    {weights_rel(t.dir) / cx.sidecar_name(t.stem)}" for t in stem_by_dir
+        )
+    if guarded:
+        files += "\n" + "\n".join(
+            f"    {weights_rel(t.dir) / cx.guards_name(t.stem)}" for t in stem_by_dir
         )
     stems = "\n".join(f"    {t.dir}: {t.stem}" for t in stem_by_dir)
     if blocked:
@@ -907,6 +927,20 @@ hipBLASLt build that holds a copy of it:
 
 TensileLite leaves the kernels such a file names out of every pool it ranks
 with the model, kernels this model was trained to pick among them.
+"""
+    if guarded:
+        sidecar += f"""
+Copy each `{cx.GUARDS_SUFFIX}` file next to its model too: the model was
+trained with kernel guards, so TensileLite serves the kernels it guards above
+their guards only, and refuses the model (ranking with Origami) without it;
+a hipBLASLt that predates kernel guards refuses the model. It replaces the
+file a former deploy of the same stem left there.
+"""
+    else:
+        sidecar += f"""
+This bundle ships no `{cx.GUARDS_SUFFIX}` file; remove the one a former
+deploy of the same stem left next to the model (a model trained without
+guards never reads it).
 """
     return f"""# tilewright model bundle
 
@@ -954,6 +988,7 @@ def stage_bundle(
     with_index: bool,
     install_text: str,
     blocked: Sequence[str] = (),
+    guards: Optional[Mapping[str, Sequence[cx.Guard]]] = None,
 ) -> Dict[str, str]:
     if staging.exists():
         shutil.rmtree(staging)
@@ -967,6 +1002,8 @@ def stage_bundle(
             (d / INDEX_NAME).write_text(t.index_text)
         if blocked:
             (d / cx.sidecar_name(t.stem)).write_text(cx.sidecar_text(t.stem, blocked))
+        if guards:
+            (d / cx.guards_name(t.stem)).write_text(cx.guards_text(t.stem, guards))
         staged[t.dir] = str(d / t.weights_name)
     (staging / "INSTALL.md").write_text(install_text)
     return staged
@@ -988,18 +1025,20 @@ def blocklist_names(
     cfg: Mapping[str, Any], stem: str, library_dir: Optional[Path], device: int
 ) -> List[str]:
     """The names of the kernels of the served pool (table and bank, read
-    from `library_dir`) that the config's blocklist names; every name of the
-    blocklist when the library cannot be read."""
+    from `library_dir`) that the config's blocklist names, the guarded ones
+    too (`Blocklist.whole`); every name of the blocklist when the library
+    cannot be read."""
     blocklist = cx.config_blocklist(cfg)
     if not blocklist:
         return []
+    whole = blocklist.whole()
     if library_dir is not None:
         try:
             pool = bank_pool.config_pool(
                 cfg, library_dir, stem, device, apply_blocklist=False
             )
             return sorted(
-                {str(k["kernel_name"]) for k in pool.kernels if blocklist.blocks(k)}
+                {str(k["kernel_name"]) for k in pool.kernels if whole.blocks(k)}
             )
         except (OSError, ValueError, RuntimeError) as e:
             ui.warn(
@@ -1008,6 +1047,15 @@ def blocklist_names(
                 f"sidecar lists every kernel of the blocklist",
             )
     return sorted(blocklist.names)
+
+
+def served_guards(
+    cfg: Mapping[str, Any], blocked: Sequence[str]
+) -> Dict[str, Tuple[cx.Guard, ...]]:
+    """{name: guards} of the sidecar names `blocked` that the config's
+    blocklist guards: the guards sidecar's lines, which the model is served
+    with."""
+    return cx.sidecar_guards(cx.config_blocklist(cfg), blocked)
 
 
 # ── build ───────────────────────────────────────────────────────────────────
@@ -1053,11 +1101,16 @@ def build_library_dir(build_dir: Path, target: Target) -> Path:
 
 
 def verify_colocated(
-    build_dir: Path, targets: List[Target], sha: str, blocked: Sequence[str] = ()
+    build_dir: Path,
+    targets: List[Target],
+    sha: str,
+    blocked: Sequence[str] = (),
+    guards: Optional[Mapping[str, Sequence[cx.Guard]]] = None,
 ) -> Tuple[List[str], List[str]]:
     """(problems, checked target dirs) of the weights the build placed next
-    to its libraries, and of their blocklist sidecars when `blocked` names
-    kernels. A target the build has no library directory for is skipped."""
+    to its libraries, of their blocklist sidecars when `blocked` names
+    kernels, and of their guards sidecars when `guards` holds guards. A
+    target the build has no library directory for is skipped."""
     problems = []
     checked = []
     for t in targets:
@@ -1084,6 +1137,16 @@ def verify_colocated(
                 f"{sidecar} is missing or differs from the deployed blocklist (a "
                 f"hipBLASLt whose build does not copy {cx.SIDECAR_SUFFIX} files "
                 f"next to its libraries serves the blocked kernels)"
+            )
+        guards_file = lib_dir / cx.guards_name(t.stem)
+        if guards and (
+            not guards_file.is_file()
+            or guards_file.read_text() != cx.guards_text(t.stem, guards)
+        ):
+            problems.append(
+                f"{guards_file} is missing or differs from the deployed guards (a "
+                f"hipBLASLt whose build does not copy {cx.GUARDS_SUFFIX} files "
+                f"next to its libraries cannot serve the model)"
             )
     if not checked:
         ui.warn(
@@ -1909,6 +1972,35 @@ def _deploy(
     data = mlrec.write_model(
         bundle, None, arch, hardware.arch_constants(arch), dtype, provenance
     )
+    blocked = blocklist_names(
+        cfg, stem, library_dir or _config_library_dir(cfg, stem), hardware_device
+    )
+    guards = served_guards(cfg, blocked)
+    evaluated_guarded = bool((bundle.get("serving") or {}).get("kernel_guards"))
+    if guards:
+        if bytes(data[:8]) != mlrec.MAGIC_V3:
+            raise DeployError(
+                "the blocklist guards kernels of the pool, which only an MLREC_v3 "
+                "model is served with (set train.catalog: v3)"
+            )
+        data = mlrec.with_kernel_guards(data)
+    elif evaluated_guarded:
+        # TensileLite refuses a flagged model without its guards sidecar.
+        data = mlrec.without_kernel_guards(data)
+    if evaluated_guarded != bool(guards) and not quiet:
+        ui.warn(
+            "guards",
+            "the bundle's own evaluations served "
+            + (
+                "guarded kernels above their guards, but the blocklist guards no "
+                "kernel of the served pool: the model deploys without the kernel "
+                "guards flag, and TensileLite leaves those kernels out whole"
+                if evaluated_guarded
+                else "the pool without kernel guards, but the blocklist guards "
+                "kernels of the served pool: the model deploys with the kernel "
+                "guards flag, and TensileLite serves them above their guards"
+            ),
+        )
     parsed = mlrec.read_model(data)
     n_cells, n_splits = len(parsed["cells"]), len(parsed["splits"])
     if [c["label"] for c in parsed["cells"]] != labels:
@@ -2046,14 +2138,18 @@ def _deploy(
         )
 
     targets = plan_targets(deploy_targets(cfg), repo)
-    blocked = blocklist_names(
-        cfg, stem, library_dir or _config_library_dir(cfg, stem), hardware_device
-    )
     if blocked and not quiet:
         ui.info(
             "blocklist",
             f"{len(blocked)} kernel(s) of the pool compute wrong results; the "
             f"sidecar {cx.sidecar_name(stem)} names them",
+        )
+    if guards and not quiet:
+        ui.info(
+            "blocklist",
+            f"{len(guards)} of them only below their guards; the model is "
+            f"flagged as trained with kernel guards and served with "
+            f"{cx.guards_name(stem)}",
         )
     applied = cx.config_blocklist(cfg)
     trained = bundle.get("blocklist")
@@ -2083,8 +2179,10 @@ def _deploy(
             n_splits=n_splits,
             file_format=parsed["format"],
             blocked=blocked,
+            guarded=bool(guards),
         ),
         blocked=blocked,
+        guards=guards,
     )
     tree = {r.cell: r for r in parsed["splits"]}
     manifest = {
@@ -2212,7 +2310,18 @@ def _deploy(
             ),
             "digest": cx.names_digest(applied),
             "trained_with": bundle.get("blocklist"),
+            **(
+                {
+                    "guarded": len(guards),
+                    "guards_sha256": sha256_bytes(
+                        cx.guards_text(stem, guards).encode()
+                    ),
+                }
+                if guards
+                else {}
+            ),
         },
+        **({"kernel_guards": True} if guards else {}),
         "applied": False,
         "built": False,
         "colocation": None,
@@ -2231,6 +2340,16 @@ def _deploy(
                     sha256_bytes(cx.sidecar_text(t.stem, blocked).encode())
                     if blocked
                     else None
+                ),
+                **(
+                    {
+                        "guards": cx.guards_name(t.stem),
+                        "guards_sha256": sha256_bytes(
+                            cx.guards_text(t.stem, guards).encode()
+                        ),
+                    }
+                    if guards
+                    else {}
                 ),
             }
             for t in targets
@@ -2277,6 +2396,11 @@ def _deploy(
                     txn.put(sidecar, cx.sidecar_text(t.stem, blocked).encode())
                 else:
                     txn.remove(sidecar)
+                guards_file = t.weights_dir / cx.guards_name(t.stem)
+                if guards:
+                    txn.put(guards_file, cx.guards_text(t.stem, guards).encode())
+                else:
+                    txn.remove(guards_file)
             for t in targets:
                 assert t.weights_dir is not None and t.index_text is not None
                 txn.put(t.weights_dir / INDEX_NAME, t.index_text.encode())
@@ -2291,6 +2415,7 @@ def _deploy(
                     txn.guard(build_library_dir(build_dir, t) / INDEX_NAME)
                     txn.guard(build_library_dir(build_dir, t) / t.weights_name)
                     txn.guard(build_library_dir(build_dir, t) / cx.sidecar_name(t.stem))
+                    txn.guard(build_library_dir(build_dir, t) / cx.guards_name(t.stem))
                 cmd = ["cmake", "--build", str(build_dir), "--target", build_target]
                 if build_jobs:
                     cmd += ["--parallel", str(build_jobs)]
@@ -2303,7 +2428,13 @@ def _deploy(
                             t.stem
                         )
                         stale.unlink(missing_ok=True)
-                problems, checked = verify_colocated(build_dir, targets, sha, blocked)
+                if not guards:
+                    for t in targets:
+                        stale = build_library_dir(build_dir, t) / cx.guards_name(t.stem)
+                        stale.unlink(missing_ok=True)
+                problems, checked = verify_colocated(
+                    build_dir, targets, sha, blocked, guards
+                )
                 if problems:
                     raise DeployError("; ".join(problems))
                 record["built"] = bool(checked)

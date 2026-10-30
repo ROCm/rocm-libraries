@@ -711,3 +711,66 @@ def test_planning_models_rank_without_the_drift_fallback():
     assert served.cs.degraded_cells() == []
     for shape in ((2048, 2048, 2048, 1), (64, 4096, 512, 1), (8, 8, 8, 1)):
         assert served.rank(shape) == plain.rank(shape)
+
+
+# ── kernel guards ────────────────────────────────────────────────────────────
+
+
+def _guarded_pool():
+    """pool_kernels() with kernel 100 guarded on M (at least 4), as a pool
+    built with a guarded blocklist carries it."""
+    pool = pool_kernels()
+    pool[0] = dict(pool[0], guards=[{"free": "M", "minimum": 4}])
+    return pool
+
+
+def test_a_guarded_kernel_is_feasible_only_where_its_guards_admit_the_shape():
+    cat, feas = make(_guarded_pool())
+    assert cat.guards == {100: (4, 0)}
+    for m in range(1, 9):
+        for n in range(1, 9):
+            shape = (m, n, 64, 1)
+            assert feas.ok(shape, 100) == (m >= 4), shape
+            assert (100 in feas.feasible(shape, cat.pool_ids)) == (m >= 4)
+            assert cat.denied(shape) == (set() if m >= 4 else {100})
+    # Other kernels' feasibility is the plain rules'.
+    _, plain = make(pool_kernels())
+    for shape in ((1, 1, 64, 1), (3, 256, 64, 1), (64, 64, 64, 1)):
+        assert [s for s in feas.feasible(shape, cat.pool_ids) if s != 100] == [
+            s for s in plain.feasible(shape, cat.pool_ids) if s != 100
+        ]
+
+
+def test_no_plan_lists_a_guarded_kernel_below_its_guard():
+    cat, feas = make(_guarded_pool())
+    # Exhaustive shapes: every kernel the bench supports where the guard
+    # admits the shape, an explicit list without the kernel where it denies.
+    shapes = [(m, 256, 64, 1) for m in (1, 2, 3, 4, 8)]
+    plans, _ = pl.build_plan(shapes, feas, PARAMS, ranker=None)
+    by_shape = {sp.shape: sp for sp in plans}
+    for shape in shapes:
+        sp = by_shape[shape]
+        if shape[0] >= 4:
+            assert sp.kernels is None
+        else:
+            assert sp.role == "exhaustive" and 100 not in sp.kernels
+            assert sp.kernels == [s for s in cat.pool_ids + cat.bank_ids if s != 100]
+    # Planned shapes: a ranker that ranks it first never gets it listed there.
+    ranker = FixedRanker([100] + cat.pool_ids)
+    params = replace(PARAMS, min_coverage=3, families_top_f=8)
+    plans, _ = pl.build_plan(shapes, feas, params, ranker=ranker)
+    for sp in plans:
+        assert (100 in sp.kernels) == (sp.shape[0] >= 4), sp.shape
+    # Seeds are benched exhaustively, with the same lists.
+    plans, _ = pl.build_plan(shapes, feas, params, ranker=ranker, seeds=shapes[:2])
+    assert all(100 not in sp.kernels for sp in plans[:2])
+
+
+def test_an_exhaustive_list_without_a_guarded_kernel_must_fit_one_bench_line(
+    monkeypatch,
+):
+    cat, feas = make(_guarded_pool())
+    monkeypatch.setattr(pl, "MAX_BENCH_LIST", 10)
+    with pytest.raises(ValueError, match="exceed the 10 a bench line lists"):
+        pl.plan_exhaustive((2, 256, 64, 1), feas)
+    assert pl.plan_exhaustive((4, 256, 64, 1), feas).kernels is None

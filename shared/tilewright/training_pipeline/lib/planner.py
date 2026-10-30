@@ -24,9 +24,12 @@ explicit kernel list built from a ranker:
 Only kernels that pass the engine's gates for the shape (LDS fit and the
 soft rules of `lib.feasibility` the run's models serve with) are planned,
 and of an alias group (lib/kernel_identity.py) only its first member in
-pool order, the one the runtime serves (`Catalog`). Lists hold at most
-`max_list` kernels (`MAX_BENCH_LIST`, the bench's limit for one problem, at
-most).
+pool order, the one the runtime serves (`Catalog`). A kernel with guards
+(lib/correctness.py `POOL_GUARDS`) is planned only for the shapes its
+guards admit, and a shape benched exhaustively that a guard denies gets an
+explicit list of every other kernel (`plan_exhaustive`), so that no bench
+runs a guarded kernel below its guard. Lists hold at most `max_list`
+kernels (`MAX_BENCH_LIST`, the bench's limit for one problem, at most).
 
 Rankers order the candidate kernels of one shape:
   * NeighborsRanker: normalised latencies (winner_us / us) of exhaustively
@@ -58,6 +61,8 @@ from typing import Sequence, Set, Tuple
 from . import features as fs
 from . import kernel_identity as ki
 from .feasibility import (
+    guard_bounds,
+    guard_denies,
     in_family_region,
     non_temporal_availability,
     non_temporal_families,
@@ -153,6 +158,13 @@ class Catalog:
     families: Dict[Tuple[int, ...], List[int]]
     nt_available: Tuple[bool, bool]
     aliases: Dict[int, int] = field(default_factory=dict)
+    # {solution: guard bounds} of the kernels with guards (POOL_GUARDS).
+    guards: Dict[int, Tuple[int, int]] = field(default_factory=dict)
+
+    def denied(self, shape: ShapeKey) -> Set[int]:
+        """The kernels whose guards deny `shape`."""
+        m, n = shape[0], shape[1]
+        return {s for s, b in self.guards.items() if guard_denies(m, n, b)}
 
     @classmethod
     def build(
@@ -185,6 +197,11 @@ class Catalog:
             families=families,
             nt_available=non_temporal_availability(kernels[s] for s in pool_ids),
             aliases=aliases,
+            guards={
+                s: guard_bounds(kernels[s]["guards"])
+                for s in pool_ids + bank_ids
+                if kernels[s].get("guards")
+            },
         )
 
 
@@ -233,7 +250,8 @@ class ProblemType:
 class Feasibility:
     """Kernels of a catalog that pass the engine's gates for a shape: the LDS
     gate and the `passes_gates` soft rules in `rules` (default: v2's, with
-    `non_temporal_rule`). A model must be planned with the rules it serves
+    `non_temporal_rule`), and that no guard of theirs denies it
+    (`Catalog.guards`). A model must be planned with the rules it serves
     with (`feasibility.soft_rules`), or deployment picks kernels no list
     has."""
 
@@ -274,6 +292,9 @@ class Feasibility:
         return self._ok(problem, sid)
 
     def _ok(self, problem: Mapping[str, Any], sid: int) -> bool:
+        bounds = self.catalog.guards.get(sid)
+        if bounds is not None and guard_denies(problem["m"], problem["n"], bounds):
+            return False
         nt_a, nt_b = self.catalog.nt_available
         return passes_gates(
             problem,
@@ -534,8 +555,24 @@ def select_seeds(
 def plan_exhaustive(
     shape: ShapeKey, feas: Feasibility, role: str = "exhaustive"
 ) -> ShapePlan:
-    ok = feas.feasible(shape, feas.catalog.pool_ids)
-    return ShapePlan(shape=shape, role=role, kernels=None, n_feasible=len(ok))
+    """Every kernel the bench supports (`kernels` None), or, when guards
+    deny the shape some kernels, an explicit list of every other pool and
+    bank kernel in catalog order; ValueError when that list exceeds
+    MAX_BENCH_LIST, where only `algo_method: 1`, which benches every kernel
+    of the problem type, would bench them."""
+    cat = feas.catalog
+    ok = feas.feasible(shape, cat.pool_ids)
+    denied = cat.denied(shape)
+    if not denied:
+        return ShapePlan(shape=shape, role=role, kernels=None, n_feasible=len(ok))
+    kept = [s for s in cat.pool_ids + cat.bank_ids if s not in denied]
+    if len(kept) > MAX_BENCH_LIST:
+        raise ValueError(
+            f"shape {'x'.join(map(str, shape))}: guards deny {len(denied)} "
+            f"kernel(s) and the other {len(kept)} exceed the {MAX_BENCH_LIST} a "
+            f"bench line lists"
+        )
+    return ShapePlan(shape=shape, role=role, kernels=kept, n_feasible=len(ok))
 
 
 def plan_shape(

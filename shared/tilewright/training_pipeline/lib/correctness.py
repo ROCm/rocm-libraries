@@ -62,6 +62,19 @@ and 8 validate it with (`bundle_blocklist`). A blocked kernel
     `blocklist_key`, as a Blocklist does), so a key whose served
     member is blocked is served by its next member and a key whose members
     are all blocked is no candidate, as in the pipeline.
+
+A guarded entry (`Entry.guards`, from the gate's static check under
+`correctness.guard_unguarded_custom`) blocks its kernel only for problems
+whose free sizes its guards deny (`Guard`: the free size M or N and the
+least value admitted): such a kernel stays in the pools built from the
+config, marked with its guards (`POOL_GUARDS`), and every stage that plans,
+benches, labels or ranks a problem leaves it out where a guard denies it
+(`guards_admit`), as TensileLite does with the guards sidecar
+`<library stem>.tilewright.guards` (`GUARDS_SUFFIX`) that stage06 stages
+beside the blocklist sidecar for a model it flags as trained with guards.
+The blocklist sidecar still names the kernel, so an integration or a model
+without guards leaves it out whole (`Blocklist.whole`). A name some entry
+blocks whole is never narrowed by a guard of another.
 """
 from __future__ import annotations
 
@@ -70,7 +83,7 @@ import hashlib
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import (
     Any,
@@ -88,11 +101,16 @@ from typing import (
 from . import dat
 from . import kernel_identity as ki
 from . import ui
+from .feasibility import GUARD_FREE_SIZES, guard_bounds, guard_denies
 from .fs import atomic_write_text
 
 SCHEMA = "tilewright_blocklist_v1"
 BLOCKLIST_FILE = "blocklist.json"
 SIDECAR_SUFFIX = ".tilewright.blocklist"
+GUARDS_SUFFIX = ".tilewright.guards"
+# The key of a pool kernel's guards (`Guard.to_dict` each) in the pools that
+# keep guarded kernels (lib/library_pool.py `without_blocked`).
+POOL_GUARDS = "guards"
 LIST_SUFFIX = ".tsv"
 LISTS_DIR = Path(__file__).resolve().parent.parent / "blocklists"
 # The name tokens, an abbreviated parameter and its value, that builds of
@@ -124,25 +142,99 @@ def _dropped(text: str) -> str:
 
 
 @dataclass(frozen=True)
+class Guard:
+    """The least free size `free` (M, the free size of A, or N, that of B)
+    a guarded kernel is served for: `minimum`, at least 2."""
+
+    free: str
+    minimum: int
+
+    def __post_init__(self) -> None:
+        if self.free not in GUARD_FREE_SIZES:
+            raise ValueError(f"a guard reads M or N, not {self.free!r}")
+        if isinstance(self.minimum, bool) or not isinstance(self.minimum, int):
+            raise ValueError(
+                f"a guard's minimum must be a whole number: {self.minimum!r}"
+            )
+        if not 2 <= self.minimum < 10**9:
+            raise ValueError(
+                f"a guard's minimum must be from 2 to 999999999: {self.minimum}"
+            )
+
+    @property
+    def index(self) -> int:
+        """The free index the guard reads (0: M, 1: N)."""
+        return GUARD_FREE_SIZES.index(self.free)
+
+    def admits(self, m: int, n: int) -> bool:
+        return (int(m), int(n))[self.index] >= self.minimum
+
+    def text(self) -> str:
+        return f"{self.free} >= {self.minimum}"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"free": self.free, "minimum": self.minimum}
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> "Guard":
+        if not isinstance(d, Mapping):
+            raise ValueError(f"a guard is a mapping of free and minimum, not {d!r}")
+        return cls(free=str(d.get("free")), minimum=d.get("minimum"))  # type: ignore
+
+
+def guards_admit(guards: Iterable[Any], m: int, n: int) -> bool:
+    """Whether every guard of `guards` (Guard objects or their dicts, as a
+    pool kernel's POOL_GUARDS holds them) admits a problem whose free sizes
+    are `m` (of A) and `n` (of B), as TensileLite decides it
+    (lib/feasibility.py `guard_denies`)."""
+    if not guards:
+        return True
+    return not guard_denies(m, n, guard_bounds(guards))
+
+
+def kernel_admits(kernel: Mapping[str, Any], m: int, n: int) -> bool:
+    """Whether a pool kernel's guards (POOL_GUARDS; none: every problem)
+    admit free sizes `m` and `n`."""
+    return guards_admit(kernel.get(POOL_GUARDS) or (), m, n)
+
+
+def _guards_of(raw: Any) -> Tuple[Guard, ...]:
+    """The guards of an entry's `guards` field, sorted by free size; one per
+    free size (ValueError otherwise)."""
+    out: Dict[str, Guard] = {}
+    for g in raw or ():
+        guard = g if isinstance(g, Guard) else Guard.from_dict(g)
+        if guard.free in out:
+            raise ValueError(f"an entry guards {guard.free} twice")
+        out[guard.free] = guard
+    return tuple(out[f] for f in GUARD_FREE_SIZES if f in out)
+
+
+@dataclass(frozen=True)
 class Entry:
     """One blocked kernel: its `name`, why (`reason`: a class of a list, or
-    what the gate saw), its kernel id and signature where known, and the
-    file or check it comes from (`source`)."""
+    what the gate saw), its kernel id and signature where known, the file or
+    check it comes from (`source`), and its `guards` when it is blocked only
+    below them (none: blocked whole)."""
 
     name: str
     reason: str = ""
     kernel_id: Optional[str] = None
     signature: Optional[str] = None
     source: str = ""
+    guards: Tuple[Guard, ...] = ()
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "name": self.name,
             "kernel_id": self.kernel_id,
             "signature": self.signature,
             "reason": self.reason,
             "source": self.source,
         }
+        if self.guards:
+            out["guards"] = [g.to_dict() for g in self.guards]
+        return out
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any], source: str = "") -> "Entry":
@@ -157,34 +249,97 @@ class Entry:
             kernel_id=str(kid) if kid else None,
             signature=str(sig) if sig else None,
             source=str(d.get("source") or source),
+            guards=_guards_of(d.get("guards")),
         )
 
 
 class Blocklist:
-    """Blocked kernels, the first entry of a name kept. A name blocks every
-    kernel of its canonical name (`lib.dat.canonical_name`), its alias
-    group (lib/kernel_identity.py) whole, and every kernel whose name has
-    the same `blocklist_key`; a kernel id only by its name hash."""
+    """Blocked kernels, the first entry of a name kept: an entry that blocks
+    it whole wins over a guarded one, and guarded entries of one name merge
+    into the first with the stricter guards (`_merged_guards`), whatever
+    their order. A name blocks every kernel of its canonical name
+    (`lib.dat.canonical_name`), its alias group (lib/kernel_identity.py)
+    whole, and every kernel whose name has the same `blocklist_key`; a
+    kernel id only by its name hash. A guarded entry (`Entry.guards`) blocks
+    those kernels only where its guards deny a problem (`guards`, `admits`);
+    `blocks` and its kin answer for the entries that block whole."""
 
     def __init__(self, entries: Iterable[Entry] = ()) -> None:
         kept: Dict[str, Entry] = {}
         for e in entries:
-            kept.setdefault(e.name, e)
+            have = kept.get(e.name)
+            if have is None or (have.guards and not e.guards):
+                kept[e.name] = e
+            elif have.guards and e.guards:
+                kept[e.name] = replace(
+                    have, guards=_merged_guards(have.guards, e.guards)
+                )
         self.entries: Tuple[Entry, ...] = tuple(kept.values())
         self.names: FrozenSet[str] = frozenset(kept)
         self.canonical: FrozenSet[str] = frozenset(dat.canonical_name(n) for n in kept)
-        self.keys: FrozenSet[str] = frozenset(
-            blocklist_key(n) for n in self.names | self.canonical
-        )
-        self.hashes: FrozenSet[str] = frozenset(
-            ki.name_hash(n) for n in self.names | self.canonical
-        )
+        whole = [n for n, e in kept.items() if not e.guards]
+        whole_names = set(whole) | {dat.canonical_name(n) for n in whole}
+        self.keys: FrozenSet[str] = frozenset(blocklist_key(n) for n in whole_names)
+        self.hashes: FrozenSet[str] = frozenset(ki.name_hash(n) for n in whole_names)
+        # {name key: guards} of the guarded entries no entry blocks whole.
+        self.guard_keys: Dict[str, Tuple[Guard, ...]] = {}
+        self.guard_hashes: Dict[str, Tuple[Guard, ...]] = {}
+        for name, e in kept.items():
+            if not e.guards:
+                continue
+            for n in (name, dat.canonical_name(name)):
+                key = blocklist_key(n)
+                if key not in self.keys:
+                    self.guard_keys[key] = _merged_guards(
+                        self.guard_keys.get(key, ()), e.guards
+                    )
+                h = ki.name_hash(n)
+                if h not in self.hashes:
+                    self.guard_hashes[h] = _merged_guards(
+                        self.guard_hashes.get(h, ()), e.guards
+                    )
 
     def __len__(self) -> int:
         return len(self.entries)
 
     def __bool__(self) -> bool:
         return bool(self.entries)
+
+    @property
+    def guarded_entries(self) -> Tuple[Entry, ...]:
+        return tuple(e for e in self.entries if e.guards)
+
+    def has_guards(self) -> bool:
+        return bool(self.guard_keys)
+
+    def whole(self) -> "Blocklist":
+        """Every entry blocking its kernels whole: what an integration or a
+        model without guards serves with (the blocklist sidecar's lines)."""
+        if not self.guarded_entries:
+            return self
+        return Blocklist(replace(e, guards=()) for e in self.entries)
+
+    def guards(self, kernel: Mapping[str, Any]) -> Tuple[Guard, ...]:
+        """The guards of a kernel (`kernel_dat_info`, or a pool entry that
+        carries its kernel id) that no entry blocks whole; none for a kernel
+        no guarded entry names."""
+        if not self.guard_keys or self.blocks(kernel):
+            return ()
+        name = kernel.get("kernel_name")
+        if name:
+            found: Tuple[Guard, ...] = ()
+            for n in (str(name), ki.canonical_name(kernel)):
+                found = _merged_guards(found, self.guard_keys.get(blocklist_key(n), ()))
+            return found
+        kid = kernel.get("kernel_id")
+        if not kid or ":" not in str(kid):
+            return ()
+        return self.guard_hashes.get(str(kid).rsplit(":", 1)[1], ())
+
+    def admits(self, kernel: Mapping[str, Any], m: int, n: int) -> bool:
+        """Whether a kernel serves a problem whose free sizes are `m` and
+        `n`: no entry blocks it whole and its guards admit them."""
+        return not self.blocks(kernel) and guards_admit(self.guards(kernel), m, n)
 
     def _keyed(self, name: str, canonical: str) -> bool:
         return blocklist_key(name) in self.keys or blocklist_key(canonical) in self.keys
@@ -208,7 +363,17 @@ class Blocklist:
         return self.blocks_id(kernel.get("kernel_id"))
 
     def kept(self, kernels: Iterable[Mapping[str, Any]]) -> List[Any]:
-        return [k for k in kernels if not self.blocks(k)]
+        """The kernels no entry blocks whole; a guarded one as a copy that
+        carries its guards (POOL_GUARDS)."""
+        out: List[Any] = []
+        for k in kernels:
+            if self.blocks(k):
+                continue
+            guards = self.guards(k)
+            out.append(
+                dict(k, **{POOL_GUARDS: [g.to_dict() for g in guards]}) if guards else k
+            )
+        return out
 
     def blocked_indices(
         self,
@@ -235,6 +400,28 @@ class Blocklist:
                 out.add(int(s))
         return out
 
+    def guarded_indices(
+        self,
+        ids: Mapping[int, str],
+        kernels: Optional[Mapping[int, Mapping[str, Any]]] = None,
+    ) -> Dict[int, Tuple[Guard, ...]]:
+        """{solution index: its guards} of the indices of `ids` that name
+        guarded kernels no entry blocks whole, matched as `blocked_indices`
+        matches."""
+        if not self.guard_keys:
+            return {}
+        known = kernels or {}
+        out: Dict[int, Tuple[Guard, ...]] = {}
+        for s, kid in ids.items():
+            kernel = known.get(int(s))
+            if kernel is not None and kernel.get("kernel_name"):
+                guards = self.guards(kernel)
+            else:
+                guards = self.guards({"kernel_id": kid})
+            if guards and not self.blocks_id(kid):
+                out[int(s)] = guards
+        return out
+
     def merged(self, other: "Blocklist") -> "Blocklist":
         return Blocklist(self.entries + other.entries)
 
@@ -244,6 +431,15 @@ class Blocklist:
             **extra,
             "entries": [e.to_dict() for e in self.entries],
         }
+
+
+def _merged_guards(a: Tuple[Guard, ...], b: Tuple[Guard, ...]) -> Tuple[Guard, ...]:
+    """The guards of both, the larger minimum of a free size kept."""
+    best: Dict[str, Guard] = {}
+    for g in (*a, *b):
+        if g.free not in best or g.minimum > best[g.free].minimum:
+            best[g.free] = g
+    return tuple(best[f] for f in GUARD_FREE_SIZES if f in best)
 
 
 def shipped_list(entry: Any) -> bool:
@@ -314,19 +510,36 @@ def list_digests(entries: Iterable[Any]) -> Dict[str, str]:
 
 
 def names_digest(blocklist: Optional[Blocklist]) -> Optional[str]:
-    """sha256 of the kernel names `blocklist` blocks, sorted, one per line;
-    None when it blocks none. Blocklists with one digest leave out the same
-    kernels, whatever files named them."""
+    """sha256 of the kernel names `blocklist` blocks, sorted, one per line,
+    a guarded name followed by a tab and its guards (`Guard.text`, `; `
+    between them); None when it blocks none. Blocklists with one digest
+    leave out the same kernels, whatever files named them."""
     if not blocklist:
         return None
-    text = "".join(f"{n}\n" for n in sorted(blocklist.names))
+    guarded = {e.name: e.guards for e in blocklist.entries if e.guards}
+    text = "".join(
+        (
+            f"{n}\t{'; '.join(g.text() for g in guarded[n])}\n"
+            if n in guarded
+            else f"{n}\n"
+        )
+        for n in sorted(blocklist.names)
+    )
     return "sha256:" + hashlib.sha256(text.encode()).hexdigest()
 
 
 def applied_record(blocklist: Optional[Blocklist]) -> Dict[str, Any]:
     """What a stage records of the blocklist it applied: its `digest`
-    (`names_digest`) and the number of `kernels` it names."""
-    return {"digest": names_digest(blocklist), "kernels": len(blocklist or ())}
+    (`names_digest`) and the number of `kernels` it names, and of those
+    guarded ones the number it serves above their guards (`guarded`, only
+    when there are any)."""
+    out: Dict[str, Any] = {
+        "digest": names_digest(blocklist),
+        "kernels": len(blocklist or ()),
+    }
+    if blocklist is not None and blocklist.guarded_entries:
+        out["guarded"] = len(blocklist.guarded_entries)
+    return out
 
 
 def blocklist_record(path: Any) -> Dict[str, Any]:
@@ -453,14 +666,144 @@ def read_sidecar(path: Any) -> List[str]:
     return out
 
 
-def sidecar_blocklist(path: Any) -> Blocklist:
-    """The kernels a sidecar names (`read_sidecar`), as a Blocklist.
-    ValueError when it cannot be read."""
+def guards_name(stem: str) -> str:
+    return f"{stem}{GUARDS_SUFFIX}"
+
+
+def guards_by_key(
+    guards: Mapping[str, Sequence[Guard]],
+) -> Dict[str, Tuple[Guard, ...]]:
+    """`guards` ({name: guards}) with one name per `blocklist_key`, the first
+    in sorted order, holding the guards of every name of its key merged (the
+    larger minimum of a free size): TensileLite and `read_guards` match a
+    guards line's name by its key and refuse a key and free size guarded
+    twice."""
+    out: Dict[str, Tuple[str, Tuple[Guard, ...]]] = {}
+    for name in sorted(guards):
+        key = blocklist_key(name)
+        first, have = out.get(key, (name, ()))
+        out[key] = (first, _merged_guards(have, tuple(guards[name])))
+    return {name: g for name, g in out.values() if g}
+
+
+def sidecar_guards(
+    blocklist: Optional[Blocklist], names: Iterable[str]
+) -> Dict[str, Tuple[Guard, ...]]:
+    """{name: guards} of the names of `names` (a sidecar's) that a guarded
+    entry of `blocklist` narrows (`Blocklist.guards` by name), one name per
+    `blocklist_key` (`guards_by_key`)."""
+    if blocklist is None or not blocklist.has_guards():
+        return {}
+    out: Dict[str, Tuple[Guard, ...]] = {}
+    for n in names:
+        guards = blocklist.guards({"kernel_name": n})
+        if guards:
+            out[str(n)] = guards
+    return guards_by_key(out)
+
+
+def guards_text(stem: str, guards: Mapping[str, Sequence[Guard]]) -> str:
+    """The guards sidecar of library `stem`: a comment, then per guard a
+    kernel name, its free size and the minimum, tab-separated, sorted by
+    name and free size, one name per `blocklist_key` (`guards_by_key`), as
+    TensileLite reads them."""
+    head = (
+        f"# Kernels of {stem} (and its bank) that tilewright offers only for "
+        f"problems whose free size reaches a minimum, for a model trained with "
+        f"kernel guards: <name> <M or N> <minimum>, one guard per line."
+    )
+    keyed = guards_by_key(guards)
+    lines = [
+        f"{name}\t{g.free}\t{g.minimum}"
+        for name in sorted(keyed)
+        for g in sorted(keyed[name], key=lambda g: g.index)
+    ]
+    return "\n".join([head, *lines]) + "\n"
+
+
+def read_guards(path: Any) -> Dict[str, Tuple[Guard, ...]]:
+    """{kernel name: guards} of a guards sidecar, read as TensileLite reads
+    it: every line but blank ones and `#` comments holds a name, M or N and
+    a minimum of at least 2, separated by blanks, and a name and free size
+    appear once (by `blocklist_key`). ValueError naming the line otherwise,
+    or when the file cannot be read."""
     try:
-        names = read_sidecar(path)
+        text = Path(path).read_text()
+    except OSError as e:
+        raise ValueError(f"cannot read the guards {path}: {e}") from None
+    out: Dict[str, List[Guard]] = {}
+    seen: Set[Tuple[str, str]] = set()
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip(" \t\r")
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split()
+        guard: Optional[Guard] = None
+        if (
+            len(fields) == 3
+            and fields[1] in GUARD_FREE_SIZES
+            and fields[2].isdigit()
+            and fields[2].isascii()
+            and len(fields[2]) <= 9
+        ):
+            try:
+                guard = Guard(fields[1], int(fields[2]))
+            except ValueError:
+                guard = None
+        if guard is None:
+            raise ValueError(
+                f"the guards {path} line {number} is not `<kernel name> <M or N> "
+                f"<minimum of at least 2>`"
+            )
+        if (blocklist_key(fields[0]), guard.free) in seen:
+            raise ValueError(
+                f"the guards {path} line {number} guards the {guard.free} of "
+                f"{fields[0]} again"
+            )
+        seen.add((blocklist_key(fields[0]), guard.free))
+        out.setdefault(fields[0], []).append(guard)
+    return {n: _guards_of(gs) for n, gs in out.items()}
+
+
+def narrowed(
+    blocklist: Blocklist, guards: Mapping[str, Sequence[Guard]], source: str = ""
+) -> Blocklist:
+    """`blocklist` as a model trained with kernel guards is served with the
+    guards `guards` ({kernel name: guards}, `read_guards`): every entry of a
+    name they guard (by `blocklist_key`) blocks it only below them, and a
+    guarded name no entry holds is blocked below its guards too."""
+    guarded = {blocklist_key(n): tuple(g) for n, g in guards.items()}
+    entries = [
+        (
+            replace(e, guards=guarded[blocklist_key(e.name)])
+            if blocklist_key(e.name) in guarded
+            else e
+        )
+        for e in blocklist.entries
+    ]
+    named = {blocklist_key(e.name) for e in blocklist.entries}
+    entries += [
+        Entry(name=n, reason="guards sidecar", source=source, guards=tuple(g))
+        for n, g in guards.items()
+        if blocklist_key(n) not in named
+    ]
+    return Blocklist(entries)
+
+
+def sidecar_blocklist(path: Any, guards_path: Any = None) -> Blocklist:
+    """The kernels a sidecar names (`read_sidecar`), as a Blocklist; with
+    `guards_path`, the guards sidecar of a model trained with kernel guards,
+    each kernel it guards blocked only below its guards, whether or not the
+    blocklist names it, as TensileLite serves such a model (`narrowed`).
+    ValueError when either cannot be read."""
+    try:
+        names = read_sidecar(path) if path is not None else []
     except OSError as e:
         raise ValueError(f"cannot read the blocklist sidecar {path}: {e}") from None
-    return Blocklist(Entry(name=n, reason="sidecar", source=str(path)) for n in names)
+    plain = Blocklist(Entry(name=n, reason="sidecar", source=str(path)) for n in names)
+    if guards_path is None:
+        return plain
+    return narrowed(plain, read_guards(guards_path), str(guards_path))
 
 
 def deployed_blocklist(record: Mapping[str, Any], stem: str) -> Optional[Blocklist]:
@@ -474,10 +817,14 @@ def deployed_blocklist(record: Mapping[str, Any], stem: str) -> Optional[Blockli
     for t in record.get("targets") or []:
         if t.get("library_stem") != stem:
             continue
-        if not t.get("blocklist"):
-            return Blocklist()
         model = Path(str(t.get("staged") or record.get("staged_model") or ""))
-        return sidecar_blocklist(model.parent / str(t["blocklist"]))
+        guards = model.parent / str(t["guards"]) if t.get("guards") else None
+        if not t.get("blocklist") and guards is None:
+            return Blocklist()
+        return sidecar_blocklist(
+            model.parent / str(t["blocklist"]) if t.get("blocklist") else None,
+            guards,
+        )
     return None
 
 

@@ -582,6 +582,7 @@ def plan(
     kernels: Optional[AuditKernels] = None,
     blocked: Iterable[int] = (),
     blocklist: Optional[Mapping[str, Any]] = None,
+    guarded: Optional[Mapping[int, Any]] = None,
 ) -> Optional[int]:
     """Register `new_models` and plan the generation that measures them:
     generation 0 (every GEMM of `gemms`, {(label, shape): exhaustive GEMM},
@@ -592,9 +593,10 @@ def plan(
     library the picks and `gemms` index, the kernel ids are recorded and
     earlier records must name the same kernels (`require_same_build`); with
     `kernels`, earlier records without kernel identities must too. No set
-    holds a solution of `blocked` (a set planned again drops it), and
-    `blocklist`, the record of the blocklist they come from, is the
-    manifest's latest and the new generation's. Returns the new
+    holds a solution of `blocked` (a set planned again drops it), nor one of
+    `guarded` ({solution: guards}, lib/correctness.py) on a GEMM its guards
+    deny, and `blocklist`, the record of the blocklist they come from, is
+    the manifest's latest and the new generation's. Returns the new
     generation's index, or None when every set holds every pick."""
     d = Path(d)
     blocked = {int(k) for k in blocked}
@@ -662,16 +664,24 @@ def plan(
     first = not m["generations"]
 
     def entry(key: Key) -> Dict[str, Any]:
+        from .correctness import guards_admit
+
         g = gemms[key]
+        shape = key[1]
+        out = blocked | {
+            s
+            for s, guards in (guarded or {}).items()
+            if not guards_admit(guards, shape[0], shape[1])
+        }
         cands = candidates(
             g, st["set_tolerance"], st["set_max"], st["set_tolerance_us"]
         )
-        cands = [k for k in cands if k not in blocked]
+        cands = [k for k in cands if k not in out]
         kernels = [
-            k for k in dict.fromkeys([*sets.get(key, []), *cands]) if k not in blocked
+            k for k in dict.fromkeys([*sets.get(key, []), *cands]) if k not in out
         ]
-        row_ids = {int(c["sol_idx_global"]) for c in g["candidates"]} - blocked
-        mine = {n: s for n, s in (picks.get(key) or {}).items() if s not in blocked}
+        row_ids = {int(c["sol_idx_global"]) for c in g["candidates"]} - out
+        mine = {n: s for n, s in (picks.get(key) or {}).items() if s not in out}
         for sid in mine.values():
             if sid in row_ids and sid not in kernels:
                 kernels.append(sid)

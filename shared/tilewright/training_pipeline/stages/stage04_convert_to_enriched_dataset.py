@@ -26,7 +26,9 @@ Per problem:
     reported.
   * Rows of a kernel the config's blocklist names (lib/correctness.py: one
     that computes wrong results) are dropped (`tested_rows_blocked`,
-    `skip_rows_blocked`), so it is never a GEMM's winner or a label.
+    `skip_rows_blocked`), so it is never a GEMM's winner or a label; so are
+    the rows of a kernel it guards on a problem its guards deny
+    (`tested_rows_below_guard`, `skip_rows_below_guard`), which no plan lists.
   * Kernel parameters come from the library `.dat`, keyed by solution index.
     With --library-stem only that library is loaded and rows of solutions
     outside it are dropped and counted. A log directory whose bench recorded
@@ -120,6 +122,7 @@ from lib.bench_log import (  # noqa: E402
 )
 from lib.bench_yaml import SCALE_COLUMNS, printed_types, scale_mode_code  # noqa: E402
 from lib.correctness import applied_record, config_blocklist  # noqa: E402
+from lib.correctness import guards_admit  # noqa: E402
 from lib.dat import (  # noqa: E402
     KERNELS_FILE,
     KernelIndex,
@@ -238,7 +241,16 @@ class Enricher:
         self.name_mismatches = 0
         self.strict = False
         self.blocked: Set[int] = set()
+        # {solution: guards} of the kernels the blocklist guards.
+        self.guarded: Dict[int, Any] = {}
         self._by_name: Optional[Dict[str, List[int]]] = None
+
+    def below_guard(self, sol_index: int, prob: Problem) -> bool:
+        """Whether `sol_index` is a guarded kernel whose guards deny the
+        problem's free sizes."""
+        guards = self.guarded.get(int(sol_index))
+        shape = prob.shape() if guards else None
+        return shape is not None and not guards_admit(guards, shape[0], shape[1])
 
     def config_for(self, sol_index: int) -> Optional[Dict[str, Any]]:
         return self.by_index.get(int(sol_index))
@@ -404,6 +416,9 @@ def problem_rows(
         if int(t.sol_index) in enricher.blocked:
             counters["tested_rows_blocked"] += 1
             continue
+        if enricher.below_guard(t.sol_index, prob):
+            counters["tested_rows_below_guard"] += 1
+            continue
         row: Dict[str, Any] = {f: t.fields.get(f, "") for f in DATA_FIELDS}
         row.update({f: t.fields.get(f, "") for f in NOISE_FIELDS})
         row.update(
@@ -428,6 +443,9 @@ def problem_rows(
             continue
         if int(s.sol_index) in enricher.blocked:
             counters["skip_rows_blocked"] += 1
+            continue
+        if enricher.below_guard(s.sol_index, prob):
+            counters["skip_rows_below_guard"] += 1
             continue
         if s.warm_up_us is None:
             counters["skip_nonfinite_warmup"] += 1
@@ -978,6 +996,11 @@ def main() -> int:
         if blocklist:
             enricher.blocked = {
                 sid for sid, info in index.by_index.items() if blocklist.blocks(info)
+            }
+            enricher.guarded = {
+                sid: blocklist.guards(info)
+                for sid, info in index.by_index.items()
+                if blocklist.guards(info)
             }
             if not args.quiet:
                 ui.info(

@@ -3035,3 +3035,659 @@ def test_the_harness_source_places_operands_at_fresh_allocations():
     for buf in ("p.a", "p.b", "p.c", "p.scale_a", "p.scale_b", "p.bias"):
         assert f"memory.copy({buf})" in main, buf
     assert "memory.alloc(p.d.size())" in main and "hipMalloc(&dev_a" not in main
+
+
+# ── kernel guards ────────────────────────────────────────────────────────────
+
+
+def _guarded_blocklist():
+    guard = cx.Guard("M", 4)
+    return cx.Blocklist(
+        [
+            cx.Entry(name="Custom_K_SK3", reason="static", guards=(guard,)),
+            cx.Entry(name="Cijk_K_PKA1_SU0", reason="fail"),
+        ]
+    )
+
+
+def test_a_guard_reads_one_free_size_from_its_minimum():
+    g = cx.Guard("M", 4)
+    assert (g.index, g.text(), g.to_dict()) == (
+        0,
+        "M >= 4",
+        {"free": "M", "minimum": 4},
+    )
+    assert cx.Guard.from_dict(g.to_dict()) == g
+    assert [g.admits(m, 1) for m in range(1, 7)] == [False] * 3 + [True] * 3
+    assert cx.Guard("N", 2).admits(1, 2) and not cx.Guard("N", 2).admits(9, 1)
+    for bad in (("K", 4), ("M", 1), ("M", 0), ("M", True), ("M", 10**9), ("M", 4.0)):
+        with pytest.raises(ValueError):
+            cx.Guard(*bad)
+    assert cx.guards_admit([], 1, 1) and cx.guards_admit(None, 1, 1)
+    both = [{"free": "M", "minimum": 4}, cx.Guard("N", 8)]
+    assert not cx.guards_admit(both, 4, 7) and cx.guards_admit(both, 4, 8)
+
+
+def test_a_guarded_entry_blocks_its_kernel_only_below_its_guards():
+    bl = _guarded_blocklist()
+    sk3 = {"kernel_name": "Custom_K_SK3"}
+    other = {"kernel_name": "Cijk_K_PKA0_SU0"}
+    assert (
+        len(bl) == 2
+        and bl.has_guards()
+        and [e.name for e in bl.guarded_entries] == ["Custom_K_SK3"]
+    )
+    assert not bl.blocks(sk3) and bl.guards(sk3) == (cx.Guard("M", 4),)
+    assert bl.blocks(other) and bl.guards(other) == ()
+    assert not bl.blocks_name("Custom_K_SK3") and bl.blocks_name("Cijk_K_PKA1_SU0")
+    assert [bl.admits(sk3, m, 1) for m in (1, 3, 4, 9)] == [False, False, True, True]
+    assert not bl.admits(other, 100, 100)
+    # The pools keep a guarded kernel, marked with its guards.
+    kept = bl.kept([sk3, other, {"kernel_name": "Cijk_free"}])
+    assert kept == [
+        {"kernel_name": "Custom_K_SK3", cx.POOL_GUARDS: [{"free": "M", "minimum": 4}]},
+        {"kernel_name": "Cijk_free"},
+    ]
+    assert cx.kernel_admits(kept[0], 4, 1) and not cx.kernel_admits(kept[0], 3, 1)
+    # Whole, the blocklist blocks it as an integration without guards does.
+    whole = bl.whole()
+    assert whole.blocks(sk3) and not whole.has_guards() and whole.names == bl.names
+    assert whole.whole() is whole
+    # By kernel id the guard is matched through the name hash.
+    kid = f"x:{ki.name_hash('Custom_K_SK3')}"
+    assert bl.guards({"kernel_id": kid}) == (cx.Guard("M", 4),)
+    assert bl.guarded_indices({7: kid, 8: "x:" + ki.name_hash("Cijk_K_PKA1_SU0")}) == {
+        7: (cx.Guard("M", 4),)
+    }
+    assert bl.blocked_indices({7: kid}) == set()
+
+
+def test_a_whole_entry_of_a_name_wins_over_a_guarded_one():
+    guarded = cx.Entry(name="Custom_K_SK3", guards=(cx.Guard("M", 4),))
+    hand = cx.Entry(name="Custom_K_SK3", reason="hand")
+    for entries in ([guarded, hand], [hand, guarded]):
+        bl = cx.Blocklist(entries)
+        assert bl.blocks({"kernel_name": "Custom_K_SK3"}) and not bl.has_guards()
+    # A name of another key with the same blocklist key stays whole too.
+    spelled = cx.Blocklist(
+        [
+            cx.Entry(name="Cijk_K_IA0_PKA1", guards=(cx.Guard("N", 4),)),
+            cx.Entry(name="Cijk_K_PKA0", reason="hand"),
+        ]
+    )
+    assert spelled.blocks({"kernel_name": "Cijk_K"}) and not spelled.has_guards()
+
+
+def test_guarded_entries_of_one_name_merge_to_the_stricter_guards():
+    """Guarded entries of one name, such as a run's and an audit set's,
+    merge into the stricter guards whatever their order, and keep the first
+    entry's record; a whole entry still wins in any position."""
+    k = {"kernel_name": "Custom_K_SK3"}
+    a = cx.Entry(name="Custom_K_SK3", reason="gate", guards=(cx.Guard("M", 4),))
+    b = cx.Entry(
+        name="Custom_K_SK3",
+        reason="other",
+        guards=(cx.Guard("M", 8), cx.Guard("N", 4)),
+    )
+    strict = (cx.Guard("M", 8), cx.Guard("N", 4))
+    for first, second in ((a, b), (b, a)):
+        merged = cx.Blocklist([first]).merged(cx.Blocklist([second]))
+        assert merged.guards(k) == strict and len(merged) == 1
+        assert merged.entries[0].reason == first.reason
+        assert not merged.admits(k, 7, 9) and merged.admits(k, 8, 4)
+    hand = cx.Entry(name="Custom_K_SK3", reason="hand")
+    for order in ([a, b, hand], [a, hand, b], [hand, a, b]):
+        assert cx.Blocklist(order).blocks(k) and not cx.Blocklist(order).has_guards()
+
+
+def test_the_guards_sidecar_names_a_key_once(tmp_path):
+    """Pool names that differ only in the tokens builds spell differently
+    share a blocklist key, which TensileLite and read_guards refuse to see
+    guarded twice: the sidecar holds one line per key and free size, the
+    largest minimum of its names'."""
+    one, two = "Cijk_K_SN_PKA1_X", "Cijk_K_SN_PKA0_X"
+    guarded = cx.Blocklist([cx.Entry(name=one, guards=(cx.Guard("M", 4),))])
+    got = cx.sidecar_guards(guarded, [one, two])
+    assert got == {two: (cx.Guard("M", 4),)}
+    path = tmp_path / cx.guards_name("S")
+    path.write_text(cx.guards_text("S", got))
+    assert cx.read_guards(path) == got
+    served = cx.narrowed(cx.Blocklist([cx.Entry(name=one)]), cx.read_guards(path))
+    for name in (one, two):
+        assert served.guards({"kernel_name": name}) == (cx.Guard("M", 4),)
+    # The guards of two spellings merge to the largest minimum per free size.
+    text = cx.guards_text(
+        "S",
+        {
+            one: (cx.Guard("M", 4), cx.Guard("N", 2)),
+            two: (cx.Guard("M", 8),),
+            "Custom_Other": (cx.Guard("N", 4),),
+        },
+    )
+    assert text.splitlines()[1:] == [
+        "Cijk_K_SN_PKA0_X\tM\t8",
+        "Cijk_K_SN_PKA0_X\tN\t2",
+        "Custom_Other\tN\t4",
+    ]
+    path.write_text(text)
+    assert len(cx.read_guards(path)) == 2
+
+
+def test_a_blocklist_with_guards_round_trips_and_digests_them(tmp_path):
+    bl = _guarded_blocklist()
+    path = tmp_path / cx.BLOCKLIST_FILE
+    cx.write_blocklist(path, bl, library_stem="L")
+    doc = json.loads(path.read_text())
+    assert doc["entries"][0]["guards"] == [{"free": "M", "minimum": 4}]
+    assert "guards" not in doc["entries"][1], "a whole entry's record is unchanged"
+    back = cx.read_list(path)
+    assert [replace(e, source="") for e in back.entries] == list(bl.entries)
+    assert back.guards({"kernel_name": "Custom_K_SK3"}) == (cx.Guard("M", 4),)
+    # The digest of a blocklist without guards is unchanged; a guard changes it.
+    plain = cx.Blocklist([replace(e, guards=()) for e in bl.entries])
+    text = "".join(f"{n}\n" for n in sorted(plain.names))
+    assert (
+        cx.names_digest(plain) == "sha256:" + hashlib.sha256(text.encode()).hexdigest()
+    )
+    assert cx.names_digest(bl) != cx.names_digest(plain)
+    assert cx.applied_record(bl)["guarded"] == 1 and "guarded" not in cx.applied_record(
+        plain
+    )
+    with pytest.raises(ValueError, match="guards M twice"):
+        cx.Entry.from_dict({"name": "x", "guards": [{"free": "M", "minimum": 4}] * 2})
+
+
+def test_the_guards_sidecar_is_written_and_read_as_tensilelite_reads_it(tmp_path):
+    guards = {"Custom_K_SK3": (cx.Guard("M", 4),), "Cijk_B": (cx.Guard("N", 8),)}
+    text = cx.guards_text("Stem", guards)
+    lines = text.splitlines()
+    assert lines[0].startswith("# Kernels of Stem") and lines[1:] == [
+        "Cijk_B\tN\t8",
+        "Custom_K_SK3\tM\t4",
+    ]
+    path = tmp_path / cx.guards_name("Stem")
+    assert path.name == "Stem.tilewright.guards"
+    path.write_text(text)
+    assert cx.read_guards(path) == guards
+    path.write_text("# c\n\n  Custom_K_SK3 \tM 4\r\nCustom_K_SK3 N 2\n")
+    assert cx.read_guards(path) == {
+        "Custom_K_SK3": (cx.Guard("M", 4), cx.Guard("N", 2))
+    }
+    for bad in (
+        "K M\n",
+        "K X 4\n",
+        "K M 1\n",
+        "K M 4 5\n",
+        "K M four\n",
+        "K M -4\n",
+        "K M 1234567890\n",
+        "K M 4\nK M 8\n",
+        "K_PKA1 M 4\nK_PKA0 M 8\n",
+    ):
+        path.write_text(bad)
+        with pytest.raises(ValueError, match="guards"):
+            cx.read_guards(path)
+    with pytest.raises(ValueError, match="cannot read"):
+        cx.read_guards(tmp_path / "gone")
+
+
+def test_a_sidecar_with_guards_narrows_its_plain_lines(tmp_path):
+    side = tmp_path / "S.tilewright.blocklist"
+    side.write_text(cx.sidecar_text("S", ["Custom_K_SK3", "Cijk_K_PKA1"]))
+    guards = tmp_path / "S.tilewright.guards"
+    guards.write_text(cx.guards_text("S", {"Custom_K_SK3": (cx.Guard("M", 4),)}))
+    sk3 = {"kernel_name": "Custom_K_SK3"}
+    plain = cx.sidecar_blocklist(side)
+    assert plain.blocks(sk3), "a model without guards serves the plain lines"
+    served = cx.sidecar_blocklist(side, guards)
+    assert not served.blocks(sk3) and served.guards(sk3) == (cx.Guard("M", 4),)
+    assert served.blocks({"kernel_name": "Cijk_K_PKA0"})
+    # A guard of a kernel the blocklist does not name restricts it too.
+    only = cx.sidecar_blocklist(None, guards)
+    assert not only.blocks(sk3) and not only.admits(sk3, 3, 9)
+    record = {
+        "blocklist": {},
+        "targets": [
+            {
+                "library_stem": "S",
+                "staged": str(tmp_path / "m.bin"),
+                "blocklist": side.name,
+                "guards": guards.name,
+            }
+        ],
+    }
+    deployed = cx.deployed_blocklist(record, "S")
+    assert deployed is not None and deployed.guards(sk3) == (cx.Guard("M", 4),)
+    del record["targets"][0]["guards"]
+    assert cx.deployed_blocklist(record, "S").blocks(sk3)
+
+
+def test_the_gate_derives_a_guard_from_each_unguarded_side(tmp_path):
+    src = _custom_source(tmp_path, "Custom_k", (4, 8))
+    sol = {
+        "problemType": {"transA": False, "transB": True},
+        "problemPredicate": {"type": "And", "value": _lf(2, 1)},
+    }
+    f = cg.check_custom_kernel(7, sol, "Custom_k", src)
+    assert f.status == cg.UNGUARDED
+    assert cg.static_guards(f) == (cx.Guard("M", 4), cx.Guard("N", 8))
+    nn = cg.check_custom_kernel(
+        7, dict(sol, problemType={"transA": False, "transB": False}), "Custom_k", src
+    )
+    assert cg.static_guards(nn) == (cx.Guard("M", 4),)
+    guarded = dict(sol, problemPredicate={"type": "And", "value": _lf(4, 8)})
+    assert cg.static_guards(cg.check_custom_kernel(7, guarded, "Custom_k", src)) == ()
+    shapes = cg.guarded_shapes(cg.SHAPES + cg.TINY_SHAPES, (cx.Guard("M", 4),))
+    assert all(s.m >= 4 for s in shapes)
+    assert "tiny_m_batched" not in {s.name for s in shapes}
+    assert {s.name for s in shapes if s.fresh} == {f"tiny_n_{n}" for n in (1, 2, 3)}
+
+
+def _guarded_world(world, tmp_path, **fake):
+    cfg = _nn_world(world, tmp_path, guard_unguarded_custom=True)
+    world.set(reads_before={"103": {"A": 4}}, depth_u={"103": 64}, **fake)
+    return cfg
+
+
+def test_the_gate_checks_a_guarded_kernel_only_where_its_guard_admits_it(
+    world, tmp_path
+):
+    """With correctness.guard_unguarded_custom the unguarded 103 (which
+    reads before A at M of 1 to 3) runs only shapes with M of 4 or more,
+    the tiny stage's N of 1 to 3 among them, passes, and the blocklist
+    holds it as a guarded entry: blocked below M of 4 only."""
+    cfg = _guarded_world(world, tmp_path)
+    s = world.run(cfg=cfg)
+    assert world.blocked() == [name(103)]
+    doc = json.loads((world.base / "gate" / cx.BLOCKLIST_FILE).read_text())
+    (entry,) = doc["entries"]
+    assert entry["guards"] == [{"free": "M", "minimum": 4}]
+    assert entry["source"] == "correctness gate (static check, guarded)"
+    assert entry["reason"].startswith("guarded: served only where M >= 4")
+    bl = cx.read_list(world.base / "gate" / cx.BLOCKLIST_FILE)
+    k103 = {"kernel_name": name(103)}
+    assert not bl.blocks(k103) and bl.guards(k103) == (cx.Guard("M", 4),)
+    assert s["verdicts"] == {"pass": 5, cg.GUARDED: 1}
+    (g,) = s["static"]["guarded"]
+    assert g["solution_index"] == 103 and g["guards"] == [{"free": "M", "minimum": 4}]
+    assert "tiny_m_batched" not in g["shapes"] and "small_m_batched" in g["shapes"]
+    assert g["tiny_shapes"] == ["tiny_n_1", "tiny_n_2", "tiny_n_3"]
+    assert g["protocols"] != [s["protocol"], s["tiny"]["protocol"]]
+    ran = [
+        c
+        for c in world.calls()
+        if "103" in c["args"][c["args"].index("--ids") + 1].split(",")
+    ]
+    assert ran and all(int(c["args"][0]) >= 4 for c in ran)
+    assert {int(c["args"][1]) for c in ran if "--fresh" in c["args"]} == {1, 2, 3}
+    v = json.loads((world.base / "gate" / cg.VERDICTS_FILE).read_text())
+    row = next(k for k in v["kernels"] if k["solution_index"] == 103)
+    assert row["verdict"] == cg.GUARDED and row["tiny"]["verdict"] == "pass"
+    # The cache keeps its verdicts under the guarded protocols: a second gate
+    # runs nothing and decides alike.
+    before = len(world.calls())
+    s2 = world.run(out="gate2", cfg=cfg)
+    assert len(world.calls()) == before and s2["verdicts"] == s["verdicts"]
+    assert world.blocked("gate2") == [name(103)]
+    # Without the key the same kernel is blocked whole and never runs.
+    plain = _nn_world(world, tmp_path)
+    s3 = world.run(out="gate3", cache="cache3", cfg=plain)
+    assert s3["verdicts"] == {"pass": 5, cg.UNGUARDED: 1}
+    entry3 = json.loads((world.base / "gate3" / cx.BLOCKLIST_FILE).read_text())
+    assert "guards" not in entry3["entries"][0]
+
+
+def test_a_guarded_kernel_that_fails_above_its_guard_is_blocked_whole(world, tmp_path):
+    cfg = _guarded_world(world, tmp_path, fail={"103": "shape:257x1"})
+    s = world.run(cfg=cfg)
+    doc = json.loads((world.base / "gate" / cx.BLOCKLIST_FILE).read_text())
+    (entry,) = doc["entries"]
+    assert "guards" not in entry and entry["source"] == "correctness gate"
+    assert "on the shapes where M >= 4" in entry["reason"]
+    assert s["verdicts"] == {"pass": 5, "fail": 1}
+    assert cx.read_list(world.base / "gate" / cx.BLOCKLIST_FILE).blocks(
+        {"kernel_name": name(103)}
+    )
+
+
+def test_a_guarded_kernel_without_a_pass_is_blocked_whole(world, tmp_path):
+    cfg = _guarded_world(world, tmp_path)
+    s = world.run(cfg=cfg, dry_run=True)
+    doc = json.loads((world.base / "gate" / cx.BLOCKLIST_FILE).read_text())
+    (entry,) = doc["entries"]
+    assert "guards" not in entry and entry["reason"].startswith("no pass where M >= 4")
+    assert s["verdicts"][cg.UNGUARDED] == 1
+
+
+def test_stage04_drops_the_rows_of_a_guarded_kernel_below_its_guard(
+    tmp_path, monkeypatch
+):
+    import stage04_convert_to_enriched_dataset as s04
+    from bench_fakes import LIBRARY_STEM, kernel_name, write_logic
+    from test_stage04_convert_to_enriched_dataset import (
+        GA,
+        MT,
+        _config,
+        _gemm,
+        _library_solutions,
+        _log_lines,
+        _rows,
+    )
+
+    lib = tmp_path / "library"
+    lib.mkdir()
+    write_logic(lib / (LIBRARY_STEM + ".dat.zlib"), _library_solutions())
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "block_0000_lines1-6_gpu0.log").write_text("\n".join(_log_lines()) + "\n")
+    bl = tmp_path / "blocklist.json"
+    cfg = _config(tmp_path / "c.yaml")
+    doc = yaml.safe_load(cfg.read_text())
+    doc["correctness"] = {"lists": [str(bl)]}
+    cfg.write_text(yaml.safe_dump(doc))
+    for minimum, out in ((GA.m + 1, "below"), (4, "above")):
+        guarded = cx.Entry(kernel_name(MT[11]), "C", guards=(cx.Guard("M", minimum),))
+        cx.write_blocklist(bl, cx.Blocklist([guarded]))
+        argv = ["stage04", "--log-dir", logs, "--out-dir", tmp_path / out]
+        argv += ["--dat-dir", lib, "--library-stem", LIBRARY_STEM, "--quiet"]
+        argv += ["--config-yaml", cfg]
+        monkeypatch.setattr(sys, "argv", [str(a) for a in argv])
+        assert s04.main() == 0
+        a = {int(r["sol_idx_global"]): r for r in _rows(tmp_path / out)[_gemm(GA)]}
+        summary = json.loads((tmp_path / out / "enrich_summary.json").read_text())
+        assert summary["kernels_blocked"] == 0
+        assert summary["blocklist"]["guarded"] == 1
+        if out == "below":
+            assert 11 not in a and a[10]["is_winner"] == "True"
+            assert summary["counters"]["tested_rows_below_guard"] >= 1
+        else:
+            assert 11 in a and "tested_rows_below_guard" not in summary["counters"]
+
+
+def test_stage06_stages_the_guards_sidecar_and_flags_the_model(tmp_path):
+    import stage06_deploy_weights as s6
+    from test_stage06_deploy_weights import LABELS, write_v3_bundle
+
+    from lib import mlrec
+
+    lib = cf.write_library(tmp_path / "lib")
+    bl = tmp_path / "blocklist.json"
+    guard = cx.Guard("M", 4)
+    cx.write_blocklist(
+        bl,
+        cx.Blocklist(
+            [
+                cx.Entry(name(103), "static", guards=(guard,)),
+                cx.Entry(name(102), "fail"),
+            ]
+        ),
+    )
+    cfg = _deploy_cfg(tmp_path / "cfg.yaml", bl)
+    train = tmp_path / "v3" / "stage05"
+    write_v3_bundle(train, LABELS)
+    out = tmp_path / "out"
+    assert (
+        s6.deploy(
+            train_dir=train, config_yaml=cfg, out_dir=out, quiet=True, library_dir=lib
+        )
+        == 0
+    )
+    staged = _staged(out)
+    # The blocklist sidecar names the guarded kernel too: an integration or
+    # a model without guards leaves it out whole.
+    assert cx.read_sidecar(staged / cx.sidecar_name(cf.STEM)) == sorted(
+        [name(102), name(103)]
+    )
+    guards = staged / cx.guards_name(cf.STEM)
+    assert cx.read_guards(guards) == {name(103): (guard,)}
+    rec = json.loads((out / "deploy_record.json").read_text())
+    data = Path(rec["staged_model"]).read_bytes()
+    assert mlrec.read_header(data)["serving"]["kernel_guards"] is True
+    assert rec["sha256"] == hashlib.sha256(data).hexdigest()
+    assert rec["kernel_guards"] is True and rec["blocklist"]["guarded"] == 1
+    digest = hashlib.sha256(guards.read_bytes()).hexdigest()
+    assert rec["blocklist"]["guards_sha256"] == digest
+    assert rec["targets"][0]["guards"] == cx.guards_name(cf.STEM)
+    assert rec["targets"][0]["guards_sha256"] == digest
+    served = cx.deployed_blocklist(rec, cf.STEM)
+    assert served.guards({"kernel_name": name(103)}) == (guard,)
+    assert served.blocks({"kernel_name": name(102)})
+    install = (out / "staged_for_deploy" / "INSTALL.md").read_text()
+    assert f"Copy each `{cx.GUARDS_SUFFIX}` file" in install
+    assert cx.guards_name(cf.STEM) in install
+    # Without guards nothing of them is staged and the model is not flagged.
+    cx.write_blocklist(bl, cx.Blocklist([cx.Entry(name(102), "fail")]))
+    out2 = tmp_path / "out2"
+    assert (
+        s6.deploy(
+            train_dir=train, config_yaml=cfg, out_dir=out2, quiet=True, library_dir=lib
+        )
+        == 0
+    )
+    assert not (_staged(out2) / cx.guards_name(cf.STEM)).exists()
+    rec2 = json.loads((out2 / "deploy_record.json").read_text())
+    assert "kernel_guards" not in rec2 and "guards" not in rec2["targets"][0]
+    data2 = Path(rec2["staged_model"]).read_bytes()
+    assert "kernel_guards" not in mlrec.read_header(data2)["serving"]
+    assert mlrec.with_kernel_guards(data2) == data
+    install = (out2 / "staged_for_deploy" / "INSTALL.md").read_text()
+    assert f"This bundle ships no `{cx.GUARDS_SUFFIX}` file" in install
+
+
+def test_stage06_flags_a_model_exactly_when_it_ships_its_guards(tmp_path, capsys):
+    """stage05 records the kernel guards flag in a bundle whose pool kept a
+    guarded kernel; stage06 deploys the flag only with the guards sidecar,
+    since TensileLite refuses a flagged model without it, and warns when the
+    bundle's evaluations served the pool otherwise than it deploys."""
+    import stage06_deploy_weights as s6
+    from test_stage06_deploy_weights import LABELS, write_v3_bundle
+
+    from lib import mlrec
+
+    lib = cf.write_library(tmp_path / "lib")
+    bl = tmp_path / "blocklist.json"
+    cfg = _deploy_cfg(tmp_path / "cfg.yaml", bl)
+    serving = {"cascade_keys": 32, "kernel_guards": True}
+    cases = (
+        ("guarded", serving, (cx.Guard("M", 4),), True, None),
+        ("unguarded", serving, (), False, "deploys without the kernel guards flag"),
+        ("plain", {"cascade_keys": 32}, (cx.Guard("M", 4),), True, "deploys with"),
+    )
+    for tag, bundle_serving, guards, flagged, warned in cases:
+        cx.write_blocklist(
+            bl, cx.Blocklist([cx.Entry(name(103), "static", guards=guards)])
+        )
+        train = tmp_path / tag / "stage05"
+        write_v3_bundle(train, LABELS, serving=bundle_serving)
+        out = tmp_path / tag / "out"
+        capsys.readouterr()
+        assert (
+            s6.deploy(
+                train_dir=train,
+                config_yaml=cfg,
+                out_dir=out,
+                quiet=False,
+                library_dir=lib,
+            )
+            == 0
+        )
+        err = capsys.readouterr().err
+        rec = json.loads((out / "deploy_record.json").read_text())
+        data = Path(rec["staged_model"]).read_bytes()
+        header = mlrec.read_header(data)["serving"]
+        assert header.get("kernel_guards", False) is flagged, tag
+        assert rec.get("kernel_guards", False) is flagged, tag
+        assert (_staged(out) / cx.guards_name(cf.STEM)).exists() is flagged, tag
+        if warned is None:
+            assert "[guards]" not in err, tag
+        else:
+            assert warned in err, tag
+
+
+def test_stage06_refuses_guards_for_a_model_that_cannot_carry_them(
+    tmp_path, make_bundle
+):
+    import stage06_deploy_weights as s6
+
+    lib = cf.write_library(tmp_path / "lib")
+    bl = tmp_path / "blocklist.json"
+    cx.write_blocklist(
+        bl, cx.Blocklist([cx.Entry(name(103), "static", guards=(cx.Guard("M", 4),))])
+    )
+    cfg = _deploy_cfg(tmp_path / "cfg.yaml", bl)
+    train = tmp_path / "round_1" / "stage05"
+    make_bundle(train, ["Tiny|Tiny|TinyK|Bnone"])
+    with pytest.raises(s6.DeployError, match="only an MLREC_v3 model"):
+        s6._deploy(
+            train_dir=train,
+            config_yaml=cfg,
+            out_dir=tmp_path / "out",
+            library_stem=None,
+            weight_dtype=None,
+            repo=None,
+            apply_patch=False,
+            build_after_apply=False,
+            build_dir=None,
+            build_jobs=None,
+            build_target=s6.MODELS_TARGET,
+            gate=None,
+            audit=None,
+            origami_reference=False,
+            quiet=True,
+            library_dir=lib,
+            hardware_device=0,
+        )
+
+
+def test_stage06_installs_and_removes_the_guards_sidecar_with_the_model(
+    tmp_path, make_bundle, monkeypatch
+):
+    import stage06_deploy_weights as s6
+    from test_stage06_deploy_weights import (
+        COPY_BODY,
+        LABELS,
+        fake_cmake,
+        weights_dir,
+        write_v3_bundle,
+    )
+
+    pytest.importorskip("tilewright")
+    lib = cf.write_library(tmp_path / "lib")
+    repo = tmp_path / "repo"
+    weights_dir(repo, "gfx950").mkdir(parents=True)
+    build = tmp_path / "build"
+    blib = build / "Tensile" / "library" / "gfx950"
+    blib.mkdir(parents=True)
+    src = repo / s6.wl.LOGIC_REL
+    fake_cmake(tmp_path, monkeypatch, COPY_BODY.format(src=str(src)))
+    bl = tmp_path / "blocklist.json"
+    guarded = cx.Blocklist([cx.Entry(name(103), "s", guards=(cx.Guard("M", 4),))])
+    cx.write_blocklist(bl, guarded)
+    cfg = _deploy_cfg(tmp_path / "cfg.yaml", bl)
+    train = tmp_path / "v3" / "stage05"
+    write_v3_bundle(train, LABELS)
+
+    def deploy(out):
+        return s6.deploy(
+            train_dir=train,
+            config_yaml=cfg,
+            out_dir=tmp_path / out,
+            quiet=True,
+            library_dir=lib,
+            repo=repo,
+            apply_patch=True,
+            build_after_apply=True,
+            build_dir=build,
+        )
+
+    g = cx.guards_name(cf.STEM)
+    assert deploy("out") == 0
+    want = {name(103): (cx.Guard("M", 4),)}
+    assert cx.read_guards(weights_dir(repo, "gfx950") / g) == want
+    assert cx.read_guards(blib / g) == want
+    rec = json.loads((tmp_path / "out" / "deploy_record.json").read_text())
+    assert rec["colocation"] == "verified"
+
+    cx.write_blocklist(bl, cx.Blocklist([cx.Entry(name(102), "fail")]))
+    assert deploy("out2") == 0
+    assert not (weights_dir(repo, "gfx950") / g).exists()
+    assert not (blib / g).exists()
+
+    cx.write_blocklist(bl, guarded)
+    skipping = COPY_BODY.format(src=str(src)).replace(
+        'if not f.name.startswith("."):',
+        'if not f.name.startswith(".") and not f.name.endswith(".guards"):',
+    )
+    fake_cmake(tmp_path, monkeypatch, skipping)
+    assert deploy("out3") == 1
+    rec = json.loads((tmp_path / "out3" / "deploy_record.json").read_text())
+    assert "cannot serve the model" in rec["error"] and rec["deployed"] is False
+    assert not (weights_dir(repo, "gfx950") / g).exists()
+
+
+def test_check_pick_log_passes_over_a_guarded_pick_below_its_guard(tmp_path):
+    import check_pick_log as cpl
+
+    pool = [100, 101, 102, 103]
+    guards = {103: [{"free": "M", "minimum": 4}]}
+
+    def log(m, top1, ran):
+        return [
+            f"[TILEWRIGHT_PICK] m={m} n=64 k=64 b=1 tA=N tB=N leaf=x top1_index={top1} "
+            f"n_configs=4",
+            f"--Solution index: {ran}",
+        ]
+
+    lines = log(2, 3, 101) + log(4, 3, 103) + log(8, 0, 100) + log(3, 0, 103)
+    lines += log(5, 1, 102)
+    result = cpl.check_picks(lines, pool, guards)
+    assert [p.shape[0] for p in result.passed_over] == [2]
+    assert [p.shape[0] for p in result.violations] == [3]
+    assert [(p.shape[0], named) for p, named in result.mismatches] == [(5, 101)]
+    assert not result.ok
+    plain = cpl.check_picks(log(2, 3, 101), pool)
+    assert plain.mismatches and not plain.passed_over
+
+
+def test_the_audit_set_never_benches_a_guarded_kernel_below_its_guard(
+    tmp_path, monkeypatch
+):
+    """Every bench line of the audit set leaves out the blocked kernels and
+    the guarded ones its shape is below the guard of (generation 0 and the
+    increments, which list new kernels on every shape alike), and a kernel
+    left out only where its guards deny a line still counts as benched."""
+    import run_orchestrator as ro
+    from lib.bench_yaml import line_solution_list, read_bench_lines
+
+    a = ro.AuditRun.__new__(ro.AuditRun)
+    a._blocked = {9}
+    a._guarded = {7: (cx.Guard("M", 4),)}
+    assert a.denied((2, 64, 64, 1)) == {7} and a.denied((4, 1, 64, 1)) == set()
+    benched = []
+    monkeypatch.setattr(a, "wrapper", lambda label, unit: None, raising=False)
+    monkeypatch.setattr(
+        a,
+        "bench_part",
+        lambda part, lines, w: benched.append(lines) or 0,
+        raising=False,
+    )
+    monkeypatch.setattr(a, "write_progress", lambda *x: None, raising=False)
+    a.shapes_this_run = 0
+    shapes = [(2, 64, 64, 1), (8, 64, 64, 1)]
+    units = {"exclusive": {"parts": [shapes]}}
+
+    def line_of(label, i, s):
+        return (
+            f"- {{M: {s[0]}, N: {s[1]}, K: {s[2]}, batch_count: {s[3]}, "
+            f"solution_index_list: [7, 9, 11]}}\n"
+        )
+
+    assert a.bench_units(tmp_path, units, line_of, "test") == 0
+    (lines,) = benched
+    assert [line_solution_list(ln) for ln in lines] == [[11], [7, 11]]
+    part = a.part_dir(tmp_path, "exclusive", 0)
+    part.mkdir(parents=True)
+    (part / "shapes.yaml").write_text("".join(lines))
+    planned = {"7": "d7", "11": "d11", "12": "d12"}
+    assert a.listed_everywhere(tmp_path, units, planned) == {"7": "d7", "11": "d11"}
+    assert [line_solution_list(ln) for ln in read_bench_lines(part / "shapes.yaml")]

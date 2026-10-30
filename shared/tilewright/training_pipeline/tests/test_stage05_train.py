@@ -1066,6 +1066,41 @@ def test_training_records_the_member_order_of_its_pool(tmp_path, monkeypatch):
     assert not (out / s5.MEMBER_ORDER_FILE).exists()
 
 
+def test_a_pool_that_keeps_a_guarded_kernel_trains_a_model_served_with_guards(
+    tmp_path, monkeypatch
+):
+    """stage06 deploys a model whose pool keeps a guarded kernel with the
+    kernel guards flag, which TensileLite serves the guards for, so stage05
+    records the flag in the bundle and its evaluations serve the model so;
+    a blocklist that blocks the kernel whole records none."""
+    import yaml
+
+    from lib import correctness as cx
+
+    pool = kernel_pool()
+    data = write_round(tmp_path / "stage04", shapes_for(10, 14, CELLS3[2:]), pool)
+    lib = tmp_path / "library"
+    lib.mkdir()
+    sols = library_solutions(pool)
+    bf.write_logic(lib / f"{bf.LIBRARY_STEM}.dat", sols)
+    name = dat.kernel_dat_info(sols[1])["kernel_name"]
+    for guards in ((cx.Guard("M", 4),), ()):
+        bl = tmp_path / f"blocklist_{len(guards)}.json"
+        cx.write_blocklist(bl, cx.Blocklist([cx.Entry(name, "static", guards=guards)]))
+        cfg = tmp_path / f"cfg_{len(guards)}.yaml"
+        doc = yaml.safe_load(write_config(cfg).read_text())
+        cfg.write_text(yaml.safe_dump({**doc, "correctness": {"lists": [str(bl)]}}))
+        out = tmp_path / f"out_{len(guards)}"
+        extra = ["--catalog", "v3", "--skip-deployed-eval", "--library-dir", lib]
+        extra += ["--library-stem", bf.LIBRARY_STEM, "--config-yaml", cfg]
+        extra += ["--min-cell-gemms", 8, "--min-base-cell-gemms", 8]
+        assert _main(monkeypatch, tmp_path, [data], out, *extra) == 0
+        serving = load_bundle(out / "models.pt")["serving"]
+        metrics = json.loads((out / "metrics.json").read_text())
+        assert serving.get("kernel_guards", False) is bool(guards)
+        assert metrics["serving"] == serving
+
+
 # ── labels of the pool alone ──────────────────────────────────────────────────
 
 

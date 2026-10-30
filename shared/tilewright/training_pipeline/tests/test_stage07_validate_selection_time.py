@@ -1245,6 +1245,147 @@ def test_runtime_selection_joins_the_picks_to_bench_timings():
     assert warm["sel_eff"] == pytest.approx((1.0 * 0.5 * 0.25) ** (1 / 3))
 
 
+def test_a_model_the_deploy_did_not_flag_is_served_without_guarded_kernels():
+    """The runtime reads the guards sidecar only for a model the deploy
+    flagged as trained with kernel guards: the pool, the timings and the
+    checks of any other model leave a guarded kernel out whole, whatever
+    blocklist names its guards."""
+    from lib import correctness as cx
+
+    guard = (cx.Guard("M", 4),)
+    blocklist = cx.Blocklist([cx.Entry(name="Custom_K_SK3", guards=guard)])
+    k = {"kernel_name": "Custom_K_SK3"}
+
+    def served(record, found):
+        ctx = s7.Context(
+            cfg={},
+            record=record,
+            bench=Path("bench"),
+            library_dir=Path("lib"),
+            stem="S",
+            weights_path=Path("w"),
+            device=0,
+            out_dir=Path("out"),
+            startup_grace_s=1.0,
+            stall_timeout_s=1.0,
+            quiet=True,
+            blocklist=found,
+        )
+        return ctx.served_blocklist()
+
+    assert served({}, blocklist).blocks(k)
+    flagged = served({"kernel_guards": True}, blocklist)
+    assert not flagged.blocks(k) and flagged.guards(k) == guard
+    assert served({}, None) is None
+
+
+def test_a_pick_below_its_guards_costs_the_kernel_the_runtime_served():
+    """The pick log names the engine's top-1 before TensileLite passes over
+    a kernel the guards of a model trained with kernel guards deny; the
+    runtime then serves the next one the engine ranks, from a request
+    deeper by one per denied kernel, which the readings cost instead."""
+    sig = dict(mt_m=128, mt_n=128, mt_k=64, mi_m=16, mi_n=16, mi_k=32)
+    pool = [
+        dict(sig, sol_idx_global=100 + i, cache_hints_a=0, cache_hints_b=i)
+        for i in range(4)
+    ]
+    pool[0]["guards"] = [{"free": "M", "minimum": 4}]
+    problems = [entry(m, 1, 1) for m in (2, 3, 8, 9)]
+    cands = [
+        {"sol_idx_global": 100, "us": 10.0, "is_skip": False},
+        {"sol_idx_global": 101, "us": 20.0, "is_skip": False},
+        {"sol_idx_global": 102, "us": 40.0, "is_skip": False},
+    ]
+    timings = {
+        (m, 1, 1, 1, "T", "N"): {"candidates": cands, "winner_us": 10.0}
+        for m in (2, 3, 8, 9)
+    }
+    cpp = [_cpp(m, (1,) * 8, i) for m, i in ((2, 0), (3, 0), (8, 0), (9, 2))]
+    asked = []
+
+    def rank(keys, depth):
+        asked.append((list(keys), depth))
+        return [[0, 2, 1] if k[0] == 2 else [0] for k in keys]
+
+    served = s7.passed_over(pool, cpp, rank)
+    k = {m: (m, 1, 1, 1, "T", "N") for m in (2, 3, 8, 9)}
+    assert served == {k[2]: 2, k[3]: None}
+    assert asked == [([k[2], k[3]], 2)]
+    assert s7.passed_over([{"sol_idx_global": 7}], cpp, rank) == {}
+    got = s7.runtime_selection(problems, cpp, pool, timings, "timed", 0, served)
+    assert (got["n_passed_over"], got["n_passed_over_to_origami"]) == (2, 1)
+    assert got["n_evaluated"] == 3
+    assert got["sel_eff"] == pytest.approx((0.25 * 1.0 * 0.25) ** (1 / 3))
+    plain = s7.runtime_selection(problems, cpp, pool, timings, "timed")
+    assert plain["n_evaluated"] == 4 and plain["n_passed_over"] == 0
+    origami = {key: 101 for key in k.values()}
+    paired = s7.paired_selection(
+        problems, cpp, origami, pool, timings, "timed", 0, served
+    )
+    rows = {r["m"]: r for r in paired["per_problem"]}
+    assert rows[2]["model_sel_eff"] == 0.25 and rows[3]["model_sel_eff"] is None
+    assert rows[8]["model_sel_eff"] == 1.0
+
+
+def test_parity_costs_the_picks_below_their_guards_as_the_runtime_served_them(
+    tmp_path, monkeypatch
+):
+    """The pick-parity run of a deploy flagged with kernel guards maps each
+    pick-log top-1 its guards deny through the engine's ranking of a request
+    deeper by one per denied kernel (`passed_over`) before it costs the
+    runtime's picks, and keeps the mapping for the Origami reference."""
+    from types import SimpleNamespace
+
+    sig = dict(mt_m=128, mt_n=128, mt_k=64, mi_m=16, mi_n=16, mi_k=32)
+    pool = [
+        dict(sig, sol_idx_global=100 + i, cache_hints_a=0, cache_hints_b=i)
+        for i in range(3)
+    ]
+    pool[0]["guards"] = [{"free": "M", "minimum": 4}]
+    entries = [entry(m, 1, 1) for m in (2, 8)]
+    cands = [
+        {"sol_idx_global": 100, "us": 10.0, "is_skip": False},
+        {"sol_idx_global": 102, "us": 40.0, "is_skip": False},
+    ]
+    ctx = s7.Context(
+        cfg={},
+        record={"kernel_guards": True},
+        bench=Path("bench"),
+        library_dir=Path("lib"),
+        stem="S",
+        weights_path=tmp_path / "w",
+        device=0,
+        out_dir=tmp_path,
+        startup_grace_s=1.0,
+        stall_timeout_s=1.0,
+        quiet=True,
+        pick_measurement="timed",
+    )
+    ctx._pool = pool
+    ctx._timings = {
+        (m, 1, 1, 1, "T", "N"): {"candidates": cands, "winner_us": 10.0} for m in (2, 8)
+    }
+    log = s7.BenchLog(picks=[_cpp(m, (1,) * 8, 0, n=3) for m in (2, 8)])
+    (tmp_path / "work" / "parity").mkdir(parents=True)
+    ran = SimpleNamespace(ok=True, ran=entries, left_out=[])
+    monkeypatch.setattr(s7, "bench_problems", lambda *a, **kw: ran)
+    monkeypatch.setattr(s7, "parse_bench_log", lambda path: log)
+    monkeypatch.setattr(s7, "check_diag", lambda *a: (True, []))
+    asked = []
+
+    def offline(ctx_, problems, min_scored=1, with_ranking=False):
+        asked.append(([e["M"] for e in problems], min_scored, with_ranking))
+        return [dict(_py(e["M"], (1,) * 8, 0, n=3), ranked=[0, 2, 1]) for e in problems]
+
+    monkeypatch.setattr(s7, "_offline_picks", offline)
+    got = s7.run_parity(ctx, "work", entries, 0.0)
+    sel = got["runtime_selection"]
+    assert (sel["n_passed_over"], sel["n_evaluated"]) == (1, 2)
+    assert sel["sel_eff"] == pytest.approx(math.sqrt(0.25 * 1.0))
+    assert ctx.served["work"] == {(2, 1, 1, 1, "T", "N"): 2}
+    assert asked == [([2, 8], 1, False), ([2], 2, True)]
+
+
 def test_paired_selection_pairs_the_runtime_with_origami_on_the_same_problems():
     sig = dict(mt_m=128, mt_n=128, mt_k=64, mi_m=16, mi_n=16, mi_k=32)
     pool = [

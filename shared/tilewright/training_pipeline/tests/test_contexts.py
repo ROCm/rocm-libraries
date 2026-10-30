@@ -1006,6 +1006,35 @@ def test_serving_libdir_serves_the_staged_model_with_the_librarys_kernels(tmp_pa
         tw.load_model_by_index(pool, str(dst), 0x12)
 
 
+def test_serving_libdir_serves_the_staged_sidecars_in_place_of_the_stems(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    pool = "TensileLibrary_BB_BB_HA_Bias_Contraction_l_Alik_Bljk_ID75a0_gfx950"
+    _write_logic(src / f"{pool}.dat", 3)
+    (src / f"{pool}.tilewright.blocklist").write_text("shipped blocklist\n")
+    (src / f"{pool}.tilewright.guards").write_text("shipped guards\n")
+    model = tmp_path / "staged.bin"
+    model.write_bytes(b"MLREC_v3 staged")
+    side = tmp_path / "staged.blocklist"
+    side.write_text("Cijk_K\n")
+    guards = tmp_path / "staged.guards"
+    guards.write_text("Cijk_K\tM\t4\n")
+    dst = tmp_path / "dst"
+    summary = pl.build_serving_libdir(
+        src, dst, pool, "new.tilewright.bin", model, blocklist=side, guards=guards
+    )
+    for name, text in (("blocklist", "Cijk_K\n"), ("guards", "Cijk_K\tM\t4\n")):
+        f = dst / f"{pool}.tilewright.{name}"
+        assert not f.is_symlink() and f.read_text() == text
+    assert summary["guards"] == str(guards) and summary["guards_sha256"]
+    # Without staged guards the stem has none, whatever the source holds.
+    summary = pl.build_serving_libdir(
+        src, dst, pool, "new.tilewright.bin", model, blocklist=side
+    )
+    assert not (dst / f"{pool}.tilewright.guards").exists()
+    assert summary["guards"] is None and summary["guards_sha256"] is None
+
+
 # ── orchestrator wiring ──────────────────────────────────────────────────────
 
 

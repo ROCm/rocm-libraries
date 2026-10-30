@@ -406,6 +406,14 @@ def plan_blocklist(
     """(the solutions of `identity`'s library that the run's blocklist or one
     the audit set was built with leaves out, the record of their union,
     written into `<d>/blocklists/`). V2Error when one cannot be read."""
+    both, sources = _plan_blocklists(cfg, audit)
+    rec = auditlib.write_blocklist_file(d, "plan", both, sources)
+    return both.blocked_indices(identity.ids, identity.kernels), rec
+
+
+def _plan_blocklists(cfg: Mapping[str, Any], audit: Path) -> Tuple[Any, List[Any]]:
+    """(the union of the run's blocklist and the audit set's, the sources'
+    records). V2Error when one cannot be read."""
     from lib import correctness as cx
 
     try:
@@ -416,8 +424,14 @@ def plan_blocklist(
     both = own.merged(built) if built else own
     sources = [{"from": "the run's config", **cx.applied_record(own)}]
     sources += [{"from": "the audit set", **r} for r in recs]
-    rec = auditlib.write_blocklist_file(d, "plan", both, sources)
-    return both.blocked_indices(identity.ids, identity.kernels), rec
+    return both, sources
+
+
+def plan_guards(cfg: Mapping[str, Any], audit: Path, identity: Any) -> Dict[int, Any]:
+    """{solution: guards} of `identity`'s library that the blocklists of
+    `plan_blocklist` guard: no set holds one on a GEMM its guards deny."""
+    both, _ = _plan_blocklists(cfg, audit)
+    return both.guarded_indices(identity.ids, identity.kernels)
 
 
 def plan(args: argparse.Namespace) -> Optional[int]:
@@ -502,6 +516,7 @@ def plan(args: argparse.Namespace) -> Optional[int]:
         kernels=kernels,
         blocked=blocked,
         blocklist=blocklist,
+        guarded=plan_guards(cfg, audit, identity),
     )
     v2.write_progress(d)
     if gen is None:

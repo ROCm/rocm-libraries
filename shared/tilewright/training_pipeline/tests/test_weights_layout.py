@@ -10,7 +10,7 @@ import pytest
 
 from lib import tilewright_index as twi
 from lib import weights_layout as wl
-from lib.correctness import SIDECAR_SUFFIX
+from lib.correctness import GUARDS_SUFFIX, SIDECAR_SUFFIX
 
 REPO = Path(__file__).resolve().parents[4]
 LOGIC = Path("projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic")
@@ -54,8 +54,8 @@ def _shipped():
 
 def test_the_shipped_directories_hold_models_only():
     """TensileCreateLibrary reads every .yaml file of the logic tree as
-    library logic, and hipBLASLt copies an index's models and sidecars to the
-    subtree the directory is named for."""
+    library logic, and hipBLASLt copies an index's models and sidecars (the
+    blocklists and the guards) to the subtree the directory is named for."""
     for d in _shipped():
         rel = d.relative_to(REPO / wl.LOGIC_REL)
         assert rel == wl.rel_dir(rel.parts[1]).relative_to(wl.LOGIC_REL), d
@@ -72,8 +72,11 @@ def test_the_shipped_directories_hold_models_only():
                 continue
             if name.endswith(".tilewright.bin"):
                 assert name in listed, f"{d / name} is in no row of the index"
-            elif name.endswith(SIDECAR_SUFFIX):
-                stem = name[: -len(SIDECAR_SUFFIX)]
+            elif name.endswith((SIDECAR_SUFFIX, GUARDS_SUFFIX)):
+                suffix = next(
+                    x for x in (SIDECAR_SUFFIX, GUARDS_SUFFIX) if name.endswith(x)
+                )
+                stem = name[: -len(suffix)]
                 assert stem in stems, f"{d / name} names a stem the index lacks"
             else:
                 pytest.fail(f"{d / name} is no model, sidecar or index")

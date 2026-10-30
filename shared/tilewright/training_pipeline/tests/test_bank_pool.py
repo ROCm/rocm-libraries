@@ -426,6 +426,56 @@ def test_check_pick_log_leaves_out_what_the_runtime_left_out(libdir, tmp_path, c
     assert "pool: 6 kernels" in capsys.readouterr().out
 
 
+def test_check_pick_log_reads_the_guards_of_a_model_trained_with_them_only(
+    libdir, tmp_path, capsys
+):
+    """The runtime reads the guards sidecar next to the model only for a
+    model trained with kernel guards, which keeps a guarded kernel in its
+    pool; it serves any other model with the blocklist sidecar's lines
+    whole. The check reads the guards next to the model by the same rule,
+    and any given with --guards."""
+    from test_v3 import LARGE, v3_bundle, write
+
+    from lib import correctness as cx
+    from lib import mlrec
+    from lib import tilewright_index as twi
+
+    names = {
+        k["sol_idx_global"]: k["kernel_name"]
+        for k in bp.library_pool(libdir, STEM, device()).kernels
+    }
+    (libdir / cx.sidecar_name(STEM)).write_text(cx.sidecar_text(STEM, [names[41]]))
+    guards = libdir / cx.guards_name(STEM)
+    guards.write_text(cx.guards_text(STEM, {names[41]: (cx.Guard("M", 4),)}))
+    model = write(v3_bundle(labels=[LARGE]))
+    (libdir / "m.tilewright.bin").write_bytes(model)
+    (libdir / twi.INDEX_NAME).write_text(f"{STEM}\tm.tilewright.bin\n")
+    log = tmp_path / "bench.log"
+    base = [str(log), "--library-dir", str(libdir), "--library-stem", STEM]
+    dev = ["--processor", "gfx950", "--cu-count", "256", "--chip-id", "0x75a0"]
+    whole = [pick(1, 0, 5), ran(30), pick(2, 4, 5), ran(44)]
+    guarded = [pick(8, 4), ran(41), pick(2, 4), ran(44), pick(9, 5), ran(44)]
+    log.write_text("\n".join(whole) + "\n")
+    assert not cpl.served_with_guards(libdir, STEM, 0x75A0)
+    assert cpl.main(base + dev) == 0
+    assert "pool: 5 kernels" in capsys.readouterr().out
+    log.write_text("\n".join(guarded) + "\n")
+    assert cpl.main(base + dev) == 1
+    capsys.readouterr()
+    assert cpl.main(base + dev + ["--guards", str(guards)]) == 0
+    assert "passed over below its guard: 1" in capsys.readouterr().out
+    (libdir / "m.tilewright.bin").write_bytes(mlrec.with_kernel_guards(model))
+    assert cpl.served_with_guards(libdir, STEM, 0x75A0)
+    assert cpl.main(base + dev) == 0
+    out = capsys.readouterr().out
+    assert "pool: 6 kernels" in out and "passed over below its guard: 1" in out
+    log.write_text("\n".join(whole) + "\n")
+    assert cpl.main(base + dev) == 1
+    (libdir / twi.INDEX_NAME).write_text(f"{STEM}\tgone.tilewright.bin\n")
+    assert not cpl.served_with_guards(libdir, STEM, 0x75A0)
+    assert cpl.main(base + dev) == 0
+
+
 # ── the live library ─────────────────────────────────────────────────────────
 
 LIVE_DIR = os.environ.get("TILEWRIGHT_GFX950_LIBRARY_DIR")

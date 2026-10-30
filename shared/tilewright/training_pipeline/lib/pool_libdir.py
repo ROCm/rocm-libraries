@@ -21,11 +21,11 @@ Kernels, code objects and the kept libraries stay untouched. Point
 `HIPBLASLT_TENSILE_LIBPATH` at the result.
 
 `build_serving_libdir` links every file of the library directory into a new
-directory except the weights file of one library stem, its blocklist sidecar
-(`<stem>.tilewright.blocklist`, lib/correctness.py) and the
-`tilewright_index`: the new directory holds a copy of the staged model under
-that weights file name, a copy of the staged sidecar when the model has one,
-and an index whose one line for the stem names the model on every device
+directory except the weights file of one library stem, its blocklist and
+guards sidecars (`<stem>.tilewright.blocklist`, `<stem>.tilewright.guards`,
+lib/correctness.py) and the `tilewright_index`: the new directory holds a
+copy of the staged model under that weights file name, a copy of each staged
+sidecar the model has, and an index whose one line for the stem names the model on every device
 (the other stems' lines kept, those for the devices of one PCI chip ID too,
 and a malformed one as it stands, so that the engine still loads no model
 for that stem). hipBLASLt pointed at it serves the staged model with the
@@ -46,7 +46,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import msgpack
 
 from . import tilewright_index as twi
-from .correctness import sidecar_name
+from .correctness import guards_name, sidecar_name
 from .dat import LOGIC_SUFFIXES, logic_stem, read_tensile_logic
 
 _SUFFIX = re.compile(r"((?:_ID[0-9a-fA-F-]+)?_gfx[0-9a-z]+(?:-[a-z]+)?)$")
@@ -138,11 +138,12 @@ def build_serving_libdir(
     model: Path,
     sha256: Optional[str] = None,
     blocklist: Optional[Path] = None,
+    guards: Optional[Path] = None,
 ) -> Dict[str, object]:
     """Fill `dst`, emptied first, so that it serves the model file `model` as
     `weights_name` for the library `stem` of the library directory `src`,
-    with the blocklist sidecar `blocklist` (none: the stem has none, whatever
-    `src` holds); returns a summary (also written to
+    with the blocklist sidecar `blocklist` and the guards sidecar `guards`
+    (none: the stem has none, whatever `src` holds); returns a summary (also written to
     `dst/.serving_libdir.json`). Another stem of `src`'s index whose line
     names `weights_name` is left out; another stem's malformed rows are kept
     as they stand (`malformed_rows` of the summary). ValueError when `model`
@@ -159,6 +160,8 @@ def build_serving_libdir(
         raise ValueError(f"{model} does not hash to {sha256} (it hashes to {digest})")
     sidecar = sidecar_name(stem)
     blocked = Path(blocklist).read_bytes() if blocklist is not None else None
+    guards_file = guards_name(stem)
+    guarded = Path(guards).read_bytes() if guards is not None else None
     if dst.is_symlink() or dst.is_file():
         dst.unlink()
     elif dst.is_dir():
@@ -167,11 +170,13 @@ def build_serving_libdir(
         shutil.rmtree(dst)
     dst.mkdir(parents=True)
     for name in names:
-        if name not in (INDEX_NAME, weights_name, sidecar):
+        if name not in (INDEX_NAME, weights_name, sidecar, guards_file):
             os.symlink(src / name, dst / name)
     (dst / weights_name).write_bytes(data)
     if blocked is not None:
         (dst / sidecar).write_bytes(blocked)
+    if guarded is not None:
+        (dst / guards_file).write_bytes(guarded)
     index = src / INDEX_NAME
     kept: List[twi.Row] = []
     dropped: List[twi.Row] = []
@@ -195,6 +200,10 @@ def build_serving_libdir(
         "blocklist": str(blocklist) if blocklist is not None else None,
         "blocklist_sha256": (
             hashlib.sha256(blocked).hexdigest() if blocked is not None else None
+        ),
+        "guards": str(guards) if guards is not None else None,
+        "guards_sha256": (
+            hashlib.sha256(guarded).hexdigest() if guarded is not None else None
         ),
         "other_stems": list(dict.fromkeys(s for s, _, _ in kept)),
         "left_out_stems": list(dict.fromkeys(s for s, _, _ in dropped)),

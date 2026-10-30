@@ -43,7 +43,10 @@ replaces the header tail with:
                                    trained-key gate, bit 8 CU floor, bit 9
                                    alignment veto (never with bit 2), bit 10
                                    drift fallback (needs the whitelist tier
-                                   and no launch keys)
+                                   and no launch keys), bit 11 kernel guards
+                                   (trained with the guards sidecar the
+                                   integration serves it with,
+                                   lib/correctness.py; ranking ignores it)
     u32      cascade_keys
     f64      min_cu_fraction, max_cu_fraction
                                    usable CUs / device CUs the model supports,
@@ -166,7 +169,8 @@ V3_TRAINED_KEY_GATE = 0x80
 V3_CU_FLOOR = 0x100
 V3_ALIGNMENT_VETO = 0x200
 V3_DRIFT_FALLBACK = 0x400
-_V3_SERVING_FLAGS_KNOWN = 0x7FF
+V3_KERNEL_GUARDS = 0x800
+_V3_SERVING_FLAGS_KNOWN = 0xFFF
 DRIFT_KEEP_MAX = 1000000
 SCHEDULE_BITS: Dict[str, int] = {"default": 1, "dynamic": 2, "auto": 4}
 BOUND_KEYS: Tuple[str, ...] = ("q_lo", "q_hi", "i_lo", "i_hi", "x_lo", "x_hi")
@@ -583,10 +587,10 @@ def _split_rules(
 
 def v3_serving_flags(serving: Mapping[str, Any]) -> int:
     """MLREC_v3 serving flags of a bundle's `serving` (soft rules, launch
-    keys, the bank, the trained-key gate and the alignment veto off and the
-    whitelist tier on unless set). ValueError for the family-wise
-    non-temporal rule without the non-temporal rule, and for the alignment
-    veto with it."""
+    keys, the bank, the trained-key gate, the alignment veto and the kernel
+    guards off and the whitelist tier on unless set). ValueError for the
+    family-wise non-temporal rule without the non-temporal rule, and for the
+    alignment veto with it."""
     flags = 0
     if serving.get("small_batched_rule", False):
         flags |= V3_SMALL_BATCHED_RULE
@@ -616,6 +620,8 @@ def v3_serving_flags(serving: Mapping[str, Any]) -> int:
                 "non-temporal rule"
             )
         flags |= V3_ALIGNMENT_VETO
+    if serving.get("kernel_guards", False):
+        flags |= V3_KERNEL_GUARDS
     return flags
 
 
@@ -1377,6 +1383,7 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
         "bank": bool(flags & V3_BANK),
         "trained_key_gate": bool(flags & V3_TRAINED_KEY_GATE),
         "cascade_keys": cascade,
+        **({"kernel_guards": True} if flags & V3_KERNEL_GUARDS else {}),
     }
     if veto is not None:
         serving["alignment_veto"] = veto
@@ -1582,6 +1589,23 @@ def with_bank(data: bytes, bank: bool) -> bytes:
     if bytes(data[:8]) != MAGIC_V3:
         raise FormatError("the bank flag is an MLREC_v3 serving option")
     return _with_flags(data, lambda f: f | V3_BANK if bank else f & ~V3_BANK)
+
+
+def with_kernel_guards(data: bytes, guards: bool = True) -> bytes:
+    """An MLREC_v3 model file that says whether it was trained with kernel
+    guards (serving flag bit 11: TensileLite serves it only with the guards
+    sidecar of its library, lib/correctness.py, and an engine without the
+    flag refuses it) and is otherwise `data`; ranking does not read it."""
+    if bytes(data[:8]) != MAGIC_V3:
+        raise FormatError("the kernel guards flag is an MLREC_v3 serving option")
+    return _with_flags(
+        data, lambda f: f | V3_KERNEL_GUARDS if guards else f & ~V3_KERNEL_GUARDS
+    )
+
+
+def without_kernel_guards(data: bytes) -> bytes:
+    """`data` without the kernel guards flag (unchanged without it)."""
+    return with_kernel_guards(data, False)
 
 
 def with_trained_keys(data: bytes, keys: Optional[Iterable[int]]) -> bytes:

@@ -1077,6 +1077,43 @@ def test_preflight_checks_the_module_serves_the_alignment_veto(monkeypatch):
     assert ro._tilewright_errors("v3", alignment_veto=True) == []
 
 
+def test_preflight_asks_the_module_for_what_the_config_serves(tmp_path, monkeypatch):
+    """preflight checks the tilewright module for the alignment veto when
+    deploy.alignment_veto is set and for the kernel guards flag when
+    correctness.guard_unguarded_custom is: a module that predates both is
+    refused once for each key the config sets, and never otherwise."""
+    import types
+
+    from lib import evaluate, features
+
+    tw = types.SimpleNamespace(
+        Config=lambda **kw: None,
+        feature_catalog_hash=features.feature_names_hash,
+        feature_catalog_hashes=lambda: [
+            features.feature_names_hash(),
+            features.v3_catalog_hash(),
+        ],
+        ModelInfo=type("ModelInfo", (), {"min_effective_cus": property(lambda i: 0)}),
+    )
+    monkeypatch.setattr(evaluate, "tilewright_module", lambda: tw)
+    veto = "deploy.alignment_veto: the tilewright module predates"
+    guards = "correctness.guard_unguarded_custom: the tilewright module predates"
+
+    def module_errors(**more):
+        cfg, _ = ro.load_config(
+            make_config(tmp_path, **{"train.catalog": "v3"}, **more)
+        )
+        errs = ro.preflight(cfg, ro.derive_paths(cfg), "validate")
+        return sorted(p for e in errs for p in (veto, guards) if e.startswith(p))
+
+    on = {"correctness.guard_unguarded_custom": True}
+    assert module_errors() == []
+    assert module_errors(**{"deploy.alignment_veto": dict(VETO_KEY)}) == [veto]
+    assert module_errors(**on) == [guards]
+    both = module_errors(**on, **{"deploy.alignment_veto": dict(VETO_KEY)})
+    assert both == sorted([veto, guards])
+
+
 def test_preflight_checks_a_stage07_build_serves_the_alignment_veto(tmp_path):
     import fake_hipblaslt as fh
 
@@ -2914,6 +2951,7 @@ def test_the_offset_rereads_are_pinned_only_when_they_change_something(tmp_path)
     floors = {"bench.canary.tolerance_us", "audit.canary_tolerance_us"}
     assert set(ro.PINNED_UNLESS_NEUTRAL) == floors | {
         "correctness.custom_kernels",
+        "correctness.guard_unguarded_custom",
         "audit.held_out",
         "contexts.granule",
         "deploy.drift_fallback.keep",

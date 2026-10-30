@@ -245,6 +245,43 @@ def test_evaluate_model_refuses_a_pool_that_degrades_a_cell():
                              tw=tw).degraded_cells == {}  # fmt: skip
 
 
+def test_evaluate_model_decides_the_drift_fallback_on_the_served_pool():
+    """TensileLite keeps a guarded kernel in the pool of a model trained with
+    kernel guards and leaves it out whole for any other model
+    (lib/evaluate.py served_pool), and the drift fallback is decided on the
+    pool it ranks: a cell whose trained whitelisted key only the guarded
+    kernel holds is degraded for the unflagged model alone."""
+    tw = pytest.importorskip("tilewright")
+    from lib.correctness import POOL_GUARDS
+    from test_v3 import _gemm
+
+    rng = random.Random(5)
+    pool = _pool(rng, n_kinds=30)
+    hashes = drift_fallback.pool_hashes(pool, SPEC)
+    listed = sorted(set(hashes))[:8]
+    bundle = v3_bundle(labels=[LARGE], serving={"cascade_keys": 4})
+    bundle["models"][LARGE]["view_key_hashes"] = listed
+    plain = mlrec.with_drift_fallback(write(bundle), 1000000)
+    flagged = mlrec.with_kernel_guards(plain)
+    guard = [{"free": "M", "minimum": 4}]
+    guarded = [dict(k, **{POOL_GUARDS: guard}) if h == listed[0] else k
+               for k, h in zip(pool, hashes)]  # fmt: skip
+    gemm = _gemm()
+    gemm["candidates"] = [dict(k, us=10.0 + i, is_skip=0, rank=i, is_origami_pick=0)
+                          for i, k in enumerate(pool)]  # fmt: skip
+    pools = {ev.pool_key(gemm): guarded}
+    with pytest.raises(
+        ValueError, match="drift fallback.*Large\\|Large\\|LargeK\\|Bnone"
+    ):
+        ev.evaluate_model(plain, [gemm], hardware=HW, pools=pools, tw=tw)
+    out = ev.evaluate_model(plain, [gemm], hardware=HW, pools=pools, tw=tw,
+                            allow_drift=True)  # fmt: skip
+    assert out.degraded_cells == {"|".join(ev.pool_key(gemm)): [LARGE]}
+    served = ev.evaluate_model(flagged, [gemm], hardware=HW, pools=pools, tw=tw)
+    assert served.degraded_cells == {}
+    assert served.results[0].served_by == "model"
+
+
 _DIAG_CHILD = """
 import json, sys
 sys.path.insert(0, sys.argv[1])

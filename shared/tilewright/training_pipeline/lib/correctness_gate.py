@@ -56,7 +56,16 @@ smaller free size reads outside the operand. A kernel whose predicates admit
 a free size below the width it declares on such a side is `unguarded`,
 blocked and never run; the source is TensileLite's CustomKernels of the
 hipBLASLt source the build was configured from, or
-`correctness.custom_kernels`.
+`correctness.custom_kernels`. With `correctness.guard_unguarded_custom` an
+unguarded kernel gets a guard instead (`static_guards`: per such side the
+free size and the width it declares, the least free size it reads within
+the operand): it runs only the shapes of both stages its guards admit (so
+the main stage's M of 2 and the tiny stage's M of 1 to 3 are skipped for a
+guard on M, and the tiny stage's N of 1 to 3 run at an M of TINY_OTHER),
+under protocols of those shapes, and when it passes, and only then, the
+blocklist holds it as a guarded entry (lib/correctness.py `Entry.guards`,
+verdict `guarded`), which blocks it only below its guards; a failure, a
+crash or no pass blocks it whole.
 
 A harness process that prints nothing for `timeout_s` (before it is ready,
 between two records, after its last one) hangs and is killed. When a process
@@ -143,6 +152,9 @@ MIN_REPETITIONS = 3
 # a free size below the vector width it reads that operand with.
 UNGUARDED = "unguarded"
 BLOCKING_VERDICTS = ("fail", "crash", UNGUARDED)
+# The verdict of an unguarded kernel that passed the shapes its guards admit
+# (`correctness.guard_unguarded_custom`): blocked only below its guards.
+GUARDED = "guarded"
 # The stages of the harness runs: the shapes of `shapes_of` (with the first
 # launches), and the tiny shapes of `tiny_shapes_of`, each with a protocol
 # and cached verdicts of its own.
@@ -1008,6 +1020,33 @@ def static_check(
             why = missing if sources is None else f"no {name}.s among the sources"
             out[sid] = check_custom_kernel(sid, sol, name, src, trans, why)
     return out
+
+
+def static_guards(finding: StaticFinding) -> Tuple[cx.Guard, ...]:
+    """The guards an unguarded kernel gets under
+    `correctness.guard_unguarded_custom`: per leading free dimension whose
+    least admitted free size is below the width its custom.config declares,
+    that free size at least that width. None for a finding of another
+    status."""
+    if finding.status != UNGUARDED:
+        return ()
+    out = []
+    for side in finding.sides.values():
+        width = side.get("declared_width")
+        if (
+            side.get("leading_free")
+            and isinstance(width, int)
+            and width > int(side.get("floor") or 1)
+        ):
+            out.append(cx.Guard(str(side["free_size"]), int(width)))
+    return tuple(sorted(out, key=lambda g: g.index))
+
+
+def guarded_shapes(
+    shapes: Sequence[Shape], guards: Sequence[cx.Guard]
+) -> Tuple[Shape, ...]:
+    """The shapes of `shapes` the guards admit."""
+    return tuple(s for s in shapes if cx.guards_admit(guards, s.m, s.n))
 
 
 def harness_caps(
@@ -1946,28 +1985,50 @@ def run_passes(
     shapes: Sequence[Shape] = SHAPES,
     tiny: Sequence[Shape] = (),
     tiny_sids: Sequence[int] = (),
+    guarded: Sequence[Tuple[Sequence[int], Sequence[Shape], bool]] = (),
 ) -> Outcome:
     """The gate's passes over `sids`: `shapes`, the first launches, and over
-    `tiny_sids` the tiny stage's shapes `tiny`; then the shapes of both again
-    with K rounded up where they were not supported, and the follow-ups of
-    failures (see the module docstring). `settle(outcome, sids,
-    failures_only)` hears of the kernels whose verdicts no later pass can
-    change: before the follow-ups those no follow-up runs, after them the
+    `tiny_sids` the tiny stage's shapes `tiny`, and per (kernels, shapes,
+    launch) group of `guarded` those shapes on those kernels (the shapes
+    their guards admit, of either stage; with `launch`, their guards admit
+    the first launches' M and N, the main stage's first launches too); then
+    the
+    shapes of all again with K rounded up where they were not supported, and
+    the follow-ups of failures (see the module docstring). `settle(outcome,
+    sids, failures_only)` hears of the kernels whose verdicts no later pass
+    can change: before the follow-ups those no follow-up runs, after them the
     rest; when a pass stops early, with `failures_only`, every kernel (a
     wrong result stands whatever the passes left to run), unless the harness
     turned out to run other kernels."""
     outcome = Outcome()
     tell: Settle = settle or (lambda _o, _s, _f: None)
-    everyone = sorted(set(sids) | set(tiny_sids))
-    every_shape = [*shapes, *tiny]
+    guarded_main = sorted(
+        {
+            int(s)
+            for ids, shp, launch in guarded
+            if launch and any(not x.fresh for x in shp)
+            for s in ids
+        }
+    )
+    everyone = sorted(
+        set(sids) | set(tiny_sids) | {int(s) for ids, _, _ in guarded for s in ids}
+    )
+    every_shape = list(
+        dict.fromkeys([*shapes, *tiny, *(x for _, shp, _ in guarded for x in shp)])
+    )
     try:
         tasks = main_tasks(sids, settings, workers, shapes)
         tasks += main_tasks(tiny_sids, settings, workers, tiny)
+        n_guarded = 0
+        for ids, shp, _ in guarded:
+            tasks += main_tasks(sorted(ids), settings, workers, shp)
+            n_guarded += len(ids)
+        launched = [*sids, *(s for s in guarded_main if s not in set(sids))]
         first = (
-            list(sids)
+            list(launched)
             if settings.first_launch == "all"
             else (
-                [s for s in sids if s in custom]
+                [s for s in launched if s in custom]
                 if settings.first_launch == "custom"
                 else []
             )
@@ -1978,6 +2039,12 @@ def run_passes(
             + (
                 f" and {len(tiny_sids):,} x {len(tiny)} tiny shapes"
                 if tiny_sids and tiny
+                else ""
+            )
+            + (
+                f", guarded kernels on the shapes their guards admit "
+                f"({n_guarded:,} kernel-stage pairs)"
+                if n_guarded
                 else ""
             )
             + f" in {len(tasks)} harness processes ({len(first)} kernels "
@@ -2138,6 +2205,29 @@ def run_gate(
                     f"{found[0].reason}); the tiny shapes still run them"
                 )
     unguarded = {s for s, f in static.items() if f.blocks}
+    # correctness.guard_unguarded_custom: an unguarded kernel with guards runs
+    # the shapes they admit, under protocols of those shapes.
+    guards: Dict[int, Tuple[cx.Guard, ...]] = {}
+    if sec.get("guard_unguarded_custom"):
+        for s in sorted(unguarded):
+            found = static_guards(static[s])
+            if found:
+                guards[s] = found
+        unguarded -= set(guards)
+    stage_shapes = {
+        s: (guarded_shapes(shapes, g), guarded_shapes(tiny, g))
+        for s, g in guards.items()
+    }
+    guard_protos = {
+        shp: (protocol(settings, hid, shp[0]), protocol(settings, hid, shp[1], TINY))
+        for shp in set(stage_shapes.values())
+    }
+
+    def protos_of(sid: int) -> Tuple[str, str]:
+        """(main, tiny) protocol of a kernel's verdicts."""
+        shp = stage_shapes.get(sid)
+        return (proto, tiny_proto) if shp is None else guard_protos[shp]
+
     known: Dict[int, Dict[str, Any]] = {}
     known_tiny: Dict[int, Dict[str, Any]] = {}
     pending: List[int] = []
@@ -2147,22 +2237,29 @@ def run_gate(
         if sid in unguarded:
             continue
         kid = ki.kernel_id(kernels[sid])
-        for proto_, have, want in (
-            (proto, known, pending),
-            (tiny_proto, known_tiny, pending_tiny),
+        main_proto, small_proto = protos_of(sid)
+        for proto_, have, want, stage_ in (
+            (main_proto, known, pending, MAIN),
+            (small_proto, known_tiny, pending_tiny, TINY),
         ):
             rec = cache.lookup(kid, dkey, code_of(sid), proto_, settings.timeout_s)
             if rec is not None:
                 have[sid] = rec
                 continue
             want.append(sid)
-            if proto_ == tiny_proto and cache.lookup(
+            if stage_ == TINY and cache.lookup(
                 kid, dkey, code_of(sid), proto_, settings.timeout_s, fresh=False
             ):
                 not_fresh += 1
     say(
         f"pool {len(kernels):,} kernels: {len(seeded)} blocked by lists, "
-        f"{len(unguarded)} unguarded in the static check, {len(known):,} with a "
+        f"{len(unguarded)} unguarded in the static check"
+        + (
+            f" ({len(guards)} more with guards, checked on the shapes they admit)"
+            if guards
+            else ""
+        )
+        + f", {len(known):,} with a "
         f"cached verdict, {len(pending):,} to check (device {dkey}, protocol "
         f"{proto}); tiny shapes: {len(known_tiny):,} cached, "
         f"{len(pending_tiny):,} to check (protocol {tiny_proto})"
@@ -2214,6 +2311,17 @@ def run_gate(
             ),
             "unguarded": [
                 {"solution_index": s, "name": static[s].name} for s in sorted(unguarded)
+            ],
+            "guarded": [
+                {
+                    "solution_index": s,
+                    "name": static[s].name,
+                    "guards": [g.to_dict() for g in guards[s]],
+                    "shapes": [x.name for x in stage_shapes[s][0]],
+                    "tiny_shapes": [x.name for x in stage_shapes[s][1]],
+                    "protocols": list(protos_of(s)),
+                }
+                for s in sorted(guards)
             ],
         },
     }
@@ -2275,8 +2383,8 @@ def run_gate(
             )
 
         stages = (
-            (MAIN, set(pending), settled, proto),
-            (TINY, set(pending_tiny), settled_tiny, tiny_proto),
+            (MAIN, set(pending), settled, 0),
+            (TINY, set(pending_tiny), settled_tiny, 1),
         )
 
         def settle(outcome: Outcome, sids: Iterable[int], failures_only: bool) -> None:
@@ -2289,9 +2397,10 @@ def run_gate(
             fresh = _fresh_runs(outcome)
             new = []
             for sid in sids:
-                for stage, wanted, done, stage_proto in stages:
+                for stage, wanted, done, which in stages:
                     if sid not in wanted or sid in done:
                         continue
+                    stage_proto = protos_of(sid)[which]
                     v = by_stage[stage].get(sid) or Verdict(sid)
                     if failures_only and v.verdict != "fail":
                         continue
@@ -2343,9 +2452,19 @@ def run_gate(
                         f"before an operand may land in another buffer and go unseen; "
                         f"the next gate runs them again"
                     )
+            groups: Dict[Tuple[Tuple[Shape, ...], bool], List[int]] = {}
+            first_mn = Shape("first_launch", *FIRST_LAUNCH_MN, 1)
+            for sid in pending:
+                if sid in guards:
+                    launch = cx.guards_admit(guards[sid], first_mn.m, first_mn.n)
+                    key = (stage_shapes[sid][0], launch)
+                    groups.setdefault(key, []).append(sid)
+            for sid in pending_tiny:
+                if sid in guards:
+                    groups.setdefault((stage_shapes[sid][1], False), []).append(sid)
             outcome = run_passes(
                 kernels,
-                sorted(pending),
+                sorted(s for s in pending if s not in guards),
                 custom,
                 settings,
                 run,
@@ -2354,7 +2473,8 @@ def run_gate(
                 settle,
                 shapes,
                 tiny,
-                sorted(pending_tiny),
+                sorted(s for s in pending_tiny if s not in guards),
+                [(ids, shp, launch) for (shp, launch), ids in groups.items() if shp],
             )
         summary["tasks"] = len(outcome.tasks)
         summary["harness_crashes"] = sum(
@@ -2417,6 +2537,25 @@ def run_gate(
         finding = static.get(sid)
         if finding is not None:
             base["static"] = finding.record()
+        if sid in guards:
+            assert finding is not None
+            row = _guarded_row(
+                base, finding, guards[sid], known.get(sid), known_tiny.get(sid),
+                sid in settled_tiny,
+            )  # fmt: skip
+            rows.append(row)
+            counts[row["verdict"]] += 1
+            blocked.append(
+                cx.Entry(
+                    name=str(k["kernel_name"]),
+                    reason=row["reason"],
+                    kernel_id=kid,
+                    signature=ki.signature_label(k),
+                    source=row["source"],
+                    guards=guards[sid] if row["verdict"] == GUARDED else (),
+                )
+            )
+            continue
         if finding is not None and finding.blocks:
             rows.append(
                 dict(
@@ -2485,6 +2624,56 @@ def run_gate(
     cx.write_blocklist(out_dir / cx.BLOCKLIST_FILE, cx.Blocklist(blocked), **head)
     _write(out_dir / SUMMARY_FILE, summary)
     return summary
+
+
+def _guarded_row(
+    base: Mapping[str, Any],
+    finding: StaticFinding,
+    guards: Sequence[cx.Guard],
+    main: Optional[Mapping[str, Any]],
+    tiny: Optional[Mapping[str, Any]],
+    tiny_now: bool,
+) -> Dict[str, Any]:
+    """The verdict row of an unguarded kernel checked on the shapes its
+    `guards` admit: `guarded` when it passed (blocked below its guards only),
+    else blocked whole, a failure or a crash as such and anything short of
+    a pass (untested, unchecked) as `unguarded`."""
+    verdict, decided = kernel_verdict(main, tiny)
+    text = " and ".join(g.text() for g in guards)
+    row = dict(
+        base,
+        guards=[g.to_dict() for g in guards],
+        evidence=(main or {}).get("evidence"),
+    )
+    if tiny is not None:
+        row["tiny"] = {
+            "verdict": tiny["verdict"],
+            "source": "gate" if tiny_now else "cache",
+            "reason": tiny.get("reason") or "",
+            "evidence": tiny.get("evidence"),
+        }
+    if verdict == "pass":
+        return dict(
+            row,
+            verdict=GUARDED,
+            source="correctness gate (static check, guarded)",
+            reason=f"guarded: served only where {text}; {finding.reason}",
+        )
+    if verdict in ("fail", "crash"):
+        own = decided or main or tiny or {}
+        return dict(
+            row,
+            verdict=verdict,
+            source="correctness gate",
+            reason=str(own.get("reason") or "wrong results in the exact check")
+            + f" (on the shapes where {text})",
+        )
+    return dict(
+        row,
+        verdict=UNGUARDED,
+        source="correctness gate (static check)",
+        reason=f"no pass where {text} ({verdict}); {finding.reason}",
+    )
 
 
 def _write(path: Path, doc: Any) -> None:

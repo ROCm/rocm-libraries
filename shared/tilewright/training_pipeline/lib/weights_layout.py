@@ -14,9 +14,10 @@ libraries of an architecture's other logic directories (`gfx950_128cu`, ...)
 load into the same subtree, so their models are rows of that subtree's
 index; hipBLASLt installs no other Tilewright directory. A directory
 holds the subtree's `tilewright_index`, its models (`*.tilewright.bin`) and
-their blocklist sidecars (`<stem>.tilewright.blocklist`), never a `.yaml`
-file: TensileCreateLibrary reads every `.yaml` file of the logic tree as
-library logic, and hipBLASLt's configuration fails on one there.
+their blocklist and guards sidecars (`<stem>.tilewright.blocklist`,
+`<stem>.tilewright.guards`), never a `.yaml` file: TensileCreateLibrary
+reads every `.yaml` file of the logic tree as library logic, and
+hipBLASLt's configuration fails on one there.
 
 hipBLASLt's build target `hipblaslt-tilewright-models` copies each directory's
 index, models and sidecars to `<build>/Tensile/library/<subtree>/`, next to

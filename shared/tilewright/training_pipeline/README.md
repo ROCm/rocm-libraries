@@ -3352,6 +3352,48 @@ run on every shape. The check reads the logic files and sources at every
 gate and is not cached, so a rebuilt library or an edited source is checked
 as it is now.
 
+With `correctness.guard_unguarded_custom` (it needs the static check) an
+unguarded kernel gets guards instead of a block: per leading free dimension
+it reads past, that free size at least the width its `custom.config`
+declares (`static_guards`; M of 4 for a kernel that reads A four wide). It
+then runs only the shapes of both stages its guards admit (the main
+stage's M of 2 and the tiny stage's M of 1 to 3 are skipped for a guard on
+M, and the tiny stage's N of 1 to 3 run at M = 257), its first launches
+when its guards admit them, under protocols of those shapes (the summary's
+`static.guarded` names them). When both stages pass it the blocklist holds
+it as a guarded entry (`guards`, verdict `guarded`, lib/correctness.py
+`Entry.guards`), which blocks it only on problems its guards deny; a
+failure or crash blocks it whole, as does anything short of a pass of both
+stages. A guarded kernel stays in the pools built from the config, marked
+with its guards: the planner lists it only for shapes its guards admit
+(and gives an exhaustively benched shape its guards deny an explicit list
+without it), the audit set's lines and protocol v2's sets leave it out of
+such shapes, stage04 drops any row of it there, and the evaluations of a
+model trained with kernel guards pass over it there, asking the engine for
+one more scored config, as TensileLite does (`lib.feasibility.guard_denies`),
+and pass over its rows in the Origami fallback; the evaluations of any other
+model, which TensileLite serves without reading the guards, leave it out of
+the pool and of the fallback whole (`lib.evaluate.served_pool`). A guard
+acts on the engine's ranking, here as in TensileLite: below it the kernel
+still counts toward the trained-key gate, the whitelist tier and the
+cascade, so a model that trained the kernel's view key can serve a problem
+below the guard otherwise than the same model with the kernel blocked
+whole. And the engine plans a view key with its first member's launch,
+which below the guard is the kernel's: a pool where the kernel shares its
+view key with a later member of another launch class needs launch keys
+(`train.launch_keys`) for that member to be scored with its own plan.
+stage05 records the flag in the bundle when its pool keeps a guarded
+kernel, so that its evaluations serve the model as it deploys. stage06
+still names the kernel in the blocklist sidecar, so an integration or a
+model without guards leaves it out whole, stages its guards in the guards
+sidecar `<library stem>.tilewright.guards` (one line per kernel name and
+free size, names that differ only in the tokens builds spell differently
+merged), and flags the model as trained with kernel guards (MLREC_v3
+serving flag bit 11) exactly when it ships the guards: TensileLite serves
+such a model with the guards only, refuses it without them, and an engine
+that predates the flag refuses it. Preflight checks that the tilewright
+module and stage 7's TensileLite know the guards.
+
 A harness process that prints nothing for `correctness.timeout_s` (before
 it is ready, between two records or after its last one) hangs and is
 killed. When a process crashes or hangs, the first kernel it found that
@@ -3458,7 +3500,13 @@ warns. `deploy_loss.py` applies the blocklist stage05 applied (through the
 snapshot its `metrics.json` names), and `check_pick_log.py` the file
 `--blocklist` names, else the sidecar the runtime read (`<library
 stem>.tilewright.blocklist` in `--library-dir`, next to the model), else
-the config's. The report notes a blocklist it cannot read and analyzes the
+the config's, narrowed by the guards sidecar (`--guards`, else the one next
+to the model when the model the directory's `tilewright_index` names
+declares kernel guards, as the runtime reads it for no other model): a pick
+line whose engine top-1 is a guarded kernel below its
+guards and whose bench ran another solution is passed over, and a bench
+that ran a guarded kernel there is a violation. The report notes a
+blocklist it cannot read and analyzes the
 whole pool.
 
 ### Deployment (stage06)
@@ -4662,8 +4710,8 @@ serves it:
   the staged model of the run's latest deploy record from
   `validate/stage07_lib/<arch>/`: a link to every file of the bench library
   (`runtime.build_dir`'s), the staged model under the deploy record's
-  weights file name, the blocklist sidecar staged with it (*Correctness
-  gate*) in place of any the library holds for the stem, and a
+  weights file name, the blocklist and guards sidecars staged with it
+  (*Correctness gate*) in place of any the library holds for the stem, and a
   `tilewright_index` whose one line for the library stem names the model on
   every device (the other stems' lines kept, those for the devices of one
   PCI chip ID too, and a malformed one as it stands, with a warning). That
@@ -4737,7 +4785,10 @@ their problems (every round's stage04 data) for the runtime's selection
 efficiency, with a bootstrap interval; a problem whose top-1 kernel has no
 row (one the benches never ran, or one that cannot run) is counted apart
 (`n_top1_without_row`) and left out of it, since the stage reads no planned
-list; on problems sampled from the training
+list; a top-1 the guards of a model trained with kernel guards deny (the
+pick log names the engine's top-1 before TensileLite passes over it) costs
+the next kernel the engine ranks that they admit, the one the runtime
+served (`n_passed_over`); on problems sampled from the training
 data (`stage07.parity_sample_trained`) that is mostly an in-sample number.
 
 A second parity run requests `stage07.parity_top_k` solutions (8; 1 or less
@@ -5588,7 +5639,9 @@ harness process may print nothing), `devices` (null: `runtime.devices`),
 `hipcc`), `static_check` (true: the static check of hand-written kernels),
 `custom_kernels` (null: TensileLite's `CustomKernels` of the hipBLASLt
 source the build was configured from; a directory holding the hand-written
-kernels' sources). `blocklist` is set by the orchestrator: the invocation's
+kernels' sources), `guard_unguarded_custom` (false: a kernel the static
+check finds unguarded is blocked whole; true: it gets guards and is checked
+and served where they admit a problem). `blocklist` is set by the orchestrator: the invocation's
 copy of the gate's blocklist (which holds the hazard canary's quarantine),
 or of the quarantine alone without the gate, which the stages apply; a
 config that sets it with the gate off (a run's snapshot with the gate turned

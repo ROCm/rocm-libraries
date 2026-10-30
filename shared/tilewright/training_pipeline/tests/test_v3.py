@@ -1493,6 +1493,44 @@ def test_serving_flags_can_be_rewritten_without_retraining():
     assert tw.describe(ev.load_model_bytes(gated, tw)).trained_keys == 2
 
 
+def test_the_kernel_guards_flag_is_written_read_and_kept_by_the_engine():
+    """Serving flag bit 11 says the model was trained with kernel guards:
+    TensileLite serves it with its library's guards sidecar only, and an
+    engine that predates the flag refuses it. It changes no ranking, so a
+    model carries it without retraining."""
+    bundle = v3_bundle(labels=[LARGE])
+    data = write(bundle, provenance=PROVENANCE)
+    flagged = mlrec.with_kernel_guards(data)
+    assert len(flagged) == len(data) and mlrec.with_kernel_guards(flagged) == flagged
+    assert mlrec.read_header(flagged)["serving"]["kernel_guards"] is True
+    assert "kernel_guards" not in mlrec.read_header(data)["serving"]
+    assert mlrec.without_kernel_guards(flagged) == data
+    assert mlrec.without_kernel_guards(data) == data
+    assert (
+        mlrec.read_model(flagged)["payload_crc32"]
+        == mlrec.read_model(data)["payload_crc32"]
+    )
+    written = write(
+        dict(bundle, serving=dict(bundle.get("serving") or {}, kernel_guards=True)),
+        provenance=PROVENANCE,
+    )
+    assert written == flagged
+    with pytest.raises(mlrec.FormatError, match="MLREC_v3"):
+        mlrec.with_kernel_guards(b"MLREC_v2" + data[8:])
+    at = mlrec._v3_header(data, len(data))["serving_offset"]
+    (flags,) = struct.unpack_from("<I", flagged, at)
+    assert flags & 0x800
+    unknown = bytearray(flagged)
+    struct.pack_into("<I", unknown, at, flags | 0x1000)
+    with pytest.raises(mlrec.FormatError, match="unknown serving flags"):
+        mlrec.read_model(bytes(unknown))
+    tw = pytest.importorskip("tilewright")
+    assert tw.describe(ev.load_model_bytes(flagged, tw)).kernel_guards is True
+    assert tw.describe(ev.load_model_bytes(data, tw)).kernel_guards is False
+    with pytest.raises(RuntimeError, match="unknown serving flags"):
+        ev.load_model_bytes(bytes(unknown), tw)
+
+
 FLOORED = {
     "min_cu_fraction": 0.25,
     "max_cu_fraction": 1.0,

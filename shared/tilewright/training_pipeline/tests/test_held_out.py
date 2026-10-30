@@ -433,3 +433,20 @@ def test_a_run_never_draws_a_registered_list(tmp_path, stubs, env, monkeypatch, 
         f"audit.held_out {late}: rounds drew its GEMMs before it held them out "
         f"(4 in round_0)" in out.out + out.err
     )
+
+
+def test_the_guard_key_needs_the_static_check_and_is_pinned_only_when_on(tmp_path):
+    cfg = yaml.safe_load(_config(tmp_path).read_text())
+    cfg["correctness"] = {"enabled": True, "lists": []}
+    base = ro.pinned_config(cfg)
+    assert "correctness.guard_unguarded_custom" not in base
+    assert ro.PINNED_UNLESS_NEUTRAL["correctness.guard_unguarded_custom"] is False
+    on = dict(cfg, correctness=dict(cfg["correctness"], guard_unguarded_custom=True))
+    assert ro.pinned_config(on)["correctness.guard_unguarded_custom"] is True
+    errors = ro.validate_config(on)[0]
+    assert not [e for e in errors if "guard_unguarded_custom" in e]
+    off = dict(on, correctness=dict(on["correctness"], static_check=False))
+    assert [e for e in ro.validate_config(off)[0] if "guard_unguarded_custom" in e] == [
+        "correctness.guard_unguarded_custom: the guards come from the static check; "
+        "turn correctness.static_check on"
+    ]

@@ -56,7 +56,9 @@ line is a position in the pool of `[origami, bok]` with bok rows equality.
 
 `config_pool` leaves out of the pool the kernels the config's blocklist
 names (lib/correctness.py), as TensileLite does with the sidecar stage06
-installs next to the model, so positions stay those of the runtime.
+installs next to the model, so positions stay those of the runtime; a
+kernel it guards stays, marked with its guards (`POOL_GUARDS`), as
+TensileLite keeps it for a model trained with kernel guards.
 `describe` gives the lines preflight prints and `summary` the record the
 report shows.
 """
@@ -1034,7 +1036,8 @@ def resolve(
 
 def without_blocked(pool: LibraryPool, blocklist: Optional[Any]) -> LibraryPool:
     """`pool` without the kernels `blocklist` (`lib.correctness.Blocklist`)
-    names; its parts count them, its files stay."""
+    blocks whole, each kernel it guards as a copy marked with its guards
+    (`Blocklist.kept`); its parts count those left out, its files stay."""
     if not blocklist:
         return pool
     parts = []

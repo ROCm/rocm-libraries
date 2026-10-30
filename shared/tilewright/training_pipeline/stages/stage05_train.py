@@ -9,9 +9,12 @@ Input : one or more folders of enriched chunk_*.csv from stage04. Repeating
 Output: <out>/models.pt         per-cell student weights, feature statistics,
                                 kernel whitelists and provenance (what stage06
                                 deploys; lib/provenance.py); for v3 also the
-                                view keys with training rows and whether the
-                                pool held the bank; the training recipe and,
-                                for pooled_ft, its pooled student
+                                view keys with training rows, whether the
+                                pool held the bank and whether it kept a
+                                guarded kernel (the kernel guards flag
+                                stage06 deploys the model with, under which
+                                the evaluations serve it); the training
+                                recipe and, for pooled_ft, its pooled student
         <out>/cells.json        per-cell metadata and measurements
         <out>/metrics.json      global measurements, arguments, environment,
                                 provenance, how the benches of the
@@ -5970,6 +5973,10 @@ def main() -> int:
         library = ev.pool_from_kernels(lib_pool.kernels)
         if v3:
             serving["bank"] = bool(lib_pool.bank.kernels)
+            # stage06 flags a model whose pool keeps a guarded kernel, so the
+            # evaluations here serve it as TensileLite serves that model.
+            if any(k.get(cx.POOL_GUARDS) for k in library):
+                serving["kernel_guards"] = True
     pools = ev.pools_for(all_gemms, library)
     ev.order_candidates_by_pool(all_gemms, pools)
     if args.served_candidates:
