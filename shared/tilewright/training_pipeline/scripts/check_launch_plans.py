@@ -8,28 +8,37 @@ MLREC_v3 models train with `lib/hipblaslt_launch.launch_plan` and
 `launch_key`; TensileLite ranks them with the plans and keys of its own
 launch code (TilewrightLaunch). This script writes the pool of a library for
 tensilelite-tests, which dumps the launch key of every pool kernel and the
-plans of random problems and execution contexts for it, then recomputes
-every dumped key with `launch_key` and plan with `launch_plan` and reports
-each one that differs.
+plans of random problems and execution contexts for it on a device of the
+given processor and CU count, under a launch rule version, then recomputes
+every dumped key with `launch_key` and plan with `launch_plan` under that
+version and reports each one that differs. The dump's first line names the
+launch model and the CU count it planned for; they must be the ones given
+here.
 
-One class of differing plans is known and counted apart (`known_class`):
-a static Stream-K launch of batch 1 with one K iteration per tile and more
-tiles than the CUs it may use, where TensileLite takes the grid Origami's
-select_grid_size chooses, which can differ from launch rule version 1's
-(lib/hipblaslt_launch.py). Such plans are reported but do not fail the
-check; every other difference does.
+Under launch rule version 1 one class of differing plans is known and
+counted apart (`known_class`): a static Stream-K launch of batch 1 with one
+K iteration per tile and more tiles than the CUs it may use, where
+TensileLite takes the grid Origami's select_grid_size chooses, which can
+differ from version 1's (lib/hipblaslt_launch.py). Such plans are reported
+but do not fail the check; every other difference does, and under a later
+version every difference does.
 
 Usage:
   check_launch_plans.py pool OUT --library-dir DIR --library-stem STEM
       --processor gfx950 --cu-count 256 [--chip-id 0x75a0] [--bank-stem STEM ...]
   TILEWRIGHT_LAUNCH_PLANS_POOL=OUT TILEWRIGHT_LAUNCH_PLANS_OUT=PLANS \\
+  TILEWRIGHT_LAUNCH_PLANS_PROCESSOR=gfx950 TILEWRIGHT_LAUNCH_PLANS_CU_COUNT=256 \\
+  [TILEWRIGHT_LAUNCH_PLANS_RULE_VERSION=V] \\
       tensilelite-tests --gtest_filter=TilewrightLaunchTest.DumpsPoolPlans
   check_launch_plans.py compare PLANS --library-dir DIR --library-stem STEM
       --processor gfx950 --cu-count 256 [--chip-id 0x75a0] [--bank-stem STEM ...]
+      [--rule-version V]
 
-Without --bank-stem the bank is every file of the problem type. Exit code 0
-when every key and plan matches but plans of the known class, 1 on another
-mismatch, 2 on bad input.
+Without --bank-stem the bank is every file of the problem type; without
+--rule-version the version is the one the architecture trains on
+(`hipblaslt_launch.rule_version`), as without
+TILEWRIGHT_LAUNCH_PLANS_RULE_VERSION. Exit code 0 when every key and plan
+matches but plans of the known class, 1 on another mismatch, 2 on bad input.
 """
 from __future__ import annotations
 
@@ -120,6 +129,18 @@ def parse_keys(lines: Iterable[str]) -> List[KeyRow]:
     return rows
 
 
+def parse_launch(lines: Iterable[str]) -> Optional[Tuple[str, int]]:
+    """(launch model id, CU count) of a dump's "# launch <id> cu_count <n>"
+    line, the first line DumpsPoolPlans writes; None without one."""
+    for line in lines:
+        w = line.split()
+        if w[:2] == ["#", "launch"]:
+            if len(w) != 5 or w[3] != "cu_count":
+                raise ValueError(f"bad launch line: {line!r}")
+            return w[2], int(w[4])
+    return None
+
+
 def parse_plans(lines: Iterable[str]) -> List[Row]:
     rows = []
     for line in lines:
@@ -151,11 +172,11 @@ KNOWN_CLASS = "one K iteration per tile, batch 1, static Stream-K"
 def known_class(
     row: Row, kernel: Mapping[str, Any], got: Tuple[bool, int, str], n_cu: int
 ) -> bool:
-    """Whether a plan that differs from `launch_plan`'s (`got`) is of the
-    known class: a Stream-K kernel, batch 1, one K iteration per tile (K at
-    most the kernel's depth), more output tiles than the CUs the launch may
-    use, and a static launch in both plans, where TensileLite takes the grid
-    Origami's select_grid_size chooses."""
+    """Whether a plan that differs from `launch_plan`'s (`got`) under rule
+    version 1 is of the known class: a Stream-K kernel, batch 1, one K
+    iteration per tile (K at most the kernel's depth), more output tiles than
+    the CUs the launch may use, and a static launch in both plans, where
+    TensileLite takes the grid Origami's select_grid_size chooses."""
     attrs = kernel.get("attributes") or {}
     if int(attrs.get("tile_processing_strategy", 0)) != 2:
         return False
@@ -200,7 +221,13 @@ def check_plans(
     pool: Sequence[Mapping[str, Any]],
     n_cu: int,
     arch: str,
+    version: Optional[int] = None,
 ) -> PlanCheck:
+    """`rows` against `launch_plan` under rule `version` (default the one
+    `arch` trains on); the known class is counted apart under version 1
+    only."""
+    if version is None:
+        version = hipblaslt_launch.rule_version(arch)
     out = PlanCheck(rows=len(rows), kernels=len({r.pos for r in rows}))
     out.field_mismatches = {f: 0 for f in FIELDS}
     out.known_field_mismatches = {f: 0 for f in FIELDS}
@@ -223,13 +250,19 @@ def check_plans(
             )
             continue
         p = hipblaslt_launch.launch_plan(
-            r.problem, kernel, kernel.get("attributes"), r.context, n_cu, arch
+            r.problem,
+            kernel,
+            kernel.get("attributes"),
+            r.context,
+            n_cu,
+            arch,
+            version=version,
         )
         got = (bool(p.dynamic_queue), int(p.grid_wgs), str(p.partial_reduction))
         bad = [f for f, a, b in zip(FIELDS, r.plan, got) if a != b]
         if not bad:
             continue
-        known = known_class(r, kernel, got, n_cu)
+        known = version == 1 and known_class(r, kernel, got, n_cu)
         counts = out.known_field_mismatches if known else out.field_mismatches
         for f in bad:
             counts[f] += 1
@@ -296,22 +329,39 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument(
         "--arch", help="arch of the launch model (default: --processor)", default=None
     )
+    ap.add_argument(
+        "--rule-version",
+        type=int,
+        default=None,
+        help="launch rule version (default: the one the arch trains on)",
+    )
     ap.add_argument("--show", type=int, default=20, help="mismatches to list")
     args = ap.parse_args(argv)
+    arch = args.arch or args.processor
     try:
+        launch = hipblaslt_launch.HipblasltLaunch(arch, version=args.rule_version)
         pool = library_pool(args)
         if args.command == "pool":
             args.path.write_text(pool_file(pool, args.library_dir))
             print(f"pool: {len(pool.kernels)} kernels from {len(pool.stems)} files")
             return 0
         lines = args.path.read_text().splitlines()
+        dumped = parse_launch(lines)
+        if dumped != (launch.id, args.cu_count):
+            raise ValueError(
+                f"the plans are of launch model and CU count {dumped}, not "
+                f"{(launch.id, args.cu_count)}: dump them with "
+                f"TILEWRIGHT_LAUNCH_PLANS_PROCESSOR, _CU_COUNT and _RULE_VERSION "
+                f"set to these"
+            )
         keys = parse_keys(lines)
         rows = parse_plans(lines)
     except (OSError, ValueError, RuntimeError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     key_result = check_keys(keys, pool.kernels)
-    result = check_plans(rows, pool.kernels, args.cu_count, args.arch or args.processor)
+    result = check_plans(rows, pool.kernels, args.cu_count, arch, launch.version)
+    print(f"launch model: {launch.id} on {args.cu_count} CUs")
     print(f"pool: {len(pool.kernels)} kernels")
     print(f"keys: {key_result.kernels}, differing: {len(key_result.mismatches)}")
     for line in key_result.mismatches[: args.show]:
@@ -326,7 +376,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"  {f}: {result.field_mismatches.get(f, 0)}")
     for line in result.examples[: args.show]:
         print(f"  {line}")
-    print(f"plans that differ in the known class ({KNOWN_CLASS}): {result.known_rows}")
+    print(
+        f"plans that differ in the known class of rule version 1 ({KNOWN_CLASS}): "
+        f"{result.known_rows}"
+    )
     for f in FIELDS:
         print(f"  {f}: {result.known_field_mismatches.get(f, 0)}")
     for line in result.known_examples[: args.show]:

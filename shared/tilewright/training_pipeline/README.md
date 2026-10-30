@@ -2475,10 +2475,11 @@ model of version 1 with its own grid, Origami's, so a gfx1250 model trains
 and is evaluated with plans TensileLite does not make for those launches,
 and stage 7's pick and order parity of a gfx1250 run can miss on them;
 `scripts/check_launch_plans.py` compares TensileLite's plans and keys for a
-library's pool with these, and counts apart, without failing, the plans of a
-static Stream-K launch of batch 1 with one K iteration per tile and more
-tiles than CUs, where TensileLite takes the grid Origami's
-`select_grid_size` chooses, which can differ from rule version 1's; a dynamic-queue
+library's pool on a device of a given processor and CU count with these,
+under a rule version, and under version 1 counts apart, without failing,
+the plans of a static Stream-K launch of batch 1 with one K iteration per
+tile and more tiles than CUs, where TensileLite's grid can differ from
+version 1's; a dynamic-queue
 Stream-K launch also needs the queue count hipBLASLt compiles into those
 kernels, the table's for the architectures that have one, else the device's
 XCD count: `hardware.num_xcd`, which a run that leaves it unset reads when it

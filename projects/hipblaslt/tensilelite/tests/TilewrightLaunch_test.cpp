@@ -7,13 +7,15 @@
 //
 // TilewrightLaunchTest.DumpsPoolPlans writes the plans of a library's pool for
 // training_pipeline/scripts/check_launch_plans.py to compare; it runs only
-// when TILEWRIGHT_LAUNCH_PLANS_POOL and TILEWRIGHT_LAUNCH_PLANS_OUT are set.
+// when TILEWRIGHT_LAUNCH_PLANS_POOL and TILEWRIGHT_LAUNCH_PLANS_OUT are set,
+// on the device and under the rule version dumpDevice() reads.
 
 #include <gtest/gtest.h>
 
 #if defined(TENSILELITE_HAS_TILEWRIGHT)
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -46,11 +48,17 @@ namespace
     using Launch = TilewrightLaunch<ContractionSolution>;
     using Plan   = std::tuple<bool, size_t, std::string>;
 
+    // A device of `processor` with `cuCount` CUs. Launch plans read only the
+    // architecture and the CU count of its analytical hardware; the other
+    // values are the test's own.
     std::shared_ptr<hip::HipAMDGPU> makeDevice(AMDGPU::Processor processor, size_t cuCount)
     {
-        using arch_t    = origami::hardware_t::architecture_t;
-        auto const arch = processor == AMDGPU::Processor::gfx942 ? arch_t::gfx942 : arch_t::gfx950;
-        auto       device        = std::make_shared<hip::HipAMDGPU>();
+        using hardware_t = origami::hardware_t;
+        auto const arch  = hardware_t::arch_name_to_enum(AMDGPU::toString(processor));
+        if(arch == hardware_t::architecture_t::Count)
+            throw std::invalid_argument("no analytical hardware for "
+                                        + AMDGPU::toString(processor));
+        auto device              = std::make_shared<hip::HipAMDGPU>();
         device->processor        = processor;
         device->computeUnitCount = static_cast<int>(cuCount);
         device->deviceName       = "tilewright-launch-test";
@@ -647,9 +655,95 @@ TEST(TilewrightLaunchTest, ScopesOfOneThreadPlanForTheirOwnDevice)
     }
 }
 
+namespace
+{
+    // The device DumpsPoolPlans plans for, and the rule version it plans
+    // under: TILEWRIGHT_LAUNCH_PLANS_PROCESSOR (default gfx950) with
+    // TILEWRIGHT_LAUNCH_PLANS_CU_COUNT CUs (default 256), under
+    // TILEWRIGHT_LAUNCH_PLANS_RULE_VERSION (default the version the
+    // processor's models train on).
+    struct DumpDevice
+    {
+        AMDGPU::Processor processor = AMDGPU::Processor::gfx950;
+        std::string       arch      = "gfx950";
+        size_t            cuCount   = 256;
+        int               version   = 0;
+    };
+
+    DumpDevice dumpDevice()
+    {
+        DumpDevice d;
+        if(std::string const name = env("TILEWRIGHT_LAUNCH_PLANS_PROCESSOR"); !name.empty())
+        {
+            d.processor = AMDGPU::toProcessor(name);
+            if(d.processor == AMDGPU::Processor::gfx000)
+                throw std::invalid_argument("unknown processor " + name);
+            d.arch = AMDGPU::toString(d.processor);
+        }
+        if(std::string const cus = env("TILEWRIGHT_LAUNCH_PLANS_CU_COUNT"); !cus.empty())
+            d.cuCount = std::stoul(cus);
+        std::string const version = env("TILEWRIGHT_LAUNCH_PLANS_RULE_VERSION");
+        d.version = version.empty() ? Launch::ruleVersion(d.arch) : std::stoi(version);
+        return d;
+    }
+
+    // The CU budgets of the contexts DumpsPoolPlans draws: every CU (0), and
+    // a quarter, three eighths, half, three quarters and seven eighths of the
+    // device's CUs.
+    std::array<size_t, 6> dumpBudgets(size_t cuCount)
+    {
+        return {0, cuCount / 4, cuCount * 3 / 8, cuCount / 2, cuCount * 3 / 4, cuCount * 7 / 8};
+    }
+}
+
+TEST(TilewrightLaunchTest, DumpsPlansOfTheDeviceAndRuleVersionItIsGiven)
+{
+    {
+        ScopedDebugEnv const processor("TILEWRIGHT_LAUNCH_PLANS_PROCESSOR", nullptr);
+        ScopedDebugEnv const cus("TILEWRIGHT_LAUNCH_PLANS_CU_COUNT", nullptr);
+        ScopedDebugEnv const version("TILEWRIGHT_LAUNCH_PLANS_RULE_VERSION", nullptr);
+        auto const           d = dumpDevice();
+        EXPECT_EQ(d.processor, AMDGPU::Processor::gfx950);
+        EXPECT_EQ(d.arch, "gfx950");
+        EXPECT_EQ(d.cuCount, 256u);
+        EXPECT_EQ(d.version, Launch::RuleVersion);
+        EXPECT_EQ(dumpBudgets(d.cuCount), (std::array<size_t, 6>{0, 64, 96, 128, 192, 224}));
+    }
+    // A CU count no device of these tests has.
+    ScopedDebugEnv const processor("TILEWRIGHT_LAUNCH_PLANS_PROCESSOR", "gfx1250");
+    ScopedDebugEnv const cus("TILEWRIGHT_LAUNCH_PLANS_CU_COUNT", "300");
+    {
+        ScopedDebugEnv const version("TILEWRIGHT_LAUNCH_PLANS_RULE_VERSION", nullptr);
+        auto const           d = dumpDevice();
+        EXPECT_EQ(d.processor, AMDGPU::Processor::gfx1250);
+        EXPECT_EQ(d.arch, "gfx1250");
+        EXPECT_EQ(d.cuCount, 300u);
+        EXPECT_EQ(d.version, 1);
+        EXPECT_EQ(dumpBudgets(d.cuCount), (std::array<size_t, 6>{0, 75, 112, 150, 225, 262}));
+        auto const device = makeDevice(d.processor, d.cuCount);
+        EXPECT_EQ(device->analyticalHardware->arch, origami::hardware_t::architecture_t::gfx1250);
+        Launch const launch(d.arch, {makeSolution(hybrid(1))}, device, d.version);
+        EXPECT_EQ(launch.id(), "hipblaslt:gfx1250:1");
+        // As many tiles as the device has CUs: one workgroup each, where
+        // planOf's gfx950 device streams them.
+        auto const problem = bf16Problem(128 * 300, 128, 64 * 300);
+        auto const plan    = launch.plan(tilewright::Config{}, problem, context(0));
+        EXPECT_EQ(Plan(plan.dynamic_queue, plan.grid_wgs, reductionName(plan.partial_reduction)),
+                  Plan(false, 300, "none"));
+        EXPECT_EQ(planOf(hybrid(1), problem, context(0)), Plan(false, 200, "tree"));
+    }
+    {
+        ScopedDebugEnv const version("TILEWRIGHT_LAUNCH_PLANS_RULE_VERSION", "2");
+        EXPECT_EQ(dumpDevice().version, 2);
+    }
+    ScopedDebugEnv const unknown("TILEWRIGHT_LAUNCH_PLANS_PROCESSOR", "gfx9999");
+    EXPECT_THROW(dumpDevice(), std::invalid_argument);
+}
+
 // Pool file: "library <dir>/<stem>" lines (the logic file without .dat[.zlib];
 // a solution index resolves to the first listed library that holds it), then
-// "pool <solution index> ..." in pool order.
+// "pool <solution index> ..." in pool order. The plans file starts with
+// "# launch <launch model id> cu_count <CUs>".
 TEST(TilewrightLaunchTest, DumpsPoolPlans)
 {
     std::string const poolPath = env("TILEWRIGHT_LAUNCH_PLANS_POOL");
@@ -709,23 +803,24 @@ TEST(TilewrightLaunchTest, DumpsPoolPlans)
         pool.push_back(solution);
     }
 
-    auto const&     type    = pool.front()->problemType;
-    size_t const    cuCount = 256;
-    auto const      device  = makeDevice(AMDGPU::Processor::gfx950, cuCount);
-    Launch const    launch("gfx950", pool, device);
-    auto const      toTw      = datatypeToTilewrightDatatype;
-    auto const      miDtype   = type.f32XdlMathOp == rocisa::DataType::XFloat32
-                                    ? tilewright::DataType::XFloat32
-                                    : toTw(type.computeInputTypeA);
-    size_t const    budgets[] = {0, 64, 96, 128, 192, 224};
-    std::mt19937_64 rng(seed);
-    auto const      logUniform = [&](double hi) {
+    auto const&      type   = pool.front()->problemType;
+    DumpDevice const dumped = dumpDevice();
+    auto const       device = makeDevice(dumped.processor, dumped.cuCount);
+    Launch const     launch(dumped.arch, pool, device, dumped.version);
+    auto const       toTw    = datatypeToTilewrightDatatype;
+    auto const       miDtype = type.f32XdlMathOp == rocisa::DataType::XFloat32
+                                   ? tilewright::DataType::XFloat32
+                                   : toTw(type.computeInputTypeA);
+    auto const       budgets = dumpBudgets(dumped.cuCount);
+    std::mt19937_64  rng(seed);
+    auto const       logUniform = [&](double hi) {
         return static_cast<size_t>(
             std::exp(std::uniform_real_distribution<double>(0.0, std::log(hi))(rng)));
     };
 
     std::ofstream out(outPath);
     ASSERT_TRUE(out) << outPath;
+    out << "# launch " << launch.id() << " cu_count " << dumped.cuCount << '\n';
     out << "# pos solution m n k batch mi_dtype cu_budget schedule dynamic_queue grid_wgs "
            "partial_reduction mt_m mt_n depth_u occupancy\n";
     for(size_t pos = 0; pos < pool.size(); ++pos)
