@@ -119,8 +119,10 @@ Additive attention bias (`UnifiedAttentionProblem.use_additive_bias`): an fp32
 `[B, H, Sq, Sk]` bias added to the scores after softcap, like ALiBi/QQ bias
 (`softcap(QK * scale) + bias`), broadcastable over B and/or H via a
 zero stride, indexed by the query head under GQA. Forward only, **gfx950 only**
-(tiled 2D and 3D split-KV, Python engine); other arches report it unsupported
-through `supports_native_unified_attention_tiled` / `_3d_tiled`. Verified by the
+(tiled 2D and 3D split-KV, in both engines); other arches report it unsupported
+through `supports_native_unified_attention_tiled` / `_3d_tiled`. A gfx950
+`AttentionRequest(use_attn_bias=True)` with an f32 bias reaches it through the
+unified routes and the gfx950 tuning candidates. Verified by the
 on-GPU numeric lane
 [test_attention_additive_bias_gfx950_numeric.py](../../../library/tests/test_attention_additive_bias_gfx950_numeric.py)
 rather than the parity scenario set above; knob semantics are in the

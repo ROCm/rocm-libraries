@@ -39,6 +39,7 @@ from .common import (
     _problem,
     _request_errors,
     _selector_matches,
+    _unified_path_coverage,
 )
 
 # The unified paths are portable, so they declare every known target rather than
@@ -60,13 +61,15 @@ _UNIFIED_CAPABILITY = Capability(
     # Unified kernels shift the causal diagonal by the runtime difference
     # between each sequence's KV and query lengths (bottom-right); top-left
     # cross-length selects the ``causal_top_left`` kernel variant on gfx950 and
-    # the scalar kernel elsewhere (tiled gates reject it off gfx950).
-    supports_features=ATTENTION_FEATURES,
+    # the scalar kernel elsewhere (tiled gates reject it off gfx950). Additive
+    # bias runs on the tiled kernels only; the tiled gate limits it to gfx950.
+    supports_features=ATTENTION_FEATURES | {"attn_bias"},
 )
 # Only the split-KV (3D) path writes the optional LSE output; its support check
 # (the 3D gate below) still refuses it on arches/features that cannot.
 _UNIFIED_3D_CAPABILITY = dataclasses.replace(
-    _UNIFIED_CAPABILITY, supports_features=ATTENTION_FEATURES | {"lse"}
+    _UNIFIED_CAPABILITY,
+    supports_features=_UNIFIED_CAPABILITY.supports_features | {"lse"},
 )
 
 
@@ -83,7 +86,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             return False, why
         problem = _problem(req)
-        ok, why = supports_native_unified_attention(problem, arch=req.arch)
+        ok, why = _unified_path_coverage(req, problem, path, req.arch)
         if not ok:
             return False, why
         if problem.select_path(req.arch) != path:
@@ -91,8 +94,10 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
                 f"problem routes to {problem.select_path(req.arch)!r} path, not {path!r}"
             )
         if problem.emit_lse:
-            # The scalar coverage check above knows nothing about LSE; the
-            # split-KV gate owns which arches and features can write it.
+            # The coverage check above (the scalar gate, or for a bias
+            # problem the path's own tiled gate -- see
+            # _unified_path_coverage) knows nothing about LSE; the split-KV
+            # gate owns which arches and features can write it.
             ok, why = supports_native_unified_attention_3d_tiled(problem, arch=req.arch)
             if not ok:
                 return False, why
@@ -117,6 +122,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             right_bound=problem.right_bound,
             sliding_window=problem.sliding_window,
             emit_lse=problem.emit_lse,
+            use_additive_bias=problem.use_additive_bias,
         )
 
     candidate = KernelCandidate(

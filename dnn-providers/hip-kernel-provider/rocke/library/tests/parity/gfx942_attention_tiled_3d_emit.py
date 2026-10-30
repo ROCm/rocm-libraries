@@ -331,6 +331,23 @@ _CONFIGS = {
         use_decode_grid=True,
         kv_cache_policy="stream",
     ),
+    # idx20: QQ bias alone (no config here enabled it before). The gfx950
+    # twin's mask build order fix (bind cmp_ge/cmp_lt before land, since C's
+    # argument evaluation order is unspecified) was mirrored into this file's
+    # 3D compute without a parity config to pin it -- this is that config.
+    20: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_qq_bias=True,
+        kv_storage_dtype=None,
+    ),
 }
 
 

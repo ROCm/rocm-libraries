@@ -261,6 +261,7 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         ctx->hoist_in_warp_row[reg] = row;
         ctx->hoist_q_pos[reg] = qp_r;
         ctx->hoist_q_head[reg] = qh_r;
+        ctx->hoist_qh_r[reg] = qh_r;
         ctx->hoist_row_mask[reg] = row_ok;
         ctx->hoist_state_row[reg] = causal_lim;
     }
@@ -704,6 +705,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 for(int reg = 0; reg < 16; ++reg)
                 {
                     rocke_value_t* qp_r = NULL;
+                    rocke_value_t* qh_r = NULL; /* plain transposed path only */
                     rocke_value_t* row_ok = NULL;
                     rocke_value_t* causal_lim = NULL;
                     rocke_value_t* col_abs = NULL;
@@ -745,7 +747,6 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                              * per-element row position / mask inline. */
                             rocke_value_t* q_row_t
                                 = rocke_b_add(b, ctx->wave_row_base, fh_c32_col(ctx, 0));
-                            rocke_value_t* qh_r;
                             rocke_value_t* qh_mul;
                             rocke_value_t* qh_mod;
                             rocke_value_t* row_ok_pos;
@@ -822,6 +823,20 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                                                                          rocke_f32(),
                                                                          4);
                         score = rocke_b_fadd(b, score, rocke_b_fmul(b, qq_v, rcp_ln2));
+                    }
+                    if(ctx->USE_ADDITIVE_BIAS)
+                    {
+                        /* Per-row query head; the spec rejects bias with the hoist /
+                         * mask-once variants, so qh_r is set here. */
+                        score = rocke_add_additive_bias(b,
+                                                        score,
+                                                        &ctx->additive_bias,
+                                                        ctx->seq_idx,
+                                                        qh_r,
+                                                        qp_r,
+                                                        col_abs,
+                                                        m_ok,
+                                                        rcp_ln2);
                     }
                     if(group_idx == 0)
                         st_scores0[n][reg] = score;
@@ -1207,6 +1222,18 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                                                                      rocke_f32(),
                                                                      4);
                     score = rocke_b_fadd(b, score, rocke_b_fmul(b, qq_v, rcp_ln2));
+                }
+                if(ctx->USE_ADDITIVE_BIAS)
+                {
+                    score = rocke_add_additive_bias(b,
+                                                    score,
+                                                    &ctx->additive_bias,
+                                                    ctx->seq_idx,
+                                                    ctx->hoist_qh_r[reg],
+                                                    qp_r,
+                                                    col_abs,
+                                                    m_ok,
+                                                    rcp_ln2);
                 }
                 masked[n][reg] = score;
             }

@@ -13,7 +13,9 @@ single-batch), which selects the transposed 32x32 path, plus a multi-batch
 group past max_seqlen_q=512 that compiles through hipcc. Softcap and
 sliding-window groups run on 2D and 3D, and a d64 / block 32 GQA-8 bf16 group
 covers the transposed 32x32 combo stack. Every 2D group asserts its score path
-and compile backend so the coverage cannot silently drift.
+and compile backend so the coverage cannot silently drift. A dispatcher group
+launches an ``AttentionRequest(use_attn_bias=True)`` through the gfx950 tuning
+candidates' binding with ``tensors["attn_bias"]``.
 
 Bias addressing (element strides; Sk stride is always 1):
 ``bias[seq_idx*batch_stride + q_head*head_stride + q_local*sq_stride + k_abs]``.
@@ -383,6 +385,80 @@ def test_additive_bias_combo_cohort_matches_reference(heads, bias_mode):
         block_size=32,
         spec_knobs=_COMBO_KNOBS,
     )
+
+
+# Dispatcher lane: an AttentionRequest(use_attn_bias=True) pinned to a gfx950
+# tuning geometry, bound with tensors["attn_bias"] and launched through the
+# candidate's binding. One geometry per score path.
+_DISPATCH_GEOMETRIES = (
+    "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm",
+    "attention_gfx950_u2d_transposed32_nw2_mw32_t2xb_llvm",
+    "attention_gfx950_u3d_splitkv_seg8_t1xb",
+)
+
+
+@requires_gfx950_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("bias_shape", ["full", "key_padding"])
+@pytest.mark.parametrize("geometry", _DISPATCH_GEOMETRIES)
+def test_dispatched_attn_bias_matches_reference(geometry, bias_shape):
+    from dispatch.attention import AttentionRequest, attention_execution_candidates
+    from dispatch.attention.common import AttentionMaskType
+
+    batch, seqlen_q, seqlen_k, hq, hkv, dtype = 2, 96, 200, 8, 2, "bf16"
+    seq_lens = [(seqlen_q, seqlen_k)] * batch
+    q, k, v, block_table, cu_q, seqused_k = _make_inputs(seq_lens, hq, hkv, dtype)
+    shape = (batch, hq, seqlen_q, seqlen_k)
+    if bias_shape == "key_padding":
+        shape = (batch, 1, 1, seqlen_k)
+    bias = torch.randn(*shape, dtype=torch.float32, device="cuda")
+
+    candidate = next(
+        c for c in attention_execution_candidates() if c.name.startswith(geometry)
+    )
+    request = AttentionRequest(
+        batch=batch,
+        nhead_q=hq,
+        nhead_k=hkv,
+        seqlen_q=seqlen_q,
+        seqlen_k=seqlen_k,
+        hdim_q=_HEAD_SIZE,
+        hdim_v=_HEAD_SIZE,
+        kv_block_size=_BLOCK_SIZE,
+        arch="gfx950",
+        dtype=dtype,
+        mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+        use_attn_bias=True,
+        algorithm=candidate.algorithm,
+        spec_id=candidate.spec_id,
+    )
+    ok, why = candidate.admits(request)
+    assert ok, why
+    spec = candidate.select_spec(request)
+    assert spec.kernel_spec.use_additive_bias
+    out = torch.empty_like(q)
+    tensors = {
+        "q": q,
+        "k": k,
+        "v": v,
+        "out": out,
+        "cu_seqlens_q": cu_q,
+        "seqused_k": seqused_k,
+        "block_table": block_table,
+        "attn_bias": bias,
+    }
+    candidate.bound_torch(request, spec, tensors).launch()
+    torch.cuda.synchronize()
+
+    scale = _HEAD_SIZE**-0.5
+    bias_full = bias.expand(batch, hq, seqlen_q, seqlen_k)
+    ref_args = (q, k, v, block_table, seq_lens, scale)
+    ref = _reference(*ref_args, bias_full)
+    tol = _TOL[dtype]
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, f"{geometry}/{bias_shape}: max_abs={max_abs:.3e} >= {tol}"
+    shift = (ref - _reference(*ref_args, None)).abs().max().item()
+    assert shift > 10 * tol, f"bias too weak to be observable (shift={shift:.3e})"
 
 
 # Host-side argument validation. These raise before any compile or launch, so

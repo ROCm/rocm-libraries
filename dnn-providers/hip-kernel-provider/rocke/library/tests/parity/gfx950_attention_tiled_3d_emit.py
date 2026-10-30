@@ -297,6 +297,54 @@ _CONFIGS = {
         use_decode_grid=True,
         kv_cache_policy="stream",
     ),
+    18: dict(
+        # Additive bias composed with ALiBi, QQ bias and softcap (all on the
+        # score before the mask select).
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=True,
+        use_alibi=True,
+        use_qq_bias=True,
+        use_additive_bias=True,
+        kv_storage_dtype=None,
+    ),
+    19: dict(
+        # Additive bias on the decode grid with multi-page tiles and sinks.
+        head_size=64,
+        block_size=32,
+        num_query_heads=16,
+        num_kv_heads=2,
+        dtype="fp16",
+        num_segments=16,
+        use_sinks=True,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        kv_storage_dtype=None,
+        tile_size_override=64,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+    ),
+    20: dict(
+        # Additive bias with an fp8 K/V cache and a sliding window.
+        head_size=128,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=4,
+        use_sinks=False,
+        sliding_window=256,
+        has_softcap=False,
+        use_additive_bias=True,
+        kv_storage_dtype="fp8e4m3",
+    ),
 }
 
 

@@ -143,6 +143,8 @@ typedef struct rocke_unified_attention_3d_tiled_spec
     /* ---- defaulted ---- */
     bool use_alibi; /* False */
     bool use_qq_bias; /* False */
+    /* gfx950 only; the gfx942 builder rejects it. Appends four kernel params. */
+    bool use_additive_bias; /* False */
     int num_seqs; /* 0 */
 
     bool has_waves_per_eu; /* Optional[int] None */

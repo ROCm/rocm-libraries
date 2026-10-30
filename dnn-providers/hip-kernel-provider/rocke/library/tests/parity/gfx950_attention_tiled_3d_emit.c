@@ -303,6 +303,55 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_decode_grid = true;
         s->kv_cache_policy = "stream";
         break;
+    case 18:
+        /* Additive bias composed with ALiBi, QQ bias and softcap (all on the
+         * score before the mask select). */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = true;
+        s->use_alibi = true;
+        s->use_qq_bias = true;
+        s->use_additive_bias = true;
+        s->kv_storage_dtype = NULL;
+        break;
+    case 19:
+        /* Additive bias on the decode grid with multi-page tiles and sinks. */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 2;
+        s->dtype = "fp16";
+        s->num_segments = 16;
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->kv_storage_dtype = NULL;
+        s->has_tile_size_override = true;
+        s->tile_size_override = 64;
+        s->use_decode_grid = true;
+        s->kv_cache_policy = "stream";
+        break;
+    case 20:
+        /* Additive bias with an fp8 K/V cache and a sliding window. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 4;
+        s->use_sinks = false;
+        s->sliding_window = 256;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->kv_storage_dtype = "fp8e4m3";
+        break;
     default:
         return -1;
     }

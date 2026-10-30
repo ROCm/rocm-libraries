@@ -75,6 +75,10 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
     case 5:
         s->use_grouped_kv2_softmax = true;
         break;
+    case 6:
+        /* Additive bias; both engines reject it (BOTH_REJECTED). */
+        s->use_additive_bias = true;
+        break;
     default:
         return -1;
     }

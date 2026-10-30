@@ -795,6 +795,7 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
     /* extended gfx950 flag stack (harmless defaults on gfx942) */
     s.use_qq_bias = a_bool(d, "use_qq_bias", s.use_qq_bias);
     s.use_alibi = a_bool(d, "use_alibi", s.use_alibi);
+    s.use_additive_bias = a_bool(d, "use_additive_bias", s.use_additive_bias);
     s.num_warps = a_int(d, "num_warps", s.num_warps);
     s.num_seqs = a_int(d, "num_seqs", s.num_seqs);
     if(d.contains("tile_size") && !d["tile_size"].is_none())
@@ -1073,6 +1074,7 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
     s.has_softcap = a_bool(d, "has_softcap", s.has_softcap);
     s.use_alibi = a_bool(d, "use_alibi", s.use_alibi);
     s.use_qq_bias = a_bool(d, "use_qq_bias", s.use_qq_bias);
+    s.use_additive_bias = a_bool(d, "use_additive_bias", s.use_additive_bias);
     s.num_seqs = a_int(d, "num_seqs", s.num_seqs);
     s.use_invariant_hoist = a_bool(d, "use_invariant_hoist", s.use_invariant_hoist);
     s.use_wide_kv_load = a_bool(d, "use_wide_kv_load", s.use_wide_kv_load);
@@ -1329,6 +1331,7 @@ static rocke_unified_attn_problem_t problem_dict_to_c(const py::dict& d, Store& 
     p.use_sinks = a_bool(d, "use_sinks", false);
     p.use_alibi = a_bool(d, "use_alibi", false);
     p.use_qq_bias = a_bool(d, "use_qq_bias", false);
+    p.use_additive_bias = a_bool(d, "use_additive_bias", false);
     p.use_fp8 = a_bool(d, "use_fp8", false);
     p.num_cus = a_int(d, "num_cus", 120);
     p.num_kv_blocks = a_int(d, "num_kv_blocks", 0);
@@ -1359,6 +1362,7 @@ static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
     d["has_softcap"] = s.has_softcap;
     d["use_alibi"] = s.use_alibi;
     d["use_qq_bias"] = s.use_qq_bias;
+    d["use_additive_bias"] = s.use_additive_bias;
     d["num_seqs"] = s.num_seqs;
     d["num_warps"] = s.num_warps;
     d["waves_per_eu"] = s.has_waves_per_eu ? py::cast(s.waves_per_eu) : py::none();

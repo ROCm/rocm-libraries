@@ -147,6 +147,7 @@ be smaller than 2 GiB.
 | `unified_attention_3d` | ✅ | ✅ | ✅ | scalar |
 | `unified_attention_reduce` | ✅ | ✅ | ✅ | scalar |
 | tiled 3D `kv_layout="strided"` | ✅ | ✅ | ❌ | non-paged Sq=1, fp16/bf16 D64/128/256, aligned unit-D KV views; existing tiled segment/reduce pipeline |
+| tiled 2D/3D `use_attn_bias=True` | ❌ | ✅ | ❌ | f32 additive bias only, added to the log2-domain score; every gfx950 tiled geometry except the non-transposed wide32 2D path (see `dispatch.attention.gfx950_unified._variant_features`) |
 | `mla_prefill_fwd` | ✅ | ❌ | ❌ | bf16 only; paged compressed KV, `W_UK` absorbed into the query and `W_UV` applied in the epilogue (the latent KV is never expanded). Takes an already projected, RoPE-rotated query. Lives in `library/kernels/mla/`, dispatched by the separate `dispatch.mla` registry (not `dispatch.attention`). gfx950 is a later phase. |
 
 ---

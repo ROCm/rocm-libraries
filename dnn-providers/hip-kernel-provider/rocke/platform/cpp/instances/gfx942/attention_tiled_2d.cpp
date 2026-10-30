@@ -78,6 +78,7 @@ rocke_attention_tiled_2d_spec_t rocke_attention_tiled_2d_spec_default(void)
     /* defaulted fields (mirror the dataclass defaults). */
     s.use_alibi = false;
     s.use_qq_bias = false;
+    s.use_additive_bias = false;
     s.num_seqs = 0;
     s.num_warps = 1;
     s.has_waves_per_eu = false;
@@ -260,6 +261,14 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
                              ROCKE_ERR_VALUE,
                              "gfx942 tiled-2D attention supports only the narrow 16x16x16 "
                              "default path; gfx950-only knobs are not available on gfx942");
+        return false;
+    }
+
+    /* The gfx942 Python spec has no additive-bias field. */
+    if(s->use_additive_bias)
+    {
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "use_additive_bias is not implemented on gfx942 yet");
         return false;
     }
 

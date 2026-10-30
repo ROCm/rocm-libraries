@@ -386,7 +386,9 @@ class TestRegistrySplit(unittest.TestCase):
         self.assertEqual(runtime_spec.tuning_id, spec.tuning_id)
         self.assertEqual(binding.grid, runtime_spec.launch_grid(_problem(req)))
 
-    def test_explicit_binding_rejects_additive_bias(self):
+    def test_explicit_binding_rejects_raw_additive_bias_inputs(self):
+        """The binding derives the bias kernargs from tensors["attn_bias"], so
+        the raw runner names are refused in tensors and launch kwargs."""
         candidate = next(
             c
             for c in attention_execution_candidates()
@@ -404,11 +406,6 @@ class TestRegistrySplit(unittest.TestCase):
             "kernels.common.attention_unified.run_unified_attention_torch",
             side_effect=fake_run,
         ):
-            tensors = _paged_tensors()
-            tensors["problem"] = replace(_problem(req), use_additive_bias=True)
-            with self.assertRaisesRegex(ValueError, "do not support additive bias"):
-                candidate.bound_torch(req, spec, tensors)
-
             for name in (
                 "additive_bias",
                 "additive_bias_batch_stride",
