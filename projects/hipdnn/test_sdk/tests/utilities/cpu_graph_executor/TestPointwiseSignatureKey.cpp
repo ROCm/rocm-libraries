@@ -476,3 +476,58 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeThirdInputTensorNotInMapThrows)
 
     EXPECT_THROW(PointwiseSignatureKey(node, tensors.map()), std::runtime_error);
 }
+
+TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapUnaryMixedPrecisionExp)
+{
+    const PointwiseSignatureKey expectedKey{
+        PointwiseMode::EXP, DataType::HALF, DataType::FLOAT, DataType::HALF};
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseUnaryGraph(dims,
+                                   dims,
+                                   DataType::HALF,
+                                   DataType::FLOAT,
+                                   DataType::HALF,
+                                   hipdnn_frontend::PointwiseMode::EXP,
+                                   1,
+                                   TensorLayout::NCHW);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+
+    const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+
+    EXPECT_TRUE(keyFromNode == expectedKey);
+}
+
+TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForImplementedUnaryModes)
+{
+    const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
+    const auto& implementedUnaryModes = getImplementedUnaryModesBitset();
+
+    // input / compute / output combinations registered by getPlanBuilders()
+    const std::vector<std::array<DataType, 3>> typeCombinations
+        = {{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT},
+           {DataType::HALF, DataType::FLOAT, DataType::HALF},
+           {DataType::BFLOAT16, DataType::FLOAT, DataType::BFLOAT16},
+           {DataType::FLOAT, DataType::FLOAT, DataType::HALF},
+           {DataType::FLOAT, DataType::FLOAT, DataType::BFLOAT16}};
+
+    for(size_t i = 0; i < implementedUnaryModes.size(); ++i)
+    {
+        if(!implementedUnaryModes.test(i))
+        {
+            continue;
+        }
+
+        const auto mode = static_cast<PointwiseMode>(i);
+        for(const auto& [input, compute, output] : typeCombinations)
+        {
+            const PointwiseSignatureKey key{mode, input, compute, output};
+            EXPECT_EQ(planBuilders.count(key), 1u) << key;
+        }
+    }
+}
