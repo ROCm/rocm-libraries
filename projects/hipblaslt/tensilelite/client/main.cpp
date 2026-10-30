@@ -27,6 +27,7 @@
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
+#include <Tensile/FusedA2A.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
@@ -228,7 +229,7 @@ namespace TensileLite
                 ("mx-b-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix B")
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
-                ("fused-gemm-a2a",           po::value<bool>()->default_value(false), "Fuse an all-to-all PUSH into the GEMM epilogue.")
+                ("fused-a2a",                po::value<FusedA2A>()->default_value(FusedA2A::Disabled), "Fused A2A mode: Disabled, GemmA2A (all-to-all PUSH from the GEMM epilogue) or A2AGemm (B's K shards gathered from the peers into a2aBuf one shard at a time).")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
@@ -287,10 +288,11 @@ namespace TensileLite
 
                 ("device-idx",               po::value<int>()->default_value(0), "Device index")
                 ("world",                    po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: device count of each problem, one value per problem-size.")
-                ("fused-a2a-extent",         po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: leading feature (M) count of each problem that goes all-to-all, one value per problem-size.")
+                ("fused-a2a-extent",         po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: extent that goes all-to-all, one value per problem-size: leading feature (M) count for GemmA2A, reduction (K) count for A2AGemm (defaults to K).")
                 ("world-filter",             po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: run only the problems whose world is listed; empty runs all.")
                 ("fused-a2a-drain-recv",     po::value<int>()->default_value(1), "Runtime drainRecv flag passed to the fused kernel (1=on): the kernel exits only once this card's recv buffer is complete.")
                 ("fused-a2a-drain-send",     po::value<int>()->default_value(1), "Runtime drainSend flag passed to the fused kernel (1=on): the kernel exits only once this card's engines have finished reading D[0:AM), so D can be reused on stream order alone. Independent of --fused-a2a-drain-recv.")
+                ("fused-a2a-sdma-rotate",    po::value<int>(), "Fused A2A: move each remote peer SDMA queue this many steps along the even xGMI engines 2,4,...,14 from its KFD recommendation (gfx950); the loopback queue keeps it. Defaults to -1.")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
@@ -806,6 +808,10 @@ namespace TensileLite
                     "[fused-a2a] --fused-a2a-drain-send=0 is not supported; leave it at 1.");
             if(args["use-user-args"].as<bool>())
                 throw std::runtime_error("[fused-a2a] --use-user-args is not supported.");
+            if(args["fused-a2a"].as<FusedA2A>() == FusedA2A::A2AGemm
+               && args["batch-mode"].as<int>() != 0)
+                throw std::runtime_error(
+                    "[fused-a2a] A2AGemm supports only --batch-mode=0 (strided).");
             if(args["rotating-buffer-size"].as<int32_t>() > 0
                && args["rotating-buffer-mode"].as<int32_t>() == 1)
                 throw std::runtime_error(
@@ -843,12 +849,15 @@ int main(int argc, const char* argv[])
     initTimingBuffer();
     calibrateTimingOverhead();
 
-    bool fusedA2A = args["fused-gemm-a2a"].as<bool>();
+    const FusedA2A fusedMode = args["fused-a2a"].as<FusedA2A>();
+    bool           fusedA2A  = fusedMode != FusedA2A::Disabled;
     if(fusedA2A)
         checkFusedA2AArgs(args);
     auto const& worldFilter = args["world-filter"].as<std::vector<int>>();
     if(!fusedA2A && !worldFilter.empty())
-        throw std::runtime_error("--world-filter applies only with --fused-gemm-a2a");
+        throw std::runtime_error("--world-filter applies only with --fused-a2a");
+    if(!fusedA2A && args.count("fused-a2a-sdma-rotate"))
+        throw std::runtime_error("--fused-a2a-sdma-rotate applies only with --fused-a2a");
 
     auto problems        = problemFactory.problems();
     int  firstProblemIdx = args["problem-start-idx"].as<int>();
@@ -885,12 +894,16 @@ int main(int argc, const char* argv[])
 
         std::vector<int> deviceIds(world);
         std::iota(deviceIds.begin(), deviceIds.end(), args["device-idx"].as<int>());
+        const int sdmaRotate = args.count("fused-a2a-sdma-rotate")
+                                   ? args["fused-a2a-sdma-rotate"].as<int>()
+                                   : kFusedA2ASdmaRotateDefault;
         for(int id : deviceIds)
             devices.push_back(
                 std::make_shared<DeviceContext>(id,
                                                 args["use-default-stream"].as<bool>(),
                                                 fusedA2A ? kCommFlagsBytes : 0,
-                                                fusedA2A ? deviceIds : std::vector<int>{}));
+                                                fusedA2A ? deviceIds : std::vector<int>{},
+                                                sdmaRotate));
     }
     std::shared_ptr<DeviceContext>              device0 = devices[0];
     std::vector<std::shared_ptr<DeviceContext>> active;

@@ -55,7 +55,7 @@ def _kernel(**over):
         "MXBlockA": False, "MXBlockB": False, "Sparse": False, "UseBeta": True,
         "UseScaleAB": False, "UseScaleCD": False, "UseScaleAlphaVec": 0, "UseE": False,
         "ActivationType": ActivationType("none"), "OutputAmaxD": False, "UseBias": 0,
-        "GroupedGemm": False, "FusedGemmA2A": False,
+        "GroupedGemm": False, "FusedA2A": "Disabled",
     }
     problem_type.update(over.pop("ProblemType", {}))
     kernel = {
@@ -276,7 +276,8 @@ def test_mbsk_trailing_args_from_adaptive_gsua():
         assert expected in sems
 
 
-def test_fused_a2a_appends_one_segment_entry():
+@pytest.mark.parametrize("mode", ["GemmA2A", "A2AGemm"])
+def test_fused_a2a_appends_one_segment_entry(mode):
     plain = _sems(_writer(), _kernel())
-    fused = _sems(_writer(), _kernel(ProblemType={"FusedGemmA2A": True}))
+    fused = _sems(_writer(), _kernel(ProblemType={"FusedA2A": mode}))
     assert fused == plain + ["FusedA2ASegment"]

@@ -311,6 +311,11 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("StinkyTofuRegisterAllocation")
 
+    if pt.get("FusedA2A") == "A2AGemm":
+      requiredParametersTemp.add("A2ASubRounds")
+    else:
+      requiredParametersTemp.discard("A2ASubRounds")
+
     # LDSSegmentBRotate=0 is the default layout; naming it would rename every kernel.
     if state.get("LDSSegmentBRotate", 0):
       requiredParametersTemp.add("LDSSegmentBRotate")

@@ -9,6 +9,7 @@
 #include <hip/hip_runtime.h>
 
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 using TensileLite::Client::DeviceContext;
@@ -90,4 +91,13 @@ TEST(TimingEvents, CreatesEachCardsEventsOnItsDevice)
         EXPECT_EQ(hipEventRecord(events.card(d)[2][1], devices[d]->stream), hipSuccess);
         EXPECT_EQ(hipEventSynchronize(events.card(d)[2][1]), hipSuccess);
     }
+}
+
+TEST(DeviceContext, SdmaRotateWalksTheEvenXgmiEngines)
+{
+    using TensileLite::Client::sdmaRotateEngine;
+    EXPECT_EQ(sdmaRotateEngine(3, 0), 3u);
+    EXPECT_EQ(sdmaRotateEngine(2, -1), 14u);
+    EXPECT_EQ(sdmaRotateEngine(14, 1), 2u);
+    EXPECT_THROW(sdmaRotateEngine(3, -1), std::runtime_error);
 }
