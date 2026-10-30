@@ -168,6 +168,7 @@ class TestTensorAttributes:
         assert tensor.set_as_runtime_parameter() is tensor
         assert tensor.get_is_runtime_pass_by_value()
         assert not tensor.get_has_compile_time_constant()
+        assert tensor.get_value_variant() is None
 
     def test_ragged_offset_round_trip(self):
         """set_ragged_offset()/get_ragged_offset() round-trip."""
@@ -414,3 +415,17 @@ class TestGraphTensorScalar:
 
         assert scalar.get_pass_by_value() == 0.5
         assert scalar.get_is_runtime_pass_by_value()
+
+    @pytest.mark.parametrize(
+        "scalar_type, api",
+        [
+            (hipdnn.ScalarType.COMPILE_TIME_CONST, (1, 0)),
+            (hipdnn.ScalarType.RUNTIME_PARAM, (1, 2)),
+        ],
+    )
+    def test_serializes_in_a_graph(self, scalar_type, api):
+        entry, min_api = _serialized_scalar(
+            hipdnn.Graph.tensor_scalar(0.5, scalar_type)
+        )
+
+        assert (entry["data_type"], entry["value"], min_api) == ("float", 0.5, api)
