@@ -5880,7 +5880,7 @@ def main() -> int:
             ui.warn(
                 "context",
                 f"dropped {n_dropped} GEMM(s) measured under a CU budget or "
-                f"non-default schedule: v2 models serve only exclusive use",
+                f"non-default schedule: v2 models are trained for exclusive use only",
             )
     all_gemms = [g for gs in cells.values() for g in gs]
     try:

@@ -91,20 +91,21 @@ describe the context. The fraction is relative to the device it is given, and
 a compute partition is a device of its own with fewer CUs, so a model may also
 declare a CU floor: the fewest usable CUs it was trained with.
 
-A CU budget never leaves a ranking unscored. A context outside the declared
-ones only by its CU budget is ranked at the nearest one the model declares on
-that device (`scoring_context(model, context, hardware)`): a budget below the
-range as the fewest usable CUs it declares (its CU floor or its smallest
-fraction of the device, whichever is more), a budget above it as the most
-(every CU, for an MLREC_v2 model). A device on which the model declares no
+Neither a CU budget nor a device's CU count (one or more) leaves a ranking
+unscored, so TensileLite never ranks a call with Origami for its CUs. A context
+outside the declared ones only by its CU budget is ranked at the nearest one the
+model declares on that device (`scoring_context(model, context, hardware)`): a
+budget below the range as the fewest usable CUs it declares (its CU floor or its
+smallest fraction of the device, whichever is more), a budget above it as the
+most (every CU, for an MLREC_v2 model). A device on which the model declares no
 context, one with fewer CUs than the floor, is ranked at the most CUs its
-largest fraction allows: the whole device, for a model that declares every
-CU. The features and launch plans of the ranking are those of that context,
-so it ranks bit for bit as a call made with it; the caller still launches the
-chosen kernel with its own budget. On a compute partition that context is one
-of the partition, which the model declares but need not have been trained on.
-A schedule the model does not list leaves every kernel unscored, and
-TensileLite then uses its Origami ranking.
+largest fraction allows: the whole device, for a model that declares every CU.
+The features and launch plans of the ranking are those of that context, so it
+ranks bit for bit as a call made with it; the caller still launches the chosen
+kernel with its own budget. On a compute partition that context is one of the
+partition, which the model declares but need not have been trained on. A
+schedule the model does not list leaves every kernel unscored, and TensileLite
+then uses its Origami ranking.
 
 **Routing.** A problem maps to one of 96 base cells
 `<M tier>|<N tier>|<K tier>|<batch tier>`: M and N are `Tiny` (≤ 32), `Small`

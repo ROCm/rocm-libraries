@@ -10,8 +10,8 @@ and serve CU budgets from one granule up to the whole device; one key turns
 the eighth off for its bench time. The gfx1250 sanity configs train half and
 an eighth. A run sizes the shares for the device it benches on, a compute
 partition included, and a model declares the smallest share it trained, so
-that serving falls back below it. Its audit set must have been built with
-the budgets it resolves."""
+that serving ranks a budget below it as that share. Its audit set must have
+been built with the budgets it resolves."""
 import copy
 import dataclasses
 import json

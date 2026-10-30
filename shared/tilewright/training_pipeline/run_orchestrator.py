@@ -2616,7 +2616,8 @@ def _context_config_checks(
     if trained and cfg_get(cfg, "train.catalog") != "v3":
         errors.append(
             "contexts.list: non-exclusive contexts need train.catalog v3 "
-            "(v2 models serve only exclusive use and stage05 drops their GEMMs)"
+            "(v2 models are trained for exclusive use only and stage05 drops "
+            "their GEMMs)"
         )
     schedules = cfg_get(cfg, "train.schedules")
     if schedules:

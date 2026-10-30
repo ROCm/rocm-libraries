@@ -8,9 +8,9 @@ The bundle is written as MLREC_v2 at the deploy weight dtype, loaded with
 `tilewright.CandidateSet` holding the library's kernel pool, the way
 TensileLite ranks at runtime: pool-order tie-break and the GEMM's execution
 context (`cu_budget`, `schedule`; absent means exclusive use of the device,
-the only context v2 models serve). MLREC_v3 bundles are written as MLREC_v3
-and ranked with hipBLASLt's launch plans (`lib.hipblaslt_launch`) as the
-engine's launch model, the plans stage05 trains with and the deployed
+the only context v2 models are trained for). MLREC_v3 bundles are written as
+MLREC_v3 and ranked with hipBLASLt's launch plans (`lib.hipblaslt_launch`) as
+the engine's launch model, the plans stage05 trains with and the deployed
 TensileLite adapter must give. The tilewright Python module is required
 (`pip install shared/tilewright/python`).
 

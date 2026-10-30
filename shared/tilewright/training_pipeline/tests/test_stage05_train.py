@@ -2733,8 +2733,8 @@ def test_declared_contexts_and_catalog_selection(tmp_path):
 
 def test_a_model_declares_no_share_below_the_smallest_it_trained():
     """The declared range starts at the smallest share the training GEMMs
-    had, so that serving falls back below it; --min-cu-fraction can only
-    raise that floor."""
+    had, so that serving ranks a smaller share as that smallest one;
+    --min-cu-fraction can only raise that floor."""
     gemms = [{}, {"cu_budget": 192}, {"cu_budget": 64}, {"cu_budget": 32}]
     assert s5.trained_cu_fraction(gemms, 256) == 0.125
     assert s5.declared_contexts(gemms, 256)["min_cu_fraction"] == 0.125
@@ -2751,8 +2751,9 @@ def test_a_model_declares_no_share_below_the_smallest_it_trained():
 
 def test_a_model_declares_the_fewest_cus_it_trained_as_its_cu_floor():
     """The CU floor is the smallest usable CU count of the training GEMMs,
-    whatever --min-cu-fraction says, so that a device smaller than the
-    bench device (a compute partition) serves no fewer CUs than trained."""
+    whatever --min-cu-fraction says, so that serving ranks fewer CUs than
+    trained as the floor on a device smaller than the bench device (a
+    compute partition), and a device with fewer CUs than the floor whole."""
     gemms = [{}, {"cu_budget": 192}, {"cu_budget": 64}, {"cu_budget": 32}]
     assert s5.trained_effective_cus(gemms, 256) == 32
     assert s5.declared_contexts(gemms, 256)["min_effective_cus"] == 32

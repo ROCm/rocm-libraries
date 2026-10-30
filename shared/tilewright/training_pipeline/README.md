@@ -2428,9 +2428,11 @@ order, the one the runtime serves, and every member keeps its position.
   the engine's pick log) and its serving cell; the kernel signature is only
   reported (`pick_mismatch_same_sig`, `same_index_other_sig`).
 
-v2 models serve only the exclusive execution context: every CU of the device
-and the default tile scheduling. hipBLASLt calls with a CU budget or a
-dynamic schedule are not scored by them and keep the analytical ranking.
+v2 models are trained for the exclusive execution context only: every CU of
+the device and the default tile scheduling. They rank a hipBLASLt call with
+a CU budget as exclusive use (its kernels still launch with the call's
+budget); calls with a dynamic or automatic schedule are not scored by them
+and keep the analytical ranking.
 Benches do not inherit the scheduling override
 `TENSILE_PERSISTENT_HYBRID_FORCE_MODE` (or its legacy name
 `TENSILE_STREAMK5_FORCE_MODE`); a config that sets one in `runtime.env`
@@ -3704,9 +3706,10 @@ is recorded as unverified (`deploy_record.json`: `built: false`,
 
 hipBLASLt ranks with the deployed model when `TENSILE_USE_TILEWRIGHT=1` is
 set. With a v2 model, problems routed to a leaf without a model of its own or
-of an ancestor, calls outside the exclusive execution context, and problems
-for which the model scores no kernel keep the analytical ranking; a v3 model
-scores every problem under the contexts it declares.
+of an ancestor, calls with a dynamic or automatic schedule, and problems for
+which the model scores no kernel keep the analytical ranking; a v3 model
+scores every problem in the schedules it declares. Neither leaves a call to
+the analytical ranking for its CU budget or its device's CU count.
 
 A bundle with a whitelist tier ships it in the model file;
 `deploy_record.json` records it and how it meets the pool of the library it
