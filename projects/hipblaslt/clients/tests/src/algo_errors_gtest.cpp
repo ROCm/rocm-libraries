@@ -578,73 +578,80 @@ namespace
                   type.setOrderA(rowMajor ? HIPBLASLT_ORDER_ROW : HIPBLASLT_ORDER_COL);
                   return type;
               };
-        const int64_t stride = kSize * kSize;
-        auto          gemmProblemType
-            = [&](const void* alphaPtr, const void* betaPtr, void* aPtr, void* dPtr) {
-                  return [=](hipblasLtMatrixLayout_t l) {
-                      hipblaslt_ext::Gemm            gemm(handle,
-                                               HIPBLAS_OP_N,
-                                               HIPBLAS_OP_N,
-                                               kType,
-                                               kType,
-                                               kType,
-                                               kType,
-                                               HIPBLAS_COMPUTE_32F);
-                      hipblaslt_ext::GemmProblemType type
-                          = problemTypeFor(gemm.getProblemTypes(), l, l == row);
-                      hipblaslt_ext::GemmEpilogue epilogue;
-                      hipblaslt_ext::GemmInputs   in = inputsWith(alphaPtr, betaPtr, aPtr, dPtr);
-                      return int(gemm.setProblem(kSize,
-                                                 kSize,
-                                                 kSize,
-                                                 1,
-                                                 kSize,
-                                                 kSize,
-                                                 kSize,
-                                                 kSize,
-                                                 stride,
-                                                 stride,
-                                                 stride,
-                                                 stride,
-                                                 epilogue,
-                                                 in,
-                                                 type));
-                  };
-              };
-        auto groupedProblemType
-            = [&](const void* alphaPtr, const void* betaPtr, void* aPtr, void* dPtr) {
-                  return [=](hipblasLtMatrixLayout_t l) {
-                      hipblaslt_ext::GroupedGemm     grouped(handle,
-                                                         HIPBLAS_OP_N,
-                                                         HIPBLAS_OP_N,
-                                                         kType,
-                                                         kType,
-                                                         kType,
-                                                         kType,
-                                                         HIPBLAS_COMPUTE_32F);
-                      hipblaslt_ext::GemmProblemType type
-                          = problemTypeFor(grouped.getProblemTypes()[0], l, l == row);
-                      std::vector<int64_t> size(2, kSize), batch(2, 1), strides(2, stride);
-                      std::vector<hipblaslt_ext::GemmEpilogue> epilogues(2);
-                      std::vector<hipblaslt_ext::GemmInputs>   ins{
-                          inputs(), inputsWith(alphaPtr, betaPtr, aPtr, dPtr)};
-                      return int(grouped.setProblem(size,
-                                                    size,
-                                                    size,
-                                                    batch,
-                                                    size,
-                                                    size,
-                                                    size,
-                                                    size,
-                                                    strides,
-                                                    strides,
-                                                    strides,
-                                                    strides,
-                                                    epilogues,
-                                                    ins,
-                                                    type));
-                  };
-              };
+        const int64_t stride          = kSize * kSize;
+        auto          gemmProblemType = [&](const void* alphaPtr,
+                                   const void* betaPtr,
+                                   void*       aPtr,
+                                   void*       dPtr,
+                                   int64_t     k = kSize) {
+            return [=](hipblasLtMatrixLayout_t l) {
+                hipblaslt_ext::Gemm            gemm(handle,
+                                         HIPBLAS_OP_N,
+                                         HIPBLAS_OP_N,
+                                         kType,
+                                         kType,
+                                         kType,
+                                         kType,
+                                         HIPBLAS_COMPUTE_32F);
+                hipblaslt_ext::GemmProblemType type
+                    = problemTypeFor(gemm.getProblemTypes(), l, l == row);
+                hipblaslt_ext::GemmEpilogue epilogue;
+                hipblaslt_ext::GemmInputs   in = inputsWith(alphaPtr, betaPtr, aPtr, dPtr);
+                return int(gemm.setProblem(kSize,
+                                           kSize,
+                                           k,
+                                           1,
+                                           kSize,
+                                           kSize,
+                                           kSize,
+                                           kSize,
+                                           stride,
+                                           stride,
+                                           stride,
+                                           stride,
+                                           epilogue,
+                                           in,
+                                           type));
+            };
+        };
+        auto groupedProblemType = [&](const void* alphaPtr,
+                                      const void* betaPtr,
+                                      void*       aPtr,
+                                      void*       dPtr,
+                                      int64_t     k = kSize) {
+            return [=](hipblasLtMatrixLayout_t l) {
+                hipblaslt_ext::GroupedGemm     grouped(handle,
+                                                   HIPBLAS_OP_N,
+                                                   HIPBLAS_OP_N,
+                                                   kType,
+                                                   kType,
+                                                   kType,
+                                                   kType,
+                                                   HIPBLAS_COMPUTE_32F);
+                hipblaslt_ext::GemmProblemType type
+                    = problemTypeFor(grouped.getProblemTypes()[0], l, l == row);
+                std::vector<int64_t> size(2, kSize), batch(2, 1), strides(2, stride);
+                std::vector<int64_t> ks{kSize, k};
+                std::vector<hipblaslt_ext::GemmEpilogue> epilogues(2);
+                std::vector<hipblaslt_ext::GemmInputs>   ins{
+                    inputs(), inputsWith(alphaPtr, betaPtr, aPtr, dPtr)};
+                return int(grouped.setProblem(size,
+                                              size,
+                                              ks,
+                                              batch,
+                                              size,
+                                              size,
+                                              size,
+                                              size,
+                                              strides,
+                                              strides,
+                                              strides,
+                                              strides,
+                                              epilogues,
+                                              ins,
+                                              type));
+            };
+        };
         const std::vector<std::pair<std::string, Call>> cases = {
             {"heuristic, null handle", heuristic(nullptr, desc, pref, 1, true)},
             {"heuristic, null descriptor", heuristic(handle, nullptr, pref, 1, true)},
@@ -711,6 +718,11 @@ namespace
              groupedProblemType(&alpha, nullptr, a, d)},
             {"GroupedGemm::setProblem with GemmProblemType, null second A",
              groupedProblemType(&alpha, &beta, nullptr, d)},
+            // Creation, after the argument checks, rejects a null alpha even when K is 0.
+            {"Gemm::setProblem with GemmProblemType, K of 0, null alpha",
+             gemmProblemType(nullptr, &beta, a, d, 0)},
+            {"GroupedGemm::setProblem with GemmProblemType, K of 0, null second alpha",
+             groupedProblemType(nullptr, &beta, a, d, 0)},
             {"GroupedGemm::setProblem with GemmProblemType, null second D",
              groupedProblemType(&alpha, &beta, a, nullptr)},
             {"matmulIsAlgoSupported, null handle",
@@ -743,6 +755,97 @@ namespace
             EXPECT_NE(columnMajor, int(HIPBLAS_STATUS_SUCCESS)) << name;
             EXPECT_EQ(call(row), columnMajor) << name;
         }
+    }
+
+    // The extension API never sends grouped layouts to the grouped path, so a grouped layout
+    // must not let a row-major one through. The C API sends the call to the grouped path, which
+    // rejects the mix itself.
+    TEST_F(AlgoErrors, smoke_RowOrderIsRefusedBesideAGroupedLayout)
+    {
+        const LayoutPtr         colOwner = layoutWithOrder(HIPBLASLT_ORDER_COL);
+        const LayoutPtr         rowOwner = layoutWithOrder(HIPBLASLT_ORDER_ROW);
+        hipblasLtMatrixLayout_t col = colOwner.get(), row = rowOwner.get();
+
+        hipblasLtMatrixLayout_t groupedLayout = nullptr;
+        ASSERT_EQ(
+            hipblasLtGroupedMatrixLayoutCreate(&groupedLayout, kType, 2, nullptr, nullptr, nullptr),
+            HIPBLAS_STATUS_SUCCESS);
+        const LayoutPtr groupedOwner(groupedLayout, &hipblasLtMatrixLayoutDestroy);
+        const uint64_t  extent = kSize;
+        const int64_t   ld     = kSize;
+        for(auto attr : {HIPBLASLT_MATRIX_LAYOUT_ROWS, HIPBLASLT_MATRIX_LAYOUT_COLS})
+            ASSERT_EQ(
+                hipblasLtMatrixLayoutSetAttribute(groupedLayout, attr, &extent, sizeof(extent)),
+                HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                      groupedLayout, HIPBLASLT_MATRIX_LAYOUT_LD, &ld, sizeof(ld)),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        hipblasLtMatmulHeuristicResult_t control{};
+        int                              controlCount = 0;
+        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      handle, desc, col, col, col, col, pref, 1, &control, &controlCount),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_GT(controlCount, 0);
+
+        hipblaslt_ext::Gemm gemm(
+            handle, HIPBLAS_OP_N, HIPBLAS_OP_N, kType, kType, kType, kType, HIPBLAS_COMPUTE_32F);
+        EXPECT_EQ(gemm.setProblem(desc, &alpha, a, row, b, col, &beta, c, groupedLayout, d, col),
+                  HIPBLAS_STATUS_NOT_SUPPORTED);
+
+        hipblaslt_ext::GroupedGemm grouped(
+            handle, HIPBLAS_OP_N, HIPBLAS_OP_N, kType, kType, kType, kType, HIPBLAS_COMPUTE_32F);
+        std::vector<hipblasLtMatmulDesc_t>   descs{desc, desc};
+        std::vector<void*>                   alphas{&alpha, &alpha}, betas{&beta, &beta};
+        std::vector<void*>                   as{a, a}, bs{b, b}, cs{c, c}, ds{d, d};
+        std::vector<hipblasLtMatrixLayout_t> la{col, row}, lb{col, col}, lc{col, groupedLayout},
+            ldl{col, col};
+        EXPECT_EQ(grouped.setProblem(descs, alphas, as, la, bs, lb, betas, cs, lc, ds, ldl),
+                  HIPBLAS_STATUS_NOT_SUPPORTED);
+
+        size_t workspace = 0;
+        EXPECT_EQ(
+            hipblaslt_ext::matmulIsAlgoSupported(
+                handle, desc, &alpha, row, col, &beta, groupedLayout, col, control.algo, workspace),
+            HIPBLAS_STATUS_NOT_SUPPORTED);
+        hipblasLtMatmulHeuristicResult_t supported      = control;
+        int                              supportedCount = 0;
+        EXPECT_EQ(hipblaslt_ext::isSolutionSupported(&supported,
+                                                     handle,
+                                                     desc,
+                                                     &alpha,
+                                                     row,
+                                                     col,
+                                                     &beta,
+                                                     groupedLayout,
+                                                     col,
+                                                     nullptr,
+                                                     &supportedCount),
+                  HIPBLAS_STATUS_NOT_SUPPORTED);
+        EXPECT_EQ(hipblaslt_ext::matmulIsTuned(handle, desc, row, col, groupedLayout, col), -1);
+
+        hipblasLtMatmulHeuristicResult_t result{};
+        int                              returned = -1;
+        EXPECT_NE(hipblasLtMatmulAlgoGetHeuristic(
+                      handle, desc, row, col, groupedLayout, col, pref, 1, &result, &returned),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_NE(hipblasLtMatmul(handle,
+                                  desc,
+                                  &alpha,
+                                  a,
+                                  row,
+                                  b,
+                                  col,
+                                  &beta,
+                                  c,
+                                  groupedLayout,
+                                  d,
+                                  col,
+                                  nullptr,
+                                  nullptr,
+                                  0,
+                                  nullptr),
+                  HIPBLAS_STATUS_SUCCESS);
     }
 
     struct WorkspaceConfig

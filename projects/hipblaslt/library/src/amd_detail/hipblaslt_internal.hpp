@@ -40,7 +40,8 @@ hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status);
 // HIPBLASLT_ORDER_ROW. Returns HIPBLAS_STATUS_NOT_SUPPORTED when any order is ROW. Callers check
 // order only after the arguments their own validation checks first are present, so a missing
 // handle, descriptor, or pointer keeps its usual status. The layout form returns SUCCESS when any
-// layout is null or grouped; the grouped path has its own order check.
+// layout is null. Only the C matmul and heuristic send grouped layouts to the grouped path, which
+// has its own order check, so only they skip this check for grouped layouts.
 hipblasStatus_t refuse_row_order(const char*      caller,
                                  hipblasLtOrder_t orderA,
                                  hipblasLtOrder_t orderB,
@@ -59,6 +60,7 @@ bool gemm_pointers_missing(int64_t                m,
                            int64_t                n,
                            int64_t                k,
                            int64_t                batchCount,
+                           bool                   grouped,
                            rocblaslt_compute_type computeType,
                            hipDataType            scaleType,
                            hipDataType            typeA,
@@ -71,7 +73,8 @@ bool gemm_pointers_missing(int64_t                m,
                            const void*            D);
 // The same check with the sizes and modes read from a descriptor and its layouts. Also true when
 // the descriptor or a layout is null.
-bool gemm_pointers_missing(rocblaslt_matmul_desc   desc,
+bool gemm_pointers_missing(bool                    grouped,
+                           rocblaslt_matmul_desc   desc,
                            rocblaslt_matrix_layout matA,
                            rocblaslt_matrix_layout matB,
                            rocblaslt_matrix_layout matC,

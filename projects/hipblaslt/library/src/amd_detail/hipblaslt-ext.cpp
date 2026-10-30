@@ -1157,6 +1157,7 @@ namespace hipblaslt_ext
                                   n,
                                   k,
                                   batch_count,
+                                  false,
                                   (rocblaslt_compute_type)problemtype.getTypeCompute(),
                                   HIPBLASLT_DATATYPE_INVALID,
                                   problemtype.getTypeA(),
@@ -1217,7 +1218,8 @@ namespace hipblaslt_ext
     {
         // A null descriptor, layout, scalar, or data pointer keeps the status rocblaslt reports
         // for it.
-        if(!gemm_pointers_missing((rocblaslt_matmul_desc)matmul_descr,
+        if(!gemm_pointers_missing(false,
+                                  (rocblaslt_matmul_desc)matmul_descr,
                                   (rocblaslt_matrix_layout)matA,
                                   (rocblaslt_matrix_layout)matB,
                                   (rocblaslt_matrix_layout)matC,
@@ -1415,6 +1417,7 @@ namespace hipblaslt_ext
                                             n[i],
                                             k[i],
                                             batch_count[i],
+                                            true,
                                             (rocblaslt_compute_type)problemtype.getTypeCompute(),
                                             HIPBLASLT_DATATYPE_INVALID,
                                             problemtype.getTypeA(),
@@ -1495,7 +1498,8 @@ namespace hipblaslt_ext
         };
         bool present = true;
         for(size_t i = 0; present && i < matmul_descr.size(); i++)
-            present = !gemm_pointers_missing((rocblaslt_matmul_desc)matmul_descr[i],
+            present = !gemm_pointers_missing(true,
+                                             (rocblaslt_matmul_desc)matmul_descr[i],
                                              layoutAt(matA, i),
                                              layoutAt(matB, i),
                                              layoutAt(matC, i),
