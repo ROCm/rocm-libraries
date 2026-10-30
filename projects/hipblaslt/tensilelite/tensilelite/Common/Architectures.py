@@ -448,6 +448,32 @@ def withoutPredicate(spec: str) -> str:
     return spec.split("[")[0].strip()
 
 
+def xnackQualifierOf(spec: str) -> Optional[str]:
+    """The spec's xnack qualifier (``xnack+``/``xnack-``), or None if it has none."""
+    _, _, qualifiers = withoutPredicate(spec).partition(":")
+    return next((q for q in qualifiers.split(":") if q in ("xnack+", "xnack-")), None)
+
+
+def capOverrideKeyOf(spec: str) -> str:
+    """The key ``ARCH_CAP_OVERRIDES`` is looked up by for this spec.
+
+    The table is written in terms of an architecture and, where it matters, the
+    xnack mode: every entry is either a bare name or ``<name>:xnack-``. So the
+    key is built from exactly those two, rather than by matching the spec as
+    written. Matching as written tied the lookup to how the request was spelled:
+    ``gfx1250:xnack-:sramecc+`` names the same xnack mode as ``gfx1250:xnack-``
+    and would have found nothing, and the same two qualifiers in the other order
+    would have missed as well -- in both cases leaving replay on in a build that
+    asked for it off, and saying nothing.
+
+    sramecc and any other qualifier are dropped because no entry is keyed on
+    them; if one ever is, this is where that becomes visible rather than
+    silently changing which spells match.
+    """
+    xnack = xnackQualifierOf(spec)
+    return f"{baseArchName(spec)}:{xnack}" if xnack else baseArchName(spec)
+
+
 # The target-ID qualifiers a spec may carry, grouped by the feature each settles.
 # A feature is settled once; a spec naming one twice either contradicts itself
 # (gfx1250:xnack-:xnack+) or repeats itself, and neither has an answer to pick.
