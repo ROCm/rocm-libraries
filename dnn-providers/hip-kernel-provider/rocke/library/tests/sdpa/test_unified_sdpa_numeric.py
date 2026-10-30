@@ -3,8 +3,8 @@
 
 """The unified SDPA binding on GPU, against the case-table oracle.
 
-Every smoke- and full-tier ``cases.py`` case the binding admits on the live
-arch is bound with ``sdpa_unified_bind``, launched twice (the second launch
+Every ``cases.py`` case the binding admits on the live arch, all tiers, is
+bound with ``sdpa_unified_bind``, launched twice (the second launch
 reuses the bound buffers, as graph replay does) and compared with
 ``sdpa_reference`` on the valid rows, fully masked rows included (O = 0,
 LSE = -inf).
@@ -48,9 +48,7 @@ _CASES = (
     else [
         c
         for c in C.all_cases()
-        if ARCH in c.archs
-        and ("smoke" in c.tags or "full" in c.tags)
-        and sdpa_unified_admits(request_from_case(c, ARCH))[0]
+        if ARCH in c.archs and sdpa_unified_admits(request_from_case(c, ARCH))[0]
     ]
 )
 
