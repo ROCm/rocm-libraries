@@ -45,9 +45,13 @@ Consequences:
 
 - A lower level never vetoes a higher one. The ds pacer (L5) must not delay the last ds
   before a barrier (L2). A filler (L6) must not take a prefetch's window (L4).
-- A barrier issues when its WMMA threshold is met. That threshold already includes the last
-  WMMA a feeding ds_load depends on and that load's drain. Do not hold the barrier for an
-  extra tail of WMMAs after the threshold.
+- A barrier issues when its WMMA threshold is met. Do not hold it for an extra tail of
+  WMMAs after the threshold. The threshold includes the last WMMA a feeding ds_load depends
+  on and that load's drain (`depThreshold`). Two exclusive groups whose claim windows
+  overlap are the exception: that drain does not fit, so the after group stops at
+  `maxParentWmmaIdx + 1` and the separation that does not fit is added to the before
+  group's threshold. A barrier that is in both the after and before maps is still averaged
+  no earlier than `depThreshold`.
 
 ## Rules
 

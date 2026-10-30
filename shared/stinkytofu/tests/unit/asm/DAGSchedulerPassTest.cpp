@@ -960,6 +960,63 @@ TEST_F(DAGSchedulerPassTest, BothSidedBarrierStopsAtTheParentDependencyNotTheOve
     EXPECT_EQ(wmmasBeforeBarrier, 18) << scheduleOrder(*bb);
 }
 
+// Exclusive after/before windows overlap, so the full parent drain does not
+// fit. Gap placement may pull the after threshold down to maxParentWmmaIdx + 1,
+// and the 9-window separation (1 slack + ceil(64/8) tensor-load gap) that does
+// not fit in front of that index is supplied by pushing before later.
+//
+// 33 WMMAs, 16 ds_loads, dsSpread off. The 16th WMMA reads the token-0 ds dest,
+// so the overlap floor is 17. depThreshold would be 16 + 56/8 + 1 = 24, and one
+// token-0 ds_load needs only 3 issue windows. Eight token-1 ds_loads put the
+// before window across the after window, and demandFits selects gap. before is
+// pushed to min(33, 17 + 9) = 26.
+TEST_F(DAGSchedulerPassTest, OverlapGapStopsAfterAtParentWmmaAndPushesBefore) {
+    bb->addSuccessor(bb);
+
+    StinkyInstruction* parentWmma = nullptr;
+    for (int i = 0; i < 16; ++i) {
+        const int src = (i == 15) ? 0 : 3000 + i * 16;
+        StinkyInstruction* wmma =
+            createWmmaF32_16x16x16_bf16(/*destStart=*/1100 + i * 16, /*src0Start=*/src);
+        if (i == 15) parentWmma = wmma;
+    }
+    StinkyInstruction* preBarrierDs =
+        createMovableDsLoad(/*destReg=*/0, /*addrReg=*/810, /*ldsToken=*/0);
+    createUnrelatedDsLoads(7);
+    auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    (void)afterWait;
+    (void)beforeWait;
+    createMovableDsLoad(/*destReg=*/500, /*addrReg=*/820, /*ldsToken=*/1);
+    for (int i = 1; i < 8; ++i)
+        createMovableDsLoad(/*destReg=*/8000 + i * 4, /*addrReg=*/830 + i, /*ldsToken=*/1);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
+    for (int i = 0; i < 16; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/4000 + i * 16, /*src0Start=*/5000 + i * 16);
+    createSCmpWritingScc(bb, /*srcSgpr=*/90);
+
+    runPassWithUnrollGemm(/*dsSpread=*/false);
+
+    auto wmmasBefore = [&](const StinkyInstruction* target) {
+        int count = 0;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == target) break;
+            if (isMatrixInstruction(*inst)) ++count;
+        }
+        return count;
+    };
+
+    ASSERT_NE(parentWmma, nullptr);
+    EXPECT_LT(positionOf(*bb, parentWmma), positionOf(*bb, preBarrierDs)) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, afterSignal), positionOf(*bb, beforeSignal)) << scheduleOrder(*bb);
+    EXPECT_GE(wmmasBefore(afterSignal), 17) << scheduleOrder(*bb);
+    EXPECT_LT(wmmasBefore(afterSignal), 24) << scheduleOrder(*bb);
+    EXPECT_GE(wmmasBefore(beforeSignal), 26) << scheduleOrder(*bb);
+    EXPECT_LT(wmmasBefore(beforeSignal), 33) << scheduleOrder(*bb);
+}
+
 TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWithoutBeforeGroup) {
     bb->addSuccessor(bb);
 

@@ -692,6 +692,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
         // threshold may move earlier than that after value, but not earlier
         // than this dependency.
         int depThreshold = 0;
+        // Parent WMMA index after the WmmaVgprSrcToDsWrite gap. 0 means the
+        // ds_loads have no WMMA parent. Overlapping exclusive groups may pull
+        // the after threshold down to this index + 1; the full drain in
+        // depThreshold does not fit once the claim windows overlap.
+        int maxParentWmmaIdx = 0;
     };
 
     int wmmaIssuedCountThisRegion_ = 0;
@@ -1979,6 +1984,7 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         int latencyWmmaBudget;
         int dsLoadCount;
         int depThreshold;
+        int maxParentWmmaIdx;
     };
 
     // Step 1a: collect all movable barriers with their PSEUDO src token sets,
@@ -2126,11 +2132,12 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         for (StinkyInstruction* barrier : group.barriers) {
             barrierWmmaThresholds_[barrier] = afterThreshold;
             result[barrier] = {afterThreshold,    afterThreshold,      latencyWmmaBudget,
-                               wmmaWindowsNeeded, matchingDsLoadCount, depThreshold};
+                               wmmaWindowsNeeded, matchingDsLoadCount, depThreshold,
+                               maxParentWmmaIdx};
         }
         overlapChecks.push_back({groupBarrier, group.barriers, afterThreshold, lastOverlap,
                                  wmmaWindowsNeeded, latencyWmmaBudget, matchingDsLoadCount,
-                                 depThreshold});
+                                 depThreshold, maxParentWmmaIdx});
         PASS_DEBUG(std::cerr << "[CDNA5 computeBarrierAfterThresholds] barrier=" << groupBarrier
                              << " barrierGroupSize=" << group.barriers.size() << " afterThreshold="
                              << afterThreshold << " matchingDsLoadCount=" << matchingDsLoadCount
@@ -2197,7 +2204,8 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
             barrierWmmaThresholds_[barrier] = adjustedAfterThreshold;
             result[barrier] = {adjustedAfterThreshold,    summary.afterThreshold,
                                summary.latencyWmmaBudget, summary.wmmaWindowsNeeded,
-                               summary.dsLoadCount,       summary.depThreshold};
+                               summary.dsLoadCount,       summary.depThreshold,
+                               summary.maxParentWmmaIdx};
         }
         PASS_DEBUG(
             std::cerr << "[CDNA5 computeBarrierAfterThresholds overlap] barrier="
@@ -3002,11 +3010,13 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // Some signal/wait-like pairs are split: one member only lands in the
         // "after" model while its counterpart only lands in the "before" model.
         // For those cross-map-only pairs, compare their implied WMMA ranges.
-        // On overlap, leave before in place and pull after to before minus the
-        // separation slack when both issue demands plus that slack fit in the
-        // region and in front of the before threshold. Otherwise split
-        // totalWmma proportionally: pull after earlier (min) and push before
-        // later (max).
+        // On overlap, pull after toward before minus the separation slack when
+        // both issue demands plus that slack fit in the region and in front of
+        // the before threshold. Otherwise split totalWmma proportionally: pull
+        // after earlier (min) and push before later (max). Overlap means the
+        // full parent drain does not fit, so neither path may pull after
+        // earlier than maxParentWmmaIdx + 1. Separation that after cannot give
+        // up past that parent is added to before.
         struct BarrierGroupThresholdSummary {
             StinkyInstruction* anchor = nullptr;
             std::vector<StinkyInstruction*> barriers;
@@ -3020,9 +3030,13 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             // windows (no drain); before uses the same value as claimWindow.
             int splitNeeded = 0;
             // Layer-2 target across overlapping pairs. After keeps the earliest
-            // target (min). Before moves later only on the proportional-split
-            // path.
+            // target (min) that is still after its parent WMMA. Before moves
+            // later on the proportional-split path, and also when a gap cannot
+            // be opened by pulling after earlier than maxParentWmmaIdx + 1.
             int pendingThreshold = 0;
+            // Latest parent WMMA among the group's after-map barriers. 0 when
+            // none of those ds_loads has a WMMA parent.
+            int maxParentWmmaIdx = 0;
             // Descendants used when publishing hard orderings on overlap.
             std::vector<StinkyInstruction*> descendantLoads;
             // A proportional placement keeps the signal/wait pair together for
@@ -3047,6 +3061,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 int baseThresholdCount = 0;
                 int maxClaimWindow = 0;
                 int maxSplitNeeded = 0;
+                int maxParentWmmaIdx = 0;
                 bool hasPrimary = false;
                 bool hasCross = false;
                 for (StinkyInstruction* barrier : group.barriers) {
@@ -3065,6 +3080,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                                                   pIt->second.latencyWmmaBudget));
                         maxSplitNeeded =
                             std::max(maxSplitNeeded, std::max(0, pIt->second.wmmaWindowsNeeded));
+                        maxParentWmmaIdx = std::max(maxParentWmmaIdx, pIt->second.maxParentWmmaIdx);
                     }
                     if (beforeThresholds.find(barrier) != beforeThresholds.end()) hasCross = true;
                 }
@@ -3077,6 +3093,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 summary.baseThreshold = baseThresholdSum / baseThresholdCount;
                 summary.claimWindow = maxClaimWindow;
                 summary.splitNeeded = maxSplitNeeded;
+                summary.maxParentWmmaIdx = maxParentWmmaIdx;
                 summary.pendingThreshold = summary.threshold;
                 groups.push_back(std::move(summary));
             }
@@ -3210,9 +3227,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // threshold would choose.
         // TODO: multiple after or before groups. Compute each pair from the
         // unmodified group threshold, then combine candidates after the loop.
-        // When the issue demands plus the separation slack fit, leave before
-        // in place and pull after to before minus that slack. Otherwise split
-        // the WMMA windows in proportion to each side's demand.
+        // When the issue demands plus the separation slack fit, pull after to
+        // before minus that slack. Otherwise split the WMMA windows in
+        // proportion to each side's demand. Overlap cannot fit the parent
+        // drain, so after cannot move earlier than maxParentWmmaIdx + 1.
+        // before moves later by whatever separation is left.
         // The two groups keep one window apart for the tensor load.
         const int separationSlack = 1;
         for (auto& afterGroup : exclusiveAfterGroups) {
@@ -3310,32 +3329,53 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     const bool demandFits =
                         totalNeeded + separationSlack < totalWmma &&
                         beforeGroup.pendingThreshold >= afterNeeded + separationSlack;
+                    // Issue windows are a floor. A parent WMMA is the other floor:
+                    // overlap does not leave room for the full drain in
+                    // depThreshold, so after only has to stay one WMMA after
+                    // maxParentWmmaIdx. No parent means that floor is absent.
+                    const int issueFloor = std::clamp(afterGroup.splitNeeded, 0, totalWmma);
+                    const int parentFloor =
+                        afterGroup.maxParentWmmaIdx > 0
+                            ? std::clamp(afterGroup.maxParentWmmaIdx + 1, 0, totalWmma)
+                            : 0;
                     if (demandFits) {
-                        // Room for both issue windows and the slack: keep before,
-                        // and pull after earlier by the slack plus the configured
+                        // Room for both issue windows and the slack: pull after
+                        // earlier by the slack plus the configured
                         // TensorLoadDsLoadGapCycles (default 64) worth of WMMA
                         // windows so tensor loads stay off the ds_loads.
                         placement = "gap";
-                        // Do not pull the after barrier earlier than the issue
-                        // windows it needs (splitNeeded is wmmaWindowsNeeded, no
-                        // drain). The configured gap (TensorLoadDsLoadGapCycles,
-                        // default 64) is extra separation, not a reason to drop
-                        // below that floor.
-                        const int afterFloor = std::clamp(afterGroup.splitNeeded, 0, totalWmma);
-                        const int afterAtGap =
-                            std::clamp(beforeGroup.pendingThreshold - separationSlack -
-                                           tensorLoadDsLoadGapWmma,
-                                       afterFloor, totalWmma);
-                        afterGroup.pendingThreshold =
-                            std::max(afterFloor, std::min(afterGroup.pendingThreshold, afterAtGap));
+                        const int separation = separationSlack + tensorLoadDsLoadGapWmma;
+                        const int afterAtGap = std::clamp(beforeGroup.pendingThreshold - separation,
+                                                          issueFloor, totalWmma);
+                        const int pulledByIssueFloor =
+                            std::max(issueFloor, std::min(afterGroup.pendingThreshold, afterAtGap));
+                        const int pulledAfter = std::max(pulledByIssueFloor, parentFloor);
+                        afterGroup.pendingThreshold = pulledAfter;
+                        // after is already one WMMA after its parent, so it
+                        // cannot open the rest of the gap. Push before later
+                        // by that remainder.
+                        if (pulledAfter > pulledByIssueFloor) {
+                            const int beforeAtGap =
+                                std::clamp(pulledAfter + separation, 0, totalWmma);
+                            beforeGroup.pendingThreshold =
+                                std::max(beforeGroup.pendingThreshold, beforeAtGap);
+                        }
                     } else {
                         placement = "proportional";
                         afterGroup.sawProportionalPlacement = true;
                         beforeGroup.sawProportionalPlacement = true;
-                        afterGroup.pendingThreshold =
-                            std::min(afterGroup.pendingThreshold, afterTarget);
+                        const int pulledAfter = std::max(
+                            parentFloor, std::min(afterGroup.pendingThreshold, afterTarget));
+                        afterGroup.pendingThreshold = pulledAfter;
+                        // Keep the split's after/before spacing when the
+                        // dependency stops after short of afterTarget.
+                        const int splitSeparation = std::max(0, beforeTarget - afterTarget);
+                        const int beforeGoal =
+                            pulledAfter > afterTarget
+                                ? std::clamp(pulledAfter + splitSeparation, 0, totalWmma)
+                                : beforeTarget;
                         beforeGroup.pendingThreshold =
-                            std::max(beforeGroup.pendingThreshold, beforeTarget);
+                            std::max(beforeGroup.pendingThreshold, beforeGoal);
                     }
                 }
 
@@ -3354,10 +3394,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                            << " afterWmmaWindow=" << afterGroup.claimWindow
                            << " beforeWmmaWindow=" << beforeGroup.claimWindow
                            << " overlap=" << overlap << " baseAfterEnd=" << baseAfterEnd
-                           << " baseBeforeBegin=" << baseBeforeBegin << " proportionalSplit="
-                           << proportionalSplit << " separationSlack=" << separationSlack
-                           << " tensorLoadDsLoadGapWmma=" << tensorLoadDsLoadGapWmma
-                           << " placement=" << placement
+                           << " baseBeforeBegin=" << baseBeforeBegin
+                           << " maxParentWmmaIdx=" << afterGroup.maxParentWmmaIdx
+                           << " proportionalSplit=" << proportionalSplit
+                           << " separationSlack=" << separationSlack << " tensorLoadDsLoadGapWmma="
+                           << tensorLoadDsLoadGapWmma << " placement=" << placement
                            << " pendingAfterThreshold=" << afterGroup.pendingThreshold
                            << " pendingBeforeThreshold=" << beforeGroup.pendingThreshold << "\n");
             }
