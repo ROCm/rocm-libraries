@@ -556,19 +556,29 @@ def archNamesFromConfig(configArchitecture, isaList, archNames):
             # different architecture or stepping is still passed over rather
             # than tuning one on the other's hardware.
             if baseArchName(arch) == baseArchName(archNames[0]):
-                # Refused rather than overwritten when two entries name the
-                # detected architecture and settle its capabilities differently.
-                # Letting the later one win made the mode a function of the
-                # order they were written in: `gfx1250:xnack-;gfx1250` tuned
-                # with replay on and the same two reversed tuned with it off,
-                # both silently. Compared against the entry that claimed the
-                # slot, not against what is in it -- the detected name starts
-                # there, and the config is allowed to qualify that.
+                # Two entries naming the detected architecture under different
+                # xnack modes are refused rather than resolved by order. Letting
+                # the later one win made the build a function of the order they
+                # were written in: `gfx1250:xnack-;gfx1250` tuned with replay on
+                # and the same two reversed tuned with it off, both silently.
+                #
+                # Compared by the mode each names, not by the capabilities each
+                # ends up with. Those are not the same test: gfx942:xnack+ and
+                # gfx942:xnack- select no capability override at all, yet the
+                # compiler takes them as distinct target IDs and the helper
+                # kernels come out different, because the mode also reaches
+                # --offload-arch. A capability comparison would call that pair
+                # equivalent and go on picking one of two real builds by
+                # position.
+                #
+                # Compared against the entry that claimed the slot, not against
+                # what is in it -- the detected name starts there, and the
+                # config is allowed to qualify that.
                 if claimed is not None and capOverrideKeyOf(arch) != capOverrideKeyOf(claimed):
                     raise ValueError(
                         f"Architecture entries {claimed!r} and {arch!r} both name the "
-                        "detected architecture but settle its capabilities differently; "
-                        "a run has one set of capabilities, so name it once."
+                        "detected architecture under different xnack modes; a run "
+                        "builds one mode, so name it once."
                     )
                 claimed = arch
                 archNames[0] = arch
