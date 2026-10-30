@@ -281,7 +281,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
 
     Extending the spec does not disturb gfx950: ``kernel_name`` is a hand-curated
     parts list, not an auto-serialization of the field set, so the gfx950 goldens
-    (``platform/tests/golden/rocke_representative_ir_sha256.json``) are untouched by
+    (``platform/tests/golden/rocke_representative_ir_sha256/``) are untouched by
     fields that only this subclass has. Dispatch still leaves every field below at
     its default, so these knobs stay invisible in production and fully addressable
     from a harness.
