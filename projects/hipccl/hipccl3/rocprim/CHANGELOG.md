@@ -2,6 +2,14 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 5.1.0 for ROCM 10.3.0
+
+### Added
+* 64-bit indexing support in `device_histogram` and `device_run_length_encode`.
+
+### Fixed
+* OOB memory access is `device_batch_memcpy`.
+
 ## rocPRIM 5.0.0 for ROCm 10.2.0
 
 ### Added
