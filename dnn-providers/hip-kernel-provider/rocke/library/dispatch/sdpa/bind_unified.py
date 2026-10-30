@@ -12,9 +12,9 @@ This module adds no shape, dtype or head-size rule of its own: "can it run"
 is the candidates' own ``admits()``, so new kernel coverage reaches SDPA
 routing without touching this file. What it does add is the guarantee that
 nothing is admitted and then dropped: every feature in ``SDPA_FEATURES`` is
-either carried (:data:`SDPA_UNIFIED_FEATURES`) or declined with a reason, and
-a request is declined when the band the unified kernels would compute is not
-the band it asked for.
+either carried (:data:`SDPA_UNIFIED_FEATURES`) or declined with a reason, a
+request is declined when the band the unified kernels would compute is not
+the band it asked for, and a request that pins a dispatch choice is declined.
 
 Binding request tensors to a kernel launch is not here yet; it needs on-GPU
 validation against ``sdpa_reference`` and lands separately.
@@ -34,7 +34,7 @@ from dispatch.attention import (
     AttentionMaskType,
     AttentionRequest,
 )
-from dispatch.attention.common import Alignment, AttentionBand, normalize_band
+from dispatch.attention.common import Alignment, AttentionBand, _attention_band
 
 if TYPE_CHECKING:
     from rocke.dispatch.core import KernelCandidate
@@ -55,6 +55,8 @@ _UNIFIED_ALGORITHMS = frozenset(
 )
 # Only the split-KV (3D) path writes LSE.
 _LSE_ALGORITHMS = frozenset({"unified_3d", "d256_decode"})
+# ``SdpaRequest`` dispatch selectors; only ``"auto"`` is served.
+_DISPATCH_PINS = ("algorithm", "spec_id", "tuning_id")
 
 # The binding's ``supports_features``: what the unified launch path carries.
 # Layouts other than packed BSHD are carried by copying Q/O to and from a
@@ -146,31 +148,49 @@ def _to_attention_request(req: "SdpaRequest") -> AttentionRequest:
     )
 
 
-def _keep_grid(s_q: int, s_kv: int, top_left: bool, left: int, right: int):
-    """hipDNN band (``-1`` unbounded, ``left = W`` keeps W + 1 keys) over a grid."""
-    q = np.arange(s_q)[:, None]
-    k = np.arange(s_kv)[None, :]
-    d = q + (0 if top_left else s_kv - s_q)
-    keep = np.ones((s_q, s_kv), dtype=bool)
-    if right >= 0:
-        keep &= k <= d + right
-    if left >= 0:
-        keep &= k >= d - left
-    return keep
+def _kept_keys(s_q: int, s_kv: int, top_left: bool, left: int, right: int):
+    """Per query row, the first and last key a hipDNN band keeps (``-1``
+    unbounded, ``left = W`` keeps W + 1 keys). A row that keeps no key is
+    ``(0, -1)``, so two bands keep the same keys iff both arrays are equal.
+
+    A band keeps one contiguous run of keys per row, so this is O(s_q) where
+    the dense s_q x s_kv mask would be quadratic.
+    """
+    d = np.arange(s_q, dtype=np.int64) + (0 if top_left else s_kv - s_q)
+    first = np.maximum(d - left, 0) if left >= 0 else np.zeros_like(d)
+    last = np.minimum(d + right, s_kv - 1) if right >= 0 else np.full_like(d, s_kv - 1)
+    empty = first > last
+    return np.where(empty, 0, first), np.where(empty, -1, last)
+
+
+def _computed_band(req: "SdpaRequest") -> AttentionBand:
+    """The band the unified kernels compute for ``req``.
+
+    Read from ``_attention_band``, which is what ``_problem`` hands every
+    unified route candidate, not from ``normalize_band``: outside the band
+    arches the problem is always built bottom-right causal, whatever band the
+    request names. ``normalize_band`` raises for a band the band arches cannot
+    serve.
+    """
+    attn = _to_attention_request(req)
+    top_left, right_bound = _attention_band(attn)
+    return AttentionBand(
+        left_bound=attn.sliding_window if attn.sliding_window > 0 else None,
+        right_bound=None if right_bound < 0 else right_bound,
+        alignment=Alignment.TOP_LEFT if top_left else Alignment.BOTTOM_RIGHT,
+    )
 
 
 def _band_reject(req: "SdpaRequest") -> "tuple[bool, str] | None":
     """Decline when the unified kernels would compute a different band.
 
-    ``normalize_band`` is the one place the attention layer resolves the band
-    its kernels actually compute, including arches whose kernels serve only
-    some bands. Bands that differ in form but keep the same keys are equal:
-    full vs bottom-right causal at ``s_q == 1`` always, and any other pair
-    (e.g. top-left vs bottom-right at ``s_q == s_kv``) only for fixed lengths,
-    since with per-sequence lengths the diagonal moves per batch.
+    Bands that differ in form but keep the same keys are equal: full vs
+    bottom-right causal at ``s_q == 1`` always, and any other pair (e.g.
+    top-left vs bottom-right at ``s_q == s_kv``) only for fixed lengths, since
+    with per-sequence lengths the diagonal moves per batch.
     """
     try:
-        band = normalize_band(_to_attention_request(req))
+        band = _computed_band(req)
     except ValueError as exc:
         return False, f"band: {exc}"
 
@@ -200,8 +220,8 @@ def _band_reject(req: "SdpaRequest") -> "tuple[bool, str] | None":
     features = req.features()
     if "padded" not in features and "ragged" not in features:
 
-        def grid(b: AttentionBand):
-            return _keep_grid(
+        def kept(b: AttentionBand):
+            return _kept_keys(
                 req.s_q,
                 req.s_kv,
                 b.alignment == Alignment.TOP_LEFT,
@@ -209,7 +229,8 @@ def _band_reject(req: "SdpaRequest") -> "tuple[bool, str] | None":
                 -1 if b.right_bound is None else b.right_bound,
             )
 
-        if np.array_equal(grid(band), grid(asked)):
+        (first_a, last_a), (first_b, last_b) = kept(band), kept(asked)
+        if np.array_equal(first_a, first_b) and np.array_equal(last_a, last_b):
             return None
 
     return False, (
@@ -252,6 +273,19 @@ def _sdpa_unified_rejects(req: "SdpaRequest") -> "tuple[bool, str] | None":
         )
     if req.implementation == "composite":
         return False, "implementation_hint: composite was requested"
+    # The unified launch routes on its own (no tuning spec), so a pin would be
+    # admitted and then ignored.
+    for pin in _DISPATCH_PINS:
+        if getattr(req, pin) != "auto":
+            return False, (
+                f"dispatch_pin: {pin}={getattr(req, pin)!r} is pinned; the "
+                f"unified launch takes only the automatic route"
+            )
+    if req.tuning_knobs:
+        return False, (
+            "dispatch_pin: tuning_knobs are set; the unified launch takes only "
+            "the automatic route"
+        )
     if req.padding_mask and req.seq_len_q is None and req.seq_len_kv is None:
         return False, "padded: padding_mask is set but no seq_len tensor is given"
 

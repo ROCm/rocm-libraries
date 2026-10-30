@@ -9,13 +9,17 @@ Decline-reason assertions check the feature name the caller can act on.
 
 from __future__ import annotations
 
+import itertools
+import tracemalloc
 from dataclasses import replace
 
+import numpy as np
 import pytest
 
 from dispatch.sdpa.bind_unified import (
     _DECLINED,
     SDPA_UNIFIED_FEATURES,
+    _kept_keys,
     sdpa_unified_admits,
     sdpa_unified_candidates,
 )
@@ -142,6 +146,22 @@ def test_padding_mask_without_seq_len_tensors_is_declined():
     assert _declined(replace(_BASE, padding_mask=True)).startswith("padded:")
 
 
+@pytest.mark.parametrize(
+    "pin",
+    [
+        {"algorithm": "unified_2d"},
+        {"algorithm": "no_such_algorithm"},
+        {"spec_id": "no_such_spec"},
+        {"tuning_id": "t0"},
+        {"tuning_knobs": (("block_m", 64),)},
+    ],
+    ids=["algorithm", "unknown_algorithm", "spec_id", "tuning_id", "tuning_knobs"],
+)
+def test_dispatch_pin_is_declined(pin):
+    """The unified launch takes no pin, so a pinned request would run unpinned."""
+    assert _declined(replace(_BASE, **pin)).startswith("dispatch_pin:")
+
+
 # --- carried features --------------------------------------------------------
 
 
@@ -251,6 +271,81 @@ def test_gfx950_noncausal_band_is_admitted():
     _admitted(replace(_BASE, left_bound=2, right_bound=1))
 
 
+# Arches outside the attention layer's band dispatch: the unified problem is
+# always built bottom-right causal there, whatever band the request names.
+NON_BAND_ARCHES = ("gfx1151", "gfx1201", "gfx90a", "gfx1100")
+
+
+@pytest.mark.parametrize("arch", NON_BAND_ARCHES)
+@pytest.mark.parametrize(
+    "bounds", [{"right_bound": 0}, {"left_bound": 2, "right_bound": 0}]
+)
+def test_non_band_arch_top_left_with_unequal_lengths_is_declined(arch, bounds):
+    req = _unified_request(arch=arch, s_q=4, s_kv=8, **bounds)
+    assert _declined(req).startswith("band:")
+
+
+@pytest.mark.parametrize("arch", NON_BAND_ARCHES)
+def test_non_band_arch_bottom_right_causal_is_admitted(arch):
+    _admitted(
+        _unified_request(
+            arch=arch, s_q=4, s_kv=8, right_bound=0, diagonal="bottom_right"
+        )
+    )
+
+
+@pytest.mark.parametrize("arch", NON_BAND_ARCHES)
+def test_non_band_arch_square_top_left_causal_is_admitted(arch):
+    """At ``s_q == s_kv`` with fixed lengths the two diagonals coincide."""
+    _admitted(_unified_request(arch=arch, right_bound=0))
+
+
+@pytest.mark.parametrize("arch", NON_BAND_ARCHES)
+def test_non_band_arch_full_attention_is_declined(arch):
+    assert "full attention" in _declined(_unified_request(arch=arch))
+
+
+def _dense_keep(s_q, s_kv, top_left, left, right):
+    q = np.arange(s_q)[:, None]
+    k = np.arange(s_kv)[None, :]
+    d = q + (0 if top_left else s_kv - s_q)
+    keep = np.ones((s_q, s_kv), dtype=bool)
+    if right >= 0:
+        keep &= k <= d + right
+    if left >= 0:
+        keep &= k >= d - left
+    return keep
+
+
+def test_kept_keys_matches_the_dense_mask():
+    for s_q, s_kv, top_left, left, right in itertools.product(
+        (1, 3, 8), (1, 5, 8), (True, False), (-1, 0, 2, 9), (-1, 0, 1, 9)
+    ):
+        first, last = _kept_keys(s_q, s_kv, top_left, left, right)
+        keep = _dense_keep(s_q, s_kv, top_left, left, right)
+        k = np.arange(s_kv)[None, :]
+        assert np.array_equal(keep, (k >= first[:, None]) & (k <= last[:, None])), (
+            s_q,
+            s_kv,
+            top_left,
+            left,
+            right,
+        )
+
+
+def test_long_context_band_check_is_not_quadratic():
+    """gfx942 resolves square top-left causal to bottom-right, so the gate
+    compares kept keys; at 128k a dense mask would need tens of GiB."""
+    req = _unified_request(arch="gfx942", s_q=131072, s_kv=131072, right_bound=0)
+    tracemalloc.start()
+    try:
+        _admitted(req)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 64 << 20, peak
+
+
 # --- d=256 -------------------------------------------------------------------
 
 
@@ -298,6 +393,8 @@ def test_candidates_is_empty_exactly_when_admits_is_false():
         replace(_BASE, paged=SdpaPaged(max_seq_len_kv=8)),
         replace(_BASE, stats=packed((2, 4, 8, 1))),
         _unified_request(arch="gfx942"),
+        _unified_request(arch="gfx1151", s_q=4, s_kv=8, right_bound=0),
+        replace(_BASE, algorithm="unified_2d"),
         _BASE,
     ]
     for req in cases:
