@@ -89,6 +89,7 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | Skill | Path | Use it when |
 | --- | --- | --- |
 | `miopen-review` | [`projects/miopen/skills/miopen-review/`](projects/miopen/skills/miopen-review/SKILL.md) | A lightweight single-pass review of a MIOpen PR or local commits: parallel reviewer lanes primed with MIOpen's contracts, a devil's-advocate pass, optional reproduction on a GPU host you supply, and draft comments posted only after approval. |
+| `miopen-deep-review` | [`projects/miopen/skills/miopen-deep-review/`](projects/miopen/skills/miopen-deep-review/SKILL.md) | Running a multi-agent deep review of a MIOpen PR, branch or commit range, with every finding verified and a ledger carried across rounds. |
 
 ### StinkyTofu
 
