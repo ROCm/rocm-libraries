@@ -473,16 +473,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
             integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
             num_sink_loop;
 
-        // The countdown loop keeps the remaining tile count and derives the key origin from the
-        // V window instead of a tile index, which shortens scalar live ranges: fewer SGPR spills
-        // and no SGPR reloads in the tile loop. The origin is not sink-aware. D192 N128 keeps the
-        // index loop: in the countdown form it spills VGPRs to scratch inside the tile loop.
-        // Policy::UseCountdownLoop (D128 without a mask) must stay a subset of this condition.
-        constexpr bool kUseCountdownLoop = !kHasSink &&
-                                           BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
-                                           !(Geometry::kHeadDimQK == 192 && Geometry::kN == 128);
-        static_assert(!Policy::template UseCountdownLoop<Problem>() || kUseCountdownLoop,
-                      "every instance the shared policy puts on the countdown loop must keep it");
+        constexpr bool kUseCountdownLoop = Policy::template UseCountdownLoop<Problem>();
         // The V TDM issue recomputes its clamped global stride locally (fewer long-lived SGPRs).
         // Tied to the countdown loop for BF16 N128/V128: D128 with and without a mask. D192 N128
         // is excluded with the countdown loop; without the countdown loop it was not measured.

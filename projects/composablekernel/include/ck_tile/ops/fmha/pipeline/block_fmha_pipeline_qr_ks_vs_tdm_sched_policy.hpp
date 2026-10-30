@@ -445,8 +445,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr bool UseCountdownLoop()
     {
-        return Geometry::kHeadDimQK == 128 && !Problem::FmhaMask::IsMasking && !Problem::kHasSink &&
-               Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
+        // Derive the key origin from the prefetched V window only when no sink phase or bias
+        // origin is needed. D192 N128 retains the index loop to limit register pressure.
+        return !Problem::kHasSink && Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+               !(Geometry::kHeadDimQK == 192 && Geometry::kN == 128);
     }
 
     template <typename Problem>
