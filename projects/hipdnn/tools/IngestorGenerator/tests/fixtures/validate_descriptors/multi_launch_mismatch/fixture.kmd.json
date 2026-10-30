@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "id": "9df0f835-c642-59be-9265-37d23e4addac",
+  "name": "fixture variant fields",
+  "fields": [
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 64
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    }
+  ]
+}

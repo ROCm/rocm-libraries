@@ -2284,6 +2284,12 @@ INSTANTIATE_TEST_SUITE_P(
                           sources["2nd"] = sources.at("merge");
                           sources.erase("merge");
                       }},
+        ViolationCase{"launch_name_starts_with_an_underscore",
+                      [](Documents& documents) {
+                          auto& sources = spellAsMultiLaunch(documents).at("sources");
+                          sources["_x"] = sources.at("merge");
+                          sources.erase("merge");
+                      }},
         ViolationCase{
             "sources_under_version_1_0",
             [](Documents& documents) { spellAsMultiLaunch(documents)["version"] = "1.0"; }},
@@ -2801,9 +2807,10 @@ TEST(TestDescriptorLoader, AcceptsAModelArtifactInASubdirectoryOfTheDescriptor)
 
     ASSERT_EQ(sets.size(), 1u);
     ASSERT_TRUE(sets.front().heuristic.has_value());
-    EXPECT_EQ(
-        sets.front().heuristic->modelArtifactPath,
-        std::filesystem::absolute(dir.path() / "models" / "model.bin").lexically_normal().string());
+    // The parser resolves the artifact canonically, so the expectation is canonical too. On
+    // Windows that yields the on-disk case of each component, which %TEMP% need not match.
+    EXPECT_EQ(sets.front().heuristic->modelArtifactPath,
+              std::filesystem::weakly_canonical(dir.path() / "models" / "model.bin").string());
 }
 
 /// RFC 0019 §11.2: a `predict_engine` model gets the same artifact pre-flight as a ranker.
@@ -5713,20 +5720,35 @@ TEST(TestDescriptorLoader, AcceptsTwoLaunchNamesNamingOneKernelInline)
 }
 
 /// The selector revision digests every launch's code object, so a pack whose launch is
-/// rebuilt does not keep a revision a ranker was trained against.
+/// rebuilt does not keep a revision a ranker was trained against. Each launch carries its
+/// own symbol, toc_key and sha256, and each of them counts on its own.
 TEST(TestDescriptorLoader, ChangingALaunchCodeObjectChangesTheEngineSelectorRevision)
 {
-    const auto revisionWith = [&](const std::string& mergeSymbol, const std::string& label) {
-        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(label));
-        auto documents = makeSetDocuments('1', "test:" + label);
-        spellAsMultiLaunch(documents).at("sources")["merge"]["symbol"] = mergeSymbol;
-        writeDocuments(dir.path(), documents);
-        return engineSelectorRevision(loadFrom(dir.path()).at(0));
-    };
+    const auto revisionWith
+        = [&](const std::string& launch, const std::string& field, const std::string& value) {
+              const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("revision_a"));
+              auto documents = makeSetDocuments('1', "test:revision_a");
+              spellAsMultiLaunch(documents).at("sources").at(launch)[field] = value;
+              writeDocuments(dir.path(), documents);
+              return engineSelectorRevision(loadFrom(dir.path()).at(0));
+          };
 
-    EXPECT_EQ(revisionWith("rocke_merge", "revision_a"), revisionWith("rocke_merge", "revision_a"));
-    EXPECT_NE(revisionWith("rocke_merge", "revision_a"),
-              revisionWith("rocke_merge_v2", "revision_a"));
+    // Setting a field to the value it already has leaves the pack as authored.
+    const std::string baseline = revisionWith("merge", "symbol", "merge_kernel");
+    EXPECT_EQ(baseline, revisionWith("decode", "symbol", "decode_kernel"));
+
+    const std::vector<std::pair<std::string, std::string>> edits
+        = {{"symbol", "rocke_changed"},
+           {"toc_key", "multi/changed"},
+           {"sha256", std::string(64, 'b')}};
+    for(const std::string launch : {"decode", "merge"})
+    {
+        for(const auto& [field, value] : edits)
+        {
+            SCOPED_TRACE(std::string(launch).append(".").append(field));
+            EXPECT_NE(revisionWith(launch, field, value), baseline);
+        }
+    }
 }
 
 /// A launch name is `^[a-z][a-z0-9_]*$`: underscores and digits after the first letter are

@@ -17,6 +17,7 @@ GlobalParameters:
   CSVMergeSameProblemID: true
   Device: 0
   PrintSolutionRejectionReason: True
+  UniformSummationOrder: 0
 
 BenchmarkProblems:
   ########################################
