@@ -161,13 +161,34 @@ def engine_rows(out):
             )
     for sweep in sorted((out / ENGINES_DIR).glob(f"*/*/{ENGINE_NAME_FILE}")):
         direction, pinned = sweep.parent.parent.name, sweep.read_text().strip()
+        recorded = set()
         for row in read_rows(sweep.parent / CSV_NAME):
+            recorded.add(row["nodeid"])
             outcome, reason = row["outcome"], row["reason"]
             served = served_engines(row[direction])
             if outcome in ("pass", "fail") and served != {pinned}:
                 outcome = "declined"
                 reason = f"served {'+'.join(sorted(served)) or 'no engine'}, not the pinned {pinned}"
             rows.append((row["nodeid"], direction, pinned, "pinned", outcome, reason))
+        # A sweep cut short (timeout, crash) leaves listed cases with no row; they count as not-run.
+        listing = sweep.parent / "nodeids.txt"
+        listed = (
+            [n for n in listing.read_text().splitlines() if n]
+            if listing.is_file()
+            else []
+        )
+        for nodeid in listed:
+            if nodeid not in recorded:
+                rows.append(
+                    (
+                        nodeid,
+                        direction,
+                        pinned,
+                        "pinned",
+                        "not-run",
+                        "no row recorded by the sweep",
+                    )
+                )
     return [dict(zip(ENGINES_FIELDS, r)) for r in rows]
 
 

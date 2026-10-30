@@ -161,3 +161,19 @@ def test_engines_csv_lists_heuristic_and_pinned_rows_and_never_counts_a_mismatch
         "fwd A: pass=1 fail=0 declined=0",
         "fwd B: pass=1 fail=0 declined=0",
     ]
+
+
+def test_engines_csv_marks_listed_cases_a_cut_short_sweep_never_recorded_as_not_run(
+    tmp_path,
+):
+    f1, f2 = "v/test_forward.py::f1", "v/test_forward.py::f2"
+    (tmp_path / "results.csv").write_text(
+        ",".join(FIELDS)
+        + "\n"
+        + format_row(row(f1, fwd="hipdnn:A", fwd_engines="A;B"))
+        + format_row(row(f2, fwd="hipdnn:A", fwd_engines="A;B"))
+    )
+    sweep(tmp_path, "fwd", "B", [row(f1, fwd="hipdnn:B")])  # the sweep died before f2
+    (tmp_path / "all-engines" / "fwd" / "b" / "nodeids.txt").write_text(f"{f1}\n{f2}\n")
+    counts = reconcile.write_engines(tmp_path)
+    assert "fwd B: pass=1 fail=0 declined=0 not-run=1" in counts.splitlines()
