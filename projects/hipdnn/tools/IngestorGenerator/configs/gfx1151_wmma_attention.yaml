@@ -16,14 +16,18 @@
 # the bias broadcast strides and every dense tensor stride are launch arguments.
 #
 # Paged prefill (the same kernel, layout paged): the cuDNN paged-K/V SDPA graph
-# (page tables, seq_len_kv, optional seq_len_q, dense or ragged Q) in one
-# launch, one object per dtype x bucket (64, 96, 128, 256) x page size (16, 32,
-# 64) x query form: a batch-strided Q (dense_q; with seqused_q when the graph
-# carries seq_len_q) or a ragged Q packed through its ragged offsets
-# (seqused_q). The causal class again serves every mask; no bias. Each paged
-# object also ships with attention sinks (sinks 1: one per-query-head sink
-# logit in the Q dtype, sink_ptr). Paged graphs are this engine's whatever
-# their query length: the decode engine's objects are dense.
+# (page tables, seq_len_q and seq_len_kv, dense or ragged Q) in one launch, one
+# object per dtype x bucket (64, 96, 128, 256) x page size (16, 32, 64; the
+# matcher's list, GFX1151_WMMA_ATTENTION_PAGE_SIZES, which a census case ties to
+# these objects) x query
+# form: a batch-strided Q (dense_q) or a ragged Q packed through its ragged
+# offsets, both taking each sequence's live rows from seq_len_q (seqused_q; a
+# dense Q's rows past it are padding, written as O = 0, and a ragged Q owns
+# only its live rows). The causal class again
+# serves every mask; no bias. Each paged object also ships with attention sinks
+# (sinks 1: one per-query-head sink logit in the Q dtype, sink_ptr). Paged
+# graphs are this engine's whatever their query length: the decode engine's
+# objects are dense.
 #
 # The native matcher (Gfx1151WmmaAttentionNative.cpp) declines the dense
 # problems the rocKE dispatcher's rule sends to decode (the decode engine takes
@@ -184,8 +188,8 @@ packs:
     - {head_dim: 192, head_dim_v: 128, knobs: bias, resolved: {kind: prefill, head_size: 192, head_size_v: 128, mask_mode: causal, block_size: 256, block_m: 128, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0, sinks: 0}}
     - {head_dim: 256, head_dim_v: 128, knobs: bias, resolved: {kind: prefill, head_size: 256, head_size_v: 128, mask_mode: causal, block_size: 256, block_m: 128, dv_split: 1, layout: dense, page_block_size: 0, dense_q: 0, seqused_q: 0, sinks: 0}}
   # Paged prefill on both families: page size x query form. A batch-strided Q
-  # (dense_q, with seqused_q for a graph carrying seq_len_q) or a ragged Q
-  # (cu_seqlens_q from the ragged offsets, seqused_q from seq_len_q).
+  # (dense_q) or a ragged Q (cu_seqlens_q from the ragged offsets); seqused_q
+  # from seq_len_q, which every hipDNN paged graph carries.
   - name: wmma_prefill_paged.{dtype}_d{head_dim}v{head_dim_v}_p{page_block_size}_m{md_block_m}_{tag}
     metadata: [dtype, kind, head_size, head_size_v, mask_mode, bias, block_size, block_m, dv_split, layout, page_block_size, dense_q, seqused_q, sinks]
     vocabulary:
@@ -199,14 +203,13 @@ packs:
       page_block_size: [16, 32, 64]
     knob_sets:
       query:
-      - {dense_q: true, tag: denseq}
       - {dense_q: true, seqused_q: true, tag: denseq_used}
       - {seqused_q: true, tag: raggedq}
     shapes:
-    - {head_dim: 64, head_dim_v: 64, knobs: query, resolved: {kind: prefill, head_size: 64, head_size_v: 64, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 0}}
-    - {head_dim: 96, head_dim_v: 96, knobs: query, resolved: {kind: prefill, head_size: 96, head_size_v: 96, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 0}}
-    - {head_dim: 128, head_dim_v: 128, knobs: query, resolved: {kind: prefill, head_size: 128, head_size_v: 128, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 0}}
-    - {head_dim: 256, head_dim_v: 256, knobs: query, resolved: {kind: prefill, head_size: 256, head_size_v: 256, mask_mode: causal, bias: none, block_size: 256, block_m: 64, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 0}}
+    - {head_dim: 64, head_dim_v: 64, knobs: query, resolved: {kind: prefill, head_size: 64, head_size_v: 64, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, sinks: 0}}
+    - {head_dim: 96, head_dim_v: 96, knobs: query, resolved: {kind: prefill, head_size: 96, head_size_v: 96, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, sinks: 0}}
+    - {head_dim: 128, head_dim_v: 128, knobs: query, resolved: {kind: prefill, head_size: 128, head_size_v: 128, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, sinks: 0}}
+    - {head_dim: 256, head_dim_v: 256, knobs: query, resolved: {kind: prefill, head_size: 256, head_size_v: 256, mask_mode: causal, bias: none, block_size: 256, block_m: 64, dv_split: 1, dense_q: 0, sinks: 0}}
   # Paged prefill with attention sinks (gpt-oss): the same objects taking one
   # per-query-head sink logit [Hq] in the Q dtype (sink_ptr, after the stride
   # arguments and before the query-form and page arguments).
@@ -224,11 +227,10 @@ packs:
       page_block_size: [16, 32, 64]
     knob_sets:
       query:
-      - {dense_q: true, tag: denseq_sinks}
       - {dense_q: true, seqused_q: true, tag: denseq_used_sinks}
       - {seqused_q: true, tag: raggedq_sinks}
     shapes:
-    - {head_dim: 64, head_dim_v: 64, knobs: query, resolved: {kind: prefill, head_size: 64, head_size_v: 64, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 1}}
-    - {head_dim: 96, head_dim_v: 96, knobs: query, resolved: {kind: prefill, head_size: 96, head_size_v: 96, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 1}}
-    - {head_dim: 128, head_dim_v: 128, knobs: query, resolved: {kind: prefill, head_size: 128, head_size_v: 128, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 1}}
-    - {head_dim: 256, head_dim_v: 256, knobs: query, resolved: {kind: prefill, head_size: 256, head_size_v: 256, mask_mode: causal, bias: none, block_size: 256, block_m: 64, dv_split: 1, dense_q: 0, seqused_q: 0, sinks: 1}}
+    - {head_dim: 64, head_dim_v: 64, knobs: query, resolved: {kind: prefill, head_size: 64, head_size_v: 64, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, sinks: 1}}
+    - {head_dim: 96, head_dim_v: 96, knobs: query, resolved: {kind: prefill, head_size: 96, head_size_v: 96, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, sinks: 1}}
+    - {head_dim: 128, head_dim_v: 128, knobs: query, resolved: {kind: prefill, head_size: 128, head_size_v: 128, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, sinks: 1}}
+    - {head_dim: 256, head_dim_v: 256, knobs: query, resolved: {kind: prefill, head_size: 256, head_size_v: 256, mask_mode: causal, bias: none, block_size: 256, block_m: 64, dv_split: 1, dense_q: 0, sinks: 1}}

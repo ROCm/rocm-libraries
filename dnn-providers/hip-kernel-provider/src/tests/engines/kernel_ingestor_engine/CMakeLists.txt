@@ -116,6 +116,7 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDensePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseCatalogTiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionPacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionCatalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionDecodePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradAotPacks.cpp
 )

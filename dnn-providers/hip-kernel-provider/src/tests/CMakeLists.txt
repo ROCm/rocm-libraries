@@ -573,6 +573,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 SUITES ${_hkp_suite}
                 EXPECTED_CASES ${_hkp_generated_packs_cases}
             )
+            # The prefill engine's page sizes and architectures, stated once in
+            # Gfx1151WmmaAttentionCatalog.hpp for the matcher and the GPU suites, are
+            # checked against the loaded objects.
+            if(_hkp_engine STREQUAL "hipkernel:Gfx1151WmmaAttention")
+                hkp_register_census_tests(
+                    TARGET hip_kernel_provider_census_tests
+                    PACK_NAME product
+                    ARCHES ${_hkp_rdna_wmma_attention_arches}
+                    SUITES TestGfx1151WmmaAttentionCatalog
+                    EXPECTED_CASES
+                        ShipsPagedObjectsForExactlyTheMatchersPageSizes
+                        ShipsForNoArchitectureOutsideTheStatedList
+                )
+            endif()
         else()
             message(STATUS
                 "hkp: this configuration does not ship ${_hkp_engine} for any RDNA arch, "
