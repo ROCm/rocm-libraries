@@ -1485,6 +1485,9 @@ def _check_skinny_tn_config(name, dataType, sizeEqual, sizeLessThan=None, sizeGr
     assert ck["grid"] == ["ComputeUnits", "One", "One"]
     assert ck["threads"] == [64, 16, 1]
     assert [a["semantic"] for a in ck["args"]] == _SKINNY_TN_ARGS
+    # Each wave reduces whole rows, every row with the same lanes, loop and
+    # reduction, so hipBLASLt can run these under uniform summation order.
+    assert ck["uniformSummationOrder"] is True
 
 
 @pytest.mark.parametrize(
