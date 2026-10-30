@@ -538,6 +538,7 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int Channels,
          unsigned int ActiveChannels,
+         class BlockId,
          class SampleIterator,
          class Counter,
          class SampleToBinOp>
@@ -551,8 +552,8 @@ void histogram_private_global(SampleIterator                                   s
                               const fixed_array<size_t, ActiveChannels>        bins_bits,
                               const fixed_array<size_t, ActiveChannels>        bins,
                               Counter*                                         private_histograms,
-                              const size_t                                     virtual_max_blocks,
-                              size_t*                                          block_id_count)
+                              const BlockId                                    virtual_max_blocks,
+                              BlockId*                                         block_id_count)
 {
     using sample_type        = typename std::iterator_traits<SampleIterator>::value_type;
     using sample_vector_type = sample_vector<sample_type, Channels>;
@@ -562,7 +563,7 @@ void histogram_private_global(SampleIterator                                   s
     const unsigned int flat_id = ::rocprim::flat_block_thread_id();
     const unsigned int flat_block_id = ::rocprim::flat_block_id();
 
-    __shared__ size_t block_id_count_shared;
+    __shared__ BlockId block_id_count_shared;
 
     // Store the start of the first histogram for each channel
     Counter* block_histogram[ActiveChannels];
@@ -578,15 +579,16 @@ void histogram_private_global(SampleIterator                                   s
         block_histogram[channel] += flat_block_id * total_bins;
     }
 
-    size_t virtual_block_id = flat_block_id;
+    BlockId virtual_block_id = flat_block_id;
 
     while(virtual_block_id < virtual_max_blocks)
     {
-        const size_t row_id       = virtual_block_id % rows;
-        const size_t col_id       = virtual_block_id / rows;
-        const size_t block_offset = col_id * items_per_block;
+        const BlockId row_id       = virtual_block_id % rows;
+        const BlockId col_id       = virtual_block_id / rows;
+        const size_t  block_offset = size_t{col_id} * items_per_block;
 
-        SampleIterator samples_block = samples + row_id * row_stride + block_offset * Channels;
+        SampleIterator samples_block
+            = samples + size_t{row_id} * row_stride + block_offset * Channels;
 
         sample_vector_type values[ItemsPerThread];
         unsigned int       valid_count;
@@ -627,7 +629,7 @@ void histogram_private_global(SampleIterator                                   s
 
         if(flat_id == 0)
         {
-            block_id_count_shared = ::rocprim::detail::atomic_add(block_id_count, size_t{1});
+            block_id_count_shared = ::rocprim::detail::atomic_add(block_id_count, BlockId{1});
         }
 
         ::rocprim::syncthreads();

@@ -188,6 +188,10 @@ inline hipError_t histogram_impl(void*          temporary_storage,
     size_t*       block_id_count             = nullptr;
     int           global_histogram_grid_size = 0;
     size_t        virtual_max_blocks         = 0;
+    // The private kernel hands out virtual block ids through an atomic counter and divides by
+    // `rows` for every one of them. 32-bit ids are much cheaper, so use them whenever the
+    // counter (which ends up at virtual_max_blocks + grid size) cannot wrap.
+    bool use_32bit_block_ids = false;
 
     if(use_shared_mem || !use_private_histogram)
     {
@@ -219,6 +223,10 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         virtual_max_blocks = ::rocprim::detail::ceiling_div(columns, items_per_block) * rows;
         global_histogram_grid_size
             = static_cast<int>(std::min<size_t>(global_histogram_grid_size, virtual_max_blocks));
+
+        use_32bit_block_ids
+            = virtual_max_blocks + static_cast<size_t>(global_histogram_grid_size)
+              <= std::numeric_limits<unsigned int>::max();
 
         const size_t     size_private_histograms = total_bins * global_histogram_grid_size;
         const hipError_t partition_result        = detail::temp_storage::partition(
@@ -376,45 +384,58 @@ inline hipError_t histogram_impl(void*          temporary_storage,
                 start = std::chrono::steady_clock::now();
             }
 
-            auto histogram_private_global_kernel
-                = [samples,
-                   columns,
-                   rows,
-                   row_stride,
-                   hist     = fixed_array<Counter*, ActiveChannels>(histogram),
-                   ops      = fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
-                   bits     = fixed_array<size_t, ActiveChannels>(bins_bits),
-                   bins_fix = fixed_array<size_t, ActiveChannels>(bins),
-                   private_histograms,
-                   virtual_max_blocks,
-                   block_id_count](auto target_config)
+            // block_id_count is always allocated and initialized (by init_histogram) as a size_t.
+            // The 32-bit variant uses its low word, which holds the same value on little-endian
+            // devices.
+            auto launch_private_global = [&](auto block_id_tag) -> hipError_t
             {
-                static constexpr histogram_config_params params = decltype(target_config)::params;
+                using block_id_type = decltype(block_id_tag);
 
-                histogram_private_global<params.histogram_global_config.block_size,
-                                         params.histogram_global_config.items_per_thread,
-                                         Channels,
-                                         ActiveChannels>(samples,
-                                                         columns,
-                                                         rows,
-                                                         row_stride,
-                                                         hist,
-                                                         ops,
-                                                         bits,
-                                                         bins_fix,
-                                                         private_histograms,
-                                                         virtual_max_blocks,
-                                                         block_id_count);
-            };
+                auto histogram_private_global_kernel
+                    = [samples,
+                       columns,
+                       rows,
+                       row_stride,
+                       hist     = fixed_array<Counter*, ActiveChannels>(histogram),
+                       ops      = fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
+                       bits     = fixed_array<size_t, ActiveChannels>(bins_bits),
+                       bins_fix = fixed_array<size_t, ActiveChannels>(bins),
+                       private_histograms,
+                       max_blocks = static_cast<block_id_type>(virtual_max_blocks),
+                       block_ids  = reinterpret_cast<block_id_type*>(block_id_count)](
+                          auto target_config)
+                {
+                    static constexpr histogram_config_params params
+                        = decltype(target_config)::params;
 
-            ROCPRIM_RETURN_ON_ERROR(
-                execute_launch_plan<Config, selector, histogram_global_config_static_selector>(
+                    histogram_private_global<params.histogram_global_config.block_size,
+                                             params.histogram_global_config.items_per_thread,
+                                             Channels,
+                                             ActiveChannels,
+                                             block_id_type>(samples,
+                                                            columns,
+                                                            rows,
+                                                            row_stride,
+                                                            hist,
+                                                            ops,
+                                                            bits,
+                                                            bins_fix,
+                                                            private_histograms,
+                                                            max_blocks,
+                                                            block_ids);
+                };
+
+                return execute_launch_plan<Config, selector, histogram_global_config_static_selector>(
                     current_target,
                     histogram_private_global_kernel,
                     dim3(global_histogram_grid_size),
                     dim3(params.histogram_global_config.block_size),
                     0,
-                    stream));
+                    stream);
+            };
+
+            ROCPRIM_RETURN_ON_ERROR(use_32bit_block_ids ? launch_private_global(0u)
+                                                        : launch_private_global(size_t{0}));
 
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_private_global_kernel",
                                                         blocks_x * block_size * rows,

@@ -78,9 +78,6 @@ struct decomposer_max_bits
                               0>()>
 {};
 
-template<class Size>
-using offset_type_t = std::conditional_t<sizeof(Size) <= 4, unsigned int, size_t>;
-
 template<class Config,
          bool Descending,
          class KeysInputIterator,

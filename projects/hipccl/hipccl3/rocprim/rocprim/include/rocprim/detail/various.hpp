@@ -63,6 +63,11 @@ struct empty_storage_type
 
 };
 
+/// \brief Offset type used for a problem of \p Size elements: 32-bit when \p Size is at most
+/// 32 bits wide, 64-bit otherwise. Lets 32-bit callers keep the cheaper 32-bit index arithmetic.
+template<class Size>
+using offset_type_t = std::conditional_t<sizeof(Size) <= 4, unsigned int, size_t>;
+
 template<class T>
 ROCPRIM_HOST_DEVICE inline
 constexpr bool is_power_of_two(const T x)
