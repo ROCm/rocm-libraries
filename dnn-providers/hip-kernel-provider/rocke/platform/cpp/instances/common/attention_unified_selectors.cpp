@@ -735,6 +735,12 @@ bool rocke_unified_attn_enable_gfx942_flash_k_sliced_ring(
     {
         return false;
     }
+    /* The ring needs the wide cfvst geometry; FLASH_WIDE=0 selects the non-ring
+     * L4 fallback, so the ring is off even when forced on. */
+    if(gfx942_flash_wide_setting() == 0)
+    {
+        return false;
+    }
     env_lower("HIPDNN_GFX942_K_SLICED_RING", v, sizeof(v));
     if(in_set(v, k_env_off, ROCKE_ENV_SET_LEN(k_env_off)))
     {

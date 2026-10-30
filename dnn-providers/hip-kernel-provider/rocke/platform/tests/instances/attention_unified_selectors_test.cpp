@@ -372,8 +372,8 @@ static void test_gfx942_flash(void)
         {"HIPDNN_GFX942_D128_SMALLTILE_DK", " OFF ", 'B', 1, 0, 64, 2, 1, 0, 1, 0, 1, 0, 3, 32, 2},
         {"HIPDNN_GFX942_BF16_CFVST", "0", 'C', 1, 0, 64, 4, 0, 0, 1, 0, 1, 1, 3, 16, 4},
         {"HIPDNN_GFX942_FLASH_WIDE", "0", 'A', 1, 0, 64, 2, 1, 0, 0, 1, 1, 0, 3, 32, 2},
-        {"HIPDNN_GFX942_FLASH_WIDE", "0", 'C', 1, 0, 64, 4, 0, 1, 0, 1, 1, 1, 3, 16, 1},
-        {"HIPDNN_GFX942_FLASH_WIDE", "0", 'E', 0, 0, 64, 2, 1, 0, 0, 1, 1, 1, 2, 32, 1},
+        {"HIPDNN_GFX942_FLASH_WIDE", "0", 'C', 1, 0, 64, 4, 0, 1, 0, 1, 1, 0, 3, 16, 4},
+        {"HIPDNN_GFX942_FLASH_WIDE", "0", 'E', 0, 0, 64, 2, 1, 0, 0, 1, 1, 0, 2, 32, 1},
     };
     size_t i;
 
