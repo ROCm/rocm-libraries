@@ -66,7 +66,7 @@ TEST(TestHipFlash2AttnScale, AbsentAttnScaleValueIsOne)
 
 // -- isApplicable: valid cases -------------------------------------------------
 
-TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16MHACausal)
+TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsHalfMhaCausal)
 {
     SKIP_IF_NO_DEVICES();
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
@@ -99,7 +99,7 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16MHACausal)
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
 
-TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16MHANonCausal)
+TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsHalfMhaNonCausal)
 {
     SKIP_IF_NO_DEVICES();
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
@@ -132,7 +132,7 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16MHANonCausal)
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
 
-TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16HeadDim64)
+TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsHalfHeadDim64)
 {
     SKIP_IF_NO_DEVICES();
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
@@ -160,7 +160,7 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16HeadDim64)
 }
 
 // GQA: different Q heads vs KV heads
-TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16GQA)
+TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsHalfGqa)
 {
     SKIP_IF_NO_DEVICES();
     const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());

@@ -46,7 +46,7 @@ TEST_F(TestHipFlash2Engine, IsApplicableReturnsFalseForNonSdpaGraph)
     EXPECT_FALSE(_engine->isApplicable(_handle, graph));
 }
 
-TEST_F(TestHipFlash2Engine, IsApplicableReturnsTrueForFP16SdpaGraphOnGfx942)
+TEST_F(TestHipFlash2Engine, IsApplicableReturnsTrueForHalfSdpaGraphOnGfx942)
 {
     SKIP_IF_NO_DEVICES();
 
