@@ -70,6 +70,41 @@ _ELEM_BYTES: dict = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}
 _VALID_VECTOR_AXES = ("col", "row")
 
 
+def xor8_params(tile_cols: int, elem_bytes: int = 2) -> Tuple[int, int, int]:
+    """``(row_shift, key_mask, unit_shift)`` of :func:`xor8_swizzle_rc`."""
+    epu = 8 // elem_bytes
+    rpl = max(1, 128 // (elem_bytes * tile_cols))
+    units = tile_cols // epu
+    if units < 2 or units & (units - 1) or rpl & (rpl - 1):
+        raise ValueError(f"xor8 swizzle: unsupported tile_cols={tile_cols}")
+    return rpl.bit_length() - 1, units - 1, epu.bit_length() - 1
+
+
+def xor8_key(b: IRBuilder, row: Value, *, tile_cols: int, elem_bytes: int = 2) -> Value:
+    """Column XOR mask (in elements) of LDS row ``row``; see :func:`xor8_swizzle_rc`."""
+    sh, mask, ush = xor8_params(tile_cols, elem_bytes)
+    key = b.lshr(row, b.const_i32(sh)) if sh else row
+    return b.shl(b.land(key, b.const_i32(mask)), b.const_i32(ush))
+
+
+def xor8_swizzle_rc(
+    b: IRBuilder, row: Value, col: Value, *, tile_cols: int, elem_bytes: int = 2
+) -> Tuple[Value, Value]:
+    """Physical ``(row, col)`` of element ``(row, col)`` in a pad-free,
+    8-byte-granular XOR-swizzled ``(rows, tile_cols)`` LDS tile.
+
+    The 8-byte unit of the column is XORed with ``(row / rpl) % units``
+    (``rpl`` rows share one 128-byte bank line: 4/2/1 for 16-bit rows of
+    16/32/64 elements), so the 16 consecutive rows a ds_read_b64 fragment
+    read touches at one unit hit all 32 banks once -- the same spread the
+    padded layout's odd row stride buys, without the pad. The XOR touches
+    column bits >= log2(8 / elem_bytes) only: an element, and any aligned
+    group of up to 8 bytes, stays inside its unit. The key is periodic in
+    16 rows, so rows that differ by a multiple of 16 share it.
+    """
+    return row, b.xor(col, xor8_key(b, row, tile_cols=tile_cols, elem_bytes=elem_bytes))
+
+
 @dataclass(frozen=True)
 class CoalescedTileLoader:
     """Sync coalesced global -> LDS load plan for a 2D tile.
@@ -132,6 +167,50 @@ class CoalescedTileLoader:
     # LDS banks instead of stepping whole row runs. 1 (default) keeps the
     # historical decode and store, byte-identical.
     row_kpack: int = 1
+    # Write the tile through :func:`xor8_swizzle_rc` (pad-free XOR-swizzled
+    # LDS; the consumer must read it the same way). Off (default) keeps the
+    # historical addressing, byte-identical.
+    lds_xor8: bool = False
+    # ``row_kpack > 1`` only: lane decode of the packed units. 0 (default):
+    # column-group fastest -- adjacent lanes take adjacent column groups of one
+    # row chunk, so one wave-wide read touches 16 free-axis lines, each only
+    # half used (the other half comes with the next wave). N (8): line-major -- groups of 64 lanes cover N row chunks
+    # (N * load_vec contiguous free-axis elements, a 128-byte line at 16 bytes
+    # per chunk) x 64/N column groups, so a read touches 64/N whole lines.
+    # Every thread keeps one column group across its chunks (the carried
+    # addressing relies on it), which needs (block_size / 64) to be a multiple
+    # of the column-group blocks. Byte-identical at 0.
+    kp_line: int = 0
+
+    def kp_col0(self, b: IRBuilder, tid: Value) -> Value:
+        """First column of this thread's (fixed) column group, packed decode."""
+        kp = self.row_kpack
+        ncg = self.tile_cols // kp
+        if not self.kp_line:
+            return b.mul(b.mod(tid, b.const_i32(ncg)), b.const_i32(kp))
+        cgl = 64 // self.kp_line
+        nb = ncg // cgl
+        colg = b.mod(tid, b.const_i32(cgl))
+        if nb > 1:
+            hi = b.mod(b.div(tid, b.const_i32(64)), b.const_i32(nb))
+            colg = b.add(b.mul(hi, b.const_i32(cgl)), colg)
+        return b.mul(colg, b.const_i32(kp))
+
+    def _xor8_cols(self, b: IRBuilder, row: Value, col: Value) -> List[Value]:
+        """Swizzled columns of rows ``row + i`` (i < load_vec) at ``col``.
+
+        ``row`` is a multiple of ``load_vec`` (a power of two), so the key of
+        ``row + i`` is the key of ``row`` XOR a build-time constant: one
+        per-thread XOR, then constants -- the addresses stay a few VGPRs.
+        """
+        eb = _ELEM_BYTES.get(self.elem_dtype.name, 2)
+        sh, mask, ush = xor8_params(self.tile_cols, eb)
+        base = b.xor(col, xor8_key(b, row, tile_cols=self.tile_cols, elem_bytes=eb))
+        cols: List[Value] = []
+        for i in range(self.load_vec):
+            k = ((i >> sh) & mask) << ush
+            cols.append(b.xor(base, b.const_i32(k)) if k else base)
+        return cols
 
     def __post_init__(self) -> None:
         # Fail fast on a mistyped ``vector_axis`` (e.g. "Row"): silently falling
@@ -142,6 +221,32 @@ class CoalescedTileLoader:
             raise ValueError(
                 f"CoalescedTileLoader: vector_axis must be one of "
                 f"{_VALID_VECTOR_AXES}, got {self.vector_axis!r}"
+            )
+        if self.kp_line:
+            kp = self.row_kpack
+            ok = kp > 1 and self.kp_line in (2, 4, 8, 16, 32)
+            if ok:
+                cgl = 64 // self.kp_line
+                ncg = self.tile_cols // kp
+                ok = (
+                    ncg % cgl == 0
+                    and (self.tile_rows // self.load_vec) % self.kp_line == 0
+                    and self.block_size % 64 == 0
+                    and (self.block_size // 64) % (ncg // cgl) == 0
+                )
+            if not ok:
+                raise ValueError(
+                    f"kp_line={self.kp_line}: needs row_kpack > 1, a power-of-two line "
+                    f"of row chunks dividing the rows, and whole 64-lane groups "
+                    f"(tile {self.tile_rows}x{self.tile_cols}, kp {kp}, "
+                    f"block {self.block_size})"
+                )
+        if self.lds_xor8 and (
+            self.vector_axis != "row" or self.load_vec <= 1 or self.row_kpack > 4
+        ):
+            raise ValueError(
+                "lds_xor8 needs the row-mode transpose store (load_vec > 1) with "
+                "row_kpack <= 4 (a store must stay inside one 8-byte unit)"
             )
         if self.row_kpack != 1:
             kp = self.row_kpack
@@ -183,8 +288,20 @@ class CoalescedTileLoader:
         g, j = divmod(e, kp)
         unit = b.add(b.mul(b.const_i32(g), c_threads), tid)
         c_groups = b.const_i32(self.tile_cols // kp)
-        colg = b.mod(unit, c_groups)
-        rowc = b.div(unit, c_groups)
+        if self.kp_line:
+            cgl = 64 // self.kp_line
+            nb = (self.tile_cols // kp) // cgl
+            lane = b.mod(unit, b.const_i32(64))
+            grp = b.div(unit, b.const_i32(64))
+            colg = b.mod(lane, b.const_i32(cgl))
+            rowc = b.div(lane, b.const_i32(cgl))
+            if nb > 1:
+                colg = b.add(b.mul(b.mod(grp, b.const_i32(nb)), b.const_i32(cgl)), colg)
+                grp = b.div(grp, b.const_i32(nb))
+            rowc = b.add(b.mul(grp, b.const_i32(self.kp_line)), rowc)
+        else:
+            colg = b.mod(unit, c_groups)
+            rowc = b.div(unit, c_groups)
         row = b.mul(rowc, c_load_vec)
         col = b.mul(colg, b.const_i32(kp))
         if j:
@@ -317,10 +434,14 @@ class CoalescedTileLoader:
         the consumer already reads K-contiguously.
         """
         if self.vector_axis == "row" and self.load_vec > 1:
+            cols = self._xor8_cols(b, row, col) if self.lds_xor8 else None
             for i in range(self.load_vec):
                 r = b.add(row, b.const_i32(i)) if i else row
-                b.smem_store_vN(smem_dst, [r, col], b.vec_extract(v, i), 1)
+                c = cols[i] if cols else col
+                b.smem_store_vN(smem_dst, [r, c], b.vec_extract(v, i), 1)
         else:
+            if self.lds_xor8:
+                raise ValueError("lds_xor8 supports the row-mode transpose store only")
             b.smem_store_vN(smem_dst, [row, col], v, self.load_vec)
 
     def load_global(
@@ -412,11 +533,13 @@ class CoalescedTileLoader:
         for g in range(0, len(staged), kp):
             grp = staged[g : g + kp]
             row, col, _ = grp[0]
+            cols = self._xor8_cols(b, row, col) if self.lds_xor8 else None
             for i in range(self.load_vec):
                 r = b.add(row, b.const_i32(i)) if i else row
                 parts = [b.vec_extract(v, i) for _r, _c, v in grp]
+                c = cols[i] if cols else col
                 b.smem_store_vN(
-                    smem_dst, [r, col], b.vec_pack(parts, self.elem_dtype), kp
+                    smem_dst, [r, c], b.vec_pack(parts, self.elem_dtype), kp
                 )
 
     # ---- address-prefetch split -------------------------------------------
