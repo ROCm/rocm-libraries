@@ -553,8 +553,6 @@ struct KernelSpec
 {
     std::string dtype = "BF16";
     int64_t headSize = HEAD_SIZE;
-    int64_t numQueryHeads = HEADS;
-    int64_t numKvHeads = HEADS;
     int64_t seqLenQ = SEQ;
     int64_t seqLenKv = SEQ;
     int64_t batch = BATCH;
@@ -589,8 +587,6 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec& spec)
     kernel.metadata = {
         {std::string("dtype"), spec.dtype},
         {std::string("head_size"), spec.headSize},
-        {std::string("num_query_heads"), spec.numQueryHeads},
-        {std::string("num_kv_heads"), spec.numKvHeads},
         {std::string("seqlen_q"), spec.seqLenQ},
         {std::string("seqlen_kv"), spec.seqLenKv},
         {std::string("batch"), spec.batch},
@@ -732,8 +728,6 @@ KernelSpec canonicalD128H9()
 {
     KernelSpec spec = canonicalAligned();
     spec.headSize = 128;
-    spec.numQueryHeads = 9;
-    spec.numKvHeads = 9;
     spec.causal = 0;
     return spec;
 }
@@ -763,8 +757,6 @@ std::vector<KernelSpec> d64H32Cohort()
 {
     KernelSpec spec = canonicalAligned();
     spec.headSize = 64;
-    spec.numQueryHeads = 32;
-    spec.numKvHeads = 32;
     spec.causal = 0;
     return cohortOf(spec, d64Tiles());
 }
@@ -804,8 +796,6 @@ KernelSpec raggedRecord2016()
 {
     KernelSpec spec;
     spec.headSize = 64;
-    spec.numQueryHeads = 64;
-    spec.numKvHeads = 8;
     spec.causal = 1;
     spec.ragged = 1;
     spec.batch = 1;
@@ -820,8 +810,6 @@ std::vector<KernelSpec> d64H64Kv8Cohort()
 {
     KernelSpec spec = canonicalAligned();
     spec.headSize = 64;
-    spec.numQueryHeads = 64;
-    spec.numKvHeads = 8;
     spec.causal = 1;
     return cohortOf(spec, d64Tiles());
 }
@@ -849,8 +837,6 @@ KernelSpec vitSemantic()
     KernelSpec spec = canonicalAligned();
     spec.dtype = "FP16";
     spec.headSize = 64;
-    spec.numQueryHeads = 12;
-    spec.numKvHeads = 12;
     spec.causal = 0;
     return spec;
 }
@@ -2327,11 +2313,19 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherHeadSi
     EXPECT_FALSE(matchesKernel(d128Graph, d64Candidate));
 }
 
-TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherHeadCount)
+TEST(TestGfx950AttentionDenseKernelMatch, OneCandidateServesEveryHeadCount)
 {
-    KernelSpec kernel;
-    kernel.numQueryHeads = HEADS * 2;
-    EXPECT_FALSE(matchesKernel(GraphSpec{}, kernel));
+    // The metadata carries no head counts: the kernel reads them as kernargs from the
+    // graph, so one candidate matches MHA, GQA, MQA and non-power-of-two head counts.
+    const KernelSpec kernel;
+    for(const auto& [queryHeads, kvHeads] : std::vector<std::pair<int64_t, int64_t>>{
+            {1, 1}, {6, 3}, {64, 8}, {9, 9}, {HEADS * 2, HEADS}})
+    {
+        GraphSpec graph;
+        graph.numQueryHeads = queryHeads;
+        graph.numKvHeads = kvHeads;
+        EXPECT_TRUE(matchesKernel(graph, kernel)) << "Hq=" << queryHeads << " Hkv=" << kvHeads;
+    }
 }
 
 TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForTheOtherMask)
@@ -2445,8 +2439,6 @@ TEST(TestGfx950AttentionDenseTileMatch, D128GqaCausalRuntimeBatchAdmitsAllSixTil
     graph.seqLenKv = 1536;
 
     KernelSpec semantic = canonicalAligned();
-    semantic.numQueryHeads = 32;
-    semantic.numKvHeads = 8;
     semantic.causal = 1;
 
     EXPECT_EQ(admittedTiles(graph, cohortOf(semantic, d128Tiles())), tileSetOf(d128Tiles()));
@@ -2520,9 +2512,11 @@ TEST(TestGfx950AttentionDenseTileMatch, AlternativeTilesKeepTheSemanticFieldComp
     otherDtype.dtype = "FP16";
     EXPECT_FALSE(matchesKernel(graph, otherDtype));
 
-    KernelSpec otherHeads = match;
+    // Head counts are not metadata: another head configuration still matches.
+    GraphSpec otherHeads = graph;
+    otherHeads.numQueryHeads = 12;
     otherHeads.numKvHeads = 3;
-    EXPECT_FALSE(matchesKernel(graph, otherHeads));
+    EXPECT_TRUE(matchesKernel(otherHeads, match));
 
     KernelSpec otherMask = match;
     otherMask.causal = 1;

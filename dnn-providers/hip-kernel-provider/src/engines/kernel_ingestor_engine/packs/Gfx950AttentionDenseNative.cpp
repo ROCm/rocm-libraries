@@ -70,14 +70,14 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_d
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.dispatch";
 
-// KMD fields (12-field schema). The KMD carries only what varies between candidates, so
+// KMD fields (10-field schema). The KMD carries only what varies between candidates, so
 // waves_per_eu/persistent/num_persistent/wide_lds_dma are absent: every shipped variant
 // holds them at one value. A variant that moved any of them would have to add it here
-// first, or the candidates collide on the catalog key and the loader drops one.
+// first, or the candidates collide on the catalog key and the loader drops one. The head
+// counts are absent too: the kernel reads them as kernargs from the graph, so one
+// candidate serves every head configuration.
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
-constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
-constexpr std::string_view NUM_KV_HEADS_FIELD = "num_kv_heads";
 constexpr std::string_view CAUSAL_FIELD = "causal";
 constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
 constexpr std::string_view RAGGED_FIELD = "ragged";
@@ -820,10 +820,10 @@ bool tileDivides(const AttentionDenseTile& tile, const AttentionDenseProblem& pr
  * declined even at its authored shape rather than matched on metadata equality.
  *
  * A served candidate receives batch/seqlen_q/seqlen_kv and num_query_heads/num_kv_heads
- * as runtime kernel arguments, so one binary serves any valid shape; the metadata's
- * shape fields are canonical build inputs and are not compared. The head counts are
- * still compared below because the catalog lists each head configuration as its own
- * entry.
+ * as runtime kernel arguments, so one binary serves any valid shape and head
+ * configuration. The metadata's shape fields are canonical build inputs and are not
+ * compared, and it carries no head counts. Head legality (positive, Hq % Hkv == 0, 32-bit
+ * extents) is decided on the graph by gfx950AttentionDenseGraphMatches().
  *
  * Divisibility is against the candidate's OWN tile -- `Sq % block_m == 0` and
  * `Skv % block_n == 0` -- so one graph can admit some tiles of a cohort and not others.
@@ -870,9 +870,7 @@ bool kernelMatches(const MatchContext& context,
     const auto intField
         = [&kernel](std::string_view field) { return kernel.getIntMetadata(std::string(field)); };
 
-    if(intField(HEAD_SIZE_FIELD) != problem.headSize
-       || intField(NUM_QUERY_HEADS_FIELD) != problem.numQueryHeads
-       || intField(NUM_KV_HEADS_FIELD) != problem.numKvHeads)
+    if(intField(HEAD_SIZE_FIELD) != problem.headSize)
     {
         return false;
     }
