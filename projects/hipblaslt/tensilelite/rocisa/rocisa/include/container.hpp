@@ -479,6 +479,65 @@ namespace rocisa
         bool         isStore;
     };
 
+    // Cache-policy modifiers of the gfx1250 tensor ops (tensor_load_to_lds). Default fields
+    // (TH_NONE / SCOPE_NONE / NV_NONE) are not printed.
+    struct TENSORModifiers : public Container
+    {
+        TENSORModifiers(CacheScope   scope   = CacheScope::SCOPE_NONE,
+                        TemporalHint th      = TemporalHint::TH_NONE,
+                        NonVolatile  nv      = NonVolatile::NV_NONE,
+                        bool         isStore = false)
+            : Container()
+            , scope(scope)
+            , th(th)
+            , nv(nv)
+            , isStore(isStore)
+        {
+        }
+
+        TENSORModifiers(const TENSORModifiers& other)
+            : Container()
+            , scope(other.scope)
+            , th(other.th)
+            , nv(other.nv)
+            , isStore(other.isStore)
+        {
+        }
+
+        std::shared_ptr<Container> clone() const override
+        {
+            return std::make_shared<TENSORModifiers>(*this);
+        }
+
+        // Same order as the LLVM printer: th, scope, nv.
+        std::string toString() const override
+        {
+            const auto& asmCaps          = rocIsa::getInstance().getAsmCaps();
+            auto        hasSCOPEModifier = capOrDefault(asmCaps, "HasSCOPEModifier");
+            auto        hasTHModifier    = capOrDefault(asmCaps, "HasTHModifier");
+            auto        hasNVModifier    = capOrDefault(asmCaps, "HasNVModifier");
+            std::string kStr;
+            if(hasTHModifier && hasTemporalHint(th))
+            {
+                kStr += " th:" + ::rocisa::toString(th, isStore);
+            }
+            if(hasSCOPEModifier && scope != CacheScope::SCOPE_NONE)
+            {
+                kStr += " scope:" + ::rocisa::toString(scope);
+            }
+            if(hasNVModifier && nv != NonVolatile::NV_NONE)
+            {
+                kStr += " " + ::rocisa::toString(nv);
+            }
+            return kStr;
+        }
+
+        CacheScope   scope;
+        TemporalHint th;
+        NonVolatile  nv;
+        bool         isStore;
+    };
+
     struct SDWAModifiers : public Container
     {
         SDWAModifiers(SelectBit dst_sel    = SelectBit::SEL_NONE,
