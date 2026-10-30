@@ -32,13 +32,11 @@
 
 #include _THRUST_STD_INCLUDE(cassert)
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  if _CCCL_DEVICE_COMPILATION()
-#    include <thrust/system/cuda/detail/terminate.h>
-#  endif // _CCCL_DEVICE_COMPILATION()
-#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+#if _CCCL_CUDA_COMPILATION() && _CCCL_DEVICE_COMPILATION()
+#  include <thrust/system/cuda/detail/terminate.h>
+#elif THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/detail/terminate.h>
-#endif // CUDA
+#endif // _CCCL_CUDA_COMPILATION() && _CCCL_DEVICE_COMPILATION()
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -57,13 +55,13 @@ temporary_allocator<T, System>::allocate(typename temporary_allocator<T, System>
     // note that we pass cnt to deallocate, not a value derived from result.second
     deallocate(result.first, cnt);
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if _CCCL_CUDA_COMPILATION()
     _THRUST_IF_TARGET(_THRUST_IS_HOST,
                  (throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");),
                  ( // _THRUST_IS_DEVICE
                    thrust::system::cuda::detail::terminate_with_message("temporary_buffer::allocate: "
                                                                         "get_temporary_buffer failed");));
-#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+#elif THRUST_HAS_HIP_COMPILER()
     _THRUST_IF_TARGET(_THRUST_IS_HOST,
                  (throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");),
                  ( // _THRUST_IS_DEVICE
