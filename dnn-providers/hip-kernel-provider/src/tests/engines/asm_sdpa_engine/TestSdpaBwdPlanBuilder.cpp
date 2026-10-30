@@ -958,10 +958,13 @@ std::vector<LayoutOverride> onAllIoTensors(const std::vector<int64_t>& strides)
     return onTensors({K_IO_TENSOR_NAMES.begin(), K_IO_TENSOR_NAMES.end()}, strides);
 }
 
-// Layouts the kernels address correctly, all GPU-verified on gfx942: BSHD, padded
-// row strides, dO strides that differ from O, odd strides on every axis whose
-// offset the kernels do not put in a 4-byte record index, and zero batch or head
-// strides on the inputs (broadcasts) and on length-1 output axes.
+// Layouts the kernels address correctly: BSHD, padded row strides, dO strides that
+// differ from O, odd strides on every axis whose offset the kernels do not put in a
+// 4-byte record index, any stride on a length-1 axis, zero batch or head strides on
+// the inputs (broadcasts), and stats whose size-1 axes have any stride (buildPlan
+// derives the LSE/D strides from Q's dims). The B=2, H=2 non-packed cases of
+// IntegrationGpuSdpaBackward run BSHD Q, K, V and dO with O and dQ rows padded to
+// D+1 on the device.
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsAddressableLayouts)
 {
     SKIP_IF_NO_DEVICES();
@@ -1105,7 +1108,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsAddressableLayouts)
 // - an odd row stride on a tensor DQDKDV indexes in 4-byte records (Q, K, V, dO,
 //   dK, dV), and an odd dK/dV head stride: rows start 2 bytes into a dword;
 // - a row stride below D, also on a length-1 sequence axis: each buffer ends
-//   S * row stride bytes into its (batch, head) slice, cutting off the last row.
+//   S * row stride elements into its (batch, head) slice, cutting off the last row.
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsMisalignedOrShortRows)
 {
     SKIP_IF_NO_DEVICES();
@@ -1124,6 +1127,12 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsMisalignedOrShortRows)
         = {int64_t{2} * (int64_t{255} * 64 + 128), int64_t{255} * 64 + 128, 64, 1};
     // S=1 with a row stride of 1.
     const std::vector<int64_t> unitRowStride = {256, 128, 1, 1};
+    // Every row at the same address (a sequence broadcast) with S=256.
+    const std::vector<int64_t> zeroRowStride = {256, 128, 0, 1};
+    // D=192 with a 128-element row stride, all strides even.
+    const std::vector<int64_t> hd192Dims = {2, 2, 256, 192};
+    const std::vector<int64_t> hd192ShortRows
+        = {int64_t{2} * (int64_t{255} * 128 + 192), int64_t{255} * 128 + 192, 128, 1};
 
     std::vector<GraphTest> declineTests;
     for(const char* name : {"q", "k", "v", "do", "dk", "dv"})
@@ -1131,7 +1140,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsMisalignedOrShortRows)
         declineTests.emplace_back(withLayouts(createSdpaBwdGraph(dims), {{name, oddRows, {}}}),
                                   std::string(name) + " row stride D+1");
     }
-    // REG-20: dO row pitch D+1, fp16.
+    // dO row pitch D+1, fp16.
     declineTests.emplace_back(
         withLayouts(createSdpaBwdGraph({2, 2, 64, 128},
                                        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF),
@@ -1150,6 +1159,18 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsMisalignedOrShortRows)
         declineTests.emplace_back(
             withLayouts(createSdpaBwdGraph({2, 2, 1, 128}), {{name, unitRowStride, {}}}),
             std::string(name) + " row stride 1 with S=1");
+        declineTests.emplace_back(
+            withLayouts(createSdpaBwdGraph(dims), {{name, zeroRowStride, {}}}),
+            std::string(name) + " row stride 0 with S=256");
+    }
+    // At D=192 a 128-element row stride is short for O, dO, dQ, dK and dV. (For Q, K
+    // and V the hd192 kernels read past the record bound through the instruction
+    // offset, so the uniform rule is conservative there; see isApplicable.)
+    for(const char* name : {"o", "do", "dq", "dk", "dv"})
+    {
+        declineTests.emplace_back(
+            withLayouts(createSdpaBwdGraph(hd192Dims), {{name, hd192ShortRows, {}}}),
+            std::string(name) + " row stride 128 with D=192");
     }
 
     for(const auto& test : declineTests)
@@ -1175,11 +1196,19 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsNonUnitHeadDimStride)
     const std::vector<int64_t> headDimStride2
         = {int64_t{2} * 256 * 256, int64_t{256} * 256, 256, 2};
 
+    // Packed BHSD with head-dim stride 0 (every element of a row at one address).
+    const std::vector<int64_t> headDimStride0
+        = {int64_t{2} * 256 * 128, int64_t{256} * 128, 128, 0};
+
     for(const char* name : K_IO_TENSOR_NAMES)
     {
-        const GraphTest test{withLayouts(createSdpaBwdGraph(dims), {{name, headDimStride2, {}}}),
-                             std::string(name) + " head-dim stride 2"};
-        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+        for(const auto& [strides, label] : {std::pair{headDimStride2, "head-dim stride 2"},
+                                            std::pair{headDimStride0, "head-dim stride 0"}})
+        {
+            const GraphTest test{withLayouts(createSdpaBwdGraph(dims), {{name, strides, {}}}),
+                                 std::string(name) + " " + label};
+            EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+        }
     }
 }
 
@@ -1291,6 +1320,30 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsMismatchedTensorDims)
             withLayouts(createSdpaBwdGraph(dims), {{name, generateStrides(oneHead), oneHead}}),
             std::string(name) + " with 1 head, Q and K with 2");
     }
+    // A sequence length or head dim that differs, with the head count matching.
+    const std::vector<int64_t> headDim64 = {2, 2, 256, 64};
+    for(const char* name : {"o", "do", "dq", "dk", "dv"})
+    {
+        declineTests.emplace_back(
+            withLayouts(createSdpaBwdGraph(dims), {{name, generateStrides(headDim64), headDim64}}),
+            std::string(name) + " with head dim 64, Q and K with 128");
+    }
+    const std::vector<int64_t> seq128 = {2, 2, 128, 128};
+    for(const char* name : {"o", "do", "dq", "dk", "dv"})
+    {
+        declineTests.emplace_back(
+            withLayouts(createSdpaBwdGraph(dims), {{name, generateStrides(seq128), seq128}}),
+            std::string(name) + " with sequence length 128, Q and K with 256");
+    }
+    // Rank-4 dims and strides are required before any of them is read.
+    declineTests.emplace_back(
+        withLayouts(createSdpaBwdGraph(dims),
+                    {{"dk", {int64_t{2} * 256 * 128, int64_t{256} * 128, 128, 1, 1}, {}}}),
+        "dk with 5 strides for rank-4 dims");
+    declineTests.emplace_back(withLayouts(createSdpaBwdGraph(dims),
+                                          {{"dk", {int64_t{256} * 128, 128, 1}, {4, 256, 128}}}),
+                              "rank-3 dk");
+
     const std::vector<int64_t> oneBatch = {1, 2, 256, 128};
     const auto oneBatchStrides = generateStrides(oneBatch);
     declineTests.emplace_back(withLayouts(createSdpaBwdGraph(dims),
@@ -1867,10 +1920,10 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsWindowMask)
 // Build a backward graph with per-tensor dims and one explicit stride set, so a
 // dimension can be driven to the limit of its field without the contiguous
 // stride for that shape tripping the byte-stride guard first. Only descriptors
-// are built, so the dims cost no memory. The graph utility derives the stats
-// strides from qDims, which is why the accepted cases below drive the k-side
-// dims: an nhead_q or seqlen_q at its own limit makes the (legitimate,
-// unchanged) stats stride guard decline the graph first.
+// are built, so the dims cost no memory. The LSE/D stride guard is computed from
+// Q's dims (H_q * S_q and S_q, as FP32 byte strides), which is why the accepted
+// cases below drive the k-side dims: an nhead_q or seqlen_q at its own limit
+// makes that guard decline the graph first.
 auto createSdpaBwdGraphForDims(const std::vector<int64_t>& qDims,
                                const std::vector<int64_t>& kDims,
                                const std::vector<int64_t>& vDims)

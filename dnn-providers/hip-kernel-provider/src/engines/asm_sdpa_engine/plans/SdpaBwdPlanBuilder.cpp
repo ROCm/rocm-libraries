@@ -600,8 +600,12 @@ bool SdpaBwdPlanBuilder::isApplicable(
     // - Head-dim (innermost) stride other than 1: it is treated as 1 (a stride-2
     //   Q gave Inf dK/dV; a stride-2 dQ left dQ elements unwritten).
     // - Sequence stride below D, even on a length-1 sequence axis: each buffer
-    //   ends S * seq stride bytes after the start of its (batch, head) slice, so
-    //   the end of the last row reads as 0 and writes there are dropped.
+    //   ends S * seq stride elements (S * Seqs bytes) after the start of its
+    //   (batch, head) slice, so the end of the last row reads as 0 and writes
+    //   there are dropped. At D=192, DQDKDV reaches bytes 128-383 of a Q, K or V
+    //   row through the instruction offset, which the record-index bound does not
+    //   check, so 64 elements would be enough there; the rule stays at D for all
+    //   tensors.
     // - Odd stride on an axis whose offset DQDKDV puts in its 4-byte record index
     //   (byte offset >> 2): the sequence axis of Q, K, V, dO, dK and dV, and the
     //   head axis of dK and dV (no-mask and sliding-window kernels; the causal
