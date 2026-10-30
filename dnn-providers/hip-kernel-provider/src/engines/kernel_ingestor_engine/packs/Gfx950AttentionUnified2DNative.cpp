@@ -528,7 +528,8 @@ std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchConte
         return std::nullopt;
     }
 
-    // head_size 64 or 128. 256 is a separate kernel family and ships in its own pack.
+    // head_size 64 or 128. D256 prefill is not shipped (deferred); bf16 D256 decode is
+    // Unified3D's.
     if(problem.headSize != 64 && problem.headSize != 128)
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"head_size"}

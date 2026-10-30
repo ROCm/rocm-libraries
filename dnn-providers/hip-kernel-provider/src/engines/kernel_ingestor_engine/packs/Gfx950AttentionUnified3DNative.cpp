@@ -564,13 +564,13 @@ std::optional<BoundTokens> gfx950AttentionUnified3DGraphMatches(const MatchConte
         return std::nullopt;
     }
 
-    // head_size 64 or 128 (the narrow 16x16 geometry) or 256 (the D256 prefill geometry, judged
-    // below once the mask is known).
+    // head_size 64 or 128 (the narrow 16x16 geometry) or 256 (rocKE's bf16 D256 decode cohort,
+    // judged below by dtype). The shipped catalog carries no 256 kernel yet.
     if(problem.headSize != 64 && problem.headSize != 128 && problem.headSize != D256_HEAD_SIZE)
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"head_size"}
                                << "head size " << problem.headSize
-                               << " is not supported; this catalog is built for 64, 128 and 256");
+                               << " is not supported; this engine matches 64, 128 and 256");
         return std::nullopt;
     }
 

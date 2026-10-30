@@ -870,7 +870,8 @@ def analyse(selection, kdp_path, sweep_dir, arm=None, budget=None) -> Reduction:
 
 def write_selection(selection, names, out) -> int:
     """Write the selection restricted to ``names``, factorised and round-trip
-    checked; returns its line count."""
+    checked; returns its line count. The compact form has no per-kernel
+    ``provenance``, so a kept kernel's is not carried (see the README)."""
     import factorise_config
     from codegen.config_loader import ConfigError
 
