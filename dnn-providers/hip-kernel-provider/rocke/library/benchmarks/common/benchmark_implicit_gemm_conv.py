@@ -76,10 +76,21 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 # validators on other targets.
 # ---------------------------------------------------------------------------
 
+from benchmarks.common import batched_timing  # noqa: E402
+from benchmarks.common.case_results import (  # noqa: E402
+    RUNNERS_UP,
+    ResultsWriter,
+    add_results_arg,
+    add_skip_measured_arg,
+    measured_keys,
+    same_results_file,
+)
 from benchmarks.common.early_stop import (  # noqa: E402
     EarlyStop,
     add_early_stop_arg,
+    case_key,
 )
+from benchmarks.common.module_cache import add_module_cache_arg  # noqa: E402
 from kernels.conv.aot_jobs import _AOT_ALIAS_PIPELINES  # noqa: E402
 from kernels.conv.aot_jobs import (  # noqa: E402
     CACHE_EPILOGUES as _EPILOGUES,
@@ -1129,6 +1140,7 @@ def main() -> int:
         "--warmup", type=int, default=3, help="warmup iterations (default: 3)"
     )
     add_early_stop_arg(parser)
+    batched_timing.add_timing_arg(parser)
     parser.add_argument(
         "--iters", type=int, default=10, help="timed iterations (default: 10)"
     )
@@ -1228,6 +1240,99 @@ def main() -> int:
             "the sweep. Implies --verify."
         ),
     )
+    rank_grp = parser.add_argument_group(
+        "Fast ranking (AOT --run-from-cache only)",
+        "Time every cached kernel in batches between two device drains, then "
+        "spend the full --warmup/--iters only on the best few. Replaces "
+        "--early-stop and --split-k-prune for the run; --early-stop-record "
+        "still gets the case's best time. Stream-K kernels keep the per-kernel "
+        "path: their workspace contract is per launch config.",
+    )
+    rank_grp.add_argument(
+        "--fast-rank",
+        action="store_true",
+        dest="fast_rank",
+        help="probe every cached kernel with a batched 1+N launch round and "
+        "measure only the finalists in full. --verify then checks the "
+        "finalists rather than every kernel.",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-finalists",
+        type=int,
+        default=batched_timing.DEFAULT_FINALISTS,
+        dest="fast_rank_finalists",
+        metavar="N",
+        help=f"kernels carried from the probe into the full-fidelity round "
+        f"(default: {batched_timing.DEFAULT_FINALISTS}). This also caps the "
+        f"ranked table.",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-chunk",
+        type=int,
+        default=batched_timing.DEFAULT_CHUNK,
+        dest="fast_rank_chunk",
+        metavar="N",
+        help=f"kernels timed between two device drains "
+        f"(default: {batched_timing.DEFAULT_CHUNK})",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-scratch",
+        type=int,
+        default=2048,
+        dest="fast_rank_scratch",
+        metavar="MiB",
+        help="device scratch the probe may hold before it closes a chunk "
+        "(default: 2048). Only two-stage wgrad allocates enough for this to "
+        "bite; fwd allocates none at all.",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-warmup",
+        type=int,
+        default=batched_timing.DEFAULT_PROBE_WARMUP,
+        dest="fast_rank_warmup",
+        metavar="N",
+        help=f"probe warmup launches per kernel, covering its cold code object "
+        f"and scratch (default: {batched_timing.DEFAULT_PROBE_WARMUP})",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-iters",
+        type=int,
+        default=batched_timing.DEFAULT_PROBE_ITERS,
+        dest="fast_rank_iters",
+        metavar="N",
+        help=f"probe timed launches per kernel "
+        f"(default: {batched_timing.DEFAULT_PROBE_ITERS})",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-primer",
+        type=int,
+        default=batched_timing.DEFAULT_PRIMER,
+        dest="fast_rank_primer",
+        metavar="N",
+        help=f"launches issued before the first measured chunk of a case, to "
+        f"bring the device's clocks up so the kernels probed first are not "
+        f"measured at idle clocks (default: {batched_timing.DEFAULT_PRIMER})",
+    )
+
+    add_results_arg(
+        parser.add_argument_group(
+            "Per-case results (AOT --run-from-cache only)",
+            "A machine-readable row per case, which benchmark_conv_compare.py "
+            "merges with the direct-conv sweep's and run_conv_shards.py "
+            "concatenates across cards.",
+        ),
+        merged=False,
+    )
+    add_skip_measured_arg(parser)
+
+    add_module_cache_arg(
+        parser.add_argument_group(
+            "Loaded binaries (AOT --run-from-cache only)",
+            "A cached binary is shape-generic, so its HIP module is loaded "
+            "once per run instead of once per case.",
+        )
+    )
+
     parser.add_argument(
         "--debug-init",
         nargs="?",
@@ -1543,6 +1648,32 @@ def main() -> int:
     )
 
     args = parser.parse_args()
+    if args.skip_measured and not args.run_from_cache:
+        print(
+            "error: --skip-measured resumes an AOT sweep; pass " "--run-from-cache DIR",
+            file=sys.stderr,
+        )
+        return 2
+    if args.results and not args.run_from_cache:
+        # The JIT sweep has no cached kernels to name, and its per-case best is
+        # a kernel it just built -- a different artifact, and --csv already
+        # covers it. Saying so beats accepting the flag and writing nothing.
+        print(
+            "error: --results records an AOT sweep; pass --run-from-cache DIR "
+            "(the JIT sweep writes --csv instead)",
+            file=sys.stderr,
+        )
+        return 2
+    if args.fast_rank and not args.run_from_cache:
+        # The JIT sweep builds and loads its kernels one at a time, so
+        # batching their launches would save nothing; saying so beats
+        # accepting the flag and ignoring it.
+        print(
+            "error: --fast-rank ranks the kernels of an AOT cache; "
+            "pass --run-from-cache DIR",
+            file=sys.stderr,
+        )
+        return 2
     # --dtype unset: one fp16 run for shape flags, every dtype for --compile-all.
     args.compile_dtypes = (args.dtype,) if args.dtype is not None else _COMPILE_DTYPES
     if args.dtype is None:
@@ -3634,11 +3765,14 @@ def _run_wgrad_sweep(
                     return 1, []
 
             if _is_atomic_launch:
+                from rocke.runtime import resolve_stream
+
                 _vals_snap = dict(values)
                 _cfg_snap = cfg
+                _resolved_stream = resolve_stream(stream)
 
-                def _launch_spk(_v=_vals_snap, _c=_cfg_snap):
-                    rt.memset(dW_dev, 0, dW_t.nbytes)
+                def _launch_spk(_v=_vals_snap, _c=_cfg_snap, _s=_resolved_stream):
+                    rt.memset_async(dW_dev, 0, dW_t.nbytes, _s)
                     launcher(_v, config=_c)
 
                 timed_fn = _launch_spk
@@ -3856,6 +3990,9 @@ def _run_wgrad_sweep(
                 s1_cfg = LaunchConfig(
                     grid=s1_grid, block=(spec.block_size, 1, 1), stream=0
                 )
+                from rocke.runtime import resolve_stream
+
+                _2s_stream = resolve_stream(s1_cfg.stream)
 
                 def _launch_two_stage(
                     _s1=s1_launcher,
@@ -3866,12 +4003,14 @@ def _run_wgrad_sweep(
                     _c2=s2_cfg,
                     _ws=ws_dev,
                     _ws_nb=ws_nbytes,
+                    _s=_2s_stream,
                 ):
                     # Stage 1 accumulates into the scratch, so it has to start from
                     # zero; dW is a plain store target for Stage 2 and needs no
-                    # clearing, but zeroing it keeps a failed launch visible.
-                    rt2.memset(_ws, 0, _ws_nb)
-                    rt2.memset(dW_dev2, 0, dW_t.nbytes)
+                    # clearing, but zeroing it keeps a failed launch visible. Queued
+                    # on the launch stream, not drained for (see _streamk_launch).
+                    rt2.memset_async(_ws, 0, _ws_nb, _s)
+                    rt2.memset_async(dW_dev2, 0, dW_t.nbytes, _s)
                     _s1(_v1, config=_c1)
                     _s2(_v2, config=_c2)
 
@@ -3995,7 +4134,7 @@ def _run_wgrad_sweep(
                         kernel_name=artifact.kernel_name,
                         signature=wgrad_streamk_signature(spec),
                     )
-                    run, free_ws, pool = _streamk_launch(
+                    run, sk_extras, pool = _streamk_launch(
                         rt=rt3,
                         launcher=launcher,
                         spec=spec,
@@ -4042,7 +4181,7 @@ def _run_wgrad_sweep(
                         continue
                     synchronize_and_release(0)
                 finally:
-                    free_ws()
+                    rt3.free(sk_extras["ws_ptr"])
 
                 cur_tflops = (flop / ms) * 1e-9
                 cur_gbps = (bytes_xfer / ms) * 1e-6
@@ -4369,9 +4508,12 @@ def _run_dgrad_sweep(
                 return 1
 
         if _zero_init:
+            from rocke.runtime import resolve_stream
 
-            def _launch_atomic():
-                rt.memset(dX_dev, 0, dX_t.nbytes)
+            _atomic_stream = resolve_stream(stream)
+
+            def _launch_atomic(_s=_atomic_stream):
+                rt.memset_async(dX_dev, 0, dX_t.nbytes, _s)
                 launcher(values, config=cfg)
 
             timed_fn = _launch_atomic
@@ -4540,11 +4682,30 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
 
     import torch
 
+    from benchmarks.common.module_cache import ModuleCache
     from rocke.runtime import synchronize_and_release
     from rocke.runtime.hip_module import HipError, Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     _TORCH_DT = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}
+
+    # A cached binary is shape-generic: its module is loaded on the first case
+    # that offers it and reused by every later one.
+    modules = ModuleCache(args.module_cache_bytes)
+    # --skip-measured: cases a previous run of this sweep already recorded,
+    # timed the way this run times them. Read before opening --results below:
+    # when the two flags name the same file, the writer must not truncate it
+    # out from under this read.
+    done = measured_keys(args.skip_measured, "implicit", args.timing)
+    # One row per case, for the comparison driver and the shard runner to
+    # merge. Does nothing without --results.
+    results_out = ResultsWriter(
+        args.results,
+        "implicit",
+        args.timing,
+        append=same_results_file(args.results, args.skip_measured),
+    )
+    n_skipped = 0
 
     def _u8(t):
         return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
@@ -4558,6 +4719,11 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
         case_direction = case[2] if len(case) > 2 else args.direction
 
         for direction in directions or (case_direction,):
+            if case_key(problem, case_dtype, direction) in done:
+                # Counted, not printed: resuming a few thousand cases would
+                # otherwise open with a few thousand lines of nothing.
+                n_skipped += 1
+                continue
             # The problem the kernels launch on (dgrad runs width-folded, as
             # the dispatcher launches it); the tensors, the reference and the
             # FLOP count stay the case's own -- the fold keeps every byte.
@@ -4739,11 +4905,48 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
             _stop = EarlyStop.for_case(args, problem, case_dtype, direction)
             n_failed = 0
 
-            n_cand = len(candidates)
             # Device scratch of the launch configs in flight (two-stage
             # workspaces, dgrad sub-GEMM tables): one per (kernel, degree),
             # so it is freed as the sweep goes rather than per case.
             live_extras: list = []
+
+            # --fast-rank takes every kernel of the case, stream-K included:
+            # its workspace is accounted like any other launch config's, and
+            # its per-launch zeroing is queued rather than drained for.
+            if args.fast_rank:
+                if candidates:
+                    failed, stopped = _fast_rank_candidates(
+                        args=args,
+                        candidates=candidates,
+                        modules=modules,
+                        direction=direction,
+                        problem=problem,
+                        run_problem=run_problem,
+                        batch_chunks=batch_chunks,
+                        case_dtype=case_dtype,
+                        arch=arch,
+                        rt=rt,
+                        ptrs=(A_dev, B_dev, D_dev),
+                        sizes=(A_t.nbytes, B_t.nbytes, D_t.nbytes),
+                        stage2_kernels=stage2_kernels,
+                        ref_out=ref_out,
+                        D_t=D_t,
+                        flop=flop,
+                        bytes_xfer=bytes_xfer,
+                        results=results,
+                        stop=_stop,
+                        u8=_u8,
+                    )
+                    n_failed += failed
+                    if failed:
+                        overall_rc = 1
+                    if stopped:
+                        for buf in (A_dev, B_dev, D_dev):
+                            rt.free(buf)
+                        return 1
+                candidates = []
+
+            n_cand = len(candidates)
             for cand_idx, (ident, hsaco_path, meta) in enumerate(candidates, 1):
                 kernel_name = meta.get("kernel_name")
                 if not kernel_name:
@@ -4754,8 +4957,8 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     )
                     continue
                 try:
-                    launcher = KernelLauncher(
-                        hsaco=hsaco_path.read_bytes(),
+                    launcher = modules.launcher(
+                        hsaco_path=hsaco_path,
                         kernel_name=kernel_name,
                         signature=_signature_for_identity(ident, case_dtype),
                     )
@@ -4767,10 +4970,11 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 # kernarg) and has its own ABI, workspace and zeroing
                 # contract per reduction, so it gets its own launch setup and
                 # one launch; its workspace is released after the loop.
-                sk_bound = sk_free = None
+                sk_bound = None
+                sk_live: list = []
                 if direction == "wgrad" and ident.streamk != "off":
                     try:
-                        sk_run, sk_free, sk_label = _cached_streamk_run(
+                        sk_run, sk_extras, sk_label = _cached_streamk_run(
                             args,
                             problem,
                             ident,
@@ -4786,6 +4990,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     except ValueError as e:
                         print(f"  [skip] {ident.label()}: {e}", flush=True)
                         continue
+                    sk_live.append(sk_extras)
                     sk_bound = (sk_run, sk_label)
 
                 # A split-K wgrad binary is one kernel for every degree > 1
@@ -4893,8 +5098,7 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                             stopped, passed = False, False
                         if stopped:
                             _free_extras(rt, live_extras)
-                            if sk_free is not None:
-                                sk_free()
+                            _free_extras(rt, sk_live)
                             for buf in (A_dev, B_dev, D_dev):
                                 rt.free(buf)
                             return 1
@@ -4944,10 +5148,13 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         flush=True,
                     )
 
-                if sk_free is not None:
-                    sk_free()
+                _free_extras(rt, sk_live)
 
             synchronize_and_release()
+            # Safe only here: every candidate of this case has drained by now
+            # (the device sync above), so no launch can still be using a
+            # module end_case unloads.
+            modules.end_case()
             _free_extras(rt, live_extras)
             for buf in (A_dev, B_dev, D_dev):
                 rt.free(buf)
@@ -4973,9 +5180,33 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     flush=True,
                 )
             # The line benchmark_conv_compare.py reads, as the JIT sweep prints.
-            tflops, _, ms, label = results[0]
+            tflops, gbps, ms, label = results[0]
             print(f"\nBest: {tflops:.1f} TFLOPS — {label}  {ms:.3f} ms", flush=True)
+            results_out.row(
+                key=case_key(problem, case_dtype, direction),
+                case=case_idx,
+                shape=problem.short(),
+                dtype=case_dtype,
+                direction=direction,
+                tflops=tflops,
+                ms=ms,
+                gbps=gbps,
+                kernel=label,
+                candidates=n_compatible,
+                # The tail of the Top-N just printed, names only.
+                runners_up=[r[-1] for r in results[1 : 1 + RUNNERS_UP]],
+            )
 
+    results_out.close()
+    if n_skipped:
+        print(
+            f"\n{n_skipped} case(s) skipped: already in {args.skip_measured}",
+            flush=True,
+        )
+    if len(cases) > 1:
+        print(f"\n{modules.summary()}", flush=True)
+        if results_out.n_rows:
+            print(f"{results_out.n_rows} row(s) written to {args.results}", flush=True)
     return overall_rc
 
 
@@ -5000,6 +5231,272 @@ def _launch_problem(direction, problem):
     from kernels.common.conv_implicit_gemm_dgrad import fold_width
 
     return fold_width(problem)
+
+
+def _extras_bytes(extras) -> int:
+    """Device bytes :func:`_extras_and_grid` allocated for one launch config."""
+    return int(extras.get("ws_bytes", 0)) + int(extras.get("sub_gemm_bytes", 0))
+
+
+def _fast_rank_candidates(
+    *,
+    args,
+    candidates,
+    modules,
+    direction,
+    problem,
+    run_problem,
+    batch_chunks,
+    case_dtype,
+    arch,
+    rt,
+    ptrs,
+    sizes,
+    stage2_kernels,
+    ref_out,
+    D_t,
+    flop,
+    bytes_xfer,
+    results,
+    stop,
+    u8,
+):
+    """Rank one case's cached kernels with :mod:`benchmarks.common.batched_timing`.
+
+    The probe times every kernel with one device drain per chunk instead of
+    three per kernel, and only the best ``--fast-rank-finalists`` are timed
+    again with the full ``--warmup``/``--iters``; those are the numbers that
+    reach ``results``.
+
+    What makes this harder here than in the direct-conv sweep is scratch. A
+    serial sweep frees a launch config's workspace before binding the next, so
+    it holds one; a probe holds a kernel's launch for as long as it could
+    still rank. Only two directions allocate any: dgrad's sub-GEMM table (a
+    few KB) and two-stage wgrad's f32 workspace (which is not small). So the
+    chunk is closed on a byte budget as well as a count, and a kernel the
+    probe rules out gives its scratch back at the end of the chunk that
+    measured it.
+
+    Stream-K kernels rank here too. Their workspace is per launch config, as
+    the two-stage one is, so it is accounted and released the same way; what
+    kept them out was the zeroing their reduction needs before every launch,
+    which used to drain the device and so serialised the batch around them.
+    It is queued on the launch stream now (see :func:`_streamk_launch`), and
+    same-stream FIFO is what makes it safe for the ``atomic`` reduction to
+    clear the shared dW while the previous candidate's launches are still in
+    flight.
+
+    Two differences from the serial path, both of them the point of the flag:
+    ``--verify`` checks the finalists rather than every kernel, and
+    ``--split-k-prune`` does not apply (a kernel's degrees are ranked like any
+    other candidates, and a probe launch costs about what the prune saved).
+
+    Returns ``(n_failed, stopped)``; ``stopped`` is a ``--dump-fail`` dump,
+    which ends the sweep as it does on the serial path.
+    """
+    from benchmarks.common import batched_timing
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import HipError
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    # (identity, path, meta, split_k). The split-K sweep is flattened into the
+    # candidate list so a degree ranks like any other kernel.
+    items = []
+    for ident, hsaco_path, meta in candidates:
+        if not meta.get("kernel_name"):
+            print(
+                f"  [skip] {ident.label()}: cache entry has no kernel_name "
+                f"(rebuild the cache)",
+                flush=True,
+            )
+            continue
+        if direction == "wgrad" and ident.streamk != "off":
+            # A stream-K binary partitions K over its CTA pool itself; the
+            # split-K kernarg is not its knob, so it ranks once.
+            degrees = (None,)
+        elif direction == "wgrad" and ident.split_k > 1:
+            degrees = _runtime_split_ks(
+                problem, ident, args.split_k, args.split_k_degrees
+            )
+            if not degrees:
+                print(
+                    f"  [skip] {ident.label()}: no split-K degree fits this "
+                    f"problem (see --split-k)",
+                    flush=True,
+                )
+                continue
+        else:
+            degrees = (None,)
+        for split_k in degrees:
+            items.append((ident, hsaco_path, meta, split_k))
+
+    n = len(items)
+    if not n:
+        return 0, False
+    width = len(str(n))
+    owned: dict = {}  # item index -> the extras its bind allocated
+    labels: dict = {}
+    held = {"bytes": 0}
+    state = {"stopped": False}
+
+    def _release(mine) -> None:
+        for extras in mine:
+            held["bytes"] -= _extras_bytes(extras)
+            for key in ("ws_ptr", "sub_gemm_buf"):
+                if key in extras:
+                    rt.free(extras[key])
+
+    def make_run(i):
+        ident, hsaco_path, meta, split_k = items[i]
+        # A kernel swept at several split-K degrees is one binary, and so is
+        # one offered to the next case: the module cache holds it for both.
+        try:
+            launcher = modules.launcher(
+                hsaco_path=hsaco_path,
+                kernel_name=meta["kernel_name"],
+                signature=_signature_for_identity(ident, case_dtype),
+            )
+        except HipError as e:
+            print(f"  [skip] {ident.label()}: {e}", flush=True)
+            return None
+        mine: list = []
+        if direction == "wgrad" and ident.streamk != "off":
+            # Its own ABI, workspace and zeroing contract; one launch, on the
+            # case's problem rather than a batch slice, as the serial path
+            # runs it.
+            try:
+                sk_run, sk_extras, sk_label = _cached_streamk_run(
+                    args,
+                    problem,
+                    ident,
+                    rt,
+                    arch,
+                    launcher,
+                    ptrs,
+                    sizes,
+                    stage2_kernels,
+                    KernelLauncher,
+                    LaunchConfig,
+                )
+            except ValueError as e:
+                print(f"  [skip] {ident.label()}: {e}", flush=True)
+                return None
+            mine.append(sk_extras)
+            bound = (sk_run, sk_label)
+        else:
+            bound = _cached_bind_batch(
+                batch_chunks,
+                direction,
+                run_problem,
+                ident,
+                meta,
+                rt,
+                launcher,
+                case_dtype,
+                split_k,
+                ptrs,
+                sizes,
+                arch,
+                stage2_kernels,
+                KernelLauncher,
+                LaunchConfig,
+                mine,
+            )
+        if bound is None:
+            _release(mine)
+            return None
+        owned[i] = mine
+        held["bytes"] += sum(_extras_bytes(e) for e in mine)
+        run, labels[i] = bound
+        return run
+
+    def on_drop(i) -> None:
+        _release(owned.pop(i, ()))
+
+    def on_probe(r) -> None:
+        if r.failed:
+            return
+        print(
+            f"  [{r.index + 1:>{width}}/{n}] probe {r.probe_ms:8.3f} ms  "
+            f"{labels[r.index]}",
+            flush=True,
+        )
+
+    def on_finalist(i, run):
+        if ref_out is None:
+            return None
+        try:
+            stopped, passed = _verify_kernel(
+                rt=rt,
+                launch_fn=run,
+                out_dev=ptrs[2],
+                out_t=D_t,
+                zero_init_out=True,
+                ref_out=ref_out,
+                kernel_name=labels[i],
+                dump_fail=args.dump_fail,
+                u8=u8,
+                arch=arch,
+                compute_dtype=case_dtype,
+            )
+        except (HipError, RuntimeError) as e:
+            print(f"  verify {labels[i]}: FAIL({e})", flush=True)
+            # A launch that raised can leave queued work in flight on this
+            # config's scratch; drain before anything frees it.
+            synchronize_and_release()
+            return False
+        state["stopped"] = state["stopped"] or stopped
+        return passed
+
+    ranked = batched_timing.rank(
+        n,
+        make_run,
+        warmup=args.warmup,
+        iters=args.iters,
+        probe_warmup=args.fast_rank_warmup,
+        probe_iters=args.fast_rank_iters,
+        finalists=args.fast_rank_finalists,
+        chunk=args.fast_rank_chunk,
+        primer=args.fast_rank_primer,
+        timing=args.timing,
+        on_probe=on_probe,
+        on_finalist=on_finalist,
+        on_drop=on_drop,
+        held_bytes=lambda: held["bytes"],
+        chunk_bytes=args.fast_rank_scratch * 1024 * 1024,
+    )
+
+    n_probed = sum(1 for r in ranked if r.probe_ms is not None)
+    n_final = sum(1 for r in ranked if r.is_finalist)
+    print(
+        f"  probe: {n_probed}/{n} timed, {n_final} finalist(s) measured in full "
+        f"({args.timing} timing)",
+        flush=True,
+    )
+    n_failed = 0
+    for r in ranked:
+        if r.ms is None:
+            continue
+        if r.passed is False:
+            # As on the serial path: a kernel that failed verification is
+            # reported and never ranked.
+            n_failed += 1
+            continue
+        stop.note(r.ms, passed=r.passed)
+        results.append(
+            (flop / (r.ms * 1e9), bytes_xfer / (r.ms * 1e6), r.ms, labels[r.index])
+        )
+        print(
+            f"  [{r.index + 1:>{width}}/{n}] {results[-1][0]:7.1f} TFLOPS  "
+            f"{r.ms:8.3f} ms  {labels[r.index]}",
+            flush=True,
+        )
+
+    # The finalists were timed holding theirs; nothing outside this call owns
+    # any of it.
+    for i in list(owned):
+        _release(owned.pop(i))
+    return n_failed, state["stopped"]
 
 
 def _free_extras(rt, live_extras: list) -> None:
@@ -5217,12 +5714,22 @@ def _streamk_launch(
     ``spec`` is the stream-K :class:`WgradConvSpec` (its ``streamk_ctas`` is
     the CTA pool, -1 = the arch default); ``problem`` the launch shape;
     ``ptrs`` / ``sizes`` the dY, X, dW buffers. Allocates the reduction's
-    workspace and returns ``(run, free, pool)``: ``run()`` zeroes what the
+    workspace and returns ``(run, extras, pool)``: ``run()`` zeroes what the
     reduction accumulates into -- dW for ``atomic``, the f32 scratch for
     ``workspace``, only the flag table for ``linear``/``tree`` -- launches the
-    kernel and, for ``workspace``, the Stage 2 reduce into dW; ``free()``
-    releases the workspace; ``pool`` is the resolved CTA pool.
+    kernel and, for ``workspace``, the Stage 2 reduce into dW; ``extras``
+    carries the workspace in the shape :func:`_free_extras` frees and
+    :func:`_extras_bytes` accounts, as the other legs' scratch is; ``pool`` is
+    the resolved CTA pool.
+
+    The zeroing is queued on the launch stream, not drained for: see
+    :meth:`rocke.runtime.hip_module.Runtime.memset_async`. Same-stream FIFO
+    orders it against this kernel's launches, and against those of any other
+    kernel queued in the same batch -- which is what lets the probe time
+    stream-K kernels back to back on one shared dW.
     """
+    from rocke.runtime import resolve_stream
+
     from kernels.common.conv_implicit_gemm_wgrad import (
         wgrad_streamk_grid,
         wgrad_streamk_launch,
@@ -5239,7 +5746,9 @@ def _streamk_launch(
     # An all-data-parallel partition (no stream-K CTAs) needs no workspace,
     # but the kernargs still carry the pointers, so a 4-byte stub stands in
     # for the empty allocation.
-    ws = rt.alloc(max(ws_bytes, 4))
+    alloc_bytes = max(ws_bytes, 4)
+    ws = rt.alloc(alloc_bytes)
+    stream = resolve_stream(0)
     try:
         extra = {}
         if reduction == "workspace":
@@ -5276,19 +5785,16 @@ def _streamk_launch(
 
     def run():
         if reduction == "atomic":
-            rt.memset(ptrs[2], 0, sizes[2])
+            rt.memset_async(ptrs[2], 0, sizes[2], stream)
         elif reduction == "workspace":
-            rt.memset(ws, 0, ws_bytes)
+            rt.memset_async(ws, 0, ws_bytes, stream)
         elif flags_bytes:
-            rt.memset(ws, 0, flags_bytes)
+            rt.memset_async(ws, 0, flags_bytes, stream)
         launcher(values, config=cfg)
         if s2 is not None:
             s2[0](s2[1], config=s2[2])
 
-    def free():
-        rt.free(ws)
-
-    return run, free, pool
+    return run, {"ws_ptr": ws, "ws_bytes": alloc_bytes}, pool
 
 
 def _streamk_mode_label(mode: str, reduction: str) -> str:
@@ -5311,7 +5817,7 @@ def _cached_streamk_run(
     KernelLauncher,
     LaunchConfig,
 ):
-    """``(run, free, label)`` for a cached stream-K wgrad binary.
+    """``(run, extras, label)`` for a cached stream-K wgrad binary.
 
     The launch helpers take a spec; this one describes the cached binary on
     the launch shape. Nothing is built from it -- the partition, workspace and
@@ -5342,7 +5848,7 @@ def _cached_streamk_run(
         streamk_ctas=args.streamk_ctas,
         ws_replicas=_ws_replicas_of(ident),
     )
-    run, free, pool = _streamk_launch(
+    run, extras, pool = _streamk_launch(
         rt=rt,
         launcher=launcher,
         spec=spec,
@@ -5354,7 +5860,7 @@ def _cached_streamk_run(
         KernelLauncher=KernelLauncher,
         LaunchConfig=LaunchConfig,
     )
-    return run, free, f"{ident.label()} @streamk_ctas={pool}"
+    return run, extras, f"{ident.label()} @streamk_ctas={pool}"
 
 
 def _split_k_degrees(
@@ -5680,6 +6186,8 @@ def _cached_bind(
     :func:`_free_extras`). Returns None, after saying why, when the binary
     cannot launch ``problem``.
     """
+    from rocke.runtime import resolve_stream
+
     from benchmarks.common.kernel_sweep import _launch_values_for
 
     try:
@@ -5716,6 +6224,9 @@ def _cached_bind(
         cluster=cluster,
     )
     run = launcher.bind(values, config=cfg)
+    # The stream ``bind`` resolved ``cfg.stream`` to, so a zeroing step below
+    # queues ahead of this kernel's launches rather than draining for them.
+    stream = resolve_stream(cfg.stream)
     if (
         direction == "wgrad"
         and ident.split_k > 1
@@ -5725,11 +6236,13 @@ def _cached_bind(
         # The packed-atomic split-K epilogue accumulates into dW, so every
         # launch needs dW zeroed first -- part of the algorithm's cost, as the
         # JIT sweep times it and as the two-stage leg below times its scratch
-        # clear.
+        # clear. Queued on the launch stream: dW is shared by every candidate
+        # of the case, and FIFO is what keeps one candidate's clear behind the
+        # previous one's launches when the probe batches them.
         _launch = run
 
-        def run(_launch=_launch, dw_ptr=ptrs[2], dw_bytes=sizes[2]):
-            rt.memset(dw_ptr, 0, dw_bytes)
+        def run(_launch=_launch, dw_ptr=ptrs[2], dw_bytes=sizes[2], stream=stream):
+            rt.memset_async(dw_ptr, 0, dw_bytes, stream)
             _launch()
 
     elif direction == "wgrad" and ident.needs_stage2:
@@ -5759,8 +6272,9 @@ def _cached_bind(
             s2_launcher=s2_launcher,
             s2_values=s2_values,
             s2_cfg=s2_cfg,
+            stream=stream,
         ):
-            rt.memset(extras["ws_ptr"], 0, extras["ws_bytes"])
+            rt.memset_async(extras["ws_ptr"], 0, extras["ws_bytes"], stream)
             launcher(values, config=cfg)
             s2_launcher(s2_values, config=s2_cfg)
 
@@ -5883,6 +6397,10 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
         rt.memcpy_h2d(buf, flat.ctypes.data, flat.nbytes)
         extras["sub_gemm_buf"] = buf
         extras["num_sub_gemms"] = len(sub_gemms)
+        # Not a kernarg: what a batched ranking charges this config's scratch
+        # budget (see _extras_bytes). The table is small, but the accounting
+        # should name everything it holds.
+        extras["sub_gemm_bytes"] = int(flat.nbytes)
         blocks = sum(
             -(-sg.gemm_m // ident.tile_m) * -(-sg.gemm_n // ident.tile_n)
             for sg in sub_gemms
