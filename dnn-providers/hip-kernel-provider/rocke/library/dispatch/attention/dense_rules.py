@@ -93,6 +93,16 @@ class _DenseTuningArch:
     production_crossed: Tuple[str, ...] = ()
 
 
+def _gfx942_cfvst_tuning_scope(s) -> bool:
+    """CFVST can be tuned where the default enables it or where the kernel
+    implements opt-in BF16 CFVST (``bf16_cfvst_supported``: D128 causal, with or
+    without causal_diag_split, on either grid).
+    """
+    from kernels.gfx942.attention_dense import bf16_cfvst_supported
+
+    return s.resolved_use_cfvst() or bf16_cfvst_supported(s)
+
+
 _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
     "gfx950": _DenseTuningArch(
         scope={
@@ -130,11 +140,12 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "interleave": lambda s: bool(s.causal),
             "lds_row_pad": lambda s: int(s.head_size) == 128,
             "lds_k_group_pad": lambda s: int(s.head_size) < 128,
-            # Policy turns cfvst (and its swizzle) on only where it is legal;
-            # the knobs can only turn it off.
-            "use_cfvst": lambda s: s.resolved_use_cfvst(),
-            "use_v_swizzle": lambda s: s.resolved_use_cfvst(),
-            "v_row_pad": lambda s: s.resolved_use_cfvst(),
+            # FP16 D128 CFVST is policy-enabled. BF16 D128 causal CFVST
+            # (diagonal split included) is opt-in and must also be reachable
+            # through tuning.
+            "use_cfvst": _gfx942_cfvst_tuning_scope,
+            "use_v_swizzle": _gfx942_cfvst_tuning_scope,
+            "v_row_pad": _gfx942_cfvst_tuning_scope,
             "causal_diag_split": lambda s: bool(s.causal)
             and int(s.sliding_window) == 0,
         },

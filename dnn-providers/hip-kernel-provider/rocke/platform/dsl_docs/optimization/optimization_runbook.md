@@ -2520,6 +2520,14 @@ An optimization is done when:
   good enough.
 - If compiler flags produce wrong answers, remove them even if
   another codebase uses them safely.
+- If attention PV reads V from LDS with narrow loads, a store-side
+  transpose that allows wide LDS reads may pay for its extra
+  registers (`use_cfvst` on gfx942 bf16 D128).
+- If the loop waits for the next K/V tile at its barriers and LDS has
+  room for a second K slot but not a second V slot, double-buffer K
+  only and prefetch next-tile V into registers (`lds_num_buffers=2`,
+  `v_reg_prefetch=True`). Each is independent; see the
+  [gfx942 bf16 D128 case study](../../../library/builders/gfx942/attention/prefill/gfx942_dense_cfvst_kdb_vprefetch_case_study.md).
 - If the HIP-debug backend disagrees with LLVM-direct on a kernel,
   one of the two is missing an op lowering — file the issue,
   don't ignore it.
