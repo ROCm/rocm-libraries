@@ -208,7 +208,10 @@ void hipblaslt_test_sigaction()
 
 static const unsigned test_timeout = [] {
     // Number of seconds each test is allowed to take before all testing is killed.
-    constexpr unsigned TEST_TIMEOUT = 600;
+    // 1200 s (was 600 s): on MI300A the ROCM31016 store-extent FindAllAlgo case
+    // (about 150 to 190 s when healthy) hit the old limit in math-ci precheckin; see ROCM-33774.
+    // HIPBLASLT_TEST_TIMEOUT overrides this.
+    constexpr unsigned TEST_TIMEOUT = 1200;
     unsigned           timeout;
     const char*        env = getenv("HIPBLASLT_TEST_TIMEOUT");
     return env && sscanf(env, "%u", &timeout) == 1 ? timeout : TEST_TIMEOUT;
