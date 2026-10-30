@@ -3766,8 +3766,8 @@ def cases():
         )
 
     # Attention band on the unified kernels: top-left alignment, full attention
-    # (right_bound=-1), lookahead and non-causal / two-sided windows. These bodies have
-    # no C++ mirror yet, so this golden is the only pin of their lowered IR.
+    # (right_bound=-1), lookahead and non-causal / two-sided windows. These pin the
+    # Python-lowered IR hash; gfx950_attention_tiled_2d_emit covers the C++ mirror.
     for _case, _kw in (
         ("top_left", dict(causal_top_left=True)),
         ("no_mask", dict(right_bound=-1)),

@@ -1343,7 +1343,104 @@ _CONFIGS = {
         use_sched_barrier=True,
         sched_barrier_mask=8,
     ),
+    # --- idx76-80: top-left / right-bound mask band.
+    76: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=2,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=2,
+        causal_top_left=True,
+    ),
+    77: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="fp16",
+        use_sinks=False,
+        sliding_window=64,
+        has_softcap=False,
+        num_warps=2,
+        use_mfma_32x32=True,
+        block_m_per_warp=32,
+        tile_size=64,
+        right_bound=5,
+    ),
+    78: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=True,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=2,
+        num_warps=4,
+        tile_size=64,
+        block_m_per_warp=32,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_half_local_pv=True,
+        right_bound=-1,
+    ),
+    79: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=128,
+        has_softcap=True,
+        num_seqs=1,
+        num_warps=1,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_invariant_hoist=True,
+        use_transposed_mask_once=True,
+        use_transposed_half_local_pv=True,
+        causal_top_left=True,
+        right_bound=3,
+    ),
+    80: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype="fp8e4m3",
+        use_fp8_mfma_pv=True,
+        causal_top_left=True,
+    ),
 }
+
+# --- idx81-85: the band on the transposed mask-limit path. idx81 hoisted causal
+# limit with rb4, idx82 unbounded, idx83-84 the D256 fast path (idx64, mask phase
+# split) unbounded and top-left + rb7, idx85 the per-iteration causal limit with
+# top-left + rb2.
+_CONFIGS[81] = dict(_CONFIGS[44], right_bound=4)
+_CONFIGS[82] = dict(_CONFIGS[46], right_bound=-1)
+_CONFIGS[83] = dict(_CONFIGS[64], right_bound=-1)
+_CONFIGS[84] = dict(_CONFIGS[64], causal_top_left=True, right_bound=7)
+_CONFIGS[85] = dict(
+    _CONFIGS[46],
+    use_transposed_invariant_hoist=False,
+    causal_top_left=True,
+    right_bound=2,
+)
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

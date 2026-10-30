@@ -16,7 +16,7 @@
  *       rocke_gfx950_attention_tiled_2d_supports_args_default
  *       rocke_gfx950_attention_tiled_2d_supports
  *   - the body-context prologue
- *       rocke_gfx950_attn2d_build_ctx_init  (Python build body lines 711-1151):
+ *       rocke_g950_build_ctx_init_local  (Python build body lines 711-1151):
  *       require_tiled_attention_arch(arch) gate -> dtype fp16/bf16 gate ->
  *       WIDE-atom geometry select (Py813-814) -> the whole ALL-CAPS config
  *       derivation -> kernel attrs + param decls -> grid ids + wave
@@ -25,7 +25,7 @@
  *       TransposeLdsReader bind (Py1128) -> the SSA constants block.
  *   - the build driver
  *       rocke_gfx950_build_unified_attention_2d_tiled
- *     which zero-inits the shared ctx, calls rocke_gfx950_attn2d_build_ctx_init,
+ *     which zero-inits the shared ctx, calls rocke_g950_build_ctx_init_local,
  *     then drives the phase functions in the exact Python execution order:
  *         emit_q_load -> emit_loop_bounds_and_inits -> emit_preloop ->
  *         emit_q_gather -> emit_preloop_prefetch -> emit_licm_hoist ->
@@ -282,7 +282,7 @@ bool rocke_gfx950_attention_tiled_2d_supports(
 }
 
 /* ===================================================================== *
- *  rocke_gfx950_attn2d_build_ctx_init -- the prologue (Python 711-1151)
+ *  rocke_g950_build_ctx_init_local -- the prologue (Python 711-1151)
  *
  *  INTEGRATION NOTE. The header-declared external definition of this symbol
  *  lives in the dedicated prologue TU (ctx_prologue.c). This driver TU carries
@@ -307,6 +307,22 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
     ctx->b = b;
     ctx->spec = spec;
     ctx->arch = arch;
+
+    /* Band checks run first: Python raises them in the spec __post_init__. */
+    if(spec->right_bound < -1)
+    {
+        char msg[96];
+        snprintf(msg,
+                 sizeof(msg),
+                 "right_bound must be >= -1 (-1 = unbounded), got %d",
+                 spec->right_bound);
+        rocke_g950_fail(b, ROCKE_ERR_VALUE, msg);
+    }
+    if(spec->right_bound != 0 && (spec->use_alibi || spec->use_qq_bias))
+        rocke_g950_fail(b,
+                        ROCKE_ERR_VALUE,
+                        "right_bound != 0 is incompatible with use_alibi / use_qq_bias "
+                        "(their offsets are defined on the causal diagonal)");
 
     /* ---- require_tiled_attention_arch(arch) (Py748) ---- */
     if(!rocke_require_tiled_attention_arch(b, arch))
@@ -729,7 +745,8 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
         b, rocke_b_div(b, ctx->cu_q_start, rocke_b_const_i32(b, BLOCK_Q)), ctx->seq_idx);
     ctx->q_block_local_idx = rocke_b_sub(b, ctx->q_block_global_idx, ctx->q_block_start_idx);
     ctx->seq_len = rocke_b_global_load_i32(b, ctx->seq_lens, ctx->seq_idx, 0);
-    ctx->context_len = rocke_b_sub(b, ctx->seq_len, ctx->cur_batch_q_len);
+    ctx->context_len = spec->causal_top_left ? rocke_b_const_i32(b, 0)
+                                             : rocke_b_sub(b, ctx->seq_len, ctx->cur_batch_q_len);
 
     ctx->qb_start_pos = rocke_b_mul(b, ctx->q_block_local_idx, rocke_b_const_i32(b, BLOCK_Q));
     {
@@ -916,7 +933,7 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
 /* ===================================================================== *
  *  build_unified_attention_2d_tiled(spec, arch="gfx950")  (lines 711-3818)
  *
- *  The driver: populate the shared build ctx via rocke_gfx950_attn2d_build_ctx_init
+ *  The driver: populate the shared build ctx via rocke_g950_build_ctx_init_local
  *  (the prologue), then run the phase functions in Python execution order and
  *  return b->kernel from the epilogue.
  * ===================================================================== */
@@ -1015,6 +1032,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
 {
     char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], kv_buf[64];
     char sw_buf[32], w_buf[32], mw_buf[32], schedb_buf[32], smxil_buf[32], ring_buf[32];
+    char rb_buf[32];
     int nqh, nkv;
 
     if(s == NULL || out == NULL)
@@ -1038,6 +1056,12 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
         snprintf(sw_buf, sizeof(sw_buf), "sw%d", s->sliding_window);
     else
         sw_buf[0] = '\0';
+    if(s->right_bound < 0)
+        snprintf(rb_buf, sizeof(rb_buf), "rbu");
+    else if(s->right_bound > 0)
+        snprintf(rb_buf, sizeof(rb_buf), "rb%d", s->right_bound);
+    else
+        rb_buf[0] = '\0';
     if(s->num_warps != 1)
         snprintf(w_buf, sizeof(w_buf), "w%d", s->num_warps);
     else
@@ -1082,6 +1106,8 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
             s->has_softcap ? "softcap" : "",
             s->use_alibi ? "alibi" : "",
             s->use_qq_bias ? "qqb" : "",
+            s->causal_top_left ? "tl" : "",
+            rb_buf,
             w_buf,
             mw_buf,
             s->use_mfma_32x32 ? "mfma32" : "",

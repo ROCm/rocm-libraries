@@ -17,7 +17,6 @@
 #include "rocke/helper_rocke.instances.common.attention_arch.h"
 #include "rocke/instance_attention_unified.h"
 #include "rocke/instance_gfx942_attention_4warp_gqa.h"
-#include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 
 static int g_failures = 0;
 
@@ -211,9 +210,16 @@ static void test_supports_tiled_3d(void)
     p.causal_top_left = true;
     CHECK(!rocke_unified_attention_supports_tiled_3d(&p, "gfx942", reason, sizeof(reason)));
     CHECK_EQ_STR(reason, "gfx942 tiled attention does not implement top-left/causal masks");
-    /* Python admits this on gfx950; the C++ builder does not implement it. */
-    CHECK(!rocke_unified_attention_supports_tiled_3d(&p, "gfx950", reason, sizeof(reason)));
-    CHECK_EQ_STR(reason, "tiled 3D top-left/causal masks are not ported to C++ yet");
+    CHECK(rocke_unified_attention_supports_tiled_3d(&p, "gfx950", reason, sizeof(reason)));
+    CHECK_EQ_STR(reason, "supported");
+    CHECK(!rocke_unified_attention_supports_tiled_2d(&p, "gfx942", reason, sizeof(reason)));
+    CHECK_EQ_STR(reason, "gfx942 tiled attention does not implement top-left/causal masks");
+    CHECK(rocke_unified_attention_supports_tiled_2d(&p, "gfx950", reason, sizeof(reason)));
+    CHECK_EQ_STR(reason, "supported");
+    p.right_bound = 5;
+    CHECK(rocke_unified_attention_supports_tiled_2d(&p, "gfx950", reason, sizeof(reason)));
+    CHECK(rocke_unified_attention_supports_tiled_3d(&p, "gfx950", reason, sizeof(reason)));
+    p.right_bound = 0;
     p.causal_top_left = false;
 
     /* 32 KiB blocks: 65534 fill the i32 KV buffer range, 65536 are exactly
@@ -435,14 +441,6 @@ static void test_tiled_attention_arch(void)
     /* An earlier sticky error is kept. */
     CHECK(!rocke_require_tiled_attention_arch(&b, "gfx9999"));
     CHECK(strstr(rocke_ir_builder_error(&b), "gfx90a") != NULL);
-    rocke_ir_builder_free(&b);
-
-    /* Python's gfx950 tiled-2D builder admits gfx942 at its arch gate. */
-    rocke_unified_attention_problem_t p = decode_problem();
-    rocke_attention_tiled_2d_spec_t spec = rocke_unified_attn_tiled_spec_from_problem(&p, "gfx950");
-    rocke_gfx950_attn2d_build_ctx_t ctx;
-    CHECK(rocke_ir_builder_init(&b, "k") == ROCKE_OK);
-    CHECK(rocke_gfx950_attn2d_build_ctx_init(&ctx, &b, &spec, "gfx942"));
     rocke_ir_builder_free(&b);
 }
 

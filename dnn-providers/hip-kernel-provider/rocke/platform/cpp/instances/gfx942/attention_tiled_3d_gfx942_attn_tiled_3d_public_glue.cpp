@@ -116,6 +116,8 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     s.use_kv_lds_swizzle = false;
     s.use_wave_page_id_load = false;
     s.kv_layout = "paged";
+    s.causal_top_left = false;
+    s.right_bound = 0;
     return s;
 }
 
@@ -130,6 +132,25 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
     if(s == NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "attention_tiled_3d spec is NULL");
+        return false;
+    }
+    /* The Python gfx942 spec has no band fields; only a hand-built C spec can
+     * carry one, so this message has no Python counterpart. */
+    if(s->causal_top_left || s->right_bound != 0)
+    {
+        const char* align = s->causal_top_left ? "top-left" : "bottom-right";
+        char upper[32];
+        if(s->right_bound == -1)
+            snprintf(upper, sizeof(upper), "unbounded");
+        else if(s->right_bound == 0)
+            snprintf(upper, sizeof(upper), "causal");
+        else
+            snprintf(upper, sizeof(upper), "right_bound=%d", s->right_bound);
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "gfx942 tiled attention does not implement %s/%s masks",
+                        align,
+                        upper);
         return false;
     }
     if(s->num_segments < 1)
@@ -406,7 +427,7 @@ int rocke_unified_attention_reduce_tiled_spec_kernel_name(
     const rocke_unified_attention_reduce_tiled_spec_t* s, char* buf, size_t cap)
 {
     /* kernel_name_join("rocke_uattn_reduce_tiled_gfx942", d<HD>, h<NUM_QH>,
-     *   seg<NUM_SEG>, dtype) */
+     *   seg<NUM_SEG>, dtype[, "lse"]) */
     char d_part[32];
     char h_part[32];
     char seg_part[32];
@@ -429,6 +450,10 @@ int rocke_unified_attention_reduce_tiled_spec_kernel_name(
     parts[np++] = h_part;
     parts[np++] = seg_part;
     parts[np++] = (s->dtype != NULL) ? s->dtype : "";
+    if(s->emit_lse)
+    {
+        parts[np++] = "lse";
+    }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
     if(st != ROCKE_OK)

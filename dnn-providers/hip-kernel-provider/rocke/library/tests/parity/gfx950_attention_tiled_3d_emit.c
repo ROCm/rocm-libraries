@@ -31,9 +31,10 @@
 
 /* Fill the segment spec `s` for config index `idx`. Returns 0 on success,
  * -1 on unknown idx. Mirrors the Python emitter's _CONFIGS exactly. */
-static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
+static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s, bool* emit_lse)
 {
     *s = rocke_unified_attention_3d_tiled_spec_default();
+    *emit_lse = false;
     switch(idx)
     {
     case 0:
@@ -326,6 +327,79 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_decode_grid = true;
         s->kv_cache_policy = "global";
         break;
+    case 19:
+        /* Reduce with the LSE output, decode grid. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_decode_grid = true;
+        *emit_lse = true;
+        break;
+    case 20:
+        /* Reduce with the LSE output. */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        *emit_lse = true;
+        break;
+    case 21:
+        /* Top-left causal mask (context_len pinned to 0). */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->causal_top_left = true;
+        break;
+    case 22:
+        /* Right bound of 8 keys with a sliding window and sinks. */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = true;
+        s->sliding_window = 128;
+        s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->right_bound = 8;
+        break;
+    case 23:
+        /* Top-left unbounded band, fp8 K/V, decode grid. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->num_segments = 16;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = "fp8e4m3";
+        s->use_decode_grid = true;
+        s->causal_top_left = true;
+        s->right_bound = -1;
+        break;
     default:
         return -1;
     }
@@ -333,11 +407,14 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
 }
 
 /* Derive the reduce spec from the segment spec, exactly as the Python emitter
- * (head_size / num_query_heads / num_kv_heads / dtype / num_segments). */
+ * (head_size / num_query_heads / num_kv_heads / dtype / num_segments, plus the
+ * config's emit_lse). */
 static void make_reduce_spec(const rocke_unified_attention_3d_tiled_spec_t* s,
+                             bool emit_lse,
                              rocke_unified_attention_reduce_tiled_spec_t* r)
 {
     *r = rocke_unified_attention_reduce_tiled_spec_default();
+    r->emit_lse = emit_lse;
     r->head_size = s->head_size;
     r->num_query_heads = s->num_query_heads;
     r->num_kv_heads = s->num_kv_heads;
@@ -418,14 +495,15 @@ int main(int argc, char** argv)
     const char* mode = (argc > 2) ? argv[2] : "ll";
 
     rocke_unified_attention_3d_tiled_spec_t s;
-    if(make_spec(idx, &s) != 0)
+    bool emit_lse = false;
+    if(make_spec(idx, &s, &emit_lse) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 1;
     }
 
     rocke_unified_attention_reduce_tiled_spec_t r;
-    make_reduce_spec(&s, &r);
+    make_reduce_spec(&s, emit_lse, &r);
 
     if(strcmp(mode, "ll") == 0)
     {

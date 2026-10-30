@@ -113,6 +113,7 @@ rocke_unified_attention_problem_t rocke_unified_attention_problem_default(void)
     p.num_kv_blocks = 0;
     p.causal_top_left = false;
     p.right_bound = 0;
+    p.emit_lse = false;
     return p;
 }
 

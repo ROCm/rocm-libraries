@@ -389,7 +389,8 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
         ctx->q_block_local_idx = rocke_b_sub(B, ctx->q_block_global_idx, ctx->q_block_start_idx);
     }
     ctx->seq_len = rocke_b_global_load_i32(B, ctx->seq_lens, ctx->seq_idx, 0);
-    ctx->context_len = rocke_b_sub(B, ctx->seq_len, ctx->cur_batch_q_len);
+    ctx->context_len = CFG.TOP_LEFT ? rocke_b_const_i32(B, 0)
+                                    : rocke_b_sub(B, ctx->seq_len, ctx->cur_batch_q_len);
 
     /* qb_start_pos = q_block_local_idx * BLOCK_Q (line 381) */
     ctx->qb_start_pos = rocke_b_mul(B, ctx->q_block_local_idx, rocke_b_const_i32(B, BLOCK_Q));
@@ -474,15 +475,23 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
 
     /* ---- Per-segment tile range (lines 514-523) ---- */
     {
-        rocke_value_t* msp_inner = rocke_b_add(B, ctx->context_len, ctx->qb_start_pos);
-        rocke_value_t* msp_raw
-            = rocke_b_add(B, msp_inner, rocke_b_const_i32(B, CFG.bm1_div_nqk + 1));
-        rocke_value_t* msp_cmp = rocke_b_cmp_lt(B, msp_raw, ctx->seq_len);
         rocke_value_t* nt_inner;
         rocke_value_t* tile_end_raw_mul_inner;
         rocke_value_t* tile_end_raw;
         rocke_value_t* tile_end_cmp;
-        ctx->max_seq_prefix_len = rocke_b_select(B, msp_cmp, msp_raw, ctx->seq_len);
+        if(CFG.RIGHT < 0)
+        {
+            /* No upper bound: every key of the sequence. */
+            ctx->max_seq_prefix_len = ctx->seq_len;
+        }
+        else
+        {
+            rocke_value_t* msp_inner = rocke_b_add(B, ctx->context_len, ctx->qb_start_pos);
+            rocke_value_t* msp_raw
+                = rocke_b_add(B, msp_inner, rocke_b_const_i32(B, CFG.bm1_div_nqk + 1 + CFG.RIGHT));
+            rocke_value_t* msp_cmp = rocke_b_cmp_lt(B, msp_raw, ctx->seq_len);
+            ctx->max_seq_prefix_len = rocke_b_select(B, msp_cmp, msp_raw, ctx->seq_len);
+        }
         nt_inner = rocke_b_add(B, ctx->max_seq_prefix_len, rocke_b_const_i32(B, T - 1));
         ctx->num_tiles = rocke_b_div(B, nt_inner, rocke_b_const_i32(B, T));
 

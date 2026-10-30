@@ -135,6 +135,8 @@ rocke_attention_tiled_2d_spec_t rocke_attention_tiled_2d_spec_default(void)
     s.use_v_hbm_direct = false;
     s.use_k_hbm_direct = false;
     s.use_causal_mask_phase_split = false;
+    s.causal_top_left = false;
+    s.right_bound = 0;
     return s;
 }
 
@@ -250,6 +252,28 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
     {
         rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "attention_tiled_2d spec is NULL");
         return false;
+    }
+
+    /* The Python gfx942 spec has no band fields; only a hand-built C spec can
+     * carry one, so this message has no Python counterpart. */
+    if(s->causal_top_left || s->right_bound != 0)
+    {
+        const char* align = s->causal_top_left ? "top-left" : "bottom-right";
+        if(s->right_bound == -1)
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "gfx942 tiled attention does not implement %s/unbounded masks",
+                                 align);
+        else if(s->right_bound == 0)
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "gfx942 tiled attention does not implement %s/causal masks",
+                                 align);
+        rocke_attn2d_set_err(b,
+                             ROCKE_ERR_VALUE,
+                             "gfx942 tiled attention does not implement %s/right_bound=%d masks",
+                             align,
+                             s->right_bound);
     }
 
     /* gfx950-only experimental knobs rejected up front on gfx942, named in

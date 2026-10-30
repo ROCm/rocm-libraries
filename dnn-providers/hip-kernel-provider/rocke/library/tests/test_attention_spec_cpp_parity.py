@@ -317,12 +317,14 @@ def test_3d_hook_rejects_other_arch_and_unported_fields(engine, arch):
     other = "gfx950" if arch == "gfx942" else "gfx942"
     with pytest.raises(NotImplementedError, match=arch):
         hook(p, other)
-    for field, value in (
-        ("use_additive_bias", True),
-        ("causal_top_left", True),
-        ("right_bound", -1),
-    ):
-        with pytest.raises(NotImplementedError, match=field):
-            hook(dict(p, **{field: value}), arch)
+    with pytest.raises(NotImplementedError, match="use_additive_bias"):
+        hook(dict(p, use_additive_bias=True), arch)
+    band = dict(p, causal_top_left=True, right_bound=-1)
+    if arch == "gfx950":
+        spec = hook(band, arch)
+        assert (spec["causal_top_left"], spec["right_bound"]) == (True, -1)
+    else:
+        with pytest.raises(ValueError, match="top-left/unbounded"):
+            hook(band, arch)
     with pytest.raises(ValueError):
         hook(dict(p, num_kv_heads=3), arch)
