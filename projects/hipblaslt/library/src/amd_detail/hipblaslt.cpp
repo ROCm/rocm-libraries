@@ -78,6 +78,44 @@ hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
     }
 }
 
+hipblasStatus_t refuse_row_order(const char*      caller,
+                                 hipblasLtOrder_t orderA,
+                                 hipblasLtOrder_t orderB,
+                                 hipblasLtOrder_t orderC,
+                                 hipblasLtOrder_t orderD)
+{
+    const hipblasLtOrder_t orders[] = {orderA, orderB, orderC, orderD};
+    const char* const      names[]  = {"A", "B", "C", "D"};
+    for(int i = 0; i < 4; ++i)
+    {
+        if(orders[i] == HIPBLASLT_ORDER_ROW)
+        {
+            log_error(caller,
+                      "HIPBLASLT_ORDER_ROW is not supported for a matmul; only "
+                      "hipblasLtMatrixTransform accepts it",
+                      "matrix",
+                      names[i]);
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+    }
+    return HIPBLAS_STATUS_SUCCESS;
+}
+
+hipblasStatus_t refuse_row_order(const char*             caller,
+                                 rocblaslt_matrix_layout matA,
+                                 rocblaslt_matrix_layout matB,
+                                 rocblaslt_matrix_layout matC,
+                                 rocblaslt_matrix_layout matD)
+{
+    // A grouped layout sends the call to the grouped path, which refuses every order but COL.
+    for(auto mat : {matA, matB, matC, matD})
+        if(mat && mat->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED)
+            return HIPBLAS_STATUS_SUCCESS;
+
+    auto order = [](rocblaslt_matrix_layout mat) { return mat ? mat->order : HIPBLASLT_ORDER_COL; };
+    return refuse_row_order(caller, order(matA), order(matB), order(matC), order(matD));
+}
+
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 /********************************************************************************
  * Fused epilogue descriptor.
@@ -1177,6 +1215,19 @@ try
     }
 #endif
 
+    if(auto order_status = refuse_row_order(__func__,
+                                            (rocblaslt_matrix_layout)Adesc,
+                                            (rocblaslt_matrix_layout)Bdesc,
+                                            (rocblaslt_matrix_layout)Cdesc,
+                                            (rocblaslt_matrix_layout)Ddesc);
+       order_status != HIPBLAS_STATUS_SUCCESS)
+    {
+        if(returnAlgoCount)
+            *returnAlgoCount = 0;
+        rocblaslt::Debug::Instance().markerStop();
+        return order_status;
+    }
+
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul_algo_get_heuristic(
         (rocblaslt_handle)handle,
         (rocblaslt_matmul_desc)matmulDesc,
@@ -1225,6 +1276,17 @@ try
         return return_status;
     }
 #endif
+
+    return_status = refuse_row_order(__func__,
+                                     (rocblaslt_matrix_layout)matA,
+                                     (rocblaslt_matrix_layout)matB,
+                                     (rocblaslt_matrix_layout)matC,
+                                     (rocblaslt_matrix_layout)matD);
+    if(return_status != HIPBLAS_STATUS_SUCCESS)
+    {
+        rocblaslt::Debug::Instance().markerStop();
+        return return_status;
+    }
 
     return_status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul((rocblaslt_handle)handle,
                                                                 (rocblaslt_matmul_desc)matmul_descr,
