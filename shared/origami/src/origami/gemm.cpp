@@ -2350,12 +2350,6 @@ double compute_total_latency(const problem_t& problem,
                              const config_t& config) {
   if (!config.is_valid()) return std::numeric_limits<double>::max();
 
-  // An empty problem (M, N or batch is 0) has no output tiles to model, and
-  // the model below divides by M, N and the tile count.
-  if (problem.size.m == 0 || problem.size.n == 0 || problem.batch == 0) {
-    return std::numeric_limits<double>::max();
-  }
-
   // Heuristic-driven kernel rejection (e.g. subtile kernels with small K).
   // When a matching heuristic marks the config as rejected, report the maximum
   // latency so rank_configs() drops the kernel from selection entirely.
@@ -2371,6 +2365,12 @@ double compute_total_latency(const problem_t& problem,
     }
   }
 
+  // An empty problem (M, N or batch is 0) has no output tiles to model, and
+  // the model below divides by M, N and the tile count. Only the launch
+  // overhead, the model's work-independent floor, remains.
+  if (problem.size.m == 0 || problem.size.n == 0 || problem.batch == 0) {
+    return heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD;
+  }
 
   // Use Formocast simulation model if prediction_mode is set to simulation
   if (config.prediction_mode == prediction_modes_t::simulation) {

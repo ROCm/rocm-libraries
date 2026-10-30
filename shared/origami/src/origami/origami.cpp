@@ -12,6 +12,7 @@
 
 #include "origami/attention.hpp"
 #include "origami/gemm.hpp"
+#include "origami/heuristics.hpp"
 #include "origami/logger.hpp"
 #include "origami/math.hpp"
 #include "origami/origami.hpp"
@@ -631,6 +632,12 @@ void log_config_rejection(const config_t& config, const char* reason) {
                              << ") REJECTED: " << reason);
 }
 
+// An empty problem (M, N or batch is 0) has no output tiles, so there is
+// nothing to model. K = 0 is not empty: D = beta * C still needs a kernel.
+bool is_empty_problem(const problem_t& problem) {
+  return problem.size.m == 0 || problem.size.n == 0 || problem.batch == 0;
+}
+
 double compute_ranked_latency(const problem_t& problem,
                               const hardware_t& hardware,
                               const config_t& config,
@@ -644,6 +651,8 @@ double compute_ranked_latency(const problem_t& problem,
       log_config_rejection(config, "LDS capacity exceeded");
       return kRejectedLatency;
     }
+    // Nothing to model; only the per-kernel launch cost remains.
+    if (is_empty_problem(problem)) { return heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD; }
     return attention::compute_total_latency(problem, hardware, config);
   }
 
@@ -654,12 +663,6 @@ double compute_ranked_latency(const problem_t& problem,
   return gemm::compute_total_latency(problem, hardware, config);
 }
 
-// An empty problem (M, N or batch is 0) has no output tiles, so there is
-// nothing to model. K = 0 is not empty: D = beta * C still needs a kernel.
-bool is_empty_problem(const problem_t& problem) {
-  return problem.size.m == 0 || problem.size.n == 0 || problem.batch == 0;
-}
-
 }  // namespace
 
 std::vector<prediction_result_t> rank_configs(const problem_t& problem,
@@ -667,14 +670,6 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const std::vector<config_t>& configs,
                                               model_t model) {
   if (configs.empty()) { throw std::runtime_error("No configurations provided."); }
-  if (is_empty_problem(problem)) {
-    // Nothing to model, so every config is equally (un)suitable: return them
-    // all, in input order, with the rejected latency.
-    std::vector<prediction_result_t> results;
-    results.reserve(configs.size());
-    for (const auto& config : configs) { results.push_back({kRejectedLatency, config}); }
-    return results;
-  }
 
   struct prediction_result_wrapper_t {
     double latency;
@@ -694,6 +689,18 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
     } else {
       invalid_configs.push_back({latency, std::cref(config)});
     }
+  }
+
+  // Empty problem: every valid config costs only the launch overhead, so
+  // there is nothing to sort or tie-break. Return the valid configs, then the
+  // rejected ones, each in input order.
+  if (is_empty_problem(problem)) {
+    std::vector<prediction_result_t> results;
+    results.reserve(configs.size());
+    for (const auto* list : {&valid_configs, &invalid_configs}) {
+      for (const auto& r : *list) { results.push_back({r.latency, r.config.get()}); }
+    }
+    return results;
   }
 
   // Fallback: when the analytical model rejected every candidate, rank the
