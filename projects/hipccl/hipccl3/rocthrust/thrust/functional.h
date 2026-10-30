@@ -306,9 +306,7 @@ struct project2nd<void, void>
 using _THRUST_STD::not_fn;
 #else // ^^^ THRUST_DOXYGEN_INVOKED ^^^ / vvv !THRUST_DOXYGEN_INVOKED vvv
 template <class _Fn>
-THRUST_DEPRECATED_BECAUSE("Use hip::std::not_fn instead")
-[[nodiscard]]
-_CCCL_API constexpr auto not_fn(_Fn&& __f)
+[[nodiscard]] THRUST_DEPRECATED_BECAUSE("Use hip::std::not_fn instead") _CCCL_API constexpr auto not_fn(_Fn&& __f)
 {
   return _THRUST_STD::not_fn(_THRUST_STD::forward<_Fn>(__f));
 }
