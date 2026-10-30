@@ -140,6 +140,8 @@ train:
   # scripts/build_whitelist_tier.py builds it again, or removes it, without
   # retraining.
   whitelist_tier_k: 32
+  # No tail guard: a cell's tier is the keys the greedy chose.
+  whitelist_tier_guard_keys: 0
   # The non-temporal rule serves a kernel with a non-temporal A hint only with
   # A transposed, and one with a B hint only with B not transposed. Off for
   # this layout: in TT the rule would never serve a kernel with a non-temporal

@@ -1124,6 +1124,35 @@ def test_only_the_gfx950_tt_and_nn_configs_deploy_the_alignment_veto(config_env)
     }
 
 
+def test_the_gfx950_origami_configs_build_their_tiers_without_the_tail_guard(
+    config_env, tmp_path
+):
+    """Every gfx950 Origami-library config sets train.whitelist_tier_guard_keys
+    to 0: a cell's whitelist tier is the keys the greedy chose, with no tail
+    guard key, and stage05 is told so (`--whitelist-tier-guard-keys 0`)."""
+    from lib import contexts as ctxlib
+
+    assert len(GFX950_ORIGAMI_CONFIGS) == 9
+    for path in GFX950_ORIGAMI_CONFIGS:
+        raw = yaml.safe_load(path.read_text())
+        assert raw["train"]["whitelist_tier_guard_keys"] == 0, path.name
+        cfg = _load(path)
+        assert ro.cfg_get(cfg, "train.whitelist_tier_k") > 0, path.name
+        assert not [w for w in ro.validate_config(cfg)[1] if "guard" in w], path.name
+        resolved, _ = ctxlib.resolve_fractions(cfg, 256)
+        p = ro.Pipeline(
+            cfg=resolved,
+            snapshot=path,
+            run_dir=tmp_path / "run",
+            paths=ro.derive_paths(cfg),
+            stages_dir=Path(ro.__file__).resolve().parent / "stages",
+            timing=ro.Timing(),
+            force_deploy=False,
+        )
+        args = p._catalog_args()
+        assert args[args.index("--whitelist-tier-guard-keys") + 1] == "0", path.name
+
+
 @pytest.mark.parametrize("path", GFX950_ORIGAMI_CONFIGS, ids=lambda p: p.name)
 def test_gfx950_origami_configs_keep_the_recipe_of_their_models(path, config_env):
     """The production recipe's sizing, contexts and audit set as the runs

@@ -832,6 +832,37 @@ def tiered(tmp_path, tw):
     return tmp_path, data, lib, ident, out
 
 
+def test_a_tier_without_the_tail_guard_is_the_greedys_tier(tiered):
+    """--whitelist-tier-guard-keys 0 (train.whitelist_tier_guard_keys of the
+    gfx950 configs): every cell's tier is the keys the greedy chose, those
+    of the default guard's tier without the keys its guard added, and the
+    networks are the same."""
+    import torch
+
+    tmp, data, lib, ident, guarded = tiered
+    off = tmp / "off" / "stage05"
+    tier_train(tmp, data, lib, off, "--whitelist-tier-k", 3,
+               "--whitelist-tier-guard-keys", 0)  # fmt: skip
+    a, b = load_bundle(guarded / "models.pt"), load_bundle(off / "models.pt")
+    doc = json.loads((guarded / wt.TIER_FILE).read_text())
+    rec = b[wt.RECORD]["guard"]
+    assert rec["keys"] == 0 and rec["n_keys_added"] == 0
+    assert rec["n_held_out_gemms"] == 0
+    assert set(a["models"]) == set(b["models"])
+    for label, entry in b["models"].items():
+        added = (doc["cells"][label].get("guard") or {}).get("added") or []
+        keys = a["models"][label]["view_key_hashes"]
+        assert entry["view_key_hashes"] == keys[: len(keys) - len(added)], label
+        assert (
+            "guard" not in json.loads((off / wt.TIER_FILE).read_text())["cells"][label]
+        )
+        sd, other = entry["state_dict"], a["models"][label]["state_dict"]
+        assert sd.keys() == other.keys()
+        assert all(
+            torch.equal(torch.as_tensor(sd[k]), torch.as_tensor(other[k])) for k in sd
+        )
+
+
 def test_stage05_gives_every_cell_a_tier_of_measured_keys(tiered):
     tmp, data, lib, ident, out = tiered
     bundle = load_bundle(out / "models.pt")
