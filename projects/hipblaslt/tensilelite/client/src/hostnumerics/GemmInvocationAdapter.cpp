@@ -569,8 +569,10 @@ namespace TensileLite::Client::hostnumerics
                                    std::string(message(bytes.error())));
             }
 
-            mxBlockA = problem.mxBlockA();
-            mxBlockB = problem.mxBlockB();
+            mxBlockA     = problem.mxBlockA();
+            mxBlockB     = problem.mxBlockB();
+            mxBlockFreeA = std::max<size_t>(1, problem.mxBlockFreeA());
+            mxBlockFreeB = std::max<size_t>(1, problem.mxBlockFreeB());
             if(mxBlockA > 0)
             {
                 const auto mappedA = getHostNumericsMxScaleType(problem.mxTypeA());
@@ -1051,8 +1053,12 @@ namespace TensileLite::Client::hostnumerics
                         = k / mxBlockA + static_cast<size_t>(k % mxBlockA != 0);
                     const size_t blockCountB
                         = k / mxBlockB + static_cast<size_t>(k % mxBlockB != 0);
+                    const size_t tilesA
+                        = m / mxBlockFreeA + static_cast<size_t>(m % mxBlockFreeA != 0);
+                    const size_t tilesB
+                        = n / mxBlockFreeB + static_cast<size_t>(n % mxBlockFreeB != 0);
                     auto layoutScaleA = detail::matrixLayout(problem.mxsa(),
-                                                             m,
+                                                             tilesA,
                                                              blockCountA,
                                                              indexMA,
                                                              indexKA,
@@ -1065,7 +1071,7 @@ namespace TensileLite::Client::hostnumerics
                         return failure(TranslationFailureCode::InvalidDescriptor,
                                        std::string(message(layoutScaleA.error())));
                     auto layoutScaleB = detail::matrixLayout(problem.mxsb(),
-                                                             n,
+                                                             tilesB,
                                                              blockCountB,
                                                              indexNB,
                                                              indexKB,
@@ -1215,6 +1221,9 @@ namespace TensileLite::Client::hostnumerics
 
         size_t mxBlockA = 0;
         size_t mxBlockB = 0;
+        // Free-dimension extent of one MX scaling tile; 1 gives one scale per row or column.
+        size_t mxBlockFreeA = 1;
+        size_t mxBlockFreeB = 1;
 
         std::vector<std::set<size_t>> selectedByBatch;
         bool                          selectAllOutputs = true;
@@ -1447,12 +1456,18 @@ namespace TensileLite::Client::hostnumerics
         if(plan.blockScaleA && plan.blockScaleB)
         {
             request.blockScaleA = roc::hostnumerics::MatmulBlockScale{
-                Tensor::copyEncodedBackingStorage(
-                    m_state->mxScaleTypeA, plan.blockScaleA->layout, plan.blockScaleA->storage),
+                repeatMxScaleTiles(Tensor::copyEncodedBackingStorage(m_state->mxScaleTypeA,
+                                                                     plan.blockScaleA->layout,
+                                                                     plan.blockScaleA->storage),
+                                   m_state->m,
+                                   m_state->mxBlockFreeA),
                 m_state->mxBlockA};
             request.blockScaleB = roc::hostnumerics::MatmulBlockScale{
-                Tensor::copyEncodedBackingStorage(
-                    m_state->mxScaleTypeB, plan.blockScaleB->layout, plan.blockScaleB->storage),
+                repeatMxScaleTiles(Tensor::copyEncodedBackingStorage(m_state->mxScaleTypeB,
+                                                                     plan.blockScaleB->layout,
+                                                                     plan.blockScaleB->storage),
+                                   m_state->n,
+                                   m_state->mxBlockFreeB),
                 m_state->mxBlockB};
         }
         translated.alpha  = Tensor::scalar(accumulatorType, m_state->alpha);

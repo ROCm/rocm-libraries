@@ -32,7 +32,8 @@ namespace
                                          size_t           N,
                                          size_t           K,
                                          int              mxBlock,
-                                         rocisa::DataType scaleType = rocisa::DataType::E8)
+                                         rocisa::DataType scaleType   = rocisa::DataType::E8,
+                                         int              mxBlockFree = 1)
     {
         auto problem = ContractionProblemGemm::GEMM_Strides(false,
                                                             false,
@@ -54,8 +55,8 @@ namespace
                                                             M * N,
                                                             0.0);
 
-        problem.setMXScaleA(scaleType, mxBlock, {}, /*padScaleTensor=*/false);
-        problem.setMXScaleB(scaleType, mxBlock, {}, /*padScaleTensor=*/false);
+        problem.setMXScaleA(scaleType, mxBlock, {}, /*padScaleTensor=*/false, mxBlockFree);
+        problem.setMXScaleB(scaleType, mxBlock, {}, /*padScaleTensor=*/false, mxBlockFree);
         problem.setComputeInputTypeA(typeA);
         problem.setComputeInputTypeB(typeB);
         problem.setAlphaType(rocisa::DataType::Float);
@@ -326,4 +327,119 @@ TEST(ReferenceMXGemm, ComputesScaledFP8GemmWithBetaAndBias)
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches
         << " max_absolute_difference=" << comparison.maxAbsoluteDifference;
+}
+
+// A 2D MX tile shares one scale across mxBlockFree rows of A or columns of B. The reference
+// must equal the same GEMM with each tile's scale replicated to every row and column it
+// covers. N leaves a partial last tile.
+TEST(ReferenceMXGemm, FreeTileScalesMatchReplicatedPerRowScales)
+{
+    const size_t M           = 64;
+    const size_t N           = 48;
+    const size_t K           = 256;
+    const int    mxBlock     = 128;
+    const int    mxBlockFree = 32;
+
+    auto tiled = makeMXProblem(rocisa::DataType::Float8,
+                               rocisa::DataType::Float8,
+                               M,
+                               N,
+                               K,
+                               mxBlock,
+                               rocisa::DataType::E8,
+                               mxBlockFree);
+    auto rowwise
+        = makeMXProblem(rocisa::DataType::Float8, rocisa::DataType::Float8, M, N, K, mxBlock);
+
+    std::vector<Float8> a(M * K);
+    std::vector<Float8> b(K * N);
+    std::vector<float>  c(M * N, 0.0f);
+    const auto binaryValues = roc::hostnumerics::GenerationRecipe::choice({.values = {-1.0, 1.0}});
+    const auto scaleValues
+        = roc::hostnumerics::GenerationRecipe::choice({.values = {1.0, 2.0, 4.0, 8.0}});
+    generateValues(a, roc::hostnumerics::ScalarType::Float8E4M3, binaryValues, 2024, 0);
+    generateValues(b, roc::hostnumerics::ScalarType::Float8E4M3, binaryValues, 2024, 1);
+
+    std::vector<E8> tiledA(tiled.mxsa().totalAllocatedElements());
+    std::vector<E8> tiledB(tiled.mxsb().totalAllocatedElements());
+    generateValues(tiledA, roc::hostnumerics::ScalarType::E8M0Zero, scaleValues, 2024, 2);
+    generateValues(tiledB, roc::hostnumerics::ScalarType::E8M0Zero, scaleValues, 2024, 3);
+
+    auto replicate = [](const TensorDescriptor& tiledScale,
+                        const TensorDescriptor& rowScale,
+                        const std::vector<E8>&  source,
+                        size_t                  freeIndex,
+                        size_t                  boundIndex,
+                        size_t                  extent) {
+        std::vector<E8> result(rowScale.totalAllocatedElements());
+        const size_t    blocks = rowScale.sizes()[boundIndex];
+        for(size_t element = 0; element < extent; ++element)
+            for(size_t block = 0; block < blocks; ++block)
+                result[element * rowScale.strides()[freeIndex]
+                       + block * rowScale.strides()[boundIndex]]
+                    = source[(element / mxBlockFree) * tiledScale.strides()[freeIndex]
+                             + block * tiledScale.strides()[boundIndex]];
+        return result;
+    };
+    const auto rowA = replicate(tiled.mxsa(),
+                                rowwise.mxsa(),
+                                tiledA,
+                                rowwise.freeIndicesA()[0].i,
+                                rowwise.boundIndices()[0].a,
+                                M);
+    const auto rowB = replicate(tiled.mxsb(),
+                                rowwise.mxsb(),
+                                tiledB,
+                                rowwise.freeIndicesB()[0].i,
+                                rowwise.boundIndices()[0].b,
+                                N);
+    ASSERT_TRUE(std::ranges::any_of(
+        tiledA, [&](E8 value) { return float(value) != float(tiledA.front()); }));
+
+    std::vector<float> dTiled(M * N, 0.0f);
+    std::vector<float> dRowwise(M * N, 0.0f);
+    ContractionInputs  inputsTiled(a.data(), b.data(), c.data(), dTiled.data(), 1.0f, 0.0f);
+    inputsTiled.mxsa = tiledA.data();
+    inputsTiled.mxsb = tiledB.data();
+    ContractionInputs inputsRowwise(a.data(), b.data(), c.data(), dRowwise.data(), 1.0f, 0.0f);
+    inputsRowwise.mxsa = rowA.data();
+    inputsRowwise.mxsb = rowB.data();
+
+    executeReferenceGemm(tiled, inputsTiled, /*elementsToValidate=*/-1, requireBlockedExecution);
+    executeReferenceGemm(
+        rowwise, inputsRowwise, /*elementsToValidate=*/-1, requireBlockedExecution);
+    EXPECT_EQ(dTiled, dRowwise);
+    EXPECT_EQ(dRowwise, expectedMXGemm(rowwise, a, b, c, rowA, rowB, 1.0f, 0.0f));
+}
+
+// K = 200 leaves a 72-element last block after one 128-element block.
+TEST(ReferenceMXGemm, Block128HandlesPartialFinalBlock)
+{
+    const size_t M       = 16;
+    const size_t N       = 16;
+    const size_t K       = 200;
+    const int    mxBlock = 128;
+
+    auto problem
+        = makeMXProblem(rocisa::DataType::Float8, rocisa::DataType::Float8, M, N, K, mxBlock);
+
+    std::vector<Float8> a(M * K);
+    std::vector<Float8> b(K * N);
+    std::vector<float>  c(M * N, 0.0f);
+    std::vector<float>  d(M * N, 0.0f);
+    std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements());
+    std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements());
+    const auto binaryValues = roc::hostnumerics::GenerationRecipe::choice({.values = {-1.0, 1.0}});
+    const auto scaleValues
+        = roc::hostnumerics::GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}});
+    generateValues(a, roc::hostnumerics::ScalarType::Float8E4M3, binaryValues, 77, 0);
+    generateValues(b, roc::hostnumerics::ScalarType::Float8E4M3, binaryValues, 77, 1);
+    generateValues(mxsa, roc::hostnumerics::ScalarType::E8M0Zero, scaleValues, 77, 2);
+    generateValues(mxsb, roc::hostnumerics::ScalarType::E8M0Zero, scaleValues, 77, 3);
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.mxsa = mxsa.data();
+    inputs.mxsb = mxsb.data();
+    executeReferenceGemm(problem, inputs, /*elementsToValidate=*/-1, requireBlockedExecution);
+    EXPECT_EQ(d, expectedMXGemm(problem, a, b, c, mxsa, mxsb, 1.0f, 0.0f));
 }

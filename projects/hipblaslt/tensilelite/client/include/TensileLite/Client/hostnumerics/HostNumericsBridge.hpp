@@ -16,6 +16,7 @@
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 
+#include <array>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
@@ -231,6 +232,30 @@ namespace TensileLite::Client
         if(!result)
             throw std::runtime_error("rocisa data type has no MX scale HostNumerics mapping.");
         return std::move(*result);
+    }
+
+    // Expands [tiles, K blocks] MX scales, where each row serves freeBlock consecutive free
+    // elements, into the [extent, K blocks] per-element scales that the reference GEMM reads.
+    // Encoded scale bits are preserved.
+    inline roc::hostnumerics::Tensor
+        repeatMxScaleTiles(const roc::hostnumerics::Tensor& scales, size_t extent, size_t freeBlock)
+    {
+        const auto& shape = scales.shape();
+        if(shape.rank() != 2 || freeBlock == 0)
+            throw std::invalid_argument("MX scale tiles must be rank two with a nonzero extent.");
+        const size_t tiles = extent / freeBlock + static_cast<size_t>(extent % freeBlock != 0);
+        if(shape[0] < tiles)
+            throw std::invalid_argument("MX scale tiles do not cover the free dimension.");
+        if(freeBlock == 1 && shape[0] == extent)
+            return scales;
+        std::vector<size_t> selected;
+        selected.reserve(extent * shape[1]);
+        for(size_t element = 0; element < extent; ++element)
+            for(size_t block = 0; block < shape[1]; ++block)
+                selected.push_back((element / freeBlock) * shape[1] + block);
+        const std::array<size_t, 2> order{0, 1};
+        return scales.copySelectedElements(selected, order)
+            .reshapeSharingStorage(roc::hostnumerics::Shape{extent, shape[1]});
     }
 
     inline std::optional<roc::hostnumerics::ActivationFunction>

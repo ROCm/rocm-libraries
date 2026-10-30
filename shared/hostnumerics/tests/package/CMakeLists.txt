@@ -81,7 +81,8 @@ add_test(
 )
 
 add_executable(hostnumerics-version-package-test "${HOSTNUMERICS_SOURCE_DIR}/tests/core_test.cpp"
-    "${HOSTNUMERICS_SOURCE_DIR}/tests/expected_test.cpp")
+    "${HOSTNUMERICS_SOURCE_DIR}/tests/expected_test.cpp"
+    "${HOSTNUMERICS_SOURCE_DIR}/tests/integer_conversion_test.cpp")
 target_link_libraries(hostnumerics-version-package-test PRIVATE roc::hostnumerics GTest::gtest_main)
 include(GoogleTest)
 gtest_discover_tests(
