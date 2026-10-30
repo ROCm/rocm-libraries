@@ -262,6 +262,7 @@ namespace TensileLite
                 // Optional so older logic files that omit the field deserialize
                 // as false (no per-tile extra-iters capability).
                 iot::mapOptional(io, "perTileExtraIters", s.perTileExtraIters);
+                iot::mapOptional(io, "occupancyProbe", s.occupancyProbe);
                 iot::mapRequired(io, "useUniversalArgs", s.useUniversalArgs);
                 iot::mapRequired(io, "useSFC", s.useSFC);
             }
@@ -312,8 +313,10 @@ namespace TensileLite
                 iot::mapOptional(io, "f32XdlMathOp", s.f32XdlMathOp);
                 iot::mapOptional(io, "supportDeviceUserArguments", s.supportDeviceUserArguments);
                 iot::mapOptional(io, "mxBlockA", s.mxBlockA);
+                iot::mapOptional(io, "mxBlockFreeA", s.mxBlockFreeA);
                 iot::mapOptional(io, "mxTypeA", s.mxTypeA);
                 iot::mapOptional(io, "mxBlockB", s.mxBlockB);
+                iot::mapOptional(io, "mxBlockFreeB", s.mxBlockFreeB);
                 iot::mapOptional(io, "mxTypeB", s.mxTypeB);
                 iot::mapOptional(io, "swizzleTensorA", s.swizzleTensorA);
                 iot::mapOptional(io, "swizzleTensorB", s.swizzleTensorB);
