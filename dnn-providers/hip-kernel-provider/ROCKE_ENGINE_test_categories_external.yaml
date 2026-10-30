@@ -3,7 +3,7 @@
 #
 # rocKE CTest Categories (RFC0010) for pre-registered (non-GTest) CTest tests.
 #
-# rocke/platform/tests/CMakeLists.txt (C++ smoke binaries) and
+# rocke/platform/tests/cmake/*.cmake (C++ smoke binaries) and
 # rocke/platform/CMakeLists.txt (Python import/golden/pytest checks) register
 # these tests directly via add_test(), not through a GTest binary categorized
 # by a shared YAML (rocKE's C++ client API and its GTest binaries were
@@ -11,8 +11,8 @@
 # Without an entry here they carry no quick/standard/comprehensive/full
 # label: the install-tree copy only has a hardcoded literal "quick" label
 # baked in by rocke/platform/CMakeLists.txt (nothing gives it
-# standard/comprehensive/full), and the build-tree copy
-# (rocke/platform/tests/CMakeLists.txt) has no tier label at all. Either way
+# standard/comprehensive/full), and the build-tree copies registered by
+# rocke/platform/tests/cmake/*.cmake have no tier label at all. Either way
 # they silently drop out of `ctest -L <tier>` selection, which is how
 # TheRock CI's per-tier test_hipkernelprovider.py invocation runs these
 # suites.
