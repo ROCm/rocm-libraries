@@ -3,6 +3,8 @@
 # Single-wave TDM kernels (one 32-thread wave per workgroup):
 #  - HalfPLR with a K tail: the tail loop and the stagger removal read the
 #    global-read increments after the unrolled loop.
+#  - StreamK with DepthU == MatrixInstK (no cross-iteration local-read prefetch):
+#    the unrolled loop has to wait for the tensor load issued one trip earlier.
 #  - ClusterDim [2, 2] StreamK HalfPLR: the increments are assembler constants.
 # Loaded by unit/test_tdm_single_wave_codegen.py as well as common tests.
 TestParameters:
@@ -53,7 +55,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
         - HalfPLR: [0, 1]
-        - DepthU: [64]
+        - DepthU: [32, 64]
         - WavefrontSize: [32]
         - ScheduleIterAlg: [4]
         - SourceSwap: [false]
