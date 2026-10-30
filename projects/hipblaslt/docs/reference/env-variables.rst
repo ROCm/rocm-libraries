@@ -103,7 +103,7 @@ choice untouched, then dispatches each of the top ``HIPBLASLT_TUNING_MAX_CANDIDA
 ``HIPBLASLT_TUNING_HOT_ITERS`` times, timing each with a HIP event pair that is read back on a
 later visit to the same problem, and pins the fastest for every call after that. A shape the cache
 file already serves is replayed from the cache, not explored. While a shape is being explored, its
-calls take a lock shared by the whole process, so calls from several threads that are exploring at
+calls take a process-wide lock, so calls from several threads that are exploring at
 the same time run that part one at a time. The call that pins a winner also appends it to the cache
 file before it returns.
 

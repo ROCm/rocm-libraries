@@ -553,10 +553,10 @@ namespace rocblaslt
 
         // The remainder require m_mutex, held shared where they only read and
         // exclusively where they mutate state or the event pool.
-        void  registerProblem(size_t                  problemKey,
-                              size_t                  problem,
-                              ProblemState&           state,
-                              const std::vector<int>& rankedSolutionIndices);
+        void registerProblem(size_t                  problemKey,
+                             size_t                  problem,
+                             ProblemState&           state,
+                             const std::vector<int>& rankedSolutionIndices);
         // What readPair() finds: the GPU has not reached the stop yet, the
         // pair holds an accepted sample, or it holds nothing a launch is known
         // to have recorded.
@@ -569,17 +569,17 @@ namespace rocblaslt
 
         PairReading readPair(const PendingMeasurement& pending, float& milliseconds) const;
         void        reclaimFinishedPairs(int device, size_t requester);
-        int   nextCandidate(const ProblemState& state) const;
-        int   measurableCandidate(const ProblemState& state,
-                                  size_t              problemKey,
-                                  int                 solutionIndex) const;
-        int   inFlightCap(const ProblemState& state) const;
-        int   visitBudget(const ProblemState& state) const;
-        int   abandonBudget(const ProblemState& state) const;
-        float score(const std::vector<float>& samples) const;
-        void  resolve(size_t problemKey, ProblemState& state);
-        void  releaseExploration(ProblemState& state);
-        void  publishResolution(size_t problemKey, const ProblemState& state);
+        int         nextCandidate(const ProblemState& state) const;
+        int         measurableCandidate(const ProblemState& state,
+                                        size_t              problemKey,
+                                        int                 solutionIndex) const;
+        int         inFlightCap(const ProblemState& state) const;
+        int         visitBudget(const ProblemState& state) const;
+        int         abandonBudget(const ProblemState& state) const;
+        float       score(const std::vector<float>& samples) const;
+        void        resolve(size_t problemKey, ProblemState& state);
+        void        releaseExploration(ProblemState& state);
+        void        publishResolution(size_t problemKey, const ProblemState& state);
         // What acquireEvents() came back with. AtCap is the device holding
         // livePairCap() pairs with every one still in flight; Failed is HIP
         // refusing to create an event or report the device.
@@ -592,15 +592,15 @@ namespace rocblaslt
 
         Acquired acquireEvents(
             hipStream_t stream, hipEvent_t& start, hipEvent_t& stop, int& device, size_t requester);
-        void  recycleEvents(hipEvent_t start, hipEvent_t stop, int device);
-        void  retireEvents(hipEvent_t start, hipEvent_t stop, int device);
+        void recycleEvents(hipEvent_t start, hipEvent_t stop, int device);
+        void retireEvents(hipEvent_t start, hipEvent_t stop, int device);
 
-        bool m_enabled   = false;
-        int  m_topK      = 0;
-        int  m_repeats   = 0;
-        int  m_coldCalls = 0;
+        bool m_enabled     = false;
+        int  m_topK        = 0;
+        int  m_repeats     = 0;
+        int  m_coldCalls   = 0;
         int  m_livePairCap = 1;
-        bool m_verbose   = false;
+        bool m_verbose     = false;
 
         // Source of ProblemState::m_registration. Never reset, so an offer left
         // on a thread before reloadForTest() cannot match a later registration.

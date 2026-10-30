@@ -75,8 +75,8 @@ namespace rocblaslt
     {
         const OnlineTunerConfig config = onlineTunerConfig();
 
-        m_topK      = std::max(config.topK, 0);
-        m_repeats   = std::max(config.repeats, 1);
+        m_topK        = std::max(config.topK, 0);
+        m_repeats     = std::max(config.repeats, 1);
         m_coldCalls   = std::max(config.coldCalls, 0);
         m_livePairCap = std::max(config.livePairCap, 1);
         m_verbose     = config.verbose;
@@ -356,8 +356,12 @@ namespace rocblaslt
     // not leave an error in the thread's HIP state. Every pair it reads has
     // been recorded, so hipEventElapsedTime does not fail with
     // hipErrorInvalidHandle, and hipErrorNotReady does not stick. Any other
-    // error is cleared, but only when the thread had none before the call: one
-    // that was already there is the caller's.
+    // error from hipEventElapsedTime is cleared, but only when the thread had
+    // none before the call: one that was already there is the caller's. An
+    // error from hipEventQuery other than hipErrorNotReady is deliberately
+    // left alone, and the pair stays outstanding: with the capture mode
+    // relaxed, only a device fault can cause one, and that is the caller's to
+    // see.
     //
     // HIP refuses hipEventQuery while a global-mode stream capture is in
     // progress anywhere in the process, and the refusal invalidates that
@@ -452,6 +456,9 @@ namespace rocblaslt
             {
                 const PendingMeasurement pending = state.m_pending[i];
 
+                // The m_launched test is defence in depth here: an unmarked
+                // pair reads as a sample only once both of its records have
+                // landed, and pooling it then is harmless.
                 float milliseconds = 0.0f;
                 if(pending.m_device != device || !pending.m_launched
                    || readPair(pending, milliseconds) != PairReading::Sample)
@@ -559,14 +566,17 @@ namespace rocblaslt
         // no lock.
         t_offer.m_candidate = -1;
 
-        state.m_pending.push_back({start, stop, candidate, device});
-        ++state.m_issued[candidate];
-
+        // Listed before the entry is added: the append can throw, and an entry
+        // added before it would never be marked launched. m_pending is
+        // reserved, so adding the entry cannot throw.
         if(!state.m_listed)
         {
-            state.m_listed = true;
             m_holders.push_back(problemKey);
+            state.m_listed = true;
         }
+
+        state.m_pending.push_back({start, stop, candidate, device});
+        ++state.m_issued[candidate];
 
         return true;
     }

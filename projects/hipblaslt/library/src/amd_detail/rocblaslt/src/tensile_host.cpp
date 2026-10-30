@@ -5748,13 +5748,12 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // finished launches and beginMeasurement() reads nothing. While a
         // problem is exploring, both take the tuner's process-wide lock
         // exclusively, so concurrent exploring calls serialise on it.
-        auto&        onlineTuner  = rocblaslt::OnlineTuner::getInstance();
-        const bool   onlineTuning
+        auto&      onlineTuner = rocblaslt::OnlineTuner::getInstance();
+        const bool onlineTuning
             = onlineTuner.enabled() && !callerSuppliedAlgo && tuningCacheKeyable(prob);
-        const size_t onlineKey
-            = !onlineTuning           ? 0
-              : data->onlineTuningKey ? *data->onlineTuningKey
-                                      : onlineTuningProblemKey(data->problem);
+        const size_t onlineKey = !onlineTuning           ? 0
+                                 : data->onlineTuningKey ? *data->onlineTuningKey
+                                                         : onlineTuningProblemKey(data->problem);
 
         if(onlineTuning)
             onlineTuner.harvestPending(onlineKey);
