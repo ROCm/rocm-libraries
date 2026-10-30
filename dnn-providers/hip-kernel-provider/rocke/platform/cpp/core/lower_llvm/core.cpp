@@ -447,8 +447,8 @@ const char* rocke_ll_fresh(rocke_lower_t* L, const char* hint)
 /* Intrinsic need-tracking (Python _need / self._decls)                   */
 /* ====================================================================== */
 
-/* Resolve a decl key to its declaration text: dyn_decls override, then the
- * flavor override table (LLVM22), then the base table. NULL if unknown. */
+/* Resolve a decl key to its declaration text: dyn_decls first, then the
+ * flavor's resolved table (rocke_ll_decl_text). NULL if unknown. */
 static const char* ll_resolve_decl(rocke_lower_t* L, const char* key)
 {
     if(!L || !key)
@@ -462,25 +462,7 @@ static const char* ll_resolve_decl(rocke_lower_t* L, const char* key)
             return L->dyn_decls.data[i].decl;
         }
     }
-    {
-        int novr = 0;
-        const rocke_ll_decl_t* ovr = rocke_ll_flavor_overrides(L->flavor, &novr);
-        for(int i = 0; i < novr; i++)
-        {
-            if(strcmp(ovr[i].key, key) == 0)
-            {
-                return ovr[i].decl;
-            }
-        }
-    }
-    for(int i = 0; i < ROCKE_LL_INTRINSIC_DECLS_COUNT; i++)
-    {
-        if(strcmp(ROCKE_LL_INTRINSIC_DECLS[i].key, key) == 0)
-        {
-            return ROCKE_LL_INTRINSIC_DECLS[i].decl;
-        }
-    }
-    return NULL;
+    return rocke_ll_decl_text(L->flavor, key);
 }
 
 static bool ll_need_has(const rocke_lower_t* L, const char* key)
@@ -2018,47 +2000,18 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
         rocke_strbuf_append(out, "\n");
     }
 
-    /* Needed intrinsic declarations, in canonical TABLE order (then dynamic
-     * decls). This mirrors finalize iterating self._decls in insertion order.
-     *
-     * Python builds self._decls as dict(_INTRINSIC_DECLS) then .update(
-     * _INTRINSIC_DECLS_LLVM22_OVERRIDES) for the LLVM22 flavor. dict.update
-     * REPLACES the value text for an existing key but PRESERVES that key's
-     * original insertion position. So we must iterate the base table in order
-     * and, per needed key, emit the override text when the flavor is LLVM22 and
-     * the key has an override -- NOT emit all overrides in a separate leading
-     * loop (which would float overridden keys, e.g. make.buffer.rsrc, to the
-     * front of the declare block). */
+    /* Needed intrinsic declarations, in the flavor's resolved table order
+     * (then dynamic decls). This mirrors finalize iterating self._decls in
+     * insertion order: _decls_for_flavor only replaces the text of base keys,
+     * so every key keeps its base-table position and takes the text the
+     * flavor resolves (rocke_ll_decl_at). */
     bool any_need = false;
-    int novr = 0;
-    const rocke_ll_decl_t* ovr = rocke_ll_flavor_overrides(L->flavor, &novr);
     for(int i = 0; i < ROCKE_LL_INTRINSIC_DECLS_COUNT; i++)
     {
-        const char* k = ROCKE_LL_INTRINSIC_DECLS[i].key;
-        const char* decl_text = ROCKE_LL_INTRINSIC_DECLS[i].decl;
-        for(int j = 0; j < novr; j++)
+        rocke_ll_decl_t d = rocke_ll_decl_at(L->flavor, i);
+        if(ll_need_has(L, d.key))
         {
-            if(strcmp(ovr[j].key, k) == 0)
-            {
-                decl_text = ovr[j].decl;
-                break;
-            }
-        }
-        if(ll_need_has(L, k))
-        {
-            rocke_strbuf_appendf(out, "%s\n", decl_text);
-            any_need = true;
-        }
-    }
-    /* dict.update appends override-only keys after the base keys. */
-    for(int i = 0; i < novr; ++i)
-    {
-        bool in_base = false;
-        for(int j = 0; j < ROCKE_LL_INTRINSIC_DECLS_COUNT; ++j)
-            in_base |= strcmp(ovr[i].key, ROCKE_LL_INTRINSIC_DECLS[j].key) == 0;
-        if(!in_base && ll_need_has(L, ovr[i].key))
-        {
-            rocke_strbuf_appendf(out, "%s\n", ovr[i].decl);
+            rocke_strbuf_appendf(out, "%s\n", d.decl);
             any_need = true;
         }
     }

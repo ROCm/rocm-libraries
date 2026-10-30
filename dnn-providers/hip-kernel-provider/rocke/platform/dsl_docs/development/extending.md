@@ -98,7 +98,7 @@ Two things to add:
    )
    ```
 
-   If the LLVM 21+ toolchain takes a different signature for the same intrinsic, add a matching entry to `_INTRINSIC_DECLS_LLVM22_OVERRIDES` and branch on `self._flavor` inside the `_op_*` handler. `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` are worked examples.
+   If the LLVM 21+ toolchain takes a different signature for the same intrinsic, add a matching entry to `_INTRINSIC_DECLS_LLVM22_OVERRIDES` and branch on `self._flavor` inside the `_op_*` handler. `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` are worked examples. Newer declaration ABI generations inherit older generations' overrides (`_decls_for_flavor` resolves the chain in `_LlvmDeclarationAbi` order), so an entry goes only in the table of the generation where the signature changed; mirror it in the C++ array of the same generation (`cpp/core/lower_llvm/data.cpp`).
 
 2. Add an `_op_<dotted_name>` handler in `_Lowerer`. For `math.my_op`:
 
