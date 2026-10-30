@@ -1663,6 +1663,13 @@ namespace hipblaslt_ext
                       hipblasLtMatrixLayout_t Cdesc,
                       hipblasLtMatrixLayout_t Ddesc)
     {
+        if(refuse_row_order(__func__,
+                            (rocblaslt_matrix_layout)Adesc,
+                            (rocblaslt_matrix_layout)Bdesc,
+                            (rocblaslt_matrix_layout)Cdesc,
+                            (rocblaslt_matrix_layout)Ddesc)
+           != HIPBLAS_STATUS_SUCCESS)
+            return -1;
         rocblaslt::Debug::Instance().markerStart("hipblasLtMatmulIsTunedCpp");
         auto status = rocblaslt_matmul_is_tuned((rocblaslt_handle)handle,
                                                 (rocblaslt_matmul_desc)matmulDesc,

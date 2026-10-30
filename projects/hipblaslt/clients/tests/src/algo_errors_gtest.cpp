@@ -378,6 +378,14 @@ namespace
                                                          &supportedCount),
                       expected)
                 << which;
+
+            // 1 is tuned and 0 is untuned; -1 is a problem the library cannot answer for.
+            const int tuned
+                = hipblaslt_ext::matmulIsTuned(handle, desc, mats[0], mats[1], mats[2], mats[3]);
+            if(rowIndex < 0)
+                EXPECT_GE(tuned, 0) << which;
+            else
+                EXPECT_EQ(tuned, -1) << which;
         }
 
         // GemmProblemType carries an order for A and B only.

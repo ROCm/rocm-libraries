@@ -1233,6 +1233,7 @@ namespace hipblaslt_ext
      *  \retval HIPBLAS_STATUS_SUCCESS           If the query was successful. The problem is
      * supported by the algorithm.
      * results. \retval HIPBLAS_STATUS_INVALID_VALUE     The problem is not supported.
+     *  \retval HIPBLAS_STATUS_NOT_SUPPORTED     A, B, C, or D uses ``HIPBLASLT_ORDER_ROW``.
      */
     HIPBLASLT_EXPORT
     hipblasStatus_t matmulIsAlgoSupported(hipblasLtHandle_t       handle,
@@ -1261,6 +1262,13 @@ namespace hipblaslt_ext
     HIPBLASLT_EXPORT
     hipblasStatus_t copyMatmul(hipblasLtMatmulDesc_t src, hipblasLtMatmulDesc_t dst);
 
+    /*! \ingroup library_module
+     *  \brief Check whether the problem has a tuned solution in the loaded library.
+     *
+     *  \retval 1  The best solution for the problem matches a tuned size exactly.
+     *  \retval 0  The problem is valid, but no tuned size matches it exactly.
+     *  \retval -1 An argument is null, or A, B, C, or D uses ``HIPBLASLT_ORDER_ROW``.
+     */
     HIPBLASLT_EXPORT
     int matmulIsTuned(hipblasLtHandle_t       handle,
                       hipblasLtMatmulDesc_t   matmulDesc,
@@ -1297,6 +1305,7 @@ namespace hipblaslt_ext
      *
      *  \retval HIPBLAS_STATUS_SUCCESS If the operation completed successfully.
      *  \retval HIPBLAS_STATUS_INVALID_VALUE If the algorithm is not supported.
+     *  \retval HIPBLAS_STATUS_NOT_SUPPORTED If A, B, C, or D uses ``HIPBLASLT_ORDER_ROW``.
      */
     HIPBLASLT_EXPORT
     hipblasStatus_t isSolutionSupported(hipblasLtMatmulHeuristicResult_t* heuristicResultsArray,
