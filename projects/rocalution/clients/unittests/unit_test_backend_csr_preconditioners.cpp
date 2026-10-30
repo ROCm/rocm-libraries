@@ -1011,10 +1011,8 @@ TYPED_TEST(backend_csr_preconditioners, ilut_factorize_with_a_row_limit_beyond_t
 
     factorize(ref.n + 1);
     factorize((1 << 30) - 1);
-
-    KNOWN_BUG("2 * maxrow overflows for maxrow >= 2^30, and the reallocation ends the program");
-    expect_in_child([&] { factorize(1 << 30); });
-    expect_in_child([&] { factorize(std::numeric_limits<int>::max()); });
+    factorize(1 << 30);
+    factorize(std::numeric_limits<int>::max());
 }
 
 // Every connected component is numbered from its first unnumbered node, level by

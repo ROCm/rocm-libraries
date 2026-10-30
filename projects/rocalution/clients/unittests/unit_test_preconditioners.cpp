@@ -1463,10 +1463,6 @@ TYPED_TEST(preconditioners, iterative_sgs_reaches_the_direct_solve)
     p.Build();
     p.ResetOperator(*A);
 
-    if(this->backend() == Backend::Accelerator)
-    {
-        KNOWN_BUG("after ItLAnalyse and ItUAnalyse of one HIP matrix, ItUSolve returns zeros");
-    }
     expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), loose_tol<T>(1e-11));
 }
 

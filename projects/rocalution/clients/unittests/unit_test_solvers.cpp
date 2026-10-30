@@ -1573,10 +1573,6 @@ TYPED_TEST(solvers, every_solver_reaches_the_solution_with_each_residual_norm)
     using T     = typename TypeParam::value_type;
     const int n = 16;
 
-    // The Linf norm uses Amax, which reads past the end of the vector on the accelerator
-    const bool amax_works = this->backend() == Backend::Host;
-
-    std::vector<std::pair<Problem<T>, bool>> linf_cases;
     for(const Problem<T>& p : problems<T>(n))
     {
         const Vec<T> x       = dense_solve(dense(p.A), rhs<T>(n));
@@ -1593,11 +1589,6 @@ TYPED_TEST(solvers, every_solver_reaches_the_solution_with_each_residual_norm)
                 {
                     continue;
                 }
-                if(norm_type == 3 && !amax_works)
-                {
-                    linf_cases.push_back({p, precond});
-                    continue;
-                }
                 SCOPED_TRACE(trace(p.method, precond, "norm " + std::to_string(norm_type)));
                 const Outcome<T> out = converge(this->backend(), p, precond, norm_type, n);
                 EXPECT_TRUE(out.status == 1 || out.status == 2) << "status " << out.status;
@@ -1605,26 +1596,6 @@ TYPED_TEST(solvers, every_solver_reaches_the_solution_with_each_residual_norm)
             }
         }
     }
-
-    if(linf_cases.empty())
-    {
-        return;
-    }
-    KNOWN_BUG("Amax on the accelerator returns the one-based index and reads past the end");
-    expect_completes([&] {
-        for(const auto& c : linf_cases)
-        {
-            const Outcome<T> out = converge(this->backend(), c.first, c.second, 3, n);
-            if((out.status != 1 && out.status != 2)
-               || !near(out.x,
-                        dense_solve(dense(c.first.A), rhs<T>(n)),
-                        converged_tol(c.first, c.second, 3, n)))
-            {
-                return false;
-            }
-        }
-        return true;
-    });
 }
 
 namespace
@@ -1848,30 +1819,13 @@ TYPED_TEST(solvers, current_residual_is_measured_in_the_chosen_norm)
     }
 
     SCOPED_TRACE("norm 3");
-    auto linf = [&](int64_t* found) {
-        CG<T> solver;
-        solver.Init(0.0, 0.0, 1e8, 3);
-        solver.SetResidualNorm(3);
-        set_up(solver, method<CG<T>>("CG"), *A, nullptr);
-        const Outcome<T> out = solve(solver, *A, b, x0);
-        *found               = solver.GetAmaxResidualIndex();
-        return out.residual;
-    };
-    if(this->backend() == Backend::Host)
-    {
-        int64_t found    = -1;
-        double  residual = linf(&found);
-        EXPECT_NEAR(residual, norm_of_type(r, 3), loose_tol<T>(1e-10) * norm_of_type(r, 3));
-        EXPECT_EQ(found, index);
-        return;
-    }
-    KNOWN_BUG("Amax on the accelerator returns the one-based index and reads past the end");
-    expect_completes([&] {
-        int64_t found    = -1;
-        double  residual = linf(&found);
-        return std::abs(residual - norm_of_type(r, 3)) <= loose_tol<T>(1e-10) * norm_of_type(r, 3)
-               && found == index;
-    });
+    CG<T> solver;
+    solver.Init(0.0, 0.0, 1e8, 3);
+    solver.SetResidualNorm(3);
+    set_up(solver, method<CG<T>>("CG"), *A, nullptr);
+    const Outcome<T> out = solve(solver, *A, b, x0);
+    EXPECT_NEAR(out.residual, norm_of_type(r, 3), loose_tol<T>(1e-10) * norm_of_type(r, 3));
+    EXPECT_EQ(solver.GetAmaxResidualIndex(), index);
 }
 
 TYPED_TEST(solvers, gmres_and_fgmres_switch_to_the_euclidean_norm)

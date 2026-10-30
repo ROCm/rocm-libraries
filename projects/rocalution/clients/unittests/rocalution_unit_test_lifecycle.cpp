@@ -164,11 +164,6 @@ TEST_F(lifecycle, restart_with_accelerator_disabled)
     rocalution::disable_accelerator_rocalution(true);
     init_and_capture();
 
-    if(hip_device_present())
-    {
-        KNOWN_BUG("neither stop_rocalution() nor the init resets the accelerator flag");
-    }
-
     EXPECT_FALSE(rocalution::_rocalution_available_accelerator());
 }
 
@@ -216,11 +211,6 @@ TEST_F(lifecycle, without_an_accelerator_moves_keep_matrices_and_vectors_on_the_
     rocalution::disable_accelerator_rocalution(true);
     init_and_capture();
 
-    // Only after an earlier init in the same process
-    if(rocalution::_rocalution_available_accelerator())
-    {
-        KNOWN_BUG("neither stop_rocalution() nor the init resets the accelerator flag");
-    }
     ASSERT_FALSE(rocalution::_rocalution_available_accelerator());
 
     const rocalution_unit::Tridiagonal<double> ref(5);

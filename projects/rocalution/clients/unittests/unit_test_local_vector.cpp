@@ -826,34 +826,19 @@ TYPED_TEST(local_vector_abs, amax_returns_the_index_and_the_largest_magnitude)
     EXPECT_EQ(this->vec(std::vector<T>())->Amax(value), -1);
     EXPECT_EQ(value, T(0));
 
-    const Backend backend = this->backend();
-    auto          checks  = [backend] {
-        for(int position : {0, 5, 11})
+    for(int position : {0, 5, 11})
+    {
+        for(int sign : {1, -1})
         {
-            for(int sign : {1, -1})
-            {
-                SCOPED_TRACE("at " + std::to_string(position) + " with sign "
-                             + std::to_string(sign));
+            SCOPED_TRACE("at " + std::to_string(position) + " with sign " + std::to_string(sign));
 
-                std::vector<T> a = x<T>();
-                a[position]      = from_int<T>(sign * 20);
+            std::vector<T> a = x<T>();
+            a[position]      = from_int<T>(sign * 20);
 
-                T found = T(0);
-                EXPECT_EQ(make_local_vector(backend, a)->Amax(found), position);
-                expect_near(found, magnitude(a[position]));
-            }
+            T found = T(0);
+            EXPECT_EQ(this->vec(a)->Amax(found), position);
+            expect_near(found, magnitude(a[position]));
         }
-    };
-
-    if(backend == Backend::Accelerator)
-    {
-        KNOWN_BUG("it returns the one-based index of rocBLAS and the value after the maximum; "
-                  "with the maximum last it reads past the end and exits the process");
-        expect_in_child(checks);
-    }
-    else
-    {
-        checks();
     }
 }
 

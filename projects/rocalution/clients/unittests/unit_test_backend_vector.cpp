@@ -367,15 +367,7 @@ TYPED_TEST(backend_vector, amax_returns_the_zero_based_index_and_the_largest_mag
         }
     };
 
-    if(TypeParam::backend == Backend::Host)
-    {
-        equal_magnitude_checks();
-        position_checks();
-        return;
-    }
-
-    // Behind the complex stub, the position checks also have the bug of the real types below
-    if(is_complex_v<T>)
+    if(TypeParam::backend == Backend::Accelerator && is_complex_v<T>)
     {
         KNOWN_BUG("the complex rocblasTamax is a FATAL_ERROR stub");
         expect_in_child([&] {
@@ -386,9 +378,7 @@ TYPED_TEST(backend_vector, amax_returns_the_zero_based_index_and_the_largest_mag
     }
 
     equal_magnitude_checks();
-    KNOWN_BUG("it returns the one-based index of rocBLAS and the value after the maximum; with "
-              "the maximum last it reads past the end and exits the process");
-    expect_in_child(position_checks);
+    position_checks();
 }
 
 // Both return the last element of the result. In place the source is the vector itself.
