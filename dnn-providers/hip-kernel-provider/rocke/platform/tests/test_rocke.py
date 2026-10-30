@@ -4102,6 +4102,55 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                     )
                     self.assertIn(self._DPP_CALL.format(0x160 | mask), ll)
 
+    # ---- vop2_f32_dpp_xor (softmax row-reduce step) ----
+    def test_vop2_f32_dpp_xor_is_update_dpp_then_fmax_or_fadd(self):
+        """One reduce step is the in-row ``update.dpp`` shuffle (``row_xmask``
+        on gfx1250) followed by ``maxnum`` / ``fadd`` -- never inline asm,
+        which LLVM's gfx1250 WMMA co-execution hazard check cannot see. The
+        shuffled value is the first operand: DPP applies to ``src0``, so that
+        is the operand GCNDPPCombine folds into the fused DPP instruction."""
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        combine = {
+            "v_max_f32": r"call float @llvm\.maxnum\.f32\(float {s}, float ",
+            "v_add_f32": r"= fadd float {s}, ",
+        }
+        for mnemonic, pattern in combine.items():
+            for mask in (1, 2, 4, 8):
+                with self.subTest(mnemonic=mnemonic, mask=mask):
+                    # Assert on the Python lowering first: _lower would skip the
+                    # subtest before these checks when the C++ engine is absent.
+                    b = self._builder(f"vop2dpp_{mnemonic}_{mask}")
+                    b.vop2_f32_dpp_xor(b.const_f32(1.0), mask, mnemonic)
+                    ll = _lower_kernel_to_llvm_python(b.kernel, arch="gfx1250")
+                    self.assertNotIn(" asm ", ll)
+                    self.assertNotIn("_dpp $0", ll)
+                    calls = re.findall(
+                        r"(%[\w.]+) = call i32 @llvm\.amdgcn\.update\.dpp\.i32\("
+                        r"i32 [^,]+, i32 [^,]+, i32 (\d+), i32 15, i32 15, i1 true\)",
+                        ll,
+                    )
+                    self.assertEqual(len(calls), 1, ll)
+                    dpp, ctrl = calls[0]
+                    self.assertEqual(int(ctrl), 0x160 | mask)
+                    shuffled = re.search(
+                        rf"(%[\w.]+) = bitcast i32 {re.escape(dpp)} to float", ll
+                    )
+                    self.assertIsNotNone(shuffled, ll)
+                    self.assertRegex(ll, pattern.format(s=re.escape(shuffled.group(1))))
+                    _assert_ir_assembles(self, ll, b.kernel.name)
+                    _assert_engines_agree(self, b.kernel, ll, arch="gfx1250")
+
+    def test_vop2_f32_dpp_xor_rejects_bad_inputs(self):
+        b = self._builder("vop2dpp_bad")
+        with self.assertRaisesRegex(ValueError, "requires f32 data"):
+            b.vop2_f32_dpp_xor(b.const_i32(1), 1, "v_add_f32")
+        for mask in (0, 16):
+            with self.assertRaisesRegex(ValueError, "xor_mask must be 1..15"):
+                b.vop2_f32_dpp_xor(b.const_f32(1.0), mask, "v_add_f32")
+        with self.assertRaisesRegex(ValueError, "must be v_max_f32/v_add_f32"):
+            b.vop2_f32_dpp_xor(b.const_f32(1.0), 1, "v_min_f32")
+
     def test_warp_shuffle_xor_dpp_emits_hip_builtin(self):
         from rocke.core.ir import IRBuilder
         from rocke.core.lower_hip import lower_kernel_to_hip
@@ -6926,13 +6975,17 @@ class TestLauncherBind(unittest.TestCase):
             return b"\x01\x02"
 
         class FakeRuntime:
-            def prepare_launch(self, fn, grid, block, args, *, shared_bytes, stream):
+            def prepare_launch(
+                self, fn, grid, block, args, *, shared_bytes, stream, cluster=None
+            ):
                 self.prepared = (fn, grid, block, args, shared_bytes, stream)
+                self.cluster = cluster
                 return lambda: enqueued.append(1)
 
         launcher = L.KernelLauncher.__new__(L.KernelLauncher)
         launcher._fn = "fn"
         launcher._packer = packer
+        launcher._cluster_dims = None
         rt = FakeRuntime()
         cfg = L.LaunchConfig(grid=(2, 1, 1), block=(64, 1, 1), stream=7)
         with mock.patch.object(L, "_runtime", return_value=rt):
@@ -6943,6 +6996,13 @@ class TestLauncherBind(unittest.TestCase):
         self.assertEqual(packed, [{"a": 1}])
         self.assertEqual(len(enqueued), 3)
         self.assertEqual(rt.prepared, ("fn", (2, 1, 1), (64, 1, 1), b"\x01\x02", 0, 7))
+        self.assertIsNone(rt.cluster)
+
+        # A clustered kernel keeps its cluster shape on the prepared launch.
+        launcher._cluster_dims = (1, 1, 2)
+        with mock.patch.object(L, "_runtime", return_value=rt):
+            launcher.bind({"a": 1}, config=cfg)
+        self.assertEqual(rt.cluster, (1, 1, 2))
 
 
 class TestLauncherFenceContract(unittest.TestCase):

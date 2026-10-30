@@ -108,7 +108,7 @@ You can save a built execution plan to bytes and load it later, in the same proc
 
 ### Supported Engines
 
-Only kernel ingestor engines support saving and loading plans, and only when every kernel of the engine is a kpack code object. Every dispatch handler of the engine must also support saving. The kernel ingestor needs a build with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` (off by default). A supported engine reports the behavior note `SUPPORTS_EXECUTION_PLAN_SERIALIZATION`. To check the engine of a built plan:
+Only kernel ingestor engines support saving and loading plans, and only when every kernel of the engine is a single-launch kpack code object. A multi-launch kernel cannot be saved yet. Every dispatch handler of the engine must also support saving. The kernel ingestor needs a build with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` (off by default). A supported engine reports the behavior note `SUPPORTS_EXECUTION_PLAN_SERIALIZATION`. To check the engine of a built plan:
 
 ```cpp
 #include <algorithm>
@@ -212,5 +212,4 @@ policies are maintained in hipDNN:
 
 ## License
 
-Copyright © Advanced Micro Devices, Inc., or its affiliates.
-SPDX-License-Identifier: MIT
+This project is licensed under the terms described in [LICENSE](./LICENSE).
