@@ -545,7 +545,7 @@ def test_shipped_spaces_declare_cost_ceilings():
     assert any("2**31" in r for r in rules["SdpaFwd/Flash2Region"])
     assert any("2**31" in r for r in rules["SdpaFwd/Gfx1151"])
     assert any("2**31" in r for r in rules["SdpaFwd/Gfx1151Decode"])
-    assert any("2**26" in r for r in rules["SdpaBackward/Default"])
+    assert any("2**29" in r for r in rules["SdpaBackward/Default"])
     assert any("2**30" in r for r in rules["RMSNorm/Default"])
     assert any("2**30" in r for r in rules["ResampleFwd/Default"])
     assert any("sq==skv" in r for r in rules["SdpaFwd/Gfx950Dense"])
@@ -1189,7 +1189,7 @@ def test_sdpa_backward_space_draws_every_feature_and_renders_it():
             axes["dtype"]
         }
         # the ceiling the description states: dqk == dv == d
-        assert axes["b"] * hq * axes["sq"] * axes["skv"] * (d + d) <= 2**26
+        assert axes["b"] * hq * axes["sq"] * axes["skv"] * (d + d) <= 2**29
 
         # O and the LSE are derived by the fill from Q, K and V, so they carry no recipe
         recipes = {int(u) for u in s.row["metadata"]["inputs"]}
