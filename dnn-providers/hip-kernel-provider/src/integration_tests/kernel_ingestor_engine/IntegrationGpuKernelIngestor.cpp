@@ -736,8 +736,11 @@ class IntegrationGpuKernelIngestorSaveLoad : public IntegrationGpuKernelIngestor
 protected:
     // Builds graph with pinnedEngineId, validates one run and saves the plan in form. Then
     // it destroys graph, loads the plan with a new handle and validates two runs of the
-    // loaded plan. Every run uses the CPU reference of the original graph. Then it checks
-    // that the loaded plan cannot be saved again.
+    // loaded plan. Every run uses the CPU reference of the original graph. Then it saves the
+    // loaded plan again in the same form, destroys the loaded graph, loads the second save
+    // with another new handle, and checks the engine, the workspace size and two runs the
+    // same way. A plan-only second save must equal the first. For a graph-and-plan save, the
+    // loaded and the reloaded graph must save plan bytes equal to the original plan's.
     void roundTripInAFreshHandle(std::shared_ptr<Graph> graph,
                                  int64_t pinnedEngineId,
                                  SaveForm form,
@@ -795,6 +798,21 @@ protected:
                 << "the saved graph holds no execution plan";
         }
 
+        // The plan bytes alone, as the built plan saves them. A graph-and-plan container holds
+        // exactly these bytes as its plan part, and loading a container keeps only that part.
+        std::vector<uint8_t> originalPlanBytes;
+        {
+            auto planSave = graph->to_compiled_plan_binary();
+            ASSERT_EQ(planSave.second.code, ErrorCode::OK) << planSave.second.err_msg;
+            originalPlanBytes = std::move(planSave.first);
+        }
+        const auto expectPlanBytesUnchanged = [&](const Graph& loadedGraph) {
+            auto planSave = loadedGraph.to_compiled_plan_binary();
+            ASSERT_EQ(planSave.second.code, ErrorCode::OK) << planSave.second.err_msg;
+            EXPECT_EQ(planSave.first, originalPlanBytes)
+                << "the plan cut out of the container differs from the original plan bytes";
+        };
+
         int64_t originalWorkspaceSize = 0;
         result = graph->get_workspace_size(originalWorkspaceSize);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -803,34 +821,75 @@ protected:
         graph.reset();
         ASSERT_TRUE(original.expired()) << "another owner keeps the original graph alive";
 
-        const ScopedPluginLogCapture capture(this);
-        ASSERT_NO_FATAL_FAILURE(detail::replaceHandleWithAFreshOne(_handle, _stream));
+        // Loads bytes in a fresh handle, checks that the load created a new provider
+        // container, kept the engine and workspace size, and logged no kernel selection,
+        // then validates two runs against the CPU reference of the original graph.
+        const auto loadCheckAndRun
+            = [&](const std::vector<uint8_t>& bytes, std::shared_ptr<Graph>& loaded) {
+                  const ScopedPluginLogCapture capture(this);
+                  ASSERT_NO_FATAL_FAILURE(detail::replaceHandleWithAFreshOne(_handle, _stream));
 
-        auto loaded = std::make_shared<Graph>();
-        result = detail::loadInForm(*loaded, _handle, saved, form);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+                  loaded = std::make_shared<Graph>();
+                  auto loadResult = detail::loadInForm(*loaded, _handle, bytes, form);
+                  ASSERT_EQ(loadResult.code, ErrorCode::OK) << loadResult.err_msg;
 
-        EXPECT_TRUE(capture.recorder().hasLogContaining(detail::CREATING_CONTAINER_LOG))
-            << "the new handle did not get a new provider container. Captured logs:\n"
-            << capture.recorder().getRecordedLogsAsString();
-        detail::expectNoKernelSelectionLogged(capture.recorder());
+                  EXPECT_TRUE(capture.recorder().hasLogContaining(detail::CREATING_CONTAINER_LOG))
+                      << "the new handle did not get a new provider container. Captured logs:\n"
+                      << capture.recorder().getRecordedLogsAsString();
+                  detail::expectNoKernelSelectionLogged(capture.recorder());
 
-        int64_t loadedEngineId = 0;
-        result = loaded->get_execution_plan_engine_id(loadedEngineId);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        EXPECT_EQ(loadedEngineId, pinnedEngineId);
+                  int64_t loadedEngineId = 0;
+                  loadResult = loaded->get_execution_plan_engine_id(loadedEngineId);
+                  ASSERT_EQ(loadResult.code, ErrorCode::OK) << loadResult.err_msg;
+                  EXPECT_EQ(loadedEngineId, pinnedEngineId);
 
-        int64_t loadedWorkspaceSize = 0;
-        result = loaded->get_workspace_size(loadedWorkspaceSize);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        EXPECT_EQ(loadedWorkspaceSize, originalWorkspaceSize);
+                  int64_t loadedWorkspaceSize = 0;
+                  loadResult = loaded->get_workspace_size(loadedWorkspaceSize);
+                  ASSERT_EQ(loadResult.code, ErrorCode::OK) << loadResult.err_msg;
+                  EXPECT_EQ(loadedWorkspaceSize, originalWorkspaceSize);
 
-        ASSERT_NO_FATAL_FAILURE(executeAndValidate(run, *loaded, _handle));
-        ASSERT_NO_FATAL_FAILURE(executeAndValidate(run, *loaded, _handle));
+                  ASSERT_NO_FATAL_FAILURE(executeAndValidate(run, *loaded, _handle));
+                  ASSERT_NO_FATAL_FAILURE(executeAndValidate(run, *loaded, _handle));
+              };
 
-        const auto resave = detail::saveInForm(*loaded, form);
-        expectPluginRefusal(
-            resave.second, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "loaded from a saved payload");
+        std::shared_ptr<Graph> loaded;
+        ASSERT_NO_FATAL_FAILURE(loadCheckAndRun(saved, loaded));
+
+        // Saving the loaded plan again must succeed. A plan-only save is exactly the bytes
+        // the plan was loaded from. A graph-and-plan save also holds the graph, which is
+        // not compared byte for byte.
+        std::vector<uint8_t> resaved;
+        {
+            auto resave = detail::saveInForm(*loaded, form);
+            ASSERT_EQ(resave.second.code, ErrorCode::OK) << resave.second.err_msg;
+            resaved = std::move(resave.first);
+        }
+        ASSERT_FALSE(resaved.empty());
+        if(form == SaveForm::PLAN_ONLY)
+        {
+            EXPECT_EQ(resaved, saved) << "the second save differs from the bytes loaded";
+        }
+        else
+        {
+            int contents = 0;
+            ASSERT_EQ(hipdnnBackendGetSerializedBinaryContents_ext(
+                          resaved.data(), resaved.size(), &contents),
+                      HIPDNN_STATUS_SUCCESS);
+            ASSERT_NE(contents & HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN, 0)
+                << "the second save holds no execution plan";
+        }
+        if(form == SaveForm::GRAPH_AND_PLAN)
+        {
+            ASSERT_NO_FATAL_FAILURE(expectPlanBytesUnchanged(*loaded));
+        }
+
+        loaded.reset();
+        std::shared_ptr<Graph> reloaded;
+        ASSERT_NO_FATAL_FAILURE(loadCheckAndRun(resaved, reloaded));
+        if(form == SaveForm::GRAPH_AND_PLAN)
+        {
+            ASSERT_NO_FATAL_FAILURE(expectPlanBytesUnchanged(*reloaded));
+        }
     }
 };
 
