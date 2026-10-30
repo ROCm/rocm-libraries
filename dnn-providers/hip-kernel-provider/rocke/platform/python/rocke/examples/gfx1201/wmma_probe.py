@@ -12,12 +12,15 @@ This probe builds that WMMA GEMM and runs ``rocke.run_manifest --verify``
 against the numpy reference ``C = A @ B.T`` with **random (asymmetric)** A/B. A
 row/col swap in the lane map transposes the result and fails verify, so a PASS
 at multiple tile counts uniquely confirms the mapping (an identity×constant
-input cannot distinguish row from col — random input can).
+input cannot distinguish row from col — random input can). Run a non-square
+shape too: a square grid hides a block-to-tile mismatch (M and N tile counts
+are equal, so a swapped launch grid covers the same tiles).
 
 Must run on a gfx1201 device (Navi 48):
 
   PYTHONPATH=python python3 -m rocke.examples.gfx1201.wmma_probe --m 16 --n 16 --k 16
   PYTHONPATH=python python3 -m rocke.examples.gfx1201.wmma_probe --m 64 --n 64 --k 64
+  PYTHONPATH=python python3 -m rocke.examples.gfx1201.wmma_probe --m 32 --n 64 --k 48
 """
 
 from __future__ import annotations
@@ -30,6 +33,23 @@ from pathlib import Path
 
 from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
 from rocke.instances.gfx1201.wmma_gemm import WmmaGemmSpec, build_wmma_gemm
+
+
+def probe_manifest(art, spec: WmmaGemmSpec, m: int, n: int, k: int) -> dict:
+    """Launch manifest for the probe kernel.
+
+    Uses the default ``grid_order`` (``"NM"``: ``block_id.x`` -> N tile), the
+    order :func:`build_wmma_gemm` reads and :func:`wmma_gemm_grid` launches.
+    """
+    return make_gemm_manifest(
+        artifact=art,
+        block_m=16,
+        block_n=16,
+        block_k=16,
+        threads_per_block=spec.block_size,  # 32 (wave32, one wave/block)
+        default_shape=(m, n, k),
+        atoms=["wmma_gfx12_f32_16x16x16_f16"],
+    )
 
 
 def main() -> int:
@@ -65,16 +85,7 @@ def main() -> int:
 
     out = Path(args.output_dir or f"/tmp/wmma_probe_{args.arch}")
     out.mkdir(parents=True, exist_ok=True)
-    manifest = make_gemm_manifest(
-        artifact=art,
-        block_m=16,
-        block_n=16,
-        block_k=16,
-        threads_per_block=spec.block_size,  # 32 (wave32, one wave/block)
-        default_shape=(args.m, args.n, args.k),
-        grid_order="MN",
-        atoms=["wmma_gfx12_f32_16x16x16_f16"],
-    )
+    manifest = probe_manifest(art, spec, args.m, args.n, args.k)
     write_artifact(art, out, manifest)
 
     if args.no_verify:

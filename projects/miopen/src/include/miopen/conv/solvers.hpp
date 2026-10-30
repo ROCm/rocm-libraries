@@ -3350,14 +3350,13 @@ struct PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC : PerformanceConfigAsmIm
     void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
     bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
-    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
-    {
-        return IsValid(problem);
-    }
+    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const;
     bool IsValid(const miopen::conv::ProblemDescription&) const;
     size_t ComputeKernelOccupancy() const;
 
 private:
+    void HeuristicInitIgnoringBatchPadding(const ExecutionContext&,
+                                           const miopen::conv::ProblemDescription&);
     void SetParamsForKSplit(const miopen::conv::ProblemDescription& problem,
                             const size_t& occupancy);
 };
