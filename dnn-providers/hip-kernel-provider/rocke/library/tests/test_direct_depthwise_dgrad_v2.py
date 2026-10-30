@@ -193,6 +193,53 @@ class TestDepthwiseDgradSpecs(unittest.TestCase):
                 self.assertEqual(why, "one padding for both axes (got PAD=1x0)")
                 self.assertIn("pad_w", reason(cls(problem=dense(-2, **shape))))
 
+    def test_stem_wmma_kernels_refuse_per_axis_padding(self):
+        # The stem dgrad WMMA kernels offset columns by PAD too.
+        from kernels.common.conv_dgrad_patch_wmma import (
+            DgradPatchWmmaSpec,
+            dgrad_patch_reason,
+        )
+        from kernels.common.conv_dgrad_smallc_wmma import (
+            DgradSmallcWmmaSpec,
+            dgrad_smallc_reason,
+        )
+
+        def stem(pad_w, KH, S, PAD):
+            return dc.DirectConvProblem(
+                N=2,
+                H=32,
+                W=48,
+                groups=1,
+                cpg=3,
+                kpg=64,
+                KH=KH,
+                KW=KH,
+                PAD=PAD,
+                stride=S,
+                dtype="bf16",
+                pad_w=pad_w,
+            )
+
+        patch = dict(waves_c=3, waves_p=1, tiles_c=1, r_blk=4)
+        smallc = dict(waves_c=1, waves_p=4, tiles_c=2, tiles_p=6, out_h=16, out_w=16)
+        cases = (
+            (DgradPatchWmmaSpec, dgrad_patch_reason, patch, (4, 4, 0)),
+            (DgradSmallcWmmaSpec, dgrad_smallc_reason, smallc, (3, 1, 1)),
+        )
+        for cls, reason, knobs, (KH, S, PAD) in cases:
+            with self.subTest(kernel=cls.__name__):
+                why = {
+                    pad_w: reason(cls(problem=stem(pad_w, KH, S, PAD), **knobs))
+                    for pad_w in (-2, -1, 0, 1)
+                }
+                self.assertIsNone(why[-1])
+                self.assertIsNone(why[PAD])
+                self.assertEqual(
+                    why[1 - PAD],
+                    f"one padding for both axes (got PAD={PAD}x{1 - PAD})",
+                )
+                self.assertIn("pad_w", why[-2])
+
     def test_benchmark_sweep_refuses_per_axis_padding(self):
         # Only --run-from-cache serves a per-axis padding (on the rotated-filter
         # kernel); the uncached sweep would build the row-streaming kernel.

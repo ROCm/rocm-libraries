@@ -24,6 +24,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/instance_conv_dgrad_patch_wmma.h"
+#include "rocke/instance_conv_dgrad_smallc_wmma.h"
 #include "rocke/instance_conv_direct_dgrad_wmma.h"
 #include "rocke/instance_conv_direct_fwd_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
@@ -205,22 +207,25 @@ template <typename Spec, typename Valid>
 static void check_wmma_padding(const char* kernel, Spec spec, Valid is_valid)
 {
     char reason[ERR_CAP];
+    char expected[ERR_CAP];
+    const int pad = spec.problem.PAD;
     spec.problem.pad_w = -1;
     CHECK(is_valid(&spec, "gfx1250", reason, sizeof(reason)),
           "%s refused pad_w=-1: %s",
           kernel,
           reason);
-    spec.problem.pad_w = 1;
+    spec.problem.pad_w = pad;
     CHECK(is_valid(&spec, "gfx1250", reason, sizeof(reason)),
           "%s refused pad_w=PAD: %s",
           kernel,
           reason);
-    spec.problem.pad_w = 0;
-    CHECK(!is_valid(&spec, "gfx1250", reason, sizeof(reason)), "%s accepted pad_w=0", kernel);
-    CHECK(strcmp(reason, "one padding for both axes (got PAD=1x0)") == 0,
-          "%s reason: %s",
+    spec.problem.pad_w = 1 - pad;
+    CHECK(!is_valid(&spec, "gfx1250", reason, sizeof(reason)),
+          "%s accepted pad_w=%d",
           kernel,
-          reason);
+          1 - pad);
+    snprintf(expected, sizeof(expected), "one padding for both axes (got PAD=%dx%d)", pad, 1 - pad);
+    CHECK(strcmp(reason, expected) == 0, "%s reason: %s", kernel, reason);
     spec.problem.pad_w = -2;
     CHECK(!is_valid(&spec, "gfx1250", reason, sizeof(reason)), "%s accepted pad_w=-2", kernel);
     CHECK(strstr(reason, "pad_w") != NULL, "%s reason names pad_w: %s", kernel, reason);
@@ -242,6 +247,33 @@ static void test_wmma_kernels_refuse_per_axis_padding(void)
     check_wmma_padding("fwd_smallk_wmma", smallk, rocke_fwd_smallk_wmma_is_valid_spec);
 }
 
+static rocke_direct_conv_problem_t stem_problem(int KH, int stride, int PAD)
+{
+    rocke_direct_conv_problem_t p = dense_problem(32, 48, 3, 64);
+    p.KH = KH;
+    p.KW = KH;
+    p.stride = stride;
+    p.PAD = PAD;
+    return p;
+}
+
+static void test_stem_wmma_kernels_refuse_per_axis_padding(void)
+{
+    rocke_dgrad_patch_wmma_spec_t patch = rocke_dgrad_patch_wmma_spec_default();
+    patch.problem = stem_problem(4, 4, 0);
+    patch.waves_c = 3;
+    patch.waves_p = 1;
+    patch.tiles_c = 1;
+    patch.r_blk = 4;
+    check_wmma_padding("dgrad_patch_wmma", patch, rocke_dgrad_patch_wmma_is_valid_spec);
+    rocke_dgrad_smallc_wmma_spec_t smallc = rocke_dgrad_smallc_wmma_spec_default();
+    smallc.problem = stem_problem(3, 1, 1);
+    smallc.tiles_p = 6;
+    smallc.out_h = 16;
+    smallc.out_w = 16;
+    check_wmma_padding("dgrad_smallc_wmma", smallc, rocke_dgrad_smallc_wmma_is_valid_spec);
+}
+
 int main(void)
 {
     test_stream_lower_name_overflow();
@@ -250,6 +282,7 @@ int main(void)
     test_tiled_dgrad_name_carries_per_axis_padding();
     test_tiled_dgrad_refuses_cpl();
     test_wmma_kernels_refuse_per_axis_padding();
+    test_stem_wmma_kernels_refuse_per_axis_padding();
     if(g_failures != 0)
     {
         fprintf(stderr, "%d check(s) failed\n", g_failures);
