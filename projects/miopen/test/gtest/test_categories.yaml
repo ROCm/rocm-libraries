@@ -632,6 +632,11 @@ exclude_gpu:
       # bias-enabled cases only, a different index set on every attempt (88 of 4,316 executions failed in
       # PR #13107 runs 38815363944 and 38983909810). FP16 and Linux gfx94X passed every execution.
       - "Full/GPU_LstmMSRnn_FP32*"
+      # Fails on every arch without bundled AI models (ALMIOPEN-2966): "no fdeep .tn.model files found" in the system db.
+      # Models ship only for gfx908/gfx90a/gfx942/gfx950, and since #13680 Windows installs per-target db files like Linux
+      # (PR #13107 run 40983714656, Windows gfx110X, 2 of 2 attempts). Remove when ALMIOPEN-2966 makes the test skip archs
+      # without models.
+      - "GPU_ConvAIModelLoad_FP32*"
     labels:
       - "quick"
       - "standard"
@@ -650,8 +655,13 @@ exclude_gpu:
       # Fails on every gfx1151 host whose CU count has no shipped system db (#13416): "Db file does not exist ...
       # gfx115128.HIP.fdb.txt" / "gfx115120.HIP.fdb.txt". Windows: 5 of 5 executions on 5 hosts (PR #13107 runs 39358709264,
       # 39480689944, develop nightly 38527180317). Linux: 12 of 12 on the 20-CU strixhalo hosts in run 39740910967 (passes on
-      # CS-RORDMZ hosts). Remove once the test skips missing dbs or #13680 lands.
+      # CS-RORDMZ hosts). Only gfx115128 dbs ship; #13680 fixed the Windows install of those, but 20-CU hosts still have no
+      # gfx115120 db. Remove once the test skips missing dbs or a gfx115120 db ships (#13416).
       - "Smoke/CPU_DBSync_NONE.StaticFDBSync/9"
+      # Fails on every arch without bundled AI models (ALMIOPEN-2966): "no fdeep .tn.model files found" in the system db.
+      # Models ship only for gfx908/gfx90a/gfx942/gfx950, and since #13680 Windows installs per-target db files like Linux.
+      # Linux gfx1151: PR #13107 run 39358709264. Remove when ALMIOPEN-2966 makes the test skip archs without models.
+      - "GPU_ConvAIModelLoad_FP32*"
     labels:
       - "quick"
       - "standard"
@@ -661,10 +671,6 @@ exclude_gpu:
 
   exclude_gpu_gfx115X_linux:
     test_patterns:
-      # Fails on Linux gfx1151 (ALMIOPEN-2966, PR #13107 run 39358709264): "no fdeep .tn.model files found" in the system db.
-      # AI heuristic models ship only for gfx908/gfx90a/gfx942/gfx950, and TheRock's Linux install keeps only the
-      # runner target's db files. Passes on Windows gfx1151. Remove when ALMIOPEN-2966 makes the test skip archs without models.
-      - "GPU_ConvAIModelLoad_FP32*"
       # OOM-killed on the 7.5 GB Linux gfx1151 runners strixhalo-12 and strixhalo-10 (ALMIOPEN-2964): SIGKILL / exit 137 in
       # PR #13107 runs 39358709264 and 39529845480; both pass on the 31-125 GB gfx1151 hosts. Only standard-tier cases are
       # excluded (the tier TheRock release tests run on these hosts); comprehensive/full OOM kills are not chased per case.
