@@ -22,7 +22,8 @@
 #include <thrust/complex.h>
 #include <thrust/detail/complex/math_private.h>
 
-#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(__cmath/copysign.h)
+#include _THRUST_STD_INCLUDE(__cmath/isinf.h)
 #include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
@@ -30,27 +31,25 @@ namespace detail::complex
 {
 THRUST_HOST_DEVICE inline complex<float> cprojf(const complex<float>& z)
 {
-  if (!isinf(z.real()) && !isinf(z.imag()))
+  if (!_THRUST_STD::isinf(z.real()) && !_THRUST_STD::isinf(z.imag()))
   {
     return z;
   }
   else
   {
-    // _THRUST_STD::numeric_limits<T>::infinity() doesn't run on the GPU
-    return complex<float>(_THRUST_STD::numeric_limits<float>::infinity(), copysignf(0.0, z.imag()));
+    return complex<float>(_THRUST_STD::numeric_limits<float>::infinity(), _THRUST_STD::copysignf(0.0, z.imag()));
   }
 }
 
 THRUST_HOST_DEVICE inline complex<double> cproj(const complex<double>& z)
 {
-  if (!isinf(z.real()) && !isinf(z.imag()))
+  if (!_THRUST_STD::isinf(z.real()) && !_THRUST_STD::isinf(z.imag()))
   {
     return z;
   }
   else
   {
-    // _THRUST_STD::numeric_limits<T>::infinity() doesn't run on the GPU
-    return complex<double>(_THRUST_STD::numeric_limits<double>::infinity(), copysign(0.0, z.imag()));
+    return complex<double>(_THRUST_STD::numeric_limits<double>::infinity(), _THRUST_STD::copysign(0.0, z.imag()));
   }
 }
 } // namespace detail::complex

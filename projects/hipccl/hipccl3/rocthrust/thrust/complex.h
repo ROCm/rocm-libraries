@@ -35,7 +35,9 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/type_traits/is_trivially_relocatable.h>
 
-#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(__type_traits/common_type.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_reference.h)
+
 #if !THRUST_COMPILER(NVRTC)
 #  include <complex>
 #  include <sstream>
@@ -804,7 +806,6 @@ THRUST_HOST_DEVICE bool operator==(const T0& x, const complex<T1>& y);
 template <typename T0, typename T1>
 THRUST_HOST_DEVICE bool operator==(const complex<T0>& x, const T1& y);
 
-#if !THRUST_COMPILER(NVRTC)
 /*! Returns true if two \p complex numbers are different and false otherwise.
  *
  *  \param x The first \p complex.
@@ -812,6 +813,8 @@ THRUST_HOST_DEVICE bool operator==(const complex<T0>& x, const T1& y);
  */
 template <typename T0, typename T1>
 THRUST_HOST_DEVICE bool operator!=(const complex<T0>& x, const complex<T1>& y);
+
+#if !THRUST_COMPILER(NVRTC)
 
 /*! Returns true if two \p complex numbers are different and false otherwise.
  *

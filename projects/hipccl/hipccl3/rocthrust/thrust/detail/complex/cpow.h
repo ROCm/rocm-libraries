@@ -21,7 +21,13 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/complex.h>
+#include <thrust/detail/complex/cexp.h>
+#include <thrust/detail/complex/clog.h>
 #include <thrust/detail/type_traits.h>
+
+#include _THRUST_STD_INCLUDE(__cmath/exponential_functions.h)
+#include _THRUST_STD_INCLUDE(__cmath/logarithms.h)
+#include _THRUST_STD_INCLUDE(__type_traits/common_type.h)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -74,9 +80,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> pow(const T0& x, const complex<T1>& y)
 {
   using T = ::internal::common_type_t<T0, T1>;
-  // Find `log` by ADL.
-  using std::log;
-  return exp(log(T(x)) * complex<T>(y));
+  return exp(_THRUST_STD::log(T(x)) * complex<T>(y));
 }
 
 THRUST_NAMESPACE_END
