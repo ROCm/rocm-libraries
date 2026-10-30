@@ -91,8 +91,9 @@ extern "C" {
 #define ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS 96
 /* Per-lane register slots (REGS_PER_LANE): 4 (M=16), 8 (M=32), 16 (32x32). */
 #define ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE 16
-/* QK / PV K-iters (HD/16 or T/16); HD<=256, T<=128 -> <=16. */
-#define ROCKE_GFX942_ATTN2D_MAX_K_ITERS 16
+/* QK / PV K-iters: HD/16 or T/16 on the narrow atom, HD/8 on the 32x32x8 wide
+ * atom; HD<=256, T<=128 -> <=32. */
+#define ROCKE_GFX942_ATTN2D_MAX_K_ITERS 32
 /* QK / PV N-tiles (T/16 or HD/16); <=16. */
 #define ROCKE_GFX942_ATTN2D_MAX_N_TILES 16
 

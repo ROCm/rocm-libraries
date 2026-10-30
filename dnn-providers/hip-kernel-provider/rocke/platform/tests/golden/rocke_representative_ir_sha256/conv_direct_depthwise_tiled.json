@@ -21,6 +21,22 @@
           "sha256": "e03a261c6075d0e3fb1bd236bc7314185be6831c209b1aa8c44bcb43425eaf3a",
           "status": "ok"
         },
+        "conv_direct_depthwise_tiled/gfx1250/dgrad_bf16_k31_w32": {
+          "arch": "gfx1250",
+          "bytes": 60185,
+          "family": "conv_direct_depthwise_tiled",
+          "kernel_name": "irhash_direct_dw_tiled_dgrad_1250_bf16_k31_N2H16W16_g32_c1k1_f31x31_bw4_bh1_bw1wv_dg_bf16",
+          "sha256": "69ae53350fb744d1d07e7026cf04d45be90afe2c601a9bca5c87efb1376b5735",
+          "status": "ok"
+        },
+        "conv_direct_depthwise_tiled/gfx1250/dgrad_fp16_k51x5_w32": {
+          "arch": "gfx1250",
+          "bytes": 43489,
+          "family": "conv_direct_depthwise_tiled",
+          "kernel_name": "irhash_direct_dw_tiled_dgrad_1250_fp16_k51x5_N2H24W24_g64_c1k1_f51x5_p25x2_bw8_bh2_bw1wv_dg",
+          "sha256": "3319c044995e4149f829ce4ad464038b04a11e70fabe17ad8c03af5c6db06a93",
+          "status": "ok"
+        },
         "conv_direct_depthwise_tiled/gfx942/bf16_k5_s2_bwv2": {
           "arch": "gfx942",
           "bytes": 168820,
@@ -66,6 +82,22 @@
           "sha256": "cbff15a2fb2071eb52d8af3d93f206b2b5fe88c3591ce9a1f01ea5027d7fc0ea",
           "status": "ok"
         },
+        "conv_direct_depthwise_tiled/gfx1250/dgrad_bf16_k31_w32": {
+          "arch": "gfx1250",
+          "bytes": 60324,
+          "family": "conv_direct_depthwise_tiled",
+          "kernel_name": "irhash_direct_dw_tiled_dgrad_1250_bf16_k31_N2H16W16_g32_c1k1_f31x31_bw4_bh1_bw1wv_dg_bf16",
+          "sha256": "0a6c8ab10f1561fa209d739a26511c38c33893b64283a3dd19d0c7d5f12d035b",
+          "status": "ok"
+        },
+        "conv_direct_depthwise_tiled/gfx1250/dgrad_fp16_k51x5_w32": {
+          "arch": "gfx1250",
+          "bytes": 43622,
+          "family": "conv_direct_depthwise_tiled",
+          "kernel_name": "irhash_direct_dw_tiled_dgrad_1250_fp16_k51x5_N2H24W24_g64_c1k1_f51x5_p25x2_bw8_bh2_bw1wv_dg",
+          "sha256": "a8a4787efc79eac4d05d8f94bac746561586b21c4c3a0ada52dbd820d83c4437",
+          "status": "ok"
+        },
         "conv_direct_depthwise_tiled/gfx942/bf16_k5_s2_bwv2": {
           "arch": "gfx942",
           "bytes": 168959,
@@ -109,6 +141,22 @@
           "family": "conv_direct_depthwise_tiled",
           "kernel_name": "irhash_direct_dw_tiled_1250_bf16_k5_N2H16W16_g96_c1k1_f5x5_bw8_bh2_bw2wv_bf16",
           "sha256": "c3a7a4fd8b569c2211e1d61007414df378413cbf03c60103e806e1dd1eeb980e",
+          "status": "ok"
+        },
+        "conv_direct_depthwise_tiled/gfx1250/dgrad_bf16_k31_w32": {
+          "arch": "gfx1250",
+          "bytes": 60388,
+          "family": "conv_direct_depthwise_tiled",
+          "kernel_name": "irhash_direct_dw_tiled_dgrad_1250_bf16_k31_N2H16W16_g32_c1k1_f31x31_bw4_bh1_bw1wv_dg_bf16",
+          "sha256": "c0f78e6153b50ea9f967e1130b568014f0994d09ab8c31ab00e3c70d31e4c103",
+          "status": "ok"
+        },
+        "conv_direct_depthwise_tiled/gfx1250/dgrad_fp16_k51x5_w32": {
+          "arch": "gfx1250",
+          "bytes": 43686,
+          "family": "conv_direct_depthwise_tiled",
+          "kernel_name": "irhash_direct_dw_tiled_dgrad_1250_fp16_k51x5_N2H24W24_g64_c1k1_f51x5_p25x2_bw8_bh2_bw1wv_dg",
+          "sha256": "6486d1fa935b6fc1762c08ab289f14174c0ae0b2dae2aa5ba270264112ebed6f",
           "status": "ok"
         },
         "conv_direct_depthwise_tiled/gfx942/bf16_k5_s2_bwv2": {

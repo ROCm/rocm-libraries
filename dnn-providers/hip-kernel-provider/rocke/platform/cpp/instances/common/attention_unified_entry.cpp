@@ -138,7 +138,7 @@ bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_probl
             *out_reason = "null problem";
         return false;
     }
-    if(p->head_size != 64 && p->head_size != 128 && p->head_size != 256)
+    if(p->head_size != 64 && p->head_size != 128 && p->head_size != 192 && p->head_size != 256)
     {
         if(out_reason != NULL)
             *out_reason = "unsupported head_size";

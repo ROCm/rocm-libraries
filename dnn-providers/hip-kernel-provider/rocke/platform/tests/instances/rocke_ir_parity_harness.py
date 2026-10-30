@@ -696,8 +696,10 @@ def build_lightning_indexer_case(arch, **over):
     return _build
 
 
-def _d256_problem():
-    """Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16)."""
+def _d256_problem(head_size=256):
+    """Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16).
+
+    ``head_size=192`` gives the D192 point of the same cohort (same lean body)."""
     from kernels.common.attention_unified import UnifiedAttentionProblem
 
     return UnifiedAttentionProblem(
@@ -705,7 +707,7 @@ def _d256_problem():
         num_seqs=1,
         num_query_heads=16,
         num_kv_heads=2,
-        head_size=256,
+        head_size=head_size,
         block_size=16,
         max_seqlen_q=4096,
         max_seqlen_k=4096,
@@ -808,13 +810,15 @@ def build_attention_d256_gfx950(arch):
     return _build
 
 
-def build_attention_d256_gfx942(arch):
+def build_attention_d256_gfx942(arch, head_size=256):
     """D256 gfx942 4-warp GQA fast path.
 
     Mirrors ``build_attention_d256_gfx950`` but pins the *gfx942* cohort: raises
     if ``_d256_gfx942_fast`` is not selected (so this can never pin the fallback),
     then lowers the dedicated ``build_gfx942_4warp_gqa`` builder -- the
     byte-sensitive V wide-load -> ``V_lds`` transpose kernel worth pinning.
+    ``head_size=192`` pins the same lean body at D192, including its
+    head-size-derived V-fill stride and the K/V key and Q row bounds.
     """
 
     def _build():
@@ -824,7 +828,7 @@ def build_attention_d256_gfx942(arch):
         )
         from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
 
-        problem = _d256_problem()
+        problem = _d256_problem(head_size)
         with _pinned_attention_arch(arch):
             if not _d256_gfx942_fast(problem, arch):
                 raise RuntimeError(
@@ -842,7 +846,7 @@ def build_attention_d128_swa_fold_gfx942(arch):
 
     Mirrors ``build_attention_d256_gfx942`` but pins the *fold* cohort. The D256
     case above cannot stand in for this one: ``build_gfx942_4warp_gqa`` returns
-    ``_build_gfx942_4warp_gqa_lean`` at the ``HD == _4WGQA_LEAN_HEAD_SIZE`` (256)
+    ``_build_gfx942_4warp_gqa_lean`` at ``HD in _4WGQA_LEAN_HEAD_SIZES`` (192, 256)
     early-return, which is ~20 lines BEFORE the D128 fold body -- so the D256
     golden never lowers a single line of the folded kernel.
 
@@ -1313,6 +1317,39 @@ def build_direct_depthwise_dgrad(
     return _build
 
 
+def build_direct_depthwise_dgrad_stream(
+    name, arch, N, H, W, groups, KH, PAD, stride=1, dtype="fp16", **spec_kw
+):
+    """Row-streaming depthwise dgrad (DirectDepthwiseDgradStreamSpec);
+    ``spec_kw`` overrides its fields (block_w, block_waves, wave_size, cpl).
+    Mirrors parity/conv_direct_grouped_emit.* (indices 171+)."""
+
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectDepthwiseDgradStreamSpec,
+            build_direct_depthwise_dgrad_streaming,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=1,
+            kpg=1,
+            KH=KH,
+            KW=KH,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+        )
+        spec = DirectDepthwiseDgradStreamSpec(problem=p, name=name, **spec_kw)
+        return build_direct_depthwise_dgrad_streaming(spec, arch=arch)
+
+    return _build
+
+
 def build_direct_depthwise_dgrad_win(
     name, arch, N, H, W, groups, KH, PAD, dtype, **knobs
 ):
@@ -1444,11 +1481,24 @@ def build_direct_wgrad(name, arch, kind, problem, **spec_kw):
 
 
 def build_direct_depthwise_tiled(
-    name, arch, N, H, W, groups, KH, PAD, stride=1, dtype="bf16", **spec_kw
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    KH,
+    PAD,
+    stride=1,
+    dtype="bf16",
+    KW=None,
+    pad_w=-1,
+    **spec_kw,
 ):
     """Output-stationary depthwise direct conv; ``spec_kw`` overrides
     DirectDepthwiseTiledSpec fields. Configs mirror parity/conv_direct_grouped_emit.*
-    (indices 57+)."""
+    (indices 57+). ``KW`` defaults to ``KH``; ``pad_w`` (-1: ``PAD``) is the
+    column padding of the rotated-filter dgrad mode (``dgrad=True``)."""
 
     def _build():
         from kernels.common.conv_direct_grouped import (
@@ -1465,10 +1515,11 @@ def build_direct_depthwise_tiled(
             cpg=1,
             kpg=1,
             KH=KH,
-            KW=KH,
+            KW=KH if KW is None else KW,
             PAD=PAD,
             stride=stride,
             dtype=dtype,
+            pad_w=pad_w,
         )
         spec = DirectDepthwiseTiledSpec(problem=p, name=name, **spec_kw)
         return build_direct_depthwise_tiled(spec, arch=arch)
@@ -3667,6 +3718,16 @@ def cases():
                 "geometry": "bm128",
             },
         ),
+        # KV-segment split of the default grid (segment epilogue + range).
+        (
+            "bottom_right_kvs4_bm128_sq512",
+            {
+                "seqlen_kv": 2048,
+                "causal_bottom_right": True,
+                "geometry": "bm128",
+                "kv_segments": 4,
+            },
+        ),
         # --- persistent (grid-stride) grid + decode variants ---
         ("persistent_causal_sq512", {"persistent": True, "num_persistent": 256}),
         (
@@ -3876,6 +3937,23 @@ def cases():
         ("persist_causal_sq512", _persist942),
         ("persist_hqswz_sq512", {**_persist942, "persist_decode": "hq_minor_swz"}),
         ("persist_hkvmaj_sq512", {**_persist942, "persist_decode": "hkv_major"}),
+        # Bottom-right causal: runtime diagonal offset on both grids, and the
+        # diagonal split with the KV-segment split.
+        ("bottom_right_sq512", {"seqlen_kv": 1024, "causal_bottom_right": True}),
+        (
+            "persist_bottom_right_sq512",
+            {**_persist942, "seqlen_kv": 1024, "causal_bottom_right": True},
+        ),
+        (
+            "bottom_right_dsplit_kvs4_sq512",
+            {
+                "seqlen_kv": 2048,
+                "causal_bottom_right": True,
+                "causal_diag_split": True,
+                "kv_segments": 4,
+                "block_m": 128,
+            },
+        ),
     ):
         add(
             "attention_dense",
@@ -4033,6 +4111,12 @@ def cases():
         "attention_d256/gfx942/4warp_gqa",
         "gfx942",
         build_attention_d256_gfx942("gfx942"),
+    )
+    add(
+        "attention_d256",
+        "attention_d256/gfx942/4warp_gqa_d192",
+        "gfx942",
+        build_attention_d256_gfx942("gfx942", head_size=192),
     )
 
     # conv_direct: parametric direct grouped convolution.
@@ -5678,6 +5762,58 @@ def cases():
             cpl=4,
         ),
     )
+    # Depthwise dgrad on the wave32 gfx1250: the row-streaming kernel, scalar
+    # and channel-packed (cpl 2 / 8), and the rotated-filter tiled kernel on a
+    # large and a non-square filter with per-axis padding. Mirrors
+    # library/tests/parity/conv_direct_grouped_emit.* (indices 179+).
+    for _tag, _shape, _over in (
+        ("k3", dict(KH=3, PAD=1), dict(block_w=8, block_waves=2)),
+        ("k3_cpl2", dict(KH=3, PAD=1), dict(block_w=8, block_waves=2, cpl=2)),
+        (
+            "k5_s2_bf16_cpl8",
+            dict(KH=5, PAD=2, stride=2, dtype="bf16", groups=256),
+            dict(block_w=4, block_waves=1, cpl=8),
+        ),
+    ):
+        add(
+            "conv_direct",
+            f"conv_direct/gfx1250/dw_dgrad_stream_{_tag}_w32",
+            "gfx1250",
+            build_direct_depthwise_dgrad_stream(
+                f"irhash_dw_dgrad_stream_1250_{_tag}",
+                "gfx1250",
+                **{"N": 2, "H": 14, "W": 14, "groups": 64, **_shape},
+                wave_size=32,
+                **_over,
+            ),
+        )
+    for _tag, _shape, _over in (
+        (
+            "bf16_k31",
+            dict(H=16, W=16, groups=32, KH=31, PAD=15),
+            dict(block_w=4, block_h=1),
+        ),
+        (
+            "fp16_k51x5",
+            dict(H=24, W=24, groups=64, KH=51, KW=5, PAD=25, pad_w=2, dtype="fp16"),
+            dict(block_w=8, block_h=2),
+        ),
+    ):
+        add(
+            "conv_direct_depthwise_tiled",
+            f"conv_direct_depthwise_tiled/gfx1250/dgrad_{_tag}_w32",
+            "gfx1250",
+            build_direct_depthwise_tiled(
+                f"irhash_direct_dw_tiled_dgrad_1250_{_tag}",
+                "gfx1250",
+                N=2,
+                **_shape,
+                block_waves=1,
+                wave_size=32,
+                dgrad=True,
+                **_over,
+            ),
+        )
 
     # gfx942 GQA head-fold (D128 sliding-window bf16). Registered SEPARATELY from
     # the D256 case above because that one early-returns into the lean D256 kernel
