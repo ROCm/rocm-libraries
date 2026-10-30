@@ -20,7 +20,9 @@ from kernels.common._fmha_common import FmhaCommonSpec, FmhaShape
 from rocke.core.ir import Value
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 
-# MFMA (gfx950, gfx942) and WMMA (gfx1151) bodies.
+# One target per attention body: MFMA (gfx950, gfx942) and WMMA (gfx1151).
+# The test builds and lowers IR on the host and needs no device, HIP or clang,
+# so it covers every body instead of only the selected device's.
 ARCHES = ["gfx950", "gfx942", "gfx1151"]
 
 
