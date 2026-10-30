@@ -486,7 +486,7 @@ at `check_support()`, never at `execute()`.
 
 | | Effort | What it takes |
 |---|---|---|
-| THD on the decode objects; packed with lengths on aiw | medium each | Decode: the merge kernel indexes O by batch, so the row-offset table would join its arguments (a decode ABI change, every decode object rebuilt and A/B'd); a packed decode step runs on the prefill objects meanwhile. aiw packed with lengths: the fill kernel needs each sequence's base (a row-offset argument) and the main kernel a length clamp to the slot (`POSITION ARRAY` gives starts only), an aiw kernel change with every object rebuilt; the RDNA prefill objects serve it on gfx12 meanwhile. |
+| THD on the decode objects; packed with lengths on aiw | medium each | Decode: the merge kernel indexes O by batch, so the row-offset table would join its arguments (a decode ABI change, every decode object rebuilt and A/B'd); a packed decode step runs on the prefill objects meanwhile. aiw packed with lengths (which is also PyTorch's `seqused_k`, §5.9): the main kernel already decodes the form (`varlen_bits` 0x1515), but it clamps a length to `Max_seqlen` rather than to the slot (`POSITION ARRAY` gives starts only), and the fill kernel needs each sequence's base and slot (a row-offset argument). Either the main kernel loads `offset[b + 1]` and clamps (its prologue changes in every object: rebuild and A/B), or the fill kernel, launched first, writes the clamped lengths to the workspace for the main kernel to read (the main kernel's code unchanged); both rebuild every aiw object, and the Q side's `INDIVIDUAL`/`ARRAY` mode is one AOTriton never tested. A `seqused_k`-only subset (Q compact, no fill) is not available: the graph carries `seq_len_q`, whose values the matcher cannot see. The RDNA prefill objects serve the form on gfx12 meanwhile, and they are the faster ones on decode-shaped graphs (§5.6). |
 | Bias on the wide decode (576/512, 512/512) objects | small per class | A `has_bias` variant of each class, built and checked against the reference as the generic tiers' were; not built until a model needs them. |
 | A prefill schedule for absorbed MLA; other `Dv ≠ Dqk` pairs on gfx11 | medium; small per pair | 192/128 prefill (modification 20) and the 576/512 and 512/512 decode objects ship; on gfx12 §5.6's padded tiers serve any pair (H1). Chunked prefill at 576/512 runs on the decode objects' 16-row tiles; a prefill schedule at that width would share each K/V tile across more rows. Other pairs on the RDNA objects: a runtime V width on the generic tiers (a second appended argument, masked V loads and O stores; every generic tier rebuilt and A/B'd), not built until a model needs it. |
 | fp32 I/O, FP8, paged KV, block masks, ALiBi, softcap | out of scope | Not planned for these engines; ALiBi and softcap have no reference semantics. |
@@ -787,6 +787,20 @@ table, the sequence extent still the longest sequence.
   padded row by batch, which is another sequence's under packing, and its main kernel clamps
   a length to `Max_seqlen_q`, not to the slot; both are aiw kernel changes (§5.4). On gfx12
   the RDNA prefill objects serve it.
+- **PyTorch's `seqused_k` is P3** (`torch.nn.attention.varlen.varlen_attn(..., seqused_k=)`,
+  AOTriton's `varlen_bits` 0x150B): Q packed through `cu_seqlens_q` with `seq_len_q[b]` its own
+  token count (`cu_seqlens_q[b + 1] − cu_seqlens_q[b]`), K and V packed through `cu_seqlens_k`
+  slots with `seq_len_kv[b] = seqused_k[b]`, at most the slot. That gives AOTriton's and
+  FlashAttention's semantics exactly: sequence b attends to the first `seqused_k[b]` keys of its
+  slot and never reads the rest, a bottom-right diagonal sits at `seqused_k[b] − Sq_b` (top-left
+  does not depend on the length), and `seqused_k[b] = 0` leaves every row keyless (O = 0). One
+  difference is a convention, not a result: a row no key reaches gets LSE = −inf here (hipDNN's
+  and cuDNN's), where FlashAttention writes +inf and AOTriton +inf or about −2.4e38;
+  `seqused_k` is inference-only, so no backward reads it, and an adapter maps it if a caller
+  does. The decode objects decline packed graphs, so a `max_q = 1` KV-cache step runs on the
+  prefill objects (no split-KV); paged K/V (`block_table`, which needs `seqused_k`) declines
+  on every family. A length past its slot, which PyTorch forbids and hipDNN's reference rejects,
+  is clamped to the slot.
 - **Tested** on gfx1201 (`TestGpuFlydslSdpaAiwDispatch.Packs*`, `...PutsEachPacked*`): the
   harness packs the dense values token-major and unpacks O and the LSE, so the per-sequence
   reference above applies unchanged; lengths 0, 1, odd and full, keyless sequences,
@@ -800,7 +814,16 @@ table, the sequence extent still the longest sequence.
   tier, a sink, one table for every operand; packed with lengths: lengths 0, below and past
   the slot, keys cut short, with and without `padding_mask`, a sink (padded rows −inf, not
   the sink). The packed buffers hold exactly the sequences' tokens, so a load past the last
-  sequence would leave the allocation.
+  sequence would leave the allocation. `seqused_k` itself
+  (`TestGpuFlydslSdpaRdnaDispatch.MirrorsSequsedKOnPackedKeySlots`): slots longer than
+  `seqused_k` with NaN in every K and V element past it, so a read of the tail turns rows NaN;
+  no mask, top-left and bottom-right; one query row; more queries than used keys;
+  `seqused_k = 0`; GQA; bf16 and f16. Checked against the per-sequence reference and against
+  hipDNN's CPU reference: a P3 graph with every length inside its slot is the form hipDNN's
+  executors run as the dense padded graph (`RaggedSdpaDensify.hpp`), so both harnesses pass it
+  the dense values they packed from, slot tails included. Passing the slot as the device
+  length (the kernel then reads the tail) fails it, and so does an offset in O seen only by the
+  CPU-reference check.
 - **What packing costs:** nothing measurable on gfx1201 -- packed at full lengths times as the
   same problem dense (0.998–1.003×, §5.8).
 
@@ -1609,8 +1632,10 @@ count tokens. The layout is token-major.
   `padding_mask`, beside the same packing. Each table gives a sequence's slot. The length gives
   the real rows within it, clamped in the kernel to the slot (`_load_varlen`, no kernel change).
   The slot's rows past the length are padded rows (O = 0, LSE = −inf). Its keys past the length
-  are never read, and a bottom-right diagonal sits at the lengths. The aiw and RDNA engines
-  decline this form for now.
+  are never read (each K/V view and its buffer records end at the length, and the raw-pointer
+  prefetch clamps rows to the last real key), and a bottom-right diagonal sits at the lengths.
+  This is PyTorch's `seqused_k` (§5.9). The RDNA prefill objects serve the form too; the aiw
+  objects decline it.
 - **Cost:** a dense launch takes one more scalar branch in the prologue and loads nothing. The KV
   loop is instruction-identical to modification 33's. Measured in §7.5.
 - **A fix with it:** a keyless view at the tensor's start (padded batch 0, head 0; the first packed
@@ -1625,7 +1650,10 @@ count tokens. The layout is token-major.
   `TestFlydslSdpaCdnaPackedGraph`,
   `TestFlydslSdpaCdnaKernelMatch.RunsPackedSequencesOnlyOnTheGenericPrefillObjects`. P3 on the device:
   `PacksPaddedSequencesInTheirSlots` (lengths 0, short, full, past the slot; with and without
-  `padding_mask`; both corners; a sink).
+  `padding_mask`; both corners; a sink), and `MirrorsSequsedKOnPackedKeySlots` (PyTorch's
+  `seqused_k`: NaN in every slot past its length, no mask and both corners, one query row,
+  `seqused_k = 0`, GQA, bf16 and f16; against the per-sequence reference and hipDNN's CPU
+  reference, as §5.9 describes).
 
 ### 7.11 Exact f32 (CDNA)
 
