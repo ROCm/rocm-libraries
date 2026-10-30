@@ -2,8 +2,8 @@
 
 - Contributors: Brian Harrison
 - **Status**: Planned
-- **Status notes**: Defines requirements and evaluation criteria, and records first compile-time measurements. No compiler is selected and no API is specified. RFC 0017 §9.3 defers JIT to a separate RFC; this is its first stage.
-- **Last verified**: 2026-10-27 against `develop` (2d9d3d7c10e)
+- **Status notes**: Defines requirements and evaluation criteria, including kernel performance and the variant space a compiler must expose, and records first compile-time measurements. No compiler is selected and no API is specified. The hipDNN-side work these requirements depend on is planned separately. RFC 0017 §9.3 defers JIT to a separate RFC; this is its first stage.
+- **Last verified**: 2026-10-30 against `develop` (cd0d5ae038a)
 - Audience: kernel authors, hipDNN project leads, ROCm component owners
 
 ## Summary
@@ -12,7 +12,8 @@ hipDNN needs a runtime compiler: a native library, shipped in TheRock, that comp
 kernel while hipDNN builds an execution plan. It has three uses:
 
 1. **Specialize** an authored kernel for the exact problem (shape, dtype, architecture)
-   instead of shipping every variant prebuilt.
+   instead of shipping every variant prebuilt. The variants it can produce still form a
+   bounded space that hipDNN can rank.
 2. **Generate** fused kernels from the operation graph, starting with pointwise operations
    before or after a convolution.
 3. **Precompile** plans ahead of time for chosen GPU targets, including on a machine with no
@@ -20,9 +21,11 @@ kernel while hipDNN builds an execution plan. It has three uses:
 
 This RFC states what that compiler must provide and how each requirement is checked, then
 records where the options reviewed so far stand, including first compile-time measurements.
-It does not choose a compiler. hipDNN project leads make that choice with the owners of the
-selected component, after the remaining measurements and the fusion proof of concept in
-[Next steps](#next-steps).
+A candidate must compile quickly, produce kernels that reach parity with hipDNN's best
+existing engines, and expose a variant space that hipDNN can rank.
+This RFC does not choose a compiler. hipDNN project leads make that choice with the owners
+of the selected component, after the remaining measurements and the fusion proof of concept
+in [Next steps](#next-steps).
 
 Reviewers are asked to:
 
@@ -35,7 +38,9 @@ Reviewers are asked to:
 **Prebuilt kernels scale by count.** hipDNN's kernel providers ship most kernels compiled
 ahead of time and packed per GPU architecture. Covering more problems means shipping more
 variants, and every value a variant bakes in must be checked when the kernel is matched to
-a problem (RFC 0017 §5).
+a problem (RFC 0017 §5). A runtime compiler moves this cost but does not remove it: the
+variants it can produce must still form a bounded space that hipDNN can rank (see
+[Variant space and selection](#variant-space-and-selection)).
 
 **Fused graphs need generated kernels.** hipDNN graphs can express `conv → pointwise` and
 `pointwise → conv` chains. Fused execution today covers fixed patterns: MIOpen's
@@ -88,6 +93,15 @@ for this reason. This constraint shapes the choice of runtime compiler.
 | Kernel ingestor | The HKP component that loads kernels described by RFC 0017 descriptors. |
 | hipGraph | HIP's mechanism for capturing a sequence of GPU work once and replaying it. |
 | Deviceless compile | Compiling for a named GPU target on a machine that has no GPU. |
+| Best existing engine | The engine and knob setting that hipDNN autotuning (RFC 0013) selects for a graph, across every installed provider's engines and their knob variants, on the same device and hipDNN build. It may be prebuilt, compiled at runtime or fused. |
+| Unfused execution | The best existing engine for each operation of a fused graph, run in sequence, with each intermediate tensor stored in the data type the graph declares for it. |
+| Variant | One compilable configuration of a kernel: fixed values for its tuning parameters, such as tile sizes. |
+| Variant space | The variants hipDNN may request for one operation input and target: an enumerated catalog, or a bounded generator that produces them. |
+| Best-of-autotune | The fastest variant found by autotuning over the variant space. |
+| Per-shape ratio | Run time of the JIT kernel divided by run time of the baseline, for one problem shape. The geomean summarizes the ratios over a set of shapes; the worst shape is the one with the largest ratio. |
+| Parity margin, worst-shape cap | The largest geomean, and the largest single per-shape ratio, above 1 that still count as parity. Set per operation family (D10). |
+| Tuning budget | The bound on how many candidates, or how much compile time, autotuning spends on JIT variants for one graph. |
+| Heuristic | A model that ranks candidate engines or kernels without running them (RFC 0019). |
 
 ## Requirements
 
@@ -151,6 +165,57 @@ Reference set: one GEMM, one implicit-GEMM convolution, one pointwise kernel, on
 attention forward, and the two fusion kernels (F3). Each in fp16 and bf16, on gfx942, gfx950
 and one RDNA architecture.
 
+### Kernel performance
+
+A compiler that compiles quickly but produces slower kernels than hipDNN already runs is not
+a candidate. The baseline is hipDNN's best existing engine for the same problem, not the
+compiler's own untuned or unfused output.
+
+Fusion saves at most the intermediate tensor's round trip through memory and, outside
+hipGraph replay, one kernel launch. What that is worth depends on the problem: it is large
+for short, memory-bound kernels and small for long, compute-bound convolutions and GEMMs. A
+fused kernel whose main loop is slower than the best existing engine's can lose the whole
+saving on large problems, so fused performance depends on the main kernel reaching parity
+first. For this reason the RFC sets no required fusion gain, and judges a fused kernel
+against the unfused execution.
+
+| ID | Level | Requirement | Checked by |
+|---|---|---|---|
+| E1 | Must (POC) | A specialized kernel performs within the parity margin of the best existing engine for the same problem. | The geomean of per-shape ratios is within the margin, and the worst shape within the cap (D10). |
+| E2 | Must (POC) | A fused kernel reaches parity with the unfused execution of the same graph, and is within the parity margin of any existing fused engine for the pattern. | Against the unfused execution, the geomean of per-shape ratios does not exceed parity and the worst shape is within the cap (D10). Against an existing fused engine, the E1 check. |
+| E3 | Must (POC) | E1 and E2 are judged on the best-of-autotune kernel over the variant space (V1), and every variant compiled to find it meets the per-kernel bound of L1. | The harness records the compile time of every variant compiled during the search, and the compile and run time of the selected code object. |
+
+Performance is measured on real model shapes that the baseline serves, in fp16 and bf16, on
+the L1 reference architectures. Both arms run on the same node in one session, interleaved,
+with a repeated baseline run to bound measurement noise. Results report the geomean, the
+worst shape and the coverage: how many of the requested shapes were measured.
+
+These requirements weigh on options differently. A compiler with a fixed cost on every
+compile can try fewer variants within a tuning budget, so its best-of-autotune comes from a
+smaller search. A compiler that already builds kernels in the baseline can meet E1 by
+producing the same code, so E1 says less about it than about a new code generator.
+
+### Variant space and selection
+
+A runtime compiler can produce far more variants than hipDNN can select from. hipDNN picks a
+kernel by ranking candidates with a heuristic and, when the user asks, by autotuning (RFC
+0013). Every variant in the space adds cost to both, and to building the heuristic. More
+variants do not guarantee better kernels: in one hipDNN attention study on gfx942, a small
+curated set came close to the best of a larger one, while dropping the wrong tuning
+parameter cost heavily. The compiler must therefore work within a space that hipDNN can
+bound and rank.
+
+| ID | Level | Requirement | Checked by |
+|---|---|---|---|
+| V1 | Must | For each supported operation input and target, the variants hipDNN may request form a bounded variant space, enumerated or produced by a bounded generator (RFC 0019 §4.3, §14.4). The compiler compiles any variant in it. | Each reference-set input maps to a bounded set of candidates, and the set's size is reported. |
+| V2 | Must | Each variant is identified by parameters known before it is compiled, so a heuristic can score it without compiling. RFC 0017 §9.3 describes one form for this metadata. | Candidates are ranked with no compilation (I1). |
+
+hipDNN also needs a heuristic that quickly picks a high-quality candidate from that space,
+and a bound on how many candidates autotuning compiles. Both are hipDNN work, planned
+separately and outside this RFC. The selection mechanism and its latency budget are open in
+RFC 0019 (§4.3, §9.4 and Open Question 8). JIT kernels use the same selection path as
+prebuilt kernels (I2).
+
 ### hipDNN integration
 
 | ID | Level | Requirement | Checked by |
@@ -163,14 +228,16 @@ and one RDNA architecture.
 ### Targets and deployment
 
 hipDNN must be able to build plans ahead of time for chosen targets, serialize them, and
-reuse them, as well as build them for the GPU in use.
+reuse them, as well as build them for the GPU in use. These are hipDNN capabilities: this
+RFC requires only that the compiler makes them possible. The hipDNN-side implementation of
+T1–T4 is planned separately and is not part of this RFC.
 
 | ID | Level | Requirement | Checked by |
 |---|---|---|---|
 | T1 | Must | Compiles for any supported target named by hipDNN, not only the GPU present. | Compile for every P4 target from one machine. |
-| T2 | Must | Compiles on a CPU-only machine with no GPU or GPU driver. | Precompile a plan on a machine without a GPU. |
-| T3 | Must | Plans containing JIT kernels serialize and restore without recompiling, including plans built for another target (RFC 0009). | Save on a CPU-only machine; load and run on the target GPU. |
-| T4 | Must | JIT kernels can be captured into a hipGraph and replayed, like prebuilt kernels. | Capture a plan's execution in a hipGraph and replay it. |
+| T2 | Must | Compiles on a CPU-only machine with no GPU or GPU driver. | Compile for a P4 target on a machine without a GPU. |
+| T3 | Must | A compiled kernel can be stored and restored without the compiler or any compiler runtime state, so that plans containing JIT kernels can be serialized, including plans built for another target (RFC 0009). | A code object and its launch details (A2), saved on a CPU-only machine, load and launch on the target GPU without the compiler. |
+| T4 | Must | JIT kernels can be captured into a hipGraph and replayed, like prebuilt kernels. | The kernel launches through `hipModuleLaunchKernel` with no compiler-owned launcher, and replays under hipGraph capture. |
 
 These follow directly when the compiler returns a standard code object with its launch
 details (A2): hipDNN stores the bytes and launches them with `hipModuleLaunchKernel`, which
@@ -186,7 +253,7 @@ of concept, before it is selected.
 |---|---|---|---|
 | F1 | Must (POC) | Pointwise operations attach as a prologue on an input or an epilogue on the output of a convolution or GEMM, without writing a new kernel per chain. | Both POC kernels come from one convolution template. |
 | F2 | Must (POC) | A prologue applies before padding, so padded positions stay zero rather than `f(0)`. | Test with padding and an operation where `f(0) ≠ 0`. |
-| F3 | Must (POC) | Two reference patterns, fp16 and bf16, NHWC (hipDNN's primary convolution layout): `conv → MUL` with a per-channel scale, and `MUL → conv` with a per-channel scale on the input. | Matches the CPU reference; meets L1; performance reported against the unfused pair. |
+| F3 | Must (POC) | Two reference patterns, fp16 and bf16, NHWC (hipDNN's primary convolution layout): `conv → MUL` with a per-channel scale, and `MUL → conv` with a per-channel scale on the input. | Matches the CPU reference; meets L1, E2 and E3. |
 | F4 | Should | Intermediate values keep the graph's compute precision between fused operations. | Comparison with an fp32 reference. |
 
 hipDNN normalizes the graph into a fusion request before calling the compiler. The compiler
@@ -196,7 +263,10 @@ does not interpret hipDNN's graph schema.
 
 The list is not exhaustive, and no option is ruled out. Each entry covers what the option
 is, how hipDNN uses it today, whether it is available at hipDNN's layer (P1), measured
-compile time, fusion support and the work needed to meet the requirements.
+compile time, fusion support and the work needed to meet the requirements. This RFC has not
+yet measured any option against the kernel performance (E1–E3) or variant space (V1–V2)
+requirements; results published by component owners use other baselines and are not
+comparable.
 
 | Option | Native compile path | Available at the `rocm-sdk-libraries` layer (P1) | Fusion today | Main work to meet the requirements |
 |---|---|---|---|---|
@@ -232,7 +302,7 @@ Measured on a development machine for framing purposes: compile only, no GPU use
 unless noted.
 
 - Each option compiled different kernels, so rows compare order of magnitude only. Compile
-  time does not show how fast the compiled kernel runs.
+  time does not show how fast the compiled kernel runs; that is judged by E1–E3.
 - The hipRTC tiled GEMM and the Triton convolution were written for this measurement, and the
   hipRTC convolution is HKP's direct (non-GEMM) kernel; none is a production kernel.
 - Loom generates code without LLVM. Its GEMM entry is a GEMV, not a tiled matrix-core GEMM.
@@ -315,22 +385,34 @@ hipDNN fusion generator and a solution for generic targets.
 | D4 | The fusion request format, and whether it extends the RFC 0017 matching and dispatch descriptors. | Open |
 | D5 | The compile-time budget applies per kernel (L1). | Decided |
 | D6 | hipDNN owns caching of compiled code objects through one shared mechanism (I4); a compiler's built-in cache is not required. | Decided |
+| D7 | Kernel performance is judged on the best-of-autotune kernel: against hipDNN's best existing engine (E1), and for fused kernels against the unfused execution and any existing fused engine (E2). | Decided |
+| D8 | The compiler works within a bounded variant space whose variants can be ranked before compiling (V1, V2). | Decided |
+| D9 | The selection mechanism, its latency budget, and the tuning budget. Tracked with RFC 0019 (§4.3, §9.4, Open Question 8) and RFC 0013. | Open |
+| D10 | The parity margin and the worst-shape cap for each operation family. hipDNN project leads set them before the performance study, and they are recorded in this RFC. | Open |
 
 ## Next steps
 
 1. Extend the compile-time measurements to the full reference set: fp16 and bf16, one RDNA
-   architecture, and the fusion kernels. Add the run time of the compiled kernels on GPU.
-2. Build the fusion proof of concept (F1–F3) on the option the measurements support.
-3. Build that option inside TheRock and check P1–P6 and T1–T4 on the installed tree, including
-   precompiling a plan on a CPU-only machine and running it under hipGraph capture on the GPU.
-4. Update this RFC with the results and close D2–D4.
+   architecture, and the fusion kernels.
+2. Define the variant space (V1) for each reference-set input, record the parity margins and
+   worst-shape caps (D10) in this RFC, then measure kernel performance as described in
+   [Kernel performance](#kernel-performance).
+3. Build the fusion proof of concept on the option the measurements support. It must meet
+   F1–F3.
+4. Build that option inside TheRock and check P1–P6 and the compiler-side checks of T1–T4 on
+   the installed tree.
+5. Update this RFC with the results and close D2–D4.
+
+hipDNN-side support for T1–T4 (precompiling and serializing plans for another target,
+hipGraph capture), the selection heuristic and the tuning budget (D9) are planned separately.
 
 ## References
 
 - hipDNN RFCs: [0005 Versioning](0005_Versioning.md),
   [0009 Execution plan serialization](0009_CompiledPlanSerialization.md),
   [0013 Autotuning](0013_Autotune.md),
-  [0017 Universal kernel descriptors](0017_UniversalKernelDescriptor.md)
+  [0017 Universal kernel descriptors](0017_UniversalKernelDescriptor.md),
+  [0019 Universal heuristic descriptors](0019_UniversalHeuristicDescriptor.md)
 - [hip-kernel-provider compilation](../../../../dnn-providers/hip-kernel-provider/src/compilation/):
   hipRTC path and module caches
 - [rocKE documentation](../../../../dnn-providers/hip-kernel-provider/rocke/platform/dsl_docs/):
