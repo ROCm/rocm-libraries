@@ -11,9 +11,9 @@ for how detection works and its coverage limits.
 
 The test repeats three steps for each sample:
 
-1. The [sampler](../../../.github/scripts/sample_hipblaslt_gemms.py) chooses the
+1. The [sampler](../clients/scripts/rocjitsu/rocjitsu_gemm_sampler.py) chooses the
    matrix dimensions, number formats and operation options.
-2. The [runner](../../../.github/scripts/run_random_hipblaslt_gemms.py) sends
+2. The [runner](../clients/scripts/rocjitsu/rocjitsu_random_gemms.py) sends
    that input to `hipblaslt-bench` under rocjitsu. The library chooses the GPU
    function, or kernel, as it normally would. No explicit solution index is used
    to force a particular kernel.
@@ -63,10 +63,12 @@ family. With a fixed seed, every night checks the same inputs against the
 latest library, so it works as a smoke test rather than a growing search.
 
 The [CPU test job](../../../.github/workflows/therock-rocjitsu-race-check-linux.yml)
-uses the library and benchmark built by the same workflow, then builds a fixed
-version of rocjitsu. It attempts every sample and uploads reports even after a
-failure. The job is advisory: its failure is visible, but does not fail the
-required Multi-Arch summary.
+runs this as its `random-gemms` workload. It uses the library and benchmark
+built by the same workflow, and
+[its driver](../../../.github/scripts/run_rocjitsu_hipblaslt_gemm_race_checks.sh)
+builds a fixed version of rocjitsu. It attempts every sample and uploads reports
+even after a failure. The job is advisory: its failure is visible, but does not
+fail the required Multi-Arch summary.
 
 The same job can be dispatched manually with the ID of a completed Multi-Arch
 run. It then tests that run's artifacts with the requested sample count, seed
@@ -77,25 +79,29 @@ gfx950 configuration. The Python environment needs PyYAML, and the benchmark
 build must enable MX data generation.
 
 ```sh
-HIPBLASLT_TENSILE_LIBPATH=/path/to/library/gfx950 python3 .github/scripts/run_random_hipblaslt_gemms.py \
-    --bench /path/to/hipblaslt-bench --rocjitsu /path/to/rocjitsu \
-    --config /path/to/gfx950_mi355x_kmd.json --count 100 --threads 8 \
-    --output /path/to/new-results
+python3 projects/hipblaslt/clients/scripts/rocjitsu/rocjitsu_random_gemms.py \
+    --client /path/to/hipblaslt-bench --rocjitsu /path/to/rocjitsu \
+    --library-dir /path/to/library/gfx950 \
+    --config /path/to/gfx950_mi355x_kmd.json --count 100 --workers 8 \
+    --continue-on-failure --reports /path/to/new-results
 ```
 
 Use `--case N` with the same seed to replay one sample. `--dry-run` lets you
 inspect the sampled inputs before running them: it writes inputs and reports
 without starting the benchmark or rocjitsu. These samples are marked `dry-run`,
-so they do not count as passes. `--stop-on-failure` stops starting new samples
-after a failure; already running samples finish. Each run creates a new output
-directory, with `summary.json` for totals and `cases.md` for individual results.
+so they do not count as passes. Without `--continue-on-failure`, the runner
+stops starting new samples after a failure; already running samples finish.
+Each run creates a new reports directory, with `summary.json` and `summary.md`
+for totals and timings, `cases.md` for individual results and `kernels.json`
+for the kernels each sample ran.
 The runner saves partial totals during execution. If the job is interrupted,
 `summary.json` retains those totals with `complete` set to `false`; completed
 cases also retain their individual results and logs.
 
 The runner's unit tests use a stand-in benchmark and emulator, so they need no
 build or GPU. The
-[component CI lane](../../../.github/workflows/component-ci-random-gemm-runner.yml)
-runs them on pull requests that change the sampler, runner or tests, and its
-result gates the required `Component CI Summary`. Run them locally with
-`python3 -m unittest discover -s .github/scripts/tests -p test_random_hipblaslt_gemms.py`.
+[component CI lane](../../../.github/workflows/component-ci-hipblaslt-rocjitsu-scripts.yml)
+runs the tests in `projects/hipblaslt/clients/scripts/rocjitsu` on pull requests
+that change that directory, and its result gates the required
+`Component CI Summary`. Run them locally with
+`python3 -m unittest discover -s projects/hipblaslt/clients/scripts/rocjitsu -p 'test_*.py'`.

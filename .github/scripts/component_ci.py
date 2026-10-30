@@ -8,7 +8,7 @@ Outputs boolean flags per component via GITHUB_OUTPUT:
   - miopen=true/false
   - tensilelite_coverage=true/false
   - hipblaslt_library_uniqueness=true/false
-  - random_gemm_runner=true/false
+  - hipblaslt_rocjitsu_scripts=true/false
 
 Each component defines a set of path patterns. If any changed file matches,
 that component is marked as triggered.
@@ -53,11 +53,9 @@ COMPONENTS = {
         "projects/hipblaslt/tensilelite/tox.ini",
         ".github/workflows/component-ci-library-uniqueness.yml",
     ],
-    "random_gemm_runner": [
-        ".github/scripts/run_random_hipblaslt_gemms.py",
-        ".github/scripts/sample_hipblaslt_gemms.py",
-        ".github/scripts/tests/test_random_hipblaslt_gemms.py",
-        ".github/workflows/component-ci-random-gemm-runner.yml",
+    "hipblaslt_rocjitsu_scripts": [
+        "projects/hipblaslt/clients/scripts/rocjitsu/**",
+        ".github/workflows/component-ci-hipblaslt-rocjitsu-scripts.yml",
     ],
 }
 

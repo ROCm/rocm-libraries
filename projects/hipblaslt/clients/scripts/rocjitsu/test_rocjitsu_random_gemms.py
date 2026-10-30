@@ -11,9 +11,9 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-import run_random_hipblaslt_gemms as runner
-import sample_hipblaslt_gemms as sampler
+sys.path.insert(0, str(Path(__file__).parent))
+import rocjitsu_random_gemms as runner
+import rocjitsu_gemm_sampler as sampler
 
 
 def bench_result(problem, *, norm="0", atol="1e-6"):
@@ -72,13 +72,14 @@ class RandomGemmTests(unittest.TestCase):
                         [
                             "--count",
                             "2",
-                            "--bench",
+                            "--continue-on-failure",
+                            "--client",
                             sys.executable,
                             "--rocjitsu",
                             sys.executable,
                             "--config",
                             str(config),
-                            "--output",
+                            "--reports",
                             str(root / "launch-failure"),
                         ]
                     ),
@@ -101,7 +102,7 @@ class RandomGemmTests(unittest.TestCase):
     def test_dry_run_and_single_case_reproduce_the_same_input(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            runner.main(["--dry-run", "--count", "100", "--output", str(root / "all")])
+            runner.main(["--dry-run", "--count", "100", "--reports", str(root / "all")])
             runner.main(
                 [
                     "--dry-run",
@@ -109,7 +110,7 @@ class RandomGemmTests(unittest.TestCase):
                     "100",
                     "--case",
                     "42",
-                    "--output",
+                    "--reports",
                     str(root / "one"),
                 ]
             )
@@ -234,10 +235,11 @@ class RandomGemmTests(unittest.TestCase):
                 "d = Path(config['sinks']['dir'])\n"
                 "started = time.monotonic()\ntime.sleep(0.1)\n"
                 "(d / 'interval.json').write_text(json.dumps([started, time.monotonic()]))\n"
+                "(d / 'libpath.txt').write_text(os.environ.get('HIPBLASLT_TENSILE_LIBPATH', ''))\n"
                 "(d / 'race.log').write_text('[rocjitsu] Kernel dispatch: symbol=\"gemm_kernel\"\\n' "
                 "+ ('RACE found\\n' if d.name == 'case-0002' and config.get('failure', 'race') == 'race' else ''))\n"
                 f"sys.path.insert(0, {str(Path(__file__).parent)!r})\n"
-                "from test_random_hipblaslt_gemms import bench_result\n"
+                "from test_rocjitsu_random_gemms import bench_result\n"
                 "if d.name == 'case-0002':\n"
                 "    mode = config.get('failure', 'race')\n"
                 "    if mode == 'terminate-runner':\n"
@@ -261,13 +263,18 @@ class RandomGemmTests(unittest.TestCase):
                 [
                     "--count",
                     "3",
-                    "--bench",
+                    "--continue-on-failure",
+                    "--library-dir",
+                    str(root),
+                    "--rocjitsu-revision",
+                    "0123abc",
+                    "--client",
                     str(bench),
                     "--rocjitsu",
                     str(emulator),
                     "--config",
                     str(config),
-                    "--output",
+                    "--reports",
                     str(output),
                 ]
             )
@@ -306,6 +313,10 @@ class RandomGemmTests(unittest.TestCase):
             self.assertIn("2 passed, 1 failed, 0 without a solution", report)
             self.assertIn("Distinct kernels: 1", report)
             self.assertIn("| case-0002 | failed | race reported |", report)
+            self.assertEqual(summary["rocjitsu_revision"], "0123abc")
+            self.assertEqual(
+                (output / "case-0001/libpath.txt").read_text(), str(root.resolve())
+            )
 
             for threads, early_stop in ((3, False), (2, True)):
                 with self.subTest(threads=threads, early_stop=early_stop):
@@ -313,19 +324,19 @@ class RandomGemmTests(unittest.TestCase):
                     command = [
                         "--count",
                         "8",
-                        "--threads",
+                        "--workers",
                         str(threads),
-                        "--bench",
+                        "--client",
                         str(bench),
                         "--rocjitsu",
                         str(emulator),
                         "--config",
                         str(config),
-                        "--output",
+                        "--reports",
                         str(output),
                     ]
-                    if early_stop:
-                        command.append("--stop-on-failure")
+                    if not early_stop:
+                        command.append("--continue-on-failure")
                     self.assertEqual(runner.main(command), 1)
                     summary = json.loads((output / "summary.json").read_text())
                     self.assertEqual(summary["failed"], 1)
@@ -374,17 +385,17 @@ class RandomGemmTests(unittest.TestCase):
                             "3",
                             "--timeout",
                             "1",
-                            "--bench",
+                            "--client",
                             str(bench),
                             "--rocjitsu",
                             str(emulator),
                             "--config",
                             str(config),
-                            "--output",
+                            "--reports",
                             str(output),
                         ]
-                        if early_stop:
-                            command.append("--stop-on-failure")
+                        if not early_stop:
+                            command.append("--continue-on-failure")
                         self.assertEqual(runner.main(command), 1)
                         summary = json.loads((output / "summary.json").read_text())
                         unsupported = int(mode == "no-solution")
@@ -431,13 +442,13 @@ class RandomGemmTests(unittest.TestCase):
                     runner.__file__,
                     "--count",
                     "3",
-                    "--bench",
+                    "--client",
                     str(bench),
                     "--rocjitsu",
                     str(emulator),
                     "--config",
                     str(config),
-                    "--output",
+                    "--reports",
                     str(output),
                 ],
                 stdout=subprocess.DEVNULL,
@@ -464,9 +475,9 @@ class RandomGemmTests(unittest.TestCase):
                         "--dry-run",
                         "--count",
                         "8",
-                        "--threads",
+                        "--workers",
                         str(threads),
-                        "--output",
+                        "--reports",
                         str(root / str(threads)),
                     ]
                 )
@@ -503,7 +514,7 @@ class RandomGemmTests(unittest.TestCase):
             )
             with self.assertRaises(SystemExit) as error:
                 runner.main(
-                    ["--config", str(config), "--output", str(root / "results")]
+                    ["--config", str(config), "--reports", str(root / "results")]
                 )
             self.assertEqual(error.exception.code, 2)
             self.assertFalse((root / "results").exists())

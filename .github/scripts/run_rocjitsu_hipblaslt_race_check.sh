@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Copyright Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier: MIT
 set -euo pipefail
 
 # The workflow that calls this script fetches hipBLASLt/TensileLite artifacts
@@ -9,15 +7,15 @@ set -euo pipefail
 # TODO(newling) Until rocjitsu is packaged as a complete runnable TheRock
 # artifact, we build the rocjitsu CLI locally. Monitor progress on packaging rocjitsu.
 #
-# RANDOM_GEMM_COUNT selects sampled gfx950 hipBLASLt GEMMs. Zero selects the
-# hipBLASLt and TensileLite smoke workloads.
+# The script runs small hipBLASLt and TensileLite GEMMs under the race detector.
+# TODO(newling) expand the GEMM-space tested.
 #
 # Basic flow:
 #   1. Use the TheRock artifact tree unpacked at ROCM_PATH.
 #   2. Build rocjitsu from the rocm-systems checkout in ROCJITSU_SOURCE_DIR.
 #   3. Select a rocjitsu config for gfx942 or gfx950.
-#   4. Run the selected GEMM workloads with the race and logging plugins enabled
-#      in per-workload configs.
+#   4. Run hipblaslt-bench and a reduced TensileLite smoke with the race and
+#      logging plugins enabled in per-workload configs.
 
 # These defaults match the GitHub Actions workspace layout: ROCM_PATH is the
 # unpacked TheRock artifact tree, ROCJITSU_SOURCE_DIR is the checked-out
@@ -39,16 +37,7 @@ TENSILE_DRIVER="${TENSILE_DRIVER:-${TENSILELITE_ROOT}/tensilelite/bin/Tensile}"
 TENSILELITE_CLIENT="${TENSILELITE_CLIENT:-${ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client}"
 RACE_TIMEOUT_SECONDS="${RACE_TIMEOUT_SECONDS:-180}"
 TENSILELITE_TIMEOUT_SECONDS="${TENSILELITE_TIMEOUT_SECONDS:-420}"
-RANDOM_GEMM_COUNT="${RANDOM_GEMM_COUNT:-0}"
-RANDOM_GEMM_SEED="${RANDOM_GEMM_SEED:-0}"
-RANDOM_GEMM_THREADS="${RANDOM_GEMM_THREADS:-8}"
 TIMING_FILE="${RACE_REPORT_DIR}/timing.tsv"
-
-if [[ ! "${RANDOM_GEMM_COUNT}" =~ ^[0-9]+$ ||
-      ! "${RANDOM_GEMM_THREADS}" =~ ^[1-9][0-9]*$ ]]; then
-  echo "RANDOM_GEMM_COUNT must be nonnegative and RANDOM_GEMM_THREADS positive" >&2
-  exit 1
-fi
 
 # Map TheRock's artifact-group name to the concrete GPU target used by both
 # rocjitsu and TensileLite. The workflow pins one rocm-systems revision, so the
@@ -78,8 +67,7 @@ select_rocjitsu_target() {
 }
 
 # Record the duration and exit status of each stage in a file that is uploaded
-# with the other race reports. The same information is also printed at exit,
-# and added to the GitHub job summary when running in Actions.
+# with the other race reports. The same information is also printed at exit.
 print_timing_summary() {
   if [[ -f "${TIMING_FILE}" ]]; then
     echo ""
@@ -88,23 +76,6 @@ print_timing_summary() {
     while IFS=$'\t' read -r label seconds status; do
       printf "%-36s %10s %6s\n" "${label}" "${seconds}" "${status}"
     done <"${TIMING_FILE}"
-    echo "Timeouts: ${RACE_TIMEOUT_SECONDS} s per race-check command," \
-      "${TENSILELITE_TIMEOUT_SECONDS} s for the TensileLite client"
-    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-      {
-        echo "### rocjitsu race check stages (${AMDGPU_FAMILIES:-local})"
-        echo ""
-        echo "| Stage | Seconds | Exit status |"
-        echo "| --- | ---: | ---: |"
-        while IFS=$'\t' read -r label seconds status; do
-          echo "| ${label} | ${seconds} | ${status} |"
-        done <"${TIMING_FILE}"
-        echo ""
-        echo "Timeouts: ${RACE_TIMEOUT_SECONDS} s per race-check command," \
-          "${TENSILELITE_TIMEOUT_SECONDS} s for the TensileLite client."
-        echo ""
-      } >>"${GITHUB_STEP_SUMMARY}"
-    fi
   fi
 }
 trap print_timing_summary EXIT
@@ -153,31 +124,20 @@ if [[ ! -x "${HIPBLASLT_BENCH}" ]]; then
   exit 1
 fi
 
-if [[ "${RANDOM_GEMM_COUNT}" != "0" ]]; then
-  for helper in hipblaslt_gentest.py hipblaslt_common.yaml hipblaslt_template.yaml; do
-    if [[ ! -f "$(dirname "${HIPBLASLT_BENCH}")/${helper}" ]]; then
-      echo "Bench input helper missing: ${helper}" >&2
-      exit 1
-    fi
-  done
+if [[ ! -d "${TENSILELITE_ROOT}" ]]; then
+  echo "TensileLite artifacts not found: ${TENSILELITE_ROOT}" >&2
+  echo "Expected TheRock BLAS test artifacts to contain share/hipblaslt/tensilelite" >&2
+  exit 1
 fi
 
-if [[ "${RANDOM_GEMM_COUNT}" == "0" ]]; then
-  if [[ ! -d "${TENSILELITE_ROOT}" ]]; then
-    echo "TensileLite artifacts not found: ${TENSILELITE_ROOT}" >&2
-    echo "Expected TheRock BLAS test artifacts to contain share/hipblaslt/tensilelite" >&2
-    exit 1
-  fi
+if [[ ! -f "${TENSILE_DRIVER}" ]]; then
+  echo "TensileLite driver not found: ${TENSILE_DRIVER}" >&2
+  exit 1
+fi
 
-  if [[ ! -f "${TENSILE_DRIVER}" ]]; then
-    echo "TensileLite driver not found: ${TENSILE_DRIVER}" >&2
-    exit 1
-  fi
-
-  if [[ ! -x "${TENSILELITE_CLIENT}" ]]; then
-    echo "tensilelite-client not found or not executable: ${TENSILELITE_CLIENT}" >&2
-    exit 1
-  fi
+if [[ ! -x "${TENSILELITE_CLIENT}" ]]; then
+  echo "tensilelite-client not found or not executable: ${TENSILELITE_CLIENT}" >&2
+  exit 1
 fi
 
 # The compiler artifact layout depends on whether TheRock enables LLVM's host
@@ -345,10 +305,7 @@ validate_race_check_output() {
   local logging_log="$5"
   local failed=0
 
-  if [[ "${command_status}" -eq 124 ]]; then
-    echo "${label} timed out (timeout(1) exit status 124)" >&2
-    failed=1
-  elif [[ "${command_status}" -ne 0 ]]; then
+  if [[ "${command_status}" -ne 0 ]]; then
     echo "${label} command failed with status ${command_status}" >&2
     failed=1
   fi
@@ -552,22 +509,6 @@ run_tensilelite_client_check() {
 }
 
 run_timed "rocjitsu version" show_rocjitsu_version
-
-if [[ "${RANDOM_GEMM_COUNT}" != "0" ]]; then
-  if [[ "${ROCJITSU_GPU_TARGET}" != "gfx950" ]]; then
-    echo "The random GEMM sampler requires gfx950" >&2
-    exit 1
-  fi
-  SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  run_timed "random hipblaslt GEMMs" \
-    python3 "${SCRIPT_DIR}/run_random_hipblaslt_gemms.py" \
-      --bench "${HIPBLASLT_BENCH}" --rocjitsu "${ROCJITSU_BIN}" \
-      --config "${ROCJITSU_CONFIG}" --count "${RANDOM_GEMM_COUNT}" \
-      --seed "${RANDOM_GEMM_SEED}" --threads "${RANDOM_GEMM_THREADS}" \
-      --timeout "${RACE_TIMEOUT_SECONDS}" \
-      --output "${RACE_REPORT_DIR}/random-gemms"
-  exit 0
-fi
 
 check_status=0
 
