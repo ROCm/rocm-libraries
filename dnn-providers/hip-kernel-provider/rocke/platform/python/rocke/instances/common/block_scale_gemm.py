@@ -71,6 +71,13 @@ from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, kernel_name_join
 
 
+# K groups whose A scales the K-group loop reads with one load per output
+# row: a row's scales of consecutive K groups are adjacent, so two groups
+# take one 8-byte load. Each group of a load is one more copy of the group's
+# MFMA loop in the kernel; four groups per 16-byte load measured slower than
+# two on some shapes.
+_GROUPS_PER_A_SCALE_LOAD = 2
+
 QuantMode = Literal["aquant", "bquant", "abquant"]
 MantissaDType = Literal["fp8e4m3", "bf8e5m2", "i4_fp8", "i4_bf8"]
 
@@ -96,11 +103,6 @@ class BlockScaleGemmSpec:
     block_tile_m: int = 16
     block_tile_n: int = 16
     name: str = "rocke_block_scale_gemm"
-    # P77 sibling: per-output-row scale broadcast, same shape as
-    # :class:`rocke.instances.common.mx_gemm.MxGemmSpec.per_input_row`.
-    # Defaults to True for backwards compat; flip on per-row
-    # varying-scale workloads.
-    per_input_row: bool = True
 
     @property
     def atom(self) -> MfmaAtom:
@@ -328,32 +330,52 @@ def build_block_scale_gemm(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Ke
     num_groups = spec.K // gk
     c_atom_k = b.const_i32(atom.k)
 
-    outer = b.scf_for_iter(
-        b.const_i32(0),
-        b.const_i32(num_groups),
-        b.const_i32(1),
-        [("acc", atom.zero_acc(b))],
-        iv_name="kg",
+    # Each lane scales the outputs it holds, so it needs the A scale of each
+    # output's row and the B scale of each output's column. In the 16x16
+    # atom a lane's ``c_per_lane`` outputs sit in ``c_per_lane`` rows of one
+    # column (``atom.lane_to_output``, the mapping the store uses): the rows
+    # are not the row the lane loads A from (``m_in_atom``), so the lane
+    # loads one A scale per output, while its column is the one it loads B
+    # from (``n_in_atom``), so one B scale serves all its outputs.
+    #
+    # The scales are read with buffer loads: the per-lane byte offset of each
+    # scale row (A) or column (B) is computed once, before the K-group loop,
+    # and the K group's byte offset, the same for every lane, goes in the
+    # load's scalar offset, so a K group adds no per-lane address arithmetic
+    # for its scales. The scale tensors are ``(ceil(M / gm), K / gk)`` (A)
+    # and ``(K / gk, ceil(N / gn))`` (B), f32, row-major. ``gk`` is a
+    # multiple of ``atom.k`` (32), so each is at most an eighth of the size
+    # in bytes of A or B: they fit a buffer's 32-bit byte range whenever A
+    # and B fit the 32-bit element index the kernel already uses for them.
+    a_scale_rsrc = b.buffer_rsrc(
+        AScale, b.const_i32(((spec.M + gm - 1) // gm) * k_scale_count_a * 4)
     )
-    with outer as (kg, (outer_acc,)):
-        # Load per-group scales (one f32 each).
-        a_scale_off = b.add(
+    b_scale_rsrc = b.buffer_rsrc(BScale, b.const_i32(num_groups * n_scale_count_b * 4))
+    a_scale_row_offsets = []
+    for i in range(atom.c_per_lane):
+        row_in_atom, _ = atom.lane_to_output(b, lane_decode.lane, i)
+        a_scale_row_offsets.append(
             b.mul(
-                b.div(b.add(m_tile_base, lane_decode.m_in_atom), b.const_i32(gm)),
-                b.const_i32(k_scale_count_a),
-            ),
-            kg,
+                b.div(b.add(m_tile_base, row_in_atom), b.const_i32(gm)),
+                b.const_i32(k_scale_count_a * 4),
+            )
         )
-        b_scale_off = b.add(
-            b.mul(kg, b.const_i32(n_scale_count_b)),
-            b.div(b.add(n_tile_base, lane_decode.n_in_atom), b.const_i32(gn)),
-        )
-        a_scale_v = b.global_load_f32(AScale, a_scale_off)
-        b_scale_v = b.global_load_f32(BScale, b_scale_off)
-        ab_scale = b.fmul(a_scale_v, b_scale_v)
+    b_scale_col_offset = b.mul(
+        b.div(b.add(n_tile_base, lane_decode.n_in_atom), b.const_i32(gn)),
+        b.const_i32(4),
+    )
 
-        # Run atoms_per_group MFMA invocations on a fresh acc; their K
-        # range is [kg * gk, (kg+1) * gk).
+    def _accumulate_group(b, kg, a_scales, acc, loop_suffix):
+        """Add K group ``kg`` to ``acc``: load the group's B scale, run its
+        ``gk / atom.k`` MFMAs on a fresh accumulator, scale the result by
+        ``a_scales[i] * b_scale`` per output ``i`` and add it to ``acc``.
+        ``loop_suffix`` keeps the names of the group's MFMA loop unique when
+        a K-group loop iteration runs more than one group."""
+        b_group_offset = b.mul(kg, b.const_i32(n_scale_count_b * 4))
+        b_scale_v = b.buffer_load(b_scale_rsrc, b_scale_col_offset, b_group_offset, F32)
+        ab_scale_vec = b.vec_pack([b.fmul(a, b_scale_v) for a in a_scales], F32)
+
+        # The group's K range is [kg * gk, (kg + 1) * gk).
         k_group_base = b.mul(kg, b.const_i32(gk))
 
         def _load_a_in_group(b, kt_local, base=k_group_base):
@@ -384,26 +406,64 @@ def build_block_scale_gemm(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Ke
             atom=atom,
             load_a=_load_a_in_group,
             load_b=_load_b_in_group,
-            iv_name="kk",
-            acc_name="gacc",
+            iv_name=f"kk{loop_suffix}",
+            acc_name=f"gacc{loop_suffix}",
         )
 
-        # Tile-level scale-and-accumulate the group's MFMA result.
-        # ``group_acc`` and ``outer_acc`` are both ``<c_per_lane x f32>``
-        # per-lane vectors; broadcast the scalar ``ab_scale`` to that
-        # width and emit one vector fmul + one vector fadd, which lower
-        # to packed ``v_pk_mul_f32`` / ``v_pk_add_f32`` (or a fused
-        # ``v_pk_fma_f32``) on AMDGPU instead of the c_per_lane scalar
-        # fmul/fadd chain the prior implementation produced. The
-        # ab_scale broadcast is correct under the spec's current
-        # uniform-scale assumption (group_m=group_n=1 collapses to per-
-        # row/col scales that map 1:1 to lane outputs).
-        ab_scale_vec = b.vector_splat(ab_scale, atom.c_per_lane)
-        scaled_group = b.vector_mul(group_acc, ab_scale_vec)
-        new_outer = b.vector_add(outer_acc, scaled_group)
-        b.scf_yield(new_outer)
+        # ``group_acc``, ``acc`` and ``ab_scale_vec`` are ``<c_per_lane x
+        # f32>`` per-lane vectors (element ``i`` belongs to output ``i``);
+        # one vector fmul and one vector fadd lower to packed
+        # ``v_pk_mul_f32`` / ``v_pk_add_f32`` on AMDGPU.
+        return b.vector_add(acc, b.vector_mul(group_acc, ab_scale_vec))
 
-    acc_final = outer.results[0]
+    # A row's A scales of consecutive K groups are adjacent, so the main
+    # K-group loop runs ``groups_per_load`` groups per iteration and reads
+    # each output row's A scales for all of them with one load. The last
+    # ``num_groups % groups_per_load`` groups run one per iteration, with
+    # one 4-byte load per row.
+    groups_per_load = _GROUPS_PER_A_SCALE_LOAD
+    num_group_runs = num_groups // groups_per_load
+    acc = atom.zero_acc(b)
+    if num_group_runs:
+        run_loop = b.scf_for_iter(
+            b.const_i32(0),
+            b.const_i32(num_group_runs),
+            b.const_i32(1),
+            [("acc", acc)],
+            iv_name="kr",
+        )
+        with run_loop as (kr, (run_acc,)):
+            a_run_offset = b.mul(kr, b.const_i32(groups_per_load * 4))
+            a_scale_runs = [
+                b.buffer_load_vN(
+                    a_scale_rsrc, row_offset, a_run_offset, F32, groups_per_load
+                )
+                for row_offset in a_scale_row_offsets
+            ]
+            first_kg = b.mul(kr, b.const_i32(groups_per_load))
+            for j in range(groups_per_load):
+                kg = b.add(first_kg, b.const_i32(j))
+                a_scales = [b.vec_extract(run, j) for run in a_scale_runs]
+                run_acc = _accumulate_group(b, kg, a_scales, run_acc, loop_suffix=j)
+            b.scf_yield(run_acc)
+        acc = run_loop.results[0]
+    if num_groups % groups_per_load:
+        tail_loop = b.scf_for_iter(
+            b.const_i32(num_group_runs * groups_per_load),
+            b.const_i32(num_groups),
+            b.const_i32(1),
+            [("tail_acc", acc)],
+            iv_name="kg",
+        )
+        with tail_loop as (kg, (tail_acc,)):
+            a_group_offset = b.mul(kg, b.const_i32(4))
+            a_scales = [
+                b.buffer_load(a_scale_rsrc, row_offset, a_group_offset, F32)
+                for row_offset in a_scale_row_offsets
+            ]
+            b.scf_yield(_accumulate_group(b, kg, a_scales, tail_acc, loop_suffix=""))
+        acc = tail_loop.results[0]
+    acc_final = acc
 
     # Output store via the shared MFMA epilogue helper: each lane
     # writes its ``c_per_lane`` cells to global via the atom's
