@@ -27,10 +27,12 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/integer_math.h>
 #include <thrust/detail/preprocessor.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__concepts/concept_macros.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/is_arithmetic.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/is_unsigned.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
 #  include _THRUST_STD_INCLUDE(limits)
 #  include _THRUST_STD_INCLUDE(type_traits)
@@ -38,6 +40,27 @@
 #endif
 
 #include <string>
+
+THRUST_NAMESPACE_BEGIN
+namespace detail
+{
+
+_CCCL_TEMPLATE(typename T)
+_CCCL_REQUIRES(_THRUST_STD::is_arithmetic_v<T>)
+[[nodiscard]] _CCCL_API constexpr bool is_negative([[maybe_unused]] T x) noexcept
+{
+  if constexpr (_THRUST_STD::is_unsigned_v<T>)
+  {
+    return false;
+  }
+  else
+  {
+    return x < 0;
+  }
+}
+
+} // namespace detail
+THRUST_NAMESPACE_END
 
 #if defined(THRUST_FORCE_32_BIT_OFFSET_TYPE) && defined(THRUST_FORCE_64_BIT_OFFSET_TYPE)
 #  error "Only THRUST_FORCE_32_BIT_OFFSET_TYPE or THRUST_FORCE_64_BIT_OFFSET_TYPE may be defined!"

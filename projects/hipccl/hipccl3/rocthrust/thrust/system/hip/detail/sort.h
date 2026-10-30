@@ -41,7 +41,6 @@
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/detail/alignment.h>
-#  include <thrust/detail/integer_math.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/detail/trivial_sequence.h>
 #  include <thrust/distance.h>
