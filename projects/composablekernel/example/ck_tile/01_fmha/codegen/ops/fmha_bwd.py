@@ -175,7 +175,7 @@ float fmha_bwd_dq_dk_dv_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>(const ck_tile::st
 {{
     using k_ = fmha_bwd_dq_dk_dv_kernel_{F_idx};
     if(s.log_level_ > 0)
-        std::cout << ", " << k_::GetName() << std::flush;
+        std::cout << ", {F_kname}" << std::flush;
     auto [kargs, grids]                    = fmha_bwd_dq_dk_dv_create_kargs_and_grids<k_>(a);
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
@@ -274,8 +274,7 @@ bool fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>(
 template <>
 std::string fmha_bwd_dq_dk_dv_get_name_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>()
 {{
-    using k_ = fmha_bwd_dq_dk_dv_kernel_{F_idx};
-    return k_::GetName();
+    return "{F_kname}";
 }}
 
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
@@ -418,6 +417,7 @@ class FmhaBwdDQDKDVKernel:
     @property
     def template(self) -> str:
         return FMHA_BWD_KERNEL_HEADER + FMHA_BWD_DQ_DK_DV_KERNEL_BODY.format(
+            F_kname=self.name,
             F_idx=self.F_idx,
             F_arch=self.F_arch,
             F_hdim=self.F_hdim,
@@ -690,7 +690,7 @@ float fmha_bwd_dot_do_o_<dot_do_o_trait_{F_idx}, {F_arch.tag}>(const ck_tile::st
 {{
     using k_ = fmha_bwd_dot_do_o_kernel_{F_idx};
     if(s.log_level_ > 0)
-        std::cout << ", " << k_::GetName() << std::flush;
+        std::cout << ", {F_kname}" << std::flush;
     auto [kargs, grids]                    = fmha_bwd_dot_do_o_create_kargs_and_grids<k_>(a);
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
@@ -712,8 +712,7 @@ void fmha_bwd_dot_do_o_oneshot_<dot_do_o_trait_{F_idx}, {F_arch.tag}>(const ck_t
 template <>
 std::string fmha_bwd_dot_do_o_get_name_<dot_do_o_trait_{F_idx}, {F_arch.tag}>()
 {{
-    using k_ = fmha_bwd_dot_do_o_kernel_{F_idx};
-    return k_::GetName();
+    return "{F_kname}";
 }}
 
 template <>
@@ -742,6 +741,7 @@ class FmhaBwdOGradDotOKernel:
     @property
     def template(self) -> str:
         return FMHA_BWD_KERNEL_HEADER + FMHA_BWD_DOT_DO_O_KERNEL_BODY.format(
+            F_kname=self.name,
             F_idx=self.F_idx,
             F_arch=self.F_arch,
             F_hdim=self.F_hdim,
@@ -821,7 +821,7 @@ float fmha_bwd_convert_dq_<convert_dq_trait_{F_idx}, {F_arch.tag}>(const ck_tile
 {{
     using k_ = fmha_bwd_convert_dq_kernel_{F_idx};
     if(s.log_level_ > 0)
-        std::cout << ", " << k_::GetName() << std::flush;
+        std::cout << ", {F_kname}" << std::flush;
     auto [kargs, grids]                    = fmha_bwd_convert_dq_create_kargs_and_grids<k_>(a);
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
@@ -843,8 +843,7 @@ void fmha_bwd_convert_dq_oneshot_<convert_dq_trait_{F_idx}, {F_arch.tag}>(const 
 template <>
 std::string fmha_bwd_convert_dq_get_name_<convert_dq_trait_{F_idx}, {F_arch.tag}>()
 {{
-    using k_ = fmha_bwd_convert_dq_kernel_{F_idx};
-    return k_::GetName();
+    return "{F_kname}";
 }}
 
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
@@ -869,6 +868,7 @@ class FmhaBwdConvertQGradKernel:
     @property
     def template(self) -> str:
         return FMHA_BWD_KERNEL_HEADER + FMHA_BWD_CONVERT_DQ_KERNEL_BODY.format(
+            F_kname=self.name,
             F_idx=self.F_idx,
             F_arch=self.F_arch,
             F_hdim=self.F_hdim,

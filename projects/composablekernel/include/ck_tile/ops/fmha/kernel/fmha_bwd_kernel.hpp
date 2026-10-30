@@ -820,7 +820,10 @@ struct FmhaBwdDQDKDVKernel
 
     CK_TILE_HOST static std::string GetName()
     {
-        // sync with generate.py
+        // Best-effort name for standalone users of this kernel; it only covers the
+        // template parameters. The example and the generated *_get_name_() API report
+        // the codegen name from codegen/ops/fmha_bwd.py instead, which is the one that
+        // matches the generated .cpp file name.
         // clang-format off
         using bfs  = typename FmhaPipeline::BlockFmhaShape;
         using gbr0 = typename bfs::Gemm0BlockWarps;
@@ -2394,7 +2397,10 @@ struct FmhaBwdOGradDotOKernel
 
     CK_TILE_HOST static std::string GetName()
     {
-        // sync with generate.py
+        // Best-effort name for standalone users of this kernel; it only covers the
+        // template parameters. The example and the generated *_get_name_() API report
+        // the codegen name from codegen/ops/fmha_bwd.py instead, which is the one that
+        // matches the generated .cpp file name.
         // clang-format off
         
         #define _SS_  std::string
@@ -2805,7 +2811,10 @@ struct FmhaBwdConvertQGradKernel
 
     CK_TILE_HOST static std::string GetName()
     {
-        // sync with generate.py
+        // Best-effort name for standalone users of this kernel; it only covers the
+        // template parameters. The example and the generated *_get_name_() API report
+        // the codegen name from codegen/ops/fmha_bwd.py instead, which is the one that
+        // matches the generated .cpp file name.
         // clang-format off
         
         #define _SS_  std::string
