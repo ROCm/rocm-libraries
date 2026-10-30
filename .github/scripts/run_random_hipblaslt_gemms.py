@@ -13,6 +13,7 @@ import re
 import shlex
 import shutil
 import signal
+import statistics
 import subprocess
 import sys
 import threading
@@ -63,8 +64,8 @@ def write_case_report(directory, records):
     lines = [
         "# GEMM inputs and outcomes",
         "",
-        "| Case | Input | Outcome | Observation |",
-        "| --- | --- | --- | --- |",
+        "| Case | Input | Outcome | Seconds | Observation |",
+        "| --- | --- | --- | ---: | --- |",
     ]
     for record in records:
         result = record["result"]
@@ -72,14 +73,60 @@ def write_case_report(directory, records):
         reason = (result.get("reason") or "numerics and race detection passed").replace(
             "|", "\\|"
         )
+        seconds = result.get("seconds", {}).get("total")
+        seconds = "" if seconds is None else f"{seconds:.1f}"
         lines.append(
-            f"| [{record['id']}]({record['id']}/input.yaml) | `{problem}` | {result['outcome']} | {reason} |"
+            f"| [{record['id']}]({record['id']}/input.yaml) | `{problem}` | {result['outcome']} | {seconds} | {reason} |"
         )
     (directory / "cases.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def write_summary_report(directory, summary, records):
+    """Write summary.md, the readable run overview shown in the CI job summary."""
+    lines = [
+        f"### GEMM race and numerical checks ({summary['architecture']}, seed {summary['seed']})",
+        "",
+        f"- Cases: {summary['sampled']} of {summary['requested']} sampled; "
+        f"{summary['passed']} passed, {summary['failed']} failed, "
+        f"{summary['unsupported']} without a solution"
+        + ("" if summary["complete"] else " (incomplete run)"),
+        f"- Elapsed: {summary['elapsed_seconds']:.1f} s with {summary['threads']} "
+        f"concurrent cases; timeout {summary['timeout_seconds']} s per command",
+        f"- Distinct kernels: {summary['distinct_kernels']}",
+    ]
+    if summary["case_seconds"]:
+        seconds = summary["case_seconds"]
+        lines.append(
+            f"- Seconds per case: min {seconds['min']:.1f}, median "
+            f"{seconds['median']:.1f}, max {seconds['max']:.1f}"
+        )
+        lines.append(
+            "- Slowest cases: "
+            + ", ".join(
+                f"{case['case']} ({case['seconds']:.1f} s)"
+                for case in summary["slowest_cases"]
+            )
+        )
+    problems = sorted(
+        (record["id"], record["result"])
+        for record in records
+        if record["result"]["outcome"] not in ("passed", "dry-run")
+    )
+    if problems:
+        lines += ["", "| Case | Outcome | Reason |", "| --- | --- | --- |"]
+        for name, result in problems:
+            reason = str(result["reason"]).replace("|", "\\|")
+            lines.append(f"| {name} | {result['outcome']} | {reason} |")
+    (directory / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def run_command(command, directory, timeout, log_name):
-    """Terminate the entire case process group on timeout, including bench."""
+    """Return (exit status, elapsed seconds, timed out).
+
+    Terminate the entire case process group on timeout, including bench, and
+    report exit status 124 like timeout(1).
+    """
+    started = time.monotonic()
     with (directory / log_name).open("w", encoding="utf-8") as log:
         with subprocess.Popen(
             command,
@@ -94,11 +141,12 @@ def run_command(command, directory, timeout, log_name):
             },
         ) as process:
             try:
-                return process.wait(timeout=timeout)
+                status = process.wait(timeout=timeout)
+                return status, time.monotonic() - started, False
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
-                return 124
+                return 124, time.monotonic() - started, True
 
 
 def check_result(problem, text, race_log):
@@ -187,14 +235,24 @@ def run_case(args, directory, problem, config):
     )
     case_config["sinks"] = {"types": ["stderr", "file"], "dir": str(directory)}
     write_json(directory / "rocjitsu.json", case_config)
-    status = run_command(convert, directory, args.timeout, "conversion.log")
+    seconds = {}
+    status, seconds["conversion"], timed_out = run_command(
+        convert, directory, args.timeout, "conversion.log"
+    )
     if status:
         return {
             "outcome": "failed",
-            "reason": "input conversion failed",
+            "reason": (
+                f"input conversion timed out after {args.timeout} s"
+                if timed_out
+                else "input conversion failed"
+            ),
             "exit_code": status,
+            "seconds": seconds,
         }
-    status = run_command(command, directory, args.timeout, "bench.log")
+    status, seconds["bench"], timed_out = run_command(
+        command, directory, args.timeout, "bench.log"
+    )
     text = (directory / "bench.log").read_text(encoding="utf-8", errors="replace")
     race_path = directory / "race.log"
     race_log = (
@@ -202,9 +260,12 @@ def run_case(args, directory, problem, config):
         if race_path.exists()
         else ""
     )
-    reason = (
-        f"bench exited {status}" if status else check_result(problem, text, race_log)
-    )
+    if timed_out:
+        reason = f"bench timed out after {args.timeout} s"
+    elif status:
+        reason = f"bench exited {status}"
+    else:
+        reason = check_result(problem, text, race_log)
     if re.search(r"^RACE\s", text + "\n" + race_log, re.MULTILINE):
         reason = "race reported"
     return {
@@ -215,6 +276,7 @@ def run_case(args, directory, problem, config):
         ),
         "reason": reason,
         "exit_code": status,
+        "seconds": seconds,
         "kernels": sorted(
             set(re.findall(r"^\s*--kernel name:\s*(\S+)\s*$", text, re.MULTILINE))
         ),
@@ -296,6 +358,7 @@ def main(argv=None):
         "unsupported": 0,
         "coverage": {key: {} for key in ("family", "transpose", "epilogue")},
         "threads": args.threads,
+        "timeout_seconds": args.timeout,
         "dry_run": args.dry_run,
         "complete": False,
     }
@@ -304,6 +367,9 @@ def main(argv=None):
     stop = threading.Event()
     iterations = iter(range(1, args.count + 1))
     records = []
+    # Case name -> total seconds, and kernel name -> case names that ran it.
+    case_seconds = {}
+    kernel_cases = {}
     started = time.perf_counter()
 
     def save_summary():
@@ -312,6 +378,24 @@ def main(argv=None):
             summary["unsupported"] / completed if completed else None
         )
         summary["elapsed_seconds"] = time.perf_counter() - started
+        durations = sorted(case_seconds.values())
+        summary["case_seconds"] = (
+            {
+                "min": durations[0],
+                "median": statistics.median(durations),
+                "max": durations[-1],
+                "total": sum(durations),
+            }
+            if durations
+            else None
+        )
+        summary["slowest_cases"] = [
+            {"case": name, "seconds": seconds}
+            for name, seconds in sorted(
+                case_seconds.items(), key=lambda item: item[1], reverse=True
+            )[:5]
+        ]
+        summary["distinct_kernels"] = len(kernel_cases)
         # Replace the file so an interrupted write leaves the previous totals intact.
         temporary = args.output / "summary.json.tmp"
         write_json(temporary, summary)
@@ -353,6 +437,7 @@ def main(argv=None):
             )
             result = {"outcome": "dry-run", "reason": "execution not requested"}
             if not args.dry_run:
+                case_started = time.monotonic()
                 try:
                     result = run_case(args, directory, problem, config)
                 except OSError as error:
@@ -360,14 +445,27 @@ def main(argv=None):
                         "outcome": "failed",
                         "reason": f"execution error: {error}",
                     }
+                result.setdefault("seconds", {})["total"] = (
+                    time.monotonic() - case_started
+                )
                 write_json(directory / "result.json", result)
                 with lock:
                     summary[result["outcome"]] += 1
+                    case_seconds[name] = result["seconds"]["total"]
+                    for kernel in result.get("kernels", []):
+                        kernel_cases.setdefault(kernel, []).append(name)
                     if args.stop_on_failure and result["outcome"] != "passed":
                         stop.set()
                     save_summary()
+                timings = ", ".join(
+                    f"{step} {seconds:.1f} s"
+                    for step, seconds in result["seconds"].items()
+                    if step != "total"
+                )
                 print(
-                    f"{name}: {result['outcome']}: {result['reason'] or 'numerics and races checked'}",
+                    f"{name}: {result['outcome']} in {result['seconds']['total']:.1f} s"
+                    + (f" ({timings})" if timings else "")
+                    + f": {result['reason'] or 'numerics and races checked'}",
                     flush=True,
                 )
             with lock:
@@ -393,6 +491,22 @@ def main(argv=None):
     finally:
         save_summary()
         write_case_report(args.output, records)
+        write_summary_report(args.output, summary, records)
+        write_json(
+            args.output / "kernels.json",
+            {kernel: sorted(cases) for kernel, cases in sorted(kernel_cases.items())},
+        )
+        if summary["case_seconds"]:
+            slowest = summary["slowest_cases"][0]
+            print(
+                f"{len(case_seconds)} cases in {summary['elapsed_seconds']:.1f} s "
+                f"with {args.threads} concurrent; per case median "
+                f"{summary['case_seconds']['median']:.1f} s, max "
+                f"{slowest['seconds']:.1f} s ({slowest['case']}), "
+                f"timeout {args.timeout} s; "
+                f"{summary['distinct_kernels']} distinct kernels",
+                flush=True,
+            )
         print(json.dumps(summary, sort_keys=True), flush=True)
     return int(summary["failed"] + summary["unsupported"] != 0)
 
