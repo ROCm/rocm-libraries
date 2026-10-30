@@ -234,6 +234,35 @@ def test_padded_bias_row_pitch():
     assert _max_abs(out, ref) < _tolerance(dtype)
 
 
+@pytest.mark.parametrize("d", [64, 128])
+@pytest.mark.parametrize("mask", ["none", "top_left"])
+def test_misaligned_bias_view(mask, d):
+    """The aligned body loads four consecutive keys with one 16-byte load that is
+    only element-aligned: a view one element into its storage, with an odd row
+    pitch, puts most of those loads off a 16-byte boundary. ``-inf`` entries ride
+    along so a lane mix-up inside a load shows."""
+    dtype, hq, hkv, batch, sq, skv = "bf16", 4, 2, 2, 256, 512
+    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask)
+    assert not spec.ragged
+    q, k, v, _ = _inputs(dtype, d, hq, hkv, batch, sq, skv, (1,))
+    pitch = skv + 5
+    shape = (batch, hq, sq, skv)
+    strides = (hq * sq * pitch, sq * pitch, pitch, 1)
+    storage = 2 * torch.randn(
+        1 + batch * hq * sq * pitch, device="cuda", dtype=torch.float32
+    )
+    bias = storage.as_strided(shape, strides, storage_offset=1)
+    bias[..., 3::7] = float("-inf")
+    assert storage.data_ptr() % 16 == 0
+    # Group loads start at element 1 + s*pitch + 4m (the batch and head terms are
+    # multiples of 4): every 4-byte residue of a 16-byte line is hit.
+    assert {(bias.storage_offset() + r * pitch) % 4 for r in range(4)} == {0, 1, 2, 3}
+    scale = 1.0 / math.sqrt(d)
+    out = _run(spec, q, k, v, bias, scale)
+    ref, _ = _reference(q, k, v, scale, bias.contiguous(), mask)
+    assert _max_abs(out, ref) < _tolerance(dtype)
+
+
 def test_minus_inf_entries_mask_keys():
     """A float mask spelled with ``-inf`` (what PyTorch SDPA makes of a boolean mask)
     hides those keys: here every odd key of every row, plus whole key blocks for one

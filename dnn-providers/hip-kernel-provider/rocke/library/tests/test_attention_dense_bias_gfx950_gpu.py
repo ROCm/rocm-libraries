@@ -136,11 +136,14 @@ def _bias_strides(bias):
     )
 
 
-def _launch(spec, q, k, v, bias, scale, *, cu_q=None, cu_kv=None):
+def _launch(spec, q, k, v, bias, scale, *, cu_q=None, cu_kv=None, bias_view=None):
     """Launch ``spec`` on float32 arrays of ``spec.dtype`` values: ``q``/``k``/``v``
     dense [B, S, H, D] or packed [T, H, D] (varlen), ``bias`` a contiguous rank-4
-    fp32 array. Returns ``(O, LSE or None)`` as float32 arrays in the kernel's
-    layouts (LSE [B, Hq, Sq] or [T, Hq])."""
+    fp32 array. ``bias_view = (storage, offset, strides)`` instead passes a strided
+    view: a 1-D fp32 ``storage``, the element ``offset`` of the view in it and the
+    view's ``(batch, head, sq)`` element strides (``bias`` is then ignored). Returns
+    ``(O, LSE or None)`` as float32 arrays in the kernel's layouts (LSE [B, Hq, Sq]
+    or [T, Hq])."""
     key = attention_dense_cache_key(spec, arch="gfx950")
     launcher = _LAUNCHERS.get(key)
     if launcher is None:
@@ -182,8 +185,17 @@ def _launch(spec, q, k, v, bias, scale, *, cu_q=None, cu_kv=None):
         lse = np.empty(lse_shape, np.float32)
         lse_mem = _nan_filled(lse.nbytes)
         vals["lse_ptr"] = lse_mem
-    bias = np.ascontiguousarray(bias, np.float32)
-    vals.update(additive_bias_launch_values(_device(bias), _bias_strides(bias)))
+    if bias_view is None:
+        bias = np.ascontiguousarray(bias, np.float32)
+        vals.update(additive_bias_launch_values(_device(bias), _bias_strides(bias)))
+    else:
+        storage, offset, strides = bias_view
+        bias_mem = _device(np.asarray(storage, np.float32))
+        # A raw pointer into bias_mem, which this frame keeps alive until the
+        # synchronous launch returns.
+        vals.update(
+            additive_bias_launch_values(bias_mem.ptr() + 4 * int(offset), strides)
+        )
     # A synchronous launch: the kernel has finished when this returns.
     launcher(
         vals,
@@ -273,6 +285,60 @@ def test_one_bias_shape_per_mask(mask, bias_shape, block_m):
     assert _max_abs(out, ref) < _tolerance(dtype)
     plain, _ = _reference(q, k, v, scale, None, mask)
     assert _max_abs(out, plain) > 5 * _tolerance(dtype)
+
+
+@pytest.mark.parametrize("d", [64, 128])
+@pytest.mark.parametrize("mask", ["none", "top_left"])
+def test_misaligned_bias_view(mask, d):
+    """The aligned body loads four consecutive keys with one 16-byte load that is
+    only element-aligned: a view one element into its storage, with an odd row
+    pitch, puts most of those loads off a 16-byte boundary. ``-inf`` entries ride
+    along so a lane mix-up inside a load shows."""
+    dtype, hq, hkv, batch, sq, skv = "bf16", 4, 2, 2, 256, 512
+    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask)
+    assert not spec.ragged
+    q, k, v, _ = _inputs(dtype, d, hq, hkv, batch, sq, skv, (1,))
+    pitch = skv + 5
+    strides = (hq * sq * pitch, sq * pitch, pitch)
+    rng = np.random.default_rng(1)
+    storage = (2 * rng.standard_normal(1 + batch * hq * sq * pitch)).astype(np.float32)
+    view = np.lib.stride_tricks.as_strided(
+        storage[1:],
+        shape=(batch, hq, sq, skv),
+        strides=tuple(4 * s for s in (*strides, 1)),
+        writeable=True,
+    )
+    view[..., 3::7] = -np.inf
+    # Group loads start at element 1 + s*pitch + 4m of a 16-byte-aligned device
+    # allocation (the batch and head terms are multiples of 4): every 4-byte residue.
+    assert {(1 + r * pitch) % 4 for r in range(4)} == {0, 1, 2, 3}
+    scale = 1.0 / math.sqrt(d)
+    out, _ = _launch(spec, q, k, v, None, scale, bias_view=(storage, 1, strides))
+    ref, _ = _reference(q, k, v, scale, np.array(view), mask)
+    assert _max_abs(out, ref) < _tolerance(dtype)
+
+
+@pytest.mark.parametrize("d", [64, 128])
+def test_vector_bias_loads_match_the_scalar_path_bitwise(d):
+    """At tile-multiple lengths the ragged body (masked scalar bias loads) reads the
+    same keys as the aligned body (16-byte loads) with the same clamp, scale and add,
+    so the outputs are bitwise equal: on the misaligned view of the test above."""
+    dtype, hq, hkv, batch, sq, skv = "bf16", 4, 2, 2, 256, 512
+    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask="top_left")
+    assert not spec.ragged
+    q, k, v, _ = _inputs(dtype, d, hq, hkv, batch, sq, skv, (1,))
+    pitch = skv + 5
+    strides = (hq * sq * pitch, sq * pitch, pitch)
+    rng = np.random.default_rng(1)
+    storage = (2 * rng.standard_normal(1 + batch * hq * sq * pitch)).astype(np.float32)
+    storage[1 + 3 :: 7] = -np.inf
+    scale = 1.0 / math.sqrt(d)
+    view = (storage, 1, strides)
+    vec, _ = _launch(spec, q, k, v, None, scale, bias_view=view)
+    scalar, _ = _launch(
+        replace(spec, ragged=True), q, k, v, None, scale, bias_view=view
+    )
+    np.testing.assert_array_equal(vec, scalar)
 
 
 @pytest.mark.parametrize(

@@ -126,6 +126,7 @@ from kernels.common.attention_dense_kv_split import (
 )
 from kernels.common._attention_additive_bias import (
     add_additive_bias_at,
+    add_additive_bias_x4_at,
     additive_bias_launch_values,
     additive_bias_row,
     append_additive_bias_signature,
@@ -1348,24 +1349,48 @@ def build_attention_dense(
         tile_key0 = b.mul(tile_idx, b.const_i32(BN))
         for nsub in range(N_SUB):
             sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
-            for i in range(16):
-                ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
-                in_range = None
-                if RAGGED:
-                    skv_c = b.const_i32(Skv)
-                    key_ok = b.cmp_lt(ktok, skv_c)
-                    in_range = b.land(bias_row_ok, key_ok)
-                scaled = b.fmul(s_reg[nsub][i], qk_scale)
-                s_reg[nsub][i] = add_additive_bias_at(
-                    b,
-                    scaled,
-                    additive_bias,
-                    row=bias_row,
-                    col=ktok,
-                    mask=in_range,
-                    rcp_ln2=bias_log2e,
-                    floor=bias_floor,
-                )
+            # The x4 bias loads lift the D128 LSE kernels past the 256-VGPR budget
+            # (2 waves/SIMD, LDS-bound) into a scratch spill; they keep the scalar loads.
+            if not RAGGED and not (spec.emit_lse and D == 128):
+                # C elements i0..i0+3 are keys c_row(i0)..c_row(i0)+3 of the
+                # lane's bias row (_mfma_32x32_c_row: c_row(i) = (i//4)*8 +
+                # (lane//32)*4 + i%4), so one 16-byte load per group replaces
+                # four scalar ones. Every key is in range here, so the scalar
+                # path's per-key mask is not needed.
+                for i0 in range(0, 16, 4):
+                    c_row0 = _mfma_32x32_c_row(b, lane, i0)
+                    ktok0 = b.add(sub_base, c_row0)
+                    scaled = [b.fmul(s_reg[nsub][i0 + j], qk_scale) for j in range(4)]
+                    s_reg[nsub][i0 : i0 + 4] = add_additive_bias_x4_at(
+                        b,
+                        scaled,
+                        additive_bias,
+                        row=bias_row,
+                        col=ktok0,
+                        rcp_ln2=bias_log2e,
+                        floor=bias_floor,
+                    )
+            else:
+                # Scalar loads: masked per key on the ragged body (the last tile
+                # and padded query rows can be out of range), plain otherwise.
+                for i in range(16):
+                    ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                    in_range = None
+                    if RAGGED:
+                        skv_c = b.const_i32(Skv)
+                        key_ok = b.cmp_lt(ktok, skv_c)
+                        in_range = b.land(bias_row_ok, key_ok)
+                    scaled = b.fmul(s_reg[nsub][i], qk_scale)
+                    s_reg[nsub][i] = add_additive_bias_at(
+                        b,
+                        scaled,
+                        additive_bias,
+                        row=bias_row,
+                        col=ktok,
+                        mask=in_range,
+                        rcp_ln2=bias_log2e,
+                        floor=bias_floor,
+                    )
 
     def _p_exp(s, neg_m):
         """P = exp2(s * qk_scale - m); bias-on scores already carry the scale."""

@@ -3,12 +3,14 @@
 
 """Host-side contract of the gfx950 dense kernel's additive bias: the spec field and
 its refusals, the kernel name and cache identity, the kernel-param / launcher ABI, the
-runner's bias validation and the dispatcher wiring. No GPU; the numerics are
+runner's bias validation, the dispatcher wiring and the bias load shape (vector on
+the aligned body, scalar on the ragged one). No GPU; the numerics are
 ``test_attention_dense_bias_gfx950_numeric.py``.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -82,6 +84,33 @@ def test_bias_is_in_the_name_and_the_cache_key(mode):
     assert attention_dense_cache_key(spec, arch="gfx950") != attention_dense_cache_key(
         plain, arch="gfx950"
     )
+
+
+_BIAS_X4_LOAD = re.compile(r"load <4 x float>, ptr addrspace\(1\) [^,]+, align (\d+)")
+
+
+@pytest.mark.parametrize("mode", list(_MODES))
+def test_the_aligned_body_reads_the_bias_four_keys_per_element_aligned_load(mode):
+    """The non-ragged body reads the bias with one <4 x float> load per four keys,
+    element-aligned only (the host contract promises no 16-byte alignment); the
+    ragged body keeps masked scalar loads, the D128 LSE body keeps plain scalar ones
+    (the vector form would spill it), and bias off emits no such load."""
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    def llvm(spec):
+        return _lower_kernel_to_llvm_python(
+            build_attention_dense(spec, arch="gfx950"),
+            arch="gfx950",
+            llvm_flavor="llvm22",
+        )
+
+    spec = _bias(_MODES[mode])
+    aligns = _BIAS_X4_LOAD.findall(llvm(spec))
+    if spec.ragged or (spec.emit_lse and spec.head_size == 128):
+        assert aligns == []
+    else:
+        assert aligns and set(aligns) == {"4"}
+    assert _BIAS_X4_LOAD.findall(llvm(replace(spec, use_additive_bias=False))) == []
 
 
 def test_bias_keeps_the_runtime_shape_cohort():

@@ -12,7 +12,8 @@ builders are Python only; the C++ lowerer lowers the IR they emit.
 Device side: :func:`declare_additive_bias_params` adds the four kernel params,
 :func:`additive_bias_row` computes a query row's base index once, and
 :func:`add_additive_bias_at` adds one element (:func:`add_additive_bias` does
-both). Host side: :func:`append_additive_bias_signature` adds the launcher
+both); :func:`add_additive_bias_x4_at` adds four consecutive in-range keys with
+one 16-byte load (the dense kernel's non-ragged body). Host side: :func:`append_additive_bias_signature` adds the launcher
 entries; :func:`additive_bias_strides` (strides derived from a tensor) or the
 unified kernels' ``_validate_additive_bias`` (strides passed by the caller)
 validates a launch, both through :func:`check_additive_bias_tensor` and
@@ -23,6 +24,7 @@ its offsets by the spec maxima); :func:`additive_bias_launch_values` packs it.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,10 +34,11 @@ from rocke.core.ir import F32, I32, IRBuilder, PtrType, Value
 # the host launcher signature, which packs kernargs by position.
 _STRIDES = ("batch", "head", "sq")
 
-# additive_bias_row / add_additive_bias_at index the bias in i32; every host
-# validator of a bias launch bounds the largest element index by this (through
-# check_additive_bias_reach). The gfx1151 dispatch binding and the hipDNN dense
-# pack (Gfx950AttentionDenseNative.cpp) keep their own copies of the bound.
+# additive_bias_row / add_additive_bias_at / add_additive_bias_x4_at index the
+# bias in i32; every host validator of a bias launch bounds the largest element
+# index by this (through check_additive_bias_reach). The gfx1151 dispatch binding
+# and the hipDNN dense pack (Gfx950AttentionDenseNative.cpp) keep their own copies
+# of the bound.
 ADDITIVE_BIAS_INDEX_LIMIT = 2**31
 
 
@@ -116,6 +119,41 @@ def add_additive_bias_at(
     if floor is not None:
         v = b.fmax(v, floor)
     return b.fadd(score, b.fmul(v, rcp_ln2))
+
+
+def add_additive_bias_x4_at(
+    b: IRBuilder,
+    scores: Sequence[Value],
+    p: AdditiveBiasParams,
+    *,
+    row: Value,
+    col: Value,
+    rcp_ln2: Value,
+    floor: Value | None = None,
+) -> list[Value]:
+    """Vector form of :func:`add_additive_bias_at` for four consecutive keys:
+    return ``scores[j] + bias[row + col + j] * rcp_ln2`` for ``j`` in 0..3, read
+    with one 16-byte load instead of four 4-byte ones. Each element gets the same
+    floor clamp, scale and add as the scalar form, so the results are bitwise
+    equal to it (pinned on the GPU against the scalar path).
+
+    The load is plain and unchecked, like ``mask=None`` in the scalar form: all
+    four keys must be in range. It is only element-aligned (``align=4``): the
+    host contract does not guarantee 16-byte alignment of ``row + col``."""
+    if len(scores) != 4:
+        raise ValueError(
+            f"add_additive_bias_x4_at takes exactly 4 scores, got {len(scores)}"
+        )
+    idx = b.add(row, col)
+    vec = b.global_load_vN(p.ptr, idx, F32, 4, align=4)
+    out: list[Value] = []
+    for j, score in enumerate(scores):
+        v = b.vec_extract(vec, j)
+        if floor is not None:
+            v = b.fmax(v, floor)
+        scaled_bias = b.fmul(v, rcp_ln2)
+        out.append(b.fadd(score, scaled_bias))
+    return out
 
 
 def add_additive_bias(

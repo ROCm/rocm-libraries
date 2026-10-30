@@ -3983,7 +3983,8 @@ def cases():
             },
         ),
         # --- additive bias (grid body only): the aligned runtime-shape body with
-        # plain loads, the ragged body whose loads are masked at the tails, and the
+        # plain 16-byte loads (four keys each, element-aligned), the ragged body
+        # whose scalar loads are masked at the tails, and the
         # windowed bodies that clamp the start tile because the bias load is plain
         # (LSE on: baked tile count; varlen: per-sequence tile count). Numerics
         # cannot observe that clamp (the window mask overwrites the read), so these
