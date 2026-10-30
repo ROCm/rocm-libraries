@@ -15,10 +15,19 @@
  *  limitations under the License.
  */
 
+#include <thrust/equal.h>
+#include <thrust/iterator/constant_iterator.h>
+#include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/reduce.h>
 #include <thrust/unique.h>
+
+#include _THRUST_STD_INCLUDE(functional)
+#include _THRUST_STD_INCLUDE(type_traits)
+
+#include <cstdint>
+#include <limits>
 
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
@@ -448,4 +457,136 @@ TEST(ReduceByKeyTests, TestReduceByKeyWithBigIndexes)
       ASSERT_EQ(result[key_id], sum + key_id * key_size);
     }
   }
+}
+
+// Checks whether the equality operator is ever invoked on out-of-bounds items
+struct check_valid_item_op
+{
+  std::uint32_t* error_counter{};
+  int expected_upper_bound{};
+
+  __device__ bool operator()(const int lhs, const int rhs) const
+  {
+    if (lhs > expected_upper_bound || rhs > expected_upper_bound)
+    {
+      if (error_counter)
+      {
+        atomicAdd(error_counter, 1);
+      }
+      return false;
+    }
+    return lhs == rhs;
+  }
+};
+
+template <typename ReturnedT>
+struct check_accumulator_t_op
+{
+  std::uint32_t* error_counter{};
+
+  template <typename T,
+            typename U,
+            typename = _THRUST_STD::enable_if_t<_THRUST_STD::is_same_v<T, U> && !_THRUST_STD::is_same_v<T, ReturnedT>>>
+  __device__ ReturnedT operator()(const T lhs, const U& rhs) const
+  {
+    return static_cast<ReturnedT>(lhs + rhs);
+  }
+
+  template <typename T>
+  __device__ ReturnedT operator()(const ReturnedT lhs, const T& rhs) const
+  {
+    atomicAdd(error_counter, 1);
+    return lhs + static_cast<ReturnedT>(rhs);
+  }
+};
+
+TEST(ReduceByKeyTests, TestReduceByKeyWithCustomEqualityOp)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  using key_vector_t = thrust::device_vector<std::int32_t>;
+  using val_vector_t = thrust::device_vector<std::int32_t>;
+  using key_t        = key_vector_t::value_type;
+  using val_t        = val_vector_t::value_type;
+
+  auto constexpr num_items = 1000;
+  auto keys                = thrust::make_counting_iterator(key_t{0});
+  auto values              = thrust::make_counting_iterator(val_t{42});
+
+  thrust::device_vector<std::uint32_t> error_counter(1, 0);
+  auto const error_counter_ptr = thrust::raw_pointer_cast(error_counter.data());
+
+  key_vector_t unique_out(num_items);
+  val_vector_t aggregates_out(num_items);
+  auto [unique_out_end, aggregates_out_end] = thrust::reduce_by_key(
+    keys,
+    keys + num_items,
+    values,
+    unique_out.begin(),
+    aggregates_out.begin(),
+    check_valid_item_op{error_counter_ptr, num_items - 1});
+
+  // Verify that the number of unique keys is correct
+  const auto num_unique_out     = _THRUST_STD::distance(unique_out.begin(), unique_out_end);
+  const auto num_aggregates_out = _THRUST_STD::distance(aggregates_out.begin(), aggregates_out_end);
+  ASSERT_EQ(num_unique_out, num_items);
+  ASSERT_EQ(num_aggregates_out, num_items);
+
+  // Verify that the equality operator was never invoked on out-of-bounds items
+  ASSERT_EQ(error_counter[0], std::uint32_t{0});
+
+  // Verify that unique keys are correct
+  bool all_keys_correct = thrust::equal(unique_out.cbegin(), unique_out.cend(), keys);
+  ASSERT_TRUE(all_keys_correct);
+
+  // Verify that the aggregates are correct
+  bool all_values_correct = thrust::equal(aggregates_out.cbegin(), aggregates_out.cend(), values);
+  ASSERT_TRUE(all_values_correct);
+}
+
+TEST(ReduceByKeyTests, TestReduceByKeyWithDifferentAccumulatorT)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  using key_t          = std::uint32_t;
+  using val_t          = std::uint8_t;
+  using reduction_op_t = check_accumulator_t_op<std::uint32_t>;
+
+  auto constexpr num_items            = 20000;
+  auto constexpr expected_num_uniques = 1;
+  constexpr auto unique_key           = key_t{42U};
+  auto keys                           = thrust::make_constant_iterator(unique_key);
+  auto values                         = thrust::make_counting_iterator(val_t{0});
+
+  thrust::device_vector<std::uint32_t> error_counter(1, 0);
+  auto const error_counter_ptr = thrust::raw_pointer_cast(error_counter.data());
+
+  thrust::device_vector<key_t> unique_out(expected_num_uniques);
+  thrust::device_vector<val_t> aggregates_out(expected_num_uniques);
+  auto [unique_out_end, aggregates_out_end] = thrust::reduce_by_key(
+    keys,
+    keys + num_items,
+    values,
+    unique_out.begin(),
+    aggregates_out.begin(),
+    _THRUST_STD::equal_to<>{},
+    reduction_op_t{error_counter_ptr});
+
+  // Verify that the number of unique keys is correct
+  auto num_unique_out     = _THRUST_STD::distance(unique_out.begin(), unique_out_end);
+  auto num_aggregates_out = _THRUST_STD::distance(aggregates_out.begin(), aggregates_out_end);
+  ASSERT_EQ(num_unique_out, expected_num_uniques);
+  ASSERT_EQ(num_aggregates_out, expected_num_uniques);
+
+  // Verify that the equality operator was never invoked on out-of-bounds items
+  ASSERT_EQ(error_counter[0], std::uint32_t{0});
+
+  // Verify that the unique key is correct
+  ASSERT_EQ(unique_out[0], unique_key);
+
+  // Verify that the aggregate is correct
+  constexpr auto mod_val            = 0x01 << std::numeric_limits<val_t>::digits;
+  constexpr auto sum                = ((num_items * (num_items - 1)) / 2);
+  constexpr auto expected_aggregate = static_cast<val_t>(sum % mod_val);
+  ASSERT_EQ(aggregates_out[0], expected_aggregate);
 }
