@@ -27,6 +27,15 @@ _INPUT_TYPE_PAIRS = {
     "BFloat8Float8_fnuz": ("BFloat8_fnuz", "Float8_fnuz"),
 }
 
+# Mirror ContractionSolution.hpp: the split-K synchronizer buffer holds
+# GsuSynchronizerElements entries in each of SynchronizerGroupedSlots slots.
+_SYNCHRONIZER_ELEMENTS = 409600 * 16
+
+# An automatic split-K kernel (globalSplitU -1) lets the runtime choose the
+# split as floor(K / DepthU / 3), bounded by the CU count. The chosen K spans
+# this many splits of the requested reduction blocks.
+AUTOMATIC_SPLIT_GROUPS = 2
+
 
 class UnsupportedSolution(Exception):
     """A known feature for which this workload generator has no implementation.
@@ -64,6 +73,7 @@ def _choose_sizes(index, preferred, reduction_multiple, predicates):
     # Native GEMM problem sizes are ordered M, N, batch, K. Free and bound
     # predicate indices address their own lists, each with one entry here.
     lower, upper, multiples = [1] * 4, [None] * 4, [1] * 4
+    synchronizer_checks = []
     dimension_types = {
         "Free0SizeMultiple": (0, {0}),
         "Free1SizeMultiple": (1, {0}),
@@ -86,6 +96,17 @@ def _choose_sizes(index, preferred, reduction_multiple, predicates):
                 raise ValueError(f"Solution {index}: invalid {kind}")
             if value[1] > 1:
                 lower[3] = max(lower[3], value[0] * value[1])
+            continue
+        if kind == "SynchronizerSizeCheck":
+            if (
+                not isinstance(value, list)
+                or len(value) != 6
+                or any(type(v) is not int for v in value)
+                or min(value[:2]) <= 0
+                or min(value[2:5]) < 0
+            ):
+                raise ValueError(f"Solution {index}: invalid {kind}")
+            synchronizer_checks.append(value)
             continue
         if kind in dimension_types:
             dim, indices = dimension_types[kind]
@@ -142,6 +163,14 @@ def _choose_sizes(index, preferred, reduction_multiple, predicates):
         if chosen < lo:
             raise UnsupportedSolution(index, ["size bounds exclude complete reduction blocks"])
         result.append(chosen)
+    for tile0, tile1, *per_tile, split in synchronizer_checks:
+        # The runtime skips this check for unsplit or automatically split
+        # launches; otherwise each output tile reserves synchronizer entries.
+        tiles = -(-result[0] // tile0) * -(-result[1] // tile1)
+        if split not in (-1, 1) and tiles * per_tile[0] * per_tile[1] * per_tile[2] > (
+            _SYNCHRONIZER_ELEMENTS
+        ):
+            raise UnsupportedSolution(index, ["split-K synchronizer buffer too small"])
     return result[0], result[1], result[3]
 
 
@@ -238,6 +267,9 @@ class LibraryMetadata:
         M and N are the dimensions of the output tile computed by one workgroup.
         K is ``reduction_blocks * DepthU * fixed_split``: each split workgroup
         processes ``reduction_blocks`` full blocks of DepthU reduction elements.
+        Automatic split-K uses ``AUTOMATIC_SPLIT_GROUPS`` in place of the fixed
+        split. The runtime then chooses floor(2 * reduction_blocks / 3) splits,
+        at least one; three blocks give two splits of three blocks each.
         Persistent scheduling (Stream-K or DataParallel) uses no fixed split
         multiplier; the runtime distributes those blocks among workgroups.
         Bounds can change M/N or the number of complete reduction blocks. Blocks
@@ -291,8 +323,8 @@ class LibraryMetadata:
         if type(split) is not int or split < -1 or (split == 0 and strategy == "None"):
             raise ValueError(f"Solution {solution_index}: invalid globalSplitU {split!r}")
         reasons = []
-        if split == -1 or mapping.get("adaptiveGemmGSUA", 0):
-            reasons.append("automatic split-K")
+        if mapping.get("adaptiveGemmGSUA", 0):
+            reasons.append("adaptive split-K")
         # TODO(newling): Add grouped and sparse GEMM, required output operations
         # and the excluded matrix layouts (AIHPBLAS-3605).
         unsupported = (
@@ -347,12 +379,16 @@ class LibraryMetadata:
         a_op, b_op = "C" if conjugate_a else "", "C" if conjugate_b else ""
         if operation != f"Contraction_l_A{a_indices}{a_op}_B{b_indices}{b_op}_Cijk_Dijk":
             raise UnsupportedSolution(solution_index, [f"contraction {operation}"])
-        reduction_multiple = lcm(
-            depth * (split if strategy == "None" else 1), *(b for b in mx_blocks if b)
-        )
+        if strategy != "None":
+            k_splits, fixed_split = 1, 1
+        elif split == -1:
+            k_splits, fixed_split = AUTOMATIC_SPLIT_GROUPS, 1
+        else:
+            k_splits, fixed_split = split, split
+        reduction_multiple = lcm(depth * fixed_split, *(b for b in mx_blocks if b))
         m, n, k = _choose_sizes(
             solution_index,
-            (m, n, 1, reduction_blocks * depth * (split if strategy == "None" else 1)),
+            (m, n, 1, reduction_blocks * depth * k_splits),
             reduction_multiple,
             record.get("sizePredicates", ()),
         )

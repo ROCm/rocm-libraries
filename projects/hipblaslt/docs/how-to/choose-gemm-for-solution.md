@@ -51,7 +51,7 @@ result matrix, with these dimensions:
 | --- | --- | --- |
 | Solution metadata | `sizeMapping.macroTile[0:2]` | M and N, the output tile's rows and columns |
 | Solution metadata | `sizeMapping.depthU` | Number of K elements in one reduction block |
-| Solution metadata | `sizeMapping.globalSplitU` | Fixed number of workgroups sharing the K reduction |
+| Solution metadata | `sizeMapping.globalSplitU` | Fixed number of workgroups sharing the K reduction, or -1 when the runtime chooses |
 | Caller argument, default 8 | `reduction_blocks` | Complete reduction blocks per fixed split, or per output tile with persistent scheduling |
 
 For ordinary fixed-split solutions, K is `reduction_blocks * depthU * globalSplitU`. For a 128-by-96 output tile,
@@ -59,6 +59,12 @@ For ordinary fixed-split solutions, K is `reduction_blocks * depthU * globalSpli
 Four workgroups share the output tile, each processing eight blocks of 32
 reduction elements. These include prefetch and final stages; eight blocks does
 not necessarily mean eight steady-state loop backedges.
+
+Automatic split-K solutions (`globalSplitU=-1`) use K =
+`2 * reduction_blocks * depthU`. For one output tile, the runtime splits K into
+floor(K / depthU / 3) parts, at least one and at most the device CU count. With
+`reduction_blocks=3`, two workgroups each process three blocks; the default of
+eight gives five workgroups sharing 16 blocks.
 
 For Stream-K and persistent DataParallel solutions, K is
 `reduction_blocks * depthU`. Their `globalSplitU` does not multiply the workload
@@ -69,7 +75,8 @@ equivalents are normalized and validated before construction.
 
 Serialized size predicates can require a different shape. The helper honors
 size bounds, equalities and divisibility constraints, including minimum K for
-fixed split-K. It keeps the requested dimensions when they fit, otherwise
+fixed split-K. It also applies the runtime's split-K synchronizer size check to
+the chosen tile. It keeps the requested dimensions when they fit, otherwise
 chooses dimensions within the bounds. K remains a multiple of the reduction
 block and fixed split; required MX block sizes also constrain K. For example,
 a 32-by-32 tile with `depthU=64` would normally give K=512. If its predicates
@@ -270,7 +277,7 @@ else:
     print("Every loaded index produced a problem")
 ```
 
-Current exclusions include automatic split-K, grouped or sparse GEMM,
+Current exclusions include adaptive split-K, grouped or sparse GEMM,
 required output operations, unusual
 layouts and contractions, and different C/D storage types. Record the reason
 and continue a sweep if desired. Catch only `UnsupportedSolution`; malformed

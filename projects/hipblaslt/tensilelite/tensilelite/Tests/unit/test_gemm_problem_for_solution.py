@@ -112,7 +112,6 @@ def test_formats_selection_and_identity(tmp_path, library_format, compressed):
 @pytest.mark.parametrize(
     "key,value",
     [
-        ("globalSplitU", -1),
         ("adaptiveGemmGSUA", 1),
         ("globalSplitU", 0),
         ("depthU", 0),
@@ -131,6 +130,66 @@ def test_unsupported_scheduling_is_distinct_from_invalid_metadata(tmp_path, key,
     else:
         with pytest.raises(ValueError):
             load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+
+
+@pytest.mark.parametrize("blocks,runtime_split", [(1, 1), (3, 2), (8, 5)])
+def test_automatic_split_k_spans_two_groups_of_blocks(tmp_path, blocks, runtime_split):
+    write_shard(tmp_path, [solution(split=-1)])
+    p = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(
+        17, reduction_blocks=blocks
+    )
+    assert (p.m, p.n, p.k) == (128, 96, 2 * blocks * 32)
+    # ContractionSolution::calculateAutoGSU for one output tile and enough CUs.
+    assert max(1, p.k // 32 // 3) == runtime_split
+
+
+def test_automatic_split_k_honors_minimum_k(tmp_path):
+    record = solution(split=-1)
+    record["problemPredicate"] = {"type": "SizeGreaterThan", "index": 3, "value": 300}
+    write_shard(tmp_path, [record])
+    p = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(
+        17, reduction_blocks=3
+    )
+    assert p.k == 320
+
+
+@pytest.mark.parametrize(
+    "per_tile,split,supported",
+    [
+        ([4, 2, 4], 4, True),
+        # Generated metadata can round the stored elements per store to zero.
+        ([1, 0, 4], 4, True),
+        ([4, 2, 4], -1, True),
+        ([409600, 16, 2], 4, False),
+        ([409600, 16, 2], 1, True),
+    ],
+)
+def test_synchronizer_size_check_matches_runtime(tmp_path, per_tile, split, supported):
+    record = solution(split=split)
+    record["problemPredicate"] = {
+        "type": "SynchronizerSizeCheck",
+        "index": 0,
+        "value": [128, 96, *per_tile, split],
+    }
+    write_shard(tmp_path, [record])
+    library = load_library_metadata(tmp_path, target="gfx942")
+    if supported:
+        p = library.choose_single_problem(17)
+        assert (p.m, p.n) == (128, 96)
+    else:
+        with pytest.raises(UnsupportedSolution, match="synchronizer"):
+            library.choose_single_problem(17)
+
+
+@pytest.mark.parametrize(
+    "value", [[128, 96, 4, 2, 4], [128, 0, 4, 2, 4, 2], [128, 96, -1, 2, 4, 2], "x"]
+)
+def test_invalid_synchronizer_size_check_is_an_error(tmp_path, value):
+    record = solution(split=2)
+    record["problemPredicate"] = {"type": "SynchronizerSizeCheck", "index": 0, "value": value}
+    write_shard(tmp_path, [record])
+    with pytest.raises(ValueError, match="SynchronizerSizeCheck"):
+        load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
 
 
 @pytest.mark.parametrize("split", [0, 1, 4])

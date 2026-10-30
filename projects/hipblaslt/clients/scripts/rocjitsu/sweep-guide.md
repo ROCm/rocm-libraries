@@ -62,7 +62,8 @@ Optional epilogues are disabled. This supports double, complex, FNUZ and MX
 operands as well as the initial real types. MX block sizes, scale datatypes and
 scale layout come from metadata; the native client initializes the operands and
 scales and computes the numerical reference. MX uses bounded HPL input values.
-Automatic split-K and the descriptor's other
+Automatic split-K solutions use K covering two splits of the requested blocks,
+and the runtime chooses the split. The descriptor's
 unimplemented features are counted as coverage gaps by reason; malformed
 metadata fails preparation. A selected workload that exceeds the buffer budget
 or fails native predicates remains selected and fails the run.
