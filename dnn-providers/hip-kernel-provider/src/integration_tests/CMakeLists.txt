@@ -263,7 +263,8 @@ foreach(_hkp_bwd_engine IN ITEMS split merged)
             continue()
         endif()
 
-        hkp_reserve_census_shard(_hkp_bwd_shard_dest ${_hkp_bwd_arch})
+        hkp_reserve_census_shard(_hkp_bwd_shard_dest ${_hkp_bwd_arch}
+            FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../config/hipkernel_flydsl_sdpa_bwd_${_hkp_bwd_engine}.toml")
         add_external_integration_test_target(
             TARGET_NAME hip_kernel_provider_flydsl_sdpa_bwd_${_hkp_bwd_engine}_${_hkp_bwd_arch}_gpu_ref_integration_tests
             PLUGIN_TARGET hip_kernel_provider

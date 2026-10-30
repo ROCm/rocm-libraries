@@ -449,7 +449,8 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                 continue()
             endif()
 
-            hkp_reserve_census_shard(_hkp_bwd_shard_dest ${_hkp_bwd_arch})
+            hkp_reserve_census_shard(_hkp_bwd_shard_dest ${_hkp_bwd_arch}
+                FILES "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_flydsl_sdpa_bwd_${_hkp_bwd_engine}.toml")
             set(_hkp_bwd_shard_args
                 INSTALL_DESTINATION "${_hkp_bwd_shard_dest}"
                 INSTALL_STAGING_KEY hkp_census_${_hkp_bwd_arch})
@@ -507,7 +508,8 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
        AND _hkp_gfx950_attention_unified_2d
        AND TARGET hipdnn_integration_tests)
-        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950
+            FILES "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950AttentionUnified2D.toml")
         set(_gfx950_shard_args
             INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_gfx950)
@@ -548,7 +550,8 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
        AND _hkp_gfx950_attention_unified_3d
        AND TARGET hipdnn_integration_tests)
-        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950
+            FILES "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950AttentionUnified3D.toml")
         set(_gfx950_shard_args
             INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_gfx950)
