@@ -156,6 +156,10 @@ struct PassFeatureConfig {
         /// the last s_barrier_wait, only WMMAs, tensor_load_to_lds and barriers are picked;
         /// other work issues only when no WMMA is left to pick. 0 = off.
         int holdAfterBarrier = 0;
+        /// Mirrors ModuleOptions::HoldBetweenCloseBarriers. When an s_barrier_wait issues and
+        /// the next barrier signal's planned WMMA threshold is at most wmmaQueueDepth past the
+        /// wait's, the same hold as holdAfterBarrier lasts until that signal issues.
+        bool holdBetweenCloseBarriers = false;
         /// In the region that ends at a loop's back-edge branch, the last loopTailWmmaRun WMMAs
         /// issue back to back, and the non-WMMA work queued before them (the next iteration's
         /// ds_loads) goes first, also when it has to wait for a ds credit; the ds spread paces

@@ -139,6 +139,8 @@
     X(BarrierTailBackToBack, bool, false) /* WMMAs the barrier cover counts on, back to back */    \
     X(HoldAfterBarrier, int,                                                                       \
       0) /* N WMMAs after a barrier wait: only WMMA/tensor_load; 0 = off */                        \
+    X(HoldBetweenCloseBarriers, bool,                                                              \
+      false) /* barriers <= WmmaQueueDepth apart: only WMMA/tensor_load between them */            \
     X(LoopTailWmmaRun, int, 0)            /* last WMMAs before the back edge, back to back */      \
     X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \
     X(DsBatchWmmas, int, 4)               /* WMMAs per ds_load pacing batch */                     \

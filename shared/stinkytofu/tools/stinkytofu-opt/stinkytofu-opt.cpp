@@ -218,6 +218,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg == "--enable-esm2-track-valu-vsrc" ||
                 arg.starts_with("--wait-alu-hold-strict-count=") ||
                 arg.starts_with("--hold-after-barrier=") ||
+                arg == "--hold-between-close-barriers" ||
                 arg.starts_with("--prefetch-lead-wmmas=") ||
                 arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
                 arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
@@ -573,6 +574,8 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--hold-after-barrier=")) {
             passFeatureConfig.dagFeatures.holdAfterBarrier =
                 std::stoi(a.substr(std::string("--hold-after-barrier=").size()));
+        } else if (a == "--hold-between-close-barriers") {
+            passFeatureConfig.dagFeatures.holdBetweenCloseBarriers = true;
         } else if (a.starts_with("--loop-tail-wmma-run=")) {
             passFeatureConfig.dagFeatures.loopTailWmmaRun =
                 std::stoi(a.substr(std::string("--loop-tail-wmma-run=").size()));

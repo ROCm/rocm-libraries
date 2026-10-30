@@ -975,19 +975,40 @@ class CDNA5ReadyQueue : public ReadyQueue {
         }
         return false;
     }
-    // dagFeatures.holdAfterBarrier: while a barrier span hold is open only WMMAs,
-    // tensor_loads and barriers are picked. Phase G still takes held work once
+    // dagFeatures.holdAfterBarrier / holdBetweenCloseBarriers: while a barrier span hold is
+    // open only WMMAs, tensor_loads and barriers are picked. Phase G still takes held work once
     // no WMMA is left, so the region always makes progress.
     bool barrierSpanHolds(const DAGNode* node) const {
         const StinkyInstruction& inst = *node->inst;
         if (isMatrixInstruction(inst) || isTensorLoad(inst) || isBarrier(inst)) return false;
+        if (closeBarrierHoldUntil_ != nullptr) return true;
         const int wmmas = getPassContext().getPassFeatureConfig().dagFeatures.holdAfterBarrier;
         return wmmas > 0 && lastBarrierWaitWmma_ >= 0 &&
                wmmaIssuedCountThisRegion_ - lastBarrierWaitWmma_ < wmmas;
     }
+    // On an s_barrier_wait whose planned threshold is \p waitThreshold: with
+    // holdBetweenCloseBarriers, opens the span hold up to the next unissued barrier signal when
+    // that signal's threshold is at most wmmaQueueDepth() WMMAs later.
+    void openCloseBarrierHold(int waitThreshold) {
+        closeBarrierHoldUntil_ = nullptr;
+        if (!getPassContext().getPassFeatureConfig().dagFeatures.holdBetweenCloseBarriers) return;
+        StinkyInstruction* next = nullptr;
+        int nextThreshold = 0;
+        for (const auto& [barrier, threshold] : barrierWmmaThresholds_) {
+            if (!isBarrierSignal(*barrier) || barriersIssuedThisRegion_.count(barrier)) continue;
+            if (next == nullptr || threshold < nextThreshold) {
+                next = barrier;
+                nextThreshold = threshold;
+            }
+        }
+        if (next != nullptr && nextThreshold - waitThreshold <= wmmaQueueDepth())
+            closeBarrierHoldUntil_ = next;
+    }
     // wmmaIssuedCountThisRegion_ when the last s_barrier_wait issued: 0 for a region that
     // starts right after one, -1 when none has issued in this region.
     int lastBarrierWaitWmma_ = -1;
+    // The barrier signal that closes the holdBetweenCloseBarriers span; nullptr = no span.
+    const StinkyInstruction* closeBarrierHoldUntil_ = nullptr;
     // Planned WMMA windows of the region's s_barrier_wait instructions, ascending.
     std::vector<int> barrierWaitWindows_;
     // WMMA count when each node entered the ready set (push), for needsWaitAlu.
@@ -1105,7 +1126,14 @@ class CDNA5ReadyQueue : public ReadyQueue {
                 std::cerr << "[CDNA5 barrierCover] wmmaIssued=" << wmmaIssuedCountThisRegion_
                           << " queuedCover=" << queuedCoverCycles() << "\n";
         });
-        if (isBarrierWait(inst)) lastBarrierWaitWmma_ = wmmaIssuedCountThisRegion_;
+        if (&inst == closeBarrierHoldUntil_) closeBarrierHoldUntil_ = nullptr;
+        if (isBarrierWait(inst)) {
+            lastBarrierWaitWmma_ = wmmaIssuedCountThisRegion_;
+            auto threshold = barrierWmmaThresholds_.find(const_cast<StinkyInstruction*>(&inst));
+            openCloseBarrierHold(threshold != barrierWmmaThresholds_.end()
+                                     ? threshold->second
+                                     : wmmaIssuedCountThisRegion_);
+        }
         if (waitAlu_) waitAlu_->commit(inst);
     }
 };
@@ -3073,6 +3101,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaIssuedCountThisRegion_ = 0;
     readyWmmaCount_.clear();
     lastBarrierWaitWmma_ = -1;
+    closeBarrierHoldUntil_ = nullptr;
     if (regionStart != blockBegin) {
         auto* prev = dyn_cast<StinkyInstruction>(std::prev(regionStart).getNodePtr());
         if (prev != nullptr && isBarrierWait(*prev)) lastBarrierWaitWmma_ = 0;
@@ -3889,5 +3918,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             }
         }
     }
+    if (lastBarrierWaitWmma_ == 0) openCloseBarrierHold(0);
 }
 }  // namespace
