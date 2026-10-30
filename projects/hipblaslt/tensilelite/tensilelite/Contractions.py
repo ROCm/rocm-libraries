@@ -351,8 +351,9 @@ class ProblemType:
         rv.mxBlockB = d.get('MXBlockB', 0)
         rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
         rv.mxTypeB = DataType(d['DataTypeMXSB']) if 'DataTypeMXSB' in d else DataType(0)
-        # mxScaleFormat is a Solution-level parameter and is populated by
-        # Solution.FromOriginalState, which has access to the parent dict.
+        # Kernel layout integer. 0 is NoSwizzle, not the runtime request -1.
+        # Solution.FromOriginalState overwrites this from the derived solution.
+        rv.mxScaleFormat = 0
 
         rv.metadataLayout = 0
         if 'MetadataLayout' in d:
@@ -733,6 +734,11 @@ class ProblemPredicate(Properties.Predicate):
                        value=floorTiles * state['DepthU'] - 1)]
             rv += [cls('SizeLessThan', index=kIdx,
                        value=kTiles * state['DepthU'] + 1)]
+
+        # Per-solution layout. A file-level predicate would demand one format
+        # for every solution in the file and reject HostPreSwizzle.
+        if problemType.mxBlockA or problemType.mxBlockB:
+            rv += [cls('MXScaleFormatEqual', value=problemType.mxScaleFormat)]
 
         return rv
 

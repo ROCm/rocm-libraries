@@ -3205,6 +3205,40 @@ namespace TensileLite
                 }
             };
 
+            struct MXScaleFormatEqual
+                : public Predicate_CRTP<MXScaleFormatEqual, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXScaleFormatEqual() = default;
+                MXScaleFormatEqual(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXScaleFormatEqual";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return mxScaleRequestMatchesKernel(problem.mxScaleFormat(), value);
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxScaleFormat(), "==", "sol", value);
+                }
+            };
+
             // W4A16 group-scale predicates.
             struct ScaleBlockSizeA
                 : public Predicate_CRTP<ScaleBlockSizeA, ContractionProblemGemm>

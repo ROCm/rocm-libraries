@@ -259,3 +259,34 @@ TEST(Predicates, BufferStoreOffsetLimitCheck_NarrowOutputUsesItsOwnWidth)
     auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(macroTile1);
     EXPECT_TRUE((*pred)(bf16ColumnMajorD(m, n)));
 }
+
+// gfx950 scale 3 requests -2 and matches no kernel layout, including a
+// canonical kernel (0) and HostPreSwizzle (1). Request 1 is format 1001.
+// Request -1 is gfx1250 scale 3 and the Tensile client: every layout stays legal.
+TEST(Predicates, MXScaleFormatEqual_rejects_unsupported_and_accepts_host_preswizzle)
+{
+    using namespace TensileLite;
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, 128, 128, 128, 128, 128, 128, 1.0, false, 1);
+    problem.setMXScaleA(rocisa::DataType::E8, 32);
+
+    auto noSwizzle       = std::make_shared<Predicates::Contraction::MXScaleFormatEqual>(0);
+    auto hostPreSwizzle  = std::make_shared<Predicates::Contraction::MXScaleFormatEqual>(1);
+    auto inMemorySwizzle = std::make_shared<Predicates::Contraction::MXScaleFormatEqual>(2);
+
+    problem.setMXScaleFormat(-2);
+    EXPECT_FALSE((*hostPreSwizzle)(problem));
+    EXPECT_FALSE((*noSwizzle)(problem));
+    EXPECT_FALSE((*inMemorySwizzle)(problem));
+
+    problem.setMXScaleFormat(1);
+    EXPECT_TRUE((*hostPreSwizzle)(problem));
+    EXPECT_FALSE((*noSwizzle)(problem));
+    EXPECT_FALSE((*inMemorySwizzle)(problem));
+
+    problem.setMXScaleFormat(-1);
+    EXPECT_TRUE((*hostPreSwizzle)(problem));
+    EXPECT_TRUE((*inMemorySwizzle)(problem));
+    EXPECT_TRUE((*noSwizzle)(problem));
+}
