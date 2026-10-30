@@ -37,9 +37,10 @@
 hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status);
 
 // Matmul reads every layout as column-major or swizzled; only hipblasLtMatrixTransform reads
-// HIPBLASLT_ORDER_ROW. Returns HIPBLAS_STATUS_NOT_SUPPORTED when any order is ROW. A null layout
-// is skipped so the caller's own validation reports it, and grouped layouts are left to the
-// grouped path's own order check.
+// HIPBLASLT_ORDER_ROW. Returns HIPBLAS_STATUS_NOT_SUPPORTED when any order is ROW. Callers check
+// order only after the arguments their own validation checks first are present, so a missing
+// handle, descriptor, or pointer keeps its usual status. The layout form returns SUCCESS when any
+// layout is null or grouped; the grouped path has its own order check.
 hipblasStatus_t refuse_row_order(const char*      caller,
                                  hipblasLtOrder_t orderA,
                                  hipblasLtOrder_t orderB,

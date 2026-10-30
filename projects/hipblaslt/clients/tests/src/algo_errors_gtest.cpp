@@ -8,6 +8,7 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <string>
 #include <vector>
@@ -456,6 +457,151 @@ namespace
                                          problemType),
                       expected)
                 << which;
+        }
+
+        hipblasLtMatrixLayoutDestroy(col);
+        hipblasLtMatrixLayoutDestroy(row);
+    }
+
+    // A missing handle, descriptor, layout or pointer is reported the same way whatever the
+    // layouts' order is: each invalid call below must return the status it returns with
+    // column-major layouts, not HIPBLAS_STATUS_NOT_SUPPORTED.
+    TEST_F(AlgoErrors, smoke_RowOrderKeepsArgumentValidationFirst)
+    {
+        auto layoutWithOrder = [&](hipblasLtOrder_t order) {
+            hipblasLtMatrixLayout_t l = nullptr;
+            EXPECT_EQ(hipblasLtMatrixLayoutCreate(&l, kType, kSize, kSize, kSize),
+                      HIPBLAS_STATUS_SUCCESS);
+            const int32_t value = order;
+            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                          l, HIPBLASLT_MATRIX_LAYOUT_ORDER, &value, sizeof(value)),
+                      HIPBLAS_STATUS_SUCCESS);
+            return l;
+        };
+        hipblasLtMatrixLayout_t col = layoutWithOrder(HIPBLASLT_ORDER_COL);
+        hipblasLtMatrixLayout_t row = layoutWithOrder(HIPBLASLT_ORDER_ROW);
+
+        hipblasLtMatmulHeuristicResult_t control{};
+        int                              controlCount = 0;
+        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      handle, desc, col, col, col, col, pref, 1, &control, &controlCount),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_GT(controlCount, 0);
+
+        // Each case gets the layout under test as A (it decides the order) and column-major
+        // layouts elsewhere.
+        using Call     = std::function<int(hipblasLtMatrixLayout_t)>;
+        auto heuristic = [&](hipblasLtHandle_t           h,
+                             hipblasLtMatmulDesc_t       d,
+                             hipblasLtMatmulPreference_t p,
+                             int                         requested,
+                             bool                        count) {
+            return [=](hipblasLtMatrixLayout_t l) {
+                hipblasLtMatmulHeuristicResult_t result{};
+                int                              returned = 0;
+                return int(hipblasLtMatmulAlgoGetHeuristic(
+                    h, d, l, col, col, col, p, requested, &result, count ? &returned : nullptr));
+            };
+        };
+        auto matmul = [&](hipblasLtHandle_t       h,
+                          hipblasLtMatmulDesc_t   d,
+                          const void*             alphaPtr,
+                          const void*             aPtr,
+                          hipblasLtMatrixLayout_t layoutB,
+                          void*                   dPtr,
+                          size_t                  workspaceSize) {
+            return [=, bPtr = b, cPtr = c, betaPtr = &beta, algo = control.algo](
+                       hipblasLtMatrixLayout_t l) {
+                return int(hipblasLtMatmul(h,
+                                           d,
+                                           alphaPtr,
+                                           aPtr,
+                                           l,
+                                           bPtr,
+                                           layoutB,
+                                           betaPtr,
+                                           cPtr,
+                                           col,
+                                           dPtr,
+                                           col,
+                                           &algo,
+                                           nullptr,
+                                           workspaceSize,
+                                           nullptr));
+            };
+        };
+        const std::vector<std::pair<std::string, Call>> cases = {
+            {"heuristic, null handle", heuristic(nullptr, desc, pref, 1, true)},
+            {"heuristic, null descriptor", heuristic(handle, nullptr, pref, 1, true)},
+            {"heuristic, null preference", heuristic(handle, desc, nullptr, 1, true)},
+            {"heuristic, zero algos requested", heuristic(handle, desc, pref, 0, true)},
+            {"heuristic, null algo count", heuristic(handle, desc, pref, 1, false)},
+            {"matmul, null handle", matmul(nullptr, desc, &alpha, a, col, d, 0)},
+            {"matmul, null descriptor", matmul(handle, nullptr, &alpha, a, col, d, 0)},
+            {"matmul, null B layout", matmul(handle, desc, &alpha, a, nullptr, d, 0)},
+            {"matmul, null alpha", matmul(handle, desc, nullptr, a, col, d, 0)},
+            {"matmul, null A with nonzero alpha", matmul(handle, desc, &alpha, nullptr, col, d, 0)},
+            {"matmul, null D", matmul(handle, desc, &alpha, a, col, nullptr, 0)},
+            {"matmul, null workspace with a size", matmul(handle, desc, &alpha, a, col, d, 1024)},
+            {"Gemm::setProblem, null descriptor",
+             [&](hipblasLtMatrixLayout_t l) {
+                 hipblaslt_ext::Gemm gemm(handle,
+                                          HIPBLAS_OP_N,
+                                          HIPBLAS_OP_N,
+                                          kType,
+                                          kType,
+                                          kType,
+                                          kType,
+                                          HIPBLAS_COMPUTE_32F);
+                 return int(gemm.setProblem(nullptr, &alpha, a, l, b, col, &beta, c, col, d, col));
+             }},
+            {"GroupedGemm::setProblem, null second descriptor",
+             [&](hipblasLtMatrixLayout_t l) {
+                 hipblaslt_ext::GroupedGemm           grouped(handle,
+                                                    HIPBLAS_OP_N,
+                                                    HIPBLAS_OP_N,
+                                                    kType,
+                                                    kType,
+                                                    kType,
+                                                    kType,
+                                                    HIPBLAS_COMPUTE_32F);
+                 std::vector<hipblasLtMatmulDesc_t>   descs{desc, nullptr};
+                 std::vector<void*>                   alphas{&alpha, &alpha}, betas{&beta, &beta};
+                 std::vector<void*>                   as{a, a}, bs{b, b}, cs{c, c}, ds{d, d};
+                 std::vector<hipblasLtMatrixLayout_t> la{l, col}, lb{col, col}, lc{col, col},
+                     ld{col, col};
+                 return int(
+                     grouped.setProblem(descs, alphas, as, la, bs, lb, betas, cs, lc, ds, ld));
+             }},
+            {"matmulIsAlgoSupported, null handle",
+             [&](hipblasLtMatrixLayout_t l) {
+                 size_t workspace = 0;
+                 return int(hipblaslt_ext::matmulIsAlgoSupported(
+                     nullptr, desc, &alpha, l, col, &beta, col, col, control.algo, workspace));
+             }},
+            {"matmulIsAlgoSupported, null alpha",
+             [&](hipblasLtMatrixLayout_t l) {
+                 size_t workspace = 0;
+                 return int(hipblaslt_ext::matmulIsAlgoSupported(
+                     handle, desc, nullptr, l, col, &beta, col, col, control.algo, workspace));
+             }},
+            {"isSolutionSupported, null handle",
+             [&](hipblasLtMatrixLayout_t l) {
+                 hipblasLtMatmulHeuristicResult_t supported = control;
+                 int                              count     = 0;
+                 return int(hipblaslt_ext::isSolutionSupported(
+                     &supported, nullptr, desc, &alpha, l, col, &beta, col, col, nullptr, &count));
+             }},
+            {"matmulIsTuned, null handle",
+             [&](hipblasLtMatrixLayout_t l) {
+                 return hipblaslt_ext::matmulIsTuned(nullptr, desc, l, col, col, col);
+             }},
+        };
+        for(const auto& [name, call] : cases)
+        {
+            const int columnMajor = call(col);
+            EXPECT_NE(columnMajor, int(HIPBLAS_STATUS_SUCCESS)) << name;
+            EXPECT_EQ(call(row), columnMajor) << name;
         }
 
         hipblasLtMatrixLayoutDestroy(col);
