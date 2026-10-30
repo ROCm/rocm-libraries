@@ -74,6 +74,7 @@ const vector<vector<int>> large_matrix_size_range = {
 // each matrix_size_range is a {n, lda, ldb, singular}
 const vector<vector<int>> large_batch_size_range = {
     {7, 7, 7, 0},
+    {20, 20, 20, 0},
 };
 
 Arguments sygvd_setup_arguments(sygvd_tuple tup)

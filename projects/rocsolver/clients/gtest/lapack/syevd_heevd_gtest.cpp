@@ -65,7 +65,7 @@ const vector<vector<int>> size_range = {
 const vector<vector<int>> large_size_range = {{192, 192}, {256, 270}, {300, 300}};
 
 // for weekly large batch tests
-const vector<vector<int>> large_batch_size_range = {{7, 7}};
+const vector<vector<int>> large_batch_size_range = {{7, 7}, {20, 20}};
 
 Arguments syevd_heevd_setup_arguments(syevd_heevd_tuple tup)
 {
