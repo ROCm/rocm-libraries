@@ -7,6 +7,7 @@
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -35,9 +37,15 @@
 // packedArchDeviceProperties() and reportUnstaged(): a device case that finds nothing staged
 // fails on an arch this build ships the op for, and skips elsewhere.
 #include "engines/kernel_ingestor_engine/packs/FlydslNormDeviceTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaCpuReferenceTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaDropout.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaObjectTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaPhiloxOracle.hpp"
 // The SDPA graph builder: plain hipDNN graph construction, shared with the RDNA suites.
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDump.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDumpTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
 
 /**
  * @file TestFlydslSdpaCdnaEngine.cpp
@@ -121,6 +129,8 @@ constexpr const char* CDNA_SCALE_TOKEN = "flydsl_sdpa_cdna.scale";
 constexpr const char* CDNA_STATS_TOKEN = "flydsl_sdpa_cdna.stats.uid";
 constexpr const char* CDNA_DIAG_OFFSET_TOKEN = "flydsl_sdpa_cdna.diag_offset";
 constexpr const char* CDNA_WINDOW_TOKEN = "flydsl_sdpa_cdna.window_lo";
+constexpr const char* CDNA_SINK_STRIDE_TOKEN = "flydsl_sdpa_cdna.sink.stride";
+constexpr const char* CDNA_SINK_FLOAT_TOKEN = "flydsl_sdpa_cdna.sink.float";
 constexpr int64_t CDNA_NO_WINDOW = -(int64_t{1} << 30);
 
 constexpr const char* CDNA_DTYPE_FIELD = "dtype";
@@ -137,6 +147,8 @@ constexpr const char* CDNA_PREFER_FEATURE_FIELD = "prefer_feature";
 constexpr const char* CDNA_PREFER_MIN_FIELD = "prefer_min";
 constexpr const char* CDNA_PREFER_MAX_FIELD = "prefer_max";
 constexpr const char* CDNA_BIAS_TOKEN = "flydsl_sdpa_cdna.bias.uid";
+constexpr const char* CDNA_BIAS_KSTRIDED_FIELD = "bias_kstrided";
+constexpr const char* CDNA_HAS_DROPOUT_FIELD = "has_dropout";
 
 /// The model shape the first CDNA objects are built for.
 SdpaGraphSpec cdnaSpec()
@@ -149,6 +161,16 @@ SdpaGraphSpec cdnaSpec()
     spec.seqLenKv = 256;
     spec.headDim = 128;
     spec.scaleKind = SdpaScale::ABSENT;
+    return spec;
+}
+
+/// The model shape padded, cuDNN's way: two batches, each with its own query and key
+/// lengths (vendored-kernel modification 32).
+SdpaGraphSpec cdnaPaddedSpec()
+{
+    auto spec = cdnaSpec();
+    spec.batch = 2;
+    setPadding(spec, {256, 100}, {256, 77});
     return spec;
 }
 
@@ -188,6 +210,8 @@ KernelDefinition makeCdnaKernel(const std::string& family = "dualwave",
     if(family == "generic")
     {
         kernel.metadata[CDNA_KV_ALIGN_FIELD] = kvAlign;
+        kernel.metadata[CDNA_BIAS_KSTRIDED_FIELD] = int64_t{0};
+        kernel.metadata[CDNA_HAS_DROPOUT_FIELD] = int64_t{0};
     }
     if(family == "decode")
     {
@@ -245,6 +269,22 @@ std::vector<CdnaCase> acceptedCases()
     cases.push_back({"AttentionSink", sink});
     sink.sinkRank4 = true;
     cases.push_back({"AttentionSinkRank4", sink});
+    // A FLOAT sink, cuDNN's and hipDNN's reference's dtype (vendored-kernel modification
+    // 36), rank 4 and rank 1, strided across heads.
+    sink.sinkDataType = DataType::FLOAT;
+    cases.push_back({"FloatSinkRank4", sink});
+    sink.sinkRank4 = false;
+    sink.sinkHeadStride = 3;
+    cases.push_back({"FloatSinkStridedAcrossHeads", sink});
+    // The int32 offset bound counts 16-bit halves: a query-dtype sink reaches 2^25 per head
+    // over 64 heads, where a FLOAT one declines.
+    auto limitSink = cdnaSpec();
+    limitSink.withSink = true;
+    limitSink.headDim = 64;
+    limitSink.heads = 64;
+    limitSink.kvHeads = 8;
+    limitSink.sinkHeadStride = int64_t{1} << 25;
+    cases.push_back({"SinkHeadOffsetsAtTheInt32Limit", limitSink});
     // Multi-head latent attention, un-absorbed: V narrower than Q and K.
     auto mla = cdnaSpec();
     mla.headDim = 192;
@@ -323,6 +363,39 @@ std::vector<CdnaCase> acceptedCases()
     paddingMask.batch = 2;
     paddingMask.biasDims = {2, 1, 1, 256};
     cases.push_back({"BiasBroadcastOverHeadsAndQueries", paddingMask});
+    // Biases only the strided bias objects read (vendored-kernel modification 31).
+    auto f32Bias = cdnaSpec();
+    f32Bias.withBias = true;
+    f32Bias.biasDataType = DataType::FLOAT;
+    cases.push_back({"BiasInF32", f32Bias});
+    auto keyBroadcast = bias;
+    keyBroadcast.biasDims = {1, 1, 256, 1};
+    cases.push_back({"BiasBroadcastAlongTheKeys", keyBroadcast});
+    auto expanded = bias;
+    expanded.batch = 2;
+    expanded.biasDims = {2, 32, 256, 256};
+    expanded.biasStrides = {256, 0, 0, 1};
+    cases.push_back({"BiasExpandedWithStrideZero", expanded});
+    auto unaligned = bias;
+    unaligned.seqLenQ = 333;
+    unaligned.seqLenKv = 333;
+    cases.push_back({"BiasRowsNotSixteenByteAligned", unaligned});
+    auto biasTail = bias;
+    biasTail.seqLenKv = 333;
+    biasTail.biasDims = {1, 1, 256, 333};
+    biasTail.biasStrides = {86016, 86016, 336, 1};
+    cases.push_back({"BiasOverAKeyLengthNotAMultipleOfFour", biasTail});
+    auto overlapping = bias;
+    overlapping.biasDims = {1, 1, 256, 256};
+    overlapping.biasStrides = {2048, 2048, 8, 1};
+    cases.push_back({"BiasRowsOverlapping", overlapping});
+    // A bias at a head dim only the bucket objects serve, and a bias with a sink.
+    auto bucketBias = bias;
+    bucketBias.headDim = 96;
+    cases.push_back({"BiasAtABucketHeadDim", bucketBias});
+    auto biasSink = bias;
+    biasSink.withSink = true;
+    cases.push_back({"BiasWithASink", biasSink});
     auto packed = cdnaSpec();
     packed.kvHeads = 32;
     packed.packedQkv = true;
@@ -346,6 +419,26 @@ std::vector<CdnaCase> acceptedCases()
     band.seqLenKv = 1024;
     band.rightBound = 100;
     cases.push_back({"TopLeftBandInsideTheKeys", band});
+    // Diagonals that pass the keys (vendored-kernel modification 30): the last rows see
+    // every key.
+    auto topLeftOverflow = cdnaSpec();
+    topLeftOverflow.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    topLeftOverflow.seqLenQ = 512;
+    topLeftOverflow.seqLenKv = 256;
+    cases.push_back({"TopLeftCausalWithMoreQueriesThanKeys", topLeftOverflow});
+    auto bottomRightBand = cdnaSpec();
+    bottomRightBand.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    bottomRightBand.rightBound = 8;
+    cases.push_back({"BottomRightBandPastTheKeys", bottomRightBand});
+    auto wideBand = cdnaSpec();
+    wideBand.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    wideBand.rightBound = 16;
+    cases.push_back({"TopLeftBandPastTheKeys", wideBand});
+    // A right bound at the largest value: stored as Skv - 1, without overflowing.
+    auto hugeRight = cdnaSpec();
+    hugeRight.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    hugeRight.rightBound = std::numeric_limits<int64_t>::max();
+    cases.push_back({"LargestRightBound", hugeRight});
     auto window = cdnaSpec();
     window.mask = SdpaMask::SLIDING_WINDOW;
     cases.push_back({"SlidingWindow", window});
@@ -375,6 +468,39 @@ std::vector<CdnaCase> acceptedCases()
     wideWindow.mask = SdpaMask::TOP_LEFT_CAUSAL;
     wideWindow.leftBound = std::numeric_limits<int64_t>::max();
     cases.push_back({"LargestLeftBound", wideWindow});
+    // A dropout probability of 0 is the undropped result every object computes, with or
+    // without its seed and offset, as on the RDNA engines (FlydslSdpaDropout.hpp).
+    auto noDrop = cdnaSpec();
+    noDrop.dropoutProbability = 0.0F;
+    cases.push_back({"DropoutProbabilityZero", noDrop});
+    auto noDropSeeded = cdnaSpec();
+    setDropout(noDropSeeded, 0.0F);
+    cases.push_back({"DropoutProbabilityZeroWithASeedAndAnOffset", noDropSeeded});
+    // Padding: each batch's own query and key lengths (vendored-kernel modification 32),
+    // under every mask, with a bias, a sink and the LSE, and without padding_mask as hipDNN's
+    // references read them (their SEM-008).
+    cases.push_back({"PaddedSequences", cdnaPaddedSpec()});
+    auto paddedNoSwitch = cdnaPaddedSpec();
+    paddedNoSwitch.paddingMask = false;
+    cases.push_back({"PaddedSequencesWithoutThePaddingMask", paddedNoSwitch});
+    for(const auto mask : {SdpaMask::TOP_LEFT_CAUSAL, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        auto paddedCausal = cdnaPaddedSpec();
+        paddedCausal.mask = mask;
+        cases.push_back(
+            {mask == SdpaMask::TOP_LEFT_CAUSAL ? "PaddedTopLeftCausal" : "PaddedBottomRightCausal",
+             paddedCausal});
+    }
+    auto paddedWindow = cdnaPaddedSpec();
+    paddedWindow.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    paddedWindow.leftBound = 32;
+    cases.push_back({"PaddedBottomRightWindow", paddedWindow});
+    auto paddedEverything = cdnaPaddedSpec();
+    paddedEverything.withBias = true;
+    paddedEverything.biasDataType = paddedEverything.dataType;
+    paddedEverything.withSink = true;
+    paddedEverything.stats = SdpaStats::LSE;
+    cases.push_back({"PaddedWithABiasASinkAndTheLse", paddedEverything});
     return cases;
 }
 
@@ -409,9 +535,22 @@ TEST_P(TestFlydslSdpaCdnaFieldDeclines, DeclinesTheField)
     }
 }
 
+/// The shared table without the f32 case: the generic CDNA objects serve f32 graphs
+/// (vendored-kernel modification 35; TestFlydslSdpaCdnaF32Graph), which every other family
+/// declines.
+std::vector<SdpaFieldDecline> cdnaFieldDeclines()
+{
+    auto cases = sdpaFieldDeclines();
+    cases.erase(std::remove_if(cases.begin(),
+                               cases.end(),
+                               [](const SdpaFieldDecline& c) { return c.name == "Fp32"; }),
+                cases.end());
+    return cases;
+}
+
 INSTANTIATE_TEST_SUITE_P(,
                          TestFlydslSdpaCdnaFieldDeclines,
-                         ::testing::ValuesIn(sdpaFieldDeclines()),
+                         ::testing::ValuesIn(cdnaFieldDeclines()),
                          [](const auto& info) { return info.param.name; });
 
 // Q, K, V, O, the bias, the LSE and the sink, each a host scalar where the kernel reads a
@@ -489,10 +628,22 @@ std::vector<SdpaFieldDecline> cdnaBoundDeclines()
         "BiasSlicePastTwoGiB",
         [biasRowPitch](SdpaGraphSpec& s) { biasRowPitch(s, int64_t{1} << 24, 1); },
         [biasRowPitch](SdpaGraphSpec& s) { biasRowPitch(s, int64_t{1} << 22, 1); });
+    // An f32 bias's slice in bytes: twice the elements' reach of the same pitch in bf16.
     edit(
-        "BiasKeysNotContiguous",
-        [biasRowPitch](SdpaGraphSpec& s) { biasRowPitch(s, 2 * s.seqLenKv, 2); },
-        [biasRowPitch](SdpaGraphSpec& s) { biasRowPitch(s, 2 * s.seqLenKv, 1); });
+        "F32BiasSlicePastTwoGiB",
+        [biasRowPitch](SdpaGraphSpec& s) {
+            biasRowPitch(s, int64_t{1} << 22, 1);
+            s.biasDataType = DataType::FLOAT;
+        },
+        [biasRowPitch](SdpaGraphSpec& s) {
+            biasRowPitch(s, int64_t{1} << 21, 1);
+            s.biasDataType = DataType::FLOAT;
+        });
+    // The strided objects read keys at their own stride, so the keys' reach counts too.
+    edit(
+        "BiasKeyReachPastTwoGiB",
+        [biasRowPitch](SdpaGraphSpec& s) { biasRowPitch(s, s.seqLenKv, int64_t{1} << 23); },
+        [biasRowPitch](SdpaGraphSpec& s) { biasRowPitch(s, s.seqLenKv, int64_t{1} << 21); });
     edit(
         "BiasOfRankFive",
         [withBias](SdpaGraphSpec& s) {
@@ -543,6 +694,291 @@ INSTANTIATE_TEST_SUITE_P(Bounds,
                          ::testing::ValuesIn(cdnaBoundDeclines()),
                          [](const auto& info) { return info.param.name; });
 
+/// Each gate on the padding fields (FlydslSdpaVarlen.hpp, and servableVarlenAsReferenceReads's
+/// lengths without padding_mask), applied to a padded graph the CDNA matcher accepts.
+std::vector<SdpaFieldDecline> cdnaPaddingDeclines()
+{
+    std::vector<SdpaFieldDecline> cases;
+    const auto add = [&cases](std::string name, std::function<void(SdpaGraphSpec&)> edit) {
+        cases.push_back({std::move(name),
+                         [edit = std::move(edit)](SdpaGraphSpec& s) {
+                             s = cdnaPaddedSpec();
+                             edit(s);
+                         },
+                         [](SdpaGraphSpec& s) { s = cdnaPaddedSpec(); }});
+    };
+    const auto noSwitch = [](SdpaGraphSpec& s) { s.paddingMask = false; };
+    add("PaddingMaskWithoutQueryLengths", [](SdpaGraphSpec& s) { s.seqLensQ.clear(); });
+    add("PaddingMaskWithoutKeyLengths", [](SdpaGraphSpec& s) { s.seqLensKv.clear(); });
+    add("QueryLengthsAlone", [noSwitch](SdpaGraphSpec& s) {
+        noSwitch(s);
+        s.seqLensKv.clear();
+    });
+    add("KeyLengthsAlone", [noSwitch](SdpaGraphSpec& s) {
+        noSwitch(s);
+        s.seqLensQ.clear();
+    });
+    add("Int64Lengths", [](SdpaGraphSpec& s) { s.seqLenDataType = DataType::INT64; });
+    add("Int64LengthsWithoutThePaddingMask", [noSwitch](SdpaGraphSpec& s) {
+        noSwitch(s);
+        s.seqLenDataType = DataType::INT64;
+    });
+    add("FloatLengths", [](SdpaGraphSpec& s) { s.seqLenDataType = DataType::FLOAT; });
+    add("LengthsOfTwoPerBatch", [](SdpaGraphSpec& s) { s.seqLenDims = {s.batch, 2, 1, 1}; });
+    add("LengthsOfRankOne", [](SdpaGraphSpec& s) { s.seqLenDims = {s.batch}; });
+    add("LengthsOfRankFive", [](SdpaGraphSpec& s) { s.seqLenDims = {s.batch, 1, 1, 1, 1}; });
+    add("LengthsForAnotherBatch", [](SdpaGraphSpec& s) { s.seqLenDims = {s.batch + 1, 1, 1, 1}; });
+    add("LengthsAtAStrideOfTwo", [](SdpaGraphSpec& s) { s.seqLenBatchStride = 2; });
+    add("QueryLengthsPassedByValue",
+        [](SdpaGraphSpec& s) { s.passByValueTensors.insert(FLYDSL_SDPA_RDNA_SEQ_LEN_Q_UID); });
+    add("KeyLengthsPassedByValue",
+        [](SdpaGraphSpec& s) { s.passByValueTensors.insert(FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID); });
+    add("VirtualQueryLengths",
+        [](SdpaGraphSpec& s) { s.virtualTensors.insert(FLYDSL_SDPA_RDNA_SEQ_LEN_Q_UID); });
+    add("VirtualQueryLengthsWithoutThePaddingMask", [noSwitch](SdpaGraphSpec& s) {
+        noSwitch(s);
+        s.virtualTensors.insert(FLYDSL_SDPA_RDNA_SEQ_LEN_Q_UID);
+    });
+    add("VirtualKeyLengthsWithoutThePaddingMask", [noSwitch](SdpaGraphSpec& s) {
+        noSwitch(s);
+        s.virtualTensors.insert(FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID);
+    });
+    add("RaggedQueryLengths",
+        [](SdpaGraphSpec& s) { s.raggedTensors.insert(FLYDSL_SDPA_RDNA_SEQ_LEN_Q_UID); });
+    add("RaggedKeyLengths",
+        [](SdpaGraphSpec& s) { s.raggedTensors.insert(FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID); });
+    add("QueryLengthsAlignedTo2",
+        [](SdpaGraphSpec& s) { s.alignment[FLYDSL_SDPA_RDNA_SEQ_LEN_Q_UID] = 2; });
+    add("KeyLengthsAlignedTo2WithoutThePaddingMask", [noSwitch](SdpaGraphSpec& s) {
+        noSwitch(s);
+        s.alignment[FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID] = 2;
+    });
+    add("PaddedRaggedQuery",
+        [](SdpaGraphSpec& s) { s.raggedTensors.insert(FLYDSL_SDPA_RDNA_Q_UID); });
+    add("RaggedQueryWithLengthsWithoutThePaddingMask", [noSwitch](SdpaGraphSpec& s) {
+        noSwitch(s);
+        s.raggedTensors.insert(FLYDSL_SDPA_RDNA_Q_UID);
+    });
+    return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(Padding,
+                         TestFlydslSdpaCdnaFieldDeclines,
+                         ::testing::ValuesIn(cdnaPaddingDeclines()),
+                         [](const auto& info) { return info.param.name; });
+
+// ---------------------------------------------------------------------------
+// Packed (THD) sequences, compact (vendored-kernel modification 34): Q/O and K/V ragged
+// through cumulative token tables, the LSE packed through Q's. The generic prefill objects
+// read the tables; the dual-wave and decode objects decline.
+// ---------------------------------------------------------------------------
+
+/// The model shape's two sequences packed end to end, the LSE packed alike.
+SdpaGraphSpec cdnaPackedSpec()
+{
+    auto spec = cdnaSpec();
+    spec.batch = 2;
+    spec.stats = SdpaStats::LSE;
+    setPacked(spec, {256, 100}, {200, 256});
+    return spec;
+}
+
+constexpr const char* CDNA_RAGGED_OFFSET_Q_TOKEN = "flydsl_sdpa_cdna.ragged_offset_q.uid";
+constexpr const char* CDNA_RAGGED_OFFSET_KV_TOKEN = "flydsl_sdpa_cdna.ragged_offset_kv.uid";
+
+TEST(TestFlydslSdpaCdnaPackedGraph, BindsTheTablesOfPackedOperands)
+{
+    using Bound = std::optional<int64_t>;
+    const auto bound = cdnaGraphMatch(cdnaPackedSpec());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_RAGGED_OFFSET_Q_TOKEN),
+              Bound(FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID));
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_RAGGED_OFFSET_KV_TOKEN),
+              Bound(FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID));
+    EXPECT_EQ(tryGetBoundInt(*bound, "flydsl_sdpa_cdna.seq_len_q.uid"), Bound(-1));
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_STATS_TOKEN), Bound(FLYDSL_SDPA_RDNA_STATS_UID));
+
+    const auto dense = cdnaGraphMatch(cdnaSpec());
+    ASSERT_TRUE(dense.has_value());
+    EXPECT_EQ(tryGetBoundInt(*dense, CDNA_RAGGED_OFFSET_Q_TOKEN), Bound(-1));
+    EXPECT_EQ(tryGetBoundInt(*dense, CDNA_RAGGED_OFFSET_KV_TOKEN), Bound(-1));
+}
+
+TEST(TestFlydslSdpaCdnaPackedGraph, AcceptsOneTableASinkEveryMaskAndNoLse)
+{
+    // Self-attention: one table for every operand.
+    auto shared = cdnaPackedSpec();
+    setPacked(shared, {256, 100}, {256, 100});
+    shared.raggedOffsetOf[FLYDSL_SDPA_RDNA_K_UID] = FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID;
+    shared.raggedOffsetOf[FLYDSL_SDPA_RDNA_V_UID] = FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID;
+    const auto bound = cdnaGraphMatch(shared);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_RAGGED_OFFSET_KV_TOKEN),
+              std::optional<int64_t>(FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID));
+
+    auto noLse = cdnaPackedSpec();
+    noLse.stats = SdpaStats::NONE;
+    EXPECT_TRUE(cdnaGraphMatch(noLse).has_value());
+    auto sink = cdnaPackedSpec();
+    sink.withSink = true;
+    EXPECT_TRUE(cdnaGraphMatch(sink).has_value());
+    for(const auto mask :
+        {SdpaMask::TOP_LEFT_CAUSAL, SdpaMask::BOTTOM_RIGHT_CAUSAL, SdpaMask::SLIDING_WINDOW})
+    {
+        auto masked = cdnaPackedSpec();
+        masked.mask = mask;
+        EXPECT_TRUE(cdnaGraphMatch(masked).has_value()) << static_cast<int>(mask);
+    }
+}
+
+/// Each gate on packed sequences, applied to a packed graph the CDNA matcher accepts.
+std::vector<SdpaFieldDecline> cdnaPackedDeclines()
+{
+    std::vector<SdpaFieldDecline> cases;
+    const auto add = [&cases](std::string name, std::function<void(SdpaGraphSpec&)> edit) {
+        cases.push_back({std::move(name),
+                         [edit = std::move(edit)](SdpaGraphSpec& s) {
+                             s = cdnaPackedSpec();
+                             edit(s);
+                         },
+                         [](SdpaGraphSpec& s) { s = cdnaPackedSpec(); }});
+    };
+    constexpr int64_t Q_TABLE = FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID;
+    constexpr int64_t KV_TABLE = FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID;
+    // An operand left dense beside packed ones, counting elements, or through the other table.
+    for(const auto& [uid, name] : {std::pair{FLYDSL_SDPA_RDNA_Q_UID, "Query"},
+                                   std::pair{FLYDSL_SDPA_RDNA_K_UID, "Key"},
+                                   std::pair{FLYDSL_SDPA_RDNA_V_UID, "Value"},
+                                   std::pair{FLYDSL_SDPA_RDNA_O_UID, "Output"}})
+    {
+        const int64_t operand = uid;
+        const bool querySide = uid == FLYDSL_SDPA_RDNA_Q_UID || uid == FLYDSL_SDPA_RDNA_O_UID;
+        add(std::string("Dense") + name,
+            [operand](SdpaGraphSpec& s) { s.unpackedTensors.insert(operand); });
+        add(std::string(name) + "CountingElements",
+            [operand](SdpaGraphSpec& s) { s.raggedMultiplierOf[operand] = 1; });
+        add(std::string(name) + "ThroughTheOtherTable", [operand, querySide](SdpaGraphSpec& s) {
+            s.raggedOffsetOf[operand] = querySide ? KV_TABLE : Q_TABLE;
+        });
+    }
+    add("HeadMajorPacking", [](SdpaGraphSpec& s) { s.layout = SdpaLayout::BHSD; });
+    // The LSE: dense beside packed operands, or packed other than Q is.
+    add("DenseLse", [](SdpaGraphSpec& s) { s.packedStats = false; });
+    add("LseThroughTheKeyTable",
+        [](SdpaGraphSpec& s) { s.raggedOffsetOf[FLYDSL_SDPA_RDNA_STATS_UID] = KV_TABLE; });
+    add("LseCountingElements",
+        [](SdpaGraphSpec& s) { s.raggedMultiplierOf[FLYDSL_SDPA_RDNA_STATS_UID] = 1; });
+    add("HeadMajorLse", [](SdpaGraphSpec& s) { s.statsSequenceMajor = false; });
+    // The tables.
+    add("Int64Offsets", [](SdpaGraphSpec& s) { s.raggedOffsetDataType = DataType::INT64; });
+    add("OffsetsForAnotherBatch",
+        [](SdpaGraphSpec& s) { s.raggedOffsetDims = {s.batch, 1, 1, 1}; });
+    add("OffsetsAtAStrideOfTwo", [](SdpaGraphSpec& s) { s.raggedOffsetBatchStride = 2; });
+    add("VirtualQueryOffsets",
+        [](SdpaGraphSpec& s) { s.virtualTensors.insert(FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID); });
+    add("KeyOffsetsPassedByValue", [](SdpaGraphSpec& s) {
+        s.passByValueTensors.insert(FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID);
+    });
+    // Per-batch lengths with packing (P3): both or none, each one the kernels read.
+    add("PackedWithQueryLengths", [](SdpaGraphSpec& s) { s.seqLensQ = {256, 100}; });
+    add("PackedWithKeyLengths", [](SdpaGraphSpec& s) { s.seqLensKv = {200, 256}; });
+    add("PackedUnderThePaddingMaskAlone", [](SdpaGraphSpec& s) { s.paddingMask = true; });
+    add("PackedAndPaddedWithInt64Lengths", [](SdpaGraphSpec& s) {
+        setPadding(s, {256, 100}, {200, 256});
+        s.seqLenDataType = DataType::INT64;
+    });
+    add("PackedAndPaddedWithVirtualKeyLengths", [](SdpaGraphSpec& s) {
+        setPadding(s, {256, 100}, {200, 256});
+        s.virtualTensors.insert(FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID);
+    });
+    add("PaddedWithADenseKey", [](SdpaGraphSpec& s) {
+        setPadding(s, {256, 100}, {200, 256});
+        s.unpackedTensors.insert(FLYDSL_SDPA_RDNA_K_UID);
+    });
+    add("PaddedWithOffsetsCountingElements", [](SdpaGraphSpec& s) {
+        setPadding(s, {256, 100}, {200, 256});
+        s.raggedMultiplierOf[FLYDSL_SDPA_RDNA_O_UID] = 1;
+    });
+    add("PaddedWithKeysCountingElements", [](SdpaGraphSpec& s) {
+        setPadding(s, {256, 100}, {200, 256});
+        s.raggedMultiplierOf[FLYDSL_SDPA_RDNA_K_UID] = 1;
+    });
+    add("PaddedWithVirtualQueryOffsets", [](SdpaGraphSpec& s) {
+        setPadding(s, {256, 100}, {200, 256});
+        s.virtualTensors.insert(FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID);
+    });
+    add("PaddedWithInt64Offsets", [](SdpaGraphSpec& s) {
+        setPadding(s, {256, 100}, {200, 256});
+        s.raggedOffsetDataType = DataType::INT64;
+    });
+    add("PaddedWithADenseLse", [](SdpaGraphSpec& s) {
+        setPadding(s, {256, 100}, {200, 256});
+        s.packedStats = false;
+    });
+    add("PackedPaddedAndDropping", [](SdpaGraphSpec& s) {
+        setPadding(s, {256, 100}, {200, 256});
+        setDropout(s, 0.1F);
+    });
+    add("PackedPaddedWithABias", [](SdpaGraphSpec& s) {
+        setPadding(s, {256, 100}, {200, 256});
+        s.withBias = true;
+        s.biasDataType = s.dataType;
+    });
+    // What packed sequences are not served with.
+    add("PackedWithABias", [](SdpaGraphSpec& s) {
+        s.withBias = true;
+        s.biasDataType = s.dataType;
+    });
+    add("PackedAndDropping", [](SdpaGraphSpec& s) { setDropout(s, 0.1F); });
+    return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(Packed,
+                         TestFlydslSdpaCdnaFieldDeclines,
+                         ::testing::ValuesIn(cdnaPackedDeclines()),
+                         [](const auto& info) { return info.param.name; });
+
+TEST(TestFlydslSdpaCdnaPackedGraph, BindsPackedSequencesWithPerBatchLengths)
+{
+    // P3: packed slots and the real lengths within them, with or without padding_mask; a
+    // sink, every mask and no LSE too.
+    using Bound = std::optional<int64_t>;
+    auto spec = cdnaPackedSpec();
+    setPadding(spec, {200, 100}, {150, 256});
+    for(const bool paddingMask : {true, false})
+    {
+        SCOPED_TRACE(paddingMask ? "padding_mask" : "lengths alone");
+        spec.paddingMask = paddingMask;
+        const auto bound = cdnaGraphMatch(spec);
+        ASSERT_TRUE(bound.has_value());
+        EXPECT_EQ(tryGetBoundInt(*bound, "flydsl_sdpa_cdna.seq_len_q.uid"),
+                  Bound(FLYDSL_SDPA_RDNA_SEQ_LEN_Q_UID));
+        EXPECT_EQ(tryGetBoundInt(*bound, "flydsl_sdpa_cdna.seq_len_kv.uid"),
+                  Bound(FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID));
+        EXPECT_EQ(tryGetBoundInt(*bound, CDNA_RAGGED_OFFSET_Q_TOKEN),
+                  Bound(FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID));
+        EXPECT_EQ(tryGetBoundInt(*bound, CDNA_RAGGED_OFFSET_KV_TOKEN),
+                  Bound(FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID));
+    }
+    auto variant = spec;
+    variant.withSink = true;
+    variant.stats = SdpaStats::NONE;
+    variant.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    variant.leftBound = 32;
+    EXPECT_TRUE(cdnaGraphMatch(variant).has_value());
+}
+
+TEST(TestFlydslSdpaCdnaPackedGraph, DeclinesARaggedLseUnderDenseOperands)
+{
+    // A ragged LSE beside dense operands: no table to pack it through.
+    auto spec = cdnaSpec();
+    spec.stats = SdpaStats::LSE;
+    spec.statsSequenceMajor = true;
+    ASSERT_TRUE(cdnaGraphMatch(spec).has_value());
+    spec.raggedTensors.insert(FLYDSL_SDPA_RDNA_STATS_UID);
+    EXPECT_FALSE(cdnaGraphMatch(spec).has_value());
+}
+
 class TestFlydslSdpaCdnaGraphDeclines : public ::testing::TestWithParam<CdnaCase>
 {
 };
@@ -555,18 +991,14 @@ TEST_P(TestFlydslSdpaCdnaGraphDeclines, DeclinesTheGraph)
 std::vector<CdnaCase> declinedCases()
 {
     std::vector<CdnaCase> cases;
-    auto topLeftOverflow = cdnaSpec();
-    topLeftOverflow.mask = SdpaMask::TOP_LEFT_CAUSAL;
-    topLeftOverflow.seqLenQ = 512;
-    topLeftOverflow.seqLenKv = 256;
-    cases.push_back({"TopLeftCausalWithMoreQueriesThanKeys", topLeftOverflow});
-    // A sink in another dtype than the query's.
-    auto f32Sink = cdnaSpec();
-    f32Sink.withSink = true;
-    f32Sink.sinkDataType = DataType::FLOAT;
-    cases.push_back({"SinkInAnotherDtype", f32Sink});
-    // A head's sink offset h * stride past int32: the kernels compute it in 32 bits, so heads
-    // 32 and up would read another head's logit.
+    // A sink in neither the query's dtype nor FLOAT.
+    auto halfSink = cdnaSpec();
+    halfSink.withSink = true;
+    halfSink.sinkDataType = DataType::HALF;
+    cases.push_back({"SinkInTheOther16BitDtype", halfSink});
+    // A head's sink offset h * stride past int32: the kernels compute it in 16-bit halves in
+    // 32 bits, so heads 32 and up would read another head's logit; a FLOAT sink's element is
+    // two halves, so 2^25 already reaches past it.
     auto wideSinkStride = cdnaSpec();
     wideSinkStride.withSink = true;
     wideSinkStride.headDim = 64;
@@ -574,34 +1006,33 @@ std::vector<CdnaCase> declinedCases()
     wideSinkStride.kvHeads = 8;
     wideSinkStride.sinkHeadStride = int64_t{1} << 26;
     cases.push_back({"SinkHeadOffsetsPastInt32", wideSinkStride});
+    wideSinkStride.sinkHeadStride = int64_t{1} << 25;
+    wideSinkStride.sinkDataType = DataType::FLOAT;
+    cases.push_back({"FloatSinkHeadOffsetsPastInt32", wideSinkStride});
     auto wideV = cdnaSpec();
     wideV.valueHeadDim = 256;
     cases.push_back({"ValueHeadDimWider", wideV});
-    auto bottomRightBand = cdnaSpec();
-    bottomRightBand.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
-    bottomRightBand.rightBound = 8;
-    cases.push_back({"BottomRightBand", bottomRightBand});
     auto leftOnly = cdnaSpec();
     leftOnly.leftBound = 64;
     cases.push_back({"SlidingWindowWithNoRightBound", leftOnly});
-    auto band = cdnaSpec();
-    band.mask = SdpaMask::TOP_LEFT_CAUSAL;
-    band.rightBound = 16;
-    cases.push_back({"RightBoundBand", band});
-    auto f32Bias = cdnaSpec();
-    f32Bias.withBias = true;
-    cases.push_back({"BiasInAnotherDtype", f32Bias});
-    auto keyBroadcast = cdnaSpec();
-    keyBroadcast.withBias = true;
-    keyBroadcast.biasDataType = DataType::BFLOAT16;
-    keyBroadcast.biasDims = {1, 1, 256, 1};
-    cases.push_back({"BiasBroadcastAlongTheKeys", keyBroadcast});
-    auto unaligned = cdnaSpec();
-    unaligned.withBias = true;
-    unaligned.biasDataType = DataType::BFLOAT16;
-    unaligned.seqLenQ = 333;
-    unaligned.seqLenKv = 333;
-    cases.push_back({"BiasRowsNotSixteenByteAligned", unaligned});
+    // A bias in neither the query's dtype nor f32.
+    auto f16Bias = cdnaSpec();
+    f16Bias.withBias = true;
+    f16Bias.biasDataType = DataType::HALF;
+    cases.push_back({"BiasInAThirdDtype", f16Bias});
+    // A negative stride on a stepped bias axis.
+    auto backwardsBias = cdnaSpec();
+    backwardsBias.withBias = true;
+    backwardsBias.biasDataType = DataType::BFLOAT16;
+    backwardsBias.biasDims = {1, 1, 256, 256};
+    backwardsBias.biasStrides = {65536, 65536, -256, 1};
+    cases.push_back({"BiasWithANegativeQueryStride", backwardsBias});
+    // A key axis neither the key length nor 1: no broadcast reads it.
+    auto wrongKeys = cdnaSpec();
+    wrongKeys.withBias = true;
+    wrongKeys.biasDataType = DataType::BFLOAT16;
+    wrongKeys.biasDims = {1, 1, 256, 128};
+    cases.push_back({"BiasOfTheWrongKeyLength", wrongKeys});
     auto bf16Stats = cdnaSpec();
     bf16Stats.stats = SdpaStats::LSE_BF16;
     cases.push_back({"Bf16Stats", bf16Stats});
@@ -614,18 +1045,11 @@ std::vector<CdnaCase> declinedCases()
     auto deviceScale = cdnaSpec();
     deviceScale.scaleKind = SdpaScale::DEVICE_TENSOR;
     cases.push_back({"DeviceScaleTensor", deviceScale});
-    auto negativeScale = cdnaSpec();
-    negativeScale.scaleKind = SdpaScale::VALUE;
-    negativeScale.scale = -0.125F;
-    cases.push_back({"NegativeScale", negativeScale});
     // Past the shared bound every family serves (2^20).
     auto hugeScale = cdnaSpec();
     hugeScale.scaleKind = SdpaScale::VALUE;
     hugeScale.scale = 2097152.0F;
     cases.push_back({"ScaleAboveTheBound", hugeScale});
-    auto fp32 = cdnaSpec();
-    fp32.dataType = DataType::FLOAT;
-    cases.push_back({"Fp32", fp32});
     auto dropout = cdnaSpec();
     dropout.withDropout = true;
     cases.push_back({"Dropout", dropout});
@@ -651,20 +1075,6 @@ std::vector<CdnaCase> declinedCases()
         = static_cast<hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment>(7);
     cases.push_back(
         {"UnknownDiagonalAlignmentUnderTheDeprecatedBoolean", unknownAlignmentDeprecated});
-    // A right bound past the keys' diagonal, at the largest value: declined without
-    // overflowing.
-    auto hugeRight = cdnaSpec();
-    hugeRight.mask = SdpaMask::TOP_LEFT_CAUSAL;
-    hugeRight.rightBound = std::numeric_limits<int64_t>::max();
-    cases.push_back({"LargestRightBound", hugeRight});
-    // The bias is read as runs of 4 keys and its view ends at the last key, so a run that
-    // straddles that end could read as zero: a key length not a multiple of 4 declines.
-    auto biasTail = cdnaSpec();
-    biasTail.withBias = true;
-    biasTail.biasDataType = DataType::BFLOAT16;
-    biasTail.seqLenKv = 333;
-    biasTail.biasDims = {1, 1, 1, 333};
-    cases.push_back({"BiasOverAKeyLengthNotAMultipleOfFour", biasTail});
     // Each query head reads V's head through K's.
     auto valueHeads = cdnaSpec();
     valueHeads.valueHeads = 4;
@@ -701,11 +1111,16 @@ TEST(TestFlydslSdpaCdnaBinding, BindsTheWindowsLowerEdgeOrNone)
         return bound.has_value() ? tryGetBoundInt(*bound, CDNA_WINDOW_TOKEN) : std::nullopt;
     };
     EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, std::nullopt), CDNA_NO_WINDOW);
-    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 64), -64);
-    EXPECT_EQ(windowOf(SdpaMask::BOTTOM_RIGHT_CAUSAL, 256, 1024, 64), 704);
+    // left_bound = L keeps the L keys ending at the diagonal (cuDNN), so the lower edge is
+    // align - (L - 1).
+    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 64), -63);
+    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 1), 0);
+    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 2), -1);
+    EXPECT_EQ(windowOf(SdpaMask::BOTTOM_RIGHT_CAUSAL, 256, 1024, 64), 705);
     // A window no row reaches is none, so the dual-wave objects still serve it.
-    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 255), CDNA_NO_WINDOW);
-    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 254), -254);
+    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 256), CDNA_NO_WINDOW);
+    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 255), -254);
+    EXPECT_EQ(windowOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 254), -253);
 }
 
 TEST(TestFlydslSdpaCdnaBinding, BindsTheDiagonalOffset)
@@ -723,6 +1138,48 @@ TEST(TestFlydslSdpaCdnaBinding, BindsTheDiagonalOffset)
     EXPECT_EQ(offsetOf(SdpaMask::BOTTOM_RIGHT_CAUSAL, 256, 1024, std::nullopt), 768);
     EXPECT_EQ(offsetOf(SdpaMask::BOTTOM_RIGHT_CAUSAL, 1024, 256, std::nullopt), -768);
     EXPECT_EQ(offsetOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 1024, 100), 100);
+    // Past the keys (modification 30): as the graph states it, below Skv - 1.
+    EXPECT_EQ(offsetOf(SdpaMask::TOP_LEFT_CAUSAL, 1024, 256, std::nullopt), 0);
+    EXPECT_EQ(offsetOf(SdpaMask::BOTTOM_RIGHT_CAUSAL, 1024, 256, 900), 132);
+    EXPECT_EQ(offsetOf(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 254), 254);
+}
+
+TEST(TestFlydslSdpaCdnaBinding, BindsADiagonalThatShowsEveryKeyAsNoMask)
+{
+    // A diagonal at Skv - 1 or past it, with no window, shows every row every key: it binds as
+    // no mask, so the dual-wave and split decode objects serve it too. At one query row a
+    // bottom-right diagonal sits at Skv - 1 inside the keys and stays causal; so does a
+    // diagonal one short of it, and one with a window.
+    const auto bind = [](SdpaMask mask,
+                         int64_t sq,
+                         int64_t skv,
+                         std::optional<int64_t> right,
+                         std::optional<int64_t> left = std::nullopt) {
+        auto spec = cdnaSpec();
+        spec.mask = mask;
+        spec.seqLenQ = sq;
+        spec.seqLenKv = skv;
+        spec.rightBound = right;
+        spec.leftBound = left;
+        const auto bound = cdnaGraphMatch(spec);
+        return bound.has_value() ? std::pair(tryGetBoundInt(*bound, CDNA_CAUSAL_TOKEN),
+                                             tryGetBoundInt(*bound, CDNA_DIAG_OFFSET_TOKEN))
+                                 : std::pair(std::optional<int64_t>(), std::optional<int64_t>());
+    };
+    using Bound = std::optional<int64_t>;
+    const auto noMask = std::pair(Bound(0), Bound(0));
+    EXPECT_EQ(bind(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 255), noMask);
+    EXPECT_EQ(bind(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 256), noMask);
+    EXPECT_EQ(bind(SdpaMask::BOTTOM_RIGHT_CAUSAL, 1024, 256, 2000), noMask);
+    EXPECT_EQ(bind(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, std::numeric_limits<int64_t>::max()),
+              noMask);
+    EXPECT_EQ(bind(SdpaMask::TOP_LEFT_CAUSAL, 2, 256, 255), noMask);
+    // Kept causal.
+    EXPECT_EQ(bind(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 254), std::pair(Bound(1), Bound(254)));
+    EXPECT_EQ(bind(SdpaMask::BOTTOM_RIGHT_CAUSAL, 1, 256, std::nullopt),
+              std::pair(Bound(1), Bound(255)));
+    EXPECT_EQ(bind(SdpaMask::TOP_LEFT_CAUSAL, 1, 256, 255), std::pair(Bound(1), Bound(255)));
+    EXPECT_EQ(bind(SdpaMask::TOP_LEFT_CAUSAL, 256, 256, 255, 16), std::pair(Bound(1), Bound(255)));
 }
 
 TEST(TestFlydslSdpaCdnaBinding, BindsTheDeprecatedBooleansAtTheirAlignment)
@@ -977,6 +1434,268 @@ bool cdnaAdmits(const SdpaGraphSpec& spec, const KernelDefinition& kernel, int c
     return bound.has_value() && matchesCdnaKernel(fixture.context(), kernel, *bound);
 }
 
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsABiasTheVectorizedObjectsCannotReadOnTheStridedOnes)
+{
+    // Each bias the vectorized objects (the dual-wave kernel's and the generic kernel's
+    // other bias objects) cannot read, one gate each, beside the bf16 bias they read: the
+    // strided objects (vendored-kernel modification 31) read every one.
+    auto base = cdnaSpec();
+    base.withBias = true;
+    base.biasDataType = DataType::BFLOAT16;
+    base.biasDims = {1, 1, 256, 256};
+    base.biasStrides = {65536, 65536, 256, 1};
+    const auto edited = [&base](const std::function<void(SdpaGraphSpec&)>& edit) {
+        auto spec = base;
+        edit(spec);
+        return spec;
+    };
+    const std::vector<std::pair<std::string, SdpaGraphSpec>> unread{
+        {"f32", edited([](SdpaGraphSpec& s) { s.biasDataType = DataType::FLOAT; })},
+        {"broadcast along the keys", edited([](SdpaGraphSpec& s) {
+             s.biasDims = {1, 1, 256, 1};
+             s.biasStrides = {256, 256, 1, 1};
+         })},
+        {"keys not contiguous",
+         edited([](SdpaGraphSpec& s) { s.biasStrides = {131072, 131072, 512, 2}; })},
+        {"a row pitch not a multiple of 8",
+         edited([](SdpaGraphSpec& s) { s.biasStrides = {66560, 66560, 260, 1}; })},
+        {"a head pitch not a multiple of 8", edited([](SdpaGraphSpec& s) {
+             s.biasDims = {1, 32, 256, 256};
+             s.biasStrides = {2097280, 65540, 256, 1};
+         })},
+        {"rows that overlap",
+         edited([](SdpaGraphSpec& s) { s.biasStrides = {65536, 65536, 248, 1}; })},
+        {"a key length not a multiple of 4", edited([](SdpaGraphSpec& s) {
+             s.seqLenKv = 334;
+             s.biasDims = {1, 1, 256, 334};
+             s.biasStrides = {86016, 86016, 336, 1};
+         })},
+    };
+    const auto kstrided = [] {
+        auto kernel = makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 1, int64_t{128}, 1);
+        kernel.metadata[CDNA_BIAS_KSTRIDED_FIELD] = int64_t{1};
+        return kernel;
+    }();
+    const auto vectorBucket
+        = makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 1, int64_t{128}, 1);
+    const auto vectorExact = makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 1);
+    const auto dualwave = makeCdnaKernel("dualwave", 128, 0, "bf16", 256, 0, 1, 1);
+    // The control: the vectorized objects read the base bias, and so do the strided ones.
+    EXPECT_TRUE(cdnaAdmits(base, vectorExact));
+    EXPECT_TRUE(cdnaAdmits(base, vectorBucket));
+    EXPECT_TRUE(cdnaAdmits(base, dualwave));
+    EXPECT_TRUE(cdnaAdmits(base, kstrided));
+    for(const auto& [name, spec] : unread)
+    {
+        SCOPED_TRACE(name);
+        EXPECT_FALSE(cdnaAdmits(spec, vectorExact));
+        EXPECT_FALSE(cdnaAdmits(spec, vectorBucket));
+        EXPECT_FALSE(cdnaAdmits(spec, dualwave));
+        EXPECT_TRUE(cdnaAdmits(spec, kstrided));
+    }
+    // A strided object is a bias object: it serves no graph without a bias.
+    EXPECT_FALSE(cdnaAdmits(cdnaSpec(), kstrided));
+}
+
+// ---------------------------------------------------------------------------
+// The softmax scale: any finite one up to 2^20 in magnitude, zero and negative included. The
+// CDNA objects without a bias keep raw scores, so a scale that needs scaled scores runs on the
+// bias objects with a zero bias, where a [1, 1, 1, Skv] bias in the query's dtype would.
+// ---------------------------------------------------------------------------
+
+constexpr const char* CDNA_ZERO_BIAS_TOKEN = "flydsl_sdpa_cdna.bias.zero";
+constexpr const char* CDNA_BIAS_VECTORIZED_TOKEN = "flydsl_sdpa_cdna.bias.vectorized";
+
+class TestFlydslSdpaCdnaScale : public ::testing::TestWithParam<SdpaScaleAccept>
+{
+};
+
+TEST_P(TestFlydslSdpaCdnaScale, TakesTheScaleAndSaysWhetherItRunsOnTheZeroBias)
+{
+    auto spec = cdnaSpec();
+    spec.scaleKind = GetParam().kind;
+    spec.scale = GetParam().scale;
+    const auto bound = cdnaGraphMatch(spec);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_ZERO_BIAS_TOKEN), GetParam().scaledScores ? 1 : 0);
+    spec.withBias = true;
+    spec.biasDataType = DataType::BFLOAT16;
+    const auto biased = cdnaGraphMatch(spec);
+    ASSERT_TRUE(biased.has_value());
+    EXPECT_EQ(tryGetBoundInt(*biased, CDNA_ZERO_BIAS_TOKEN), 0);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestFlydslSdpaCdnaScale,
+                         ::testing::ValuesIn(sdpaScaleAccepts()),
+                         [](const auto& info) { return info.param.name; });
+
+TEST(TestFlydslSdpaCdnaScaleBinding, ARuntimeScaleIsNotKnownAtMatchAndRunsOnThePlainObjects)
+{
+    auto spec = cdnaSpec();
+    spec.scaleKind = SdpaScale::RUNTIME_TENSOR;
+    spec.scale = -0.5F;
+    const auto bound = cdnaGraphMatch(spec);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_ZERO_BIAS_TOKEN), 0);
+    EXPECT_TRUE(cdnaAdmits(spec, makeCdnaKernel("generic", 128, 0, "bf16", 128)));
+}
+
+TEST(TestFlydslSdpaCdnaScaleGraphMatch, DeclinesAZeroBiasWhereAGraphsOwnBiasDeclines)
+{
+    // The f32 objects have no bias twins, and packed sequences take no bias: each declines a
+    // scale that needs scaled scores, and takes a positive one (the control).
+    auto f32 = cdnaSpec();
+    f32.dataType = DataType::FLOAT;
+    f32.scaleKind = SdpaScale::VALUE;
+    ASSERT_TRUE(cdnaGraphMatch(f32).has_value());
+    f32.scale = -0.125F;
+    EXPECT_FALSE(cdnaGraphMatch(f32).has_value());
+    auto packed = cdnaPackedSpec();
+    packed.scaleKind = SdpaScale::VALUE;
+    ASSERT_TRUE(cdnaGraphMatch(packed).has_value());
+    packed.scale = 0.0F;
+    EXPECT_FALSE(cdnaGraphMatch(packed).has_value());
+}
+
+TEST(TestFlydslSdpaCdnaScaleGraphMatch, SaysWhetherTheVectorizedObjectsReadTheZeroBias)
+{
+    // As for a [1, 1, 1, Skv] bias: keys in runs of 4.
+    auto spec = cdnaSpec();
+    spec.scaleKind = SdpaScale::VALUE;
+    spec.scale = -0.125F;
+    auto bound = cdnaGraphMatch(spec);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_BIAS_VECTORIZED_TOKEN), 1);
+    spec.seqLenKv = 334;
+    bound = cdnaGraphMatch(spec);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_BIAS_VECTORIZED_TOKEN), 0);
+}
+
+TEST(TestFlydslSdpaCdnaScaleKernelMatch, RunsANonPositiveScaleOnTheBiasObjects)
+{
+    const auto kstrided = [] {
+        auto kernel = makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 1, int64_t{128}, 1);
+        kernel.metadata[CDNA_BIAS_KSTRIDED_FIELD] = int64_t{1};
+        return kernel;
+    }();
+    const auto plain = makeCdnaKernel("generic", 128, 0, "bf16", 128);
+    const auto vectorExact = makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 1);
+    const auto dualwave = makeCdnaKernel("dualwave", 128, 0, "bf16", 256, 0, 1, 1);
+    const auto dualwavePlain = makeCdnaKernel("dualwave", 128, 0, "bf16", 256);
+    const auto decode = makeCdnaKernel("decode", 128, 0, "bf16", 64);
+    for(const float scale : {0.0F, -0.0F, -0.125F, 1.0e-40F})
+    {
+        SCOPED_TRACE(scale);
+        auto spec = cdnaSpec();
+        spec.scaleKind = SdpaScale::VALUE;
+        spec.scale = scale;
+        EXPECT_FALSE(cdnaAdmits(spec, plain));
+        EXPECT_FALSE(cdnaAdmits(spec, dualwavePlain));
+        EXPECT_TRUE(cdnaAdmits(spec, vectorExact));
+        EXPECT_TRUE(cdnaAdmits(spec, dualwave));
+        EXPECT_TRUE(cdnaAdmits(spec, kstrided));
+        // The split decode objects have no bias twins.
+        auto decoding = spec;
+        decoding.seqLenQ = 1;
+        decoding.seqLenKv = 4096;
+        EXPECT_FALSE(cdnaAdmits(decoding, decode));
+        // A key length the vectorized objects do not read: the strided ones only.
+        spec.seqLenKv = 334;
+        EXPECT_FALSE(cdnaAdmits(spec, vectorExact));
+        EXPECT_FALSE(cdnaAdmits(spec, dualwave));
+        EXPECT_TRUE(cdnaAdmits(spec, kstrided));
+    }
+    // The control: a normal positive scale stays on the plain objects.
+    auto spec = cdnaSpec();
+    spec.scaleKind = SdpaScale::VALUE;
+    spec.scale = std::numeric_limits<float>::min();
+    EXPECT_TRUE(cdnaAdmits(spec, plain));
+    EXPECT_TRUE(cdnaAdmits(spec, dualwavePlain));
+    EXPECT_FALSE(cdnaAdmits(spec, vectorExact));
+    EXPECT_FALSE(cdnaAdmits(spec, kstrided));
+    auto decoding = spec;
+    decoding.seqLenQ = 1;
+    decoding.seqLenKv = 4096;
+    EXPECT_TRUE(cdnaAdmits(decoding, decode));
+}
+
+TEST(TestFlydslSdpaCdnaScaleWorkspace, HoldsTheZeroBiasAfterWhatTheLaunchTakesAlready)
+{
+    namespace sdpa = hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa;
+    auto spec = cdnaSpec();
+    spec.scaleKind = SdpaScale::VALUE;
+    spec.scale = -0.125F;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto& handler = dispatchHandler(FLYDSL_SDPA_CDNA);
+    const auto vectorExact = makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 1);
+    EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, vectorExact),
+              sdpa::zeroBiasBytes(spec.seqLenKv));
+    // With a dropout seed given by value, after its 16 bytes.
+    setDropout(spec, 0.25F);
+    spec.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID);
+    const GraphFixture dropping(buildFlydslSdpaRdnaGraph(spec));
+    const auto droppingBound = matchesGraph(FLYDSL_SDPA_CDNA, dropping.context());
+    ASSERT_TRUE(droppingBound.has_value());
+    auto dropoutBias = vectorExact;
+    dropoutBias.metadata[CDNA_HAS_DROPOUT_FIELD] = int64_t{1};
+    EXPECT_EQ(handler.workspaceBytes(dropping.context(), *droppingBound, dropoutBias),
+              16U + sdpa::zeroBiasBytes(spec.seqLenKv));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, AddsABiasAtABucketHeadDim)
+{
+    // A bias at head dim 96 on a bucket bias object; the plain bucket object declines it.
+    auto bucket = cdnaSpec();
+    bucket.headDim = 96;
+    bucket.withBias = true;
+    bucket.biasDataType = DataType::BFLOAT16;
+    EXPECT_TRUE(cdnaAdmits(
+        bucket, makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 1, int64_t{128}, 1)));
+    EXPECT_FALSE(cdnaAdmits(
+        bucket, makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 0, int64_t{128}, 1)));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, AddsABiasWithASink)
+{
+    // A bias with a sink on a bias and sink object; the sink object without a bias and the
+    // bias object without a sink decline it.
+    auto sink = cdnaSpec();
+    sink.withBias = true;
+    sink.biasDataType = DataType::BFLOAT16;
+    sink.withSink = true;
+    const auto withSink = [](int64_t hasBias) {
+        auto kernel = makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, hasBias);
+        kernel.metadata["has_sink"] = int64_t{1};
+        return kernel;
+    };
+    EXPECT_TRUE(cdnaAdmits(sink, withSink(1)));
+    EXPECT_FALSE(cdnaAdmits(sink, withSink(0)));
+    EXPECT_FALSE(cdnaAdmits(sink, makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 1)));
+    // A bias the vectorized objects do not read -- f32, or broadcast along the keys -- runs
+    // with a sink on the strided sink-and-bias objects alone (COVERAGE.md section 7.5 item
+    // 16), which read the vectorized ones' bias too.
+    auto stridedWithSink = withSink(1);
+    stridedWithSink.metadata["bias_kstrided"] = int64_t{1};
+    auto f32Sink = sink;
+    f32Sink.biasDataType = DataType::FLOAT;
+    auto keyBroadcastSink = sink;
+    keyBroadcastSink.biasDims = {1, 32, 256, 1};
+    for(const auto& spec : {f32Sink, keyBroadcastSink})
+    {
+        EXPECT_FALSE(cdnaAdmits(spec, withSink(1)));
+        EXPECT_TRUE(cdnaAdmits(spec, stridedWithSink));
+    }
+    EXPECT_TRUE(cdnaAdmits(sink, stridedWithSink));
+    // Without a sink, the strided sink object declines; without a bias, it declines too.
+    auto f32NoSink = f32Sink;
+    f32NoSink.withSink = false;
+    EXPECT_FALSE(cdnaAdmits(f32NoSink, stridedWithSink));
+}
+
 TEST(TestFlydslSdpaCdnaKernelMatch, DeclinesATileWhoseQueryOrOutputPaddingRowsPassThirtyTwoBits)
 {
     // Q's and O's padding rows are bounded each on its own. Q alone: Q/K 192 wide and V/O
@@ -1137,6 +1856,93 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsAnyDiagonalOnTheGenericAndDecodeObjects)
     EXPECT_TRUE(cdnaAdmits(decode, makeCdnaKernel("decode", 128, 1, "bf16", 64)));
 }
 
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsADiagonalPastTheKeysOnlyOnTheGenericPrefillObjects)
+{
+    // The generic prefill objects clamp each row's diagonal to the last key (modification
+    // 30); the dual-wave and split decode objects mask their last KV tile's padding with the
+    // diagonal alone, so they decline a diagonal that passes the keys, the dual-wave
+    // offset-0 object included (top-left with more queries than keys is offset 0).
+    auto topLeft = cdnaSpec();
+    topLeft.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    topLeft.seqLenQ = 512;
+    topLeft.seqLenKv = 256;
+    auto band = cdnaSpec();
+    band.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    band.rightBound = 1;
+    auto shortQuery = cdnaSpec();
+    shortQuery.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    shortQuery.seqLenQ = 40;
+    shortQuery.seqLenKv = 20;
+    for(const auto& [name, spec] : {std::pair{"top-left, Sq > Skv", topLeft},
+                                    std::pair{"band one past the keys", band},
+                                    std::pair{"40 queries over 20 keys", shortQuery}})
+    {
+        SCOPED_TRACE(name);
+        EXPECT_TRUE(cdnaAdmits(spec, makeCdnaKernel("generic", 128, 1, "bf16", 128)));
+        EXPECT_FALSE(cdnaAdmits(spec, makeCdnaKernel("decode", 128, 1, "bf16", 64)));
+        EXPECT_FALSE(cdnaAdmits(spec, makeCdnaKernel("dualwave", 128, 1)));
+        EXPECT_FALSE(cdnaAdmits(spec, makeCdnaKernel("dualwave", 128, 1, "bf16", 256, 0, 0)));
+    }
+    // The control: the same diagonals inside the keys stay on the dual-wave and decode
+    // objects, and a non-causal graph with more queries than keys is no diagonal at all.
+    auto inside = band;
+    inside.rightBound = 0;
+    EXPECT_TRUE(cdnaAdmits(inside, makeCdnaKernel("dualwave", 128, 1)));
+    EXPECT_TRUE(cdnaAdmits(inside, makeCdnaKernel("decode", 128, 1, "bf16", 64)));
+    auto nonCausal = topLeft;
+    nonCausal.mask = SdpaMask::NONE;
+    EXPECT_TRUE(cdnaAdmits(nonCausal, makeCdnaKernel("dualwave", 128, 0)));
+    EXPECT_TRUE(cdnaAdmits(nonCausal, makeCdnaKernel("decode", 128, 0, "bf16", 64)));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsAnExact512PrefillGraphOnTheExactObject)
+{
+    // The exact 512/512 prefill objects serve 512/512 only: a narrower Q/K, a narrower V, or a
+    // bias (no 512 bias object) declines on them.
+    auto spec = cdnaSpec();
+    spec.heads = 1;
+    spec.kvHeads = 1;
+    spec.headDim = 512;
+    auto wide = makeCdnaKernel("generic", 512, 0, "bf16", 128);
+    wide.metadata["dv_split"] = int64_t{4};
+    EXPECT_TRUE(cdnaAdmits(spec, wide));
+    auto narrower = spec;
+    narrower.headDim = 504;
+    EXPECT_FALSE(cdnaAdmits(narrower, wide));
+    auto mla = spec;
+    mla.valueHeadDim = 256;
+    EXPECT_FALSE(cdnaAdmits(mla, wide));
+    auto bias = spec;
+    bias.withBias = true;
+    bias.biasDataType = bias.dataType;
+    EXPECT_FALSE(cdnaAdmits(bias, wide));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsADiagonalThatShowsEveryKeyOnEveryNonCausalObject)
+{
+    // A band wide enough that every row sees every key binds as no mask, so the dual-wave and
+    // split decode objects' non-causal builds serve it beside the generic one, and no causal
+    // object does. One key short of that, it stays on the generic causal objects alone.
+    auto everyKey = cdnaSpec();
+    everyKey.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    everyKey.seqLenQ = 512;
+    everyKey.seqLenKv = 256;
+    everyKey.rightBound = 255;
+    for(const auto& kernel : {makeCdnaKernel("generic", 128, 0, "bf16", 128),
+                              makeCdnaKernel("decode", 128, 0, "bf16", 64),
+                              makeCdnaKernel("dualwave", 128, 0)})
+    {
+        SCOPED_TRACE(kernel.name);
+        EXPECT_TRUE(cdnaAdmits(everyKey, kernel));
+    }
+    EXPECT_FALSE(cdnaAdmits(everyKey, makeCdnaKernel("generic", 128, 1, "bf16", 128)));
+    auto oneShort = everyKey;
+    oneShort.rightBound = 254;
+    EXPECT_TRUE(cdnaAdmits(oneShort, makeCdnaKernel("generic", 128, 1, "bf16", 128)));
+    EXPECT_FALSE(cdnaAdmits(oneShort, makeCdnaKernel("decode", 128, 1, "bf16", 64)));
+    EXPECT_FALSE(cdnaAdmits(oneShort, makeCdnaKernel("dualwave", 128, 0)));
+}
+
 TEST(TestFlydslSdpaCdnaKernelMatch, RunsASlidingWindowOnlyOnTheGenericKernel)
 {
     auto spec = cdnaSpec();
@@ -1168,6 +1974,33 @@ TEST(TestFlydslSdpaCdnaKernelMatch, AddsASinkOnlyOnTheGenericKernel)
     const auto plainBound = matchesGraph(FLYDSL_SDPA_CDNA, plain.context());
     ASSERT_TRUE(plainBound.has_value());
     EXPECT_FALSE(matchesCdnaKernel(plain.context(), withSink, *plainBound));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, ServesAFloatSinkOnTheSinkObjects)
+{
+    // A FLOAT sink (vendored-kernel modification 36) binds its dtype and its head stride in
+    // f32 elements, and runs on the sink objects, which read either dtype; a query-dtype sink
+    // binds 0.
+    auto spec = cdnaSpec();
+    spec.withSink = true;
+    spec.sinkDataType = DataType::FLOAT;
+    spec.sinkHeadStride = 3;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_SINK_FLOAT_TOKEN), std::optional<int64_t>(1));
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_SINK_STRIDE_TOKEN), std::optional<int64_t>(3));
+    auto withSink = makeCdnaKernel("generic", 128, 0, "bf16", 64);
+    withSink.metadata["has_sink"] = int64_t{1};
+    EXPECT_TRUE(matchesCdnaKernel(fixture.context(), withSink, *bound));
+    EXPECT_FALSE(matchesCdnaKernel(
+        fixture.context(), makeCdnaKernel("generic", 128, 0, "bf16", 64), *bound));
+    spec.sinkDataType.reset();
+    const GraphFixture query(buildFlydslSdpaRdnaGraph(spec));
+    const auto queryBound = matchesGraph(FLYDSL_SDPA_CDNA, query.context());
+    ASSERT_TRUE(queryBound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*queryBound, CDNA_SINK_FLOAT_TOKEN), std::optional<int64_t>(0));
+    EXPECT_TRUE(matchesCdnaKernel(query.context(), withSink, *queryBound));
 }
 
 TEST(TestFlydslSdpaCdnaKernelMatch, ReadsVThroughItsOwnStridesOnlyOnTheMaskedPath)
@@ -1296,6 +2129,572 @@ TEST(TestFlydslSdpaCdnaKernelMatch, ScoresACompanionAboveTheDefaultWhereItsRuleP
     EXPECT_EQ(scoreAt(1, 128, makeCdnaKernel()), 100.0);
 }
 
+TEST(TestFlydslSdpaCdnaBinding, BindsThePerBatchLengthsAndTheDiagonalsAlignment)
+{
+    const auto lengths = [](const BoundTokens& bound) {
+        return std::pair{tryGetBoundInt(bound, "flydsl_sdpa_cdna.seq_len_q.uid"),
+                         tryGetBoundInt(bound, "flydsl_sdpa_cdna.seq_len_kv.uid")};
+    };
+    using Bound = std::optional<int64_t>;
+    auto padded = cdnaPaddedSpec();
+    padded.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    const auto bound = cdnaGraphMatch(padded);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(
+        lengths(*bound),
+        std::pair(Bound(FLYDSL_SDPA_RDNA_SEQ_LEN_Q_UID), Bound(FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID)));
+    EXPECT_EQ(tryGetBoundInt(*bound, "flydsl_sdpa_cdna.diag_bottom_right"), 1);
+    // Lengths without padding_mask bind the same (hipDNN's references' SEM-008).
+    padded.paddingMask = false;
+    const auto noSwitch = cdnaGraphMatch(padded);
+    ASSERT_TRUE(noSwitch.has_value());
+    EXPECT_EQ(lengths(*noSwitch), lengths(*bound));
+
+    auto topLeft = cdnaSpec();
+    topLeft.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    const auto dense = cdnaGraphMatch(topLeft);
+    ASSERT_TRUE(dense.has_value());
+    EXPECT_EQ(lengths(*dense), std::pair(Bound(-1), Bound(-1)));
+    EXPECT_EQ(tryGetBoundInt(*dense, "flydsl_sdpa_cdna.diag_bottom_right"), 0);
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsPaddingOnlyOnObjectsThatReadEachBatchsLengths)
+{
+    // Each object, admitted for the dense graph (the control) and then asked the padded one.
+    struct Case
+    {
+        std::string name;
+        KernelDefinition kernel;
+        SdpaMask mask;
+        bool servesPadding;
+    };
+    const auto generic = [](int64_t causal, int64_t kvAlign = 0) {
+        return makeCdnaKernel("generic", 128, causal, "bf16", 128, kvAlign);
+    };
+    const auto decode
+        = [](int64_t causal) { return makeCdnaKernel("decode", 128, causal, "bf16", 64); };
+    const std::vector<Case> cases{
+        {"GenericNonCausal", generic(0), SdpaMask::NONE, true},
+        {"GenericTopLeft", generic(1), SdpaMask::TOP_LEFT_CAUSAL, true},
+        {"GenericBottomRight", generic(1), SdpaMask::BOTTOM_RIGHT_CAUSAL, true},
+        // Built without the KV tail mask: a batch's keys past its length would be read.
+        {"GenericKvAligned", generic(0, 64), SdpaMask::NONE, false},
+        {"DecodeNonCausal", decode(0), SdpaMask::NONE, true},
+        {"DecodeBottomRight", decode(1), SdpaMask::BOTTOM_RIGHT_CAUSAL, true},
+        // The plain causal compare: a top-left diagonal passes a batch's keys when it has
+        // more queries than keys.
+        {"DecodeTopLeft", decode(1), SdpaMask::TOP_LEFT_CAUSAL, false},
+        // The dual-wave kernel reads no per-batch lengths.
+        {"DualwaveNonCausal", makeCdnaKernel("dualwave", 128, 0), SdpaMask::NONE, false},
+        {"DualwaveBottomRight",
+         makeCdnaKernel("dualwave", 128, 1),
+         SdpaMask::BOTTOM_RIGHT_CAUSAL,
+         false},
+    };
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.name);
+        auto dense = cdnaSpec();
+        dense.batch = 2;
+        dense.mask = c.mask;
+        EXPECT_TRUE(cdnaAdmits(dense, c.kernel));
+        auto padded = cdnaPaddedSpec();
+        padded.mask = c.mask;
+        EXPECT_EQ(cdnaAdmits(padded, c.kernel), c.servesPadding);
+    }
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsPackedSequencesOnlyOnTheGenericPrefillObjects)
+{
+    // The generic prefill objects read the row-offset tables (vendored-kernel modification
+    // 34); the dual-wave and the split, packed-GQA decode objects index every operand by
+    // batch; an object built without the KV tail mask would read a sequence's keys past its
+    // length. Each admitted for the dense graph (the control), then asked the packed one.
+    struct Case
+    {
+        std::string name;
+        KernelDefinition kernel;
+        SdpaMask mask;
+        bool servesPacked;
+    };
+    const std::vector<Case> cases{
+        {"GenericNonCausal", makeCdnaKernel("generic", 128, 0, "bf16", 128), SdpaMask::NONE, true},
+        {"GenericBottomRight",
+         makeCdnaKernel("generic", 128, 1, "bf16", 128),
+         SdpaMask::BOTTOM_RIGHT_CAUSAL,
+         true},
+        {"GenericKvAligned",
+         makeCdnaKernel("generic", 128, 0, "bf16", 128, 64),
+         SdpaMask::NONE,
+         false},
+        {"DecodeNonCausal", makeCdnaKernel("decode", 128, 0, "bf16", 64), SdpaMask::NONE, false},
+        {"DecodeBottomRight",
+         makeCdnaKernel("decode", 128, 1, "bf16", 64),
+         SdpaMask::BOTTOM_RIGHT_CAUSAL,
+         false},
+        {"DualwaveNonCausal", makeCdnaKernel("dualwave", 128, 0), SdpaMask::NONE, false},
+    };
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.name);
+        auto dense = cdnaSpec();
+        dense.batch = 2;
+        dense.mask = c.mask;
+        EXPECT_TRUE(cdnaAdmits(dense, c.kernel));
+        auto packed = cdnaPackedSpec();
+        packed.stats = SdpaStats::NONE;
+        packed.mask = c.mask;
+        EXPECT_EQ(cdnaAdmits(packed, c.kernel), c.servesPacked);
+        // With per-batch lengths in the slots (P3), the same objects.
+        setPadding(packed, {200, 100}, {150, 256});
+        EXPECT_EQ(cdnaAdmits(packed, c.kernel), c.servesPacked);
+    }
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, RanksAPaddedGraphOnTheMaskedDefaultTier)
+{
+    // A key length the KV tile divides: dense, the object built without the tail mask ranks
+    // first; padded, it declines and the masked object of the same tier serves.
+    auto aligned = makeCdnaKernel("generic", 128, 0, "bf16", 128, 64);
+    aligned.priority = 110;
+    auto masked = makeCdnaKernel("generic", 128, 0, "bf16", 128, 0);
+    masked.priority = 100;
+    const auto best = [&](const SdpaGraphSpec& spec) {
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+        std::optional<int64_t> top;
+        for(const auto* kernel : {&aligned, &masked})
+        {
+            if(bound.has_value() && matchesCdnaKernel(fixture.context(), *kernel, *bound)
+               && (!top.has_value() || kernel->priority > *top))
+            {
+                top = static_cast<int64_t>(kernel->priority);
+            }
+        }
+        return top;
+    };
+    auto dense = cdnaSpec();
+    dense.batch = 2;
+    EXPECT_EQ(best(dense), 110);
+    EXPECT_EQ(best(cdnaPaddedSpec()), 100);
+}
+
+// ---------------------------------------------------------------------------
+// Dropout (vendored-kernel modification 33): the graph matcher binds a probability with its
+// seed and offset; only the generic dropout objects apply it
+// ---------------------------------------------------------------------------
+
+/// The model shape dropping with probability 0.1, from a device INT64 seed and offset.
+SdpaGraphSpec cdnaDroppingSpec()
+{
+    auto spec = cdnaSpec();
+    setDropout(spec, 0.1F);
+    return spec;
+}
+
+/// A generic prefill object built with dropout.
+KernelDefinition makeCdnaDropoutKernel(int64_t headDim = 128, int64_t causal = 0)
+{
+    auto kernel = makeCdnaKernel("generic", headDim, causal, "bf16", 128);
+    kernel.metadata[CDNA_HAS_DROPOUT_FIELD] = int64_t{1};
+    return kernel;
+}
+
+std::vector<CdnaCase> cdnaDropoutAccepts()
+{
+    const auto with = [](const std::function<void(SdpaGraphSpec&)>& edit) {
+        auto spec = cdnaDroppingSpec();
+        edit(spec);
+        return spec;
+    };
+    return {
+        {"DeviceInt64SeedAndOffset", cdnaDroppingSpec()},
+        {"SeedAndOffsetPassedByValue", with([](SdpaGraphSpec& s) {
+             s.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID);
+             s.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID);
+         })},
+        {"Int32SeedAndOffsetPassedByValue", with([](SdpaGraphSpec& s) {
+             s.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID);
+             s.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID);
+             s.dropoutSeedDataType = DataType::INT32;
+             s.dropoutOffsetDataType = DataType::INT32;
+         })},
+        {"ProbabilityJustBelowOne", with([](SdpaGraphSpec& s) { s.dropoutProbability = 0.99F; })},
+        {"BottomRightCausal",
+         with([](SdpaGraphSpec& s) { s.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL; })},
+        {"SlidingWindow", with([](SdpaGraphSpec& s) { s.mask = SdpaMask::SLIDING_WINDOW; })},
+        {"WithTheLse", with([](SdpaGraphSpec& s) { s.stats = SdpaStats::LSE; })},
+        // Under padding (D6): each batch's mask at the graph's declared extents.
+        {"UnderPadding", with([](SdpaGraphSpec& s) {
+             s.batch = 2;
+             setPadding(s, {256, 3}, {256, 40});
+         })},
+        {"UnderPaddingWithoutThePaddingMask", with([](SdpaGraphSpec& s) {
+             s.batch = 2;
+             setPadding(s, {256, 3}, {256, 40});
+             s.paddingMask = false;
+         })},
+        // With a bias (the dropout objects' bias builds), in the query's dtype or f32 (the
+        // latter finds no dropout object at kernel match).
+        {"WithABias", with([](SdpaGraphSpec& s) {
+             s.withBias = true;
+             s.biasDataType = s.dataType;
+         })},
+        {"WithAnF32Bias", with([](SdpaGraphSpec& s) {
+             s.withBias = true;
+             s.biasDataType = DataType::FLOAT;
+         })},
+        // And under padding, where the bias builds read the bias as the vectorized objects
+        // do (vendored-kernel modification 37), at any key length per batch.
+        {"WithABiasUnderPadding", with([](SdpaGraphSpec& s) {
+             s.batch = 2;
+             setPadding(s, {256, 3}, {256, 41});
+             s.withBias = true;
+             s.biasDataType = s.dataType;
+         })},
+    };
+}
+
+INSTANTIATE_TEST_SUITE_P(Dropout,
+                         TestFlydslSdpaCdnaGraphAccepts,
+                         ::testing::ValuesIn(cdnaDropoutAccepts()),
+                         [](const auto& info) { return info.param.name; });
+
+/// Each gate on the dropout fields (FlydslSdpaDropout.hpp, and the CDNA matcher's
+/// combinations), applied to a dropping graph the CDNA matcher accepts.
+std::vector<SdpaFieldDecline> cdnaDropoutDeclines()
+{
+    using Builder = hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesBuilder;
+    std::vector<SdpaFieldDecline> cases;
+    const auto add = [&cases](std::string name, std::function<void(SdpaGraphSpec&)> edit) {
+        cases.push_back({std::move(name),
+                         [edit = std::move(edit)](SdpaGraphSpec& s) {
+                             s = cdnaDroppingSpec();
+                             edit(s);
+                         },
+                         [](SdpaGraphSpec& s) { s = cdnaDroppingSpec(); }});
+    };
+    const auto field = [&add](std::string name, std::function<void(Builder&)> write) {
+        add(std::move(name),
+            [write = std::move(write)](SdpaGraphSpec& s) { s.extraAttributes = write; });
+    };
+    constexpr int64_t AUX = FLYDSL_SDPA_RDNA_AUX_UID;
+    field("WithADropoutMask", [](Builder& b) { b.add_dropout_mask_tensor_uid(AUX); });
+    field("WithADropoutScale", [](Builder& b) { b.add_dropout_scale_tensor_uid(AUX); });
+    // A one-element dump no writer fills; a well-formed one is served (sdpaRngDumpDeclines).
+    field("WithAnRngDump", [](Builder& b) { b.add_rng_dump_tensor_uid(AUX); });
+    for(const auto& [name, p] :
+        {std::pair{"ProbabilityOne", 1.0F},
+         std::pair{"ProbabilityAboveOne", 1.5F},
+         std::pair{"ProbabilityNegative", -0.1F},
+         std::pair{"ProbabilityNaN", std::numeric_limits<float>::quiet_NaN()},
+         std::pair{"ProbabilityInfinite", std::numeric_limits<float>::infinity()}})
+    {
+        const float probability = p;
+        add(name, [probability](SdpaGraphSpec& s) { s.dropoutProbability = probability; });
+    }
+    add("WithoutASeed", [](SdpaGraphSpec& s) { s.withDropoutSeed = false; });
+    add("WithoutAnOffset", [](SdpaGraphSpec& s) { s.withDropoutOffset = false; });
+    add("SeedAndOffsetWithoutAProbability", [](SdpaGraphSpec& s) { s.dropoutProbability.reset(); });
+    add("Int32SeedOnTheDevice", [](SdpaGraphSpec& s) { s.dropoutSeedDataType = DataType::INT32; });
+    add("Int32OffsetOnTheDevice",
+        [](SdpaGraphSpec& s) { s.dropoutOffsetDataType = DataType::INT32; });
+    add("FloatSeedPassedByValue", [](SdpaGraphSpec& s) {
+        s.dropoutSeedDataType = DataType::FLOAT;
+        s.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID);
+    });
+    add("SeedOfTwoValues", [](SdpaGraphSpec& s) { s.dropoutSeedDims = {1, 1, 1, 2}; });
+    add("SeedOfRankOne", [](SdpaGraphSpec& s) { s.dropoutSeedDims = {1}; });
+    add("VirtualSeed",
+        [](SdpaGraphSpec& s) { s.virtualTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID); });
+    add("VirtualOffset",
+        [](SdpaGraphSpec& s) { s.virtualTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID); });
+    add("RaggedSeed",
+        [](SdpaGraphSpec& s) { s.raggedTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID); });
+    add("SeedAlignedTo4",
+        [](SdpaGraphSpec& s) { s.alignment[FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID] = 4; });
+    add("OffsetAlignedTo4",
+        [](SdpaGraphSpec& s) { s.alignment[FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID] = 4; });
+    // A bad seed declines even where nothing is drawn: the matcher gates what it reads.
+    add("Int32DeviceSeedAtProbabilityZero", [](SdpaGraphSpec& s) {
+        s.dropoutProbability = 0.0F;
+        s.dropoutSeedDataType = DataType::INT32;
+    });
+    // The dropout objects add no sink yet.
+    add("WithASink", [](SdpaGraphSpec& s) { s.withSink = true; });
+    add("WithABiasAndASink", [](SdpaGraphSpec& s) {
+        s.withBias = true;
+        s.biasDataType = s.dataType;
+        s.withSink = true;
+    });
+    return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(Dropout,
+                         TestFlydslSdpaCdnaFieldDeclines,
+                         ::testing::ValuesIn(cdnaDropoutDeclines()),
+                         [](const auto& info) { return info.param.name; });
+
+TEST(TestFlydslSdpaCdnaBinding, BindsTheDropoutProbabilitySeedAndOffset)
+{
+    const auto bound = cdnaGraphMatch(cdnaDroppingSpec());
+    ASSERT_TRUE(bound.has_value());
+    const auto bits = tryGetBoundInt(*bound, "flydsl_sdpa_cdna.dropout_p");
+    ASSERT_TRUE(bits.has_value());
+    float probability = 0.0F;
+    const auto bits32 = static_cast<int32_t>(*bits);
+    std::memcpy(&probability, &bits32, sizeof(probability));
+    EXPECT_EQ(probability, 0.1F);
+    EXPECT_EQ(tryGetBoundInt(*bound, "flydsl_sdpa_cdna.dropout_seed.uid"),
+              FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID);
+    EXPECT_EQ(tryGetBoundInt(*bound, "flydsl_sdpa_cdna.dropout_offset.uid"),
+              FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID);
+
+    const auto dense = cdnaGraphMatch(cdnaSpec());
+    ASSERT_TRUE(dense.has_value());
+    EXPECT_EQ(tryGetBoundInt(*dense, "flydsl_sdpa_cdna.dropout_p"), 0);
+    EXPECT_EQ(tryGetBoundInt(*dense, "flydsl_sdpa_cdna.dropout_seed.uid"), -1);
+    EXPECT_EQ(tryGetBoundInt(*dense, "flydsl_sdpa_cdna.dropout_offset.uid"), -1);
+}
+
+// RNG dump (FlydslSdpaRngDump.hpp): the shared decline table, the binding, and the writer
+// beside every staged dropout object.
+INSTANTIATE_TEST_SUITE_P(RngDump,
+                         TestFlydslSdpaCdnaFieldDeclines,
+                         ::testing::ValuesIn(sdpaRngDumpDeclines()),
+                         [](const auto& info) { return info.param.name; });
+
+TEST(TestFlydslSdpaCdnaBinding, BindsTheRngDumpOrNone)
+{
+    auto withDump = cdnaDroppingSpec();
+    withDump.withRngDump = true;
+    const auto bound = cdnaGraphMatch(withDump);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, "flydsl_sdpa_cdna.rng_dump.uid"),
+              FLYDSL_SDPA_RDNA_RNG_DUMP_UID);
+    for(const auto& spec : {cdnaDroppingSpec(), cdnaSpec()})
+    {
+        const auto none = cdnaGraphMatch(spec);
+        ASSERT_TRUE(none.has_value());
+        EXPECT_EQ(tryGetBoundInt(*none, "flydsl_sdpa_cdna.rng_dump.uid"), -1);
+    }
+    // Under padding the CDNA objects drop too, so the dump is served there as well.
+    auto padded = withDump;
+    setPadding(padded, {128, 3}, {100, 128});
+    const auto paddedBound = cdnaGraphMatch(padded);
+    ASSERT_TRUE(paddedBound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*paddedBound, "flydsl_sdpa_cdna.rng_dump.uid"),
+              FLYDSL_SDPA_RDNA_RNG_DUMP_UID);
+}
+
+/// Every staged CDNA object built with dropout.
+std::vector<KernelDefinition> stagedCdnaDropoutKernels()
+{
+    std::vector<KernelDefinition> kernels;
+    const auto* staged = findLoadedSet(FLYDSL_SDPA_CDNA.engineName);
+    for(const auto& pack : staged == nullptr ? decltype(staged->packs){} : staged->packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            const auto* dropout = tryGetMetadataField<int64_t>(kernel.metadata, "has_dropout");
+            if(dropout != nullptr && *dropout == 1)
+            {
+                kernels.push_back(KernelDefinition{kernel.id,
+                                                   pack.id,
+                                                   pack.dispatchId,
+                                                   kernel.source,
+                                                   kernel.metadata,
+                                                   kernel.priority,
+                                                   kernel.arch.empty() ? pack.arch : kernel.arch,
+                                                   kernel.originDirectory,
+                                                   kernel.name,
+                                                   kernel.treeRoot,
+                                                   kernel.sources});
+            }
+        }
+    }
+    return kernels;
+}
+
+// Every staged dropout object's shard ships the writer with the argument list the native
+// launches, and an object whose shard does not (its directory moved) declines a dump while
+// still serving the dropping graph.
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsADumpOnlyBesideTheWriter)
+{
+    auto withDump = cdnaDroppingSpec();
+    withDump.withRngDump = true;
+    const GraphFixture dumping(buildFlydslSdpaRdnaGraph(withDump));
+    const GraphFixture dropping(buildFlydslSdpaRdnaGraph(cdnaDroppingSpec()));
+    const auto dumpBound = matchesGraph(FLYDSL_SDPA_CDNA, dumping.context());
+    const auto dropBound = matchesGraph(FLYDSL_SDPA_CDNA, dropping.context());
+    ASSERT_TRUE(dumpBound.has_value() && dropBound.has_value());
+    size_t writers = 0;
+    size_t matched = 0;
+    for(const auto& kernel : stagedCdnaDropoutKernels())
+    {
+        ASSERT_TRUE(flydsl_sdpa::hasDropoutMaskWriter(kernel)) << kernel.name;
+        for(const auto& arch : kernel.arch)
+        {
+            const auto mask = flydsl_sdpa::dropoutMaskKernel(kernel, arch);
+            EXPECT_EQ(mask.source.kind, KernelSourceKind::KPACK) << arch;
+            EXPECT_EQ(mask.getIntMetadata("block_threads"), 256) << arch;
+            const auto& expected = flydsl_sdpa::dropoutMaskSignature();
+            ASSERT_EQ(mask.source.signature.size(), expected.size()) << arch;
+            for(size_t i = 0; i < expected.size(); ++i)
+            {
+                EXPECT_EQ(mask.source.signature[i].kind, expected[i].kind) << arch << " " << i;
+                EXPECT_EQ(mask.source.signature[i].size, expected[i].size) << arch << " " << i;
+                EXPECT_EQ(mask.source.signature[i].offset, expected[i].offset) << arch << " " << i;
+            }
+            ++writers;
+        }
+        if(!matchesKernel(FLYDSL_SDPA_CDNA, dropping.context(), kernel, *dropBound))
+        {
+            continue;
+        }
+        EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, dumping.context(), kernel, *dumpBound))
+            << kernel.name;
+        auto moved = kernel;
+        moved.originDirectory = std::filesystem::path("/nonexistent") / "FlyDSL" / "sdpa_cdna"
+                                / kernel.originDirectory.filename();
+        EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_CDNA, dumping.context(), moved, *dumpBound))
+            << kernel.name;
+        EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_CDNA, dropping.context(), moved, *dropBound))
+            << kernel.name;
+        ++matched;
+    }
+    if(flydslShipsAnywhere("sdpa_cdna"))
+    {
+        EXPECT_GT(writers, 0U);
+        EXPECT_GT(matched, 0U) << "no staged dropout object serves the dropping graph";
+    }
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsADroppingGraphOnlyOnTheDropoutObjects)
+{
+    const auto dropping = cdnaDroppingSpec();
+    auto noDrop = cdnaDroppingSpec();
+    noDrop.dropoutProbability = 0.0F;
+    // The dropout object: a dropping graph, never a plain one (probability 0 included).
+    EXPECT_TRUE(cdnaAdmits(dropping, makeCdnaDropoutKernel()));
+    EXPECT_FALSE(cdnaAdmits(cdnaSpec(), makeCdnaDropoutKernel()));
+    EXPECT_FALSE(cdnaAdmits(noDrop, makeCdnaDropoutKernel()));
+    // The plain objects: the undropped result at probability 0, never a drop.
+    for(const auto& kernel : {makeCdnaKernel("generic", 128, 0, "bf16", 128),
+                              makeCdnaKernel("dualwave", 128, 0),
+                              makeCdnaKernel("decode", 128, 0, "bf16", 64)})
+    {
+        SCOPED_TRACE(kernel.name);
+        EXPECT_TRUE(cdnaAdmits(noDrop, kernel));
+        EXPECT_FALSE(cdnaAdmits(dropping, kernel));
+    }
+    // An object whose metadata says nothing about dropout serves nothing.
+    auto unknown = makeCdnaKernel("generic", 128, 0, "bf16", 128);
+    unknown.metadata.erase(CDNA_HAS_DROPOUT_FIELD);
+    EXPECT_FALSE(cdnaAdmits(cdnaSpec(), unknown));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsAKeyAlignedDroppingGraphOnTheAlignedDropoutObjects)
+{
+    // The non-causal dropout objects' builds without the KV tail mask (gfx942, gfx950): a
+    // dropping graph whose key length the KV tile divides, never another one, never a padded
+    // one, and never a graph that does not drop.
+    auto aligned = makeCdnaDropoutKernel();
+    aligned.metadata[CDNA_KV_ALIGN_FIELD] = int64_t{64};
+    const auto masked = makeCdnaDropoutKernel();
+    const auto dropping = cdnaDroppingSpec();
+    ASSERT_EQ(dropping.seqLenKv % 64, 0);
+    EXPECT_TRUE(cdnaAdmits(dropping, aligned));
+    EXPECT_TRUE(cdnaAdmits(dropping, masked));
+    auto ragged = dropping;
+    ragged.seqLenQ = 333;
+    ragged.seqLenKv = 333;
+    EXPECT_FALSE(cdnaAdmits(ragged, aligned)) << "the object skips the KV tail mask";
+    EXPECT_TRUE(cdnaAdmits(ragged, masked));
+    auto padded = cdnaPaddedSpec();
+    setDropout(padded, 0.1F);
+    EXPECT_FALSE(cdnaAdmits(padded, aligned));
+    EXPECT_TRUE(cdnaAdmits(padded, masked));
+    auto noDrop = dropping;
+    noDrop.dropoutProbability = 0.0F;
+    EXPECT_FALSE(cdnaAdmits(noDrop, aligned));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsADroppingGraphWithABiasOnTheDropoutBiasObjects)
+{
+    // Dropout with a bias (COVERAGE.md section 7.9's second wave): the dropout objects' bias
+    // builds, which read the bias the vectorized objects read. Neither the plain dropout
+    // object nor a bias object without dropout serves it; an f32 bias, which only the strided
+    // objects read, has no dropout object.
+    auto dropping = cdnaDroppingSpec();
+    dropping.withBias = true;
+    dropping.biasDataType = dropping.dataType;
+    ASSERT_TRUE(cdnaGraphMatch(dropping).has_value());
+    auto dropoutBias = makeCdnaDropoutKernel();
+    dropoutBias.metadata[CDNA_HAS_BIAS_FIELD] = int64_t{1};
+    EXPECT_TRUE(cdnaAdmits(dropping, dropoutBias));
+    EXPECT_FALSE(cdnaAdmits(dropping, makeCdnaDropoutKernel()));
+    EXPECT_FALSE(cdnaAdmits(dropping, makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 1)));
+    EXPECT_FALSE(cdnaAdmits(cdnaDroppingSpec(), dropoutBias));
+    auto f32Bias = dropping;
+    f32Bias.biasDataType = DataType::FLOAT;
+    EXPECT_FALSE(cdnaAdmits(f32Bias, dropoutBias));
+    // Under padding too, at a key length no multiple of the 4-key runs (vendored-kernel
+    // modification 37), and not on the plain dropout object.
+    auto padded = dropping;
+    setPadding(padded, {256, 100}, {256, 77});
+    padded.batch = 2;
+    ASSERT_TRUE(cdnaGraphMatch(padded).has_value());
+    EXPECT_TRUE(cdnaAdmits(padded, dropoutBias));
+    EXPECT_FALSE(cdnaAdmits(padded, makeCdnaDropoutKernel()));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsAPaddedGraphsBiasOnTheVectorizedObjects)
+{
+    // Under padding a batch's key length need not be a multiple of the vectorized objects'
+    // 4-key runs: their last real row reads the bias up to the launch's key length
+    // (vendored-kernel modification 37), so they serve it as they do dense, sink included,
+    // and the strided objects still do. A bias the vectorized objects cannot read (f32)
+    // stays on the strided ones.
+    auto padded = cdnaPaddedSpec();
+    padded.withBias = true;
+    padded.biasDataType = padded.dataType;
+    auto dense = padded;
+    dense.seqLensQ.clear();
+    dense.seqLensKv.clear();
+    dense.paddingMask = false;
+    const auto vectorized = makeCdnaKernel("generic", 128, 0, "bf16", 128, 0, 1, 1);
+    auto strided = vectorized;
+    strided.metadata["bias_kstrided"] = int64_t{1};
+    EXPECT_TRUE(cdnaAdmits(dense, vectorized));
+    EXPECT_TRUE(cdnaAdmits(padded, vectorized));
+    EXPECT_TRUE(cdnaAdmits(padded, strided));
+    auto f32 = padded;
+    f32.biasDataType = DataType::FLOAT;
+    EXPECT_FALSE(cdnaAdmits(f32, vectorized));
+    EXPECT_TRUE(cdnaAdmits(f32, strided));
+    padded.withSink = true;
+    auto vectorizedSink = vectorized;
+    vectorizedSink.metadata["has_sink"] = int64_t{1};
+    strided.metadata["has_sink"] = int64_t{1};
+    EXPECT_TRUE(cdnaAdmits(padded, vectorizedSink));
+    EXPECT_TRUE(cdnaAdmits(padded, strided));
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, RunsAPaddedDroppingGraphOnTheDropoutObjects)
+{
+    // Dropout under padding (D6): the dropout objects read each batch's lengths too.
+    auto padded = cdnaPaddedSpec();
+    setDropout(padded, 0.1F);
+    for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        padded.mask = mask;
+        EXPECT_TRUE(cdnaAdmits(padded, makeCdnaDropoutKernel(128, mask == SdpaMask::NONE ? 0 : 1)));
+        EXPECT_FALSE(cdnaAdmits(
+            padded, makeCdnaKernel("decode", 128, mask == SdpaMask::NONE ? 0 : 1, "bf16", 64)));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // GPU: the staged objects against a host reference
 // ---------------------------------------------------------------------------
@@ -1389,11 +2788,414 @@ std::vector<T> fillValues(size_t count, uint32_t seed)
 /// the bound.
 constexpr double LSE_TOLERANCE = 2e-3;
 
+/// The harness's host copies of Q, K, V and O and their logical (B, H, S, D) strides, K and V
+/// starting @p kStart and @p vStart elements in (inside one packed buffer).
+template <typename T>
+struct CdnaHostOperands
+{
+    const std::vector<T>& q;
+    const std::vector<T>& k;
+    const std::vector<T>& v;
+    const std::vector<T>& o;
+    const std::vector<int64_t>& qStrides;
+    const std::vector<int64_t>& kvStrides;
+    const std::vector<int64_t>& vStrides;
+    const std::vector<int64_t>& oStrides;
+    int64_t kStart = 0;
+    int64_t vStart = 0;
+
+    static double at(const std::vector<T>& t,
+                     const std::vector<int64_t>& strides,
+                     int64_t start,
+                     int64_t b,
+                     int64_t h,
+                     int64_t s,
+                     int64_t d)
+    {
+        const int64_t index
+            = start + b * strides[0] + h * strides[1] + s * strides[2] + d * strides[3];
+        return static_cast<double>(static_cast<float>(t[static_cast<size_t>(index)]));
+    }
+};
+
+/// A CDNA launch's RNG dump (FlydslSdpaRngDumpTestSupport.hpp): the oracle's mask bit for bit at
+/// every element, padded rows and keys past a batch's length included, with hipDNN's keep-rate
+/// check; and O as hipDNN's CPU reference computes it with the dump as its explicit mask. With
+/// a bias the dump alone: that reference adds none, and the harness checks O against the
+/// oracle's mask and the bias.
+template <typename T>
+void expectCdnaRngDump(const RngDumpReferenceProblem& reference,
+                       const std::vector<float>& dumped,
+                       const SdpaGraphSpec& spec,
+                       const CdnaHostOperands<T>& host,
+                       double tolerance)
+{
+    using Host = CdnaHostOperands<T>;
+    expectRngDumpIsTheOracleMask(
+        dumped, reference.extents, reference.p, spec.dropoutSeed, spec.dropoutOffset);
+    if(spec.withBias)
+    {
+        return;
+    }
+    expectOutputIsTheReferenceUnderTheDump(
+        reference,
+        dumped,
+        [&host](int64_t b, int64_t h, int64_t s, int64_t e) {
+            return Host::at(host.q, host.qStrides, 0, b, h, s, e);
+        },
+        [&host](int64_t b, int64_t h, int64_t j, int64_t e) {
+            return Host::at(host.k, host.kvStrides, host.kStart, b, h, j, e);
+        },
+        [&host](int64_t b, int64_t h, int64_t j, int64_t e) {
+            return Host::at(host.v, host.vStrides, host.vStart, b, h, j, e);
+        },
+        [&host](int64_t b, int64_t h, int64_t s, int64_t e) {
+            return Host::at(host.o, host.oStrides, 0, b, h, s, e);
+        },
+        tolerance);
+}
+
+/// NaN over the harness's bias values at @p biasOffset (b, h, s, j), within @p extents [B, H, Sq,
+/// Skv]: on every key of every third row from the second (biasNanRows), a row whose O and LSE are
+/// NaN; and under padding at and past each batch's key length (biasNanPastKeys), which the
+/// kernels must mask whatever the bias holds there; that needs a bias of its own per batch
+/// (@p biasDims as the graph declares it).
+template <typename BiasOffset>
+void writeCdnaBiasNans(const SdpaGraphSpec& spec,
+                       const std::vector<int64_t>& biasDims,
+                       const std::array<int64_t, 4>& extents,
+                       BiasOffset biasOffset,
+                       std::vector<float>& biasValues)
+{
+    const auto [b, h, s, skv] = extents;
+    ASSERT_TRUE(!spec.biasNanPastKeys
+                || (!spec.seqLensKv.empty() && biasDims.size() == 4 && biasDims[0] == b));
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    for(int64_t bi = 0; bi < b; ++bi)
+    {
+        const int64_t firstPast
+            = spec.biasNanPastKeys
+                  ? std::clamp<int64_t>(spec.seqLensKv[static_cast<size_t>(bi)], 0, skv)
+                  : skv;
+        for(int64_t hi = 0; hi < h; ++hi)
+        {
+            for(int64_t si = 0; si < s; ++si)
+            {
+                const bool nanRow = spec.biasNanRows && si % 3 == 1;
+                for(int64_t j = nanRow ? 0 : firstPast; j < skv; ++j)
+                {
+                    biasValues[biasOffset(bi, hi, si, j)] = nan;
+                }
+            }
+        }
+    }
+}
+
+/// The sink logits a CDNA case binds, one per query head (none without a sink): random values
+/// in the query's dtype, held in @p sinkValues for a query-dtype sink; for a FLOAT sink (vendored-
+/// kernel modification 36) the same plus low bits no 16-bit dtype holds, so a sink read as 16-bit
+/// is caught; or every one the spec's value, or -inf.
+template <typename T>
+std::vector<float> cdnaSinkLogits(const SdpaGraphSpec& spec, std::vector<T>& sinkValues)
+{
+    const bool floatSink = spec.sinkDataType == DataType::FLOAT;
+    sinkValues
+        = spec.withSink ? fillValues<T>(static_cast<size_t>(spec.heads), 5U) : std::vector<T>{};
+    std::vector<float> logits(sinkValues.size());
+    for(size_t hi = 0; hi < sinkValues.size(); ++hi)
+    {
+        logits[hi] = static_cast<float>(sinkValues[hi])
+                     + (floatSink ? static_cast<float>((hi % 7) + 1) * 1.0e-3F : 0.0F);
+    }
+    if(spec.sinkValue)
+    {
+        std::fill(sinkValues.begin(), sinkValues.end(), T(*spec.sinkValue));
+        std::fill(logits.begin(),
+                  logits.end(),
+                  floatSink ? *spec.sinkValue : static_cast<float>(T(*spec.sinkValue)));
+    }
+    if(spec.sinkNegativeInfinity)
+    {
+        std::fill(sinkValues.begin(), sinkValues.end(), T(-std::numeric_limits<float>::infinity()));
+        std::fill(logits.begin(), logits.end(), -std::numeric_limits<float>::infinity());
+    }
+    return logits;
+}
+
+/// A CDNA sink case's O and LSE against hipDNN's CPU reference (FLOAT [1, Hq, 1, 1], SEM-022;
+/// FlydslSdpaCpuReferenceTestSupport.hpp), with the bias, band and padding @p problem holds.
+template <typename T, typename BiasAt>
+void expectCdnaSinkIsTheCpuReference(const SdpaCpuReferenceProblem& problem,
+                                     const CdnaHostOperands<T>& host,
+                                     BiasAt biasAt,
+                                     const std::vector<float>& stats,
+                                     bool statsSequenceMajor,
+                                     double tolerance,
+                                     double lseTolerance)
+{
+    using Host = CdnaHostOperands<T>;
+    expectSdpaIsTheCpuReference(
+        problem,
+        [&host](int64_t b, int64_t h, int64_t s, int64_t e) {
+            return Host::at(host.q, host.qStrides, 0, b, h, s, e);
+        },
+        [&host](int64_t b, int64_t h, int64_t j, int64_t e) {
+            return Host::at(host.k, host.kvStrides, host.kStart, b, h, j, e);
+        },
+        [&host](int64_t b, int64_t h, int64_t j, int64_t e) {
+            return Host::at(host.v, host.vStrides, host.vStart, b, h, j, e);
+        },
+        biasAt,
+        [&host](int64_t b, int64_t h, int64_t s, int64_t e) {
+            return Host::at(host.o, host.oStrides, 0, b, h, s, e);
+        },
+        [&](int64_t b, int64_t h, int64_t s) {
+            const auto index = statsSequenceMajor ? (b * problem.seqLenQ + s) * problem.heads + h
+                                                  : (b * problem.heads + h) * problem.seqLenQ + s;
+            return static_cast<double>(stats[static_cast<size_t>(index)]);
+        },
+        tolerance,
+        lseTolerance);
+}
+
+/// A packed (THD) launch's O and LSE, read back from @p packedODevice and @p packedStatsDevice
+/// (Q's tokens end to end at @p offsetsQ, then a guard of Sq rows) and unpacked into the dense
+/// @p o (laid out by @p oStrides) and @p stats, so the dense oracle checks them unchanged. Every
+/// guard element must still hold the fill's NaN.
+template <typename T>
+void unpackCdnaPackedOutputs(const SdpaGraphSpec& spec,
+                             const std::vector<int32_t>& offsetsQ,
+                             const std::vector<int64_t>& oStrides,
+                             const void* packedODevice,
+                             const void* packedStatsDevice,
+                             bool withStats,
+                             std::vector<T>& o,
+                             std::vector<float>& stats)
+{
+    const int64_t b = spec.batch;
+    const int64_t h = spec.heads;
+    const int64_t s = spec.seqLenQ;
+    const int64_t dv = spec.valueHeadDim.value_or(spec.headDim);
+    const int64_t tokensQ = offsetsQ.back() + s;
+    const auto packedOCount = static_cast<size_t>(tokensQ * h * dv);
+    const auto packedStatsCount = static_cast<size_t>(tokensQ * h);
+    std::vector<T> packedO(packedOCount);
+    std::vector<float> packedStats(packedStatsCount);
+    ASSERT_EQ(
+        hipSuccess,
+        hipMemcpy(packedO.data(), packedODevice, packedOCount * sizeof(T), hipMemcpyDeviceToHost));
+    ASSERT_EQ(hipSuccess,
+              hipMemcpy(packedStats.data(),
+                        packedStatsDevice,
+                        packedStatsCount * sizeof(float),
+                        hipMemcpyDeviceToHost));
+    for(int64_t bi = 0; bi < b; ++bi)
+    {
+        const int64_t first = offsetsQ[static_cast<size_t>(bi)];
+        for(int64_t si = 0; si < spec.packedSeqLensQ[static_cast<size_t>(bi)]; ++si)
+        {
+            for(int64_t hi = 0; hi < h; ++hi)
+            {
+                for(int64_t e = 0; e < dv; ++e)
+                {
+                    o[static_cast<size_t>(bi * oStrides[0] + hi * oStrides[1] + si * oStrides[2]
+                                          + e * oStrides[3])]
+                        = packedO[static_cast<size_t>(((first + si) * h + hi) * dv + e)];
+                }
+                if(withStats)
+                {
+                    const auto statsIndex
+                        = spec.statsSequenceMajor ? (bi * s + si) * h + hi : (bi * h + hi) * s + si;
+                    stats[static_cast<size_t>(statsIndex)]
+                        = packedStats[static_cast<size_t>((first + si) * h + hi)];
+                }
+            }
+        }
+    }
+    // The guard: every element still the fill's NaN.
+    int64_t guardWrites = 0;
+    for(int64_t t = offsetsQ.back(); t < tokensQ; ++t)
+    {
+        for(int64_t hi = 0; hi < h; ++hi)
+        {
+            for(int64_t e = 0; e < dv; ++e)
+            {
+                guardWrites += std::isnan(static_cast<float>(
+                                   packedO[static_cast<size_t>((t * h + hi) * dv + e)]))
+                                   ? 0
+                                   : 1;
+            }
+            guardWrites += std::isnan(packedStats[static_cast<size_t>(t * h + hi)]) ? 0 : 1;
+        }
+    }
+    EXPECT_EQ(guardWrites, 0) << "packed O or LSE written past the last sequence";
+}
+
+/// Whether padded row @p row (batch, head, query) holds O = 0 and LSE = -inf exactly, on a sink
+/// object too: it is padding, not a row no key reached.
+template <typename T>
+bool cdnaPaddedRowIsExact(const SdpaGraphSpec& spec,
+                          const std::vector<T>& o,
+                          const std::vector<int64_t>& oStrides,
+                          const std::vector<float>& stats,
+                          bool withStats,
+                          const std::array<int64_t, 3>& row)
+{
+    const auto [bi, hi, si] = row;
+    const int64_t h = spec.heads;
+    const int64_t s = spec.seqLenQ;
+    const int64_t dv = spec.valueHeadDim.value_or(spec.headDim);
+    bool exact = true;
+    for(int64_t e = 0; e < dv; ++e)
+    {
+        exact = exact && CdnaHostOperands<T>::at(o, oStrides, 0, bi, hi, si, e) == 0.0;
+    }
+    if(withStats)
+    {
+        const auto statsIndex
+            = spec.statsSequenceMajor ? (bi * s + si) * h + hi : (bi * h + hi) * s + si;
+        const auto lse = stats[static_cast<size_t>(statsIndex)];
+        exact = exact && std::isinf(lse) && lse < 0.0F;
+    }
+    return exact;
+}
+
 /// Runs each of @p kernels for @p spec through prepare() and launch() and checks every
 /// output element against a double-precision reference, in the memory layout @p spec names:
 /// BSHD, BHSD, or Q, K and V as views into one packed buffer. The inputs and the reference
 /// are computed once and shared by every kernel: the reference is the costly part, and the
 /// kernels a shape admits are often a dozen tile variants.
+/// Whether @p kernel, run for @p spec, reads the zero bias its launch stages in the workspace: a
+/// bias object for a graph without a bias (a scale that needs scaled scores).
+bool cdnaReadsZeroBias(const SdpaGraphSpec& spec, const KernelDefinition& kernel)
+{
+    const auto* hasBias = tryGetMetadataField<int64_t>(kernel.metadata, CDNA_HAS_BIAS_FIELD);
+    return !spec.withBias && hasBias != nullptr && *hasBias == 1;
+}
+
+/// Whether @p spec is packed with both lengths, every one inside its slot (P3, PyTorch's
+/// seqused_k): the form hipDNN's executors run as the dense padded graph
+/// (RaggedSdpaDensify.hpp, a length past its slot an error), so hipDNN's CPU reference checks it.
+bool cdnaDensifiable(const SdpaGraphSpec& spec)
+{
+    if(!spec.packed() || spec.seqLensQ.empty() || spec.seqLensKv.empty())
+    {
+        return false;
+    }
+    for(size_t bi = 0; bi < static_cast<size_t>(spec.batch); ++bi)
+    {
+        if(spec.seqLensQ[bi] < 0 || spec.seqLensQ[bi] > spec.packedSeqLensQ[bi]
+           || spec.seqLensKv[bi] < 0 || spec.seqLensKv[bi] > spec.packedSeqLensKv[bi])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// The NaN device values a spec asks for, in the dense @p q, @p k and @p v (K and V laid out
+/// by @p kStrides and @p vStrides):
+///  - NaN in Q's first column at one query position (every batch and head), or in K's at one
+///    key (every batch and KV head): every row that sees it must come out NaN, O and LSE, as
+///    PyTorch's does. Separate Q and K buffers only.
+///  - P3 (PyTorch's seqused_k): NaN in every K and V element of a slot past its length, which
+///    the packed K and V then hold, so a kernel that reads one turns its rows NaN.
+template <typename T>
+void writeCdnaNans(const SdpaGraphSpec& spec,
+                   const std::vector<int64_t>& kStrides,
+                   const std::vector<int64_t>& vStrides,
+                   std::vector<T>& q,
+                   std::vector<T>& k,
+                   std::vector<T>& v)
+{
+    const T nan(std::numeric_limits<float>::quiet_NaN());
+    if(!spec.packedQkv && (spec.queryNanPosition || spec.keyNanPosition))
+    {
+        const auto qNanStrides = sdpaStrides(spec.layout, spec.heads, spec.seqLenQ, spec.headDim);
+        const auto kNanStrides
+            = sdpaStrides(spec.layout, spec.kvHeads, spec.seqLenKv, spec.headDim);
+        for(int64_t bi = 0; bi < spec.batch; ++bi)
+        {
+            for(int64_t hi = 0; spec.queryNanPosition && hi < spec.heads; ++hi)
+            {
+                q[static_cast<size_t>(bi * qNanStrides[0] + hi * qNanStrides[1]
+                                      + *spec.queryNanPosition * qNanStrides[2])]
+                    = nan;
+            }
+            for(int64_t hi = 0; spec.keyNanPosition && hi < spec.kvHeads; ++hi)
+            {
+                k[static_cast<size_t>(bi * kNanStrides[0] + hi * kNanStrides[1]
+                                      + *spec.keyNanPosition * kNanStrides[2])]
+                    = nan;
+            }
+        }
+    }
+    if(!spec.slotTailNan)
+    {
+        return;
+    }
+    ASSERT_TRUE(spec.packed() && !spec.seqLensKv.empty() && !spec.packedQkv);
+    const int64_t dv = spec.valueHeadDim.value_or(spec.headDim);
+    for(int64_t bi = 0; bi < spec.batch; ++bi)
+    {
+        const int64_t slot = spec.packedSeqLensKv[static_cast<size_t>(bi)];
+        const int64_t length
+            = std::clamp<int64_t>(spec.seqLensKv[static_cast<size_t>(bi)], 0, slot);
+        for(int64_t j = length; j < slot; ++j)
+        {
+            for(int64_t hi = 0; hi < spec.kvHeads; ++hi)
+            {
+                for(int64_t e = 0; e < spec.headDim; ++e)
+                {
+                    k[static_cast<size_t>(bi * kStrides[0] + hi * kStrides[1] + j * kStrides[2]
+                                          + e * kStrides[3])]
+                        = nan;
+                }
+                for(int64_t e = 0; e < dv; ++e)
+                {
+                    v[static_cast<size_t>(bi * vStrides[0] + hi * vStrides[1] + j * vStrides[2]
+                                          + e * vStrides[3])]
+                        = nan;
+                }
+            }
+        }
+    }
+}
+
+/// @p o and @p stats with a packed graph's rows past each Q slot set as hipDNN's reference
+/// writes padded rows (O = 0, LSE = -inf): they are no outputs, and the dense rewrite packs back
+/// only slot rows.
+template <typename T>
+std::pair<std::vector<T>, std::vector<float>>
+    cdnaAbsentRowsAsPadded(const SdpaGraphSpec& spec,
+                           const std::vector<int64_t>& oStrides,
+                           std::vector<T> o,
+                           std::vector<float> stats)
+{
+    const int64_t h = spec.heads;
+    const int64_t s = spec.seqLenQ;
+    const int64_t dv = spec.valueHeadDim.value_or(spec.headDim);
+    for(int64_t bi = 0; spec.packed() && bi < spec.batch; ++bi)
+    {
+        for(int64_t hi = 0; hi < h; ++hi)
+        {
+            for(int64_t si = spec.packedSeqLensQ[static_cast<size_t>(bi)]; si < s; ++si)
+            {
+                for(int64_t e = 0; e < dv; ++e)
+                {
+                    o[static_cast<size_t>(bi * oStrides[0] + hi * oStrides[1] + si * oStrides[2]
+                                          + e * oStrides[3])]
+                        = T(0.0F);
+                }
+                const auto statsIndex
+                    = spec.statsSequenceMajor ? (bi * s + si) * h + hi : (bi * h + hi) * s + si;
+                stats[static_cast<size_t>(statsIndex)] = -std::numeric_limits<float>::infinity();
+            }
+        }
+    }
+    return {std::move(o), std::move(stats)};
+}
+
 template <typename T>
 void expectCandidatesMatchReference(const MatchContext& context,
                                     const BoundTokens& bound,
@@ -1438,31 +3240,41 @@ void expectCandidatesMatchReference(const MatchContext& context,
     const auto oCount = static_cast<size_t>(b * s * h * dv);
     auto q = fillValues<T>(qCount, 1U);
     auto k = spec.packedQkv ? q : fillValues<T>(kvCount, 2U);
-    const auto v = spec.packedQkv ? q : fillValues<T>(vCount, 3U);
-    // NaN in Q's first column at one query position (every batch and head), or in K's at one
-    // key (every batch and KV head): every row that sees it must come out NaN, O and LSE, as
-    // PyTorch's does. Separate Q and K buffers only.
-    if(!spec.packedQkv && (spec.queryNanPosition || spec.keyNanPosition))
+    auto v = spec.packedQkv ? q : fillValues<T>(vCount, 3U);
+    if(spec.valueScale.has_value() && !spec.packedQkv)
     {
-        const T nan(std::numeric_limits<float>::quiet_NaN());
-        const auto qNanStrides = sdpaStrides(spec.layout, h, s, d);
-        const auto kNanStrides = sdpaStrides(spec.layout, hk, skv, d);
+        for(auto& value : v)
+        {
+            value = T(static_cast<float>(value) * *spec.valueScale);
+        }
+    }
+    // The dropout mask exposed (separate tensors only): Q zero, so every visible key has the
+    // same probability, and V the identity on its first head_dim keys, so O[i][e] is nonzero
+    // exactly when key e of row i is kept.
+    if(spec.exposeDropoutMask)
+    {
+        ASSERT_FALSE(spec.packedQkv);
+        std::fill(q.begin(), q.end(), T(0.0F));
+        const auto vExposeStrides
+            = sdpaStrides(spec.valueLayout.value_or(spec.layout), hk, skv, dv);
         for(int64_t bi = 0; bi < b; ++bi)
         {
-            for(int64_t hi = 0; spec.queryNanPosition && hi < h; ++hi)
+            for(int64_t hi = 0; hi < hk; ++hi)
             {
-                q[static_cast<size_t>(bi * qNanStrides[0] + hi * qNanStrides[1]
-                                      + *spec.queryNanPosition * qNanStrides[2])]
-                    = nan;
-            }
-            for(int64_t hi = 0; spec.keyNanPosition && hi < hk; ++hi)
-            {
-                k[static_cast<size_t>(bi * kNanStrides[0] + hi * kNanStrides[1]
-                                      + *spec.keyNanPosition * kNanStrides[2])]
-                    = nan;
+                for(int64_t j = 0; j < skv; ++j)
+                {
+                    for(int64_t e = 0; e < dv; ++e)
+                    {
+                        v[static_cast<size_t>(bi * vExposeStrides[0] + hi * vExposeStrides[1]
+                                              + j * vExposeStrides[2] + e * vExposeStrides[3])]
+                            = T(j == e ? 1.0F : 0.0F);
+                    }
+                }
             }
         }
     }
+    // NaN where the spec asks: one query position or key, or every slot's keys past its length.
+    ASSERT_NO_FATAL_FAILURE(writeCdnaNans(spec, kvStrides, vStrides, q, k, v));
     std::vector<T> o(oCount, T(0.0F));
     // Freed on every exit, including a failed ASSERT part-way through a kernel.
     std::vector<void*> allocations;
@@ -1526,6 +3338,107 @@ void expectCandidatesMatchReference(const MatchContext& context,
     {
         buffers.push_back({FLYDSL_SDPA_RDNA_STATS_UID, statsDevice});
     }
+    // Packed (THD; vendored-kernel modification 34): each operand's sequences end to end,
+    // token-major ([T, H, D], the strides setPacked's graph states), holding the dense
+    // tensors' values, and the cumulative token tables Q/O and K/V go through. O and the LSE
+    // come back the same way and are unpacked into the dense ones, so the oracle below is
+    // unchanged. A guard of S rows past the last sequence must stay unwritten.
+    const bool packed = spec.packed();
+    std::vector<int32_t> offsetsQ{0};
+    std::vector<int32_t> offsetsKv{0};
+    for(int64_t bi = 0; packed && bi < b; ++bi)
+    {
+        offsetsQ.push_back(offsetsQ.back() + spec.packedSeqLensQ[static_cast<size_t>(bi)]);
+        offsetsKv.push_back(offsetsKv.back() + spec.packedSeqLensKv[static_cast<size_t>(bi)]);
+    }
+    const int64_t tokensQ = offsetsQ.back() + s;
+    const int64_t tokensKv = offsetsKv.back() + skv;
+    const auto packedOCount = static_cast<size_t>(tokensQ * h * dv);
+    const auto packedStatsCount = static_cast<size_t>(tokensQ * h);
+    void* packedQDevice = nullptr;
+    void* packedKDevice = nullptr;
+    void* packedVDevice = nullptr;
+    void* packedODevice = nullptr;
+    void* packedStatsDevice = nullptr;
+    void* tableQDevice = nullptr;
+    void* tableKvDevice = nullptr;
+    if(packed)
+    {
+        ASSERT_FALSE(spec.packedQkv);
+        // Sequence bi's token si, head hi, element e of a dense operand, packed at its token.
+        const auto pack = [](const std::vector<T>& dense,
+                             const std::vector<int64_t>& strides,
+                             const std::vector<int32_t>& offsets,
+                             const std::vector<int32_t>& lengths,
+                             int64_t tokens,
+                             int64_t heads,
+                             int64_t width) {
+            std::vector<T> out(static_cast<size_t>(tokens * heads * width), T(0.0F));
+            for(size_t bi = 0; bi < lengths.size(); ++bi)
+            {
+                for(int64_t si = 0; si < lengths[bi]; ++si)
+                {
+                    for(int64_t hi = 0; hi < heads; ++hi)
+                    {
+                        for(int64_t e = 0; e < width; ++e)
+                        {
+                            out[static_cast<size_t>(((offsets[bi] + si) * heads + hi) * width + e)]
+                                = dense[static_cast<size_t>(static_cast<int64_t>(bi) * strides[0]
+                                                            + hi * strides[1] + si * strides[2]
+                                                            + e * strides[3])];
+                        }
+                    }
+                }
+            }
+            return out;
+        };
+        const auto upload = [&allocations](void** device, const auto& host) {
+            using Element = typename std::decay_t<decltype(host)>::value_type;
+            ASSERT_EQ(hipSuccess, hipMalloc(device, host.size() * sizeof(Element)));
+            allocations.push_back(*device);
+            ASSERT_EQ(
+                hipSuccess,
+                hipMemcpy(
+                    *device, host.data(), host.size() * sizeof(Element), hipMemcpyHostToDevice));
+        };
+        upload(&packedQDevice, pack(q, qStrides, offsetsQ, spec.packedSeqLensQ, tokensQ, h, d));
+        upload(&packedKDevice,
+               pack(k, kvStrides, offsetsKv, spec.packedSeqLensKv, tokensKv, hk, d));
+        upload(&packedVDevice,
+               pack(v, vStrides, offsetsKv, spec.packedSeqLensKv, tokensKv, hk, dv));
+        upload(&tableQDevice, offsetsQ);
+        upload(&tableKvDevice, offsetsKv);
+        // Poisoned per kernel, below.
+        ASSERT_EQ(hipSuccess, hipMalloc(&packedODevice, packedOCount * sizeof(T)));
+        allocations.push_back(packedODevice);
+        ASSERT_EQ(hipSuccess, hipMalloc(&packedStatsDevice, packedStatsCount * sizeof(float)));
+        allocations.push_back(packedStatsDevice);
+        for(auto& buffer : buffers)
+        {
+            if(buffer.uid == FLYDSL_SDPA_RDNA_Q_UID)
+            {
+                buffer.ptr = packedQDevice;
+            }
+            else if(buffer.uid == FLYDSL_SDPA_RDNA_K_UID)
+            {
+                buffer.ptr = packedKDevice;
+            }
+            else if(buffer.uid == FLYDSL_SDPA_RDNA_V_UID)
+            {
+                buffer.ptr = packedVDevice;
+            }
+            else if(buffer.uid == FLYDSL_SDPA_RDNA_O_UID)
+            {
+                buffer.ptr = packedODevice;
+            }
+            else if(buffer.uid == FLYDSL_SDPA_RDNA_STATS_UID)
+            {
+                buffer.ptr = packedStatsDevice;
+            }
+        }
+        buffers.push_back({FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID, tableQDevice});
+        buffers.push_back({FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID, tableKvDevice});
+    }
     // The bias, in the query's dtype, right-aligned to [B, H, Sq, Skv] as the graph states it.
     const auto biasLayout = sdpaBiasLayout(spec);
     const auto& biasDims = biasLayout.first;
@@ -1552,12 +3465,24 @@ void expectCandidatesMatchReference(const MatchContext& context,
         }
         return static_cast<size_t>(offset);
     };
-    auto biasValues = spec.withBias ? fillValues<T>(biasCount, 4U) : std::vector<T>{};
+    // The bias in the query's dtype, or f32 (read by the strided bias objects, vendored-kernel
+    // modification 31); held as f32 here either way, each value exact in its dtype.
+    const bool biasF32 = spec.biasDataType == DataType::FLOAT;
+    std::vector<float> biasValues;
+    if(spec.withBias)
+    {
+        for(const auto value : fillValues<T>(biasCount, 4U))
+        {
+            biasValues.push_back(static_cast<float>(value));
+        }
+    }
+    const float biasLowest = biasF32 ? std::numeric_limits<float>::lowest()
+                                     : static_cast<float>(std::numeric_limits<T>::lowest());
     if(spec.withBias
        && (spec.biasMasksRows || spec.biasNegativeInfinityLeadingKeys > 0
            || spec.biasNegativeInfinityRows))
     {
-        const T negativeInfinity(-std::numeric_limits<float>::infinity());
+        const float negativeInfinity = -std::numeric_limits<float>::infinity();
         for(int64_t bi = 0; bi < b; ++bi)
         {
             for(int64_t hi = 0; hi < h; ++hi)
@@ -1571,8 +3496,7 @@ void expectCandidatesMatchReference(const MatchContext& context,
                     {
                         for(int64_t j = 0; j < skv; ++j)
                         {
-                            biasValues[biasOffset(bi, hi, si, j)]
-                                = std::numeric_limits<T>::lowest();
+                            biasValues[biasOffset(bi, hi, si, j)] = biasLowest;
                         }
                     }
                     const int64_t masked
@@ -1587,39 +3511,60 @@ void expectCandidatesMatchReference(const MatchContext& context,
             }
         }
     }
+    if(spec.withBias && (spec.biasNanRows || spec.biasNanPastKeys))
+    {
+        writeCdnaBiasNans(spec, biasDims, {b, h, s, skv}, biasOffset, biasValues);
+    }
     void* biasDevice = nullptr;
     if(spec.withBias)
     {
-        ASSERT_EQ(hipSuccess, hipMalloc(&biasDevice, biasCount * sizeof(T)));
-        allocations.push_back(biasDevice);
-        ASSERT_EQ(
-            hipSuccess,
-            hipMemcpy(biasDevice, biasValues.data(), biasCount * sizeof(T), hipMemcpyHostToDevice));
+        if(biasF32)
+        {
+            ASSERT_EQ(hipSuccess, hipMalloc(&biasDevice, biasCount * sizeof(float)));
+            allocations.push_back(biasDevice);
+            ASSERT_EQ(hipSuccess,
+                      hipMemcpy(biasDevice,
+                                biasValues.data(),
+                                biasCount * sizeof(float),
+                                hipMemcpyHostToDevice));
+        }
+        else
+        {
+            std::vector<T> narrowed;
+            narrowed.reserve(biasCount);
+            for(const auto value : biasValues)
+            {
+                narrowed.push_back(T(value));
+            }
+            ASSERT_EQ(hipSuccess, hipMalloc(&biasDevice, biasCount * sizeof(T)));
+            allocations.push_back(biasDevice);
+            ASSERT_EQ(
+                hipSuccess,
+                hipMemcpy(
+                    biasDevice, narrowed.data(), biasCount * sizeof(T), hipMemcpyHostToDevice));
+        }
         buffers.push_back({FLYDSL_SDPA_RDNA_BIAS_UID, biasDevice});
     }
     const auto biasAt = [&](int64_t bi, int64_t hi, int64_t si, int64_t j) {
-        return static_cast<double>(static_cast<float>(biasValues[biasOffset(bi, hi, si, j)]));
+        return static_cast<double>(biasValues[biasOffset(bi, hi, si, j)]);
     };
-    // The attention sink: one logit per query head, in the query's dtype, or every one the
-    // spec's value.
-    auto sinkValues = spec.withSink ? fillValues<T>(static_cast<size_t>(h), 5U) : std::vector<T>{};
-    if(spec.sinkValue)
-    {
-        std::fill(sinkValues.begin(), sinkValues.end(), T(*spec.sinkValue));
-    }
-    if(spec.sinkNegativeInfinity)
-    {
-        std::fill(sinkValues.begin(), sinkValues.end(), T(-std::numeric_limits<float>::infinity()));
-    }
+    // The attention sink: one logit per query head, in the query's dtype or, for a FLOAT sink
+    // (vendored-kernel modification 36), in f32 with low bits no 16-bit dtype holds, so a sink
+    // read as 16-bit is caught; or every one the spec's value.
+    const bool floatSink = spec.sinkDataType == DataType::FLOAT;
+    std::vector<T> sinkValues;
+    const auto sinkLogits = cdnaSinkLogits(spec, sinkValues);
     void* sinkDevice = nullptr;
     if(spec.withSink)
     {
-        ASSERT_EQ(hipSuccess, hipMalloc(&sinkDevice, static_cast<size_t>(h) * sizeof(T)));
+        const size_t sinkBytes = static_cast<size_t>(h) * (floatSink ? sizeof(float) : sizeof(T));
+        ASSERT_EQ(hipSuccess, hipMalloc(&sinkDevice, sinkBytes));
         allocations.push_back(sinkDevice);
         ASSERT_EQ(hipSuccess,
                   hipMemcpy(sinkDevice,
-                            sinkValues.data(),
-                            static_cast<size_t>(h) * sizeof(T),
+                            floatSink ? static_cast<const void*>(sinkLogits.data())
+                                      : static_cast<const void*>(sinkValues.data()),
+                            sinkBytes,
                             hipMemcpyHostToDevice));
         buffers.push_back({FLYDSL_SDPA_RDNA_SINK_UID, sinkDevice});
     }
@@ -1629,6 +3574,70 @@ void expectCandidatesMatchReference(const MatchContext& context,
     {
         buffers.push_back({FLYDSL_SDPA_RDNA_SCALE_UID, &runtimeScale});
     }
+    // The per-batch query and key lengths of a padded graph, INT32 [B, 1, 1, 1] on the device.
+    void* seqLensQDevice = nullptr;
+    void* seqLensKvDevice = nullptr;
+    for(const auto& [values, device, uid] :
+        {std::tuple{&spec.seqLensQ, &seqLensQDevice, FLYDSL_SDPA_RDNA_SEQ_LEN_Q_UID},
+         std::tuple{&spec.seqLensKv, &seqLensKvDevice, FLYDSL_SDPA_RDNA_SEQ_LEN_KV_UID}})
+    {
+        if(values->empty())
+        {
+            continue;
+        }
+        ASSERT_EQ(hipSuccess, hipMalloc(device, values->size() * sizeof(int32_t)));
+        allocations.push_back(*device);
+        ASSERT_EQ(
+            hipSuccess,
+            hipMemcpy(
+                *device, values->data(), values->size() * sizeof(int32_t), hipMemcpyHostToDevice));
+        buffers.push_back({uid, *device});
+    }
+    // The Philox seed and offset: INT64 device values, or host values given at execute.
+    auto hostSeed64 = static_cast<int64_t>(spec.dropoutSeed);
+    auto hostOffset64 = static_cast<int64_t>(spec.dropoutOffset);
+    auto hostSeed32 = static_cast<int32_t>(spec.dropoutSeed);
+    auto hostOffset32 = static_cast<int32_t>(spec.dropoutOffset);
+    void* seedDevice = nullptr;
+    void* offsetDevice = nullptr;
+    for(const auto& [present, uid, device, dataType, host64, host32] :
+        {std::tuple{spec.withDropoutSeed,
+                    FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID,
+                    &seedDevice,
+                    spec.dropoutSeedDataType.value_or(DataType::INT64),
+                    &hostSeed64,
+                    &hostSeed32},
+         std::tuple{spec.withDropoutOffset,
+                    FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID,
+                    &offsetDevice,
+                    spec.dropoutOffsetDataType.value_or(DataType::INT64),
+                    &hostOffset64,
+                    &hostOffset32}})
+    {
+        if(!present)
+        {
+            continue;
+        }
+        if(spec.passByValueTensors.count(uid) != 0)
+        {
+            buffers.push_back({uid,
+                               dataType == DataType::INT32 ? static_cast<void*>(host32)
+                                                           : static_cast<void*>(host64)});
+            continue;
+        }
+        ASSERT_EQ(hipSuccess, hipMalloc(device, sizeof(int64_t)));
+        allocations.push_back(*device);
+        ASSERT_EQ(hipSuccess, hipMemcpy(*device, host64, sizeof(int64_t), hipMemcpyHostToDevice));
+        buffers.push_back({uid, *device});
+    }
+    // The RNG dump, FLOAT [B, Hq, Sq, Skv] packed: a fresh NaN-filled buffer per kernel, below.
+    const RngDumpExtents dumpExtents{b, h, s, skv};
+    if(spec.withRngDump)
+    {
+        ASSERT_FALSE(packed || spec.withSink || spec.packedQkv);
+        buffers.push_back({FLYDSL_SDPA_RDNA_RNG_DUMP_UID, nullptr});
+    }
+
     // Element (batch, head, token, d) of a buffer laid out by logical (B, H, S, D) strides.
     const auto at = [](const std::vector<T>& t,
                        const std::vector<int64_t>& strides,
@@ -1644,23 +3653,71 @@ void expectCandidatesMatchReference(const MatchContext& context,
     const double scale
         = spec.scaleKind == SdpaScale::ABSENT ? 1.0 : static_cast<double>(spec.scale);
     const int64_t group = h / hk;
+    // Under padding each batch has its own lengths (TEST-LOCAL ORACLE for padding, as hipDNN's
+    // references define it): each clamped to [0, S], as the GPU reference clamps them; rows
+    // past a batch's query length are padding, O = 0 and LSE = -inf; keys past its key length
+    // are never read; and a bottom-right diagonal sits at its own Skv_b - Sq_b. Lengths given
+    // without padding_mask are padding too (the references' SEM-008).
+    const bool padded = !spec.seqLensQ.empty() && !spec.seqLensKv.empty();
+    const auto clampedLength
+        = [](int32_t value, int64_t full) { return std::clamp<int64_t>(value, 0, full); };
+    // Packed (TEST-LOCAL ORACLE until hipDNN's ragged reference runs here), sequence bi is the
+    // same problem at its own token counts; its rows past them do not exist, so go unchecked.
+    // With per-batch lengths too (P3), a sequence's length is clamped to its slot, and the
+    // slot's rows past it are padded rows.
+    const auto slotQ = [&](int64_t bi) {
+        return packed ? static_cast<int64_t>(spec.packedSeqLensQ[static_cast<size_t>(bi)]) : s;
+    };
+    const auto slotKv = [&](int64_t bi) {
+        return packed ? static_cast<int64_t>(spec.packedSeqLensKv[static_cast<size_t>(bi)]) : skv;
+    };
+    const auto lengthQ = [&](int64_t bi) {
+        return padded ? clampedLength(spec.seqLensQ[static_cast<size_t>(bi)], slotQ(bi))
+                      : slotQ(bi);
+    };
+    const auto lengthKv = [&](int64_t bi) {
+        return padded ? clampedLength(spec.seqLensKv[static_cast<size_t>(bi)], slotKv(bi))
+                      : slotKv(bi);
+    };
+    // Packed slots with every length inside its slot (P3): hipDNN's CPU reference checks it too
+    // (below).
+    const bool densifiable = cdnaDensifiable(spec);
     // The reference's rule: query row i sees key j <= i + align + right, align 0 top-left
-    // and Skv - Sq bottom-right.
-    const int64_t align = alignBottomRight ? skv - s : 0;
-    const int64_t offset = align + spec.rightBound.value_or(0);
-    // And with a left bound, no key j < i + align - left (a sliding window).
+    // and Skv - Sq bottom-right (per batch under padding).
+    const auto alignOf
+        = [&](int64_t bi) { return alignBottomRight ? lengthKv(bi) - lengthQ(bi) : 0; };
+    // Dropout (TEST-LOCAL ORACLE, FlydslSdpaPhiloxOracle.hpp, until hipDNN's reference serves
+    // it): a key's probability is kept with its Philox bit and scaled by 1 / (1 - p) in O; the
+    // softmax's normaliser and the LSE stay undropped. The mask's coordinates are the graph's
+    // (padded) extents, so a padded batch draws the dense one's mask.
+    const float dropoutP = spec.dropoutProbability.value_or(0.0F);
+    const bool drops = dropoutP > 0.0F;
+    const auto dropThreshold = flydsl_sdpa::dropoutThreshold(dropoutP);
+    const double dropScale = drops ? static_cast<double>(flydsl_sdpa::dropoutScale(dropoutP)) : 1.0;
+    const auto keeps = [&](int64_t bi, int64_t hi, int64_t si, int64_t j) {
+        return !drops
+               || philox_oracle::keeps(spec.dropoutSeed,
+                                       spec.dropoutOffset,
+                                       philox_oracle::MaskCoordinates{bi, hi, si, j, h, s, skv},
+                                       dropThreshold);
+    };
+    // And with a left bound L, no key j <= i + align - L (a sliding window of L keys up to and
+    // including the diagonal, cuDNN's convention).
     std::optional<int64_t> left = spec.leftBound;
     if(spec.mask == SdpaMask::SLIDING_WINDOW && !left.has_value())
     {
         left = 64;
     }
     // The reference, once: each row's kind and LSE, and O. A row is NaN (NaN in a score it
-    // sees), keyless (no key reaches it) or ordinary.
+    // sees), keyless (no key reaches it), ordinary, padded (past its batch's query length:
+    // O = 0 and LSE = -inf exactly) or absent (past a packed sequence's tokens: unchecked).
     enum class Row : uint8_t
     {
         ORDINARY,
         NAN_ROW,
         KEYLESS,
+        PADDED,
+        ABSENT,
     };
     const auto rowCount = static_cast<size_t>(b * h * s);
     std::vector<Row> rowKind(rowCount, Row::ORDINARY);
@@ -1669,14 +3726,29 @@ void expectCandidatesMatchReference(const MatchContext& context,
     std::vector<double> scores(static_cast<size_t>(skv));
     for(int64_t bi = 0; bi < b; ++bi)
     {
+        const int64_t align = alignOf(bi);
+        const int64_t offset = align + spec.rightBound.value_or(0);
+        const int64_t keys = lengthKv(bi);
         for(int64_t hi = 0; hi < h; ++hi)
         {
             for(int64_t si = 0; si < s; ++si)
             {
+                if(si >= slotQ(bi))
+                {
+                    rowKind[static_cast<size_t>((bi * h + hi) * s + si)] = Row::ABSENT;
+                    continue;
+                }
+                if(si >= lengthQ(bi))
+                {
+                    // A padded row: O = 0 and LSE = -inf, exactly, on a sink object too (it is
+                    // padding, not a row no key reached).
+                    rowKind[static_cast<size_t>((bi * h + hi) * s + si)] = Row::PADDED;
+                    continue;
+                }
                 // Negative for a row no key reaches: O is 0 and the LSE -inf.
-                const int64_t lastKey = causal ? std::min(si + offset, skv - 1) : skv - 1;
+                const int64_t lastKey = causal ? std::min(si + offset, keys - 1) : keys - 1;
                 const int64_t firstKey
-                    = left.has_value() ? std::max<int64_t>(0, si + align - *left) : 0;
+                    = left.has_value() ? std::max<int64_t>(0, si + align - *left + 1) : 0;
                 double maxScore = -std::numeric_limits<double>::infinity();
                 // A NaN score (NaN in Q, or in K at a visible key) makes the row's O and LSE
                 // NaN, as PyTorch's softmax does.
@@ -1699,6 +3771,16 @@ void expectCandidatesMatchReference(const MatchContext& context,
                 const bool keyless = !nanRow
                                      && (lastKey < firstKey
                                          || !(maxScore > -std::numeric_limits<double>::infinity()));
+                // The sink's logit joins the denominator of a row that reaches keys, and its
+                // max, so a row at a bias's lowest value beside a finite sink does not
+                // overflow; a row that reaches none has O = 0 and LSE = the sink.
+                const double sinkLogit
+                    = spec.withSink ? static_cast<double>(sinkLogits[static_cast<size_t>(hi)])
+                                    : -std::numeric_limits<double>::infinity();
+                if(spec.withSink && !keyless && !nanRow)
+                {
+                    maxScore = std::max(maxScore, sinkLogit);
+                }
                 double sum = 0.0;
                 for(int64_t j = firstKey; j <= lastKey; ++j)
                 {
@@ -1706,11 +3788,6 @@ void expectCandidatesMatchReference(const MatchContext& context,
                         = keyless ? 0.0 : std::exp(scores[static_cast<size_t>(j)] - maxScore);
                     sum += scores[static_cast<size_t>(j)];
                 }
-                // The sink's logit joins the denominator of a row that reaches keys; a row
-                // that reaches none has O = 0 and LSE = the sink.
-                const double sinkLogit = spec.withSink ? static_cast<double>(static_cast<float>(
-                                                             sinkValues[static_cast<size_t>(hi)]))
-                                                       : -std::numeric_limits<double>::infinity();
                 if(spec.withSink && !keyless)
                 {
                     sum += std::exp(sinkLogit - maxScore);
@@ -1738,11 +3815,14 @@ void expectCandidatesMatchReference(const MatchContext& context,
                     double expected = 0.0;
                     for(int64_t j = firstKey; j <= lastKey; ++j)
                     {
-                        expected += scores[static_cast<size_t>(j)]
-                                    * at(v, vStrides, vStart, bi, hi / group, j, e);
+                        if(keeps(bi, hi, si, j))
+                        {
+                            expected += scores[static_cast<size_t>(j)]
+                                        * at(v, vStrides, vStart, bi, hi / group, j, e);
+                        }
                     }
                     expectedO[row * static_cast<size_t>(dv) + static_cast<size_t>(e)]
-                        = expected / sum;
+                        = expected * dropScale / sum;
                 }
             }
         }
@@ -1761,10 +3841,28 @@ void expectCandidatesMatchReference(const MatchContext& context,
         {
             ASSERT_EQ(hipSuccess, hipMemset(statsDevice, 0xFF, statsCount * sizeof(float)));
         }
+        if(packed)
+        {
+            ASSERT_EQ(hipSuccess, hipMemset(packedODevice, 0xFF, packedOCount * sizeof(T)));
+            ASSERT_EQ(hipSuccess,
+                      hipMemset(packedStatsDevice, 0xFF, packedStatsCount * sizeof(float)));
+        }
+        DeviceRngDump rngDump(dumpExtents, spec.withRngDump);
+        for(auto& buffer : buffers)
+        {
+            if(buffer.uid == FLYDSL_SDPA_RDNA_RNG_DUMP_UID)
+            {
+                buffer.ptr = rngDump.device();
+            }
+        }
         // A split object launched with more than one split writes its partials here: exactly the
         // size the engine reports, so a launch that writes past it fails the case.
         const auto workspaceBytes = handler.workspaceBytes(context, bound, kernel);
         const GuardedWorkspace workspace(workspaceBytes);
+        // A bias object run for a graph without a bias reads the zero bias the launch writes
+        // at the workspace's end, past what it writes itself: the canary there must be gone.
+        const bool readsZeroBias = cdnaReadsZeroBias(spec, kernel);
+        workspace.poisonForTheZeroBias(readsZeroBias);
         const Handle handle;
         handler.launch(handle,
                        *prepared,
@@ -1774,6 +3872,9 @@ void expectCandidatesMatchReference(const MatchContext& context,
         ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
         EXPECT_EQ(workspace.overwrittenGuardBytes(), 0U)
             << "the launch wrote past the " << workspaceBytes << "-byte workspace it reported";
+        workspace.expectTheZeroBiasAtTheEnd(
+            readsZeroBias,
+            hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa::zeroBiasBytes(skv));
         ASSERT_EQ(hipSuccess,
                   hipMemcpy(o.data(), oDevice, oCount * sizeof(T), hipMemcpyDeviceToHost));
         if(withStats)
@@ -1783,6 +3884,35 @@ void expectCandidatesMatchReference(const MatchContext& context,
                 hipMemcpy(
                     stats.data(), statsDevice, statsCount * sizeof(float), hipMemcpyDeviceToHost));
         }
+        // Packed: O and the LSE unpacked into the dense tensors, and the guard rows checked.
+        if(packed)
+        {
+            ASSERT_NO_FATAL_FAILURE(unpackCdnaPackedOutputs<T>(
+                spec, offsetsQ, oStrides, packedODevice, packedStatsDevice, withStats, o, stats));
+        }
+        // The RNG dump: the oracle's mask bit for bit at every element, padded rows and keys
+        // past a batch's length included, with hipDNN's keep-rate check; and O as hipDNN's CPU
+        // reference computes it with the dump as its explicit mask.
+        if(spec.withRngDump)
+        {
+            expectCdnaRngDump(
+                RngDumpReferenceProblem{dumpExtents,
+                                        hk,
+                                        d,
+                                        dv,
+                                        static_cast<float>(scale),
+                                        dropoutP,
+                                        left.value_or(-1),
+                                        causal ? spec.rightBound.value_or(0) : -1,
+                                        !alignBottomRight,
+                                        padded ? spec.seqLensQ : std::vector<int32_t>{},
+                                        padded ? spec.seqLensKv : std::vector<int32_t>{}},
+                rngDump.readBack(),
+                spec,
+                CdnaHostOperands<T>{
+                    q, k, v, o, qStrides, kvStrides, vStrides, oStrides, kStart, vStart},
+                absoluteTolerance);
+        }
         double worst = 0.0;
         int64_t nonFinite = 0;
         int64_t firstNonFiniteRow = std::numeric_limits<int64_t>::max();
@@ -1790,6 +3920,8 @@ void expectCandidatesMatchReference(const MatchContext& context,
         std::string where;
         double worstLse = 0.0;
         std::string whereLse;
+        int64_t paddedRowMisses = 0;
+        std::string wherePadded;
         for(int64_t bi = 0; bi < b; ++bi)
         {
             for(int64_t hi = 0; hi < h; ++hi)
@@ -1797,6 +3929,21 @@ void expectCandidatesMatchReference(const MatchContext& context,
                 for(int64_t si = 0; si < s; ++si)
                 {
                     const auto row = static_cast<size_t>((bi * h + hi) * s + si);
+                    if(rowKind[row] == Row::ABSENT)
+                    {
+                        continue;
+                    }
+                    if(rowKind[row] == Row::PADDED)
+                    {
+                        if(!cdnaPaddedRowIsExact<T>(
+                               spec, o, oStrides, stats, withStats, {bi, hi, si}))
+                        {
+                            ++paddedRowMisses;
+                            wherePadded = "b=" + std::to_string(bi) + " h=" + std::to_string(hi)
+                                          + " s=" + std::to_string(si);
+                        }
+                        continue;
+                    }
                     if(withStats)
                     {
                         // [B, H, Sq] packed, or [B, Sq, H] when the graph lays it out so.
@@ -1813,6 +3960,13 @@ void expectCandidatesMatchReference(const MatchContext& context,
                         {
                             // No sink, or a sink of -inf: the LSE is exactly -inf.
                             lseError = std::isinf(lse) && lse < 0.0 ? 0.0 : 1e30;
+                        }
+                        else if(rowKind[row] == Row::KEYLESS && floatSink
+                                && static_cast<float>(lse) != static_cast<float>(expectedLse[row]))
+                        {
+                            // The sink itself: an f32 sink's bits exactly, so one read as
+                            // 16-bit is a full miss.
+                            lseError = 1e30;
                         }
                         if(!(lseError <= LSE_TOLERANCE))
                         {
@@ -1833,6 +3987,12 @@ void expectCandidatesMatchReference(const MatchContext& context,
                         if(rowKind[row] == Row::NAN_ROW)
                         {
                             error = std::isnan(actual) ? 0.0 : std::numeric_limits<double>::max();
+                        }
+                        else if(spec.exposeDropoutMask && (actual != 0.0) != (expected != 0.0))
+                        {
+                            // The mask read off O: a key kept or dropped against the oracle's
+                            // bit is a full miss, however small the probability.
+                            error = std::numeric_limits<double>::max();
                         }
                         else if(!std::isfinite(actual))
                         {
@@ -1859,6 +4019,57 @@ void expectCandidatesMatchReference(const MatchContext& context,
                               : std::string())
             << "; split workspace " << workspaceBytes << " bytes";
         EXPECT_EQ(worstLse, 0.0) << "an LSE outside tolerance, worst at " << whereLse;
+        EXPECT_EQ(paddedRowMisses, 0)
+            << "padded rows not O = 0 and LSE = -inf, last at " << wherePadded;
+
+        // A sink, against hipDNN's CPU reference as well (FLOAT [1, Hq, 1, 1], SEM-022): with
+        // the bias, the band and padding the graph has; a bias under padding (vendored-kernel
+        // modification 37), sink or not; and a scale that needs scaled scores. And packed slots
+        // with every length inside its slot (P3, PyTorch's seqused_k), which hipDNN's executors
+        // run as the dense padded graph (RaggedSdpaDensify.hpp: the slots unpacked, the lengths
+        // the graph's own, a length past its slot an error): the reference then sees the dense
+        // values this harness packed from, slot tails included. Not other packed graphs,
+        // dropped or NaN: their forms are checked above.
+        if((spec.withSink || (padded && spec.withBias) || sdpaSpecNeedsScaledScores(spec)
+            || densifiable)
+           && (!packed || densifiable) && !drops && !spec.queryNanPosition && !spec.keyNanPosition
+           && !spec.biasNanRows)
+        {
+            SdpaCpuReferenceProblem reference{b,
+                                              h,
+                                              hk,
+                                              hk,
+                                              s,
+                                              skv,
+                                              d,
+                                              dv,
+                                              static_cast<float>(scale),
+                                              left.value_or(-1),
+                                              causal ? spec.rightBound.value_or(0) : -1,
+                                              !alignBottomRight,
+                                              {},
+                                              {},
+                                              sinkLogits,
+                                              spec.withBias,
+                                              withStats};
+            for(int64_t bi = 0; padded && bi < b; ++bi)
+            {
+                reference.seqLensQ.push_back(static_cast<int32_t>(lengthQ(bi)));
+                reference.seqLensKv.push_back(static_cast<int32_t>(lengthKv(bi)));
+            }
+            // A packed graph's rows past a slot are no outputs (the dense rewrite packs back
+            // only slot rows): they read as the reference's padded rows.
+            const auto [oDense, statsDense] = cdnaAbsentRowsAsPadded(spec, oStrides, o, stats);
+            expectCdnaSinkIsTheCpuReference(
+                reference,
+                CdnaHostOperands<T>{
+                    q, k, v, oDense, qStrides, kvStrides, vStrides, oStrides, kStart, vStart},
+                biasAt,
+                statsDense,
+                spec.statsSequenceMajor,
+                absoluteTolerance,
+                LSE_TOLERANCE);
+        }
     }
 }
 
@@ -1910,6 +4121,13 @@ void expectCdnaMatchesReference(const SdpaGraphSpec& spec,
         expectCandidatesMatchReference<hipdnn_data_sdk::types::half>(
             fixture.context(), *bound, candidates, spec, std::min(absoluteTolerance, 4e-3));
     }
+    else if(spec.dataType == DataType::FLOAT)
+    {
+        // Exact f32 products and an f32 P (vendored-kernel modification 35): the error is
+        // the accumulation's and exp2's, about 1e-6 on these values.
+        expectCandidatesMatchReference<float>(
+            fixture.context(), *bound, candidates, spec, std::min(absoluteTolerance, 1e-5));
+    }
     else
     {
         expectCandidatesMatchReference<Bf16>(
@@ -1919,6 +4137,8 @@ void expectCdnaMatchesReference(const SdpaGraphSpec& spec,
 
 /// bf16 output rounding is ~2^-8 relative on values of magnitude <= 1.
 constexpr double BF16_TOLERANCE = 2e-2;
+/// Exact f32 (vendored-kernel modification 35): f32 products and accumulation, P in f32.
+constexpr double F32_TOLERANCE = 1e-5;
 
 // The model shape, where the dual-wave kernel ships (gfx950) one of its objects runs too.
 TEST(TestGpuFlydslSdpaCdnaDispatch, NonCausalMatchesTheReference)
@@ -1968,6 +4188,63 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ReadsARuntimeScaleAtExecute)
     spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
     spec.scaleKind = SdpaScale::RUNTIME_TENSOR;
     spec.scale = 0.2F;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+// Zero and negative softmax scales on the CDNA objects (the bias objects, reading a zero bias;
+// the plain ones keep raw scores), every candidate the matcher admits, against the harness's
+// reference and hipDNN's CPU reference: at zero every kept key weighs the same (O the mean of
+// V over them, the LSE the log of their count), a negative scale reverses the scores' order.
+// One small shape per behavior: causal at zero, padding under a bottom-right mask at a key
+// length off the vectorized objects' runs, and a sink, at -0.3. The sweep (both scales on
+// every case, the dual-wave objects, a band, a bias, dropout, a decode shape, -2, a subnormal
+// scale and a constant tensor) is Full/TestGpuFlydslSdpaCdnaFullTier.
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesZeroAndNegativeScales)
+{
+    SdpaGraphSpec base;
+    base.headDim = 64;
+    base.heads = 2;
+    base.kvHeads = 1;
+    base.seqLenQ = 64;
+    base.seqLenKv = 64;
+    base.stats = SdpaStats::LSE;
+    {
+        SCOPED_TRACE("causal at scale 0");
+        auto spec = base;
+        spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+        spec.scale = 0.0F;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("padded, bottom-right, keys off the vector runs, at scale -0.3");
+        auto spec = base;
+        spec.batch = 2;
+        spec.seqLenKv = 67;
+        spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+        setPadding(spec, {64, 20}, {67, 33});
+        spec.scale = -0.3F;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("a sink at scale -0.3");
+        auto spec = base;
+        spec.withSink = true;
+        spec.scale = -0.3F;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ABiasObjectTakesANegativeRuntimeScale)
+{
+    // A runtime scale is read after the object is chosen: a bias object (the graph's own bias
+    // here) scales first, so it takes a negative one; the plain ones refuse it
+    // (RefusesANonPositiveRuntimeScaleAtLaunch).
+    auto spec = cdnaSpec();
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    spec.withBias = true;
+    spec.scaleKind = SdpaScale::RUNTIME_TENSOR;
+    spec.scale = -0.3F;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
@@ -2144,6 +4421,45 @@ TEST_P(TestGpuFlydslSdpaCdnaFullTier, ServesTheCombinationsNoOtherCaseReaches)
     }
 }
 
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesAVaeMidBlockAtHeadDim512)
+{
+    // The generic prefill engine's exact 512/512 objects at a ragged tail; the VAE mid-block's
+    // own shapes are in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.heads = 1;
+    spec.kvHeads = 1;
+    spec.headDim = 512;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 261;
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, ServesAVaeMidBlockAtHeadDim512)
+{
+    // The Stable Diffusion / Flux VAE mid-block attention: one head x 512 channels, non-causal,
+    // on the generic prefill engine's exact 512/512 objects (O split four ways across
+    // workgroups; K chunked on gfx942 and gfx90a). A ragged tail, and causal with GQA.
+    auto spec = cdnaSpec();
+    spec.batch = 2;
+    spec.heads = 1;
+    spec.kvHeads = 1;
+    spec.headDim = 512;
+    spec.seqLenQ = 1024;
+    spec.seqLenKv = 1024;
+    spec.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA);
+    spec.seqLenQ = 1000;
+    spec.seqLenKv = 777;
+    spec.dataType = DataType::HALF;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA);
+    spec.dataType = DataType::BFLOAT16;
+    spec.heads = 4;
+    spec.batch = 1;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA);
+}
+
 /// DeepSeek-V4's attention: Q/K and V 512 wide, one KV head, causal, with or without a 128-key
 /// sliding window. The decode engine's wide objects serve it (any query length), so it must be
 /// right here too.
@@ -2202,11 +4518,115 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesATopLeftBand)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesDiagonalsThatPassTheKeys)
+{
+    // Rows whose diagonal passes the last key see every key (modification 30): top-left with
+    // more queries than keys, and a band wider than Skv - Sq under a window. Every head dim,
+    // f16, a bias, a sink and decode-sized queries are in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    {
+        SCOPED_TRACE("top-left, Sq 700 > Skv 333");
+        auto topLeft = spec;
+        topLeft.seqLenQ = 700;
+        topLeft.seqLenKv = 333;
+        expectCdnaMatchesReference(topLeft, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("top-left band 100 with a window of 64, Sq = Skv = 300");
+        auto band = spec;
+        band.seqLenQ = 300;
+        band.seqLenKv = 300;
+        band.rightBound = 100;
+        band.leftBound = 64;
+        expectCdnaMatchesReference(band, BF16_TOLERANCE);
+    }
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, ServesDiagonalsThatPassTheKeys)
+{
+    // Rows whose diagonal passes the last key see every key, and the last KV tile's padding
+    // stays out (modification 30): top-left with more queries than keys, and bands wider
+    // than Skv - Sq, at ragged key lengths, each head dim's generic object, f16, a bias, a
+    // sink, a window, and decode-sized queries.
+    auto spec = cdnaSpec();
+    spec.stats = SdpaStats::LSE;
+    {
+        SCOPED_TRACE("top-left, Sq 700 > Skv 333");
+        auto topLeft = spec;
+        topLeft.mask = SdpaMask::TOP_LEFT_CAUSAL;
+        topLeft.seqLenQ = 700;
+        topLeft.seqLenKv = 333;
+        expectCdnaMatchesReference(topLeft, BF16_TOLERANCE);
+        for(const int64_t headDim : {int64_t{64}, int64_t{256}, int64_t{96}})
+        {
+            SCOPED_TRACE("head_dim " + std::to_string(headDim));
+            auto other = topLeft;
+            other.headDim = headDim;
+            expectCdnaMatchesReference(other, BF16_TOLERANCE);
+        }
+        auto half = topLeft;
+        half.dataType = DataType::HALF;
+        expectCdnaMatchesReference(half, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("top-left band 100, Sq = Skv = 300");
+        auto band = spec;
+        band.mask = SdpaMask::TOP_LEFT_CAUSAL;
+        band.seqLenQ = 300;
+        band.seqLenKv = 300;
+        band.rightBound = 100;
+        expectCdnaMatchesReference(band, BF16_TOLERANCE);
+        SCOPED_TRACE("with a window of 64");
+        band.leftBound = 64;
+        expectCdnaMatchesReference(band, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("bottom-right band 250, Sq 500 > Skv 300: rows from 250 see every key");
+        auto band = spec;
+        band.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+        band.seqLenQ = 500;
+        band.seqLenKv = 300;
+        band.rightBound = 250;
+        expectCdnaMatchesReference(band, BF16_TOLERANCE);
+        SCOPED_TRACE("with a sink");
+        band.headDim = 64;
+        band.withSink = true;
+        expectCdnaMatchesReference(band, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("top-left with a per-head bias, Sq 400 > Skv 264");
+        auto bias = spec;
+        bias.mask = SdpaMask::TOP_LEFT_CAUSAL;
+        bias.seqLenQ = 400;
+        bias.seqLenKv = 264;
+        bias.withBias = true;
+        bias.biasDataType = DataType::BFLOAT16;
+        bias.biasDims = {1, 32, 400, 264};
+        expectCdnaMatchesReference(bias, BF16_TOLERANCE);
+    }
+    {
+        // Decode-sized queries: the prefill objects serve them, the decode objects declining.
+        SCOPED_TRACE("top-left, Sq 40 > Skv 20, and a band past 20000 keys at Sq 3");
+        auto shortQuery = spec;
+        shortQuery.mask = SdpaMask::TOP_LEFT_CAUSAL;
+        shortQuery.seqLenQ = 40;
+        shortQuery.seqLenKv = 20;
+        expectCdnaMatchesReference(shortQuery, BF16_TOLERANCE);
+        shortQuery.seqLenQ = 3;
+        shortQuery.seqLenKv = 20000;
+        shortQuery.rightBound = 19999;
+        expectCdnaMatchesReference(shortQuery, BF16_TOLERANCE);
+    }
+}
+
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesSlidingWindows)
 {
-    // Narrower than a KV tile, across a tile boundary, and wider than the keys; top-left
-    // and bottom-right; ragged lengths.
-    for(const int64_t left : {int64_t{0}, int64_t{37}, int64_t{64}, int64_t{200}, int64_t{4096}})
+    // The diagonal alone (left_bound 1) and one key more, narrower than a KV tile, across a
+    // tile boundary, and wider than the keys; top-left and bottom-right; ragged lengths.
+    for(const int64_t left :
+        {int64_t{1}, int64_t{2}, int64_t{37}, int64_t{64}, int64_t{200}, int64_t{4096}})
     {
         SCOPED_TRACE("left_bound " + std::to_string(left));
         auto spec = cdnaSpec();
@@ -2683,8 +5103,8 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasInsideASlidingWindow)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
-// The runtime scale is read from host memory at launch; one the kernels cannot take (not
-// positive, not finite, or past the shared 2^20 bound) is refused there. Every operand is
+// The runtime scale is read from host memory at launch; one a plain object cannot take (not
+// positive and normal, not finite, or past the shared 2^20 bound) is refused there. Every operand is
 // bound to real device memory, so the scale is the only thing a launch can refuse, and a
 // servable scale with the same buffers launches.
 TEST(TestGpuFlydslSdpaCdnaDispatch, RefusesANonPositiveRuntimeScaleAtLaunch)
@@ -2739,11 +5159,17 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, RefusesANonPositiveRuntimeScaleAtLaunch)
     };
 
     const Handle handle;
+    // Zero, negative and subnormal: a plain object keeps raw scores (rawScoresServe), and a
+    // runtime scale arrives after it was chosen. The rest no object takes.
     for(float scale : {0.0F,
+                       -0.0F,
                        -0.125F,
+                       1.0e-40F,
                        std::numeric_limits<float>::quiet_NaN(),
                        std::numeric_limits<float>::infinity(),
-                       2097152.0F /* 2^21, past the 2^20 bound */})
+                       -std::numeric_limits<float>::infinity(),
+                       2097152.0F /* 2^21, past the 2^20 bound */,
+                       -2097152.0F})
     {
         const auto buffers = buffersWith(scale);
         EXPECT_THROW(handler.launch(handle,
@@ -2941,11 +5367,1531 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAPaddingMaskWithBottomRightCausalCrossAt
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
+TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasTheVectorizedObjectsCannotRead)
+{
+    // The strided bias objects (vendored-kernel modification 31) at one head dim, causal: an
+    // f32 bias, and 334 keys at a pitch of 336. Every head dim and every bias shape are in
+    // Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.headDim = 128;
+    spec.withBias = true;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 264;
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    {
+        SCOPED_TRACE("f32 per head");
+        auto f32 = spec;
+        f32.biasDataType = DataType::FLOAT;
+        f32.biasDims = {1, 32, 200, 264};
+        expectCdnaMatchesReference(f32, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("334 keys at a pitch of 336");
+        auto padded = spec;
+        padded.biasDataType = DataType::BFLOAT16;
+        padded.seqLenKv = 334;
+        padded.biasDims = {1, 1, 200, 334};
+        padded.biasStrides = {67200, 67200, 336, 1};
+        expectCdnaMatchesReference(padded, BF16_TOLERANCE);
+    }
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, AddsABiasTheVectorizedObjectsCannotRead)
+{
+    // The strided bias objects (vendored-kernel modification 31): an f32 bias, a bias
+    // broadcast along the keys, rows that are not 16-byte aligned, a key length that is not a
+    // multiple of 4 under a padded pitch, rows that overlap, and a bias expanded with stride
+    // 0. Each at the bucket widths' exact head dims, non-causal and causal, with the LSE.
+    for(const int64_t headDim : {int64_t{64}, int64_t{128}, int64_t{256}})
+    {
+        for(const bool causal : {false, true})
+        {
+            auto spec = cdnaSpec();
+            spec.headDim = headDim;
+            spec.withBias = true;
+            spec.biasDataType = DataType::BFLOAT16;
+            spec.seqLenQ = 200;
+            spec.seqLenKv = 264;
+            spec.stats = SdpaStats::LSE;
+            if(causal)
+            {
+                spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+            }
+            const std::string where
+                = "head_dim " + std::to_string(headDim) + (causal ? ", causal" : "");
+            {
+                SCOPED_TRACE(where + ", f32 per head");
+                auto f32 = spec;
+                f32.biasDataType = DataType::FLOAT;
+                f32.biasDims = {1, 32, 200, 264};
+                expectCdnaMatchesReference(f32, BF16_TOLERANCE);
+            }
+            {
+                SCOPED_TRACE(where + ", broadcast along the keys, f32 and bf16");
+                auto keys = spec;
+                keys.batch = 2;
+                keys.biasDims = {2, 1, 200, 1};
+                expectCdnaMatchesReference(keys, BF16_TOLERANCE);
+                keys.biasDataType = DataType::FLOAT;
+                expectCdnaMatchesReference(keys, BF16_TOLERANCE);
+            }
+            {
+                SCOPED_TRACE(where + ", rows of 333 keys, packed");
+                auto packed = spec;
+                packed.seqLenKv = 333;
+                packed.biasDims = {1, 1, 200, 333};
+                expectCdnaMatchesReference(packed, BF16_TOLERANCE);
+            }
+            {
+                SCOPED_TRACE(where + ", 334 keys at a pitch of 336, and rows that overlap");
+                auto padded = spec;
+                padded.seqLenKv = 334;
+                padded.biasDims = {1, 1, 200, 334};
+                padded.biasStrides = {67200, 67200, 336, 1};
+                expectCdnaMatchesReference(padded, BF16_TOLERANCE);
+                padded.biasStrides = {67200, 67200, 104, 1};
+                expectCdnaMatchesReference(padded, BF16_TOLERANCE);
+            }
+            {
+                SCOPED_TRACE(where + ", expanded over batch, heads and rows with stride 0");
+                auto expanded = spec;
+                expanded.batch = 2;
+                expanded.biasDims = {2, 32, 200, 264};
+                expanded.biasStrides = {264, 0, 0, 1};
+                expectCdnaMatchesReference(expanded, BF16_TOLERANCE);
+            }
+        }
+    }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAnF32BiasThatMasksWholeRowsAtItsLowestFiniteValue)
+{
+    // Every third row's f32 bias at -FLT_MAX and the first 128 keys -inf, causal, at one head
+    // dim; every head dim, with and without the -inf keys, in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.headDim = 128;
+    spec.withBias = true;
+    spec.biasDataType = DataType::FLOAT;
+    spec.biasMasksRows = true;
+    spec.biasNegativeInfinityLeadingKeys = 128;
+    spec.seqLenQ = 256;
+    spec.seqLenKv = 264;
+    spec.stats = SdpaStats::LSE;
+    spec.scaleKind = SdpaScale::VALUE;
+    spec.scale = 1.0F / std::sqrt(128.0F);
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, AddsAnF32BiasThatMasksWholeRowsAtItsLowestFiniteValue)
+{
+    // An f32 padding mask: every third row's bias is f32's lowest finite value (-FLT_MAX) on
+    // every key, and the first 128 keys of every row -inf (every third row then reaches no key
+    // in the causal case). Its scores sit at -FLT_MAX, the masked-score sentinel's value; the
+    // strided objects keep their scores halved so it stays a score (modification 31): O the
+    // mean of V over the live keys, LSE -FLT_MAX, as PyTorch and the RDNA kernels give.
+    for(const int64_t headDim : {int64_t{64}, int64_t{128}, int64_t{256}})
+    {
+        for(const bool causal : {false, true})
+        {
+            SCOPED_TRACE("head_dim " + std::to_string(headDim) + (causal ? ", causal" : ""));
+            auto spec = cdnaSpec();
+            spec.headDim = headDim;
+            spec.withBias = true;
+            spec.biasDataType = DataType::FLOAT;
+            spec.biasMasksRows = true;
+            spec.seqLenQ = 256;
+            spec.seqLenKv = 264;
+            spec.stats = SdpaStats::LSE;
+            spec.scaleKind = SdpaScale::VALUE;
+            spec.scale = 1.0F / std::sqrt(static_cast<float>(headDim));
+            if(causal)
+            {
+                spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+            }
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+            spec.biasNegativeInfinityLeadingKeys = 128;
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        }
+    }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasAtTheBucketHeadDims)
+{
+    // One bucket head dim (its own bucket on gfx90a, 128's elsewhere), causal, -inf rows; every
+    // bucket head dim and f16 are in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.headDim = 96;
+    spec.withBias = true;
+    spec.biasDataType = DataType::BFLOAT16;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 264;
+    spec.biasDims = {1, 32, 200, 264};
+    spec.stats = SdpaStats::LSE;
+    spec.biasNegativeInfinityRows = true;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, AddsABiasAtTheBucketHeadDims)
+{
+    // Head dims no exact object serves, on the bucket bias objects: on gfx90a 96 and 160 have
+    // buckets of their own, elsewhere they take the next power of two's.
+    for(const int64_t headDim : {int64_t{72}, int64_t{96}, int64_t{160}, int64_t{200}})
+    {
+        for(const bool causal : {false, true})
+        {
+            SCOPED_TRACE("head_dim " + std::to_string(headDim) + (causal ? ", causal" : ""));
+            auto spec = cdnaSpec();
+            spec.headDim = headDim;
+            spec.withBias = true;
+            spec.biasDataType = DataType::BFLOAT16;
+            spec.seqLenQ = 200;
+            spec.seqLenKv = 264;
+            spec.biasDims = {1, 32, 200, 264};
+            spec.stats = SdpaStats::LSE;
+            spec.biasNegativeInfinityRows = true;
+            if(causal)
+            {
+                spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+            }
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+            spec.dataType = DataType::HALF;
+            spec.biasDataType = DataType::HALF;
+            spec.biasDims = {1, 1, 1, 264};
+            spec.biasNegativeInfinityRows = false;
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        }
+    }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasAndASink)
+{
+    // A bias and a sink together (the sink objects' bias builds), causal, at one head dim:
+    // rows at the lowest finite value and -inf leading keys that leave rows keyless (O 0, LSE
+    // the sink). Every head dim and the other cases are in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.headDim = 64;
+    spec.withBias = true;
+    spec.biasDataType = DataType::BFLOAT16;
+    spec.withSink = true;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 264;
+    spec.biasDims = {1, 32, 200, 264};
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.biasMasksRows = true;
+    spec.biasNegativeInfinityLeadingKeys = 128;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, AddsABiasAndASink)
+{
+    // A bias and a sink together (the sink objects' bias builds): a per-head bias, a padding
+    // mask whose rows are at the lowest finite value, -inf leading keys that leave causal
+    // rows keyless (O 0, LSE the sink), and a sink far above the scores (LSE the sink).
+    for(const int64_t headDim : {int64_t{64}, int64_t{128}})
+    {
+        for(const bool causal : {false, true})
+        {
+            SCOPED_TRACE("head_dim " + std::to_string(headDim) + (causal ? ", causal" : ""));
+            auto spec = cdnaSpec();
+            spec.headDim = headDim;
+            spec.withBias = true;
+            spec.biasDataType = DataType::BFLOAT16;
+            spec.withSink = true;
+            spec.seqLenQ = 200;
+            spec.seqLenKv = 264;
+            spec.biasDims = {1, 32, 200, 264};
+            spec.stats = SdpaStats::LSE;
+            if(causal)
+            {
+                spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+            }
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+            spec.biasMasksRows = true;
+            spec.biasNegativeInfinityLeadingKeys = 128;
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+            spec.biasMasksRows = false;
+            spec.biasNegativeInfinityLeadingKeys = 0;
+            spec.sinkValue = 200.0F;
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        }
+    }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, AddsABiasTheVectorizedObjectsCannotReadWithASink)
+{
+    // An f32 bias with a sink on the strided sink-and-bias objects, causal, at one head dim:
+    // rows at f32's lowest finite value and -inf leading keys that leave rows keyless. Every
+    // head dim and the other cases are in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.headDim = 64;
+    spec.withBias = true;
+    spec.biasDataType = DataType::FLOAT;
+    spec.withSink = true;
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 261;
+    spec.biasDims = {1, 32, 200, 261};
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.biasMasksRows = true;
+    spec.biasNegativeInfinityLeadingKeys = 128;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, AddsABiasTheVectorizedObjectsCannotReadWithASink)
+{
+    // f32 and key-broadcast biases with a sink, on the strided sink-and-bias objects
+    // (COVERAGE.md section 7.5 item 16): rows at f32's lowest finite value average V over
+    // their keys with the sink in the denominator; -inf leading keys leave causal rows keyless
+    // (O 0, LSE the sink); and a sink far above the scores (LSE the sink).
+    for(const int64_t headDim : {int64_t{64}, int64_t{128}})
+    {
+        for(const bool causal : {false, true})
+        {
+            SCOPED_TRACE("head_dim " + std::to_string(headDim) + (causal ? ", causal" : ""));
+            auto spec = cdnaSpec();
+            spec.headDim = headDim;
+            spec.withBias = true;
+            spec.biasDataType = DataType::FLOAT;
+            spec.withSink = true;
+            spec.seqLenQ = 200;
+            spec.seqLenKv = 261;
+            spec.biasDims = {1, 32, 200, 261};
+            spec.stats = SdpaStats::LSE;
+            if(causal)
+            {
+                spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+            }
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+            spec.biasMasksRows = true;
+            spec.biasNegativeInfinityLeadingKeys = 128;
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+            spec.biasMasksRows = false;
+            spec.biasNegativeInfinityLeadingKeys = 0;
+            spec.sinkValue = 200.0F;
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+            // Broadcast along the keys, in the query's dtype.
+            spec.sinkValue.reset();
+            spec.biasDataType = DataType::BFLOAT16;
+            spec.biasDims = {1, 32, 200, 1};
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        }
+    }
+}
+
 TEST_P(TestGpuFlydslSdpaCdnaFullTier, LongerSequenceMatchesTheReference)
 {
     auto spec = cdnaSpec();
     spec.seqLenQ = 1024;
     spec.seqLenKv = 1024;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+// Padding (vendored-kernel modification 32): each batch's own lengths, rows past a batch's
+// query length O = 0 and LSE = -inf, keys past its key length never read. Every staged object
+// the matchers admit runs, the generic prefill and split decode objects alike.
+
+/// A padded GQA graph over three batches: whole, cut inside a query tile, and empty.
+SdpaGraphSpec paddedGpuSpec()
+{
+    auto spec = cdnaSpec();
+    spec.batch = 3;
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    spec.stats = SdpaStats::LSE;
+    setPadding(spec, {300, 129, 0}, {300, 63, 200});
+    return spec;
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, PadsEachBatchToItsOwnLengths)
+{
+    expectCdnaMatchesReference(paddedGpuSpec(), BF16_TOLERANCE);
+    // In f16, and BHSD.
+    auto spec = paddedGpuSpec();
+    spec.dataType = DataType::HALF;
+    spec.layout = SdpaLayout::BHSD;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, GivesABatchWithNoKeysRowsNoKeyReaches)
+{
+    // With no mask and no bias a row's sum is never 0 dense; a padded batch with no keys
+    // makes it 0, and its rows must come out O = 0, LSE = -inf, not 0 * inf.
+    auto spec = paddedGpuSpec();
+    spec.seqLensQ = {300, 17, 300};
+    spec.seqLensKv = {0, 300, 1};
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, PadsEveryMaskAtEachBatchsOwnDiagonal)
+{
+    // A batch with more queries than keys and one with fewer, at both corners; a bottom-right
+    // diagonal sits at each batch's own Skv_b - Sq_b, and so does its window.
+    auto spec = paddedGpuSpec();
+    spec.seqLensQ = {200, 64, 300};
+    spec.seqLensKv = {100, 256, 300};
+    for(const auto mask : {SdpaMask::TOP_LEFT_CAUSAL, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        SCOPED_TRACE(mask == SdpaMask::TOP_LEFT_CAUSAL ? "top-left" : "bottom-right");
+        spec.mask = mask;
+        spec.leftBound.reset();
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        spec.leftBound = 40;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    // A band right of the diagonal.
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.leftBound.reset();
+    spec.rightBound = 50;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, PadsWithABiasAndASink)
+{
+    // A padded row's LSE is -inf even beside a sink, and a batch with no keys is keyless (LSE
+    // the sink); then a bias the vectorized objects read over key lengths no multiple of 4,
+    // with a sink. The other biases are in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = paddedGpuSpec();
+    spec.seqLensKv = {300, 0, 200};
+    spec.seqLensQ = {300, 129, 100};
+    spec.withSink = true;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.withBias = true;
+    spec.biasDataType = spec.dataType;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenKv = 296;
+    spec.seqLensQ = {300, 129, 7};
+    spec.seqLensKv = {63, 61, 296};
+    spec.headDim = 64;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, PadsWithABiasAndASink)
+{
+    // A padded row's LSE is -inf even beside a sink; a row of a batch with no keys is keyless,
+    // so its LSE is the sink.
+    auto spec = paddedGpuSpec();
+    spec.seqLensKv = {300, 0, 200};
+    spec.seqLensQ = {300, 129, 100};
+    spec.withSink = true;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.withSink = false;
+    spec.withBias = true;
+    spec.biasDataType = spec.dataType;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    // An f32 bias, which the objects that read it one key at a time serve (modification 31).
+    spec.biasDataType = DataType::FLOAT;
+    spec.withSink = false;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    // A bias the vectorized objects read (a row pitch of 296), over batches whose key lengths
+    // are no multiple of 4 and that have more queries than keys: the last real row's final keys
+    // keep their bias on the vectorized objects (vendored-kernel modification 37) and on the
+    // strided ones. With a sink too.
+    spec.seqLenKv = 296;
+    spec.biasDataType = spec.dataType;
+    spec.seqLensQ = {300, 129, 7};
+    spec.seqLensKv = {63, 61, 296};
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.headDim = 64;
+    spec.withSink = true;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, PadsWithABiasAtEveryKeyLengthModuloTheVectorRuns)
+{
+    // Under padding the vectorized bias objects read the last real row's bias up to the
+    // launch's key length (vendored-kernel modification 37): one batch per key length mod 4,
+    // bottom-right, a bias that is NaN past each batch's keys. Every length set, head dim,
+    // mask and edge row is in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.batch = 4;
+    spec.heads = 4;
+    spec.kvHeads = 2;
+    spec.headDim = 128;
+    spec.seqLenQ = 160;
+    spec.seqLenKv = 296;
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.withBias = true;
+    spec.biasDataType = spec.dataType;
+    spec.biasDims = {4, 4, 160, 296};
+    spec.biasNanPastKeys = true;
+    setPadding(spec, {129, 70, 160, 3}, {61, 62, 63, 64});
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, PadsWithABiasAtEveryKeyLengthModuloTheVectorRuns)
+{
+    // Under padding the vectorized bias objects read the last real row's bias up to the
+    // launch's key length (vendored-kernel modification 37). Before it that row's final 4-key
+    // run straddled the batch's bias view and read as zero whenever the batch's key length was
+    // no multiple of 4. Here: every key length mod 4 and mod 8, more queries than keys, keys
+    // across a KV tile, a bias of its own per batch that is NaN past each batch's keys (masked
+    // whatever it holds there), and rows at the lowest finite value, -inf and NaN. Every staged
+    // object the matcher admits runs (vectorized and strided), against the harness's reference
+    // and, but for NaN rows, hipDNN's CPU reference.
+    auto spec = cdnaSpec();
+    spec.batch = 4;
+    spec.heads = 4;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 160;
+    spec.seqLenKv = 296;
+    spec.stats = SdpaStats::LSE;
+    spec.withBias = true;
+    spec.biasDataType = spec.dataType;
+    spec.biasDims = {4, 4, 160, 296};
+    spec.biasNanPastKeys = true;
+    struct Lengths
+    {
+        std::vector<int32_t> q;
+        std::vector<int32_t> kv;
+    };
+    const std::array<Lengths, 3> lengthSets{Lengths{{129, 70, 160, 3}, {57, 58, 59, 60}},
+                                            Lengths{{129, 70, 160, 3}, {61, 62, 63, 64}},
+                                            Lengths{{160, 1, 100, 159}, {293, 294, 295, 133}}};
+    for(const auto& lengths : lengthSets)
+    {
+        setPadding(spec, lengths.q, lengths.kv);
+        for(const int64_t headDim : {int64_t{64}, int64_t{128}})
+        {
+            for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+            {
+                SCOPED_TRACE("keys " + std::to_string(lengths.kv.front()) + ", head_dim "
+                             + std::to_string(headDim)
+                             + (mask == SdpaMask::NONE ? "" : ", bottom-right"));
+                spec.headDim = headDim;
+                spec.mask = mask;
+                expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+            }
+        }
+    }
+    auto edge = spec;
+    edge.headDim = 128;
+    setPadding(edge, lengthSets[1].q, lengthSets[1].kv);
+    for(const auto mask : {SdpaMask::TOP_LEFT_CAUSAL, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        edge.mask = mask;
+        {
+            SCOPED_TRACE("rows at the lowest finite value, -inf leading keys");
+            auto rows = edge;
+            rows.biasMasksRows = true;
+            rows.biasNegativeInfinityLeadingKeys = 40;
+            expectCdnaMatchesReference(rows, BF16_TOLERANCE);
+        }
+        {
+            SCOPED_TRACE("-inf rows");
+            auto rows = edge;
+            rows.biasNegativeInfinityRows = true;
+            expectCdnaMatchesReference(rows, BF16_TOLERANCE);
+        }
+        {
+            SCOPED_TRACE("NaN rows");
+            auto rows = edge;
+            rows.biasNanRows = true;
+            expectCdnaMatchesReference(rows, BF16_TOLERANCE);
+        }
+    }
+    {
+        // The bucket objects, f16, and a sink (the vectorized sink-and-bias objects).
+        SCOPED_TRACE("head_dim 80, f16");
+        auto bucket = edge;
+        bucket.headDim = 80;
+        bucket.dataType = DataType::HALF;
+        bucket.biasDataType = DataType::HALF;
+        expectCdnaMatchesReference(bucket, BF16_TOLERANCE);
+        SCOPED_TRACE("a sink");
+        auto sink = edge;
+        sink.headDim = 64;
+        sink.withSink = true;
+        sink.biasMasksRows = true;
+        expectCdnaMatchesReference(sink, BF16_TOLERANCE);
+        SCOPED_TRACE("head_dim 256");
+        auto wide = edge;
+        wide.headDim = 256;
+        expectCdnaMatchesReference(wide, BF16_TOLERANCE);
+    }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAFloatSink)
+{
+    // A FLOAT sink (vendored-kernel modification 36), rank 1, and rank 4 over rows no key
+    // reaches (LSE = the sink's f32 bits), against the harness's reference and hipDNN's CPU
+    // reference. The other cases are in Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto spec = cdnaSpec();
+    spec.headDim = 64;
+    spec.heads = 16;
+    spec.kvHeads = 2;
+    spec.withSink = true;
+    spec.sinkDataType = DataType::FLOAT;
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    {
+        SCOPED_TRACE("rank 1");
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("rank 4, rows no key reaches");
+        auto rank4 = spec;
+        rank4.sinkRank4 = true;
+        rank4.seqLenKv = 64;
+        expectCdnaMatchesReference(rank4, BF16_TOLERANCE);
+    }
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, AddsAFloatSink)
+{
+    // A FLOAT sink, cuDNN's and hipDNN's reference's dtype (vendored-kernel modification 36),
+    // against the harness's reference and hipDNN's CPU reference: rank 1 and rank 4, rows no
+    // key reaches (LSE = the sink's f32 bits), a sink far above the scores, a sink of -inf,
+    // decode split across workgroups (the merge reads it), a bias the vectorized objects read
+    // and an f32 one only the strided objects do, and padding.
+    auto spec = cdnaSpec();
+    spec.headDim = 64;
+    spec.heads = 16;
+    spec.kvHeads = 2;
+    spec.withSink = true;
+    spec.sinkDataType = DataType::FLOAT;
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    {
+        SCOPED_TRACE("rank 1");
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("rank 4, f16, head_dim 128, rows no key reaches");
+        auto rank4 = spec;
+        rank4.sinkRank4 = true;
+        rank4.dataType = DataType::HALF;
+        rank4.headDim = 128;
+        rank4.seqLenKv = 64;
+        expectCdnaMatchesReference(rank4, BF16_TOLERANCE);
+        SCOPED_TRACE("a sink of -inf");
+        rank4.sinkNegativeInfinity = true;
+        expectCdnaMatchesReference(rank4, BF16_TOLERANCE);
+    }
+    {
+        // 200 + 2^-7: bf16 and f16 both round it to 200, past the LSE's tolerance.
+        SCOPED_TRACE("a sink far above the scores");
+        auto far = spec;
+        far.sinkValue = 200.0078125F;
+        expectCdnaMatchesReference(far, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("decode split across workgroups");
+        auto step = spec;
+        step.seqLenQ = 1;
+        step.seqLenKv = 20000;
+        expectCdnaMatchesReference(step, BF16_TOLERANCE);
+    }
+    for(const int64_t headDim : {int64_t{64}, int64_t{128}})
+    {
+        SCOPED_TRACE("a bias and a sink, head_dim " + std::to_string(headDim));
+        auto biased = cdnaSpec();
+        biased.headDim = headDim;
+        biased.withBias = true;
+        biased.biasDataType = DataType::BFLOAT16;
+        biased.withSink = true;
+        biased.sinkDataType = DataType::FLOAT;
+        biased.seqLenQ = 200;
+        biased.seqLenKv = 264;
+        biased.biasDims = {1, 32, 200, 264};
+        biased.stats = SdpaStats::LSE;
+        biased.mask = SdpaMask::TOP_LEFT_CAUSAL;
+        biased.biasMasksRows = true;
+        biased.biasNegativeInfinityLeadingKeys = 128;
+        expectCdnaMatchesReference(biased, BF16_TOLERANCE);
+        // An f32 bias: the strided sink-and-bias objects (modification 31).
+        biased.biasDataType = DataType::FLOAT;
+        biased.biasMasksRows = false;
+        biased.biasNegativeInfinityLeadingKeys = 0;
+        biased.sinkValue = 1.0e30F;
+        expectCdnaMatchesReference(biased, BF16_TOLERANCE);
+    }
+    {
+        // A padded row's LSE is -inf beside a sink; a batch with no keys is keyless, LSE the sink.
+        SCOPED_TRACE("padding");
+        auto padded = paddedGpuSpec();
+        padded.seqLensKv = {300, 0, 200};
+        padded.seqLensQ = {300, 129, 100};
+        padded.withSink = true;
+        padded.sinkDataType = DataType::FLOAT;
+        expectCdnaMatchesReference(padded, BF16_TOLERANCE);
+    }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, PadsAtABucketHeadDim)
+{
+    auto spec = paddedGpuSpec();
+    spec.headDim = 80;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, DecodesPaddedBatchesWithSplitKeys)
+{
+    // Batched decode over caches of different lengths, the main inference use of padding: a
+    // long one (many splits, so the merge runs), a one-key one, an empty one, and a batch
+    // with no query.
+    auto spec = cdnaSpec();
+    spec.batch = 4;
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 4096;
+    spec.stats = SdpaStats::LSE;
+    setPadding(spec, {1, 1, 0, 1}, {4096, 1, 300, 0});
+    for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        spec.mask = mask;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DECODE);
+    }
+    // A multi-token step, and a sink.
+    spec.seqLenQ = 5;
+    spec.seqLensQ = {5, 2, 0, 5};
+    spec.withSink = true;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DECODE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ClampsLengthsOutsideTheSequence)
+{
+    // As hipDNN's GPU reference clamps them: to [0, S].
+    auto spec = paddedGpuSpec();
+    spec.seqLensQ = {1000, -5, 150};
+    spec.seqLensKv = {-1, 999, 150};
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsANanRowNanBesidePaddedRows)
+{
+    // A NaN row in a query tile that also holds padded rows: the NaN row's O and LSE stay
+    // NaN and the padded rows are O = 0, LSE = -inf (the padded rows' stores must not fold
+    // into the no-keys test, which fast math would make NaN-blind), at both corners and
+    // with no mask, and in a decode whose merge fills a padded batch.
+    auto spec = paddedGpuSpec();
+    spec.seqLensQ = {300, 140, 0};
+    spec.queryNanPosition = 130;
+    for(const auto mask :
+        {SdpaMask::NONE, SdpaMask::TOP_LEFT_CAUSAL, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        spec.mask = mask;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    spec.withSink = true;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+
+    auto decode = cdnaSpec();
+    decode.batch = 3;
+    decode.seqLenQ = 1;
+    decode.seqLenKv = 4096;
+    decode.stats = SdpaStats::LSE;
+    decode.keyNanPosition = 5;
+    setPadding(decode, {1, 0, 1}, {4096, 4096, 3});
+    expectCdnaMatchesReference(decode, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DECODE);
+}
+
+// Dropout (vendored-kernel modification 33): the mask AOTriton (>= 0.15) and the aiw objects
+// draw, bit for bit, checked against the test-local oracle (FlydslSdpaPhiloxOracle.hpp).
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, DropsTheOraclesMaskBitForBit)
+{
+    // The aiw objects' own cases (TestGpuFlydslSdpaAiwDispatch.DropsTheOraclesMaskBitForBit),
+    // the same graphs, seed and offset: both families must draw this one mask.
+    struct Case
+    {
+        int64_t headDim;
+        SdpaMask mask;
+        float p;
+    };
+    for(const auto& c : {Case{64, SdpaMask::NONE, 0.25F},
+                         Case{128, SdpaMask::TOP_LEFT_CAUSAL, 0.1F},
+                         Case{256, SdpaMask::NONE, 0.5F}})
+    {
+        SCOPED_TRACE("head_dim " + std::to_string(c.headDim));
+        SdpaGraphSpec spec;
+        spec.dataType = DataType::HALF;
+        spec.batch = 2;
+        spec.heads = 3;
+        spec.kvHeads = 3;
+        spec.headDim = c.headDim;
+        spec.seqLenQ = 150;
+        spec.seqLenKv = c.headDim;
+        spec.mask = c.mask;
+        spec.stats = SdpaStats::LSE;
+        // A seed past 32 bits, and an offset that carries into the counter's high word.
+        setDropout(spec, c.p, 0x0123456789ABCDEFULL, (uint64_t{1} << 32) - 7);
+        spec.exposeDropoutMask = true;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, DropsWithABias)
+{
+    // The dropout objects' bias builds: the mask bit for bit through O (Q zero, V the
+    // identity), then under padding with a bias that is NaN past each batch's keys, through O
+    // and the RNG dump. Every head dim, the full output and the edge rows are in
+    // Full/TestGpuFlydslSdpaCdnaFullTier.
+    auto mask = cdnaSpec();
+    mask.heads = 8;
+    mask.kvHeads = 2;
+    mask.seqLenQ = 64;
+    mask.seqLenKv = 128;
+    mask.withBias = true;
+    mask.biasDataType = DataType::BFLOAT16;
+    mask.biasDims = {1, 1, 64, 128};
+    mask.exposeDropoutMask = true;
+    setDropout(mask, 0.3F, 99U, 7U);
+    {
+        SCOPED_TRACE("the mask through O");
+        expectCdnaMatchesReference(mask, BF16_TOLERANCE);
+    }
+    mask.batch = 3;
+    mask.biasDims = {3, 8, 64, 128};
+    mask.biasNanPastKeys = true;
+    mask.withRngDump = true;
+    setPadding(mask, {64, 33, 0}, {127, 61, 128});
+    {
+        SCOPED_TRACE("under padding, the mask through O and the RNG dump");
+        expectCdnaMatchesReference(mask, BF16_TOLERANCE);
+    }
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, DropsWithABias)
+{
+    // The dropout objects' bias builds: the bias added to the scores, the mask drawn after the
+    // softmax's sum (the LSE undropped, the bias in it). A per-head bias, a padding mask whose
+    // rows are at the lowest finite value, -inf leading keys that leave causal rows keyless;
+    // and the mask bit for bit through O (Q zero, V the identity).
+    for(const int64_t headDim : {int64_t{64}, int64_t{128}, int64_t{256}})
+    {
+        for(const bool causal : {false, true})
+        {
+            SCOPED_TRACE("head_dim " + std::to_string(headDim) + (causal ? ", causal" : ""));
+            auto spec = cdnaSpec();
+            spec.headDim = headDim;
+            spec.heads = 8;
+            spec.kvHeads = 2;
+            spec.seqLenQ = 200;
+            spec.seqLenKv = 264;
+            spec.withBias = true;
+            spec.biasDataType = DataType::BFLOAT16;
+            spec.biasDims = {1, 8, 200, 264};
+            spec.stats = SdpaStats::LSE;
+            spec.mask = causal ? SdpaMask::TOP_LEFT_CAUSAL : SdpaMask::NONE;
+            setDropout(spec, 0.1F, 1234U, 77U);
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+            spec.biasMasksRows = true;
+            spec.biasNegativeInfinityLeadingKeys = 128;
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        }
+    }
+    auto mask = cdnaSpec();
+    mask.heads = 8;
+    mask.kvHeads = 2;
+    mask.seqLenQ = 64;
+    mask.seqLenKv = 128;
+    mask.withBias = true;
+    mask.biasDataType = DataType::BFLOAT16;
+    mask.biasDims = {1, 1, 64, 128};
+    mask.exposeDropoutMask = true;
+    setDropout(mask, 0.3F, 99U, 7U);
+    {
+        SCOPED_TRACE("the mask through O");
+        expectCdnaMatchesReference(mask, BF16_TOLERANCE);
+    }
+    // Under padding (vendored-kernel modification 37): key lengths no multiple of 4, a batch
+    // with more queries than keys, one with no query, a bias of its own per batch that is NaN
+    // past each batch's keys; the full output, then the mask bit for bit through O and the RNG
+    // dump.
+    auto padded = cdnaSpec();
+    padded.batch = 3;
+    padded.heads = 8;
+    padded.kvHeads = 2;
+    padded.seqLenQ = 300;
+    padded.seqLenKv = 296;
+    padded.withBias = true;
+    padded.biasDataType = DataType::BFLOAT16;
+    padded.biasDims = {3, 8, 300, 296};
+    padded.biasNanPastKeys = true;
+    padded.stats = SdpaStats::LSE;
+    padded.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    setPadding(padded, {300, 129, 0}, {295, 63, 200});
+    setDropout(padded, 0.1F, 1234U, 77U);
+    {
+        SCOPED_TRACE("under padding");
+        expectCdnaMatchesReference(padded, BF16_TOLERANCE);
+        padded.mask = SdpaMask::NONE;
+        padded.headDim = 64;
+        padded.biasMasksRows = true;
+        expectCdnaMatchesReference(padded, BF16_TOLERANCE);
+    }
+    auto paddedMask = mask;
+    paddedMask.batch = 3;
+    paddedMask.biasDims = {3, 8, 64, 128};
+    paddedMask.biasNanPastKeys = true;
+    paddedMask.withRngDump = true;
+    setPadding(paddedMask, {64, 33, 0}, {127, 61, 128});
+    {
+        SCOPED_TRACE("under padding, the mask through O and the RNG dump");
+        expectCdnaMatchesReference(paddedMask, BF16_TOLERANCE);
+    }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, DropsWithTheUndroppedLse)
+{
+    // GQA, a key length that is no multiple of 4 or of the KV tile, more queries than one
+    // tile, both dtypes; the LSE is the undropped one.
+    auto spec = cdnaSpec();
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 270;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    setDropout(spec, 0.2F, 42U, 5U);
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.mask = SdpaMask::NONE;
+    spec.seqLenKv = 301;
+    spec.headDim = 64;
+    spec.layout = SdpaLayout::BHSD;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.dataType = DataType::HALF;
+    spec.headDim = 256;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, DropsWithASeedAndOffsetGivenByValue)
+{
+    SdpaGraphSpec spec;
+    spec.dataType = DataType::HALF;
+    spec.headDim = 64;
+    spec.seqLenQ = 70;
+    spec.seqLenKv = 64;
+    spec.stats = SdpaStats::LSE;
+    setDropout(spec, 0.3F, 0xFEDCBA9876543210ULL, 1000U);
+    spec.exposeDropoutMask = true;
+    spec.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID);
+    spec.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID);
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    // INT32 by value: widened on the host to the same counter.
+    spec.dropoutSeed = 77U;
+    spec.dropoutSeedDataType = DataType::INT32;
+    spec.dropoutOffsetDataType = DataType::INT32;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    // One by value and one on the device.
+    spec.dropoutSeedDataType = DataType::INT64;
+    spec.dropoutOffsetDataType = DataType::INT64;
+    spec.passByValueTensors.erase(FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID);
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, WritesTheRngDumpItApplied)
+{
+    // The aiw and RDNA cases' graphs, seed and offset (TestGpuFlydslSdpa*Dispatch.
+    // WritesTheRngDumpItApplied): every family must write this one mask. Keys not a multiple
+    // of 4, masked keys, GQA, a seed past 32 bits and an offset into the counter's high word.
+    struct Case
+    {
+        int64_t headDim;
+        SdpaMask mask;
+        int64_t seqLenKv;
+        float p;
+    };
+    for(const auto& c :
+        {Case{64, SdpaMask::NONE, 70, 0.25F}, Case{128, SdpaMask::TOP_LEFT_CAUSAL, 96, 0.1F}})
+    {
+        SCOPED_TRACE("head_dim " + std::to_string(c.headDim));
+        SdpaGraphSpec spec;
+        spec.dataType = DataType::HALF;
+        spec.batch = 2;
+        spec.heads = 4;
+        spec.kvHeads = 2;
+        spec.headDim = c.headDim;
+        spec.seqLenQ = 40;
+        spec.seqLenKv = c.seqLenKv;
+        spec.mask = c.mask;
+        spec.stats = SdpaStats::LSE;
+        setDropoutWithRngDump(spec, c.p, 0x0123456789ABCDEFULL, (uint64_t{1} << 32) - 7);
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    // Under padding: the raw bit at padded rows and at keys past a batch's length too, the
+    // dense graph's mask; the seed and offset given by value.
+    SdpaGraphSpec padded;
+    padded.dataType = DataType::HALF;
+    padded.batch = 3;
+    padded.heads = 3;
+    padded.kvHeads = 3;
+    padded.headDim = 128;
+    padded.seqLenQ = 50;
+    padded.seqLenKv = 64;
+    padded.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    padded.stats = SdpaStats::LSE;
+    setDropoutWithRngDump(padded, 0.3F, 42U, 5U);
+    setPadding(padded, {50, 17, 0}, {64, 30, 64});
+    padded.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID);
+    padded.passByValueTensors.insert(FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID);
+    expectCdnaMatchesReference(padded, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, DropsTheDenseMaskUnderPadding)
+{
+    // D6: a padded batch draws its mask at the graph's declared extents, so its real rows'
+    // bits are the dense graph's (read off O bit for bit, Q zero and V the identity), and
+    // its padded rows are O = 0, LSE = -inf.
+    SdpaGraphSpec spec;
+    spec.dataType = DataType::HALF;
+    spec.batch = 3;
+    spec.heads = 3;
+    spec.kvHeads = 3;
+    spec.headDim = 128;
+    spec.seqLenQ = 150;
+    spec.seqLenKv = 128;
+    spec.stats = SdpaStats::LSE;
+    setDropout(spec, 0.25F, 0x0123456789ABCDEFULL, (uint64_t{1} << 32) - 7);
+    setPadding(spec, {150, 77, 0}, {128, 50, 128});
+    spec.exposeDropoutMask = true;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, DropsUnderPaddingWithTheUndroppedLse)
+{
+    // D6: the full output and the undropped LSE of a padded, dropping GQA graph, a batch
+    // with no keys and one with no queries among them, and lengths without padding_mask.
+    auto spec = paddedGpuSpec();
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    setDropout(spec, 0.2F, 42U, 5U);
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.seqLensKv = {0, 300, 199};
+    spec.mask = SdpaMask::NONE;
+    spec.headDim = 64;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.paddingMask = false;
+    spec.dataType = DataType::HALF;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesTheUndroppedResultAtProbabilityZero)
+{
+    auto spec = cdnaSpec();
+    spec.seqLenQ = 200;
+    spec.seqLenKv = 200;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.stats = SdpaStats::LSE;
+    setDropout(spec, 0.0F);
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, PadsWithoutThePaddingMask)
+{
+    // Lengths without padding_mask are padding too (hipDNN's references' SEM-008).
+    auto spec = paddedGpuSpec();
+    spec.paddingMask = false;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+/// Packed (THD; vendored-kernel modification 34): sequences of lengths full, odd and 0 end
+/// to end, GQA, the LSE packed alike; the harness packs the dense values token-major and
+/// checks no store reaches past the last sequence.
+SdpaGraphSpec packedGpuSpec()
+{
+    auto spec = cdnaSpec();
+    spec.batch = 3;
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    spec.stats = SdpaStats::LSE;
+    setPacked(spec, {300, 129, 0}, {300, 63, 200});
+    return spec;
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, PacksSequencesEndToEnd)
+{
+    expectCdnaMatchesReference(packedGpuSpec(), BF16_TOLERANCE);
+    // In f16, without the LSE, and with one table for queries and keys.
+    auto spec = packedGpuSpec();
+    spec.dataType = DataType::HALF;
+    spec.stats = SdpaStats::NONE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    setPacked(spec, {300, 1, 77}, {300, 1, 77});
+    spec.stats = SdpaStats::LSE;
+    spec.raggedOffsetOf[FLYDSL_SDPA_RDNA_K_UID] = FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID;
+    spec.raggedOffsetOf[FLYDSL_SDPA_RDNA_V_UID] = FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, PacksSequencesWithNoKeysAndASink)
+{
+    // A sequence with no keys gives rows no key reaches (O = 0, LSE = -inf, or the sink's
+    // logit beside a sink); one with no queries writes nothing.
+    auto spec = packedGpuSpec();
+    setPacked(spec, {300, 17, 0}, {0, 300, 1});
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.withSink = true;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, PacksEveryMaskAtEachSequencesOwnDiagonal)
+{
+    // More queries than keys and fewer, at both corners, a window and a band: a bottom-right
+    // diagonal sits at each sequence's own Skv_b - Sq_b, as under padding.
+    auto spec = packedGpuSpec();
+    setPacked(spec, {200, 64, 300}, {100, 256, 300});
+    for(const auto mask : {SdpaMask::TOP_LEFT_CAUSAL, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        SCOPED_TRACE(mask == SdpaMask::TOP_LEFT_CAUSAL ? "top-left" : "bottom-right");
+        spec.mask = mask;
+        spec.leftBound.reset();
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        spec.leftBound = 40;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.leftBound.reset();
+    spec.rightBound = 50;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, PacksAtABucketHeadDimAndASingleTokenExtent)
+{
+    // A bucket head dim (the qk_mask objects), and decode-shaped sequences whose sequence
+    // extent is 1, where the token stride still steps the packed tokens.
+    auto spec = packedGpuSpec();
+    spec.headDim = 80;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    auto decode = packedGpuSpec();
+    decode.batch = 4;
+    decode.seqLenQ = 1;
+    decode.seqLenKv = 512;
+    setPacked(decode, {1, 0, 1, 1}, {512, 3, 0, 77});
+    decode.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(decode, BF16_TOLERANCE);
+}
+
+// ---------------------------------------------------------------------------
+// Exact f32 (vendored-kernel modification 35): the generic prefill objects only, no bias,
+// sink or dropout yet
+// ---------------------------------------------------------------------------
+
+SdpaGraphSpec cdnaF32Spec()
+{
+    auto spec = cdnaSpec();
+    spec.dataType = DataType::FLOAT;
+    return spec;
+}
+
+TEST(TestFlydslSdpaCdnaF32Graph, AcceptsWhatTheF32ObjectsServe)
+{
+    std::vector<CdnaCase> cases;
+    cases.push_back({"NonCausal", cdnaF32Spec()});
+    for(const auto mask :
+        {SdpaMask::TOP_LEFT_CAUSAL, SdpaMask::BOTTOM_RIGHT_CAUSAL, SdpaMask::SLIDING_WINDOW})
+    {
+        auto masked = cdnaF32Spec();
+        masked.mask = mask;
+        cases.push_back({"Mask" + std::to_string(static_cast<int>(mask)), masked});
+    }
+    auto mqa = cdnaF32Spec();
+    mqa.kvHeads = 1;
+    cases.push_back({"Mqa", mqa});
+    auto lse = cdnaF32Spec();
+    lse.stats = SdpaStats::LSE;
+    cases.push_back({"Lse", lse});
+    auto bhsd = cdnaF32Spec();
+    bhsd.layout = SdpaLayout::BHSD;
+    cases.push_back({"Bhsd", bhsd});
+    auto packedQkv = cdnaF32Spec();
+    packedQkv.kvHeads = packedQkv.heads;
+    packedQkv.packedQkv = true;
+    cases.push_back({"PackedQkv", packedQkv});
+    auto floatMma = cdnaF32Spec();
+    floatMma.mmaCoreMode = DataType::FLOAT;
+    cases.push_back({"MmaCoreModeFloat", floatMma});
+    auto padded = cdnaPaddedSpec();
+    padded.dataType = DataType::FLOAT;
+    cases.push_back({"Padded", padded});
+    auto packed = cdnaPackedSpec();
+    packed.dataType = DataType::FLOAT;
+    cases.push_back({"Packed", packed});
+    auto packedSlots = packed;
+    setPadding(packedSlots, {200, 100}, {150, 256});
+    cases.push_back({"PackedWithPerBatchLengths", packedSlots});
+    for(const int64_t headDim : {64, 72, 200, 256})
+    {
+        auto width = cdnaF32Spec();
+        width.headDim = headDim;
+        cases.push_back({"HeadDim" + std::to_string(headDim), width});
+    }
+    for(const auto& [name, spec] : cases)
+    {
+        EXPECT_TRUE(cdnaGraphMatch(spec).has_value()) << name;
+    }
+}
+
+TEST(TestFlydslSdpaCdnaF32Graph, DeclinesWhatTheF32ObjectsDoNotServe)
+{
+    std::vector<CdnaCase> cases;
+    auto mixed = cdnaF32Spec();
+    mixed.keyDataType = DataType::BFLOAT16;
+    cases.push_back({"MixedDtypes", mixed});
+    for(const auto biasType : {DataType::FLOAT, DataType::BFLOAT16})
+    {
+        auto bias = cdnaF32Spec();
+        bias.withBias = true;
+        bias.biasDataType = biasType;
+        cases.push_back({"Bias" + std::to_string(static_cast<int>(biasType)), bias});
+    }
+    auto sink = cdnaF32Spec();
+    sink.withSink = true;
+    sink.sinkDataType = DataType::FLOAT;
+    cases.push_back({"Sink", sink});
+    auto dropout = cdnaF32Spec();
+    setDropout(dropout, 0.2F);
+    cases.push_back({"Dropout", dropout});
+    for(const auto mma : {DataType::HALF, DataType::BFLOAT16})
+    {
+        auto reduced = cdnaF32Spec();
+        reduced.mmaCoreMode = mma;
+        cases.push_back({"MmaCoreMode" + std::to_string(static_cast<int>(mma)), reduced});
+    }
+    // And the other way: an f32 MMA on a 16-bit graph.
+    auto floatOnBf16 = cdnaSpec();
+    floatOnBf16.mmaCoreMode = DataType::FLOAT;
+    cases.push_back({"FloatMmaOnBf16", floatOnBf16});
+    for(const auto& [name, spec] : cases)
+    {
+        EXPECT_FALSE(cdnaGraphMatch(spec).has_value()) << name;
+    }
+    // Each case's control: the same graph in bf16 (or without the f32 MMA) is served.
+    auto control = cdnaF32Spec();
+    setDropout(control, 0.0F);
+    EXPECT_TRUE(cdnaGraphMatch(control).has_value()) << "probability 0";
+}
+
+TEST(TestFlydslSdpaCdnaF32Graph, HoldsAnF32OperandsBytesToThirtyTwoBits)
+{
+    // Every operand view is addressed by 32-bit byte offsets: an f32 sequence of 5M tokens at
+    // head_dim 128 spans 2.56 GB, past them, where the same graph in bf16 (1.28 GB) fits.
+    auto spec = cdnaSpec();
+    spec.heads = 1;
+    spec.kvHeads = 1;
+    spec.seqLenQ = 5000000;
+    spec.seqLenKv = 5000000;
+    EXPECT_TRUE(cdnaGraphMatch(spec).has_value()) << "bf16";
+    spec.dataType = DataType::FLOAT;
+    EXPECT_FALSE(cdnaGraphMatch(spec).has_value()) << "f32";
+}
+
+TEST(TestFlydslSdpaCdnaF32KernelMatch, RunsF32OnlyOnF32GenericPrefillObjects)
+{
+    const auto f32 = cdnaF32Spec();
+    const auto bf16 = cdnaSpec();
+    EXPECT_TRUE(cdnaAdmits(f32, makeCdnaKernel("generic", 128, 0, "f32", 128)));
+    EXPECT_FALSE(cdnaAdmits(f32, makeCdnaKernel("generic", 128, 0, "bf16", 128)));
+    EXPECT_FALSE(cdnaAdmits(bf16, makeCdnaKernel("generic", 128, 0, "f32", 128)));
+    // A bucket serves f32 head dims up to it, as in 16 bits.
+    auto narrow = cdnaF32Spec();
+    narrow.headDim = 72;
+    EXPECT_TRUE(cdnaAdmits(
+        narrow, makeCdnaKernel("generic", 128, 0, "f32", 128, 0, 1, 0, std::nullopt, int64_t{1})));
+    // The dual-wave and split decode kernels take no f32, whatever their records say; the
+    // same graphs in bf16 run on the same records.
+    EXPECT_FALSE(cdnaAdmits(f32, makeCdnaKernel("dualwave", 128, 0, "f32", 256)));
+    EXPECT_TRUE(cdnaAdmits(bf16, makeCdnaKernel("dualwave", 128, 0, "bf16", 256)));
+    auto decode = cdnaF32Spec();
+    decode.seqLenQ = 1;
+    decode.seqLenKv = 4096;
+    EXPECT_FALSE(cdnaAdmits(decode, makeCdnaKernel("decode", 128, 0, "f32", 64), 304));
+    auto decodeBf16 = decode;
+    decodeBf16.dataType = DataType::BFLOAT16;
+    EXPECT_TRUE(cdnaAdmits(decodeBf16, makeCdnaKernel("decode", 128, 0, "bf16", 64), 304));
+}
+
+/// Exact f32: f32 products and accumulation, P in f32.
+SdpaGraphSpec cdnaF32GpuSpec()
+{
+    auto spec = cdnaF32Spec();
+    spec.heads = 8;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 333;
+    spec.stats = SdpaStats::LSE;
+    return spec;
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32AtEveryHeadDimItServes)
+{
+    // The buckets up to 64 and 128 (their own widths and narrower ones) and 256 (a bucket on
+    // gfx950, exact elsewhere), with and without a bottom-right diagonal, GQA, ragged last
+    // tiles and the LSE; gfx950's 256 bucket at a width inside it.
+    std::vector<int64_t> headDims{64, 40, 128, 72, 256};
+    if(packedArchDeviceProperties().gcnArchName == "gfx950")
+    {
+        headDims.push_back(200);
+    }
+    for(const int64_t headDim : headDims)
+    {
+        for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+        {
+            SCOPED_TRACE("head_dim " + std::to_string(headDim)
+                         + (mask == SdpaMask::NONE ? "" : ", causal"));
+            auto spec = cdnaF32GpuSpec();
+            spec.headDim = headDim;
+            spec.mask = mask;
+            expectCdnaMatchesReference(spec, F32_TOLERANCE);
+        }
+    }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32WithEveryMaskAndLayout)
+{
+    auto spec = cdnaF32GpuSpec();
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    expectCdnaMatchesReference(spec, F32_TOLERANCE);
+    spec.mask = SdpaMask::SLIDING_WINDOW;
+    expectCdnaMatchesReference(spec, F32_TOLERANCE);
+    spec.mask = SdpaMask::NONE;
+    spec.layout = SdpaLayout::BHSD;
+    spec.kvHeads = 1;
+    expectCdnaMatchesReference(spec, F32_TOLERANCE);
+    auto packedQkv = cdnaF32GpuSpec();
+    packedQkv.kvHeads = packedQkv.heads;
+    packedQkv.seqLenKv = packedQkv.seqLenQ;
+    packedQkv.packedQkv = true;
+    packedQkv.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(packedQkv, F32_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32EdgeCases)
+{
+    // COVERAGE.md section 7's rows reachable without a bias: rows no key reaches (more
+    // queries than keys, bottom-right), a NaN row beside finite ones, padded batches (one
+    // with no keys) and packed sequences.
+    auto keyless = cdnaF32GpuSpec();
+    keyless.seqLenQ = 333;
+    keyless.seqLenKv = 64;
+    keyless.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(keyless, F32_TOLERANCE);
+    auto nanRow = cdnaF32GpuSpec();
+    nanRow.queryNanPosition = 130;
+    expectCdnaMatchesReference(nanRow, F32_TOLERANCE);
+    auto padded = paddedGpuSpec();
+    padded.dataType = DataType::FLOAT;
+    padded.seqLensKv = {0, 300, 1};
+    padded.queryNanPosition = 100;
+    expectCdnaMatchesReference(padded, F32_TOLERANCE);
+    auto packed = packedGpuSpec();
+    packed.dataType = DataType::FLOAT;
+    packed.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(packed, F32_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsF32DenormalInputs)
+{
+    // V in f32's denormal range (k/32 times 2^-130): O is a convex mix of V, so it is
+    // denormal too, and must match to a few denormal ulps. With denormals flushed (the
+    // 16-bit objects' DAZ) every O element would read 0, about 1e-40 off.
+    for(const int64_t headDim : {64, 128, 256})
+    {
+        SCOPED_TRACE("head_dim " + std::to_string(headDim));
+        auto spec = cdnaF32GpuSpec();
+        spec.headDim = headDim;
+        spec.stats = SdpaStats::NONE;
+        spec.valueScale = std::ldexp(1.0F, -130);
+        expectCdnaMatchesReference(spec, 5e-42);
+    }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesADiagonalThatShowsEveryKeyOnTheNonCausalObjects)
+{
+    // Bound as no mask: every staged object that admits it -- the dual-wave kernel's on
+    // gfx950, the split decode objects' at a short query -- matches the reference's banded
+    // graph.
+    auto prefill = cdnaSpec();
+    prefill.seqLenQ = 512;
+    prefill.seqLenKv = 256;
+    prefill.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    prefill.rightBound = 300;
+    prefill.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(prefill, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DUALWAVE);
+    auto decode = cdnaSpec();
+    decode.seqLenQ = 4;
+    decode.seqLenKv = 2048;
+    decode.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    decode.rightBound = 3;
+    decode.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(decode, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DECODE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, PacksPaddedSequencesInTheirSlots)
+{
+    // P3: each packed slot holds a shorter real sequence (cuDNN's ragged operands with
+    // seq_len). The slot's rows past it are padded rows, O = 0 and LSE = -inf; its keys past it
+    // are never read; nothing reaches the next slot. Lengths 0, short, full, and past the slot
+    // (clamped to it), with and without padding_mask, at both corners.
+    auto spec = packedGpuSpec();
+    setPacked(spec, {300, 129, 40}, {300, 63, 200});
+    setPadding(spec, {250, 129, 0}, {300, 30, 999});
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.paddingMask = false;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.withSink = true;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, MirrorsSequsedKOnPackedKeySlots)
+{
+    // PyTorch's varlen seqused_k as a hipDNN graph (P3): Q packed through cu_seqlens_q with
+    // seq_len_q its own token counts, K and V packed through cu_seqlens_k slots with
+    // seq_len_kv = seqused_k <= the slot. Each slot's keys past seqused_k hold NaN, so a read
+    // of one turns rows NaN; a bottom-right diagonal sits at seqused_k - Sq_b; seqused_k = 0
+    // leaves every row keyless (O = 0, LSE = -inf); GQA. Checked against the per-sequence
+    // oracle and hipDNN's CPU reference (the dense rewrite its executors run).
+    auto spec = packedGpuSpec();
+    spec.batch = 4;
+    spec.seqLenQ = 64;
+    spec.seqLenKv = 128;
+    // Fewer queries than used keys, one query (decode), more (leading keyless rows
+    // bottom-right), and no used key at all.
+    setPacked(spec, {48, 1, 64, 17}, {128, 96, 64, 80});
+    setPadding(spec, {48, 1, 64, 17}, {100, 33, 20, 0});
+    spec.slotTailNan = true;
+    for(const auto mask :
+        {SdpaMask::NONE, SdpaMask::TOP_LEFT_CAUSAL, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        SCOPED_TRACE(static_cast<int>(mask));
+        spec.mask = mask;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    spec.dataType = DataType::HALF;
+    spec.stats = SdpaStats::NONE;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32InPaddedSlotsAndAtAnEveryKeyDiagonal)
+{
+    // The f32 objects (modification 35) under the host-side rules that arrived beside them:
+    // packed slots with per-batch lengths (P3), and a diagonal at or past the last key bound
+    // as no mask, which runs on the non-causal f32 objects.
+    auto slots = packedGpuSpec();
+    slots.dataType = DataType::FLOAT;
+    setPacked(slots, {300, 129, 40}, {300, 63, 200});
+    setPadding(slots, {250, 129, 0}, {300, 30, 999});
+    expectCdnaMatchesReference(slots, F32_TOLERANCE);
+    slots.paddingMask = false;
+    slots.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    expectCdnaMatchesReference(slots, F32_TOLERANCE);
+    auto everyKey = cdnaF32GpuSpec();
+    everyKey.seqLenQ = 512;
+    everyKey.seqLenKv = 256;
+    everyKey.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    everyKey.rightBound = 300;
+    everyKey.stats = SdpaStats::LSE;
+    expectCdnaMatchesReference(everyKey, F32_TOLERANCE);
+}
+
+// The zero- and negative-scale sweep (TestGpuFlydslSdpaCdnaDispatch.ServesZeroAndNegativeScales
+// is its quick case): every candidate the matcher admits, at 0 and -0.3, for causal (the
+// dual-wave objects too, where they ship), a key length off the vectorized objects' runs, a
+// band, the graph's own bias, a sink, padding, dropout (its keep mask bit for bit through the
+// RNG dump) and a decode-shaped graph, which the generic objects run (the split decode objects
+// have no bias twins); then -2, a subnormal scale and a constant scale tensor.
+TEST_P(TestGpuFlydslSdpaCdnaFullTier, ServesZeroAndNegativeScales)
+{
+    struct Case
+    {
+        std::string name;
+        SdpaGraphSpec spec;
+        const PackSymbols* family;
+    };
+    std::vector<Case> cases;
+    auto causal = cdnaSpec();
+    causal.scaleKind = SdpaScale::VALUE;
+    causal.heads = 8;
+    causal.kvHeads = 2;
+    causal.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    causal.stats = SdpaStats::LSE;
+    cases.push_back({"Causal", causal, &FLYDSL_SDPA_CDNA_DUALWAVE});
+    SdpaGraphSpec base;
+    base.headDim = 128;
+    base.heads = 4;
+    base.kvHeads = 2;
+    base.seqLenQ = 200;
+    base.seqLenKv = 200;
+    base.stats = SdpaStats::LSE;
+    auto offRuns = base;
+    offRuns.seqLenKv = 203;
+    offRuns.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    cases.push_back({"KeysOffTheVectorRuns", offRuns, &FLYDSL_SDPA_CDNA});
+    auto band = base;
+    band.mask = SdpaMask::SLIDING_WINDOW;
+    band.leftBound = 32;
+    cases.push_back({"Band", band, &FLYDSL_SDPA_CDNA});
+    auto biased = base;
+    biased.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    biased.withBias = true;
+    cases.push_back({"ItsOwnBias", biased, &FLYDSL_SDPA_CDNA});
+    auto sink = base;
+    sink.headDim = 64;
+    sink.heads = 8;
+    sink.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    sink.withSink = true;
+    cases.push_back({"Sink", sink, &FLYDSL_SDPA_CDNA});
+    auto padded = base;
+    padded.batch = 3;
+    setPadding(padded, {200, 30, 0}, {200, 50, 20});
+    cases.push_back({"Padded", padded, &FLYDSL_SDPA_CDNA});
+    SdpaGraphSpec dropout;
+    dropout.dataType = DataType::HALF;
+    dropout.heads = 4;
+    dropout.kvHeads = 2;
+    dropout.seqLenQ = 40;
+    dropout.seqLenKv = 72;
+    dropout.stats = SdpaStats::LSE;
+    setDropoutWithRngDump(dropout, 0.25F, 0x0123456789ABCDEFULL, 99U);
+    cases.push_back({"DropoutWithItsRngDump", dropout, &FLYDSL_SDPA_CDNA});
+    auto decode = base;
+    decode.batch = 1;
+    decode.heads = 8;
+    decode.seqLenQ = 1;
+    decode.seqLenKv = 1024;
+    decode.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    cases.push_back({"DecodeShaped", decode, &FLYDSL_SDPA_CDNA});
+    for(auto c : cases)
+    {
+        for(const float scale : {0.0F, -0.3F})
+        {
+            SCOPED_TRACE(c.name + " at scale " + std::to_string(scale));
+            c.spec.scale = scale;
+            expectCdnaMatchesReference(c.spec, BF16_TOLERANCE, *c.family);
+        }
+    }
+    // A scale far enough below zero to reverse the order sharply, a subnormal one (which a
+    // raw-score object would flush to zero), and a constant scale tensor.
+    auto spec = cases[1].spec;
+    for(const float scale : {-2.0F, 1.0e-40F})
+    {
+        SCOPED_TRACE("keys off the vector runs at scale " + std::to_string(scale));
+        spec.scale = scale;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    spec.scaleKind = SdpaScale::CONSTANT_TENSOR;
+    spec.scale = -0.5F;
+    SCOPED_TRACE("keys off the vector runs at a constant scale tensor of -0.5");
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
@@ -2969,6 +6915,11 @@ void testing::expectCdnaObjectMatchesReference(const SdpaGraphSpec& spec,
     {
         expectCandidateMatchesReference<hipdnn_data_sdk::types::half>(
             fixture.context(), *bound, kernel, spec, 4e-3);
+    }
+    else if(spec.dataType == DataType::FLOAT)
+    {
+        expectCandidateMatchesReference<float>(
+            fixture.context(), *bound, kernel, spec, F32_TOLERANCE);
     }
     else
     {

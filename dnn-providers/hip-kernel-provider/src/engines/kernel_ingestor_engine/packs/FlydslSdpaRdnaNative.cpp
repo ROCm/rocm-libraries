@@ -174,12 +174,15 @@ double flydslSdpaRdnaScore(const MatchContext& /*context*/,
  *        the `signature` block every one of this pack's UKDs carries.
  *
  * Q, K, V, O, LSE pointers; seq_len_q, seq_len_kv, num_heads, kv_group, right_bound,
- * left_bound, align_bottom_right, lse_on (i32); scale (f32); the (batch, sequence, head)
+ * left_bound, align_bottom_right, flags (i32: bit 0 the LSE output, bit 1 per-batch
+ * lengths, bit 2 padded rows filled, bit 3 packed sequences); scale (f32); the (batch, sequence, head)
  * element strides of Q, K, V, O and LSE (i64); then the BIAS pointer and its (batch, head,
  * query, key) element strides (i64), the runtime head_dim (i32, read only by a generic
- * object), the query heads per V head (i32), and the SINK pointer and its head stride (i64,
- * read only by a has_sink object) -- each appended so the arguments before them kept their
- * offsets.
+ * object), the query heads per V head (i32), the SINK pointer and its head stride (i64,
+ * read only by a has_sink object), the per-batch query and key length pointers (null for a
+ * dense graph) and the packed-sequence offset tables (null unless packed), and the dropout
+ * seed and offset1 pointers, offset2 (i64), threshold (i32) and scale (f32), read by a
+ * has_dropout object only -- each appended so the arguments before them kept their offsets.
  *
  * Names are empty and offsets zero because neither is compared for this producer -- FlyDSL
  * emits no argument names; see requireSignatureMatch. The semantic names are recorded per
@@ -193,11 +196,12 @@ const std::vector<KernelArgument>& flydslSdpaRdnaKernelSignature()
     static const KernelArgument s_f32{"by_value", static_cast<uint32_t>(sizeof(float)), 0, ""};
     static const KernelArgument s_i64{"by_value", static_cast<uint32_t>(sizeof(int64_t)), 0, ""};
     static const std::vector<KernelArgument> s_signature{
-        s_pointer, s_pointer, s_pointer, s_pointer, s_pointer, s_i32,     s_i32, s_i32,
-        s_i32,     s_i32,     s_i32,     s_i32,     s_i32,     s_f32,     s_i64, s_i64,
-        s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64, s_i64,
-        s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_pointer, s_i64, s_i64,
-        s_i64,     s_i64,     s_i32,     s_i32,     s_pointer, s_i64};
+        s_pointer, s_pointer, s_pointer, s_pointer, s_pointer, s_i32,     s_i32,     s_i32,
+        s_i32,     s_i32,     s_i32,     s_i32,     s_i32,     s_f32,     s_i64,     s_i64,
+        s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_i64,
+        s_i64,     s_i64,     s_i64,     s_i64,     s_i64,     s_pointer, s_i64,     s_i64,
+        s_i64,     s_i64,     s_i32,     s_i32,     s_pointer, s_i64,     s_pointer, s_pointer,
+        s_pointer, s_pointer, s_pointer, s_pointer, s_i64,     s_i32,     s_f32};
     return s_signature;
 }
 
@@ -211,13 +215,21 @@ public:
                            SdpaProblem problem,
                            std::optional<hipdnn_plugin_sdk::ScalarOperand> scaleOperand,
                            std::array<OperandStrides, 5> strides,
-                           BiasStrides biasStrides)
+                           BiasStrides biasStrides,
+                           PhiloxSources philox,
+                           std::optional<DropoutMaskLaunch> dropoutMask,
+                           bool rawScores,
+                           bool zeroBias)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
         , _scaleOperand(scaleOperand)
         , _strides(strides)
         , _biasStrides(biasStrides)
+        , _philox(philox)
+        , _dropoutMask(std::move(dropoutMask))
+        , _rawScores(rawScores)
+        , _zeroBias(zeroBias)
     {
     }
 
@@ -253,6 +265,31 @@ public:
         return _biasStrides;
     }
 
+    /// Where the dropout seed and offset come from.
+    const PhiloxSources& philox() const
+    {
+        return _philox;
+    }
+
+    /// The RNG dump's writer, launched after the attention launch; empty without a dump.
+    const std::optional<DropoutMaskLaunch>& dropoutMask() const
+    {
+        return _dropoutMask;
+    }
+
+    /// Whether the object keeps its running max over unscaled scores (no bias): it takes a
+    /// runtime scale only when rawScoresServe accepts it.
+    bool rawScores() const
+    {
+        return _rawScores;
+    }
+
+    /// Whether the object reads the zero bias from the workspace (readsZeroBias).
+    bool zeroBias() const
+    {
+        return _zeroBias;
+    }
+
 private:
     IngestorKernelCode _code;
     FlydslSdpaRdnaBinding _binding;
@@ -260,6 +297,10 @@ private:
     std::optional<hipdnn_plugin_sdk::ScalarOperand> _scaleOperand;
     std::array<OperandStrides, 5> _strides;
     BiasStrides _biasStrides;
+    PhiloxSources _philox;
+    std::optional<DropoutMaskLaunch> _dropoutMask;
+    bool _rawScores;
+    bool _zeroBias;
 };
 
 /**
@@ -281,12 +322,23 @@ public:
     {
     }
 
-    /// The kernel's only scratch is LDS and registers.
-    size_t workspaceBytes(const MatchContext& /*context*/,
-                          const BoundTokens& /*bound*/,
-                          const KernelDefinition& /*kernel*/) const override
+    /// The kernel's only scratch is LDS and registers; a dropout seed given by value needs 8
+    /// bytes to be read from, and a bias object run for a graph without a bias reads the zero
+    /// bias after them (readsZeroBias).
+    size_t workspaceBytes(const MatchContext& context,
+                          const BoundTokens& bound,
+                          const KernelDefinition& kernel) const override
     {
-        return 0;
+        const auto binding = flydslSdpaRdnaBinding(bound);
+        const size_t seedBytes
+            = philoxSources(context, binding).seedValue.has_value() ? SEED_WORKSPACE_BYTES : 0;
+        if(!readsZeroBias(binding, kernel))
+        {
+            return seedBytes;
+        }
+        const auto problem
+            = problemFor(requireTensor(context, binding.q), requireTensor(context, binding.k));
+        return zeroBiasOffset(seedBytes) + zeroBiasBytes(problem.seqLenKv);
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -369,33 +421,68 @@ public:
             }
             biasStrides = *strides;
         }
+        // An object without a bias keeps raw scores (rawScoresServe), a bias object scaled ones.
+        const bool rawScores = integerMetadata(kernel, HAS_BIAS_FIELD) != 1;
+        const bool zeroBias = readsZeroBias(binding, kernel);
+        if(zeroBias)
+        {
+            biasStrides = ZERO_BIAS_STRIDES;
+        }
 
-        return std::make_unique<PreparedFlydslSdpaRdna>(
-            std::move(code),
-            binding,
-            problem,
-            scaleOperand,
-            std::array<OperandStrides, 5>{stridesOf(q),
-                                          stridesOf(k),
-                                          stridesOf(v),
-                                          stridesOf(o),
-                                          binding.stats == NO_STATS
-                                              ? OperandStrides{}
-                                              : stridesOf(requireTensor(context, binding.stats))},
-            biasStrides);
+        // Packed (THD) sequences (kernel modification 29): a batch's base is its first
+        // token's row times the batch stride, so each operand's batch stride is its sequence
+        // stride (the LSE is packed through Q's table alike, as the graph match requires).
+        std::array<OperandStrides, 5> strides{
+            stridesOf(q),
+            stridesOf(k),
+            stridesOf(v),
+            stridesOf(o),
+            binding.stats == NO_STATS ? OperandStrides{}
+                                      : stridesOf(requireTensor(context, binding.stats))};
+        if(binding.packed())
+        {
+            for(auto& operand : strides)
+            {
+                operand.batch = operand.sequence;
+            }
+        }
+
+        // The RNG dump's writer (FlydslSdpaRngDump.hpp), when the graph names a dump.
+        auto dropoutMask = prepareDropoutMask(_kpackLoader,
+                                              context,
+                                              kernel,
+                                              binding.rngDump,
+                                              problem.batch,
+                                              problem.numHeads,
+                                              problem.seqLenQ,
+                                              problem.seqLenKv);
+
+        return std::make_unique<PreparedFlydslSdpaRdna>(std::move(code),
+                                                        binding,
+                                                        problem,
+                                                        scaleOperand,
+                                                        strides,
+                                                        biasStrides,
+                                                        philoxSources(context, binding),
+                                                        std::move(dropoutMask),
+                                                        rawScores,
+                                                        zeroBias);
     }
 
     void launch(const Handle& handle,
                 const PreparedDispatch& prepared,
                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                 uint32_t numDeviceBuffers,
-                void* /*workspace*/) const override
+                void* workspace) const override
     {
         const auto& preparedSdpa = dynamic_cast<const PreparedFlydslSdpaRdna&>(prepared);
         const auto& binding = preparedSdpa.binding();
         const auto& problem = preparedSdpa.problem();
-        const float scale
-            = launchScale(binding, preparedSdpa.scaleOperand(), deviceBuffers, numDeviceBuffers);
+        const float scale = launchScale(binding,
+                                        preparedSdpa.scaleOperand(),
+                                        deviceBuffers,
+                                        numDeviceBuffers,
+                                        preparedSdpa.rawScores());
 
         const auto q
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.q, deviceBuffers, numDeviceBuffers);
@@ -405,13 +492,38 @@ public:
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.v, deviceBuffers, numDeviceBuffers);
         const auto o
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.o, deviceBuffers, numDeviceBuffers);
-        // The kernel writes the LSE output only when lse_on is set, so with no stats tensor
+        // The kernel writes the LSE output only when flags bit 0 is set, so with no stats tensor
         // the pointer is never dereferenced. The bias and the sink are read only by the
         // has_bias and has_sink objects, which kernel_match pairs with a bound one.
         void* stats = optionalBuffer(binding.stats, deviceBuffers, numDeviceBuffers);
         void* bias = optionalBuffer(binding.bias, deviceBuffers, numDeviceBuffers);
+        if(preparedSdpa.zeroBias())
+        {
+            // After the seed a by-value dropout seed takes (workspaceBytes).
+            bias = stageZeroBias(workspace,
+                                 zeroBiasOffset(preparedSdpa.philox().seedValue.has_value()
+                                                    ? SEED_WORKSPACE_BYTES
+                                                    : 0),
+                                 problem.seqLenKv,
+                                 handle.getStream(),
+                                 "flydsl_sdpa_rdna");
+        }
         void* sink = optionalBuffer(binding.sink, deviceBuffers, numDeviceBuffers);
-        const int64_t sinkStride = binding.sinkStride;
+        // The head stride, with the sink's dtype in its bit 32 (kernel modification 31).
+        const int64_t sinkStride = rdnaSinkStrideArgument(binding.sinkStride, binding.sinkFloat);
+        // Each batch's lengths under padding; null (the launch's lengths) for a dense graph.
+        void* seqLenQ = optionalBuffer(binding.seqLenQ, deviceBuffers, numDeviceBuffers);
+        void* seqLenKv = optionalBuffer(binding.seqLenKv, deviceBuffers, numDeviceBuffers);
+        // Each packed sequence's token range (kernel modification 29); null when not packed.
+        void* rowOffQ = optionalBuffer(binding.raggedOffsetQ, deviceBuffers, numDeviceBuffers);
+        void* rowOffKv = optionalBuffer(binding.raggedOffsetKv, deviceBuffers, numDeviceBuffers);
+        // Read by a has_dropout object only (kernel modification 27).
+        const auto dropout = philoxLaunchArgs(binding,
+                                              preparedSdpa.philox(),
+                                              deviceBuffers,
+                                              numDeviceBuffers,
+                                              workspace,
+                                              handle.getStream());
 
         const auto& s = preparedSdpa.strides();
         const auto& b = preparedSdpa.biasStrides();
@@ -431,7 +543,7 @@ public:
                     static_cast<int32_t>(binding.rightBound),
                     static_cast<int32_t>(binding.leftBound),
                     static_cast<int32_t>(binding.alignBottomRight),
-                    static_cast<int32_t>(binding.stats == NO_STATS ? 0 : 1),
+                    rdnaLaunchFlags(binding),
                     scale,
                     s[0].batch,
                     s[0].sequence,
@@ -456,7 +568,27 @@ public:
                     static_cast<int32_t>(problem.headDim),
                     static_cast<int32_t>(problem.numHeads / problem.numVHeads),
                     sink,
-                    sinkStride);
+                    sinkStride,
+                    seqLenQ,
+                    seqLenKv,
+                    rowOffQ,
+                    rowOffKv,
+                    dropout.seed,
+                    dropout.offset1,
+                    dropout.offset2,
+                    dropout.threshold,
+                    dropout.scale);
+        // The keep mask the launch above applied, on its stream after it.
+        if(preparedSdpa.dropoutMask().has_value())
+        {
+            preparedSdpa.dropoutMask()->launch(handle.getStream(),
+                                               deviceBuffers,
+                                               numDeviceBuffers,
+                                               dropout.seed,
+                                               dropout.offset1,
+                                               dropout.offset2,
+                                               dropout.threshold);
+        }
     }
 
 private:

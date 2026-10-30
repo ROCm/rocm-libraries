@@ -665,6 +665,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         // The split engine is one pack with a handler per slot: the first slot stands for
         // the pack above, the others are probed beside it.
         "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch",
+        "hipkernel.flydsl_sdpa_dropout_mask.dispatch",
 #endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())

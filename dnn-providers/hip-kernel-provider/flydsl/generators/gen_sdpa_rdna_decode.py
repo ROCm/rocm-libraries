@@ -42,14 +42,25 @@ from ._sdpa_rdna_build import LLVM_OPTIONS, WAVE_SIZE, verify_layout
 
 OP = "sdpa_rdna_decode"
 
+# VGPR spills accepted, by (arch, generic head_dim_max): the generic tier up to 512 (H4,
+# kernel modification 30) on gfx11, whose column handling sits at the register file's edge
+# beside the exact 512/512 schedule's 251-254 VGPRs: the f16 objects spill 1, the bf16 ones
+# none. (Zeroing the out-of-range K and V columns with a select after each load spilled 5
+# and ran 3x slower than the exact objects; they now read at the slice's end, which the
+# hardware returns as zeros.) gfx12 builds the tier at 198 with none. A spill is refused
+# anywhere else, and above the count here.
+_SPILL_ALLOWANCE = {("gfx11-generic", 512): 1}
+
 # The two kernels of a decode object. The main kernel: Q, K, V, O, LSE, the split
 # workspace's O and (max, sum) pairs (pointers); the problem's i32 scalars and the
 # split count; the scale; the (batch, sequence, head) strides of Q, K, V, O and LSE;
 # the bias pointer and its (batch, head, query, key) strides; the runtime head_dim
 # (read only by a generic object); the sink pointer and its head stride (read only by
-# a sink object). Each appended, so every decode object has the same list. The merge
-# kernel: O, LSE and the two workspace pointers; seq_len_q, num_heads, lse_on, num_splits; O's and LSE's
-# strides; the runtime head_dim; the sink pointer and its head stride.
+# a sink object); the per-batch length pointers, and the packed-sequence offset
+# pointers (kernel modification 26; null for a dense launch). Each appended, so every
+# decode object has the same list. The merge kernel: O, LSE and the two workspace
+# pointers; seq_len_q, num_heads, lse_on, num_splits; O's and LSE's strides; the runtime
+# head_dim; the sink pointer and its head stride; the per-batch query lengths.
 _DECODE_ARG_NAMES = (
     "Q",
     "K",
@@ -65,7 +76,7 @@ _DECODE_ARG_NAMES = (
     "right_bound",
     "left_bound",
     "align_bottom_right",
-    "lse_on",
+    "flags",
     "num_splits",
     "scale",
     *(f"{t}_stride_{a}" for t in ("q", "k", "v", "o", "lse") for a in ("b", "s", "h")),
@@ -77,6 +88,10 @@ _DECODE_ARG_NAMES = (
     "head_dim_rt",
     "SINK",
     "sink_stride",
+    "SEQLEN_Q",
+    "SEQLEN_KV",
+    "ROW_OFF_Q",
+    "ROW_OFF_KV",
 )
 _DECODE_SIGNATURE = (
     *(("global_buffer", 8, 8 * i) for i in range(7)),
@@ -87,8 +102,9 @@ _DECODE_SIGNATURE = (
     ("by_value", 4, 256),
     ("global_buffer", 8, 264),
     ("by_value", 8, 272),
+    *(("global_buffer", 8, 280 + 8 * i) for i in range(4)),
 )
-_DECODE_KERNARG_SEGMENT_SIZE = 280
+_DECODE_KERNARG_SEGMENT_SIZE = 312
 _MERGE_ARG_NAMES = (
     "O",
     "LSE",
@@ -96,12 +112,13 @@ _MERGE_ARG_NAMES = (
     "WS_MAX_SUM",
     "seq_len_q",
     "num_heads",
-    "lse_on",
+    "flags",
     "num_splits",
     *(f"{t}_stride_{a}" for t in ("o", "lse") for a in ("b", "s", "h")),
     "head_dim_rt",
     "SINK",
     "sink_stride",
+    "SEQLEN_Q",
 )
 _MERGE_SIGNATURE = (
     *(("global_buffer", 8, 8 * i) for i in range(4)),
@@ -110,8 +127,9 @@ _MERGE_SIGNATURE = (
     ("by_value", 4, 96),
     ("global_buffer", 8, 104),
     ("by_value", 8, 112),
+    ("global_buffer", 8, 120),
 )
-_MERGE_KERNARG_SEGMENT_SIZE = 120
+_MERGE_KERNARG_SEGMENT_SIZE = 128
 # One workgroup per (batch, kv head, split, output-column tile of head_dim /
 # dv_split) of DECODE_WAVES waves, by 16-row tile of the GQA group's rows along the
 # grid's second dimension; the merge, one workgroup of DECODE_MERGE_THREADS per
@@ -151,10 +169,12 @@ def _build_decode(
     # Q, K, V, O, LSE, WS_O, WS_MAX_SUM; batch, seq_len_q, seq_len_kv, num_heads,
     # kv_group, right_bound, left_bound, align_bottom_right, lse_on, num_splits;
     # the scale; fifteen strides; the bias pointer and its four strides; the
-    # runtime head_dim; the sink pointer and its head stride.
+    # runtime head_dim; the sink pointer and its head stride; the per-batch length and
+    # packed-sequence offset pointers.
     args = [null] * 7 + [1, 1, 1, 1, 1, 0, -1, 0, 0, 1, 1.0] + [1] * 15
     args += [null] + [1] * 4 + [1]
     args += [null, 0]
+    args += [null] * 4
     args.append(fx.Stream(None))
     effective = dict(getattr(launch, "compile_hints", {}).get("llvm_options") or {})
     effective.update(llvm_options)
@@ -212,8 +232,22 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
         described = describe(blob, where, main_symbol)
         merge = describe(blob, where, merge_symbol)
         verify_arch(described, arch, where)
+        spills = described.get("vgpr_spill_count") or 0
+        allowance = (
+            _SPILL_ALLOWANCE.get((arch, instance.knobs["head_dim_max"]), 0)
+            if instance.knobs["head_dim"] is None
+            else 0
+        )
+        if spills > allowance:
+            raise GeneratorError(
+                f"{where}: decode spills {spills} VGPRs, {allowance} allowed"
+            )
         verify_layout(
-            described, _DECODE_SIGNATURE, _DECODE_KERNARG_SEGMENT_SIZE, where, "decode"
+            {**described, "vgpr_spill_count": 0},
+            _DECODE_SIGNATURE,
+            _DECODE_KERNARG_SEGMENT_SIZE,
+            where,
+            "decode",
         )
         verify_layout(
             merge, _MERGE_SIGNATURE, _MERGE_KERNARG_SEGMENT_SIZE, where, "merge"

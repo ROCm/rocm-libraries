@@ -50,6 +50,10 @@
     {
       "name": "has_sink",
       "type": "int"
+    },
+    {
+      "name": "has_dropout",
+      "type": "int"
     }
   ]
 }

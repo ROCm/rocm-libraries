@@ -113,14 +113,14 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 
 | `ARCH` | `OPS` | Objects |
 |---|---|---|
-| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 744 (90 + 63 + 84 + 72 + 33 + 198 + 198, plus the 3 reduce companions of the dQ op) |
-| `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw` | 381 (90 + 63 + 84 + 72 + 72) |
-| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged sdpa_bwd_dbias_reduce sdpa_bwd_dsink_reduce` | 2,982 (90 + 63 + 56 + 20 + 24 + 86 + 1,319 + 1,010 + 309 + 3 + 2) |
-| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
-| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
+| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 901 (90 + 63 + 204 + 108 + 1 + 33 + 198 + 198, plus the 3 reduce companions of the dQ op) |
+| `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_dropout_mask` | 614 (90 + 63 + 156 + 108 + 196 + 1) |
+| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_dropout_mask sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged sdpa_bwd_dbias_reduce sdpa_bwd_dsink_reduce` | 3,061 (90 + 63 + 134 + 20 + 24 + 1 + 86 + 1,319 + 1,010 + 309 + 3 + 2) |
+| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask` | 340 (90 + 63 + 162 + 24 + 1) |
+| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask` | 346 (90 + 63 + 168 + 24 + 1) |
 
 ```bash
-ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq"
+ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq"
 
 # Compile into a scratch directory -- must be empty or nonexistent, since the
 # generator writes files rather than clearing the directory, so an object left
@@ -214,6 +214,8 @@ for ARCH in gfx11-generic gfx12-generic; do
   $PY -m generators.gen_sdpa_rdna_decode --arch $ARCH
   # AOTriton's gfx1201 kernel, its own engine (gfx12-generic only).
   [ $ARCH = gfx12-generic ] && $PY -m generators.gen_sdpa_aiw --arch $ARCH
+  # The RNG dump's keep-mask writer (COVERAGE.md §5.10), one object per target.
+  $PY -m generators.gen_sdpa_dropout_mask --arch $ARCH
 
   # (2) Descriptors. Every field is derived from the manifest and the objects it
   #     names, so a descriptor cannot disagree with the object it describes.
@@ -233,6 +235,7 @@ for ARCH in gfx950 gfx942 gfx90a; do
   $PY -m generators.gen_sdpa_cdna --arch $ARCH
   $PY -m generators.gen_sdpa_cdna_dualwave --arch $ARCH
   $PY -m generators.gen_sdpa_cdna_decode --arch $ARCH
+  $PY -m generators.gen_sdpa_dropout_mask --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH --check
 done

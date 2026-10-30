@@ -8,11 +8,14 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
@@ -44,13 +47,15 @@
  * own tuning table -- so an engine of its own, `hipkernel:flydsl_sdpa_aiw`, beside the RDNA
  * prefill and decode engines. It serves the same graphs they do, so it applies their graph
  * matcher (FlydslSdpaRdnaCommon.hpp) under its own symbol; which engine runs a graph several
- * serve is the heuristic's to decide, not a rule here.
+ * serve is the heuristic's to decide, not a rule here. Of the three it alone serves padding
+ * (per-batch lengths under padding_mask), which every object reads at runtime, and dropout,
+ * which its `has_dropout` objects apply (AOTriton's ENABLE_DROPOUT, a compile-time axis).
  *
  * Each object bakes dtype, its head-dim tile (exact, or padded: any head_dim up to the tile
  * that is a multiple of 8, the real one a runtime argument), V's head_dim, whether a mask or
  * window applies, the additive mask and its dtype, and the attention sink. Batch, both
- * sequence lengths, the three head counts, every stride, the window, the scale and the LSE
- * layout are kernel arguments.
+ * sequence lengths (and per-batch ones), the three head counts, every stride, the window, the
+ * scale and the LSE layout are kernel arguments.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -74,6 +79,19 @@ constexpr std::string_view BIAS_F32_FIELD = "bias_f32";
 constexpr std::string_view BIAS_KSTRIDED_FIELD = "bias_kstrided";
 /// The workgroup size the object was built for (its tuning table's).
 constexpr std::string_view BLOCK_THREADS_FIELD = "block_threads";
+
+/// The padded-row fill kernel every object carries beside its main one (aiw modification
+/// 10), and its launch: one workgroup per (query head, 16 query rows, batch), 256 threads.
+constexpr std::string_view FILL_SYMBOL_FIELD = "fill_symbol";
+constexpr int64_t FILL_THREADS = 256;
+constexpr int64_t FILL_ROWS = 16;
+
+/// Whether a launch fills the padded rows: a padded graph under FILL_PADDED_ROWS. Never a
+/// packed one, whose rows past a sequence are the next sequence's.
+bool fillsPaddedRows(const FlydslSdpaRdnaBinding& binding)
+{
+    return FILL_PADDED_ROWS && binding.padded();
+}
 
 /// The kernel's grid is (query heads, query tiles, batch): the y and z extents are 16-bit
 /// in practice on the dispatch path, and x is 32-bit.
@@ -111,16 +129,109 @@ int64_t unboundedWindow(const SdpaProblem& problem)
     return problem.seqLenQ + problem.seqLenKv;
 }
 
+/// The kernel's window sentinel for bottom-right causal, resolved per sequence in the kernel
+/// to right = seqlen_k - seqlen_q and an unbounded left (fmha_common_gfx1201.py
+/// `WINDOW_BOTRIGHT`, AOTriton's `parse_window`).
+constexpr int64_t WINDOW_BOTTOM_RIGHT = -2147483646;
+
+/// Whether the mask is bottom-right causal and nothing else: right bound 0, no left bound.
+bool isBottomRightCausal(const FlydslSdpaRdnaBinding& binding)
+{
+    return binding.alignBottomRight != 0 && binding.rightBound == 0
+           && binding.leftBound == UNBOUNDED;
+}
+
+/// Whether each sequence has lengths of its own: padded, or packed (THD).
+bool perSequenceLengths(const FlydslSdpaRdnaBinding& binding)
+{
+    return binding.padded() || binding.packed();
+}
+
+/// Whether the kernel can apply the graph's mask to every sequence. Padded or packed, each
+/// sequence has its own lengths, so a bottom-right diagonal sits at its own Skv_b - Sq_b: the
+/// kernel resolves that per sequence for bottom-right causal (its sentinel) but takes any other
+/// bound as one literal for the launch, which is right at the top-left corner only.
+bool maskServesEverySequence(const FlydslSdpaRdnaBinding& binding)
+{
+    return !perSequenceLengths(binding) || binding.alignBottomRight == 0
+           || (binding.rightBound == UNBOUNDED && binding.leftBound == UNBOUNDED)
+           || isBottomRightCausal(binding);
+}
+
 /// hipDNN's bounds as the kernel's top-left window: key j is kept iff
 /// i - window_left <= j <= i + window_right. hipDNN keeps kv in
-/// [q + align - left, q + align + right], with align = Skv - Sq at the bottom-right corner.
+/// [q + align - left, q + align + right], with align = Skv - Sq at the bottom-right corner and
+/// `left` the bound resolveMaskBounds stored: the graph's left_bound minus one (cuDNN's
+/// left_bound counts the diagonal key).
+/// Padded or packed, bottom-right causal goes as the kernel's sentinel, resolved per sequence.
 std::array<int64_t, 2> windowFor(const FlydslSdpaRdnaBinding& binding, const SdpaProblem& problem)
 {
+    if(perSequenceLengths(binding) && isBottomRightCausal(binding))
+    {
+        return {WINDOW_BOTTOM_RIGHT, WINDOW_BOTTOM_RIGHT};
+    }
     const int64_t align = binding.alignBottomRight != 0 ? problem.seqLenKv - problem.seqLenQ : 0;
     const int64_t unbounded = unboundedWindow(problem);
     const int64_t left = binding.leftBound == UNBOUNDED ? unbounded : binding.leftBound - align;
     const int64_t right = binding.rightBound == UNBOUNDED ? unbounded : binding.rightBound + align;
     return {left, right};
+}
+
+/// VarlenBits for padding, on each side: lengths from an array, one per batch (INDIVIDUAL),
+/// each batch's rows at its own base (not stacked, position IMPLIED) -- fmha_abi_gfx1201.py
+/// `VARLEN_SEQUSED_CACHE_SIDE`. Q's byte, then K's; the LSE layout bits stay 0, overridden by
+/// the LSE's own strides.
+constexpr int32_t VARLEN_PADDED_SIDE = 0x04;
+constexpr int32_t VARLEN_PADDED_BITS = VARLEN_PADDED_SIDE | (VARLEN_PADDED_SIDE << 8);
+
+/// VarlenBits for packed (THD) sequences, on each side: every sequence in one stacked tensor
+/// (STACKED), its bounds from a cumulative table (LENGTH CUMULATIVE), its first row the table's
+/// own entry (POSITION REUSE) -- fmha_abi_gfx1201.py `VARLEN_COMPACT_SIDE`, AOTriton's
+/// `cu_seqlens`. The kernel then reads no batch stride. The LSE layout bits stay 0, overridden by
+/// the LSE's own strides, whose batch term the kernel multiplies by 0 here.
+constexpr int32_t VARLEN_COMPACT_SIDE = 0x0B;
+constexpr int32_t VARLEN_COMPACT_BITS = VARLEN_COMPACT_SIDE | (VARLEN_COMPACT_SIDE << 8);
+
+/// The kernel's variable-length arguments (seqinfo_q0 .. max_seqlen_k): where each batch's
+/// sequences live and how long they are. A dense graph passes no arrays and bits 0, which the
+/// kernel reads as every sequence S_max long at its batch's own base. A padded one passes the
+/// per-batch length arrays, and the graph's extents as the maxima the grid and the dropout
+/// stream are laid out by.
+struct AiwVarlenArgs
+{
+    void* seqinfoQ0 = nullptr;
+    void* seqinfoQ1 = nullptr;
+    void* seqinfoK0 = nullptr;
+    void* seqinfoK1 = nullptr;
+    int32_t bits = 0;
+    int32_t numSeqlens = 0;
+    int32_t maxSeqlenQ = 0;
+    int32_t maxSeqlenK = 0;
+};
+
+AiwVarlenArgs aiwVarlenArgs(const FlydslSdpaRdnaBinding& binding,
+                            const SdpaProblem& problem,
+                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                            uint32_t numDeviceBuffers)
+{
+    AiwVarlenArgs args;
+    args.maxSeqlenQ = static_cast<int32_t>(problem.seqLenQ);
+    args.maxSeqlenK = static_cast<int32_t>(problem.seqLenKv);
+    if(binding.padded())
+    {
+        args.seqinfoQ0 = optionalBuffer(binding.seqLenQ, deviceBuffers, numDeviceBuffers);
+        args.seqinfoK0 = optionalBuffer(binding.seqLenKv, deviceBuffers, numDeviceBuffers);
+        args.bits = VARLEN_PADDED_BITS;
+        args.numSeqlens = static_cast<int32_t>(problem.batch);
+    }
+    else if(binding.packed())
+    {
+        args.seqinfoQ0 = optionalBuffer(binding.raggedOffsetQ, deviceBuffers, numDeviceBuffers);
+        args.seqinfoK0 = optionalBuffer(binding.raggedOffsetKv, deviceBuffers, numDeviceBuffers);
+        args.bits = VARLEN_COMPACT_BITS;
+        args.numSeqlens = static_cast<int32_t>(problem.batch);
+    }
+    return args;
 }
 
 /**
@@ -162,8 +273,9 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
         return false;
     }
 
-    // An exact object serves its head_dim; a padded one any multiple of 8 up to its tile,
-    // with V as wide as Q and K. Padded tiers rank below the exact objects.
+    // An exact object serves its head_dim pair; a padded one any pair of multiples of 8 up to
+    // its tile, V narrower or wider than Q and K: the kernel bounds Q/K's columns by hdim_qk
+    // and V/O's by hdim_vo, two runtime widths. Padded tiers rank below the exact objects.
     const auto bakedHeadDim = integerMetadata(kernel, HEAD_DIM_FIELD);
     const auto headDimMax = integerMetadata(kernel, HEAD_DIM_MAX_FIELD);
     const auto bakedHeadDimV = integerMetadata(kernel, HEAD_DIM_V_FIELD);
@@ -173,8 +285,9 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
     }
     if(*bakedHeadDim == GENERIC_HEAD_DIM)
     {
-        if(problem.headDim % GENERIC_HEAD_DIM_ALIGN != 0 || problem.headDim > *headDimMax
-           || problem.headDimV != problem.headDim)
+        if(problem.headDim % GENERIC_HEAD_DIM_ALIGN != 0
+           || problem.headDimV % GENERIC_HEAD_DIM_ALIGN != 0
+           || std::max(problem.headDim, problem.headDimV) > *headDimMax)
         {
             return false;
         }
@@ -199,6 +312,30 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
 
     const auto binding = flydslSdpaRdnaBinding(bound);
     if(integerMetadata(kernel, CAUSAL_FIELD) != (needsMask(binding) ? 1 : 0))
+    {
+        return false;
+    }
+    if(!maskServesEverySequence(binding))
+    {
+        return false;
+    }
+    // Packed sequences with per-batch lengths (each table entry a slot, its rows past the length
+    // padded rows): the kernel could read them (LENGTH INDIVIDUAL, POSITION ARRAY), but its fill
+    // kernel addresses a padded row by batch, which is the next sequence's under packing, and
+    // the main kernel clamps a length to Max_seqlen_q, not to its slot. The RDNA prefill objects
+    // serve them, on gfx12 too.
+    if(binding.padded() && binding.packed())
+    {
+        return false;
+    }
+    // A dropout object for a graph that drops, a plain one for one that does not (a
+    // probability of 0 is the undropped result). Absent is a plain object.
+    if(integerMetadata(kernel, HAS_DROPOUT_FIELD).value_or(0) != (binding.dropsOut() ? 1 : 0))
+    {
+        return false;
+    }
+    // An RNG dump is written by the dropout mask writer, which must ship in this object's shard.
+    if(binding.rngDump != NO_RNG_DUMP && !hasDropoutMaskWriter(kernel))
     {
         return false;
     }
@@ -248,6 +385,15 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
         }
     }
 
+    // A padded graph's padded rows are written by the object's fill kernel: an object that
+    // names none, or a fill grid past its y extent, declines the graph.
+    if(fillsPaddedRows(binding)
+       && (stringMetadata(kernel, FILL_SYMBOL_FIELD).value_or("").empty()
+           || (problem.seqLenQ + FILL_ROWS - 1) / FILL_ROWS > GRID_YZ_LIMIT))
+    {
+        return false;
+    }
+
     return integerMetadata(kernel, HAS_SINK_FIELD) == (binding.sink == NO_SINK ? 0 : 1);
 }
 
@@ -275,6 +421,22 @@ double flydslSdpaAiwScore(const MatchContext& /*context*/,
  * mask's batch, head and query strides (i64); SINK and its head stride; the mask's key
  * stride; num_head_v (i32); the LSE's batch, head and sequence strides (i64).
  */
+/// The fill kernel's argument list: O, LSE and the per-batch query lengths; Max_seqlen_q and
+/// V's head dim; O's and the LSE's (batch, head, sequence) strides.
+const std::vector<KernelArgument>& flydslSdpaAiwFillSignature()
+{
+    static const std::vector<KernelArgument> s_signature = [] {
+        const KernelArgument pointer{"global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+        const KernelArgument i32{"by_value", static_cast<uint32_t>(sizeof(int32_t)), 0, ""};
+        const KernelArgument i64{"by_value", static_cast<uint32_t>(sizeof(int64_t)), 0, ""};
+        std::vector<KernelArgument> signature(3, pointer);
+        signature.insert(signature.end(), 2, i32);
+        signature.insert(signature.end(), 6, i64);
+        return signature;
+    }();
+    return s_signature;
+}
+
 const std::vector<KernelArgument>& flydslSdpaAiwSignature()
 {
     static const std::vector<KernelArgument> s_signature = [] {
@@ -311,7 +473,10 @@ public:
                           std::optional<hipdnn_plugin_sdk::ScalarOperand> scaleOperand,
                           std::array<std::array<int64_t, 3>, 5> strides,
                           BiasStrides biasStrides,
-                          std::array<int64_t, 2> window)
+                          std::array<int64_t, 2> window,
+                          PhiloxSources philox,
+                          std::optional<IngestorKernelCode> fillCode,
+                          std::optional<DropoutMaskLaunch> dropoutMask)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
@@ -319,6 +484,9 @@ public:
         , _strides(strides)
         , _biasStrides(biasStrides)
         , _window(window)
+        , _philox(philox)
+        , _fillCode(std::move(fillCode))
+        , _dropoutMask(std::move(dropoutMask))
     {
     }
 
@@ -360,6 +528,24 @@ public:
         return _window;
     }
 
+    /// Where the dropout seed and offset come from.
+    /// The padded-row fill kernel, for a launch that fills padded rows; else none.
+    compilation::IRunnableKernel* fillForStream(hipStream_t stream) const
+    {
+        return _fillCode.has_value() ? &_fillCode->kernelForStream(stream) : nullptr;
+    }
+
+    const PhiloxSources& philox() const
+    {
+        return _philox;
+    }
+
+    /// The RNG dump's writer, launched after the attention launch; empty without a dump.
+    const std::optional<DropoutMaskLaunch>& dropoutMask() const
+    {
+        return _dropoutMask;
+    }
+
 private:
     IngestorKernelCode _code;
     FlydslSdpaRdnaBinding _binding;
@@ -368,6 +554,9 @@ private:
     std::array<std::array<int64_t, 3>, 5> _strides;
     BiasStrides _biasStrides;
     std::array<int64_t, 2> _window;
+    PhiloxSources _philox;
+    std::optional<IngestorKernelCode> _fillCode;
+    std::optional<DropoutMaskLaunch> _dropoutMask;
 };
 
 /**
@@ -384,12 +573,15 @@ public:
     {
     }
 
-    /// The kernel's only scratch is LDS and registers.
-    size_t workspaceBytes(const MatchContext& /*context*/,
-                          const BoundTokens& /*bound*/,
+    /// The kernel's only scratch is LDS and registers; a dropout seed given by value needs 8
+    /// bytes to be read from.
+    size_t workspaceBytes(const MatchContext& context,
+                          const BoundTokens& bound,
                           const KernelDefinition& /*kernel*/) const override
     {
-        return 0;
+        return philoxSources(context, flydslSdpaRdnaBinding(bound)).seedValue.has_value()
+                   ? SEED_WORKSPACE_BYTES
+                   : 0;
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -425,6 +617,36 @@ public:
                          static_cast<unsigned int>(queryTiles),
                          static_cast<unsigned int>(problem.batch));
 
+        // The padded-row fill kernel (aiw modification 10): the same code object under its
+        // own symbol, so the same archive entry with that symbol and its own argument list.
+        std::optional<IngestorKernelCode> fillCode;
+        if(fillsPaddedRows(binding))
+        {
+            const auto fillSymbol = stringMetadata(kernel, FILL_SYMBOL_FIELD);
+            const auto fillTiles = (problem.seqLenQ + FILL_ROWS - 1) / FILL_ROWS;
+            if(!fillSymbol.has_value() || fillSymbol->empty() || fillTiles > GRID_YZ_LIMIT)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "flydsl_sdpa_aiw: kernel '" + toString(kernel.kernelId)
+                        + "' names no fill kernel, or its fill launch overflows");
+            }
+            KernelDefinition fillKernel = kernel;
+            fillKernel.source.symbol = *fillSymbol;
+            fillKernel.source.signature = flydslSdpaAiwFillSignature();
+            auto fill = buildIngestorKernelCode(_kernelCompiler,
+                                                _kpackLoader,
+                                                context,
+                                                fillKernel,
+                                                options,
+                                                flydslSdpaAiwFillSignature());
+            fill.setBlockSize(static_cast<unsigned int>(FILL_THREADS), 1, 1);
+            fill.setGridSize(static_cast<unsigned int>(problem.numHeads),
+                             static_cast<unsigned int>(fillTiles),
+                             static_cast<unsigned int>(problem.batch));
+            fillCode.emplace(std::move(fill));
+        }
+
         std::optional<hipdnn_plugin_sdk::ScalarOperand> scaleOperand;
         if(binding.scaleSource == ScaleSource::TENSOR)
         {
@@ -459,6 +681,16 @@ public:
             lse[2] = std::max<int64_t>(lse[2], 1);
         }
 
+        // The RNG dump's writer (FlydslSdpaRngDump.hpp), when the graph names a dump.
+        auto dropoutMask = prepareDropoutMask(_kpackLoader,
+                                              context,
+                                              kernel,
+                                              binding.rngDump,
+                                              problem.batch,
+                                              problem.numHeads,
+                                              problem.seqLenQ,
+                                              problem.seqLenKv);
+
         return std::make_unique<PreparedFlydslSdpaAiw>(
             std::move(code),
             binding,
@@ -467,20 +699,28 @@ public:
             std::array<std::array<int64_t, 3>, 5>{
                 bhsStrides(q), bhsStrides(k), bhsStrides(v), bhsStrides(o), lse},
             biasStrides,
-            windowFor(binding, problem));
+            windowFor(binding, problem),
+            philoxSources(context, binding),
+            std::move(fillCode),
+            std::move(dropoutMask));
     }
 
     void launch(const Handle& handle,
                 const PreparedDispatch& prepared,
                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                 uint32_t numDeviceBuffers,
-                void* /*workspace*/) const override
+                void* workspace) const override
     {
         const auto& preparedSdpa = dynamic_cast<const PreparedFlydslSdpaAiw&>(prepared);
         const auto& binding = preparedSdpa.binding();
         const auto& problem = preparedSdpa.problem();
-        const float scale
-            = launchScale(binding, preparedSdpa.scaleOperand(), deviceBuffers, numDeviceBuffers);
+        // Every aiw object scales its scores before the softmax's max (the kernel's
+        // correction (b)), so it takes any scale isServableScale accepts.
+        const float scale = launchScale(binding,
+                                        preparedSdpa.scaleOperand(),
+                                        deviceBuffers,
+                                        numDeviceBuffers,
+                                        /*rawScores=*/false);
 
         const auto q
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.q, deviceBuffers, numDeviceBuffers);
@@ -495,15 +735,18 @@ public:
         void* stats = optionalBuffer(binding.stats, deviceBuffers, numDeviceBuffers);
         void* bias = optionalBuffer(binding.bias, deviceBuffers, numDeviceBuffers);
         void* sink = optionalBuffer(binding.sink, deviceBuffers, numDeviceBuffers);
-        void* none = nullptr;
 
         const auto& s = preparedSdpa.strides();
         const auto& b = preparedSdpa.biasStrides();
         const auto& window = preparedSdpa.window();
         const auto i32 = [](int64_t value) { return static_cast<int32_t>(value); };
-        const int32_t zero = 0;
-        const int64_t zero64 = 0;
-        const float noDropout = 1.0F;
+        const auto varlen = aiwVarlenArgs(binding, problem, deviceBuffers, numDeviceBuffers);
+        const auto dropout = philoxLaunchArgs(binding,
+                                              preparedSdpa.philox(),
+                                              deviceBuffers,
+                                              numDeviceBuffers,
+                                              workspace,
+                                              handle.getStream());
 
         // Changing this argument list means changing flydslSdpaAiwSignature() with it.
         preparedSdpa.kernelForStream(handle.getStream())
@@ -514,23 +757,23 @@ public:
                     bias,
                     o.ptr,
                     stats,
-                    none, // seqinfo_q0: dense, no varlen
-                    none,
-                    none,
-                    none,
-                    zero, // varlen_bits
-                    zero, // num_seqlens
-                    i32(problem.seqLenQ),
-                    i32(problem.seqLenKv),
+                    varlen.seqinfoQ0,
+                    varlen.seqinfoQ1,
+                    varlen.seqinfoK0,
+                    varlen.seqinfoK1,
+                    varlen.bits,
+                    varlen.numSeqlens,
+                    varlen.maxSeqlenQ,
+                    varlen.maxSeqlenK,
                     i32(window[0]),
                     i32(window[1]),
-                    none, // philox_seed_ptr: no dropout
-                    none,
-                    zero64,
-                    none,
-                    none,
-                    zero, // idropout_p
-                    noDropout,
+                    dropout.seed,
+                    dropout.offset1,
+                    dropout.offset2,
+                    dropout.seedOutput,
+                    dropout.offsetOutput,
+                    dropout.threshold,
+                    dropout.scale,
                     i32(problem.numHeads),
                     i32(problem.numKvHeads),
                     i32(problem.headDim),
@@ -552,12 +795,43 @@ public:
                     b[1],
                     b[2],
                     sink,
-                    binding.sinkStride,
+                    // The head stride, with the sink's dtype in its bit 32 (kernel
+                    // modification 11).
+                    rdnaSinkStrideArgument(binding.sinkStride, binding.sinkFloat),
                     b[3],
                     i32(problem.numVHeads),
                     s[4][0],
                     s[4][1],
                     s[4][2]);
+
+        // The padded rows, O = 0 and LSE = -inf: rows the main kernel never stores, on the
+        // same stream (aiw modification 10).
+        if(auto* fill = preparedSdpa.fillForStream(handle.getStream()))
+        {
+            fill->launch(handle.getStream(),
+                         o.ptr,
+                         stats,
+                         varlen.seqinfoQ0,
+                         varlen.maxSeqlenQ,
+                         i32(problem.headDimV),
+                         s[3][0],
+                         s[3][1],
+                         s[3][2],
+                         s[4][0],
+                         s[4][1],
+                         s[4][2]);
+        }
+        // The keep mask the main launch applied, on its stream after it.
+        if(preparedSdpa.dropoutMask().has_value())
+        {
+            preparedSdpa.dropoutMask()->launch(handle.getStream(),
+                                               deviceBuffers,
+                                               numDeviceBuffers,
+                                               dropout.seed,
+                                               dropout.offset1,
+                                               dropout.offset2,
+                                               dropout.threshold);
+        }
     }
 
 private:

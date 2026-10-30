@@ -13,9 +13,11 @@
 #include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
 #include <hipdnn-gpu-ref/ShallowGpuTensor.hpp>
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
@@ -50,13 +52,20 @@ inline std::vector<int64_t> squeezeToRank(const std::vector<int64_t>& strides, s
     return {strides.begin(), strides.begin() + static_cast<std::ptrdiff_t>(rank)};
 }
 
+// The graph plans use fp32 softmax probabilities, like the CPU reference and cuDNN's reference,
+// so the GPU reference is an independent oracle for every dtype (SdpaSemanticsRegister.md SEM-012).
+inline constexpr hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode REFERENCE_SDPA_PROBABILITY_MODE
+    = hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode::FLOAT;
+
+// Opt-in emulation of a provider kernel's P storage, for callers that want to model it
+// explicitly (GpuFpReferenceSdpa::fprop's probabilityMode). Not used by the graph plans.
+// The P->bf16 cast is a property of the P@V matmul inputs, not the output: the AITER BF16
+// forward kernel materializes the softmax probabilities in bf16 before P@V whenever Q/K/V are
+// bf16, regardless of the (fp32 or bf16) output dtype.
 template <typename QDataType, typename KDataType, typename VDataType, typename ODataType>
-constexpr hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode sdpaProbabilityMode()
+constexpr hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode providerSdpaProbabilityMode()
 {
     using hipdnn_data_sdk::types::bfloat16;
-    // The P->bf16 cast is a property of the P@V matmul inputs, not the output: the
-    // AITER BF16 forward kernel materializes the softmax probabilities in bf16 before
-    // P@V whenever Q/K/V are bf16, regardless of the (fp32 or bf16) output dtype.
     if constexpr(std::is_same_v<QDataType, bfloat16> && std::is_same_v<KDataType, bfloat16>
                  && std::is_same_v<VDataType, bfloat16>)
     {
@@ -80,7 +89,15 @@ struct GpuSdpaFwdParams
         int64_t rightBound,
         bool topLeftAlignment,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes = nullptr,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr)
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* seqLenQAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* seqLenKvAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* pageTableKAttributes
+        = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* pageTableVAttributes
+        = nullptr,
+        int64_t pagedMaxSeqKv = 0,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* sinkAttributes = nullptr)
         : qTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(qAttributes))
         , kTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(kAttributes))
         , vTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(vAttributes))
@@ -97,6 +114,27 @@ struct GpuSdpaFwdParams
                         ? std::make_optional(
                               hipdnn_test_sdk::detail::unpackTensorAttributes(*lseAttributes))
                         : std::nullopt)
+        , seqLenQTensor(seqLenQAttributes != nullptr
+                            ? std::make_optional(hipdnn_test_sdk::detail::unpackTensorAttributes(
+                                  *seqLenQAttributes))
+                            : std::nullopt)
+        , seqLenKvTensor(seqLenKvAttributes != nullptr
+                             ? std::make_optional(hipdnn_test_sdk::detail::unpackTensorAttributes(
+                                   *seqLenKvAttributes))
+                             : std::nullopt)
+        , pageTableKTensor(pageTableKAttributes != nullptr
+                               ? std::make_optional(hipdnn_test_sdk::detail::unpackTensorAttributes(
+                                     *pageTableKAttributes))
+                               : std::nullopt)
+        , pageTableVTensor(pageTableVAttributes != nullptr
+                               ? std::make_optional(hipdnn_test_sdk::detail::unpackTensorAttributes(
+                                     *pageTableVAttributes))
+                               : std::nullopt)
+        , pagedMaxSeqKv(pagedMaxSeqKv)
+        , sinkTensor(sinkAttributes != nullptr
+                         ? std::make_optional(
+                               hipdnn_test_sdk::detail::unpackTensorAttributes(*sinkAttributes))
+                         : std::nullopt)
     {
     }
 
@@ -112,6 +150,36 @@ struct GpuSdpaFwdParams
     bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> lseTensor;
+    // Padding lengths (INT32, one per batch); applicability guarantees both or neither.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenQTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenKvTensor;
+    // Paged KV cache: page tables for K and/or V and the logical key extent (0 = not paged).
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> pageTableKTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> pageTableVTensor;
+    int64_t pagedMaxSeqKv;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sinkTensor;
+    // Explicit-mask dropout (cuDNN custom dropout): mask and single-element scale.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutMaskTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutScaleTensor;
+    // Philox dropout checked through RNG_DUMP: dropoutMaskTensor is the rng_dump tensor and this is
+    // 1 / (1 - p).
+    std::optional<float> philoxDropoutScale;
+    // cuDNN Max / Sum_exp row statistics outputs, FLOAT [B, H, Sq, 1].
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> maxTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sumExpTensor;
+    bool alibi = false;
+    // fp8 Q/K/V descales, FLOAT scalar or [B, H_kv, 1, 1]; all three or none.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleQTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleKTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleVTensor;
+    // cuDNN sdpa_fp8 softmax / output scaling: one-element FLOAT scales and amax outputs.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleSTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleSTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleOTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> amaxSTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> amaxOTensor;
+    // cuDNN block-sparse mask, UINT8 (SEM-025).
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> blockMaskTensor;
 };
 
 template <typename QDataType,
@@ -150,14 +218,125 @@ public:
         // The graph stats tensor is rank-4 [B, H, Sq, 1], but fprop requires LSE to be
         // rank-3 [B, H, Sq]. Drop the trailing size-1 dim (and its stride) so the shapes
         // line up without relaxing the reference's strict rank check.
+        const auto bindRowStats =
+            [&variantPack](const auto& stats,
+                           std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>>& bound) {
+                if(stats.has_value())
+                {
+                    const auto squeezedDims = squeezeTrailingUnitDim(stats->dims);
+                    const auto squeezedStrides = squeezeToRank(stats->strides, squeezedDims.size());
+                    bound.emplace(variantPack.at(stats->uid), squeezedDims, squeezedStrides);
+                }
+            };
         std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> lseTensor;
-        if(_params.lseTensor.has_value())
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> maxTensor;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> sumExpTensor;
+        bindRowStats(_params.lseTensor, lseTensor);
+        bindRowStats(_params.maxTensor, maxTensor);
+        bindRowStats(_params.sumExpTensor, sumExpTensor);
+
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<int32_t>> seqLenQTensor;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<int32_t>> seqLenKvTensor;
+        if(_params.seqLenQTensor.has_value() && _params.seqLenKvTensor.has_value())
         {
-            const auto squeezedDims = squeezeTrailingUnitDim(_params.lseTensor->dims);
-            const auto squeezedStrides
-                = squeezeToRank(_params.lseTensor->strides, squeezedDims.size());
-            lseTensor.emplace(
-                variantPack.at(_params.lseTensor->uid), squeezedDims, squeezedStrides);
+            seqLenQTensor.emplace(variantPack.at(_params.seqLenQTensor->uid),
+                                  _params.seqLenQTensor->dims,
+                                  _params.seqLenQTensor->strides);
+            seqLenKvTensor.emplace(variantPack.at(_params.seqLenKvTensor->uid),
+                                   _params.seqLenKvTensor->dims,
+                                   _params.seqLenKvTensor->strides);
+        }
+
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<int32_t>> pageTableK;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<int32_t>> pageTableV;
+        for(auto [attr, table] : {std::pair{&_params.pageTableKTensor, &pageTableK},
+                                  std::pair{&_params.pageTableVTensor, &pageTableV}})
+        {
+            if(attr->has_value())
+            {
+                table->emplace(variantPack.at((*attr)->uid), (*attr)->dims, (*attr)->strides);
+            }
+        }
+
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> sinkTensor;
+        if(_params.sinkTensor.has_value())
+        {
+            sinkTensor.emplace(variantPack.at(_params.sinkTensor->uid),
+                               _params.sinkTensor->dims,
+                               _params.sinkTensor->strides);
+        }
+
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> dropoutMask;
+        std::optional<float> dropoutScale;
+        if(_params.dropoutMaskTensor.has_value() && _params.philoxDropoutScale.has_value())
+        {
+            dropoutMask.emplace(variantPack.at(_params.dropoutMaskTensor->uid),
+                                _params.dropoutMaskTensor->dims,
+                                _params.dropoutMaskTensor->strides);
+            dropoutScale = _params.philoxDropoutScale;
+        }
+        else if(_params.dropoutMaskTensor.has_value() && _params.dropoutScaleTensor.has_value())
+        {
+            dropoutMask.emplace(variantPack.at(_params.dropoutMaskTensor->uid),
+                                _params.dropoutMaskTensor->dims,
+                                _params.dropoutMaskTensor->strides);
+            dropoutScale = resolveScalarOperand(
+                *_params.dropoutScaleTensor, variantPack, "SDPA dropout scale");
+        }
+
+        // A pass-by-value descale (baked or runtime) is staged in a one-element tensor: its
+        // variant-pack slot, if any, holds a host pointer. A device descale is viewed in place.
+        const auto bindDescale
+            = [&variantPack](
+                  const std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>& d,
+                  std::optional<hipdnn_data_sdk::utilities::Tensor<float>>& staged,
+                  std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>>& view)
+            -> hipdnn_data_sdk::utilities::TensorBase<float>* {
+            if(!d.has_value())
+            {
+                return nullptr;
+            }
+            if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(*d))
+            {
+                staged.emplace(std::vector<int64_t>{1});
+                staged->fillWithValue(resolveScalarOperand(*d, variantPack, "SDPA descale"));
+                return &staged.value();
+            }
+            view.emplace(variantPack.at(d->uid), d->dims, d->strides);
+            return &view.value();
+        };
+        std::optional<hipdnn_data_sdk::utilities::Tensor<float>> stagedDescaleQ;
+        std::optional<hipdnn_data_sdk::utilities::Tensor<float>> stagedDescaleK;
+        std::optional<hipdnn_data_sdk::utilities::Tensor<float>> stagedDescaleV;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> descaleQView;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> descaleKView;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> descaleVView;
+        auto* descaleQ = bindDescale(_params.descaleQTensor, stagedDescaleQ, descaleQView);
+        auto* descaleK = bindDescale(_params.descaleKTensor, stagedDescaleK, descaleKView);
+        auto* descaleV = bindDescale(_params.descaleVTensor, stagedDescaleV, descaleVView);
+
+        const auto scalar = [&variantPack](const auto& attrs, const char* name) {
+            return attrs.has_value()
+                       ? std::optional<float>(resolveScalarOperand(*attrs, variantPack, name))
+                       : std::nullopt;
+        };
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> amaxS;
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> amaxO;
+        for(auto [attr, bound] :
+            {std::pair{&_params.amaxSTensor, &amaxS}, std::pair{&_params.amaxOTensor, &amaxO}})
+        {
+            if(attr->has_value())
+            {
+                bound->emplace(variantPack.at((*attr)->uid), (*attr)->dims, (*attr)->strides);
+            }
+        }
+
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<uint8_t>> blockMask;
+        if(_params.blockMaskTensor.has_value())
+        {
+            blockMask.emplace(variantPack.at(_params.blockMaskTensor->uid),
+                              _params.blockMaskTensor->dims,
+                              _params.blockMaskTensor->strides);
         }
 
         std::optional<float> attnScale;
@@ -172,13 +351,30 @@ public:
                 kTensor,
                 vTensor,
                 oTensor,
-                attnScale,
-                attnMaskTensor.has_value() ? &attnMaskTensor.value() : nullptr,
-                _params.leftBound,
-                _params.rightBound,
-                _params.topLeftAlignment,
-                lseTensor.has_value() ? &lseTensor.value() : nullptr,
-                sdpaProbabilityMode<QDataType, KDataType, VDataType, ODataType>());
+                hipdnn_gpu_ref::GpuSdpaFwdOptions<MaskDataType>{}
+                    .setScale(attnScale)
+                    .setMask(attnMaskTensor.has_value() ? &attnMaskTensor.value() : nullptr)
+                    .setBand(_params.leftBound, _params.rightBound, _params.topLeftAlignment)
+                    .setSeqLens(seqLenQTensor.has_value() ? &seqLenQTensor.value() : nullptr,
+                                seqLenKvTensor.has_value() ? &seqLenKvTensor.value() : nullptr)
+                    .setPaged(pageTableK.has_value() ? &pageTableK.value() : nullptr,
+                              pageTableV.has_value() ? &pageTableV.value() : nullptr,
+                              _params.pagedMaxSeqKv)
+                    .setSink(sinkTensor.has_value() ? &sinkTensor.value() : nullptr)
+                    .setDropout(dropoutMask.has_value() ? &dropoutMask.value() : nullptr,
+                                dropoutScale)
+                    .setAlibi(_params.alibi)
+                    .setBlockMask(blockMask.has_value() ? &blockMask.value() : nullptr)
+                    .setLse(lseTensor.has_value() ? &lseTensor.value() : nullptr)
+                    .setRowStats(maxTensor.has_value() ? &maxTensor.value() : nullptr,
+                                 sumExpTensor.has_value() ? &sumExpTensor.value() : nullptr)
+                    .setProbabilityMode(REFERENCE_SDPA_PROBABILITY_MODE)
+                    .setDescales(descaleQ, descaleK, descaleV)
+                    .setSoftmaxScales(scalar(_params.scaleSTensor, "SDPA scale_s"),
+                                      scalar(_params.descaleSTensor, "SDPA descale_s"))
+                    .setOutputScale(scalar(_params.scaleOTensor, "SDPA scale_o"))
+                    .setAmax(amaxS.has_value() ? &amaxS.value() : nullptr,
+                             amaxO.has_value() ? &amaxO.value() : nullptr));
     }
 
 private:
@@ -200,6 +396,12 @@ public:
     using ODataType = hipdnn_test_sdk::utilities::DataTypeToNative<ODataTypeEnum>;
     // UNSET (no mask) maps to a placeholder float: the plan then always passes a null mask.
     using MaskDataType = hipdnn_test_sdk::utilities::MaskDataTypeToNative<MaskDataTypeEnum>;
+    // fp8 inputs need the Q/K/V descales and allow the sdpa_fp8 scaling (isSupportedSdpaFwdNode).
+    static constexpr bool IS_FP8_INPUT
+        = QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3
+          || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ
+          || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2
+          || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ;
 
     bool isApplicable(
         const hipdnn_flatbuffers_sdk::data_objects::Node& node,
@@ -207,131 +409,23 @@ public:
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
+        // The dense gate is shared with the CPU reference (isSupportedSdpaFwdNode). The GPU kernel
+        // reads a paged container in place, so a paged side needs a scalar descale.
         const auto* nodeAttributes = node.attributes_as_SdpaAttributes();
-        if(nodeAttributes == nullptr)
+        if(nodeAttributes == nullptr
+           || !isSupportedSdpaFwdNode(*nodeAttributes,
+                                      tensorMap,
+                                      MaskDataTypeEnum,
+                                      IS_FP8_INPUT,
+                                      /*requireScalarPagedDescale=*/true))
         {
             return false;
         }
-
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->q_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->k_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->v_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->o_tensor_uid());
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->q_tensor_uid(), QDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->k_tensor_uid(), KDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->v_tensor_uid(), VDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->o_tensor_uid(), ODataTypeEnum);
-
-        // The mask dtype is part of the plan: the UNSET builder takes graphs without a mask,
-        // every other builder takes graphs whose mask tensor has exactly that dtype.
-        if constexpr(MaskDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
-        {
-            if(nodeAttributes->attn_mask_tensor_uid().has_value())
-            {
-                return false;
-            }
-        }
-        else
-        {
-            if(!nodeAttributes->attn_mask_tensor_uid().has_value())
-            {
-                return false;
-            }
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->attn_mask_tensor_uid().value());
-            CHECK_TENSOR_TYPE(
-                tensorMap, nodeAttributes->attn_mask_tensor_uid().value(), MaskDataTypeEnum);
-        }
-
-        // Ragged tensors need the ragged plan; read as dense they would give wrong results.
-        CHECK_NO_RAGGED_TENSORS(tensorMap);
-
-        // Unsupported mask modes
-        if(nodeAttributes->alibi_mask() || nodeAttributes->padding_mask())
-        {
-            return false;
-        }
-
-        // Unsupported: variable sequence lengths
-        if(nodeAttributes->seq_len_q_tensor_uid().has_value()
-           || nodeAttributes->seq_len_kv_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        // Unsupported: dropout
-        if(nodeAttributes->dropout_probability().has_value()
-           || nodeAttributes->seed_tensor_uid().has_value()
-           || nodeAttributes->offset_tensor_uid().has_value()
-           || nodeAttributes->dropout_mask_tensor_uid().has_value()
-           || nodeAttributes->dropout_scale_tensor_uid().has_value()
-           || nodeAttributes->rng_dump_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        // The scale may be baked, pass-by-value or device-resident. It must be one element, and a
-        // device scale must be FLOAT since it is read back as one float.
-        if(nodeAttributes->scale_tensor_uid().has_value())
-        {
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid().value());
-            const auto scale = hipdnn_test_sdk::detail::unpackTensorAttributes(
-                *tensorMap.at(nodeAttributes->scale_tensor_uid().value()));
-            if(elementCount(scale) != 1
-               || (!isHostScalarOperand(scale)
-                   && scale.data_type != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT))
-            {
-                return false;
-            }
-        }
-
-        // Unsupported: paged KV cache
-        if(nodeAttributes->page_table_k_tensor_uid().has_value()
-           || nodeAttributes->page_table_v_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        // Unsupported: block sparse attention
-        if(nodeAttributes->block_mask_tensor_uid().has_value()
-           || nodeAttributes->sink_token_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        // Unsupported: FP8 quantization / descaling
-        if(nodeAttributes->descale_q_tensor_uid().has_value()
-           || nodeAttributes->descale_k_tensor_uid().has_value()
-           || nodeAttributes->descale_v_tensor_uid().has_value()
-           || nodeAttributes->descale_s_tensor_uid().has_value()
-           || nodeAttributes->scale_s_tensor_uid().has_value()
-           || nodeAttributes->scale_o_tensor_uid().has_value()
-           || nodeAttributes->amax_s_tensor_uid().has_value()
-           || nodeAttributes->amax_o_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        // Unsupported: max / running-sum softmax stats outputs (the reference does not
-        // produce these). The log-sum-exp stats tensor IS supported and handled below.
-        if(nodeAttributes->max_tensor_uid().has_value()
-           || nodeAttributes->sum_exp_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        // Supported: log-sum-exp output via the stats tensor. It must exist in the map and
-        // be FLOAT (LSE is always float). The rank reconciliation to [B, H, Sq] is enforced
-        // in execute().
-        if(nodeAttributes->stats_tensor_uid().has_value())
-        {
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->stats_tensor_uid().value());
-            CHECK_TENSOR_TYPE(tensorMap,
-                              nodeAttributes->stats_tensor_uid().value(),
-                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-        }
-
-        CHECK_NO_RAGGED_TENSORS(tensorMap);
 
         return true;
     }
@@ -368,18 +462,79 @@ public:
 
         const auto band = extractDiagonalBandParams(*nodeAttributes, "GpuSdpaFwdPlan");
 
+        GpuSdpaFwdParams params(
+            *tensorMap.at(nodeAttributes->q_tensor_uid()),
+            *tensorMap.at(nodeAttributes->k_tensor_uid()),
+            *tensorMap.at(nodeAttributes->v_tensor_uid()),
+            *tensorMap.at(nodeAttributes->o_tensor_uid()),
+            std::move(scaleTensor),
+            band.leftBound,
+            band.rightBound,
+            band.topLeftAlignment,
+            attnMaskPtr,
+            lsePtr,
+            nodeAttributes->seq_len_q_tensor_uid().has_value()
+                ? tensorMap.at(nodeAttributes->seq_len_q_tensor_uid().value())
+                : nullptr,
+            nodeAttributes->seq_len_kv_tensor_uid().has_value()
+                ? tensorMap.at(nodeAttributes->seq_len_kv_tensor_uid().value())
+                : nullptr,
+            nodeAttributes->page_table_k_tensor_uid().has_value()
+                ? tensorMap.at(nodeAttributes->page_table_k_tensor_uid().value())
+                : nullptr,
+            nodeAttributes->page_table_v_tensor_uid().has_value()
+                ? tensorMap.at(nodeAttributes->page_table_v_tensor_uid().value())
+                : nullptr,
+            sdpaPagedMaxSeqKv(*nodeAttributes, tensorMap),
+            nodeAttributes->sink_token_tensor_uid().has_value()
+                ? tensorMap.at(nodeAttributes->sink_token_tensor_uid().value())
+                : nullptr);
+        params.alibi = nodeAttributes->alibi_mask();
+        for(auto [uid, bound] :
+            {std::pair{nodeAttributes->descale_q_tensor_uid(), &params.descaleQTensor},
+             std::pair{nodeAttributes->descale_k_tensor_uid(), &params.descaleKTensor},
+             std::pair{nodeAttributes->descale_v_tensor_uid(), &params.descaleVTensor},
+             std::pair{nodeAttributes->scale_s_tensor_uid(), &params.scaleSTensor},
+             std::pair{nodeAttributes->descale_s_tensor_uid(), &params.descaleSTensor},
+             std::pair{nodeAttributes->scale_o_tensor_uid(), &params.scaleOTensor},
+             std::pair{nodeAttributes->amax_s_tensor_uid(), &params.amaxSTensor},
+             std::pair{nodeAttributes->amax_o_tensor_uid(), &params.amaxOTensor},
+             std::pair{nodeAttributes->block_mask_tensor_uid(), &params.blockMaskTensor}})
+        {
+            if(uid.has_value())
+            {
+                *bound
+                    = hipdnn_test_sdk::detail::unpackTensorAttributes(*tensorMap.at(uid.value()));
+            }
+        }
+        if(nodeAttributes->max_tensor_uid().has_value())
+        {
+            params.maxTensor = hipdnn_test_sdk::detail::unpackTensorAttributes(
+                *tensorMap.at(nodeAttributes->max_tensor_uid().value()));
+        }
+        if(nodeAttributes->sum_exp_tensor_uid().has_value())
+        {
+            params.sumExpTensor = hipdnn_test_sdk::detail::unpackTensorAttributes(
+                *tensorMap.at(nodeAttributes->sum_exp_tensor_uid().value()));
+        }
+        if(nodeAttributes->dropout_mask_tensor_uid().has_value())
+        {
+            params.dropoutMaskTensor = hipdnn_test_sdk::detail::unpackTensorAttributes(
+                *tensorMap.at(nodeAttributes->dropout_mask_tensor_uid().value()));
+            params.dropoutScaleTensor = hipdnn_test_sdk::detail::unpackTensorAttributes(
+                *tensorMap.at(nodeAttributes->dropout_scale_tensor_uid().value()));
+        }
+        else if(isSdpaPhiloxDropoutWithDump(*nodeAttributes, tensorMap))
+        {
+            // The engine's dumped keep mask is the reference's explicit mask.
+            params.dropoutMaskTensor = hipdnn_test_sdk::detail::unpackTensorAttributes(
+                *tensorMap.at(nodeAttributes->rng_dump_tensor_uid().value()));
+            params.philoxDropoutScale
+                = 1.0F / (1.0F - nodeAttributes->dropout_probability().value());
+        }
         return std::make_unique<
             GpuSdpaFwdPlan<QDataType, KDataType, VDataType, ODataType, float, MaskDataType>>(
-            GpuSdpaFwdParams(*tensorMap.at(nodeAttributes->q_tensor_uid()),
-                             *tensorMap.at(nodeAttributes->k_tensor_uid()),
-                             *tensorMap.at(nodeAttributes->v_tensor_uid()),
-                             *tensorMap.at(nodeAttributes->o_tensor_uid()),
-                             std::move(scaleTensor),
-                             band.leftBound,
-                             band.rightBound,
-                             band.topLeftAlignment,
-                             attnMaskPtr,
-                             lsePtr));
+            std::move(params));
     }
 };
 

@@ -43,7 +43,10 @@
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaDropout.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDump.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaVarlen.hpp"
 
 /**
  * @file FlydslSdpaCdnaCommon.hpp
@@ -137,12 +140,57 @@ inline constexpr std::string_view STATS_PACKED_TOKEN = "flydsl_sdpa_cdna.stats.p
 inline constexpr std::string_view V_OWN_STRIDES_TOKEN = "flydsl_sdpa_cdna.v.own_strides";
 /// The uid of the additive bias (attn_mask), or NO_BIAS when the graph has none.
 inline constexpr std::string_view BIAS_TOKEN = "flydsl_sdpa_cdna.bias.uid";
-/// The attention sink's uid, or NO_SINK, and its element stride across query heads
-/// (vendored-kernel modification 19).
+/// 1 when the vectorized bias objects read the graph's bias, 0 when only the strided ones
+/// do (`bias_kstrided`, vendored-kernel modification 31) or there is none.
+inline constexpr std::string_view BIAS_VECTORIZED_TOKEN = "flydsl_sdpa_cdna.bias.vectorized";
+/// 1 when a graph without a bias needs scaled scores (runsOnAZeroBias: a zero, negative or
+/// subnormal scale), which the objects without a bias do not keep: it runs on the bias
+/// objects with a zero bias. BIAS_VECTORIZED_TOKEN then says whether the vectorized ones read
+/// it (servableVectorZeroBias). Else 0.
+inline constexpr std::string_view ZERO_BIAS_TOKEN = "flydsl_sdpa_cdna.bias.zero";
+/// The attention sink's uid, or NO_SINK, its element stride across query heads
+/// (vendored-kernel modification 19), and 1 when it is FLOAT rather than in the query's dtype
+/// (modification 36).
 inline constexpr std::string_view SINK_TOKEN = "flydsl_sdpa_cdna.sink.uid";
 inline constexpr std::string_view SINK_STRIDE_TOKEN = "flydsl_sdpa_cdna.sink.stride";
+inline constexpr std::string_view SINK_FLOAT_TOKEN = "flydsl_sdpa_cdna.sink.float";
+/// The generic kernel's sink_on argument (vendored-kernel modification 36): no sink, a sink in
+/// the query's dtype, or a FLOAT one.
+inline constexpr int32_t SINK_OFF = 0;
+inline constexpr int32_t SINK_QUERY_DTYPE = 1;
+inline constexpr int32_t SINK_FLOAT = 2;
 /// 1 for an object built to add an attention sink's logit to its softmax (modification 19).
 inline constexpr std::string_view HAS_SINK_FIELD = "has_sink";
+/// The uids of the per-batch query and key lengths under padding, or NO_SEQ_LEN for a dense
+/// graph (vendored-kernel modification 32).
+inline constexpr std::string_view SEQ_LEN_Q_TOKEN = "flydsl_sdpa_cdna.seq_len_q.uid";
+inline constexpr std::string_view SEQ_LEN_KV_TOKEN = "flydsl_sdpa_cdna.seq_len_kv.uid";
+/// 1 when the mask's diagonal is bottom-right aligned, which under padding moves with each
+/// batch's own lengths (modification 32); 0 for top-left or no mask.
+inline constexpr std::string_view DIAG_BOTTOM_RIGHT_TOKEN = "flydsl_sdpa_cdna.diag_bottom_right";
+/// The uids of the ragged-offset tables packed (THD) Q/O and K/V go through, or NO_SEQ_LEN
+/// for unpacked operands (FlydslSdpaVarlen.hpp servablePackedVarlen; modification 34).
+inline constexpr std::string_view RAGGED_OFFSET_Q_TOKEN = "flydsl_sdpa_cdna.ragged_offset_q.uid";
+inline constexpr std::string_view RAGGED_OFFSET_KV_TOKEN = "flydsl_sdpa_cdna.ragged_offset_kv.uid";
+
+/// The generic kernel's `varlen_flags` bits (modification 32): per-batch lengths are passed,
+/// and a padded query row is stored as O = 0, LSE = -inf (hipDNN's reference contract);
+/// and the diagonal is bottom-right, so it moves with each batch's lengths. Modification 34:
+/// the operands are packed (THD) through the row-offset tables, each sequence starting at its
+/// own first token and as long as its token count.
+inline constexpr int32_t VARLEN_PADDED = 1;
+inline constexpr int32_t VARLEN_BOTTOM_RIGHT = 2;
+inline constexpr int32_t VARLEN_PACKED = 4;
+/// Dropout (vendored-kernel modification 33): the probability's f32 bits (0 for none), and
+/// the uids of the Philox seed and offset tensors, or NO_DROPOUT_TENSOR.
+inline constexpr std::string_view DROPOUT_P_TOKEN = "flydsl_sdpa_cdna.dropout_p";
+inline constexpr std::string_view DROPOUT_SEED_TOKEN = "flydsl_sdpa_cdna.dropout_seed.uid";
+inline constexpr std::string_view DROPOUT_OFFSET_TOKEN = "flydsl_sdpa_cdna.dropout_offset.uid";
+/// The uid of the RNG dump the dropout mask writer fills, or NO_RNG_DUMP (FlydslSdpaRngDump.hpp).
+inline constexpr std::string_view RNG_DUMP_TOKEN = "flydsl_sdpa_cdna.rng_dump.uid";
+/// 1 for an object built to drop attention probabilities (modification 33), 0 for one built
+/// without; the dual-wave and split decode families build none.
+inline constexpr std::string_view HAS_DROPOUT_FIELD = "has_dropout";
 
 /// The dual-wave kernel's workgroup is fixed (two waves of 64 per 32 query rows of its
 /// 256-row tile); the generic kernel runs two threads per query row of its tile.
@@ -259,6 +307,25 @@ struct OperandStrides
 /// The kernels move 16-byte vectors: eight bf16 / f16 elements.
 inline constexpr int64_t VECTOR_ELEMENTS = 8;
 
+/// The element types the CDNA objects are built for, by their metadata name: the 16-bit
+/// ones every FlyDSL SDPA family takes, and exact f32 (vendored-kernel modification 35),
+/// which only the generic CDNA kernel computes. The RDNA engines keep the shared
+/// kernelDataTypeName, so they still decline f32 graphs.
+inline std::optional<std::string> cdnaKernelDataTypeName(data_objects::DataType dataType)
+{
+    if(dataType == data_objects::DataType::FLOAT)
+    {
+        return std::string("f32");
+    }
+    return kernelDataTypeName(dataType);
+}
+
+/// Bytes per Q/K/V/O element: 4 for f32, BYTES_PER_ELEMENT for the 16-bit types.
+inline int64_t cdnaElementBytes(data_objects::DataType dataType)
+{
+    return dataType == data_objects::DataType::FLOAT ? int64_t{4} : BYTES_PER_ELEMENT;
+}
+
 /**
  * @brief The strides of @p tensor as the kernels take them, or nullopt for a tensor they
  *        cannot read.
@@ -271,8 +338,13 @@ inline constexpr int64_t VECTOR_ELEMENTS = 8;
  * store nowhere only because they fall outside it, which needs a sequence stride of at
  * least D. So a single-row sequence is given stride D rather than its stated one, which
  * is never stepped, and overlapping rows decline. A batch or head axis of extent 1 is never
- * stepped and gets stride 0. A ragged operand would be read as one dense batch, so it
- * declines too.
+ * stepped and gets stride 0.
+ *
+ * A ragged operand is packed (THD; modification 34): the generic kernel starts each sequence
+ * at its first token, which it reads from the operand's row-offset table, so its batch stride
+ * is not read and is given as 0, and its sequence stride steps tokens even where no sequence
+ * is longer than one. Which packings the kernels read is servablePackedVarlen's to say (the
+ * graph matcher asks it of every graph with a ragged operand).
  */
 inline std::optional<OperandStrides> servableStrides(const data_objects::TensorAttributes& tensor,
                                                      int64_t batch,
@@ -280,6 +352,7 @@ inline std::optional<OperandStrides> servableStrides(const data_objects::TensorA
                                                      int64_t sequence,
                                                      int64_t headDim)
 {
+    const bool packed = tensor.ragged_offset_tensor_uid().has_value();
     const auto* dims = tensor.dims();
     const auto* strides = tensor.strides();
     if(dims == nullptr || strides == nullptr || dims->size() != SDPA_RANK
@@ -294,7 +367,7 @@ inline std::optional<OperandStrides> servableStrides(const data_objects::TensorA
         return std::nullopt;
     }
     const auto stepped = [&](uint32_t axis, int64_t extent) -> std::optional<int64_t> {
-        if(extent == 1)
+        if(extent == 1 && (!packed || axis != SEQ_AXIS))
         {
             return axis == SEQ_AXIS ? headDim : 0;
         }
@@ -305,7 +378,7 @@ inline std::optional<OperandStrides> servableStrides(const data_objects::TensorA
         }
         return stride;
     };
-    const auto batchStride = stepped(BATCH_AXIS, batch);
+    const auto batchStride = packed ? std::optional<int64_t>(0) : stepped(BATCH_AXIS, batch);
     const auto sequenceStride = stepped(SEQ_AXIS, sequence);
     const auto headStride = stepped(HEAD_AXIS, heads);
     if(!batchStride.has_value() || !sequenceStride.has_value() || !headStride.has_value()
@@ -314,12 +387,12 @@ inline std::optional<OperandStrides> servableStrides(const data_objects::TensorA
         return std::nullopt;
     }
     const auto spanRows = checkedProduct({sequence - 1, *sequenceStride});
-    if(!spanRows.has_value() || (*spanRows + headDim) * BYTES_PER_ELEMENT > INT32_LIMIT)
+    if(!spanRows.has_value()
+       || (*spanRows + headDim) * cdnaElementBytes(tensor.data_type()) > INT32_LIMIT)
     {
         return std::nullopt;
     }
-    if(tensor.ragged_offset_tensor_uid().has_value() || tensor.virtual_()
-       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor))
+    if(tensor.virtual_() || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor))
     {
         return std::nullopt;
     }
@@ -365,35 +438,111 @@ inline std::optional<ViewStrides> viewStridesFor(const data_objects::TensorAttri
                        OperandStrides{problem.numHeads * problem.seqLenQ, 1, problem.seqLenQ}};
 }
 
-/// The bias's (batch, head, query) strides as the kernels take them; 0 broadcasts an axis.
+/// The bias's (batch, head, query, key) strides as the kernels take them, 0 broadcasting an
+/// axis; whether it is f32; and whether the vectorized bias objects read it (`vectorized`),
+/// or only the strided ones (`bias_kstrided`, vendored-kernel modification 31).
 struct BiasStrides
 {
     int64_t batch = 0;
     int64_t head = 0;
     int64_t query = 0;
+    int64_t key = 1;
+    bool f32 = false;
+    bool vectorized = true;
 };
 
+/// 1 for a generic object that reads its bias one key at a time, at a runtime key stride
+/// and element type (vendored-kernel modification 31); 0 for one that reads it as runs of 4
+/// keys in the query's dtype.
+inline constexpr std::string_view BIAS_KSTRIDED_FIELD = "bias_kstrided";
+
 /**
- * @brief The bias's strides, or nullopt for one the kernels cannot add.
+ * @brief The bias's strides as the strided bias objects read it, or nullopt for one no
+ *        object can add.
  *
- * The objects that add a bias read it in the query's dtype, as PyTorch requires of a float
- * attn_mask, right-aligned to [B, H, Sq, Skv] with any of B, H and Sq broadcast (extent 1 or
- * absent); the key axis is read contiguously and cannot be. Rows move as 16-byte vectors, so
- * every stride is a multiple of 8 elements, and one (batch, head) slice is one buffer view
- * of (Sq - 1) * stride_q + Skv elements within 32-bit addressing. A row stride below Skv
- * would overlap rows, so it declines.
+ * The strided objects (vendored-kernel modification 31) read each key on its own: in the
+ * query's dtype or f32, right-aligned to [B, H, Sq, Skv] with any axis broadcast (extent 1,
+ * absent or stride 0; the keys too), the tensor declaring 16-byte alignment. Its
+ * (batch, head) slice is one buffer view of (Sq - 1) * stride_q + (Skv - 1) * stride_k + 1
+ * elements, every byte offset within it 32-bit, as each stride is.
  */
-inline std::optional<BiasStrides> servableBias(const data_objects::TensorAttributes& bias,
-                                               const SdpaProblem& problem)
+inline std::optional<BiasStrides> servableStridedBias(const data_objects::TensorAttributes& bias,
+                                                      const SdpaProblem& problem)
+{
+    const auto* dims = bias.dims();
+    const auto* strides = bias.strides();
+    const bool f32 = bias.data_type() == data_objects::DataType::FLOAT;
+    if(dims == nullptr || strides == nullptr || dims->empty() || dims->size() > SDPA_RANK
+       || strides->size() != dims->size() || (bias.data_type() != problem.dataType && !f32)
+       || bias.virtual_() || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&bias)
+       || bias.ragged_offset_tensor_uid().has_value())
+    {
+        return std::nullopt;
+    }
+    // 16-byte aligned, as every bias the RDNA kernels read; only rows, keys and pitches
+    // past that alignment are read one key at a time.
+    const int64_t elementBytes = f32 ? int64_t{4} : BYTES_PER_ELEMENT;
+    if(!declaresAlignment(bias, VECTOR_ELEMENTS * BYTES_PER_ELEMENT))
+    {
+        return std::nullopt;
+    }
+    const auto rank = static_cast<int64_t>(dims->size());
+    const std::array<int64_t, 4> full{
+        problem.batch, problem.numHeads, problem.seqLenQ, problem.seqLenKv};
+    std::array<int64_t, 4> stride{0, 0, 0, 0};
+    for(int64_t axis = 0; axis < SDPA_RANK; ++axis)
+    {
+        const int64_t declared = axis - (SDPA_RANK - rank);
+        const int64_t extent
+            = declared < 0 ? 1 : dims->Get(static_cast<flatbuffers::uoffset_t>(declared));
+        if(extent == 1)
+        {
+            continue; // broadcast, or an axis of one
+        }
+        const int64_t value = strides->Get(static_cast<flatbuffers::uoffset_t>(declared));
+        if(extent != full[static_cast<size_t>(axis)] || value < 0 || value > INT32_LIMIT)
+        {
+            return std::nullopt;
+        }
+        stride[static_cast<size_t>(axis)] = value;
+    }
+    const auto lastRow = checkedProduct({problem.seqLenQ - 1, stride[2]});
+    const auto lastKey = checkedProduct({problem.seqLenKv - 1, stride[3]});
+    if(!lastRow.has_value() || !lastKey.has_value()
+       || (*lastRow + *lastKey + 1) * elementBytes > INT32_LIMIT)
+    {
+        return std::nullopt;
+    }
+    return BiasStrides{stride[0], stride[1], stride[2], stride[3], f32, false};
+}
+
+/**
+ * @brief Whether the vectorized bias objects read @p bias.
+ *
+ * They -- the dual-wave kernel's and the generic kernel's bias objects but the strided
+ * ones -- read it in the query's dtype, as PyTorch requires of a float attn_mask,
+ * right-aligned to [B, H, Sq, Skv] with any of B, H and Sq broadcast; the key axis is read
+ * contiguously and cannot be. Rows move as 16-byte vectors, so the tensor declares 16-byte
+ * alignment, every stride is a multiple of 8 elements, and one (batch, head) slice is one
+ * buffer view of (Sq - 1) * stride_q + Skv elements within 32-bit addressing. A row stride
+ * below Skv would overlap rows; the kernels read keys in runs of 4, and a run straddling
+ * the view's end could read as zero, so the key length is a multiple of 4. Under padding
+ * the generic objects keep the last real row's view at this key length, not the batch's
+ * (vendored-kernel modification 37): the bias is dense over it, so a batch's own key
+ * length may be any.
+ */
+inline bool servableVectorBias(const data_objects::TensorAttributes& bias,
+                               const SdpaProblem& problem)
 {
     const auto* dims = bias.dims();
     const auto* strides = bias.strides();
     if(dims == nullptr || strides == nullptr || dims->empty() || dims->size() > SDPA_RANK
        || strides->size() != dims->size() || bias.data_type() != problem.dataType || bias.virtual_()
        || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&bias)
-       || bias.ragged_offset_tensor_uid().has_value())
+       || bias.ragged_offset_tensor_uid().has_value()
+       || !declaresAlignment(bias, VECTOR_ELEMENTS * BYTES_PER_ELEMENT))
     {
-        return std::nullopt;
+        return false;
     }
     // Right-aligned: the last axis is the keys, then the queries, heads and batch.
     const auto rank = static_cast<int64_t>(dims->size());
@@ -411,7 +560,7 @@ inline std::optional<BiasStrides> servableBias(const data_objects::TensorAttribu
         }
         if(extent != full[static_cast<size_t>(axis)])
         {
-            return std::nullopt;
+            return false;
         }
         const int64_t value
             = extent == 1 ? 0 : strides->Get(static_cast<flatbuffers::uoffset_t>(declared));
@@ -419,40 +568,75 @@ inline std::optional<BiasStrides> servableBias(const data_objects::TensorAttribu
     }
     if(problem.seqLenKv > 1 && stride[3] != 1)
     {
-        return std::nullopt;
+        return false;
     }
     for(size_t axis = 0; axis < 3; ++axis)
     {
         if(stride[axis] < 0 || stride[axis] % VECTOR_ELEMENTS != 0 || stride[axis] > INT32_LIMIT)
         {
-            return std::nullopt;
+            return false;
         }
     }
     if(stride[2] != 0 && stride[2] < problem.seqLenKv)
     {
-        return std::nullopt;
+        return false;
     }
-    // The kernels read the bias as runs of 4 keys, and the slice's view ends at the last
-    // row's last key: a run straddling that end may read as zero, so a key length that is
-    // not a multiple of 4 declines.
     if(problem.seqLenKv % 4 != 0)
     {
-        return std::nullopt;
+        return false;
     }
     const auto span = checkedProduct({problem.seqLenQ - 1, stride[2]});
-    if(!span.has_value() || (*span + problem.seqLenKv) * BYTES_PER_ELEMENT > INT32_LIMIT)
+    return span.has_value() && (*span + problem.seqLenKv) * BYTES_PER_ELEMENT <= INT32_LIMIT;
+}
+
+/**
+ * @brief The bias's strides, or nullopt for one no object can add; `vectorized` says
+ *        whether the vectorized bias objects read it too (servableVectorBias()).
+ *
+ * Every bias graph runs on the strided objects (servableStridedBias()); one the vectorized
+ * objects read runs on those as well, ranked above.
+ */
+inline std::optional<BiasStrides> servableBias(const data_objects::TensorAttributes& bias,
+                                               const SdpaProblem& problem)
+{
+    auto strided = servableStridedBias(bias, problem);
+    if(strided.has_value() && servableVectorBias(bias, problem))
     {
-        return std::nullopt;
+        // A key axis of one is stride 0 to the strided objects and unread past key 0 by
+        // the vectorized ones; both read the same element.
+        strided->vectorized = true;
     }
-    return BiasStrides{stride[0], stride[1], stride[2]};
+    return strided;
+}
+
+/**
+ * @brief Whether the vectorized bias objects read the zero bias (runsOnAZeroBias), as they
+ *        would a [1, 1, 1, Skv] bias in the query's dtype (servableVectorBias): its keys in runs
+ *        of 4, so a key length that is a multiple of 4, its one row within 32-bit offsets.
+ *
+ * Every bias object reads it at stride 0 on the batch, head and query axes; the strided ones
+ * at key stride 0 too (zeroBiasStrides), the vectorized ones along its row of Skv zeros.
+ */
+inline bool servableVectorZeroBias(const SdpaProblem& problem)
+{
+    return problem.seqLenKv % 4 == 0 && problem.seqLenKv * BYTES_PER_ELEMENT <= INT32_LIMIT;
+}
+
+/// The zero bias's strides as the kernels take them: 0 on every axis, in the query's dtype.
+constexpr BiasStrides zeroBiasStrides(bool vectorized)
+{
+    return BiasStrides{0, 0, 0, 0, false, vectorized};
 }
 
 /// The (batch, head, query) strides of @p stats, an LSE output the kernels write: f32
 /// [B, H, Sq, 1], each axis of more than one element at a positive stride, every element
 /// within 32-bit offsets. nullopt for one they cannot. An axis of one element gets stride 0.
+/// A ragged LSE is packed as Q is (modification 34; the graph matcher checks it goes through
+/// Q's table): batch stride 0, and a sequence stride that steps tokens at any extent.
 inline std::optional<OperandStrides> servableStatsStrides(
     const data_objects::TensorAttributes& stats, int64_t batch, int64_t heads, int64_t sequence)
 {
+    const bool packed = stats.ragged_offset_tensor_uid().has_value();
     const auto* dims = stats.dims();
     const auto* strides = stats.strides();
     if(dims == nullptr || strides == nullptr || dims->size() != SDPA_RANK
@@ -466,14 +650,14 @@ inline std::optional<OperandStrides> servableStatsStrides(
         return std::nullopt;
     }
     if(stats.data_type() != data_objects::DataType::FLOAT || stats.virtual_()
-       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&stats)
-       || stats.ragged_offset_tensor_uid().has_value())
+       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&stats))
     {
         return std::nullopt;
     }
     // A stride on an axis of extent 1 is never used to address anything.
-    const auto axisStride = [strides](uint32_t axis, int64_t extent) -> std::optional<int64_t> {
-        if(extent == 1)
+    const auto axisStride
+        = [strides, packed](uint32_t axis, int64_t extent) -> std::optional<int64_t> {
+        if(extent == 1 && (!packed || axis != SEQ_AXIS))
         {
             return 0;
         }
@@ -484,7 +668,7 @@ inline std::optional<OperandStrides> servableStatsStrides(
         }
         return stride;
     };
-    const auto batchStride = axisStride(BATCH_AXIS, batch);
+    const auto batchStride = packed ? std::optional<int64_t>(0) : axisStride(BATCH_AXIS, batch);
     const auto headStride = axisStride(HEAD_AXIS, heads);
     const auto seqStride = axisStride(SEQ_AXIS, sequence);
     if(!batchStride.has_value() || !headStride.has_value() || !seqStride.has_value())
@@ -526,25 +710,36 @@ struct CdnaMask
     bool causal = false;
     int64_t offset = 0;
     int64_t windowLo = NO_WINDOW;
+    /// Whether the diagonal is bottom-right aligned: under padding the kernels move it, and
+    /// the window's edge with it, by each batch's (Skv_b - Skv) - (Sq_b - Sq)
+    /// (vendored-kernel modification 32).
+    bool bottomRight = false;
 };
 
 /**
  * @brief The graph's mask in the kernels' terms, or nullopt for one they cannot apply.
  *
- * The reference (CpuFpReferenceSdpa isMasked) hides key j from query row i when
+ * In the kernels' terms (resolveMaskBounds; left is the graph's left_bound - 1) the
+ * reference hides key j from query row i when
  * j > i + align + right, with align 0 top-left and Skv - Sq bottom-right; so causal and a
  * band to the right of the diagonal are both one offset, align + right. It hides j <
  * i + align - left too, a sliding window: the window's lower edge, align - left, is the
  * generic kernel's `window_lo` (vendored-kernel modification 11), and a window no row
  * reaches is none. A left bound with no right one declines: only the causal objects mask
- * at all. So does an offset past Skv - Sq: the causal objects mask the last KV tile's
- * padding with the same compare, which holds only while every row's diagonal stays
- * inside the keys -- top-left with more queries than keys, or a band.
+ * at all. An offset past Skv - Sq -- top-left with more queries than keys, or a band wider
+ * than that -- lets the last rows' diagonals pass the keys: the generic kernel's prefill
+ * objects clamp each row's diagonal to the last key (vendored-kernel modification 30), so
+ * those rows see every key and the last KV tile's padding stays masked; the dual-wave and
+ * split decode objects do not, and their kernel matchers decline such an offset
+ * (`diagonalPassesTheKeys`). An offset past
+ * Skv - 1 shows every row every key, as Skv - 1 does, so it is stored as Skv - 1 and
+ * stays within int32.
  */
 inline std::optional<CdnaMask>
     maskFor(const data_objects::SdpaAttributes& attributes, int64_t seqLenQ, int64_t seqLenKv)
 {
-    // The deprecated booleans resolved as the reference does (resolveMaskBounds).
+    // The deprecated booleans resolved as the reference does (resolveMaskBounds); `left` is
+    // the graph's left_bound minus one, the keys before the diagonal a row sees.
     const auto bounds = resolveMaskBounds(attributes);
     if(!bounds.has_value())
     {
@@ -563,12 +758,9 @@ inline std::optional<CdnaMask>
     }
     const int64_t align = alignBottomRight ? seqLenKv - seqLenQ : 0;
     // Compared before adding, so a bound near INT64_MAX cannot overflow.
-    if(right > seqLenKv - seqLenQ - align)
-    {
-        return std::nullopt;
-    }
-    const int64_t offset = align + right;
+    const int64_t offset = right > seqLenKv - 1 - align ? seqLenKv - 1 : align + right;
     CdnaMask mask{true, offset};
+    mask.bottomRight = alignBottomRight;
     // The last query row, the one reaching furthest right, hides keys j < (Sq - 1) +
     // window_lo; at or below -(Sq - 1) the window hides nothing (left compared, not
     // subtracted, for the same reason).
@@ -576,7 +768,75 @@ inline std::optional<CdnaMask>
     {
         mask.windowLo = align - left;
     }
+    // Every row sees every key: a diagonal at Skv - 1 or past it, with no window, hides
+    // nothing, so it is bound as no mask and runs on every engine's non-causal objects.
+    // The dual-wave and split decode objects would otherwise decline it, because its diagonal
+    // passes the keys. Under padding or packing, each batch's diagonal stays at or past its
+    // own last key, since Sq_b <= Sq and Skv_b <= Skv. Only diagonals that pass the keys are
+    // rebound: at one query row a bottom-right diagonal sits at Skv - 1 exactly, inside the
+    // keys, and keeps its causal objects.
+    if(offset == seqLenKv - 1 && mask.windowLo == NO_WINDOW && seqLenQ > 1)
+    {
+        return CdnaMask{};
+    }
     return mask;
+}
+
+/**
+ * @brief The graph's packed (THD) fields as the CDNA engines serve them, or nullopt.
+ *
+ * Without lengths: servablePackedVarlen()'s compact THD. With them (P3, cuDNN's ragged
+ * operands with `seq_len`): the same packing -- Q and O through one INT32 `[B + 1]` token
+ * table, K and V through one, each operand packed token by token through its table -- and both
+ * per-batch lengths, isServableSeqLenTensor, with or without `padding_mask` (as
+ * servableVarlenAsReferenceReads() reads them). Each table gives a sequence's slot; its length gives the real
+ * rows within it: the kernel clamps the length to the slot (vendored-kernel modification 34),
+ * a row past it in the slot is a padded row (O = 0, LSE = -inf), and keys past it are never
+ * read. One length alone, or `padding_mask` without both, declines.
+ */
+inline std::optional<SdpaVarlen> cdnaServablePackedVarlen(
+    const MatchContext& context, const data_objects::SdpaAttributes& attributes, int64_t batch)
+{
+    const bool hasSeqLenQ = attributes.seq_len_q_tensor_uid().has_value();
+    const bool hasSeqLenKv = attributes.seq_len_kv_tensor_uid().has_value();
+    if(!hasSeqLenQ && !hasSeqLenKv && !attributes.padding_mask())
+    {
+        return servablePackedVarlen(context, attributes, batch);
+    }
+    if(!hasSeqLenQ || !hasSeqLenKv
+       || !isServableSeqLenTensor(context, *attributes.seq_len_q_tensor_uid(), batch)
+       || !isServableSeqLenTensor(context, *attributes.seq_len_kv_tensor_uid(), batch))
+    {
+        return std::nullopt;
+    }
+    const auto* q = findTensor(context, attributes.q_tensor_uid());
+    const auto* k = findTensor(context, attributes.k_tensor_uid());
+    const auto* v = findTensor(context, attributes.v_tensor_uid());
+    const auto* o = findTensor(context, attributes.o_tensor_uid());
+    if(q == nullptr || k == nullptr || v == nullptr || o == nullptr)
+    {
+        return std::nullopt;
+    }
+    const int64_t offsetQ = q->ragged_offset_tensor_uid().value_or(NO_SEQ_LEN);
+    const int64_t offsetKv = k->ragged_offset_tensor_uid().value_or(NO_SEQ_LEN);
+    if(!isPackedThrough(*q, offsetQ) || !isPackedThrough(*o, offsetQ)
+       || !isPackedThrough(*k, offsetKv) || !isPackedThrough(*v, offsetKv)
+       || !isServableRaggedOffsetTensor(context, offsetQ, batch)
+       || !isServableRaggedOffsetTensor(context, offsetKv, batch))
+    {
+        return std::nullopt;
+    }
+    SdpaVarlen varlen{*attributes.seq_len_q_tensor_uid(), *attributes.seq_len_kv_tensor_uid()};
+    varlen.raggedOffsetQ = offsetQ;
+    varlen.raggedOffsetKv = offsetKv;
+    return varlen;
+}
+
+/// Whether a causal diagonal at @p offset passes the last key for some query row: row
+/// Sq - 1 sees keys up to Sq - 1 + offset.
+inline bool diagonalPassesTheKeys(const SdpaProblem& problem, int64_t offset)
+{
+    return offset > problem.seqLenKv - problem.seqLenQ;
 }
 
 /**
@@ -594,7 +854,7 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
         return std::nullopt;
     }
     const auto& attributes = *attributesPtr;
-    if(!computesInFloat(context))
+    if(!computesInFloat(context) || usesUnreadSchemaFields(context))
     {
         return std::nullopt;
     }
@@ -627,7 +887,7 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
         return std::nullopt;
     }
     // One dtype throughout, and one the kernels are built for.
-    if(!kernelDataTypeName(problem.dataType).has_value() || k->data_type() != problem.dataType
+    if(!cdnaKernelDataTypeName(problem.dataType).has_value() || k->data_type() != problem.dataType
        || v->data_type() != problem.dataType || o->data_type() != problem.dataType)
     {
         return std::nullopt;
@@ -656,19 +916,50 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
         return std::nullopt;
     }
 
+    // Variable sequence lengths (padding, ragged Q/K/V/O) and dropout (the probability, seed,
+    // offset, mask, scale and RNG dump): each feature's rules live in its own header, shared
+    // with the RDNA engines. A probability of 0 is the undropped result every object computes.
+    // A graph with a ragged operand is packed (THD), compact or with per-batch lengths, or
+    // declines (vendored-kernel modification 34).
+    const auto varlen = hasRaggedOperand(context, attributes)
+                            ? cdnaServablePackedVarlen(context, attributes, problem.batch)
+                            : servableVarlenAsReferenceReads(context, attributes, problem.batch);
+    const auto dropout = servableDropout(context, attributes);
+    if(!varlen.has_value() || !dropout.has_value())
+    {
+        return std::nullopt;
+    }
+    // Packed sequences with dropout or a bias decline, as on the RDNA engines: the dropout
+    // mask's counters and the bias are laid out by batch and position, and their packed
+    // forms are later work.
+    if(varlen->packed() && (dropout->active() || attributes.attn_mask_tensor_uid().has_value()))
+    {
+        return std::nullopt;
+    }
+    // A probability above 0 runs on the dropout objects, which add no sink, so that
+    // combination declines until objects serve it. Their bias builds add a bias the vectorized
+    // objects read; any other bias finds no dropout object at kernel match. Under padding
+    // they draw each batch's mask at the graph's declared extents, as AOTriton's varlen does,
+    // so a padded batch's mask is the dense one's (vendored-kernel modifications 32, 33).
+    if(dropout->active() && attributes.sink_token_tensor_uid().has_value())
+    {
+        return std::nullopt;
+    }
+    // The RNG dump: the keep mask a dropping launch applied, written by the mask writer at
+    // every element, padded rows and keys past a batch's length included.
+    const auto rngDump = servableRngDump(context,
+                                         attributes,
+                                         *dropout,
+                                         *varlen,
+                                         problem.batch,
+                                         problem.numHeads,
+                                         problem.seqLenQ,
+                                         problem.seqLenKv);
+    if(!rngDump.has_value())
+    {
+        return std::nullopt;
+    }
     // Every optional feature the kernels as built do not implement, declined explicitly.
-    if(attributes.seq_len_q_tensor_uid().has_value()
-       || attributes.seq_len_kv_tensor_uid().has_value())
-    {
-        return std::nullopt;
-    }
-    if(attributes.seed_tensor_uid().has_value() || attributes.offset_tensor_uid().has_value()
-       || attributes.dropout_mask_tensor_uid().has_value()
-       || attributes.dropout_scale_tensor_uid().has_value()
-       || attributes.dropout_probability().has_value())
-    {
-        return std::nullopt;
-    }
     if(attributes.page_table_k_tensor_uid().has_value()
        || attributes.page_table_v_tensor_uid().has_value()
        || attributes.max_seq_len_kv().has_value() || attributes.block_mask_tensor_uid().has_value())
@@ -684,24 +975,28 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     {
         return std::nullopt;
     }
-    // Softmax statistics: the LSE output is served; the split max / sum-exp outputs and the
-    // RNG dump are not. Asking for stats without naming a tensor to write them to is a graph
-    // the kernels cannot satisfy.
-    if(attributes.max_tensor_uid().has_value() || attributes.sum_exp_tensor_uid().has_value()
-       || attributes.rng_dump_tensor_uid().has_value())
+    // Softmax statistics: the LSE output is served; the split max / sum-exp outputs are not
+    // (the RNG dump is servableRngDump's). Asking for stats without naming a tensor to write
+    // them to is a graph the kernels cannot satisfy.
+    if(attributes.max_tensor_uid().has_value() || attributes.sum_exp_tensor_uid().has_value())
     {
         return std::nullopt;
     }
     int64_t biasUid = NO_BIAS;
+    bool biasVectorized = false;
     if(attributes.attn_mask_tensor_uid().has_value())
     {
         const auto* bias = findTensor(context, attributes.attn_mask_tensor_uid().value());
-        if(bias == nullptr || !declaresAlignment(*bias, vectorBytes)
-           || !servableBias(*bias, problem).has_value())
+        const auto biasStrides = bias == nullptr ? std::nullopt : servableBias(*bias, problem);
+        if(!biasStrides.has_value())
         {
             return std::nullopt;
         }
         biasUid = attributes.attn_mask_tensor_uid().value();
+        // Under padding too: the vectorized objects' last real row reads the bias up to the
+        // launch's key length (vendored-kernel modification 37), so a batch's key length
+        // need not be a multiple of their 4-key runs.
+        biasVectorized = biasStrides->vectorized;
     }
     int64_t statsUid = NO_STATS;
     bool statsPacked = true;
@@ -714,7 +1009,14 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
             = stats == nullptr
                   ? std::nullopt
                   : servableStatsStrides(*stats, problem.batch, problem.numHeads, problem.seqLenQ);
-        if(!lseStrides.has_value() || !declaresAlignment(*stats, sizeof(float))
+        // Under packed operands the LSE is packed through Q's own table, one row per query
+        // token (a dense one would need each sequence's batch base, which a packed launch
+        // does not index); otherwise it is dense.
+        const bool lseLayoutServed
+            = stats != nullptr
+              && (varlen->packed() ? isPackedThrough(*stats, varlen->raggedOffsetQ)
+                                   : !stats->ragged_offset_tensor_uid().has_value());
+        if(!lseStrides.has_value() || !lseLayoutServed || !declaresAlignment(*stats, sizeof(float))
            || !elementsDoNotOverlap(*stats)
            || (attributes.generate_stats().has_value() && !attributes.generate_stats().value()))
         {
@@ -727,13 +1029,29 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     {
         return std::nullopt;
     }
-    if(attributes.alibi_mask() || attributes.padding_mask())
+    // ALiBi slopes (the padding mask is servableVarlen's).
+    if(attributes.alibi_mask())
     {
         return std::nullopt;
     }
+    // The MMA input type: unset, or the operands' own class. An f32 graph takes only FLOAT
+    // (exact f32 products); HALF or BFLOAT16 on one would ask for a reduced-precision MMA
+    // the f32 objects do not run (vendored-kernel modification 35).
     const auto mmaCoreMode = attributes.mma_core_mode();
-    if(mmaCoreMode != data_objects::DataType::UNSET && mmaCoreMode != data_objects::DataType::HALF
-       && mmaCoreMode != data_objects::DataType::BFLOAT16)
+    const bool f32 = problem.dataType == data_objects::DataType::FLOAT;
+    if(f32 ? mmaCoreMode != data_objects::DataType::UNSET
+                 && mmaCoreMode != data_objects::DataType::FLOAT
+           : mmaCoreMode != data_objects::DataType::UNSET
+                 && mmaCoreMode != data_objects::DataType::HALF
+                 && mmaCoreMode != data_objects::DataType::BFLOAT16)
+    {
+        return std::nullopt;
+    }
+    // The f32 objects' first wave takes no bias, sink or dropout: each declines until objects
+    // serve it (COVERAGE.md section 7.11).
+    if(f32
+       && (attributes.attn_mask_tensor_uid().has_value()
+           || attributes.sink_token_tensor_uid().has_value() || dropout->active()))
     {
         return std::nullopt;
     }
@@ -772,21 +1090,36 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
         std::memcpy(&scaleBits, &scale, sizeof(scale));
         scaleToken = static_cast<int64_t>(scaleBits);
     }
+    // A scale that needs scaled scores, on a graph without a bias, runs on the bias objects
+    // with a zero bias (runsOnAZeroBias). It declines where a graph's own bias does: packed
+    // sequences, and the f32 objects, which have no bias twins.
+    const bool zeroBias = runsOnAZeroBias(context, attributes);
+    if(zeroBias)
+    {
+        if(varlen->packed() || f32)
+        {
+            return std::nullopt;
+        }
+        biasVectorized = servableVectorZeroBias(problem);
+    }
 
-    // An attention sink: one logit per query head, in the query's dtype, as a rank-1
-    // [Hq] or rank-4 [1, Hq, 1, 1] device tensor (vendored-kernel modification 19).
+    // An attention sink: one logit per query head, FLOAT or in the query's dtype, as a
+    // rank-1 [Hq] or rank-4 [1, Hq, 1, 1] device tensor (vendored-kernel modifications 19
+    // and 36).
     int64_t sinkUid = NO_SINK;
     int64_t sinkStride = 0;
+    int64_t sinkFloat = 0;
     if(attributes.sink_token_tensor_uid().has_value())
     {
-        const auto stride = servableSinkStride(
+        const auto sink = servableSink(
             context, *attributes.sink_token_tensor_uid(), problem.numHeads, problem.dataType);
-        if(!stride.has_value())
+        if(!sink.has_value())
         {
             return std::nullopt;
         }
         sinkUid = *attributes.sink_token_tensor_uid();
-        sinkStride = *stride;
+        sinkStride = sink->stride;
+        sinkFloat = sink->isFloat ? 1 : 0;
     }
 
     BoundTokens bound;
@@ -801,10 +1134,26 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     bound[std::string(STATS_PACKED_TOKEN)] = statsPacked ? 1 : 0;
     bound[std::string(V_OWN_STRIDES_TOKEN)] = vOwnStrides ? 1 : 0;
     bound[std::string(BIAS_TOKEN)] = biasUid;
+    bound[std::string(BIAS_VECTORIZED_TOKEN)] = biasVectorized ? 1 : 0;
+    bound[std::string(ZERO_BIAS_TOKEN)] = zeroBias ? 1 : 0;
     bound[std::string(SINK_TOKEN)] = sinkUid;
     bound[std::string(SINK_STRIDE_TOKEN)] = sinkStride;
+    bound[std::string(SINK_FLOAT_TOKEN)] = sinkFloat;
     bound[std::string(SCALE_SOURCE_TOKEN)] = static_cast<int64_t>(scaleSource);
     bound[std::string(SCALE_TOKEN)] = scaleToken;
+    bound[std::string(SEQ_LEN_Q_TOKEN)] = varlen->seqLenQ;
+    bound[std::string(SEQ_LEN_KV_TOKEN)] = varlen->seqLenKv;
+    bound[std::string(DIAG_BOTTOM_RIGHT_TOKEN)] = mask->bottomRight ? 1 : 0;
+    bound[std::string(RAGGED_OFFSET_Q_TOKEN)] = varlen->raggedOffsetQ;
+    bound[std::string(RAGGED_OFFSET_KV_TOKEN)] = varlen->raggedOffsetKv;
+    int32_t probabilityBits = 0;
+    static_assert(sizeof(probabilityBits) == sizeof(dropout->probability),
+                  "float must be 32-bit to round-trip");
+    std::memcpy(&probabilityBits, &dropout->probability, sizeof(probabilityBits));
+    bound[std::string(DROPOUT_P_TOKEN)] = static_cast<int64_t>(probabilityBits);
+    bound[std::string(DROPOUT_SEED_TOKEN)] = dropout->seed;
+    bound[std::string(DROPOUT_OFFSET_TOKEN)] = dropout->offset;
+    bound[std::string(RNG_DUMP_TOKEN)] = *rngDump;
     return bound;
 }
 
@@ -820,10 +1169,40 @@ struct FlydslSdpaCdnaBinding
     int64_t windowLo = NO_WINDOW;
     int64_t stats = NO_STATS;
     int64_t bias = NO_BIAS;
+    /// Whether the graph runs on the zero bias (ZERO_BIAS_TOKEN).
+    bool zeroBias = false;
     int64_t sink = NO_SINK;
     int64_t sinkStride = 0;
+    /// Whether the sink is FLOAT rather than in the query's dtype.
+    bool sinkFloat = false;
     ScaleSource scaleSource = ScaleSource::VALUE;
     int64_t scale = 0;
+    int64_t seqLenQ = NO_SEQ_LEN;
+    int64_t seqLenKv = NO_SEQ_LEN;
+    int64_t bottomRight = 0;
+    int64_t raggedOffsetQ = NO_SEQ_LEN;
+    int64_t raggedOffsetKv = NO_SEQ_LEN;
+    float dropoutProbability = 0.0F;
+    int64_t dropoutSeed = NO_DROPOUT_TENSOR;
+    int64_t dropoutOffset = NO_DROPOUT_TENSOR;
+    int64_t rngDump = NO_RNG_DUMP;
+
+    bool padded() const
+    {
+        return seqLenQ != NO_SEQ_LEN;
+    }
+
+    /// Whether the graph packs its sequences (THD, through ragged-offset tables).
+    bool packed() const
+    {
+        return raggedOffsetQ != NO_SEQ_LEN;
+    }
+
+    /// Whether any probability is dropped: a probability of 0 runs the plain objects.
+    bool dropsOut() const
+    {
+        return dropoutProbability > 0.0F;
+    }
 };
 
 inline FlydslSdpaCdnaBinding flydslSdpaCdnaBinding(const BoundTokens& bound)
@@ -850,10 +1229,22 @@ inline FlydslSdpaCdnaBinding flydslSdpaCdnaBinding(const BoundTokens& bound)
     binding.windowLo = read(WINDOW_TOKEN);
     binding.stats = read(STATS_TOKEN);
     binding.bias = read(BIAS_TOKEN);
+    binding.zeroBias = read(ZERO_BIAS_TOKEN) != 0;
     binding.sink = read(SINK_TOKEN);
     binding.sinkStride = read(SINK_STRIDE_TOKEN);
+    binding.sinkFloat = read(SINK_FLOAT_TOKEN) != 0;
     binding.scaleSource = static_cast<ScaleSource>(read(SCALE_SOURCE_TOKEN));
     binding.scale = read(SCALE_TOKEN);
+    binding.seqLenQ = read(SEQ_LEN_Q_TOKEN);
+    binding.seqLenKv = read(SEQ_LEN_KV_TOKEN);
+    binding.bottomRight = read(DIAG_BOTTOM_RIGHT_TOKEN);
+    binding.raggedOffsetQ = read(RAGGED_OFFSET_Q_TOKEN);
+    binding.raggedOffsetKv = read(RAGGED_OFFSET_KV_TOKEN);
+    const auto probabilityBits = static_cast<int32_t>(read(DROPOUT_P_TOKEN));
+    std::memcpy(&binding.dropoutProbability, &probabilityBits, sizeof(probabilityBits));
+    binding.dropoutSeed = read(DROPOUT_SEED_TOKEN);
+    binding.dropoutOffset = read(DROPOUT_OFFSET_TOKEN);
+    binding.rngDump = read(RNG_DUMP_TOKEN);
     return binding;
 }
 
@@ -868,14 +1259,20 @@ inline std::optional<int64_t>
     };
     static constexpr std::array<Constant, 3> GENERIC_CONSTANTS{
         {{"any_diagonal", 1}, {"split_kv", 0}, {"pack_gqa", 0}}};
-    static constexpr std::array<Constant, 6> DUALWAVE_CONSTANTS{{{"kv_align", 0},
+    static constexpr std::array<Constant, 8> DUALWAVE_CONSTANTS{{{"kv_align", 0},
                                                                  {"qk_mask", 0},
                                                                  {"has_sink", 0},
                                                                  {"dv_split", 1},
                                                                  {"split_kv", 0},
-                                                                 {"pack_gqa", 0}}};
-    static constexpr std::array<Constant, 4> DECODE_CONSTANTS{
-        {{"any_diagonal", 1}, {"kv_align", 0}, {"split_kv", 1}, {"pack_gqa", 1}}};
+                                                                 {"pack_gqa", 0},
+                                                                 {"bias_kstrided", 0},
+                                                                 {"has_dropout", 0}}};
+    static constexpr std::array<Constant, 6> DECODE_CONSTANTS{{{"any_diagonal", 1},
+                                                               {"kv_align", 0},
+                                                               {"split_kv", 1},
+                                                               {"pack_gqa", 1},
+                                                               {"bias_kstrided", 0},
+                                                               {"has_dropout", 0}}};
     const auto lookup = [field](const auto& constants) -> std::optional<int64_t> {
         for(const auto& constant : constants)
         {
@@ -1069,7 +1466,7 @@ inline bool reachesWithin32Bits(const MatchContext& context,
         const auto rowsReach = [&](const OperandStrides& strides, int64_t width) {
             const auto span = checkedProduct({*paddedRows - 1, strides.sequence});
             return span.has_value() && *span <= INT32_LIMIT - width
-                   && fits(checkedProduct({*span + width, BYTES_PER_ELEMENT}));
+                   && fits(checkedProduct({*span + width, cdnaElementBytes(problem.dataType)}));
         };
         if(!rowsReach(*qStrides, problem.headDim) || !rowsReach(*oStrides, problem.headDimV))
         {
@@ -1082,7 +1479,7 @@ inline bool reachesWithin32Bits(const MatchContext& context,
                                  problem.numHeads,
                                  problem.seqLenQ,
                                  problem.headDimV,
-                                 BYTES_PER_ELEMENT)))
+                                 cdnaElementBytes(problem.dataType))))
     {
         return false;
     }
@@ -1090,10 +1487,11 @@ inline bool reachesWithin32Bits(const MatchContext& context,
     {
         // One KV head's group: its query heads and every query row.
         const int64_t group = problem.numHeads / problem.numKvHeads;
+        const auto elementBytes = cdnaElementBytes(problem.dataType);
         if(!fits(wholeTensorBytes(
-               *qStrides, 1, group, problem.seqLenQ, problem.headDim, BYTES_PER_ELEMENT))
+               *qStrides, 1, group, problem.seqLenQ, problem.headDim, elementBytes))
            || !fits(wholeTensorBytes(
-               *oStrides, 1, group, problem.seqLenQ, problem.headDimV, BYTES_PER_ELEMENT)))
+               *oStrides, 1, group, problem.seqLenQ, problem.headDimV, elementBytes)))
         {
             return false;
         }
@@ -1146,10 +1544,27 @@ inline bool familyKernelMatches(const MatchContext& context,
         return false;
     }
 
+    // A bias object for a graph with a bias, or one that runs on the zero bias (a scale that
+    // needs scaled scores, ZERO_BIAS_TOKEN); a plain one for any other.
     const auto hasBias = integerMetadata(kernel, HAS_BIAS_FIELD);
     const auto boundBias = tryGetBoundInt(bound, BIAS_TOKEN);
-    if(!hasBias.has_value() || !boundBias.has_value()
-       || *hasBias != (*boundBias != NO_BIAS ? 1 : 0))
+    const auto zeroBias = tryGetBoundInt(bound, ZERO_BIAS_TOKEN);
+    if(!hasBias.has_value() || !boundBias.has_value() || !zeroBias.has_value())
+    {
+        return false;
+    }
+    const bool biased = *boundBias != NO_BIAS || *zeroBias != 0;
+    if(*hasBias != (biased ? 1 : 0))
+    {
+        return false;
+    }
+    // A bias the vectorized objects cannot read -- broadcast along the keys, f32, a key
+    // length or row pitch off their vectors -- runs on the strided ones only
+    // (vendored-kernel modification 31), which read any bias.
+    const auto kstrided = familyKnob(kernel, BIAS_KSTRIDED_FIELD, family);
+    const auto biasVectorized = tryGetBoundInt(bound, BIAS_VECTORIZED_TOKEN);
+    if(!kstrided.has_value() || !biasVectorized.has_value()
+       || (biased && *kstrided == 0 && *biasVectorized == 0))
     {
         return false;
     }
@@ -1160,11 +1575,77 @@ inline bool familyKernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // The dual-wave and split decode objects mask the last KV tile's padding with their
+    // causal compare alone, so they serve only a diagonal that stays inside the keys (the
+    // generic prefill objects clamp it, vendored-kernel modification 30, at any query
+    // length).
+    const auto boundCausal = tryGetBoundInt(bound, CAUSAL_TOKEN);
+    if(!boundCausal.has_value()
+       || ((tile->dualwave || tile->splitKv) && *boundCausal != 0
+           && diagonalPassesTheKeys(problem, *diagOffset)))
+    {
+        return false;
+    }
+    // Padding runs on the generic kernel, whose objects read per-batch lengths (vendored-
+    // kernel modification 32); the dual-wave kernel takes none. The split decode objects
+    // keep the plain causal compare, so under padding they serve a bottom-right diagonal
+    // only, held inside the keys above and so inside every batch's own; a top-left one
+    // passes the keys of any batch with more queries than keys.
+    const auto seqLenQ = tryGetBoundInt(bound, SEQ_LEN_Q_TOKEN);
+    const auto bottomRight = tryGetBoundInt(bound, DIAG_BOTTOM_RIGHT_TOKEN);
+    if(!seqLenQ.has_value() || !bottomRight.has_value())
+    {
+        return false;
+    }
+    const bool padded = *seqLenQ != NO_SEQ_LEN;
+    if(padded && (tile->dualwave || (tile->splitKv && *boundCausal != 0 && *bottomRight == 0)))
+    {
+        return false;
+    }
+    // Packed (THD) sequences run on the generic prefill objects, which read the row-offset
+    // tables (vendored-kernel modification 34); the dual-wave, split and packed-GQA (decode)
+    // objects index every operand by batch.
+    const auto raggedOffsetQ = tryGetBoundInt(bound, RAGGED_OFFSET_Q_TOKEN);
+    if(!raggedOffsetQ.has_value()
+       || (*raggedOffsetQ != NO_SEQ_LEN && (tile->dualwave || tile->splitKv || tile->packGqa)))
+    {
+        return false;
+    }
+    // f32 runs on the generic prefill objects (vendored-kernel modification 35): the
+    // dual-wave kernel is gfx950's 16-bit pipeline, and the split decode objects have no f32
+    // build yet.
+    if(problem.dataType == data_objects::DataType::FLOAT && (tile->dualwave || tile->splitKv))
+    {
+        return false;
+    }
+    // Per-sequence lengths of either kind: each sequence's keys end at its own length.
+    const bool perSequence = padded || *raggedOffsetQ != NO_SEQ_LEN;
     // A sink object for a graph with an attention sink, a plain one for a graph without
     // (vendored-kernel modification 19; the dual-wave kernel builds none).
     const auto sinkUid = tryGetBoundInt(bound, SINK_TOKEN);
     const auto hasSink = familyKnob(kernel, HAS_SINK_FIELD, family);
     if(!sinkUid.has_value() || !hasSink.has_value() || *hasSink != (*sinkUid != NO_SINK ? 1 : 0))
+    {
+        return false;
+    }
+    // A dropout object for a graph that drops probabilities, a plain one for a graph that
+    // does not (vendored-kernel modification 33; the generic prefill objects only).
+    const auto dropoutBits = tryGetBoundInt(bound, DROPOUT_P_TOKEN);
+    const auto hasDropout = familyKnob(kernel, HAS_DROPOUT_FIELD, family);
+    if(!dropoutBits.has_value() || !hasDropout.has_value())
+    {
+        return false;
+    }
+    float probability = 0.0F;
+    const auto probabilityBits = static_cast<int32_t>(*dropoutBits);
+    std::memcpy(&probability, &probabilityBits, sizeof(probability));
+    if(*hasDropout != (probability > 0.0F ? 1 : 0))
+    {
+        return false;
+    }
+    // An RNG dump is written by the dropout mask writer, which must ship in this object's shard.
+    const auto rngDump = tryGetBoundInt(bound, RNG_DUMP_TOKEN);
+    if(!rngDump.has_value() || (*rngDump != NO_RNG_DUMP && !hasDropoutMaskWriter(kernel)))
     {
         return false;
     }
@@ -1180,8 +1661,11 @@ inline bool familyKernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // An object built without the KV tail mask serves no padding or packing either: a
+    // sequence's keys past its own length would reach the softmax.
     const auto kvAlign = familyKnob(kernel, KV_ALIGN_FIELD, family);
-    if(!kvAlign.has_value() || *kvAlign < 0 || (*kvAlign > 0 && problem.seqLenKv % *kvAlign != 0))
+    if(!kvAlign.has_value() || *kvAlign < 0
+       || (*kvAlign > 0 && (perSequence || problem.seqLenKv % *kvAlign != 0)))
     {
         return false;
     }
@@ -1219,7 +1703,7 @@ inline bool familyKernelMatches(const MatchContext& context,
         = *qkMask == 1 ? problem.headDim <= *headDim && problem.headDim % QK_MASK_ALIGN == 0
                        : *qkMask == 0 && *headDim == problem.headDim;
 
-    const auto dataTypeName = kernelDataTypeName(problem.dataType);
+    const auto dataTypeName = cdnaKernelDataTypeName(problem.dataType);
     const auto causal = tryGetBoundInt(bound, CAUSAL_TOKEN);
     return servesHead && dataTypeName.has_value()
            && stringMetadata(kernel, DTYPE_FIELD) == *dataTypeName && causal.has_value()
@@ -1294,11 +1778,16 @@ inline FlydslLayout4 bshdLayout(int64_t batch, int64_t sequence, int64_t heads, 
  * diag_offset, then the strides stride_q_b, stride_q_h, stride_o_b, stride_o_n,
  * stride_o_h, stride_kv_b, stride_kv_h, stride_bias_b, stride_bias_h (i32); its bias
  * row stride is bias_stride0. Generic (flash_attn_generic.py): Q, K, V, O,
- * LSE; seq_len, seq_len_kv (i32); CuSeqQ, CuSeqKv, BlockTable; block_table_stride (i32);
+ * LSE; seq_len, seq_len_kv (i32); SeqLenQ, SeqLenKv (upstream's cu_seqlens slots, a padded
+ * launch's per-batch lengths), BlockTable; varlen_flags (the page-table stride's slot; i32);
  * sm_scale (f32); num_heads_q, num_heads_kv, stride_q_n, stride_kv_n, lse_on, diag_offset
  * and the same seven strides (i32), then the window, the bias and its strides, V's strides,
  * the Q/K head dim, the split workspace and count, the sink and its stride and switch,
- * and the LSE's batch, head and token strides (i32). A 4-byte scalar slot is the same to the
+ * the LSE's batch, head and token strides, and the bias's key stride and f32 switch
+ * (vendored-kernel modification 31) (i32); then RowOffQ, RowOffKv, DropoutSeed and
+ * DropoutOffset, the dropout offset's two by-value words and idropout_p (i32) and
+ * dropout_scale (f32), appended once for the varlen and dropout changes
+ * (modification 32). A 4-byte scalar slot is the same to the
  * signature check whichever type it holds, so each list is written as runs of tensors
  * and scalars.
  */
@@ -1350,23 +1839,162 @@ inline const std::vector<KernelArgument>& genericSignature()
                                                                         {1, false},
                                                                         {1, true},
                                                                         {2, false},
-                                                                        {3, false}});
+                                                                        {5, false},
+                                                                        {4, true},
+                                                                        {4, false}});
     return s_signature;
 }
 
 /// The split objects' merge kernel: O, LSE, WsO, WsLse; then seq_len, num_heads_q, lse_on,
 /// num_splits and O's batch, token and head strides (i32); the Sink, its head stride and
-/// sink_on; and the LSE's batch, head and token strides (i32).
+/// sink_on; the LSE's batch, head and token strides (i32); and the per-batch query lengths,
+/// packed sequences' row offsets and the varlen flags (vendored-kernel modification 32).
 inline const std::vector<KernelArgument>& mergeSignature()
 {
-    static const std::vector<KernelArgument> s_signature
-        = signatureOf({{4, true}, {7, false}, {1, true}, {2, false}, {3, false}});
+    static const std::vector<KernelArgument> s_signature = signatureOf(
+        {{4, true}, {7, false}, {1, true}, {2, false}, {3, false}, {2, true}, {1, false}});
     return s_signature;
 }
 
 inline const data_objects::TensorAttributes& requireTensor(const MatchContext& context, int64_t uid)
 {
     return requireSdpaTensor(context, uid, "flydsl_sdpa_cdna");
+}
+
+/// A dropout launch's workspace when its seed or offset is given by value: the kernels read
+/// the seed and offset1 through pointers (vendored-kernel modification 33), so a host seed is
+/// written to the first 8 bytes, and a host offset rides offset2 beside 8 zero bytes read as
+/// offset1.
+inline constexpr size_t DROPOUT_WORKSPACE_BYTES = 2 * sizeof(uint64_t);
+
+/// Where a dropout launch's Philox seed and offset come from: the graph's device tensor, or a
+/// host value resolved at execute.
+struct CdnaPhiloxSources
+{
+    std::optional<hipdnn_plugin_sdk::ScalarOperand> seedValue;
+    std::optional<hipdnn_plugin_sdk::ScalarOperand> offsetValue;
+
+    bool needWorkspace() const
+    {
+        return seedValue.has_value() || offsetValue.has_value();
+    }
+};
+
+inline CdnaPhiloxSources cdnaPhiloxSources(const MatchContext& context,
+                                           const FlydslSdpaCdnaBinding& binding)
+{
+    CdnaPhiloxSources sources;
+    if(!binding.dropsOut())
+    {
+        return sources;
+    }
+    const auto byValue
+        = [&context](int64_t uid) -> std::optional<hipdnn_plugin_sdk::ScalarOperand> {
+        if(!hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&requireTensor(context, uid)))
+        {
+            return std::nullopt;
+        }
+        return hipdnn_plugin_sdk::makeScalarOperand(
+            context.graph.getTensorMap(), uid, "dropout seed or offset");
+    };
+    sources.seedValue = byValue(binding.dropoutSeed);
+    sources.offsetValue = byValue(binding.dropoutOffset);
+    return sources;
+}
+
+/// A Philox seed or offset given by value, widened to 64 bits: INT64 as is, INT32
+/// sign-extended (as C++ widens it), read as the bits the kernels take.
+inline uint64_t cdnaPhiloxScalar(const hipdnn_plugin_sdk::ScalarOperand& operand,
+                                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                 uint32_t numDeviceBuffers)
+{
+    const auto value
+        = hipdnn_plugin_sdk::resolveScalarOperand(operand, deviceBuffers, numDeviceBuffers);
+    if(const auto* wide = std::get_if<int64_t>(&value))
+    {
+        return static_cast<uint64_t>(*wide);
+    }
+    if(const auto* narrow = std::get_if<int32_t>(&value))
+    {
+        return static_cast<uint64_t>(static_cast<int64_t>(*narrow));
+    }
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+        "flydsl_sdpa_cdna: a dropout seed or offset given by value must be INT64 or INT32");
+}
+
+/// The generic kernel's dropout arguments (modification 33). A plain object reads none; it
+/// gets O for both pointers, no offset, a threshold of 0 and a scale of 1.
+struct CdnaDropoutArgs
+{
+    void* seed = nullptr;
+    void* offset1 = nullptr;
+    uint64_t offset2 = 0;
+    int32_t threshold = 0;
+    float scale = 1.0F;
+};
+
+inline CdnaDropoutArgs cdnaDropoutArgs(const FlydslSdpaCdnaBinding& binding,
+                                       const CdnaPhiloxSources& sources,
+                                       const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                       uint32_t numDeviceBuffers,
+                                       void* workspace,
+                                       void* placeholder,
+                                       hipStream_t stream)
+{
+    CdnaDropoutArgs args{placeholder, placeholder};
+    if(!binding.dropsOut())
+    {
+        return args;
+    }
+    if(sources.needWorkspace() && workspace == nullptr)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "flydsl_sdpa_cdna: a dropout seed or offset given by value needs the engine's "
+            "workspace");
+    }
+    // 32-bit memsets on the launch stream, not a host copy: the values travel in the
+    // commands themselves, so the launch stays capturable into a graph.
+    auto* words = static_cast<uint32_t*>(workspace);
+    const auto write = [stream](uint32_t* word, uint32_t value) {
+        if(hipMemsetD32Async(word, static_cast<int>(value), 1, stream) != hipSuccess)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "flydsl_sdpa_cdna: could not write the dropout seed or offset to the "
+                "workspace");
+        }
+    };
+    if(sources.seedValue.has_value())
+    {
+        const auto seed = cdnaPhiloxScalar(*sources.seedValue, deviceBuffers, numDeviceBuffers);
+        write(words, static_cast<uint32_t>(seed));
+        write(words + 1, static_cast<uint32_t>(seed >> 32));
+        args.seed = workspace;
+    }
+    else
+    {
+        args.seed = hipdnn_plugin_sdk::findDeviceBuffer(
+                        binding.dropoutSeed, deviceBuffers, numDeviceBuffers)
+                        .ptr;
+    }
+    if(sources.offsetValue.has_value())
+    {
+        args.offset2 = cdnaPhiloxScalar(*sources.offsetValue, deviceBuffers, numDeviceBuffers);
+        write(words + 2, 0);
+        write(words + 3, 0);
+        args.offset1 = words + 2;
+    }
+    else
+    {
+        args.offset1 = hipdnn_plugin_sdk::findDeviceBuffer(
+                           binding.dropoutOffset, deviceBuffers, numDeviceBuffers)
+                           .ptr;
+    }
+    args.threshold = dropoutThreshold(binding.dropoutProbability);
+    args.scale = dropoutScale(binding.dropoutProbability);
+    return args;
 }
 
 /// The compiled kernel plus everything launch() needs.
@@ -1381,7 +2009,11 @@ public:
                            ViewStrides strides,
                            BiasStrides biasStrides,
                            int64_t splits = 1,
-                           std::optional<IngestorKernelCode> mergeCode = std::nullopt)
+                           std::optional<IngestorKernelCode> mergeCode = std::nullopt,
+                           CdnaPhiloxSources philoxSources = {},
+                           std::optional<DropoutMaskLaunch> dropoutMask = std::nullopt,
+                           bool rawScores = true,
+                           std::optional<size_t> zeroBiasAt = std::nullopt)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
@@ -1391,7 +2023,37 @@ public:
         , _biasStrides(biasStrides)
         , _splits(splits)
         , _mergeCode(std::move(mergeCode))
+        , _philoxSources(philoxSources)
+        , _dropoutMask(std::move(dropoutMask))
+        , _rawScores(rawScores)
+        , _zeroBiasAt(zeroBiasAt)
     {
+    }
+
+    /// Whether the object keeps its running max over unscaled scores (no bias): it takes a
+    /// runtime scale only when rawScoresServe accepts it.
+    bool rawScores() const
+    {
+        return _rawScores;
+    }
+
+    /// Where in the workspace the zero bias the object reads starts (runsOnAZeroBias); empty
+    /// when it reads the graph's bias or none.
+    const std::optional<size_t>& zeroBiasAt() const
+    {
+        return _zeroBiasAt;
+    }
+
+    /// Where a dropout launch's seed and offset come from (vendored-kernel modification 33).
+    const CdnaPhiloxSources& philoxSources() const
+    {
+        return _philoxSources;
+    }
+
+    /// The RNG dump's writer, launched after the attention launch; empty without a dump.
+    const std::optional<DropoutMaskLaunch>& dropoutMask() const
+    {
+        return _dropoutMask;
     }
 
     /// How many ways the keys are split; the merge kernel runs when more than one.
@@ -1451,6 +2113,10 @@ private:
     BiasStrides _biasStrides;
     int64_t _splits = 1;
     std::optional<IngestorKernelCode> _mergeCode;
+    CdnaPhiloxSources _philoxSources;
+    std::optional<DropoutMaskLaunch> _dropoutMask;
+    bool _rawScores = true;
+    std::optional<size_t> _zeroBiasAt;
 };
 
 /**
@@ -1469,13 +2135,16 @@ public:
     {
     }
 
-    /// Only a split object launched with more than one split needs scratch: the partials.
+    /// A split object launched with more than one split needs scratch for its partials; a
+    /// dropout launch whose seed or offset is given by value needs 16 bytes to read them from
+    /// (a dropout object is never a split one); and a bias object run for a graph without a
+    /// bias reads the zero bias after either (runsOnAZeroBias).
     size_t workspaceBytes(const MatchContext& context,
                           const BoundTokens& bound,
                           const KernelDefinition& kernel) const override
     {
         const auto tile = candidateTile(kernel, _family);
-        if(!tile.has_value() || !tile->splitKv)
+        if(!tile.has_value())
         {
             return 0;
         }
@@ -1483,15 +2152,12 @@ public:
         const auto problem = problemFor(requireTensor(context, binding.q),
                                         requireTensor(context, binding.k),
                                         &requireTensor(context, binding.v));
-        const auto bytes = splitWorkspaceBytes(
-            problem, candidateSplits(problem, *tile, context.deviceProperties.multiProcessorCount));
-        if(!bytes.has_value())
+        const auto used = workspaceBeforeZeroBias(context, binding, problem, *tile);
+        if(!readsZeroBias(binding, kernel))
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "flydsl_sdpa_cdna: the split workspace exceeds 32-bit addressing");
+            return used;
         }
-        return *bytes;
+        return zeroBiasOffset(used) + zeroBiasBytes(problem.seqLenKv);
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -1594,7 +2260,9 @@ public:
         if(binding.bias != NO_BIAS)
         {
             const auto servable = servableBias(requireTensor(context, binding.bias), problem);
-            if(!servable.has_value())
+            if(!servable.has_value()
+               || (!servable->vectorized
+                   && familyKnob(kernel, BIAS_KSTRIDED_FIELD, _family).value_or(0) == 0))
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -1602,6 +2270,30 @@ public:
             }
             biasStrides = *servable;
         }
+        // An object without a bias keeps raw scores (rawScoresServe), a bias object scaled ones.
+        const bool rawScores = integerMetadata(kernel, HAS_BIAS_FIELD) != 1;
+        std::optional<size_t> zeroBiasAt;
+        if(readsZeroBias(binding, kernel))
+        {
+            const auto vectorized = tryGetBoundInt(bound, BIAS_VECTORIZED_TOKEN).value_or(0) != 0;
+            if(!vectorized && familyKnob(kernel, BIAS_KSTRIDED_FIELD, _family).value_or(0) == 0)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "flydsl_sdpa_cdna: the zero bias is not one this kernel can add");
+            }
+            biasStrides = zeroBiasStrides(vectorized);
+            zeroBiasAt = zeroBiasOffset(workspaceBeforeZeroBias(context, binding, problem, *tile));
+        }
+        // The RNG dump's writer (FlydslSdpaRngDump.hpp), when the graph names a dump.
+        auto dropoutMask = prepareDropoutMask(_kpackLoader,
+                                              context,
+                                              kernel,
+                                              binding.rngDump,
+                                              problem.batch,
+                                              problem.numHeads,
+                                              problem.seqLenQ,
+                                              problem.seqLenKv);
         return std::make_unique<PreparedFlydslSdpaCdna>(std::move(code),
                                                         binding,
                                                         problem,
@@ -1610,7 +2302,11 @@ public:
                                                         *strides,
                                                         biasStrides,
                                                         splits,
-                                                        std::move(mergeCode));
+                                                        std::move(mergeCode),
+                                                        cdnaPhiloxSources(context, binding),
+                                                        std::move(dropoutMask),
+                                                        rawScores,
+                                                        zeroBiasAt);
     }
 
     void launch(const Handle& handle,
@@ -1630,13 +2326,21 @@ public:
                 hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
                     *preparedSdpa.scaleOperand(), deviceBuffers, numDeviceBuffers)));
             // A pass-by-value scalar, read from host memory. A constant scale was checked at
-            // match time; this one arrives now.
+            // match time; this one arrives now, after the object was chosen.
             if(!isServableScale(static_cast<double>(scale)))
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                    "flydsl_sdpa_cdna: the runtime softmax scale must be positive and at most "
-                    "2^20");
+                    "flydsl_sdpa_cdna: the runtime softmax scale must be finite and at most 2^20 "
+                    "in magnitude");
+            }
+            if(preparedSdpa.rawScores() && !rawScoresServe(static_cast<double>(scale)))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "flydsl_sdpa_cdna: an object without a bias takes a runtime softmax scale "
+                    "only when it is positive and normal; give a zero, negative or subnormal "
+                    "scale as a value, which runs on the bias objects");
             }
         }
         else
@@ -1667,7 +2371,17 @@ public:
                                                    binding.bias, deviceBuffers, numDeviceBuffers)
                                                    .ptr
                                              : o;
+        if(preparedSdpa.zeroBiasAt().has_value())
+        {
+            bias = stageZeroBias(workspace,
+                                 *preparedSdpa.zeroBiasAt(),
+                                 problem.seqLenKv,
+                                 handle.getStream(),
+                                 "flydsl_sdpa_cdna");
+        }
         const auto& biasStrides = preparedSdpa.biasStrides();
+        // Read by the strided bias objects only (vendored-kernel modification 31).
+        const int32_t biasF32 = biasStrides.f32 ? 1 : 0;
 
         const auto qLayout
             = bshdLayout(problem.batch, problem.seqLenQ, problem.numHeads, problem.headDim);
@@ -1682,14 +2396,19 @@ public:
         const auto i32 = [](int64_t value) { return static_cast<int32_t>(value); };
         const int32_t zero = 0;
         auto& kernel = preparedSdpa.kernelForStream(handle.getStream());
-        // The attention sink, when one is bound; otherwise O stands in and sink_on is 0.
+        // The attention sink, when one is bound; otherwise O stands in and sink_on is
+        // SINK_OFF. sink_on names the sink's dtype (vendored-kernel modification 36).
         const bool hasSink = binding.sink != NO_SINK;
         void* sink = hasSink ? hipdnn_plugin_sdk::findDeviceBuffer(
                                    binding.sink, deviceBuffers, numDeviceBuffers)
                                    .ptr
                              : o;
         const auto sinkStride = static_cast<int32_t>(binding.sinkStride);
-        const int32_t sinkOn = hasSink ? 1 : 0;
+        int32_t sinkOn = SINK_OFF;
+        if(hasSink)
+        {
+            sinkOn = binding.sinkFloat ? SINK_FLOAT : SINK_QUERY_DTYPE;
+        }
         // The split workspace: the partial O, then the partial LSEs. Unread with one split,
         // when O stands in.
         const auto splits = static_cast<int32_t>(preparedSdpa.splits());
@@ -1701,6 +2420,45 @@ public:
                                                       * problem.seqLenQ * splits * problem.headDimV)
                                       * sizeof(float))
                           : o;
+        // Padding (vendored-kernel modification 32): each batch's query and key lengths, in
+        // the generic kernel's cu_seqlens slots, and its varlen flags in the page-table
+        // stride's; a dense launch passes O for both and no flag, and loads nothing.
+        void* seqLensQ = binding.padded() ? hipdnn_plugin_sdk::findDeviceBuffer(
+                                                binding.seqLenQ, deviceBuffers, numDeviceBuffers)
+                                                .ptr
+                                          : o;
+        void* seqLensKv = binding.padded() ? hipdnn_plugin_sdk::findDeviceBuffer(
+                                                 binding.seqLenKv, deviceBuffers, numDeviceBuffers)
+                                                 .ptr
+                                           : o;
+        // Packed (THD) sequences (modification 34): the row-offset tables in their own slots;
+        // the flag says to read them. A packed sequence's diagonal moves with its own lengths,
+        // as a padded batch's does.
+        void* rowOffsetsQ = binding.packed()
+                                ? hipdnn_plugin_sdk::findDeviceBuffer(
+                                      binding.raggedOffsetQ, deviceBuffers, numDeviceBuffers)
+                                      .ptr
+                                : o;
+        void* rowOffsetsKv = binding.packed()
+                                 ? hipdnn_plugin_sdk::findDeviceBuffer(
+                                       binding.raggedOffsetKv, deviceBuffers, numDeviceBuffers)
+                                       .ptr
+                                 : o;
+        const bool perSequence = binding.padded() || binding.packed();
+        const int32_t varlenFlags
+            = (binding.padded() ? VARLEN_PADDED : 0) | (binding.packed() ? VARLEN_PACKED : 0)
+              | (perSequence && binding.bottomRight != 0 ? VARLEN_BOTTOM_RIGHT : 0);
+        // Dropout (vendored-kernel modification 33): the seed and offset1 pointers, offset2's
+        // two words, the keep threshold and the scale; read only by a dropout object.
+        const auto dropout = cdnaDropoutArgs(binding,
+                                             preparedSdpa.philoxSources(),
+                                             deviceBuffers,
+                                             numDeviceBuffers,
+                                             workspace,
+                                             o,
+                                             handle.getStream());
+        const auto offset2Low = static_cast<int32_t>(static_cast<uint32_t>(dropout.offset2));
+        const auto offset2High = static_cast<int32_t>(static_cast<uint32_t>(dropout.offset2 >> 32));
 
         // A tensor the launch does not use is passed as O, as upstream's launchers do; the
         // kernels as built never read it. Changing these argument lists means changing
@@ -1770,13 +2528,13 @@ public:
                       qLayout, // read for its pointer only
                       seqLenQ,
                       seqLenKv,
-                      o, // CuSeqQ
-                      qLayout,
-                      o, // CuSeqKv
-                      qLayout,
+                      seqLensQ,
+                      qLayout, // read for its pointer only
+                      seqLensKv,
+                      qLayout, // read for its pointer only
                       o, // BlockTable
                       qLayout,
-                      zero,
+                      varlenFlags,
                       scale,
                       numHeads,
                       numKvHeads,
@@ -1812,7 +2570,33 @@ public:
                       sinkOn,
                       i32(strides.lse.batch),
                       i32(strides.lse.head),
-                      i32(strides.lse.sequence));
+                      i32(strides.lse.sequence),
+                      i32(biasStrides.key),
+                      biasF32,
+                      rowOffsetsQ,
+                      qLayout, // read for its pointer only
+                      rowOffsetsKv,
+                      qLayout, // read for its pointer only
+                      dropout.seed,
+                      qLayout, // read for its pointer only
+                      dropout.offset1,
+                      qLayout, // read for its pointer only
+                      offset2Low,
+                      offset2High,
+                      dropout.threshold,
+                      dropout.scale);
+        // The keep mask the launch above applied, on its stream after it (a dropout object is
+        // never a split one).
+        if(preparedSdpa.dropoutMask().has_value())
+        {
+            preparedSdpa.dropoutMask()->launch(handle.getStream(),
+                                               deviceBuffers,
+                                               numDeviceBuffers,
+                                               dropout.seed,
+                                               dropout.offset1,
+                                               static_cast<int64_t>(dropout.offset2),
+                                               dropout.threshold);
+        }
         if(splits > 1)
         {
             // Changing this argument list means changing mergeSignature() with it.
@@ -1839,11 +2623,46 @@ public:
                         sinkOn,
                         i32(strides.lse.batch),
                         i32(strides.lse.head),
-                        i32(strides.lse.sequence));
+                        i32(strides.lse.sequence),
+                        seqLensQ,
+                        qLayout, // read for its pointer only
+                        o, // RowOffQ
+                        qLayout,
+                        varlenFlags);
         }
     }
 
 private:
+    /// Whether @p kernel, launched for @p binding, reads the zero bias: a bias object for a
+    /// graph without a bias of its own.
+    static bool readsZeroBias(const FlydslSdpaCdnaBinding& binding, const KernelDefinition& kernel)
+    {
+        return binding.bias == NO_BIAS && integerMetadata(kernel, HAS_BIAS_FIELD) == 1;
+    }
+
+    /// The workspace bytes a launch takes before the zero bias: a split launch's partials, or
+    /// a dropout seed and offset given by value.
+    static size_t workspaceBeforeZeroBias(const MatchContext& context,
+                                          const FlydslSdpaCdnaBinding& binding,
+                                          const SdpaProblem& problem,
+                                          const CdnaTile& tile)
+    {
+        if(!tile.splitKv)
+        {
+            return cdnaPhiloxSources(context, binding).needWorkspace() ? DROPOUT_WORKSPACE_BYTES
+                                                                       : 0;
+        }
+        const auto bytes = splitWorkspaceBytes(
+            problem, candidateSplits(problem, tile, context.deviceProperties.multiProcessorCount));
+        if(!bytes.has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "flydsl_sdpa_cdna: the split workspace exceeds 32-bit addressing");
+        }
+        return *bytes;
+    }
+
     const compilation::IKernelCompiler& _kernelCompiler;
     const compilation::KpackKernelLoader& _kpackLoader;
     CdnaFamily _family;

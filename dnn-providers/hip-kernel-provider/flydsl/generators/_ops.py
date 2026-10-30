@@ -28,11 +28,14 @@ _SDPA_BWD_SPLIT_DIRS = (
 OP_KERNEL_DIRS = {
     "rmsnorm": ("norm",),
     "rmsnorm_bwd": ("norm",),
-    "sdpa_rdna": ("attention_rdna",),
-    "sdpa_rdna_decode": ("attention_rdna",),
-    "sdpa_cdna": ("attention_cdna",),
-    "sdpa_cdna_dualwave": ("attention_cdna",),
-    "sdpa_cdna_decode": ("attention_cdna",),
+    # The RDNA and CDNA kernels import the aiw directory's Philox (RDNA kernel modification
+    # 27, CDNA 38; decision Q7: one source for the dropout stream), so it is an input of
+    # theirs too.
+    "sdpa_rdna": ("attention_rdna", "attention_rdna4/philox.py"),
+    "sdpa_rdna_decode": ("attention_rdna", "attention_rdna4/philox.py"),
+    "sdpa_cdna": ("attention_cdna", "attention_rdna4/philox.py"),
+    "sdpa_cdna_dualwave": ("attention_cdna", "attention_rdna4/philox.py"),
+    "sdpa_cdna_decode": ("attention_cdna", "attention_rdna4/philox.py"),
     "sdpa_aiw": ("attention_rdna4",),
     "sdpa_bwd_prep": _SDPA_BWD_SPLIT_DIRS,
     "sdpa_bwd_dkdv": _SDPA_BWD_SPLIT_DIRS,
@@ -40,4 +43,7 @@ OP_KERNEL_DIRS = {
     "sdpa_bwd_merged": ("attention_bwd_cdna", "attention_cdna"),
     "sdpa_bwd_dbias_reduce": ("attention_bwd_cdna", "attention_cdna"),
     "sdpa_bwd_dsink_reduce": ("attention_bwd_cdna", "attention_cdna"),
+    # The RNG dump's keep-mask writer draws the attention kernels' counters through the same
+    # Philox, so that file is its input too; its own directory keeps it out of sdpa_aiw's.
+    "sdpa_dropout_mask": ("dropout_mask", "attention_rdna4/philox.py"),
 }

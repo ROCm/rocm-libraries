@@ -11,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -29,11 +30,15 @@
 #include "core/ApplicabilityManager.hpp"
 #include "core/ApplicabilityPool.hpp"
 #include "core/Container.hpp"
+#include "core/GraphSchema.hpp"
 #include "core/Handle.hpp"
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
@@ -1475,6 +1480,207 @@ TEST_F(TestApplicabilityManager, TwoCallersShareOnePoolAndEachGetTheSequentialAn
         EXPECT_LE(pool.threadCount(), 4u);
     }
     EXPECT_EQ(ApplicabilityPool::liveThreads(), baseline);
+}
+
+// ---------------------------------------------------------------------------
+// The provider's schema guard (GraphSchema.hpp)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// The graph-schema fields a test graph uses: one FLOAT tensor carrying them.
+struct SchemaFields
+{
+    int64_t alignment = 16;
+    bool ragged = false;
+    int64_t multiplier = 1;
+    bool overrideShape = false;
+    bool runtimePassByValue = false;
+    /// A floor the writer stamped, when set.
+    std::optional<hipdnn_data_sdk::utilities::Version> stamp;
+};
+
+flatbuffers::FlatBufferBuilder schemaGraph(const SchemaFields& fields)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims{1, 1, 1, 1};
+    const std::vector<int64_t> strides{1, 1, 1, 1};
+    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
+    tensors.push_back(data_objects::CreateTensorAttributesDirect(
+        builder,
+        1,
+        "x",
+        data_objects::DataType::FLOAT,
+        &strides,
+        &dims,
+        false,
+        data_objects::TensorValue::NONE,
+        0,
+        fields.runtimePassByValue,
+        fields.ragged ? flatbuffers::Optional<int64_t>(2) : flatbuffers::nullopt,
+        fields.alignment,
+        fields.multiplier));
+    const auto tensorsVector = builder.CreateVector(tensors);
+    data_objects::GraphBuilder graph(builder);
+    graph.add_tensors(tensorsVector);
+    graph.add_is_override_shape_enabled(fields.overrideShape);
+    std::optional<data_objects::EngineApiVersion> stamp;
+    if(fields.stamp.has_value())
+    {
+        stamp = hipdnn_plugin_sdk::toEngineApiVersion(*fields.stamp);
+        graph.add_min_required_engine_api_version(&*stamp);
+    }
+    builder.Finish(graph.Finish());
+    return builder;
+}
+
+SchemaFields withAlignment(int64_t alignment)
+{
+    SchemaFields fields;
+    fields.alignment = alignment;
+    return fields;
+}
+
+SchemaFields withRagged(int64_t multiplier = 1)
+{
+    SchemaFields fields;
+    fields.ragged = true;
+    fields.multiplier = multiplier;
+    return fields;
+}
+
+SchemaFields withOverrideShape()
+{
+    SchemaFields fields;
+    fields.overrideShape = true;
+    return fields;
+}
+
+SchemaFields withPassByValue()
+{
+    SchemaFields fields;
+    fields.runtimePassByValue = true;
+    return fields;
+}
+
+SchemaFields stamped(const char* version, SchemaFields fields = {})
+{
+    fields.stamp = hipdnn_data_sdk::utilities::Version{std::string(version)};
+    return fields;
+}
+
+constexpr int64_t BASELINE_HAND = 0x4001;
+constexpr int64_t BASELINE_STAGED = 0x4002;
+constexpr int64_t OPTED_IN_1_3 = 0x4003;
+constexpr int64_t OPTED_IN_1_4 = 0x4004;
+
+} // namespace
+
+TEST(TestGraphSchemaGuard, TheProviderBaselineIsTheSchemaItDeclaredBeforeTheBump)
+{
+    EXPECT_EQ(hip_kernel_provider::core::providerBaselineGraphSchema().str(), "1.2.0");
+}
+
+TEST(TestGraphSchemaGuard, AGraphsFloorIsItsFieldsOrItsStampWhicheverIsNewer)
+{
+    const auto floorOf = [](const SchemaFields& fields) {
+        const auto buffer = schemaGraph(fields);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            buffer.GetBufferPointer(), buffer.GetSize());
+        return hip_kernel_provider::core::graphSchemaFloor(graph).str();
+    };
+    EXPECT_EQ(floorOf({}), "1.0.0");
+    EXPECT_EQ(floorOf(withOverrideShape()), "1.1.0");
+    EXPECT_EQ(floorOf(withPassByValue()), "1.2.0");
+    EXPECT_EQ(floorOf(withAlignment(8)), "1.3.0");
+    EXPECT_EQ(floorOf(withRagged()), "1.3.0");
+    EXPECT_EQ(floorOf(withRagged(4)), "1.4.0");
+    EXPECT_EQ(floorOf(stamped("1.4.0")), "1.4.0");
+    EXPECT_EQ(floorOf(stamped("1.2.0", withRagged())), "1.3.0");
+}
+
+// Every engine applies to every graph here; the guard alone decides, and an engine it holds back
+// is never asked.
+TEST_F(TestApplicabilityManager, EnginesBelowAGraphsSchemaDeclineItWithoutRunning)
+{
+    WorkerBudget budget{8};
+    ApplicabilityPool pool{budget};
+    ApplicabilityManager manager{pool};
+    using hipdnn_data_sdk::utilities::Version;
+    addHandWritten(manager, BASELINE_HAND, true);
+    addStaged(manager, decided(BASELINE_STAGED, true));
+    manager.addEngine(std::make_unique<FakeHandWrittenEngine>(OPTED_IN_1_3, true, _journal),
+                      "opted in at 1.3.0",
+                      Version{std::string("1.3.0")});
+    manager.addEngine(std::make_unique<FakeHandWrittenEngine>(OPTED_IN_1_4, true, _journal),
+                      "opted in at 1.4.0",
+                      Version{std::string("1.4.0")});
+    EXPECT_EQ(manager.maxGraphSchema(BASELINE_HAND).str(), "1.2.0");
+    EXPECT_EQ(manager.maxGraphSchema(OPTED_IN_1_4).str(), "1.4.0");
+
+    struct Case
+    {
+        const char* name;
+        SchemaFields fields;
+        std::vector<int64_t> applicable;
+    };
+    const std::vector<int64_t> every{BASELINE_HAND, BASELINE_STAGED, OPTED_IN_1_3, OPTED_IN_1_4};
+    for(const auto& c : std::vector<Case>{
+            {"plain", {}, every},
+            {"override shapes (1.1.0)", withOverrideShape(), every},
+            {"pass-by-value (1.2.0)", withPassByValue(), every},
+            {"declared alignment (1.3.0)", withAlignment(8), {OPTED_IN_1_3, OPTED_IN_1_4}},
+            {"ragged (1.3.0)", withRagged(), {OPTED_IN_1_3, OPTED_IN_1_4}},
+            {"ragged multiplier (1.4.0)", withRagged(4), {OPTED_IN_1_4}},
+            {"stamped 1.4.0", stamped("1.4.0"), {OPTED_IN_1_4}}})
+    {
+        SCOPED_TRACE(c.name);
+        const auto buffer = schemaGraph(c.fields);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            buffer.GetBufferPointer(), buffer.GetSize());
+        _journal.clear();
+        EXPECT_EQ(manager.getApplicableEngineIds(_handle, graph),
+                  inIterationOrder(manager, c.applicable));
+        for(const auto& [engineId, thread] : _journal.handWritten())
+        {
+            static_cast<void>(thread);
+            EXPECT_TRUE(std::find(c.applicable.begin(), c.applicable.end(), engineId)
+                        != c.applicable.end())
+                << "engine " << engineId << " was asked about a graph past its schema";
+        }
+    }
+}
+
+// The guard's loop skips an admitted engine that throws, as the base class's loop does, and
+// still reports the others.
+TEST_F(TestApplicabilityManager, TheGuardsLoopSkipsAnAdmittedEngineThatThrows)
+{
+    WorkerBudget budget{8};
+    ApplicabilityPool pool{budget};
+    ApplicabilityManager manager{pool};
+    using hipdnn_data_sdk::utilities::Version;
+    addHandWritten(manager, BASELINE_HAND, true);
+    auto throwing = std::make_shared<StagedSpec>(decided(OPTED_IN_1_3, true));
+    throwing->failure = Failure::IN_BEGIN;
+    throwing->failureStatus = HIPDNN_PLUGIN_STATUS_BAD_PARAM;
+    throwing->failureMessage = "graph stage failed";
+    manager.addEngine(std::make_unique<FakeStagedEngine>(throwing, _journal),
+                      "opted in at 1.3.0, throws",
+                      Version{std::string("1.3.0")});
+    manager.addEngine(std::make_unique<FakeHandWrittenEngine>(OPTED_IN_1_4, true, _journal),
+                      "opted in at 1.4.0",
+                      Version{std::string("1.4.0")});
+
+    // Declared alignment needs 1.3.0, so the baseline engine is held back and the guard's loop
+    // runs.
+    const auto buffer = schemaGraph(withAlignment(8));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        buffer.GetBufferPointer(), buffer.GetSize());
+    const auto outcome = capture([&] { return manager.getApplicableEngineIds(_handle, graph); });
+    ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
+    EXPECT_EQ(outcome.ids, inIterationOrder(manager, {OPTED_IN_1_4}));
 }
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

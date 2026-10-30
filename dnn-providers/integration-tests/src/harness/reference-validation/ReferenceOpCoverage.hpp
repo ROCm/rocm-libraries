@@ -119,4 +119,9 @@ const std::vector<KnownReferenceGap>& knownReferenceGaps();
 const KnownReferenceGap* findKnownReferenceGap(ReferenceExecutorType type,
                                                std::string_view bundleId);
 
+/// The same lookup in a caller's table (tests exercise the gap path with their own entries).
+const KnownReferenceGap* findKnownReferenceGap(const std::vector<KnownReferenceGap>& gaps,
+                                               ReferenceExecutorType type,
+                                               std::string_view bundleId);
+
 } // namespace hipdnn_integration_tests::bundle

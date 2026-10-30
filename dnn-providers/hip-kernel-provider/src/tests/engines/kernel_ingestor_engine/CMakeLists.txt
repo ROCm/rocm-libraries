@@ -74,6 +74,8 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdParity.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdObjectsPerObject.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaObjects.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaDropout.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaAiwClasses.cpp
     )
     # The architectures each op has objects for, so a device case that finds none
     # staged on one of them fails instead of skipping (FlydslNormDeviceTestSupport.hpp).
@@ -82,7 +84,7 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     # every other, so the test asks at run time whether the device's shard is staged.
     foreach(_flydsl_op rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode
                        sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_bwd_merged sdpa_bwd_prep
-                       sdpa_bwd_dkdv sdpa_bwd_dq)
+                       sdpa_bwd_dkdv sdpa_bwd_dq sdpa_dropout_mask)
         string(REPLACE ";" "," _flydsl_archs
                        "${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_flydsl_op}}")
         string(TOUPPER "${_flydsl_op}" _flydsl_op_upper)

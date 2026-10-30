@@ -34,6 +34,7 @@ from ._codeobject import (
     arg_records,
     describe,
     hkp_pack_module,
+    kernel_names,
     verify_arch,
     verify_generic,
 )
@@ -90,11 +91,29 @@ _PARAMS = (
 _SIZES = {"ptr": 8, "i64": 8, "i32": 4, "f32": 4}
 
 
-def _signature() -> tuple[tuple, tuple]:
+# The padded-row fill kernel each object carries beside the main one (aiw modification
+# 10): O, LSE and the per-sequence lengths; Max_seqlen_q and V's head dim; O's and the
+# LSE's (batch, head, sequence) strides.
+_FILL_PARAMS = (
+    ("O", "ptr"),
+    ("LSE", "ptr"),
+    ("seqlens", "ptr"),
+    ("max_seqlen_q", "i32"),
+    ("hdim_vo", "i32"),
+    ("stride_o_batch", "i64"),
+    ("stride_o_head", "i64"),
+    ("stride_o_seq", "i64"),
+    ("lse_stride_b", "i64"),
+    ("lse_stride_h", "i64"),
+    ("lse_stride_s", "i64"),
+)
+
+
+def _signature(params=None) -> tuple[tuple, tuple]:
     """The (kind, size, offset) layout and the names of the parameter list: each argument
     at the next offset its own size aligns to."""
     layout, names, offset = [], [], 0
-    for name, kind in _PARAMS:
+    for name, kind in _PARAMS if params is None else params:
         size = _SIZES[kind]
         offset = (offset + size - 1) // size * size
         layout.append(("global_buffer" if kind == "ptr" else "by_value", size, offset))
@@ -126,10 +145,17 @@ _SCHEDULE_KNOBS = (
 #   faster than the RDNA kernel's head_dim 256 objects on medium and long sequences;
 # - a mask at head_dim 128 (the f32 one's v8 load holds twice the registers of a 16-bit
 #   one, README modification 5; the non-causal f32 one spills one more since the
-#   natural-log scores of modification 9);
+#   natural-log scores of modification 9); a sink beside the mask spills no more (2-4,
+#   its few epilogue scalars), so the sink-and-mask objects share these classes;
 # - the padded tiers, which carry the column masks on top of their tile's schedule. Those
 #   at 224 and 256 spill the most, and whether they beat the RDNA generic tiers anywhere
-#   is for autotune (then UHD) to measure.
+#   is for autotune (then UHD) to measure. Their mask objects (the additive mask's loads
+#   and its natural-log scores on top) spill more again at 128, 224 and 256;
+# - the wide tiers up to 384 and 512, the tuning table's own 384 and 512 schedules (8
+#   waves; 2 and 4 QK shards per Q row tile), which spill at any build: an exact 384 or
+#   512 object spills 40-79 plain and 63-129 with an f32 mask (measured, not shipped). The padded column masks add about 40 at 384 and 20 at 512 plain; a mask at
+#   512 adds 30-80 more. Nothing else serves 264-504 at a prefill tile; at 512/512 the RDNA
+#   decode objects serve too, and autotune picks.
 _SPILL_ALLOWANCE: dict[tuple[int, int, int, int, int], int] = {
     (128, 0, 1, 0, 0): 3,
     (128, 0, 1, 1, 0): 4,
@@ -147,6 +173,49 @@ _SPILL_ALLOWANCE: dict[tuple[int, int, int, int, int], int] = {
     (128, 1, 0, 0, 1): 10,
     (224, 1, 0, 0, 1): 20,
     (256, 1, 0, 0, 1): 63,
+    (128, 0, 1, 0, 1): 14,
+    (128, 0, 1, 1, 1): 26,
+    (128, 1, 1, 0, 1): 15,
+    (128, 1, 1, 1, 1): 24,
+    (224, 0, 1, 0, 1): 21,
+    (224, 0, 1, 1, 1): 16,
+    (224, 1, 1, 0, 1): 26,
+    (224, 1, 1, 1, 1): 26,
+    (256, 0, 1, 0, 1): 77,
+    (256, 0, 1, 1, 1): 74,
+    (256, 1, 1, 0, 1): 80,
+    (256, 1, 1, 1, 1): 86,
+    (384, 0, 0, 0, 1): 111,
+    (384, 0, 1, 0, 1): 108,
+    (384, 0, 1, 1, 1): 106,
+    (384, 1, 0, 0, 1): 105,
+    (384, 1, 1, 0, 1): 121,
+    (384, 1, 1, 1, 1): 120,
+    (512, 0, 0, 0, 1): 66,
+    (512, 0, 1, 0, 1): 124,
+    (512, 0, 1, 1, 1): 141,
+    (512, 1, 0, 0, 1): 68,
+    (512, 1, 1, 0, 1): 135,
+    (512, 1, 1, 1, 1): 136,
+}
+
+
+# VGPR spills accepted on the dropout twins, by (head_dim, causal): the Philox state and the
+# keep masks live beside the plain schedule's registers. 64 and 128 spill nothing; 256 spills
+# 4-6 more than its plain twin (21/32 non-causal/causal), the most of either dtype measured.
+_DROPOUT_SPILL_ALLOWANCE: dict[tuple[int, int], int] = {
+    (256, 0): 27,
+    (256, 1): 36,
+}
+
+# The dropout twins with an additive mask (R1), by (head_dim, causal, bias_f32): only 256
+# spills, about as the mask objects without dropout do there (30/50); 64 and 128 spill
+# nothing.
+_DROPOUT_BIAS_SPILL_ALLOWANCE: dict[tuple[int, int, int], int] = {
+    (256, 0, 0): 35,
+    (256, 0, 1): 39,
+    (256, 1, 0): 52,
+    (256, 1, 1): 52,
 }
 
 
@@ -173,6 +242,9 @@ def _plan(instance: Instance):
         bias_f32=bool(knobs["bias_f32"]),
         bias_key_strided=bool(knobs["bias_kstrided"]),
         sink=bool(knobs["has_sink"]),
+        # The dropout twins (AOTriton's ENABLE_DROPOUT) draw from 32-bit Philox, the width
+        # every FlyDSL family uses, so a mask does not depend on the build host's GPU.
+        **({"dropout": True, "philox_width": 32} if knobs["has_dropout"] else {}),
     )
     plan = tuning.plan(meta)
     if plan.knobs.block_dmodel != knobs["head_dim_max"]:
@@ -213,7 +285,10 @@ def _build_one(instance: Instance, dump_dir: Path):
         bias = torch.zeros(
             1, 8, 128, 128, dtype=torch.float32 if knobs["bias_f32"] else dtype
         )
-    launch.compile(q, k, v, o, 1, 128, 128, lse=lse, sink=sink, bias=bias)
+    # A dropout build requires a probability; like every other value, it is a runtime
+    # argument the placeholder only stands in for.
+    dropout = {"dropout_p": 0.5} if knobs["has_dropout"] else {}
+    launch.compile(q, k, v, o, 1, 128, 128, lse=lse, sink=sink, bias=bias, **dropout)
     blob, _ = hsaco_from_dump(dump_dir)
     return blob, plan
 
@@ -273,6 +348,7 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path | N
     op_dir = out_root / OP / arch
     op_dir.mkdir(parents=True, exist_ok=True)
     expected, names = _signature()
+    fill_expected, fill_names = _signature(_FILL_PARAMS)
     records: list[dict] = []
 
     built = compile_all(
@@ -286,7 +362,20 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path | N
 
         filename = f"{instance.name}.hsaco"
         where = f"{arch}/{OP}/{filename}"
-        described = describe(blob, where)
+        fill_symbol = instance.knobs["fill_symbol"]
+        kernels = kernel_names(blob, where)
+        if len(kernels) != 2 or fill_symbol not in kernels:
+            raise GeneratorError(
+                f"{where}: expected a main kernel and {fill_symbol!r}, found {kernels}"
+            )
+        described = describe(blob, where, next(n for n in kernels if n != fill_symbol))
+        fill = describe(blob, where, fill_symbol)
+        if fill["signature"] != fill_expected:
+            raise GeneratorError(
+                f"{where}: the fill kernel's kernarg layout is\n  {fill['signature']}\nbut "
+                f"is declared as\n  {fill_expected}\nUpdate _FILL_PARAMS and the native "
+                "dispatch together."
+            )
         verify_arch(described, arch, where)
         if described["signature"] != expected:
             raise GeneratorError(
@@ -295,15 +384,27 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path | N
             )
         threads = _workgroup_size(blob, where, described["symbol"])
         knobs = instance.knobs
-        allowed = _SPILL_ALLOWANCE.get(
-            (
-                knobs["head_dim_max"],
-                knobs["causal"],
-                knobs["has_bias"],
-                knobs["bias_f32"],
-                int(knobs["head_dim"] is None),
-            ),
-            0,
+        allowed = (
+            _DROPOUT_BIAS_SPILL_ALLOWANCE.get(
+                (knobs["head_dim_max"], knobs["causal"], knobs["bias_f32"]), 0
+            )
+            if knobs["has_dropout"] and knobs["has_bias"]
+            else (
+                _DROPOUT_SPILL_ALLOWANCE.get(
+                    (knobs["head_dim_max"], knobs["causal"]), 0
+                )
+                if knobs["has_dropout"]
+                else _SPILL_ALLOWANCE.get(
+                    (
+                        knobs["head_dim_max"],
+                        knobs["causal"],
+                        knobs["has_bias"],
+                        knobs["bias_f32"],
+                        int(knobs["head_dim"] is None),
+                    ),
+                    0,
+                )
+            )
         )
         if described.get("vgpr_spill_count", 0) > allowed:
             raise GeneratorError(
@@ -337,6 +438,8 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path | N
                 "block": [threads, 1, 1],
                 "grid_rule": _GRID_RULE,
                 "args": arg_records(names, described["signature"]),
+                "fill_args": arg_records(fill_names, fill["signature"]),
+                "fill_vgprs": fill["vgpr_count"],
                 "file": filename,
                 "symbol": described["symbol"],
                 "bytes": len(blob),

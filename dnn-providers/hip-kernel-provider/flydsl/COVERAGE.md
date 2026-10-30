@@ -300,6 +300,7 @@ and
 | causal variant: a right bound is applied, or not | query heads, and the GQA/MQA group size |
 | schedule: tile (`block_m` 64 or 128, `block_n` 32), output-column split (`dv_split`), head-dim pairs (`hd_pair`) | every operand's (batch, sequence, head) stride |
 | whether an additive bias is applied (`has_bias`) | the bias's (batch, head, query, key) strides — 0 on a broadcast axis |
+| whether an attention sink is added (`has_sink`) | the sink's head stride, and its dtype (FLOAT or the query's; bit 32 of the stride argument, kernel modification 31) |
 | | softmax scale |
 | | `right_bound`, `left_bound`, diagonal alignment |
 | | whether to write the LSE output, and its strides |
@@ -337,8 +338,9 @@ earlier schedule split the output columns across two workgroups that each
 recomputed the whole of QK^T.)
 
 **Every other head_dim** that is a multiple of 8, up to 256, is served by a
-generic tier (kernel modification 15): twenty-four more objects, bf16 and f16 ×
-causal × largest head (64, 96, 128, 160, 224 or 256), without a bias. The actual
+generic tier (kernel modification 15): seventy-two more objects, bf16 and f16 ×
+causal × largest head (64, 96, 128, 160, 224 or 256) × without a bias, with an f32
+one and with one in the query's dtype. The actual
 head_dim is a runtime argument; Q and K columns past it are zeroed as they load
 and O columns past it are not stored, so the tensors are read exactly as wide as
 they are. A generic object computes at its largest width, so the tiers are cut
@@ -352,7 +354,10 @@ not fit the register file in one. They rank below the specialized objects, each
 narrower tier above the wider (`priority` 40, 30, 20, 15, 12, 10), so under the static
 order 64/96/128/256 run their own object and the narrowest generic tier takes the rest
 (autotune, timing every candidate, may find otherwise). A bias
-on a head no specialized object serves declines.
+on such a head runs on its tier's bias objects, so every head_dim the generic tiers
+serve takes a bias as the specialized ones do, with the same results (§5.7). Each bias
+object keeps its plain twin's schedule, but for the tier up to 64, which takes the
+128-row tile the specialized `head_dim` 64 bias object was measured to need.
 
 The causal variant is the one that applies a right bound — top-left or
 bottom-right causal, and any band to the right of the diagonal. It is two
@@ -361,9 +366,9 @@ KV loop at the diagonal and skips fully masked tiles, and the non-causal one
 carries a V prefetch across iterations that the causal one drops for register
 pressure. Everything else about the mask is a runtime argument, served by both.
 
-**Decode** has its own seventy-two objects (`hipkernel:flydsl_sdpa_rdna_decode`; bf16 and f16 × causal × `head_dim`
-64, 96, 128, 256 without a bias, with an f32 one and with one in the query's dtype, plus
-two generic tiers, the wide 576/512 and 512/512 objects and the sink objects at 64 and
+**Decode** has its own eighty-eight objects (`hipkernel:flydsl_sdpa_rdna_decode`; bf16 and f16 × causal × `head_dim`
+64, 96, 128, 256 and two generic tiers, each without a bias, with an f32 one and with one
+in the query's dtype, plus the wide 576/512 and 512/512 objects and the sink objects at 64 and
 128), from a kernel
 written for it
 ([`flash_attn_decode_rdna.py`](kernels_src/kernels/attention_rdna/flash_attn_decode_rdna.py)).
@@ -387,10 +392,20 @@ each split's rows, one per half of the output columns (`dv_split` 2), to fit the
 register file. The bias objects read the same broadcast bias
 as the prefill ones, each lane its own (head, position) row of the GQA group's slice.
 Every other head_dim that is a multiple of 8 runs on a generic decode object -- up to
-96, or above it up to 256 with the column split -- that reads it at runtime and never
+96, above it up to 256 with the column split, and past 256 up to 512 with the columns split
+four ways (H4, kernel modification 30; no bias, no sink) -- that reads it at runtime and never
 fetches the K and V columns past it, so a step moves only the bytes its head has (an
-up-to-128 tier does not fit the register file). Within the decode engine they rank
-below the exact objects, the narrower tier above the wider (`priority` 145, 140).
+up-to-128 tier does not fit the register file), with or without a bias (a bias object
+taking one tile, as at a specialized head_dim). Within the decode engine they rank
+below the exact objects, the narrower tier above the wider (`priority` 145, 140, 135).
+The tier up to 512 is the only RDNA object for 264-504 on gfx11 (on gfx12 §5.6's padded tiers
+serve them too); it serves any query length at decode-tile speed. A K or V column past the
+runtime head_dim reads at its slice's own end, past the buffer's range, so the hardware
+returns zeros with no select after the load (modification 30): with the selects the tiers
+below use, the gfx11 build spilled 5 VGPRs. It is slower than the exact 512/512 objects at
+the same width (§5.8, deferred item 9).
+On gfx11 the f16 objects still spill 1 VGPR, accepted for that class only
+(`_SPILL_ALLOWANCE` in `gen_sdpa_rdna_decode.py`); the bf16 ones and gfx12's spill none.
 K and V with different head counts stay on the prefill objects. A split launch takes
 workspace (a partial O, the row max and the row sum per split, so the merge weighs each
 split by its key count even when a bias near the dtype's lowest value puts every max far
@@ -402,13 +417,13 @@ One SDPA-forward node, and:
 
 | Condition | Why |
 |---|---|
-| Q, K, V, O present, rank 4, device operands, **not ragged**, each declaring 16-byte alignment; no two elements of O at one address | The kernel reads each through a pointer as a dense batch; a ragged (THD) operand would be read as one. Rows move as 16-byte vectors from each base, and many workgroups write O at once. |
+| Q, K, V, O present, rank 4, device operands, **not ragged** but in compact THD on §5.6's objects (§5.9), each declaring 16-byte alignment; no two elements of O at one address | The RDNA kernels read each through a pointer as a dense batch; a ragged (THD) operand would be read as one. Rows move as 16-byte vectors from each base, and many workgroups write O at once. |
 | One dtype for all four, `BFLOAT16` or `HALF` | One element type throughout; no fp32 WMMA operand form exists. |
 | Head-dim stride 1 on all four; other strides positive | Each lane reads a row's head-dim values as one contiguous vector. Every other stride is a kernel argument, so BSHD, BHSD and packed-QKV views are all served. |
-| K and V share batch and sequence; K has Q's head dim; O is Q's shape with V's head dim; V's head dim at most Q/K's, and one an object bakes: equal to Q/K's, 128 with Q/K 192 (MLA prefill), or 512 with Q/K 576 (absorbed-MLA decode) | No broadcast. The graph matcher admits any V no wider than Q/K; each object's kernel matcher then requires its baked `head_dim_v`. The MLA objects bake both head dims (kernel modification 20); every other object has one. |
+| K and V share batch and sequence; K has Q's head dim; O is Q's shape with V's head dim; V's head dim one an object bakes: equal to Q/K's, 128 with Q/K 192 (MLA prefill), or 512 with Q/K 576 (absorbed-MLA decode) | No broadcast. The graph matcher admits any V head dim, narrower or wider than Q/K's (§5.6's padded tiers take both at runtime, H1); each RDNA object's kernel matcher then requires its baked `head_dim_v`, and a generic tier's V is its runtime `head_dim`. The MLA objects bake both head dims (kernel modification 20); every other object has one. |
 | `Hq % Hk == 0` and `Hq % Hv == 0`; K and V may differ in head count | The K head and the V head are each the query head divided by its own group size. |
-| Any `left_bound`/`right_bound` ≥ −1 at either named `diagonal_alignment`, or the deprecated causal booleans (not both) | The kernel applies the reference's two-sided rule (`CpuFpReferenceSdpa` `isMasked`) directly. A boolean sets `right_bound` 0 unless the graph sets one: `causal_mask` at the stored `diagonal_alignment` (bottom-right when it says so), `causal_mask_bottom_right` always bottom-right. An alignment the schema does not name declines, boolean or not. |
-| Scale: `attn_scale_value` (> 0 and ≤ 2²⁰), a pass-by-value scalar tensor, or absent | Absent is 1.0, cuDNN's default, which hipDNN's references apply too. Every FlyDSL SDPA family serves the same range (`FlydslSdpaShared.hpp` `MAX_SOFTMAX_SCALE`): positive, because the CDNA kernels take the running max over unscaled scores, and at most 2²⁰, beyond which each family overflows f32 at a different point, so all decline alike. A pass-by-value scale is read from host memory at launch, and one outside the range is refused there. |
+| Any `right_bound` ≥ −1 and `left_bound` ≥ 1 or −1 at either named `diagonal_alignment`, or the deprecated causal booleans (not both) | The kernel applies the reference's two-sided rule (`CpuFpReferenceSdpa` `isMasked`) directly. `left_bound` follows cuDNN: `L` keeps the `L` keys ending at the diagonal, so the kernel is handed `L − 1`; `left_bound` 0 keeps none and declines. A boolean sets `right_bound` 0 unless the graph sets one: `causal_mask` at the stored `diagonal_alignment` (bottom-right when it says so), `causal_mask_bottom_right` always bottom-right. An alignment the schema does not name declines, boolean or not. |
+| Scale: `attn_scale_value` (finite, \|scale\| ≤ 2²⁰: zero and negative included), a pass-by-value scalar tensor, or absent | Absent is 1.0, cuDNN's default, which hipDNN's references apply too. Every FlyDSL SDPA family serves the same range (`FlydslSdpaShared.hpp` `isServableScale`, `MAX_SOFTMAX_SCALE`), as PyTorch and AOTriton take any scale: at most 2²⁰ in magnitude, beyond which each family overflows f32 at a different point, so all decline alike; NaN and ±inf decline. The RDNA prefill and decode objects without a bias keep their running max over unscaled scores and fold the scale into the exponent, which holds only for a positive, normal scale (`rawScoresServe`): a negative one reverses the order and turns a masked score's −inf into +inf, and zero (or a subnormal one, which flushes to it) turns it into NaN. Their bias objects scale first and mask after, so a graph without a bias whose scale -- a value or a constant tensor -- is zero, negative or subnormal runs on the query-dtype bias objects, reading a zero bias the engine writes into its workspace on the launch stream, at stride 0 on every axis (`runsOnAZeroBias`; packed sequences too). No object changed: such a graph pays what a bias object costs over its plain twin (§6.2), where scaling before the max in the plain objects would have cost every positive-scale graph a multiply per score. Where no bias twin exists (the decode objects past `head_dim` 256 and the 576/512 and 512/512 ones) such a graph declines. The aiw objects scale every score before the max (correction (b)) and take any such scale on their plain objects. A pass-by-value scale is read from host memory at launch, after the object was chosen: one outside the range is refused there, and so is a zero, negative or subnormal one on a plain RDNA object (a bias object or an aiw object takes it). |
 | Stats, if requested: a named f32 `[B, H, Sq, 1]` device tensor, 4-byte aligned, positive strides on its axes longer than 1, no two elements at one address | The kernel writes the natural-log LSE of the scaled scores there, through its strides. |
 | Bias (`attn_mask`), if present: an f32 device tensor, or one in the query's dtype, declaring 16-byte alignment, of rank 1–4 whose dims, right-aligned to `[B, H, Sq, Skv]`, are each that extent or 1; positive strides on real axes; one (batch, head) slice under 2³⁰ elements | Added to the scaled scores before the mask, as the reference does; a size-1 or absent axis broadcasts. The kernel reads it through a 32-bit buffer descriptor with 32-bit offsets. |
 | `Sq`, `Skv` < 2²⁹; one (batch, kv head) slice of K or V under 2 GiB; grid under 2³¹ | int32 mask arithmetic, and 32-bit bounds-checked buffer descriptors. |
@@ -418,6 +433,30 @@ every such score is masked, so nothing is padded and nothing pads the softmax.
 A row no key reaches — a narrow window, or bottom-right causal with more
 queries than keys — gets O = 0 and LSE = −inf, as the reference defines it.
 
+**Graph schema.** Before a matcher runs, the ingestor declines a graph whose schema floor
+(hipDNN's `computeMinimumEnginePluginApiVersion`) is above the engine's UED `sdk_version`.
+Every FlyDSL SDPA engine (RDNA, aiw and CDNA alike) claims **1.4.0**, the newest version
+the SDK defines (`K_MAX_SUPPORTED_API_VERSION`), so ragged graphs reach the matchers; each
+field the schema added up to it is gated:
+
+| Schema | Field | Gate |
+|---|---|---|
+| 1.1.0 | graph `is_override_shape_enabled` | declined (`usesUnreadSchemaFields`): no matcher sees the execute-time shapes |
+| 1.2.0 | tensor `is_runtime_pass_by_value` | the scale tensor must be one (`isServableScaleTensor`); a Philox seed or offset may be (`isServablePhiloxTensor`); every other tensor declines one where it is read (operands, LSE, bias, sink, lengths, offset tables, RNG dump) |
+| 1.3.0 | tensor `ragged_offset_tensor_uid` | Q/K/V/O: compact THD or cuDNN's packed form, else declined (§5.9, §7.10); the LSE: packed through Q's table or dense; every other tensor declines it |
+| 1.3.0 | tensor `alignment` | `declaresAlignment` wherever a device tensor is read: Q/K/V/O and the bias 16 bytes, LSE, lengths, offset tables and RNG dump 4, sink 2 (4 when FLOAT), seed and offset on the device 8 |
+| 1.4.0 | tensor `ragged_offset_multiplier` | a ragged tensor's must be its own sequence stride (`isPackedThrough`); on a tensor that is not ragged anything but 1 declines (`usesUnreadSchemaFields`) |
+
+`TestFlydslSdpaGraphSchema` pins the claim to the SDK's newest version: an SDK that adds one
+fails it until the new fields are reviewed here. RMSNorm stays at 1.2.0 (§2). **Through
+hipDNN's backend:** the provider declares engine plugin API 1.4.0, the SDK's newest
+(`src/core/PluginPublic.cpp`), so the backend routes it ragged graphs; its schema guard
+(`src/core/GraphSchema.hpp`) still declines a graph past 1.2.0 for every engine that has not
+opted in (`asm_sdpa`, `hip_mlops`, `hip_flash2`, rocKE, the other ingestor engines), and the
+FlyDSL SDPA engines opt in through their UEDs (`TestContainer.PinsEveryEnginesDeclaredGraphSchema`).
+The reference branch's four BSHD ragged bundles pass end to end on these engines against
+their golden tensors.
+
 ### 5.3 Against common SDPA feature requirements
 
 | # | Requirement | Status |
@@ -425,19 +464,20 @@ queries than keys — gets O = 0 and LSE = −inf, as the reference defines it.
 | 1 | fp16, bf16; fp32 accumulate | **served** |
 | 2 | BSHD, BHSD, general B/S/H strides, packed QKV | **served**; packed QKV checked on the GPU as strided views into one buffer |
 | 3 | MHA, MQA, GQA (`Hq % Hk == 0 && Hq % Hv == 0`) | **served**, including K and V with different head counts |
-| 4 | attention scale | **served** (positive, at most 2²⁰) |
+| 4 | attention scale | **served**: any finite one up to 2²⁰ in magnitude, zero and negative included (§5.2) |
 | 5 | causal, top-left | **served** |
 | 6 | causal, bottom-right, `Sq ≠ Skv` | **served** |
 | 7 | softmax stats / LSE | **served** |
 | 8 | arbitrary sequence lengths | **served** |
-| 9 | head dims 64, 128, 256; `d % 8 == 0` | **served**: 64/96/128/256 specialized, every other multiple of 8 up to 256 by the generic tier (not with a bias) |
-| 10 | padding mask via `SEQ_LEN_Q`/`SEQ_LEN_KV` | missing |
+| 9 | head dims 64, 128, 256; `d % 8 == 0` | **served**: 64/96/128/256 specialized, every other multiple of 8 up to 256 by the generic tier, with or without a bias; multiples of 8 from 264 to 512 by the decode engine's generic tier up to 512 at any query length (no bias; H4), and on gfx12 by §5.6's padded tiers up to 384 and 512, with or without a mask |
+| 10 | padding mask via `SEQ_LEN_Q`/`SEQ_LEN_KV` | **served** (§5.9) by every RDNA prefill and decode object (kernel modifications 26 and 28) and every object of §5.6, at every mask; padded rows O = 0 and LSE = −inf, lengths clamped to [0, S], both lengths without `padding_mask` read as padding (hipDNN's SEM-008) |
 | 11 | sliding window (`left_bound`) | **served** (and right-side bands) |
-| 12 | varlen / THD | missing (declined) |
-| 13 | decode (`Sq == 1`) | **served by a decode path**: GQA-packed rows in 16-row tiles (one tile, 16 rows, on the bias objects) and split-KV, K and V with one head count (MQA, speculative steps) at `head_dim` 64/96/128/256 and every other multiple of 8 up to 256 |
-| — | `Dv ≠ Dqk` (MLA) | **served** for un-absorbed prefill (Q/K 192, V 128) and absorbed MLA (Q/K 576, V 512) on the decode objects, which tile any number of rows, so absorbed chunked prefill runs there too; every mask, LSE, no bias. The 576/512 objects are built for absorbed MLA's one KV head, but the matcher only requires K's and V's head counts to match |
-| 14 | additive bias | **served**: f32 or the query's dtype, broadcast over any of B, H, Sq, Skv; with every mask, the LSE output and every specialized head dim, on the prefill and the decode objects |
-| — | attention sink | **served** at `head_dim` 64 and 128 (gpt-oss), prefill and decode, with every mask and the LSE output, no bias: one logit per query head in the query's dtype, rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, a key with no value in each row's softmax (kernel modification 21). A row no key reaches gets O = 0 and LSE = the sink. hipDNN's CPU reference declines sinks; the GPU tests check them against their own reference |
+| 12 | varlen / THD | **served** (§5.9): compact THD, ragged Q/O and K/V through cumulative token tables, the LSE packed alike, by §5.6's objects (gfx12) and the prefill objects (gfx11 and gfx12, kernel modification 29); packed with both lengths (cuDNN's form) by the prefill objects; the decode objects decline both |
+| 13 | decode (`Sq == 1`) | **served by a decode path**: GQA-packed rows in 16-row tiles (one tile, 16 rows, on the bias objects) and split-KV, K and V with one head count (MQA, speculative steps) at `head_dim` 64/96/128/256 and every other multiple of 8 up to 512 (past 256 without a bias) |
+| — | `Dv ≠ Dqk` | **served** for un-absorbed MLA prefill (Q/K 192, V 128) and absorbed MLA (Q/K 576, V 512) on the decode objects, which tile any number of rows, so absorbed chunked prefill runs there too; every mask, LSE; a bias on the 192/128 prefill objects (N2), none on the decode ones. The 576/512 objects are built for absorbed MLA's one KV head, but the matcher only requires K's and V's head counts to match. On gfx12, **any pair** of multiples of 8 up to 512, V narrower or wider, on §5.6's padded tiers (H1); the RDNA objects serve only the pairs above |
+| 14 | additive bias | **served**: f32 or the query's dtype, broadcast over any of B, H, Sq, Skv; with every mask, the LSE output and every head dim the plain objects serve (specialized and generic tiers), on the prefill and the decode objects; with a sink at `head_dim` 64 and 128 (prefill and decode, both bias dtypes); on the MLA 192/128 prefill objects; not on the wide decode objects |
+| — | dropout | **served** (§5.10): on gfx11 by the RDNA prefill objects' dropout twins (`head_dim` 64/96/128/256), on gfx12 by §5.6's objects (`head_dim` 64/128/256); bf16/f16, causal or not, with or without an additive bias (f32 or the query's dtype; R1, R2), no sink, no padding; the decode objects decline it |
+| — | attention sink | **served** at `head_dim` 64 and 128 (gpt-oss), prefill and decode, with every mask and the LSE output, with or without an additive bias (f32 or the query's dtype): one logit per query head, FLOAT (cuDNN's and hipDNN's reference's dtype; kernel modification 31, aiw README modification 11) or in the query's dtype, rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, a key with no value in each row's softmax (kernel modification 21). The same objects read either dtype: bit 32 of their sink stride argument names it, and the logit is widened to f32 exactly, so a FLOAT sink keeps its full value and a query-dtype one gives what it gave before. A row no key reaches gets O = 0 and LSE = the sink (its f32 bits, for a FLOAT sink); with a bias, the sink and the bias share the natural-log domain, so a sink far above a row the bias holds at its lowest finite value takes the whole softmax. On gfx12, §5.6's sink objects also take either additive mask. The GPU tests check every sink case against their own reference and hipDNN's CPU reference (`CpuFpReferenceSdpa`, FLOAT `[1, Hq, 1, 1]`) |
 
 ### 5.4 What is still missing, and what closing it takes
 
@@ -446,11 +486,10 @@ at `check_support()`, never at `execute()`.
 
 | | Effort | What it takes |
 |---|---|---|
-| **Padding mask** | medium | Two per-batch length pointers read once per workgroup. The diagonal offset is already computed in-kernel from the lengths for exactly this. hipDNN's CPU reference does not implement padding yet, so its semantics must be defined there first. |
-| **Varlen / THD** | medium, after padding | Ragged offsets replace the batch stride; the grid stays over the longest sequence and tiles past a sequence's end exit early. |
-| Bias on a generic head_dim | small | A `has_bias` variant of the twenty-four generic prefill objects (+24). |
-| A prefill schedule for absorbed MLA; other `Dv ≠ Dqk` pairs | medium; small per pair | 192/128 prefill (modification 20) and the 576/512 and 512/512 decode objects ship. Chunked prefill at 576/512 runs on the decode objects' 16-row tiles; a prefill schedule at that width would share each K/V tile across more rows. Other pairs are a row each. |
-| fp32 I/O, FP8, dropout, paged KV, block masks, ALiBi, softcap | out of scope | Not planned for these engines; ALiBi and softcap have no reference semantics. |
+| THD on the decode objects; packed with lengths on aiw | medium each | Decode: the merge kernel indexes O by batch, so the row-offset table would join its arguments (a decode ABI change, every decode object rebuilt and A/B'd); a packed decode step runs on the prefill objects meanwhile. aiw packed with lengths (which is also PyTorch's `seqused_k`, §5.9): the main kernel already decodes the form (`varlen_bits` 0x1515), but it clamps a length to `Max_seqlen` rather than to the slot (`POSITION ARRAY` gives starts only), and the fill kernel needs each sequence's base and slot (a row-offset argument). Either the main kernel loads `offset[b + 1]` and clamps (its prologue changes in every object: rebuild and A/B), or the fill kernel, launched first, writes the clamped lengths to the workspace for the main kernel to read (the main kernel's code unchanged); both rebuild every aiw object, and the Q side's `INDIVIDUAL`/`ARRAY` mode is one AOTriton never tested. A `seqused_k`-only subset (Q compact, no fill) is not available: the graph carries `seq_len_q`, whose values the matcher cannot see. The RDNA prefill objects serve the form on gfx12 meanwhile, and they are the faster ones on decode-shaped graphs (§5.6). |
+| Bias on the wide decode (576/512, 512/512) objects | small per class | A `has_bias` variant of each class, built and checked against the reference as the generic tiers' were; not built until a model needs them. |
+| A prefill schedule for absorbed MLA; other `Dv ≠ Dqk` pairs on gfx11 | medium; small per pair | 192/128 prefill (modification 20) and the 576/512 and 512/512 decode objects ship; on gfx12 §5.6's padded tiers serve any pair (H1). Chunked prefill at 576/512 runs on the decode objects' 16-row tiles; a prefill schedule at that width would share each K/V tile across more rows. Other pairs on the RDNA objects: a runtime V width on the generic tiers (a second appended argument, masked V loads and O stores; every generic tier rebuilt and A/B'd), not built until a model needs it. |
+| fp32 I/O, FP8, paged KV, block masks, ALiBi, softcap | out of scope | Not planned for these engines; ALiBi and softcap have no reference semantics. |
 | **Backward** | out of scope here | These engines are inference-only. LSE is emitted so a backward can be added without an ABI break. |
 | **Other architectures** | see below | The objects are `gfx11-generic` and `gfx12-generic` builds, so every RDNA3 / RDNA3.5 / RDNA4 part is served. |
 
@@ -474,12 +513,13 @@ objects.
 | Claim | Checked by |
 |---|---|
 | The objects are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — every object byte-identical, per target |
-| Each decode object carries its merge kernel, with both argument layouts as declared | `gen_sdpa_rdna_decode.py`, before the object is written; the 40-slot main layout by `TestFlydslSdpaRdnaDecodePacks` |
-| Each prefill object has the declared 38-argument layout and spills no registers | `gen_sdpa_rdna.py`, before the object is written |
+| Each decode object carries its merge kernel, with both argument layouts as declared | `gen_sdpa_rdna_decode.py`, before the object is written; the 44-slot main layout by `TestFlydslSdpaRdnaDecodePacks` |
+| Each prefill object has the declared 47-argument layout and spills no registers | `gen_sdpa_rdna.py`, before the object is written; the layout again by `TestFlydslSdpaRdnaPacks` |
 | The vendored kernel matches AITER but for its recorded modifications | `tools/diff_upstream.py --aiter` ([REGEN.md](REGEN.md) §5) |
 | Each engine's shard ships exactly one object per `dtype × head_dim × causal × has_bias × bias_q × head_dim_max × has_sink` class, each with its engine's one signature | `TestFlydslSdpaRdnaPacks` and `TestFlydslSdpaRdnaDecodePacks`, and the shard census that runs them |
-| The accept/decline rules above, the bindings, and candidate selection | `TestFlydslSdpaRdnaGraphAccepts`, `TestFlydslSdpaRdnaGraphDeclines`, `TestFlydslSdpaRdnaBinding`, `TestFlydslSdpaRdnaKernelMatch` |
-| The staged objects compute attention and LSE — GQA, ragged lengths, cross-attention, both causal corners, windows, bands, keyless rows, decode, `head_dim` 96, runtime and default scale — against a double-precision reference | `TestGpuFlydslSdpaRdnaDispatch` |
+| The accept/decline rules above, the bindings, and candidate selection | `TestFlydslSdpaRdnaGraphAccepts`, `TestFlydslSdpaRdnaGraphDeclines`, `TestFlydslSdpaRdnaBinding`, `TestFlydslSdpaRdnaKernelMatch`; padding (§5.9) `TestFlydslSdpaVarlen*` and `Padding/TestFlydslSdpaRdnaFieldDeclines` |
+| Which shipped aiw object a graph selects for the classes added after the engine landed (head dims 264-512 on the tiers up to 384 and 512; a sink with either mask at 64 and 128; a V head dim of its own on the tier of the wider, H1), and that the top-ranked one matches the reference on gfx12 (§5.7's mask and sink rows included), beside §5's decode objects at 512/512 | `TestFlydslSdpaAiwClasses`, `TestGpuFlydslSdpaAiwClasses` |
+| The staged objects compute attention and LSE — GQA, ragged lengths, cross-attention, both causal corners, windows, bands, keyless rows, decode, `head_dim` 96, runtime and default scale, a bias at every generic tier, bias rows and tiles at −inf and at the lowest finite value (§5.7), zero and negative scales on every engine (causal, a band, a bias, a sink, padding, packed sequences, dropout, decode across splits; against hipDNN's CPU reference too) — against a double-precision reference | `TestGpuFlydslSdpaRdnaDispatch`, and every staged object by `TestGpuFlydslSdpaObjects` |
 
 ---
 
@@ -494,11 +534,19 @@ nothing with §5's kernels. `gfx12-generic` only; the native half is
 which applies §5's graph matcher and declines only what this kernel cannot compute.
 
 - **Served:** bf16 and f16; `head_dim` 64, 128 and 256 exactly, any multiple of 8 up to
-  a padded tier's width (64, 96, 128, 160, 224, 256), Q/K 192 with V 128; causal at
+  a padded tier's width (64, 96, 128, 160, 224, 256, 384, 512), Q/K 192 with V 128 exactly;
+  on a padded tier, any pair of Q/K and V head dims, V narrower or wider, each a multiple of 8
+  and the wider within the tile (the kernel bounds Q/K's columns by `hdim_qk` and V/O's by
+  `hdim_vo`, two runtime arguments; H1, no object change); causal at
   either alignment, sliding windows and two-sided bands (hipDNN's bottom-right window is
   the kernel's shifted by `Skv - Sq`); an additive mask in Q's dtype or f32, broadcast
-  over B, H and Sq, its key axis contiguous; attention sinks at 64 and 128; a V head
-  count of its own; the LSE through its own strides; a scale baked or read at launch.
+  over B, H and Sq, its key axis contiguous, on the exact head dims and every padded tier
+  alike; attention sinks at 64 and 128, alone or with either mask (one natural-log domain,
+  README modification 9; the sink joins the row's max, so a sink far above a row the mask
+  holds at its lowest finite value takes the whole softmax, as PyTorch's does); a V head
+  count of its own; the LSE through its own strides; a scale baked or read at launch;
+  padding (per-batch lengths, §5.9) and packed (THD) sequences (§5.9) on every object, read
+  at runtime; dropout (§5.10) on its `has_dropout` objects.
 - **Edge cases, as §5's prefill:** a mask at the lowest finite value (bf16 or f32
   `finfo.min`, the HF padding convention) on every key of a row gives O = mean(V) and an
   LSE near the mask, as PyTorch does; a mask or sink above 2.36e38 no longer overflows
@@ -507,12 +555,19 @@ which applies §5's graph matcher and declines only what this kernel cannot comp
 - **Declined:** a mask whose key axis is strided; Q, K, V or O, or a mask, with a batch,
   head or sequence (query) stride that is not a multiple of 8 elements; an f32 mask whose
   declared alignment is under 32 bytes; more than 65,535 query tiles or batches (the
-  grid's y and z); a mask or sink on a padded tier (those ship plain); head dims that are
-  not multiples of 8; anything past 32-bit offsets. The kernel also takes packed (varlen)
-  batches and dropout, which this engine does not serve yet.
+  grid's y and z); a sink on a padded tier or at 256 (with or without a mask); head dims that are
+  not multiples of 8, or past 512, on either side (absorbed MLA's 576/512 runs on §5's decode
+  objects); anything past 32-bit offsets; padded or packed,
+  a bottom-right mask other than plain causal (§5.9); packed with a mask, or with a dense LSE
+  (§5.9); dropout with a mask, a sink, padding, packing, at a padded head dim or MLA (§5.10).
 - **Which engine runs a graph** both this and §5's prefill engine serve is autotune's
   (UHD's) to decide: measured on gfx1201, this one is faster on MLA prefill and long
   sequences, §5's on decode and sinks.
+- **Head dims past 256** (264-512, AOTriton's gfx1201 FlyDSL build ships 384 and 512) run on
+  the padded tiers up to 384 and 512, the tuning table's own 384 and 512 schedules, plain or
+  with either mask. They are the only RDNA objects for 264-504 at any tile; at 512/512 with one
+  KV head §5's decode objects serve too, and autotune picks. Both tiers spill heavily (as an
+  exact 384 or 512 build of this kernel does; allowances per class in `gen_sdpa_aiw.py`, §5.8).
 
 ### 5.7 Edge cases: the same answer from every family
 
@@ -532,7 +587,9 @@ RDNA).
 | A sink far above every score | Folded into the running max: LSE = the sink, O ≈ 0 |
 | A split-KV decode | Splits weighed by their key counts, whatever the bias |
 | A NaN score in a row | O and LSE NaN for that row |
-| Scale | Positive and at most 2²⁰ in every family (§5.2) |
+| Padding: a row past its batch's query length | Not written: O and the LSE keep what the buffer held (§5.9) |
+| Padding: a batch whose key length is 0 | Every row keyless: O = 0, LSE = −inf |
+| Scale | Any finite one up to 2²⁰ in magnitude in every family (§5.2, §7): at zero every kept key weighs the same (O the mean of V over them, the LSE the log of their count; with a bias, softmax of the bias); a negative scale reverses the scores' order |
 
 What differs, and why:
 
@@ -549,6 +606,304 @@ What differs, and why:
   wave64 (CDNA) parts, from the reduction tree's shape. dgamma is bitwise repeatable on a
   device, but its summation grouping follows the device's compute-unit count, so its last
   bits can differ between GPUs. Both are hardware differences.
+
+### 5.8 Measured costs, and deferred performance work (RDNA, aiw)
+
+The RDNA counterpart of §7.5. Measured on gfx1201 against the tree before the change: 7
+interleaved rounds per shape, bf16, 32 query and 8 KV heads, median of the round medians.
+The measurements are kept outside the repository.
+
+| Change | Result | Decision |
+|---|---|---|
+| A bias on the generic prefill and decode tiers, a mask on the aiw padded tiers (new objects only; §6.2) | every object shipped before regenerates byte-identical and times as before (63 object × shape rows: median +0.06%, all within ±0.6% but one decode row, faster by 3.7%) | shipped |
+| What the new bias objects cost over their plain twins | prefill, the tier up to 96 at 4096 tokens: +11–13%, as the specialized `head_dim` 128 bias objects (+10–13%); the tier up to 224: +4–7%; the tier up to 128 at `head_dim` 120: +22–29%, 4–7% slower than the specialized `head_dim` 128 bias objects running their full width. Decode: see the next row | kept, for coverage -- **deferred** (item 1) |
+| Decode bias loads issued ahead of the QK product (modification 25) | the bias objects below `head_dim` 128 issued their sixteen per-tile bias loads after the QK product and waited on them at once; ahead, they overlap it, as at 128 and up already. Measured in steady state (5 rounds of 6,000 launches per timing, against the objects before it): `head_dim` 64 at B4, 8192 keys −20% (the bias cost over the plain object falls from +32% to +6%), short caches −1 to −4%; the generic tier up to 96 at `head_dim` 80 on long caches −2 to −5% (bias cost +5–6% → about +1%), short caches within noise (+0.1–0.7%, sign not repeating). Timed in 300-launch batches instead, on gfx1201 and gfx1200 alike, `head_dim` 64 gains 4–13% on long caches and the generic tier's short-cache rows read +0.7–1.9% (the accepted cost). The specialized `head_dim` 96 objects measured +0.8–1.0% on short caches and −0.2% on long ones with it, so keep the late loads. Objects without a bias and every bias object that already loaded early are byte-identical | shipped, `head_dim` 64 and the generic tier up to 96 |
+| Per-batch lengths in every RDNA prefill and decode object (modification 26; all 440 objects change) | 6 interleaved rounds against the objects before it, 63 object × shape rows, dense graphs: gfx1201 median +0.06% (all rows within ±1.6% but one), gfx1101 median +0.17% (max +2.6%, a node shared with other jobs). The exception: the `head_dim` 64 causal sink prefill object on gfx1201, +6.5% at 10 µs and +1.3% at 133 µs, with identical registers and the length path not taken (−1.1% on gfx1101): the object's code layout. Two earlier forms cost every short launch 2–8% and were replaced: a branch on the length pointers (it waited on them before the other argument loads) and a branchless read (a cold line every dense launch) | shipped -- **deferred** (item 5) |
+| Padding's own cost on the RDNA prefill objects (gfx1201, top-left causal) | padded at full lengths against the same graph dense: 1.000–1.016×; at half lengths 0.27–0.43× the dense time | -- |
+| The aiw padded mask objects | faster than the RDNA generic bias objects at `head_dim` 120 (by about 20%), 200 (about 40%) and at 80 on 1024 tokens; at 80 on 4096 tokens the bf16 mask is faster, the f32 one 50% slower than its plain twin and slower than the RDNA object. VGPR spills at 128, 224 and 256 (up to 86, allowed per class in `gen_sdpa_aiw.py`) | shipped; which engine runs a graph is autotune's (UHD's) choice |
+| The aiw padded tiers up to 384 and 512 (new objects only; 5 rounds, bf16, two gfx1201 nodes within 3%) | the tier up to 384: 47–51 TFLOP/s at `head_dim` 384 and 40–43 at 320 (B1, H8, 4096 tokens; 39–44 at B2, H16, 1024), either mask within ±8% of plain. The tier up to 512: 34–42 TFLOP/s plain at 512 and 34–35 at 448; a mask costs 1.3–2.1× (bf16 25–33, f32 20–27 TFLOP/s). Against §5's decode objects at 512/512 with one KV head: 1.8–2.0× faster non-causal and 2.0–3.9× faster bottom-right causal (the more the diagonal masks, the more) from 64 query rows up (4096 and 16384 keys); at one query row the decode objects are 8× faster (48 against 397 µs, B4 H8, 4096 keys). AOTriton's tuning notes put exact 384/512 builds at 54–61 and 52–55 TFLOP/s (f16, upstream) | shipped; autotune picks between the aiw and decode objects at 512/512 -- **deferred** (item 6) |
+| An aiw sink with a mask (new objects only) | the sink adds nothing measurable to a mask object: within −1.6% to +0.9% of the same mask without a sink at `head_dim` 64 and 128 (1024 and 4096 tokens, both masks, causal and not). Over a sink alone the mask costs what it costs without a sink (bf16 +4–28%, f32 +6–26%) | shipped |
+| A FLOAT sink on the sink objects (A6: kernel modification 31, aiw README modification 11; the 48 RDNA and 24 aiw sink objects change, every other object byte-identical) | 7 interleaved rounds against the objects before it, timed with query-dtype sinks (the arguments those objects had), bf16. gfx1201: 38 sink object × shape rows (RDNA prefill and decode, aiw; with and without a bias; 14 µs to 3.7 ms) median +0.13%, geomean +0.19%, range −0.38% to +0.87%, none past 2% with a repeating sign; the byte-identical plain objects, the control, median +0.06% (−0.25% to +0.55%). gfx1101: 23 sink rows (RDNA prefill and decode; 16 µs to 7.7 ms) median −0.11%, geomean −0.59%, range −5.2% to +1.1%; the three past 2% with a repeating sign are faster (decode sink objects, where the byte-identical plain decode objects moved −1.2% to −1.4% too), the control median −0.11%. A FLOAT sink against a query-dtype one on the same object: median +0.01% (−3.1% to +1.4%, the extremes on 15–20 µs launches) | shipped |
+| The RDNA gfx11 dropout twins against their plain twins (kernel modification 27; gfx1101, bf16, p = 0.1, 5 rounds, new objects only, the plain ones byte-identical) | 1.29–2.04×, median 1.51×: `head_dim` 64 1.48–1.61×, 96 1.38–1.53×, 128 1.29–1.41× (the 128 twins re-read Q per K-step, their plain twins hold it), 256 1.78–2.04× before the next row's change (the twin split its columns two ways, so each half repeated the QK product and the Philox draw) | shipped, for coverage |
+| The RDNA gfx11 `head_dim` 256 dropout twins without the column split (opt2: head-dim pairs, bf16 64 rows, f16 32 rows where 64 spill 3 VGPRs; the 4 twins renamed, every other object byte-identical, the keep masks unchanged) | gfx1101, bf16 and f16, p = 0.1, 5 interleaved rounds against the split twins: 1.5–1.9× faster (1×16×2048: bf16 4849 → 3014 µs, f16 4740 → 3430; 4×8×512: 659 → 400, 632 → 434; causal alike); against the plain twin now 1.15–1.22× (bf16) and 1.22–1.35× (f16). AOTriton 0.12 (PyTorch 2.13) on the same node: its dropout costs 1.27–1.60× its plain at these shapes, and ours runs in 0.41–0.85× its dropout time. At 64, 96 and 128 our dropout runs in 0.48–1.09× AOTriton's dropout time, and its ratio to our plain twin is within 10% of AOTriton's or better, except `head_dim` 96 causal (1.40–1.55× against 1.28–1.32×), where our plain object is 2.1–2.3× faster than AOTriton's | shipped |
+| The aiw dropout twins against their plain twins and AOTriton (opt2; no object changed; gfx1201, bf16, p = 0.1) | against the plain twin 1.93–2.27× at `head_dim` 64, 1.48–1.71× at 128, 1.21–1.42× at 256. AOTriton 0.12 (PyTorch 2.13) on a gfx1201 node of the same kind: its dropout costs 1.22–1.75× its plain, but its plain is 1.4–2.4× slower than ours, and our dropout runs in 0.48–0.88× its dropout time. The extra cost is the Philox VALU work itself (the same 10-round Philox4x32 as AOTriton's; the twins' VGPRs are within 9 of their plain twins', no occupancy step) | shipped; no change: no cheap lever (overlapping the draws with the WMMA would be a scheduling change in AOTriton's kernel) |
+| Packed (THD) sequences on the aiw objects (no object changed; gfx1201, bf16, top-left causal, the LSE packed, 5 rounds) | packed at full lengths against the same problem dense: 0.998–1.003× (padded: 0.998–1.020×); at half the lengths 0.25–0.64× the dense time | -- |
+| Padded rows filled and lengths clamped on every RDNA prefill and decode object (modification 28; all 456 change, registers unchanged but one decode object's +1 SGPR) | 5 interleaved rounds (alternating order) against the objects before it: dense graphs on gfx1201 prefill median +0.15%, decode +0.27%; on gfx1101 +0.35% and +0.12%, within noise but for a single 43 µs row. Padded graphs at half lengths write the padded rows they used to skip: up to +12% on a short launch, the feature's own cost | shipped |
+| Packed (THD) sequences on every RDNA prefill object (modification 29; all 360 change, VGPRs unchanged but +1 on eight gfx11 generic-tier bias objects, within the same allocation granule; the decode objects byte-identical) | 7 interleaved rounds (alternating order) against the objects before it, 51 object × shape rows, dense graphs: gfx1201 median +0.04%, every row within −1.5% to +0.7% (a 5-round chunk round had flagged the bf16 `head_dim` 96 causal object at +6.7% on a 43 µs launch; it did not repeat); gfx1101 median −0.05% (a node shared with other jobs, where byte-identical decode objects swung by up to 13%). The packed path itself: packed at full lengths against the same problem dense 0.995–1.011× on gfx1201 (0.98–1.06× on gfx1101), at half the lengths 0.24–0.43×, and packed slots at full length with per-batch lengths at half (P3) 0.25–0.45× | shipped |
+| The RDNA generic decode tier up to 512 (H4; new objects only, the 568 others byte-identical) against the exact 512/512 objects at nearly the same width (bf16, bottom-right causal, one or two KV heads, 1 and 16 query rows, 4096 and 16384 keys; 5 rounds) | at `head_dim` 504: gfx1201 1.23–1.29×, gfx1101 2.6–3.2×; at 384: gfx1201 0.95–1.02×, gfx1101 1.24–1.73×. The first build (a select after each K and V load) spilled 5 VGPRs on gfx11 and took 3.0–3.6× there; reading out-of-range columns at the slice's end removed the spill and a tenth of the cost, so the spill was not the main cost. On gfx11 nothing else serves 264–504 | shipped, for coverage -- **deferred** (item 9) |
+| Padded rows filled on the aiw objects (modification 10: a fill kernel beside each main kernel, which keeps its registers; the length clamp) | 5 interleaved rounds on gfx1201 against the objects before it: dense graphs median +0.01% (37 rows, −2.7% to +0.5%). A padded graph launches the fill kernel too: +2.8% to +4% at full lengths (133–417 µs), and at half lengths, which now write their padded rows, up to +24% on a 56 µs launch. The first form, the same stores inside the main kernel, cost one VGPR and on six objects a wave of occupancy (`head_dim` 128 non-causal 7–19% slower dense) and was replaced | shipped -- **deferred** (item 8) |
+
+**Deferred performance work** -- costs accepted for coverage, to revisit:
+
+1. *The generic prefill tier up to 128 with a bias.* Like the specialized `head_dim` 128 bias
+   object it re-reads Q per K-step (kernel modification 14), and it also masks the columns
+   past the runtime head_dim. A 64-row tile or head-dim pairs for this one tier are the
+   candidates.
+2. *The decode bias objects' per-element bias loads.* Each lane loads its sixteen bias values
+   one element at a time, a full tile's worth of address arithmetic and sixteen loads per KV
+   step; issued ahead (modification 25) their latency is hidden, but the bias still costs
+   about 6% at `head_dim` 64 on long caches. Vector loads of a lane's contiguous keys (the
+   gfx12 layout reads eight adjacent keys per lane) are the candidate. An earlier note here
+   put the generic tier's cost at 12–14% on a short cache: that was its plain twin timed in
+   a warmer GPU state than its bias objects; measured alike, the gap is about 2%.
+3. *The bias schedule of the generic tier up to 64.* It takes the specialized `head_dim` 64
+   bias object's 128-row tile; the 64-row tile its plain twin uses was not measured with a
+   bias.
+4. *The aiw f32-mask padded objects.* The f32 mask's v8 loads on top of the column masks
+   spill at 128, 224 and 256 and cost most at 96; the kernel's tuning table plans these
+   tiers as it plans the plain ones. A plan of their own (fewer row sub-tiles, a shallower
+   prefetch) is the candidate.
+5. *The `head_dim` 64 causal sink prefill object on gfx12-generic* is 6.5% slower on a
+   10 µs launch since modification 26 (1.3% at 133 µs), with the same registers and the new
+   path not taken: a code-layout effect on that one object. Candidates: an alignment hint on
+   its KV loop, or a schedule of its own.
+6. *The aiw tiers up to 384 and 512.* They run the tuning table's own 384 and 512 schedules,
+   which spill at any build of this kernel (an exact 384 or 512 object spills 40-129); the
+   padded column masks add about 40 spills at 384 and 20 at 512, and a mask at 512 another
+   30-80, which is where the 1.3-2.1x mask cost comes from. Candidates: exact 384 and 512
+   objects beside the tiers (16, AOTriton's own set; their speed against the tiers is
+   unmeasured), and a 512 mask schedule of its own (fewer QK shards or a shallower V
+   prefetch).
+7. ~~*The RDNA `head_dim` 256 dropout twins*~~ Done (opt2): the twins run the head-dim pairs
+   without the column split (f16 on 32-row tiles), 1.15–1.35× their plain twins on gfx1101 (from
+   1.8–2.0×), below AOTriton's own 1.27–1.60×.
+8. *The aiw fill kernel's launch on padded graphs.* A padded graph pays a second launch
+   (+3-4% at 130-420 µs when no row is padded), since the host cannot see the device
+   lengths. Candidates: fold the fill back into the main kernel once a form leaves its
+   registers alone (an occupancy floor the allocator honours), or skip the launch where the
+   caller states the lengths are full.
+9. *The RDNA generic decode tier up to 512 on gfx11* takes 2.6–3.2× the exact 512/512
+   objects at `head_dim` 504 (gfx12 1.2–1.3×), with no spill in its bf16 build: every K and V
+   load computes its own offset (a select between the column and the slice's end), where
+   the exact objects fold the column into the load's immediate offset and keep more loads in
+   flight at the same register count. Candidates: branch once per 16-column K-step and per
+   8-column V chunk on the runtime head_dim (uniform), loading with immediate offsets inside
+   and skipping whole steps past it, which also stops a narrower head paying the tier's
+   full width; or tiers at 384 and 448.
+
+### 5.9 Varlen and padding
+
+hipDNN states padding cuDNN's way: `padding_mask` with `seq_len_q` and `seq_len_kv`, one
+length per batch, over dense Q/K/V/O whose sequence extent is the longest sequence
+(`FlydslSdpaVarlen.hpp`, shared by every family's graph matcher). Packed sequences are RFC
+0014's ragged tensors: each operand's sequences stored end to end, located through an offset
+table, the sequence extent still the longest sequence.
+
+| | aiw (gfx12) | RDNA prefill, decode | CDNA |
+|---|---|---|---|
+| Padding (both lengths, with or without `padding_mask`) | **served**, every object (the kernel's runtime varlen path, `varlen_bits` 0x0404; padded rows filled by modification 10) | **served**, every object (kernel modifications 26 and 28) | **served**, §7.8 |
+| Packed THD, compact (ragged Q/O and K/V, no lengths) | **served**, every object (the kernel's stacked varlen path, `varlen_bits` 0x0B0B) | **served** on the prefill objects (kernel modification 29); the decode objects decline | **served** on the generic prefill objects, §7.10 |
+| Packed with both lengths (cuDNN's form; each table entry a slot) | declined (below) | **served** on the prefill objects (modification 29, P3) | **served** on the generic prefill objects (P3, §7.10) |
+
+- **The lengths:** INT32 `[B, 1, 1, 1]`, batch stride 1, a device tensor declaring 4-byte
+  alignment; not virtual, not ragged, not pass-by-value. INT64 lengths, either length alone,
+  and `padding_mask` without both lengths decline.
+- **Both lengths without `padding_mask` are padding too** (`servableVarlenAsReferenceReads`):
+  hipDNN's references read them so (their SEM-008, which keeps hipDNN's golden bundles
+  valid); cuDNN would refuse such a graph.
+- **Lengths outside `[0, S]` are clamped to it** in the kernels, as hipDNN's GPU reference
+  clamps them (RDNA kernel modification 28, aiw modification 10): a length past `S` would
+  otherwise read past the batch's slice.
+- **Padded rows -- past a batch's query length, inside `S` -- are written as O = 0 and LSE =
+  −inf**, hipDNN's reference contract (cuDNN ≥ 9.14), sink objects included: a padded row
+  is not a keyless row. RDNA (kernel modification 28): a store of constants beside the live
+  rows' store, under bit 2 of `flags`; on the decode objects with several splits the merge
+  kernel fills them. aiw (modification 10): a second kernel in each object,
+  `flash_attn_aiw_padfill_kernel`, launched by the native beside the main kernel for padded
+  graphs only -- inside the main kernel the same stores cost a VGPR in every form tried, and
+  at `head_dim` 128 that cut occupancy (19% slower); the main kernels keep their VGPR and
+  spill counts. Rows can instead be left as the buffer held them (AOTriton's behaviour, and
+  free); the RDNA and aiw natives choose with one switch, `FILL_PADDED_ROWS`
+  (`FlydslSdpaRdnaCommon.hpp`), on for every padded graph. CDNA has no such switch: a padded
+  launch always fills (§7.8). Whole tiles past the length still run no KV iteration.
+- **Keys past a batch's key length are masked** with the dense tail's own compare, so a
+  batch with no key gives every row O = 0 and LSE = −inf.
+- **A bias under padding** is laid out over the launch's extents (`[.., Sq, Skv]`, the longest
+  sequence), and every family adds only each batch's real keys of it, whatever the bias holds past
+  them (NaN included). The RDNA prefill and decode objects read it one key at a time within a view
+  of the launch's extents; the aiw objects read 8-key vectors only on KV tiles wholly inside a
+  batch's keys and the tail tile one clamped key at a time; CDNA's vectorized bias objects read
+  4-key runs, with each batch's last real row viewed to the launch's key width (modification 37,
+  §7.8), so they serve a padded bias as they do a dense one. Tested at every key length mod 8
+  with NaN past each batch's keys and rows at the lowest finite value, −inf and NaN
+  (`TestGpuFlydslSdpa{Rdna,Aiw,Cdna}Dispatch.PadsWithABiasAtEveryKeyLength*`,
+  `TestGpuFlydslSdpaRdnaDispatch.DecodesPaddedBatchesWithABiasAtEveryKeyLength`).
+- **The mask, per batch:** top-left masks and windows are the same literal bounds for every
+  batch. A bottom-right diagonal sits at each batch's own `Skv_b − Sq_b`. The RDNA kernels
+  compute that offset in the kernel for every bound. The aiw kernel resolves bottom-right
+  causal per sequence (its `WINDOW_BOTRIGHT` sentinel) but takes any other bound as one
+  literal per launch, so the aiw objects decline a bottom-right window or band under padding
+  and the RDNA objects serve it.
+- **What a dense launch pays** (kernel modification 26): the RDNA kernels read the lengths
+  only when bit 1 of their `flags` argument (the LSE switch's word) says they are passed, so a
+  dense launch loads nothing more. Measured against the objects before it (§5.8): within
+  noise on gfx1101 and, but for one object, on gfx1201.
+- **Tested** against a test-local per-batch reference (`TestGpuFlydslSdpaAiwDispatch.Pads*`,
+  `TestGpuFlydslSdpaRdnaDispatch.Pads*`, `...PutsEachBatchsBottomRightMaskAtItsOwnCorner`,
+  `...DecodesEachBatchAgainstItsOwnCache`, until hipDNN's reference serves padding): lengths 0,
+  1, odd and full, keyless batches, bottom-right with more queries than keys, a bottom-right
+  window (RDNA), GQA, a window, a mask, a sink, generic and padded head-dim tiers, batched
+  decode with caches of 0, 1, short and full length, split several ways, lengths below 0 and
+  past `S`, both lengths without `padding_mask`; O and the LSE filled with NaN beforehand and
+  padded rows required to read exactly O = 0 and LSE = −inf. Each RDNA kernel change was
+  mutation-checked against these on gfx1151 (modification 28: every step killed but the
+  lower clamp, an equivalent mutant -- a negative length already acts as 0), and the
+  natives' fill switches on gfx1151 and gfx1201.
+- **Packed (THD), compact** (`servablePackedVarlen`), the form hipDNN's ragged reference runs:
+  Q and O ragged through one INT32 `[B + 1, 1, 1, 1]` device table, K and V through one (the
+  same one for self-attention, or another), each tensor's `ragged_offset_multiplier` its own
+  sequence stride, so the stored offsets count tokens (AOTriton's and AITER's `cu_seqlens`),
+  and each token's heads within one sequence stride (token-major; a head-major packing
+  declines). The kernel reads sequence b's rows from `offset[b]` to `offset[b + 1]` and
+  ignores the batch stride. The offsets are the caller's to keep non-decreasing from 0 with no
+  sequence past the extent, as the reference requires; the kernel does not check them.
+- **The LSE under packing** must be packed through Q's table too (`[T, H]`, any token and
+  head stride): a dense `[B, H, S, 1]` LSE needs each sequence's batch base, which the stacked
+  launch does not have, so it declines. No LSE is fine.
+- **Not served packed:** a mask (laid out by batch) and dropout, on every family. On aiw, a
+  bottom-right mask other than plain causal (resolved per sequence only for causal, as under
+  padding); the RDNA prefill objects move every bottom-right bound with each sequence's own
+  lengths and serve them all. A sink is served. The RDNA decode objects decline packed graphs
+  (their merge kernel indexes O by batch), so a packed one-query-row graph runs on the prefill
+  objects. CDNA serves compact packing on its generic prefill objects under the same rules,
+  and packing with both lengths too (P3, §7.10).
+- **RDNA prefill, packed (kernel modification 29):** bit 3 of `flags` makes the kernel read
+  sequence b's token range from the two tables (the `ROW_OFF_Q` / `ROW_OFF_KV` pointers
+  modification 26 appended, unread until then, so no argument moved). A batch's base is its
+  first token's row times the batch stride, which the native passes as each operand's
+  sequence stride (the LSE's too); its query and key counts are the tables' differences,
+  clamped to `[0, S]`. Q's loads stop at the rows the sequence owns, so none reaches the next
+  sequence or past the last; the K/V slices already stop at its key count. The read sits in
+  the lengths' one branch on the flags word, so a dense launch still loads nothing.
+- **Packed with both lengths (P3, `servablePackedVarlenWithLengths`), cuDNN's form**: ragged
+  operands as above plus both length tensors, with or without `padding_mask` (as over dense
+  operands). Each table entry is then a slot: sequence b's first `seq_len[b]` tokens are its
+  rows and keys, clamped to `[0, slot]`; the slot's rows past the length are padded rows
+  (O = 0, LSE = −inf, as under padding) and its keys past the length are never read. Served
+  on the RDNA prefill objects (both bits 1 and 3). One length alone, `padding_mask` without
+  both, or a length tensor the kernels cannot read declines, and so does every packing the
+  compact form declines. **aiw declines it:** its kernel could read the form (`varlen_bits`
+  STACKED, LENGTH INDIVIDUAL, POSITION ARRAY: `0x1515`), but its fill kernel addresses a
+  padded row by batch, which is another sequence's under packing, and its main kernel clamps
+  a length to `Max_seqlen_q`, not to the slot; both are aiw kernel changes (§5.4). On gfx12
+  the RDNA prefill objects serve it.
+- **PyTorch's `seqused_k` is P3** (`torch.nn.attention.varlen.varlen_attn(..., seqused_k=)`,
+  AOTriton's `varlen_bits` 0x150B): Q packed through `cu_seqlens_q` with `seq_len_q[b]` its own
+  token count (`cu_seqlens_q[b + 1] − cu_seqlens_q[b]`), K and V packed through `cu_seqlens_k`
+  slots with `seq_len_kv[b] = seqused_k[b]`, at most the slot. That gives AOTriton's and
+  FlashAttention's semantics exactly: sequence b attends to the first `seqused_k[b]` keys of its
+  slot and never reads the rest, a bottom-right diagonal sits at `seqused_k[b] − Sq_b` (top-left
+  does not depend on the length), and `seqused_k[b] = 0` leaves every row keyless (O = 0). One
+  difference is a convention, not a result: a row no key reaches gets LSE = −inf here (hipDNN's
+  and cuDNN's), where FlashAttention writes +inf and AOTriton +inf or about −2.4e38;
+  `seqused_k` is inference-only, so no backward reads it, and an adapter maps it if a caller
+  does. The decode objects decline packed graphs, so a `max_q = 1` KV-cache step runs on the
+  prefill objects (no split-KV); paged K/V (`block_table`, which needs `seqused_k`) declines
+  on every family. A length past its slot, which PyTorch forbids and hipDNN's reference rejects,
+  is clamped to the slot.
+- **Tested** on gfx1201 (`TestGpuFlydslSdpaAiwDispatch.Packs*`, `...PutsEachPacked*`): the
+  harness packs the dense values token-major and unpacks O and the LSE, so the per-sequence
+  reference above applies unchanged; lengths 0, 1, odd and full, keyless sequences,
+  bottom-right with more queries than keys, GQA, a window, a sink, a padded tier, one table
+  for every operand. Every matcher gate has a decline case (`Packed/...FieldDeclines`) and was
+  mutated; so were the native's packed paths (the VarlenBits, K's table, the per-sequence
+  window, the bound K table), each failing these device cases on gfx1201.
+- **Tested, RDNA prefill** (`TestGpuFlydslSdpaRdnaDispatch.Packs*`, `...PutsEachPacked*`,
+  on gfx1151, gfx1101 and gfx1201): the same harness and reference; lengths 0, 1, odd and
+  full, keyless sequences, bottom-right causal and a bottom-right window with GQA, a generic
+  tier, a sink, one table for every operand; packed with lengths: lengths 0, below and past
+  the slot, keys cut short, with and without `padding_mask`, a sink (padded rows −inf, not
+  the sink). The packed buffers hold exactly the sequences' tokens, so a load past the last
+  sequence would leave the allocation. `seqused_k` itself
+  (`TestGpuFlydslSdpaRdnaDispatch.MirrorsSequsedKOnPackedKeySlots`): slots longer than
+  `seqused_k` with NaN in every K and V element past it, so a read of the tail turns rows NaN;
+  no mask, top-left and bottom-right; one query row; more queries than used keys;
+  `seqused_k = 0`; GQA; bf16 and f16. Checked against the per-sequence reference and against
+  hipDNN's CPU reference: a P3 graph with every length inside its slot is the form hipDNN's
+  executors run as the dense padded graph (`RaggedSdpaDensify.hpp`), so both harnesses pass it
+  the dense values they packed from, slot tails included. Passing the slot as the device
+  length (the kernel then reads the tail) fails it, and so does an offset in O seen only by the
+  CPU-reference check.
+- **What packing costs:** nothing measurable on gfx1201 -- packed at full lengths times as the
+  same problem dense (0.998–1.003×, §5.8).
+
+### 5.10 Dropout
+
+hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offset tensor
+(`FlydslSdpaDropout.hpp`, shared by every family's graph matcher).
+
+| | aiw (gfx12) | RDNA prefill, decode | CDNA |
+|---|---|---|---|
+| Probability in (0, 1) with seed and offset | **served** by 36 `has_dropout` objects: bf16/f16 × causal × `head_dim` 64, 128, 256 × {no mask, a mask in the query's dtype, an f32 mask (R1)}, no sink | prefill on gfx11: **served** by 48 `has_dropout` objects (kernel modification 27): bf16/f16 × causal × `head_dim` 64, 96, 128, 256 × {no bias, an f32 bias, one in the query's dtype (R2)}, no sink; prefill on gfx12 (the aiw objects serve it, decision Q3) and decode: declined | **served** by `has_dropout` objects on the generic prefill tiers, 34 on gfx942, 28 on gfx950 and 24 on gfx90a (22, 16 and 12 without a bias, 12 with one the vectorized objects read), §7.9 |
+| Probability 0 | the plain objects (the undropped result) | the plain objects | the plain objects |
+| RNG dump (`rng_dump`) of a dropping graph | **served**: the mask writer after the attention launch | prefill on gfx11: **served** the same way; elsewhere the graph's dropout is declined | **served** the same way, padded graphs included (§7.9) |
+
+- **The mask is AOTriton's**, bit for bit from AOTriton 0.15 on: Philox4x32-10 keyed by the seed,
+  one counter per 4 keys of a (batch, query head, row) at
+  `offset1 + offset2 + ((b·Hq + h)·Sq + i)·cdiv(Skv, 4) + j/4`, key `j` taking word `j % 4`,
+  kept iff that word as int32 exceeds `int32(f32(p − 0.5)·2³²)`. Checked against AOTriton
+  b5e8cfb's `fast_dropout_mask` and the host oracle the tests use. **PyTorch 2.10 bundles
+  AOTriton 0.11.1, whose words 1 and 2 sit the other way round** (columns `4g + {0, 2, 1, 3}`),
+  so its masks differ from these; from AOTriton 0.15 on they are the same. cuDNN's mapping is
+  undocumented: the promise there is the same semantics (keep with probability `1 − p`, kept
+  probabilities scaled by `1/(1 − p)`, the softmax normaliser and the LSE undropped), not the
+  same bits.
+- **The threshold is computed in f32**, as AOTriton's kernel does it; PyTorch-ROCm applies
+  exactly that one (measured at probabilities where the f32 and double forms disagree on an
+  element). `philox.py`'s host helper computes it in double and is not used.
+- **One graph, one mask:** the mask depends only on the seed, the offset, B, Hq, Sq, Skv and
+  each element's position, not on the tile schedule; each query head of a GQA group draws its
+  own.
+- **Seed and offset:** `[1, 1, 1, 1]`, INT64 on the device (8-byte aligned; the kernel reads
+  it there, as PyTorch passes it), or INT64/INT32 by value (widened on the host; a seed given by
+  value is written to 8 bytes of workspace with two memsets on the launch stream, so the
+  launch stays capturable). INT32 on the device, a seed or offset without a probability, a
+  probability outside [0, 1), and the mask-and-scale form decline.
+- **The RNG dump** (`rng_dump`, `FlydslSdpaRngDump.hpp`): the keep mask the launch applied,
+  FLOAT `[B, Hq, Sq, Skv]`, 1 kept and 0 dropped, which hipDNN's references apply as the
+  explicit mask (scaled by `1/(1 − p)`) and keep-rate check. It is written by its own small
+  kernel, the `sdpa_dropout_mask` op: one object per target (gfx11-generic, gfx12-generic,
+  gfx90a, gfx942, gfx950), drawing the same counters through the same `philox.py`, one thread
+  per counter. The dropping engines' natives launch it on the attention launch's stream, after
+  it, only for a graph that names a dump, so no attention object changed (byte-identical, their
+  digests untouched). It holds the raw keep bit at every element, masked keys, padded rows and
+  keys past a batch's length included: those are draws the attention kernel makes and discards,
+  and the references' keep-rate check counts the whole buffer. Its objects ship under an engine
+  of their own, `hipkernel:flydsl_sdpa_dropout_mask`, which serves no graph; a native finds the
+  object beside its own (`sdpa_dropout_mask/<target>/` in the same arch shard), and an object
+  whose shard lacks it declines a dump at kernel match. Served: FLOAT, the graph's extents,
+  packed row-major strides (any stride on an axis of one element), a plain device tensor at a
+  4-byte-aligned base, under 2³¹ draws (the writer's grid), with a probability above 0.
+  Declined: any other dtype, extent, rank or layout, virtual, pass-by-value or ragged dumps, a
+  dump with probability 0 (the plain objects apply no mask) or without dropout, a dump that is
+  another of the node's tensors, and a dump over packed operands. Tested: every gate
+  (`RngDump/TestFlydslSdpa{Rdna,Cdna}FieldDeclines`, `TestFlydslSdpaRngDump*`,
+  `TestFlydslSdpaCdnaKernelMatch.RunsADumpOnlyBesideTheWriter`), and on the device the dump
+  equal to the oracle's mask bit for bit at every element with hipDNN's keep-rate check, O
+  equal to hipDNN's CPU reference run with the dump as its mask, and the undropped LSE
+  (`TestGpuFlydslSdpa{Rdna,Aiw,Cdna}Dispatch.WritesTheRngDumpItApplied`).
+- **Declined in this first wave**, each a row of objects when a model needs it: dropout with a
+  sink, under padding, on the padded head-dim tiers and the generic tiers, MLA,
+  on the RDNA gfx12 prefill objects (the aiw objects serve gfx12), and on the decode objects
+  (CDNA's own first wave and its declines: §7.9). Decode objects never serve dropout
+  (inference); a dropping graph with one query row runs on the prefill objects.
+- **Tested:** the oracle against AOTriton's own masks (`TestFlydslSdpaPhiloxOracle`), every
+  matcher gate (`Dropout/TestFlydslSdpaRdnaFieldDeclines`, `TestFlydslSdpaDropout*`), and on
+  gfx1201 the mask read off O bit for bit (Q zero, V the identity), the full output and the
+  undropped LSE against the reference with the oracle's mask, a seed and offset by value, and
+  probability 0 (`TestGpuFlydslSdpaAiwDispatch.Drops*`); on gfx1151 the same for the RDNA
+  twins: the mask bit for bit at `head_dim` 64, 96 (causal), 128 and 256 (causal), the
+  undropped LSE with GQA and a bottom-right mask, seed and offset by value
+  (`TestGpuFlydslSdpaRdnaDispatch.Drops*`). Each of the RDNA kernel's dropout steps (the peer
+  bit trade, the signed compare, offset1, the scale, the query-head plane, the bit order) was
+  mutated and the mutant failed these tests.
+- **The RDNA twins (kernel modification 27)** draw the mask after the row sum, so `l` and the
+  LSE stay undropped, and fold `1/(1 − p)` into `1/l`. gfx11's WMMA layout gives a lane the
+  even or the odd keys of 16; each lane draws the 8 consecutive keys of its half (two Philox
+  counters) and trades the packed keep bits with its xor-16 peer, one shuffle per 16 keys. At
+  `head_dim` 128 a twin re-reads Q per K-step and at 256 splits its columns two ways, where
+  its plain twin does not: with the Philox state the plain schedules spill (29 and 2 VGPRs).
+  The twins take 169–244 VGPRs, no spill.
 
 ## 6. The instance budget: what is baked, what is runtime, and why
 
@@ -601,7 +956,9 @@ recorded here is the decision and the gate it passed.
 | Additive bias on the decode objects | per-score loads and an add in the inner loop | tried as a runtime argument (a uniform branch skipped with no bias bound): `head_dim` 64 slower with no bias, beyond noise with a repeating sign; testing it once and running one of two copies of the KV loop instead spills at 128 and 256, the register allocation being the larger copy's | baked axis, +16 |
 | Row tiles on the decode objects (groups over 16 rows) | the row tile as the grid's second dimension; no work per score | 0 VGPRs; time within noise on every decode shape (computing the tile from the block index instead cost a few percent on short d64 decode, sign repeating). The bias objects are left one tile: theirs spill 2 VGPRs at `head_dim` 128 and up with it | runtime, not on the bias objects |
 | Head-dim pairs (`hd_pair`) | a schedule, not a feature: the partial-score exchange through LDS, behind the barrier that already publishes V | compile-time by the rule; objects without it compile to identical code | baked, replaces `dv_split` above 128 |
+| Per-batch lengths (padding, modification 26) | a flag test and two scalar loads per workgroup, under the flag only | tried as a branch on the length pointers and as a branchless read: both cost short launches 2–8%; behind a bit of the LSE flag word, within noise but for one object (§5.8) | runtime |
 | Idle-wave skip (rows past `seq_len_q`) | one branch per KV tile | removing it gains a few percent on small f16 non-causal prefill (`head_dim` 64) and nothing elsewhere, and roughly doubles every partly empty tile the decode objects do not take — K and V with different head counts, chunked prefill of fewer than 128 rows, a bias on a generic head_dim | kept, re-measured with the decode family in place |
+| Sink dtype (FLOAT or the query's; A6), sink objects only | two 16-bit loads and a select where the sink's logit is read, once per row or workgroup in the epilogue (or the decode merge), in arguments the objects already had | VGPRs and LDS unchanged on 215 of the 216 sink objects (a gfx950 bias-and-sink object uses one fewer VGPR); against the objects before it, within noise on every shape, sign not repeating (§5.8, §7.5); objects without a sink byte-identical | runtime |
 
 ### 6.2 Instance ledger
 
@@ -626,13 +983,42 @@ shard, so the shipped count per arch is the same as the authored count.
 | SDPA forward, MLA (V narrower) | dtype (2) × causal (2); Q/K 192, V 128 (`head_dim_v`, kernel modification 20); the 192 schedule (head-dim pairs); no bias | 4 | shipped, `gfx11-generic`; the 140 above rebuilt byte-identical |
 | SDPA decode, wide heads with one KV head | dtype (2) × causal (2) × {Q/K 576 with V 512 (absorbed MLA), 512/512}; the output columns split four ways (`dv_split` 4, 128 each, the d256 objects' register footprint); Q re-read per K-step; no bias | 8 | shipped, `gfx11-generic`; the 144 above rebuilt byte-identical |
 | SDPA forward and decode, attention sink | dtype (2) × `head_dim` {64, 128} × causal (2) × {prefill, decode}; a per-head logit in the query's dtype (`has_sink`, kernel modification 21 and the decode kernel's own); no bias | 16 | shipped, `gfx11-generic`; the 152 above compile to identical instructions with the sink arguments appended |
-| **Total, gfx11-generic** | | **309** | |
+| SDPA forward and decode, a bias on the generic tiers | an f32-bias and a query-dtype-bias object (`has_bias`, `bias_q`) beside each of the 24 generic prefill and 8 generic decode objects; each keeps its plain twin's schedule, but the prefill tier up to 64 takes the 128-row tile of the specialized `head_dim` 64 bias object | 64 | shipped, `gfx11-generic`; the 309 above byte-identical |
+| SDPA forward, dropout (§5.10) | a dropout twin (`has_dropout`, kernel modification 27, Philox per score) of dtype (2) × causal (2) × `head_dim` {64, 96, 128, 256}, no bias, no sink; Q re-read at 128, head-dim pairs without a column split at 256 (f16 on 32-row tiles) | 16 | shipped, `gfx11-generic` only (gfx12 takes dropout from the aiw objects); the 373 above byte-identical |
+| SDPA forward and decode, a bias with a sink (N1) | an f32-bias and a query-dtype-bias object beside each of the 16 sink objects (`has_sink` with `has_bias`, `bias_q`), each on its bias schedule; the kernels compose the two (the sink takes the bias's natural-log domain), no spill | 16 | shipped, both RDNA targets; the 389 above byte-identical |
+| SDPA forward, MLA with a bias (N2) | an f32-bias and a query-dtype-bias object beside each of the 4 MLA objects (`has_bias`, `bias_q`), on the 192 schedule; no spill | 8 | shipped, both RDNA targets; the 421 above byte-identical |
+| SDPA forward, dropout with a bias (R2) | an f32-bias and a query-dtype-bias object beside each of the 16 dropout twins (`has_dropout` with `has_bias`, `bias_q`), on the bias schedule (at 256 a two-way column split); no spill | 32 | shipped, `gfx11-generic` only; the 429 above byte-identical |
+| SDPA decode, a generic tier up to 512 (H4) | dtype (2) × causal (2); every multiple of 8 up to 512 (kernel modification 30 lifts the generic decode cap from 256), the output columns split four ways (`dv_split` 4), K and V columns past the runtime head_dim read as zeros past the slice; no bias, no sink; the gfx11 f16 objects spill 1 VGPR, allowed for this class (§5.1) | 4 | shipped, both RDNA targets; the 461 above byte-identical |
+| SDPA dropout keep-mask writer (§5.10) | the RNG dump's writer (`sdpa_dropout_mask`, its own op and engine, which serves no graph): one object, every value at runtime | 1 | shipped, `gfx11-generic` and `gfx12-generic`; every attention object byte-identical (no attention digest moved) |
+| SDPA forward and decode, a FLOAT sink (A6) | not an axis: the sink objects read a FLOAT sink or one in the query's dtype, named by bit 32 of their sink stride argument (kernel modification 31), the logit widened to f32 exactly | ±0 | shipped, both RDNA targets; the 24 prefill and 24 decode sink objects change, every other object byte-identical (§5.8) |
+| **Total, gfx11-generic** | | **466** | |
 | SDPA prefill schedules (§5.1) | not an axis: `block_m` 64 for `head_dim` 64, non-causal 128 without a bias and the generic tier up to 64, and head-dim pairs (`hd_pair`) for 256 and the generic tiers above 128, replace the schedules of the same classes | ±0 | shipped; the 66 objects whose schedule did not change rebuilt byte-identical with kernel modification 18 in the source |
-| **gfx12-generic** | the same table, built from the same sources for RDNA4 | **309** | shipped; GPU suites pass on gfx1201 |
+| **gfx12-generic** | the same table but its dropout twins, built from the same sources for RDNA4 | **417** | shipped; GPU suites pass on gfx1201 |
 | SDPA forward, AOTriton's gfx1201 kernel (§5.6) | dtype (2) × causal (2) × {64, 128, 256 each plain, with a mask in Q's dtype, with an f32 mask; sinks at 64 and 128; MLA 192/128; padded tiers 64, 96, 128, 160, 224, 256} | 72 | shipped, `gfx12-generic` only; GPU suites pass on gfx1201 |
-| **Total, gfx12-generic** | | **381** | |
-| **Total, both families** | | **690** | |
+| SDPA forward, AOTriton's kernel, a mask on the padded tiers | a mask in Q's dtype and an f32 one beside each of the 24 padded-tier objects (`has_bias`, `bias_f32`); their VGPR spills are allowed per class and recorded (§5.8) | 48 | shipped, `gfx12-generic` only; the 72 above byte-identical |
+| SDPA forward, AOTriton's kernel, dropout (§5.10) | a dropout twin (`has_dropout`, AOTriton's `ENABLE_DROPOUT`, Philox per score) of dtype (2) × causal (2) × `head_dim` {64, 128, 256}, no mask, no sink; 256 spills 4–6 VGPRs over its plain twin, allowed per class | 12 | shipped, `gfx12-generic` only; the 120 above byte-identical (the kernel's argument list already carried dropout) |
+| SDPA forward, AOTriton's kernel, head dims past 256 (§5.6) | padded tiers up to 384 and 512 (the tuning table's 384 and 512 schedules) × dtype (2) × causal (2) × {plain, a mask in Q's dtype, an f32 one}; they spill 62-141 VGPRs, allowed per class (§5.8) | 24 | shipped, `gfx12-generic` only; the 132 above byte-identical |
+| SDPA forward, AOTriton's kernel, a sink with a mask (§5.6) | a mask in Q's dtype and an f32 one beside each of the 8 sink objects (`has_sink` with `has_bias`, `bias_f32`); `head_dim` 128 spills 2-4 VGPRs, within the mask objects' allowances | 16 | shipped, `gfx12-generic` only; the 156 above byte-identical |
+| SDPA forward, AOTriton's kernel, a FLOAT sink (A6) | not an axis: the sink objects read a FLOAT sink or one in the query's dtype, named by bit 32 of their sink stride argument (README modification 11) | ±0 | shipped, `gfx12-generic` only; the 24 sink objects change, the other 172 byte-identical (§5.8) |
+| SDPA forward, AOTriton's kernel, dropout with a mask (R1) | a mask in Q's dtype and an f32 one beside each of the 12 dropout twins (`has_dropout` with `has_bias`, `bias_f32`); 256 spills 34-52 VGPRs, allowed per class (`_DROPOUT_BIAS_SPILL_ALLOWANCE`), 64 and 128 none | 24 | shipped, `gfx12-generic` only; the 172 above byte-identical |
+| **Total, gfx12-generic** | the RDNA table (417, without its dropout objects), AOTriton's kernel (196) and the keep-mask writer (1) | **614** | |
+| **Total, both families** | | **1080** | |
 | SDPA forward, CDNA (§7) | per arch: dtype (2) × `head_dim` × causal (2), the kernel family fixed by arch and `head_dim`; the generic non-causal class also by `kv_align`, the dual-wave causal class by `any_diagonal`, the dual-wave classes by `has_bias`; companion tiers (§7.6); the MLA objects by `head_dim_v` and `qk_mask` | 100 on gfx950, 102 on gfx942, 102 on gfx90a | shipped; GPU suites pass on all three |
+| SDPA forward, CDNA, a bias on the bucket objects | one bias object beside each bucket class's default tier (`has_bias`) | 12 on gfx950, 12 on gfx942, 28 on gfx90a | shipped; the objects without it compile to identical instructions, but the generic kernel's causal prefill ones (modification 30, below) |
+| SDPA forward, CDNA, a bias read one key at a time | dtype (2) × bucket {64, 128, 256} × causal (2), `bias_kstrided` (modification 31; f32 or the query's dtype at runtime) | 12 per arch | shipped; the generic kernel takes two more arguments, appended to every object's list, and the objects without it compile to identical instructions |
+| SDPA forward, CDNA, a sink with a bias | one bias object beside each prefill sink object (`has_bias` × `has_sink`) | 8 per arch | shipped |
+| SDPA forward, CDNA, diagonals past the keys | not an axis: the generic kernel's causal prefill objects clamp each row's diagonal (modification 30) | ±0 | shipped; every generic causal prefill object changes by the clamp (§7.5); the decode objects compile to identical instructions |
+| SDPA forward and decode, CDNA, padding (§7.8) | not an axis: the generic kernel reads per-batch lengths behind a flag (modification 32), and its argument list grows once for packed sequences and dropout | ±0 | shipped; every generic prefill and decode object changes (§7.5); the dual-wave objects byte-identical |
+| SDPA forward, CDNA, dropout (§7.9) | dtype (2) × causal (2) × `head_dim` {64, 128, 256}, `has_dropout` (modification 33), no bias, no sink, a generic prefill tier | 12 per arch | shipped; the objects without it byte-identical (modification 32 already carried the arguments) |
+| SDPA forward, CDNA, dropout on faster tiles (opt2, §7.9) | dtype (2) × the non-causal dropout objects' key-aligned builds (`kv_align` 64: `head_dim` 64, 128, 256 on gfx942, 64 and 256 on gfx950), gfx942's 256-row companion at 128 without the KV global prefetch (and its key-aligned build, preferred from 49152 rows), gfx950's 64 moved from the 64-row to the 128-row tile | 10 on gfx942, 4 on gfx950 | shipped; every other object byte-identical, gfx950's two 64-row `head_dim` 64 dropout objects replaced |
+| SDPA forward, CDNA, exact f32 (§7.11) | `f32` × {buckets 64 and 128; 256 exact, or a bucket on gfx950} × causal (2), generic prefill objects (modification 35), no bias, sink or dropout | 6 per arch | shipped; every 16-bit object byte-identical |
+| SDPA forward, CDNA, packed THD (§7.10) | not an axis: the generic prefill kernel reads the row-offset tables behind a flag (modification 34), through arguments modification 32 appended | ±0 | shipped; every generic prefill and decode object changes (§7.5; the decode ones only by the keyless-view fix, modification 34); the dual-wave objects byte-identical |
+| SDPA forward, CDNA, a sink with a strided bias | dtype (2) × `head_dim` {64, 128} × causal (2): a strided build (`bias_kstrided`) of each prefill sink-and-bias tier, ranked below it | 8 per arch | shipped; every existing object byte-identical |
+| SDPA forward, CDNA, dropout with a bias (§7.9) | dtype (2) × causal (2) × `head_dim` {64, 128, 256}, `has_dropout` × `has_bias` (vectorized), each dropout object's tier | 12 per arch | shipped; every existing object byte-identical |
+| SDPA forward, CDNA, exact 512/512 prefill | dtype (2) × causal (2), `head_dim` = `head_dim_v` 512, O split four ways (`dv_split` 4, modification 16), Q streamed past 256; K chunked by 256 on gfx942 and gfx90a (modification 18) | 4 per arch | shipped; every existing object byte-identical; the decode engine's wide objects serve 512/512 too (both candidates, autotune picks) |
+| SDPA dropout keep-mask writer (§7.9, §5.10) | the RNG dump's writer, one object per arch | 1 per arch | shipped; every attention object byte-identical |
+| SDPA forward and decode, CDNA, a FLOAT sink (A6) | not an axis: the runtime `sink_on` names the sink's dtype, FLOAT or the query's (modification 36), the logit widened to f32 exactly | ±0 | shipped; the 24 prefill and 8 decode sink objects per arch change, every other object (the dual-wave ones included) byte-identical (§7.5) |
+| **Total, CDNA** | | **179 on gfx950, 187 on gfx942, 193 on gfx90a** | |
 
 Adding a row here, with its gate result in §6.1 where it introduces a runtime
 feature, is part of adding the feature.
@@ -700,7 +1086,10 @@ and f16, the default tier first:
 | gfx942, gfx90a absorbed MLA, decode | Q/K up to 768 (multiples of 8), V 512, as above | the same, K staged in three 256-column chunks per KV tile (`k_chunk`), without the KV global prefetch | the same |
 | every arch, any other multiple of 8 | up to 64, 128, 256 (Q, K and V the graph's width) | `generic` with Q/K and V masked to the runtime width (`qk_mask`, `head_dim_v` = the bucket), `priority` below every exact tier (76, 74, 70), the narrower bucket above the wider | the same |
 | gfx90a, the widths that are not powers of two | up to 96, 160, 192, 224 (modification 26) | `generic` buckets at those widths, tiles from an MI210 sweep (96: 256 rows; 160: 256 rows; 192, 224: 128 rows, the 256-row tiles spilling 22-46 VGPRs); causal 96 and 160 with measured companions | the same |
+| every arch, a bias at any other multiple of 8 | up to each bucket's width | the bucket's default tier with the bias (`has_bias`); on gfx942 and gfx90a at 64 without three waves per SIMD, which spill with it | the same |
+| every arch, a bias the vectorized objects do not read (f32, broadcast along the keys, rows off the 16-byte vectors) | up to 64, 128, 256 (Q, K and V the graph's width) | the bucket's bias tier reading the bias one key at a time (`bias_kstrided`; gfx950 128 at 128 rows, one wave per SIMD), `priority` 20 below the bucket's; it serves every bias, ranked below the vectorized objects | the same |
 | every arch, attention sink | 64, 128 | `generic` (gfx950 64 rows; gfx942 and gfx90a gfx942's default 128-row tier) with the sink (`has_sink`), and the split, packed decode tier with it | the same |
+| every arch, attention sink with a bias | 64, 128 | the prefill sink tier with the bias (gfx942 and gfx90a at 64 without three waves per SIMD; gfx950 causal 128 at 128 rows, one wave per SIMD) | the same |
 | every arch, decode | 64, 128, 256 | `generic` 64 (128 at 256) with the keys split across workgroups and the GQA group packed into its rows (`split_kv`, `pack_gqa`), an engine of its own (`hipkernel:flydsl_sdpa_cdna_decode`) that serves any query length; which engine runs a graph is autotune's (UHD's) | the same |
 
 The dual-wave kernel takes `head_dim` 64 and 128 only, so gfx950's 256 comes from the
@@ -726,11 +1115,12 @@ baked field at a time (§7.3).
 
 | Baked per object | Runtime kernel argument |
 |---|---|
-| dtype (`bf16`, `f16`) | batch |
+| dtype (`bf16`, `f16`; `f32` on the generic prefill objects, §7.11) | batch |
 | `head_dim` (64, 128, 256), or a bucket (64, 128, 256; on gfx90a also 96, 160, 192, 224; 1024 or 768 for absorbed MLA) whose Q/K width is runtime (`qk_mask`) | query and key lengths, independently; the Q/K head dim under `qk_mask` |
 | V's head dim (`head_dim_v`: `head_dim`'s, 128 or 512 on the MLA objects, or following Q/K's on a bucket object) | V's strides, apart from K's (read through them on the `qk_mask` and MLA objects) |
 | causal, or none | the causal diagonal: top-left, bottom-right, a band to its right; a sliding window's lower edge (generic kernel) |
 | | query and KV head counts (MHA, GQA, MQA) |
+| | each batch's own query and key lengths under padding (generic kernel, §7.8) |
 | | every operand's (batch, sequence, head) strides: BSHD, BHSD, packed QKV |
 | | softmax scale |
 | | whether to write the LSE output, and its (batch, head, query) strides (generic kernel) |
@@ -738,10 +1128,12 @@ baked field at a time (§7.3).
 | generic non-causal: whether the KV tail is masked (`kv_align`) | |
 | gfx950 d128 causal: whether any diagonal is served (`any_diagonal`) | |
 | whether an additive bias is added (`has_bias`) | the bias's (batch, head, query) strides |
-| whether an attention sink is added (`has_sink`) | the sink's head stride |
+| whether the bias is read one key at a time (`bias_kstrided`, generic bucket objects) | its key stride, and whether it is f32 or in the query's dtype |
+| whether an attention sink is added (`has_sink`) | the sink's head stride, and its dtype (FLOAT or the query's, in `sink_on`, modification 36) |
+| whether attention probabilities are dropped (`has_dropout`, generic prefill objects) | the probability (as the keep threshold and the scale), the Philox seed and offset |
 | decode: keys split, the GQA group packed into rows (`split_kv`, `pack_gqa`); O's columns split (`dv_split`); K staged in column chunks (`k_chunk`) | how many splits |
 
-One hundred objects on gfx950, one hundred and two on gfx942 and on gfx90a. A class -- (dtype, `head_dim`, causal,
+174 objects on gfx950, 176 on gfx942 and 192 on gfx90a. A class -- (dtype, `head_dim`, causal,
 bias) -- ships a default tier that serves every shape of it, and measured companions
 for the shapes where another schedule wins (§7.6). Two variants specialise a tier
 further and rank above it where they apply. The generic kernel can skip masking the
@@ -767,17 +1159,20 @@ One SDPA-forward node, and:
 
 | Condition | Why |
 |---|---|
-| Q, K, V, O rank 4, device operands, **not ragged**, each declaring 16-byte alignment; head-dim stride 1; every other stride on an axis longer than 1 positive and a multiple of 8 elements; one (batch, head) slice of each within 32-bit addressing | The batch, sequence and head strides are kernel arguments, so BSHD, BHSD and packed-QKV views are served; each lane moves 16-byte vectors; each slice is one buffer view, whose record count is 32-bit. V with strides other than K's is served by the `qk_mask` and MLA objects, whose masked load path reads V through its own; the generic kernel's direct-to-LDS path and the dual-wave kernel read V through K's descriptor, so those objects decline it. |
-| One dtype for all four, `bf16` or `f16` | One object per dtype. |
+| Q, K, V, O rank 4, device operands, dense or packed THD (§7.10), each declaring 16-byte alignment; head-dim stride 1; every other stride on an axis longer than 1 positive and a multiple of 8 elements; one (batch, head) slice of each within 32-bit addressing | The batch, sequence and head strides are kernel arguments, so BSHD, BHSD and packed-QKV views are served; each lane moves 16-byte vectors; each slice is one buffer view, whose record count is 32-bit. V with strides other than K's is served by the `qk_mask` and MLA objects, whose masked load path reads V through its own; the generic kernel's direct-to-LDS path and the dual-wave kernel read V through K's descriptor, so those objects decline it. |
+| One dtype for all four, `bf16` or `f16`, or `f32` (§7.11) | One object per dtype. f32 runs on the generic prefill objects only, with `mma_core_mode` unset or `FLOAT`, and without a bias, a sink or dropout; a 16-bit graph asking for a `FLOAT` MMA declines. |
 | `Hq % Hk == 0`; V shaped as K but for a head dim at most K's, O as Q with V's head dim | The kernels do not broadcast; V's head dim is its own only on the MLA objects (modification 13). |
 | `head_dim` equal to an object's baked value, or, on a `qk_mask` object, a multiple of 8 up to its bucket; V's head dim equal to the object's `head_dim_v`, or Q/K's on a bucket object | Checked by the kernel matcher against each candidate's metadata. A masked K or V load zeroes whole 8-column halves. |
-| No mask, or `right_bound` ≥ 0 at either named `diagonal_alignment` (or one of the deprecated causal booleans: right 0 unless the graph sets one, `causal_mask` at the stored alignment, `causal_mask_bottom_right` always bottom-right; an unnamed alignment declines either way), with a diagonal offset `align + right_bound` of at most `Skv − Sq`; a `left_bound` only with a right one | The kernels apply the reference's rule, key `j` visible from query row `i` iff `i + align − left ≤ j ≤ i + offset`, with `align` 0 top-left and `Skv − Sq` bottom-right. The causal objects mask the last KV tile's padding with the same compare, which holds only while every row's diagonal stays inside the keys: so bottom-right is served at any lengths, top-left when `Sq ≤ Skv`, and a band only as far as `Skv − Sq`. A sliding window (`left_bound`) runs on the generic kernel only (modification 11) -- on gfx950 its causal tiers beside the dual-wave objects; a window no row reaches is no window. |
-| Scale: `attn_scale_value` (> 0 and ≤ 2²⁰), a pass-by-value scalar tensor, or absent | Absent is 1.0, cuDNN's default, which hipDNN's references apply too. The same range as the RDNA engines (`FlydslSdpaShared.hpp` `MAX_SOFTMAX_SCALE`): positive, because the running max is over unscaled scores, and at most 2²⁰, below where the causal objects' running-max floor overflows f32. A pass-by-value scale is read from host memory at launch, and one outside the range is refused there. |
+| No mask, or `right_bound` ≥ 0 at either named `diagonal_alignment` (or one of the deprecated causal booleans: right 0 unless the graph sets one, `causal_mask` at the stored alignment, `causal_mask_bottom_right` always bottom-right; an unnamed alignment declines either way); a `left_bound` (−1, or L ≥ 1) only with a right one | The kernels apply the reference's rule, key `j` visible from query row `i` iff `i + align − L < j ≤ i + offset`, with `align` 0 top-left and `Skv − Sq` bottom-right (a `left_bound` L keeps L keys up to and including the diagonal, cuDNN and SEM-001, so the kernel's window edge is `align − (L − 1)`, and 0 declines), so both alignments are served at any lengths and a band of any width. A row whose diagonal passes the last key -- top-left with more queries than keys, a band wider than `Skv − Sq` -- sees every key: the generic kernel's prefill objects clamp each row's diagonal to the last key, so the last KV tile's padding stays masked (modification 30); an offset past `Skv − 1` is stored as `Skv − 1`, which shows every row every key. The dual-wave kernel and the split decode objects mask that padding with their diagonal compare alone, so they serve only diagonals inside the keys (offset at most `Skv − Sq`), and the generic prefill tiers take the rest, at any query length. A diagonal at `Skv − 1` or past it with no window shows every row every key, so it binds as no mask. With more than one query row, every engine's non-causal objects then serve it, dual-wave and decode included; at one query row such a bottom-right diagonal is inside the keys and stays causal. Under padding or packing this holds per batch. A sliding window (`left_bound`) runs on the generic kernel only (modification 11) -- on gfx950 its causal tiers beside the dual-wave objects; a window no row reaches is no window. |
+| Scale: `attn_scale_value` (finite, \|scale\| ≤ 2²⁰: zero and negative included), a pass-by-value scalar tensor, or absent | Absent is 1.0, cuDNN's default, which hipDNN's references apply too. The same range as the RDNA engines (`FlydslSdpaShared.hpp` `isServableScale`, `MAX_SOFTMAX_SCALE`): at most 2²⁰ in magnitude, below where the causal objects' running-max floor overflows f32; NaN and ±inf decline. The objects without a bias keep their running max over unscaled scores (modification 21 on the dual-wave kernel), which holds only for a positive, normal scale (`rawScoresServe`); the bias objects scale first and mask after (modification 28), so a graph without a bias whose scale -- a value or a constant tensor -- is zero, negative or subnormal runs on them, reading a zero `[1, 1, 1, Skv]` bias in the query's dtype the engine writes into its workspace on the launch stream (`runsOnAZeroBias`): on the vectorized objects at a key length that is a multiple of 4, on the strided ones (at stride 0) at any. It declines where a graph's own bias does: f32 and packed graphs, and the split decode objects, which have no bias twins (the generic prefill objects serve those graphs), nor do the 256/128 and 512 objects. A pass-by-value scale is read from host memory at launch, after the object was chosen: one outside the range is refused there, and so is a zero, negative or subnormal one on an object without a bias. |
 | Key length a multiple of 64, for a `kv_align` 64 object | That object does not mask the last KV tile. |
 | Stats, if requested: a named f32 `[B, H, Sq, 1]` device tensor, each axis longer than 1 at a positive stride, every element within 32-bit offsets | The kernels write the natural-log LSE of the scaled scores. The generic kernel and its merge take its strides (modification 20); the dual-wave kernel writes one packed `[B, H, Sq]`, so a strided LSE runs on gfx950's generic companions. A row no key reaches gets −inf (or the sink); a row whose softmax sum is NaN (a NaN or +inf score) gets NaN, as PyTorch's does, and a decode split left NaN carries NaN into the merged O and LSE rather than being skipped (modification 29). |
-| Bias (`attn_mask`), if present: in the query's dtype, declaring 16-byte alignment, rank 1–4 right-aligned to `[B, H, Sq, Skv]`, any of B, H and Sq broadcast, the key axis contiguous; strides multiples of 8 elements, a query stride of at least `Skv` (or 0); a key length that is a multiple of 4; one (batch, head) slice within 32-bit addressing | Added to the scaled scores, as PyTorch adds a float `attn_mask`, which it requires in the query's dtype. Both kernels add it (the generic one by modification 12); rows move as 16-byte vectors; each slice is one buffer view, and the kernels read keys in runs of 4, so a run straddling the view's end could read as zero. A bias in another dtype, broadcast along the keys, or misaligned (a key length not a multiple of 8 in a packed bias, or not a multiple of 4 at all) declines. A bias build softmaxes over `q·k · scale + bias`, as PyTorch, hipDNN's CPU reference and the RDNA kernels do (modification 28): a bias that masks whole KV tiles with −inf is served, a row it masks with −inf on every key gets O = 0 and LSE −inf, and a row masked on every key with the dtype's lowest *finite* value averages V uniformly over the keys the causal mask leaves. |
-| Attention sink, if present: one logit per query head in the query's dtype, rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, a device operand, its head stride positive (unless one head) with `(Hq − 1) × stride` within int32, at `head_dim` 64 or 128, without a bias | Served by the generic kernel's `has_sink` objects (modification 19), which are built without a bias, so a graph with both declines; the dual-wave kernel builds none. The sink joins against the max over the row's scores and itself, prefill and decode merge alike, so a sink far above the scores gives O ≈ 0 and LSE = the sink, as PyTorch and the RDNA kernels do (modification 29). |
-| Declined outright: padding / varlen, dropout, paged KV, block masks, FP8 descales, ALiBi, the split max / sum-exp stats, a non-`AUTO` implementation | The objects are built without them. |
+| Bias (`attn_mask`), if present: in the query's dtype or f32, declaring 16-byte alignment, rank 1–4 right-aligned to `[B, H, Sq, Skv]`, any axis broadcast (extent 1, absent, or stride 0), every stride a non-negative int32; one (batch, head) slice, `(Sq − 1) · stride_q + (Skv − 1) · stride_k + 1` elements, within 32-bit byte offsets | Added to the scaled scores, as PyTorch adds a float `attn_mask`. The vectorized bias objects -- both kernels' (the generic one's by modification 12) -- read a bias in the query's dtype whose keys are contiguous, every stride a multiple of 8 elements, the query stride at least `Skv` (or 0) and the key length a multiple of 4: rows move as 16-byte vectors and keys in runs of 4, and a run straddling the view's end could read as zero. Every other bias -- f32, broadcast along the keys, a key length or row pitch off those vectors, rows that overlap -- runs on the generic kernel's strided bias objects (`bias_kstrided`, modification 31), bucket objects at 64, 128 and 256 that read it one key at a time at a runtime key stride and element type; they read the others too, ranked below. A bias build softmaxes over `q·k · scale + bias`, as PyTorch, hipDNN's CPU reference and the RDNA kernels do (modification 28): a bias that masks whole KV tiles with −inf is served, a row it masks with −inf on every key gets O = 0 and LSE −inf, and a row masked on every key with the dtype's lowest *finite* value (f32's −FLT_MAX included: the strided objects keep their scores halved, modification 31) averages V uniformly over the keys the causal mask leaves. |
+| Attention sink, if present: one logit per query head, FLOAT or in the query's dtype, rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, a device operand aligned to its element, its head stride positive (unless one head) with `(Hq − 1) × stride` 16-bit halves (two per FLOAT element) within int32, at `head_dim` 64 or 128; with any bias | Served by the generic kernel's `has_sink` objects (modification 19), with a bias by their bias builds (prefill tiers only: the decode tier packs the GQA group into rows, which addresses no per-head bias); the dual-wave kernel builds none. A sink with a bias only the strided objects read (f32, broadcast along the keys, off the 16-byte rows) runs on strided builds of those sink-and-bias tiers (`bias_kstrided`, modification 31), ranked below the vectorized ones. The sink joins against the max over the row's scores and itself, prefill and decode merge alike, so a sink far above the scores gives O ≈ 0 and LSE = the sink, as PyTorch and the RDNA kernels do (modification 29). The same objects read a FLOAT sink (cuDNN's and hipDNN's reference's dtype) or one in the query's dtype, named by the runtime `sink_on` (modification 36), and widen it to f32 exactly. |
+| Padding, if present: both per-batch lengths, with or without `padding_mask` (§7.8) | Served on the generic prefill and decode objects (modification 32); the dual-wave and `kv_align` 64 objects decline it, and so do the decode objects under a top-left causal mask. |
+| Dropout, if present: a probability in [0, 1) with an INT64 device or INT64/INT32 by-value seed and offset (§7.9); above 0 without a sink, padded or not, with or without a bias the vectorized objects read | Above 0, served by the generic `has_dropout` objects (modification 33) at `head_dim` 64, 128, 256, and their bias builds; 0 is the undropped result every object computes. |
+| Packed THD, if present: compact, Q/O and K/V ragged through INT32 `[B + 1, 1, 1, 1]` token tables, the LSE packed through Q's, optionally with both per-batch lengths (P3); without a bias or dropout (§7.10) | Served on the generic prefill objects (modification 34); the dual-wave, decode and `kv_align` 64 objects decline it. |
+| Declined outright: the dropout mask-and-scale form and the RNG dump, paged KV, block masks, FP8 descales, ALiBi, the split max / sum-exp stats, a non-`AUTO` implementation | The objects are built without them. |
 | Batch pitch and grid within int32 | 32-bit addressing. |
 
 ### 7.3 What comes next, and the rule it follows
@@ -794,12 +1189,15 @@ against the coverage it buys. In order:
 | ~~Runtime head counts~~ | Done: trailing i32 arguments on both kernels, and the generic kernel's token pitches with them (modification 3). |
 | ~~Full strides: BHSD, packed QKV~~ | Done: per-(batch, head) buffer views, the head's offset in each view's base (modification 6). V with its own strides runs on the `qk_mask` and MLA objects (§7.2). |
 | ~~LSE output~~ | Done: compiled in, switched at launch (modification 4); any strides on the generic kernel (modification 20). |
-| ~~`Sq ≠ Skv`, both causal alignments, right-side bands~~ | Done: the diagonal offset is a kernel argument (modification 5). Top-left with more queries than keys and wider bands need the last KV tile's padding masked apart from the diagonal. |
+| ~~`Sq ≠ Skv`, both causal alignments, right-side bands~~ | Done: the diagonal offset is a kernel argument (modification 5). Top-left with more queries than keys and bands of any width: the generic prefill objects clamp each row's diagonal to the last key (modification 30); the dual-wave kernel's pipeline and the split decode objects mask their padding with the diagonal, so the generic prefill tiers serve those. |
 | ~~Sliding windows~~ | Done on the generic kernel: a runtime lower edge in the mask and the KV loop's start (modification 11). The dual-wave kernel's pipeline starts at a fixed tile; gfx950 windows run on its generic tiers. |
 | ~~`head_dim` 64 and 256, f16~~ | Done: rows in the instance table. Other head dims need the generic kernel's row loads generalised past powers of two. 256 on gfx942 followed with unpadded LDS tiles (modification 9). |
-| Varlen, paged KV | Both kernels already take cumulative sequence offsets and a block table, passed unused today. |
-| ~~Additive bias~~ | Done: the dual-wave kernel's at `head_dim` 64 and 128 on gfx950 (modification 8), and the generic kernel's (modification 12) at 64, 128 and 256 on gfx90a, gfx942 and gfx950; a bias that masks whole tiles or rows gives what PyTorch gives (modification 28). f32 bias and misaligned rows need a conversion or unaligned path. |
-| ~~Attention sinks~~ | Done on the generic kernel at head dims 64 and 128 (modification 19), a baked axis like the bias: a per-query-head logit in the query's dtype, rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, in the softmax's denominator and the LSE, taken against the max over the scores and the sink (modification 29). hipDNN's CPU reference declines sinks; the GPU tests check them against their own reference. |
+| ~~Padding~~ | Done on the generic kernel (modification 32, §7.8): per-batch lengths in upstream's cu_seqlens slots, read behind a flag; padded rows O = 0, LSE = −inf. |
+| ~~Packed THD~~ | Done on the generic prefill objects (modification 34, §7.10): the row-offset tables behind a flag bit, each sequence's views from its first token. The decode objects and the merge kernel follow when a packed decode graph needs them. |
+| ~~fp32 I/O~~ | Done on the generic prefill objects (modification 35, §7.11): exact f32 MFMA on every arch, the 64 and 128 buckets and 256 (a bucket on gfx950). Bias, sink, dropout and split decode in f32 follow when a model needs them. |
+| Paged KV | The generic kernel takes a block table, passed unused today. |
+| ~~Additive bias~~ | Done: the dual-wave kernel's at `head_dim` 64 and 128 on gfx950 (modification 8), and the generic kernel's (modification 12) at 64, 128 and 256 on gfx90a, gfx942 and gfx950; a bias that masks whole tiles or rows gives what PyTorch gives (modification 28); on the bucket objects, so at every multiple of 8 up to 256; and an f32 bias, one broadcast along the keys and rows off the 16-byte vectors on strided bucket objects at 64, 128 and 256 that read it one key at a time (modification 31). |
+| ~~Attention sinks~~ | Done on the generic kernel at head dims 64 and 128 (modification 19), a baked axis like the bias: a per-query-head logit, FLOAT or in the query's dtype (modification 36, `sink_on` at runtime), rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, in the softmax's denominator and the LSE, taken against the max over the scores and the sink (modification 29); with a bias the vectorized objects read, on the sink tiers' bias builds, and with one only the strided objects read, on their strided builds. The GPU tests check every sink case against their own reference and hipDNN's CPU reference. |
 | ~~Other head dims~~ | Done for every multiple of 8 up to 256, as on RDNA (modification 17): bucket objects at 64, 128 and 256 (and on gfx90a also 96, 160, 192 and 224, modification 26) whose Q, K and V follow the graph's head dim, the K and V loads bounded in 8-column halves. |
 | ~~Decode: KV split and GQA packing~~ | Done on the generic kernel (modifications 14, 15): one workgroup per (batch, row tile, KV head) with the group's query heads as rows, the keys split over the grid's y by a count the engine picks from the shape and the device's compute units, and a merge kernel in the same object. Without a bias. |
 | ~~V head dim ≠ Q/K (MLA prefill)~~ | Done on the generic kernel (modification 13): V's own strides, a baked `head_dim_v`, and a runtime Q/K width masked to zero past it within a 256 bucket. Absorbed MLA (576/512, one KV head) and 512/512 ship on gfx950 (modification 16: O split by columns, Q streamed). gfx942 takes them with K staged in 256-column chunks, three passes per KV tile (modification 18). |
@@ -818,14 +1216,19 @@ above (§7.6), and repeated as features land.
 | Each engine's shard ships no two objects of one build, one top-ranked serve-all object per graph class, and each object with its family's signature | `TestFlydslSdpaCdnaPacks`, `TestFlydslSdpaCdnaDualwavePacks`, `TestFlydslSdpaCdnaDecodePacks`, and the shard census that runs them |
 | A generic-kernel companion outranks its class's default exactly where its rule prefers it | `TestFlydslSdpaCdnaKernelMatch` |
 | The accept/decline rules above, the causal and scale bindings, and candidate selection, including `kv_align` | `TestFlydslSdpaCdnaGraphAccepts`, `TestFlydslSdpaCdnaGraphDeclines`, `TestFlydslSdpaCdnaBinding`, `TestFlydslSdpaCdnaKernelMatch` |
-| Every staged object the matcher admits computes attention — non-causal and causal, ragged tails, a longer sequence, a scale value, a runtime scale tensor, MHA, MQA and an odd group size, cross-attention, chunked prefill, decode, rows no key reaches, a top-left band, `head_dim` 64 and 256, f16, BHSD and packed QKV, a per-head bias and a padding mask — and the LSE output, against a reference | `TestGpuFlydslSdpaCdnaDispatch` (and `Full/TestGpuFlydslSdpaCdnaFullTier`, below), on gfx950, gfx942 and gfx90a |
+| Every staged object the matcher admits computes attention — non-causal and causal, ragged tails, a longer sequence, a scale value, a runtime scale tensor, MHA, MQA and an odd group size, cross-attention, chunked prefill, decode, rows no key reaches, a top-left band, diagonals that pass the keys, `head_dim` 64 and 256, f16, BHSD and packed QKV, a per-head bias and a padding mask, a bias at the bucket head dims, an f32 bias, one broadcast along the keys or laid out off the 16-byte rows, a bias with a sink, padding (§7.8), dropout (§7.9), packed THD (§7.10), exact f32 (§7.11), zero and negative scales (on the bias objects, against hipDNN's CPU reference too) — and the LSE output, against a reference | `TestGpuFlydslSdpaCdnaDispatch` (and `Full/TestGpuFlydslSdpaCdnaFullTier`, below), on gfx950, gfx942 and gfx90a |
 
 Every candidate a shape admits runs against one set of inputs and one f64 reference, computed
 once per case. The sweeps and large shapes are `Full/TestGpuFlydslSdpaCdnaFullTier`, full tier
 only (§4's tier note): every width inside the non-power-of-two buckets, DeepSeek-V4's head dim
 512 at prefill lengths, the lowest-finite bias rows in every combination, the combinations no
-other case reaches, and the 1024-long sequence. The quick tier keeps one configuration of each
-behavior, so the unit binary fits its 300 s quick-tier budget on a CDNA runner.
+other case reaches, and the 1024-long sequence; and, of the parity cases, the strided-bias
+shapes at every head dim, a bias with a sink (both bias dtypes) in every combination, the
+diagonals that pass the keys at every head dim, the bucket bias head dims, the f32 lowest-finite
+bias rows, the FLOAT sink's other cases, the VAE mid-block at head dim 512, dropout with a bias
+at every head dim, and the padded bias at every key length, head dim and edge row. The quick
+tier keeps one configuration of each behavior (each moved case keeps a quick case of the same
+name), so the unit binary fits its 300 s quick-tier budget on a CDNA runner.
 
 ### 7.5 Measured costs, and deferred performance work
 
@@ -847,6 +1250,17 @@ the harness's own bias. The measurements are kept outside the repository.
 | Additive bias (`has_bias`, a compile-time axis) | the plain dual-wave objects carry two unused bias-stride arguments, neutral but for a fraction of a percent on two d64 shapes. A bias object costs what reading its bias costs -- a full `[B, H, S, S]` bias is as many bytes as the scores. At `head_dim` 128 the bias objects spill a few VGPRs (upstream's own bias addressing spills too), with no cost visible beyond the bias's own | two objects per class on gfx950; the d128 spill allowed and recorded |
 | LSE strides on the generic kernel and its merge (modification 20) | against the objects before it, LSE on and off: within noise on gfx942 and on gfx950 at `head_dim` 64 and 128, prefill and decode; the merge's strided LSE write costs the split decode objects a fraction of a percent with LSE on; the gfx950 `head_dim` 256 non-causal object is slower by about half a percent on every shape, LSE on or off, from how the changed prologue reschedules its loop | runtime, for coverage -- **deferred** (gfx950 d256 non-causal) |
 | Scaled-domain bias and NaN-safe row handling (modifications 28 and 29; the same edge-case results as the RDNA kernels, §5.7) | objects without a bias within about a percent. Bias objects: the causal ones on gfx950 and gfx942 slower by 2.5-5%, the gfx950 `head_dim` 128 non-causal one by about 2% (its exponent no longer fuses), the gfx90a `head_dim` 64 causal 128-row object by 9-13% on three of four shapes; on gfx950 the `head_dim` 64 bias objects by up to about 6% (generic causal at a decode shape, dual-wave causal), 3% (dual-wave non-causal); the gfx950 dual-wave `head_dim` 128 causal bias objects got faster (8-17%). The aiw `head_dim` 128 float-mask objects (aiw modification 9) slower by 3-4% | kept, for cross-family parity -- **deferred** |
+| Exact f32 objects (modification 35, new objects only; 5 rounds, every 16-bit object byte-identical so no A/B) | against the fastest 16-bit object on the same shape (B1 H32/8 at 4096 and B4 H16/4 at 1024 tokens; `head_dim` 64, 96, 128, 256; causal and not): gfx942 (an MI325X) 2.2-6.1x the time, f32 at 36-111 TFLOP/s by the useful FLOPs (at 256 the split objects run the QK product twice); gfx950 6.0-9.0x, 42-114 TFLOP/s, against its dual-wave bf16 objects. The f32 MFMA's peak is an eighth (gfx942) and a sixteenth (gfx950) of bf16's, so the f32 objects run nearer their peak than the 16-bit ones do. gfx950's tiles from timing the alternatives that hold: causal 64 and 128 on 128 rows (+14-21%), the unsplit 256 bucket against `dv_split` 2 (+12-19%) | shipped; f32 tile selection **deferred** (item 19) |
+| Diagonals that pass the keys (modification 30): a key cap in the masked tiles of every generic causal prefill object | against the objects before it, 13 interleaved rounds per shape (116 shape rows on gfx950 and gfx942, 156 on gfx90a): gfx950 median 0.0%, none slower by more than 1.5%, the `head_dim` 128 causal 64-row tile 7-8% faster at one query row; gfx942 median 0.0%, every row within 1.2%; gfx90a median 0.0%, the 160 and 64 buckets' causal tiles 2-3% slower, the 224 bucket's 2-3% faster, the `head_dim` 64 causal bias tile 5% slower at the long prefill shape and 5-11% faster at the decode shapes (158 to 192 VGPRs). gfx950's `head_dim` 128 causal 64-row tile spills 4 VGPRs where it spilled 2. The decode objects keep the plain compare and compile to the same instructions | kept, for cross-family parity -- the gfx90a costs **deferred** |
+| A bias on the bucket objects | new objects; a full bias at `head_dim` 128 runs 11-15% slower on the 128 bucket than on the exact bias objects (B1 H32 S4096: gfx950 755 against 669 µs, gfx942 1452 against 1260, gfx90a 5414 against 4890) -- the bucket's masked loads | shipped |
+| The strided bias objects (`bias_kstrided`, modification 31) | new objects. An f32 full bias at B1 H32 S4096 against the vectorized objects' bf16 one at the same head dim: `head_dim` 128 1.7x on gfx950 (1147 against 669 µs), 1.9x on gfx942 and gfx90a; `head_dim` 64 2.5x, 2.6x and 4.4x -- one load per score. The two arguments every generic object takes leave the others' instructions unchanged | shipped, for coverage -- **deferred** |
+| A bias with a sink | new objects, the sink tiers' bias builds | shipped |
+| Padding, dropout and packed THD (modifications 32-34), dense graphs | 9 interleaved rounds per arch, the objects before modification 32 against these. gfx942, 249 dense rows (prefill, decode, bias, sink): median +0.3%, geomean +0.5%, range −1.1% to +3.6%. gfx950, 248 rows: median +0.3%, geomean +0.6%, range −1.9% to +7.0%. gfx90a, 362 rows: median +0.2%, geomean +0.4%, range −4.7% to +4.8%. Every KV loop is instruction-identical between modifications 32 and 34; the outliers are scheduling and prologue. gfx942's `head_dim` 128 non-causal 128-row bias object is +3.2-3.6% on its three shapes: its KV loop now packs 22 bias adds and multiplies into `v_pk_*`, with 33 more hazard-wait cycles per iteration. The old object spilled 4 SGPRs inside that loop and the new one does not. gfx950's `head_dim` 128 causal 64-row tiles are +6.7% at one query row (item 14's objects; the decode objects serve that shape several times faster). gfx950's `head_dim` 128 non-causal 64-row bias object is +3.7% at S4096; its loop has the same size and waits as before, but with registers reassigned. Split decode objects at the shortest launches (12-40 µs) are +2-4% on every arch. The dual-wave objects are byte-identical and moved −2% to +3%, which is the noise floor on short launches | runtime, for coverage -- **deferred** (item 18) |
+| A FLOAT sink on the generic sink objects (A6, modification 36; the 24 prefill and 8 decode sink objects per arch change, every other object byte-identical) | 7 interleaved rounds against the objects before it, timed with query-dtype sinks (the arguments those objects had), bf16. gfx942: 46 sink object × shape rows (prefill and split decode, with and without a bias; 14 µs to 1.7 ms) median +0.03%, geomean +0.05%, range −0.69% to +0.98%, none past 2% with a repeating sign; the byte-identical plain objects, the control, median −0.03% (−0.88% to +0.78%). A FLOAT sink against a query-dtype one on the same object: median +0.00% (−1.3% to +0.55%). gfx950 and gfx90a run the same generic-kernel sink code (the dual-wave kernel builds no sink) and were not timed | shipped |
+| Padding, packed THD, dropout: the feature's own cost (the same rounds) | Padded at full lengths against the same object dense: median +0.4% (gfx90a), +0.5% (gfx942), +1.2% (gfx950); at most +5.6-8.9%, on the shortest decode launches (two length loads per workgroup). Packed at full lengths against dense: median +0.3%, +0.4%, +1.0%; at most +3.4-7.2%, on B1 S256 launches of 10-25 µs. Dropout objects at p = 0.1 against the fastest plain object at the same shape: gfx942 1.43-2.11x (median 1.75x), gfx90a 1.20-1.96x (1.57x), gfx950 1.62-3.54x (2.76x; there the fastest plain object is the dual-wave kernel's). The cost is one Philox4x32-10 per 4 scores | shipped |
+| Dropout on faster tiles (opt2: the non-causal dropout objects' key-aligned builds on gfx942 and gfx950, gfx942's 256-row companion at `head_dim` 128, gfx950's `head_dim` 64 on the 128-row tile; 16 new and 2 replaced objects, every other object byte-identical, the keep masks unchanged) | 7 interleaved rounds against the objects before it, bf16, p = 0.1, the dropout shapes of the row above plus two at `head_dim` 256. gfx942: `head_dim` 128 non-causal 1×32×4096 1296 → 1029 µs (−21%, the 256-row companion), 2×32×1024 184 → 150 (−18%), 2×16×512 47.5 → 45.1 (the key-aligned 128-row build; the 256-row one is slower there, 70.7, and ranks below it under 49152 rows); `head_dim` 64 −3% to −5%, 256 −2.5% to −3% (key-aligned builds). gfx950: `head_dim` 64 non-causal 1×16×4096 329 → 265 µs (−19%), 4×16×1024 92.5 → 75.8 (−18%), 1×8×256 16.1 → 14.9; 256 −5% to −6%. The unchanged dropout objects and the plain ones within ±1%. Against AOTriton 0.12's dropout on the same nodes: gfx942 0.54–0.93×, gfx950 0.60–1.04× at `head_dim` 64 and 128 (§7.9) | shipped |
+| A padded batch's bias viewed to the launch's key width (modification 37; per arch the 44 (gfx950, gfx942) or 60 (gfx90a) vectorized bias objects change outside their KV loops, every other object byte-identical) | 7 interleaved rounds against the objects before it, bf16, `head_dim` 64, 96 and 128, S512 to S4096 and batched decode. Dense graphs on the same object: gfx942, 57 object × shape rows, median +0.21%, geomean +0.29%, range −0.51% to +1.53% (the `head_dim` 64 causal 128-row bucket object +1.4% at B16 S512, 53 µs, its loop instruction-identical); the byte-identical objects, the control, median +0.03% (−1.94% to +0.92%). gfx950, 57 rows, median −0.05%, range −0.80% to +0.66%; control 88 rows +0.01% (−2.37% to +1.14%). gfx90a, 108 rows, median +0.01%, range −0.34% to +1.25% (the 160 bucket's non-causal 256-row object +1.1-1.3% at S512); control 105 rows −0.01% (−0.20% to +0.20%). Padded graphs with a bias, the fastest object before (a strided one) against after (a vectorized one): gfx942, 19 graphs, median 1.61x faster (1.11x to 2.76x): a per-head bias at `head_dim` 64 and S2048 2.5-2.8x; BERT's key-padding mask `[B, 1, 1, S]` at S512 1.2-1.4x (1.1x with a sink); `head_dim` 96 (a bucket) 1.5-1.6x; 128 1.6-1.8x; batched decode 1.3-1.6x. gfx950, 19 graphs, median 1.70x (1.00x to 2.80x): `head_dim` 64 at S2048 2.4-2.8x, 96 1.7-2.1x, 128 1.6-2.4x, batched decode 1.1-1.2x, BERT's mask at S512 1.0-1.1x (20-30 µs launches; with a sink the strided object stays the faster there). gfx90a, 19 graphs, median 1.68x (1.02x to 2.60x): `head_dim` 64 at S2048 2.2-2.5x, 96 2.5-2.6x, 128 1.6-2.1x, batched decode 1.1-1.4x, BERT's mask at S512 1.0-1.2x. Dropout with a bias under padding, declined before, runs on the dropout objects' bias builds | shipped |
+| One Philox source (modification 38: the CDNA kernel imports `philox.py` instead of restating the round; every dropout object is rebuilt, 24 on gfx90a, 34 on gfx942, 28 on gfx950: 79 reordered with the same instructions and registers, 7 with small instruction or register changes, no VGPR spill; every other object byte-identical) | 7 interleaved rounds against the objects before it, bf16, p = 0.1, the dropout shapes of the row above (every staged candidate, mask none and causal). gfx942 (MI300X), 30 object × shape rows: median +0.07%, geomean +0.12%, range −0.34% to +0.59%. gfx950, 21 rows: median +0.07%, geomean +0.15%, range −0.62% to +1.18% (the `head_dim` 64 non-causal key-aligned 128-row object at B4 S1024 +1.2%, rounds of either sign; the `head_dim` 128 non-causal 64-row object at B1 H32/8 S4096 +1.1%, its ISA a reorder of the same instructions and registers). gfx90a, 16 rows: median +0.02%, range −0.05% to +0.53%. The byte-identical objects, the control: median +0.02%, −0.01%, −0.01%. The dropout objects with a bias were not timed (gfx942's `head_dim` 256 causal one goes from 418 to 422 VGPRs, one wave per SIMD either way). The keep mask is unchanged: `DropsTheOraclesMaskBitForBit`, `WritesTheRngDumpItApplied` and the reference's RNG-dump bundles pass on all three arches | shipped |
 
 **Deferred performance work** -- costs accepted for coverage, to revisit:
 
@@ -923,7 +1337,57 @@ the harness's own bias. The measurements are kept outside the repository.
     the same objects run that much slower under the current host code, so the cause is in
     the arguments or launch the host gives them, and is not yet found.
     The split decode object serves that shape several times faster, so it is not the one
-    autotune picks there.
+    autotune picks there. With modification 30's key cap in place they measure 7-8% faster
+    at that shape than before it, so about half of it is back; the cause is still not
+    found.
+15. *The strided bias objects* (modification 31). Each score loads its own bias element,
+    so an f32 bias, or one broadcast along the keys, runs well below the vectorized
+    objects' speed. Measured against the vectorized bucket bias objects at the same
+    shapes (13 interleaved rounds, bf16, prefill S1024-S4096 and decode): gfx950 about
+    1.2-1.5x slower at `head_dim` 96/128; gfx942 1.5-2.6x at `head_dim` 56/64 and 4-5.4x at
+    96/128; gfx90a 1.8-3.5x at 56/64 and 2.8-3.9x at 96/128. Decode shapes cost least
+    (1.1-2x, except gfx942 `head_dim` 128 at about 4x). An f32 bias costs more than a
+    query-dtype one at `head_dim` 64 on every arch. An f32 bias with contiguous keys could take 16-byte loads as the
+    bf16 objects do (an f32 vectorized bias object, or a unit-stride fast path inside the
+    strided one for rows that stay aligned); a bias broadcast along the keys needs one load
+    per row, not per score; and the bias could be staged through LDS with its K tile
+    (item 7). A padded graph's query-dtype bias no longer pays this: since modification 37
+    it runs on the vectorized objects as a dense one does (1.0-2.8x faster than on the
+    strided ones, median 1.6-1.7x per arch; the row above), so the strided objects serve only the biases the
+    vectorized ones cannot read.
+16. ~~*A sink with a bias the vectorized objects do not read*~~ Done: a strided build of
+    each prefill sink-and-bias tier, 8 objects per arch (§6.2). Under padding a
+    query-dtype bias with a sink is back on the vectorized sink-and-bias objects
+    (modification 37).
+17. *gfx90a under modification 30.* The 160 and 64 buckets' causal tiles are 2-3% slower,
+    and the `head_dim` 64 causal bias tile went from 158 to 192 VGPRs (5% slower at the long
+    prefill shape, faster at decode shapes): a gfx90a tile retuned for the key cap, or a
+    cheaper cap, are the candidates.
+18. *Modifications 32-34 on dense graphs.* Two things to look at. First, gfx942's
+    `head_dim` 128 non-causal 128-row bias object (+3.2-3.6%): the packed bias arithmetic's
+    hazard waits are new in its loop. A schedule that keeps the scalar form would fix it, or
+    a different SLP decision for that loop. gfx950's `head_dim` 128 non-causal 64-row bias
+    object (+3.7%) has its loop's registers reassigned the same way. Second, the split decode
+    objects' prologue on the shortest launches (+2-4%): the per-batch length flag and the
+    keyless-view test, read behind uniform branches. Folding the flag tests into one branch, or a varlen-free decode build for
+    dense graphs, would remove most of it. Dropout's own cost (1.2-3.5x at p = 0.1) is the
+    Philox draws; amortising them over the 4 scores each draw covers is already done, and per
+    score it costs what AOTriton's does (§7.9). The rest is the tile under the draws: opt2 moved
+    the long non-causal classes to faster tiles (§7.5). What remains on gfx950 is the dual-wave
+    kernel, 1.6-2.5x faster than the generic one when plain, with no dropout build: the Philox
+    draws would go into its skewed pipeline (six insertion sites, a tight VGPR budget), a
+    contained but not small kernel change. A cheaper generator (fewer rounds) would break bit
+    parity with AOTriton.
+    Modification 37 (a padded batch's bias view) changes only the vectorized bias objects'
+    prologues and costs dense graphs nothing measurable (the row above).
+19. *Exact f32 (modification 35).* The first wave's tiles were picked by occupancy and a
+    short timing (gfx942 and gfx950, a few tiles each), not the full AOT selection the 16-bit
+    set went through (§7.6). On gfx942 and gfx90a the 256 objects split O's columns, so each
+    half recomputes the QK product: gfx950's unsplit 256 measured 12-19% faster than its split
+    one, and a gfx942 tile that holds 256 whole would need a smaller K/V staging than 64 KiB
+    allows today. The f32 kernel reuses the 16-bit K-step's pack layout (four 32x32x2 MFMAs
+    per 4-element pack); a layout built for f32 (fewer, wider LDS reads) and the bank-conflict
+    padding for 4-byte elements were not explored.
 
 ### 7.6 How the instance set was chosen
 
@@ -985,7 +1449,7 @@ them when the ingestor gains one.
 ### 7.7 gfx90a (MI210, MI250)
 
 gfx90a runs the generic kernel on gfx942's code path (vendored-kernel modification 24)
-and ships what gfx942 ships but the dual-wave engine: `hipkernel:flydsl_sdpa_cdna` (78
+and ships what gfx942 ships but the dual-wave engine: `hipkernel:flydsl_sdpa_cdna` (138
 objects, with the 96/160/192/224 buckets below) and `hipkernel:flydsl_sdpa_cdna_decode` (24).
 
 - **The plain prefill classes** (bf16 and f16; `head_dim` 64, 128, 256; causal or not)
@@ -1021,6 +1485,211 @@ objects, with the 96/160/192/224 buckets below) and `hipkernel:flydsl_sdpa_cdna_
 - **Found on the way:** without the KV global prefetch, bf16 at `head_dim` 64 with 128
   rows and 128 with 256 rows did not trace (an upstream loader mismatch, fixed by
   vendored-kernel modification 25, on gfx942 too).
+
+### 7.8 Varlen and padding (CDNA)
+
+Padding as §5.9 states it (`padding_mask` with `seq_len_q` and `seq_len_kv`, INT32 `[B, 1, 1, 1]`,
+one length per batch, over dense Q/K/V/O sized by the longest sequence) is served on the generic
+kernel's prefill and decode objects, which read each batch's lengths at runtime (vendored-kernel
+modification 32): 0 new objects.
+
+| | Generic prefill | Split decode | Dual-wave (gfx950) |
+|---|---|---|---|
+| Padding, any mask | **served**: causal at either corner, bands, windows, bias (vectorized or strided), sink, LSE, every head-dim tier | **served**: no mask, or bottom-right causal (its diagonal stays inside every batch's keys); top-left causal declines | declines (reads no lengths); gfx950's generic tiers serve it |
+| `kv_align` 64 objects | decline (no KV tail mask); the class's masked default tier serves | | |
+| Packed THD (ragged offsets) | **served** (§7.10) | declined | declined |
+
+- **Rows past a batch's query length: O = 0 and LSE = −inf**, hipDNN's reference contract (cuDNN ≥
+  9.14), on sink objects too: a padded row is padding, not a row no key reached. The fill is
+  what a padded launch does; there is no "skip" switch on CDNA.
+- **Keys past a batch's key length are never read**, and masked by the dense tail's own compare;
+  a batch with no key gives every row O = 0 and LSE = −inf (or the sink).
+- **The mask, per batch:** a bottom-right diagonal (and a window's edge) sits at each batch's
+  own `Skv_b − Sq_b`; top-left bounds are the same literal for every batch.
+- **Lengths** are clamped in the kernel to `[0, S]`, as hipDNN's GPU reference clamps them.
+  **Lengths without `padding_mask`** (both of them) are padding too, as hipDNN's references read
+  them (their SEM-008); one alone declines. INT64, a batch stride other than 1, pass-by-value,
+  virtual or ragged lengths, and a base not declared 4-byte aligned decline.
+- **With dropout** (§7.9): served; each batch draws its mask at the graph's declared extents, so a
+  padded batch's real rows get the dense graph's bits.
+- **A bias under padding runs on the vectorized objects** wherever it does dense, sink and dropout
+  included, and on the strided ones (`bias_kstrided`, modification 31) as before. A batch's key
+  length need not be a multiple of the vectorized objects' 4-key runs: each batch's bias view keeps
+  its last real row at the launch's key width (modification 37), which ends on a whole run and lies
+  inside the bias, since the vectorized objects serve only a bias dense over `[.., Sq, Skv]` with
+  `Skv` a multiple of 4. Before it, that row's final run straddled the batch's view and read as
+  zero (found on the device at `Skv_b` 63), so padded graphs' biases ran on the strided objects
+  and dropout with a bias under padding declined. Keys from `Skv_b` on are masked by the batch's
+  key compare whatever the bias holds there (NaN included).
+- **Cost:** a padded launch loads two lengths per workgroup behind a flag; a dense launch loads
+  nothing. Measured in §7.5.
+- **Tested** against a test-local per-batch reference until hipDNN's serves padding
+  (`TestGpuFlydslSdpaCdnaDispatch.Pads*`, `DecodesPaddedBatchesWithSplitKeys`,
+  `ClampsLengthsOutsideTheSequence`, `GivesABatchWithNoKeysRowsNoKeyReaches`): lengths 0, 1, odd,
+  full, past `S` and negative; batches with more queries than keys; both corners, a band and a
+  window; GQA, BHSD, f16, a bucket head dim, a bias in the query's dtype and f32, a sink; decode
+  over caches of different lengths with splits and the merge; O and the LSE filled with NaN
+  beforehand. A bias at key lengths of every residue mod 4 and mod 8, NaN past each batch's keys,
+  rows at the lowest finite value, −inf and NaN, on every vectorized and strided object the
+  matcher admits, against hipDNN's CPU reference too
+  (`PadsWithABiasAtEveryKeyLengthModuloTheVectorRuns`: the quick tier runs the length set with
+  the 63-key batch, `Full/TestGpuFlydslSdpaCdnaFullTier` all of it); with the objects before
+  modification 37 it fails on the last real row of the 63-key batch. Every gate:
+  `Padding/TestFlydslSdpaCdnaFieldDeclines`,
+  `TestFlydslSdpaCdnaKernelMatch.RunsPaddingOnlyOnObjectsThatReadEachBatchsLengths`,
+  `RanksAPaddedGraphOnTheMaskedDefaultTier`, `RunsAPaddedGraphsBiasOnTheVectorizedObjects`.
+
+### 7.9 Dropout (CDNA)
+
+Dropout as §5.10 states it (`dropout_probability` with a seed and an offset tensor) is served on
+`has_dropout` objects (vendored-kernel modification 33): bf16/f16 × causal or not × `head_dim` 64,
+128, 256, no bias, no sink, generic prefill tiers; 22 on gfx942, 16 on gfx950 and 12 on gfx90a.
+Beyond one object per class, the non-causal ones on gfx942 and gfx950 ship the key-aligned build
+their plain class has, gfx942 adds a 256-row companion at 128 (preferred from 49152 rows), and
+gfx950's 64 runs on the 128-row tile (opt2, tuned against AOTriton's own dropout cost below).
+
+| | Generic prefill | Split decode | Dual-wave (gfx950) |
+|---|---|---|---|
+| Probability in (0, 1) with seed and offset | **served** by the `has_dropout` objects: either causal corner, bands and windows, GQA, the LSE | declines (inference; a dropping graph with one query row runs on the prefill objects) | declines; gfx950's generic dropout objects serve it |
+| Probability 0 | the plain objects (the undropped result) | the plain objects | the plain objects |
+
+- **The same mask as the aiw objects and AOTriton (≥ 0.15), bit for bit:** Philox4x32-10 (the aiw
+  kernel's `philox.py`, which the CDNA kernel imports as the RDNA one does: one source,
+  vendored-kernel modification 38), the
+  same counter layout, word order and f32 threshold (§5.10). The provider's tests run the aiw
+  objects' own mask cases on the CDNA objects (`DropsTheOraclesMaskBitForBit`, the same graphs, seed
+  and offset), both against one host oracle.
+- **Applied after the softmax's row sum**, so `l` and the LSE are undropped; `1 / (1 − p)` folds into
+  O's normaliser.
+- **Seed and offset:** as §5.10. The CDNA kernel reads both through pointers, so a seed given by
+  value is written to the engine's workspace (two memsets on the launch stream) and an offset given
+  by value rides `offset2` beside 8 zeroed workspace bytes read as `offset1`: 16 bytes of
+  workspace when either is a host value.
+- **Under padding** (§7.8) the dropout objects draw each batch's mask at the graph's declared
+  extents (`Sq`, `Skv` the padded maxima, `i`, `j` positions within the sequence), as AOTriton's
+  varlen does: a padded batch's real rows get the dense graph's bits, and its padded rows O = 0,
+  LSE = −inf.
+- **The RNG dump** as §5.10 states it: the mask writer after the generic launch (a dropout object
+  is never a split one), on padded graphs too, where it writes the raw bit at padded rows and
+  at keys past a batch's length (the draws the kernel discards). Tested with the RDNA and aiw
+  cases' graphs, seed and offset, and under padding with a seed and offset by value
+  (`TestGpuFlydslSdpaCdnaDispatch.WritesTheRngDumpItApplied`).
+- **With a bias** (the second wave): a bias build of each dropout object, 12 per arch. The bias is
+  in the query's dtype, read as the vectorized objects read it. It is added to the scores, and the
+  mask is drawn after the softmax's sum, as AOTriton composes them. Every dropout tier holds the
+  bias without a spill. A bias only the strided objects read (f32, broadcast along the keys) finds
+  no dropout object and declines at kernel match.
+- **Declined**, each a row of objects when a model needs it: dropout with a sink, with a strided
+  bias, at bucket head dims, MLA, on the dual-wave and decode objects. Dropout with a bias under
+  padding is served (§7.8, modification 37).
+- **Cost:** measured in §7.5. Against AOTriton 0.12 (PyTorch 2.13, the same nodes, p = 0.1, bf16):
+  our dropout objects take 0.54–0.93× AOTriton's dropout time at `head_dim` 64 and 128 on gfx942
+  and 0.60–1.04× on gfx950. Their cost over our fastest plain object is often higher than
+  AOTriton's over its own plain (up to 1.9× AOTriton's ratio, gfx950 `head_dim` 64 causal)
+  because our plain objects are faster: on gfx950 the dual-wave kernel, which has no dropout
+  build (item 18). The per-score cost, one
+  Philox4x32-10 per 4 scores, is the same as AOTriton's. At `head_dim` 256 on gfx942 the dropout
+  objects cost 1.05–1.6× our plain ones (AOTriton 1.15–1.41×), but our plain 256 objects are about
+  2× slower than AOTriton's there (a plain-tier gap, not a dropout one).
+- **Tested** against the test-local oracle until hipDNN's reference serves dropout
+  (`TestGpuFlydslSdpaCdnaDispatch.Drops*`, `ComputesTheUndroppedResultAtProbabilityZero`): the mask
+  read off O bit for bit (Q zero, V the identity) on the aiw cases' graphs, the full output and the
+  undropped LSE with GQA, BHSD, both dtypes, a key length no multiple of 4 or of the KV tile, a seed
+  and offset by value (INT64 and INT32) and on the device; under padding, the dense mask bit for bit
+  and the full output with a batch of no keys and one of no queries, and with a bias (key lengths
+  no multiple of 4, NaN past each batch's keys) the full output, the mask bit for bit and the RNG
+  dump. Every gate:
+  `Dropout/TestFlydslSdpaCdnaFieldDeclines`, `TestFlydslSdpaCdnaKernelMatch.RunsADroppingGraphOnlyOnTheDropoutObjects`,
+  `RunsAPaddedDroppingGraphOnTheDropoutObjects`.
+
+### 7.10 Packed THD (CDNA)
+
+Compact THD is served on the generic prefill objects, which read the row-offset tables at runtime
+(vendored-kernel modification 34). This is hipDNN's ragged reference's form and the one the aiw
+objects serve (§5.9, `servablePackedVarlen`): 0 new objects. Q and O are ragged through one INT32
+`[B + 1, 1, 1, 1]` device table, and K and V through one (the same one or another). Each table holds
+cumulative token counts from 0. Each multiplier is the tensor's own sequence stride, so the offsets
+count tokens. The layout is token-major.
+
+| | Generic prefill | Split decode | Dual-wave (gfx950) |
+|---|---|---|---|
+| Packed THD | **served**: any mask (a bottom-right diagonal per sequence), GQA, a sink, the LSE packed through Q's table, every head-dim tier, `bf16`/`f16` | declines (indexes by batch; a packed graph with one query row runs on the prefill objects) | declines; gfx950's generic tiers serve it |
+| `kv_align` 64 objects | decline (no KV tail mask) | | |
+
+- **Each sequence is its own problem:** its views start at its first token and span its own token
+  count, clamped in the kernel to `[0, S]`. Nothing is read or written past the sequence's last
+  token, because the next sequence's tokens begin there. A bottom-right diagonal sits at each
+  sequence's own `Skv_b − Sq_b`, as under padding.
+- **The LSE** must be packed through Q's own table, `[T, H]` in any stride. A dense LSE would need
+  each sequence's batch base, which a packed launch does not index, so it declines. So does a
+  ragged LSE beside dense operands.
+- **Declined, as on the aiw objects:** an operand left dense beside ragged ones; Q and O, or K and
+  V, through different tables; offsets that do not count tokens; head-major packing; INT64,
+  virtual, by-value or misaligned tables; one length alone, or `padding_mask` alone, with
+  packing; packing with a bias; packing with dropout.
+- **With per-batch lengths (P3, cuDNN's ragged operands with `seq_len`; CDNA-local,
+  `cdnaServablePackedVarlen`):** served. Both INT32 `[B, 1, 1, 1]` lengths, with or without
+  `padding_mask`, beside the same packing. Each table gives a sequence's slot. The length gives
+  the real rows within it, clamped in the kernel to the slot (`_load_varlen`, no kernel change).
+  The slot's rows past the length are padded rows (O = 0, LSE = −inf). Its keys past the length
+  are never read (each K/V view and its buffer records end at the length, and the raw-pointer
+  prefetch clamps rows to the last real key), and a bottom-right diagonal sits at the lengths.
+  This is PyTorch's `seqused_k` (§5.9). The RDNA prefill objects serve the form too; the aiw
+  objects decline it.
+- **Cost:** a dense launch takes one more scalar branch in the prologue and loads nothing. The KV
+  loop is instruction-identical to modification 33's. Measured in §7.5.
+- **A fix with it:** a keyless view at the tensor's start (padded batch 0, head 0; the first packed
+  sequence) no longer has the gfx942 objects' pre-loop K prefetch read the row before K's base
+  (modification 34). This is on the decode objects too.
+- **Tested** against the test-local per-sequence reference (`TestGpuFlydslSdpaCdnaDispatch.Packs*`).
+  The harness packs the dense values token-major, unpacks O and the LSE, and checks that a guard of
+  `S` rows past the last sequence stays unwritten. Cases: lengths 0, 1, odd and full; a sequence
+  with no keys (with and without a sink); more queries than keys and fewer, at both corners, with a
+  window and a band; GQA; f16; one table for every operand; no LSE; a bucket head dim; and
+  single-token sequences. Every gate: `Packed/TestFlydslSdpaCdnaFieldDeclines`,
+  `TestFlydslSdpaCdnaPackedGraph`,
+  `TestFlydslSdpaCdnaKernelMatch.RunsPackedSequencesOnlyOnTheGenericPrefillObjects`. P3 on the device:
+  `PacksPaddedSequencesInTheirSlots` (lengths 0, short, full, past the slot; with and without
+  `padding_mask`; both corners; a sink), and `MirrorsSequsedKOnPackedKeySlots` (PyTorch's
+  `seqused_k`: NaN in every slot past its length, no mask and both corners, one query row,
+  `seqused_k = 0`, GQA, bf16 and f16; against the per-sequence reference and hipDNN's CPU
+  reference, as §5.9 describes).
+
+### 7.11 Exact f32 (CDNA)
+
+AOTriton serves fp32 attention on every arch it ships, as exact fp32 (`TRITON_F32_DEFAULT=ieee`).
+The generic CDNA kernel does too (vendored-kernel modification 35): f32 products and f32
+accumulation through `v_mfma_f32_32x32x2f32`, four per 16-bit K-step, with P kept in f32 and f32
+denormals kept (no DAZ). It runs the gfx942-class path on every arch: the hardware transpose, K16
+MFMA, permlane O store and DMA are 16-bit only. 6 objects per arch, no bias, sink or dropout:
+
+| | gfx942, gfx90a | gfx950 |
+|---|---|---|
+| bucket to 64 (`qk_mask`) | non-causal 256 rows, causal 128 | non-causal 256 rows, causal 128 |
+| bucket to 128 | K in 64-column chunks, 128 rows (256 rows spill 37-38 VGPRs with the bucket's masks) | non-causal: K chunked, 256 rows; causal: unchunked, 128 rows |
+| 256: Q re-read | exact 256, K chunked, O's columns split in two (`dv_split` 2), 256 rows | a bucket to 256, unsplit, 128 rows, one wave per SIMD |
+
+- **Occupancy decides the tiles.** On gfx942 and gfx90a every f32 tile fills 34-51 KiB of the 64
+  KiB LDS, one workgroup per CU, so a 128-row tile puts one wave on each SIMD and a 256-row tile
+  two; registers are not the limit there. On gfx950 the 160 KiB holds two to four workgroups,
+  or one whole 256 tile, and the tiles were timed against the others that hold. No object
+  spills. A bucket cannot split O's columns (modification 17), so on gfx942 and gfx90a f32 head
+  dims from 136 to 248 have no object yet; on gfx950 the 256 bucket serves them.
+- **Precision:** within 1e-5 of the double reference on unit-scale inputs, the LSE within 2e-3
+  (the suites' bound; measured about 1e-6). f32 denormal inputs give denormal outputs
+  (`KeepsF32DenormalInputs`).
+- **The other engines:** the dual-wave kernel and the split decode objects take no f32 (the kernel
+  matcher declines it on their tiles); the RDNA and aiw engines decline f32 at graph scope (RDNA has
+  no f32 WMMA; the user deferred RDNA fp32). That is a coverage gap, not a behaviour difference.
+- **Declined in f32 until objects serve them:** a bias, a sink, dropout, a `HALF` or `BFLOAT16`
+  `mma_core_mode` (a reduced-precision MMA these objects do not run). Padding, packed THD, packed
+  slots with per-batch lengths (P3) and a diagonal past the keys bound as no mask (§7.2) are
+  served (the generic kernel reads them in f32 as in 16 bits).
+- **Speed:** §7.5.
+- **Tested:** `TestFlydslSdpaCdnaF32Graph` (accepts and declines), `TestFlydslSdpaCdnaF32KernelMatch`,
+  `TestGpuFlydslSdpaCdnaDispatch.ComputesF32*` (`ComputesF32InPaddedSlotsAndAtAnEveryKeyDiagonal`
+  for P3 and the rebound diagonal) and `KeepsF32DenormalInputs`, the per-object suite
+  and the census (`ShipsTheF32FirstWave`); every new gate mutation-checked.
 
 ---
 
