@@ -30,6 +30,7 @@ from lib import audit as al
 from lib import audit_sustained as asus
 from lib import audit_v2 as v2
 from lib import contexts as ctxlib
+from lib import module_checks
 from lib import procs
 from lib import run_bundles as rb
 from lib import run_layout
@@ -3104,7 +3105,9 @@ def test_preflight_refuses_an_audit_set_the_run_could_not_build(
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            ro, "_tilewright_errors", lambda catalog="v2", alignment_veto=False: []
+            module_checks,
+            "tilewright_errors",
+            lambda catalog="v2", alignment_veto=False: [],
         )
         assert errors() == []
         benching = _benching_copy(w["audit"], tmp_path / "benching")
@@ -3167,7 +3170,9 @@ def test_preflight_refuses_a_complete_audit_set_of_other_settings_or_contexts(
     paths = ro.derive_paths(w["cfg"])
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            ro, "_tilewright_errors", lambda catalog="v2", alignment_veto=False: []
+            module_checks,
+            "tilewright_errors",
+            lambda catalog="v2", alignment_veto=False: [],
         )
         cfg = json.loads(json.dumps(w["cfg"]))
         assert ro.preflight(cfg, paths, "full") == []

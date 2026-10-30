@@ -197,6 +197,7 @@ from lib import host_load  # noqa: E402
 from lib import kernel_identity as ki  # noqa: E402
 from lib import kfd  # noqa: E402
 from lib import library_pool as lp  # noqa: E402
+from lib import module_checks as mclib  # noqa: E402
 from lib import pinning  # noqa: E402
 from lib import procs  # noqa: E402
 from lib import provenance as provlib  # noqa: E402
@@ -2680,84 +2681,6 @@ def _executable_errors(path: Path, what: str) -> List[str]:
     return []
 
 
-def _guard_module_errors() -> List[str]:
-    """A tilewright module that predates the kernel guards flag, which the
-    models of a run with correctness.guard_unguarded_custom declare and it
-    refuses ('unknown serving flags')."""
-    try:
-        from lib import evaluate
-
-        tilewright = evaluate.tilewright_module()
-    except Exception:
-        return []
-    if hasattr(getattr(tilewright, "ModelInfo", None), "kernel_guards"):
-        return []
-    return [
-        "correctness.guard_unguarded_custom: the tilewright module predates the "
-        "kernel guards flag (its ModelInfo has no kernel_guards), so it refuses "
-        "the models stage06 flags; reinstall it with `pip install "
-        "shared/tilewright/python`"
-    ]
-
-
-def _tilewright_errors(catalog: str = "v2", alignment_veto: bool = False) -> List[str]:
-    try:
-        from lib import evaluate
-
-        tilewright = evaluate.tilewright_module()
-    except Exception as e:
-        return [
-            f"the tilewright Python module does not import ({e!r}); install it "
-            f"with `pip install shared/tilewright/python`"
-        ]
-    try:
-        from lib import features
-    except Exception as e:
-        return [f"lib.features does not import: {e!r}"]
-    have = getattr(tilewright, "feature_catalog_hash", None)
-    if callable(have) and have() != features.feature_names_hash():
-        return [
-            f"feature catalog hash mismatch: tilewright module "
-            f"{have()} vs lib/features.py {features.feature_names_hash()}"
-        ]
-    if catalog == "v3":
-        hashes = getattr(tilewright, "feature_catalog_hashes", None)
-        listed = list(hashes()) if callable(hashes) else []
-        if features.v3_catalog_hash() not in listed:
-            return [
-                f"train.catalog v3: the tilewright module does not compute the "
-                f"v3 catalog {features.v3_catalog_hash()} (it has {listed}); "
-                f"reinstall it with `pip install shared/tilewright/python`"
-            ]
-        if not hasattr(getattr(tilewright, "ModelInfo", None), "min_effective_cus"):
-            return [
-                "train.catalog v3: the tilewright module predates the CU floor "
-                "(its ModelInfo has no min_effective_cus), so it refuses the "
-                "models stage05 writes, which declare one ('unknown serving "
-                "flags'); reinstall it with `pip install shared/tilewright/python`"
-            ]
-    if alignment_veto and not hasattr(
-        getattr(tilewright, "ModelInfo", None), "alignment_veto"
-    ):
-        return [
-            "deploy.alignment_veto: the tilewright module predates the alignment "
-            "veto (its ModelInfo has no alignment_veto), so it refuses the models "
-            "stage06 stages, which declare it ('unknown serving flags'); reinstall "
-            "it with `pip install shared/tilewright/python`"
-        ]
-    try:
-        current = evaluate.module_takes_attributes(tilewright)
-    except Exception as e:
-        return [f"the tilewright module cannot build kernel configs: {e!r}"]
-    if not current:
-        return [
-            "the tilewright module is older than this checkout's engine (its "
-            "Config takes no kernel attributes); reinstall it with "
-            "`pip install shared/tilewright/python`"
-        ]
-    return []
-
-
 PLANNER_BENCH_KEYS = ("solution_index_list", "skip_screen_prepass")
 
 
@@ -4711,12 +4634,12 @@ def preflight(
             for w in disk_warns:
                 ui.warn("disk", w)
     errs += xslib.config_errors(cfg)
-    errs += _tilewright_errors(
+    errs += mclib.tilewright_errors(
         str(cfg_get(cfg, "train.catalog") or "v2"),
         cfg_get(cfg, "deploy.alignment_veto") is not None,
     )
     if cfg_get(cfg, "correctness.guard_unguarded_custom"):
-        errs += _guard_module_errors()
+        errs += mclib.guard_module_errors()
     return list(dict.fromkeys(errs))
 
 

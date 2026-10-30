@@ -17,6 +17,7 @@ import pytest
 import yaml
 
 import run_orchestrator as ro
+from lib import module_checks
 from lib import run_layout
 from lib import sustained as suslib
 
@@ -1062,8 +1063,8 @@ def test_preflight_checks_the_module_serves_the_alignment_veto(monkeypatch):
         ModelInfo=type("ModelInfo", (), {"min_effective_cus": property(lambda i: 0)}),
     )
     monkeypatch.setattr(evaluate, "tilewright_module", lambda: tw)
-    assert ro._tilewright_errors("v3") == []
-    (err,) = ro._tilewright_errors("v3", alignment_veto=True)
+    assert module_checks.tilewright_errors("v3") == []
+    (err,) = module_checks.tilewright_errors("v3", alignment_veto=True)
     assert err.startswith("deploy.alignment_veto: the tilewright module predates")
     assert "ModelInfo has no alignment_veto" in err
     tw.ModelInfo = type(
@@ -1074,7 +1075,7 @@ def test_preflight_checks_the_module_serves_the_alignment_veto(monkeypatch):
             "alignment_veto": property(lambda i: None),
         },
     )
-    assert ro._tilewright_errors("v3", alignment_veto=True) == []
+    assert module_checks.tilewright_errors("v3", alignment_veto=True) == []
 
 
 def test_preflight_asks_the_module_for_what_the_config_serves(tmp_path, monkeypatch):
@@ -1772,7 +1773,7 @@ def test_preflight_wants_a_module_of_this_engine(monkeypatch):
     ):
         tw = module(config)
         monkeypatch.setattr(evaluate, "tilewright_module", lambda m=tw: m)
-        errors = ro._tilewright_errors()
+        errors = module_checks.tilewright_errors()
         assert len(errors) == len(expected)
         assert all(want in got for want, got in zip(expected, errors))
 
@@ -2192,8 +2193,8 @@ def test_preflight_checks_the_v3_catalog(monkeypatch):
         feature_catalog_hashes=lambda: [features.feature_names_hash()],
     )
     monkeypatch.setattr(evaluate, "tilewright_module", lambda: tw)
-    assert ro._tilewright_errors("v2") == []
-    (err,) = ro._tilewright_errors("v3")
+    assert module_checks.tilewright_errors("v2") == []
+    (err,) = module_checks.tilewright_errors("v3")
     assert "does not compute the v3 catalog" in err
     tw.feature_catalog_hashes = lambda: [
         features.feature_names_hash(),
@@ -2201,11 +2202,11 @@ def test_preflight_checks_the_v3_catalog(monkeypatch):
     ]
     # A module that computes the v3 catalog but predates the CU floor every
     # v3 model declares refuses the models stage05 writes.
-    (err,) = ro._tilewright_errors("v3")
+    (err,) = module_checks.tilewright_errors("v3")
     assert "predates the CU floor" in err and "min_effective_cus" in err
     tw.ModelInfo = type("ModelInfo", (), {"min_effective_cus": property(lambda i: 0)})
-    assert ro._tilewright_errors("v3") == []
-    assert ro._tilewright_errors("v2") == []
+    assert module_checks.tilewright_errors("v3") == []
+    assert module_checks.tilewright_errors("v2") == []
 
 
 # ── planner ──────────────────────────────────────────────────────────────────
