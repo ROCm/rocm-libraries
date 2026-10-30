@@ -1294,6 +1294,80 @@ def _smem_storage_type(t: SmemType) -> str:
     return out
 
 
+# Alignment of the single LDS pool global that backs every smem allocation.
+# No segment can be aligned more strictly than the pool it lives in.
+_SMEM_POOL_ALIGN = 16
+
+# Element byte width an LDS access derives its alignment claim from. Element
+# names not listed fall back to 2 bytes.
+_LDS_ELEM_BYTES = {
+    "i8": 1,
+    "u8": 1,
+    "fp8e4m3": 1,
+    "bf8e5m2": 1,
+    "f16": 2,
+    "bf16": 2,
+    "i32": 4,
+    "tf32": 4,
+    "f32": 4,
+    "i64": 8,
+    "f64": 8,
+}
+
+
+def _lds_access_align(op: Op) -> Optional[int]:
+    """Return the ``align N`` (bytes) that ``op`` claims on its LDS access.
+
+    This is the one home of the alignment every smem load / store emits
+    through a pool segment. The emitters print this value, and the pool
+    layout aligns each segment's offset to the largest value its accesses
+    claim, so a claim is never larger than what the segment base guarantees.
+    (The in-segment index is the kernel author's responsibility: a vector
+    access must start at a multiple of its claim.)
+
+    A vector access wider than the pool alignment (``<8 x float>`` is 32
+    bytes) claims the pool alignment: no segment can be aligned more strictly
+    than the pool it lives in, and LDS instructions need no more than 16.
+
+    Returns ``None`` for an op that makes no alignment claim on an smem
+    operand (intrinsic and raw-pointer LDS paths carry no ``align``). Raises
+    ``ValueError`` for a store whose ``align`` attribute is not a positive
+    power of two: capping it would hide an invalid claim.
+    """
+    natural = _lds_natural_align(op)
+    return None if natural is None else min(natural, _SMEM_POOL_ALIGN)
+
+
+def _lds_natural_align(op: Op) -> Optional[int]:
+    """The natural alignment of ``op``'s LDS access, before the pool cap."""
+    name = op.name
+    if name == "tile.smem_store":
+        return _LDS_ELEM_BYTES.get(op.operands[-1].type.name, 2)
+    if name == "tile.smem_store_vN":
+        vec = int(op.attrs["vec"])
+        elem = op.operands[-1].type.elem.name  # type: ignore[attr-defined]
+        align = int(op.attrs.get("align", vec * _LDS_ELEM_BYTES.get(elem, 2)))
+        if align <= 0 or align & (align - 1):
+            raise ValueError(
+                f"tile.smem_store_vN: align {align} is not a positive power of two"
+            )
+        return align
+    if name == "tile.smem_load_vN":
+        vec = int(op.attrs["vec"])
+        elem = op.result.type.elem.name  # type: ignore[attr-defined]
+        # 96-bit payloads (3 words, 6 halfwords, 12 bytes) are not a power of
+        # two wide, so they claim only element alignment.
+        if vec in (3, 6, 12):
+            return 12 // vec
+        return vec * _LDS_ELEM_BYTES.get(elem, 2)
+    if name in ("tile.smem_store_vN_f32", "tile.smem_load_vN_f32"):
+        return int(op.attrs["vec"]) * 4
+    if name in ("tile.smem_load_v4", "tile.smem_store_distributed"):
+        # Both lower to one scalar access per element, each claiming 2 bytes.
+        return 2
+    return None
+
+
 # ----------------------------- block model -------------------------------
 
 
@@ -2105,6 +2179,28 @@ class _Lowerer:
         walk(region.ops, loop_end=None)
         return intervals, used
 
+    def _collect_smem_access_align(self, region: Region) -> Dict[str, int]:
+        """Map each smem global to the widest alignment its accesses claim.
+
+        Walks every op in ``region`` (recursively) and records, per global
+        name, the largest :func:`_lds_access_align` of an access whose smem
+        operand is that global. Globals with no aligned access are absent.
+        """
+        widest: Dict[str, int] = {}
+
+        def walk(ops: List) -> None:
+            for op in ops:
+                align = _lds_access_align(op)
+                if align is not None:
+                    gname = self._smem_storage_name.get(op.operands[0].name)
+                    if gname is not None:
+                        widest[gname] = max(widest.get(gname, 0), align)
+                for r in op.regions:
+                    walk(r.ops)
+
+        walk(region.ops)
+        return widest
+
     def _compute_smem_layout(self) -> None:
         """Compute byte offsets for all smem allocations in a single pool.
 
@@ -2122,9 +2218,11 @@ class _Lowerer:
         is before the current start and whose size is large enough), or open
         a new slot at the end of the pool.
 
-        Each allocation's offset is aligned to 16 bytes for byte-element
-        types (i8, fp8e4m3, bf8e5m2), 8 bytes for f64, and 4 bytes otherwise.
-        The pool itself is rounded up to 16-byte alignment.
+        Each segment's offset is aligned to the larger of its element rule
+        (16 bytes for byte-element types, 8 for f64, 4 otherwise) and the
+        widest alignment any access to it claims (a ``<4 x float>`` store
+        claims 16), so every ``align N`` the accesses emit holds. The pool
+        itself is rounded up to 16-byte alignment.
 
         Falls back to the original sequential packing when liveness analysis
         yields no intervals (e.g. zero smem allocations).
@@ -2160,15 +2258,20 @@ class _Lowerer:
                 seg *= d
             return seg
 
-        def _align(stype: "SmemType") -> int:
+        # ---- live intervals and access alignments from the kernel body ----
+        live, used = self._collect_smem_liveness(self.kernel.body)
+        access_align = self._collect_smem_access_align(self.kernel.body)
+
+        def _align(gname: str, stype: "SmemType") -> int:
             # A packed-only type never reaches here: core/ir.py
             # _refuse_packed_only_value refuses its LDS tiles.
             if stype.elem.name == "f64":
-                return 8
-            return 16 if stype.elem.name in ("i8", "u8", "fp8e4m3", "bf8e5m2") else 4
-
-        # ---- live intervals from the kernel body ----
-        live, used = self._collect_smem_liveness(self.kernel.body)
+                elem_align = 8
+            elif stype.elem.name in ("i8", "u8", "fp8e4m3", "bf8e5m2"):
+                elem_align = 16
+            else:
+                elem_align = 4
+            return max(elem_align, access_align.get(gname, 0))
 
         # Never-referenced allocations (allocated but never read, written or
         # address-taken) must not consume pool space. The pre-pool lowering
@@ -2221,7 +2324,7 @@ class _Lowerer:
         for gname, stype in sorted_allocs:
             seg = _seg_size(stype)
             self._smem_sizes[gname] = seg
-            aln = _align(stype)
+            aln = _align(gname, stype)
             first_seq, last_seq = live.get(gname, (0, 0))
             # Exclusive (cshuffle no-alias) allocations must not reuse another
             # allocation's slot, and must never be reused by later allocations,
@@ -2294,7 +2397,9 @@ class _Lowerer:
                 slots.append((aligned_off, seg, _EXCL_LAST_SEQ if excl else last_seq))
 
         pool_size = max(s_off + s_size for s_off, s_size, _ in slots)
-        self._smem_pool_size = (pool_size + 15) & ~15
+        self._smem_pool_size = (pool_size + _SMEM_POOL_ALIGN - 1) & ~(
+            _SMEM_POOL_ALIGN - 1
+        )
 
     _LDS_AA_BASE = 900000
 
@@ -3626,19 +3731,7 @@ class _Lowerer:
         # Alignment is the element byte size: 1 for i8/u8, 2 for f16/bf16,
         # 4 for f32/i32, 8 for i64/f64. The AMDGPU backend rejects loads /
         # stores with under-aligned addresses on ``addrspace(3)``.
-        align = {
-            "i8": 1,
-            "u8": 1,
-            "fp8e4m3": 1,
-            "bf8e5m2": 1,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }.get(value.type.name, 2)
+        align = _lds_access_align(op)
         self._current().emit(
             f"  store {_llvm_type(value.type)} {self._operand(value)}, ptr addrspace(3) {gep}, align {align}"
         )
@@ -3693,22 +3786,7 @@ class _Lowerer:
             f"{', '.join(gidx)}"
         )
         elem_ty = _llvm_type(value.type.elem)  # type: ignore[attr-defined]
-        elem_bytes = {
-            "i8": 1,
-            "u8": 1,
-            "fp8e4m3": 1,
-            "bf8e5m2": 1,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }.get(
-            value.type.elem.name, 2
-        )  # type: ignore[attr-defined]
-        align = int(op.attrs.get("align", vec * elem_bytes))
+        align = _lds_access_align(op)
         self._current().emit(
             f"  store <{vec} x {elem_ty}> {self._operand(value)}, ptr addrspace(3) {gep}, "
             f"align {align}{self._lds_aa_suffix(gname)}"
@@ -3735,7 +3813,10 @@ class _Lowerer:
                 f"  {ep} = getelementptr inbounds half, ptr addrspace(3) {base}, i32 {i}"
             )
             ld = self._fresh("smem.ld")
-            self._current().emit(f"  {ld} = load half, ptr addrspace(3) {ep}, align 2")
+            self._current().emit(
+                f"  {ld} = load half, ptr addrspace(3) {ep}, "
+                f"align {_lds_access_align(op)}"
+            )
             elems.append(ld)
         prev = "undef"
         for i, e in enumerate(elems):
@@ -3778,25 +3859,9 @@ class _Lowerer:
             f"{', '.join(idx_strs)}"
         )
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
-        # Element byte size drives the vector alignment. 16-bit
-        # (f16 / bf16): 2 bytes; 32-bit (f32 / i32): 4 bytes; 64-bit
-        # (i64 / f64): 8 bytes.
-        elem_bytes = {
-            "i8": 1,
-            "u8": 1,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }.get(
-            op.result.type.elem.name,
-            2,  # type: ignore[attr-defined]
-        )
-        # New 96-bit widths guarantee only element alignment, including FP8.
-        align = 12 // vec if vec in (3, 6, 12) else vec * elem_bytes
+        # Natural vector alignment: vec * element bytes (96-bit widths claim
+        # only element alignment).
+        align = _lds_access_align(op)
         # gfx1250: mark 8-wide (128-bit) LDS loads volatile to block the WMMA-aware
         # pass from substituting ds_load_tr16_b128 (transposed) in place of the plain
         # sequential ds_read_b128.  Only 8-wide loads feed the 16x16x32 WMMA fragment
@@ -4460,7 +4525,8 @@ class _Lowerer:
                 f"ptr addrspace(3) {base_ptr}, i32 0, i32 {i}"
             )
             self._current().emit(
-                f"  store {elem_ty} {ev}, ptr addrspace(3) {gep}, align 2"
+                f"  store {elem_ty} {ev}, ptr addrspace(3) {gep}, "
+                f"align {_lds_access_align(op)}"
             )
 
     def _op_memref_cooperative_global_store(self, op: Op) -> None:
@@ -6403,7 +6469,7 @@ class _Lowerer:
             f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
-        align = vec * 4
+        align = _lds_access_align(op)
         # vec=1 stores expect the scalar form regardless of how the value was typed.
         if vec == 1:
             # value may be a scalar `float` (from `vec_extract`) or `<1 x float>`.
@@ -6438,7 +6504,7 @@ class _Lowerer:
             f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(idx_strs)}"
         )
-        align = vec * 4
+        align = _lds_access_align(op)
         if vec == 1:
             scalar = self._fresh("smem.s")
             self._current().emit(
@@ -7214,16 +7280,17 @@ class _Lowerer:
         # allocations. Segments are placed by liveness-guided interval packing
         # (see _compute_smem_layout): non-interfering allocations reuse the same
         # byte range, so the pool holds max(overlapping segments) rather than the
-        # sum. Per-allocation alignment is preserved (4 bytes for f16/bf16/f32/
-        # i32, 16 bytes for i8/fp8).
+        # sum. Each segment is aligned to its element rule and to the widest
+        # alignment its accesses claim (see _compute_smem_layout).
         # Each _op_tile_smem_* method emits a byte-level GEP to its segment
         # base before the typed aggregate GEP, so the typed addressing is
-        # unchanged. align 16 satisfies all segment alignments (the strictest
-        # is the 16-byte requirement for ds_read_b64_tr_b8 on i8/fp8 tiles).
+        # unchanged. The pool alignment bounds every segment alignment (an
+        # access claims at most the pool alignment; see _lds_access_align).
         if self._smem_globals:
             out.append(
                 f"{self._smem_pool_name} = internal unnamed_addr addrspace(3) "
-                f"global [{self._smem_pool_size} x i8] poison, align 16"
+                f"global [{self._smem_pool_size} x i8] poison, "
+                f"align {_SMEM_POOL_ALIGN}"
             )
             out.append("")
 
