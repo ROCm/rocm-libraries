@@ -631,6 +631,8 @@ struct PointwiseOperationTestParams
     // Optional parameters
     std::optional<float> eluAlpha;
     std::optional<float> softplusBeta;
+    std::optional<float> swishBeta;
+    std::optional<int64_t> axis;
 
     // Test metadata
     std::string testDescription;
@@ -687,7 +689,15 @@ public:
                                         params.inputDataType,
                                         params.accumulatorDataType,
                                         params.inputDataType,
-                                        params.mode);
+                                        params.mode,
+                                        1,
+                                        TensorLayout::NCHW,
+                                        std::nullopt,
+                                        std::nullopt,
+                                        std::nullopt,
+                                        params.swishBeta,
+                                        params.eluAlpha,
+                                        params.softplusBeta);
 
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
@@ -741,6 +751,61 @@ public:
 
         const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
         EXPECT_TRUE((verifyBinaryOutput<T0, T1, T0>(*outTensor, params)));
+    }
+
+    // GEN_INDEX: the output holds the coordinate of each element along the axis.
+    template <typename OutputType>
+    static void runGenIndexTest(const std::vector<int64_t>& dims,
+                                int64_t axis,
+                                DataType inputDataType,
+                                DataType outputDataType)
+    {
+        auto [graph, tensorBundle, variantPack]
+            = buildPointwiseUnaryGraph(dims,
+                                       dims,
+                                       inputDataType,
+                                       DataType::FLOAT,
+                                       outputDataType,
+                                       hipdnn_frontend::PointwiseMode::GEN_INDEX,
+                                       1,
+                                       TensorLayout::NCHW,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       axis);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
+        const auto& attributes = graphWrap.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+
+        CpuReferenceGraphExecutor().execute(
+            serializedGraph.data(), serializedGraph.size(), variantPack);
+
+        const auto* outTensor = static_cast<Tensor<OutputType>*>(
+            tensorBundle.tensors.at(attributes.out_0_tensor_uid()).get());
+        for(int64_t n = 0; n < dims[0]; ++n)
+        {
+            for(int64_t c = 0; c < dims[1]; ++c)
+            {
+                for(int64_t h = 0; h < dims[2]; ++h)
+                {
+                    for(int64_t w = 0; w < dims[3]; ++w)
+                    {
+                        const std::array<int64_t, 4> coordinates = {n, c, h, w};
+                        EXPECT_EQ(static_cast<int64_t>(
+                                      static_cast<float>(outTensor->getHostValue(n, c, h, w))),
+                                  coordinates[static_cast<size_t>(axis)]);
+                    }
+                }
+            }
+        }
     }
 
     // Comparison operations produce a BOOLEAN output tensor.
@@ -886,8 +951,26 @@ public:
         input1.fillTensorWithValue(params.in1TensorValue);
         Tensor<OutputType> output(params.outputDims);
 
-        CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::pointwiseCompute(
-            sdkPointwiseMode(params.mode), output, input0, input1);
+        if(params.swishBeta.has_value() || params.eluAlpha.has_value()
+           || params.softplusBeta.has_value())
+        {
+            CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::pointwiseCompute(
+                sdkPointwiseMode(params.mode),
+                output,
+                input0,
+                input1,
+                0.0f,
+                std::numeric_limits<float>::max(),
+                0.0f,
+                params.swishBeta.has_value() ? params.swishBeta.value() : 1.0f,
+                params.eluAlpha.has_value() ? params.eluAlpha.value() : 1.0f,
+                params.softplusBeta.has_value() ? params.softplusBeta.value() : 1.0f);
+        }
+        else
+        {
+            CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::pointwiseCompute(
+                sdkPointwiseMode(params.mode), output, input0, input1);
+        }
 
         const CpuFpReferenceValidation<OutputType> validator;
         return validator.allClose(output, outTensor);
@@ -1730,4 +1813,454 @@ TEST(TestPointwiseOperationsCpuGraphExecutor, ExpReciprocalDivideComposedGraph)
             }
         }
     }
+}
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluBackwardPositiveX)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::GELU_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
+    params.testDescription = "GELU backward with positive X";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluBackwardPositiveXBroadcastChannel)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::GELU_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
+    params.in1Dims = {1, 3, 1, 1};
+    params.testDescription = "GELU backward with positive X with X broadcast over H and W";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluBackwardNegativeX)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::GELU_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = -1.0f; // X
+    params.testDescription = "GELU backward with negative X";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluBackwardNegativeXBroadcastChannel)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::GELU_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = -1.0f; // X
+    params.in1Dims = {1, 3, 1, 1};
+    params.testDescription = "GELU backward with negative X with X broadcast over H and W";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluApproxTanhBackwardPositiveX)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::GELU_APPROX_TANH_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
+    params.testDescription = "GELU tanh backward with positive X";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor,
+           BinaryGeluApproxTanhBackwardPositiveXBroadcastChannel)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::GELU_APPROX_TANH_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
+    params.in1Dims = {1, 3, 1, 1};
+    params.testDescription = "GELU tanh backward with positive X with X broadcast over H and W";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryGeluApproxTanhBackwardNegativeX)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::GELU_APPROX_TANH_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = -1.0f; // X
+    params.testDescription = "GELU tanh backward with negative X";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor,
+           BinaryGeluApproxTanhBackwardNegativeXBroadcastChannel)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::GELU_APPROX_TANH_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = -1.0f; // X
+    params.in1Dims = {1, 3, 1, 1};
+    params.testDescription = "GELU tanh backward with negative X with X broadcast over H and W";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySwishBackwardPositiveX)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SWISH_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
+    params.testDescription = "Swish backward with positive X";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySwishBackwardPositiveXBroadcastChannel)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SWISH_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
+    params.in1Dims = {1, 3, 1, 1};
+    params.testDescription = "Swish backward with positive X with X broadcast over H and W";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySwishBackwardNegativeX)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SWISH_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = -1.0f; // X
+    params.testDescription = "Swish backward with negative X";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySwishBackwardNegativeXBroadcastChannel)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SWISH_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = -1.0f; // X
+    params.in1Dims = {1, 3, 1, 1};
+    params.testDescription = "Swish backward with negative X with X broadcast over H and W";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySwishBackwardWithBeta)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SWISH_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
+    params.swishBeta = 0.5f;
+    params.testDescription = "Swish backward with custom beta";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySwishBackwardWithBetaBroadcastChannel)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SWISH_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
+    params.swishBeta = 0.5f;
+    params.in1Dims = {1, 3, 1, 1};
+    params.testDescription = "Swish backward with custom beta with X broadcast over H and W";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryEluBackwardPositiveX)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::ELU_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 2.0f; // X
+    params.testDescription = "ELU backward with positive X passes dy through";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryEluBackwardPositiveXBroadcastChannel)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::ELU_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 2.0f; // X
+    params.in1Dims = {1, 3, 1, 1};
+    params.testDescription
+        = "ELU backward with positive X passes dy through with X broadcast over H and W";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryEluBackwardNegativeX)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::ELU_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = -1.0f; // X
+    params.testDescription = "ELU backward with negative X, default alpha";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryEluBackwardNegativeXBroadcastChannel)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::ELU_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = -1.0f; // X
+    params.in1Dims = {1, 3, 1, 1};
+    params.testDescription
+        = "ELU backward with negative X, default alpha with X broadcast over H and W";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryEluBackwardWithAlpha)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::ELU_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = -1.0f; // X
+    params.eluAlpha = 0.5f;
+    params.testDescription = "ELU backward with custom alpha";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinaryEluBackwardWithAlphaBroadcastChannel)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::ELU_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = -1.0f; // X
+    params.eluAlpha = 0.5f;
+    params.in1Dims = {1, 3, 1, 1};
+    params.testDescription = "ELU backward with custom alpha with X broadcast over H and W";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySoftplusBackwardPositiveX)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
+    params.testDescription = "Softplus backward with positive X";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySoftplusBackwardPositiveXBroadcastChannel)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
+    params.in1Dims = {1, 3, 1, 1};
+    params.testDescription = "Softplus backward with positive X with X broadcast over H and W";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySoftplusBackwardNegativeX)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = -1.0f; // X
+    params.testDescription = "Softplus backward with negative X";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySoftplusBackwardNegativeXBroadcastChannel)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = -1.0f; // X
+    params.in1Dims = {1, 3, 1, 1};
+    params.testDescription = "Softplus backward with negative X with X broadcast over H and W";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySoftplusBackwardWithBeta)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
+    params.softplusBeta = 2.0f;
+    params.testDescription = "Softplus backward with custom beta";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TYPED_TEST(PointwiseOperationsCpuGraphExecutor, BinarySoftplusBackwardWithBetaBroadcastChannel)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
+    params.inputDataType = nativeTypeToDataType<TypeParam>();
+    params.input1DataType = nativeTypeToDataType<TypeParam>();
+    params.accumulatorDataType = nativeTypeToDataType<float>();
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
+    params.softplusBeta = 2.0f;
+    params.in1Dims = {1, 3, 1, 1};
+    params.testDescription = "Softplus backward with custom beta with X broadcast over H and W";
+
+    PointwiseOperationsTestHelper::runBinaryTest<TypeParam>(params);
+}
+
+TEST(TestPointwiseOperationsCpuGraphExecutor, SoftplusBackwardMixedTypeFloatDyHalfX)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::SOFTPLUS_BWD;
+    params.inputDataType = DataType::FLOAT;
+    params.input1DataType = DataType::HALF;
+    params.accumulatorDataType = DataType::FLOAT;
+    params.in0TensorValue = 2.0f;
+    params.in1TensorValue = 1.0f;
+    params.testDescription = "Softplus backward with float dy and half x";
+
+    PointwiseOperationsTestHelper::runMixedTypeBinaryTest<float, half>(params);
+}
+
+TEST(TestPointwiseOperationsCpuGraphExecutor, GeluBackwardMixedTypeFloatDyBfloat16X)
+{
+    PointwiseOperationTestParams params;
+    params.mode = hipdnn_frontend::PointwiseMode::GELU_BWD;
+    params.inputDataType = DataType::FLOAT;
+    params.input1DataType = DataType::BFLOAT16;
+    params.accumulatorDataType = DataType::FLOAT;
+    params.in0TensorValue = 2.0f;
+    params.in1TensorValue = -1.0f;
+    params.testDescription = "GELU backward with float dy and bfloat16 x";
+
+    PointwiseOperationsTestHelper::runMixedTypeBinaryTest<float, bfloat16>(params);
+}
+
+TEST(TestPointwiseOperationsCpuGraphExecutor, GenIndexAxis0Float)
+{
+    PointwiseOperationsTestHelper::runGenIndexTest<float>(
+        {2, 3, 2, 2}, 0, DataType::FLOAT, DataType::FLOAT);
+}
+
+TEST(TestPointwiseOperationsCpuGraphExecutor, GenIndexAxis1Float)
+{
+    PointwiseOperationsTestHelper::runGenIndexTest<float>(
+        {2, 3, 2, 2}, 1, DataType::FLOAT, DataType::FLOAT);
+}
+
+TEST(TestPointwiseOperationsCpuGraphExecutor, GenIndexAxis2Half)
+{
+    PointwiseOperationsTestHelper::runGenIndexTest<half>(
+        {2, 3, 4, 2}, 2, DataType::HALF, DataType::HALF);
+}
+
+TEST(TestPointwiseOperationsCpuGraphExecutor, GenIndexAxis3Bfloat16)
+{
+    PointwiseOperationsTestHelper::runGenIndexTest<bfloat16>(
+        {2, 3, 2, 4}, 3, DataType::BFLOAT16, DataType::BFLOAT16);
+}
+
+TEST(TestPointwiseOperationsCpuGraphExecutor, GenIndexInt32Output)
+{
+    PointwiseOperationsTestHelper::runGenIndexTest<int32_t>(
+        {2, 3, 2, 4}, 1, DataType::FLOAT, DataType::INT32);
+}
+
+TEST(TestPointwiseOperationsCpuGraphExecutor, GenIndexFloatInputHalfOutput)
+{
+    PointwiseOperationsTestHelper::runGenIndexTest<half>(
+        {1, 3, 2, 2}, 1, DataType::FLOAT, DataType::HALF);
 }

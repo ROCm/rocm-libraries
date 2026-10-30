@@ -74,6 +74,25 @@ public:
                                                                               softplusBeta);
     }
 
+    // GEN_INDEX: the input tensor only defines the shape; the output holds the coordinate of each
+    // element along the given axis.
+    template <typename InputType, typename ComputeType = double>
+    static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+                                 hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                 const hipdnn_data_sdk::utilities::TensorBase<InputType>& /*input*/,
+                                 const int64_t axis)
+    {
+        if(operation != hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX)
+        {
+            throw std::runtime_error("Only GEN_INDEX accepts an axis: "
+                                     + std::to_string(static_cast<int>(operation)));
+        }
+
+        DeviceExecutor policy;
+        policy.executeGenerateIndex(output, axis);
+        policy.markOutputModified(output);
+    }
+
     // Binary operations
     template <typename Input1Type, typename Input2Type, typename ComputeType = double>
     static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
@@ -110,12 +129,24 @@ public:
                                  const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2,
                                  const ParamType lowerClip,
                                  const ParamType upperClip,
-                                 const ParamType lowerSlope)
+                                 const ParamType lowerSlope,
+                                 const ParamType swishBeta = ParamType{1},
+                                 const ParamType eluAlpha = ParamType{1},
+                                 const ParamType softplusBeta = ParamType{1})
     {
         static_assert(hipdnn_test_sdk::detail::IS_VALID_TENSOR_TYPE_V<ParamType>,
                       "ParamType must be a valid tensor type for scalar parameters");
         executeParameterizedBinaryOperation<Input1Type, Input2Type, ParamType, ComputeType>(
-            operation, output, input1, input2, lowerClip, upperClip, lowerSlope);
+            operation,
+            output,
+            input1,
+            input2,
+            lowerClip,
+            upperClip,
+            lowerSlope,
+            swishBeta,
+            eluAlpha,
+            softplusBeta);
     }
 
 private:
@@ -330,6 +361,26 @@ private:
             policy.executeBinaryBroadcast(
                 input1, input2, output, pointwise::TanhBackward<ComputeType>{});
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_BWD:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::GeluBackward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_BWD:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::GeluApproxTanhBackward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_BWD:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::SwishBackward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_BWD:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::EluBackward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::SoftplusBackward<ComputeType>{});
+            break;
         default:
             throw std::runtime_error("Unsupported binary pointwise operation: "
                                      + std::to_string(static_cast<int>(operation)));
@@ -370,7 +421,10 @@ private:
         const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2,
         const ParamType lowerClip,
         const ParamType upperClip,
-        const ParamType lowerSlope)
+        const ParamType lowerSlope,
+        const ParamType swishBeta,
+        const ParamType eluAlpha,
+        const ParamType softplusBeta)
     {
         DeviceExecutor policy;
 
@@ -384,6 +438,27 @@ private:
                                               static_cast<ComputeType>(lowerClip),
                                               static_cast<ComputeType>(upperClip),
                                               static_cast<ComputeType>(lowerSlope)});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_BWD:
+            policy.executeBinaryBroadcast(
+                input1,
+                input2,
+                output,
+                pointwise::SwishBackward<ComputeType>{static_cast<ComputeType>(swishBeta)});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_BWD:
+            policy.executeBinaryBroadcast(
+                input1,
+                input2,
+                output,
+                pointwise::EluBackward<ComputeType>{static_cast<ComputeType>(eluAlpha)});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD:
+            policy.executeBinaryBroadcast(
+                input1,
+                input2,
+                output,
+                pointwise::SoftplusBackward<ComputeType>{static_cast<ComputeType>(softplusBeta)});
             break;
         default:
             throw std::runtime_error("Unsupported parameterized binary pointwise operation: "

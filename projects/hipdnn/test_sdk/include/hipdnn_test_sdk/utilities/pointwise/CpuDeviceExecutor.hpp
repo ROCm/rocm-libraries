@@ -130,6 +130,25 @@ public:
         hipdnn_test_sdk::detail::makeParallelTensorFunctor(func, outputDims)();
     }
 
+    // Fills output with the coordinate of each element along the given axis.
+    void executeGenerateIndex(hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                              int64_t axis)
+    {
+        const auto& outputDims = output.dims();
+        if(axis < 0 || static_cast<size_t>(axis) >= outputDims.size())
+        {
+            throw std::runtime_error("GEN_INDEX axis is out of range for the output tensor");
+        }
+
+        auto func = [&](const std::vector<int64_t>& indices) {
+            output.setHostValue(hipdnn_test_sdk::detail::safeConvert<OutputType>(
+                                    indices[static_cast<size_t>(axis)]),
+                                indices);
+        };
+
+        hipdnn_test_sdk::detail::makeParallelTensorFunctor(func, outputDims)();
+    }
+
     void markOutputModified(hipdnn_data_sdk::utilities::TensorBase<OutputType>& output)
     {
         output.memory().markHostModified();

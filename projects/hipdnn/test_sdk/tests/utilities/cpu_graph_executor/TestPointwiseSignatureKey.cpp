@@ -681,6 +681,18 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForImplementedBinaryModes)
     }
 }
 
+TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForGenIndexInt32Output)
+{
+    const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
+
+    for(auto input : {DataType::FLOAT, DataType::INT32})
+    {
+        const PointwiseSignatureKey key{
+            PointwiseMode::GEN_INDEX, input, DataType::FLOAT, DataType::INT32};
+        EXPECT_EQ(planBuilders.count(key), 1u) << key;
+    }
+}
+
 TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForLogicalOperations)
 {
     const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
