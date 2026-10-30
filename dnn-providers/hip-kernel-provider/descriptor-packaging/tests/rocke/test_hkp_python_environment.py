@@ -347,6 +347,21 @@ def test_configure_uses_sdk_without_imported_comgr(build_environment):
     assert "package-comgr" not in selection
 
 
+def _assert_ctest_comgr_defaults(env, expected):
+    # CTest parses native path separators and CMake escaping before comparison.
+    ctest = Path(env.cmake).with_name("ctest" + Path(env.cmake).suffix)
+    proc = env.run(ctest, "--test-dir", env.build_dir, "--show-only=json-v1")
+    tests = json.loads(proc.stdout)["tests"]
+    assert {test["name"] for test in tests} == {
+        "hip-kernel-provider-hkp-pack-quick",
+        "hip-kernel-provider-hkp-pack",
+    }
+    for test in tests:
+        command = test["command"]
+        assert command.count("--default-comgr") == 1
+        assert Path(command[command.index("--default-comgr") + 1]) == expected
+
+
 # Exercise both a missing SDK (TheRock's build interpreter) and a competing SDK:
 # the build's exported compiler must be the one configure, packing and CTest use.
 @pytest.mark.parametrize("sdk", [False, True])
@@ -366,8 +381,8 @@ def test_configure_and_pack_use_imported_comgr(build_environment, sdk, package):
     result = env.consumer()
     assert Path(result["comgr"]) == expected
     assert Path(result["env"]["ROCKE_COMGR_LIB"]) == expected
+    _assert_ctest_comgr_defaults(env, expected)
     tests = (env.build_dir / "CTestTestfile.cmake").read_text(encoding="utf-8")
-    assert tests.count(f'"--default-comgr" "{expected.as_posix()}"') == 2
     assert "ROCKE_COMGR_LIB=" not in tests
 
 
@@ -499,8 +514,7 @@ def test_configure_and_pack_preserve_runtime_comgr_override(
     assert Path(selection.split("ROCKE_COMGR_LIB;", 1)[1].strip()) == explicit
     assert Path(result["env"]["ROCKE_COMGR_LIB"]) == explicit
     assert Path(result["comgr"]) == explicit
-    tests = (env.build_dir / "CTestTestfile.cmake").read_text(encoding="utf-8")
-    assert tests.count(f'"--default-comgr" "{explicit.as_posix()}"') == 2
+    _assert_ctest_comgr_defaults(env, explicit)
 
 
 def test_pth_runtime_and_parent_inventory_preserved(tmp_path, build_environment):
