@@ -900,6 +900,8 @@ class DirectDepthwiseDgradWindowedSpec:
     w_fold: int = 1         # mfma: images per 16x16 tile (1, 2, 4)
     prefetch_rows: int = 1  # mfma: dY rows in flight
     wave_size: int = 64
+    fwd: bool = False       # mfma: rotated filter -- the forward pass
+    out_stride: int = 1     # fwd: 2 keeps every 2nd row/col of the grid
 ```
 
 The filter, the padding and the dtype are baked (the kernel name carries
@@ -964,6 +966,29 @@ ceil(H / block_h))`. Extra constraints: `groups % 8 == 0` (a plan-time rule),
 resident-fragment estimate `mfma_frag_vgprs()` within
 `DW_DGRAD_MFMA_MAX_FRAG_VGPRS`, and `mfma_lds_bytes()` within
 `DW_DGRAD_MFMA_LDS_BUDGET`.
+
+**Forward pass (`fwd=True`, MFMA form only).** The kernel reads the filter
+rotated by 180 degrees (`W[k, KH-1-r, s]` instead of `W[k, r, KW-1-s]`), which
+makes it the stride-1 depthwise *forward* convolution of the transposed
+problem: dY is the forward input, dX the forward output and `PAD` is
+`KH - 1 - pad` (`dw_win_fwd_problem`; square filters only, the same `PAD` for
+"same" padding). The kernel name gains `_fwd`, and the kernel takes the
+*forward* kernarg block (A = input, D = output); the transposed problem only
+sizes the spec's grid and checks. `out_stride=2` (name `_s2`) runs a
+stride-2 forward pass: the kernel walks the stride-1 grid of `2 Ho x 2 Wo`,
+skips the odd rows' MFMAs and stages / stores only the even columns
+(`block_h` must be even). AOT variant `direct_depthwise_win` (direction fwd,
+3x3..9x9 "same" padding, stride 1 and 2), registered in the gfx950 forward
+dispatcher list (the stride-1 depthwise instances ahead of the tiled ones).
+
+The forward pass also takes a grouped problem with `cpg = kpg` a multiple of 8
+up to `DW_WIN_MAX_GROUP_CH` (64): a wave still owns 8 output channels, its A
+fragments are the group's dense weights `W[k, ., ., 8h .. 8h+7]` (one 16-byte
+load per input chunk `h`) instead of the one-hot diagonal, and it contracts
+the `cpg / 8` input chunks of its group from the staged window (one MFMA per
+chunk). A block must hold whole groups (`block_ch % cpg == 0`); the kernel
+name gains `_g<cpg>`, and `p_groups * cpg` bounds the channels. The AOT grid
+carries the 3x3 ResNeXt/RegNet groups (`DW_WIN_FWD_GROUP_CH`).
 
 Non-finite semantics differ between the forms. The VALU forms (including
 `dot2`) keep an Inf / NaN in dY inside its channel and receptive field. The

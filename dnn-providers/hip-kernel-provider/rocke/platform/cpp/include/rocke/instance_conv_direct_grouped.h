@@ -617,9 +617,15 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
  *      w_fold: int = 1           # images per MFMA tile (mfma only)
  *      prefetch_rows: int = 1    # dY rows in flight (mfma only)
  *      wave_size: int = 64
+ *      fwd: bool = False         # rotated filter: the forward pass (mfma only);
+ *                                # a forward problem may be grouped, cpg = kpg
+ *                                # a multiple of 8 up to ROCKE_DW_WIN_MAX_GROUP_CH
+ *      out_stride: int = 1       # fwd: 2 keeps every 2nd row/col of the grid
  *
- *  AOT: takes the direct dgrad kernarg block (N, H, W, Ho, Wo, groups and the
- *  dY/dX strides are runtime); KH, KW and PAD are baked.
+ *  AOT: with fwd=False, takes the direct dgrad kernarg block (N, H, W, Ho, Wo,
+ *  groups and the dY/dX strides are runtime); with fwd=True, the rotated
+ *  filter runs the forward pass and the kernel takes the forward kernarg
+ *  block instead (A = input, D = output). KH, KW and PAD are baked either way.
  *  Grid (VALU):  (ceil(W / block_w), ceil(groups / block_ch), N * ceil(H / block_h))
  *  Grid (mfma):  (ceil(W / tile_w), ceil(groups / block_ch),
  *                 ceil(N / w_fold) * ceil(H / block_h))
@@ -634,6 +640,8 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
 #define ROCKE_DW_DGRAD_MFMA_MAX_FRAG_VGPRS 224
 #define ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS 4
 #define ROCKE_DW_DGRAD_MFMA_LDS_BUDGET (64 * 1024)
+/* Widest group (cpg = kpg) the grouped forward form contracts per wave. */
+#define ROCKE_DW_WIN_MAX_GROUP_CH 64
 
 typedef struct rocke_direct_depthwise_dgrad_win_spec
 {
@@ -648,6 +656,8 @@ typedef struct rocke_direct_depthwise_dgrad_win_spec
     int w_fold; /* default 1 */
     int prefetch_rows; /* default 1 */
     int wave_size; /* default 64 */
+    bool fwd; /* default false */
+    int out_stride; /* default 1; 2 with fwd */
 } rocke_direct_depthwise_dgrad_win_spec_t;
 
 rocke_direct_depthwise_dgrad_win_spec_t rocke_direct_depthwise_dgrad_win_spec_default(void);

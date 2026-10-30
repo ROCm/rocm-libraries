@@ -26,6 +26,7 @@ __all__ = [
     "DIRECT_DGRAD_PATCH_WMMA",
     "DIRECT_DGRAD_SMALLC_WMMA",
     "DIRECT_DGRAD_WMMA",
+    "DIRECT_DEPTHWISE_WIN_FWD",
     "DIRECT_FWD_SMALLC_WMMA",
     "DIRECT_FWD_SMALLK_WMMA",
     "DIRECT_FWD_WMMA",
@@ -58,6 +59,11 @@ DIRECT_DGRAD_WMMA = "direct_dgrad_wmma"
 # Single-kernel dgrad variants that run a forward kernel on the transposed
 # problem (fused weights, no pre-pass): one step with the forward ABI.
 DIRECT_DGRAD_FPROP_SINGLE = ("direct_grouped_dgrad_4c", "direct_grouped_dgrad_fused")
+# Depthwise (and 8..64-channel grouped) forward, stride 1 or 2, square filter,
+# on the windowed dgrad kernel's Toeplitz MFMA form with the filter rotated
+# (``fwd=True``): the spec's problem is the transposed stride-1 grid
+# (dw_win_fwd_problem); the kernel takes the forward kernarg block.
+DIRECT_DEPTHWISE_WIN_FWD = "direct_depthwise_win"
 # Wave32 WMMA dgrad of stem convolutions (C <= 4, ungrouped): a patch
 # embedding as one GEMM with a pixel-shuffle store, and overlapping stems as a
 # GEMM over the flattened (r, s, c) followed by col2im in LDS.
@@ -216,6 +222,15 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
     if variant == "direct_depthwise_dgrad_win":
         return dc.DirectDepthwiseDgradWindowedSpec(
             problem=problem, name="rocke_direct_dw_dgrad_win", **knobs
+        )
+    if variant == DIRECT_DEPTHWISE_WIN_FWD:
+        return dc.DirectDepthwiseDgradWindowedSpec(
+            problem=dc.dw_win_fwd_problem(problem),
+            name="rocke_direct_dw_win_fwd",
+            mfma=True,
+            fwd=True,
+            out_stride=problem.stride,
+            **knobs,
         )
     if variant == "direct_grouped_dgrad":
         return dc.DirectConvDgradSpec(
@@ -476,7 +491,7 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
             return dc.is_valid_depthwise_col_spec(spec, arch=arch)
         if variant == "direct_depthwise_dgrad":
             return dc.is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
-        if variant == "direct_depthwise_dgrad_win":
+        if variant in ("direct_depthwise_dgrad_win", DIRECT_DEPTHWISE_WIN_FWD):
             return dc.is_valid_depthwise_dgrad_win_spec(spec, arch=arch)
         if variant == "direct_grouped_dgrad":
             return dc.is_valid_dgrad_spec(spec, arch=arch)
@@ -591,6 +606,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         "direct_depthwise_col": dc.build_direct_depthwise_col,
         "direct_depthwise_dgrad": dc.build_direct_depthwise_dgrad_streaming,
         "direct_depthwise_dgrad_win": dc.build_direct_depthwise_dgrad_windowed,
+        DIRECT_DEPTHWISE_WIN_FWD: dc.build_direct_depthwise_dgrad_windowed,
         "direct_grouped_dgrad": dc.build_direct_conv_dgrad,
         "direct_grouped_dgrad_4c": dc.build_direct_conv_4c,
         "direct_grouped_dgrad_fused": dc.build_direct_conv,
