@@ -88,14 +88,14 @@ namespace
 {
     // Shared, hoisted description of the tiny GEBSR input used by the tests below
     // (mb = nb = nnzb = 2, 1x1 blocks, zero-based).
-    const std::vector<int32_t> gebsr_row_ptr{0, 1, 2};
-    const std::vector<int32_t> gebsr_col_ind{1, 0};
-    const std::vector<float>   gebsr_val{2.0f, 3.0f};
+    const std::vector<rocsparse_int> gebsr_row_ptr{0, 1, 2};
+    const std::vector<rocsparse_int> gebsr_col_ind{1, 0};
+    const std::vector<float>         gebsr_val{2.0f, 3.0f};
 
     // Expected GEBSC (transpose) of the matrix above.
-    const std::vector<int32_t> expected_bsc_col_ptr{0, 1, 2};
-    const std::vector<int32_t> expected_bsc_row_ind{1, 0};
-    const std::vector<float>   expected_bsc_val{3.0f, 2.0f};
+    const std::vector<rocsparse_int> expected_bsc_col_ptr{0, 1, 2};
+    const std::vector<rocsparse_int> expected_bsc_row_ind{1, 0};
+    const std::vector<float>         expected_bsc_val{3.0f, 2.0f};
 }
 
 class Gebsr2Gebsc : public HandleTest
@@ -106,9 +106,9 @@ class Gebsr2Gebsc : public HandleTest
 // size (it drives the sort scratch estimate). Split out from the convert case.
 TEST_F(Gebsr2Gebsc, buffer_size)
 {
-    device_vector<int32_t> row_ptr{gebsr_row_ptr};
-    device_vector<int32_t> col_ind{gebsr_col_ind};
-    device_vector<float>   val{gebsr_val};
+    device_vector<rocsparse_int> row_ptr{gebsr_row_ptr};
+    device_vector<rocsparse_int> col_ind{gebsr_col_ind};
+    device_vector<float>         val{gebsr_val};
     ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
 
     size_t buffer_size = 0;
@@ -121,9 +121,9 @@ TEST_F(Gebsr2Gebsc, buffer_size)
 // GEBSC arrays (col_ptr / row_ind / val) equal the analytic transpose.
 TEST_F(Gebsr2Gebsc, transpose_values)
 {
-    device_vector<int32_t> row_ptr{gebsr_row_ptr};
-    device_vector<int32_t> col_ind{gebsr_col_ind};
-    device_vector<float>   val{gebsr_val};
+    device_vector<rocsparse_int> row_ptr{gebsr_row_ptr};
+    device_vector<rocsparse_int> col_ind{gebsr_col_ind};
+    device_vector<float>         val{gebsr_val};
     ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
 
     size_t buffer_size = 0;
@@ -134,9 +134,9 @@ TEST_F(Gebsr2Gebsc, transpose_values)
     device_vector<char> tmp{buffer_size ? buffer_size : size_t(1)};
     ASSERT_TRUE(tmp.ptr);
 
-    device_vector<float>   bsc_val{size_t(2)};
-    device_vector<int32_t> bsc_row_ind{size_t(2)};
-    device_vector<int32_t> bsc_col_ptr{size_t(3)};
+    device_vector<float>         bsc_val{size_t(2)};
+    device_vector<rocsparse_int> bsc_row_ind{size_t(2)};
+    device_vector<rocsparse_int> bsc_col_ptr{size_t(3)};
     ASSERT_TRUE(bsc_val.ptr && bsc_row_ind.ptr && bsc_col_ptr.ptr);
 
     ASSERT_EQ(rocsparse_sgebsr2gebsc(handle,
@@ -165,10 +165,10 @@ TEST_F(Gebsr2Gebsc, transpose_values)
 // gebsr2gebsc bad args: null handle and null buffer-size pointer are rejected.
 TEST_F(Gebsr2Gebsc, bad_args)
 {
-    device_vector<int32_t> row_ptr{gebsr_row_ptr};
-    device_vector<int32_t> col_ind{gebsr_col_ind};
-    device_vector<float>   val{gebsr_val};
-    size_t                 bs = 0;
+    device_vector<rocsparse_int> row_ptr{gebsr_row_ptr};
+    device_vector<rocsparse_int> col_ind{gebsr_col_ind};
+    device_vector<float>         val{gebsr_val};
+    size_t                       bs = 0;
 
     EXPECT_EQ(
         rocsparse_sgebsr2gebsc_buffer_size(nullptr, 2, 2, 2, val, row_ptr, col_ind, 1, 1, &bs),
@@ -200,17 +200,17 @@ class PruneCsr2CsrByPct : public HandleTest
 TEST_F(PruneCsr2CsrByPct, full_pipeline)
 {
     // A = 2x2 with entries {1, 4} (identity pattern), prune bottom 50%.
-    device_vector<int32_t> row_ptr_A{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> col_ind_A{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val_A{std::vector<float>{1.0f, 4.0f}};
+    device_vector<rocsparse_int> row_ptr_A{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> col_ind_A{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val_A{std::vector<float>{1.0f, 4.0f}};
     ASSERT_TRUE(row_ptr_A.ptr && col_ind_A.ptr && val_A.ptr);
 
     MatDescr descr_A, descr_C;
     MatInfo  info;
     ASSERT_TRUE(descr_A.d && descr_C.d && info.i);
 
-    const float            percentage = 50.0f;
-    device_vector<int32_t> row_ptr_C{size_t(3)};
+    const float                  percentage = 50.0f;
+    device_vector<rocsparse_int> row_ptr_C{size_t(3)};
     ASSERT_TRUE(row_ptr_C.ptr);
 
     size_t buffer_size = 0;
@@ -251,8 +251,8 @@ TEST_F(PruneCsr2CsrByPct, full_pipeline)
                                                          tmp.ptr),
               rocsparse_status_success);
 
-    device_vector<int32_t> col_ind_C{size_t(2)};
-    device_vector<float>   val_C{size_t(2)};
+    device_vector<rocsparse_int> col_ind_C{size_t(2)};
+    device_vector<float>         val_C{size_t(2)};
     ASSERT_TRUE(col_ind_C.ptr && val_C.ptr);
 
     ASSERT_EQ(rocsparse_sprune_csr2csr_by_percentage(handle,
@@ -275,21 +275,21 @@ TEST_F(PruneCsr2CsrByPct, full_pipeline)
 
     // Pruning the smaller-magnitude half of {1, 4} keeps only the 4.
     EXPECT_EQ(nnz_C, 1);
-    EXPECT_EQ(to_host(row_ptr_C.ptr, 3), (std::vector<int32_t>{0, 0, 1}));
+    EXPECT_EQ(to_host(row_ptr_C.ptr, 3), (std::vector<rocsparse_int>{0, 0, 1}));
     ASSERT_GE(nnz_C, 1);
-    EXPECT_EQ(to_host(col_ind_C.ptr, 1), (std::vector<int32_t>{1}));
+    EXPECT_EQ(to_host(col_ind_C.ptr, 1), (std::vector<rocsparse_int>{1}));
     EXPECT_FLOAT_EQ(to_host(val_C.ptr, 1)[0], 4.0f);
 }
 
 TEST_F(PruneCsr2CsrByPct, bad_args)
 {
-    device_vector<int32_t> row_ptr_A{std::vector<int32_t>{0, 1, 2}};
-    device_vector<int32_t> col_ind_A{std::vector<int32_t>{0, 1}};
-    device_vector<float>   val_A{std::vector<float>{1.0f, 4.0f}};
-    MatDescr               descr_A, descr_C;
-    MatInfo                info;
-    device_vector<int32_t> row_ptr_C{size_t(3)};
-    size_t                 bs = 0;
+    device_vector<rocsparse_int> row_ptr_A{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> col_ind_A{std::vector<rocsparse_int>{0, 1}};
+    device_vector<float>         val_A{std::vector<float>{1.0f, 4.0f}};
+    MatDescr                     descr_A, descr_C;
+    MatInfo                      info;
+    device_vector<rocsparse_int> row_ptr_C{size_t(3)};
+    size_t                       bs = 0;
 
     EXPECT_EQ(rocsparse_sprune_csr2csr_by_percentage_buffer_size(nullptr,
                                                                  2,
@@ -349,8 +349,8 @@ TEST_F(PruneDense2CsrByPct, full_pipeline)
     MatInfo  info;
     ASSERT_TRUE(descr.d && info.i);
 
-    const float            percentage = 50.0f;
-    device_vector<int32_t> row_ptr{size_t(3)};
+    const float                  percentage = 50.0f;
+    device_vector<rocsparse_int> row_ptr{size_t(3)};
     ASSERT_TRUE(row_ptr.ptr);
 
     size_t buffer_size = 0;
@@ -376,8 +376,8 @@ TEST_F(PruneDense2CsrByPct, full_pipeline)
                   handle, 2, 2, A, 2, percentage, descr.d, row_ptr, &nnz, info.i, tmp.ptr),
               rocsparse_status_success);
 
-    device_vector<int32_t> col_ind{size_t(4)};
-    device_vector<float>   val{size_t(4)};
+    device_vector<rocsparse_int> col_ind{size_t(4)};
+    device_vector<float>         val{size_t(4)};
     ASSERT_TRUE(col_ind.ptr && val.ptr);
 
     ASSERT_EQ(rocsparse_sprune_dense2csr_by_percentage(
@@ -387,19 +387,19 @@ TEST_F(PruneDense2CsrByPct, full_pipeline)
 
     // The 50% cut over all 4 dense entries drops the two zeros; both nonzeros stay.
     EXPECT_EQ(nnz, 2);
-    EXPECT_EQ(to_host(row_ptr.ptr, 3), (std::vector<int32_t>{0, 1, 2}));
+    EXPECT_EQ(to_host(row_ptr.ptr, 3), (std::vector<rocsparse_int>{0, 1, 2}));
     ASSERT_GE(nnz, 2);
-    EXPECT_EQ(to_host(col_ind.ptr, 2), (std::vector<int32_t>{0, 1}));
+    EXPECT_EQ(to_host(col_ind.ptr, 2), (std::vector<rocsparse_int>{0, 1}));
     EXPECT_EQ(to_host(val.ptr, 2), (std::vector<float>{1.0f, 4.0f}));
 }
 
 TEST_F(PruneDense2CsrByPct, bad_args)
 {
-    device_vector<float>   A{std::vector<float>{1.0f, 0.0f, 0.0f, 4.0f}};
-    MatDescr               descr;
-    MatInfo                info;
-    device_vector<int32_t> row_ptr{size_t(3)};
-    size_t                 bs = 0;
+    device_vector<float>         A{std::vector<float>{1.0f, 0.0f, 0.0f, 4.0f}};
+    MatDescr                     descr;
+    MatInfo                      info;
+    device_vector<rocsparse_int> row_ptr{size_t(3)};
+    size_t                       bs = 0;
 
     EXPECT_EQ(rocsparse_sprune_dense2csr_by_percentage_buffer_size(
                   nullptr, 2, 2, A, 2, 50.0f, descr.d, nullptr, row_ptr, nullptr, info.i, &bs),

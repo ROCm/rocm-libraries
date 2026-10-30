@@ -24,7 +24,16 @@ contributes what is conv-specific:
   (:func:`wgrad_atomic_epilogue_available`) and accumulates rounding error with
   the degree (:data:`ATOMIC_16BIT_MAX_SPLIT_K`); a merged tile reduces through
   the workspace only; the workspace must fit the i32 ``ws_bytes`` kernarg;
-* the gridDim.z budget (``z = groups * split_k``).
+  WMMA (wave32) arches have no workspace path, and their packed atomic needs
+  neither cshuffle nor an even store vector;
+* the gridDim.z budget (``z = groups * split_k``);
+* for the forward split (the two-stage WMMA kernel, built on
+  :data:`FWD_SPLIT_K_ARCHS` only): its GEMM ``N*[Do*]Ho*Wo x kpg x
+  [Z*]Y*X*cpg``, the problems it cannot take (pointwise, 3-D) and the i32
+  workspace of ``split_k`` fp32 slabs of the output. Its auto degree comes from
+  :func:`rocke.helpers.split_k.select_split_k_fwd` -- no arch it is built for
+  has a fitted cost model. Its partials meet in fp32 slabs, never in 16-bit
+  atomics, so no accuracy cap applies.
 
 An explicit degree, an override, and an auto degree on an arch without a cost
 model (gfx942 included: it has not been fitted) all go through the
@@ -51,7 +60,7 @@ import functools
 from dataclasses import dataclass
 
 from rocke.core.arch.target import ArchTarget
-from rocke.helpers.split_k import select_split_k_wgrad
+from rocke.helpers.split_k import select_split_k_fwd, select_split_k_wgrad
 from rocke.helpers.split_k_planner import (
     MAX_GRID_DIM_Z,
     SplitKKernel,
@@ -62,6 +71,7 @@ from rocke.helpers.split_k_planner import (
 )
 
 from kernels.common._conv_implicit_gemm_common import ConvProblem
+from kernels.common.conv_fwd_split_k_reduce import fwd_split_k_workspace_nbytes
 from kernels.common.conv_implicit_gemm_dgrad import (
     _dg_K,
     _dg_M,
@@ -74,11 +84,14 @@ from kernels.common.conv_implicit_gemm_wgrad import (
     _wg_M,
     _wg_N,
     wgrad_atomic_epilogue_available,
+    wgrad_two_stage_available,
+    wgrad_wmma_split_k_available,
 )
 from kernels.common.conv_implicit_gemm_wgrad_two_stage import wgrad_workspace_nbytes
 
 __all__ = [
     "ATOMIC_16BIT_MAX_SPLIT_K",
+    "FWD_SPLIT_K_ARCHS",
     "MAX_WGRAD_WS_BYTES",
     "ConvSplitK",
     "parse_split_k_override",
@@ -95,6 +108,13 @@ ATOMIC_16BIT_MAX_SPLIT_K = 128
 # ws_bytes is an i32 kernarg, so a two-stage workspace above this overflows it.
 MAX_WGRAD_WS_BYTES = (1 << 31) - 4
 
+# Targets the split-K forward kernel is built and validated for (the AOT cache
+# builds it for these only). Elsewhere an auto forward request resolves to 1.
+FWD_SPLIT_K_ARCHS = ("gfx1250",)
+# The forward workspace is addressed through an i32 byte count like every
+# operand.
+MAX_FWD_WS_BYTES = (1 << 31) - 1
+
 _DIRECTIONS = ("fwd", "wgrad", "dgrad")
 _REDUCTIONS = ("auto", "atomic", "workspace")
 
@@ -105,7 +125,8 @@ class ConvSplitK:
 
     Attributes:
         split_k: the degree to build and launch (1 = no split).
-        two_stage: reduce through the f32 workspace and Stage 2 (wgrad only).
+        two_stage: reduce through the f32 workspace and Stage 2 (wgrad; the
+            forward split always does, so it is set whenever it splits).
         requested: the degree before the launch limits applied -- the explicit
             value, the override, or the auto choice.
         reason: why, for logs and diagnostics.
@@ -180,16 +201,30 @@ def _resolve_wgrad(
     z_cap = MAX_GRID_DIM_Z // grid_groups
     # Merged tiles cannot use the packed atomic: its epilogue has no way to
     # drop an off-diagonal group pair, so only the workspace carries the mask.
-    # The packed 16-bit atomic is emitted by the cshuffle epilogue only (the
-    # direct-store one scatters the MFMA layout and has no pairs to add).
-    layout_ok, atomic_why = wgrad_atomic_epilogue_available(p, dtype, None)
+    # On MFMA the packed 16-bit atomic is emitted by the cshuffle epilogue only
+    # (the direct-store one scatters the MFMA layout and has no pairs to add).
+    # WMMA (wave32) has only the default epilogue, and its split-K epilogue
+    # forms each packed pair itself.
+    wave_size = ArchTarget.from_gfx(arch).wave_size
+    layout_ok, atomic_why = wgrad_atomic_epilogue_available(p, dtype, None, wave_size)
     if gm > 1:
         atomic_why = "a merged tile reduces through the workspace only"
-    elif layout_ok and epilogue == "default" and _is_16bit(dtype):
+    elif wave_size == 32 and not wgrad_wmma_split_k_available(arch):
+        # Same gate as is_valid_wgrad_spec: the WMMA epilogue needs the float
+        # global atomics the arch catalog marks as run on a device.
+        atomic_why = (
+            f"{arch} has no validated float global atomics "
+            "(has_global_float_atomic_add)"
+        )
+    elif layout_ok and epilogue == "default" and _is_16bit(dtype) and wave_size != 32:
         atomic_why = "the default epilogue emits no packed 16-bit atomic"
     atomic_ok = atomic_why == "ok"
-    # Deliberately unmerged: the workspace is R copies of the true dW.
-    ws_ok = wgrad_workspace_nbytes(p, ws_replicas) <= MAX_WGRAD_WS_BYTES
+    # Deliberately unmerged: the workspace is R copies of the true dW. WMMA
+    # arches have no two-stage path, so no workspace at all.
+    ws_ok = (
+        wgrad_two_stage_available(arch)
+        and wgrad_workspace_nbytes(p, ws_replicas) <= MAX_WGRAD_WS_BYTES
+    )
     if reduction == "workspace" and not ws_ok:
         # Fixing the reduction does not lift its limit: the caller's two-stage
         # binary cannot encode this workspace at any degree.
@@ -256,7 +291,19 @@ def _resolve_wgrad(
             arch=arch,
             groups=grid_groups,
             block_size=block_size,
+            # Selects the arch's WgradSplitPolicy (gfx1250) where it has one.
+            dtype_d=dtype,
         )
+        if reduction == "atomic" and not atomic_ok and allow_unsplit:
+            # An auto degree the packed atomic cannot serve runs unsplit, as
+            # on the planner path (e.g. a WMMA 16-bit dW with an odd row: no
+            # packed pair and no workspace). A forced degree still raises.
+            return ConvSplitK(
+                1,
+                False,
+                legacy.split_k,
+                f"CK formula ({legacy.reason}); no split: {atomic_why}",
+            )
         return _rule(legacy.split_k, f"CK formula ({legacy.reason})", atomic_cap=False)
 
     reductions = []
@@ -299,6 +346,88 @@ def _resolve_wgrad(
     )
     two_stage = plan.reduction is not None and plan.reduction.workspace
     return ConvSplitK(plan.split_k, two_stage, plan.split_k, plan.reason)
+
+
+def fwd_split_k_problem_reason(p: ConvProblem, arch: str) -> str | None:
+    """Why no forward split-K kernel can serve ``p`` on ``arch``, or ``None``.
+
+    Only what the problem and the target decide; the spec-level gates (WMMA,
+    pipeline, epilogue) are the builder's
+    (:func:`kernels.common.conv_implicit_gemm.fwd_split_k_reason`).
+    """
+    if arch.split(":", 1)[0] not in FWD_SPLIT_K_ARCHS:
+        return f"split-K forward is built for {', '.join(FWD_SPLIT_K_ARCHS)} only"
+    if p.is_pointwise:
+        return "split-K forward does not support the pointwise fast path"
+    if p.is_3d:
+        return "split-K forward does not support 3-D convolution"
+    return None
+
+
+def _fwd_degree_limit(p: ConvProblem, degree: int) -> int:
+    """``degree`` held to what one forward split-K launch can encode: the
+    gridDim.z budget (``z = group * split_k + slice``) and the i32 workspace.
+    The workspace halves with the degree, so the largest degree that fits is
+    found by halving (an explicit degree is not held; the launch rejects it)."""
+    degree = min(degree, MAX_GRID_DIM_Z // max(1, p.groups))
+    while degree > 1 and fwd_split_k_workspace_nbytes(p.M, p.K, degree) > (
+        MAX_FWD_WS_BYTES
+    ):
+        degree //= 2
+    return max(1, degree)
+
+
+def _resolve_fwd(
+    p: ConvProblem,
+    *,
+    arch: str,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    split_k: int,
+    allow_unsplit: bool,
+    override: int | None,
+    num_cus: int | None,
+) -> ConvSplitK:
+    if split_k != -1:
+        return ConvSplitK(split_k, split_k > 1, split_k, f"explicit split_k={split_k}")
+    why = fwd_split_k_problem_reason(p, arch)
+    if override is not None:
+        # Held to what the kernel can build, as for dgrad: an unbuildable
+        # split becomes 1 rather than a spec the builder then rejects.
+        degree = 1 if why is not None else _fwd_degree_limit(p, override)
+        if why is not None and override != 1:
+            note = f" (no split: {why})"
+        elif degree < override:
+            note = f" (held to {degree})"
+        else:
+            note = ""
+        return ConvSplitK(
+            degree, degree > 1, override, f"override split_k={override}{note}"
+        )
+    if why is not None:
+        decision_degree, reason = 1, f"no split: {why}"
+    else:
+        d = select_split_k_fwd(
+            M=p.M,
+            N=p.kpg,
+            K=p.K_gemm,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            groups=p.groups,
+            arch=arch,
+            num_cus=num_cus,
+        )
+        decision_degree = _fwd_degree_limit(p, d.split_k)
+        reason = d.reason
+        if decision_degree < d.split_k:
+            reason += f" (held to {decision_degree} by gridDim.z / the workspace)"
+    if decision_degree == 1 and not allow_unsplit:
+        # The caller holds a split-K binary: degree 1 is the separate plain
+        # kernel, and the policy says splitting this problem does not pay.
+        raise ValueError(f"fwd split-K does not serve this problem: {reason}")
+    return ConvSplitK(decision_degree, decision_degree > 1, decision_degree, reason)
 
 
 def _resolve_dgrad(
@@ -429,7 +558,11 @@ def resolve_conv_split_k(
             on, for a part built differently from its arch's default;
             ``None`` keeps the arch default.
 
-    Forward convolution has no split-K path and always resolves to 1.
+    Forward convolution splits only on :data:`FWD_SPLIT_K_ARCHS` (the
+    two-stage WMMA kernel); elsewhere, and for the problems that kernel cannot
+    take, an auto or override request resolves to 1. ``block_size``,
+    ``group_merge``, ``ws_replicas`` and ``num_xcds`` do not affect the
+    forward answer.
     """
     if direction not in _DIRECTIONS:
         raise ValueError(f"direction must be one of {_DIRECTIONS}, got {direction!r}")
@@ -441,8 +574,6 @@ def resolve_conv_split_k(
         epilogue = None
     if override is not None and override < 1:
         raise ValueError(f"override must be None or >= 1, got {override}")
-    if direction == "fwd":
-        return ConvSplitK(1, False, 1, "fwd implicit GEMM has no split-K path")
     return _resolve_cached(
         direction,
         problem,
@@ -501,6 +632,18 @@ def _resolve_cached(
         "num_cus": num_cus,
         "num_xcds": num_xcds,
     }
+    if direction == "fwd":
+        return _resolve_fwd(
+            problem,
+            arch=arch,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            split_k=split_k,
+            allow_unsplit=allow_unsplit,
+            override=override,
+            num_cus=num_cus,
+        )
     if direction == "dgrad":
         return _resolve_dgrad(problem, **common)
     return _resolve_wgrad(

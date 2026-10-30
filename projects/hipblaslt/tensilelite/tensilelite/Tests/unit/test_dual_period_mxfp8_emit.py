@@ -29,13 +29,13 @@ def _emit_dual_period_kernel(plr=0):
     parameters -- no environment knobs are required.  ``plr`` only reaches the
     solution; the schedule pins its own base, so it cannot change the assembly.
     """
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
-    from Tensile.Common.GlobalParameters import assignGlobalParameters
-    from Tensile.SolutionStructs.Solution import Solution
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Common.GlobalParameters import assignGlobalParameters
+    from tensilelite.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
@@ -73,10 +73,10 @@ def _emit_dual_period_kernel(plr=0):
     assert sol.get("Valid"), "dual-period MXFP8 solution did not validate"
     assert sol.get("_DualPeriodMXFP8"), "solution did not take the dual-period path"
 
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelObjectsFromSolutions, processKernelSource)
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.Common.Types import DebugConfig
     import rocisa
 
     kernels = generateKernelObjectsFromSolutions([sol])

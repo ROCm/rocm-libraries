@@ -19,6 +19,7 @@
  * Every spine helper below is fully ported from its Python counterpart; no
  * stub bodies remain in this file.
  */
+#include "rocke/arch_domain.h"
 #include "rocke/arch_target.h"
 #include "rocke/lower_llvm_internal.h"
 #include "rocke/tf32_internal.h"
@@ -35,102 +36,10 @@
 #include <exception>
 #include <new>
 
-/* ====================================================================== */
-/* Flavor ladder -- the single source for the C++ side                    */
-/* ====================================================================== */
-
-/* One rung: the flavor, its canonical name, and its minimum LLVM major.
- * Mirrors the Python LLVM_FLAVORS tuple and _LLVM_FLAVOR_LADDER, which
- * are a single source enforced by test_no_hand_rolled_flavor_membership_lists.
- * Everything on this side that names, parses, validates, enumerates, or
- * version-maps a flavor reads this table, so adding a rung is one row here
- * plus the enumerator in lower_llvm.h -- previously it was five coordinated
- * edits across three files, which is exactly the drift the Python lint bans.
- *
- * Ordered oldest first to match LLVM_FLAVORS, so error messages listing the
- * set read the same in both engines. */
-static const struct
-{
-    rocke_llvm_flavor_t flavor;
-    const char* name;
-    unsigned min_llvm_major;
-    /* Datalayout generation: false = the LLVM20 plain-p8 shape, true = the
-     * LLVM21+ indexed-p8 shape. Python's _DATALAYOUT_KIND_FLAVORS partition,
-     * as a column. */
-    bool modern;
-} ROCKE_LL_FLAVOR_LADDER[] = {
-    {ROCKE_LLVM_FLAVOR_LLVM20, "llvm20", 0, false},
-    {ROCKE_LLVM_FLAVOR_LLVM22, "llvm22", 21, true},
-    {ROCKE_LLVM_FLAVOR_LLVM23, "llvm23", 23, true},
-};
-
-static const int ROCKE_LL_FLAVOR_LADDER_COUNT
-    = (int)(sizeof(ROCKE_LL_FLAVOR_LADDER) / sizeof(ROCKE_LL_FLAVOR_LADDER[0]));
-
-int rocke_llvm_flavor_count(void)
-{
-    return ROCKE_LL_FLAVOR_LADDER_COUNT;
-}
-
-const char* rocke_llvm_flavor_at(int index)
-{
-    if(index < 0 || index >= ROCKE_LL_FLAVOR_LADDER_COUNT)
-        return "";
-    return ROCKE_LL_FLAVOR_LADDER[index].name;
-}
-
-const char* rocke_llvm_flavor_name(rocke_llvm_flavor_t flavor)
-{
-    int i;
-    for(i = 0; i < ROCKE_LL_FLAVOR_LADDER_COUNT; ++i)
-    {
-        if(ROCKE_LL_FLAVOR_LADDER[i].flavor == flavor)
-            return ROCKE_LL_FLAVOR_LADDER[i].name;
-    }
-    return ""; /* AUTO, or a value outside the enum */
-}
-
-rocke_llvm_flavor_t rocke_llvm_flavor_from_name(const char* name)
-{
-    int i;
-    if(name)
-    {
-        for(i = 0; i < ROCKE_LL_FLAVOR_LADDER_COUNT; ++i)
-        {
-            if(strcmp(name, ROCKE_LL_FLAVOR_LADDER[i].name) == 0)
-                return ROCKE_LL_FLAVOR_LADDER[i].flavor;
-        }
-    }
-    return ROCKE_LLVM_FLAVOR_AUTO;
-}
-
-bool rocke_llvm_flavor_is_known(rocke_llvm_flavor_t flavor)
-{
-    int i;
-    for(i = 0; i < ROCKE_LL_FLAVOR_LADDER_COUNT; ++i)
-    {
-        if(ROCKE_LL_FLAVOR_LADDER[i].flavor == flavor)
-            return true;
-    }
-    return false;
-}
-
-/* The lowerer's private symbols live in namespace ckc; the public entry points
- * (rocke_llvm_flavor_name/from_name above, rocke_lower_kernel_to_llvm[_ex] below)
- * stay at global scope under their extern "C" header declarations. */
+/* The lowerer's private symbols live in namespace ckc; public entry points stay
+ * at global scope under their extern "C" header declarations. */
 namespace ckc
 {
-
-bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor)
-{
-    int i;
-    for(i = 0; i < ROCKE_LL_FLAVOR_LADDER_COUNT; ++i)
-    {
-        if(ROCKE_LL_FLAVOR_LADDER[i].flavor == flavor)
-            return ROCKE_LL_FLAVOR_LADDER[i].modern;
-    }
-    return false; /* AUTO / out of range: the legacy shape, as before */
-}
 
 /* Resolve from the compiler loaded by COMGR. Explicit flavors keep offline
  * emission independent of a runtime installation. If no compiler can be
@@ -138,24 +47,15 @@ bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor)
  * Python-driven C++ lowering passes its resolved flavor explicitly. */
 static rocke_llvm_flavor_t ll_resolve_flavor(void)
 {
-    const char* env = getenv("ROCKE_LLVM_FLAVOR");
-    if(env)
-    {
-        rocke_llvm_flavor_t flavor = rocke_llvm_flavor_from_name(env);
-        if(flavor != ROCKE_LLVM_FLAVOR_AUTO)
-            return flavor;
-    }
+    rocke_llvm_flavor_t explicit_flavor = rocke_ll_explicit_flavor(getenv("ROCKE_LLVM_FLAVOR"));
+    if(explicit_flavor != ROCKE_LLVM_FLAVOR_AUTO)
+        return explicit_flavor;
     const ckc::CompilerInfo* info = ckc::candidate_compiler_info();
     if(!info || !info->llvm_major)
         throw ckc::ValueError(
             "Cannot determine LLVM flavor: COMGR could not be loaded or queried. "
             "Select a queryable COMGR library or an explicit LLVM flavor for offline IR emission.");
-    for(int i = ROCKE_LL_FLAVOR_LADDER_COUNT - 1; i >= 0; --i)
-    {
-        if(info->llvm_major >= ROCKE_LL_FLAVOR_LADDER[i].min_llvm_major)
-            return ROCKE_LL_FLAVOR_LADDER[i].flavor;
-    }
-    return ROCKE_LLVM_FLAVOR_LLVM20;
+    return rocke_ll_flavor_for_llvm_major(info->llvm_major);
 }
 
 /* ====================================================================== */
@@ -370,7 +270,7 @@ void rocke_ll_require_llvm23_target_fact(rocke_lower_t* L,
                       ll_target_fact_name(fact),
                       gfx ? gfx : "(unknown)");
     }
-    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
+    if(!rocke_ll_profile_has(L->flavor, ROCKE_LL_CAP_LLVM23_TARGET_OPS))
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_VALUE,
@@ -595,6 +495,28 @@ static bool ll_need_has(const rocke_lower_t* L, const char* key)
     return false;
 }
 
+/* Python: _Lowerer._check_arch_domain. Refuses the lowering when the committed
+ * arch-domain table says this target cannot lower `key`, the lane is in error
+ * mode, and no waiver covers the cell. Warn mode has nothing to do here: this
+ * engine has no warning channel, so the Python side reports what it emitted
+ * (lower_llvm.check_arch_domain_in_ir). Run once per key, as Python does. */
+static void ll_check_arch_domain(rocke_lower_t* L, const char* key)
+{
+    if(L->arch_domain_mode != ROCKE_ARCH_DOMAIN_ERROR)
+    {
+        return;
+    }
+    char msg[ROCKE_ERR_MSG_CAP];
+    const char* flavor = rocke_arch_domain_column_flavor(rocke_llvm_flavor_name(L->flavor));
+    const rocke_arch_domain_cell_t* cell = rocke_arch_domain_negative(flavor, key, L->backend->gfx);
+    if(cell == NULL || cell->waived)
+    {
+        return;
+    }
+    rocke_arch_domain_message(cell, flavor, msg, sizeof msg);
+    rocke_ll_fail(L, ROCKE_ERR_ARCH_DOMAIN, "%s", msg);
+}
+
 void rocke_ll_need(rocke_lower_t* L, const char* key)
 {
     if(!L || !key)
@@ -614,6 +536,7 @@ void rocke_ll_need(rocke_lower_t* L, const char* key)
     {
         rocke_ll_fail(L, ROCKE_ERR_OOM, "need push");
     }
+    ll_check_arch_domain(L, key);
 }
 
 void rocke_ll_need_dynamic(rocke_lower_t* L, const char* key, const char* decl)
@@ -2314,6 +2237,20 @@ static void ll_lower_into(rocke_lower_t* L,
         }
         rocke_ll_fail(L, bst != ROCKE_OK ? bst : ROCKE_ERR_KEY, "unknown arch backend %s", arch);
     }
+    /* The lane's mode is read here, once, so a misspelled ROCKE_ARCH_DOMAIN
+     * fails every lowering and not only one that demands an intrinsic -- the
+     * same check lower_kernel_to_llvm makes on the Python side. Reading it per
+     * demand let one bad value pass or fail depending on what the kernel asked
+     * for, and parsed the environment again for every distinct intrinsic. */
+    {
+        char msg[ROCKE_ERR_MSG_CAP];
+        if(rocke_arch_domain_mode(
+               getenv(ROCKE_ARCH_DOMAIN_ENV), &L->arch_domain_mode, msg, sizeof msg)
+           != ROCKE_OK)
+        {
+            rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", msg);
+        }
+    }
     /* This lowering's own copy of the target's row, with the triple and the
      * AMDGPU datalayout filled in. The datalayout is FLAVOR-KEYED (Python
      * backend.datalayout(flavor) via _datalayout_for_flavor): the p8 field
@@ -2415,6 +2352,7 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     L.needs_fp_atomic_md = false;
     L.needs_av_scope_md = false;
     L.needs_nontemporal_md = false;
+    L.arch_domain_mode = ROCKE_ARCH_DOMAIN_WARN; /* replaced by ll_lower_into */
     rocke_vec_init(&L.blocks);
     rocke_vec_init(&L.needs);
     rocke_vec_init(&L.dyn_decls);

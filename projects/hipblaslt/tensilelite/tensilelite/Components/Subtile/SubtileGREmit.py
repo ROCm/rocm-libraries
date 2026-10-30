@@ -18,6 +18,7 @@
 
 import contextlib
 from ...ExecutionPolicy import isPersistentDataParallel
+from ...Common.Utilities import SWIZZLE_DTL_OFFSET12_MAX, swizzleTensorMaxDepthU
 import math
 from functools import singledispatch
 
@@ -27,8 +28,8 @@ from rocisa.enum import RegisterType
 from rocisa.instruction import (
     BufferLoadB128,
     SAddCU32, SAddU32, SAddU64, SAndB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32,
-    SNop, SOrB32, SSubI32, SXorB32,
-    SCBranchSCC1, SCmpEQU32, SCSelectB32, SEndpgm,
+    SNop, SOrB32, SSubI32, SSubU32, SXorB32,
+    SCBranchSCC1, SCmpEQU32, SCmpLeU32, SCSelectB32, SEndpgm,
     SLShiftLeftB64, SLShiftRightB32,
     VAddU32, VAndB32, VCmpLtI32, VCmpXEqU32, VCndMaskB32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32, VOrB32,
@@ -49,6 +50,7 @@ from rocisa.code import Label
 from rocisa.functions import vectorMultiplyBpe
 from ...Common import INDEX_CHARS
 from ...SolutionStructs.Utilities import isSubtileIterateMode as _isSubtileIterateMode
+from ...Common.Utilities import isMxf4SubtilePath
 from ...Common.DataType import DataType
 
 
@@ -104,11 +106,60 @@ def _emitGRLDSBufferSwap(tag, tile, ti, writer, kernel):
   raise NotImplementedError(f"emitGRLDSBufferSwap not implemented for {type(tag).__name__}")
 
 @singledispatch
-def _emitGRPtrUpdate(tag, tile, ti, writer, kernel):
+def _emitGRPtrUpdate(tag, tile, ti, writer, kernel, holdOnLastIter=False):
   raise NotImplementedError(f"emitGRPtrUpdate not implemented for {type(tag).__name__}")
 
 # Stubs for tags not yet implemented.
-_stub = lambda tag, tile, ti, writer, kernel: None
+_stub = lambda *args, **kwargs: None
+
+
+def emitSrdAdvance(module, tc, inc, writer, kernel=None, holdOnLastIter=False):
+  """Advance Srd{tc}'s base pointer by inc bytes.
+
+  holdOnLastIter suppresses the advance when the K-block that the PGR=2 pre-loop's
+  second prefetch cluster would read does not exist at all. It is set only for the
+  pre-loop advance that sits between the two clusters. When the whole summation
+  fits in one DepthU the pre-loop branches straight to the NLL, which reads only
+  cluster 1's LDS buffer, so cluster 2 prefetches a K-block past the end of the
+  tensor. Its loads still have to issue -- the pre-loop's vmcnt(N) counts on them
+  -- so instead of skipping them we leave the SRD in place and let them re-read
+  cluster 1's K-block. Srd+2 is a fixed tile-boundary limit rather than a distance
+  to the end of the tensor, so nothing else would clip them and they run off the
+  end of the allocation (hipErrorIllegalAddress on the MX scale tensors, whose
+  allocations are small enough to end on a mapping boundary).
+
+  The hold must not fire when a K-tail follows a single unrolled iteration. There
+  cluster 2's K-block is the tail's own block: it exists (partially), and the tail
+  loop reads it through this same SRD, so holding makes the tail re-MAC K-block 0.
+  The condition is therefore "hold iff sizeL <= DepthU", expressed as
+  LoopCounterL <= (0 if the tail runs else 1). The tail test mirrors
+  calculateLoopNumIter's own SizesSum % DepthU.
+  """
+  if not holdOnLastIter or not isMxf4SubtilePath(kernel):
+    module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc,
+                       comment=f"{tc}: advance SRD by {inc} bytes"))
+    module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+                        comment=f"{tc}: carry"))
+    return
+
+  depthU = kernel["DepthU"]
+  assert (depthU & (depthU - 1)) == 0, "PGR=2 pre-loop SRD hold assumes DepthU is a power of two"
+  tmp = writer.sgprPool.checkOut(1, tag=f"emitSrdAdvance_{tc}", preventOverflow=False)
+  module.add(SAndB32(dst=sgpr(tmp), src0=sgpr("SizesSum+%u" % writer.states.unrollIdx),
+                     src1=depthU - 1,
+                     comment="tail = SizesSum %% DepthU (0 => NLL is terminal)"))
+  module.add(SCmpEQU32(src0=sgpr(tmp), src1=0, comment="no tail loop?"))
+  module.add(SCSelectB32(dst=sgpr(tmp), src0=1, src1=0,
+                         comment="hold threshold: 1 without a tail, 0 with one"))
+  module.add(SCmpLeU32(src0=sgpr("LoopCounterL"), src1=sgpr(tmp),
+                       comment="sizeL <= DepthU? (cluster 2 has no K-block to read)"))
+  module.add(SCSelectB32(dst=sgpr(tmp), src0=0, src1=inc,
+                         comment=f"{tc}: hold SRD rather than read past the tensor"))
+  module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=sgpr(tmp),
+                     comment=f"{tc}: advance SRD by {inc} bytes"))
+  module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+                      comment=f"{tc}: carry"))
+  writer.sgprPool.checkIn(tmp)
 _emitGlobalReadOffset.register(GRTag_TLU1)(_stub)
 _emitGlobalRead.register(GRTag_TLU1)(_stub)
 for _tag in (GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1):
@@ -263,6 +314,8 @@ def _emitGR_TLU0(tag, tile, ti, writer, kernel):
 
       rl = ti.localSubtilesRegister[min(reg_idx, perpDimSize - 1)]
       offsetK = j * int(ti.mmaTileShape[1] * ti.subtileShape[1] * ti.bpe)
+      if ti.isPreShuffled:
+        offsetK = _preShuffledKStepBytes(ti, offsetK)
 
       module.addComment0(f"GR load {tc} subtile [{i},{j}]")
 
@@ -318,7 +371,7 @@ def _emitGRLDSSwap_TLU0(tag, tile, ti, writer, kernel):
 @_emitGRPtrUpdate.register(GRTag_1x1)
 @_emitGRPtrUpdate.register(GRTag_1x2)
 @_emitGRPtrUpdate.register(GRTag_2x2)
-def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
+def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel, holdOnLastIter=False):
   """Advance SRD base pointer by one depthU iteration (depthU * bpe bytes)."""
   tc = ti.tc
   # TDM path: advance Address{tc} and sync the TDM descriptor instead of SRD.
@@ -333,17 +386,24 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
     return module
 
   module = Module(f"GR Ptr Update ({tc})")
-  inc = int(ti.depthUBytes)
-  module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc,
-             comment=f"{tc}: advance SRD by {inc} bytes"))
-  module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
-             comment=f"{tc}: carry"))
+  # Host-pre-shuffled data interleaves one K tile across all rows of an MFMA
+  # tile, so advancing one DepthU consumes 16 contiguous row fragments.
+  rowMultiplier = ti.mmaTileShape[0] if ti.isPreShuffled else 1
+  inc = int(ti.depthUBytes * rowMultiplier)
+  emitSrdAdvance(module, tc, inc, writer, kernel, holdOnLastIter)
   return module
 
 
 @_emitGRPtrUpdate.register(GRTag_TLU1)
-def _emitGRPtrUpdate_TLU1(tag, tile, ti, writer, kernel):
+def _emitGRPtrUpdate_TLU1(tag, tile, ti, writer, kernel, holdOnLastIter=False):
   """Advance the SRD base pointer by one DepthU K-window.
+
+  holdOnLastIter is accepted so this shares the dispatcher's signature, but it is
+  deliberately not honoured here. The hold is a TLU=0 (TN) optimization: it relies
+  on cluster 2 being able to harmlessly re-read cluster 1's K-block, which only
+  holds for the pre-loop shape the TN path builds. GRTag_TLU1 covers the NN/NT/TT
+  layouts, where applying it miscompares. Leaving the advance unconditional keeps
+  those kernels byte-identical to the unoptimized path.
 
   The free dim is unit-stride here and K is strided, so a DepthU window spans
   DepthU * bpe * strideK bytes.  depthUBytes is already DepthU * bpe, so it only
@@ -515,6 +575,33 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
 
 # --- Legacy interleaved A+B GR offset (temporary, matches reference exactly) ---
 
+def _preShuffledKStepBytes(tileInfo, offsetK):
+  """Scale a K-subtile step for pre-shuffled data, refusing steps that cannot be encoded.
+
+  A K step consumes a K-extent on every row of the block, so the global step is
+  ``mmaTileShape[0]`` times the unit-stride byte count.  That product rides in the
+  DTL immediate, so it has a hard ceiling; past it the step has to move into
+  soffset the way the TLU=1 K-window path already does.
+  """
+  rowsPerBlock = int(tileInfo.mmaTileShape[0])
+  depthU = int(tileInfo.depthUBytes / tileInfo.bpe)
+  maxDepthU = swizzleTensorMaxDepthU(rowsPerBlock, tileInfo.bpe)
+  if depthU > maxDepthU:
+    raise RuntimeError(
+        "SwizzleTensor%s with DepthU %u is not supported: the pre-shuffled global "
+        "read is only validated up to DepthU %u.  Emitting it would read the wrong "
+        "K positions instead of failing."
+        % (tileInfo.tc, depthU, maxDepthU))
+  scaled = offsetK * rowsPerBlock
+  if scaled > SWIZZLE_DTL_OFFSET12_MAX:
+    raise RuntimeError(
+        "SwizzleTensor%s: pre-shuffled K-window step is %u bytes (DepthU %u, %u "
+        "rows per block), which does not fit the %u byte DTL immediate.  Fold the "
+        "step into soffset instead."
+        % (tileInfo.tc, scaled, depthU, rowsPerBlock, SWIZZLE_DTL_OFFSET12_MAX))
+  return scaled
+
+
 def _grComputeOffset_legacy(module, writer, tileInfo, colId, rowId, output):
   tc = tileInfo.tc
   bpeBits = int(8*tileInfo.bpe)
@@ -522,10 +609,18 @@ def _grComputeOffset_legacy(module, writer, tileInfo, colId, rowId, output):
   colBytes = tmpVgpr + 1
   loadWidth = tileInfo.loadWidthGR
   module.add(VLShiftLeftB32(dst=vgpr(colBytes), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(colId), comment="scale col_id by load_width"))
-  strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
-  module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=sgpr(strideRef), src1=vgpr(rowId), comment="%s: rowId * stride"%tc))
-  module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpeBits.bit_length()-1), src=vgpr(tmpVgpr), comment="%s: rowId*stride*bpe"%tc))
-  module.add(VLShiftRightB32(dst=vgpr(tmpVgpr), shiftHex=hex(3), src=vgpr(tmpVgpr), comment="to bytes"))
+  if tileInfo.isPreShuffled:
+    # The GR enumeration covers one K-subtile at a time, so a row step is that
+    # subtile's K-extent, not the whole DepthU window.  They are equal only when
+    # localSubtileGrid[1] == 1.
+    subIterKBytes = tileInfo.subIterKBytes
+    module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(subIterKBytes.bit_length()-1),
+                              src=vgpr(rowId), comment="%s: rowId * subIterKBytes"%tc))
+  else:
+    strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
+    module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=sgpr(strideRef), src1=vgpr(rowId), comment="%s: rowId * stride"%tc))
+    module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpeBits.bit_length()-1), src=vgpr(tmpVgpr), comment="%s: rowId*stride*bpe"%tc))
+    module.add(VLShiftRightB32(dst=vgpr(tmpVgpr), shiftHex=hex(3), src=vgpr(tmpVgpr), comment="to bytes"))
   module.add(VAddU32(dst=vgpr(output), src0=vgpr(colBytes), src1=vgpr(tmpVgpr), comment="%s: GR row_offset"%tc))
   writer.vgprPool.checkIn(tmpVgpr)
 
@@ -585,7 +680,7 @@ def _grComputeAllOffsets_legacy(module, writer, tileInfo, colId, rowId, rowOffse
     module.add(VAddU32(dst=vgpr(rowOffset), src0=offset, src1=vgpr(rowOffset), comment="%s: advance row for GR offset %u"%(tileInfo.tc, i)))
     rotatedcolId = writer.vgprPool.checkOut(1, tag="_grComputeAllOffsets_legacy_rotatedcolId")
     loadWidth = tileInfo.loadWidthGR
-    if tileInfo.loadRatioGR == 0.5:
+    if tileInfo.loadRatioGR == 0.5 and not tileInfo.isPreShuffled:
       if tileInfo.bpe == 1:  # FP8: intra-block K_group +2 rotation, preserving block bit
         tmpBlock = writer.vgprPool.checkOut(1, tag="_grComputeAllOffsets_legacy_tmpBlock")
         module.add(VAndB32(dst=vgpr(tmpBlock), src0=vgpr(colId), src1=hex(4), comment="%s: block_bit = colId & 4"%tileInfo.tc))
@@ -734,13 +829,27 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
   module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
   module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"), src1=wavesize-1, comment=""))
   module.add(VAndB32(dst=vgpr(colIdA), src0=vgpr("Serial"), src1=(blockSize-1), comment="get col_id in wave for %uB load"%loadWidth))
+  # Without a pre-shuffled tensor the swizzle derives colIdB from colIdA, so only
+  # seed it separately when one of the two skips the swizzle.
+  if tileInfoA.isPreShuffled or tileInfoB.isPreShuffled:
+    module.add(VAndB32(dst=vgpr(colIdB), src0=vgpr("Serial"), src1=(blockSize-1), comment="colIdB base"))
   module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
-  _grSwizzleColIds(module, writer, [(tileInfoA, colIdA), (tileInfoB, colIdB)],
-                   blockSize, numRowsPerLDSBanks, laneId, waveId)
+  # A pre-shuffled tensor already carries the host's layout, so it must not be
+  # swizzled again; pass only the tensors that still need it.
+  swizzlePairs = [(t, c) for t, c in ((tileInfoA, colIdA), (tileInfoB, colIdB))
+                  if not t.isPreShuffled]
+  if swizzlePairs:
+    _grSwizzleColIds(module, writer, swizzlePairs,
+                     blockSize, numRowsPerLDSBanks, laneId, waveId)
   _grComputeRowPartition_legacy(module, kernel, writer, tileInfoA, waveId, rowOffsetA)
   _grComputeRowPartition_legacy(module, kernel, writer, tileInfoB, waveId, rowOffsetB)
   _grComputeAllOffsets_legacy(module, writer, tileInfoA, colIdA, rowId, rowOffsetA)
   _grComputeAllOffsets_legacy(module, writer, tileInfoB, colIdB, rowId, rowOffsetB)
+
+  for tile, rowOff in ((tileInfoA, rowOffsetA), (tileInfoB, rowOffsetB)):
+    if tile.isPreShuffled:
+      _addPreShuffleCorrectionToGROffsets(module, writer, kernel, tile, rowOff)
+
   writer.vgprPool.checkIn(tmpVgpr)
   _grComputeSubtileOffsets_legacy(writer, module, tileInfoA)
   _grComputeSubtileOffsets_legacy(writer, module, tileInfoB)
@@ -1323,6 +1432,42 @@ def _grComputeSubtileOffsets_tlu(writer, module, tileInfo):
         module.add(VAddU32(dst=vgpr(reg), src0=vgpr(tileInfo.sharedVgprGROffset[i]),
                    src1=hex(off), comment="%s: subtile row %u offset (vgpr)" % (tc, regId)))
   return module
+def _addPreShuffleCorrectionToGROffsets(module, writer, kernel, tile, rowOffset):
+  """Fold aligned 16-row HBM padding into pre-shuffled GR offsets."""
+  tc = tile.tc
+  strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
+  depthU = int(tile.subIterKBytes / tile.bpe)
+  nTileRows = tile.mmaTileShape[0]
+  corrVgpr = writer.vgprPool.checkOut(
+      1, tag="_addPreShuffleCorrectionToGROffsets_corrVgpr")
+  tmpSgpr = writer.sgprPool.checkOut(
+      1, tag="_addPreShuffleCorrectionToGROffsets_tmpSgpr", preventOverflow=False)
+
+  module.add(VAndB32(dst=vgpr(corrVgpr),
+                     src0=hex(~(nTileRows - 1) & 0xFFFFFFFF),
+                     src1=vgpr(rowOffset), comment="aligned pre-shuffled row"))
+  if tile.bpe == 0.5:
+    # Halve the stride rather than the product: a K shorter than one DepthU
+    # window makes this step legitimately negative, and shifting the product
+    # right is a logical shift, which would turn it into roughly 2**31.
+    module.add(SLShiftRightB32(dst=sgpr(tmpSgpr), shiftHex=hex(1),
+                               src=sgpr(strideRef), comment="FP4 elements to bytes"))
+    module.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=hex(depthU // 2),
+                       comment="stride - DepthU"))
+  else:
+    module.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr(strideRef), src1=hex(depthU),
+                       comment="stride - DepthU"))
+  module.add(VMulLOU32(dst=vgpr(corrVgpr), src0=sgpr(tmpSgpr),
+                       src1=vgpr(corrVgpr), comment="row padding correction"))
+
+  for i, grOffset in enumerate(tile.sharedVgprGROffset):
+    module.add(VAddU32(dst=vgpr(grOffset), src0=vgpr(grOffset),
+                       src1=vgpr(corrVgpr),
+                       comment="pre-shuffled %s GR[%u] correction" % (tc, i)))
+  writer.vgprPool.checkIn(corrVgpr)
+  writer.sgprPool.checkIn(tmpSgpr)
+
+
 ##################################################
 # Subroutine to generate GR load code
 #
@@ -1350,8 +1495,9 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
       isSubtileIter = _isSubtileIterateMode(kernel, tc)
       group2 = sgpr("tdm%sGroup2" % tc, 4) if isSubtileIter else None
       group3 = sgpr("tdm%sGroup3" % tc, 4) if isSubtileIter else None
+      tensor = writer.tdmLoadModifiers(kernel, tc) if writer is not None else None
       module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), group2, group3,
-                                 comment="TDM: global->LDS for %s" % tc))
+                                 comment="TDM: global->LDS for %s" % tc, tensor=tensor))
     return module
 
   linearId = tileInfo.getLocalSubtileLinearId(sId0, sId1)
@@ -1379,6 +1525,8 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
   useSgpr = regList.is_sgpr
 
   offsetK = sId1 * int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe)
+  if tileInfo.isPreShuffled:
+    offsetK = _preShuffledKStepBytes(tileInfo, offsetK)
 
   subtileOffset = int(math.ceil(tileInfo.loadRatioGR*tileInfo.subtileSize))
   # loadRatioGR folds in grLoadWaves, so subtileOffset is the bytes one
@@ -1909,9 +2057,9 @@ def tdmApplyTileKOffsetSubtile(writer, kernel, tP):
 ##################################################
 # Subroutine to update ptrs
 #
-def globalReadPtrUpdates(tc, writer, kernel):
+def globalReadPtrUpdates(tc, writer, kernel, holdOnLastIter=False):
   ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  return ti_.emitGRPtrUpdate(writer, kernel)
+  return ti_.emitGRPtrUpdate(writer, kernel, holdOnLastIter)
 
 
 def _grDTLAddKSlice(writer, kernel, module, tc, ti, dstVgpr):

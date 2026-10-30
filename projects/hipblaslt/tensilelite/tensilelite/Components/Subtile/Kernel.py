@@ -13,7 +13,8 @@ from .LogicalScheduler import (
       ReadGranularity, GRPlacementStrategy)
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion
+  INDEX_CHARS, IsaVersion, ceilDivide, plsinBlockSchedTile, isMxf4SubtilePath
+from ...Common.MxScaleLayout import splatFirst
 
 
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, Label
@@ -200,8 +201,8 @@ class ABGRTile:
   def emitLDSBufferSwap(self, ti, writer, kernel):
     return _emitGRLDSBufferSwap(self.config.tag, self, ti, writer, kernel)
 
-  def emitPtrUpdate(self, ti, writer, kernel):
-    return _emitGRPtrUpdate(self.config.tag, self, ti, writer, kernel)
+  def emitPtrUpdate(self, ti, writer, kernel, holdOnLastIter=False):
+    return _emitGRPtrUpdate(self.config.tag, self, ti, writer, kernel, holdOnLastIter)
 
 
 class ABLRTile:
@@ -458,6 +459,11 @@ class TileInfo:
     isAB = tc in ['A', 'B']
     isMXSAB = tc in ['MXSA', 'MXSB']
     _tc = 'A' if isA else 'B'
+    # SwizzleTensor{A,B} means the host has already transformed the data into
+    # the MFMA-friendly 16-row interleaved layout.  The GR/LR emitters must not
+    # apply the ordinary LDS swizzle to these tensors.
+    self.isPreShuffled = isAB and kernel["ProblemType"].get(
+        "SwizzleTensor%s" % _tc, False)
 
     # --- Extract kernel config ---
     if isinstance(geometry, (ABTilePair, MXScaleTilePair)):
@@ -466,8 +472,10 @@ class TileInfo:
         # The MX scale tile spans one scale epoch in K, which the solution
         # records as _ScalePeriodU*: the loop DepthU on the single-period paths,
         # the fixed 256-K swizzle tile on dual-period MXFP8, where the data loop
-        # is finer (DepthU=128) than the scale epoch.
-        self.depthU = kernel["_ScalePeriodU%s" % _tc]
+        # is finer (DepthU=128) than the scale epoch.  Solution assignment sets
+        # it for every real solution; a kernel dict built by hand falls back to
+        # the loop DepthU, which is what the single-period paths resolve to.
+        self.depthU = kernel.get("_ScalePeriodU%s" % _tc, kernel["DepthU"])
         self.scaleDepthU = kernel["_DepthU%s" % tc]  # scale DepthU (e.g. _DepthUMXSA = 8)
       else:
         self.depthU = kernel["_DepthU%s" % tc]
@@ -818,6 +826,10 @@ class TileInfo:
       if i % numMMATilesPerReg != 0:
         continue
       vstart = pool.checkOutAligned(numDword, numDword, tag="allocVgprTileRegisters_legacy_vstart")
+      if isDTile and pool is writer.vgprPool:
+        # D tile spilled out of the agpr file into arch vgprs; record it so the
+        # store paths can assert they never target a live accumulator.
+        writer.states.subtileSpilledDRanges.append((vstart, vstart + numDword))
       for k in range(numDword):
         self.vgprTiles[-1].append(vstart + k)
 
@@ -882,9 +894,9 @@ class TileInfo:
       return self.gr.emitLDSBufferSwap(self, writer, kernel)
     return Module()
 
-  def emitGRPtrUpdate(self, writer, kernel):
+  def emitGRPtrUpdate(self, writer, kernel, holdOnLastIter=False):
     if self.gr is not None:
-      return self.gr.emitPtrUpdate(self, writer, kernel)
+      return self.gr.emitPtrUpdate(self, writer, kernel, holdOnLastIter)
     return Module()
 
   def emitStoreD(self, writer, kernel):
@@ -1252,11 +1264,11 @@ def preLoop(writer, kernel):
   # Just sample impl, we can also interleave A/B loads
   for i in range(pgr):
     module.addComment0("Emitting %u-th set of GRs"%i)
-    module.add(globalReadDoSubtile('A', writer, kernel))
-    module.add(globalReadDoSubtile('B', writer, kernel))
-    # Scale GR in preloop
-    module.add(globalReadDoScaleSubtile('A', writer, kernel))
-    module.add(globalReadDoScaleSubtile('B', writer, kernel))
+    for tc in splatFirst(kernel, ("A", "B", "MXSA", "MXSB")):
+      if tc.startswith("MXS"):
+        module.add(globalReadDoScaleSubtile(tc[3], writer, kernel))
+      else:
+        module.add(globalReadDoSubtile(tc, writer, kernel))
     module.addComment("Add appropriate GR offset swap logic")
   module.addComment("")
 
@@ -1314,8 +1326,10 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
   """
   module = Module("MultiDU tail SRD rewind (partial macro tile)")
   scaleInc = lambda ti: int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
-  incs = [("A", int(numUnroll.get('A', 1)) * int(tiA.depthUBytes)),
-          ("B", int(numUnroll.get('B', 1)) * int(tiB.depthUBytes))]
+  dataInc = lambda ti: int(ti.depthUBytes) * (
+      int(ti.mmaTileShape[0]) if ti.isPreShuffled else 1)
+  incs = [("A", int(numUnroll.get('A', 1)) * dataInc(tiA)),
+          ("B", int(numUnroll.get('B', 1)) * dataInc(tiB))]
   if scaleTiA is not None:
     incs.append(("MXSA", int(numUnroll.get('SA', 1)) * scaleInc(scaleTiA)))
   if scaleTiB is not None:
@@ -1432,6 +1446,44 @@ def mainLoop(writer, kernel):
       candidates = [forcedPartition]
   else:
       candidates = [(M, N)] if singlePartition else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
+  # Block scheduling cuts the tile into blocks that each run a whole K reduction
+  # and then store while the next block's MFMAs are still issuing. Partitioning
+  # is otherwise a VGPR-pressure escape valve whose full-size candidate always
+  # fits and always wins, so these tiles ask for a floor instead.
+  #
+  # Only the tail is partitioned: the mainloop keeps the one-partition candidate
+  # and comes out identical to baseline, while the tail gets its own VGPR tile
+  # layout and reuses the registers the mainloop held for B. MT>256x256 is out
+  # because it stores by lending, which stages nothing.
+  #
+  # The resulting grid on MT256x256, where M and N are 8 MFMA tiles each:
+  #
+  #       N ->  0,1    2,3    4,5    6,7       sizeN = 2: the MX scale read
+  #   M 0..3  |  s0  |  s1  |  s2  |  s3  |    granularity forbids narrower
+  #   | 4..7  |  s4  |  s5  |  s6  |  s7  |    sizeM = 4: 2 does not assemble
+  #   v                                        (tile assignment diverges)
+  #
+  # The M split is what makes the grid finer than N alone can. It is not free:
+  # A and scale-A become partition-varying, so their LDS reads are re-issued per
+  # partition.
+  blockSched = plsinBlockSchedTile(kernel)
+  minParts = 4 if blockSched else 1
+  wider = []
+  if minParts > 1 and pgr != 0:
+    def _stageable(sizeM, sizeN):
+      return sizeM == M and N % sizeN == 0 and ceilDivide(N, sizeN) >= minParts
+    wider = [c for c in candidates if _stageable(*c)]
+  lendStore = kernel["MacroTile0"] > 256 or kernel["MacroTile1"] > 256
+  tailOwnTiles = bool(wider) and not lendStore
+  tailPartitionSizeN = wider[0][1] if tailOwnTiles else 0
+  tailPartitionSizeM = (4 if blockSched else 0) if tailOwnTiles else 0
+  # An uneven M split is worse than none: _plsinStagedStoreCount requires
+  # uniform partition sizes, so the kernel would lose the N-only staging it has
+  # today and get nothing back.
+  if tailPartitionSizeM and M % tailPartitionSizeM != 0:
+      tailPartitionSizeM = 0
+  if wider and not tailOwnTiles:
+      candidates = wider
   for partSizeM, partSizeN in candidates:
       hasTDM = bool(kernel.get("enableTDMA")) and bool(kernel.get("enableTDMB"))
       grPlacement = (GRPlacementStrategy.BUNCHED if hasTDM
@@ -1459,6 +1511,11 @@ def mainLoop(writer, kernel):
           pgl=kernel.get("PrefetchGL2", 0),
           scaleReuse=(kernel.get("_ScaleReuseA", 1)
                       if kernel.get("_DualPeriodMXFP8") else 1),
+          blockSched=blockSched,
+          isMxf4Subtile=isMxf4SubtilePath(kernel),
+          tailOwnTiles=tailOwnTiles,
+          tailPartitionSizeN=tailPartitionSizeN,
+          tailPartitionSizeM=tailPartitionSizeM,
       )
 
       scheduler = LogicalScheduler(cfg)
