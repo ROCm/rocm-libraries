@@ -136,11 +136,11 @@ struct PassFeatureConfig {
         /// WMMA windows by the region's matrix latency. 0 disables the extra
         /// gap. Mirrors ModuleOptions::TensorLoadDsLoadGapCycles.
         int tensorLoadDsLoadGapCycles = 64;
-        /// Max cycle-distance between two adjacent barrier groups for
-        /// StinkyMergeBarrierPass to merge them into a single multi-token
-        /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).
-        /// Internal tuning knob only — deliberately not surfaced as a module
-        /// option, so TensileLite cannot set it.
+        /// Unused by StinkyMergeBarrierPass. Adjacent groups merge only when no
+        /// matrix instruction is issued between them. Kept so existing callers
+        /// and --merge-barrier-threshold= still parse. Internal knob only —
+        /// deliberately not surfaced as a module option, so TensileLite cannot
+        /// set it.
         int mergeBarrierThreshold = 0;
         /// Mirrors ModuleOptions::ClusterBarrier: InsertClusterBarrierPass will run
         /// after the scheduler and plant SCC-clobbering handshakes around workgroup

@@ -159,7 +159,7 @@ Per WMMA window, at most `globalReadPerWmma` (arch default 1) tensor_loads issue
 | `WarGateWmmas` | -1 → derived `L / I` | `--war-gate-wmmas=N` | WMMAs a ds_load waits before overwriting a vgpr a WMMA read. Active only with `EnableESM2` + `EnableESM2TrackValuVsrc`. |
 | `ClusterBarrierRule3SignalLeadCycles` | -1 → heuristic | – | Cluster-barrier Rule 3 signal lead: 200 if the main loop's WMMA latency sum > 500, else 100. See [Insert cluster barrier pass](../developer/cluster-barrier.md). |
 | `ReduceClusterBarrierPerLoop` | -1 → heuristic | – | `1`: first Rule 3 handshake of each enclosing loop, then another after each 2000 estimated cycles. Nearby HalfPLR / ExpandPointerSwap copies still share one handshake. `0`: every loop trigger handshakes. Unset turns on when the main loop's WMMA latency sum > 2500 and that sum / ds_load count >= 5. See [Insert cluster barrier pass](../developer/cluster-barrier.md). |
-| *CLI only* `mergeBarrierThreshold` | 0 → 11 | `--merge-barrier-threshold=N` | Max cycle distance for `StinkyMergeBarrierPass` to merge adjacent barrier groups. |
+| *CLI only* `mergeBarrierThreshold` | unused | `--merge-barrier-threshold=N` | Parsed but ignored. `StinkyMergeBarrierPass` merges adjacent groups only when no matrix instruction is issued between them. |
 
 ## Arch defaults and hardware facts
 
