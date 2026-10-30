@@ -31,9 +31,6 @@ Known bugs:
   # REMOVE this entry once the output-store path is fixed so the case re-activates
   # as an enforced bit-exact regression gate.
 
-  # ROCM-32344: on gfx950 the custom MT256x256x64 bf16 kernels give wrong values at
-  # K = 64. REMOVE this entry in the PR that fixes ROCM-32344. Review by 2026-11-01.
-  - { name: matmul_fast_check_short_k, function: matmul, a_type: bf16_r, transA: T, known_bug_platforms: gfx950 }
   # ROCM-32050: an illegal memory access on gfx1250 in f32 NN 32768 x 32768 x 4096,
   # where C and D are exactly 4 GiB; it kills the test process there. REMOVE this
   # entry in the PR that fixes ROCM-32050. Review by 2026-11-01.
