@@ -328,6 +328,14 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
         del fields["tapk_prefetch"], fields["tapk_xhalo"], fields["b_kpack"]  # dgrad knobs, off
         del fields["reg_prefetch"], fields["lds_xor"]  # fwd K-loop knobs, off
         del fields["split_addr_k_decode"]
+        del fields["a_direct"], fields["uk_tap_fast"]  # fwd LDS-lean knobs, off
+        for name in ("cshuffle_m_chunks", "tapk_ilv", "tapk_lds_ahead", "tapk_lds_barrier", "tapk_setprio",
+                     "xh_b_kpad", "xh_b_wide", "xhalo_exact"):  # dgrad x-halo knobs, off
+            del fields[name]
+        for name in ("defer_mfma", "defer_mfma_per_write", "lds_ahead", "lds_kpack_read", "rpf_fetch_late",
+                     "rpf_lds_barrier", "rpf_setprio", "split_tail", "uk_chunk_group", "uk_nopad", "uk_xhalo",
+                     "vmem_interleave", "xh_dpp"):  # fwd K-loop / x-halo knobs, off
+            del fields[name]
         legacy = hashlib.sha1(
             json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
