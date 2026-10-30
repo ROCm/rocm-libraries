@@ -83,6 +83,21 @@ TEST_P(parameterized_global_matrix_local_data_only, local_data_only_double)
 INSTANTIATE_TEST_CASE_P(global_matrix,
                         parameterized_global_matrix_local_data_only,
                         testing::Combine(testing::Bool(), testing::Bool()));
+
+class parameterized_global_matrix_ghost_order
+    : public testing::TestWithParam<std::tuple<bool, bool, bool>>
+{
+};
+
+TEST_P(parameterized_global_matrix_ghost_order, ghost_order_double)
+{
+    testing_global_matrix_ghost_order<double>(
+        std::get<0>(GetParam()), std::get<1>(GetParam()), std::get<2>(GetParam()));
+}
+
+INSTANTIATE_TEST_CASE_P(global_matrix,
+                        parameterized_global_matrix_ghost_order,
+                        testing::Combine(testing::Bool(), testing::Bool(), testing::Bool()));
 /*
 TEST_P(parameterized_backend, backend)
 {

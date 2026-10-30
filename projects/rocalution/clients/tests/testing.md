@@ -168,9 +168,10 @@ suites.
 `global_*` and `parallel_manager` suites (`SUPPORT_MPI`).
 
 **What requires an MPI launcher:** the `global_matrix/*` and `global_amg/*` parameterized cases call
-MPI and skip themselves unless `mpirun` started the process; `global_amg/*` also skips unless it runs
-on exactly 2 ranks. All ranks must run the same tests in the same order, so start them with a filter.
-CTest registers this run as `rocalution-test-mpi-np2`:
+MPI and skip themselves unless `mpirun` started the process; `global_amg/*` and the `ghost_order`
+cases of `global_matrix/*` also skip unless they run on exactly 2 ranks. All ranks must run the same
+tests in the same order, so start them with a filter. CTest registers this run as
+`rocalution-test-mpi-np2`, with the `standard`, `comprehensive` and `full` labels:
 
 ```bash
 mpirun -np 2 ./rocalution-test --gtest_filter='global_amg/*:global_matrix/*'

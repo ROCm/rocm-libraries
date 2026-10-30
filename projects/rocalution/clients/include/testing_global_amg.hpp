@@ -180,6 +180,8 @@ void testing_global_amg_one_sided_coupling(const std::string& amg, bool coo, boo
     }
 
     EXPECT_EQ(mat.GetGhost().GetM(), n);
+    EXPECT_EQ(mat.GetGhost().GetN(), rank == 0 ? 0 : 1);
+    EXPECT_EQ(mat.GetGhost().GetNnz(), rank == 0 ? 0 : 1);
 
     GlobalVector<T> x(pm);
     GlobalVector<T> b(pm);
