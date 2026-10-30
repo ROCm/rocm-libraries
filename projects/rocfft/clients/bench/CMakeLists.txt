@@ -58,6 +58,10 @@ if( NOT HIP_FOUND )
   find_package( hip REQUIRED PATHS /opt/rocm/lib/cmake/hip/ )
 endif()
 
+if( ROCFFT_MPI_ENABLE AND NOT MPI_FOUND )
+  find_package( MPI REQUIRED )
+endif()
+
 if( NOT ROCmCMakeBuildTools_FOUND )
   find_package( ROCmCMakeBuildTools PATHS ${ROCM_PATH} /opt/rocm )
   if( NOT ROCmCMakeBuildTools_FOUND )

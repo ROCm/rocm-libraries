@@ -100,9 +100,6 @@ option(ROCFFT_RUNTIME_COMPILE_DEFAULT "Compile kernels at runtime by default" OF
 # Set default to OFF since users are not likely to tune
 option(ROCFFT_BUILD_OFFLINE_TUNER "Build with offline tuner executable rocfft_offline_tuner" OFF)
 
-# Provide ability to disable hipRAND dependency
-option(USE_HIPRAND "Use hipRAND to provide device-side input generation" ON)
-
 # Split up function pool compilation across N files to parallelize its build
 set(ROCFFT_FUNCTION_POOL_N 8 CACHE STRING "Number of files to split function_pool into for compilation")
 
@@ -175,12 +172,8 @@ rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
 find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
 find_package( hiprtc REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hiprtc/ )
 
-# Enable MPI support in rocFFT:
-option(ROCFFT_MPI_ENABLE "Enable MPI" OFF)
-option(ROCFFT_CRAY_MPI_ENABLE "Cray MPI" OFF)
 if( ROCFFT_MPI_ENABLE )
   find_package( MPI REQUIRED )
-  include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 endif()
 
 # Optional RCCL backend for single-node multi-GPU communication.

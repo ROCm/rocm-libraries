@@ -56,9 +56,9 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   # This project may compile dependencies for clients
   project( hipfft-clients LANGUAGES CXX )
   include( ../cmake/buildopts.cmake )
-  set( BUILD_CLIENTS_SAMPLES ON)
-  set( BUILD_CLIENTS_TESTS ON)
-  set( BUILD_CLIENTS_BENCH ON)
+  set( BUILD_CLIENTS_SAMPLES ON )
+  set( BUILD_CLIENTS_TESTS ON )
+  set( BUILD_CLIENTS_BENCH ON )
   find_package( hipfft REQUIRED CONFIG PATHS )
 endif()
   
