@@ -489,6 +489,7 @@ crash.
 | `HIPDNN_FUZZ_FILTER` | `--filter` | Regex on `<Op>/<Space>`. | every space |
 | `HIPDNN_FUZZ_TIME_BUDGET` | `--time-budget` | Wall-clock limit, e.g. `30m`, `4h`. | none |
 | `HIPDNN_FUZZ_CASE_TIMEOUT` | `--case-timeout` | Longest one case may run before it counts as a hang (the driver kills the binary: `CRASH`). | `10m` |
+| `HIPDNN_FUZZ_SHRINK` | `--shrink` | Candidate runs to spend shrinking each `WRONG` or `CRASH` sample (see [Shrinking](#gauntlet-fuzz-runs)). `0` is off. Applies to `--row` runs too. | `0` |
 
 The binary, `--test-article`, `--test-engine` and `--test-config` are flags of the
 driver and are passed through; `--binary-arg` adds any other binary flag. Other flags:
@@ -535,6 +536,40 @@ with `--samples`, `--seed`, `--data-seed`, `--filter` or `--time-budget` (a usag
 `HIPDNN_FUZZ_*` variables for them are ignored. The binary flags, `--spaces-dir`,
 `--work-dir` and `--case-timeout` apply as usual.
 
+**Shrinking (`--shrink N`).** A random sample that fails is rarely the smallest one that does.
+With `--shrink N` the driver, after the batch a `WRONG` or `CRASH` sample was found in (once its
+failure folder is written), spends at most `N` candidate runs on reducing it. A candidate is the
+sample with one axis moved toward a simpler value, the other axes kept:
+
+- a `range` axis is binary-searched toward its low end, its declared `boundaries` below the
+  current value tried first;
+- a `values` axis tries the entries before the current one, first entry first (the list order
+  of a space is "simpler first").
+
+The data seed and the case id stay, so a candidate has the finding's GTest name (a changed
+`dtype` changes the suite's `<tag>_cases` part, exactly as it would for a drawn sample) and the
+engine TOML grades it as it graded the finding. A candidate that violates one of the space's
+constraints is skipped and costs no budget. The axes are visited in the space's order, again and
+again, until a whole pass moves nothing or the budget is spent. A candidate is **accepted only if
+its outcome class equals the finding's**: `WRONG` stays `WRONG`, `CRASH` (a hang included) stays
+`CRASH`; a candidate that passes, is declined, or turns one failure into the other is refused.
+
+Each candidate runs as a one-case batch under `<work-dir>/shrink/<case>/` (its own bundles, logs
+and reports). It never enters `outcomes.jsonl`, `samples.jsonl` or the summary counts, and leaves
+no failure folder. Shrinking is not cut by `--time-budget` (a long budget can overrun by
+`N` runs per finding; a hang costs `--case-timeout` each); Ctrl-C ends it early and keeps the best
+sample so far.
+
+The result goes to `failures/<case>/shrunk/`: `sweep_row.json` (the shrunk sample in the
+`--row` file format), `axes.json` (original and shrunk values, the axes changed, runs spent and
+steps accepted), the shrunk graph and its metadata (`<case>.json`, `<case>.meta.json`, written as
+in the failure folder), `outcome.json` (the last accepted candidate's outcome record) and
+`replay.sh`. `replay.sh` calls the driver with `--row shrunk/sweep_row.json` and the same binary,
+article, engine, config and `HIPDNN_*` environment, so it runs under the shrink run's own GTest
+name and TOML grading. `summary.json` gives each finding `"shrunk": {"runs", "accepted_steps",
+"axes_changed"}` and the console report prints one `shrunk:` line per shrunk finding. When no
+simpler value kept the outcome, `shrunk/` holds the original sample and `axes_changed` is empty.
+
 **Every sample gets one outcome.**
 
 | What happened | Outcome |
@@ -548,7 +583,8 @@ with `--samples`, `--seed`, `--data-seed`, `--filter` or `--time-budget` (a usag
 **Outputs** under `--work-dir`: `bundles/` (what the binary was given), `outcomes.jsonl`,
 `samples.jsonl`, `summary.json` (counts per outcome for each engine and space, decline
 and unexercised reasons, findings), `reports/` and `logs/` (one per binary invocation),
-and `failures/<case>/` for each `WRONG` and `CRASH`. The exit status is non-zero if any
+`failures/<case>/` for each `WRONG` and `CRASH` (with `shrunk/` under `--shrink`) and
+`shrink/<case>/` (the candidate runs of a shrink). The exit status is non-zero if any
 sample is `WRONG` or `CRASH`; `UNEXERCISED` samples are listed with their reasons and
 never count as green. A run whose samples are all `DECLINED` or `UNEXERCISED` has not
 tested the engine.

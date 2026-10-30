@@ -20,6 +20,12 @@ recorded earlier fix. ``sample()`` draws every other axis from the one seeded ge
 ``sample_from_axes()`` is the other way in: the axis values are given, not drawn, and so are the
 data seed and the case id. It is what ``run_gauntlet_fuzz.py --row`` runs. It re-checks the
 space's constraints, so a row that no sample could be raises ``InvalidRowError``.
+
+``shrink()`` searches for simpler axis values that keep a failure: one axis at a time, a ``range``
+axis binary-searched toward its low end (its declared boundaries below the value first), a
+``values`` axis moved to an earlier entry of its list (list order is "simpler first"). It renders
+each candidate with ``sample_from_axes`` and asks an oracle (the driver's candidate run) whether
+the failure stayed; a candidate the space does not allow costs the oracle nothing.
 """
 
 import copy
@@ -27,6 +33,10 @@ import hashlib
 import json
 import random
 import re
+
+# A range-axis candidate that violates a constraint is replaced by the nearest legal value; this
+# bounds how far the search looks before it gives the axis up.
+SHRINK_SCAN_LIMIT = 1024
 
 SEED_LIMIT = (
     2**32
@@ -234,3 +244,120 @@ def _row(space, row_id, origin, data_seed, axis_values, case):
         if key in case:
             row[key] = case[key]
     return row
+
+
+class ShrinkStop(Exception):
+    """Raised by a shrink oracle that wants no more candidates (budget spent, run stopping)."""
+
+
+def _same_value(a, b):
+    return type(a) is type(b) and a == b
+
+
+def shrink(space, axis_values, data_seed, row_case_id, oracle):
+    """Simpler axis values for which ``oracle`` still answers true.
+
+    ``oracle(sample)`` gets a legal ``Sample`` rendered from candidate axis values (same data
+    seed and case id as the original) and answers whether the failure it stands for stayed; it
+    may raise ``ShrinkStop`` to end the search. A candidate that violates a constraint is never
+    shown to the oracle, and one already answered for the same axis values is not asked again.
+
+    Axes are visited in the space's order, one at a time, with the others held at their current
+    values, until no axis can move. A ``values`` axis tries the entries before its current one,
+    first entry first. A ``range`` axis tries its low end and the declared boundaries below the
+    value, then binary-searches what lies between the highest value refused and the lowest
+    accepted (a value the constraints forbid gives way to the nearest legal one). Returns
+    ``(axis_values, accepted_steps)``: the original when nothing could move.
+    """
+    current = copy.deepcopy(axis_values)
+    steps = 0
+    answers = {}
+
+    def attempt(name, value):
+        """The oracle's answer for ``value`` of axis ``name`` (True or False); None when the
+        candidate is not a legal sample."""
+        candidate = dict(current)
+        candidate[name] = value
+        key = json.dumps(candidate, sort_keys=True)
+        if key in answers:
+            return answers[key]
+        try:
+            rendered = sample_from_axes(space, candidate, data_seed, row_case_id)
+        except InvalidRowError:
+            answers[key] = None
+            return None
+        answers[key] = bool(oracle(rendered))
+        return answers[key]
+
+    def accept(name, value):
+        nonlocal steps
+        current[name] = copy.deepcopy(value)
+        steps += 1
+
+    def shrink_values(name, axis):
+        tried = []
+        for earlier in axis.values:
+            if _same_value(earlier, current[name]):
+                break  # from the current entry on, nothing is simpler
+            if any(_same_value(earlier, t) for t in tried):
+                continue
+            tried.append(earlier)
+            if attempt(name, earlier):
+                accept(name, earlier)
+                return True
+        return False
+
+    def shrink_range(name, axis):
+        moved = False
+        lower = axis.lo - 1  # every value up to here is refused (or below the range)
+        upper = current[name]  # the lowest value known to keep the failure
+        for probe in sorted({axis.lo, *axis.boundaries}):
+            if not axis.lo <= probe < upper:
+                continue
+            answer = attempt(name, probe)
+            if answer:
+                accept(name, probe)
+                moved = True
+                upper = probe
+                break
+            if answer is False:
+                lower = probe
+        while upper - lower > 1:
+            mid = (lower + upper) // 2
+            found = None
+            for offset in range(min(upper - lower, SHRINK_SCAN_LIMIT)):
+                for candidate in (mid + offset, mid - offset) if offset else (mid,):
+                    if lower < candidate < upper:
+                        answer = attempt(name, candidate)
+                        if answer is not None:
+                            found = (candidate, answer)
+                            break
+                if found is not None:
+                    break
+            if found is None:
+                break  # no legal value is left between the two
+            candidate, answer = found
+            if answer:
+                accept(name, candidate)
+                moved = True
+                upper = candidate
+            else:
+                lower = candidate
+        return moved
+
+    # An axis is settled once it was searched with the other axes where they are now; one that
+    # moves unsettles all the others, and the search ends when every axis is settled.
+    settled = set()
+    try:
+        while len(settled) < len(space.axes):
+            for name, axis in space.axes.items():
+                if name in settled:
+                    continue
+                moved = (shrink_range if axis.is_range else shrink_values)(name, axis)
+                if moved:
+                    settled = {name}
+                else:
+                    settled.add(name)
+    except ShrinkStop:
+        pass
+    return current, steps

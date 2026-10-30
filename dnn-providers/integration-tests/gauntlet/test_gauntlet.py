@@ -4320,3 +4320,410 @@ def test_sample_from_axes_names_the_violated_rule_and_its_reason(tmp_path):
         sampler.sample_from_axes(sp, {"a": 1, "n": 2}, -3)
     # sample() is untouched: a seed still draws the same legal sample
     assert sampler.sample(sp, 5).axis_values == sampler.sample(sp, 5).axis_values
+
+
+# --------------------------------------------------------------------------
+# --shrink: smaller samples for WRONG and CRASH findings
+# --------------------------------------------------------------------------
+
+SHRINK_ENV_NAME = "HIPDNN_SHRINK_TEST_MARK"  # a HIPDNN_ variable replays carry
+
+
+def _shrink_space(tmp_path, **overrides):
+    """A toy space with a dtype, two ``values`` axes and a ``range`` axis. ``n`` must reach ``a``
+    and is no multiple of 3, so some values of ``n`` are not legal."""
+    spaces = tmp_path / "spaces"
+    spaces.mkdir(exist_ok=True)
+    decl = {
+        "axes": {
+            "dtype": {"values": ["half", "bfloat16"]},
+            "a": {"values": [1, 2, 3]},
+            "b": {"values": ["x", "y", "z"]},
+            "n": {"range": [1, 100], "boundaries": [1, 100]},
+        },
+        "derive": {},
+        "constraints": [
+            {"rule": "n >= a", "reason": "n must reach a"},
+            {"rule": "n % 3 != 0", "reason": "n is no multiple of 3"},
+        ],
+        "case": {
+            "values": {"dtype": "${dtype}", "a": "${a}", "b": "${b}", "n": "${n}"},
+            "metadata": {"purpose": "probe"},
+        },
+    }
+    decl.update(overrides)
+    write_space(spaces, **decl)
+    return spaces
+
+
+FOUND = {"dtype": "bfloat16", "a": 3, "b": "z", "n": 97}
+
+
+def _when(behaviour, *conditions):
+    """A stub ``match`` rule on rendered values: ``(path, op, value)`` conditions."""
+    return {
+        "where": [{"path": p, "op": op, "value": v} for p, op, v in conditions],
+        "behaviour": behaviour,
+    }
+
+
+def _shrink_run(run, spaces, budget, axes=None, extra=()):
+    """Run one toy row under ``--shrink budget``; returns the driver's exit status."""
+    row = _write_row(
+        run.tmp,
+        space="Toy/Default",
+        axes=FOUND if axes is None else axes,
+        case_id="found",
+        data_seed=11,
+    )
+    return _run_row(
+        run, row, "--spaces-dir", str(spaces), "--shrink", str(budget), *extra
+    )
+
+
+def _shrunk_dir(run, case="found"):
+    return run.failure_dir(case, space="Toy_Default") / "shrunk"
+
+
+def _candidate_runs(run):
+    """The stub's run invocations that came from a shrink candidate's sandbox."""
+
+    def golden(invocation):
+        argv = invocation["argv"]
+        return Path(argv[argv.index("--golden-data-dir") + 1])
+
+    return [
+        i
+        for i in run.invocations
+        if i["mode"] == "run" and (run.work / "shrink") in golden(i).parents
+    ]
+
+
+def _shrunk_axes(run, case="found"):
+    return json.loads((_shrunk_dir(run, case) / "axes.json").read_text())
+
+
+def test_a_wrong_gated_on_a_dim_shrinks_the_range_axis_to_the_smallest_legal_value(
+    run, tmp_path
+):
+    # bug caught: a shrink that stops at a plausible value, or that treats a value the space
+    # forbids (39, a multiple of 3) as the answer, instead of the exact legal threshold
+    spaces = _shrink_space(tmp_path)
+    run.control(match=[_when("wrong", ("values.n", ">=", 39))])
+    assert _shrink_run(run, spaces, 50) == 1
+    shrunk = _shrunk_axes(run)
+    assert shrunk["original"] == FOUND
+    assert shrunk["shrunk"] == {"dtype": "half", "a": 1, "b": "x", "n": 40}
+    assert shrunk["changed"] == ["dtype", "a", "b", "n"]
+    candidates = _candidate_runs(run)
+    # a binary search, not a scan of the 60 values above the threshold
+    assert len(candidates) == shrunk["runs"] <= 12
+    # what the shrunk sample is: the row file, and the rendered row of the sample it names
+    row = json.loads((_shrunk_dir(run) / "sweep_row.json").read_text())
+    assert row == {
+        "space": "Toy/Default",
+        "axes": shrunk["shrunk"],
+        "data_seed": 11,
+        "case_id": "found",
+    }
+    sp = space_lib.load_space(spaces / "Toy.space.json")
+    shrunk_sample = sampler.sample_from_axes(sp, row["axes"], 11, "found")
+    graph = json.loads((_shrunk_dir(run) / "Toy_Default_found.json").read_text())
+    assert graph == {"nodes": [], "tensors": []}
+    meta = json.loads((_shrunk_dir(run) / "Toy_Default_found.meta.json").read_text())
+    assert meta["seed"] == 11 and meta["purpose"] == "regression"
+    assert "shrunk" in meta["reference_source"]
+    result = json.loads((_shrunk_dir(run) / "outcome.json").read_text())["result"]
+    assert result["outcome"] == "WRONG"
+    assert result["test"] == "gauntlet_Toy_Default_fp16_cases.found"
+    assert shrunk_sample.axis_values == shrunk["shrunk"]
+
+
+def test_a_wrong_gated_on_a_values_axis_keeps_that_value_and_simplifies_the_rest(
+    run, tmp_path
+):
+    # bug caught: shrinking moves the axis that causes the failure to an earlier entry, or
+    # leaves the axes that do not matter where they were
+    spaces = _shrink_space(tmp_path)
+    run.control(match=[_when("wrong", ("values.b", "==", "z"))])
+    assert _shrink_run(run, spaces, 50) == 1
+    shrunk = _shrunk_axes(run)
+    assert shrunk["shrunk"] == {"dtype": "half", "a": 1, "b": "z", "n": 1}
+    assert shrunk["changed"] == ["dtype", "a", "n"]
+    summary_finding = run.summary["findings"][0]
+    assert summary_finding["shrunk"] == {
+        "runs": shrunk["runs"],
+        "accepted_steps": shrunk["accepted_steps"],
+        "axes_changed": ["dtype", "a", "n"],
+    }
+    assert shrunk["runs"] == len(_candidate_runs(run))
+
+
+def test_a_candidate_that_changes_the_outcome_class_is_rejected(run, tmp_path):
+    # bug caught: shrinking walks from a CRASH into a WRONG (any failure counts) and reports a
+    # different defect than the one found
+    spaces = _shrink_space(
+        tmp_path, constraints=[{"rule": "n >= a", "reason": "n must reach a"}]
+    )
+    run.control(
+        match=[
+            _when("crash", ("values.n", ">=", 60)),
+            _when("wrong", ("values.n", ">=", 20)),
+        ]
+    )
+    assert _shrink_run(run, spaces, 50, axes={**FOUND, "b": "x"}) == 1
+    outcomes = run.outcome_list
+    assert [o["outcome"] for o in outcomes] == ["CRASH"]
+    shrunk = _shrunk_axes(run)
+    assert shrunk["shrunk"]["n"] == 60  # not 20, where the same rule set answers WRONG
+    result = json.loads((_shrunk_dir(run) / "outcome.json").read_text())["result"]
+    assert result["outcome"] == "CRASH" and result["crash_kind"] == "death"
+    assert run.summary["findings"][0]["shrunk"]["axes_changed"] == ["dtype", "a", "n"]
+
+
+def test_a_candidate_that_hangs_is_not_a_wrong(run, tmp_path):
+    # bug caught: a hang is a CRASH, so a candidate that hangs must not stand in for a WRONG
+    spaces = _shrink_space(
+        tmp_path, constraints=[{"rule": "n >= a", "reason": "n must reach a"}]
+    )
+    run.control(
+        match=[
+            _when("wrong", ("values.n", ">=", 50)),
+            _when("hang", ("values.n", ">=", 10)),
+        ],
+        hang_seconds=60,
+    )
+    assert _shrink_run(run, spaces, 50, extra=("--case-timeout", "1s")) == 1
+    assert _shrunk_axes(run)["shrunk"]["n"] == 50
+    result = json.loads((_shrunk_dir(run) / "outcome.json").read_text())["result"]
+    assert result["outcome"] == "WRONG"
+
+
+def test_the_shrink_budget_counts_candidate_runs_and_keeps_the_progress_so_far(
+    run, tmp_path
+):
+    spaces = _shrink_space(tmp_path)
+    run.control(match=[_when("wrong", ("values.n", ">=", 39))])
+    assert _shrink_run(run, spaces, 3) == 1
+    assert len(_candidate_runs(run)) == 3
+    shrunk = _shrunk_axes(run)
+    # dtype, a and b went to their first entries; n was not reached
+    assert shrunk["shrunk"] == {"dtype": "half", "a": 1, "b": "x", "n": 97}
+    assert shrunk["runs"] == 3 and shrunk["accepted_steps"] == 3
+    assert run.summary["findings"][0]["shrunk"] == {
+        "runs": 3,
+        "accepted_steps": 3,
+        "axes_changed": ["dtype", "a", "b"],
+    }
+
+
+def test_a_candidate_the_space_forbids_costs_no_budget(run, tmp_path):
+    # bug caught: n=1 and n=2 break 'n >= a' while a is 3; counting them would spend the whole
+    # budget before a could move, and the search would end on n=3
+    spaces = _shrink_space(
+        tmp_path,
+        axes={"n": {"range": [1, 100], "boundaries": [1]}, "a": {"values": [1, 2, 3]}},
+        constraints=[{"rule": "n >= a", "reason": "n must reach a"}],
+        case={"values": {"a": "${a}", "n": "${n}"}, "metadata": {"purpose": "probe"}},
+    )
+    run.control(default="wrong")
+    assert _shrink_run(run, spaces, 2, axes={"n": 3, "a": 3}) == 1
+    assert _shrunk_axes(run)["shrunk"] == {"n": 1, "a": 1}
+    assert len(_candidate_runs(run)) == 2
+
+
+def test_shrinking_is_off_unless_asked_for(run, tmp_path):
+    spaces = _shrink_space(tmp_path)
+    run.control(default="wrong")
+    assert _shrink_run(run, spaces, 0) == 1
+    assert not (run.work / "shrink").exists()
+    assert not _shrunk_dir(run).exists()
+    assert "shrunk" not in run.summary["findings"][0]
+    assert run.summary["shrink_budget"] == 0
+
+
+def test_the_shrink_budget_comes_from_the_environment_and_a_flag_overrides_it(
+    run, tmp_path, monkeypatch
+):
+    spaces = _shrink_space(tmp_path)
+    run.control(default="wrong")
+    monkeypatch.setenv("HIPDNN_FUZZ_SHRINK", "2")
+    row = _write_row(
+        run.tmp, space="Toy/Default", axes=FOUND, case_id="found", data_seed=11
+    )
+    assert _run_row(run, row, "--spaces-dir", str(spaces)) == 1
+    assert run.summary["shrink_budget"] == 2 and len(_candidate_runs(run)) == 2
+    shutil.rmtree(run.work)
+    run.log.unlink()
+    assert _run_row(run, row, "--spaces-dir", str(spaces), "--shrink", "0") == 1
+    assert run.summary["shrink_budget"] == 0 and not (run.work / "shrink").exists()
+
+
+def test_a_negative_shrink_budget_is_a_usage_error(run, tmp_path, capsys):
+    row = _write_row(tmp_path)
+    with pytest.raises(SystemExit) as exit_info:
+        _run_row(run, row, "--shrink", "-1")
+    assert exit_info.value.code == 2
+    assert "--shrink must be >= 0" in capsys.readouterr().err
+
+
+def test_candidates_stay_out_of_outcomes_samples_and_counts(run, tmp_path):
+    # bug caught: a candidate run is counted as a sample, so the summary no longer reconciles
+    # and a shrink changes the verdict of the run it is part of
+    spaces = _shrink_space(tmp_path)
+    run.control(match=[_when("wrong", ("values.n", ">=", 39))])
+    seeds = range(5, 11)
+    drawn = [
+        sampler.sample(space_lib.load_space(spaces / "Toy.space.json"), s)
+        for s in seeds
+    ]
+    wrong = [s.case_id for s in drawn if s.axis_values["n"] >= 39]
+    assert wrong and len(wrong) < len(drawn)  # the seeds draw both kinds
+    assert run.run("--samples", "6", "--spaces-dir", str(spaces), "--shrink", "40",
+                   "--seed", "5", space=None) == 1  # fmt: skip
+    candidates = _candidate_runs(run)
+    assert len(candidates) > 0
+    outcomes = run.outcome_list
+    assert [o["case"] for o in outcomes] == [s.case_id for s in drawn]
+    assert [o["case"] for o in outcomes if o["outcome"] == "WRONG"] == wrong
+    assert len((run.work / "samples.jsonl").read_text().splitlines()) == 6
+    summary = run.summary
+    assert summary["samples"] == 6 and summary["reconciled"] is True
+    assert sum(summary["outcomes"].values()) == 6
+    assert summary["outcomes"]["WRONG"] == len(wrong)
+    (engine,) = summary["engines"].values()
+    assert engine["samples"] == 6
+    # each finding was shrunk, in its own folder
+    assert sorted(f["case"] for f in summary["findings"]) == sorted(wrong)
+    assert all(f["shrunk"]["runs"] > 0 for f in summary["findings"])
+    for case in wrong:
+        assert (_shrunk_dir(run, case) / "replay.sh").is_file()
+        assert (run.work / "shrink" / f"Toy_Default_{case}").is_dir()
+    # no candidate left a failure folder of its own or a reports/logs file in the run's dirs
+    assert sorted(p.name for p in (run.work / "failures").iterdir()) == sorted(
+        f"Toy_Default_{c}" for c in wrong
+    )
+    assert len(list((run.work / "reports").glob("*-run.jsonl"))) == 1
+
+
+def test_a_shrunk_row_replays_under_the_same_gtest_name_and_outcome(run, tmp_path):
+    # bug caught: the replay of a shrunk sample lands in another suite than the shrink run, so
+    # the engine TOML's tolerance and skip globs grade it differently (RFC 0023, A6)
+    spaces = _shrink_space(tmp_path)
+    run.monkeypatch.setenv(SHRINK_ENV_NAME, "marked")
+    run.control(
+        match=[
+            _when("wrong", ("values.dtype", "==", "bfloat16"), ("values.n", ">=", 39))
+        ]
+    )
+    assert _shrink_run(
+        run,
+        spaces,
+        50,
+        extra=("--test-engine", "ENG", "--test-article", "ART", "--test-config", "CFG"),
+    ) == 1  # fmt: skip
+    script = (_shrunk_dir(run) / "replay.sh").read_text()
+    shrunk = _shrunk_axes(run)
+    assert shrunk["shrunk"] == {"dtype": "bfloat16", "a": 1, "b": "x", "n": 40}
+    final = json.loads((_shrunk_dir(run) / "outcome.json").read_text())["result"]
+    assert final["test"] == "gauntlet_Toy_Default_bfp16_cases.found"
+    assert final["test"] == run.outcome_list[0]["test"]  # the finding's own name
+
+    # what replay.sh runs: the driver on the row file, with the run's binary, engine and config
+    assert '--row "$D/sweep_row.json"' in script
+    for token in ("--test-engine ENG", "--test-article ART", "--test-config CFG",
+                  f"--binary {fuzz._quote(str(STUB))}", "--spaces-dir", f"{SHRINK_ENV_NAME}=marked"):  # fmt: skip
+        assert token in script
+    assert not any(flag in script for flag in ("--shrink", "--seed", "--filter"))
+
+    # running that row reproduces the WRONG under the same GTest name
+    replay_work = tmp_path / "replayed"
+    done = fuzz.main(
+        [
+            "--binary", str(STUB), "--work-dir", str(replay_work), "--case-timeout", "30s",
+            "--spaces-dir", str(spaces),
+            "--row", str(_shrunk_dir(run) / "sweep_row.json"),
+        ]
+    )  # fmt: skip
+    assert done == 1
+    (again,) = [
+        json.loads(line)
+        for line in (replay_work / "outcomes.jsonl").read_text().splitlines()
+    ]
+    assert (again["test"], again["outcome"]) == (final["test"], "WRONG")
+    sp = space_lib.load_space(spaces / "Toy.space.json")
+    expected = sampler.sample_from_axes(sp, shrunk["shrunk"], 11, "found").row
+    written = json.loads(
+        (
+            replay_work / "bundles/gauntlet/Toy/Default/bfp16_cases/sweep.json"
+        ).read_text()
+    )["cases"]
+    assert json.dumps(written) == json.dumps([expected])
+
+
+@pytest.mark.skipif(shutil.which("sh") is None, reason="needs a POSIX shell")
+def test_the_shrunk_replay_script_runs_and_reproduces_the_finding(run, tmp_path):
+    spaces = _shrink_space(tmp_path)
+    run.control(match=[_when("wrong", ("values.n", ">=", 39))])
+    assert _shrink_run(run, spaces, 50) == 1
+    folder = _shrunk_dir(run)
+    done = subprocess.run(
+        ["sh", str(folder / "replay.sh")], capture_output=True, text=True, timeout=120
+    )
+    assert done.returncode == 1, done.stdout + done.stderr
+    (again,) = [
+        json.loads(line)
+        for line in (folder / "replay-work" / "outcomes.jsonl").read_text().splitlines()
+    ]
+    final = json.loads((folder / "outcome.json").read_text())["result"]
+    assert (again["test"], again["outcome"]) == (final["test"], "WRONG")
+
+
+def test_the_report_prints_one_line_per_shrunk_finding(run, tmp_path, capsys):
+    spaces = _shrink_space(tmp_path)
+    run.control(match=[_when("wrong", ("values.b", "==", "z"))])
+    assert _shrink_run(run, spaces, 50) == 1
+    out = capsys.readouterr().out
+    lines = [ln for ln in out.splitlines() if ln.strip().startswith("shrunk:")]
+    assert len(lines) == 1
+    assert 'dtype "bfloat16" -> "half"' in lines[0] and "n 97 -> 1" in lines[0]
+    assert str(_shrunk_dir(run) / "replay.sh") in lines[0]
+
+
+def test_a_finding_nothing_simpler_reproduces_still_gets_a_shrunk_folder(run, tmp_path):
+    spaces = _shrink_space(tmp_path)
+    axes = {"dtype": "half", "a": 1, "b": "x", "n": 1}
+    run.control(default="wrong")
+    assert _shrink_run(run, spaces, 5, axes=axes) == 1
+    shrunk = _shrunk_axes(run)
+    assert shrunk["shrunk"] == axes and shrunk["changed"] == []
+    assert shrunk["runs"] == 0 and shrunk["accepted_steps"] == 0
+    assert _candidate_runs(run) == []
+    assert run.summary["findings"][0]["shrunk"]["axes_changed"] == []
+
+
+def test_shrink_search_ends_on_a_value_the_oracle_accepted_even_when_it_is_not_monotonic(
+    tmp_path,
+):
+    # the sampler-level search assumes values below a refused one are refused too; whatever the
+    # oracle says, what it returns is a value it accepted and nothing is asked twice
+    sp = space_lib.load_space(
+        write_space(
+            tmp_path,
+            axes={"n": {"range": [1, 64], "boundaries": [1, 64]}},
+            derive={},
+            constraints=[],
+            case={"values": {"n": "${n}"}, "metadata": {}},
+        )
+    )
+    asked = []
+
+    def oracle(candidate):
+        n = candidate.axis_values["n"]
+        asked.append(n)
+        return n in (64, 48, 33)
+
+    axes, steps = sampler.shrink(sp, {"n": 64}, 3, "c", oracle)
+    assert (axes["n"], steps) == (48, 1)  # 33 lies below the refused 40
+    assert len(asked) == len(set(asked))  # no candidate is asked twice
+    assert 64 not in asked  # the original is never run again

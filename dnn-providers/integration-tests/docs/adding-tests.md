@@ -214,6 +214,15 @@ a failure seen with device-filled inputs reproduces bit for bit only on the same
 `--gtest_filter`, record the engine's decline or fix in the usual way, and keep the
 fuzz finding's `repro.json` in the issue that reports the defect.
 
+When the run used `--shrink`, the finding also has `failures/<case>/shrunk/`. Freeze that graph
+rather than the original: it fails the same way (same outcome class) with the simplest axis
+values the shrink found, so the checked-in case is small and its cause is easier to read. Use
+`$FAIL/shrunk/<case>.json` in the command above; its `<case>.meta.json` sits next to it, and
+`shrunk/axes.json` lists what changed. Keep the original when `axes_changed` is empty (the
+two are then the same sample). The shrunk case is graded under the GTest name its `replay.sh`
+shows, so check that name against the engine TOML's tolerance and skip globs before freezing a
+case whose `dtype` changed.
+
 The finding keeps the alignment it failed at. A space's `alignment` axis writes a
 `tensor_patches` entry into the sweep row, and the failure's graph has that alignment
 baked in. `import_graph.py` compares each tensor's `alignment` with the template's and

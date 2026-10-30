@@ -16,7 +16,7 @@ Synopsis::
 
     run_gauntlet_fuzz.py --binary BIN [--test-article A] [--test-engine E] [--test-config C]
         [--work-dir DIR] [--samples N] [--seed S] [--data-seed D] [--filter REGEX]
-        [--time-budget 30m] [--case-timeout 10m] [--batch-size N] [--summary FILE]
+        [--time-budget 30m] [--case-timeout 10m] [--batch-size N] [--summary FILE] [--shrink N]
         [--spaces-dir DIR] [--binary-arg ARG ...]
     run_gauntlet_fuzz.py --binary BIN ... --row FILE        (one explicit sample, see below)
 
@@ -28,6 +28,7 @@ Control (a flag overrides its environment variable)::
     HIPDNN_FUZZ_FILTER       --filter        regex on <Op>/<Space> (default: every space)
     HIPDNN_FUZZ_TIME_BUDGET  --time-budget   wall-clock limit, e.g. 30m, 4h (default none)
     HIPDNN_FUZZ_CASE_TIMEOUT --case-timeout  longest one case may run (default 10m)
+    HIPDNN_FUZZ_SHRINK       --shrink        candidate runs spent shrinking each WRONG/CRASH (default 0 = off)
 
 Sample ``i`` of a space has shape seed ``S + i``; batches are drawn round-robin over the
 spaces. Without ``--samples`` and with ``--time-budget`` (or with ``--samples 0``) the run is
@@ -47,10 +48,25 @@ with ``--samples``, ``--seed``, ``--data-seed``, ``--filter`` or ``--time-budget
 ``HIPDNN_FUZZ_*`` variables for them are ignored); one case runs and the outcome, summary and
 failure folder are those of any run. The failure folder's ``replay.sh`` replays with ``--row``.
 
+``--shrink N`` shrinks each ``WRONG`` and ``CRASH`` sample once its failure folder is written, after
+the batch it was found in (also in a ``--row`` run). A candidate is the sample with one axis moved
+toward a simpler value (a ``range`` axis binary-searched toward its low end, its declared boundaries
+first; a ``values`` axis to an earlier entry of its list), with the data seed and the case id kept,
+so its GTest name is the finding's. It runs as a one-case batch under ``<work>/shrink/<case>/`` and
+is accepted only if its outcome class is the finding's: ``WRONG`` stays ``WRONG``, ``CRASH`` (hang
+included) stays ``CRASH``. A candidate no constraint allows is skipped and costs nothing; at most N
+candidates run per finding. Candidates never enter ``outcomes.jsonl``, ``samples.jsonl`` or the
+summary counts. ``failures/<case>/shrunk/`` holds ``sweep_row.json`` (a ``--row`` file),
+``axes.json`` (original and shrunk values), the graph and meta, ``outcome.json`` of the last
+accepted candidate and a ``replay.sh`` that replays with ``--row``. ``summary.json`` gives each
+finding ``shrunk: {runs, accepted_steps, axes_changed}``. SIGINT ends a shrink early, keeping the
+best sample so far; the time budget does not.
+
 Outputs under the work directory: ``outcomes.jsonl`` (one record per sample),
 ``samples.jsonl``, ``summary.json``, ``reports/`` and ``logs/`` (per binary invocation) and
-``failures/<case>/`` for every ``WRONG`` and ``CRASH``. The exit status is non-zero iff a
-sample was ``WRONG`` or ``CRASH`` (2 for usage and space errors).
+``failures/<case>/`` for every ``WRONG`` and ``CRASH`` (and ``shrink/<case>/`` for the candidate
+runs of ``--shrink``). The exit status is non-zero iff a sample was ``WRONG`` or ``CRASH`` (2 for
+usage and space errors).
 """
 
 import argparse
@@ -420,6 +436,13 @@ class Fuzz:
         self._samples_file = None
         # (space id, case id) -> the values of the ``values`` axes the sample drew
         self._outcome_axes = {}
+        # While a shrink candidate runs: the list its one outcome goes to, instead of the run's
+        # outcomes, counts and failure folders (None otherwise).
+        self._candidate_sink = None
+        # (space, sample, result, record) of each WRONG/CRASH not shrunk yet
+        self._pending_shrink = []
+        # (space id, case id) -> what the shrink of that finding did
+        self._shrunk = {}
 
     # -- control ---------------------------------------------------------
 
@@ -596,6 +619,7 @@ class Fuzz:
                 self._execute(sp, samples)
                 ran = True
                 self._print_batch(sp, samples, self.results[before:])
+                self._shrink_pending()
             if not ran:
                 self.stop_reason = self.stop_reason or "sample-cap"
                 return
@@ -620,6 +644,7 @@ class Fuzz:
         self._samples_file.flush()
         before = len(self.results)
         self._execute(sp, [s])
+        self._shrink_pending()
         self.stop_reason = self.stop_reason or "row"
         (result,) = self.results[before:]
         print(f"row {sp.space_id} {s.case_id}: {result['outcome']}", flush=True)
@@ -928,10 +953,6 @@ class Fuzz:
     ):
         engine = (record or {}).get("engine")
         arch = (record or {}).get("arch")
-        if engine:
-            self.engines_seen[engine] = self.engines_seen.get(engine, 0) + 1
-        if arch and self.arch_seen is None:
-            self.arch_seen = arch
         result = {
             "space": sp.space_id,
             "case": sample.case_id,
@@ -945,11 +966,6 @@ class Fuzz:
             "arch": arch,
             "source": "binary" if record is not None else "driver",
         }
-        self._outcome_axes[(sp.space_id, sample.case_id)] = {
-            name: sample.axis_values[name]
-            for name, axis in sp.axes.items()
-            if not axis.is_range and name in sample.axis_values
-        }
         if record is not None:
             for key in ("purpose", "depth", "origin", "verifier", "platform"):
                 if key in record:
@@ -959,6 +975,20 @@ class Fuzz:
                 result["kernels"] = [str(k) for k in kernels]
         if crash_kind:
             result["crash_kind"] = crash_kind
+        if self._candidate_sink is not None:
+            # A shrink candidate is classified like any sample but belongs to no count,
+            # record or artifact of the run (see ``_run_candidate``).
+            self._candidate_sink.append((result, record))
+            return
+        if engine:
+            self.engines_seen[engine] = self.engines_seen.get(engine, 0) + 1
+        if arch and self.arch_seen is None:
+            self.arch_seen = arch
+        self._outcome_axes[(sp.space_id, sample.case_id)] = {
+            name: sample.axis_values[name]
+            for name, axis in sp.axes.items()
+            if not axis.is_range and name in sample.axis_values
+        }
         if outcome in FAILING:
             # The fault folder exists before the run goes on.
             result["failure_dir"] = str(self.failures / self._case_dir_name(sp, sample))
@@ -969,6 +999,8 @@ class Fuzz:
             print(f"  {outcome}: {sp.space_id} {sample.case_id}: {reason}", flush=True)
             print(f"    artifacts: {result['failure_dir']}", flush=True)
             print(f"    replay: {result['replay']}", flush=True)
+            if self.args.shrink:
+                self._pending_shrink.append((sp, sample, result, record))
         self.results.append(result)
         self._outcomes_file.write(json.dumps(result) + "\n")
         self._outcomes_file.flush()
@@ -1007,11 +1039,11 @@ class Fuzz:
             "case_id": sample.case_id,
         }
 
-    def _replay_argv(self, sp, sample, work_dir, row_path):
+    def _replay_argv(self, sp, sample, work_dir, row_path, as_row=False):
         a = self.args
         # A drawn sample replays from its seeds; a --row sample has none, so it replays from
-        # the row file the failure folder keeps.
-        if self.row_sample is not None:
+        # the row file the failure folder keeps, and so does a shrunk sample (``as_row``).
+        if as_row or self.row_sample is not None:
             which = ["--row", str(row_path)]
         else:
             which = [
@@ -1072,13 +1104,12 @@ class Fuzz:
     def _case_dir_name(sp, sample):
         return f"{sp.operation}_{sp.name}_{sample.case_id}"
 
-    def _write_failure(self, sp, sample, result, record, tail):
-        """``<work>/failures/<case>/``: everything needed to replay or freeze a finding."""
+    def _write_graph_and_meta(
+        self, folder, case, sp, sample, reference_source, notes_prefix
+    ):
+        """``<case>.json`` (the sample's expanded graph, uids canonical when they can be) and
+        ``<case>.meta.json`` in ``folder``; returns the uid map."""
         bu = self._bu
-        case = self._case_dir_name(sp, sample)
-        folder = self.failures / case
-        folder.mkdir(parents=True, exist_ok=True)
-
         template = json.loads(sp.template_path.read_bytes())
         expanded = bu.expand(template, sample.row["values"])
         load_support_matrix_units().apply_case_patches(expanded, sample.row)
@@ -1088,16 +1119,59 @@ class Fuzz:
 
         meta = dict(sample.row["metadata"])
         meta["purpose"] = "regression"
-        meta["reference_source"] = f"gauntlet-fuzz: space {sp.space_id}, " + (
-            f"explicit row (case {sample.case_id})"
-            if self.row_sample is not None
-            else f"shape seed {sample.shape_seed}"
+        meta["reference_source"] = (
+            f"gauntlet-fuzz: space {sp.space_id}, {reference_source}"
         )
         meta["notes"] = (
-            f"{result['outcome']} found by gauntlet-fuzz. {sample.row['metadata'].get('notes', '')}".strip()
+            f"{notes_prefix} {sample.row['metadata'].get('notes', '')}".strip()
         )
         meta = bu.remap_meta_inputs(meta, uid_map)
         json_dump(folder / f"{case}.meta.json", meta)
+        return uid_map
+
+    def _write_replay_script(self, folder, argv, comment, row_file="row.json"):
+        """``replay.sh`` in ``folder``: ``argv`` with its work and row paths relative to the
+        script's own directory; ``comment`` is the header lines."""
+        env_set, env_unset = self._replay_env()
+        script_argv = [
+            (
+                _Raw('"$D/replay-work"')
+                if t == str(folder / "replay-work")
+                else _Raw(f'"$D/{row_file}"') if t == str(folder / row_file) else t
+            )
+            for t in argv
+        ]
+        script_command = self._replay_command(script_argv, env_set, env_unset)
+        script = (
+            "#!/bin/sh\n"
+            f"{comment}"
+            'D=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
+            f"exec {script_command}\n"
+        )
+        write_text(folder / "replay.sh", script)
+        try:
+            os.chmod(folder / "replay.sh", 0o755)
+        except OSError:
+            pass
+
+    def _write_failure(self, sp, sample, result, record, tail):
+        """``<work>/failures/<case>/``: everything needed to replay or freeze a finding."""
+        case = self._case_dir_name(sp, sample)
+        folder = self.failures / case
+        folder.mkdir(parents=True, exist_ok=True)
+
+        uid_map = self._write_graph_and_meta(
+            folder,
+            case,
+            sp,
+            sample,
+            (
+                f"explicit row (case {sample.case_id})"
+                if self.row_sample is not None
+                else f"shape seed {sample.shape_seed}"
+            ),
+            f"{result['outcome']} found by gauntlet-fuzz.",
+        )
 
         host_fill = host_input_fill()
         env_set, env_unset = self._replay_env()
@@ -1156,33 +1230,18 @@ class Fuzz:
         json_dump(folder / "outcome.json", {"result": result, "record": record})
         write_text(folder / "log_tail.txt", tail)
 
-        script_argv = [
-            (
-                _Raw('"$D/replay-work"')
-                if t == str(folder / "replay-work")
-                else _Raw('"$D/row.json"') if t == str(folder / "row.json") else t
-            )
-            for t in argv
-        ]
-        script_command = self._replay_command(script_argv, env_set, env_unset)
         axes_text = json.dumps(sample.axis_values, sort_keys=True)
         if self.row_sample is not None:
             what = f"Renders the same explicit row (axes {axes_text}, data seed"
         else:
             what = f"Regenerates the same sweep row (shape seed {sample.shape_seed}, data seed"
-        script = (
-            "#!/bin/sh\n"
+        self._write_replay_script(
+            folder,
+            argv,
             f"# Replay {case}: {result['outcome']} on {engine or 'unknown engine'}.\n"
             f"# {what} {sample.data_seed}) and runs it alone.\n"
-            f"# Input fill path: {'host' if host_fill else 'device'} ({HOST_FILL_ENV}).\n"
-            'D=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
-            f"exec {script_command}\n"
+            f"# Input fill path: {'host' if host_fill else 'device'} ({HOST_FILL_ENV}).\n",
         )
-        write_text(folder / "replay.sh", script)
-        try:
-            os.chmod(folder / "replay.sh", 0o755)
-        except OSError:
-            pass
         write_text(
             folder / "replay.txt",
             f"{command}\n"
@@ -1190,6 +1249,129 @@ class Fuzz:
             + f"input fill path: {'host' if host_fill else 'device'} ({HOST_FILL_ENV}="
             f"{os.environ.get(HOST_FILL_ENV)!r})\n"
             f"freeze: {self._freeze_command(folder / (case + '.json'))}\n",
+        )
+        return folder
+
+    # -- shrinking -------------------------------------------------------
+
+    def _shrink_pending(self):
+        """Shrink the WRONG and CRASH samples the last batch found (``--shrink``)."""
+        pending, self._pending_shrink = self._pending_shrink, []
+        for sp, sample, result, record in pending:
+            if self.stop.is_set():
+                break
+            self._shrink(sp, sample, result, record)
+
+    def _run_candidate(self, sp, candidate, work):
+        """The ``(result, record)`` the binary gives for a candidate sample, run as a one-case
+        batch in the sandbox ``work``: its own bundle root, logs and reports, so the candidate
+        never enters the run's outcomes, samples, counts or failure folders."""
+        saved = (self.bundles, self.logs, self.reports)
+        self.bundles, self.logs, self.reports = (
+            work / "bundles",
+            work / "logs",
+            work / "reports",
+        )
+        self.logs.mkdir(parents=True, exist_ok=True)
+        self.reports.mkdir(parents=True, exist_ok=True)
+        self._candidate_sink = []
+        try:
+            self._execute(sp, [candidate])
+            sink = self._candidate_sink
+        finally:
+            self._candidate_sink = None
+            self.bundles, self.logs, self.reports = saved
+        return sink[0] if sink else (None, None)
+
+    def _shrink(self, sp, sample, result, record):
+        """Reduce a finding's axis values while its outcome class stays the same, then write
+        ``failures/<case>/shrunk/``. The data seed and case id stay, so a candidate runs under
+        the GTest name of the finding's own suite and the engine TOML grades it the same way.
+        """
+        budget = self.args.shrink
+        work = self.work / "shrink" / self._case_dir_name(sp, sample)
+        print(
+            f"  shrinking {sp.space_id} {sample.case_id} (up to {budget} candidate runs)",
+            flush=True,
+        )
+        state = {"runs": 0, "best": (sample, result, record)}
+
+        def oracle(candidate):
+            if state["runs"] >= budget or self.stop.is_set():
+                raise sampler.ShrinkStop
+            state["runs"] += 1
+            got, got_record = self._run_candidate(sp, candidate, work)
+            if got is None or got["outcome"] != result["outcome"]:
+                return False
+            state["best"] = (candidate, got, got_record)
+            return True
+
+        axes, steps = sampler.shrink(
+            sp, sample.axis_values, sample.data_seed, sample.case_id, oracle
+        )
+        final, final_result, final_record = state["best"]
+        changes = {
+            name: [sample.axis_values[name], axes[name]]
+            for name in sp.axes
+            if json.dumps(sample.axis_values[name]) != json.dumps(axes[name])
+        }
+        folder = self._write_shrunk(
+            sp, sample, final, final_result, final_record, state["runs"], steps, changes
+        )
+        self._shrunk[(sp.space_id, sample.case_id)] = {
+            "runs": state["runs"],
+            "accepted_steps": steps,
+            "axes_changed": list(changes),
+            "changes": changes,
+            "replay_script": str(folder / "replay.sh"),
+        }
+
+    def _write_shrunk(
+        self, sp, original, final, final_result, final_record, runs, steps, changes
+    ):
+        """``<work>/failures/<case>/shrunk/``: the shrunk sample as a ``--row`` file, its axis
+        values, graph, meta, outcome and a replay of it."""
+        case = self._case_dir_name(sp, original)
+        folder = self.failures / case / "shrunk"
+        folder.mkdir(parents=True, exist_ok=True)
+        json_dump(folder / "sweep_row.json", self._row_spec(sp, final))
+        json_dump(
+            folder / "axes.json",
+            {
+                "original": original.axis_values,
+                "shrunk": final.axis_values,
+                "changed": list(changes),
+                "data_seed": final.data_seed,
+                "case_id": final.case_id,
+                "runs": runs,
+                "accepted_steps": steps,
+            },
+        )
+        outcome = final_result["outcome"]
+        self._write_graph_and_meta(
+            folder,
+            case,
+            sp,
+            final,
+            f"shrunk explicit row (case {final.case_id})",
+            f"{outcome} found by gauntlet-fuzz, shrunk from the sampled axis values.",
+        )
+        json_dump(
+            folder / "outcome.json", {"result": final_result, "record": final_record}
+        )
+        argv = self._replay_argv(
+            sp, final, folder / "replay-work", folder / "sweep_row.json", as_row=True
+        )
+        engine = final_result["engine"] or self._run_engine()
+        self._write_replay_script(
+            folder,
+            argv,
+            f"# Replay the shrunk {case}: {outcome} on {engine or 'unknown engine'}.\n"
+            f"# Renders the shrunk explicit row (axes {json.dumps(final.axis_values, sort_keys=True)},"
+            f" data seed {final.data_seed}) and runs it alone,\n"
+            f"# as GTest {final_result['test']}.\n"
+            f"# Input fill path: {'host' if host_input_fill() else 'device'} ({HOST_FILL_ENV}).\n",
+            row_file="sweep_row.json",
         )
         return folder
 
@@ -1281,16 +1463,20 @@ class Fuzz:
         findings = []
         for r in self.results:
             if r["outcome"] in FAILING:
-                findings.append(
-                    {
-                        "space": r["space"],
-                        "case": r["case"],
-                        "outcome": r["outcome"],
-                        "reason": r["reason"],
-                        "failure_dir": r.get("failure_dir"),
-                        "replay": r.get("replay"),
+                finding = {
+                    "space": r["space"],
+                    "case": r["case"],
+                    "outcome": r["outcome"],
+                    "reason": r["reason"],
+                    "failure_dir": r.get("failure_dir"),
+                    "replay": r.get("replay"),
+                }
+                shrunk = self._shrunk.get((r["space"], r["case"]))
+                if shrunk is not None:
+                    finding["shrunk"] = {
+                        k: shrunk[k] for k in ("runs", "accepted_steps", "axes_changed")
                     }
-                )
+                findings.append(finding)
         a = self.args
         failed = bool(totals["WRONG"] or totals["CRASH"])
         return {
@@ -1300,6 +1486,7 @@ class Fuzz:
             "samples_per_space": a.samples or None,
             "continuous": not a.samples,
             "time_budget_seconds": a.time_budget,
+            "shrink_budget": a.shrink,
             "stopped_because": self.stop_reason,
             "elapsed_seconds": (
                 round(time.monotonic() - self._started_at, 3) if self._started_at else 0
@@ -1358,6 +1545,17 @@ class Fuzz:
         for f in shown:
             print(f"  {f['outcome']} {f['space']} {f['case']}")
             print(f"    replay: {f['replay']}")
+            shrunk = self._shrunk.get((f["space"], f["case"]))
+            if shrunk is not None:
+                moved = ", ".join(
+                    f"{name} {json.dumps(old)} -> {json.dumps(new)}"
+                    for name, (old, new) in shrunk["changes"].items()
+                )
+                print(
+                    f"    shrunk: {moved or 'no simpler axis value kept the outcome'}"
+                    f" ({shrunk['runs']} runs, {shrunk['accepted_steps']} steps);"
+                    f" replay: sh {shrunk['replay_script']}"
+                )
         if len(summary["findings"]) > len(shown):
             print(
                 f"  ... {len(summary['findings']) - len(shown)} more findings in the summary"
@@ -1434,6 +1632,14 @@ def build_parser():
     p.add_argument(
         "--time-budget",
         help="wall-clock limit, e.g. 30m, 4h (env HIPDNN_FUZZ_TIME_BUDGET)",
+    )
+    p.add_argument(
+        "--shrink",
+        type=int,
+        metavar="N",
+        help="after a WRONG or CRASH, spend up to N candidate runs shrinking the sample's axis"
+        " values toward simpler ones that keep the outcome class (env HIPDNN_FUZZ_SHRINK;"
+        " default 0 = off); the result goes to failures/<case>/shrunk/",
     )
     p.add_argument(
         "--case-timeout",
@@ -1532,6 +1738,13 @@ def parse_args(argv=None):
             if flag_value is not None
             else _env_default(env_name, convert, parser)
         )
+
+    # Unlike the draw controls, the shrink budget applies to a --row run too.
+    args.shrink = pick(args.shrink, "HIPDNN_FUZZ_SHRINK", int)
+    if args.shrink is None:
+        args.shrink = 0
+    if args.shrink < 0:
+        parser.error("--shrink must be >= 0")
 
     if args.row_spec is None:
         args.samples = pick(args.samples, "HIPDNN_FUZZ_SAMPLES", int)
