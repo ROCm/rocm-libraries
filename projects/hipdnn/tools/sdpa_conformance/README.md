@@ -46,7 +46,7 @@ python aotriton/run_aotriton.py --out <dir> --fake always-decline          # har
 Other options: `--packed-gpu` (adds `tests/`' `gpu` cases), `--workers N` (default one per GPU),
 `-- <pytest args>`. Pin engines with `HIPDNN_FWD_ENGINE` / `HIPDNN_BWD_ENGINE`.
 `--fwd-no-stats` (with `--suite forward`) runs the forward without Stats, so engines that decline
-when Stats are requested can be exercised; AOTriton's M buffer is left unwritten and
+when Stats are requested can be exercised; AOTriton's M buffer is filled with zeros (its wrapper rejects NaN in M) and
 `test_forward.py` compares only O. The runner refuses it for any collection that includes
 backward or varlen cases, whose backward consumes the forward's Stats.
 AOTriton's calibration and backend knobs (`USE_ADIFFS_TXT`, `RECORD_ADIFFS_TO`, `SKIP_BWD`,
