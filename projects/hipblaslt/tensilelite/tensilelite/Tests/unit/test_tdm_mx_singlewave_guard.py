@@ -1,9 +1,5 @@
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-################################################################################
 """Solution acceptance for single-wave MX scale TDM (gfx1250).
 
 At one wave a single descriptor covers the whole scale tile, and it is only
