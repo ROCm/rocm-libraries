@@ -1280,6 +1280,21 @@ GFX950_ATTENTION_TILED_2D = [
         "use_alibi": True,
         "emit_lse": True,
     },
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 32,
+        "num_kv_heads": 32,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "kv_storage_dtype": "fp8e4m3",
+        "use_fp8_mfma_qk": True,
+        "use_mfma_32x32": True,
+        "block_m_per_warp": 32,
+        "tile_size": 64,
+    },
 ]
 
 GFX942_ATTENTION_TILED_3D = [

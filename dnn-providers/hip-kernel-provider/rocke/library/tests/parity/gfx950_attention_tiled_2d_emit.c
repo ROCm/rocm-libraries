@@ -1123,6 +1123,25 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_alibi = true;
         s->emit_lse = true;
         break;
+    /* fp8 KV cache kept as raw fp8 in K_lds (use_fp8_mfma_qk) on the
+     * non-transposed 32x32 QK path: K is read as fp8 and dequantized with
+     * k_scale before the bf16 MFMA, as on the transposed path. */
+    case 68:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = "fp8e4m3";
+        s->use_fp8_mfma_qk = true;
+        s->use_mfma_32x32 = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        break;
     default:
         return -1;
     }

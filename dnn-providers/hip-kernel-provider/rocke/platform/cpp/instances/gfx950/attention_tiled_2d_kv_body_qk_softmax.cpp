@@ -927,12 +927,10 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 rocke_value_t* kc_base = rocke_b_const_i32(b, k * 16);
                 rocke_value_t* kc_off32 = rocke_b_add(
                     b, kc_base, rocke_b_mul(b, lane_half_qg, rocke_b_const_i32(b, 8)));
-                rocke_value_t* idx[3];
-                rocke_value_t* B32_v;
-                idx[0] = ctx->cur_buf;
-                idx[1] = k_row32;
-                idx[2] = kc_off32;
-                B32_v = rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, 8);
+                /* The shared K reader: when K_lds holds raw fp8 bytes it reads
+                 * them as fp8 and dequantizes with k_scale. */
+                rocke_value_t* B32_v = rocke_gfx950_attn2d_read_k8_mfma_operand(
+                    ctx, ctx->cur_buf, k_row32, kc_off32);
                 acc32 = fh_mfma_32x32x16(ctx, ctx->q32_regs[k], B32_v, acc32);
             }
             S32_n[n] = acc32;
