@@ -1266,15 +1266,15 @@ namespace TensileLite
             return true;
         }
 
-        template <size_t BLOCK_M, size_t BLOCK_K, typename AccumT>
-        TENSILELITE_CPU_REF_FORCE_INLINE void loadFastPathATile(const AccumT* curBatchA,
-                                                                AccumT*       aReg,
-                                                                size_t        m0,
-                                                                size_t        k0,
-                                                                size_t        sizeM,
-                                                                size_t        sizeK,
-                                                                size_t        strideMA,
-                                                                size_t        strideKA)
+        template <size_t BLOCK_M, size_t BLOCK_K, typename MacT>
+        TENSILELITE_CPU_REF_FORCE_INLINE void loadFastPathATile(const MacT* curBatchA,
+                                                                MacT*       aReg,
+                                                                size_t      m0,
+                                                                size_t      k0,
+                                                                size_t      sizeM,
+                                                                size_t      sizeK,
+                                                                size_t      strideMA,
+                                                                size_t      strideKA)
         {
             for(size_t km = 0; km < BLOCK_K; ++km)
             {
@@ -1289,21 +1289,21 @@ namespace TensileLite
                     }
                     else
                     {
-                        aReg[km * BLOCK_M + mm] = AccumT(0);
+                        aReg[km * BLOCK_M + mm] = MacT(0);
                     }
                 }
             }
         }
 
-        template <size_t BLOCK_K, size_t BLOCK_N, typename AccumT>
-        TENSILELITE_CPU_REF_FORCE_INLINE void loadFastPathBTile(const AccumT* curBatchB,
-                                                                AccumT*       bReg,
-                                                                size_t        n0,
-                                                                size_t        k0,
-                                                                size_t        sizeN,
-                                                                size_t        sizeK,
-                                                                size_t        strideNB,
-                                                                size_t        strideKB)
+        template <size_t BLOCK_K, size_t BLOCK_N, typename MacT>
+        TENSILELITE_CPU_REF_FORCE_INLINE void loadFastPathBTile(const MacT* curBatchB,
+                                                                MacT*       bReg,
+                                                                size_t      n0,
+                                                                size_t      k0,
+                                                                size_t      sizeN,
+                                                                size_t      sizeK,
+                                                                size_t      strideNB,
+                                                                size_t      strideKB)
         {
             for(size_t kn = 0; kn < BLOCK_K; ++kn)
             {
@@ -1318,7 +1318,7 @@ namespace TensileLite
                     }
                     else
                     {
-                        bReg[kn * BLOCK_N + nn] = AccumT(0);
+                        bReg[kn * BLOCK_N + nn] = MacT(0);
                     }
                 }
             }
@@ -1328,10 +1328,10 @@ namespace TensileLite
                   size_t BLOCK_N,
                   size_t BLOCK_K,
                   typename OperandMathOpT,
-                  typename AccumT>
-        TENSILELITE_CPU_REF_FORCE_INLINE void innerFastPathReduction(const AccumT* A,
-                                                                     const AccumT* B,
-                                                                     AccumT*       C)
+                  typename MacT>
+        TENSILELITE_CPU_REF_FORCE_INLINE void innerFastPathReduction(const MacT* A,
+                                                                     const MacT* B,
+                                                                     MacT*       C)
         {
             for(size_t k_i = 0; k_i < BLOCK_K; ++k_i)
             {
@@ -1339,37 +1339,37 @@ namespace TensileLite
                 {
                     for(size_t n_i = 0; n_i < BLOCK_N; ++n_i)
                     {
-                        auto  b_index = k_i * BLOCK_N + n_i;
-                        auto  a_index = k_i * BLOCK_M + m_i;
-                        auto  c_index = m_i * BLOCK_N + n_i;
-                        AccumT valB   = B[b_index];
-                        AccumT valA   = A[a_index];
+                        auto b_index = k_i * BLOCK_N + n_i;
+                        auto a_index = k_i * BLOCK_M + m_i;
+                        auto c_index = m_i * BLOCK_N + n_i;
+                        MacT valB    = B[b_index];
+                        MacT valA    = A[a_index];
                         C[c_index]
-                            += static_cast<AccumT>(static_cast<OperandMathOpT>(valA))
-                               * static_cast<AccumT>(static_cast<OperandMathOpT>(valB));
+                            += static_cast<MacT>(static_cast<OperandMathOpT>(valA))
+                               * static_cast<MacT>(static_cast<OperandMathOpT>(valB));
                     }
                 }
             }
         }
 
-        template <size_t BLOCK_M, size_t BLOCK_N, typename AccumT>
+        template <size_t BLOCK_M, size_t BLOCK_N, typename MacT>
         TENSILELITE_CPU_REF_FORCE_INLINE void accumulateMXScaledTile(
-            AccumT*       cReg,
-            const AccumT* tilePartial,
-            size_t       m0,
-            size_t       n0,
-            size_t       sizeM,
-            size_t       sizeN,
-            const E8*    mxsaBatch,
-            const E8*    mxsbBatch,
-            size_t       mxsaI,
-            size_t       mxsbI,
-            size_t       mxBlockA,
-            size_t       mxBlockB,
-            size_t       strideMxsaM,
-            size_t       strideMxsaBlk,
-            size_t       strideMxsbN,
-            size_t       strideMxsbBlk)
+            MacT*       cReg,
+            const MacT* tilePartial,
+            size_t      m0,
+            size_t      n0,
+            size_t      sizeM,
+            size_t      sizeN,
+            const E8*   mxsaBatch,
+            const E8*   mxsbBatch,
+            size_t      mxsaI,
+            size_t      mxsbI,
+            size_t      mxBlockA,
+            size_t      mxBlockB,
+            size_t      strideMxsaM,
+            size_t      strideMxsaBlk,
+            size_t      strideMxsbN,
+            size_t      strideMxsbBlk)
         {
             for(size_t mm = 0; mm < BLOCK_M; ++mm)
             {
@@ -1377,10 +1377,10 @@ namespace TensileLite
                 if(global_m >= sizeM)
                     continue;
 
-                AccumT sa = (mxBlockA > 0 && mxsaBatch)
-                    ? static_cast<AccumT>(static_cast<float>(
+                MacT sa = (mxBlockA > 0 && mxsaBatch)
+                    ? static_cast<MacT>(static_cast<float>(
                           mxsaBatch[global_m * strideMxsaM + mxsaI * strideMxsaBlk]))
-                    : AccumT(1);
+                    : MacT(1);
 
                 for(size_t nn = 0; nn < BLOCK_N; ++nn)
                 {
@@ -1388,10 +1388,10 @@ namespace TensileLite
                     if(global_n >= sizeN)
                         continue;
 
-                    AccumT sb = (mxBlockB > 0 && mxsbBatch)
-                        ? static_cast<AccumT>(static_cast<float>(
+                    MacT sb = (mxBlockB > 0 && mxsbBatch)
+                        ? static_cast<MacT>(static_cast<float>(
                               mxsbBatch[global_n * strideMxsbN + mxsbI * strideMxsbBlk]))
-                        : AccumT(1);
+                        : MacT(1);
 
                     cReg[mm * BLOCK_N + nn]
                         += tilePartial[mm * BLOCK_N + nn] * sa * sb;
@@ -1402,11 +1402,17 @@ namespace TensileLite
         // Solve GEMM problems using efficient tiled CPU code.
         // This function assumes the problem is eligible for the fast path — callers
         // must check isFastPathEligible() first.
-        // AccumT: accumulation precision (float or double).
+        // AccumT: epilogue type (float or double). Alpha, beta, the ScaleAB and
+        // scaleAlphaVec scales, C, bias, activation and gate residual are applied in
+        // it, and D is written back from it.
         // OperandMathOpT: per-operand math type used immediately before multiply.
         // XFloat32, for example, truncates float operands to a 10-bit mantissa.
-        // Default matches AccumT, making the operand cast a no-op.
-        template <typename AccumT = float, typename OperandMathOpT = AccumT>
+        // Default matches AccumT; when it also matches MacT the operand cast is a no-op.
+        // MacT: K-loop multiply-accumulate type. The A/B shadow copies, the tile
+        // registers and the K-loop sums (including the MX block scaling) are in it;
+        // each finished sum is converted to AccumT once, before the epilogue.
+        // Default matches AccumT, making that conversion a no-op.
+        template <typename AccumT = float, typename OperandMathOpT = AccumT, typename MacT = AccumT>
         void solveCPUFast(ContractionProblemGemm const& problem,
                           ContractionInputs const&      inputs)
         {
@@ -1448,20 +1454,20 @@ namespace TensileLite
             size_t strideBatchC = problem.c().strides()[problem.batchIndices()[0].d];
             size_t strideBatchD = problem.d().strides()[problem.batchIndices()[0].d];
 
-            // 4. Shadow copies in AccumT.
+            // 4. Shadow copies: A and B in MacT, everything else in AccumT.
             //
             // For A and B, also pass the compute-input type so the shadow is
             // pre-quantized to mirror the GPU MFMA / slow-path semantics when
             // storage is wider than the MAC input (e.g. Half storage with F8
             // compute-input). C/D never have a separate MAC-input type.
-            ShadowBuffer<AccumT> shadowA(inputs.a,
-                                         problem.a().dataType(),
-                                         problem.a().totalAllocatedElements(),
-                                         problem.computeInputTypeA());
-            ShadowBuffer<AccumT> shadowB(inputs.b,
-                                         problem.b().dataType(),
-                                         problem.b().totalAllocatedElements(),
-                                         problem.computeInputTypeB());
+            ShadowBuffer<MacT> shadowA(inputs.a,
+                                       problem.a().dataType(),
+                                       problem.a().totalAllocatedElements(),
+                                       problem.computeInputTypeA());
+            ShadowBuffer<MacT> shadowB(inputs.b,
+                                       problem.b().dataType(),
+                                       problem.b().totalAllocatedElements(),
+                                       problem.computeInputTypeB());
             ShadowBuffer<AccumT> shadowC(
                 inputs.c, problem.c().dataType(), problem.c().totalAllocatedElements());
 
@@ -1562,8 +1568,8 @@ namespace TensileLite
 #pragma omp parallel for collapse(3)
             for(size_t b = 0; b < sizeBatch; ++b)
             {
-                const AccumT* curBatchA = shadowA.data() + (b * strideBatchA);
-                const AccumT* curBatchB = shadowB.data() + (b * strideBatchB);
+                const MacT*   curBatchA = shadowA.data() + (b * strideBatchA);
+                const MacT*   curBatchB = shadowB.data() + (b * strideBatchB);
                 const AccumT* curBatchC = shadowC.data() + (b * strideBatchC);
                 AccumT*       curBatchD = ptrD + (b * strideBatchD);
 
@@ -1579,9 +1585,9 @@ namespace TensileLite
                     {
                         auto n0 = n * BLOCK_N;
 
-                        std::array<AccumT, BLOCK_M * BLOCK_K> aReg = {0};
-                        std::array<AccumT, BLOCK_K * BLOCK_N> bReg = {0};
-                        std::array<AccumT, BLOCK_M * BLOCK_N> cReg = {0};
+                        std::array<MacT, BLOCK_M * BLOCK_K> aReg = {0};
+                        std::array<MacT, BLOCK_K * BLOCK_N> bReg = {0};
+                        std::array<MacT, BLOCK_M * BLOCK_N> cReg = {0};
 
                         if(hasMX)
                         {
@@ -1608,7 +1614,7 @@ namespace TensileLite
                                                                     strideNB,
                                                                     strideKB);
 
-                                std::array<AccumT, BLOCK_M * BLOCK_N> tilePartial = {0};
+                                std::array<MacT, BLOCK_M * BLOCK_N> tilePartial = {0};
                                 innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K, OperandMathOpT>(
                                     aReg.data(), bReg.data(), tilePartial.data());
 
@@ -1661,7 +1667,7 @@ namespace TensileLite
                             }
                         }
 
-                        // Copy from cReg back.
+                        // Copy from cReg back, converting each sum from MacT to AccumT.
                         for(size_t nn = 0; nn < BLOCK_N; ++nn)
                         {
                             for(size_t mm = 0; mm < BLOCK_M; ++mm)
@@ -1671,7 +1677,7 @@ namespace TensileLite
                                 if(global_n < sizeN && global_m < sizeM)
                                 {
                                     size_t idxD     = global_n * strideND + global_m;
-                                    curBatchD[idxD] = cReg[mm * BLOCK_N + nn];
+                                    curBatchD[idxD] = static_cast<AccumT>(cReg[mm * BLOCK_N + nn]);
                                 }
                             }
                         }
