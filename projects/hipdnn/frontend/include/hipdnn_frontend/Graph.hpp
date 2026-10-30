@@ -299,7 +299,8 @@ protected:
         plan.executionPlanDesc
             = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(executionPlan);
 
-        // A deserialized compiled plan is finalized by construction and can be re-serialized.
+        // A deserialized compiled plan is finalized by construction. Saving it again returns the
+        // plan bytes the backend kept at load; the plan is not serialized again.
         auto engineId = detail::getNullableAttrScalar<int64_t>(
             plan.executionPlanDesc->get(),
             HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT,
@@ -2766,6 +2767,11 @@ public:
      * If the graph has not been lowered to a backend descriptor, it will be
      * auto-lowered before serialization.
      *
+     * When the graph holds a finalized execution plan whose engine supports plan
+     * serialization, the plan is saved with the graph in one graph-and-plan container.
+     * Otherwise only the graph is saved. A plan loaded from bytes is saved as the plan
+     * bytes it was loaded from, unchanged; see serialize_compiled_plan().
+     *
      * @param[out] data The serialized binary data.
      * @return Error indicating success or failure.
      */
@@ -2778,6 +2784,7 @@ public:
     /** @brief Serialize a previously built graph to a binary byte vector.
      *
      * Requires a valid backend descriptor (call build_operation_graph() first).
+     * Embeds the execution plan as the non-const serialize() overload does.
      *
      * @param[out] data The serialized binary data.
      * @return Error indicating success or failure.
@@ -2788,6 +2795,8 @@ public:
     }
 
     /** @brief Serialize the graph to a binary byte vector, auto-lowering if needed.
+     *
+     * Embeds the execution plan as serialize() does.
      *
      * @return A pair of the serialized data and an Error.
      */
@@ -2800,6 +2809,8 @@ public:
     }
 
     /** @brief Serialize a previously built graph to a binary byte vector.
+     *
+     * Embeds the execution plan as serialize() does.
      *
      * @return A pair of the serialized data and an Error.
      */
@@ -2832,7 +2843,9 @@ public:
      * afterwards to finalize for execution.
      *
      * Any embedded execution plan is dropped (with a warning), as deserializing
-     * it needs a handle. Use from_binary(handle, data) to restore it.
+     * it needs a handle. Use from_binary(handle, data) to restore it. Loading the
+     * graph alone is also how to replace a plan saved by an older provider: build
+     * a new plan from the graph and save that.
      *
      * @param data The binary data to deserialize.
      * @return Error indicating success or failure.
@@ -2846,7 +2859,12 @@ public:
     /** @brief Deserialize a graph from a binary byte vector with handle.
      *
      * Unpacks the serialized graph, reconstructs frontend nodes and attributes,
-     * and finalizes the backend descriptor with the given handle.
+     * and finalizes the backend descriptor with the given handle. An embedded
+     * execution plan is restored too, and keeps a copy of its plan bytes, which
+     * include any GPU code object, for as long as the plan lives.
+     *
+     * An embedded execution plan is restored bound to the device of @p handle's
+     * stream, and executes only on handles whose stream is on that device.
      *
      * @param handle The hipDNN handle for finalization.
      * @param data The binary data to deserialize.
@@ -2908,7 +2926,9 @@ public:
      * afterwards to finalize for execution.
      *
      * Any embedded execution plan is dropped (with a warning), as deserializing
-     * it needs a handle. Use deserialize(handle, data) to restore it.
+     * it needs a handle. Use deserialize(handle, data) to restore it. Loading the
+     * graph alone is also how to replace a plan saved by an older provider: build
+     * a new plan from the graph and save that.
      *
      * @param data The binary data to deserialize.
      * @return Error indicating success or failure.
@@ -2920,7 +2940,16 @@ public:
 
     /** @brief Serialize the compiled backend execution plan to a byte vector.
      *
-     * Requires build_plans() or build() to have finalized the execution plan.
+     * Requires build_plans() or build() to have finalized the execution plan, or a plan loaded
+     * from bytes with deserialize(handle, data) or from_compiled_plan_binary().
+     *
+     * A loaded plan is not rebuilt when it is saved. It returns the exact plan bytes it was
+     * loaded from, which still hold the original kernel and the provider and format versions.
+     * Upgrading the provider does not change what a re-save writes. To pick up a newer kernel,
+     * build a new plan from the graph and save that; for a saved graph, from_binary(data)
+     * loads the graph alone. A plan loaded from a graph-and-plan container returns only its
+     * plan part, not the container.
+     *
      * The returned data is intended for from_compiled_plan_binary().
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -2931,7 +2960,7 @@ public:
         {
             return {ErrorCode::INVALID_VALUE,
                     "Graph has no finalized compiled execution plan. Call build() or "
-                    "build_plans() first."};
+                    "build_plans(), or load one with from_compiled_plan_binary()."};
         }
 
         size_t planByteSize = 0;
@@ -2955,7 +2984,11 @@ public:
         return {};
     }
 
-    /** @brief Serialize the compiled backend execution plan to a byte vector. */
+    /** @brief Serialize the compiled backend execution plan to a byte vector.
+     *
+     * Same rules as serialize_compiled_plan(): a loaded plan returns the plan bytes it was
+     * loaded from, unchanged.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::pair<std::vector<uint8_t>, Error> to_compiled_plan_binary() const
     {
@@ -2972,6 +3005,13 @@ public:
      * allowed on this lightweight plan-only object; graph-aware override
      * validation is skipped, so callers must supply overrides that are
      * consistent with the deserialized plan.
+     *
+     * The restored plan keeps a copy of its plan bytes, which include any GPU
+     * code object, for as long as it lives. A later save returns those bytes.
+     *
+     * The plan is bound to the device of @p handle's stream and executes only on
+     * handles whose stream is on that device. To run it on another device,
+     * deserialize the same bytes with a handle on that device.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error deserialize_compiled_plan(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
@@ -3003,6 +3043,9 @@ public:
      * allowed on this lightweight plan-only object; graph-aware override
      * validation is skipped, so callers must supply overrides that are
      * consistent with the deserialized plan.
+     *
+     * The restored plan keeps a copy of its plan bytes, which include any GPU
+     * code object, for as long as it lives. A later save returns those bytes.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error from_compiled_plan_binary(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
@@ -4828,6 +4871,11 @@ public:
 
     /**
      * @brief Execute the graph with tensor pointers mapped by UID
+     *
+     * The handle's stream must be on the device the plan was built or
+     * deserialized for; a handle on another device fails with
+     * HIPDNN_BACKEND_ERROR. To run on another device, serialize the plan and
+     * deserialize it with a handle on that device.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers

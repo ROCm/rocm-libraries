@@ -15,11 +15,10 @@ fixture is re-blessed.
 Covers the acceptance matrix: D64/D128 x bf16/fp16 x default/persistent x GQA, causal
 and full, plus sliding-window (W128/W256, both grids, D64/D128) and sinks (alone and
 combined). Every case is in the gfx942 supported set; varlen and ragged are rejected on
-gfx942, so unlike the gfx950 sibling they are absent here. The opt-in bf16 D128 CFVST
-and independent K-double-buffer (``lds_num_buffers=2``) and V-register-prefetch
+gfx942, so unlike the gfx950 sibling they are absent here. The opt-in bf16 D128
+K-double-buffer (``lds_num_buffers=2``) and V-register-prefetch
 (``v_reg_prefetch=True``) knobs are pinned individually and together on supported
-persistent grids (including LSE). CFVST alone also covers the nonpersistent grid;
-no shipped default reaches the new pipeline paths.
+persistent grids (including LSE); no shipped default reaches the new pipeline paths.
 
 Both D64 K-LDS layouts are pinned so drift on either is caught:
   * ``default_d64_*``  -- specs built DIRECTLY with ``lds_k_group_pad=0``: the UNPADDED
@@ -104,11 +103,18 @@ def _cases():
     def mk(**over):
         d = dict(base)
         d.update(over)
-        gfx942_only = d.get("emit_lse", False) or any(
-            k in d for k in ("use_cfvst", "lds_num_buffers", "v_reg_prefetch")
+        gfx942_only = (
+            d.get("emit_lse", False)
+            or d.get("window_wave_skip", False)
+            or any(k in d for k in ("lds_num_buffers", "v_reg_prefetch"))
         )
         spec_type = Gfx942AttentionDenseSpec if gfx942_only else AttentionDenseSpec
         return lambda: build_attention_dense(spec_type(**d), arch=_ARCH)
+
+    def mk_gfx942(**over):
+        d = dict(base)
+        d.update(over)
+        return lambda: build_attention_dense(Gfx942AttentionDenseSpec(**d), arch=_ARCH)
 
     def mk_dispatch(**over):
         """Build via the gfx942 dispatch spec so the case tracks the SHIPPED config
@@ -209,6 +215,30 @@ def _cases():
         "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": mk_dispatch(
             sliding_window=128
         ),
+        # Window spanning the query block (W >= block_m): three-phase band loop
+        # (window-bound / mask-free / causal-bound) on the persistent grid, and the
+        # narrow-band dispatch geometry for D64 bf16 (64-row blocks).
+        "attention_dense_gfx942/persist_swa_d128_bf16_w256": mk(
+            sliding_window=256,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+        ),
+        "attention_dense_gfx942/dispatch_swa_sink_d64_bf16_w128": mk_dispatch(
+            head_size=64, sliding_window=128, use_sinks=True
+        ),
+        # Wave-uniform skip of fully masked (wave, tile) pairs on the persistent grid
+        # (the dispatch D128 case above covers the one-CTA-per-block grid).
+        "attention_dense_gfx942/persist_swa_wskip_d128_fp16_w128": mk(
+            dtype="fp16",
+            sliding_window=128,
+            block_m=128,
+            block_n=32,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+            window_wave_skip=True,
+        ),
         # D64 SWA: structurally distinct builder arm (packed 2-rows/DMA + K row-group
         # pad + wpe=4 tune). Numeric coverage is in _SWA_COHORT
         "attention_dense_gfx942/swa_d64_bf16_w128": mk(
@@ -269,6 +299,30 @@ def _cases():
         # --- sinks + LSE: a keyless row keeps the sink seed (m = sink * LOG2E,
         #     l = 1), so its LSE is the sink logit rather than -inf. Same geometry
         #     as the LSE empty-window case. ---
+        # --- bottom-right causal (runtime diagonal offset) on both grids, the
+        #     diagonal split, the KV-segment split, and the dispatcher path. ---
+        "attention_dense_gfx942/br_d128_bf16": mk(
+            seqlen_kv=1024, causal_bottom_right=True
+        ),
+        "attention_dense_gfx942/br_persist_d128_bf16": mk(
+            seqlen_kv=1024,
+            causal_bottom_right=True,
+            persistent=True,
+            num_persistent=304,
+        ),
+        "attention_dense_gfx942/br_dsplit_d64_bf16": mk_gfx942(
+            head_size=64,
+            seqlen_kv=1024,
+            causal_bottom_right=True,
+            causal_diag_split=True,
+        ),
+        "attention_dense_gfx942/br_dsplit_kvs4_d128_bf16": mk_gfx942(
+            seqlen_kv=2048,
+            causal_bottom_right=True,
+            causal_diag_split=True,
+            kv_segments=4,
+            block_m=128,
+        ),
         "attention_dense_gfx942/lse_sink_persist_empty_window_d128_bf16": mk(
             emit_lse=True,
             use_sinks=True,
@@ -278,27 +332,22 @@ def _cases():
             seqlen_kv=64,
             sliding_window=64,
         ),
-        # --- Opt-in BF16 D128 CFVST with independently enabled K double buffering
-        #     and V register prefetch. CFVST alone can use the default grid; KDB/VPF
-        #     require the persistent grid. Pin both persistent decodes and LSE;
-        #     V LDS stays single-buffered. ---
-        "attention_dense_gfx942/cfvst_d128_bf16_causal": mk(use_cfvst=True),
+        # --- Opt-in K double buffering and V register prefetch on the BF16 D128
+        #     CFVST body (on by default), persistent grid only. Pin both persistent
+        #     decodes and LSE; V LDS stays single-buffered. ---
         "attention_dense_gfx942/persist_bthkvmin_kdb_d128_bf16_causal": mk(
-            use_cfvst=True,
             lds_num_buffers=2,
             persistent=True,
             num_persistent=304,
             persist_decode="bt_hkv_minor",
         ),
         "attention_dense_gfx942/persist_bthkvmin_vpf_d128_bf16_causal": mk(
-            use_cfvst=True,
             v_reg_prefetch=True,
             persistent=True,
             num_persistent=304,
             persist_decode="bt_hkv_minor",
         ),
         "attention_dense_gfx942/persist_bthkvmin_kdbvpf_d128_bf16_causal": mk(
-            use_cfvst=True,
             lds_num_buffers=2,
             v_reg_prefetch=True,
             persistent=True,
@@ -306,21 +355,18 @@ def _cases():
             persist_decode="bt_hkv_minor",
         ),
         "attention_dense_gfx942/persist_kdb_d128_bf16_qbmaj": mk(
-            use_cfvst=True,
             lds_num_buffers=2,
             persistent=True,
             num_persistent=304,
             persist_decode="qb_major",
         ),
         "attention_dense_gfx942/persist_vpf_d128_bf16_qbmaj": mk(
-            use_cfvst=True,
             v_reg_prefetch=True,
             persistent=True,
             num_persistent=304,
             persist_decode="qb_major",
         ),
         "attention_dense_gfx942/persist_kdbvpf_d128_bf16_qbmaj": mk(
-            use_cfvst=True,
             lds_num_buffers=2,
             v_reg_prefetch=True,
             persistent=True,
@@ -331,7 +377,6 @@ def _cases():
         # use the final row max independently for both pipeline levers.
         "attention_dense_gfx942/lse_persist_bthkvmin_kdb_d128_bf16": mk(
             emit_lse=True,
-            use_cfvst=True,
             lds_num_buffers=2,
             persistent=True,
             num_persistent=304,
@@ -339,7 +384,6 @@ def _cases():
         ),
         "attention_dense_gfx942/lse_persist_bthkvmin_vpf_d128_bf16": mk(
             emit_lse=True,
-            use_cfvst=True,
             v_reg_prefetch=True,
             persistent=True,
             num_persistent=304,
@@ -347,7 +391,6 @@ def _cases():
         ),
         "attention_dense_gfx942/lse_persist_bthkvmin_kdbvpf_d128_bf16": mk(
             emit_lse=True,
-            use_cfvst=True,
             lds_num_buffers=2,
             v_reg_prefetch=True,
             persistent=True,
@@ -356,7 +399,6 @@ def _cases():
         ),
         # The measured final optimization: KDB + VPF + K pad4 + diagonal split.
         "attention_dense_gfx942/persist_bthkvmin_kdbvpf_pad4_dsplit": mk(
-            use_cfvst=True,
             lds_num_buffers=2,
             v_reg_prefetch=True,
             lds_row_pad=4,
@@ -365,10 +407,9 @@ def _cases():
             num_persistent=304,
             persist_decode="bt_hkv_minor",
         ),
-        # Diagonal split with each pipeline lever alone, and BF16 CFVST alone with
-        # the split and on the persistent grid: each flag-on path has its own pin.
+        # Diagonal split with each pipeline lever alone: each flag-on path has its
+        # own pin.
         "attention_dense_gfx942/persist_bthkvmin_kdb_dsplit_d128_bf16": mk(
-            use_cfvst=True,
             lds_num_buffers=2,
             causal_diag_split=True,
             persistent=True,
@@ -376,19 +417,8 @@ def _cases():
             persist_decode="bt_hkv_minor",
         ),
         "attention_dense_gfx942/persist_bthkvmin_vpf_dsplit_d128_bf16": mk(
-            use_cfvst=True,
             v_reg_prefetch=True,
             causal_diag_split=True,
-            persistent=True,
-            num_persistent=304,
-            persist_decode="bt_hkv_minor",
-        ),
-        "attention_dense_gfx942/cfvst_dsplit_d128_bf16_causal": mk(
-            use_cfvst=True,
-            causal_diag_split=True,
-        ),
-        "attention_dense_gfx942/persist_bthkvmin_cfvst_d128_bf16_causal": mk(
-            use_cfvst=True,
             persistent=True,
             num_persistent=304,
             persist_decode="bt_hkv_minor",
@@ -449,7 +479,6 @@ def test_pipeline_golden_entries_cover_each_independent_mode_and_llvm_flavor():
     doc = json.loads(_GOLDEN.read_text())
     expected = set(_cases())
     required = {
-        "attention_dense_gfx942/cfvst_d128_bf16_causal",
         "attention_dense_gfx942/persist_bthkvmin_kdb_d128_bf16_causal",
         "attention_dense_gfx942/persist_bthkvmin_vpf_d128_bf16_causal",
         "attention_dense_gfx942/persist_bthkvmin_kdbvpf_d128_bf16_causal",
@@ -462,8 +491,6 @@ def test_pipeline_golden_entries_cover_each_independent_mode_and_llvm_flavor():
         "attention_dense_gfx942/persist_bthkvmin_kdbvpf_pad4_dsplit",
         "attention_dense_gfx942/persist_bthkvmin_kdb_dsplit_d128_bf16",
         "attention_dense_gfx942/persist_bthkvmin_vpf_dsplit_d128_bf16",
-        "attention_dense_gfx942/cfvst_dsplit_d128_bf16_causal",
-        "attention_dense_gfx942/persist_bthkvmin_cfvst_d128_bf16_causal",
     }
     assert required <= expected, sorted(required - expected)
     assert set(doc["flavors"]) == set(GOLDEN_PROFILE_FLAVORS)
@@ -513,7 +540,6 @@ def test_independent_pipeline_diag_split_changes_lowered_ir():
         persistent=True,
         num_persistent=304,
         persist_decode="bt_hkv_minor",
-        use_cfvst=True,
     )
     fingerprints = {}
     for nbuf, vpf, label in (

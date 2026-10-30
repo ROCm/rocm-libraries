@@ -171,15 +171,37 @@ class TestTuningSpace(unittest.TestCase):
         # use_kv_lds_swizzle x use_wave_page_id_load.
         self.assertEqual(len(specs), 40)
 
+    def test_3d_space_drops_kv_lds_swizzle_at_head_size_192(self):
+        """24 chunks per K/V row: the XOR swizzle would leave the row."""
+        for arch in ("gfx950", "gfx942"):
+            with self.subTest(arch=arch):
+                specs = _sampled(
+                    f"attention_{arch}_u3d_splitkv_seg64_t1xb",
+                    256,
+                    arch=arch,
+                    seqlen_q=1,
+                    seqlen_k=4096,
+                    hdim_q=192,
+                    hdim_v=192,
+                )
+                self.assertTrue(specs)
+                self.assertFalse(any(s.kernel_spec.use_kv_lds_swizzle for s in specs))
+
     def test_3d_cache_policy_base_follows_the_problem(self):
         """The 3D builder resolves the K/V cache policy per problem
         (``_kv_cache_policy_3d``): restating it names the default kernel, the
         other value stays reachable, and every id records the policy built."""
         for arch in ("gfx950", "gfx942"):
-            for seqlen_q, auto in ((1, "stream"), (1024, "all")):
-                with self.subTest(arch=arch, seqlen_q=seqlen_q):
+            # Decode streams K/V past the caches only when it exceeds the
+            # last-level cache (64 x 4096 tokens x 8 heads here, not 1 x 4096).
+            for seqlen_q, batch, auto in (
+                (1, 64, "stream"),
+                (1, 1, "all"),
+                (1024, 1, "all"),
+            ):
+                with self.subTest(arch=arch, seqlen_q=seqlen_q, batch=batch):
                     prefix = f"attention_{arch}_u3d_splitkv_seg64_t1xb"
-                    kw = dict(arch=arch, seqlen_q=seqlen_q, seqlen_k=4096)
+                    kw = dict(arch=arch, batch=batch, seqlen_q=seqlen_q, seqlen_k=4096)
                     specs = _sampled(prefix, 1000, **kw)
                     kernels = {repr(s.kernel_spec) for s in specs}
                     self.assertEqual(len(kernels), len(specs))
@@ -1036,6 +1058,9 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
                     dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1
                 ),
                 _gfx942_request(dtype="bf16", hdim_q=128, hdim_v=128),
+                # A wide sliding window keeps the default geometry, so the
+                # window-only knobs are swept from their defaults.
+                _gfx942_request(sliding_window=512),
             )
         )
         missing = _dense_swept_fields("gfx942") - changed
@@ -1048,12 +1073,12 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
 
         # New tuning choices must not alter the default kernel spec.
         self.assertIsNone(base.use_cfvst)
-        self.assertFalse(base.resolved_use_cfvst())
+        self.assertTrue(base.resolved_use_cfvst())
         self.assertEqual(base.lds_num_buffers, 1)
         self.assertFalse(base.v_reg_prefetch)
 
-        # Production-level tuning stays one knob at a time, pairing CFVST
-        # with a dependent knob when the dependent knob alone is illegal.
+        # Production-level tuning stays one knob at a time on the default
+        # CFVST body.
         specs = _gfx942_specs(req, level="production")
         modes = {
             (
@@ -1064,10 +1089,10 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
             for spec in specs
         }
         for expected in (
-            (False, 1, False),  # default
-            (True, 1, False),  # CFVST only
-            (True, 2, False),  # CFVST + KDB
-            (True, 1, True),  # CFVST + VPF
+            (True, 1, False),  # default
+            (False, 1, False),  # CFVST off
+            (True, 2, False),  # KDB
+            (True, 1, True),  # VPF
         ):
             self.assertIn(expected, modes)
         self.assertNotIn((True, 2, True), modes)
@@ -1075,14 +1100,9 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
         # Explicit tuning pins can opt into every legal independent mode,
         # including the combined mode outside the curated production sweep.
         choices = (
-            {"use_cfvst": True},
-            {"use_cfvst": True, "lds_num_buffers": 2},
-            {"use_cfvst": True, "v_reg_prefetch": True},
-            {
-                "use_cfvst": True,
-                "lds_num_buffers": 2,
-                "v_reg_prefetch": True,
-            },
+            {"lds_num_buffers": 2},
+            {"v_reg_prefetch": True},
+            {"lds_num_buffers": 2, "v_reg_prefetch": True},
         )
         for knobs in choices:
             with self.subTest(knobs=knobs):
@@ -1199,8 +1219,7 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
         """Tuning must not advertise configurations that the kernel gate rejects.
 
         Exercise the real public pinning path, including combinations with the
-        prerequisite CFVST explicitly enabled. Nonpersistent CFVST alone is
-        tested positively in a separate test.
+        prerequisite CFVST explicitly enabled or turned off.
         """
         bf16 = _gfx942_request(dtype="bf16", hdim_q=128, hdim_v=128)
         fp16 = _gfx942_request(dtype="fp16", hdim_q=128, hdim_v=128)
@@ -1215,7 +1234,7 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
                 (bf16, {"persistent": False, "use_cfvst": True, **mode})
                 for mode in modes
             ]
-            + [(bf16, mode) for mode in modes]  # Missing BF16 CFVST.
+            + [(bf16, {"use_cfvst": False, **mode}) for mode in modes]  # No CFVST.
             + [(fp16, {"use_cfvst": True, **mode}) for mode in modes]
             + [(bf16, {"use_cfvst": True, "block_n": 32, **mode}) for mode in modes]
             + [
@@ -1266,7 +1285,6 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
             nhead_k=8,
         )
         knobs = {
-            "use_cfvst": True,
             "lds_num_buffers": 2,
             "v_reg_prefetch": True,
             "lds_row_pad": 4,
@@ -1285,7 +1303,7 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
         ok, why = supports_gfx942(spec, arch="gfx942")
         self.assertTrue(ok, why)
         name = selected.kernel_name()
-        for marker in ("cfvst1", "kdb1", "vpf1", "krowpad4", "dsplit"):
+        for marker in ("kdb1", "vpf1", "krowpad4", "dsplit"):
             self.assertIn(marker, name)
         replay = tuning_spec_with_knobs(req, "gfx942_dense", dict(selected.knobs))
         self.assertEqual(replay.kernel_spec, spec)
