@@ -271,7 +271,8 @@ const std::vector<index_t> kTestedMN{1, 17, 63, 64, 127, 257};
 
 // K values with a partial last K tile: none is a multiple of 128, so none is a multiple of any K
 // tile of the TDM gtests (128 to 512); 2 to 92 are below one 128-deep K tile; all but 160 leave a
-// partial last 32-element scale block; 90 and 92 give FP4 rows of 45 and 46 bytes.
+// partial last 32-element scale block; 90 and 92 give FP4 rows of 45 and 46 bytes. Keep in sync
+// with kAlignedPitchKs and kNarrowPitchKs of test_mx_gemm_tdm_k_tail.cpp, which run these K.
 const std::vector<index_t> kKTailKs{2, 24, 80, 90, 92, 160, 240, 296, 488, 1840};
 
 TEST(MxGemmTdmGates, AcceptsTestedShapes)
