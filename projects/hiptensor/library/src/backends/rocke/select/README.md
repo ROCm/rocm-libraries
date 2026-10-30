@@ -11,6 +11,7 @@ A target without models selects by rocKE's rules.
 
 ```
 <target>/<class>.model     one model per problem class, for example gfx950/contraction.h.model
+<target>/<class>.check     check vectors of a format v3 model (its exporter's predictions)
 tools/gen_corpus.py        problem corpus of a training sweep
 tools/sweep_driver.cpp     runs a corpus through hipTensor and records every candidate's time
 tools/train_select.py      trains, exports and evaluates the models; proposes the next sweep round
@@ -28,7 +29,7 @@ whose recipe (`HIPTENSOR_ROCKE_F32_RECIPE`) is not `x6` look up `<class>.<recipe
 One line of text:
 
 ```
-v2;schema=<n>;routes=<route>,<route>,...;margin=<m>;features=<name>,<name>,...;trees=<n>|<tree>|...
+v3;schema=<n>;routes=<route>,...;margin=<m>;gemm=<sha256>|-;features=<name>,...;trees=<n>|<tree>|...
 tree: <leaves>;<split features>;<thresholds>;<left children>;<right children>;<leaf values>
 ```
 
@@ -38,8 +39,21 @@ the route of rocKE's tensor GETT planner); the model scores the candidates of th
 rocKE's rules order the others (the planner's route first, then a preferred candidate, then the
 rest after the scored ones). `margin`: the model's best candidate replaces the first scored
 candidate of rocKE's static order only when its prediction is lower by more than the margin (0: always;
-`train_select.py` chooses it per class on held-out problems). Models of the earlier format
-`v1;schema=<n>;features=...;trees=...` score the GEMM and strided GEMM routes only.
+`train_select.py` chooses it per class on held-out problems). `gemm`: a model whose features
+include `lg_pred_ns` (the predicted time of rocKE's tensor GETT planner, which depends on rocKE's
+GEMM selection models) names the SHA-256 of the `index.txt` of the planner's GEMM selection models
+it was trained with (`<pack dir>/gemm_models`, written by the pack build); the pack build fails when
+it differs from the index it writes, and the library does not use the model (the plan log says why)
+for a problem with a JIT candidate when it differs from the pack's (`-`: none named; such a model is
+not used with JIT candidates either). Models of the earlier formats are still read:
+`v2;schema=<n>;routes=...;margin=...;features=...;trees=...` (no planner models named) and
+`v1;schema=<n>;features=...;trees=...` (the GEMM and strided GEMM routes only).
+
+`<class>.check` (written by `train_select.py` next to every model it exports) holds feature vectors
+of the model's training rows (every route it scores among them), each with the exported model's
+prediction (the exporter's walk of the text) and LightGBM's. hipTensor's CPU test
+`rocke_select_model_test` walks every shipped model of format v3 on its vectors with the library's
+code: the first must match exactly, the second within the compact export's rounding.
 
 Split features index the model's feature list; the library maps those names to its feature schema
 (`kFeatureNames` in `../rocke_select.cpp`, version `kSelectSchema`). Schemas are append only, so a
@@ -52,9 +66,16 @@ does not compute, malformed routes or trees) is not used (the selection then fol
 and the plan log says why).
 
 Features are integers (log2 values in 1/256 steps, counts, tile sizes, kernel resources from the
-pack, the planner's route and predicted time of a JIT candidate), so the selection is the same on
-every host for the same problem, device and pack. A JIT candidate has the same features before and
-after its kernels are built.
+pack, the planner's route, predicted time and bytes moved of a JIT candidate), so the selection is
+the same on every host for the same problem, device and pack. A JIT candidate has the same features
+before and after its kernels are built. Schema 3 gives the JIT candidate its bytes moved (`lg_bytes`,
+`intensity_q8`; 0 in schema 2); a model of schema 2 is scored with the values of schema 2.
+
+The training corpus covers what the API admits: contractions with M and N modes and any number of
+contracted modes, including none (outer products). Contractions with a batch mode (a mode of A, B
+and D), a mode of one tensor only, or no M or no N mode are refused by `hiptensorCreateContraction`
+and `hiptensorCreateContractionTrinary` (`HIPTENSOR_STATUS_NOT_SUPPORTED`), so no model scores them;
+`train_select.py` refuses training rows with a batch mode.
 
 ## Retraining
 
@@ -68,7 +89,9 @@ with the target GPU and a hipTensor build with `-DHIPTENSOR_ENABLE_ROCKE_BACKEND
    from a space-filling sequence, splits them into modes and draws storage orders; `--aligned`
    makes a share of the extents multiples of 8 (rocKE's tensor GETT planner serves more of those),
    `--padded` pads a share of the strides; `--big` draws large problems (past the default design's
-   flop and tensor caps), which the models need for the large rows of hipTensor's benchmarks.
+   flop and tensor caps), which the models need for the large rows of hipTensor's benchmarks;
+   `--outer` makes a share of the problems outer products (no contracted mode); `--style api`
+   draws the problems of the API validation harness (packed tensors, 1-3 modes per group).
 2. Build the driver against the library (`tools/sweep_driver.cpp` uses the public API only) and time
    every candidate of every problem cold (a cache-evicting read before each timed call):
    `HIPTENSOR_BACKEND=rocke HIPTENSOR_BACKEND_FALLBACK=0 HIPTENSOR_ROCKE_SELECT_DUMP=dump.jsonl
@@ -77,10 +100,13 @@ with the target GPU and a hipTensor build with `-DHIPTENSOR_ENABLE_ROCKE_BACKEND
    output agrees with the f64 route's. (Without `--cold`, `HIPTENSOR_ALGO_DEFAULT_PATIENT` plans
    with `HIPTENSOR_ROCKE_AUTOTUNE_TOPK=all` time the candidates in the library, back to back.)
 3. Train and export: `python tools/train_select.py train --dumps 'dump*.jsonl' --cold
-   'cold*.jsonl' --calib 'dump_round1*.jsonl' --arch <target> --models . --report report.json`.
+   'cold*.jsonl' --calib 'dump_round1*.jsonl' --arch <target> --models . --report report.json
+   --gemm-digest <sha256 of the build's share/hiptensor/rocke/<target>/gemm_models/index.txt>`.
    The model size, objective and margin are chosen on the held-out folds of the space-filling
-   round's problems (`--calib`; the model-guided rounds oversample decision boundaries). It drops
-   candidates whose
+   round's problems (`--calib`; the model-guided rounds oversample decision boundaries); a problem
+   with a JIT candidate also trains without it (the candidates of a `HIPTENSOR_JIT_MODE_NONE` plan),
+   and `--ensemble K` averages K models on bootstrap samples (the shipped gfx950 `contraction.h`
+   model). It drops candidates whose
    output disagrees, reports the selection efficiency of the model on problems held out by group
    k-fold next to rocKE's rules, and checks that the exported trees reproduce LightGBM's
    predictions exactly.

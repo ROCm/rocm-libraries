@@ -244,11 +244,21 @@ bool plan_gett(const std::vector<std::string>& modes_a,
         if(contains(modes_b, x) && !contains(modes_d, x))
             k_modes.push_back(x);
     {
+        /* every mode of D is an M or N mode, and every mode of A (of B) an M (N) or K mode: a
+         * batch / Hadamard mode or a mode of one operand only is refused, not dropped */
         std::set<std::string> mn(m_modes.begin(), m_modes.end());
         mn.insert(n_modes.begin(), n_modes.end());
+        std::set<std::string> mk(m_modes.begin(), m_modes.end());
+        mk.insert(k_modes.begin(), k_modes.end());
+        std::set<std::string> nk(n_modes.begin(), n_modes.end());
+        nk.insert(k_modes.begin(), k_modes.end());
         std::set<std::string> dset(modes_d.begin(), modes_d.end());
-        if(mn != dset || k_modes.empty() || m_modes.empty() || n_modes.empty())
-            return fail("not a plain bilinear contraction (batch / Hadamard modes unsupported)");
+        std::set<std::string> aset(modes_a.begin(), modes_a.end());
+        std::set<std::string> bset(modes_b.begin(), modes_b.end());
+        if(mn != dset || mk != aset || nk != bset || k_modes.empty() || m_modes.empty()
+           || n_modes.empty())
+            return fail("not a plain bilinear contraction (batch / Hadamard modes and modes of one "
+                        "operand only unsupported)");
     }
     /* min(modes_d, key=sd): the first of the smallest */
     std::string d_fast = modes_d[0];

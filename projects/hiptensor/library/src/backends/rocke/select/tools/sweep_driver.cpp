@@ -47,8 +47,11 @@
 //               ||D_ref|| over the elements finite in D_ref, bad = elements finite in D_ref and
 //               not in D. train_select.py takes the cold times and drops disagreeing candidates.
 //
+//   --tag-suffix S  the problems' tags (dump and cold lines) are "<id>S", e.g. "#none" for a
+//               HIPTENSOR_JIT_MODE_NONE sweep of problems whose JIT-mode sweep has the plain ids.
+//
 // usage: sweep_driver SPECS [--start I] [--end J] [--deadline S] [--progress F] [--default]
-//                     [--jit] [--cold R --cold-out FILE] [--flush-mb MB]
+//                     [--jit] [--cold R --cold-out FILE] [--flush-mb MB] [--tag-suffix S]
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <hiptensor/hiptensor.h>
@@ -590,11 +593,12 @@ int main(int argc, char** argv)
     {
         std::fprintf(stderr,
                      "usage: %s SPECS [--start I] [--end J] [--deadline S] [--progress F] "
-                     "[--default] [--jit] [--cold R --cold-out FILE] [--flush-mb MB]\n",
+                     "[--default] [--jit] [--cold R --cold-out FILE] [--flush-mb MB] "
+                     "[--tag-suffix S]\n",
                      argv[0]);
         return 2;
     }
-    std::string specs = argv[1], progress, coldOut;
+    std::string specs = argv[1], progress, coldOut, tagSuffix;
     long        start = 0, end = 1L << 40;
     double      deadline   = 1e9;
     bool        defaultRun = false;
@@ -620,6 +624,8 @@ int main(int argc, char** argv)
             coldOut = argv[++i];
         else if(a == "--flush-mb")
             cold.flushB = size_t(std::atol(argv[++i])) << 20;
+        else if(a == "--tag-suffix")
+            tagSuffix = argv[++i];
     }
     if(cold.reps > 0)
     {
@@ -729,7 +735,7 @@ int main(int argc, char** argv)
         }
         if(st == HIPTENSOR_STATUS_SUCCESS)
         {
-            std::string tag = std::to_string(id);
+            std::string tag = std::to_string(id) + tagSuffix;
             setenv("HIPTENSOR_ROCKE_SELECT_DUMP_TAG", tag.c_str(), 1);
             if(!dumpPath.empty())
                 setenv("HIPTENSOR_ROCKE_SELECT_DUMP", dumpPath.c_str(), 1);

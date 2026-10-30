@@ -747,6 +747,7 @@ namespace
         std::string launches; // kernel families of the program's launches, '+'-separated
         uint64_t    estimate = 0;
         uint64_t    required = 0;
+        std::string line; // the whole selection log line
     };
 
     std::string field(std::string const& line, std::string const& name)
@@ -779,6 +780,7 @@ namespace
         out.pick       = field(line, "Pick");
         out.source     = field(line, "Source");
         out.launches   = field(line, "Launches");
+        out.line       = line;
         // "Source: <source> (<reason>), Pick: ..."
         auto const open  = line.find("(", line.find("Source: "));
         auto const close = line.rfind("), Pick: ");
@@ -926,6 +928,8 @@ namespace
         int groupRank = 0;
         // > 0: the extent of m0, n0 and k0 (groupRank)
         int64_t groupFirst = 0;
+        // an outer product: no contracted mode, A = m p, B = n, D = n m p (groupRank 0)
+        bool outer = false;
     };
 
     void runContraction(ContractionCase const& c,
@@ -951,7 +955,7 @@ namespace
         }
         LogCapture log;
         // modes: m0 m1 n0 k0 k1 with random extents, some not multiples of any tile (hipTensor
-        // refuses batched modes, shared by A, B and D)
+        // refuses batched modes, shared by A, B and D); with c.outer no contracted mode
         std::vector<int64_t>       pick = {1, 3, 5, 8, 17, 33, 64, 70};
         std::map<int32_t, int64_t> ext;
         std::vector<int32_t>       ma, mb, md, kmodes;
@@ -991,6 +995,12 @@ namespace
             mb     = {'k', 'n', 'q'};
             md     = {'n', 'm', 'p'};
             kmodes = {'k', 'q'};
+            if(c.outer)
+            {
+                ma     = {'m', 'p'};
+                mb     = {'n'};
+                kmodes = {};
+            }
             std::shuffle(ma.begin(), ma.end(), rng);
             std::shuffle(mb.begin(), mb.end(), rng);
             std::shuffle(md.begin(), md.end(), rng);
@@ -1171,6 +1181,17 @@ namespace
                     {r.type, r.compute, seed++, true, true, false, HIPTENSOR_OP_IDENTITY, 5});
                 out.push_back(
                     {r.type, r.compute, seed++, true, false, true, HIPTENSOR_OP_IDENTITY, 6});
+            }
+        }
+        // outer products (no contracted mode), scale and bilinear
+        seed = 190;
+        for(auto const& r : rows)
+        {
+            for(bool scale : {false, true})
+            {
+                ContractionCase o{r.type, r.compute, seed++, true, !scale, scale};
+                o.outer = true;
+                out.push_back(o);
             }
         }
         return out;
@@ -3665,6 +3686,17 @@ namespace
                 out.push_back({r.type, r.compute, seed++, true, !scale, scale, r.opA});
             }
         }
+        // outer products (no contracted mode): every route
+        seed = 1350;
+        for(auto const& r : rows)
+        {
+            if(r.opA == HIPTENSOR_OP_IDENTITY)
+            {
+                ContractionCase c{r.type, r.compute, seed++, true, seed % 2 == 0, seed % 2 != 0};
+                c.outer = true;
+                out.push_back(c);
+            }
+        }
         return out;
     }
 
@@ -3937,7 +3969,11 @@ namespace
                  "bad_routes", "v2;schema=2;routes=3,x;margin=0;features=route;trees=1|" + tree},
              {"bad_route_id", "v2;schema=2;routes=3,99;margin=0;features=route;trees=1|" + tree},
              {"later_schema",
-              "v2;schema=3;routes=3,6,7,8,9;margin=0;features=route;trees=1|" + tree},
+              "v2;schema=4;routes=3,6,7,8,9;margin=0;features=route;trees=1|" + tree},
+             {"v3_bad_gemm",
+              "v3;schema=3;routes=3,6,7,8,9;margin=0;gemm=abc;features=route;trees=1|" + tree},
+             {"v3_no_gemm_field",
+              "v3;schema=3;routes=3,6,7,8,9;margin=0;features=route;trees=1|" + tree},
              {"unknown_feature",
               "v2;schema=2;routes=3,6,7,8,9;margin=0;features=nosuch;trees=1|" + tree},
              {"no_routes_field", "v2;schema=2;features=route;trees=1|" + tree},
@@ -3968,6 +4004,12 @@ namespace
             EXPECT_EQ(none.pick, rules.pick);
             EXPECT_EQ(none.source, rules.source);
         }
+        // format v3 (the planner's GEMM selection models named; a model that does not read the
+        // planner's predicted time names none): as v2
+        auto v3 = with("v3", "v3;schema=3;routes=3,6,7,8,9;margin=0;gemm=-;features=route;trees=1|"
+                                 + tree);
+        EXPECT_EQ(v3.source, "MODEL") << v3.reason;
+        EXPECT_EQ(v3.pick, v2.pick);
     }
 
     // The workspace is known at plan creation: MIN <= DEFAULT <= MAX, the plan's required

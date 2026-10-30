@@ -41,7 +41,12 @@
 //    the kernel cache; hiptensorWriteKernelCacheToFile / HIPTENSOR_KERNEL_CACHE_DIR carry the
 //    kernels to a fresh process that may not compile;
 //  - a kernel that cannot be built (compiling disabled, the time budget spent, missing or
-//    damaged selection models) leaves the plan on the next candidate with the same results.
+//    damaged selection models) leaves the plan on the next candidate with the same results;
+//  - the boundary to rocKE's planner: every problem of rocKE's tuned and AOT GETT route tables,
+//    described to hipTensor with other mode labels, in other descriptor orders and with extent-1
+//    modes, and planned by the JIT with the tables off (HIPTENSOR_ROCKE_GETT_TABLES=off), takes
+//    exactly the table's launches (kernels, grids, blocks, pack steps, arguments) as rocKE's C++
+//    engine (linked into this test) plans them for the table entry.
 // RockeGettJitLatency.DISABLED_Report prints the JIT's costs (planner, cold compile per kernel,
 // cache hits).
 
@@ -63,6 +68,7 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <numeric>
 #include <random>
 #include <set>
 #include <string>
@@ -74,6 +80,9 @@
 #endif
 
 #include "api_test_helpers.hpp"
+
+// rocKE's C++ engine (the route tables and their plans; this test links hiptensor_rocke_core)
+#include "rocke/instance_tensor_gett.h"
 
 namespace
 {
@@ -907,6 +916,39 @@ namespace
                        {"N0", "K1", "K0"},
                        {"M0", "N0"},
                        {{"K0", 512}, {"K1", 10}, {"M0", 320}, {"N0", 768}}});
+        // operands that already are the K-contiguous GETT's copies (packed in its operand mode
+        // order): the planner runs that GETT on the user's A and B in place
+        // (single/tensor_gett_kc; found with rocKE's planner, as the C++ planner decides):
+        // two modes each; several modes with padded strides; extent-1 modes and padding
+        out.push_back({"kc_in_place_f16_scale",
+                       HIPTENSOR_R_16F,
+                       false,
+                       {"p", "b"},
+                       {"o", "b"},
+                       {"p", "o"},
+                       {{"b", 64}, {"o", 1023}, {"p", 1248}}});
+        Problem kc2{"kc_in_place_bf16_bilinear_padded",
+                    HIPTENSOR_R_16BF,
+                    true,
+                    {"c", "h", "x", "e", "k"},
+                    {"a", "x", "e", "k"},
+                    {"c", "a", "h"},
+                    {{"a", 133}, {"c", 224}, {"e", 8}, {"h", 45}, {"k", 2}, {"x", 6}}};
+        kc2.sa = {{"k", 1}, {"e", 2}, {"x", 16}, {"h", 96}, {"c", 4320}};
+        kc2.sb = {{"k", 1}, {"e", 2}, {"x", 16}, {"a", 96}};
+        kc2.sd = {{"h", 1}, {"a", 48}, {"c", 6384}};
+        out.push_back(kc2);
+        Problem kc3{"kc_in_place_bf16_bilinear_unit_modes",
+                    HIPTENSOR_R_16BF,
+                    true,
+                    {"a", "k", "z", "m"},
+                    {"f", "x", "z", "g"},
+                    {"x", "g", "a", "m", "f", "k"},
+                    {{"a", 1}, {"f", 1}, {"g", 77}, {"k", 3}, {"m", 209}, {"x", 33}, {"z", 192}}};
+        kc3.sa = {{"z", 1}, {"m", 192}, {"k", 40128}, {"a", 240768}};
+        kc3.sb = {{"z", 1}, {"g", 192}, {"x", 14784}, {"f", 975744}};
+        kc3.sd = {{"k", 1}, {"f", 3}, {"m", 3}, {"a", 627}, {"g", 627}, {"x", 48279}};
+        out.push_back(kc3);
         return out;
     }
 
@@ -1083,7 +1125,8 @@ TEST(RockeGettJit, FixedRoutesExact)
     }
     if(plannerTarget())
     {
-        // MN single launch, the pack hybrid, and the K-contiguous route
+        // MN single launch, the pack hybrid, and the K-contiguous route (packed, and on the user
+        // operands in place)
         std::set<std::string> kinds;
         for(auto const& r : routes)
         {
@@ -1093,16 +1136,18 @@ TEST(RockeGettJit, FixedRoutesExact)
         EXPECT_TRUE(kinds.count("single") && kinds.count("pack_hybrid")
                     && kinds.count("tensor_gett_mn") && kinds.count("tensor_gett_kc"))
             << ::testing::PrintToString(routes);
+        EXPECT_TRUE(routes.count("single/tensor_gett_kc") && routes.count("pack_hybrid/tensor_gett_kc"))
+            << ::testing::PrintToString(routes);
     }
 }
 
-// Seeded random problems (HIPTENSOR_ROCKE_TEST_GETT_JIT_PROBLEMS, default 32; seed base
+// Seeded random problems (HIPTENSOR_ROCKE_TEST_GETT_JIT_PROBLEMS, default 64; seed base
 // HIPTENSOR_ROCKE_TEST_GETT_JIT_SEED): whatever route a plan takes, every output is exact; on
 // gfx950 a share of them takes the JIT route, and its plans are exact with the scale and poison
 // variants.
 TEST(RockeGettJit, RandomProblemsExact)
 {
-    int const                  n    = envInt("HIPTENSOR_ROCKE_TEST_GETT_JIT_PROBLEMS", 32);
+    int const                  n    = envInt("HIPTENSOR_ROCKE_TEST_GETT_JIT_PROBLEMS", 64);
     uint64_t const             base = uint64_t(envInt("HIPTENSOR_ROCKE_TEST_GETT_JIT_SEED", 9100));
     int                        jit  = 0;
     std::map<std::string, int> routes;
@@ -1359,6 +1404,12 @@ TEST(RockeGettJitCacheDir, SharedAcrossProcesses)
     EXPECT_EQ(o.compiled, o.kernels);
     {
         ScopedEnvironmentVariable nocompile("HIPTENSOR_ROCKE_JIT_NO_COMPILE", "1");
+        ScopedEnvironmentVariable child("HIPTENSOR_ROCKE_TEST_GETT_JIT_CHILD", "dir");
+        EXPECT_TRUE(runChild("RockeGettJitChild.ServesFromTheDirectory"));
+    }
+    // a spent compile budget still serves the directory's kernels (only compiling stops)
+    {
+        ScopedEnvironmentVariable budget("HIPTENSOR_JIT_MAX_MS", "0.000000001");
         ScopedEnvironmentVariable child("HIPTENSOR_ROCKE_TEST_GETT_JIT_CHILD", "dir");
         EXPECT_TRUE(runChild("RockeGettJitChild.ServesFromTheDirectory"));
     }
@@ -1764,7 +1815,156 @@ TEST(RockeGettJitSelection, FeaturesBeforeAndAfterTheBuild)
     EXPECT_EQ(features(pending[0]).find("\"gett_kind\":0"), std::string::npos) << pending[0];
     EXPECT_EQ(features(pending[0]).find("\"steps\":0"), std::string::npos) << pending[0];
     EXPECT_EQ(features(pending[0]).find("\"lg_pred_ns\":0"), std::string::npos) << pending[0];
+    // schema 3: the bytes the route moves (packs, operands, D, C)
+    EXPECT_EQ(features(pending[0]).find("\"lg_bytes\":0"), std::string::npos) << pending[0];
+    EXPECT_EQ(features(pending[0]).find("\"intensity_q8\":0"), std::string::npos) << pending[0];
     std::remove(dump.c_str());
+}
+
+// The plan's mode is a feature of every candidate (schema 3, jit_mode): 1 when the plan
+// specializes its elementwise launches with the JIT (HIPTENSOR_JIT_MODE_DEFAULT), 0 with
+// HIPTENSOR_JIT_MODE_NONE and with the JIT turned off (HIPTENSOR_ROCKE_JIT=off); the candidates'
+// times differ between the modes (the GEMM routes' packing and epilogue launches).
+TEST(RockeGettJitSelection, PlanModeIsAFeature)
+{
+    std::string const dump = tempPath("mode_dump.jsonl");
+    std::remove(dump.c_str());
+    ScopedEnvironmentVariable out("HIPTENSOR_ROCKE_SELECT_DUMP", dump.c_str());
+    auto const                p = fixedProblems()[1];
+    RunOptions                opt;
+    opt.variants = {{"plain", 1.0, -2.0, false, false, 0, 0}};
+    struct Mode
+    {
+        char const*        tag;
+        hiptensorJitMode_t jit;
+        char const*        env; // HIPTENSOR_ROCKE_JIT
+        char const*        want;
+    };
+    for(auto const& m : {Mode{"mode_none", HIPTENSOR_JIT_MODE_NONE, nullptr, "\"jit_mode\":0"},
+                         Mode{"mode_default", HIPTENSOR_JIT_MODE_DEFAULT, nullptr, "\"jit_mode\":1"},
+                         Mode{"mode_off", HIPTENSOR_JIT_MODE_DEFAULT, "off", "\"jit_mode\":0"}})
+    {
+        ScopedEnvironmentVariable tag("HIPTENSOR_ROCKE_SELECT_DUMP_TAG", m.tag);
+        ScopedEnvironmentVariable jit("HIPTENSOR_ROCKE_JIT", m.env);
+        opt.jit = m.jit;
+        auto o  = runProblem(p, opt);
+        EXPECT_TRUE(o.exact) << m.tag;
+        auto const lines = dumpLines(dump, m.tag, "");
+        ASSERT_FALSE(lines.empty()) << m.tag;
+        for(auto const& l : lines)
+        {
+            EXPECT_NE(l.find(m.want), std::string::npos) << m.tag << ": " << l;
+        }
+    }
+    std::remove(dump.c_str());
+}
+
+// A v3 selection model that reads the planner's predicted time (lg_pred_ns) names the digest of
+// the planner's GEMM selection models it was trained with (the SHA-256 of
+// <pack dir>/gemm_models/index.txt): with the pack's digest it ranks the candidates; with another
+// digest (or none) it is not used for a problem with a JIT candidate (the rules then put the
+// planner's route first) and the plan log says why.
+TEST(RockeGettJitSelection, ModelNamesThePlannersModels)
+{
+    if(!plannerTarget())
+    {
+        GTEST_SKIP() << "the planner serves gfx950";
+    }
+    if(selfExecutable().empty())
+    {
+        GTEST_SKIP() << "needs /proc/self/exe";
+    }
+    ScopedEnvironmentVariable select("HIPTENSOR_ROCKE_SELECT", nullptr);
+    // the pack's planner models: their index's digest
+    std::string pack;
+    {
+        ScopedEnvironmentVariable child("HIPTENSOR_ROCKE_TEST_GETT_JIT_CHILD", "print");
+        FILE* pipe = popen(("\"" + selfExecutable()
+                            + "\" --gtest_filter=RockeGettJitChild.PrintsThePack")
+                               .c_str(),
+                           "r");
+        ASSERT_NE(pipe, nullptr);
+        std::string printed;
+        char        buf[4096];
+        while(std::fgets(buf, sizeof(buf), pipe) != nullptr)
+        {
+            printed += buf;
+        }
+        ASSERT_EQ(pclose(pipe), 0) << printed;
+        auto const at = printed.find("ROCKE-PACK-PATH=");
+        ASSERT_NE(at, std::string::npos) << printed;
+        pack = printed.substr(at + 16);
+        pack = pack.substr(0, pack.find('\n'));
+    }
+    std::string const index = pack.substr(0, pack.find_last_of('/')) + "/gemm_models/index.txt";
+    FILE*             sum   = popen(("sha256sum \"" + index + "\"").c_str(), "r");
+    ASSERT_NE(sum, nullptr);
+    char digest[65] = {};
+    ASSERT_EQ(std::fscanf(sum, "%64s", digest), 1);
+    ASSERT_EQ(pclose(sum), 0) << index;
+
+    auto const p = fixedProblems()[0];
+    RunOptions opt;
+    opt.variants = {{"plain", 1.0, -2.0, false, false, 0, 0}};
+    auto with    = [&](std::string const& name, std::string const& gemm) {
+        // the direct GETT (8) predicted fastest; lg_pred_ns read (a tree that never splits on it)
+        auto const text = "v3;schema=3;routes=3,6,7,8,11;margin=0;gemm=" + gemm
+                          + ";features=route,lg_pred_ns;trees=1|" + favourRoute(8);
+        ScopedEnvironmentVariable models("HIPTENSOR_ROCKE_SELECT_MODELS",
+                                         writeSelectModel(name, "contraction.h", text).c_str());
+        LogCapture                log;
+        auto                      o = runProblem(p, opt);
+        return std::make_pair(o, log.last("rocKE selection:"));
+    };
+    auto [same, sameLine] = with("gemm_same", digest);
+    EXPECT_EQ(same.source, "MODEL") << sameLine;
+    EXPECT_EQ(same.pick.rfind("dgett:", 0), 0u) << sameLine;
+    EXPECT_TRUE(same.exact);
+    for(auto const& [name, gemm] : {std::pair<std::string, std::string>{"gemm_other", std::string(64, 'a')},
+                                     {"gemm_none", "-"}})
+    {
+        auto [o, line] = with(name, gemm);
+        EXPECT_TRUE(o.jit) << name << ": " << line;
+        EXPECT_EQ(o.source, "TUNED") << name << ": " << line;
+        EXPECT_NE(line.find("trained with other GEMM selection models"), std::string::npos)
+            << name << ": " << line;
+        EXPECT_TRUE(o.exact);
+    }
+}
+
+// The JIT candidate's bytes moved are a feature from schema 3 (lg_bytes, intensity_q8); a model
+// of schema 2 sees them as that schema had them (0). A model on lg_bytes alone (no candidate moves
+// 0 bytes but the JIT candidate under schema 2): with schema 2 the JIT candidate is predicted
+// worst and not picked; with schema 3 every candidate ties and the rules' order (the planner's
+// route first) stands.
+TEST(RockeGettJitSelection, EarlierSchemaSeesItsFeatures)
+{
+    if(!plannerTarget())
+    {
+        GTEST_SKIP() << "the planner serves gfx950";
+    }
+    ScopedEnvironmentVariable select("HIPTENSOR_ROCKE_SELECT", nullptr);
+    auto const                p = fixedProblems()[0];
+    RunOptions                opt;
+    opt.variants = {{"plain", 1.0, -2.0, false, false, 0, 0}};
+    // lg_bytes <= 0.5: 1 (worst), else 0
+    std::string const tree = "2;0;0.5;-1;-2;1 0";
+    auto              with = [&](std::string const& name, int schema) {
+        auto const text = "v3;schema=" + std::to_string(schema)
+                          + ";routes=3,6,7,8,11;margin=0;gemm=-;features=lg_bytes;trees=1|"
+                          + tree;
+        ScopedEnvironmentVariable models("HIPTENSOR_ROCKE_SELECT_MODELS",
+                                         writeSelectModel(name, "contraction.h", text).c_str());
+        return runProblem(p, opt);
+    };
+    auto two = with("schema2_bytes", 2);
+    EXPECT_EQ(two.source, "MODEL") << two.reason;
+    EXPECT_FALSE(two.jit) << two.pick;
+    EXPECT_TRUE(two.exact);
+    auto three = with("schema3_bytes", 3);
+    EXPECT_EQ(three.source, "MODEL") << three.reason;
+    EXPECT_TRUE(three.jit) << three.pick;
+    EXPECT_TRUE(three.exact);
 }
 
 // The JIT candidate's route feature (gett_kind) names the route rocKE's planner chose: 1 MN-layout
@@ -1818,8 +2018,10 @@ TEST(RockeGettJitSelection, RouteFeatureNamesThePlannersRoute)
             << o.route << ": " << lines[0];
         seen.insert(it->second);
     }
-    // the fixed problems take MN-layout, pack hybrid, K-contiguous and ring-body routes
-    EXPECT_GE(seen.size(), 3u);
+    // the fixed problems take MN-layout, pack hybrid, K-contiguous (packed and in place) and
+    // ring-body routes
+    EXPECT_GE(seen.size(), 4u);
+    EXPECT_TRUE(seen.count(5)) << "no plan took the K-contiguous GETT on the operands in place";
     std::remove(dump.c_str());
 }
 
@@ -1837,6 +2039,277 @@ TEST(RockeGettJit, WorkspaceEstimate)
     auto o       = runProblem(p, opt);
     ASSERT_TRUE(o.jit) << o.pick;
     EXPECT_GT(o.workspace, 0u);
+}
+
+// ------------------------------------------------------------------ the boundary to rocKE
+
+namespace
+{
+    // The record of a route table entry's plan as rocKE's engine plans it, in the format of the
+    // pack's GETT route records (pack/rocke_pack_builder.cpp gettPlanDescriptor) and of the
+    // library's "rocKE GETT JIT plan" log line.
+    std::string tableRecord(rocke::gett::TablePlan const& plan)
+    {
+        auto launch = [](std::string const&                        kernel,
+                         int const*                                grid,
+                         int                                       block,
+                         std::map<std::string, std::string> const& binds) {
+            std::string out = "|k=" + kernel + ";g=" + std::to_string(grid[0]) + ","
+                              + std::to_string(grid[1]) + "," + std::to_string(grid[2])
+                              + ";b=" + std::to_string(block) + ";a=";
+            bool first = true;
+            for(auto const& [k, v] : binds)
+            {
+                out += (first ? "" : ",") + k + "=" + v;
+                first = false;
+            }
+            return out;
+        };
+        uint64_t              off = 0;
+        std::vector<uint64_t> offsets;
+        std::string           packs;
+        for(auto const& s : plan.packs)
+        {
+            packs += launch(s.spec.kernel_name(),
+                            s.grid,
+                            s.block,
+                            {{"X", s.operand + "+0"}, {"Y", "W+" + std::to_string(off)}});
+            offsets.push_back(off);
+            off += (uint64_t(s.workspace_bytes) + 255) / 256 * 256;
+        }
+        rocke::gett::Plan pl;
+        std::string       why;
+        if(!plan.gett.plan(&pl, &why))
+        {
+            return "no plan: " + why;
+        }
+        std::map<std::string, std::string> binds = {{"C", "O+0"},
+                                                    {"M", "#" + std::to_string(pl.M)},
+                                                    {"N", "#" + std::to_string(pl.N)},
+                                                    {"K", "#" + std::to_string(pl.K)},
+                                                    {"alpha", "@a"}};
+        if(plan.gett.knobs.bilinear)
+        {
+            binds["Cin"]  = "C+0";
+            binds["beta"] = "@b";
+        }
+        int src[2];
+        rocke::gett::gett_operand_sources(plan, src);
+        auto const ops = rocke::gett::launch_operands(plan.gett);
+        binds["A"] = src[0] >= 0 ? "W+" + std::to_string(offsets[size_t(src[0])]) : ops.first + "+0";
+        binds["B"]
+            = src[1] >= 0 ? "W+" + std::to_string(offsets[size_t(src[1])]) : ops.second + "+0";
+        int grid[3];
+        rocke::gett::tensor_gett_grid(plan.gett, grid);
+        return "v1;ws=" + std::to_string(off) + ";steps=" + std::to_string(plan.packs.size() + 1)
+               + packs
+               + launch(plan.gett.kernel_name(), grid, rocke::gett::tensor_gett_block(plan.gett), binds);
+    }
+
+    // The entry with its modes named as the request of the same memory layout is named
+    // canonically: x0, x1, ... by first appearance in D, A, B, each tensor from its fastest mode
+    // (the entries are packed row-major: the last mode is the fastest).
+    rocke::gett::TunedEntry canonicalEntry(rocke::gett::TunedEntry const& e)
+    {
+        std::map<std::string, std::string> names;
+        for(auto const* modes : {&e.modes_d, &e.modes_a, &e.modes_b})
+        {
+            for(auto it = modes->rbegin(); it != modes->rend(); ++it)
+            {
+                if(!names.count(*it))
+                {
+                    names[*it] = "x" + std::to_string(names.size());
+                }
+            }
+        }
+        rocke::gett::TunedEntry out = e;
+        out.extents.clear();
+        for(auto const& [m, x] : e.extents)
+        {
+            out.extents[names.at(m)] = x;
+        }
+        for(auto* modes : {&out.modes_a, &out.modes_b, &out.modes_d})
+        {
+            for(auto& m : *modes)
+            {
+                m = names.at(m);
+            }
+        }
+        return out;
+    }
+} // namespace
+
+// Every problem of rocKE's tuned and AOT GETT route tables, described to hipTensor (column-major
+// descriptors of the entry's packed layout; per problem one of: the plain description, other mode
+// labels, the descriptor modes listed in another order with their strides, an extent-1 mode in
+// every tensor), and planned by the contraction JIT with the tables off: the logged launches are
+// exactly the ones rocKE's C++ engine plans for the entry (table_plan; rocKE's tests check that
+// they are Python's and that the table entries are rocKE's product routes), with the modes named
+// as the planner request names them. So hipTensor's request of a contraction is the request
+// rocKE's pack builder plans for it: the same modes, order, extents and strides, and the same
+// decision of the planner (a tuned entry found by its key, an AOT entry re-planned).
+TEST(RockeGettJitBoundary, TablesPlanLikeRocke)
+{
+    if(!plannerTarget())
+    {
+        GTEST_SKIP() << "the planner serves gfx950";
+    }
+    int             device = 0;
+    hipDeviceProp_t props;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+    // the tables' entries were planned for the target's CU count (rocKE's arch_num_cus)
+    if(props.multiProcessorCount != 256)
+    {
+        GTEST_SKIP() << "the route tables were planned for 256 CUs, the device has "
+                     << props.multiProcessorCount;
+    }
+    ScopedEnvironmentVariable tables("HIPTENSOR_ROCKE_GETT_TABLES", "off");
+    ApiObjects                api;
+    std::mt19937_64           rng(77);
+    int                       compared = 0, tunedEntries = 0;
+    for(auto const* json : {rocke_tensor_gett_tuned_json(), rocke_tensor_gett_aot_json()})
+    {
+        std::vector<rocke::gett::TunedEntry> entries;
+        std::string                          why;
+        ASSERT_TRUE(rocke::gett::tuned_entries(json, "gfx950", &entries, &why)) << why;
+        ASSERT_FALSE(entries.empty());
+        tunedEntries += json == rocke_tensor_gett_tuned_json() ? int(entries.size()) : 0;
+        for(auto const& entry : entries)
+        {
+            auto const              canon = canonicalEntry(entry);
+            rocke::gett::TablePlan  plan;
+            ASSERT_TRUE(rocke::gett::table_plan(canon, "gfx950", &plan, &why))
+                << entry.key << ": " << why;
+            auto const want    = tableRecord(plan);
+            int const  variant = compared % 4;
+            // the entry's tensors as hipTensor descriptors: modes reversed (column-major), packed
+            // strides; mode ids: a fixed map, or (variant 1) other labels
+            std::map<std::string, int32_t> ids;
+            int32_t                        next = variant == 1 ? 900 + int32_t(rng() % 50) : 10;
+            for(auto const& [m, x] : entry.extents)
+            {
+                ids[m] = next;
+                next += variant == 1 ? 3 + int32_t(rng() % 5) : 1;
+            }
+            struct Desc
+            {
+                std::vector<int32_t> modes;
+                std::vector<int64_t> extents, strides;
+            };
+            auto describeTensor = [&](std::vector<std::string> const& rowMajor) {
+                Desc    d;
+                int64_t s = 1;
+                for(auto it = rowMajor.rbegin(); it != rowMajor.rend(); ++it)
+                {
+                    d.modes.push_back(ids.at(*it));
+                    d.extents.push_back(entry.extents.at(*it));
+                    d.strides.push_back(s);
+                    s *= entry.extents.at(*it);
+                }
+                if(variant == 2)
+                {
+                    // the same layout listed in another order
+                    std::vector<size_t> order(d.modes.size());
+                    std::iota(order.begin(), order.end(), size_t(0));
+                    std::shuffle(order.begin(), order.end(), rng);
+                    Desc o;
+                    for(auto i : order)
+                    {
+                        o.modes.push_back(d.modes[i]);
+                        o.extents.push_back(d.extents[i]);
+                        o.strides.push_back(d.strides[i]);
+                    }
+                    d = o;
+                }
+                return d;
+            };
+            auto A = describeTensor(entry.modes_a), B = describeTensor(entry.modes_b),
+                 D = describeTensor(entry.modes_d);
+            if(variant == 3)
+            {
+                // extent-1 modes: an M mode (A and D, at the front, stride 7) and an N mode (B
+                // and D, at the back, a stride past the span); a mode of A, B and D would be a
+                // batch mode, which the API refuses
+                auto unit = [](Desc& d, int32_t mode, bool front, int64_t stride) {
+                    auto at = front ? 0 : d.modes.size();
+                    d.modes.insert(d.modes.begin() + long(at), mode);
+                    d.extents.insert(d.extents.begin() + long(at), 1);
+                    d.strides.insert(d.strides.begin() + long(at), stride);
+                };
+                // (the API admits at most six modes per group)
+                auto count = [](std::vector<std::string> const& x, std::vector<std::string> const& y) {
+                    return std::count_if(x.begin(), x.end(), [&y](std::string const& m) {
+                        return std::find(y.begin(), y.end(), m) != y.end();
+                    });
+                };
+                if(count(entry.modes_a, entry.modes_d) < 6)
+                {
+                    unit(A, 5, true, 7);
+                    unit(D, 5, true, 7);
+                }
+                if(count(entry.modes_b, entry.modes_d) < 6)
+                {
+                    unit(B, 6, false, int64_t(1) << 20);
+                    unit(D, 6, false, int64_t(1) << 20);
+                }
+            }
+            auto const type = entry.dtype == "bf16" ? HIPTENSOR_R_16BF : HIPTENSOR_R_16F;
+            auto       dA   = api.tensor(A.extents, A.strides, type);
+            auto       dB   = api.tensor(B.extents, B.strides, type);
+            auto       dD   = api.tensor(D.extents, D.strides, type);
+            hiptensorOperationDescriptor_t desc = nullptr;
+            ASSERT_EQ(hiptensorCreateContraction(api.handle,
+                                                 &desc,
+                                                 dA,
+                                                 A.modes.data(),
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 dB,
+                                                 B.modes.data(),
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 entry.bilinear ? dD : nullptr,
+                                                 entry.bilinear ? D.modes.data() : nullptr,
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 dD,
+                                                 D.modes.data(),
+                                                 HIPTENSOR_COMPUTE_DESC_32F),
+                      HIPTENSOR_STATUS_SUCCESS)
+                << entry.key;
+            api.keep(desc);
+            hiptensorPlanPreference_t pref = nullptr;
+            ASSERT_EQ(hiptensorCreatePlanPreference(
+                          api.handle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_DEFAULT),
+                      HIPTENSOR_STATUS_SUCCESS);
+            LogCapture log;
+            uint64_t   estimate = 0;
+            // the estimate plans every candidate (the planner runs; nothing is compiled)
+            EXPECT_EQ(hiptensorEstimateWorkspaceSize(
+                          api.handle, desc, pref, HIPTENSOR_WORKSPACE_MAX, &estimate),
+                      HIPTENSOR_STATUS_SUCCESS);
+            static_cast<void>(hiptensorDestroyPlanPreference(pref));
+            auto const line = log.last("rocKE GETT JIT plan ");
+            ASSERT_FALSE(line.empty()) << entry.key << " (variant " << variant << ")\n"
+                                       << log.all();
+            auto got = line.substr(line.find(": ", line.find("rocKE GETT JIT plan ")) + 2);
+            while(!got.empty() && (got.back() == '\n' || got.back() == '\r' || got.back() == ' '))
+            {
+                got.pop_back();
+            }
+            EXPECT_EQ(got, want) << entry.key << " (" << entry.route << ", variant " << variant
+                                 << ")";
+            // no table candidate with the tables off
+            EXPECT_EQ(log.all().find("tuned:"), std::string::npos) << entry.key;
+            compared++;
+            if(HasFatalFailure())
+            {
+                return;
+            }
+        }
+    }
+    std::printf("GETT-JIT-BOUNDARY %d table problems (%d tuned) planned as rocKE plans them\n",
+                compared,
+                tunedEntries);
+    EXPECT_GE(compared, 200);
 }
 
 // The JIT's costs per problem (fixed problems and HIPTENSOR_ROCKE_TEST_GETT_JIT_LATENCY_PROBLEMS

@@ -246,14 +246,20 @@ def plan_gett(
     m_modes = [x for x in modes_d if x in modes_a and x not in modes_b]
     n_modes = [x for x in modes_d if x in modes_b and x not in modes_a]
     k_modes = [x for x in modes_a if x in modes_b and x not in modes_d]
+    # every mode of D is an M or N mode, and every mode of A (of B) an M (N) or K mode: a batch /
+    # Hadamard mode (in A, B and D) or a mode of one operand only (summed over by no kernel) is
+    # refused, not dropped
     if (
         set(m_modes) | set(n_modes) != set(modes_d)
+        or set(m_modes) | set(k_modes) != set(modes_a)
+        or set(n_modes) | set(k_modes) != set(modes_b)
         or not k_modes
         or not m_modes
         or not n_modes
     ):
         raise ValueError(
-            "not a plain bilinear contraction (batch / Hadamard modes unsupported)"
+            "not a plain bilinear contraction (batch / Hadamard modes and modes of one "
+            "operand only unsupported)"
         )
     d_fast = min(modes_d, key=lambda x: sd[x])
     swapped = (d_fast in n_modes) == (d_fast_role == "A")

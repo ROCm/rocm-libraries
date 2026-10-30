@@ -201,6 +201,7 @@ if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
         ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_plan.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_runtime.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_select.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/backends/rocke/rocke_select_model.cpp
     )
     if(HIPTENSOR_ENABLE_ROCKE_JIT)
         list(APPEND HIPTENSOR_CORE_SOURCES

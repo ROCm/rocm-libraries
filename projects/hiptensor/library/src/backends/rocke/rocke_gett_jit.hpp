@@ -74,6 +74,10 @@ namespace hiptensor
             // does not predict it)
             int     kind        = 0;
             int64_t predictedNs = 0;
+            // estimated device bytes read and written by the launches: every pack step reads
+            // its operand and writes the copy, the GETT reads both operands (copies or the user's
+            // tensors), writes D and, bilinear, reads C (a selection feature from schema 3)
+            uint64_t bytes = 0;
         };
 
         // Plans `problem` (a contraction: A, B, optional C, D) with rocKE's tensor GETT planner
@@ -81,13 +85,23 @@ namespace hiptensor
         // planner's scope (f16 / bf16 data of one type with the 32F compute type, no operators,
         // C laid out as D, the target, the layouts its kernels read) or the planner finds no
         // route, or the route needs more than `workspaceLimit` bytes of workspace. Planning
-        // decisions are kept per process (the same problem plans once).
+        // decisions are kept per process (the same problem plans once). Each call logs the
+        // planned launches ("rocKE GETT JIT plan <route>: <record>", heuristics level) in the
+        // format of the pack's GETT route records (pack/rocke_pack_builder.cpp
+        // gettPlanDescriptor), so a route can be compared with rocKE's route tables.
         bool planGettJit(backend::Problem const&             problem,
                          Pack const&                         pack,
                          uint64_t                            workspaceLimit,
                          std::shared_ptr<GettJitPlan const>& out,
                          GettJitPlanInfo&                    info,
                          std::string&                        reason);
+
+        // The SHA-256 (hex) of the index of the GEMM selection models the planner reads for
+        // `pack` (<pack dir>/gemm_models/index.txt: one digest per model file), which names the
+        // model set; empty when the pack has none or they do not load. A selection model whose
+        // features include the planner's predicted time names the digest it was trained with
+        // (rocke_select.cpp).
+        std::string gettJitModelsDigest(Pack const& pack);
 
         // What building a planned route did.
         struct GettJitReport

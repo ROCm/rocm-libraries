@@ -32,10 +32,12 @@
 //   2. the selection model of the problem's cell in the pack: gradient-boosted trees that
 //      predict each candidate's slowdown against the best candidate (log2) from integer
 //      features of the problem and the candidate; the lowest prediction wins, ties by the
-//      static order. A model scores the routes it was trained on (format v2 names them: the
-//      route rocKE's tensor GETT planner chooses (JIT), the ring GETT, the direct GETT, the
+//      static order. A model scores the routes it was trained on (formats v2 and v3 name them:
+//      the route rocKE's tensor GETT planner chooses (JIT), the ring GETT, the direct GETT, the
 //      GEMM and strided GEMM routes; a format v1 model scores the GEMM and strided GEMM routes
-//      only);
+//      only). A model whose features include the planner's predicted time names (format
+//      v3) the digest of the planner's GEMM selection models it was trained with, and is not
+//      used with other ones;
 //   3. rules for the routes the model does not score (or every route without a model): the
 //      JIT route first, else a preferred candidate (the ring GETT; the direct GETT on a
 //      target without the GEMM routes; the tuned reduction classes); the remaining routes
@@ -44,7 +46,8 @@
 //      or the model does not load.
 //
 // No timing, no allocation and no device call. Features are integers (log2 values in 1/256
-// steps), so the selection is the same on every host for the same problem, device and pack.
+// steps), so the selection is the same on every host for the same problem, device, pack and
+// plan mode (whether the plan specializes its elementwise launches with the JIT, a feature).
 // A JIT candidate has the same features before and after its launches are built.
 
 #ifndef HIPTENSOR_BACKENDS_ROCKE_ROCKE_SELECT_HPP
@@ -56,15 +59,12 @@
 #include <vector>
 
 #include "rocke_plan.hpp"
+#include "rocke_select_model.hpp"
 
 namespace hiptensor
 {
     namespace rockebackend
     {
-        // Version of the feature schema. A model names the schema it was trained on and the
-        // features it reads. Schemas are append only (schema 2 adds the JIT route's facts), so a
-        // model of an earlier schema is used; one of a later schema is not.
-        inline constexpr int kSelectSchema = 2;
 
         // log2(max(x, 1)) in 1/256 steps, exact integer arithmetic.
         int64_t log2Q8(uint64_t x);
@@ -72,10 +72,12 @@ namespace hiptensor
         // The names of the features, in the order features() writes them.
         std::vector<char const*> const& featureNames();
 
-        // The feature vector of a candidate of `problem`.
+        // The feature vector of a candidate of `problem`, with the values of feature schema
+        // `schema` (1 .. kSelectSchema).
         void features(backend::Problem const& problem,
                       Candidate const&        candidate,
-                      std::vector<int64_t>&   out);
+                      std::vector<int64_t>&   out,
+                      int                     schema = kSelectSchema);
 
         // The model cells a problem's selection looks up, most specific first (route table
         // keys select.model.<cell>). Empty for operations without a model (elementwise).
@@ -104,6 +106,10 @@ namespace hiptensor
             SelectSource        source = SelectSource::Static;
             // the model used: "<cell>@<id>", or why none was used
             std::string model;
+            // why the cell's model was not used for this problem although it loaded (other GEMM
+            // selection models of the planner than the model's); empty otherwise (the plan log
+            // adds it)
+            std::string note;
         };
 
         // Orders the candidates (see the top of this file). `useModel` false skips step 2.

@@ -33,6 +33,9 @@ CMake to build the engine archive, or ``ROCKE_CORE_ARCHIVE``).
   kernel builders build it from the C++ planner's route (what hipTensor's contraction JIT
   compiles), lowers to the same LLVM IR as the Python engine's kernel of the Python planner's
   route (SHA-256 of the .ll at ROCKE_LLVM_FLAVOR, llvm22 when unset).
+* Problems with a batch mode or a mode of one operand only are refused by both planners.
+* The engine archive the comparisons link is current: planner_ref.ensure_archive always runs the
+  incremental build of rocke_core (an archive of older sources is never compared).
 
 ``ROCKE_GETT_PLANNER_PROBLEMS`` / ``ROCKE_GETT_PLANNER_GEMMS`` / ``ROCKE_GETT_PLANNER_SPECS`` /
 ``ROCKE_GETT_PLANNER_IR_PROBLEMS`` set the sample sizes.
@@ -60,7 +63,7 @@ GEMM_SKINNY_SELECT_TESTS = True
 N_PROBLEMS = int(os.environ.get("ROCKE_GETT_PLANNER_PROBLEMS", "2000"))
 N_GEMMS = int(os.environ.get("ROCKE_GETT_PLANNER_GEMMS", "2000"))
 N_SPECS = int(os.environ.get("ROCKE_GETT_PLANNER_SPECS", "3000"))
-N_IR = int(os.environ.get("ROCKE_GETT_PLANNER_IR_PROBLEMS", "160"))
+N_IR = int(os.environ.get("ROCKE_GETT_PLANNER_IR_PROBLEMS", "480"))
 JOBS = min(32, os.cpu_count() or 1)
 
 
@@ -162,6 +165,14 @@ def test_planner_equals_python(cli, tmp_path, arch):
     assert {"tensor_gett_mn", "tensor_gett_kc"} <= cands, cands
     assert len(timed) > n // 20, len(timed)
     assert len(routes) < len(py), "the sample has no refused problem"
+    # a mode of one operand only (or a batch mode): refused by both planners, not dropped
+    lonely = [
+        i
+        for i, p in enumerate(problems)
+        if (set(p["a"]) - set(p["b"]) - set(p["d"])) or (set(p["b"]) - set(p["a"]) - set(p["d"]))
+    ]
+    assert lonely, "the sample has no problem with a mode of one operand only"
+    assert all(py[i] == "none" for i in lonely), [problems[i] for i in lonely if py[i] != "none"][:3]
     # every chosen spec without a Python-engine-only lever is the C++ builders' spec
     assert not [c for c in cpp if " builder=DIFF" in c]
 
@@ -185,3 +196,36 @@ def test_planned_kernels_lower_like_python(cli, tmp_path, monkeypatch):
     # the sample builds both route kinds and K-contiguous / MN GETT bodies
     assert {c.split("|")[0] for c in routes} == {"single", "pack_hybrid"}, routes[:5]
     assert len(routes) >= len(problems) // 5, len(routes)
+
+
+def test_engine_archive_is_rebuilt(tmp_path, monkeypatch):
+    """ensure_archive runs the incremental engine build on every call, also when an archive
+    exists (a no-op when no source changed), and configures a directory of this tree's own when
+    the shared default directory belongs to another rocKE tree."""
+    monkeypatch.delenv("ROCKE_CORE_ARCHIVE", raising=False)
+    calls = []
+    monkeypatch.setattr(
+        PR.subprocess, "run", lambda cmd, **kw: calls.append(list(map(str, cmd)))
+    )
+    root = tmp_path / "rocke_verify"
+    root.mkdir()
+    (root / "CMakeCache.txt").write_text(f"CMAKE_HOME_DIRECTORY:INTERNAL={PR.PLATFORM}\n")
+    (root / "librocke_core.a").write_bytes(b"!<arch>\n")
+    assert PR.ensure_archive(root) == root / "librocke_core.a"
+    assert calls == [
+        ["cmake", "--build", str(root), "--target", "rocke_core", "-j", str(os.cpu_count() or 1)]
+    ], calls
+    # no cache yet: configure, then build
+    calls.clear()
+    fresh = tmp_path / "fresh"
+    PR.ensure_archive(fresh)
+    assert [c[:2] for c in calls] == [["cmake", "-S"], ["cmake", "--build"]], calls
+    # the default directory configured from another tree: a directory of this tree
+    calls.clear()
+    monkeypatch.setattr(PR.tempfile, "gettempdir", lambda: str(tmp_path / "t"))
+    other = tmp_path / "t" / "rocke_verify"
+    other.mkdir(parents=True)
+    (other / "CMakeCache.txt").write_text("CMAKE_HOME_DIRECTORY:INTERNAL=/elsewhere/platform\n")
+    got = PR.ensure_archive()
+    assert got.parent != other and got.parent.name.startswith("rocke_verify_"), got
+    assert [c[:2] for c in calls] == [["cmake", "-S"], ["cmake", "--build"]], calls

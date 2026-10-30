@@ -47,10 +47,14 @@ efficiency = best time / time of the pick, per problem) from GRID: rank (LambdaR
 rank the candidates of a problem (relevance levels of 1/REL_STEPS log2 slowdown below the best
 candidate, the problems as query groups), l2 regresses the slowdown; --objective fixes one.
 A ranking model's scores are exported negated, so that the lowest prediction wins in either case.
-A problem whose candidates include the route of rocKE's tensor GETT planner (JIT) also trains as a
-problem of its own without that candidate (tag "<tag>#none"): the candidates a plan created with
-HIPTENSOR_JIT_MODE_NONE ranks (their features do not depend on the JIT candidate's presence), so the
-models order the other routes among themselves too (--no-none-copies turns it off).
+The plan's mode is a feature (jit_mode, schema 3): a plan created with HIPTENSOR_JIT_MODE_DEFAULT
+specializes its elementwise launches with the JIT, which makes the candidates of the GEMM routes
+(their operand packing and epilogue launches) faster than in a HIPTENSOR_JIT_MODE_NONE plan. A
+corpus is swept in both modes: the JIT-mode sweep (sweep_driver --jit) under the problems' ids, the
+NONE-mode sweep under "<id>#none" (sweep_driver --tag-suffix '#none'), each with the times of its
+own mode. A problem with a JIT candidate and no NONE-mode sweep also trains as a problem "<tag>#none"
+of its other candidates with the JIT-mode times (the earlier approximation; --no-none-copies turns
+it off).
 
 --config objective:TREESxLEAVES (with --margin) trains that configuration without the search and
 the cross-validation (a retraining whose configuration was chosen before; judge it on held-out
@@ -71,14 +75,23 @@ the next timing round, with a share of random pool problems for exploration. Wit
 it also reports how many pool picks changed against the previous round's models (stop when the
 boundary is stable).
 
-Model text (route table value select.model.<cell>, read by rocke_select.cpp):
-  v2;schema=2;routes=<route>,...;margin=<m>;features=<names>;trees=<n>|<tree>|...
+Model text (route table value select.model.<cell>, read by rocke_select_model.cpp):
+  v3;schema=3;routes=<route>,...;margin=<m>;gemm=<sha256|->;features=<names>;trees=<n>|<tree>|...
   tree: <leaves>;<split features>;<thresholds>;<left>;<right>;<leaf values>
 routes: the Route values (rocke_plan.hpp) of the training rows; the library scores exactly those
 routes with the model and orders the others by its rules. margin: the model's best candidate
 replaces the first candidate of the static order only when its prediction is lower by more than
 the margin (chosen per cell on the held-out folds: where rocKE's order is already good, a model
-pick that is not clearly better keeps it).
+pick that is not clearly better keeps it). gemm: when the features include
+lg_pred_ns (rocKE's tensor GETT planner's predicted time), the SHA-256 of the index of the GEMM
+selection models the planner read when the dumps were written (--gemm-digest: the digest of
+<pack dir>/gemm_models/index.txt of the build that wrote them); the library does not use the model
+with other ones, and the pack build refuses the pair.
+
+Next to each model, <cell>.check holds CHECK_ROWS feature vectors of the training rows (every route
+the model scores among them) with the exported model's prediction (this file's walker) and
+LightGBM's: the library's CPU test (test/00_unit/rocke_select_model_test.cpp) checks that its walk of
+the shipped model gives the first exactly and the second within the compact export's rounding.
 """
 
 import argparse
@@ -96,8 +109,10 @@ import numpy as np
 
 warnings.filterwarnings("ignore", message="X does not have valid feature names")
 
-SCHEMA = 2
+SCHEMA = 3
 CLIP = 4.0
+# feature vectors per model in its .check file
+CHECK_ROWS = 96
 GRID = [("rank", 150, 15), ("rank", 300, 31), ("xendcg", 300, 31), ("l2", 300, 31)]
 # ranking relevance: REL_TOP for the best candidate, one level less per 1/REL_STEPS log2 slowdown
 REL_STEPS = 16
@@ -200,9 +215,15 @@ JIT_ROUTE = 11
 
 
 def with_none_copies(rows):
-    """`rows` plus, for every problem with a JIT candidate, its other candidates as problem
-    "<tag>#none" (the selection of a plan without the JIT)."""
-    jit = set(r["tag"] for r in rows if r["f"]["route"] == JIT_ROUTE)
+    """`rows` plus, for every problem with a JIT candidate that has no NONE-mode sweep of its
+    own ("<tag>#none"), its other candidates as problem "<tag>#none" (the selection of a plan
+    without the JIT, with the JIT-mode times)."""
+    tags = set(r["tag"] for r in rows)
+    jit = set(
+        r["tag"]
+        for r in rows
+        if r["f"]["route"] == JIT_ROUTE and r["tag"] + "#none" not in tags
+    )
     extra = [
         dict(r, tag=r["tag"] + "#none")
         for r in rows
@@ -444,7 +465,15 @@ def best_pick(rs):
 # ---------------------------------------------------------------------------------- export
 
 
-def export(booster, names, routes, compact=True, sign=1.0, margin=0.0):
+def export(
+    booster,
+    names,
+    routes,
+    compact=True,
+    sign=1.0,
+    margin=0.0,
+    gemm="-",
+):
     """Model text from a LightGBM booster; checks the tree layout the C++ walker assumes.
 
     compact: thresholds become floor(t) + 0.5 (the same decisions for the integer features) and
@@ -511,10 +540,16 @@ def export(booster, names, routes, compact=True, sign=1.0, margin=0.0):
                 leaf_text,
             )
         )
-    head = "v2;schema=%d;routes=%s;margin=%.6g;features=%s;trees=%d" % (
+    if "lg_pred_ns" not in names:
+        gemm = "-"
+    assert gemm == "-" or (
+        len(gemm) == 64 and all(c in "0123456789abcdef" for c in gemm)
+    ), "the model reads lg_pred_ns: --gemm-digest <sha256 of gemm_models/index.txt>"
+    head = "v3;schema=%d;routes=%s;margin=%.6g;gemm=%s;features=%s;trees=%d" % (
         SCHEMA,
         ",".join(str(r) for r in sorted(routes)),
         margin,
+        gemm,
         ",".join(names),
         len(trees),
     )
@@ -528,7 +563,9 @@ def parse(text):
     head = parts[0].split(";")
     routes = None
     margin = 0.0
-    if head[0] == "v2":
+    if head[0] == "v3":
+        head = head[:4] + head[5:]
+    if head[0] in ("v2", "v3"):
         routes = set(int(x) for x in head[2][len("routes=") :].split(","))
         margin = float(head[3][len("margin=") :])
         head = head[:2] + head[4:]
@@ -616,7 +653,61 @@ def search(a, entry, crow, probs, cprobs, names):
     entry["calib_model_cv"] = summary(efficiencies(cprobs, pick_by(cv_scores, margin)))
     entry["model_cv"] = s
     entry["model_cv_routes"] = route_shares(probs, pick_by(cv_scores, margin))
+    # per plan mode (HIPTENSOR_JIT_MODE_NONE problems are tagged "<id>#none"), and the worst
+    # held-out-fold picks
+    pick = pick_by(cv_scores, margin)
+    for mode, sel in (("jit", lambda t: not t.endswith("#none")), ("none", lambda t: t.endswith("#none"))):
+        sub = {t: rs for t, rs in probs.items() if sel(t)}
+        if sub:
+            entry.setdefault("model_cv_by_mode", {})[mode] = summary(efficiencies(sub, pick))
+            entry.setdefault("static_by_mode", {})[mode] = summary(efficiencies(sub, static_pick))
+    worst = sorted(
+        ((pick(rs)["us"] / min(r["us"] for r in rs), t, pick(rs)["key"], best_pick(rs)["key"]) for t, rs in probs.items()),
+        reverse=True,
+    )[:12]
+    entry["model_cv_worst"] = [{"slow": round(w[0], 3), "tag": w[1], "pick": w[2], "best": w[3]} for w in worst]
     return objective, trees, leaves, margin
+
+
+def check_rows(crow, routes, n=CHECK_ROWS, seed=11):
+    """n training rows for the .check file: each route the model scores, then a deterministic
+    sample of the rest (distinct feature vectors)."""
+    rng = random.Random(seed)
+    seen, out = set(), []
+    by_route = defaultdict(list)
+    for r in crow:
+        by_route[int(r["f"]["route"])].append(r)
+    pool = list(crow)
+    rng.shuffle(pool)
+    order = []
+    for rt in sorted(by_route):
+        rs = list(by_route[rt])
+        rng.shuffle(rs)
+        order += rs[:4]
+    for r in order + pool:
+        key = tuple(sorted(r["f"].items()))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+        if len(out) >= n:
+            break
+    return out
+
+
+def write_check(path, model, names, rows, ref):
+    """<cell>.check: '# features <names>' then per row '<walker> <lightgbm> <values>'."""
+    with open(path, "w", newline="\n") as f:
+        f.write("# features %s\n" % ",".join(names))
+        for r, lg in zip(rows, ref):
+            f.write(
+                "%s %s %s\n"
+                % (
+                    repr(float(predict(model, r["f"]))),
+                    repr(float(lg)),
+                    " ".join(str(int(r["f"][n])) for n in names),
+                )
+            )
 
 
 def cmd_train(a):
@@ -644,6 +735,9 @@ def cmd_train(a):
         names = feature_names(crow)
         routes = sorted(set(int(r["f"]["route"]) for r in crow))
         st = summary(efficiencies(probs, static_pick))
+        # the training domain is what the API admits: no contraction has a batch mode (a mode of
+        # A, B and D; hiptensorCreateContraction refuses them)
+        assert not any(r["f"].get("modes_l", 0) for r in crow), "a row with a batch mode"
         entry = {
             "problems": len(probs),
             "rows": len(crow),
@@ -692,7 +786,15 @@ def cmd_train(a):
         # the full-precision export reproduces LightGBM bit for bit (an ensemble: up to the
         # order of the sums)
         full = parse(
-            export(boosters, names, routes, compact=False, sign=sign, margin=margin)
+            export(
+                boosters,
+                names,
+                routes,
+                compact=False,
+                sign=sign,
+                margin=margin,
+                gemm=a.gemm_digest or "-",
+            )
         )
         mine = np.array([predict(full, r["f"]) for r in crow])
         exact = bool(np.array_equal(ref, mine))
@@ -702,7 +804,14 @@ def cmd_train(a):
             "export_max_abs_diff"
         ]
         # the compact export (the shipped model) picks what LightGBM picks
-        text = export(boosters, names, routes, sign=sign, margin=margin)
+        text = export(
+            boosters,
+            names,
+            routes,
+            sign=sign,
+            margin=margin,
+            gemm=a.gemm_digest or "-",
+        )
         model = parse(text)
         small = np.array([predict(model, r["f"]) for r in crow])
         entry["compact_max_abs_diff"] = float(np.max(np.abs(ref - small)))
@@ -721,6 +830,11 @@ def cmd_train(a):
         with open(path, "w", newline="\n") as f:
             f.write(text + "\n")
         entry["model_bytes"] = len(text)
+        # the check vectors of the library's test: the exported model's and LightGBM's predictions
+        crows = check_rows(crow, routes)
+        cref = m.predict(matrix(crows, names))
+        write_check(os.path.join(out_dir, cell + ".check"), model, names, crows, cref)
+        entry["check_rows"] = len(crows)
         report["cells"][cell] = entry
         print(
             cell,
@@ -977,6 +1091,12 @@ def main():
         "--config", default="", help="train: objective:TREESxLEAVES, no search"
     )
     ap.add_argument("--margin", type=float, default=0.0, help="train: with --config")
+    ap.add_argument(
+        "--gemm-digest",
+        default="",
+        help="train: sha256 of the dumps' build's gemm_models/index.txt (models that read "
+        "lg_pred_ns name it)",
+    )
     ap.add_argument(
         "--no-none-copies",
         dest="none_copies",

@@ -10,6 +10,7 @@ the Python lines of a problem file (used to shard the comparison over processes)
 
 from __future__ import annotations
 
+import hashlib
 import json
 import multiprocessing
 import os
@@ -95,7 +96,7 @@ def _strides(modes, ext, rng):
 def contraction(rng, arch: str = "gfx950") -> dict:
     """A random contraction: 1-3 M / N / K modes (tensor ranks 2-6), random mode orders and
     padded strides, sizes from tiny to large, f16 / bf16, scale / bilinear, a CU count; a few
-    with a batch mode (no GETT route)."""
+    with a batch mode or a mode of one operand only (no GETT route)."""
     while True:
         nm, nn, nk = rng.randint(1, 3), rng.randint(1, 3), rng.randint(1, 3)
         if nm + nk <= 6 and nn + nk <= 6 and nm + nn <= 6 and nm + nk >= 2:
@@ -118,6 +119,11 @@ def contraction(rng, arch: str = "gfx950") -> dict:
     for b in batch:
         ext[b] = rng.randint(1, 8)
     ma, mb, md = M + K + batch, N + K + batch, M + N + batch
+    # a mode of one operand only (refused by the planner, not dropped)
+    if rng.random() < 0.03:
+        lone = names[nm + nn + nk + len(batch)]
+        ext[lone] = rng.randint(2, 8)
+        (ma if rng.random() < 0.5 else mb).append(lone)
     for lst in (ma, mb, md):
         if rng.random() < 0.8:
             rng.shuffle(lst)
@@ -824,8 +830,6 @@ def ir_line(p: dict) -> str:
     """The SHA-256 of the LLVM IR (ROCKE_LLVM_FLAVOR, the Python engine's lowering) of every kernel
     of the Python planner's route (tensor_gett_planner_cli --ir): "<kind>|<pack sha>;...|<GETT
     sha>", or "none"."""
-    import hashlib
-
     import rocke.dispatch.families.tensor_gett as TG
     from rocke.instances.common.tensor import (
         GettKnobs,
@@ -911,14 +915,31 @@ def _cxx() -> str:
 
 
 def ensure_archive(build_root: Path | None = None) -> Path:
-    """The engine archive: ``ROCKE_CORE_ARCHIVE`` if set, else ``<build_root>/librocke_core.a``
-    (built with CMake when missing)."""
+    """The engine archive: ``ROCKE_CORE_ARCHIVE`` if set (the caller keeps it current), else
+    ``<build_root>/librocke_core.a``, brought up to date with the sources on every call: CMake
+    configures the build directory when it has no cache yet, and the incremental ``cmake --build``
+    of ``rocke_core`` always runs (nothing to do when no source changed; a changed engine source,
+    e.g. the GEMM dispatcher or the planner, is rebuilt), so the C++ side of a comparison is never
+    an archive of older sources."""
     env = os.environ.get("ROCKE_CORE_ARCHIVE", "")
     if env:
         return Path(env)
     root = Path(build_root or (Path(tempfile.gettempdir()) / "rocke_verify"))
+    cache = root / "CMakeCache.txt"
+    if build_root is None and cache.exists():
+        # the shared default directory configured from another rocKE tree: a directory of this
+        # tree's own
+        home = [
+            ln.split("=", 1)[1].strip()
+            for ln in cache.read_text(errors="replace").splitlines()
+            if ln.startswith("CMAKE_HOME_DIRECTORY:")
+        ]
+        if home and Path(home[0]).resolve() != PLATFORM.resolve():
+            tag = hashlib.sha256(str(PLATFORM.resolve()).encode()).hexdigest()[:12]
+            root = root.with_name("rocke_verify_" + tag)
+            cache = root / "CMakeCache.txt"
     archive = root / "librocke_core.a"
-    if not archive.exists():
+    if not cache.exists():
         subprocess.run(
             [
                 "cmake",
@@ -931,19 +952,19 @@ def ensure_archive(build_root: Path | None = None) -> Path:
             check=True,
             stdout=subprocess.DEVNULL,
         )
-        subprocess.run(
-            [
-                "cmake",
-                "--build",
-                str(root),
-                "--target",
-                "rocke_core",
-                "-j",
-                str(os.cpu_count() or 1),
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-        )
+    subprocess.run(
+        [
+            "cmake",
+            "--build",
+            str(root),
+            "--target",
+            "rocke_core",
+            "-j",
+            str(os.cpu_count() or 1),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
     return archive
 
 

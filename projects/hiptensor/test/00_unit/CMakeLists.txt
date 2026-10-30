@@ -92,6 +92,14 @@ if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
         ${HIPTENSOR_COMMON_TEST_SOURCES}
         ${CMAKE_CURRENT_SOURCE_DIR}/rocke_backend_test.cpp
         )
+    # The shipped selection models (HIPTENSOR_ROCKE_SELECT_MODEL_DIR) read and walked by the
+    # library's model code against the exporter's check vectors (CPU only).
+    add_hiptensor_unit_test(rocke_select_model_test
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocke_select_model_test.cpp
+        ${PROJECT_SOURCE_DIR}/library/src/backends/rocke/rocke_select_model.cpp
+        )
+    target_compile_definitions(rocke_select_model_test PRIVATE
+        HIPTENSOR_ROCKE_SELECT_MODEL_DIR="${HIPTENSOR_ROCKE_SELECT_MODEL_DIR}")
     # Every contraction on the f64 route (operands converted to f64, one rounding of the result).
     add_test(NAME rocke_backend_test_f64_route
              COMMAND rocke_backend_test --gtest_filter=*RockeContraction*)
@@ -110,6 +118,8 @@ if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
             ${HIPTENSOR_COMMON_TEST_SOURCES}
             ${CMAKE_CURRENT_SOURCE_DIR}/rocke_gett_jit_test.cpp
             )
+        # rocKE's C++ engine: the route tables and their plans the JIT's routes are compared with
+        target_link_libraries(rocke_gett_jit_test PRIVATE hiptensor_rocke_core)
         add_test(NAME rocke_backend_test_jit COMMAND rocke_backend_test)
         set_tests_properties(rocke_backend_test_jit PROPERTIES
             ENVIRONMENT "HIPTENSOR_ROCKE_TEST_JIT=1;HIPTENSOR_ROCKE_JIT=all"

@@ -1145,8 +1145,15 @@ bool hybrid_roles(const GettSpec& p, std::vector<std::pair<std::string, bool>>* 
             k_modes.push_back(x);
     std::set<std::string> mn(m_modes.begin(), m_modes.end());
     mn.insert(n_modes.begin(), n_modes.end());
+    std::set<std::string> mk(m_modes.begin(), m_modes.end());
+    mk.insert(k_modes.begin(), k_modes.end());
+    std::set<std::string> nk(n_modes.begin(), n_modes.end());
+    nk.insert(k_modes.begin(), k_modes.end());
     std::set<std::string> dset(p.modes_d.begin(), p.modes_d.end());
-    if(mn != dset || k_modes.empty() || m_modes.empty() || n_modes.empty())
+    std::set<std::string> aset(p.modes_a.begin(), p.modes_a.end());
+    std::set<std::string> bset(p.modes_b.begin(), p.modes_b.end());
+    if(mn != dset || mk != aset || nk != bset || k_modes.empty() || m_modes.empty()
+       || n_modes.empty())
         return false;
     /* d_fast = min(modes_d, key=sd): the first minimum */
     std::string d_fast = p.modes_d[0];

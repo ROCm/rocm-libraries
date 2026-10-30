@@ -73,6 +73,16 @@ and AOT GETT route tables ``gett.tuned.<hash>`` (the launch record) and ``gett.t
 of the target, ``select.model.<cell>`` (``<dir>/<arch>/<cell>.model``, written by the selection
 training flow; see rocke_select.hpp for the format).
 
+With --gemm-models DIR (rocKE's ``dispatch/gemm/selector_models``), it writes next to the pack of
+every target rocKE's tensor GETT planner serves (``TENSOR_GETT_ARCHS``) ``<out>/<arch>/gemm_models``:
+the GEMM selection model files the planner's model loader reads for that target
+(:func:`gemm_model_files`, the files of ``rocke::gemm_dispatch::Models::load``) and ``index.txt``
+(``<sha256> <file>`` per file, by name), which hipTensor's contraction JIT loads and checks at run
+time. They are data next to the pack, not part of it; hipTensor's C++ builder writes the same
+directory (library/tests/test_hiptensor_pack_cross_check.py compares them). A selection model of
+format v3 that names the digest of the planner's models it was trained with (``gemm=<sha256 of
+index.txt>``) must name this index's digest.
+
 With --list, it writes each target's manifest ``<out>/<arch>.manifest`` instead of its pack,
 without lowering or compiling anything (:func:`pack_manifest`): the kernels with their attributes
 and argument names, the routes and the kernel classes of hipTensor's JIT. The manifests of
@@ -85,7 +95,7 @@ test rocke_pack_manifest_test checks that its C++ builder writes the same.
 Usage:
     make_rocke_pack.py --arch gfx950 [--arch gfx942] --out DIR [--rocke-src DIR]
                         [--jobs N] [--cache-dir DIR] [--compile-timeout S] [--num-cus N]
-                        [--select-models DIR] [--only REGEX]
+                        [--select-models DIR] [--only REGEX] [--gemm-models DIR]
     make_rocke_pack.py --list --arch gfx950 [--arch gfx942] --out DIR [--num-cus N]
 """
 
@@ -95,6 +105,7 @@ import hashlib
 import json
 import multiprocessing
 import os
+import shutil
 import struct
 import sys
 import time
@@ -1593,7 +1604,7 @@ def select_models(model_dir, arch):
         with open(os.path.join(d, fn), encoding="ascii") as f:
             text = f.read().strip()
         if (
-            not text.startswith(("v1;schema=", "v2;schema="))
+            not text.startswith(("v1;schema=", "v2;schema=", "v3;schema="))
             or "\n" in text
             or "\0" in text
         ):
@@ -1601,6 +1612,108 @@ def select_models(model_dir, arch):
                 f"rocKE pack: {os.path.join(d, fn)} is not a selection model"
             )
         out["select.model." + fn[: -len(".model")]] = text
+    return out
+
+
+def gemm_model_files(model_dir, arch):
+    """``{file name: bytes}``: the files rocKE's tensor GETT planner's GEMM model loader reads
+    for ``arch`` from ``model_dir`` (the C++ loader ``rocke::gemm_dispatch::Models::load`` and
+    the Python selector alike: per selector kind (rcr, native) ``gemm_<kind>_<arch>.model.txt``,
+    then its ``.meta.json`` sidecar, and for a sidecar of the kind's feature version and this
+    target its guard bags; the skinny sidecar ``skinny_cfg_<arch>.meta.json`` and, for its
+    feature version and target, the model and bags it names). A file the loader needs and does
+    not find is an error."""
+    import json
+
+    files = {}
+
+    def read(name):
+        path = os.path.join(model_dir, name)
+        if not name or "/" in name or "\\" in name or not os.path.isfile(path):
+            return None
+        with open(path, "rb") as f:
+            files[name] = f.read()
+        return files[name]
+
+    for kind, stem, versions in (
+        ("rcr", "gemm_rcr_", ("g4-v1", "r2c-v2")),
+        ("native", "gemm_native_", ("r2n-v1",)),
+    ):
+        if read(stem + arch + ".model.txt") is None:
+            continue
+        meta = read(stem + arch + ".meta.json")
+        if meta is None:
+            continue
+        m = json.loads(meta.decode("utf-8"))
+        if m.get("feature_version") not in versions or m.get("arch") != arch:
+            continue
+        guard = m.get("guard")
+        bags = guard.get("bags") if isinstance(guard, dict) else None
+        for b in bags if isinstance(bags, list) else []:
+            if isinstance(b, str) and read(b) is None:
+                raise SystemExit(
+                    f"gemm models of {arch}: {b}: guard bag named by the sidecar is missing"
+                )
+    meta = read("skinny_cfg_" + arch + ".meta.json")
+    if meta is not None:
+        m = json.loads(meta.decode("utf-8"))
+        if m.get("feature_version") == "r3sk-v1" and m.get("arch") == arch:
+            bags = m.get("bags")
+            names = [m.get("model") if isinstance(m.get("model"), str) else ""]
+            names += [b for b in (bags if isinstance(bags, list) else []) if isinstance(b, str)]
+            for n in names:
+                if read(n) is None:
+                    raise SystemExit(
+                        f"gemm models of {arch}: {n}: model file named by the sidecar is missing"
+                    )
+    return files
+
+
+def write_gemm_models(model_dir, pack_dir, arch):
+    """``<pack_dir>/gemm_models`` for a target the tensor GETT planner serves (removed for the
+    others); the SHA-256 (hex) of its index, or "" when none is written."""
+    from rocke.instances.common.tensor.gett import TENSOR_GETT_ARCHS
+
+    dst = os.path.join(pack_dir, "gemm_models")
+    shutil.rmtree(dst, ignore_errors=True)
+    if arch not in TENSOR_GETT_ARCHS:
+        return ""
+    files = gemm_model_files(model_dir, arch)
+    if not files:
+        raise SystemExit(f"gemm models of {arch}: no model file in {model_dir}")
+    os.makedirs(dst)
+    index = ""
+    for name in sorted(files):
+        with open(os.path.join(dst, name), "wb") as f:
+            f.write(files[name])
+        index += hashlib.sha256(files[name]).hexdigest() + " " + name + "\n"
+    with open(os.path.join(dst, "index.txt"), "w", newline="\n") as f:
+        f.write(index)
+    return hashlib.sha256(index.encode("ascii")).hexdigest()
+
+
+def select_model_gemm_digest(text):
+    """The ``gemm=`` digest a v3 selection model names ("" for "-" and other formats)."""
+    if not text.startswith("v3;"):
+        return ""
+    for field in text.split("|", 1)[0].split(";"):
+        if field.startswith("gemm="):
+            return "" if field == "gemm=-" else field[len("gemm=") :]
+    return ""
+
+
+def gemm_digest_errors(models, digest):
+    """The selection models (``{select.model.<cell>: text}``) that name another digest of the
+    planner's GEMM selection models than ``digest`` (the index this pack ships): the build refuses
+    them (their planner features would not be the ones the library computes)."""
+    out = []
+    for key, text in sorted(models.items()):
+        want = select_model_gemm_digest(text)
+        if want and digest and want != digest:
+            out.append(
+                f"{key} was trained with the GEMM selection models {want}, the planner's are "
+                f"{digest}"
+            )
     return out
 
 
@@ -1632,6 +1745,12 @@ def main(argv=None):
         "--select-models",
         default="",
         help="directory of kernel selection models (<dir>/<arch>/<cell>.model)",
+    )
+    ap.add_argument(
+        "--gemm-models",
+        default="",
+        help="rocKE's GEMM selection models (dispatch/gemm/selector_models): written to "
+        "<out>/<arch>/gemm_models for the targets rocKE's tensor GETT planner serves",
     )
     a = ap.parse_args(argv)
     if not a.arch:
@@ -1736,12 +1855,20 @@ def main(argv=None):
         pack_id, size = write_pack(
             os.path.join(a.out, arch), arch, kernels, routes, compiler_id, rocke_version
         )
+        gemm_files = ""
+        if a.gemm_models:
+            digest = write_gemm_models(a.gemm_models, os.path.join(a.out, arch), arch)
+            gemm_files = digest[:16] or "none"
+            for err in gemm_digest_errors(models, digest):
+                print(f"rocKE pack ERROR {arch}: {err}", file=sys.stderr)
+                status = 2
         secs = sum(r.get("seconds", 0.0) for r in ok)
         print(
             f"rocKE pack {arch}: {len(kernels)} kernels ({len(skipped)} descriptors do not "
             f"apply), {size} bytes, pack id {pack_id[:16]}, compile {secs:.0f} CPU-s, "
             f"wall {time.time() - t0:.0f} s, selection models: "
-            f"{', '.join(sorted(k[len('select.model.'):] for k in models)) or 'none'}",
+            f"{', '.join(sorted(k[len('select.model.'):] for k in models)) or 'none'}"
+            + (f", GETT planner models: {gemm_files}" if a.gemm_models else ""),
             flush=True,
         )
         for r in skipped:

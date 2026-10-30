@@ -35,6 +35,14 @@ problems train_select.py propose chose from a pool). --big draws large problems 
 extents from 2^9 up to 2^2 past the row's range, the flop cap raised by 2^7 and tensors up to
 1 GiB (the sizes of the requirements' large rows, past the default design's caps).
 
+--outer F makes a share F of the problems outer products (no contracted mode: D = A B with every
+mode of A and of B in D), which hipTensor admits. Batch modes (in A, B and D), modes of one tensor
+only and contractions without M or N modes are not drawn: hipTensor refuses them
+(hiptensorCreateContraction returns HIPTENSOR_STATUS_NOT_SUPPORTED). --style api draws the problems
+of the API validation harness instead (1-3 modes per group, 75 % of the problems with extents that
+are multiples of 8, packed tensors in random mode orders, tensors of 2^12 .. 2^25 elements, f16 /
+bf16; problem i of a corpus is the harness's problem of seed --seed + i).
+
 Spec lines (one problem each, read by sweep_driver.cpp):
   C <id> <dtype> <compute> <bilinear> <nA> <nB> <nD> modesA.. extA.. strA.. modesB.. extB.. strB..
     modesD.. extD.. strD..                       (C shares D's layout when bilinear)
@@ -43,6 +51,7 @@ Spec lines (one problem each, read by sweep_driver.cpp):
 usage:
   gen_corpus.py contraction --seed S --per-row N --out FILE [--rows h16f,h16b,s,c,d,z]
                             [--aligned 0.6] [--padded 0.15] [--first-id I] [--big]
+                            [--outer 0.1] [--style halton|api]
   gen_corpus.py reduction   --seed S --per-row N --out FILE
   gen_corpus.py refine      --from SPECS --worst IDS --seed S --per 3 --out FILE
   gen_corpus.py pick        --from SPECS --worst IDS --out FILE
@@ -141,7 +150,10 @@ def tensor_fields(modes, ext, strides):
     )
 
 
-def contraction_spec(pid, row, lgm, lgn, lgk, rng, aligned=0.0, padded=0.0, big=False):
+def contraction_spec(
+    pid, row, lgm, lgn, lgk, rng, aligned=0.0, padded=0.0, big=False, outer=False
+):
+    """outer: no contracted mode (K = 1)."""
     dtype, compute, es, cap, (lo, hi) = CROWS[row]
     max_bytes = MAX_TENSOR_BYTES
     if big:
@@ -149,7 +161,7 @@ def contraction_spec(pid, row, lgm, lgn, lgk, rng, aligned=0.0, padded=0.0, big=
         max_bytes = 1 << 30
     M = round_extent(2**lgm, rng)
     N = round_extent(2**lgn, rng)
-    K = round_extent(2**lgk, rng)
+    K = 1 if outer else round_extent(2**lgk, rng)
     # flop cap and tensor size cap: shrink the largest extent
     while math.log2(M * N * K) > cap or max(M * K, N * K, M * N) * es > max_bytes:
         if M >= N and M >= K:
@@ -161,10 +173,12 @@ def contraction_spec(pid, row, lgm, lgn, lgk, rng, aligned=0.0, padded=0.0, big=
     nm = rng.choice((1, 1, 2, 2, 3))
     nn = rng.choice((1, 1, 2))
     nk = rng.choice((1, 1, 2, 3))
+    if outer:
+        nk = 0
     em, en, ek = (
         split_extent(M, nm, rng),
         split_extent(N, nn, rng),
-        split_extent(K, nk, rng),
+        split_extent(K, nk, rng) if nk else [],
     )
     if rng.random() < aligned:
         em, en, ek = ([align8(e, rng) for e in g] for g in (em, en, ek))
@@ -201,6 +215,69 @@ def contraction_spec(pid, row, lgm, lgn, lgk, rng, aligned=0.0, padded=0.0, big=
         + tensor_fields(md, ext, sd)
     )
     return " ".join(f)
+
+
+API_DTYPES = {"f16": ("f16", "32F"), "bf16": ("bf16", "32F")}
+
+
+def _api_split(rng, lg, n, friendly):
+    cuts = sorted(rng.uniform(0, lg) for _ in range(n - 1))
+    out, prev = [], 0.0
+    for c in cuts + [lg]:
+        e = max(1, round(2 ** (c - prev)))
+        prev = c
+        if friendly:
+            e = max(8, (e + 4) // 8 * 8)
+        elif rng.random() < 0.4:
+            e |= 1
+        out.append(min(e, 8192))
+    return out
+
+
+def api_spec(pid, seed):
+    """The problem the API validation harness draws for `seed` (the same random stream), as a
+    spec line: tensors packed in their mode order (hipTensor's column-major descriptors, the
+    first mode fastest)."""
+    rng = random.Random(seed)
+    while True:
+        nm, nn, nk = rng.randint(1, 3), rng.randint(1, 3), rng.randint(1, 2)
+        if nm + nk <= 5 and nn + nk <= 5 and nm + nn <= 5:
+            break
+    friendly = rng.random() < 0.75
+    while True:
+        lm, ln, lk = rng.uniform(5, 14), rng.uniform(5, 14), rng.uniform(4, 13)
+        em = _api_split(rng, lm, nm, friendly)
+        en = _api_split(rng, ln, nn, friendly)
+        ek = _api_split(rng, lk, nk, friendly)
+        M, N, K = math.prod(em), math.prod(en), math.prod(ek)
+        if max(M * K, N * K, M * N) <= 2**25 and min(M * K, N * K, M * N) >= 2**12:
+            break
+    letters = list("abcdefghijklmnopqrstuvwxyz")
+    rng.shuffle(letters)
+    ms, ns, ks = letters[:nm], letters[nm : nm + nn], letters[nm + nn : nm + nn + nk]
+    ext = dict(zip(ms + ns + ks, em + en + ek))
+
+    def order(v):
+        v = list(v)
+        if rng.random() < 0.8:
+            rng.shuffle(v)
+        return v
+
+    A, B, D = order(ms + ks), order(ns + ks), order(ms + ns)
+    dtype = rng.choice(["f16", "bf16"])
+    bil = 1 if rng.choice(["scale", "bilinear"]) == "bilinear" else 0
+    code = {m: i + 1 for i, m in enumerate(sorted(ext))}
+
+    def fields(t):
+        st, s = [], 1
+        for m in t:
+            st.append(s)
+            s *= ext[m]
+        return [str(code[m]) for m in t] + [str(ext[m]) for m in t] + [str(x) for x in st]
+
+    dt, compute = API_DTYPES[dtype]
+    f = ["C", str(pid), dt, compute, str(bil), str(len(A)), str(len(B)), str(len(D))]
+    return " ".join(f + fields(A) + fields(B) + fields(D))
 
 
 def reduction_spec(pid, row, lgtotal, frac_kept, rng):
@@ -242,12 +319,21 @@ def main():
     ap.add_argument("--aligned", type=float, default=0.0)
     ap.add_argument("--padded", type=float, default=0.0)
     ap.add_argument("--big", action="store_true")
+    ap.add_argument(
+        "--outer", type=float, default=0.0, help="share of outer products (no contracted mode)"
+    )
+    ap.add_argument("--style", choices=("halton", "api"), default="halton")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     rng = random.Random(a.seed)
     lines = []
     pid = a.first_id
-    if a.kind == "contraction":
+    if a.kind == "contraction" and a.style == "api":
+        # --per-row problems of the API harness's generator, seeds seed .. seed + n - 1
+        for i in range(a.per_row):
+            lines.append(api_spec(pid, a.seed + i))
+            pid += 1
+    elif a.kind == "contraction":
         rows = a.rows.split(",") if a.rows else list(CROWS)
         for row in rows:
             lo, hi = CROWS[row][4]
@@ -257,8 +343,13 @@ def main():
             for i in range(a.per_row):
                 u = [(halton(i + 1, PRIMES[d]) + shift[d]) % 1.0 for d in range(3)]
                 lg = [lo + (hi - lo) * x for x in u]
+                # outer products draw from a stream of their own (a corpus without them is the
+                # one of the earlier generator for the same seed)
+                outer = a.outer > 0.0 and random.Random(a.seed * 1000003 + pid).random() < a.outer
                 lines.append(
-                    contraction_spec(pid, row, *lg, rng, a.aligned, a.padded, a.big)
+                    contraction_spec(
+                        pid, row, *lg, rng, a.aligned, a.padded, a.big, outer
+                    )
                 )
                 pid += 1
     elif a.kind == "reduction":

@@ -22,6 +22,11 @@ change of a kernel row, attribute, route or JIT class on either side fails a def
 both sides and the manifests agree. The kernel ABI names of rocKE's C header must equal the
 Python ones.
 
+With the built C++ builder, both writers also write the GEMM selection models of rocKE's tensor
+GETT planner next to the packs of the targets it serves (``--gemm-models``,
+``<out>/<arch>/gemm_models``, the data hipTensor's contraction JIT reads): the same files and the
+same ``index.txt`` byte for byte.
+
 With the built C++ builder, its ``--rreduce-picks`` mode (hipTensor's untuned reduction choice,
 ``rocke_rreduce_rule.hpp``) must return the candidates of ``rreduce_host.untuned_choices`` for
 random problems, compute-unit counts and workspace limits on every pack target.
@@ -342,6 +347,45 @@ def test_kernel_abi_names_match_the_c_header():
     }
 
 
+def test_writer_gemm_models_and_digest_check(tmp_path):
+    """The writer's --gemm-models directory: exactly the files the planner's model loader reads
+    for a target the tensor GETT planner serves (none for the others), an index of their SHA-256
+    digests by name, and the index's digest, which a v3 selection model reading the planner's
+    predicted time must name (another one is refused)."""
+    import hashlib
+
+    from rocke.instances.common.tensor.gett import TENSOR_GETT_ARCHS
+
+    w = _load_writer()
+    src = _LIBROOT.parent / "platform" / "python" / "rocke" / "dispatch" / "gemm"
+    src = src / "selector_models"
+    for arch in _PACK_TARGETS:
+        digest = w.write_gemm_models(str(src), str(tmp_path / arch), arch)
+        d = tmp_path / arch / "gemm_models"
+        if arch not in TENSOR_GETT_ARCHS:
+            assert digest == "" and not d.exists(), arch
+            continue
+        files = w.gemm_model_files(str(src), arch)
+        assert files and sorted(p.name for p in d.iterdir()) == sorted([*files, "index.txt"])
+        index = (d / "index.txt").read_bytes()
+        assert digest == hashlib.sha256(index).hexdigest()
+        lines = index.decode().splitlines()
+        assert [ln.split(" ", 1)[1] for ln in lines] == sorted(files)
+        for ln in lines:
+            sha, name = ln.split(" ", 1)
+            assert sha == hashlib.sha256((src / name).read_bytes()).hexdigest(), name
+        # the sidecars name the guard bags and skinny models the loader reads
+        assert any(".bag" in n for n in files) and any(n.startswith("skinny_") for n in files)
+        head = "v3;schema=3;routes=11;margin=0;batched=1;gemm=%s;features=route,lg_pred_ns;trees=0"
+        good = {"select.model.contraction.h": head % digest}
+        bad = {"select.model.contraction.h": head % ("0" * 64)}
+        none = {"select.model.contraction.h": head % "-"}
+        assert w.gemm_digest_errors(good, digest) == []
+        assert w.gemm_digest_errors(none, digest) == []
+        assert len(w.gemm_digest_errors(bad, digest)) == 1
+        assert w.select_model_gemm_digest("v2;schema=2;routes=3;margin=0;features=x;trees=0") == ""
+
+
 # ------------------------------------------------------------------------------------------------
 # With the built C++ builder: the manifests and the packs
 # ------------------------------------------------------------------------------------------------
@@ -512,6 +556,9 @@ def test_cpp_pack_equals_python_pack(tmp_path):
         common += ["--select-models", models]
     if jobs:
         common += ["--jobs", jobs]
+    # the planner's GEMM selection models (no compile: cheap), next to the packs
+    gemm_models = _LIBROOT.parent / "platform" / "python" / "rocke" / "dispatch" / "gemm"
+    common += ["--gemm-models", str(gemm_models / "selector_models")]
 
     env = dict(os.environ, ROCKE_COMGR_LIB=comgr, PYTHONDONTWRITEBYTECODE="1")
     env.pop("ROCKE_LLVM_FLAVOR", None)  # both follow the COMGR library's flavor
@@ -568,3 +615,19 @@ def test_cpp_pack_equals_python_pack(tmp_path):
             a = (cpp_hdr / arch / f).read_bytes()
             b = (py_out / arch / f).read_bytes()
             assert a == b, f"{arch}/{f}: the C++ pack differs from the Python pack"
+
+        # 3. the planner's GEMM selection models next to the pack: the same files, byte for byte
+        # (a directory only for the targets the planner serves, on both sides)
+        from rocke.instances.common.tensor.gett import TENSOR_GETT_ARCHS
+
+        cg, pg = cpp_out / arch / "gemm_models", py_out / arch / "gemm_models"
+        assert cg.is_dir() == pg.is_dir() == (arch in TENSOR_GETT_ARCHS), arch
+        if cg.is_dir():
+            cf = sorted(p.name for p in cg.iterdir())
+            pf = sorted(p.name for p in pg.iterdir())
+            assert cf == pf, f"{arch}/gemm_models: {cf} vs {pf}"
+            assert "index.txt" in cf and len(cf) > 1
+            for name in cf:
+                assert (cg / name).read_bytes() == (pg / name).read_bytes(), (
+                    f"{arch}/gemm_models/{name}: the C++ builder's file differs"
+                )

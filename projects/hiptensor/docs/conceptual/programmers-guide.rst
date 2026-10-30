@@ -118,9 +118,16 @@ These environment variables, read at every plan creation and workspace estimate,
             fastest mode); ``0`` turns the JIT off (the contraction JIT too).
     *   -   ``HIPTENSOR_JIT_MAX_MS``
         -   The compile time, in milliseconds, one ``hiptensorCreatePlan`` may spend on JIT compiles. Past it, the
-            remaining launches of the plan keep their kernel-pack kernels (kernels already in the kernel cache are
-            still used), and a contraction whose planner route still needs a compile takes the next candidate.
-            Unset or ``0``: no limit.
+            remaining launches of the plan keep their kernel-pack kernels (kernels already in the kernel cache or
+            in a ``HIPTENSOR_KERNEL_CACHE_DIR`` file are still used), and a contraction whose planner route still
+            needs a compile takes the next candidate. The budget is checked before each compile and doesn't stop
+            a compile in progress, so a plan can exceed it by the time of its last compile (a contraction route's
+            kernel can take some hundreds of milliseconds). Unset or ``0``: no limit.
+    *   -   ``HIPTENSOR_ROCKE_GETT_TABLES``
+        -   ``off`` or ``0``, for checks: contractions on the rocKE backend don't consult rocKE's tuned and AOT
+            GETT route tables, so rocKE's tensor-contraction planner (contraction JIT) also plans the problems
+            those tables hold. The route the planner then chooses is the one of the tables (a test compares
+            them).
     *   -   ``HIPTENSOR_KERNEL_CACHE_DIR``
         -   A directory (of the user, not writable by others unless sticky) where plans created with
             ``HIPTENSOR_JIT_MODE_DEFAULT`` look for a kernel before they compile it and store every kernel they
@@ -170,8 +177,15 @@ and the generic kernel), checking every capability on the host without launching
    f64) are trained on cold timings of every route of their class: on gfx950 the contraction JIT's route,
    the ring GETT, the GEMM routes, the native f32 route, the f64 route and the direct GETT. They choose
    among all of them, so a contraction takes, for example, the ring GETT, the contraction JIT's route or a
-   GEMM route, whichever its model predicts fastest. Selection takes no timing, no allocation and no device
-   call, and is the same on every host for the same problem, device and pack.
+   GEMM route, whichever its model predicts fastest. Whether the plan specializes its elementwise launches
+   with the JIT (``HIPTENSOR_JIT_MODE_DEFAULT``) is a feature: those launches (the operand packing and
+   epilogue of the GEMM routes, for example) then run faster, so the gfx950 models are trained on timings of
+   both plan modes. Their training problems include contractions without contracted modes (outer products).
+   A model whose features include the contraction JIT planner's predicted time names the GEMM selection
+   models of that planner it was trained with; with other ones (another ``gemm_models`` directory next to
+   the pack) it isn't used for problems with a contraction JIT candidate, and the plan log says why. Selection
+   takes no timing, no allocation and no device call, and is the same on every host for the same problem,
+   device, pack and plan mode.
 4. Routes the model of the class doesn't score, and every route of a class without a model, follow rocKE's
    rules: the contraction JIT's route first; then a contraction the ring GETT serves takes it (with the
    operands whose fastest free run is not a multiple of 8 elements first packed into the workspace when the

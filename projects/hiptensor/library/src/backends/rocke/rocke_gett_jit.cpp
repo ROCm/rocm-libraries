@@ -62,7 +62,8 @@ namespace hiptensor
             // ("<sha256 hex> <file name>" per line, written by the pack builder).
             constexpr char kModelDir[]   = "gemm_models";
             constexpr char kModelIndex[] = "index.txt";
-            // Planning decisions kept per process (the oldest half is dropped past this).
+            // Planning decisions kept per process (all of them are dropped when one more would
+            // exceed this; the planner then decides again).
             constexpr size_t kMaxPlans = 4096;
 
             void logGett(std::string const& msg)
@@ -138,23 +139,32 @@ namespace hiptensor
 
             struct LoadedModels
             {
+                std::once_flag              once;
                 std::unique_ptr<gd::Models> models;
                 std::string                 reason;
+                std::string                 digest; // sha256 hex of the index (models loaded)
             };
 
-            // The planner's selection models of a pack's target, loaded once per process.
-            gd::Models const* modelsFor(Pack const& pack, std::string& reason)
+            // The planner's selection models of a pack's target, loaded once per process. The
+            // load (a text parse of the model files) runs outside the lock of the table of
+            // packs: only the plans of the same pack wait for it.
+            LoadedModels const& loadedModelsFor(Pack const& pack)
             {
-                static std::mutex                          mutex;
-                static std::map<std::string, LoadedModels> loaded;
-                std::scoped_lock                           lock(mutex);
-                auto const                                 key = pack.path() + "|" + pack.arch();
-                auto                                       it  = loaded.find(key);
-                if(it == loaded.end())
+                static std::mutex                                          mutex;
+                static std::map<std::string, std::shared_ptr<LoadedModels>> loaded;
+                std::shared_ptr<LoadedModels>                              slot;
                 {
+                    std::scoped_lock lock(mutex);
+                    auto&            s = loaded[pack.path() + "|" + pack.arch()];
+                    if(s == nullptr)
+                    {
+                        s = std::make_shared<LoadedModels>();
+                    }
+                    slot = s;
+                }
+                std::call_once(slot->once, [&pack, &lm = *slot] {
                     using Clock     = std::chrono::steady_clock;
                     auto const   t0 = Clock::now();
-                    LoadedModels lm;
                     ModelReader  r;
                     r.dir = directoryOf(pack.path()) + "/" + kModelDir;
                     std::string index;
@@ -195,6 +205,8 @@ namespace hiptensor
                         else
                         {
                             lm.models = std::move(models);
+                            lm.digest = hexOf(sha256(reinterpret_cast<uint8_t const*>(index.data()),
+                                                     index.size()));
                         }
                     }
                     double const ms
@@ -205,10 +217,15 @@ namespace hiptensor
                                 ? "rocKE GETT JIT: loaded the GEMM selection models of "
                                       + pack.arch() + " from " + r.dir + msg
                                 : "rocKE GETT JIT: " + lm.reason);
-                    it = loaded.emplace(key, std::move(lm)).first;
-                }
-                reason = it->second.reason;
-                return it->second.models.get();
+                });
+                return *slot;
+            }
+
+            gd::Models const* modelsFor(Pack const& pack, std::string& reason)
+            {
+                auto const& lm = loadedModelsFor(pack);
+                reason         = lm.reason;
+                return lm.models.get();
             }
 
             // ------------------------------------------------------------ the request
@@ -367,6 +384,8 @@ namespace hiptensor
             std::string     user[2];
             uint64_t        workspace = 0;
             GettJitPlanInfo info;
+            // the launches in the format of the pack's GETT route records (logged per plan)
+            std::string record;
         };
 
         namespace
@@ -452,6 +471,56 @@ namespace hiptensor
                         return false;
                     }
                 }
+                // the record of the pack's GETT route tables (rocke_pack_builder.cpp
+                // gettPlanDescriptor): per launch the kernel, grid, block and the bound arguments
+                // (X / Y: a pack step's source operand and its copy at a workspace offset; the
+                // GETT's operands, D (O), C, the GEMM view and the scales)
+                auto launch = [](std::string const&                        kernel,
+                                 int const*                                grid,
+                                 int                                       block,
+                                 std::map<std::string, std::string> const& binds) {
+                    std::string out = "|k=" + kernel + ";g=" + std::to_string(grid[0]) + ","
+                                      + std::to_string(grid[1]) + "," + std::to_string(grid[2])
+                                      + ";b=" + std::to_string(block) + ";a=";
+                    bool first = true;
+                    for(auto const& [k, v] : binds)
+                    {
+                        out += (first ? "" : ",") + k + "=" + v;
+                        first = false;
+                    }
+                    return out;
+                };
+                plan.record = "v1;ws=" + std::to_string(plan.workspace)
+                              + ";steps=" + std::to_string(plan.packs.size() + 1);
+                for(auto const& pk : plan.packs)
+                {
+                    plan.record += launch(pk.name,
+                                          pk.grid,
+                                          pk.block,
+                                          {{"X", pk.operand + "+0"},
+                                           {"Y", "W+" + std::to_string(pk.offset)}});
+                }
+                std::map<std::string, std::string> binds = {
+                    {"C", "O+0"},
+                    {"M", "#" + std::to_string(plan.M)},
+                    {"N", "#" + std::to_string(plan.N)},
+                    {"K", "#" + std::to_string(plan.K)},
+                    {"alpha", "@a"},
+                };
+                if(plan.bilinear)
+                {
+                    binds["Cin"]  = "C+0";
+                    binds["beta"] = "@b";
+                }
+                for(int i = 0; i < 2; i++)
+                {
+                    binds[i == 0 ? "A" : "B"]
+                        = plan.src[i] >= 0
+                              ? "W+" + std::to_string(plan.packs[size_t(plan.src[i])].offset)
+                              : plan.user[i] + "+0";
+                }
+                plan.record += launch(plan.gettName, plan.grid, plan.block, binds);
+
                 auto& info          = plan.info;
                 info.workspaceBytes = plan.workspace;
                 info.launches       = static_cast<int>(plan.packs.size()) + 1;
@@ -471,6 +540,16 @@ namespace hiptensor
                                     : route.candidate == "tensor_gett_kc"  ? (packed ? 3 : 5)
                                     : packed                               ? 2
                                                                            : 1;
+                // bytes moved: each pack step reads its operand and writes the copy (its
+                // workspace bytes each way), the GETT reads both operands of its GEMM view, writes
+                // D and, bilinear, reads C (16-bit elements)
+                uint64_t const es = 2;
+                info.bytes        = es * uint64_t(plan.M + plan.N) * uint64_t(plan.K)
+                             + es * uint64_t(plan.M) * uint64_t(plan.N) * (plan.bilinear ? 2 : 1);
+                for(auto const& s : route.packs)
+                {
+                    info.bytes += 2 * uint64_t(s.workspace_bytes);
+                }
                 return true;
             }
 
@@ -579,6 +658,7 @@ namespace hiptensor
                 reason = planned.reason;
                 return false;
             }
+            logGett("rocKE GETT JIT plan " + planned.plan->info.route + ": " + planned.plan->record);
             if(planned.plan->workspace > workspaceLimit)
             {
                 reason = "the planned GETT route needs more workspace than the limit";
@@ -587,6 +667,11 @@ namespace hiptensor
             out  = planned.plan;
             info = planned.plan->info;
             return true;
+        }
+
+        std::string gettJitModelsDigest(Pack const& pack)
+        {
+            return loadedModelsFor(pack).digest;
         }
 
         bool buildGettJitProgram(GettJitPlan const&        plan,

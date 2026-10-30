@@ -132,6 +132,11 @@ namespace hiptensor
             int     launches    = 0;
             int     gettKind    = 0;
             int64_t predictedNs = 0;
+            // the plan specializes its elementwise launches with the JIT
+            // (HIPTENSOR_JIT_MODE_DEFAULT, the JIT not turned off): the operand packing and
+            // epilogue launches of the GEMM routes then run faster than the pack's (set by the
+            // backend for the selection; a feature from schema 3)
+            bool jitMode = false;
             // The f32 recipe that decided the routes of a contraction, when it is not x6: its
             // candidates are ranked by the models of the selection cells <cell>.<tag> (the packs
             // have them for the default recipe, native), else by the static order.
@@ -177,6 +182,10 @@ namespace hiptensor
             // tensor GETT planner (plans with HIPTENSOR_JIT_MODE_DEFAULT in a library built with
             // the JIT; not the steps of a trinary contraction)
             bool jitGett = false;
+            // Contractions: consult the pack's tuned and AOT GETT route tables (false with
+            // HIPTENSOR_ROCKE_GETT_TABLES=off: rocKE's tensor GETT planner decides the problems
+            // they hold too, which compares the JIT route with the tables)
+            bool gettTables = true;
             // Trinary contractions: orders the candidates of one of the two steps (indices, best
             // first; the selection of rocke_select.hpp). Empty: the static order.
             std::function<std::vector<int>(backend::Problem const&, std::vector<Candidate> const&)>

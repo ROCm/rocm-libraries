@@ -146,3 +146,25 @@ def test_unplannable_problem_is_refused():
     req = _req(["M0", "H0"], ["N0", "H0"], d=["H0", "N0", "M0"], ext=ext)
     with pytest.raises(ValueError):
         plan_tensor_gett(req)
+
+
+@pytest.mark.parametrize("operand", ["A", "B"])
+def test_mode_of_one_operand_only_is_refused(operand):
+    # X0 is a mode of one operand only: no kernel sums it, so every route refuses the problem
+    # (it is not dropped silently)
+    from rocke.instances.common.tensor.gett_plan import plan_gett
+
+    ext = dict(_EXT, X0=4)
+    a = ["X0", "K1", "K0", "M1", "M0"] if operand == "A" else ["K1", "K0", "M1", "M0"]
+    b = ["X0", "K1", "K0", "N1", "N0"] if operand == "B" else ["K1", "K0", "N1", "N0"]
+    with pytest.raises(ValueError, match="one operand only"):
+        plan_gett(a, b, _D, ext)
+    req = _req(a, b, ext=ext)
+    assert TG._hybrid_roles(req.problem) is None
+    with pytest.raises(ValueError):
+        TG._plan_mn(req)
+    assert TG._plan_kc(req) is None
+    with pytest.raises(ValueError):
+        plan_tensor_gett(req)
+    # the same problem without X0 has a route
+    assert plan_tensor_gett(_req([m for m in a if m != "X0"], [m for m in b if m != "X0"]))

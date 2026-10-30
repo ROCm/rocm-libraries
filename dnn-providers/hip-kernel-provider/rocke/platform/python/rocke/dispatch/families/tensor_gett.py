@@ -768,7 +768,8 @@ def _hybrid_roles(p):
     fastest mode) for the pack hybrid of a problem whose unpacked GETT plan
     does not exist: an operand needs a pack when its free modes have no
     16-byte DTL run (``gett_plan``'s operand vector width below 8). None when
-    the problem is not a plain contraction (batch / Hadamard modes)."""
+    the problem is not a plain contraction (batch / Hadamard modes, a mode of one
+    operand only)."""
     from ...instances.common.tensor.gett_plan import (
         _vec,
         merge_digits,
@@ -783,7 +784,12 @@ def _hybrid_roles(p):
     m_modes = [x for x in md if x in ma and x not in mb]
     n_modes = [x for x in md if x in mb and x not in ma]
     k_modes = [x for x in ma if x in mb and x not in md]
-    if set(m_modes) | set(n_modes) != set(md) or not (k_modes and m_modes and n_modes):
+    if (
+        set(m_modes) | set(n_modes) != set(md)
+        or set(m_modes) | set(k_modes) != set(ma)
+        or set(n_modes) | set(k_modes) != set(mb)
+        or not (k_modes and m_modes and n_modes)
+    ):
         return None
     d_fast = min(md, key=lambda x: sd[x])
     order = (("B", sb, n_modes), ("A", sa, m_modes))

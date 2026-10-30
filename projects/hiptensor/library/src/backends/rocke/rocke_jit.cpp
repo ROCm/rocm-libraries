@@ -1393,6 +1393,18 @@ namespace hiptensor
                 }
                 if(!allowCompile)
                 {
+                    // past the budget only compiling stops: a HIPTENSOR_KERNEL_CACHE_DIR file is a
+                    // cache hit too
+                    auto const persisted = persistPath(specKey);
+                    if(!persisted.empty() && fileExists(persisted))
+                    {
+                        cache.read(persisted, dc, "hiptensorCreatePlan");
+                        entry = cache.bySpecKey(specKey);
+                        if(entry != nullptr)
+                        {
+                            return entry;
+                        }
+                    }
                     reason = "the plan's JIT time budget is spent";
                     return nullptr;
                 }

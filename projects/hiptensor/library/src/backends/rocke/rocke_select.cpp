@@ -40,6 +40,10 @@
 
 #include "platform.hpp"
 #include "rocke_select.hpp"
+#include "rocke_select_model.hpp"
+#ifdef HIPTENSOR_ENABLE_ROCKE_JIT
+#include "rocke_gett_jit.hpp"
+#endif
 
 namespace hiptensor
 {
@@ -49,69 +53,17 @@ namespace hiptensor
         {
             using backend::OpKind;
             using backend::Problem;
+            using selectmodel::Model;
+            using selectmodel::parseModel;
 
-            // The feature schema (version kSelectSchema). Append only; a change of meaning is a
-            // new schema version.
-            std::vector<char const*> const kFeatureNames = {"op",
-                                                            "dtype",
-                                                            "out_dtype",
-                                                            "compute16",
-                                                            "bilinear",
-                                                            "opnd_op",
-                                                            "lg_m",
-                                                            "lg_n",
-                                                            "lg_k",
-                                                            "lg_l",
-                                                            "lg_mnk",
-                                                            "modes_m",
-                                                            "modes_n",
-                                                            "modes_k",
-                                                            "modes_l",
-                                                            "unit_a",
-                                                            "unit_b",
-                                                            "unit_d",
-                                                            "lg_inner",
-                                                            "lg_inner_kept",
-                                                            "route",
-                                                            "f64route",
-                                                            "body",
-                                                            "tile_m",
-                                                            "tile_n",
-                                                            "tile_k",
-                                                            "block",
-                                                            "persistent",
-                                                            "streamk",
-                                                            "kblock",
-                                                            "direct",
-                                                            "steps",
-                                                            "memsets",
-                                                            "lg_ws",
-                                                            "lg_bytes",
-                                                            "lg_flops",
-                                                            "intensity_q8",
-                                                            "ctas",
-                                                            "waves_q8",
-                                                            "tiles_q8",
-                                                            "tail_q8",
-                                                            "pad_q8",
-                                                            "split",
-                                                            "lg_chunk",
-                                                            "lds",
-                                                            "scratch",
-                                                            "cus",
-                                                            // schema 2
-                                                            "gett_kind",
-                                                            "lg_pred_ns"};
+            static_assert(int(Route::RingGett) == 7 && int(Route::DirectGett) == 8
+                              && int(Route::TunedReduction) == 10 && int(Route::JitGett) == 11,
+                          "selectmodel::legacyRoute names these Route values");
 
-            // The routes a model of format v1 scores (the routes of the schema-1 corpus); a
-            // model of format v2 names its routes.
             bool legacyRoute(Route route)
             {
-                return route != Route::RingGett && route != Route::DirectGett
-                       && route != Route::TunedReduction && route != Route::JitGett;
+                return selectmodel::legacyRoute(int(route));
             }
-
-            constexpr size_t kRoutes = 32;
 
             int dtypeCode(hiptensorDataType_t type)
             {
@@ -137,250 +89,6 @@ namespace hiptensor
             int64_t ceilDiv(int64_t a, int64_t b)
             {
                 return b > 0 ? (a + b - 1) / b : 0;
-            }
-
-            // A gradient-boosted tree ensemble over named features. Node n of a tree goes left
-            // when x[feature[n]] <= threshold[n]; a child c < 0 is leaf ~c.
-            struct Tree
-            {
-                std::vector<int32_t> feature;
-                std::vector<double>  threshold;
-                std::vector<int32_t> left, right;
-                std::vector<double>  leaf;
-            };
-
-            struct Model
-            {
-                std::string          id;
-                std::vector<int32_t> featureIndex; // model feature -> schema index
-                std::vector<Tree>    trees;
-                // the routes the model was trained on (Route values), which it scores
-                std::vector<bool> routes = std::vector<bool>(kRoutes, false);
-                // the prediction by which the model's best candidate must beat the first scored
-                // candidate of the static order to be selected instead of it (0: none)
-                double margin = 0.0;
-
-                bool scores(Route route) const
-                {
-                    return size_t(route) < routes.size() && routes[size_t(route)];
-                }
-
-                double predict(std::vector<int64_t> const& x) const
-                {
-                    double sum = 0.0;
-                    for(auto const& t : trees)
-                    {
-                        if(t.feature.empty())
-                        {
-                            sum += t.leaf[0];
-                            continue;
-                        }
-                        int32_t node = 0;
-                        while(node >= 0)
-                        {
-                            auto const value
-                                = static_cast<double>(x[featureIndex[t.feature[node]]]);
-                            node = value <= t.threshold[node] ? t.left[node] : t.right[node];
-                        }
-                        sum += t.leaf[~node];
-                    }
-                    return sum;
-                }
-            };
-
-            std::vector<std::string> split(std::string const& text, char sep)
-            {
-                std::vector<std::string> out;
-                size_t                   start = 0;
-                while(true)
-                {
-                    auto end = text.find(sep, start);
-                    out.push_back(text.substr(start, end - start));
-                    if(end == std::string::npos)
-                    {
-                        return out;
-                    }
-                    start = end + 1;
-                }
-            }
-
-            template <typename T>
-            bool parseList(std::string const& text, std::vector<T>& out)
-            {
-                out.clear();
-                char const* p   = text.c_str();
-                char const* end = p + text.size();
-                while(p < end)
-                {
-                    while(p < end && *p == ' ')
-                    {
-                        p++;
-                    }
-                    if(p == end)
-                    {
-                        break;
-                    }
-                    char* next = nullptr;
-                    if constexpr(std::is_floating_point_v<T>)
-                    {
-                        out.push_back(std::strtod(p, &next));
-                    }
-                    else
-                    {
-                        out.push_back(static_cast<T>(std::strtol(p, &next, 10)));
-                    }
-                    if(next == p)
-                    {
-                        return false;
-                    }
-                    p = next;
-                }
-                return true;
-            }
-
-            uint64_t fnv1a64(std::string const& text)
-            {
-                uint64_t hash = 0xCBF29CE484222325ull;
-                for(unsigned char c : text)
-                {
-                    hash = (hash ^ c) * 0x100000001B3ull;
-                }
-                return hash;
-            }
-
-            // Parses a model of the pack's route table:
-            //   v2;schema=<n>;routes=<route>,...;margin=<m>;features=<name>,...;trees=<n>|<tree>...
-            //   v1;schema=<n>;features=<name>,...;trees=<n>|<tree>|<tree>...
-            //   tree: <leaves>;<split features>;<thresholds>;<left>;<right>;<leaf values>
-            // (lists space separated; a one-leaf tree has empty node lists). A v1 model scores
-            // the routes of the schema-1 corpus (legacyRoute).
-            bool parseModel(std::string const& cell,
-                            std::string const& text,
-                            Model&             model,
-                            std::string&       why)
-            {
-                auto parts = split(text, '|');
-                auto head  = split(parts[0], ';');
-                if(!((head.size() == 4 && head[0] == "v1")
-                     || (head.size() == 6 && head[0] == "v2")))
-                {
-                    why = "unknown model format";
-                    return false;
-                }
-                // feature schemas are append only: a model of an older schema reads features
-                // this library still computes with the same meaning
-                bool knownSchema = false;
-                for(int s = 1; s <= kSelectSchema; s++)
-                {
-                    knownSchema = knownSchema || head[1] == "schema=" + std::to_string(s);
-                }
-                if(!knownSchema)
-                {
-                    why = "model of another feature schema (" + head[1] + ")";
-                    return false;
-                }
-                if(head[0] == "v2")
-                {
-                    if(head[2].rfind("routes=", 0) != 0)
-                    {
-                        why = "malformed model header";
-                        return false;
-                    }
-                    for(auto const& r : split(head[2].substr(7), ','))
-                    {
-                        char*      end   = nullptr;
-                        auto const route = std::strtol(r.c_str(), &end, 10);
-                        if(r.empty() || *end != '\0' || route < 0 || size_t(route) >= kRoutes)
-                        {
-                            why = "malformed model routes";
-                            return false;
-                        }
-                        model.routes[size_t(route)] = true;
-                    }
-                    char* end   = nullptr;
-                    bool  valid = head[3].rfind("margin=", 0) == 0 && head[3].size() > 7;
-                    if(valid)
-                    {
-                        model.margin = std::strtod(head[3].c_str() + 7, &end);
-                        valid = *end == '\0' && std::isfinite(model.margin) && model.margin >= 0.0;
-                    }
-                    if(!valid)
-                    {
-                        why = "malformed model margin";
-                        return false;
-                    }
-                    head.erase(head.begin() + 2, head.begin() + 4);
-                }
-                else
-                {
-                    for(size_t r = 0; r < kRoutes; r++)
-                    {
-                        model.routes[r] = legacyRoute(static_cast<Route>(r));
-                    }
-                }
-                if(head[2].rfind("features=", 0) != 0 || head[3].rfind("trees=", 0) != 0)
-                {
-                    why = "malformed model header";
-                    return false;
-                }
-                auto const& names = kFeatureNames;
-                for(auto const& name : split(head[2].substr(9), ','))
-                {
-                    auto it = std::find_if(
-                        names.begin(), names.end(), [&name](char const* n) { return name == n; });
-                    if(it == names.end())
-                    {
-                        why = "the model reads feature " + name + ", which this library lacks";
-                        return false;
-                    }
-                    model.featureIndex.push_back(static_cast<int32_t>(it - names.begin()));
-                }
-                auto const trees = std::strtoul(head[3].c_str() + 6, nullptr, 10);
-                if(trees + 1 != parts.size())
-                {
-                    why = "tree count mismatch";
-                    return false;
-                }
-                auto const nf = static_cast<int32_t>(model.featureIndex.size());
-                for(size_t i = 1; i < parts.size(); i++)
-                {
-                    auto f = split(parts[i], ';');
-                    Tree t;
-                    if(f.size() != 6 || !parseList(f[1], t.feature) || !parseList(f[2], t.threshold)
-                       || !parseList(f[3], t.left) || !parseList(f[4], t.right)
-                       || !parseList(f[5], t.leaf))
-                    {
-                        why = "malformed tree " + std::to_string(i - 1);
-                        return false;
-                    }
-                    auto const leaves = std::strtol(f[0].c_str(), nullptr, 10);
-                    auto const nodes  = static_cast<int32_t>(t.feature.size());
-                    bool ok = leaves >= 1 && t.leaf.size() == size_t(leaves) && nodes == leaves - 1
-                              && t.threshold.size() == size_t(nodes)
-                              && t.left.size() == size_t(nodes) && t.right.size() == size_t(nodes);
-                    for(int32_t n = 0; ok && n < nodes; n++)
-                    {
-                        ok = t.feature[n] >= 0 && t.feature[n] < nf;
-                        for(auto child : {t.left[n], t.right[n]})
-                        {
-                            // children come after their parent, so every walk ends
-                            ok = ok
-                                 && ((child >= 0 && child > n && child < nodes)
-                                     || (child < 0 && ~child < leaves));
-                        }
-                    }
-                    if(!ok)
-                    {
-                        why = "inconsistent tree " + std::to_string(i - 1);
-                        return false;
-                    }
-                    model.trees.push_back(std::move(t));
-                }
-                char hex[17];
-                snprintf(
-                    hex, sizeof(hex), "%016llx", static_cast<unsigned long long>(fnv1a64(text)));
-                model.id = cell + "@" + hex;
-                return true;
             }
 
             // The text of a cell's model: the pack's route select.model.<cell>, or with
@@ -480,15 +188,18 @@ namespace hiptensor
 
         std::vector<char const*> const& featureNames()
         {
-            return kFeatureNames;
+            return selectmodel::featureNames();
         }
 
-        void features(Problem const& problem, Candidate const& candidate, std::vector<int64_t>& out)
+        void features(Problem const&        problem,
+                      Candidate const&      candidate,
+                      std::vector<int64_t>& out,
+                      int                   schema)
         {
             auto const&   f   = candidate.facts;
             auto const&   p   = candidate.program;
             int64_t const cus = std::max(1, problem.device.cuCount);
-            out.assign(kFeatureNames.size(), 0);
+            out.assign(selectmodel::featureNames().size(), 0);
             size_t i   = 0;
             auto   put = [&out, &i](int64_t v) { out[i++] = v; };
             put(problem.kind == OpKind::Contraction ? 0
@@ -533,11 +244,13 @@ namespace hiptensor
             put(jit ? int64_t(f.launches) : static_cast<int64_t>(p.steps.size()));
             put(jit ? 0 : static_cast<int64_t>(p.memsets.size()));
             put(log2Q8(p.workspaceBytes));
-            put(log2Q8(f.bytes));
+            // schema 2 had no byte estimate for the JIT route
+            uint64_t const bytes = jit && schema < 3 ? 0 : f.bytes;
+            put(log2Q8(bytes));
             put(log2Q8(f.flops));
-            put(f.bytes > 0 ? static_cast<int64_t>(std::min<uint64_t>(f.flops, uint64_t(1) << 52)
-                                                   * 256 / f.bytes)
-                            : 0);
+            put(bytes > 0 ? static_cast<int64_t>(std::min<uint64_t>(f.flops, uint64_t(1) << 52)
+                                                 * 256 / bytes)
+                          : 0);
             put(f.ctas);
             put(f.ctas * 256 / cus);
             int64_t tiles = f.ctas;
@@ -558,6 +271,8 @@ namespace hiptensor
             // schema 2
             put(f.gettKind);
             put(log2Q8(uint64_t(std::max<int64_t>(f.predictedNs, 0))));
+            // schema 3
+            put(f.jitMode ? 1 : 0);
         }
 
         std::vector<std::string> selectionCells(Problem const& problem, std::string const& tag)
@@ -660,12 +375,35 @@ namespace hiptensor
                         sel.model = why;
                     }
                 }
+                // a model that reads the planner's predicted time needs the planner's GEMM
+                // selection models it was trained with (the features of the JIT candidate)
+#ifdef HIPTENSOR_ENABLE_ROCKE_JIT
+                bool const jitCandidate
+                    = std::any_of(candidates.begin(), candidates.end(), [](Candidate const& c) {
+                          return c.facts.route == Route::JitGett;
+                      });
+                if(model != nullptr && model->readsPrediction && jitCandidate)
+                {
+                    auto const digest = gettJitModelsDigest(pack);
+                    if(model->gemm != digest)
+                    {
+                        sel.model = "model " + model->id
+                                    + " not used: trained with other GEMM selection models of "
+                                      "rocKE's tensor GETT planner ("
+                                    + (model->gemm.empty() ? std::string("none named")
+                                                           : model->gemm.substr(0, 16))
+                                    + ", the pack's " + digest.substr(0, 16) + ")";
+                        sel.note = sel.model;
+                        model    = nullptr;
+                    }
+                }
+#endif
             }
             // the candidates the model scores: the routes it was trained on (without a model,
             // the routes of the schema-1 corpus, so that the rules below order the others)
             auto scored = [&candidates, &model](int i) {
                 auto const route = candidates[i].facts.route;
-                return model != nullptr ? model->scores(route) : legacyRoute(route);
+                return model != nullptr ? model->scores(int(route)) : legacyRoute(route);
             };
 
             // 3. the rules for the routes the model does not score: the route rocKE's tensor
@@ -706,7 +444,7 @@ namespace hiptensor
             {
                 if(scored(static_cast<int>(i)))
                 {
-                    features(problem, candidates[i], x);
+                    features(problem, candidates[i], x, model->schema);
                     sel.scores[i] = model->predict(x);
                 }
             }

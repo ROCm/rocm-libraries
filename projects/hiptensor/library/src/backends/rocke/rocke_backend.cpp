@@ -162,6 +162,29 @@ namespace hiptensor
 #endif
             }
 
+            // Whether a plan of `pref` specializes its elementwise launches with the JIT
+            // (jitPlan, the JIT not turned off by HIPTENSOR_ROCKE_JIT=0|off): a selection feature
+            // of every candidate (CandidateFacts::jitMode), whose launches then run faster.
+            bool jitLaunches(bool jit)
+            {
+                auto mode = getEnvironmentVariable("HIPTENSOR_ROCKE_JIT");
+                return jit && !(mode && (*mode == "0" || *mode == "off"));
+            }
+
+            void markJitMode(std::vector<Candidate>& candidates, bool jit)
+            {
+                bool const on = jitLaunches(jit);
+                for(auto& c : candidates)
+                {
+                    c.facts.jitMode = on;
+                }
+            }
+
+            void markJitMode(std::vector<Candidate>& candidates, hiptensorPlanPreference const* pref)
+            {
+                markJitMode(candidates, jitPlan(pref));
+            }
+
             // HIPTENSOR_JIT_MAX_MS: the compile budget of one plan (0: none).
             double jitBudgetMs()
             {
@@ -179,17 +202,23 @@ namespace hiptensor
                 options.f64Only = route && *route == "f64";
                 options.disableTuned
                     = getEnvironmentVariable("HIPTENSOR_ROCKE_DISABLE_TUNED").has_value();
+                // HIPTENSOR_ROCKE_GETT_TABLES=off|0 (check): the GETT route tables not consulted
+                auto tables        = getEnvironmentVariable("HIPTENSOR_ROCKE_GETT_TABLES");
+                options.gettTables = !(tables && (*tables == "off" || *tables == "0"));
                 std::string recipeNote;
                 options.f32Recipe = f32Recipe(recipeNote);
                 if(note != nullptr)
                 {
                     *note = recipeNote;
                 }
-                // the steps of a trinary contraction: the selection of a contraction
+                // the steps of a trinary contraction: the selection of a contraction (in the
+                // plan's mode: the trinary program's elementwise launches are specialized too)
                 bool const model = useModel();
-                options.rankStep = [&pack, model](Problem const&                problem,
-                                                  std::vector<Candidate> const& candidates) {
-                    return rankCandidates(problem, pack, candidates, model).order;
+                options.rankStep = [&pack, model, jit](Problem const&                problem,
+                                                       std::vector<Candidate> const& candidates) {
+                    auto marked = candidates;
+                    markJitMode(marked, jit);
+                    return rankCandidates(problem, pack, marked, model).order;
                 };
                 return options;
             }
@@ -337,13 +366,14 @@ namespace hiptensor
                     auto*                  plan = context.plan;
                     auto const*            pref = plan != nullptr ? plan->mPref : nullptr;
                     bool const             jit  = jitPlan(pref);
-                    if(auto status = enumerateCandidates(problem,
-                                                         *pack,
-                                                         candidateOptions(*pack, jit, &recipeNote),
-                                                         context.workspaceSizeLimit,
-                                                         candidates,
-                                                         reason);
-                       status != HIPTENSOR_STATUS_SUCCESS)
+                    auto const status = enumerateCandidates(problem,
+                                                            *pack,
+                                                            candidateOptions(*pack, jit, &recipeNote),
+                                                            context.workspaceSizeLimit,
+                                                            candidates,
+                                                            reason);
+                    markJitMode(candidates, pref);
+                    if(status != HIPTENSOR_STATUS_SUCCESS)
                     {
                         return status;
                     }
@@ -591,6 +621,7 @@ namespace hiptensor
                     {
                         return status;
                     }
+                    markJitMode(candidates, context.planPref);
                     auto const sel = rankCandidates(problem, *pack, candidates, useModel());
                     // DEFAULT: the workspace of the candidate a plan selects (of every
                     // candidate the measured selection may time); MIN: the least that some
@@ -691,6 +722,10 @@ namespace hiptensor
                             snprintf(num, sizeof(num), "(%.3f)", sel.scores[k]);
                             msg += num;
                         }
+                    }
+                    if(!sel.note.empty())
+                    {
+                        msg += "; " + sel.note;
                     }
                     if(!note.empty())
                     {

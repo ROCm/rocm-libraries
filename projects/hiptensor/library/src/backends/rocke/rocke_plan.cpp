@@ -5583,7 +5583,7 @@ namespace hiptensor
                 };
 
                 // rocKE's tuned GETT route for the problems it measured
-                if(!f64Only && !options.disableTuned)
+                if(!f64Only && !options.disableTuned && options.gettTables)
                 {
                     Program     program;
                     std::string why;
@@ -5688,6 +5688,7 @@ namespace hiptensor
                         facts.launches     = info.launches;
                         facts.gettKind     = info.kind;
                         facts.predictedNs  = info.predictedNs;
+                        facts.bytes        = info.bytes;
                         add("jit:" + info.kernel, std::move(program), facts);
                         out.back().jitGett = std::move(jit);
                     }

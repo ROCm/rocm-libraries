@@ -58,7 +58,10 @@
 // target rocKE's tensor GETT planner serves, <out>/<arch>/gemm_models: the selection model files
 // the planner's loader reads for that target (rocke::gemm_dispatch::Models::load, exactly those)
 // and index.txt ("<sha256> <file>" per file), which the backend's contraction JIT
-// (rocke_gett_jit.cpp) loads and checks at run time. They are data, not part of the pack.
+// (rocke_gett_jit.cpp) loads and checks at run time. They are data, not part of the pack. A
+// selection model (--select-models) of format v3 that names the digest of the planner's models
+// it was trained with (gemm=<sha256 of index.txt>) must name this index's digest: the build fails
+// otherwise (the model's planner features would not be the ones the library computes).
 //
 // --list writes, instead of the packs, each target's manifest <out>/<arch>.manifest: the
 // kernels with their attributes and argument names, the routes (no selection models) and the
@@ -1694,8 +1697,9 @@ namespace
             bool       ascii = std::all_of(text.begin(), text.end(), [](char c) {
                 return static_cast<unsigned char>(c) < 0x80;
             });
-            bool const format
-                = text.rfind("v1;schema=", 0) == 0 || text.rfind("v2;schema=", 0) == 0;
+            bool const format = text.rfind("v1;schema=", 0) == 0
+                                || text.rfind("v2;schema=", 0) == 0
+                                || text.rfind("v3;schema=", 0) == 0;
             if(!ascii || !format || text.find('\n') != std::string::npos
                || text.find('\0') != std::string::npos)
             {
@@ -1967,11 +1971,14 @@ namespace
     }
 
     // <out>/<arch>/gemm_models for a target the tensor GETT planner serves (removed for the
-    // others). Returns the number of files written; throws on errors.
+    // others). Returns the number of files written and `digest`, the SHA-256 (hex) of the index
+    // (empty when none is written); throws on errors.
     size_t writeGemmModels(std::string const& modelDir,
                            fs::path const&    packDir,
-                           std::string const& arch)
+                           std::string const& arch,
+                           std::string&       digest)
     {
+        digest.clear();
         fs::path const  dst = packDir / "gemm_models";
         std::error_code ec;
         fs::remove_all(dst, ec);
@@ -2000,7 +2007,28 @@ namespace
             index += hiptensor::rockepack::hex(d.data(), d.size()) + " " + name + "\n";
         }
         writeFile(dst / "index.txt", index.data(), index.size());
+        auto const d = hiptensor::rockepack::sha256(index.data(), index.size());
+        digest       = hiptensor::rockepack::hex(d.data(), d.size());
         return r.files.size();
+    }
+
+    // The digest of the planner's GEMM selection models a selection model (v3) was trained with:
+    // its header field gemm=<hex> ("" for "-" and for other formats).
+    std::string selectModelGemmDigest(std::string const& text)
+    {
+        if(text.rfind("v3;", 0) != 0)
+        {
+            return "";
+        }
+        auto const head = text.substr(0, text.find('|'));
+        auto const at   = head.find(";gemm=");
+        if(at == std::string::npos)
+        {
+            return "";
+        }
+        auto value = head.substr(at + 6);
+        value      = value.substr(0, value.find(';'));
+        return value == "-" ? std::string() : value;
     }
 
     // --list: writes and / or checks the manifests. 0, 1 when a manifest differs from the
@@ -2457,13 +2485,38 @@ namespace
             size_t gemmModelFiles = 0;
             if(!o.gemmModels.empty())
             {
+                std::string digest;
                 try
                 {
-                    gemmModelFiles = writeGemmModels(o.gemmModels, dir, arch);
+                    gemmModelFiles = writeGemmModels(o.gemmModels, dir, arch, digest);
                 }
                 catch(std::exception const& e)
                 {
                     std::fprintf(stderr, "rocKE pack ERROR %s: %s\n", arch.c_str(), e.what());
+                    status = 2;
+                    continue;
+                }
+                // the selection models whose features include the planner's predicted time were
+                // trained with these GEMM selection models
+                bool mismatch = false;
+                for(auto const& kv : models)
+                {
+                    auto const want = selectModelGemmDigest(kv.second);
+                    if(!want.empty() && !digest.empty() && want != digest)
+                    {
+                        std::fprintf(stderr,
+                                     "rocKE pack ERROR %s: %s was trained with the GEMM selection "
+                                     "models %s, the planner's are %s (%s/gemm_models)\n",
+                                     arch.c_str(),
+                                     kv.first.c_str(),
+                                     want.c_str(),
+                                     digest.c_str(),
+                                     dir.string().c_str());
+                        mismatch = true;
+                    }
+                }
+                if(mismatch)
+                {
                     status = 2;
                     continue;
                 }

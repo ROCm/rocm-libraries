@@ -13,11 +13,19 @@ builder, never part of hipTensor's build:
 
 ```bash
 python library/builders/hiptensor/make_rocke_pack.py --arch gfx950 --out /path/to/out \
-    [--select-models <hipTensor>/library/src/backends/rocke/select] [--jobs N] [--only REGEX]
+    [--select-models <hipTensor>/library/src/backends/rocke/select] [--jobs N] [--only REGEX] \
+    [--gemm-models platform/python/rocke/dispatch/gemm/selector_models]
 ```
 
+With `--gemm-models`, both writers also put the GEMM selection models of rocKE's tensor GETT
+planner next to the pack of each target that planner serves (`<out>/<arch>/gemm_models`: the files
+the planner's model loader reads for that target and `index.txt`, one SHA-256 digest per file; the
+input of hipTensor's contraction JIT), and refuse a selection model of format v3 that names another
+digest of `index.txt` than the one written (`gemm=<sha256>`, models that read the planner's
+predicted time). The cross-check below compares these directories too.
+
 For the same rocKE sources and COMGR library both write the same packs: the same kernels, code
-objects, kernel records, routes and selection models. Only the two header strings that name the
+objects, kernel records, routes and selection models (and the same `gemm_models` directories). Only the two header strings that name the
 toolchain differ: the C++ builder writes the JIT compiler id and `rocke <version>; build <id>`,
 this script `llvm-<version>;comgr=<library>` and `rocke <version>; hiptensor_aot <hash>`. Given
 this script's strings (`--compiler-id`, `--rocke-version`), the C++ builder writes byte-identical
