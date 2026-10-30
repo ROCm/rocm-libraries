@@ -7,6 +7,7 @@
 #include <nanobind/stl/vector.h>
 
 #include <roc/hostnumerics/index_range.hpp>
+#include <roc/hostnumerics/sampling.hpp>
 #include <string>
 
 namespace nb = nanobind;
