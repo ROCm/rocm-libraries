@@ -588,18 +588,11 @@ TEST(IndexRangeCpp, SizeBoundaries) {
     EXPECT_EQ(range.start(), 1);
     EXPECT_EQ(range.stop(), 7);
     EXPECT_EQ(range.stride(), 2);
-    EXPECT_THROW(primeIndexRange(
-                     {.logicalElements = 2, .allocatedElements = maximum, .requestedElements = 1}),
+    EXPECT_THROW(primeIndexRange({.logicalElements = maximum, .requestedElements = 1}),
                  std::runtime_error);
     // Zero requested elements selects none; a request covering every element selects all.
-    EXPECT_EQ(
-        primeIndexRange({.logicalElements = 10, .allocatedElements = 10, .requestedElements = 0})
-            .count(),
-        0);
-    EXPECT_EQ(
-        primeIndexRange({.logicalElements = 10, .allocatedElements = 10, .requestedElements = 10})
-            .count(),
-        10);
+    EXPECT_EQ(primeIndexRange({.logicalElements = 10, .requestedElements = 0}).count(), 0);
+    EXPECT_EQ(primeIndexRange({.logicalElements = 10, .requestedElements = 10}).count(), 10);
 }
 
 template <typename T>

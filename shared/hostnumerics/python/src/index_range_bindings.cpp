@@ -61,17 +61,16 @@ count() returns the exact number of entries for any range.
             nb::is_operator());
     module.def(
         "prime_index_range",
-        [](size_t logicalElements, size_t allocatedElements, size_t requestedElements) {
-            return primeIndexRange({.logicalElements = logicalElements,
-                                    .allocatedElements = allocatedElements,
-                                    .requestedElements = requestedElements});
+        [](size_t logicalElements, size_t requestedElements) {
+            return primeIndexRange(
+                {.logicalElements = logicalElements, .requestedElements = requestedElements});
         },
-        nb::kw_only(), "logical_elements"_a, "allocated_elements"_a, "requested_elements"_a,
+        nb::kw_only(), "logical_elements"_a, "requested_elements"_a,
         R"doc(
-Choose a prime stride from allocated_elements / requested_elements.
+Choose a prime stride from logical_elements / requested_elements.
 The resulting count is approximate. Zero requested elements selects no index;
 a request at least as large as logical_elements selects the full logical range.
-All arguments are keyword-only because the three counts are easy to transpose.
+Both arguments are keyword-only because the two counts are easy to transpose.
 )doc");
 }
 }  // namespace roc::hostnumerics::python_bindings
