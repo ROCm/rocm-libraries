@@ -154,7 +154,8 @@ def make_dense_candidate(
 ) -> KernelCandidate:
     """One dense candidate. ``base_spec(req)`` is its default kernel spec (raise
     ``ValueError`` when the request cannot have one); ``supports`` is the
-    kernel's own validator; ``features`` is the capability's feature set;
+    kernel's own validator; ``features`` is the capability's feature set
+    (``layout_dense`` is added: every dense kernel reads contiguous tensors);
     ``algorithm`` the selector a pin names it by; ``recorded`` names the
     fields ``base_spec`` resolves per problem (see
     :meth:`rocke.dispatch.tuning.KnobSpace.recorded`); ``derived`` recomputes
@@ -173,7 +174,9 @@ def make_dense_candidate(
         abi_version=ATTENTION_ABI_VERSION,
         priority=3,
         capability=Capability(
-            arches=(arch,), dtypes=("bf16", "fp16"), supports_features=features
+            arches=(arch,),
+            dtypes=("bf16", "fp16"),
+            supports_features=frozenset(features) | {"layout_dense"},
         ),
         space=DenseSpace(
             abi=ATTENTION_ABI_VERSION,

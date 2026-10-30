@@ -378,8 +378,13 @@ class TestRdnaAttentionSelection(unittest.TestCase):
                     self.assertEqual(_window_bounds(request), expected)
 
     def test_explicit_layout_and_score_requirements_are_not_ignored_elsewhere(self):
+        # gfx950 serves contiguous prefill with its dense kernel and a single
+        # contiguous query row with the strided decode kernel, never RDNA WMMA.
+        single_row = dispatch_attention(
+            _request(arch="gfx950", layout="dense", seqlen_q=1)
+        )
+        self.assertEqual(single_row.candidate.name, "attention_strided_decode")
         for changes in (
-            {"layout": "dense"},
             {"layout": "ragged"},
             {"layout": "paged"},
             {"use_softcap": True},

@@ -293,6 +293,12 @@ class UnifiedAttention2DTiledSpec:
     # v1 is intentionally restricted to bf16/no-bias/no-window until parity
     # is proven broadly.
     use_register_pv: bool = False
+    # Walk query blocks longest-first: grid row ``y`` computes query block
+    # ``num_q_blocks - 1 - y``. Under causal masking a block's cost grows with
+    # its index, so the dynamically scheduled grid starts the longest blocks
+    # first and leaves the cheapest ones for the tail. The launch grid is
+    # unchanged; the order is a bijection, so outputs are identical.
+    use_qblock_reverse: bool = False
     # ``T`` (per-CTA-iter KV-tile size in tokens). When ``None``, the
     # kernel uses ``T = block_size`` (one paged-KV cache block per
     # iter, matching the AITER decode path). Setting ``tile_size > block_size``
@@ -964,6 +970,7 @@ class UnifiedAttention2DTiledSpec:
             "fp8mfma" if self.use_fp8_mfma_qk else "",
             "fp8pv" if self.use_fp8_mfma_pv else "",
             "regpv" if self.use_register_pv else "",
+            "qrev" if self.use_qblock_reverse else "",
             "lse" if self.emit_lse else "",
         )
 
@@ -1009,10 +1016,10 @@ def supports_tiled_2d(
         return False, arch_reason
     if dtype not in ("fp16", "bf16"):
         return False, f"tiled 2D kernel currently supports fp16/bf16 (got {dtype!r})"
-    if head_size not in (64, 128, 256):
+    if head_size not in (64, 128, 192, 256):
         return (
             False,
-            f"tiled 2D kernel only supports head_size in {{64,128,256}} (got {head_size})",
+            f"tiled 2D kernel only supports head_size in {{64,128,192,256}} (got {head_size})",
         )
     if head_size % 32 != 0:
         return (
@@ -1323,6 +1330,13 @@ def build_unified_attention_2d_tiled(
 
     kv_head_idx = b.block_id_x()
     q_block_global_idx = b.block_id_y()
+    if spec.use_qblock_reverse:
+        # Grid y extent, as the launcher sizes it: total_q // BLOCK_Q + num_seqs.
+        total_q = b.global_load_i32(cu_q, num_seqs_p)
+        num_q_blocks = b.add(b.div(total_q, b.const_i32(BLOCK_Q)), num_seqs_p)
+        q_block_global_idx = b.sub(
+            b.sub(num_q_blocks, b.const_i32(1)), q_block_global_idx
+        )
     tid = b.thread_id_x()
 
     # Wave decomposition. For NUM_WARPS=1 this collapses to `wave_id=0,

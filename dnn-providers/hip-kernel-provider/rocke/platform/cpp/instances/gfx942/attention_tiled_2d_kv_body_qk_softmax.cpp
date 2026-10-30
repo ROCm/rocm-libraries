@@ -709,13 +709,34 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
          * ============================================================ */
         rocke_value_t* cur_buf = ctx->cur_buf;
         rocke_value_t* nxt_buf = ctx->nxt_buf_v;
-        if(ctx->GROUPED_KV2)
+        if(ctx->K_SINGLE_BUF)
+        {
+            /* Single K slot: drain the QK K-reads and barrier before the next-K
+             * copy reuses the slot (Python's K_SINGLE_BUF branch). */
+            rocke_b_s_waitcnt(b, /*vmcnt=*/-1, /*lgkmcnt=*/0, /*expcnt=*/-1);
+            rocke_b_sync(b);
+            if(ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
+            {
+                /* split cfvst already issued V; only next-K remains. */
+            }
+            else if(!ctx->EARLY_V_SCHEDULE)
+            {
+                rocke_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
+            }
+            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+        }
+        else if(ctx->GROUPED_KV2)
         {
             rocke_gfx942_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
             rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, cur_buf);
         }
         else if(ctx->EARLY_V_SCHEDULE)
         {
+            rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+        }
+        else if(ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
+        {
+            /* split cfvst already published V; only next-K remains. */
             rocke_gfx942_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
         }
         else

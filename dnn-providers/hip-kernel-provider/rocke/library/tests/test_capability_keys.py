@@ -282,6 +282,16 @@ def test_direct_problem_key_covers_every_extent_the_predicate_reads():
             )
 
 
+def test_direct_problem_key_separates_column_paddings():
+    # The predicate reads the column padding as PAD_W, which pad_w overrides,
+    # so a key that drops pad_w would answer a per-axis padding with the
+    # verdict for an equal one.
+    p = DirectConvProblem(N=2, H=28, W=28, groups=16, cpg=16, kpg=16, PAD=1)
+    assert problem_capability_key(p, is_direct=True) != problem_capability_key(
+        dataclasses.replace(p, pad_w=0), is_direct=True
+    )
+
+
 def test_direct_problem_key_collapses_shapes_onto_geometries():
     p = DirectConvProblem(N=2, H=28, W=28, groups=16, cpg=16, kpg=16)
     same = dataclasses.replace(p, N=64, H=7, W=7, dtype="bf16")
