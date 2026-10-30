@@ -148,7 +148,7 @@ Twelve tests. They fall into three groups, and the sizes are the interesting par
 
 | gate | flavor coverage | why |
 |---|---|---|
-| golden (`rocke_representative_ir_sha256.json`) | **all three, from any host** | flavor is an explicit *input* to `lower_case(case, flavor)`; pure Python emission, no toolchain needed. The JSON stores one sub-document per flavor under `flavors:`. |
+| golden (`rocke_representative_ir_sha256/`) | **all three, from any host** | flavor is an explicit *input* to `lower_case(case, flavor)`; pure Python emission, no toolchain needed. Each per-family JSON shard stores one sub-document per flavor under `flavors:`. |
 | emitted-IR validity (`tools/check_ir_validity.py`) | **host flavor only** | it compiles and links; only the installed toolchain can judge |
 | byte-identity (`tools/check_byte_identity.py`) | one flavor per run, selected **ambiently** | no `--flavor` argument; both engines read `ROCKE_LLVM_FLAVOR`, so CLAUDE.md's recipe is three separate invocations with the env var set |
 

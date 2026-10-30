@@ -7230,12 +7230,12 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SAndB32(dst=sgpr(staggerUStrideShift), src0=sgpr("StaggerU"), src1=hex(0x1F00)))
       module.add(SLShiftRightB32(dst=sgpr(staggerUStrideShift), shiftHex=hex(8), src=sgpr(staggerUStrideShift)))
       module.add(SAndB32(dst=sgpr(staggerUMapping), src0=sgpr("StaggerU"), src1=hex(0xE000)))
-      module.add(SAndB32(dst=sgpr("StaggerU"), src0=sgpr("StaggerU"), src1=hex(0xFF)))
+      # Keep the packed StaggerU intact: persistent kernels rerun this per tile.
+      module.add(SAndB32(dst=sgpr(currentStaggerU), src0=sgpr("StaggerU"), src1=hex(0xFF), comment="init staggerU"))
       if kernel["PrefetchGlobalRead"] >= 3:
         module.add(SCmpLeU32(src0=sgpr("OrigLoopCounter"), src1=(kernel["PrefetchGlobalRead"] - 1), \
             comment="loopCount <= PGR-1" ))
-        module.add(SCMovB32(dst=sgpr("StaggerU"), src=0, comment="set StaggerU=0 if loopCount <= PGR-1"))
-      module.add(SMovB32(dst=sgpr(currentStaggerU), src=sgpr("StaggerU"), comment="init staggerU"))
+        module.add(SCMovB32(dst=sgpr(currentStaggerU), src=0, comment="set staggerU=0 if loopCount <= PGR-1"))
       module.add(beginStaggerUIterLabel)
       module.add(SLShiftLeftB32(dst=sgpr(shiftedStaggerU), src=sgpr(currentStaggerU), \
               shiftHex=sgpr(staggerUStrideShift), comment="shift by StaggerUStride"))
@@ -9145,8 +9145,8 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["PrefetchGlobalRead"]==2:
           with self.allocTmpSgpr(2, tag="closeLoop_tmpSgprInfo") as tmpSgprInfo:
             tmpSgpr = tmpSgprInfo.idx
-            module.add(SCmpEQU32(src0=sgpr("StaggerU"), src1=0))
-            module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=hex(2), src1=hex(1)))
+            module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("StaggerU"), src1=hex(0xFF), comment="SCC = StaggerU amount != 0"))
+            module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=hex(1), src1=hex(2)))
             decCode = SSubU32(dst=loopCounter, src0=loopCounter, \
                 src1=sgpr(tmpSgpr), \
                 comment="dec counter%s"%(loopChar) )

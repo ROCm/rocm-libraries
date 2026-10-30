@@ -5892,6 +5892,21 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
         }
     }
+    // Every solution writes the same D, so one that leaves D unwritten would be checked against
+    // the previous solution's result. Fill D before each verified launch so that cannot pass.
+    const bool verifyD = (arg.unit_check || arg.norm_check || arg.allclose_check || arg.fast_check)
+                         && !arg.c_equal_d;
+    auto fillDWithSentinel = [&]() {
+        for(auto& d : dD)
+        {
+            hipError_t err = fast_check_fill_sentinel_device(
+                d.buf(), To, d.getNumBytes() / realDataTypeSize(To), stream);
+            // fast_check rejects other D types up front; all ones still poisons them.
+            if(err == hipErrorInvalidValue)
+                err = hipMemsetAsync(d.buf(), 0xFF, d.getNumBytes(), stream);
+            CHECK_HIP_ERROR(err);
+        }
+    };
     if(!arg.timing)
     {
         // fast_check launches and checks each solution fast_check_repeat times, solution by
@@ -5996,12 +6011,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                     = placedWorkspace->straddle(heuristicResult[sol].workspaceSize, workspace_size);
                 workspaceBytes = heuristicResult[sol].workspaceSize;
             }
-            if(arg.fast_check && !arg.c_equal_d)
-            {
-                for(int i = 0; i < gemm_count; i++)
-                    CHECK_HIP_ERROR(
-                        fast_check_fill_sentinel_device((*dDp)[i].buf(), To, size_D[i], stream));
-            }
+            if(verifyD)
+                fillDWithSentinel();
             if(fcCheckE)
                 for(int i = 0; i < gemm_count; i++)
                     CHECK_HIP_ERROR(
@@ -6552,6 +6563,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         // Every path prepares a candidate with this first.
         auto prepareCandidate = [&](size_t) {
+            if(verifyD)
+                fillDWithSentinel();
             if((arg.unit_check || arg.norm_check || arg.allclose_check) && arg.c_equal_d)
             {
                 if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM

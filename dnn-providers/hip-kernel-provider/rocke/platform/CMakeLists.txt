@@ -344,13 +344,15 @@ if(ROCKE_INSTALL_TESTS)
     # Host-only golden IR byte-stability gate. The relocatable runner rebuilds the
     # representative IR from the co-located rocke package and compares digests to
     # the committed golden. It needs the parity harness module (imported by name)
-    # and the golden JSON co-located next to it; no GPU and no examples required.
+    # and the golden's per-family JSON shards co-located next to it; no GPU and no
+    # examples required.
     install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/tests/rocke_installed_golden_test.py"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR})
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/instances/rocke_ir_parity_harness.py"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR})
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/rocke_representative_ir_sha256.json"
-            DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/rocke_representative_ir_sha256"
+            DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden
+            FILES_MATCHING PATTERN "*.json")
 
     # Host-only differential golden check (Python reference emitters only; no
     # compiler). The rest of tests/instances/differential needs the C++ build and
@@ -857,6 +859,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_correctness.py"
         "tests/library/tests/test_direct_conv_correctness.py"
         "tests/library/tests/test_conv_dgrad_depthwise_windowed.py"
+        "tests/library/tests/test_direct_depthwise_dgrad_v2.py"
         "tests/library/tests/test_conv_dgrad_4c.py"
         "tests/library/tests/test_conv_dgrad_fused_weights.py"
         "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
