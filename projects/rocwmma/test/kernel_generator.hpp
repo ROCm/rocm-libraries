@@ -313,11 +313,11 @@ namespace rocwmma
                        && arch != DeviceInfo::hipGcnArch_t::GFX1201
                        && arch != DeviceInfo::hipGcnArch_t::GFX1250
                     )
+                    // clang-format on
                     {
                         // Current KernelParams have f8: skip kernel on host.
                         return;
                     }
-                    // clang-format on
                 }
 
                 // Generate kernel
