@@ -43,8 +43,6 @@
 #include <utility>
 #include <vector>
 
-#include <unistd.h>
-
 #include "unit_test_common.hpp"
 #include "unit_test_local.hpp"
 #include "unit_test_reference.hpp"
@@ -2218,40 +2216,27 @@ TYPED_TEST(solvers, divergence_tolerance_below_one_stops_at_the_first_check)
     }
 }
 
-TYPED_TEST(solvers, idr_ends_the_program_when_the_shadow_space_breaks_down)
+// A breakdown stops IDR and is reported, as a breakdown stops BiCGStab(l)
+TYPED_TEST(solvers, idr_stops_when_the_shadow_space_breaks_down)
 {
     using T = typename TypeParam::value_type;
-    // A P^T A U block of zero
-    const Csr<T> ref = diagonal(Vec<T>(4, 0));
-    auto         A   = this->make(ref);
-    IDR<T>       solver;
-    solver.Init(0.0, 1e-10, 1e8, 10);
-    set_up(solver, idr<T>(2), *A, nullptr);
-
-    EXPECT_FATAL_ERROR(solve(solver, *A, rhs<T>(4), Vec<T>(4, 0)), "idr\\.cpp");
-}
-
-namespace
-{
-    // FATAL_ERROR reports its cause on stdout, and death tests match stderr
-    void expect_fatal_error_saying(const std::function<void()>& f, const std::string& pattern)
-    {
-        EXPECT_EXIT(
-            {
-                std::fflush(stdout);
-                dup2(2, 1);
-                f();
-            },
-            testing::ExitedWithCode(1),
-            pattern);
-    }
+    KNOWN_BUG("IDR ends the program on a breakdown instead of stopping");
+    expect_in_child([&] {
+        // A P^T A U block of zero
+        const Csr<T> ref = diagonal(Vec<T>(4, 0));
+        auto         A   = this->make(ref);
+        IDR<T>       solver;
+        solver.Init(0.0, 1e-10, 1e8, 10);
+        set_up(solver, idr<T>(2), *A, nullptr);
+        solve_reporting(solver, *A, rhs<T>(4), "M(k,k) == 0");
+    });
 }
 
 // The first step of IDR(1) takes U = r = b and M = (P, A b). On the zero matrix M is
 // zero. On the matrix with off-diagonal entries max / 2, the signs of b against those
 // of P make M = |P_0| inf or |P_0| inf - |P_1| inf. On the rotation, (A r, r) = 0
 // makes omega = 0 * (kappa / 0) in the dimension reduction step.
-TYPED_TEST(solvers, idr_reports_the_breakdown_that_ends_the_program)
+TYPED_TEST(solvers, idr_reports_the_breakdown_and_stops)
 {
     using T = typename TypeParam::value_type;
     Csr<T>  zero(2), huge(2), rotation(2);
@@ -2279,23 +2264,27 @@ TYPED_TEST(solvers, idr_reports_the_breakdown_that_ends_the_program)
     {
         const Csr<T>* A;
         Vec<T>        b;
-        const char*   pattern;
+        const char*   message;
     };
-    const Case cases[] = {{&zero, {1, 2}, "M\\(k,k\\) == 0"},
-                          {&huge, {0, 10 * sign0}, "M\\(k,k\\) == inf"},
-                          {&huge, {-10 * sign1, 10 * sign0}, "M\\(k,k\\) == NaN"},
+    const Case cases[] = {{&zero, {1, 2}, "M(k,k) == 0"},
+                          {&huge, {0, 10 * sign0}, "M(k,k) == inf"},
+                          {&huge, {-10 * sign1, 10 * sign0}, "M(k,k) == NaN"},
                           {&rotation, {1, 2}, "w == NaN"}};
+
+    KNOWN_BUG("IDR ends the program on a breakdown instead of stopping");
     for(const Case& c : cases)
     {
         for(bool precond : {false, true})
         {
-            SCOPED_TRACE(std::string(c.pattern) + (precond ? " with Jacobi" : ""));
-            auto      A = this->make(*c.A);
-            Jacobi<T> jacobi;
-            IDR<T>    solver;
-            solver.Init(0.0, 0.0, 1e8, 10);
-            quietly([&] { set_up(solver, idr<T>(1), *A, precond ? &jacobi : nullptr); });
-            expect_fatal_error_saying([&] { solve(solver, *A, c.b, Vec<T>(2, 0)); }, c.pattern);
+            SCOPED_TRACE(std::string(c.message) + (precond ? " with Jacobi" : ""));
+            expect_in_child([&] {
+                auto      A = this->make(*c.A);
+                Jacobi<T> jacobi;
+                IDR<T>    solver;
+                solver.Init(0.0, 0.0, 1e8, 10);
+                quietly([&] { set_up(solver, idr<T>(1), *A, precond ? &jacobi : nullptr); });
+                solve_reporting(solver, *A, c.b, c.message);
+            });
         }
     }
 }
