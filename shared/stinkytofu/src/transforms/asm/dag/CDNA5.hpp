@@ -702,6 +702,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
         int latencyWmmaBudget = 0;
         int wmmaWindowsNeeded = 0;
         int dsLoadCount = 0;
+        // Step 4b parent-WMMA drain (maxParentWmmaIdx + budget). The overlap
+        // afterThreshold can sit later than this. Averaging with a before
+        // threshold may move earlier than that after value, but not earlier
+        // than this dependency.
+        int depThreshold = 0;
     };
 
     int wmmaIssuedCountThisRegion_ = 0;
@@ -2005,6 +2010,7 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         int wmmaWindowsNeeded;
         int latencyWmmaBudget;
         int dsLoadCount;
+        int depThreshold;
     };
 
     // Step 1a: collect all movable barriers with their PSEUDO src token sets,
@@ -2151,11 +2157,12 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         }
         for (StinkyInstruction* barrier : group.barriers) {
             barrierWmmaThresholds_[barrier] = afterThreshold;
-            result[barrier] = {afterThreshold, afterThreshold, latencyWmmaBudget, wmmaWindowsNeeded,
-                               matchingDsLoadCount};
+            result[barrier] = {afterThreshold,    afterThreshold,      latencyWmmaBudget,
+                               wmmaWindowsNeeded, matchingDsLoadCount, depThreshold};
         }
         overlapChecks.push_back({groupBarrier, group.barriers, afterThreshold, lastOverlap,
-                                 wmmaWindowsNeeded, latencyWmmaBudget, matchingDsLoadCount});
+                                 wmmaWindowsNeeded, latencyWmmaBudget, matchingDsLoadCount,
+                                 depThreshold});
         PASS_DEBUG(std::cerr << "[CDNA5 computeBarrierAfterThresholds] barrier=" << groupBarrier
                              << " barrierGroupSize=" << group.barriers.size() << " afterThreshold="
                              << afterThreshold << " matchingDsLoadCount=" << matchingDsLoadCount
@@ -2220,9 +2227,9 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
 
         for (StinkyInstruction* barrier : summary.barriers) {
             barrierWmmaThresholds_[barrier] = adjustedAfterThreshold;
-            result[barrier] = {adjustedAfterThreshold, summary.afterThreshold,
+            result[barrier] = {adjustedAfterThreshold,    summary.afterThreshold,
                                summary.latencyWmmaBudget, summary.wmmaWindowsNeeded,
-                               summary.dsLoadCount};
+                               summary.dsLoadCount,       summary.depThreshold};
         }
         PASS_DEBUG(
             std::cerr << "[CDNA5 computeBarrierAfterThresholds overlap] barrier="
@@ -2993,10 +3000,16 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     if (hasWMMAInRegion_) {
         // Layer 1/3 (base merge):
         // Build one threshold map from two independent estimators:
-        //   - afterThresholds : "barrier should be after at least N WMMA"
-        //   - beforeThresholds: "barrier should be before/around WMMA N"
-        // If a barrier appears in both maps, average them to get a single
-        // neutral placement point in barrierWmmaThresholds_.
+        //   - afterThresholds : step-4 overlap/window placement. Step 4b may
+        //     replace it when the parent-WMMA drain is later.
+        //   - beforeThresholds: where the barrier should sit so the
+        //     post-barrier ds_loads can issue and be consumed.
+        // A barrier in both maps averages the two. The average may pull the
+        // step-4 after earlier, but not earlier than depThreshold (the
+        // parent-WMMA index plus the same drain budget). That dependency is
+        // the floor even when it did not replace the overlap after, because
+        // overlap can sit later than the parent drain. Example: overlap after
+        // 50, dep 45, before 30 averages to 40, and the barrier keeps 45.
         auto afterThresholds = computeBarrierAfterThresholds(regionStart, regionEnd);
         auto beforeThresholds = computeBarrierBeforeThresholds(regionStart, regionEnd);
         for (auto& [barrier, afterOutput] : afterThresholds) {
@@ -3004,10 +3017,20 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         }
         for (auto& [barrier, beforeOutput] : beforeThresholds) {
             auto it = barrierWmmaThresholds_.find(barrier);
-            if (it != barrierWmmaThresholds_.end())
-                it->second = (it->second + beforeOutput.beforeThreshold) / 2;
-            else
+            if (it != barrierWmmaThresholds_.end()) {
+                const int afterThreshold = it->second;
+                const int beforeThreshold = beforeOutput.beforeThreshold;
+                const int averaged = (afterThreshold + beforeThreshold) / 2;
+                const int depThreshold = afterThresholds.find(barrier)->second.depThreshold;
+                it->second = std::max(depThreshold, averaged);
+                PASS_DEBUG(std::cerr << "[CDNA5 onInitRegion after-before floor] barrier="
+                                     << barrier << " afterThreshold=" << afterThreshold
+                                     << " beforeThreshold=" << beforeThreshold
+                                     << " depThreshold=" << depThreshold << " averaged=" << averaged
+                                     << " merged=" << it->second << "\n");
+            } else {
                 barrierWmmaThresholds_[barrier] = beforeOutput.beforeThreshold;
+            }
         }
         // Layer 2/3 (exclusive overlap reconcile):
         // Some signal/wait-like pairs are split: one member only lands in the

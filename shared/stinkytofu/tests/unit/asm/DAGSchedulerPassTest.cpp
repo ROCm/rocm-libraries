@@ -851,6 +851,104 @@ TEST_F(DAGSchedulerPassTest, BarrierAfterUsesParentWmmaWhenItExceedsDrainThresho
     EXPECT_LT(positionOf(*bb, afterParentWmma), positionOf(*bb, lateSignal)) << scheduleOrder(*bb);
 }
 
+// One stage barrier with ds_loads on both sides is in both threshold maps.
+// The pre-barrier ds_load overwrites a VGPR read by WMMA 16, so the after
+// threshold is that parent plus the single-load drain budget
+// (16 + 56/8 + 1 = 24). The post-barrier ds_load pulls the before threshold
+// below that (the issue window is subtracted from the region), and averaging
+// the two promotes the barrier at 19. One of the twelve competing WMMAs
+// issues before the ds_load, so a threshold of 24 leaves seven WMMAs between
+// the load and the barrier (7 * 8 cycles covers the 56-cycle return). The
+// average leaves two. DsSpread is off so the drain is the instruction
+// latency. The trailing compare keeps the loop tail from being a WMMA, which
+// would otherwise defer the first WMMA and hide the gap.
+TEST_F(DAGSchedulerPassTest, BothSidedBarrierKeepsTheAfterThresholdAsAFloor) {
+    bb->addSuccessor(bb);
+
+    StinkyInstruction* parentWmma = nullptr;
+    for (int i = 0; i < 16; ++i) {
+        const int src = (i == 15) ? 0 : 3000 + i * 16;
+        StinkyInstruction* wmma =
+            createWmmaF32_16x16x16_bf16(/*destStart=*/1100 + i * 16, /*src0Start=*/src);
+        if (i == 15) parentWmma = wmma;
+    }
+    StinkyInstruction* preBarrierDs =
+        createMovableDsLoad(/*destReg=*/0, /*addrReg=*/810, /*ldsToken=*/3);
+    for (int i = 0; i < 12; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/2000 + i * 16, /*src0Start=*/4000 + i * 16);
+    auto [signal, wait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/3);
+    (void)wait;
+    StinkyInstruction* postBarrierDs =
+        createMovableDsLoad(/*destReg=*/500, /*addrReg=*/820, /*ldsToken=*/3);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
+    createSCmpWritingScc(bb, /*srcSgpr=*/90);
+
+    runPassWithUnrollGemm(/*dsSpread=*/false);
+
+    auto wmmasBetween = [&](const StinkyInstruction* from, const StinkyInstruction* to) {
+        int count = 0;
+        bool started = false;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == to) return started ? count : -1;
+            if (started && isMatrixInstruction(*inst)) ++count;
+            if (inst == from) started = true;
+        }
+        return -1;
+    };
+
+    ASSERT_NE(parentWmma, nullptr);
+    EXPECT_LT(positionOf(*bb, parentWmma), positionOf(*bb, preBarrierDs)) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, signal), positionOf(*bb, postBarrierDs)) << scheduleOrder(*bb);
+    EXPECT_GE(wmmasBetween(preBarrierDs, signal), 7) << scheduleOrder(*bb);
+}
+
+// The overlap after can sit later than the parent-WMMA drain. WMMA 10 reads
+// the VGPR the pre-barrier ds_load overwrites, so depThreshold is 10 + 56/8 + 1
+// = 18. One matching ds_load over 35 WMMAs and 2 ds_loads needs 18 windows, so
+// the overlap after is 18 + 8 = 26. The post-barrier ds_load's before threshold
+// is 4, and (26 + 4) / 2 = 15, which is under the parent drain. The barrier
+// keeps 18: later than the average, earlier than the overlap after. The
+// trailing compare keeps head balance off. The WMMAs after the consumer are
+// the work that would fill a later overlap placement.
+TEST_F(DAGSchedulerPassTest, BothSidedBarrierStopsAtTheParentDependencyNotTheOverlapAfter) {
+    bb->addSuccessor(bb);
+
+    StinkyInstruction* parentWmma = nullptr;
+    for (int i = 0; i < 10; ++i) {
+        const int src = (i == 9) ? 0 : 3000 + i * 16;
+        StinkyInstruction* wmma =
+            createWmmaF32_16x16x16_bf16(/*destStart=*/1100 + i * 16, /*src0Start=*/src);
+        if (i == 9) parentWmma = wmma;
+    }
+    StinkyInstruction* preBarrierDs =
+        createMovableDsLoad(/*destReg=*/0, /*addrReg=*/810, /*ldsToken=*/3);
+    auto [signal, wait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/3);
+    (void)wait;
+    StinkyInstruction* postBarrierDs =
+        createMovableDsLoad(/*destReg=*/500, /*addrReg=*/820, /*ldsToken=*/3);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
+    for (int i = 0; i < 24; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/5000 + i * 16, /*src0Start=*/6000 + i * 16);
+    createSCmpWritingScc(bb, /*srcSgpr=*/90);
+
+    runPassWithUnrollGemm(/*dsSpread=*/false);
+
+    int wmmasBeforeBarrier = 0;
+    for (const IRBase& ir : *bb) {
+        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (inst == signal) break;
+        if (isMatrixInstruction(*inst)) ++wmmasBeforeBarrier;
+    }
+
+    ASSERT_NE(parentWmma, nullptr);
+    EXPECT_LT(positionOf(*bb, parentWmma), positionOf(*bb, preBarrierDs)) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, signal), positionOf(*bb, postBarrierDs)) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBeforeBarrier, 18) << scheduleOrder(*bb);
+}
+
 TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWithoutBeforeGroup) {
     bb->addSuccessor(bb);
 
