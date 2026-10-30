@@ -30,11 +30,10 @@ CoExporter), args (tab addr i64, glob addr i64, nlayers i32) on the handle strea
 
 ## Decisions taken here
 
-- Fixture lock: until CoExporter's manifest lands, `manifest.json` holds the four spike
-  Qwen3.8 rt0 objects (spike rocm-libraries 102d947a342, vLLM geometry maxlen 4096, block 784,
-  x-packed KV). Their `src` is the first 32 hex of each object's sha256, NOT vLLM's
-  `compile_key`: these objects will not match a real vLLM payload. Replace with the
-  exporter's set (README "The megakernel family").
+- Lock: `manifest.json` is CoExporter's rt0 set (megakernels `users/sareeder/co-export`
+  1f9108f, `common/results/co/rt0/final/`, manifest sha256 e689d054dfca...): 16 objects,
+  Qwen3.8 TP1 and TP2, Qwen3.6, Gemma4 at M 1, 2, 4, 8; `src` is vLLM's `compile_key`.
+  Earlier heads carried the spike's four Qwen3.8 objects as a stand-in.
 - The pack step skips the lock check when `artifacts/` is absent (no `dvc pull`): configure
   already warns, as for rocKE, and nothing is packed.
 - `lm_head`, `cus`, ... are KMD fields of type bool/int, all `matcher_only_fields`.
