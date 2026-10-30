@@ -56,6 +56,13 @@ or `UPGRADED` (tier changed, with the reason), `REFUTED` or `UNVERIFIED` (what b
 `CONFIRMED` and `REFUTED` are equal outcomes: never look for a reason to confirm, and
 correct tier inflation as readily as errors.
 
+A claim of magnitude (a performance cost, a latency, a frequency, a size) cannot be `DOWNGRADED`,
+`PARTIAL`-narrowed or `REFUTED` by reading code or by a number that does not cover the risky
+cases. Only a measurement of the claimed cases, or code that makes the cost provably absent
+there, can lower it. An author's average over mixed cases bounds nothing about the worst
+case in it. Without such a measurement the verdict is `UNVERIFIED` at the reported tier, with
+an Approval request for the measurement.
+
 A second verifier, who is neither the reporter nor the first verifier, rechecks a `REFUTED`
 verdict on a `BLOCKING` or `IMPORTANT` finding and any verdict whose final tier is on the
 other side of the `IMPORTANT`/`SUGGESTION` line from the reported tier; an upgrade needs the

@@ -13,6 +13,21 @@ When your packet lists owned files (docs-only change), you are the correctness o
   and `projects/miopen/test/gtest/README.md` for test conventions.
 - Existing public headers the change edits (`projects/miopen/include/miopen/miopen.h`) keep accurate Doxygen documentation.
 
+## PR text (PR targets only)
+
+The description explains why more than how, and every factual claim in it is checked against the diff. Read `pr/pr-text.txt` and
+`facts.md` (the description-against-commits fact), and verify each remaining claim, recording the check under Coverage:
+
+- Scope: the files, solvers, archs, data types, layouts and backends the text names match what the diff touches; nothing the diff
+  changes is missing from the text (a changed default, a removed fallback, a db edit).
+- Risk and compatibility statements (find-db and perf-db compatibility, ABI or public API impact, behavior change on existing
+  configurations) match the code.
+- Test results and counts (passed, skipped, architecture, build flags) match the evidence available: CI logs, the `RUN` lane's
+  rows. A result the author states and nothing supports is `UNVERIFIED`, not accepted.
+- Linked tickets, defects and PRs are described accurately. Existence and resolution of the links belong to `AUTH`: hand off.
+
+A false or unsupported claim is `IMPORTANT` when a reader would rely on it to judge risk (kind `process`), else `SUGGESTION`.
+
 ## Concision
 
 Concision, hedging, filler, marketing and table-versus-prose points are findings only when the bloat hides a requirement,

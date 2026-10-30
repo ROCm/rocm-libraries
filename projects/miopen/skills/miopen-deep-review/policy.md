@@ -87,6 +87,12 @@ diff; reformat churn mixed into a functional change.
   markdown, reStructuredText, plain-text docs, license files (`LICENSE`, `CONTRIBUTING`,
   `SECURITY`, `README`) and skill prompt text. Config files (`.gitignore`,
   `.clang-format`) are not.
+- A performance-affecting change (solver selection, kernels, perf-config search spaces, heuristics, find or perf data, per-call host
+  work on Find, `GetSolution` or `GetWorkSpaceSize`) needs measured evidence in the PR (`projects/miopen/CONTRIBUTING.md`: the
+  author reports the impact on performance), matched to where the cost lands ([lanes/perf.md](lanes/perf.md)). No evidence is at
+  least `IMPORTANT`; the reviewer never runs GPU work without approval.
+- Generated or binary data (find-db, perf-db, models, bundles) is judged against its generator and its validating gate, not by
+  reading rows: a hand edit without the generator change, or a gate that did not run on the changed data, is a finding.
 - A required (architecture, suite) pair with no executed run is at least `IMPORTANT`. Green
   is not coverage: a suite counts only for cases that executed, with the solver and
   architecture under review. Skipped, filtered-out (`--gtest_filter`, `Smoke` prefix, `exclude_gpu_*`), not-applicable or

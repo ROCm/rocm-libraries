@@ -45,5 +45,5 @@ Read every changed line of your owned files, and the outside code each change de
 - Complexity that a simpler construct in the same codebase already solves.
 
 Missing or weak tests are not findings here: hand them off to `TESTQ` (weak tests) or `TESTB` (missing coverage). Test registration in
-`projects/miopen/test/gtest/test_categories.yaml` and gtest naming are owned by `BUILD`: hand them off, do not file them. Record
-anything else for another lane under **Handoffs**; do not file it.
+`projects/miopen/test/gtest/test_categories.yaml` and gtest naming are owned by `BUILD`: hand them off, do not file them. Counterparts a change should also have reached go to `SIBLING`, architecture gates to `ARCH`, and speed or latency claims to
+`PERF`. Record anything else for another lane under **Handoffs**; do not file it.

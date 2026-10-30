@@ -57,7 +57,7 @@ change's **Options and guards**: a changed file whose flag no run enabled is une
 - Testing section absent, or "tested locally" without a command: `process` finding (IMPORTANT).
 - Checklist items marked passed with no log or CI run: `process` finding (IMPORTANT).
 - Results from a head other than `$HEAD` when the delta touches the tested code: `process` finding (IMPORTANT).
-- Performance claims without method, baseline and hardware: `process` finding (SUGGESTION).
+- Performance claims without method, baseline and hardware: hand to `PERF` (it owns evidence against risk); file here only a claim the PR text states and no log supports.
 
 Close each gap with the suite, arch and run that covers it. For a family PR CI does not test, that is a `workflow_dispatch` of
 `therock-multi-arch-ci.yml` (inputs `linux_amdgpu_families` and `pr_labels`, e.g. `test:miopen,test_filter:quick`; it runs the `quick` tier, so check the tests

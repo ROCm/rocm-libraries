@@ -156,7 +156,7 @@ not in the final diff). The lane report may quote a private term; text drafted f
 
 ## Sweeping review output
 
-For the output sweep, search the round's `REPORT.md`, `COMMENTS.md`, `CONTEXT.md`, every `.md` under `orient/` and `verify/`
+For the output sweep, search the round's `REPORT.md`, `COMMENTS.md`, `CONTEXT.md`, `facts.md`, every `.md` under `orient/` and `verify/`
 (recursively, except `*-evidence/`), the published copy `$KNOWLEDGE/$KEY-r<N>/*.md` and `LEDGER.md` instead of the
 published change: load them with `meta` (a missing file or `$KNOWLEDGE` copy fails the load), then run step 2 and filter.
 Evidence subdirectories (`verify/<ID>-evidence/`, `lanes/*-evidence/`, `lanes/<ID>/`) are local-only and never shared, so
@@ -167,7 +167,7 @@ the sweep skips them; they may hold local paths and private terms:
 load_output() {
   local RN; RN=$(basename "$PWD")   # the round directory, r<N>
   local R="$EVIDENCE/$RN" K="$KNOWLEDGE/$KEY-$RN" f n=0 miss=0
-  for f in "$R/REPORT.md" "$R/COMMENTS.md" "$R/CONTEXT.md" "$EVIDENCE/LEDGER.md"; do
+  for f in "$R/REPORT.md" "$R/COMMENTS.md" "$R/CONTEXT.md" "$R/facts.md" "$EVIDENCE/LEDGER.md"; do
     if [ -f "$f" ]; then meta "${f#"$EVIDENCE"/}" < "$f"; n=$((n + 1))
     else echo "sweep: missing $f" >&2; miss=1; fi
   done
@@ -183,7 +183,7 @@ load_output() {
 load_output || { echo "STOP: sweep input missing, not clean" >&2; exit 1; }
 sed -i.bak 's#users/[A-Za-z0-9._-]*/#users/#g' "$L/pub.content" && rm "$L/pub.content.bak"   # the expected branch prefix
 cat > "$L/sweep-allow.txt" <<'EOF2'
-^(CORR|TESTQ|TESTB|AUTH|BUILD|DEPS|API|ROCK|LEAK|DUP|DOCS|RUN|DRIFT|ORCH|VER|SCOUT|SYNTH)[0-9]*-p?[0-9]+$
+^(CORR|TESTQ|TESTB|AUTH|BUILD|DEPS|API|ROCK|LEAK|DUP|DOCS|RUN|DRIFT|SIBLING|ARCH|PERF|ORCH|VER|SCOUT|SYNTH)[0-9]*-p?[0-9]+$
 ^(handoffs?|worktrees?)$
 ^https?://(github\.com/ROCm/[A-Za-z0-9._-]+|raw\.githubusercontent\.com/ROCm/[A-Za-z0-9._-]+|rocm\.docs\.amd\.com|docs\.amd\.com|www\.amd\.com|example\.com)([/:?#].*)?$
 EOF2

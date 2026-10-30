@@ -30,6 +30,8 @@ shared, published or swept, and no report or comment may depend on a reader open
 - Read `Scope:` in `dispatch-context.md`. A finding in an area a scope note names says so in `Actual`; the note does not
   lower its tier ([../policy.md](../policy.md) tiers follow blast radius, and deprecated code that still ships can block).
   Only "do not file findings in <area>" caps findings there at `FUTURE WORK`.
+- Read `facts.md`. Do not file a finding for an established fact (`ORCH` files those): cite it as `F<n>` and file only what it does
+  not state, such as its consequence in your area. A lane whose M-rule line or tier depends on a fact cites it.
 - Write every output to the absolute `Output:` path of your dispatch, never to a path relative to your working directory.
 - Shell blocks begin `. ./env.sh`, which exports the variables above, `GREP` and `fullclone`: run each block as its own
   command in a subshell (`( … )` or `bash -c`) from `$EVIDENCE/r<N>/` (the absolute paths are in `dispatch-context.md`), so a
