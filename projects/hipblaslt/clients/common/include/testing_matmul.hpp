@@ -48,6 +48,7 @@
 // Ungated: generateW4A16Input is used even without the MX data generator.
 #include "near.hpp"
 #include "norm.hpp"
+#include "relaunch_compare.hpp"
 #include "testing_matmul_grouped_c.hpp"
 #include "ulp.hpp"
 #include "unit.hpp"
@@ -969,6 +970,15 @@ auto _sigmoid = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
                                      / (static_cast<decltype(in)>(1) + std::exp(-in)));
 };
 
+// -1 inherits the handle. A value on the test argument is this problem's request
+// and wins over the bench-wide CLI knob.
+inline int32_t resolved_uniform_summation_order(const Arguments& arg)
+{
+    if(arg.uniform_summation_order >= 0)
+        return arg.uniform_summation_order;
+    return hipblaslt_bench_options::uniform_summation_order();
+}
+
 void testing_matmul_bad_arg(const Arguments& arg)
 {
     const int64_t M = 128;
@@ -1214,6 +1224,18 @@ inline std::string solution_description(hipblasLtHandle_t      handle,
     return s.str();
 }
 
+// After check(), names the solution that the failure lines it printed were for.
+inline void report_failed_solution(int64_t                failures_before,
+                                   hipblasLtHandle_t      handle,
+                                   hipblasLtMatmulAlgo_t& algo,
+                                   size_t                 sol,
+                                   size_t                 count)
+{
+    if(hipblaslt_bench_options::verification_failures() > failures_before)
+        hipblaslt_cerr << "the failed checks above are for "
+                       << solution_description(handle, algo, sol, count, true) << std::endl;
+}
+
 void check(hipStream_t                   stream,
            const Arguments&              arg,
            const uint32_t&               gemm_count,
@@ -1457,40 +1479,53 @@ void check(hipStream_t                   stream,
 
         if(arg.norm_check)
         {
-            double norm_error = 0.0;
-            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            // norm_error, the reported value, sums the per-batch errors. The limit applies to
+            // each batch, so a large batch count of accurate results does not add up to a failure.
+            double       norm_error  = 0.0;
+            double       worst_error = 0.0;
+            int64_t      worst_batch = 0;
+            const double limit       = norm_tolerance(To, arg.compute_type, arg.a_type, arg.b_type);
+            const bool   can_compare = limit > 0.0 && norm_check_general_supports(To);
+            if(can_compare)
             {
-                norm_error = std::abs(norm_check_general('F',
-                                                         M[gemmIdx],
-                                                         N[gemmIdx],
-                                                         ldd[gemmIdx],
-                                                         stride_d[gemmIdx],
-                                                         hD_gold[gemmIdx].buf(),
-                                                         hD_1[gemmIdx].buf(),
-                                                         num_batches[gemmIdx],
-                                                         To));
-            }
-            else
-            {
+                const bool strided      = batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+                const auto stride_bytes = strided ? stride_d[gemmIdx] * realDataTypeSize(To) : 0;
                 for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
                 {
-                    norm_error = std::abs(norm_check_general('F',
-                                                             M[gemmIdx],
-                                                             N[gemmIdx],
-                                                             ldd[gemmIdx],
-                                                             0,
-                                                             hD_gold[batch].buf(),
-                                                             hD_1[batch].buf(),
-                                                             1,
-                                                             To));
-                    hipblaslt_error += norm_error;
+                    const auto offset = batch * stride_bytes;
+                    void*      gold
+                        = (char*)(strided ? hD_gold[gemmIdx] : hD_gold[batch]).buf() + offset;
+                    void* result = (char*)(strided ? hD_1[gemmIdx] : hD_1[batch]).buf() + offset;
+                    const double batch_error = std::abs(norm_check_general(
+                        'F', M[gemmIdx], N[gemmIdx], ldd[gemmIdx], 0, gold, result, 1, To));
+                    norm_error += batch_error;
+                    if(!std::isnan(worst_error)
+                       && (std::isnan(batch_error) || batch_error > worst_error))
+                    {
+                        worst_error = batch_error;
+                        worst_batch = batch;
+                    }
                 }
             }
             hipblaslt_error += norm_error;
             if(arg.norm_check_assert)
             {
-                CHECK_SUCCESS(
-                    norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
+                CHECK_SUCCESS(norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
+            }
+            if(!can_compare)
+            {
+                hipblaslt_bench_options::verification_failures()++;
+                hipblaslt_cerr << "norm check of D of gemm " << gemmIdx
+                               << " not done: no norm limit or comparison for "
+                               << hip_datatype_to_string(To) << ", so D was not verified"
+                               << std::endl;
+            }
+            else if(!(worst_error < limit))
+            {
+                hipblaslt_bench_options::verification_failures()++;
+                hipblaslt_cerr << "norm check failed for D of gemm " << gemmIdx << ": batch "
+                               << worst_batch << " has norm_error " << worst_error
+                               << ", at or above the GEMM limit of " << limit << std::endl;
             }
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
@@ -1594,8 +1629,11 @@ void check(hipStream_t                   stream,
             }
             allclose_merge_pair(hipblaslt_atol, hipblaslt_rtol, gemm_atol, gemm_rtol);
             if(failure.bad_count)
+            {
+                hipblaslt_bench_options::verification_failures()++;
                 hipblaslt_cerr << "allclose check failed for D of gemm " << gemmIdx << ": "
                                << allclose_failure_message(failure) << std::endl;
+            }
         }
 
         if(arg.ulp_check)
@@ -2690,7 +2728,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     &dyn,
                     sizeof(dyn)));
             }
-            int32_t uso = hipblaslt_bench_options::uniform_summation_order();
+            int32_t uso = resolved_uniform_summation_order(arg);
             if(uso >= 0)
             {
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
@@ -4237,7 +4275,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         &dyn,
                         sizeof(dyn)));
                 }
-                int32_t uso = hipblaslt_bench_options::uniform_summation_order();
+                int32_t uso = resolved_uniform_summation_order(arg);
                 if(uso >= 0)
                 {
                     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
@@ -6152,6 +6190,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
                 }
+                const int64_t failures_before = hipblaslt_bench_options::verification_failures();
                 check(stream,
                       arg,
                       gemm_count,
@@ -6186,6 +6225,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Taux,
                       Talpha,
                       batchMode);
+                report_failed_solution(failures_before,
+                                       handle,
+                                       heuristicResult[sol].algo,
+                                       sol,
+                                       heuristicResult.size());
             }
             if(arg.fast_check)
             {
@@ -6539,6 +6583,143 @@ void testing_matmul_with_bias(const Arguments& arg,
             assert(perf_monitor);
             perf_monitor->start();
         };
+        // --post_bench_verify_iters: each launch path sets relaunch to one launch of rotation
+        // block 0, which writes the D that the first cold launch copied to hD_1.
+        std::function<void(size_t)>  relaunch;
+        std::vector<HipDeviceBuffer> dD_reference;
+        const int                    d_copies
+            = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? arg.batch_count : gemm_count;
+        const int    post_iters          = hipblaslt_bench_options::post_bench_verify_iters();
+        const size_t reference_elem_size = post_iters > 0 ? realDataTypeSize(To) : 0;
+        auto elementsOf = [&](int c) { return hD_1[c].getNumBytes() / reference_elem_size; };
+        std::unique_ptr<HipDeviceBuffer> dRelaunchSlots;
+        if(post_iters > 0)
+        {
+            // Allocate the reference copy of D and the per-relaunch slots before the search, so
+            // that a problem that is too big for the extra memory stops here with a message.
+            size_t reference_bytes = 0;
+            for(int c = 0; c < d_copies; c++)
+                reference_bytes += hD_1[c].getNumBytes();
+            const size_t slot_bytes = size_t(post_iters) * sizeof(RelaunchSlot);
+            for(int c = 0; c < d_copies; c++)
+                dD_reference.emplace_back(To, elementsOf(c));
+            dRelaunchSlots        = std::make_unique<HipDeviceBuffer>(HIP_R_8I, slot_bytes);
+            hipError_t allocation = dRelaunchSlots->memcheck();
+            for(int c = 0; allocation == hipSuccess && c < d_copies; c++)
+                allocation = dD_reference[c].memcheck();
+            if(allocation != hipSuccess)
+                hipblaslt_cerr << "--post_bench_verify_iters needs " << reference_bytes + slot_bytes
+                               << " bytes of device memory for the reference copy of D and the "
+                                  "per-relaunch results, and the allocation failed"
+                               << std::endl;
+            CHECK_DEVICE_ALLOCATION(allocation);
+        }
+        // Where element e of D copy c sits: copy c is gemm c, or batch c in pointer-array mode.
+        auto describeElement = [&](int c, uint64_t e) {
+            const bool    pointer_array = batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+            const int     gemm          = pointer_array ? 0 : c;
+            const int64_t stride        = pointer_array ? 0 : stride_d[gemm];
+            const int64_t batch         = pointer_array ? c : (stride ? int64_t(e) / stride : 0);
+            const int64_t within        = int64_t(e) - (pointer_array ? 0 : batch * stride);
+            return "gemm " + std::to_string(gemm) + ", batch " + std::to_string(batch) + ", row "
+                   + std::to_string(within % ldd[gemm]) + ", column "
+                   + std::to_string(within / ldd[gemm]);
+        };
+        // An element's bytes in hex, most significant byte first (little-endian), followed by its
+        // decoded value when the type can be decoded and the value isn't NaN. The raw bytes are
+        // what the compare kernel compared, so two NaNs with different bits stay distinguishable.
+        auto describeValue = [&](const void* element) {
+            std::ostringstream out;
+            out << "0x" << std::hex << std::setfill('0');
+            for(size_t i = reference_elem_size; i-- > 0;)
+                out << std::setw(2) << int(static_cast<const unsigned char*>(element)[i]);
+            const double decoded = fast_check_load(element, To, 0);
+            if(!std::isnan(decoded))
+                out << " (" << std::dec << std::setprecision(9) << decoded << ")";
+            return out.str();
+        };
+        // Relaunches solution sol back to back, comparing each D bit for bit with hD_1 on the
+        // device, and copies the per-relaunch results to the host once at the end.
+        auto verifyRelaunches = [&](size_t sol, bool first_launch_failed) {
+            const int relaunches = post_iters;
+            for(int c = 0; c < d_copies; c++)
+                CHECK_HIP_ERROR(hipMemcpyAsync(dD_reference[c].buf(),
+                                               hD_1[c].buf(),
+                                               hD_1[c].getNumBytes(),
+                                               hipMemcpyHostToDevice,
+                                               stream));
+
+            RelaunchSlot* dSlots = dRelaunchSlots->as<RelaunchSlot>();
+            CHECK_HIP_ERROR(relaunch_slots_reset_device(dSlots, relaunches, stream));
+            for(int k = 0; k < relaunches; k++)
+            {
+                relaunch(sol);
+                uint64_t offset = 0;
+                for(int c = 0; c < d_copies; c++)
+                {
+                    CHECK_HIP_ERROR(relaunch_compare_device((*dDp)[c].buf(),
+                                                            dD_reference[c].buf(),
+                                                            elementsOf(c),
+                                                            reference_elem_size,
+                                                            offset,
+                                                            dSlots + k,
+                                                            stream));
+                    CHECK_HIP_ERROR(relaunch_capture_first_device((*dDp)[c].buf(),
+                                                                  elementsOf(c),
+                                                                  reference_elem_size,
+                                                                  offset,
+                                                                  dSlots + k,
+                                                                  stream));
+                    offset += elementsOf(c);
+                }
+            }
+            std::vector<RelaunchSlot> hSlots(relaunches);
+            CHECK_HIP_ERROR(hipMemcpyAsync(hSlots.data(),
+                                           dSlots,
+                                           relaunches * sizeof(RelaunchSlot),
+                                           hipMemcpyDeviceToHost,
+                                           stream));
+            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+            int differing = 0;
+            int first     = -1;
+            for(int k = 0; k < relaunches; k++)
+            {
+                if(hSlots[k].count == 0)
+                    continue;
+                differing++;
+                if(first < 0)
+                    first = k;
+            }
+            if(!differing)
+            {
+                if(first_launch_failed)
+                    hipblaslt_cerr
+                        << "post_bench_verify_iters: all " << relaunches
+                        << " relaunches matched the first launch, which already failed "
+                           "the checks above, so a match doesn't mean the result is right"
+                        << std::endl;
+                return;
+            }
+
+            const RelaunchSlot& slot = hSlots[first];
+            int                 c    = 0;
+            uint64_t            e    = slot.first;
+            while(c + 1 < d_copies && e >= elementsOf(c))
+                e -= elementsOf(c++);
+            hipblaslt_bench_options::verification_failures()++;
+            hipblaslt_cerr
+                << "post_bench_verify_iters failed for "
+                << solution_description(
+                       handle, heuristicResult[sol].algo, sol, heuristicResult.size(), true)
+                << ": " << differing << " of " << relaunches
+                << " relaunches gave a different D than the first launch"
+                << (first_launch_failed ? " (which already failed the checks above)" : "")
+                << ". In relaunch " << first + 1 << ", " << slot.count
+                << " elements of D differ; the first is " << describeElement(c, e) << ": "
+                << describeValue(slot.bits) << " instead of "
+                << describeValue(hD_1[c].as<char>() + e * reference_elem_size) << std::endl;
+        };
         auto measured = [&](size_t sol, hipblaslt_bench::TimingResult& timing) {
             // hipblaslt-bench stops a single GEMM's cotenant before the efficiency
             // monitor and a grouped GEMM's after it; keep both orders.
@@ -6603,6 +6784,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 std::fill(tol.begin(), tol.end(), 1e-2);
             }
+            bool first_launch_failed = false;
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
                 if(arg.dump_matrix)
@@ -6625,6 +6807,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                     "batch_" + std::to_string(batchId) + "_D_Gold_output.txt");
                     }
                 }
+                const int64_t failures_before = hipblaslt_bench_options::verification_failures();
                 check(stream,
                       arg,
                       gemm_count,
@@ -6659,6 +6842,23 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Taux,
                       Talpha,
                       batchMode);
+                report_failed_solution(failures_before,
+                                       handle,
+                                       heuristicResult[sol].algo,
+                                       sol,
+                                       heuristicResult.size());
+                first_launch_failed
+                    = hipblaslt_bench_options::verification_failures() > failures_before;
+            }
+            if(post_iters > 0 && relaunch)
+                verifyRelaunches(sol, first_launch_failed);
+            else if(post_iters > 0)
+            {
+                // A launch path without a relaunch hook must not look verified.
+                hipblaslt_bench_options::verification_failures()++;
+                hipblaslt_cerr << "post_bench_verify_iters is not supported for this launch path, "
+                                  "so the relaunches of solution "
+                               << sol << " were not checked" << std::endl;
             }
 
 #define argument_param                                                                            \
@@ -6768,7 +6968,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             searchCfg.flush = arg.flush;
             if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
-                search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
+                relaunch = [&](size_t) { CHECK_HIPBLASLT_ERROR(gemmVec[0].run(stream)); };
+                search   = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
                     timingCfg,
@@ -6834,6 +7035,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                            workspace_size,
                                            stream);
                 };
+                relaunch = [&](size_t sol) {
+                    EXPECT_HIPBLAS_STATUS(launchBatched(sol, 0), HIPBLAS_STATUS_SUCCESS);
+                };
                 search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
@@ -6880,6 +7084,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                         workspace_size,
                         stream);
                 };
+                relaunch = [&](size_t sol) {
+                    EXPECT_HIPBLAS_STATUS(launchMatmul(sol, 0), HIPBLAS_STATUS_SUCCESS);
+                };
                 search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
@@ -6920,6 +7127,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       stream),
                         HIPBLAS_STATUS_SUCCESS);
                 };
+                relaunch = [&](size_t sol) { runBlock(sol, 0); };
                 search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
@@ -6950,6 +7158,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             else if(arg.use_user_args)
             {
                 std::vector<unsigned char*> d_userArgsVec(block_count);
+                relaunch = [&](size_t) {
+                    CHECK_HIPBLASLT_ERROR(groupedGemmVec[0].run(d_userArgsVec[0], stream));
+                };
                 search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
@@ -6995,7 +7206,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else
             {
-                search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
+                relaunch = [&](size_t) { CHECK_HIPBLASLT_ERROR(groupedGemmVec[0].run(stream)); };
+                search   = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
                     searchCfg,
                     timingCfg,

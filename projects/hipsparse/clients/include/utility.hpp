@@ -33,6 +33,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include <sstream>
+#include <stdexcept>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
@@ -267,6 +268,44 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
     } while(0)
 #endif
 #define CHECK_HIP_ERROR(ERROR) CHECK_HIP_ERROR2(ERROR)
+
+// Record a failure without throwing, so these are safe in a destructor.
+// Inline so GOOGLE_TEST is taken from the including translation unit.
+inline void log_hip_error(const char* call, hipError_t status)
+{
+#ifdef GOOGLE_TEST
+    EXPECT_EQ(status, hipSuccess) << call << " failed: " << hipGetErrorString(status);
+#else
+    fprintf(
+        stderr, "%s failed: %s (%d)\n", call, hipGetErrorString(status), static_cast<int>(status));
+#endif
+}
+
+inline void log_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
+#ifdef GOOGLE_TEST
+    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS)
+        << call << " failed: " << hipsparseStatusToString(status);
+#else
+    fprintf(stderr, "%s failed: %s\n", call, hipsparseStatusToString(status));
+#endif
+}
+
+[[noreturn]] inline void throw_hip_error(const char* call, hipError_t status)
+{
+    std::ostringstream message;
+    message << call << " failed: " << hipGetErrorString(status) << " (" << static_cast<int>(status)
+            << ")";
+    throw std::runtime_error(message.str());
+}
+
+[[noreturn]] inline void throw_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
+    std::ostringstream message;
+    message << call << " failed: " << hipsparseStatusToString(status) << " ("
+            << static_cast<int>(status) << ")";
+    throw std::runtime_error(message.str());
+}
 
 // EXPECT_HIPSPARSE_STATUS
 #ifdef GOOGLE_TEST

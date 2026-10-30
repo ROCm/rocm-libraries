@@ -36,7 +36,7 @@ import enum
 import os
 import warnings
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
+from typing import Dict, List, NamedTuple, Optional, Set, Tuple
 
 from .arch import MmaEmulationRecipe
 from .codegen_policy import codegen_policy_for_kernel
@@ -63,10 +63,15 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _buffer_op_bytes,
+    _global_ptr_offset_op_error,
+    _global_ptr_to_i64_op_error,
+    _if_else_branch_yield,
     _is_unsigned,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
+    _trap_op_error,
     check_cluster_dims,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
@@ -80,124 +85,31 @@ from .mma_operand import (
 )
 from .tf32 import tf32_mma_target_error, tf32_op_error
 
-
-# Datalayout / triple. Copied verbatim from clang's output for the same
-# target on this box: clang -target amdgcn-amd-amdhsa -mcpu=gfx950
-# -emit-llvm -S. The string is LLVM-version-keyed, not gfx-keyed: every
-# wired arch shares one datalayout, but two fields drift across LLVM 20
-# (ROCm 7.0/7.1), LLVM 22 (ROCm 7.2), and LLVM 23 (ROCm 7.13+):
-#
-#   * the ELF symbol-mangling spec ``m:e``: absent in LLVM 20 and LLVM 22,
-#     present in LLVM 23 (AMD clang 23.0.0git, ROCm 7.13). (It also appeared
-#     in early LLVM 22 builds but was dropped; ROCm 7.2's LLVM 22 omits it.)
-#         LLVM 20:  e-p:64:64-...
-#         LLVM 22:  e-p:64:64-...
-#         LLVM 23:  e-m:e-p:64:64-...
-#   * the buffer-resource address space (``p8``, the 128-bit buffer
-#     descriptor -- NOT the buffer fat pointer, which is ``p7``) gained an
-#     index-width field in LLVM 22:
-#         LLVM 20:       ...-p8:128:128-...
-#         LLVM 22 / 23:  ...-p8:128:128:128:48-...
-#
-# Each constant reflects what the installed hipcc actually produces for that
-# LLVM vintage; the drift guard re-derives them from the toolchain.
-#
-# (Confirmed against clang 20 and current clang 22 amdgcn output.) On the
-# textual-IR (comgr SOURCE) path the parser is lenient: it overrides the
-# module datalayout with the target's canonical one, so a stale-but-well-
-# formed string compiles to byte-identical HSACO and the drift is
-# invisible at runtime. That leniency is not a contract -- bitcode input
-# or a stricter verifier can reject a mismatch, so we emit the correct
-# string up front. Pick by :data:`LLVM_FLAVOR_*` via
-# :func:`_datalayout_for_flavor`. A drift guard
-# (``test_datalayout_matches_hipcc_emitted_ir``) re-derives both from the
-# installed toolchain; if it fails, regenerate with the clang command above.
-_DATALAYOUT_LLVM20 = (
-    "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-    "-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32"
-    "-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-    "-n32:64-S32-A5-G1-ni:7:8:9"
-)
-_DATALAYOUT_LLVM22 = (
-    "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-    "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
-    "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-    "-n32:64-S32-A5-G1-ni:7:8:9"
-)
-# Layout emitted for rocKE's ``llvm23`` flavor. Relative to our ``llvm22``
-# constant it adds two independent things:
-#
-#   1. the ELF symbol-mangling spec ``m:e``, which LLVM 20 and LLVM 22 omit;
-#   2. address spaces ``p10``-``p15``, introduced upstream by ``5bf967cb132b``.
-#
-# Both were re-derived from the clang on an amd-staging host and confirmed
-# gfx-invariant there across every wired arch
-# (gfx90a/942/950/1100/1151/1201/1250).
-#
-# This is rocKE's flavor constant, NOT a claim about what every LLVM 23+ /
-# ROCm 7.13+ build emits: compiler builds vary, and older ones -- including some
-# builds numbered LLVM 23 or later -- omit ``p10``-``p15``. The drift guard
-# ``test_datalayout_matches_hipcc_emitted_ir`` accommodates exactly that
-# variation.
-#
-# Why we carry the longer form. LLVM's backend has long rejected a module whose
-# DataLayout is incompatible with the target's ("Can't create a MachineFunction
-# using a Module with a Target-incompatible DataLayout attached" -- the check is
-# already in LLVM 22's MachineFunction.cpp, so it predates ``fc6829a3``). What
-# changed in ``fc6829a3`` ("clang: Do not overwrite a module's DataLayout in the
-# backend") is that clang stopped replacing an explicitly supplied layout, which
-# exposes that pre-existing check to the layout rocKE hands it. On the clang
-# builds we tested, the consequence is concrete:
-#
-#   * against staging clang (post-``fc6829a3``), a module carrying the short
-#     form fails codegen outright, and the long form builds and links;
-#   * against the older ``/opt/rocm`` clang we tested, whose own layout omits
-#     ``p10``-``p15``, the long form is still accepted (rc=0) because that clang
-#     overwrites the supplied layout before codegen.
-#
-# That is an observation about the builds we exercised, not a proof about every
-# toolchain. It is still the right trade: do NOT "fix" a mismatch against an
-# older hipcc by deleting ``p10``-``p15``, since that re-breaks every kernel on a
-# current toolchain. Regenerate via ``test_datalayout_matches_hipcc_emitted_ir``
-# if a future build drifts further.
-_DATALAYOUT_LLVM23 = (
-    "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-    "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-p10:32:32-p11:32:32"
-    "-p12:32:32-p13:32:32-p14:32:32-p15:32:32-i64:64-v16:16-v24:32"
-    "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-    "-n32:64-S32-A5-G1-ni:7:8:9"
-)
-_TRIPLE = "amdgcn-amd-amdhsa"
-
-
-# A small set of AMDGPU intrinsic signatures changed between LLVM 20
-# (ROCm 7.0/7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22):
-#
-#   * ``make.buffer.rsrc.p1`` -> ``make.buffer.rsrc.p8.p1`` and the
-#     ``num_records`` arg widened from ``i32`` to ``i64`` (LLVM PR
-#     #126828).
-#   * fp8 / bf8 MFMA A/B operands collapsed from ``<2 x i32>`` to a
-#     scalar ``i64`` (same 64 bits, different LLVM type).
-#
-# comgr verifies the toplevel ``declare`` lines BEFORE running the
-# auto-upgrade pass, so we have to emit the right signature up front.
-# Resolve from the loaded compiler when lowering; ``lower_kernel_to_llvm``
-# also accepts an explicit ``llvm_flavor=`` for offline emission.
-LLVM_FLAVOR_LLVM20 = "llvm20"
-LLVM_FLAVOR_LLVM22 = "llvm22"
-LLVM_FLAVOR_LLVM23 = "llvm23"
-
-# Every flavor rocke can emit, oldest first. This is the SSOT every flavor
-# membership test must go through -- validating against a hand-rolled tuple is
-# how ``llvm23`` was silently rejected by the C++ backend path while the Python
-# path accepted it. ``test_no_hand_rolled_flavor_membership_lists`` pins that no
-# such private list reappears, and
-# ``test_cpp_engine_accepts_exactly_the_python_flavor_set`` pins that the C++
-# engine's ladder still matches this tuple.
-LLVM_FLAVORS: Tuple[str, ...] = (
+from .llvm_profile import (
+    LLVM_EMISSION_ALIASES,
+    LLVM_EMISSION_FLAVORS,
     LLVM_FLAVOR_LLVM20,
     LLVM_FLAVOR_LLVM22,
     LLVM_FLAVOR_LLVM23,
+    LLVM_FLAVOR_LLVM24,
+    LLVM_FLAVORS,
+    LlvmDatalayoutKind,
+    _DATALAYOUT_KIND_FLAVORS,
+    _DATALAYOUT_LLVM20,
+    _DATALAYOUT_LLVM22,
+    _DATALAYOUT_LLVM23,
+    _LLVM_EMISSION_PROFILES,
+    _LlvmDeclarationAbi,
+    _LlvmEmissionCapability,
+    _TRIPLE,
+    _datalayout_for_flavor,
+    _datalayout_kind_for_flavor,
+    _datalayout_kind_from_ir,
+    _emission_profile,
+    _flavor_at_least,
+    _flavor_for_llvm,
+    _is_modern_flavor,
+    _supports_llvm23_target_ops,
 )
 
 
@@ -277,119 +189,6 @@ class ArchDomainError(NotImplementedError):
         )
 
 
-class LlvmDatalayoutKind(enum.Enum):
-    """Datalayout generation, i.e. what an IR module's ``p8`` field reveals.
-
-    Two datalayout fields drift between flavors -- the buffer-resource address
-    space ``p8`` shape and the ELF mangling spec ``m:e`` -- but only ``p8``
-    partitions the flavors into the *generation* that gates intrinsic-declare
-    compatibility (``make.buffer.rsrc.p8.p1``, fp8/bf8 MFMA operand widths). So
-    this kind groups flavors by p8 shape, NOT by full datalayout identity:
-    llvm22 and llvm23 share a generation yet differ in ``m:e`` (llvm23 has it),
-    so the datalayout alone still cannot narrow to a single flavor.
-
-    Members are named after the datalayout shape, deliberately not after its
-    recency: a "modern" label stops being true the moment a newer generation
-    lands, whereas ``P8_INDEXED`` keeps describing exactly what it matches.
-    """
-
-    #: LLVM 20 and older: ``p8:128:128`` (no index-width field).
-    P8_PLAIN = "p8_plain"
-    #: LLVM 21+: ``p8:128:128:128:48`` (index width appended).
-    P8_INDEXED = "p8_indexed"
-
-    @property
-    def flavors(self) -> FrozenSet[str]:
-        """Flavors that emit this datalayout generation."""
-        return _DATALAYOUT_KIND_FLAVORS[self]
-
-    def describe(self) -> str:
-        """Human-readable form for diagnostics, e.g. ``p8_indexed (llvm22/llvm23)``."""
-        return f"{self.value} ({'/'.join(sorted(self.flavors))})"
-
-
-# Partition of :data:`LLVM_FLAVORS` by datalayout generation. Every flavor must
-# appear in exactly one entry, and every enum member must have an entry;
-# ``test_datalayout_kinds_partition_every_flavor`` is the exhaustiveness check a
-# language-level ``match`` would give for free.
-_DATALAYOUT_KIND_FLAVORS: Dict[LlvmDatalayoutKind, FrozenSet[str]] = {
-    LlvmDatalayoutKind.P8_PLAIN: frozenset({LLVM_FLAVOR_LLVM20}),
-    LlvmDatalayoutKind.P8_INDEXED: frozenset({LLVM_FLAVOR_LLVM22, LLVM_FLAVOR_LLVM23}),
-}
-
-# Substrings that identify each generation in a module's ``target datalayout``.
-# Kept consistent with the ``_DATALAYOUT_*`` constants by
-# ``test_datalayout_kind_markers_match_datalayouts``.
-_P8_MARKERS: Dict[LlvmDatalayoutKind, str] = {
-    LlvmDatalayoutKind.P8_INDEXED: "p8:128:128:128:48",
-    LlvmDatalayoutKind.P8_PLAIN: "p8:128:128-",
-}
-
-
-def _datalayout_kind_for_flavor(flavor: str) -> Optional[LlvmDatalayoutKind]:
-    """Datalayout generation a flavor emits, or ``None`` if unrecognised."""
-    for kind, flavors in _DATALAYOUT_KIND_FLAVORS.items():
-        if flavor in flavors:
-            return kind
-    return None
-
-
-def _datalayout_kind_from_ir(ir_text: str) -> Optional[LlvmDatalayoutKind]:
-    """Datalayout generation of an IR module, read from its ``p8`` field.
-
-    ``None`` when the module has no recognisable ``target datalayout``. This
-    cannot narrow to a single flavor -- see :class:`LlvmDatalayoutKind`.
-    """
-    # P8_INDEXED first: its marker has the plain form as a prefix.
-    for kind in (LlvmDatalayoutKind.P8_INDEXED, LlvmDatalayoutKind.P8_PLAIN):
-        if _P8_MARKERS[kind] in ir_text:
-            return kind
-    return None
-
-
-def _is_modern_flavor(flavor: str) -> bool:
-    """True for flavors emitting the LLVM 21+ ``p8`` shape (llvm22 / llvm23)."""
-    return flavor in _DATALAYOUT_KIND_FLAVORS[LlvmDatalayoutKind.P8_INDEXED]
-
-
-def _datalayout_for_flavor(flavor: str) -> str:
-    """Module ``target datalayout`` string for an LLVM flavor.
-
-    Two fields drift between flavors: the buffer-resource address space ``p8``
-    (the 128-bit buffer descriptor, not the ``p7`` fat pointer) gained an
-    index-width field in LLVM 22, and the ELF symbol-mangling spec ``m:e``
-    (absent in LLVM 20 and LLVM 22) is present in LLVM 23
-    (see :data:`_DATALAYOUT_LLVM20` / :data:`_DATALAYOUT_LLVM22` /
-    :data:`_DATALAYOUT_LLVM23`).  LLVM22 is the default for unknown values so a
-    typo'd override degrades to the modern layout rather than the legacy one.
-    """
-    if flavor == LLVM_FLAVOR_LLVM20:
-        return _DATALAYOUT_LLVM20
-    if flavor == LLVM_FLAVOR_LLVM23:
-        return _DATALAYOUT_LLVM23
-    return _DATALAYOUT_LLVM22
-
-
-def _flavor_for_llvm(major: int) -> str:
-    """Map the loaded compiler's LLVM major to an existing emission flavor.
-
-    LLVM 21 introduced the indexed-p8 generation represented by llvm22.
-    Newer compilers use the latest known flavor; this mapping does not claim
-    that every build of an LLVM major has an identical DataLayout.
-    """
-    for minimum, flavor in reversed(_LLVM_FLAVOR_LADDER):
-        if major >= minimum:
-            return flavor
-    return LLVM_FLAVORS[0]
-
-
-_LLVM_FLAVOR_LADDER: tuple[tuple[int, str], ...] = (
-    (0, LLVM_FLAVOR_LLVM20),
-    (21, LLVM_FLAVOR_LLVM22),
-    (23, LLVM_FLAVOR_LLVM23),
-)
-
-
 def _detect_llvm_flavor() -> str:
     """Choose an explicit flavor or query the compiler loaded by COMGR.
 
@@ -403,7 +202,7 @@ def _detect_llvm_flavor() -> str:
     silently falling back to auto-detection -- a typo'd override otherwise
     looks like it pinned a flavor while actually asking COMGR to guess.
     """
-    env = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
+    env = os.environ.get("ROCKE_LLVM_FLAVOR", "")
     if env:
         if env not in LLVM_FLAVORS:
             raise ValueError(
@@ -811,6 +610,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
     "s.setprio": ("declare void @llvm.amdgcn.s.setprio(i16 immarg)"),
+    "trap": "declare void @llvm.trap()",
     "s.waitcnt": ("declare void @llvm.amdgcn.s.waitcnt(i32 immarg)"),
     "make.buffer.rsrc.p1": (
         "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
@@ -855,6 +655,16 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "raw.ptr.buffer.load.f16": (
         "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
+    # 1-byte buffer load and store: the narrowest access, range-checked whole,
+    # for 1-byte elements (i8, u8, fp8, bf8) one at a time.
+    "raw.ptr.buffer.load.i8": (
+        "declare i8 @llvm.amdgcn.raw.ptr.buffer.load.i8("
+        "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
+    "raw.ptr.buffer.store.i8": (
+        "declare void @llvm.amdgcn.raw.ptr.buffer.store.i8("
+        "i8, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
     ),
     "raw.ptr.buffer.store.i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32("
@@ -1200,9 +1010,10 @@ def _decls_for_flavor(flavor: str) -> Dict[str, str]:
     lowerer to ask.
     """
     decls = dict(_INTRINSIC_DECLS)
-    if flavor == LLVM_FLAVOR_LLVM22:
+    abi = _emission_profile(flavor).declaration_abi
+    if abi is _LlvmDeclarationAbi.LLVM22:
         decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
-    elif flavor == LLVM_FLAVOR_LLVM23:
+    elif abi is _LlvmDeclarationAbi.LLVM23:
         decls.update(_INTRINSIC_DECLS_LLVM23_OVERRIDES)
     return decls
 
@@ -1288,6 +1099,24 @@ def check_arch_domain_in_ir(ir_text: str, arch: str, flavor: Optional[str]) -> N
 # Declaration key of the K=128 f8f6f4 MFMA (A and B as ``<8 x i32>``). The key is
 # the intrinsic name without the ``llvm.amdgcn.`` prefix, as for the 32x32x64 key.
 _F8F6F4_16X16X128_KEY = "mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32"
+
+
+class _BufferAccessForm(NamedTuple):
+    """The raw buffer intrinsic form that moves one access of a given width."""
+
+    suffix: str  # the intrinsic's type suffix: raw.ptr.buffer.load.<suffix>
+    llvm_type: str  # the integer type the access is loaded or stored as
+    load_hint: str  # the name hint of the loaded integer
+
+
+# One form per buffer access width in bytes (core/ir.py _BUFFER_ACCESS_BYTES).
+_BUFFER_ACCESS_FORMS: dict[int, _BufferAccessForm] = {
+    1: _BufferAccessForm("i8", "i8", "bli8"),
+    2: _BufferAccessForm("i16", "i16", "bli16"),
+    4: _BufferAccessForm("i32", "i32", "bli32"),
+    8: _BufferAccessForm("v2i32", "<2 x i32>", "blv2"),
+    16: _BufferAccessForm("v4i32", "<4 x i32>", "blv4"),
+}
 
 
 def _llvm_type(t: Type) -> str:
@@ -2040,6 +1869,23 @@ class _Lowerer:
                 return _param_llvm_type(p)
         return _llvm_type(v.type)
 
+    def _require_global_header_ptr(self, op_name: str, ptr: Value) -> None:
+        """Refuse ``op_name`` when the module types its ``ptr`` operand other
+        than ``ptr addrspace(1)``.
+
+        The global-pointer ops emit against ``ptr addrspace(1)``. The IR rules
+        check the IR type, but a parameter's ``addr_space`` override (such as
+        ``"constant"``) moves its header type away from it, and the emitted
+        instruction would then not match the header. The C++ engine
+        (``ll_require_global_header_ptr``) refuses with the same text.
+        """
+        header = self._ptr_llvm_type(ptr)
+        if header != "ptr addrspace(1)":
+            raise TypeError(
+                f"{op_name} ptr must be a global pointer, got {header} "
+                "(its parameter's addr_space)"
+            )
+
     def _need(self, key: str) -> None:
         """Register a demand for an intrinsic declaration, and vet it.
 
@@ -2072,16 +1918,17 @@ class _Lowerer:
         table = arch_domain.load(self._flavor)
         if table is None:
             return
+        flavor = table.flavor
         arch = self._backend.arch.gfx
         cell = table.lookup(key, arch)
         if cell is None or not arch_domain.is_negative(cell.status):
             return
-        waived = arch_domain.is_waived(key, arch, self._flavor)
+        waived = arch_domain.is_waived(key, arch, flavor)
         if mode == arch_domain.MODE_ERROR and not waived:
-            raise ArchDomainError(key, arch, self._flavor, cell.status, cell.evidence)
+            raise ArchDomainError(key, arch, flavor, cell.status, cell.evidence)
         warnings.warn(
             ArchDomainWarning(
-                key, arch, self._flavor, cell.status, cell.evidence, waived=waived
+                key, arch, flavor, cell.status, cell.evidence, waived=waived
             ),
             stacklevel=3,
         )
@@ -2118,17 +1965,18 @@ class _Lowerer:
             )
 
     def _require_llvm23_target_fact(self, op: str, fact: _OpTargetFact) -> None:
-        """Reject an LLVM-23-only operation unless the target records ``fact``.
+        """Require the LLVM23-generation target-op profile and target fact.
 
-        The rule reads the target's facts, never its name, so a target whose
-        row records the fact lowers the operation with no code change.
+        The profile capability is shared by the qualified LLVM23 and LLVM24
+        lanes. The target rule reads facts, never a target name, so a new target
+        whose row records the fact needs no lowering change.
         """
         arch = self._backend.arch
         if not fact.holds_for(arch):
             raise ValueError(
                 f"{op} requires a target with {fact.value}, got {arch.gfx}"
             )
-        if self._flavor != LLVM_FLAVOR_LLVM23:
+        if not _supports_llvm23_target_ops(self._flavor):
             raise ValueError(f"{op} requires LLVM flavor llvm23, got {self._flavor}")
 
     # ----- constant folding helpers -----
@@ -5322,6 +5170,12 @@ class _Lowerer:
         """
         required_arch = op.attrs.get("required_arch")
         required_flavor = op.attrs.get("required_llvm_flavor")
+        minimum_flavor = op.attrs.get("minimum_llvm_flavor")
+        if minimum_flavor is not None and not isinstance(minimum_flavor, str):
+            raise TypeError(
+                "tile.inline_asm failed - minimum_llvm_flavor has a non-string "
+                "value, expected a string"
+            )
         if required_arch is not None and self._backend.arch.gfx != required_arch:
             raise ValueError(
                 f"tile.inline_asm requires {required_arch}, got {self._backend.arch.gfx}"
@@ -5329,6 +5183,13 @@ class _Lowerer:
         if required_flavor is not None and self._flavor != required_flavor:
             raise ValueError(
                 f"tile.inline_asm requires LLVM flavor {required_flavor}, "
+                f"got {self._flavor}"
+            )
+        if minimum_flavor is not None and not _flavor_at_least(
+            self._flavor, minimum_flavor
+        ):
+            raise ValueError(
+                f"tile.inline_asm requires LLVM flavor {minimum_flavor}, "
                 f"got {self._flavor}"
             )
         template = _escape_llvm_asm_string(op.attrs["template"])
@@ -5479,6 +5340,7 @@ class _Lowerer:
         # ptr + byte_off as a new global pointer (getelementptr i8). The
         # offset must be i64 so block bases beyond 2 GiB do not overflow.
         ptr, off = op.operands
+        self._require_global_header_ptr("global_ptr_add", ptr)
         off_ty = _llvm_type(off.type)
         if off_ty == "i32":
             off64 = self._fresh("goff64")
@@ -5494,12 +5356,25 @@ class _Lowerer:
             f"{self._operand(ptr)}, i64 {off64}"
         )
 
+    def _op_tile_global_ptr_offset(self, op: Op) -> None:
+        # ptr + byte_off without ``inbounds``: the result may point outside
+        # the allocation, so the compiler must not assume it does not.
+        error = _global_ptr_offset_op_error(op)
+        if error:
+            raise ValueError(error)
+        ptr, off = op.operands
+        self._require_global_header_ptr("global_ptr_offset", ptr)
+        self._current().emit(
+            f"  {op.result.name} = getelementptr i8, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i64 {self._operand(off)}"
+        )
+
     def _op_tile_global_ptr_to_i64(self, op: Op) -> None:
-        if len(op.operands) != 1 or len(op.results) != 1:
-            raise ValueError("global_ptr_to_i64 expects one operand and one result")
+        error = _global_ptr_to_i64_op_error(op)
+        if error:
+            raise ValueError(error)
         (ptr,) = op.operands
-        if self._ptr_llvm_type(ptr) != "ptr addrspace(1)":
-            raise TypeError("global_ptr_to_i64 ptr must be a global pointer")
+        self._require_global_header_ptr("global_ptr_to_i64", ptr)
         self._current().emit(
             f"  {op.result.name} = ptrtoint ptr addrspace(1) {self._operand(ptr)} to i64"
         )
@@ -6023,6 +5898,13 @@ class _Lowerer:
         level = int(op.attrs["level"])
         self._current().emit(f"  call void @llvm.amdgcn.s.setprio(i16 {level})")
 
+    def _op_tile_trap(self, op: Op) -> None:
+        error = _trap_op_error(op)
+        if error:
+            raise ValueError(error)
+        self._need("trap")
+        self._current().emit("  call void @llvm.trap()")
+
     # ----- buffer-rsrc + async DRAM->LDS -----
 
     def _op_tile_buffer_rsrc(self, op: Op) -> None:
@@ -6153,43 +6035,49 @@ class _Lowerer:
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
         """Dtype-generic vectorised buffer load.
 
-        Loads `<dwords x i32>` via the matching intrinsic and bitcasts
-        to `<n x elem_type>`.  Handles f16/bf16 (2-byte) and f32/i32
-        (4-byte) elements.
+        One raw buffer load of the result's width (``_BUFFER_ACCESS_FORMS``),
+        bitcast to the ``<n x elem>`` result.
         """
+        nbytes = _buffer_op_bytes(op)
         rsrc, voffset, soffset = op.operands
-        dwords = int(op.attrs["dwords"])
-        elem_type = op.attrs["elem_type"]
-        n = op.result.type.count  # elements in the result vector
-        _LLVM_ELEM = {"f16": "half", "bf16": "bfloat", "f32": "float", "i32": "i32"}
-        llvm_elem = _LLVM_ELEM[elem_type]
-        if dwords == 1:
-            self._need("raw.ptr.buffer.load.i32")
-            tmp = self._fresh("bli32")
-            self._current().emit(
-                f"  {tmp} = call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32("
-                f"ptr addrspace(8) {self._operand(rsrc)}, "
-                f"i32 {self._operand(voffset)}, "
-                f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
-            )
-            self._current().emit(
-                f"  {op.result.name} = bitcast i32 {tmp} to <{n} x {llvm_elem}>"
-            )
-        else:
-            intr = f"raw.ptr.buffer.load.v{dwords}i32"
-            self._need(intr)
-            tmp = self._fresh(f"blv{dwords}")
-            self._current().emit(
-                f"  {tmp} = call <{dwords} x i32> @llvm.amdgcn.raw.ptr.buffer.load.v{dwords}i32("
-                f"ptr addrspace(8) {self._operand(rsrc)}, "
-                f"i32 {self._operand(voffset)}, "
-                f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
-            )
-            self._current().emit(
-                f"  {op.result.name} = bitcast <{dwords} x i32> {tmp} to <{n} x {llvm_elem}>"
-            )
+        result_type = op.result.type
+        form = _BUFFER_ACCESS_FORMS[nbytes]
+        self._need(f"raw.ptr.buffer.load.{form.suffix}")
+        tmp = self._fresh(form.load_hint)
+        self._current().emit(
+            f"  {tmp} = call {form.llvm_type} "
+            f"@llvm.amdgcn.raw.ptr.buffer.load.{form.suffix}("
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
+        self._current().emit(
+            f"  {op.result.name} = bitcast {form.llvm_type} {tmp} to "
+            f"{_llvm_type(result_type)}"
+        )
+
+    def _op_tile_buffer_store_vN(self, op: Op) -> None:
+        """Dtype-generic vectorised buffer store: the value bitcast to one
+        integer of its width (``_BUFFER_ACCESS_FORMS``) and stored with the
+        matching raw buffer store."""
+        nbytes = _buffer_op_bytes(op)
+        rsrc, voffset, soffset, val = op.operands
+        form = _BUFFER_ACCESS_FORMS[nbytes]
+        self._need(f"raw.ptr.buffer.store.{form.suffix}")
+        bc = self._fresh("bsbc")
+        self._current().emit(
+            f"  {bc} = bitcast {_llvm_type(val.type)} {self._operand(val)} to "
+            f"{form.llvm_type}"
+        )
+        self._current().emit(
+            f"  call void @llvm.amdgcn.raw.ptr.buffer.store.{form.suffix}("
+            f"{form.llvm_type} {bc}, "
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
 
     def _op_tile_buffer_load(self, op: Op) -> None:
         """Dtype-generic scalar buffer load (single element, OOB-clamped).
@@ -6200,6 +6088,8 @@ class _Lowerer:
         rsrc, voffset, soffset = op.operands
         elem_type = op.attrs["elem_type"]
         _LLVM_ELEM = {"f16": "half", "bf16": "bfloat", "f32": "float", "i32": "i32"}
+        if elem_type not in _LLVM_ELEM:
+            raise ValueError(f"tile.buffer_load: unsupported elem_type {elem_type!r}")
         llvm_elem = _LLVM_ELEM[elem_type]
         if elem_type in ("f16", "bf16"):
             self._need("raw.ptr.buffer.load.i16")
@@ -6247,7 +6137,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('cachepolicy', 0))})"
             )
         else:
             intr = f"raw.ptr.buffer.store.v{dwords}i32"
@@ -6262,7 +6152,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('cachepolicy', 0))})"
             )
 
     def _op_tile_buffer_store_f16(self, op: Op) -> None:
@@ -6277,7 +6167,7 @@ class _Lowerer:
             f"ptr addrspace(8) {self._operand(rsrc)}, "
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
-            f"i32 0)"
+            f"i32 {int(op.attrs.get('cachepolicy', 0))})"
         )
 
     def _op_tile_buffer_load_bf16(self, op: Op) -> None:
@@ -6341,7 +6231,7 @@ class _Lowerer:
             f"ptr addrspace(8) {self._operand(rsrc)}, "
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
-            f"i32 0)"
+            f"i32 {int(op.attrs.get('cachepolicy', 0))})"
         )
 
     def _op_tile_buffer_store_vN_bf16(self, op: Op) -> None:
@@ -6363,7 +6253,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('cachepolicy', 0))})"
             )
         else:
             intr = f"raw.ptr.buffer.store.v{dwords}i32"
@@ -6378,7 +6268,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('cachepolicy', 0))})"
             )
 
     def _op_tile_buffer_store_f32(self, op: Op) -> None:
@@ -7227,7 +7117,18 @@ class _Lowerer:
             br label %if.end
           if.end:
             [continuation]
+
+        An if/else with results takes each result from the ``scf.yield``
+        that ends each branch, through one ``phi`` per result at the head of
+        ``if.end``::
+
+          if.end:
+            %if7 = phi float [ %a, %if.then ], [ %b, %if.else ]
         """
+        # Refuse a malformed if/else, or a branch that does not yield the
+        # results, before reading the op or emitting.
+        for branch in range(2):
+            _if_else_branch_yield(op, branch)
         (cond,) = op.operands
         then_region = op.regions[0]
         else_region = op.regions[1]
@@ -7244,7 +7145,7 @@ class _Lowerer:
         cur.terminated = True
 
         # Lower then branch (then_blk is now _current).
-        self.lower_region(then_region)
+        then_values = self._lower_if_else_branch(op, then_region)
         then_last = self._current()
         # then falls through to join; use another placeholder.
         if not then_last.terminated:
@@ -7255,7 +7156,7 @@ class _Lowerer:
         else_blk = self._new_block("if.else")
 
         # Lower else branch.
-        self.lower_region(else_region)
+        else_values = self._lower_if_else_branch(op, else_region)
         else_last = self._current()
 
         # Create join block (becomes _current for subsequent ops).
@@ -7263,6 +7164,12 @@ class _Lowerer:
         if not else_last.terminated:
             else_last.emit(f"  br label %{end_blk.label}")
             else_last.terminated = True
+        for result, then_value, else_value in zip(op.results, then_values, else_values):
+            end_blk.emit(
+                f"  {result.name} = phi {_llvm_type(result.type)} "
+                f"[ {then_value}, %{then_last.label} ], "
+                f"[ {else_value}, %{else_last.label} ]"
+            )
 
         # Backpatch placeholders in the predecessor and then blocks.
         for blk in (cur, then_last):
@@ -7270,6 +7177,16 @@ class _Lowerer:
                 line = line.replace("%IF_ELSE", f"%{else_blk.label}")
                 line = line.replace("%IF_END", f"%{end_blk.label}")
                 blk.lines[i] = line
+
+    def _lower_if_else_branch(self, op: Op, region: Region) -> List[str]:
+        """Lower one branch of the scf.if_else ``op``; return the operands its
+        closing ``scf.yield`` gives the results (none when ``op`` has none)."""
+        if not op.results:
+            self.lower_region(region)
+            return []
+        self._yield_stack.append([])
+        self.lower_region(region)
+        return self._yield_stack.pop()
 
     def _op_scf_yield(self, op: Op) -> None:
         if not self._yield_stack:
@@ -7591,7 +7508,8 @@ def lower_kernel_to_llvm(
 
     ``llvm_flavor`` overrides the autodetected default (one of
     :data:`LLVM_FLAVOR_LLVM20` / :data:`LLVM_FLAVOR_LLVM22` /
-    :data:`LLVM_FLAVOR_LLVM23`). Useful for tests that want to pin a
+    :data:`LLVM_FLAVOR_LLVM23` / :data:`LLVM_FLAVOR_LLVM24`). Useful for tests
+    that want to pin a
     specific flavor regardless of the host ROCm install.
 
     ``arch`` selects the ISA backend (e.g. ``"gfx942"``, ``"gfx950"``) that
