@@ -106,9 +106,9 @@ A swept configuration is built in four layers. A registered candidate fixes a
 coarse geometry, `select_spec` fills in the problem, a walk over the arch's
 knob axes varies the tuning fields, and a `waves_per_eu` loop runs inside each
 knob set. That loop is the shared `KnobSpace` outer-knob hook: both attention
-spaces derive from `WavesPerEuSpace` (`waves.py`), which names `waves_per_eu`
-as the outer knob and puts it in the id stem, and each supplies its own WPE
-values:
+spaces derive from the shared `rocke.dispatch.tuning.WavesPerEuSpace`, which
+names `waves_per_eu` as the outer knob and puts it in the id stem, and each
+supplies its own WPE values (`waves.py`):
 
 ```text
 candidate            one geometry variant, fixed at registration
@@ -120,9 +120,9 @@ candidate            one geometry variant, fixed at registration
 
 The axes and production stacks are data in `axes.py`; `dense_rules.py` and
 `unified_rules.py` state attention's legality rules as `KnobSpace`
-subclasses (through `waves.py`'s `WavesPerEuSpace`); `candidate.py` turns a
-variant into a registered candidate. The RDNA WMMA kernels have no occupancy
-loop: `wmma_rules.py`'s `WmmaSpace` is a plain `KnobSpace`.
+subclasses (through `WavesPerEuSpace`); `candidate.py` turns a variant into a
+registered candidate. The RDNA WMMA kernels have no occupancy loop:
+`wmma_rules.py`'s `WmmaSpace` is a plain `KnobSpace`.
 Walking, sampling, canonicalizing and naming are the shared
 `rocke.dispatch.tuning` (platform `ARCHITECTURE.md` section 14). Geometry
 catalogs live in the arch modules.
@@ -346,8 +346,8 @@ the replacement silently. A change to the payload or the canonicalization
 rules bumps `TUNING_ID_VERSION` in `rocke.dispatch.tuning.identity`. gfx942 dense
 resolves `persistent` and `waves_per_eu` per problem, so those two are always
 recorded with their effective value. Pins match on `config_key`; the
-`{variant_id}_wpe{N}` stem (`waves.py`: `waves_per_eu` is the attention
-spaces' outer knob) is only read to skip variants a bare id cannot name
+`{variant_id}_wpe{N}` stem (`tuning.WavesPerEuSpace`: `waves_per_eu` is the
+attention spaces' outer knob) is only read to skip variants a bare id cannot name
 (`KnobSpace.stem_prefix`). Knob values take the type their axis declares, so
 `True` and `1` name the same configuration. The compiled binary has a separate
 identity: `AttentionTuningSpec.identity()` (the kernel cache key), which
@@ -417,8 +417,8 @@ unchanged.
 | `attention_rdna_wmma_prefill` (priority 5) | multi-wave prefill (`kernels.gfx1151.wmma_fmha_fwd_v2`) | `algorithm="wmma_fmha_fwd_v2"`, `spec_id="rdna_wmma_fmha_fwd_v2"` | every other request |
 
 The decode/prefill rule is `gfx1151.rdna_attention_use_decode`, a pure function
-of the problem, the WMMA family and the CU count; its docstring describes the
-crossover points it encodes. A decode bucket
+of the problem, the WMMA family and the CU count, which the hipDNN native
+mirrors; its docstring describes the crossover points it encodes. A decode bucket
 (64/128/256) serves Q/K widths only from its own minimum up
 (`wmma_fmha_decode_bucket`), so widths no bucket serves (Q64/V128, for
 instance) and `runtime_head_dims` requests run the prefill. Pinning either
@@ -478,11 +478,19 @@ stream handles are forwarded. Use `fence=False` for asynchronous or
 graph-captured launches, then release retained owners after the appropriate
 synchronization and graph-destruction boundary.
 
-The shipped `hipkernel:Gfx1151WmmaAttention` catalog does not package these
-kernels yet: it still builds the single-wave `kernels.gfx1151.wmma_fmha_fwd`
-objects (runtime-head-dim buckets, plus exact D64/D128 transposed-QK objects
-on gfx11), which rocKE dispatch no longer selects. Moving the catalog to the
-prefill/decode pair is a separate packaging change. Kernel design and
+The shipped catalog packages the same two kernels per RDNA family (generic
+targets) as two hipDNN engines: `hipkernel:Gfx1151WmmaAttention` is the prefill
+in the causal class (runtime no-mask/causal/window bounds) for Q/V buckets
+64/64, 96/96, 128/128, 192/128, 256/128 and 256/256 x bias none/f32/q, and
+`hipkernel:Gfx1151WmmaAttentionDecode` is the split-KV decode (buckets
+64/128/256 x bias), a two-launch kernel whose `merge` launch is a companion
+kernel of the same code object (RFC 0017 §15.1 `sources`). Both native
+matchers apply `rdna_attention_use_decode`, so exactly one serves a problem,
+and the decode engine uses the split count of `decode_launch_plan`, with one
+difference: more than one split always merges in the `merge` launch, never in
+the kernel's fused merge (whose arrival counters hipDNN's stateless workspace
+would need zeroed every launch), so the hipDNN workspace holds only the split
+partials. Kernel design, ABI and
 generic-target requirements are in the
 [RDNA WMMA SDPA guide](../../builders/gfx1151/attention/README.md). The
 dispatch ABI string is `gfx1151.ATTENTION_GFX1151_ABI`
@@ -620,9 +628,9 @@ from the gfx942 spec rather than from a free field.
   gfx950 2D LDS / KQ-pad legality, stated as the `UnifiedSpace` hooks.
 - `wmma_rules.py` — RDNA WMMA knob scope and launch legality for both kernels,
   stated as the `WmmaSpace` hooks.
-- `waves.py` — `waves_per_eu` as the attention spaces' outer knob: the WPE
-  sweep values and `WavesPerEuSpace`, which sets the outer knob and the
-  `{variant_id}_wpe{N}` id stem for both spaces.
+- `waves.py` — the WPE values each sweep level tries for `waves_per_eu`, the
+  attention spaces' outer knob; the shared `rocke.dispatch.tuning.WavesPerEuSpace`
+  sets the outer knob and the `{variant_id}_wpe{N}` id stem for both spaces.
 - `candidate.py` — `make_tuning_candidate` and `make_dense_candidate`, both
   over `rocke.dispatch.tuning.make_tuned_candidate`.
 - `tuning_specs.py` — shared explicit kernel-spec/build construction.

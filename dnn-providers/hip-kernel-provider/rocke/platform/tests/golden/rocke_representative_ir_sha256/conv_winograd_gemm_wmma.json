@@ -1,0 +1,81 @@
+{
+  "aliases": {
+    "llvm24": "llvm23"
+  },
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "conv_winograd_gemm_wmma/gfx1250/reduce_fp16": {
+          "arch": "gfx1250",
+          "bytes": 4372,
+          "family": "conv_winograd_gemm_wmma",
+          "kernel_name": "wino_gemm_reduce",
+          "sha256": "cfac1d262cddc4ed08d86b5a91e2a547f5f924667141459831f26751df35ad27",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {
+        "conv_winograd_gemm_wmma/gfx1250/bf16_sk_direct_taps2": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        },
+        "conv_winograd_gemm_wmma/gfx1250/fp16_default": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        }
+      }
+    },
+    "llvm22": {
+      "cases": {
+        "conv_winograd_gemm_wmma/gfx1250/reduce_fp16": {
+          "arch": "gfx1250",
+          "bytes": 4464,
+          "family": "conv_winograd_gemm_wmma",
+          "kernel_name": "wino_gemm_reduce",
+          "sha256": "069ab0991f5326841224e6b03a93b4978ca90c1147d9b9eb432f061b615691c6",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {
+        "conv_winograd_gemm_wmma/gfx1250/bf16_sk_direct_taps2": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        },
+        "conv_winograd_gemm_wmma/gfx1250/fp16_default": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        }
+      }
+    },
+    "llvm23": {
+      "cases": {
+        "conv_winograd_gemm_wmma/gfx1250/bf16_sk_direct_taps2": {
+          "arch": "gfx1250",
+          "bytes": 178113,
+          "family": "conv_winograd_gemm_wmma",
+          "kernel_name": "wino_gemm_wmma_wm2_wn4_fm8_fn4_tk64_st2_ptdm_direct_sk_pf_x8_siterative-ilp_taps2_bf16",
+          "sha256": "c614b6cfcaac5c0d270b9844aa092562f5661e4ca1d05c9369753cd8331d6fc5",
+          "status": "ok"
+        },
+        "conv_winograd_gemm_wmma/gfx1250/fp16_default": {
+          "arch": "gfx1250",
+          "bytes": 211622,
+          "family": "conv_winograd_gemm_wmma",
+          "kernel_name": "wino_gemm_wmma_wm2_wn4_fm8_fn4_tk128_st2_ptdm_tdm_pf_x8_siterative-ilp",
+          "sha256": "77b6c49591490b764e4da2742d6a5b9f02d52ddebb4cede653f6882c276658f7",
+          "status": "ok"
+        },
+        "conv_winograd_gemm_wmma/gfx1250/reduce_fp16": {
+          "arch": "gfx1250",
+          "bytes": 4528,
+          "family": "conv_winograd_gemm_wmma",
+          "kernel_name": "wino_gemm_reduce",
+          "sha256": "b6668987179ab1aec7ce393981ad8d3a6a8910714884641e024f5b6d8b147524",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    }
+  },
+  "schema": "ck.dsl.ir_golden_sha256/v2"
+}

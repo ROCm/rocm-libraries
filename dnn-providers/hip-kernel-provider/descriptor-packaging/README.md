@@ -70,14 +70,14 @@ A root, or an arch, left with nothing to pack is skipped, not failed. Only produ
 gated by a build option (rocKE today) are disabled by kind; a kind outside that set is
 not pruned.
 
-The provider wires seven roots: production, plus six over the four authored test sets.
+The provider wires eight roots: production, plus seven over the five authored test sets.
 `shared` packs twice, once into each test binary's discovery root. `archive_fixture` packs
 twice, once for each test binary, so each binary reads its own archive.
 
 | Root | Source | Ships |
 |---|---|---|
 | Production | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH` defaulting to the in-tree `src/engines/kernel_ingestor_engine/descriptors/` | yes |
-| Test | `src/engines/kernel_ingestor_engine/test_descriptors/{shared,unit,integration,archive_fixture}/` | only under `HIPKERNELPROVIDER_ENABLE_TESTS` |
+| Test | `src/engines/kernel_ingestor_engine/test_descriptors/{shared,unit,integration,archive_fixture,multi_launch}/` | only under `HIPKERNELPROVIDER_ENABLE_TESTS` |
 
 Before wiring any root, configure asks the packer (`pipeline.shipped_engines` and
 `pipeline.offered_engines`, under the base interpreter, with the same filters) which
@@ -313,7 +313,7 @@ A UKD carries **exactly one** of `kernel_source` (one launch) or `sources` (seve
 packed `sources` is a JSON object keyed by launch name with at least two entries, each a
 complete `kpack` source with the five keys above, and its UKD declares `"version": "1.1"`.
 Launch names are lowercase identifiers (`^[a-z][a-z0-9_]*$`). Neither key, both keys, a
-single entry, a bad name, a `sources` under version 1.0 and an entry that is not `kpack`
+single entry, a bad name, a packed `sources` under version 1.0 and an entry that is not `kpack`
 are all refused, by the packer and by the loader. Two launch names may name one kernel (a
 stage that runs one kernel twice with different arguments): such entries carry equal
 `library`, `toc_key` and `symbol`. Key order carries no meaning. The packer stamps 1.1 on a UKD with
@@ -329,52 +329,86 @@ the key skips a 1.1 file at its version gate.
 }
 ```
 
-The authored form is the same map, each value a full `rocke` source (`kind`, `source`,
-`builder`, `spec`, optional `target`) plus an optional `role`. Authored entries are `rocke`
-only. A `hip` or `hsaco` entry is refused as not yet supported as a `sources` entry, an
-`embedded_source` entry because it is not packed into a code object, and a `kpack` entry
-because already-packed entries are not pack input. The packer still validates a packed
-`sources`, so a shipped tree can be checked.
+The authored form is the same map, with entries of **one** kind: `rocke`, `hip` or `hsaco`.
+Mixing kinds in one map is refused, as is an `embedded_source` entry (it is not packed into a
+code object) and a `kpack` entry (already-packed entries are not pack input). The packer
+still validates a packed `sources`, so a shipped tree can be checked.
 
-- **One builder, several kernels.** A builder may return a `rocke.helpers.KernelModule`: a
+- **`rocke` entry.** A full `rocke` source (`kind`, `source`, `builder`, `spec`, optional
+  `target`) plus an optional `role`.
+- **`hip` entry.** Exactly the single-launch hip `kernel_source`: `kind`, `source` (relative
+  to the descriptor), `entry` and `build` (`defines`, `flags`). `entry` is the launch's
+  kernel symbol; there is no other field.
+- **`hsaco` entry.** Exactly the single-launch hsaco `kernel_source`: `kind`, `file`
+  (relative to the descriptor) and `symbol`. The UKD's `arch` must be non-empty, as for a
+  single-launch hsaco.
+- **`role` is `rocke` only** and is refused on a `hip` or `hsaco` entry.
+
+- **One builder, several kernels (`rocke`).** A builder may return a `rocke.helpers.KernelModule`: a
   primary kernel plus role-keyed companions in **one code object**. An entry without `role`
   takes the builder's primary kernel; an entry with `role` takes that companion, and the
   builder must return a module that has it. Entries with the same `source`, `builder`,
   `spec` and `target` compile once, so they share `library`, `toc_key` and `sha256` and
   differ in `symbol`; at runtime they resolve out of one loaded module.
-- **Two builders.** Entries naming different builders (a split-KV segment kernel and its
+- **Two builders (`rocke`).** Entries naming different builders (a split-KV segment kernel and its
   reduce kernel, say) are two entries with no `role`, and two code objects. No wrapper
-  builder is needed.
-- **Claim check.** For each compiled variant a UKD uses, the kernels its entries claim
+  builder is needed. IngestorGenerator cannot vary a second builder's spec per variant: a
+  launch's `spec` override is static (see the `launches` paragraph in the
+  [IngestorGenerator README](../../../projects/hipdnn/tools/IngestorGenerator/README.md#the-engine-manifest-and-reduction)).
+- **Claim check (`rocke`).** For each compiled variant a UKD uses, the kernels its entries claim
   must equal the kernels the compile produced: the primary plus every companion role. Entries
   that name one kernel under different launch names make one claim. A compiled companion
   that no entry claims, or a claimed role the module lacks, fails the pack and the message
   names both lists.
-- **Never authored.** `role` exists only in the authored form. The packed `symbol` and
-  `signature` are read out of the compiled object, so they cannot disagree with what was
-  built.
-- **Provenance.** For a `sources` UKD `provenance.effective_spec` is an object keyed by
-  launch name; entries that share a compile carry identical evidence.
+- **Never authored.** `role` exists only in the authored form. The packed `signature` is
+  read out of the compiled object, so it cannot disagree with what was built, and so is the
+  `rocke` `symbol`; a `hip` or `hsaco` `symbol` is the authored one, and the pack fails
+  when the object does not contain it.
+- **Provenance (`rocke`).** For a `rocke` `sources` UKD `provenance.effective_spec` is an
+  object keyed by launch name; entries that share a compile carry identical evidence.
   `agreement.verify` binds each entry's `symbol` and code object to its own evidence.
-- **Consumer agreement.** A UKD carries one consumer metadata declaration. For a `sources`
-  UKD each declared `metadata_fields` entry must be reported by **at least one** launch,
-  and every launch that does report it must match the metadata. A launch whose spec lacks
-  the attribute just does not report that field, so a segment kernel can report
-  `block_size` while its reduce kernel, which has none, reports nothing. A field no launch
-  reports still fails, and so does one reported with a value that differs from the
-  metadata on any launch. There is no per-launch declaration and no exemption list. A
-  misspelled binding still fails, because a binding is shared and the misspelled attribute
-  is then missing on every launch. A single-launch UKD is unchanged: its fields must be
-  observable.
+- **Consumer agreement (`rocke`).** A UKD carries one consumer metadata declaration. For a
+  `rocke` `sources` UKD each declared `metadata_fields` entry must be reported by **at
+  least one** launch, and every launch that does report it must match the metadata. A
+  launch whose spec lacks the attribute just does not report that field, so a segment
+  kernel can report `block_size` while its reduce kernel, which has none, reports nothing.
+  A field no launch reports still fails, and so does one reported with a value that differs
+  from the metadata on any launch. There is no per-launch declaration and no exemption
+  list. A misspelled binding still fails, because a binding is shared and the misspelled
+  attribute is then missing on every launch. A single-launch UKD is unchanged: its fields
+  must be observable.
+- **Shared compiles (`hip`, `hsaco`).** `hip` entries with the same `source` and `build`
+  compile once, and `hsaco` entries naming the same `file` read it once; each such group
+  is one `toc_key` and one archive entry. Every launch keeps its own symbol (`entry` for
+  `hip`, `symbol` for `hsaco`) and gets its own `signature`, read out of the code object
+  for that symbol. Entries on different sources, builds or files are separate entries in
+  the archive. A translation unit or code object may hold kernels no launch names; there is
+  no claim check for these kinds.
+- **Provenance (`hip`, `hsaco`).** `origin_kind` is the shared kind and
+  `provenance.sources` is keyed by launch name with each launch's authored identity:
+  `{source, entry, build}` for `hip` and `{file, sha256, symbol}` for `hsaco`. The toolchain
+  field is top level as for a single launch (`hipcc_version` for `hip`, none for `hsaco`).
+  No compiler observed these kernels, so there is **no `effective_spec`** and no consumer
+  agreement evidence. A declaration with `metadata_fields` over a `hip` or `hsaco`
+  `sources` UKD is refused, exactly as for a single launch; one without them leaves the
+  kernel reported as unclaimed by the desk check. Claims, consumer agreement and evidence
+  publish and verify are `rocke` only.
 
 The packer lists the entries and nothing more: launch order, workspace and the hand-off
 between stages belong to the native dispatch handler of the pack. That handler declares the
 launch names it launches (`IKernelDispatchHandler::launchNames`, empty by default, which is
 a single-launch handler reading `kernel_source`). The state manager drops a kernel whose
 launch names differ from that set, before applicability, so an accepted kernel is always
-launchable. A variant with a different launch set therefore belongs in its own pack. The
-handler reaches one launch's definition with `launchKernelDefinition(kernel, "merge")` and
-hands it to `buildIngestorKernelCode`.
+launchable. The loader resolves one handler per `dispatch_symbol`, so a handler serves every
+KDP whose UDD names that symbol, whether the KDPs share one UDD or each has its own. A
+variant with a different launch set therefore needs a KDP whose UDD names a handler of its
+own, and the packer enforces it per shard: kernels served by one dispatch symbol that name
+different launch sets, or a single-launch kernel beside a multi-launch one, fail the pack,
+naming the dispatch symbol, each KDP and each kernel's launch set. The order of the
+`sources` keys carries no meaning, so the same names in another order are one set. The
+check sees one packaging root, so two roots that register the same dispatch symbol are not
+compared. The handler reaches one launch's definition with
+`launchKernelDefinition(kernel, "merge")` and hands it to `buildIngestorKernelCode`.
 
 ## Emitted-bundle census
 
@@ -683,8 +717,9 @@ attention KDP (840 UKDs in one group, 7 varying spec fields) keeps 17.
 - **Each value is packed; combinations are not.** The sweep guarantees, say, that some fp16
   UKD and some causal UKD are packed, not that an fp16 causal one is. Breakage specific to
   a combination is caught only if a UKD with it is listed in `UKDS`.
-- **The key is the UKD `name`, not its `id`.** Ids are `uuid4` values regenerated on every
-  ingestor run; names encode the specialization and are unique.
+- **The key is the UKD `name`, not its `id`.** Ids are random UUIDs, kept across
+  regenerations of an installed bundle but not derived from content; names encode the
+  specialization and are unique.
 - **Derive reads the root with the packer's own loader** (`load_flat_input`): it sees
   the descriptors the packer sees (hidden paths skipped) and refuses what the packer
   refuses. Which KDPs ship is the packer's `kdp_survives`, which UKDs ship its
@@ -757,7 +792,7 @@ compiles hip and rocke fixtures. There is no local Windows reproduction.
 | `sha256` | The blob's sha256 differs from the entry's `sha256` (`kernel_source`, or each launch entry of `sources`). |
 | `signature` | A kpack entry's `signature` is empty or not a list (checked per launch for `sources`). |
 | `symbol` | An entry's `symbol` does not appear in its blob (checked per launch for `sources`). |
-| `launches` | A kpack UKD ships `kernel_source` where `expect.json` lists `launches`, or `sources` where it lists none, or both keys, or a `sources` that is not an object; the shipped launch names differ from the expected ones; or a launch's shipped `symbol` differs from the compiler's recorded one for that launch in `provenance.effective_spec` (the primary `symbol`, or `companions[<role>]` for an authored role), or the record is missing. |
+| `launches` | A kpack UKD ships `kernel_source` where `expect.json` lists `launches`, or `sources` where it lists none, or both keys, or a `sources` that is not an object; the shipped launch names differ from the expected ones; or, for a rocke UKD, a launch's shipped `symbol` differs from the compiler's recorded one for that launch in `provenance.effective_spec` (the primary `symbol`, or `companions[<role>]` for an authored role), or the record is missing. A hip or hsaco launch has no such record; its `symbol` is held by the `symbol` row. |
 | `launch-signature` | A shipped launch's `signature` differs from the argument list its `symbol` has in the archive blob, or the blob has no such kernel. |
 | `provenance-origin` | `origin_kind` differs from the UKD's expected kind (the authored `kernel_source.kind`). |
 | `no-rules-for-kind` | A UKD's expected kind has no entry in `tools/hkp_probe_kinds.py`: a new producer kind must add its entry. |

@@ -797,18 +797,19 @@ def _cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     ``arch`` sits at index 1 like every other key family in this module, so
     ``_assert_cache_key_arch`` can check key-vs-compile agreement uniformly and
     two arches can never alias to one cached kernel.
+
+    Like the tiled keys, it holds only fields the scalar 2D build reads. The
+    dynamic shape (``total_q``, ``num_seqs``, ``max_seqlen_q``, ``max_seqlen_k``)
+    reaches the kernel as kernargs or the launch grid, never as IR, so one binary
+    serves every batch. ``test_attention_scalar_cache_key.py`` enforces this.
     """
     return (
         "scalar",
         arch,
-        problem.total_q,
-        problem.num_seqs,
         problem.num_query_heads,
         problem.num_kv_heads,
         problem.head_size,
         problem.block_size,
-        problem.max_seqlen_q,
-        problem.max_seqlen_k,
         problem.dtype,
         problem.q_dtype,
         problem.sliding_window,
@@ -1297,16 +1298,16 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
     # combo and a much heavier prelude.
     if _enable_combo_2d(problem, arch) and problem.sliding_window > 0:
         return problem.block_size
-    # fp16 D128 single-batch sliding-window: force T=64. The generic
+    # fp16 & bf16 D128 single-batch sliding-window: force T=64. The generic
     # 2*block_size tile would give T=32 at block_size=16, whose 256 outer
     # iterations at S=8192 under-amortise the per-iter cost. T=64 halves the
-    # iteration count; measured ~1.65x on gfx950 (numerically identical --
-    # both paths max_abs 1.95e-3).
+    # iteration count; faster on gfx950 for both dtypes, within tolerance of
+    # the narrow path's output on each (fp16 max_abs 1.95e-3, bf16 max_abs
+    # 1.5625e-02 -- larger due to bf16's lower precision, not a routing bug).
     if (
         _enable_single_batch_combo(problem, arch)
         and problem.sliding_window > 0
         and problem.head_size == 128
-        and problem.dtype == "fp16"
     ):
         return 64
     # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort.
@@ -2015,10 +2016,12 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         them per-score, so biased single-batch prefill takes the combo path
         instead of the fallback. Only softcap/sinks are excluded (above)
         because the mask-limit shortcut can't fold them.
-      * sliding window: fp16 D128 only -- the transposed-32x32 path is ~1.65x
-        faster here than the narrow 16x16 path (both numerically equal); other
-        SW shapes keep their existing routing, and the no-SW VALU sub-flags
-        auto-disable via _enable_transposed_subflags.
+      * sliding window: fp16 & bf16 D128 only (measured both on gfx950) -- the
+        transposed-32x32 path is faster here than the narrow 16x16 path on
+        both dtypes, within tolerance of it numerically (fp16 max_abs
+        1.95e-3, bf16 max_abs 1.5625e-02); other SW shapes keep their
+        existing routing, and the no-SW VALU sub-flags auto-disable via
+        _enable_transposed_subflags.
       * head_size in {64, 128}.
       * max_seqlen_q > 256 (long prefill; decode-class shapes route to the 3D
         split-KV path via ``select_path``, and the autotuner's win starts at
@@ -2034,20 +2037,19 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         return False
     if problem.softcap > 0 or problem.use_sinks:
         return False
-    # fp16 D128 sliding-window (block_size==16 only) routes to the transposed-
-    # 32x32 fp32 online-softmax path (~1.65x faster here than the narrow 16x16
-    # path; both numerically equal). Scoped to block_size==16 because that is the
-    # cohort we measured. bs in {32,64} would now also build safely under the
-    # combo -- the _enable_k_single_buffer geometry guard derives block_m <=
-    # tile_size, so the former block_m=128 > tile_size=64 collision no longer
-    # raises -- but their combo speedup is unmeasured, so they keep their
-    # existing routing. bf16 D128 SW and all other SW shapes also stay on their
-    # existing paths; the no-SW VALU sub-flags auto-disable for SW via
-    # _enable_transposed_subflags.
+    # fp16 & bf16 D128 sliding-window (block_size==16 only) route to the
+    # transposed-32x32 fp32 online-softmax path (faster here than the narrow
+    # 16x16 path on both dtypes, measured on gfx950; within tolerance of it
+    # numerically -- fp16 max_abs 1.95e-3, bf16 max_abs 1.5625e-02).
+    # Scoped to block_size==16 because that is the cohort we measured. bs in
+    # {32,64} would now also build safely under the combo -- the
+    # _enable_k_single_buffer geometry guard derives block_m <= tile_size, so
+    # the former block_m=128 > tile_size=64 collision no longer raises -- but
+    # their combo speedup is unmeasured, so they keep their existing routing.
+    # All other SW shapes also stay on their existing paths; the no-SW VALU
+    # sub-flags auto-disable for SW via _enable_transposed_subflags.
     if problem.sliding_window > 0 and not (
-        problem.head_size == 128
-        and problem.dtype == "fp16"
-        and problem.block_size == 16
+        problem.head_size == 128 and problem.block_size == 16
     ):
         return False
     if problem.head_size not in (64, 128):
@@ -2946,6 +2948,48 @@ def kv_addr_width_for_builder(
     return False
 
 
+def gfx942_3d_kv_needs_i64_addr(
+    num_kv_blocks: int,
+    block_bytes: int,
+    *,
+    kv_fp8: bool,
+    use_wide_kv_load: bool,
+    tile_size: int,
+    head_size: int,
+) -> bool:
+    """``use_i64_kv_addr`` for the gfx942 tiled 3D kernel on this paged cache.
+
+    The kernel has no i64 path, so its spec refuses the flag: True means the
+    cache is past what the selected K/V loader reads. The single rule for the
+    spec builder, the cache key and the dispatcher's tuning specs.
+    """
+    from ..gfx942.attention_tiled_3d import i32_kv_cache_bytes
+
+    limit = i32_kv_cache_bytes(
+        kv_fp8=kv_fp8,
+        use_wide_kv_load=use_wide_kv_load,
+        tile_size=tile_size,
+        head_size=head_size,
+    )
+    return num_kv_blocks > 0 and num_kv_blocks * block_bytes > limit
+
+
+def _enable_i64_kv_addr_3d(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """3D ``use_i64_kv_addr``: ``_enable_i64_kv_addr``, except on gfx942, whose
+    limit depends on the K/V loader (``gfx942_3d_kv_needs_i64_addr``)."""
+    # Below the buffer range every loader is i32, so skip the selector walk.
+    if arch != "gfx942" or not _enable_i64_kv_addr(problem):
+        return _enable_i64_kv_addr(problem)
+    return gfx942_3d_kv_needs_i64_addr(
+        problem.num_kv_blocks,
+        _kv_block_bytes(problem),
+        kv_fp8=_kv_storage_dtype(problem) is not None,
+        use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem, arch),
+        tile_size=_gfx942_3d_tile_size_override(problem, arch) or problem.block_size,
+        head_size=problem.head_size,
+    )
+
+
 def _kv_block_bytes(problem: UnifiedAttentionProblem) -> int:
     """Byte size of one paged K (or V) block for ``problem``."""
     elem_bytes = 1 if problem.use_fp8 else 2
@@ -2958,11 +3002,11 @@ def _enable_i64_kv_addr(problem: UnifiedAttentionProblem) -> bool:
     The default load path puts the full byte offset (incl.
     ``physical_block * block_stride``) in a 32-bit buffer voffset, bounded at
     ``_I32_KV_BUFFER_BYTES``; past that, loads silently return zeros. When the
-    cache is that large we fold the per-block offset into a
-    64-bit buffer base (a tiny, wave-uniform ``make_buffer_rsrc`` per
-    block; measured within ~1-2% of the i32 path). Below the cap we keep
-    the fast i32 path. ``num_kv_blocks == 0`` means the cache size is
-    unknown (caller did not supply it) -> assume small / fast path.
+    cache is that large we fold the per-block offset into a 64-bit buffer
+    base (a wave-uniform ``make_buffer_rsrc`` per block; the gfx942 tiled 2D
+    K/V copies build one per page of a tile, not one per copy). Below the cap
+    we keep the i32 path. ``num_kv_blocks == 0`` means the cache size is
+    unknown (caller did not supply it) -> assume small / i32 path.
     """
     return kv_cache_needs_i64_addr(problem.num_kv_blocks, _kv_block_bytes(problem))
 
@@ -3044,15 +3088,35 @@ def _spec_kv_addr_limit(
     return min(limits, key=lambda limit: limit.nbytes, default=None)
 
 
+def _3d_spec_kv_addr_limit(
+    problem: UnifiedAttentionProblem, spec, arch: str
+) -> _KvAddrLimit | None:
+    """Largest paged K cache, in bytes, the 3D segment kernel built from ``spec``
+    reads. gfx942 has no i64 path, so its K/V loader sets the limit."""
+    if arch == "gfx942":
+        from ..gfx942.attention_tiled_3d import i32_kv_cache_bytes
+
+        return _KvAddrLimit(
+            i32_kv_cache_bytes(
+                kv_fp8=spec.kv_storage_dtype is not None,
+                use_wide_kv_load=spec.use_wide_kv_load,
+                tile_size=spec.tile_size,
+                head_size=spec.head_size,
+            ),
+            _KV_LIMIT_NO_I64_PATH,
+        )
+    return _spec_kv_addr_limit(problem, spec)
+
+
 def _kv_addr_fix(
     problem: UnifiedAttentionProblem, num_kv_blocks: int, kv_addr_limit: _KvAddrLimit
 ) -> str:
     """What a caller can do about a cache past ``kv_addr_limit``."""
     if kv_addr_limit.cause == _KV_LIMIT_NO_I64_PATH:
         return (
-            "This kernel has no i64 KV path (the scalar, gfx942 4-warp GQA and "
-            "gfx1250 kernels index at most 2^31 elements), so fixing "
-            "num_kv_blocks will not help. Use a smaller cache."
+            "This kernel has no i64 KV path (the scalar, gfx942 4-warp GQA, "
+            "gfx942 tiled 3D and gfx1250 kernels), so fixing num_kv_blocks "
+            "will not help. Use a smaller cache."
         )
     if kv_addr_limit.cause != _KV_LIMIT_I32_BUFFER:
         return (
@@ -4030,7 +4094,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         _select_3d_waves_per_eu(problem, arch),
         _enable_gfx942_3d_wide_kv_load(problem, arch),
         _kv_storage_dtype(problem),
-        _enable_i64_kv_addr(problem),
+        _enable_i64_kv_addr_3d(problem, arch),
         decode_grid,
         _kv_cache_policy_3d(problem, arch),
         _gfx950_3d_tile_size_override(problem, arch),
@@ -4195,9 +4259,9 @@ def _attn_values(
     _require_additive_bias(problem, additive_bias)
     # Production 2D and scalar launches and the torch direct-launch harnesses
     # pack kernargs here, so check the real K cache against what the compiled
-    # kernel addresses (``kv_addr_limit``, from ``_spec_kv_addr_limit``). Not
-    # covered: the 3D path and the gfx1250 tiled_2d_verify harness, which pack
-    # their own.
+    # kernel addresses (``kv_addr_limit``, from ``_spec_kv_addr_limit``). The 3D
+    # path checks in ``_run_3d_tiled_on_stream``; the gfx1250 tiled_2d_verify
+    # harness packs its own and is not covered.
     _check_kv_addr_width(problem, k, kv_addr_limit)
     vals = {
         "output_ptr": out,
@@ -4421,6 +4485,19 @@ def _run_3d_tiled_on_stream(
     else:
         num_segments = _num_segments(problem, _launch_arch)
         cache_key = _tiled_3d_cache_key(problem, _launch_arch)
+    # The spec saw problem.num_kv_blocks, which a caller can leave stale, so
+    # check the real paged cache. gfx1250's 3D spec makes no i64 decision.
+    if kv_cache_layout is None and _launch_arch in ("gfx942", "gfx950"):
+        if cache_key not in _3D_KV_ADDR_LIMITS:
+            segment_spec = (
+                tuning_spec.kernel_spec
+                if tuning_spec is not None
+                else _tiled_3d_spec_from_problem(problem, _launch_arch)
+            )
+            _3D_KV_ADDR_LIMITS[cache_key] = _3d_spec_kv_addr_limit(
+                problem, segment_spec, _launch_arch
+            )
+        _check_kv_addr_width(problem, k, _3D_KV_ADDR_LIMITS[cache_key])
     if kv_cache_layout is not None:
         cache_key = cache_key + ("strided_kv",)
     capturing = _torch_stream_capturing()
@@ -4814,6 +4891,8 @@ _2D_LAUNCH_META: Dict[Tuple, _Attention2DLaunchMeta] = {}
 # Per-cache-key ``_spec_kv_addr_limit`` of the default-route spec. The spec is a
 # function of the cache key, so it is built once per kernel, not per total_q.
 _2D_KV_ADDR_LIMITS: dict[tuple, _KvAddrLimit | None] = {}
+# The same for the 3D segment kernel, from ``_3d_spec_kv_addr_limit``.
+_3D_KV_ADDR_LIMITS: dict[tuple, _KvAddrLimit | None] = {}
 _2D_GRAPHS: Dict[Tuple, Any] = {}
 _2D_GRAPH_REFS: Dict[Tuple, Tuple[Any, ...]] = {}
 _SCALAR_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
@@ -5668,7 +5747,7 @@ def _get_scalar_launcher(
         kernel_name=kname,
         signature=_attn_signature(
             problem.dtype,
-            include_bt_stride=False,
+            include_bt_stride=True,
             kv_dtype=_kv_storage_dtype(problem),
         ),
         cache_key=("scalar",) + cache_key,
@@ -6287,7 +6366,7 @@ def run_unified_attention_torch(
         softcap=softcap,
         sinks=sinks,
         bt_stride=bt_stride,
-        include_bt_stride=False,
+        include_bt_stride=True,
         k_scale=k_scale,
         v_scale=v_scale,
         out_scale=out_scale,
@@ -6329,7 +6408,6 @@ class UnifiedAttention2DSpec:
         p = self.problem
         return kernel_name_join(
             self.name,
-            f"q{p.total_q}",
             f"h{p.num_query_heads}",
             f"kv{p.num_kv_heads}",
             f"d{p.head_size}",
@@ -6434,6 +6512,7 @@ def build_unified_attention_2d(
     _out_scale = b.param("out_scale", F32)
     softcap = b.param("softcap", F32)
     num_seqs = b.param("num_seqs", I32)
+    bt_stride = b.param("block_table_stride", I32)
 
     q_tok = b.block_id_x()
     q_head = b.block_id_y()
@@ -6490,16 +6569,8 @@ def build_unified_attention_2d(
         iv_name="kpos",
     )
     with loop as (kpos, (m_val, l_val, acc_val)):
-        block_idx, token_in_block = _magic_div_mod(b, kpos, p.block_size)
-        physical = b.global_load_i32(
-            block_tables,
-            b.add(
-                b.mul(
-                    seq_idx,
-                    b.const_i32((p.max_seqlen_k + p.block_size - 1) // p.block_size),
-                ),
-                block_idx,
-            ),
+        physical, token_in_block = _physical_block_and_token(
+            b, p, block_tables, bt_stride, seq_idx, kpos
         )
 
         # Vectorised QK dot product. Both Q[q_tok, q_head, :] and
@@ -6613,7 +6684,6 @@ class UnifiedAttention3DSpec(UnifiedAttention2DSpec):
         p = self.problem
         return kernel_name_join(
             self.name,
-            f"q{p.total_q}",
             f"h{p.num_query_heads}",
             f"kv{p.num_kv_heads}",
             f"d{p.head_size}",
@@ -6671,6 +6741,7 @@ def build_unified_attention_3d(
     scale = abi["scale"]
     _softcap = b.param("softcap", F32)
     num_seqs = b.param("num_seqs", I32)
+    bt_stride = b.param("block_table_stride", I32)
 
     q_tok = b.block_id_x()
     q_head = b.block_id_y()
@@ -6721,6 +6792,7 @@ def build_unified_attention_3d(
             query,
             key,
             block_tables,
+            bt_stride,
             seq_idx,
             q_tok,
             q_head,
@@ -6746,7 +6818,9 @@ def build_unified_attention_3d(
         alpha = b.exp2(b.fsub(m_val, new_m))
         prob = b.exp2(b.fsub(score, new_m))
         new_l = b.fadd(b.fmul(l_val, alpha), prob)
-        vv = _emit_v_load(b, p, dtype, value, block_tables, seq_idx, kv_head, kpos, dim)
+        vv = _emit_v_load(
+            b, p, dtype, value, block_tables, bt_stride, seq_idx, kv_head, kpos, dim
+        )
         new_acc = b.fadd(b.fmul(acc_val, alpha), b.fmul(prob, vv))
         b.scf_yield(new_m, new_l, new_acc)
 
@@ -6783,7 +6857,6 @@ class UnifiedAttentionReduceSpec:
         p = self.problem
         return kernel_name_join(
             self.name,
-            f"q{p.total_q}",
             f"h{p.num_query_heads}",
             f"d{p.head_size}",
             f"seg{self.num_segments}",
@@ -7022,6 +7095,7 @@ def _emit_qk_score(
     query: Value,
     key: Value,
     block_tables: Value,
+    bt_stride: Value,
     seq_idx: Value,
     q_tok: Value,
     q_head: Value,
@@ -7050,7 +7124,7 @@ def _emit_qk_score(
     """
     score = b.const_f32(0.0)
     physical, token_in_block = _physical_block_and_token(
-        b, p, block_tables, seq_idx, kpos
+        b, p, block_tables, bt_stride, seq_idx, kpos
     )
     q_desc = _q_descriptor(p)
     kv_desc = _paged_kv_descriptor(p)
@@ -7101,13 +7175,14 @@ def _emit_v_load(
     dtype: Type,
     value: Value,
     block_tables: Value,
+    bt_stride: Value,
     seq_idx: Value,
     kv_head: Value,
     kpos: Value,
     dim: Value,
 ) -> Value:
     physical, token_in_block = _physical_block_and_token(
-        b, p, block_tables, seq_idx, kpos
+        b, p, block_tables, bt_stride, seq_idx, kpos
     )
     v_off = _paged_kv_descriptor(p).offset(
         b,
@@ -7123,12 +7198,17 @@ def _physical_block_and_token(
     b: IRBuilder,
     p: UnifiedAttentionProblem,
     block_tables: Value,
+    bt_stride: Value,
     seq_idx: Value,
     kpos: Value,
 ) -> Tuple[Value, Value]:
+    """Look up ``kpos``'s physical KV block in row ``seq_idx`` of the block table.
+
+    ``bt_stride`` is the table's row stride kernarg, not a value derived from
+    ``max_seqlen_k``: callers may allocate rows wider than the longest sequence.
+    """
     block_idx, token_in_block = _magic_div_mod(b, kpos, p.block_size)
-    max_blocks = (p.max_seqlen_k + p.block_size - 1) // p.block_size
     physical = b.global_load_i32(
-        block_tables, b.add(b.mul(seq_idx, b.const_i32(max_blocks)), block_idx)
+        block_tables, b.add(b.mul(seq_idx, bt_stride), block_idx)
     )
     return physical, token_in_block
