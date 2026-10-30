@@ -29,13 +29,13 @@
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/copy.h>
 #include <thrust/detail/execution_policy.h>
-#include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/for_each.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/tuple.h>
 
+#include _THRUST_STD_INCLUDE(__host_stdlib/memory)
 #include _THRUST_STD_INCLUDE(__iterator/advance.h)
 #include _THRUST_STD_INCLUDE(__iterator/distance.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)

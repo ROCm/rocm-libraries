@@ -31,7 +31,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/memory_wrapper.h> // for ::new
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/type_traits.h>
@@ -44,6 +43,7 @@
 #include _THRUST_LIBCXX_INCLUDE(__iterator/tabulate_output_iterator.h)
 #include _THRUST_LIBCXX_INCLUDE(__iterator/transform_input_output_iterator.h)
 #include _THRUST_LIBCXX_INCLUDE(__iterator/transform_output_iterator.h)
+#include _THRUST_STD_INCLUDE(__host_stdlib/memory) // for ::new
 #include _THRUST_STD_INCLUDE(__new/device_new.h)
 #include _THRUST_STD_INCLUDE(__tuple_dir/get.h)
 #include _THRUST_STD_INCLUDE(__tuple_dir/tuple_element.h)

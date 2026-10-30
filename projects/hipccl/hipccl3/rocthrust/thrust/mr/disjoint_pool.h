@@ -34,7 +34,6 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/binary_search.h>
-#include <thrust/detail/algorithm_wrapper.h>
 #include <thrust/detail/seq.h>
 #include <thrust/find.h>
 #include <thrust/host_vector.h>
@@ -46,6 +45,7 @@
 #include _THRUST_LIBCXX_INCLUDE(__cmath/pow2.h)
 #include _THRUST_STD_INCLUDE(__algorithm/max.h)
 #include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#include _THRUST_STD_INCLUDE(__host_stdlib/algorithm)
 #include _THRUST_STD_INCLUDE(cassert)
 #include _THRUST_STD_INCLUDE(cstdint)
 

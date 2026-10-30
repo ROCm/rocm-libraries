@@ -31,7 +31,6 @@
 #endif // no system header
 
 #include <thrust/detail/allocator/allocator_traits.h>
-#include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/type_deduction.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_member_function.h>
@@ -39,6 +38,7 @@
 #include <thrust/detail/type_traits/is_call_possible.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 
+#include _THRUST_STD_INCLUDE(__host_stdlib/memory)
 #include _THRUST_STD_INCLUDE(__type_traits/add_lvalue_reference.h)
 #include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_empty.h)
