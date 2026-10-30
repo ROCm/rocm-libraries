@@ -85,7 +85,8 @@ public:
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
         if(_params.reluLowerClip.has_value() || _params.reluUpperClip.has_value()
-           || _params.reluLowerClipSlope.has_value() || _params.swishBeta.has_value())
+           || _params.reluLowerClipSlope.has_value() || _params.swishBeta.has_value()
+           || _params.eluAlpha.has_value() || _params.softplusBeta.has_value())
         {
             executeParameterized(variantPack);
         }
@@ -175,7 +176,9 @@ private:
                 _params.reluUpperClip.has_value() ? _params.reluUpperClip.value()
                                                   : std::numeric_limits<float>::max(),
                 _params.reluLowerClipSlope.has_value() ? _params.reluLowerClipSlope.value() : 0.0f,
-                _params.swishBeta.has_value() ? _params.swishBeta.value() : 1.0f);
+                _params.swishBeta.has_value() ? _params.swishBeta.value() : 1.0f,
+                _params.eluAlpha.has_value() ? _params.eluAlpha.value() : 1.0f,
+                _params.softplusBeta.has_value() ? _params.softplusBeta.value() : 1.0f);
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(_params.mode))
         {
@@ -325,10 +328,19 @@ public:
                                      "in PointwisePlanBuilder for the Cpu Graph Executor");
         }
 
-        if(nodeAttributes->elu_alpha().has_value() || nodeAttributes->softplus_beta().has_value())
+        using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+        if(nodeAttributes->elu_alpha().has_value()
+           && nodeAttributes->operation() != PointwiseMode::ELU_FWD)
         {
-            throw std::runtime_error("ELU and Softplus parameters are not supported "
-                                     "in PointwisePlanBuilder for the Cpu Graph Executor yet");
+            throw std::runtime_error("elu_alpha is only supported for ELU_FWD in "
+                                     "PointwisePlanBuilder for the Cpu Graph Executor");
+        }
+
+        if(nodeAttributes->softplus_beta().has_value()
+           && nodeAttributes->operation() != PointwiseMode::SOFTPLUS_FWD)
+        {
+            throw std::runtime_error("softplus_beta is only supported for SOFTPLUS_FWD in "
+                                     "PointwisePlanBuilder for the Cpu Graph Executor");
         }
 
         return std::make_unique<PointwisePlan<Input0Type, Input1Type, Input2Type, OutputType>>(
