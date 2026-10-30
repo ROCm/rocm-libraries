@@ -293,7 +293,7 @@ export HIPDNN_FORCE_BENCHMARKING=0
 - For MIOpen convolution, forcing benchmarking on makes plans without `global.workspace_size_limit` use the maximum workspace MIOpen reports, which can be far larger than the default.
 - The variable is process-wide, with no per-provider or per-engine granularity: a leaked value from one test or shell changes an unrelated run.
 - `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
-- Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample, so each sample reads what the previous one wrote. The winner runs last, but the final contents are correct only when in-place execution is idempotent.
+- Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample, so each sample reads what the previous one wrote. The winner runs last, but the final contents are correct only when in-place execution is idempotent. `Graph::autotune()` also runs its winner last, after every timed pass, and waits for that run to finish, so on success the buffers you passed hold the winner's output, with the same in-place caveat.
 
 ### Engine Applicability Threading
 

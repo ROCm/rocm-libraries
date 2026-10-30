@@ -1126,6 +1126,7 @@ def test_source_native_ctest_uses_effective_build_comgr(
         "-B",
         str(build),
         "-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON",
+        "-DHIPKERNELPROVIDER_ENABLE_TESTS=ON",
         "-DBUILD_TESTING=ON",
         "-DROCKE_INSTALL_TESTS=OFF",
         "-DROCKE_BUILD_PYBIND=OFF",
@@ -1141,6 +1142,33 @@ def test_source_native_ctest_uses_effective_build_comgr(
             else str(library)
         )
     subprocess.run(command, env=env, check=True, capture_output=True, text=True)
+    inventory = json.loads(
+        subprocess.run(
+            ["ctest", "--test-dir", str(build), "--show-only=json-v1"],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )["tests"]
+    assert any(test["name"] == "rocke_compiler_discovery_source" for test in inventory)
+    # Every concern-owned registration must retain the effective compiler
+    # default, including native tests added after the registration was split.
+    # Relative defaults are anchored without collapsing symlink-sensitive '..'.
+    expected_comgr = (
+        os.path.join(os.getcwd(), env["ROCKE_COMGR_LIB"])
+        if selection == "relative-environment"
+        else str(library)
+    )
+    launcher = [
+        sys.executable,
+        str(PLATFORM / "cmake" / ".." / "tools" / "run_with_comgr.py"),
+        "--default-comgr",
+        expected_comgr,
+        "--",
+    ]
+    for test in inventory:
+        assert test["command"][: len(launcher)] == launcher, test["name"]
     subprocess.run(
         [
             "cmake",
