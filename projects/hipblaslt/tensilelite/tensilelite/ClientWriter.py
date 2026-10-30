@@ -42,7 +42,8 @@ from . import ROOT_PATH
 from . import LibraryIO
 from .Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
-from .Common.Architectures import archNamesByIsa, baseArchName, isaToGfx, withoutPredicate
+from .Common.Architectures import (ARCH_CAP_OVERRIDES, archNamesByIsa, baseArchName,
+                                   capOverrideKeyOf, isaToGfx)
 from .Common.GlobalParameters import globalParameters
 from .Common.TimingInstrumentation import timing_context
 from .TensileCreateLibrary import copyStaticFiles, libraryDir
@@ -320,14 +321,24 @@ def rebuildTargetGfx(gfxName, archNames):
   replay on -- with the drains the benchmarked kernels did not have.
 
   So the qualifier is restored from the request that produced ``gfxName`` in the
-  first place. The predicate is not: it selects hardware, says nothing about what
-  goes into a code object, and is not this process's to forward.
+  first place -- but only where it selects an override, which is the whole
+  reason to send it. One that selects nothing is pure cost: `gfx942:xnack+` has
+  no entry, so forwarding it changes no capability, while it does reach
+  `--offload-arch` and pins the source kernels to xnack+, where the bare name
+  leaves them loadable under either mode. The directory and the .co filter both
+  still resolve, so that surfaces when a device loads the library rather than at
+  build time.
 
-  Falls back to ``gfxName`` when no request names that architecture, which is
-  every unqualified build.
+  The predicate is dropped for a different reason: it selects hardware, says
+  nothing about what goes into a code object, and is not this process's to
+  forward.
+
+  Falls back to ``gfxName``, which is every unqualified build and now also every
+  qualified one whose qualifier the capability table does not speak to.
   """
   return next(
-      (withoutPredicate(a) for a in (archNames or []) if baseArchName(a) == gfxName),
+      (key for a in (archNames or [])
+       if baseArchName(a) == gfxName and (key := capOverrideKeyOf(a)) in ARCH_CAP_OVERRIDES),
       gfxName,
   )
 
