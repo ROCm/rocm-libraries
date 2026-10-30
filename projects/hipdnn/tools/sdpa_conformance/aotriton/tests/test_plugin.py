@@ -3,12 +3,14 @@
 
 """pytester suite of the conformance plugin: outcome table, mode record, CSV, --shard, --fake."""
 
+import json
 import os
 import textwrap
 
 import pytest
 
 import aotriton_layout
+import conformance_contract as contract
 import hipdnn_aotriton_plugin as plugin
 import reconcile
 
@@ -639,3 +641,282 @@ def test_forward_fallback():
         "ref-fwd",
         "ref:no fwd",
     )
+
+
+# ------------------------------------------------------------------ kernels, fail side, stage
+
+BOTH_CALLED = (
+    CALLS
+    + """
+def call_both():
+    call_fwd()
+    call_bwd()
+"""
+)
+
+
+def test_kernel_ids_fill_the_kernel_columns_and_never_change_the_served_state(
+    run, fake_sdpa
+):
+    fake_sdpa.kernels = {"fwd": "k-fwd", "bwd": "prep=a|dkdv=b|dq=c"}
+    fake_sdpa.engine_lists = {"fwd": ("E1", "E2")}
+    result, rows = run(
+        BOTH_CALLED
+        + """
+def test_both():
+    call_both()
+    call_fwd()
+"""
+    )
+    got = rows["test_both"]
+    assert (got["fwd_kernel"], got["bwd_kernel"]) == ("k-fwd", "prep=a|dkdv=b|dq=c")
+    assert (got["fwd"], got["bwd"], got["fwd_engines"]) == (
+        "hipdnn:fake_fwd",
+        "hipdnn:fake_bwd",
+        "E1;E2",
+    )
+
+
+def test_fail_side_names_the_forward_comparison_or_a_backward_that_never_ran(run):
+    result, rows = run(
+        BOTH_CALLED
+        + """
+def test_forward_assertion_in_a_backward_case():
+    call_both()
+    assert False, 'Forward pass is_allclose=False tfts=None'
+
+def test_backward_assertion():
+    call_both()
+    assert False, 'dk_allclose=False dv_allclose=True dq_allclose=True db_allclose=True'
+
+def test_backward_never_ran():
+    call_fwd()
+    assert False, 'dq mismatch'
+
+def test_passing_has_no_side():
+    call_both()
+""",
+        extra_files={
+            "test_forward": """
+import hipdnn_sdpa, torch
+
+def test_forward_file_always_fails_forward():
+    o = torch.zeros(1)
+    hipdnn_sdpa.sdpa_fwd(o, o, o, o=o, stats=o, scale=1.0)
+    hipdnn_sdpa.sdpa_bwd(o, o, o, o, o, o, dq=o, dk=o, dv=o, scale=1.0)
+    assert False, 'anything'
+"""
+        },
+    )
+    side = {name: row["fail_side"] for name, row in rows.items()}
+    assert side == {
+        "test_forward_assertion_in_a_backward_case": "fwd",
+        "test_backward_assertion": "bwd",
+        "test_backward_never_ran": "fwd",
+        "test_passing_has_no_side": "",
+        "test_forward_file_always_fails_forward": "fwd",
+    }
+
+
+def write_marker(directory, worker, **fields):
+    """What hipdnn_sdpa's runtime leaves in the in-flight directory (contract marker)."""
+    marker = dict.fromkeys(contract.MARKER_FIELDS, "") | fields
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / contract.marker_name(worker)).write_text(json.dumps(marker))
+
+
+def test_a_failing_case_reads_its_stage_from_the_marker_and_teardown_removes_the_marker(
+    run, monkeypatch, tmp_path
+):
+    inflight = tmp_path / "inflight"
+    monkeypatch.setenv(contract.INFLIGHT_DIR_ENV, str(inflight))
+    monkeypatch.setenv(contract.PASS_SLUG_ENV, "main")
+    result, rows = run(
+        BOTH_CALLED
+        + f"""
+import json, pathlib
+MARKER = pathlib.Path({str(inflight / "main" / "main.json")!r})
+
+def leave_marker(stage):
+    MARKER.parent.mkdir(parents=True, exist_ok=True)
+    MARKER.write_text(json.dumps(dict(nodeid=os.environ['PYTEST_CURRENT_TEST'].split(' ')[0], stage=stage)))
+
+import os
+def test_fails_in_execute():
+    call_both()
+    leave_marker('execute')
+    assert False, 'dq mismatch'
+
+def test_next_case_sees_no_marker():
+    assert not MARKER.exists()
+"""
+    )
+    assert rows["test_fails_in_execute"]["stage"] == "execute"
+    assert rows["test_next_case_sees_no_marker"]["outcome"] != "fail"
+    assert not (inflight / "main" / "main.json").exists()
+
+
+def test_the_kernel_log_is_installed_in_each_pytest_process_except_under_fake(
+    run, fake_sdpa
+):
+    run(PRELUDE + "def test_x():\n    pass\n")
+    assert fake_sdpa.log_installs == 1
+    run(PRELUDE + "def test_x():\n    pass\n", "--fake=always-decline")
+    assert fake_sdpa.log_installs == 1
+
+
+# ------------------------------------------------------------------ repro on failure
+
+REPRO_CASES = (
+    BOTH_CALLED
+    + """
+import torch
+
+def call_roles():
+    t = torch.zeros(1)
+    hipdnn_sdpa.sdpa_fwd(t, t, t, o=t, stats=t, scale=1.0, bias=t)
+    hipdnn_sdpa.sdpa_bwd(t, t, t, t, t, t, dq=t, dk=t, dv=t, scale=1.0)
+
+@pytest.mark.parametrize('i', range(5))
+def test_fails(i):
+    call_roles()
+    assert False, 'dq mismatch'
+
+def test_passes():
+    call_roles()
+
+def test_fails_without_any_call():
+    assert False, 'no hipDNN involved'
+"""
+)
+
+
+def test_a_failing_case_saves_a_repro_within_the_per_engine_function_cap(
+    run, fake_sdpa, tmp_path
+):
+    repro = tmp_path / "out" / "repro"
+    result, rows = run(REPRO_CASES, f"--repro-dir={repro}")
+    fails = [r for n, r in rows.items() if n.startswith("test_fails[")]
+    saved = sorted(r["repro"] for r in fails if r["repro"])
+    assert len(fails) == 5 and len(saved) == contract.REPRO_MAX_PER_KEY
+    for r in fails:
+        if r["repro"]:
+            assert r["repro"] == "repro/" + contract.repro_case(r["nodeid"], "main")
+    (dir_, directions, roles) = fake_sdpa.repros[0]
+    assert directions == ["bwd", "fwd"]
+    assert {"q", "k", "v", "o", "stats", "bias", "do", "dq", "dk", "dv"} <= set(roles)
+    assert rows["test_passes"]["repro"] == ""
+    assert rows["test_fails_without_any_call"]["repro"] == ""
+    assert len(fake_sdpa.repros) == contract.REPRO_MAX_PER_KEY
+
+
+# ------------------------------------------------------------------ crash rows from markers
+
+CRASHERS = """
+import os
+import hipdnn_aotriton_plugin as plug
+import json, pathlib
+
+def me():
+    return os.environ['PYTEST_CURRENT_TEST'].split(' ')[0]
+
+def leave(directory, worker, **extra):
+    d = pathlib.Path(directory)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / (worker + '.json')).write_text(json.dumps(dict(nodeid=me(), pid=os.getpid(), **extra)))
+"""
+
+
+@pytest.fixture
+def crashing(pytester, tmp_path, monkeypatch):
+    """Run test bodies that leave markers and die, under xdist (-n 1: a replacement worker follows)."""
+    monkeypatch.setenv("PYTHONPATH", aotriton_layout.pythonpath())
+    inflight = tmp_path / "inflight"
+    monkeypatch.setenv(contract.INFLIGHT_DIR_ENV, str(inflight))
+    monkeypatch.setenv(contract.PASS_SLUG_ENV, "pass2")
+    out = tmp_path / "out"
+
+    def go(source):
+        pytester.makepyfile(CRASHERS + textwrap.dedent(source))
+        pytester.runpytest_subprocess(
+            *PLUGIN, "-n", "1", "--max-worker-restart=5", f"--results-dir={out}"
+        )
+        return {
+            r["nodeid"].split("::")[-1]: r
+            for r in reconcile.read_rows(out / "results.csv")
+        }, inflight
+
+    return go
+
+
+def test_a_dead_worker_row_names_the_engine_direction_stage_and_lists_from_its_marker(
+    crashing,
+):
+    rows, inflight = crashing(
+        f"""
+def test_dies_in_the_forward_execute():
+    leave(os.environ['{contract.INFLIGHT_DIR_ENV}'] + '/pass2', os.environ['PYTEST_XDIST_WORKER'], direction='fwd', stage='execute',
+          engine='E1', fwd_engines=['E1', 'E2', 'E3'], bwd_engines=[], kernel='k-1',
+          pin_fwd='', pin_bwd='')
+    os._exit(134)
+
+def test_dies_building_a_pinned_backward():
+    leave(os.environ['{contract.INFLIGHT_DIR_ENV}'] + '/pass2', os.environ['PYTEST_XDIST_WORKER'],
+          direction='bwd', stage='build', engine='', pin_bwd='X', bwd_engines=['X', 'Y'])
+    os._exit(134)
+
+def test_after():
+    pass
+"""
+    )
+    fwd = rows["test_dies_in_the_forward_execute"]
+    assert (fwd["outcome"], fwd["fwd"], fwd["fail_side"], fwd["stage"]) == (
+        "crash",
+        "hipdnn:E1",
+        "fwd",
+        "execute",
+    )
+    assert (fwd["fwd_engines"], fwd["fwd_kernel"]) == ("E1;E2;E3", "k-1")
+    assert fwd["reason"].endswith(")") and "(pid " in fwd["reason"]
+    bwd = rows["test_dies_building_a_pinned_backward"]
+    assert (bwd["bwd"], bwd["fail_side"], bwd["stage"], bwd["bwd_engines"]) == (
+        "hipdnn:X",
+        "bwd",
+        "build",
+        "X;Y",
+    )
+    assert rows["test_after"]["outcome"] != "crash"
+    assert (
+        list((inflight / "pass2").glob("*.json")) == []
+    )  # each read marker is deleted
+
+
+def test_a_marker_of_another_pass_or_another_case_never_names_a_crash(
+    crashing, tmp_path
+):
+    stale = tmp_path / "inflight" / "pass1"
+    rows, inflight = crashing(
+        f"""
+def test_dies():
+    leave({str(stale)!r}, os.environ['PYTEST_XDIST_WORKER'], direction='fwd', stage='execute', engine='OLD')
+    leave(os.environ['{contract.INFLIGHT_DIR_ENV}'] + '/pass2', os.environ['PYTEST_XDIST_WORKER'],
+          direction='fwd', stage='execute', engine='OTHER')
+    m = pathlib.Path(os.environ['{contract.INFLIGHT_DIR_ENV}'] + '/pass2/' + os.environ['PYTEST_XDIST_WORKER'] + '.json')
+    d = json.loads(m.read_text()); d['nodeid'] = 'some::other_case'; m.write_text(json.dumps(d))
+    os._exit(134)
+
+def test_dies_with_its_own_marker():
+    leave(os.environ['{contract.INFLIGHT_DIR_ENV}'] + '/pass2', os.environ['PYTEST_XDIST_WORKER'],
+          direction='fwd', stage='build', engine='MINE')
+    os._exit(134)
+"""
+    )
+    dies = rows["test_dies"]
+    assert (dies["outcome"], dies["fwd"], dies["fail_side"], dies["stage"]) == (
+        "crash",
+        "",
+        "",
+        "",
+    )
+    assert rows["test_dies_with_its_own_marker"]["fwd"] == "hipdnn:MINE"
+    assert (stale / "gw0.json").exists()  # not the controller's to delete
