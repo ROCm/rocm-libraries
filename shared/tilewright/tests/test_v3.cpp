@@ -837,7 +837,7 @@ TEST_CASE("a launch model plans each fully scored view key once, for its first c
     CHECK(std::find(s.begin(), s.end(), i + 6) != s.end());
   }
 
-  // Never asked by v2 models or for unsupported contexts; its errors propagate.
+  // Never asked by v2 models or for an unlisted schedule; its errors propagate.
   auto v2 = std::make_shared<RecordingLaunch>();
   with(load_spec(grid_model()), v2).rank(p, hw, kAll);
   CHECK(v2->asked.empty());
@@ -952,7 +952,7 @@ TEST_CASE("a ranking asks the launch model to prefetch the whitelist tier it wil
   }
 
   // Nothing is prefetched without a whitelist, and nothing is asked for by a
-  // v2 model or for an unsupported context.
+  // v2 model or for an unlisted schedule.
   {
     const tw::ModelPtr open = load_spec(v3_grid({}));
     auto launch             = std::make_shared<PrefetchLaunch>();

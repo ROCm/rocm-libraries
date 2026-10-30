@@ -157,7 +157,7 @@ Features compute_features(const Model& model,
                           const ExecutionContext& context,
                           const LaunchPlan& plan);
 
-// True when the model was trained for `context` on `hardware`. v2 models cover
+// True when the model declares `context` on `hardware`. v2 models cover
 // only every CU (cu_budget 0 or at least hardware.N_CU) with Schedule::Default.
 // v3 models cover the schedules they list and the CU budgets whose usable
 // CUs, as a fraction of hardware.N_CU, lie in their range and, for a model
@@ -177,11 +177,11 @@ bool supports(const Model& model,
 // the most. On a device with no usable CU count the model covers (fewer
 // CUs than the floor, for one), the most its largest fraction allows (the
 // whole device for a largest fraction of 1), a context supports()
-// rejects. Every CU is returned as cu_budget 0. std::nullopt for a
-// schedule the model does not list or hardware.N_CU 0. The features and
-// launch plans (LaunchModel::plan) of the ranking are those of the
-// returned context; the caller still launches the ranked kernels with its
-// own budget.
+// rejects. Every CU is returned as cu_budget 0. A context supports()
+// rejects with a schedule the model does not list, or on hardware.N_CU 0,
+// gets std::nullopt. The features and launch plans (LaunchModel::plan) of
+// the ranking are those of the returned context; the caller still
+// launches the ranked kernels with its own budget.
 std::optional<ExecutionContext> scoring_context(const Model& model,
                                                 const ExecutionContext& context,
                                                 const Hardware& hardware) noexcept;

@@ -58,7 +58,7 @@ struct FeatureCatalog {
   // the ranking rules: they get identical features, feasibility, whitelist
   // membership and scores. Model::view_key_size values.
   void (*view_key)(const Model& m, const Config& c, const std::int64_t* attrs, std::uint64_t* out);
-  // The execution contexts the model was trained for.
+  // The execution contexts the model declares (tilewright::supports).
   bool (*supports)(const Model& m, const ExecutionContext& context, const Hardware& hardware);
   // The context a ranking for `context` is scored at (tilewright::scoring_context):
   // `context` when `supports` holds; for a context outside it only by its CU

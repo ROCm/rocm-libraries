@@ -14,9 +14,9 @@ tilewright is framework-independent: it must not include Tensile, TensileLite or
 |------|---------|
 | `include/tilewright/types.hpp`, `model.hpp` | Public API used by TensileLite and the training pipeline. Keep it stable. |
 | `src/tilewright/format.cpp` | MLREC_v2 and MLREC_v3 loader (strict validation, CRC-32) and per-cell lazy dequantization |
-| `src/tilewright/features.cpp` | Feature catalogs and their registry (v2: query 55, item 12, interaction 37; v3: query 59, item 8 plus the attribute spec, interaction 44; view keys; supported contexts), LDS gate, feasibility rules |
+| `src/tilewright/features.cpp` | Feature catalogs and their registry (v2: query 55, item 12, interaction 37; v3: query 59, item 8 plus the attribute spec, interaction 44; view keys; supported and scoring contexts), LDS gate, feasibility rules |
 | `src/tilewright/kernels.cpp` | fp32 `linear` / `linear_relu` / `dot` in scalar, AVX2 and AVX-512 variants |
-| `src/tilewright/rank.cpp` | Routing, context check, view-key grouping, tiers, whitening, scoring, tie-breaks, attribute validation, `CandidateSet`, `rank_configs` |
+| `src/tilewright/rank.cpp` | Routing, scoring context, view-key grouping, tiers, whitening, scoring, tie-breaks, attribute validation, `CandidateSet`, `rank_configs` |
 | `src/tilewright/registry.cpp` | File loading, canonical-path deduplication, `tilewright_index` (rows per library stem and PCI chip ID), environment knobs |
 | `src/tilewright/cache.cpp` | The process-wide cache limit over fp32 cell weights and candidate-set caches (least recently used released first) |
 | `python/` | nanobind module `tilewright` (`src/bindings.cpp`) and pytest suite |

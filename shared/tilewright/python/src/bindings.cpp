@@ -844,8 +844,8 @@ NB_MODULE(_tilewright, m) {
       "holds; for a context outside it only by its CU budget, the same schedule with the "
       "nearest usable CUs the model supports on this hardware or, on hardware where it "
       "supports none (fewer CUs than the CU floor), the most its largest CU fraction allows "
-      "(cu_budget 0 for every CU); None for a schedule the model does not list or hardware "
-      "with no CUs.");
+      "(cu_budget 0 for every CU); None for a context supports() rejects with a schedule the "
+      "model does not list or on hardware with no CUs.");
 
   m.def(
       "rank_configs",
