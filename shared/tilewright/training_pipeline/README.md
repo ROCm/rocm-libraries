@@ -3502,8 +3502,11 @@ collapse repair pass it, as they rank over the library pool: they measure
 the degraded rankings, such as a gate baseline's or those of an audit pool
 that leaves out more kernels, and name the cells
 (`Evaluation.degraded_cells`; `drift_degraded` in `gate.json` and the audit
-record). The gate of such a model needs `--library-dir`. Stage 8 evaluates
-the bundle as stage05 wrote it, without the fallback. The planner ranks any
+record). The gate of such a model needs `--library-dir`. The audit packs a
+bundle's `models.pt` with the fallback as stage06 stages it (lib/audit.py
+`model_bytes`), so that a final retrain's decision scores its candidate as
+it scores the staged file of the bundle the run ships. Stage 8 evaluates the
+bundle as stage05 wrote it, without the fallback. The planner ranks any
 planning model without it, the subset simulation (lib/shipped_subset.py)
 refuses it, the deploy record keeps the preflight's counts
 (`drift_fallback`) and, with a whitelist tier, those over the pool the model

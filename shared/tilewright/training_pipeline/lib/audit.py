@@ -3102,19 +3102,22 @@ def model_bytes(
 ) -> bytes:
     """MLREC bytes of a model file: a stage05 `models.pt` bundle is written
     at `weight_dtype`, as stage06 stages it, with the provenance and, for an
-    MLREC_v3 bundle, the alignment veto stage06 records under `cfg`
-    (lib/provenance.py `deployed_provenance`, lib/feasibility.py
-    `deployed_alignment_veto`; the bundle's own without a config); anything
-    else is read as MLREC. With `alignment_veto` False the bytes are those
-    without the veto, as the run scores its rounds' bundles: a models.pt
-    is written without it and an MLREC_v3 file has it removed
-    (`without_alignment_veto`)."""
+    MLREC_v3 bundle, the alignment veto and the drift fallback stage06
+    records under `cfg` (lib/provenance.py `deployed_provenance`,
+    lib/feasibility.py `deployed_alignment_veto`, lib/drift_fallback.py
+    `deployed_keep_ppm`, which stage06 refuses for a bundle that cannot take
+    it, as this does with ValueError; the bundle's own without a config);
+    anything else is read as MLREC. With `alignment_veto` False the bytes are
+    those without the veto, as the run scores its rounds' bundles: a
+    models.pt is written without it and an MLREC_v3 file has it removed
+    (`without_alignment_veto`); the drift fallback stays."""
     path = Path(path)
     if path.suffix != ".pt":
         data = path.read_bytes()
         return data if alignment_veto else without_alignment_veto(data)
     import torch
 
+    from . import drift_fallback
     from . import feasibility as feas
     from . import hardware as hwlib
     from . import mlrec
@@ -3126,12 +3129,27 @@ def model_bytes(
         if cfg is None
         else prov.deployed_provenance(bundle.get("provenance"), cfg)
     )
-    if cfg is not None and str(bundle.get("catalog") or "v2") == "v3":
+    keep = drift_fallback.deployed_keep_ppm(cfg)
+    v3 = str(bundle.get("catalog") or "v2") == "v3"
+    if keep is not None and not v3:
+        raise ValueError(
+            f"deploy.drift_fallback: {path} is not an MLREC_v3 bundle; the drift "
+            f"fallback is an MLREC_v3 serving option"
+        )
+    if cfg is not None and v3:
         serving = dict(bundle.get("serving") or {})
         serving.pop("alignment_veto", None)
+        serving.pop("drift_keep_ppm", None)
         veto = feas.deployed_alignment_veto(cfg) if alignment_veto else None
         if veto is not None:
             serving["alignment_veto"] = veto
+        if keep is not None:
+            why = drift_fallback.refusal(serving, (bundle.get("models") or {}).values())
+            if why is not None:
+                raise ValueError(
+                    f"deploy.drift_fallback: {path} cannot take the drift fallback: {why}"
+                )
+            serving["drift_keep_ppm"] = keep
         bundle = dict(bundle, serving=serving)
     return mlrec.write_model(
         bundle, None, arch, hwlib.arch_constants(arch), weight_dtype, recorded or {}

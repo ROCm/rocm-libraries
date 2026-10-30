@@ -1142,6 +1142,64 @@ def test_the_gate_measures_a_baseline_the_library_serves_degraded(tmp_path, gate
     ]
 
 
+def test_the_audit_scores_the_drift_fallback_stage06_stages(tmp_path, trained, capsys):
+    """lib/audit.py `model_bytes` packs a models.pt under deploy.drift_fallback
+    as stage06 stages it, with the alignment veto and without, so that a final
+    retrain's decision scores its candidate as it scores the staged file of
+    the bundle the run ships; without the veto the bytes keep the fallback.
+    A bundle that stage06 refuses the fallback for is refused too."""
+    pytest.importorskip("tilewright")
+    from lib import audit as auditlib
+    from test_kernel_identity import pool_library
+    from test_stage05_train import kernel_pool
+
+    pool_library(tmp_path / "full", kernel_pool(), stem=STEM)
+    keys = sorted(library_keys(gate_cfg(tmp_path / "keys.yaml"), tmp_path / "full"))
+    train = tmp_path / "v3" / "stage05"
+    write_drift_bundle(train, [keys[:2], keys[2:4], keys[4:6]], keys)
+    pt = train / "models.pt"
+    staged = {}
+    for name, extra in (
+        ("plain", {}),
+        ("drift", {"drift_fallback": {"keep": 1.0}}),
+        ("both", {"drift_fallback": {"keep": 1.0}, "alignment_veto": dict(VETO_KEY)}),
+    ):
+        path = gate_cfg(tmp_path / f"{name}.yaml", weight_dtype="bf16", **extra)
+        assert deploy(train, path, tmp_path / name, library_dir=tmp_path / "full") == 0
+        rec = json.loads((tmp_path / name / "deploy_record.json").read_text())
+        staged[name] = Path(rec["staged_model"]).read_bytes()
+        cfg = yaml.safe_load(path.read_text())
+        assert auditlib.model_bytes(pt, "gfx950", "bf16", cfg) == staged[name], name
+        assert auditlib.model_bytes(
+            pt, "gfx950", "bf16", cfg, alignment_veto=False
+        ) == mlrec.without_alignment_veto(staged[name])
+    assert mlrec.read_header(staged["both"])["serving"]["drift_keep_ppm"] == 1000000
+    assert mlrec.without_alignment_veto(staged["both"]) == staged["drift"]
+    assert mlrec.without_drift_fallback(staged["drift"]) == staged["plain"]
+    drift_cfg = yaml.safe_load((tmp_path / "drift.yaml").read_text())
+    refused = tmp_path / "nocascade" / "stage05"
+    write_v3_bundle(refused, LABELS, serving={"cascade_keys": 0})
+    with pytest.raises(
+        ValueError, match="cannot take the drift fallback: it has no cascade"
+    ):
+        auditlib.model_bytes(refused / "models.pt", "gfx950", "bf16", drift_cfg)
+    capsys.readouterr()
+    assert (
+        deploy(
+            refused,
+            tmp_path / "drift.yaml",
+            tmp_path / "refused",
+            library_dir=tmp_path / "full",
+        )
+        == 1
+    )
+    assert (
+        "cannot take the drift fallback: it has no cascade" in capsys.readouterr().err
+    )
+    with pytest.raises(ValueError, match="not an MLREC_v3 bundle"):
+        auditlib.model_bytes(trained / "models.pt", "gfx950", "bf16", drift_cfg)
+
+
 def test_a_v3_bundle_ships_with_the_trained_key_gate(tmp_path):
     train = tmp_path / "v3" / "stage05"
     write_v3_bundle(train, LABELS, trained_view_keys=[11, 7])

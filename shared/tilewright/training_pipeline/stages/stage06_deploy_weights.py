@@ -634,7 +634,7 @@ def deployed_serving(
     serving = dict(bundle.get("serving") or {})
     serving.pop("drift_keep_ppm", None)
     if keep is not None:
-        why = _drift_refusal(serving, list((bundle.get("models") or {}).values()))
+        why = drift_fallback.refusal(serving, (bundle.get("models") or {}).values())
         if why is not None:
             raise DeployError(
                 f"deploy.drift_fallback: {what} cannot take the drift fallback: {why}"
@@ -666,34 +666,12 @@ def deployed_serving(
     return dict(bundle, serving=serving)
 
 
-def _drift_refusal(serving: Mapping[str, Any], models: List[Any]) -> Optional[str]:
-    """Why a v3 bundle with `serving` and the cell entries `models` cannot
-    take the drift fallback, or None: the engine counts the view keys of a
-    whitelist tier."""
-    if not serving.get("whitelist_tier", True):
-        return "it has no whitelist tier"
-    if not int(serving.get("cascade_keys", 32) or 0):
-        return (
-            "it has no cascade (cascade_keys 0), so a degraded cell would fully score "
-            "every feasible key"
-        )
-    if serving.get("launch_keys"):
-        return "it serves launch keys"
-    if any(m.get("smart_k_signatures") for m in models):
-        return "a cell lists signatures"
-    if not any(m.get("view_key_hashes") for m in models):
-        return "no cell lists a view key"
-    return None
-
-
 def drift_keep_ppm(cfg: Mapping[str, Any]) -> Optional[int]:
-    """The keep_ppm of `deploy.drift_fallback`, or None when it is absent;
-    DeployError for a share the engine cannot hold exactly."""
-    section = cfg_get(cfg, "deploy.drift_fallback")
-    if section is None:
-        return None
+    """The keep_ppm of `deploy.drift_fallback`, or None when it is absent
+    (lib/drift_fallback.py `deployed_keep_ppm`); DeployError for a share the
+    engine cannot hold exactly."""
     try:
-        return drift_fallback.keep_ppm((section or {}).get("keep"))
+        return drift_fallback.deployed_keep_ppm(cfg)
     except ValueError as e:
         raise DeployError(f"deploy.drift_fallback: {e}") from None
 

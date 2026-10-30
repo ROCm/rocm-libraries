@@ -56,6 +56,39 @@ def keep_ppm(keep: Any) -> int:
     return int(ppm)
 
 
+def deployed_keep_ppm(cfg: Optional[Mapping[str, Any]]) -> Optional[int]:
+    """The keep_ppm stage06 packs into every MLREC_v3 model it stages under
+    config `cfg` (`deploy.drift_fallback`; absent or null: None); ValueError
+    for a share the file cannot hold (`keep_ppm`)."""
+    section = ((cfg or {}).get("deploy") or {}).get("drift_fallback")
+    if section is None:
+        return None
+    return keep_ppm((section or {}).get("keep"))
+
+
+def refusal(
+    serving: Mapping[str, Any], cells: Iterable[Mapping[str, Any]]
+) -> Optional[str]:
+    """Why an MLREC_v3 bundle with `serving` and the cell entries `cells` (its
+    `models` values) cannot take the drift fallback, or None: the engine
+    counts the view keys of a whitelist tier."""
+    cells = list(cells)
+    if not serving.get("whitelist_tier", True):
+        return "it has no whitelist tier"
+    if not int(serving.get("cascade_keys", 32) or 0):
+        return (
+            "it has no cascade (cascade_keys 0), so a degraded cell would fully score "
+            "every feasible key"
+        )
+    if serving.get("launch_keys"):
+        return "it serves launch keys"
+    if any(m.get("smart_k_signatures") for m in cells):
+        return "a cell lists signatures"
+    if not any(m.get("view_key_hashes") for m in cells):
+        return "no cell lists a view key"
+    return None
+
+
 def model_keep_ppm(parsed: Mapping[str, Any]) -> Optional[int]:
     """The keep_ppm a parsed model (lib/mlrec.py read_model or read_header)
     is served with, or None without the drift fallback."""
@@ -159,9 +192,11 @@ def drift_summary(
 __all__: Sequence[str] = (
     "cell_counts",
     "degraded_cells",
+    "deployed_keep_ppm",
     "drift_summary",
     "keep_ppm",
     "missing_keys",
     "model_keep_ppm",
     "pool_hashes",
+    "refusal",
 )
