@@ -31,12 +31,12 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(__concepts/concept_macros.h)
+#  include _THRUST_STD_INCLUDE(__exception/throw_error.h)
 #  include _THRUST_STD_INCLUDE(__type_traits/is_arithmetic.h)
 #  include _THRUST_STD_INCLUDE(__type_traits/is_unsigned.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
 #  include _THRUST_STD_INCLUDE(limits)
 #  include _THRUST_STD_INCLUDE(type_traits)
-#  include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 #endif
 
 #include <string>
@@ -79,10 +79,10 @@ THRUST_NAMESPACE_END
     status                              = call arguments;                                 \
   }
 
-#define _THRUST_INDEX_TYPE_DISPATCH_GUARD_UNDERFLOW(count)                          \
-  if (thrust::detail::is_negative(count))                                           \
-  {                                                                                 \
-    ::internal::__throw_runtime_error("Invalid input range, passed negative size"); \
+#define _THRUST_INDEX_TYPE_DISPATCH_GUARD_UNDERFLOW(count)                           \
+  if (thrust::detail::is_negative(count))                                            \
+  {                                                                                  \
+    _THRUST_STD::__throw_runtime_error("Invalid input range, passed negative size"); \
   }
 
 #define _THRUST_INDEX_TYPE_DISPATCH_GUARD_UNDERFLOW2(count1, count2) \
@@ -122,7 +122,7 @@ THRUST_NAMESPACE_END
     if (static_cast<std::uint64_t>(count)                                                     \
         > static_cast<std::uint64_t>(_THRUST_STD::numeric_limits<index_type>::max()))         \
     {                                                                                         \
-      ::internal::__throw_runtime_error(                                                      \
+      _THRUST_STD::__throw_runtime_error(                                                     \
         "Input size exceeds the maximum allowable value for " #index_type                     \
         ". It was used because the macro THRUST_FORCE_32_BIT_OFFSET_TYPE was defined. "       \
         "To handle larger input sizes, either remove this macro to dynamically dispatch "     \
@@ -134,7 +134,7 @@ THRUST_NAMESPACE_END
     if (static_cast<std::uint64_t>(count1) + static_cast<std::uint64_t>(count2)               \
         > static_cast<std::uint64_t>(_THRUST_STD::numeric_limits<index_type>::max()))         \
     {                                                                                         \
-      ::internal::__throw_runtime_error(                                                      \
+      _THRUST_STD::__throw_runtime_error(                                                     \
         "Input size exceeds the maximum allowable value for " #index_type                     \
         ". It was used because the macro THRUST_FORCE_32_BIT_OFFSET_TYPE was defined. "       \
         "To handle larger input sizes, either remove this macro to dynamically dispatch "     \
