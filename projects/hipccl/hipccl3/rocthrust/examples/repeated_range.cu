@@ -28,8 +28,6 @@
 
 #include <iostream>
 
-#include "include/host_device.h"
-
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <iterator>
 #endif
@@ -95,11 +93,7 @@ protected:
 
 int main()
 {
-  thrust::device_vector<int> data(4);
-  data[0] = 10;
-  data[1] = 20;
-  data[2] = 30;
-  data[3] = 40;
+  thrust::device_vector<int> data{10, 20, 30, 40};
 
   // print the initial data
   std::cout << "range        ";

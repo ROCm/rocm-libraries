@@ -24,7 +24,6 @@
 #include <thrust/scan.h>
 #include <thrust/sequence.h>
 
-#include "include/host_device.h"
 #include <assert.h>
 
 // We have a matrix stored in a `thrust::device_vector`. We want to perform a

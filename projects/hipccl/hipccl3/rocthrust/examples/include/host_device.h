@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #if !THRUST_CUDA_COMPILATION() || !THRUST_HAS_HIP_COMPILER()
 
 #  ifndef __host__

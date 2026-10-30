@@ -28,8 +28,6 @@
 
 #include <iostream>
 
-#include "include/host_device.h"
-
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <iterator>
 #endif

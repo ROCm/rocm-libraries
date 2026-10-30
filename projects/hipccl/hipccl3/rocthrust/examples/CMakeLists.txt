@@ -19,6 +19,11 @@ function(add_thrust_example EXAMPLE)
     add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
 
     target_compile_options(${EXAMPLE_TARGET} PRIVATE ${COMPILE_OPTIONS})
+    # We do not want to explicitly include `host_device.h` if not needed, so force include the file for non CUDA targets
+    target_compile_options(${EXAMPLE_TARGET} PRIVATE
+      $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/FI ${CMAKE_CURRENT_SOURCE_DIR}/include/host_device.h>
+      $<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_CURRENT_SOURCE_DIR}/include/host_device.h>
+    )
     target_link_libraries(${EXAMPLE_TARGET}
         PRIVATE
             rocthrust
