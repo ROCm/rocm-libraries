@@ -23,6 +23,7 @@
 #include <optional>
 #include <random>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -142,10 +143,17 @@ namespace
     Plan planOf(Kernel const&                       kernel,
                 tilewright::Problem const&          problem,
                 tilewright::ExecutionContext const& ctx,
-                AMDGPU::Processor                   processor = AMDGPU::Processor::gfx950)
+                AMDGPU::Processor                   processor = AMDGPU::Processor::gfx950,
+                int                                 version   = 0)
     {
-        Launch launch("gfx950", {makeSolution(kernel)}, makeDevice(processor, 256));
+        Launch launch("gfx950", {makeSolution(kernel)}, makeDevice(processor, 256), version);
         auto   plan = launch.plan(tilewright::Config{}, problem, ctx);
+        // The plan from the kernel's record is the one of TensileLite's own
+        // launch code.
+        auto const resolved = launch.resolvedPlan(tilewright::Config{}, problem, ctx);
+        EXPECT_EQ(plan.dynamic_queue, resolved.dynamic_queue);
+        EXPECT_EQ(plan.grid_wgs, resolved.grid_wgs);
+        EXPECT_EQ(plan.partial_reduction, resolved.partial_reduction);
         return {plan.dynamic_queue, plan.grid_wgs, reductionName(plan.partial_reduction)};
     }
 
@@ -163,8 +171,88 @@ namespace
 
 TEST(TilewrightLaunchTest, IdNamesTheArchAndRuleVersion)
 {
-    EXPECT_EQ(Launch("gfx950", {}).id(), "hipblaslt:gfx950:" + std::to_string(Launch::RuleVersion));
+    EXPECT_EQ(Launch::RuleVersion, 2);
+    EXPECT_EQ(Launch("gfx950", {}).id(), "hipblaslt:gfx950:2");
+    EXPECT_EQ(Launch("gfx950", {}).version(), Launch::RuleVersion);
     EXPECT_NE(Launch("gfx942", {}).id(), Launch("gfx950", {}).id());
+    // gfx1250 models train on rule version 1 (RULE_1_ARCHS of
+    // training_pipeline/lib/hipblaslt_launch.py).
+    EXPECT_EQ(Launch("gfx1250", {}).id(), "hipblaslt:gfx1250:1");
+    EXPECT_EQ(Launch("gfx950", {}, nullptr, 1).id(), "hipblaslt:gfx950:1");
+    EXPECT_EQ(Launch("gfx1250", {}, nullptr, 2).id(), "hipblaslt:gfx1250:2");
+    for(int const bad : {-1, 3})
+        EXPECT_THROW(Launch("gfx950", {}, nullptr, bad), std::invalid_argument) << bad;
+}
+
+// rule_version() of hipblaslt_launch.py: the table its
+// test_each_arch_trains_on_its_rule_version pins (RULE_1_ARCHS).
+TEST(TilewrightLaunchTest, EachArchTrainsOnItsRuleVersion)
+{
+    for(char const* arch : {"gfx950", "gfx942", "gfx90a", "gfx1201"})
+        EXPECT_EQ(Launch::ruleVersion(arch), Launch::RuleVersion) << arch;
+    EXPECT_EQ(Launch::ruleVersion("gfx1250"), 1);
+}
+
+// served_rule_version() of hipblaslt_launch.py, for the same ids.
+TEST(TilewrightLaunchTest, ServesAModelTheRuleVersionItRecords)
+{
+    EXPECT_EQ(Launch::servedRuleVersion("gfx950", "hipblaslt:gfx950:1"), 1);
+    EXPECT_EQ(Launch::servedRuleVersion("gfx950", "hipblaslt:gfx950:2"), 2);
+    EXPECT_EQ(Launch::servedRuleVersion("gfx950", ""), 2);
+    EXPECT_EQ(Launch::servedRuleVersion("gfx950", "hipblaslt:gfx950:3"), 2);
+    EXPECT_EQ(Launch::servedRuleVersion("gfx950", "hipblaslt:gfx942:1"), 2);
+    EXPECT_EQ(Launch::servedRuleVersion("gfx950", "other:gfx950:1"), 2);
+    EXPECT_EQ(Launch::servedRuleVersion("gfx1250", "hipblaslt:gfx1250:1"), 1);
+    EXPECT_EQ(Launch::servedRuleVersion("gfx1250", "hipblaslt:gfx1250:2"), 1);
+    EXPECT_EQ(Launch::servedRuleVersion("gfx942", "hipblaslt:gfx942:1"), 1);
+}
+
+// The plans of hipblaslt_launch.py's test_one_k_iteration_launches_by_rule_version
+// under rule version 2, which equal the pipeline's, and under version 1, which
+// keep Origami's grid and report a partial reduction for every grid that does
+// not divide the tiles.
+TEST(TilewrightLaunchTest, OneKIterationLaunchesByRuleVersion)
+{
+    Kernel const sk{.occupancy = 1, .strategy = 2, .assign = 0};
+    Kernel const busy{.occupancy = 4, .strategy = 2, .assign = 0};
+    Kernel const atomic{.occupancy = 1, .strategy = 2, .assign = 0, .atomic = 1};
+    struct Case
+    {
+        Kernel              kernel;
+        tilewright::Problem problem;
+        size_t              budget;
+        Plan                v1;
+        Plan                v2;
+    };
+    for(auto const& c : {
+            Case{sk, bf16Problem(5120, 5120, 64), 0, {false, 246, "tree"}, {false, 246, "none"}},
+            Case{busy,
+                 bf16Problem(7680, 5120, 64),
+                 64,
+                 {false, 2400, "none"},
+                 {false, 2400, "none"}},
+            Case{sk, bf16Problem(7680, 5120, 64), 64, {false, 64, "tree"}, {false, 64, "none"}},
+            Case{atomic,
+                 bf16Problem(7680, 5120, 17),
+                 64,
+                 {false, 64, "atomic"},
+                 {false, 64, "none"}},
+            Case{
+                sk, bf16Problem(7680, 5120, 128), 64, {false, 2400, "none"}, {false, 2400, "none"}},
+            Case{sk,
+                 bf16Problem(128 * 300, 128, 64 * 300),
+                 96,
+                 {false, 86, "tree"},
+                 {false, 86, "tree"}},
+        })
+    {
+        auto const ctx = context(c.budget);
+        EXPECT_EQ(planOf(c.kernel, c.problem, ctx, AMDGPU::Processor::gfx950, 1), c.v1)
+            << c.problem.size.m << " x " << c.problem.size.n << " x " << c.problem.size.k;
+        EXPECT_EQ(planOf(c.kernel, c.problem, ctx, AMDGPU::Processor::gfx950, 2), c.v2)
+            << c.problem.size.m << " x " << c.problem.size.n << " x " << c.problem.size.k;
+        EXPECT_EQ(planOf(c.kernel, c.problem, ctx), c.v2);
+    }
 }
 
 TEST(TilewrightLaunchTest, HybridThresholds)

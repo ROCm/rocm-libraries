@@ -1961,10 +1961,12 @@ namespace
     constexpr std::uint32_t TrainedOnBank = 0x40;
 
     // An MLREC_v3 model with `servingFlags` that reads `attributes`. Its one
-    // cell scores every problem, with the launch model of gfx950 libraries.
+    // cell scores every problem, with the launch model `launchModel`, by
+    // default the one gfx950 models train with.
     std::filesystem::path writeV3Model(ScratchDir const&                             dir,
                                        std::uint32_t                                 servingFlags,
-                                       std::vector<tilewright_test::AttrSpec> const& attributes)
+                                       std::vector<tilewright_test::AttrSpec> const& attributes,
+                                       std::string launchModel = {})
     {
         tilewright_test::CellSpec cell;
         cell.label = "Large|Large|LargeK|Bnone";
@@ -1974,8 +1976,9 @@ namespace
         spec.cells            = {cell};
         spec                  = tilewright_test::as_v3(spec, attributes);
         spec.v3_serving_flags = servingFlags;
-        spec.provenance
-            = {{"launch_model", TilewrightLaunch<ContractionSolution>("gfx950", {}).id()}};
+        if(launchModel.empty())
+            launchModel = TilewrightLaunch<ContractionSolution>("gfx950", {}).id();
+        spec.provenance = {{"launch_model", launchModel}};
 
         auto const image = tilewright_test::write_model(spec);
         auto const path  = dir.path() / "v3.tilewright.bin";
@@ -2040,6 +2043,42 @@ TEST(PredictionLibraryTest, TilewrightBankFollowsTheAttributesOfAModelNotTrained
 {
     ScopedTilewrightBank unset(nullptr);
     expectBankRanked(0, {{"work_group_x", 0}}, true);
+}
+
+// A model trained on launch rule version 1 ranks with that version's plans
+// whatever version gfx950 models train on now; one that records a launch model
+// TensileLite does not serve it with is not used, and origami ranks.
+TEST(PredictionLibraryTest, TilewrightPlansAModelUnderTheLaunchRuleVersionItRecords)
+{
+    EXPECT_EQ(TilewrightLaunch<ContractionSolution>::ruleVersion("gfx950"), 2);
+    struct Case
+    {
+        std::string recorded;
+        std::string served;
+    };
+    for(auto const& c : {Case{"hipblaslt:gfx950:1", "hipblaslt:gfx950:1"},
+                         Case{"hipblaslt:gfx950:2", "hipblaslt:gfx950:2"},
+                         Case{"hipblaslt:gfx950:3", ""},
+                         Case{"hipblaslt:gfx942:1", ""}})
+    {
+        SCOPED_TRACE(c.recorded);
+        SolutionMap<ContractionSolution> solutions;
+        addContestedKernels(solutions);
+        ScratchDir                          dir("tensilelite_tilewright_rule_version");
+        ContractionProblemPredictionLibrary lib;
+        loadWithTilewright(
+            dir, writeV3Model(dir, 0, {}, c.recorded), contestedTable, solutions, lib);
+        if(c.served.empty())
+        {
+            EXPECT_EQ(lib.tilewright_ranker, nullptr);
+            continue;
+        }
+        ASSERT_NE(lib.tilewright_ranker, nullptr);
+        EXPECT_EQ(lib.tilewright_ranker->launchModel(), c.served);
+        auto const top = solutionIndices(
+            lib.findTopSolutions(TensileLite::testing::dummyProblem(), makeGfx950Device(), 4));
+        EXPECT_EQ(top.size(), 3u);
+    }
 }
 
 namespace

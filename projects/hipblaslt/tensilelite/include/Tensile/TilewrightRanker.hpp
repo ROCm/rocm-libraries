@@ -319,23 +319,59 @@ namespace TensileLite
         using MyProblem = typename MySolution::Problem;
         using Scope     = TilewrightLaunchScope<MyProblem>;
 
-        // RULE_VERSION of training_pipeline/lib/hipblaslt_launch.py, whose
-        // launch_plan() returns the plans this class returns but in one
-        // class: a static Stream-K launch of batch 1 with one K iteration per
-        // tile and more tiles than CUs takes the grid Origami's
-        // select_grid_size() chooses (rulePlan() through
-        // resolveDefaultPersistentLaunch()), which can differ from rule
-        // version 1's; the pipeline's scripts/check_launch_plans.py counts
-        // such plans as a known class.
-        static constexpr int RuleVersion = 1;
+        // RULE_VERSION of training_pipeline/lib/hipblaslt_launch.py, the
+        // newest launch rule version: under it, launch_plan() returns the
+        // plans this class returns. A model records the version it trained
+        // on, and plan() serves it under that version (servedRuleVersion()):
+        // version 1 reported a partial reduction for every static Stream-K
+        // grid that does not divide the tiles, where version 2 reports none
+        // for one K iteration per tile, whose workgroups split no tile.
+        // Version 1's launch_plan() also took another grid than Origami's
+        // select_grid_size() (rulePlan() through
+        // resolveDefaultPersistentLaunch()) for a static Stream-K launch of
+        // batch 1 with one K iteration per tile and more tiles than CUs; the
+        // pipeline's scripts/check_launch_plans.py counts such plans of
+        // version 1 as a known class.
+        static constexpr int RuleVersion = 2;
 
+        // rule_version() of hipblaslt_launch.py: the rule version models of
+        // `arch`, a compiler target as logicArch() gives it, train on. Its
+        // RULE_1_ARCHS hold the same table, which
+        // TilewrightLaunchTest.EachArchTrainsOnItsRuleVersion pins as the
+        // pipeline's test does: change them together.
+        static int ruleVersion(std::string_view arch) noexcept
+        {
+            return arch == "gfx1250" ? 1 : RuleVersion;
+        }
+
+        // served_rule_version() of hipblaslt_launch.py: the rule version
+        // plan() follows for a model of `arch` that records the launch model
+        // `recorded`: 1 for a model trained on rule version 1, whatever
+        // version `arch` trains on now, else ruleVersion(arch), whose id the
+        // tilewright engine compares with the recorded one. Version 1 on an
+        // arch that trains on version 2 keeps the models trained before that
+        // arch moved servable, and is transitional: once its libraries ship
+        // models of version 2, it goes, or serves RULE_1_ARCHS only, here and
+        // in the pipeline alike.
+        static int servedRuleVersion(std::string const& arch, std::string const& recorded)
+        {
+            return recorded == "hipblaslt:" + arch + ":1" ? 1 : ruleVersion(arch);
+        }
+
+        // Under rule `version`, 0 for ruleVersion(arch); throws
+        // std::invalid_argument for a version this class does not implement.
         TilewrightLaunch(std::string                              arch,
                          std::vector<std::shared_ptr<MySolution>> solutions,
-                         std::shared_ptr<Hardware const>          device = nullptr)
+                         std::shared_ptr<Hardware const>          device  = nullptr,
+                         int                                      version = 0)
             : m_arch(std::move(arch))
             , m_solutions(std::move(solutions))
             , m_device(std::move(device))
+            , m_ruleVersion(version == 0 ? ruleVersion(m_arch) : version)
         {
+            if(m_ruleVersion < 1 || m_ruleVersion > RuleVersion)
+                throw std::invalid_argument("tilewright launch: no launch rule version "
+                                            + std::to_string(m_ruleVersion));
             m_kernels.reserve(m_solutions.size());
             for(auto const& solution : m_solutions)
                 m_kernels.push_back(kernelLaunch(*solution));
@@ -343,7 +379,13 @@ namespace TensileLite
 
         std::string id() const override
         {
-            return "hipblaslt:" + m_arch + ":" + std::to_string(RuleVersion);
+            return "hipblaslt:" + m_arch + ":" + std::to_string(m_ruleVersion);
+        }
+
+        // The rule version plan() follows.
+        int version() const noexcept
+        {
+            return m_ruleVersion;
         }
 
         std::uint64_t launch_key(tilewright::Config const& config) const override
@@ -443,7 +485,7 @@ namespace TensileLite
                 DeviceLaunch const device
                     = scope ? scopeDeviceLaunch(*scope) : deviceLaunch(hardware);
                 if(device.rule)
-                    return rulePlan(kernel, device, problem, context);
+                    return rulePlan(kernel, device, problem, context, m_ruleVersion);
             }
             return resolvedPlan(config.index, scope, hardware, problem, context);
         }
@@ -598,15 +640,22 @@ namespace TensileLite
                    * CeilDivide(problem.size.n, size_t{kernel.tileN}) * problem.batch;
         }
 
+        // A grid that does not divide the tiles splits some of them, but for
+        // one K iteration per tile, where every workgroup ends on a tile's
+        // edge (streamKStraddlesTiles() of ContractionSolution.cpp): rule
+        // version 1 reported a partial reduction there too.
         static tilewright::LaunchPlan launchPlan(KernelLaunch const&  kernel,
                                                  WorkAssignment       effectiveWorkAssignment,
                                                  size_t               grid,
                                                  size_t               tiles,
-                                                 origami::reduction_t reduction)
+                                                 size_t               itersPerTile,
+                                                 origami::reduction_t reduction,
+                                                 int                  ruleVersion)
         {
-            bool const dynamic = effectiveWorkAssignment == WorkAssignment::DynamicWorkQueue;
+            bool const dynamic   = effectiveWorkAssignment == WorkAssignment::DynamicWorkQueue;
+            bool const straddles = itersPerTile > 1 || ruleVersion < 2;
             tilewright::LaunchPlan plan{.dynamic_queue = dynamic, .grid_wgs = grid};
-            if(kernel.streamK && !dynamic && grid > 0 && tiles % grid != 0)
+            if(kernel.streamK && !dynamic && grid > 0 && tiles % grid != 0 && straddles)
                 plan.partial_reduction = kernel.atomic ? tilewright::PartialReduction::Atomic
                                          : reduction == origami::reduction_t::parallel
                                              ? tilewright::PartialReduction::Parallel
@@ -615,11 +664,12 @@ namespace TensileLite
         }
 
         // resolvePersistentSettings() of a persistent kernel whose `rule` holds,
-        // on a device whose `rule` holds.
+        // on a device whose `rule` holds, under rule `ruleVersion`.
         static tilewright::LaunchPlan rulePlan(KernelLaunch const&                 kernel,
                                                DeviceLaunch const&                 device,
                                                tilewright::Problem const&          problem,
-                                               tilewright::ExecutionContext const& context)
+                                               tilewright::ExecutionContext const& context,
+                                               int                                 ruleVersion)
         {
             size_t const tiles            = outputTiles(kernel, problem);
             auto const   computeInputType = problem.mi_dtype == tilewright::DataType::XFloat32
@@ -653,8 +703,13 @@ namespace TensileLite
             inputs.computeUnits   = device.computeUnits;
 
             auto const launch = resolveDefaultPersistentLaunch(inputs);
-            return launchPlan(
-                kernel, launch.effectiveWorkAssignment, launch.grid, tiles, launch.reduction);
+            return launchPlan(kernel,
+                              launch.effectiveWorkAssignment,
+                              launch.grid,
+                              tiles,
+                              inputs.itersPerTile,
+                              launch.reduction,
+                              ruleVersion);
         }
 
         tilewright::LaunchPlan resolvedPlan(size_t                              index,
@@ -682,7 +737,9 @@ namespace TensileLite
                               launch.effectiveWorkAssignment,
                               launch.grid,
                               launch.totalTiles,
-                              launch.reduction);
+                              launchProblem.getItersPerTile(solution.sizeMapping),
+                              launch.reduction,
+                              m_ruleVersion);
         }
 
         void checkIndex(size_t index) const
@@ -795,6 +852,7 @@ namespace TensileLite
         // every ranking, scattered over the pool.
         std::vector<KernelLaunch, HugePageAllocator<KernelLaunch>> m_kernels;
         std::shared_ptr<Hardware const>                            m_device;
+        int                                                        m_ruleVersion;
     };
 
     /**
@@ -833,12 +891,13 @@ namespace TensileLite
             : m_candidates(std::move(model),
                            std::move(configs),
                            tilewright::PoolOptions{.tie_break = tilewright::TieBreak::PoolOrder,
-                                                   .launch    = std::move(launch)})
+                                                   .launch    = launch})
             , m_arch(std::move(arch))
             , m_blocklist(std::move(blocklist))
             , m_blocked(std::move(blocked))
             , m_unresolved(std::move(unresolved))
             , m_library(std::move(library))
+            , m_launchModel(launch ? launch->id() : std::string())
         {
         }
 
@@ -983,15 +1042,22 @@ namespace TensileLite
                 std::sort(unresolved.begin(), unresolved.end());
             }
 
+            // A model ranks with the plans of the launch rule version it
+            // records (TilewrightLaunch::servedRuleVersion()).
             std::shared_ptr<const tilewright::LaunchModel> launch;
-            if(tilewright::describe(*model).format_version >= 3)
+            auto const                                     info = tilewright::describe(*model);
+            if(info.format_version >= 3)
             {
                 std::vector<std::shared_ptr<MySolution>> solutions;
                 solutions.reserve(poolSize);
                 for(size_t i = 0; i < poolSize; i++)
                     solutions.push_back(solutionAt(i));
-                launch = std::make_shared<const TilewrightLaunch<MySolution>>(arch,
-                                                                              std::move(solutions));
+                launch = std::make_shared<const TilewrightLaunch<MySolution>>(
+                    arch,
+                    std::move(solutions),
+                    nullptr,
+                    TilewrightLaunch<MySolution>::servedRuleVersion(arch,
+                                                                    info.provenance.launch_model));
             }
 
             auto ranker = std::make_shared<const TilewrightRanker>(std::move(model),
@@ -1311,6 +1377,12 @@ namespace TensileLite
             return m_arch;
         }
 
+        // The id of the launch model the ranker plans with; empty without one.
+        std::string const& launchModel() const noexcept
+        {
+            return m_launchModel;
+        }
+
         tilewright::CandidateSet const& candidates() const noexcept
         {
             return m_candidates;
@@ -1587,6 +1659,7 @@ namespace TensileLite
         std::vector<bool>                        m_blocked;
         std::vector<std::string>                 m_unresolved;
         std::string                              m_library;
+        std::string                              m_launchModel;
         mutable std::mutex                       m_reportedMutex;
         mutable std::set<std::pair<size_t, int>> m_reported;
     };
