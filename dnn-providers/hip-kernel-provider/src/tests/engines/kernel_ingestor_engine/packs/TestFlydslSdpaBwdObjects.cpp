@@ -39,6 +39,21 @@ using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing::bwd_device;
 
+/// Skips the running test unless the device is a gfx950; a test already skipped stays as it is.
+void skipUnlessGfx950()
+{
+    if(::testing::Test::IsSkipped())
+    {
+        return;
+    }
+    const auto arch = packedArchDeviceProperties().gcnArchName;
+    if(arch.rfind("gfx950", 0) != 0)
+    {
+        GTEST_SKIP() << "the lowest-finite bias cases run on a gfx950 device; " << arch
+                     << " is covered by the gfx11 parity suite or ships no such engine";
+    }
+}
+
 class TestGpuFlydslSdpaBwdMergedDispatch : public FlydslSdpaBwdDevice
 {
 protected:
@@ -63,6 +78,39 @@ protected:
     TestGpuFlydslSdpaBwdSplitDispatchFp32()
         : FlydslSdpaBwdDevice(SPLIT_OPS)
     {
+    }
+};
+
+/// A bias that masks whole rows at the lowest finite value of its dtype. The cases run on a
+/// gfx950 device only: the gfx11 split kernels' lowest-finite bias cases are in the gfx11
+/// parity suite (TestFlydslSdpaBwdParity.cpp), and no other architecture ships these engines.
+class TestGpuFlydslSdpaBwdMergedLowestFiniteBias : public FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdMergedLowestFiniteBias()
+        : FlydslSdpaBwdDevice(MERGED_OPS)
+    {
+    }
+
+    void SetUp() override
+    {
+        FlydslSdpaBwdDevice::SetUp();
+        skipUnlessGfx950();
+    }
+};
+
+class TestGpuFlydslSdpaBwdSplitLowestFiniteBias : public FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdSplitLowestFiniteBias()
+        : FlydslSdpaBwdDevice(SPLIT_OPS)
+    {
+    }
+
+    void SetUp() override
+    {
+        FlydslSdpaBwdDevice::SetUp();
+        skipUnlessGfx950();
     }
 };
 
@@ -141,6 +189,17 @@ BwdCase headDimCase(DataType dtype, int64_t headDim)
 {
     BwdCase c = plainCase(dtype);
     c.headDim = headDim;
+    return c;
+}
+
+/// Every key of every third row of a bias at the dtype's lowest finite value, on the shape of
+/// the gfx11 parity case of the same name.
+BwdCase lowestFiniteBiasCase(DataType dtype)
+{
+    BwdCase c = biasCase(dtype);
+    c.seqQ = 200;
+    c.seqKv = 300;
+    c.biasFill = BwdBiasFill::LOWEST_ROWS;
     return c;
 }
 
@@ -296,6 +355,31 @@ TEST_F(TestGpuFlydslSdpaBwdSplitDispatchFp32, HeadDimOf37AtAPaddedRowStrideMatch
 TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, DeclinesBiasBesideAPaddingMask)
 {
     expectDeclined(SPLIT_ENGINE, biasWithPaddingSpec());
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedLowestFiniteBias, MatchesTheReferenceInBf16)
+{
+    expectCase(MERGED_ENGINE, lowestFiniteBiasCase(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedLowestFiniteBias, MatchesTheReferenceInF16)
+{
+    expectCase(MERGED_ENGINE, lowestFiniteBiasCase(DataType::HALF));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBias, MatchesTheReferenceInBf16)
+{
+    expectCase(SPLIT_ENGINE, lowestFiniteBiasCase(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBias, MatchesTheReferenceInF16)
+{
+    expectCase(SPLIT_ENGINE, lowestFiniteBiasCase(DataType::HALF));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBias, MatchesTheReferenceInFp32)
+{
+    expectCase(SPLIT_ENGINE, lowestFiniteBiasCase(DataType::FLOAT));
 }
 
 } // namespace
