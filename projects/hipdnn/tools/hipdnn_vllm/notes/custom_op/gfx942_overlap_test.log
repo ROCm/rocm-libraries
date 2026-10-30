@@ -1,0 +1,99 @@
+free slot: job 68215720 gpu 1 at 2026-10-30T13:08:10-04:00
+== test 2026-10-30T13:08:10-04:00 ctr-cx66-mi300x-31.adc.amd.com HIP_VISIBLE_DEVICES=1
+arch gfx942
+== unit
+FAILED tests/unit/test_declines.py::test_cpp_taxonomy_matches_python - FileNo...
+1 failed, 204 passed, 19 warnings in 78.56s (0:01:18)
+== custom_op (production catalog)
+tests/gpu/test_custom_op.py::test_prepare_returns_reason_for_unknown_op_id PASSED [ 12%]
+tests/gpu/test_custom_op.py::test_exec_strict_raises_and_non_strict_counts_fallback PASSED [ 25%]
+tests/gpu/test_custom_op.py::test_plan_cache_keyed_by_shape_and_payload_not_address PASSED [ 37%]
+tests/gpu/test_custom_op.py::test_disabled_declines_without_building PASSED [ 50%]
+tests/gpu/test_custom_op.py::test_capture_miss_strict_raises_non_strict_records PASSED [ 62%]
+tests/gpu/test_custom_op.py::test_engine_untouched_unless_opted_in_h6 PASSED [ 75%]
+tests/gpu/test_custom_op.py::test_megakernel_capture_replays SKIPPED     [ 87%]
+tests/gpu/test_custom_op.py::test_megakernel_key_mismatch_declines SKIPPED [100%]
+SKIPPED [1] tests/gpu/test_custom_op.py:209: megakernel stand-in not loaded (set HIPDNN_DESCRIPTOR_DIR to the integration set)
+SKIPPED [1] tests/gpu/test_custom_op.py:249: megakernel stand-in not loaded (set HIPDNN_DESCRIPTOR_DIR to the integration set)
+=================== 6 passed, 2 skipped, 2 warnings in 4.36s ===================
+== custom_op (stand-in catalog)
+tests/gpu/test_custom_op.py::test_megakernel_capture_replays PASSED      [ 50%]
+tests/gpu/test_custom_op.py::test_megakernel_key_mismatch_declines PASSED [100%]
+================== 2 passed, 6 deselected, 1 warning in 0.13s ==================
+== gpu (not conv)
+FAILED tests/gpu/test_paged_attention.py::test_decode[14-2-64-16-dtype0] - hi...
+FAILED tests/gpu/test_paged_attention.py::test_decode[14-2-64-16-dtype1] - hi...
+FAILED tests/gpu/test_paged_attention.py::test_decode[32-8-64-32-dtype0] - hi...
+FAILED tests/gpu/test_paged_attention.py::test_decode[32-8-64-32-dtype1] - hi...
+FAILED tests/gpu/test_paged_attention.py::test_decode[16-8-128-16-dtype0] - h...
+FAILED tests/gpu/test_paged_attention.py::test_decode[16-8-128-16-dtype1] - h...
+FAILED tests/gpu/test_paged_attention.py::test_decode[8-8-128-64-dtype0] - hi...
+FAILED tests/gpu/test_paged_attention.py::test_decode[8-8-128-64-dtype1] - hi...
+FAILED tests/gpu/test_paged_attention.py::test_decode[8-1-256-16-dtype0] - hi...
+FAILED tests/gpu/test_paged_attention.py::test_decode[8-1-256-16-dtype1] - hi...
+FAILED tests/gpu/test_paged_attention.py::test_decode[16-4-256-32-dtype0] - h...
+FAILED tests/gpu/test_paged_attention.py::test_decode[16-4-256-32-dtype1] - h...
+FAILED tests/gpu/test_paged_attention.py::test_spec_decode_uniform_query_len[dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_spec_decode_uniform_query_len[dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_mixed_prefill_and_decode[None-LBHNC-dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_mixed_prefill_and_decode[None-LBHNC-dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_mixed_prefill_and_decode[None-LBNHC-dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_mixed_prefill_and_decode[None-LBNHC-dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_mixed_prefill_and_decode[48-LBHNC-dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_mixed_prefill_and_decode[48-LBHNC-dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_mixed_prefill_and_decode[48-LBNHC-dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_mixed_prefill_and_decode[48-LBNHC-dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_chunked_prefill_with_context[32-8-64-16-dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_chunked_prefill_with_context[32-8-64-16-dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_chunked_prefill_with_context[16-8-128-32-dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_chunked_prefill_with_context[16-8-128-32-dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_chunked_prefill_with_context[8-2-256-16-dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_chunked_prefill_with_context[8-2-256-16-dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_prefill_without_context[dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_prefill_without_context[dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_kv_cache_above_4gib[seq_q0-seq_kv0-attention.uniform_decode-dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_kv_cache_above_4gib[seq_q0-seq_kv0-attention.uniform_decode-dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_kv_cache_above_4gib[seq_q1-seq_kv1-attention.mixed-dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_kv_cache_above_4gib[seq_q1-seq_kv1-attention.mixed-dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_sinks[p2a-None-sink_dtype0] - ...
+FAILED tests/gpu/test_paged_attention.py::test_sinks[p2a-None-sink_dtype1] - ...
+FAILED tests/gpu/test_paged_attention.py::test_sinks[p2a-128-sink_dtype0] - h...
+FAILED tests/gpu/test_paged_attention.py::test_sinks[p2a-128-sink_dtype1] - h...
+FAILED tests/gpu/test_paged_attention.py::test_sinks[p2b-None-sink_dtype0] - ...
+FAILED tests/gpu/test_paged_attention.py::test_sinks[p2b-None-sink_dtype1] - ...
+FAILED tests/gpu/test_paged_attention.py::test_sinks[p2b-128-sink_dtype0] - h...
+FAILED tests/gpu/test_paged_attention.py::test_sinks[p2b-128-sink_dtype1] - h...
+FAILED tests/gpu/test_paged_attention.py::test_sinks_decline_falls_back_to_triton
+FAILED tests/gpu/test_paged_attention.py::test_capture_replay_uniform_decode[dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_capture_replay_uniform_decode[dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_capture_replay_mixed_graph[dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_capture_replay_mixed_graph[dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_capture_replay_with_sinks - hi...
+FAILED tests/gpu/test_paged_attention.py::test_eager_calls_run_power_of_two_buckets
+FAILED tests/gpu/test_paged_attention.py::test_capture_holds_the_prebuilt_capture_size_plan[dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_capture_holds_the_prebuilt_capture_size_plan[dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_v2_runner_capture_sizes_from_the_capture_batch[dtype0]
+FAILED tests/gpu/test_paged_attention.py::test_v2_runner_capture_sizes_from_the_capture_batch[dtype1]
+FAILED tests/gpu/test_paged_attention.py::test_a_new_kv_cache_is_prepared_again
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[-1-64-16-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[-1-64-16-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[-1-128-32-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[-1-128-32-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[-1-128-16-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[-1-128-16-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[47-64-16-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[47-64-16-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[47-128-32-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[47-128-32-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[47-128-16-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[47-128-16-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[-1-64-16-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[-1-64-16-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[-1-128-32-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[-1-128-32-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[47-64-16-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[47-64-16-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[47-128-32-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[47-128-32-dtype1]
+74 failed, 507 passed, 47 skipped, 41 deselected, 29 xfailed, 18 warnings in 118.21s (0:01:58)
+== end test 2026-10-30T13:11:42-04:00

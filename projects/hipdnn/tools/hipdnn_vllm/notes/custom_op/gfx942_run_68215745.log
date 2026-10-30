@@ -1,0 +1,64 @@
+srun: job 68215745 queued and waiting for resources
+srun: job 68215745 has been allocated resources
+start 2026-10-30T11:49:53-04:00 ctr-cx66-mi300x-31.adc.amd.com arch=gfx942 branch=users/sareeder/hipdnn-vllm-custom-op whl=hipdnn_vllm-0.1.0+rocm10.0.0.gfx94x-cp312-cp312-linux_x86_64.whl
+standin.tgz
+src 0398903c test(hipdnn_vllm): H6 check counts CUSTOM_OP nodes and megakernel decisions, with an opted-in control; notes
+WARNING: torchvision 0.29.2 does not provide the extra 'device-gfx1100'
+WARNING: torchvision 0.29.1 does not provide the extra 'device-gfx1100'
+{'plugin_commit': '55181f60133b5b62de6a35f48e10adb1cb103613', 'plugin_tree_dirty_files': 0, 'provider_cmake_flags': ['-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON', '-DHIPDNN_ENABLE_SDPA=ON', '-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON', '-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON', '-DHIPKERNELPROVIDER_ENABLE_TESTS=OFF', '-DHIPDNN_SKIP_TESTS=ON', '-DROCKE_INSTALL_TESTS=OFF', '-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON', '-DENABLE_MEGAKERNEL_ENGINE=ON']}
+== unit
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+28 failed, 177 passed, 4 warnings in 53.60s
+== custom_op (production catalog)
+tests/gpu/test_custom_op.py::test_prepare_returns_reason_for_unknown_op_id PASSED [ 12%]
+tests/gpu/test_custom_op.py::test_exec_strict_raises_and_non_strict_counts_fallback PASSED [ 25%]
+tests/gpu/test_custom_op.py::test_plan_cache_keyed_by_shape_and_payload_not_address PASSED [ 37%]
+tests/gpu/test_custom_op.py::test_disabled_declines_without_building PASSED [ 50%]
+tests/gpu/test_custom_op.py::test_capture_miss_strict_raises_non_strict_records PASSED [ 62%]
+tests/gpu/test_custom_op.py::test_engine_untouched_unless_opted_in_h6 PASSED [ 75%]
+tests/gpu/test_custom_op.py::test_megakernel_capture_replays SKIPPED     [ 87%]
+tests/gpu/test_custom_op.py::test_megakernel_key_mismatch_declines SKIPPED [100%]
+SKIPPED [1] tests/gpu/test_custom_op.py:209: megakernel stand-in not loaded (set HIPDNN_DESCRIPTOR_DIR to the integration set)
+SKIPPED [1] tests/gpu/test_custom_op.py:249: megakernel stand-in not loaded (set HIPDNN_DESCRIPTOR_DIR to the integration set)
+=================== 6 passed, 2 skipped, 2 warnings in 5.03s ===================
+== custom_op (stand-in catalog)
+/tmp/hvco_68215745_80125/venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:300: PytestDeprecationWarning: The configuration option "asyncio_default_fixture_loop_scope" is unset.
+The event loop scope for asynchronous fixtures will default to the "fixture" caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to "function" scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: "function", "class", "module", "package", "session"
+
+  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.2.0, pluggy-1.7.0 -- /tmp/hvco_68215745_80125/venv/bin/python
+rootdir: /tmp/hvco_68215745_80125/t
+plugins: asyncio-1.4.1, anyio-4.15.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 8 items / 6 deselected / 2 selected
+
+tests/gpu/test_custom_op.py::test_megakernel_capture_replays PASSED      [ 50%]
+tests/gpu/test_custom_op.py::test_megakernel_key_mismatch_declines PASSED [100%]
+
+=============================== warnings summary ===============================
+tests/gpu/conftest.py:30
+  /tmp/hvco_68215745_80125/t/tests/gpu/conftest.py:30: PytestUnknownMarkWarning: Unknown pytest.mark.gpu - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    item.add_marker(pytest.mark.gpu)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================== 2 passed, 6 deselected, 1 warning in 0.18s ==================
+== gpu (not conv)
+../venv/lib/python3.12/site-packages/torch/library.py:352: in _register_fake
+    handle = entry.fake_impl.register(
+../venv/lib/python3.12/site-packages/torch/_library/fake_impl.py:87: in register
+    lib.impl(self.qualname, meta_kernel, "Meta", allow_override=allow_override)
+../venv/lib/python3.12/site-packages/torch/library.py:493: in impl
+    if torch._C._dispatch_has_kernel_for_dispatch_key(
+E   RuntimeError: operator torchvision::nms does not exist
+=============================== warnings summary ===============================
+tests/gpu/conftest.py:30
+  /tmp/hvco_68215745_80125/t/tests/gpu/conftest.py:30: PytestUnknownMarkWarning: Unknown pytest.mark.gpu - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    item.add_marker(pytest.mark.gpu)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+39 deselected, 1 warning, 1 error in 4.00s
+DONE 2026-10-30T12:06:00-04:00
+cleaned 2026-10-30T12:06:05-04:00

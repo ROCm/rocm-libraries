@@ -1,0 +1,47 @@
+# tests/unit, CPU-only hipdnn_env container, venv /tmp/hvco/venv (pins + whl-next)
+# base = PR #14255 head cb84aebee6f, ours = 66d0838cd8f
+## torchvision 0.29.0+rocm10.0.0 (from whl-next): _C.so undefined symbol _ZN3c104cuda19CUDAErrorLogCaptureC1Ev -> torchvision::nms missing
+== base: 18 failed
+tests/unit/test_paged_plan_sizes.py::test_v2_full_capture_forward_context_bounds_no_requests
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_vllm_dispatcher[FULL_AND_PIECEWISE-0-256]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_vllm_dispatcher[FULL_AND_PIECEWISE-3-64]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_vllm_dispatcher[FULL-0-48]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_vllm_dispatcher[FULL_DECODE_ONLY-0-32]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_vllm_dispatcher[PIECEWISE-0-256]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_vllm_dispatcher[NONE-0-256]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_v2_model_runner[FULL_AND_PIECEWISE-0-256]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_v2_model_runner[FULL_AND_PIECEWISE-3-64]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_v2_model_runner[FULL_AND_PIECEWISE-2-64]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_v2_model_runner[FULL-0-48]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_v2_model_runner[FULL_DECODE_ONLY-0-32]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_v2_model_runner[PIECEWISE-0-256]
+tests/unit/test_probe.py::test_decoder_single_layer_kind - RuntimeErro...
+tests/unit/test_probe.py::test_encoder_window_is_symmetric - RuntimeEr...
+tests/unit/test_probe.py::test_gemma_style_layer_types_scale_and_softcap
+tests/unit/test_probe.py::test_chunk_lookback_model_needs_patch_and_falls_back
+tests/unit/test_probe.py::test_sinks_detected_for_gpt_oss_and_not_prefiltered
+== ours: 18 failed
+tests/unit/test_paged_plan_sizes.py::test_v2_full_capture_forward_context_bounds_no_requests
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_vllm_dispatcher[FULL_AND_PIECEWISE-0-256]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_vllm_dispatcher[FULL_AND_PIECEWISE-3-64]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_vllm_dispatcher[FULL-0-48]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_vllm_dispatcher[FULL_DECODE_ONLY-0-32]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_vllm_dispatcher[PIECEWISE-0-256]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_vllm_dispatcher[NONE-0-256]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_v2_model_runner[FULL_AND_PIECEWISE-0-256]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_v2_model_runner[FULL_AND_PIECEWISE-3-64]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_v2_model_runner[FULL_AND_PIECEWISE-2-64]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_v2_model_runner[FULL-0-48]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_v2_model_runner[FULL_DECODE_ONLY-0-32]
+tests/unit/test_paged_plan_sizes.py::test_capture_sizes_match_the_v2_model_runner[PIECEWISE-0-256]
+tests/unit/test_probe.py::test_decoder_single_layer_kind - RuntimeErro...
+tests/unit/test_probe.py::test_encoder_window_is_symmetric - RuntimeEr...
+tests/unit/test_probe.py::test_gemma_style_layer_types_scale_and_softcap
+tests/unit/test_probe.py::test_chunk_lookback_model_needs_patch_and_falls_back
+tests/unit/test_probe.py::test_sinks_detected_for_gpt_oss_and_not_prefiltered
+## torchvision 0.28.0+rocm10.0.0 (vLLM index pin)
+0.28.0+rocm10.0.0 torchvision.nms
+== base
+196 passed, 9 skipped, 15 warnings in 48.13s
+== ours
+196 passed, 9 skipped, 15 warnings in 48.13s

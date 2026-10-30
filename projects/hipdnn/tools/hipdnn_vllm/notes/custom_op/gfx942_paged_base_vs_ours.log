@@ -1,0 +1,30 @@
+free slot: job 68218902 gpu 1 at 2026-10-30T13:41:40-04:00
+== cmp 2026-10-30T13:41:40-04:00 ctr-cx66-mi300x-31.adc.amd.com HIP_VISIBLE_DEVICES=1
+arch gfx942
+== base cb84aebee6fe5c9b935b0be599e98569779c21a0
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[47-128-32-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[47-128-16-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[47-128-16-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[-1-64-16-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[-1-64-16-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[-1-128-32-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[-1-128-32-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[47-64-16-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[47-64-16-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[47-128-32-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[47-128-32-dtype1]
+74 failed, 40 passed, 42 skipped, 16 warnings in 32.02s
+== ours 55181f60133b5b62de6a35f48e10adb1cb103613
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[47-128-32-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[47-128-16-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_paged_decode_matches_gathered_dense[47-128-16-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[-1-64-16-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[-1-64-16-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[-1-128-32-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[-1-128-32-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[47-64-16-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[47-64-16-dtype1]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[47-128-32-dtype0]
+FAILED tests/gpu/test_sdpa.py::test_ragged_paged_matches_gathered_dense[47-128-32-dtype1]
+74 failed, 40 passed, 42 skipped, 16 warnings in 12.49s
+== end cmp 2026-10-30T13:42:33-04:00

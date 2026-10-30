@@ -1,0 +1,6 @@
+== setup 2026-10-30T12:55:51-04:00 ctr-cx66-mi300x-31.adc.amd.com HIP_VISIBLE_DEVICES=
+src 66d0838c notes(hipdnn_vllm): gfx94X wheel rebuild after the megakernel-engine re-merge (92ed944eeb0) whl=hipdnn_vllm-0.1.0+rocm10.0.0.gfx94x-cp312-cp312-linux_x86_64.whl
+standin.tgz
+2.13.0+rocm10.0.0 0.28.0+rocm10.0.0 torchvision.nms
+9fdb4197af72c18404c52648c3c71c84c9e28cfd 0
+== end setup 2026-10-30T13:07:13-04:00
