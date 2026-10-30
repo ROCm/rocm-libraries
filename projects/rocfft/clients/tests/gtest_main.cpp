@@ -51,6 +51,18 @@
 #include "bitwise_repro/bitwise_repro_test.h"
 #include "rocfft/rocfft.h"
 
+#if __has_include(<filesystem>)
+#include <filesystem>
+#else
+#include <experimental/filesystem>
+namespace std
+{
+    namespace filesystem = experimental::filesystem;
+}
+#endif
+
+namespace fs = std::filesystem;
+
 // Control output verbosity:
 int verbose;
 
@@ -71,8 +83,8 @@ double real_prob_factor;
 double complex_planar_prob_factor;
 // Modifier for probability of running tests with callbacks
 double callback_prob_factor;
-// Modifier for probability of running very large tests
-double very_large_prob_factor;
+// Flag to indicate that only quick tests have been requested
+bool quick_tests_only = false;
 // Number of random tests per suite
 size_t n_random_tests = 0;
 
@@ -222,7 +234,7 @@ std::vector<std::string> tokens_to_run()
 
 void precompile_test_kernels(const std::string& precompile_file)
 {
-    std::cout << "precompiling test kernels...\n";
+    std::cout << "precompiling test kernels..." << std::endl;
     WorkQueue<std::string> tokenQueue;
 
     auto tokens = tokens_to_run();
@@ -294,6 +306,26 @@ void precompile_test_kernels(const std::string& precompile_file)
     std::cout << "done precompiling FFT plans in " << static_cast<size_t>(precompile_ms.count())
               << " ms\n";
 }
+
+// Static destructor to make a best-effort attempt to clean up any
+// file that was created.  This will run after any FFT library is
+// unloaded so the file should not be in use anymore at that point.
+struct precompile_file_cleanup
+{
+    ~precompile_file_cleanup()
+    {
+        try
+        {
+            if(!path.empty())
+                fs::remove(path);
+        }
+        catch(...)
+        {
+        }
+    }
+    fs::path path;
+};
+static precompile_file_cleanup precompile_cleanup;
 
 int main(int argc, char* argv[])
 {
@@ -385,11 +417,6 @@ int main(int argc, char* argv[])
                    "Probability multiplier for running individual callback transforms")
         ->default_val(0.2)
         ->check(CLI::Range(0.0, 1.0));
-    app.add_option("--very_large_prob",
-                   very_large_prob_factor,
-                   "Probability multiplier for running very large transforms")
-        ->default_val(0.2)
-        ->check(CLI::Range(0.0, 1.0));
 
     constexpr auto emulation_quick      = "quick";
     constexpr auto emulation_smoke      = "smoke";
@@ -405,7 +432,6 @@ int main(int argc, char* argv[])
                    "--unittest_prob",
                    "--nrand",
                    "--callback_prob",
-                   "--very_large_prob",
                    "--R")
         ->each([&](const std::string& emulationtype) {
             // Emulation test suites focus on well-established software paths; we are looking for
@@ -420,7 +446,7 @@ int main(int argc, char* argv[])
             callback_prob_factor = 0;
 
             // Very large transforms are not an emulation test target.
-            very_large_prob_factor = 0;
+            quick_tests_only = true;
 
             if(emulationtype == emulation_quick)
             {
@@ -483,9 +509,10 @@ int main(int argc, char* argv[])
         ->each([&](const std::string&) {
             // The objective is to have a test that takes about 5 minutes, so just set the
             // probability per test to a small value to achieve this result.
-            test_prob      = 0.0005;
-            emulation_prob = 0.005;
-            unittest_prob  = 0.2;
+            test_prob        = 0.0005;
+            emulation_prob   = 0.005;
+            unittest_prob    = 0.2;
+            quick_tests_only = true;
 
             // Allow nrand to take precedence over this option:
             if(!opt_nrand->count())
@@ -627,10 +654,14 @@ int main(int argc, char* argv[])
     app.add_option("--repro-db",
                    repro_db_path,
                    "Database file full path name for bitwise reproducibility tests");
-    app.add_option("--precompile",
-                   precompile_file,
-                   "Precompile kernels to a file for all test cases before running tests")
-        ->default_val("");
+    auto precompile_option
+        = app.add_option(
+                 "--precompile",
+                 precompile_file,
+                 "Precompile kernels to a file for all test cases before running tests.  If file "
+                 "is not specified, a temporary file will be chosen.")
+              ->default_val("")
+              ->expected(0, 1);
     app.add_flag("--printtokens", printtokens, "Print test tokens to scheduled to be run and exit");
     // Default value is set in fft_params.h based on if device-side PRNG was enabled.
     app.add_option("-g, --inputGen",
@@ -693,13 +724,20 @@ int main(int argc, char* argv[])
               << "\tdouble epsilon: " << double_epsilon << std::endl;
     std::cout << "Random seed: " << random_seed << std::endl;
 
+    // Use temporary file for precompiling if no file was specified
+    if(precompile_option->count() && precompile_file.empty())
+    {
+        // Pick a name in the temp directory - rocFFT will gracefully
+        // share this file between two test programs, or fall back to
+        // in-memory cache if this file can't be opened
+        precompile_cleanup.path = fs::temp_directory_path() / "rocfft-test.db";
+        precompile_file         = precompile_cleanup.path.string();
+    }
+
     // If precompiling, tell rocFFT to use the specified cache file
     // to write kernels to
-    //
-    // But if our environment already has a cache file for RTC, then
-    // we should just use that
     std::unique_ptr<EnvironmentSetTemp> env_precompile;
-    if(!precompile_file.empty() && rocfft_getenv("ROCFFT_RTC_CACHE_PATH").empty())
+    if(!precompile_file.empty())
     {
         env_precompile = std::make_unique<EnvironmentSetTemp>("ROCFFT_RTC_CACHE_PATH",
                                                               precompile_file.c_str());
