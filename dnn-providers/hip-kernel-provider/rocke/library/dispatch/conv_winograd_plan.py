@@ -354,6 +354,7 @@ def _fused1d(problem: ConvProblem, dtype: str, plan: WinogradPlan):
     from kernels.common import conv_winograd_gen as WG
     from kernels.common.conv_winograd_fused_1d_wmma import (
         FusedWino1DSpec,
+        LLVM_FLAVORS as FUSED_LLVM_FLAVORS,
         build_fused_wino_1d,
         fused_signature,
     )
@@ -402,6 +403,7 @@ def _fused1d(problem: ConvProblem, dtype: str, plan: WinogradPlan):
             spec.waves * 32,
             sig,
             kernargs,
+            llvm_flavors=FUSED_LLVM_FLAVORS,
         )
     )
     return tuple(steps), {"U": int(max(gsizes["U"], 4))}

@@ -42,6 +42,10 @@ from typing import Tuple
 
 from rocke.core.arch import ArchTarget
 from rocke.core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
+from rocke.core.llvm_profile import (
+    LLVM_FLAVOR_LLVM20,
+    LLVM_FLAVORS as _ALL_LLVM_FLAVORS,
+)
 from rocke.helpers.spec import SignatureBuilder, ceil_div, kernel_name_join
 from kernels.common._conv_implicit_gemm_common import ConvProblem
 from kernels.common.conv_winograd_fwd import _OOB, _load_raw, _raw_to_f32
@@ -53,6 +57,9 @@ VEC = 8  # channels per lane in the transforms (16-byte LDS / global accesses)
 PAD_H = 8  # fp16 row skew (16 bytes)
 PAD_F = 4  # fp32 row skew (16 bytes)
 VGPR_BUDGET = 440
+# LLVM flavors the kernel lowers at: every configuration issues the gfx1250
+# f16 WMMA, which llvm20 does not declare.
+LLVM_FLAVORS = tuple(f for f in _ALL_LLVM_FLAVORS if f != LLVM_FLAVOR_LLVM20)
 
 
 @dataclass(frozen=True)

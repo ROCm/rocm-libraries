@@ -234,14 +234,22 @@ def test_unfused_plans_need_llvm23(flavor):
         gc.dispatch_conv_grouped(req)
     assert not gc.conv_grouped_sweep_space(req)
     assert not gc.dispatch_conv_grouped_all(_req(llvm_flavor=flavor))
-    # 1-D: only the fused plan (no K3) is left, and it lowers at the flavor.
+    # 1-D: only the fused plan (no K3) is left. It needs the gfx1250 f16 WMMA,
+    # which llvm20 does not declare, so llvm20 admits no plan.
     req1 = _pin(_req(llvm_flavor=flavor, Hi=1, Wi=300, Y=1, X=11, pad_h=0, pad_w=5))
-    assert {s.plan.kind for s in gc.conv_grouped_sweep_space(req1)} == {"fused1d"}
-    res = gc.dispatch_conv_grouped(req1)
-    assert res.spec.plan.kind == "fused1d"
-    for step in gc.launch_plan_for(req1, res.spec).steps:
-        assert step.kernel.llvm_flavors is None
-        lower_kernel_to_llvm(step.kernel.build(_ARCH), llvm_flavor=flavor, arch=_ARCH)
+    if flavor == "llvm20":
+        assert not gc.conv_grouped_sweep_space(req1)
+        with pytest.raises(ValueError, match="needs LLVM flavor"):
+            gc.dispatch_conv_grouped(req1)
+    else:
+        assert {s.plan.kind for s in gc.conv_grouped_sweep_space(req1)} == {"fused1d"}
+        res = gc.dispatch_conv_grouped(req1)
+        assert res.spec.plan.kind == "fused1d"
+        for step in gc.launch_plan_for(req1, res.spec).steps:
+            assert flavor in (step.kernel.llvm_flavors or (flavor,))
+            lower_kernel_to_llvm(
+                step.kernel.build(_ARCH), llvm_flavor=flavor, arch=_ARCH
+            )
     # The K3 kernel the flavor check refers to does refuse to lower there.
     k3 = next(
         st
