@@ -367,3 +367,30 @@ def test_a_watchdog_kill_turns_the_matching_crash_row_into_hang_and_keeps_the_st
     )
     assert "frame A" in stack.read_text()
     assert reconcile.mark_hangs(d, tmp_path, "main") == 0  # idempotent
+
+
+def test_inventory_matches_asm_builders_by_class_name_and_never_a_longer_engine_name(
+    tmp_path,
+):
+    (tmp_path / "engine-inventory.txt").write_text("hipkernel:alpha\nASM_SDPA_ENGINE\n")
+    write_pass(tmp_path, "", {}, [], [])
+    (tmp_path / "declines").mkdir()
+    declines = [
+        ("SdpaFwdPlanBuilder", "fwd: head_dim 96"),
+        ("SdpaBwdPlanBuilder", "bwd: never on gfx950"),
+        ("ConvFwdPlanBuilder", "conv: unrelated"),
+        ("hipkernel:alpha_v2", "alpha_v2: other engine"),
+    ]
+    (tmp_path / "declines" / "gw0.jsonl").write_text(
+        "".join(
+            json.dumps({"engine": e, "line": l, "nodeid": "n"}) + "\n"
+            for e, l in declines
+        )
+    )
+    text = reconcile.inventory_summary(tmp_path, [])
+    alpha, asm = (
+        text[: text.index("ASM_SDPA_ENGINE")],
+        text[text.index("ASM_SDPA_ENGINE") :],
+    )
+    assert "alpha_v2" not in alpha and "no decline reason logged" in alpha
+    assert "head_dim 96" in asm and "never on gfx950" in asm and "unrelated" not in asm
