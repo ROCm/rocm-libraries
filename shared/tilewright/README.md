@@ -364,7 +364,10 @@ ranks with Origami and warns: ship such models only with an engine that has
 the floor. `with_cu_floor(data, None)` of `training_pipeline/lib/mlrec.py`
 removes the floor from a file without retraining; the file then loads in such
 an engine and ranks as a model without a floor. The same holds for the
-alignment veto: an engine that predates it refuses a file that declares it.
+alignment veto: an engine that predates it refuses a file that declares it,
+and `with_alignment_veto(data, k_min, align_bits)` and
+`without_alignment_veto(data)` add it to a file or remove it without
+retraining.
 
 `i_dim` is 8 plus the attribute features: one per identity, log2p1 and
 nonzero attribute (`x`, `log2(1 + max(x, 0))`, `x != 0`) and one per value of a

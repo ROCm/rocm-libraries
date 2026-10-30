@@ -389,7 +389,8 @@ class ModelRanker(Ranker):
     as `Feasibility` takes them) override the model's serving rules, which
     only an MLREC_v3 model allows; `self.rules` are the ones it ranks with.
     A model ranks kernels its own rules exclude without having trained on
-    them for such shapes."""
+    them for such shapes. An MLREC_v3 model ranks without its alignment
+    veto, a serving rule no plan applies."""
 
     name = "model"
 
@@ -412,6 +413,9 @@ class ModelRanker(Ranker):
         self.tw = tw or ev.tilewright_module()
         header = mlrec.read_header(data)
         version = int(header["version"])
+        if version == 3:
+            data = mlrec.without_alignment_veto(data)
+            header = mlrec.read_header(data)
         own = soft_rules(header.get("serving") or {}, version)
         if rules is not None and dict(rules) != own:
             if version != 3:

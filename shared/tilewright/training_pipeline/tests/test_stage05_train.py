@@ -1386,6 +1386,29 @@ def test_stage05_trains_bank_era_data_as_data_of_the_table_alone(
     assert set(era[0]["trained_view_keys"]) == trained
 
 
+def test_the_alignment_veto_key_changes_no_bit_of_training(tmp_path, monkeypatch):
+    """deploy.alignment_veto is a deploy key: with it stage05 trains, bit for
+    bit, the bundle, whitelist tier and member order of the config without
+    it, and the bundle carries no veto."""
+    import yaml
+
+    w = bank_era_world(tmp_path)
+    cfg = w.configs["origami"]
+    doc = yaml.safe_load(cfg.read_text())
+    doc.setdefault("deploy", {})["alignment_veto"] = {"k_min": 512, "align_bytes": 128}
+    vetoed = tmp_path / "vetoed.yaml"
+    vetoed.write_text(yaml.safe_dump(doc))
+    plain = _pool_train(
+        monkeypatch, tmp_path, w.era, tmp_path / "plain", cfg, w.lib, w.stem
+    )
+    veto = _pool_train(
+        monkeypatch, tmp_path, w.era, tmp_path / "veto", vetoed, w.lib, w.stem
+    )
+    _same_tree(plain[0], veto[0])
+    assert plain[1] == veto[1] and plain[2] == veto[2]
+    assert "alignment_veto" not in (veto[0].get("serving") or {})
+
+
 @pytest.mark.parametrize("kind", ["origami", "bank"])
 def test_a_fresh_runs_data_trains_as_it_did_without_the_restriction(
     tmp_path, monkeypatch, kind

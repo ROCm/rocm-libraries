@@ -300,6 +300,7 @@ def model_view(data: bytes, hardware: DeviceHardware, tw: Any) -> ModelView:
                 serving.get("non_temporal_family_rule"),
             ),
             ("the trained-key gate", serving.get("trained_key_gate")),
+            ("the alignment veto", serving.get("alignment_veto")),
         )
         if on
     ]

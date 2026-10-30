@@ -880,3 +880,50 @@ def test_tail_gemms_are_listed_and_a_passing_collapse_is_retrained(run):
     for r in judged:
         assert r["tail_floor"] == 0.7
         assert all(t["sel_eff"] < 0.7 for t in r["tail_gemms"])
+
+
+def test_stage04b_ranks_round_bundles_without_the_alignment_veto(tmp_path, monkeypatch):
+    """deploy.alignment_veto is a deploy key: with it in the run's config,
+    stage04b ranks the round's MLREC_v3 bundle as stage05 wrote it, without
+    the veto, and decides exactly as without the key."""
+    import yaml
+
+    import stage04b_iterate_active_learning as s4b
+    from lib import evaluate as ev
+    from lib import mlrec
+    from test_stage05_train import kernel_pool, write_attributes
+
+    r0, r1 = tmp_path / "round_0", tmp_path / "round_1"
+    old = shapes_for(10, 30, CELLS3[:2])
+    write_attributes(write_round(r0 / "stage04", old), kernel_pool())
+    train(tmp_path, [r0 / "stage04"], r0 / "stage05", "--catalog", "v3")
+    new = write_round(r1 / "stage04", shapes_for(11, 45, CELLS3) + old[:5])
+    write_attributes(new, kernel_pool())
+    plain = write_config(tmp_path / "plain.yaml")
+    doc = yaml.safe_load(plain.read_text())
+    doc["deploy"] = {"alignment_veto": {"k_min": 512, "align_bytes": 128}}
+    vetoed = tmp_path / "vetoed.yaml"
+    vetoed.write_text(yaml.safe_dump(doc))
+    seen = []
+    real = ev.evaluate_model
+
+    def capture(data, *a, **kw):
+        seen.append(bytes(data))
+        return real(data, *a, **kw)
+
+    monkeypatch.setattr(ev, "evaluate_model", capture)
+    decided = {}
+    for cfg in (plain, vetoed):
+        out = tmp_path / cfg.stem
+        argv = ["stage04b", "--models-dir", r0 / "stage05", "--enriched-csv-dir", new]
+        argv += ["--out-dir", out, "--arch", "gfx950", "--config-yaml", cfg]
+        argv += ["--round-idx", 1, "--quiet"]
+        monkeypatch.setattr(sys, "argv", [str(a) for a in argv])
+        assert s4b.main() == 0
+        decided[cfg.stem] = (
+            json.loads((out / "decisions.json").read_text())["per_cell"],
+            (out / "retrain_cells.txt").read_text(),
+        )
+    assert seen and all(d[:8] == mlrec.MAGIC_V3 for d in seen)
+    assert all("alignment_veto" not in mlrec.read_header(d)["serving"] for d in seen)
+    assert decided["plain"] == decided["vetoed"]

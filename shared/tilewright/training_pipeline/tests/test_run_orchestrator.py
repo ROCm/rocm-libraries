@@ -927,6 +927,186 @@ def test_every_stage_runs_with_the_runtime_env(tmp_path, stubs, env, monkeypatch
     assert yaml.safe_load(text)["runtime"]["env"] == {"TW_STAGE_KNOB": "on"}
 
 
+def test_the_alignment_veto_is_a_v3_deploy_key(tmp_path):
+    """deploy.alignment_veto ({k_min, align_bytes}, or null) serves MLREC_v3
+    models without the non-temporal rule; a final-retrain recipe cannot set
+    it, since stage06 deploys every bundle with the run's."""
+    veto = {"k_min": 512, "align_bytes": 128}
+    cfg = yaml.safe_load(make_config(tmp_path).read_text())
+    cfg["train"]["catalog"] = "v3"
+    assert ro.validate_config(cfg)[0] == []
+    cfg["deploy"]["alignment_veto"] = veto
+    assert ro.validate_config(cfg)[0] == []
+    assert ro.cfg_get(cfg, "deploy.alignment_veto") == veto
+    cfg["deploy"]["alignment_veto"] = None
+    assert ro.validate_config(cfg)[0] == []
+    assert ro.cfg_get({}, "deploy.alignment_veto") is None
+    assert ro.RECIPE_DEPLOYED_KEYS["alignment_veto"] == "deploy.alignment_veto"
+    for bad, needle in (
+        ({"k_min": 0, "align_bytes": 128}, "deploy.alignment_veto.k_min"),
+        ({"k_min": 512, "align_bytes": 96}, "power of two"),
+        ({"k_min": 512}, "deploy.alignment_veto.align_bytes: required key is missing"),
+        (
+            {"k_min": 512, "align_bytes": 128, "bits": 1},
+            "deploy.alignment_veto.bits: unknown key",
+        ),
+        (512, "deploy.alignment_veto: expected a mapping"),
+    ):
+        cfg["deploy"]["alignment_veto"] = bad
+        errors = ro.validate_config(cfg)[0]
+        assert any(needle in e for e in errors), (bad, errors)
+    cfg["deploy"]["alignment_veto"] = veto
+    # make_config's layout is TN, where the veto never applies.
+    warnings = ro.validate_config(cfg)[1]
+    assert any("deploy.alignment_veto: layout TN" in w for w in warnings), warnings
+    cfg["hipblaslt"]["transB"] = "T"
+    assert not any("alignment_veto" in w for w in ro.validate_config(cfg)[1])
+    cfg["train"]["non_temporal_rule"] = True
+    assert any("non-temporal rule" in e for e in ro.validate_config(cfg)[0])
+    cfg["train"]["non_temporal_rule"] = False
+    cfg["train"]["catalog"] = "v2"
+    assert any("train.catalog: v3" in e for e in ro.validate_config(cfg)[0])
+
+
+VETO_KEY = {"k_min": 512, "align_bytes": 128}
+ALIGNMENT_VETO_KEYS = (
+    "deploy.alignment_veto.k_min",
+    "deploy.alignment_veto.align_bytes",
+)
+
+
+def test_the_alignment_veto_refuses_data_types_it_does_not_count(tmp_path):
+    """The config check refuses the veto for a K-contiguous operand whose data
+    type the veto does not count at its element width (lib/feasibility.py
+    ALIGNMENT_VETO_DTYPES)."""
+    cfg = yaml.safe_load(make_config(tmp_path).read_text())
+    cfg["train"]["catalog"] = "v3"
+    cfg["deploy"]["alignment_veto"] = dict(VETO_KEY)
+    cfg["hipblaslt"]["transB"] = "T"
+    assert ro.validate_config(cfg)[0] == []
+    cfg["hipblaslt"]["a_type"] = "i8_r"
+    errors = ro.validate_config(cfg)[0]
+    assert any("hipblaslt.a_type i8_r" in e for e in errors), errors
+    # B, which the veto never reads in TT, may be of any type
+    cfg["hipblaslt"].update(a_type="bf16_r", b_type="f4_r")
+    assert not [e for e in ro.validate_config(cfg)[0] if "alignment_veto" in e]
+
+
+def test_the_alignment_veto_is_pinned_only_when_set(tmp_path):
+    """deploy.alignment_veto's keys enter a run's pin only when the config
+    sets the veto, so that a pin written before the key existed is not
+    changed by it."""
+    cfg, _ = ro.load_config(make_config(tmp_path, **{"train.catalog": "v3"}))
+    assert not [k for k in ro.pinned_config(cfg) if k.startswith("deploy.alignment")]
+    cfg["deploy"]["alignment_veto"] = dict(VETO_KEY)
+    pinned = ro.pinned_config(cfg)
+    assert pinned["deploy.alignment_veto.k_min"] == 512
+    assert pinned["deploy.alignment_veto.align_bytes"] == 128
+
+
+def test_rounds_score_their_bundles_without_the_alignment_veto(tmp_path, pipeline_dir):
+    """With deploy.alignment_veto a round's stage06 and the audit evaluations
+    and v2 registrations of rounds score their bundles without the veto,
+    the final retrain's stage06 with it; every option they are given is one
+    the script defines; without the key no command changes."""
+    run = tmp_path / "run"
+    rd, final = run / "round_1", run / ro.FINAL_RETRAIN_DIR
+    plain = _pipeline(tmp_path, make_config(tmp_path, **{"train.catalog": "v3"}))
+    assert plain.round_scoring_args() == []
+    assert "--score-without-alignment-veto" not in plain.args_stage06(rd)
+    assert "--without-alignment-veto" not in plain.args_audit_eval(rd)
+    veto = _pipeline(
+        tmp_path,
+        make_config(
+            tmp_path,
+            **{"train.catalog": "v3", "deploy.alignment_veto": dict(VETO_KEY)},
+        ),
+    )
+    assert veto.round_scoring_args() == ["--without-alignment-veto"]
+    s06 = veto.args_stage06(rd, ro.GatePlan(rd / "g", 0.95, "not-worse", rd / "b"))
+    assert "--score-without-alignment-veto" in s06
+    assert "--score-without-alignment-veto" not in veto.args_stage06(final)
+    assert veto.args_audit_eval(rd)[-1] == "--without-alignment-veto"
+    for cmd, flag in (
+        (
+            [pipeline_dir / "stages" / ro.STAGE_DEFS["stage06"].script],
+            "--score-without-alignment-veto",
+        ),
+        ([ro.AUDIT_EVAL_SCRIPT], "--without-alignment-veto"),
+        ([ro.AUDIT_V2_SCRIPT, "run"], "--without-alignment-veto"),
+    ):
+        proc = subprocess.run(
+            [sys.executable, *map(str, cmd), "--help"],
+            capture_output=True,
+            text=True,
+            env=dict(os.environ, COLUMNS="80"),
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert flag in defined_options(proc.stdout), cmd
+
+
+def test_preflight_checks_the_module_serves_the_alignment_veto(monkeypatch):
+    """With deploy.alignment_veto a tilewright module that predates the veto
+    is refused up front: it refuses every model stage06 stages."""
+    import types
+
+    from lib import evaluate, features
+
+    tw = types.SimpleNamespace(
+        Config=lambda **kw: None,
+        feature_catalog_hash=features.feature_names_hash,
+        feature_catalog_hashes=lambda: [
+            features.feature_names_hash(),
+            features.v3_catalog_hash(),
+        ],
+        ModelInfo=type("ModelInfo", (), {"min_effective_cus": property(lambda i: 0)}),
+    )
+    monkeypatch.setattr(evaluate, "tilewright_module", lambda: tw)
+    assert ro._tilewright_errors("v3") == []
+    (err,) = ro._tilewright_errors("v3", alignment_veto=True)
+    assert err.startswith("deploy.alignment_veto: the tilewright module predates")
+    assert "ModelInfo has no alignment_veto" in err
+    tw.ModelInfo = type(
+        "ModelInfo",
+        (),
+        {
+            "min_effective_cus": property(lambda i: 0),
+            "alignment_veto": property(lambda i: None),
+        },
+    )
+    assert ro._tilewright_errors("v3", alignment_veto=True) == []
+
+
+def test_preflight_checks_a_stage07_build_serves_the_alignment_veto(tmp_path):
+    import fake_hipblaslt as fh
+
+    v3 = tmp_path / "v3"
+    cfg, _ = ro.load_config(
+        make_config(
+            tmp_path,
+            **{
+                "stage07.build_dir": str(v3),
+                "train.catalog": "v3",
+                "deploy.alignment_veto": dict(VETO_KEY),
+            },
+        )
+    )
+    paths = ro.derive_paths(cfg)
+    floor = ("MLREC_v3", ro.CU_FLOOR_MARKER)
+    fh.write_fake_build(v3, "gfx950", STEM, capabilities=floor)
+    (err,) = ro.stage07_build_errors(cfg, paths)
+    assert err.startswith(f"stage07.build_dir {v3}: its TensileLite")
+    assert "which declare an alignment veto its engine predates" in err
+    assert err.endswith(f"no {ro.ALIGNMENT_VETO_MARKER!r} in it")
+    fh.write_fake_build(
+        v3, "gfx950", STEM, capabilities=floor + (ro.ALIGNMENT_VETO_MARKER,)
+    )
+    assert ro.stage07_build_errors(cfg, paths) == []
+    cfg["deploy"]["alignment_veto"] = None
+    fh.write_fake_build(v3, "gfx950", STEM, capabilities=floor)
+    assert ro.stage07_build_errors(cfg, paths) == []
+
+
 def test_runtime_env_is_validated(tmp_path):
     cfg, _ = ro.load_config(make_config(tmp_path))
     cfg["runtime"]["env"] = {"HIP_VISIBLE_DEVICES": "0", "OK_KNOB": True}
@@ -2736,8 +2916,11 @@ def test_the_offset_rereads_are_pinned_only_when_they_change_something(tmp_path)
         "correctness.custom_kernels",
         "audit.held_out",
         "contexts.granule",
-    } | {f"bench.rebench.{k}" for k in NEUTRAL_REREADS} | set(NEED_BUDGET)
+    } | {f"bench.rebench.{k}" for k in NEUTRAL_REREADS} | set(NEED_BUDGET) | set(
+        ALIGNMENT_VETO_KEYS
+    )
     assert all(ro.PINNED_UNLESS_NEUTRAL[k] == 0 for k in floors)
+    assert all(ro.PINNED_UNLESS_NEUTRAL[k] is None for k in ALIGNMENT_VETO_KEYS)
     assert ro.PINNED_UNLESS_NEUTRAL["audit.held_out"] == []
     assert ro.PINNED_UNLESS_NEUTRAL["correctness.custom_kernels"] is None
     assert all(REREAD_DEFAULTS[k] == v for k, v in NEUTRAL_REREADS.items())
@@ -3973,6 +4156,14 @@ def test_the_cu_floor_marker_is_the_name_the_engines_loader_gives_the_floor():
     names as const char*, which every compiler stores whole; a message the
     loader builds as a std::string some compilers store in pieces."""
     read = r"\.u32\(&\w+, " + re.escape(f'"{ro.CU_FLOOR_MARKER}"') + r"\)"
+    assert re.search(read, FORMAT_CPP.read_text())
+
+
+@pytest.mark.skipif(not FORMAT_CPP.is_file(), reason="no engine sources")
+def test_the_alignment_veto_marker_is_the_name_the_engines_loader_gives_its_k():
+    """As for the CU floor: the C string naming the veto's first field in the
+    engine's loader."""
+    read = r"\.u32\(&\w+, " + re.escape(f'"{ro.ALIGNMENT_VETO_MARKER}"') + r"\)"
     assert re.search(read, FORMAT_CPP.read_text())
 
 

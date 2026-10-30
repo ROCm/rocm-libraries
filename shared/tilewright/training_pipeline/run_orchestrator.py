@@ -185,6 +185,7 @@ from lib import correctness as cxlib  # noqa: E402
 from lib import correctness_gate as cgate  # noqa: E402
 from lib import device_values as dvlib  # noqa: E402
 from lib import external_sets as xslib  # noqa: E402
+from lib import feasibility as feaslib  # noqa: E402
 from lib import fingerprint  # noqa: E402
 from lib import gpu_health  # noqa: E402
 from lib import gpu_lease  # noqa: E402
@@ -908,6 +909,13 @@ SCHEMA = _section(
                 "provenance": _str(
                     default=provlib.DEPLOY_PROVENANCE_MODES[0],
                     choices=provlib.DEPLOY_PROVENANCE_MODES,
+                ),
+                "alignment_veto": _section(
+                    {
+                        "k_min": _int(required=True, minimum=1, maximum=2**32 - 1),
+                        "align_bytes": _int(required=True, minimum=1, maximum=2**28),
+                    },
+                    nullable=True,
                 ),
             }
         ),
@@ -1734,6 +1742,8 @@ def validate_config(
     _final_retrain_config_checks(cfg, errors, warnings)
     _train_config_checks(cfg, errors, warnings)
 
+    _alignment_veto_config_checks(cfg, errors, warnings)
+
     deploy_root = cfg_get(cfg, "deploy.rocm_libraries_to_deploy")
     apply_patch = cfg_get(cfg, "deploy.apply_patch")
     build_after = cfg_get(cfg, "deploy.build_after_apply")
@@ -1758,6 +1768,41 @@ def validate_config(
     else:
         errors += stage07_errors
     return errors, warnings
+
+
+def _alignment_veto_config_checks(
+    cfg: Mapping[str, Any], errors: List[str], warnings: List[str]
+) -> None:
+    """deploy.alignment_veto: a power-of-two line, and models it can serve:
+    MLREC_v3 (train.catalog v3) without the non-temporal rule; a warning for
+    a layout it never applies to (TN and NT: two K-contiguous operands, or
+    none)."""
+    if cfg_get(cfg, "deploy.alignment_veto") is None:
+        return
+    h = cfg.get("hipblaslt") or {}
+    a_contiguous = str(h.get("transA", "")).upper() == "T"
+    b_contiguous = str(h.get("transB", "")).upper() == "N"
+    if a_contiguous == b_contiguous:
+        warnings.append(
+            f"deploy.alignment_veto: layout {h.get('transA')}{h.get('transB')} has "
+            f"{'both operands' if a_contiguous else 'no operand'} K-contiguous; the "
+            f"veto applies only where exactly one is (TT, NN)"
+        )
+    try:
+        feaslib.deployed_alignment_veto(cfg)
+    except ValueError as e:
+        errors.append(str(e))
+    if cfg_get(cfg, "train.catalog") != "v3":
+        errors.append(
+            "deploy.alignment_veto: the alignment veto is an MLREC_v3 serving rule; "
+            "set train.catalog: v3"
+        )
+    elif cfg_get(cfg, "train.non_temporal_rule"):
+        errors.append(
+            "deploy.alignment_veto: the models are served with the non-temporal "
+            "rule (train.non_temporal_rule), which the alignment veto is never "
+            "served with"
+        )
 
 
 def _guard_config_checks(
@@ -2343,6 +2388,8 @@ PINNED_UNLESS_NEUTRAL: Dict[str, Any] = {
     "seed.strong_cell_factor": 1.0,
     "seed.strong_cell_margin": STRONG_CELL_MARGIN,
     "seed.large_k_factor": 1.0,
+    "deploy.alignment_veto.k_min": None,
+    "deploy.alignment_veto.align_bytes": None,
 }
 
 
@@ -2552,7 +2599,7 @@ def _executable_errors(path: Path, what: str) -> List[str]:
     return []
 
 
-def _tilewright_errors(catalog: str = "v2") -> List[str]:
+def _tilewright_errors(catalog: str = "v2", alignment_veto: bool = False) -> List[str]:
     try:
         from lib import evaluate
 
@@ -2588,6 +2635,15 @@ def _tilewright_errors(catalog: str = "v2") -> List[str]:
                 "models stage05 writes, which declare one ('unknown serving "
                 "flags'); reinstall it with `pip install shared/tilewright/python`"
             ]
+    if alignment_veto and not hasattr(
+        getattr(tilewright, "ModelInfo", None), "alignment_veto"
+    ):
+        return [
+            "deploy.alignment_veto: the tilewright module predates the alignment "
+            "veto (its ModelInfo has no alignment_veto), so it refuses the models "
+            "stage06 stages, which declare it ('unknown serving flags'); reinstall "
+            "it with `pip install shared/tilewright/python`"
+        ]
     try:
         current = evaluate.module_takes_attributes(tilewright)
     except Exception as e:
@@ -2749,6 +2805,7 @@ RECIPE_FIXED_TRAIN_KEYS = ("catalog", "attribute_spec")
 RECIPE_DEPLOYED_KEYS = {
     "trained_key_gate": "train.trained_key_gate",
     "no_trained_key_gate": "train.trained_key_gate",
+    "alignment_veto": "deploy.alignment_veto",
 }
 # stage05 options the orchestrator derives from the run (its rounds, library
 # and device) and from the final retrain itself (every cell).
@@ -3999,6 +4056,8 @@ def stage07_build(cfg: Mapping[str, Any], paths: Paths) -> Optional[Stage07Build
 # it; its messages about the floor are built at run time from pieces under
 # some compilers.
 CU_FLOOR_MARKER = "CU floor"
+# The name the same loader gives the first field of the alignment veto.
+ALIGNMENT_VETO_MARKER = "alignment veto K"
 # Files of a hipBLASLt build that hold TensileLite's host code: its shared
 # TensileLite library, else hipBLASLt's own library (a static TensileLite).
 TENSILELITE_LIBRARIES = (
@@ -4042,8 +4101,9 @@ def stage07_capabilities(
 ) -> Dict[str, str]:
     """{string a stage-7 TensileLite must hold: what it lacks without it}:
     the loader of the format train.catalog trains (for MLREC_v3, of the CU
-    floor every model declares too), with a bank the setting that serves it
-    and, when the run leaves kernels of the pool out (`blocks_pool`), the
+    floor every model declares too, and with deploy.alignment_veto of the
+    veto every staged model declares), with a bank the setting that serves
+    it and, when the run leaves kernels of the pool out (`blocks_pool`), the
     reader of the blocklist sidecar stage06 ships."""
     catalog = str(cfg_get(cfg, "train.catalog") or "v2")
     out = {
@@ -4055,6 +4115,13 @@ def stage07_capabilities(
             "cannot load the MLREC_v3 models stage05 writes, which declare a CU "
             "floor its engine predates ('unknown serving flags'); build hipBLASLt "
             "from a checkout whose shared/tilewright has the CU floor"
+        )
+    if cfg_get(cfg, "deploy.alignment_veto") is not None:
+        out[ALIGNMENT_VETO_MARKER] = (
+            "cannot load the models stage06 stages with deploy.alignment_veto, "
+            "which declare an alignment veto its engine predates ('unknown "
+            "serving flags'), so hipBLASLt would rank with Origami; build "
+            "hipBLASLt from a checkout whose shared/tilewright has the veto"
         )
     if bank_pool.bank_source(cfg).enabled:
         out[TILEWRIGHT_BANK_VAR] = (
@@ -4448,7 +4515,10 @@ def preflight(
             for w in disk_warns:
                 ui.warn("disk", w)
     errs += xslib.config_errors(cfg)
-    errs += _tilewright_errors(str(cfg_get(cfg, "train.catalog") or "v2"))
+    errs += _tilewright_errors(
+        str(cfg_get(cfg, "train.catalog") or "v2"),
+        cfg_get(cfg, "deploy.alignment_veto") is not None,
+    )
     return list(dict.fromkeys(errs))
 
 
@@ -7117,6 +7187,9 @@ class Pipeline:
                 ]
                 if cell_gate.record_only:
                     args.append("--cell-gate-record-only")
+        if round_index(rd) is not None and self.round_scoring_args():
+            # A round's gates and audit score its bundle without the veto.
+            args.append("--score-without-alignment-veto")
         if self.origami_reference:
             args.append("--origami-reference")
         if self.paths.deploy_root is not None:
@@ -7856,7 +7929,18 @@ class Pipeline:
             "--out",
             str(rd / "stage05" / auditlib.RESULT_FILE),
             *self.audit_eval_common(),
+            *self.round_scoring_args(),
         ]
+
+    def round_scoring_args(self) -> List[str]:
+        """The option of scripts/audit_eval.py and scripts/audit_v2.py that
+        scores a bundle as every decision of the rounds does: without the
+        alignment veto (deploy.alignment_veto), which only the staged files,
+        the final retrain's decision and its stage06 score; none without the
+        key, so that such a run's commands are as before it."""
+        if self.get("deploy.alignment_veto") is None:
+            return []
+        return ["--without-alignment-veto"]
 
     def audit_eval_common(self) -> List[str]:
         """scripts/audit_eval.py options of the run: its audit set, config
@@ -7939,6 +8023,8 @@ class Pipeline:
         owner_dir: Path,
         models: Sequence[Tuple[str, Path]],
         round_idx: Optional[int],
+        *,
+        without_veto: bool = False,
     ) -> Optional[int]:
         """Protocol v2 (lib/audit_v2.py) of `models` ((name, models.pt)) on
         the audit set: `scripts/audit_v2.py run` registers them and benches,
@@ -7946,9 +8032,10 @@ class Pipeline:
         sets lack a pick of theirs (generation 0 when the audit set has no
         v2 measurement yet), then, with audit.sustained, the sustained
         composite's power-capped exclusive GEMMs that lack one
-        (lib/audit_sustained.py). None when the audit set is not complete
-        for the current pool (the end of a full run tries again); a failure
-        is reported, never fatal."""
+        (lib/audit_sustained.py); `without_veto` registers their picks as
+        the rounds' decisions score them (`round_scoring_args`). None when
+        the audit set is not complete for the current pool (the end of a
+        full run tries again); a failure is reported, never fatal."""
         d = auditlib.config_dir(self.cfg)
         if d is None or self.get("audit.v2") == "off" or not models:
             return 0
@@ -7970,6 +8057,8 @@ class Pipeline:
             cmd.append("--no-sustained")
         for name, path in models:
             cmd += ["--model", f"{name}={path}"]
+        if without_veto:
+            cmd += self.round_scoring_args()
         ui.banner(f"audit v2 -- {names} on the audit set", ui.C.BLUE)
         rc = self.run_tool(
             owner_dir, "audit_v2", cmd, round_idx, self.devices, per_gpu=True
@@ -7988,7 +8077,9 @@ class Pipeline:
         audit record has v2."""
         models = rd / "stage05" / "models.pt"
         if self.get("audit.v2") == "rounds" and models.is_file():
-            self.audit_v2(rd, [(self.v2_name(rd), models)], step.index)
+            self.audit_v2(
+                rd, [(self.v2_name(rd), models)], step.index, without_veto=True
+            )
 
     def round_audited(self, rd: Path, v2: bool) -> bool:
         """The round's bundle has a complete audit record (with a complete
@@ -8028,9 +8119,29 @@ class Pipeline:
         it is now: rounds' candidates, and the final retrain's models.pt
         leaving out the shapes of the rounds it trained on; one record per
         bundle in audit_results/<round or final_retrain>.json (the report
-        prefers the more complete record of a bundle)."""
+        prefers the more complete record of a bundle). With
+        deploy.alignment_veto the rounds' bundles are scored without the
+        veto, as their stage06 scored them, and the final retrain with it,
+        in two evaluations."""
         out_dir = self.run_dir / AUDIT_RESULTS_DIR
         out_dir.mkdir(parents=True, exist_ok=True)
+        rounds = [rd for rd in rds if round_index(rd) is not None]
+        finals = [d for d in rds if round_index(d) is None]
+        apart = self.round_scoring_args()
+        groups = (
+            [(rounds, apart), (finals[:1], [])]
+            if apart
+            else [(rounds + finals[:1], [])]
+        )
+        worst = 0
+        for bundles, extra in groups:
+            if bundles:
+                worst = max(worst, self._rescore(out_dir, bundles, extra))
+        return worst
+
+    def _rescore(self, out_dir: Path, rds: Sequence[Path], extra: List[str]) -> int:
+        """One audit_eval.py evaluation of `rescore_rounds` (`extra`: its
+        round-scoring option)."""
         scores = out_dir / "rescore.json"
         rounds = [rd for rd in rds if round_index(rd) is not None]
         finals = [d for d in rds if round_index(d) is None]
@@ -8041,7 +8152,7 @@ class Pipeline:
             cmd += ["--model-file", str(d / "stage05" / "models.pt")]
             for name in rb.trained_rounds(d):
                 cmd += ["--trained-round-dir", str(self.run_dir / name)]
-        cmd += ["--out", str(scores), *self.audit_eval_common()]
+        cmd += ["--out", str(scores), *self.audit_eval_common(), *extra]
         names = [rd.name for rd in rounds] + [d.name for d in finals[:1]]
         ui.banner(
             f"audit -- {', '.join(names)} on the audit set as it is now", ui.C.BLUE
@@ -8066,7 +8177,10 @@ class Pipeline:
         a shipped final retrain's, whose v2 bench failed when it was
         decided) and of the undecided final retrain `final` (its models.pt),
         then the bundles whose records are not complete scored again
-        (`rescore_rounds`)."""
+        (`rescore_rounds`). With deploy.alignment_veto the rounds' bundles
+        are registered without the veto, as their decisions scored them, and
+        the final retrain's with it, together with the bytes its gate
+        compares it with (`decision_baseline_v2`)."""
         d = auditlib.config_dir(self.cfg)
         if d is None or not rounds:
             return
@@ -8088,17 +8202,47 @@ class Pipeline:
         if shipped is not None and not self.round_audited(shipped, mode != "off"):
             wanted[shipped] = mode != "off"
             todo.append(shipped)
-        models = [
-            (self.v2_name(rd), rd / "stage05" / "models.pt")
+        listed = [
+            (rd, (self.v2_name(rd), rd / "stage05" / "models.pt"))
             for rd in todo
             if wanted[rd] and (rd / "stage05" / "models.pt").is_file()
         ]
-        if final is not None and mode != "off" and final.is_file():
+        models = [m for _, m in listed]
+        undecided = final is not None and mode != "off" and final.is_file()
+        if undecided:
+            assert final is not None
             models.append((self.v2_name(final.parent.parent), final))
-        if models:
-            self.audit_v2(self.run_dir, models, None)
+        if not self.round_scoring_args():
+            if models:
+                self.audit_v2(self.run_dir, models, None)
+        else:
+            plain = [m for rd, m in listed if round_index(rd) is not None]
+            staged = [m for m in models if m not in plain]
+            if undecided:
+                assert final is not None
+                staged += self.decision_baseline_v2(rounds, final.parent.parent)
+            if plain:
+                self.audit_v2(self.run_dir, plain, None, without_veto=True)
+            if staged:
+                self.audit_v2(self.run_dir, staged, None)
         if todo:
             self.rescore_rounds(todo)
+
+    def decision_baseline_v2(
+        self, rounds: Sequence[Path], final_dir: Path
+    ) -> List[Tuple[str, Path]]:
+        """The model the final retrain in `final_dir` is compared with when
+        it is a round's bundle (the bundle the run ships, else the final
+        round's: `FinalRetrain.baseline`), as protocol v2 registers it for
+        that decision: its staged file, which carries the alignment veto
+        (else its models.pt, which audit_v2.py packs with it); none when it
+        is a final retrain, which is registered with the veto."""
+        ships = shipped_round([b for b in run_bundles(self.run_dir) if b != final_dir])
+        base = ships if ships is not None else (rounds[-1] if rounds else None)
+        if base is None or round_index(base) is None:
+            return []
+        path, _ = auditlib.bundle_model(base)
+        return [(self.v2_name(base), path)] if path.is_file() else []
 
     def end_of_run_waits(self, n_done: int, total: int) -> List[str]:
         """What waits for the planned rounds when a full run stops early

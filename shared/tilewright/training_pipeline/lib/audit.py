@@ -1501,6 +1501,8 @@ class _Scorer:
         self.rules = soft_rules(
             self.header.get("serving") or {}, int(self.header["version"])
         )
+        # The model's alignment veto, a serving rule its ceilings honour.
+        self.veto = (self.header.get("serving") or {}).get("alignment_veto")
         self.nt = non_temporal_availability(prep.pool.kernels)
         self.families = (
             non_temporal_families(prep.pool.kernels)
@@ -1518,7 +1520,7 @@ class _Scorer:
         return _label_of(self.labels, ev.context_of(g))
 
     def row(self, g: Mapping[str, Any], r: Any, sel_eff: Optional[float]) -> Row:
-        from .feasibility import passes_gates
+        from .feasibility import alignment_vetoed, passes_gates
         from .features import config_kwargs_from_row, problem_kwargs_from_row
         from .grid import cell_key
 
@@ -1536,6 +1538,15 @@ class _Scorer:
                 **self.rules,
             )
         ]
+        if self.veto:
+            # The veto serves none of the kernels it rejects, unless it
+            # rejects every kernel the other rules pass.
+            kept = [
+                c
+                for c in ok
+                if not alignment_vetoed(problem, config_kwargs_from_row(c), self.veto)
+            ]
+            ok = kept or ok
         w = float(g["winner_us"])
         allowed = {int(x["sol_idx_global"]) for x in ok}
         table = self.table_ids
@@ -3080,16 +3091,25 @@ def model_bytes(
     arch: str,
     weight_dtype: str,
     cfg: Optional[Mapping[str, Any]] = None,
+    *,
+    alignment_veto: bool = True,
 ) -> bytes:
     """MLREC bytes of a model file: a stage05 `models.pt` bundle is written
-    at `weight_dtype`, as stage06 deploys it, with the provenance stage06
-    records under `cfg` (lib/provenance.py `deployed_provenance`; the
-    bundle's own without a config); anything else is read as MLREC."""
+    at `weight_dtype`, as stage06 stages it, with the provenance and, for an
+    MLREC_v3 bundle, the alignment veto stage06 records under `cfg`
+    (lib/provenance.py `deployed_provenance`, lib/feasibility.py
+    `deployed_alignment_veto`; the bundle's own without a config); anything
+    else is read as MLREC. With `alignment_veto` False the bytes are those
+    without the veto, as the run scores its rounds' bundles: a models.pt
+    is written without it and an MLREC_v3 file has it removed
+    (`without_alignment_veto`)."""
     path = Path(path)
     if path.suffix != ".pt":
-        return path.read_bytes()
+        data = path.read_bytes()
+        return data if alignment_veto else without_alignment_veto(data)
     import torch
 
+    from . import feasibility as feas
     from . import hardware as hwlib
     from . import mlrec
     from . import provenance as prov
@@ -3100,9 +3120,28 @@ def model_bytes(
         if cfg is None
         else prov.deployed_provenance(bundle.get("provenance"), cfg)
     )
+    if cfg is not None and str(bundle.get("catalog") or "v2") == "v3":
+        serving = dict(bundle.get("serving") or {})
+        serving.pop("alignment_veto", None)
+        veto = feas.deployed_alignment_veto(cfg) if alignment_veto else None
+        if veto is not None:
+            serving["alignment_veto"] = veto
+        bundle = dict(bundle, serving=serving)
     return mlrec.write_model(
         bundle, None, arch, hwlib.arch_constants(arch), weight_dtype, recorded or {}
     )
+
+
+def without_alignment_veto(data: bytes) -> bytes:
+    """`data` without the alignment veto when it is an MLREC_v3 model file
+    that declares one (lib/mlrec.py `without_alignment_veto`); any other
+    bytes as they are."""
+    from . import mlrec
+
+    data = bytes(data)
+    if data[: len(mlrec.MAGIC_V3)] != mlrec.MAGIC_V3:
+        return data
+    return mlrec.without_alignment_veto(data)
 
 
 def run_for_stage(

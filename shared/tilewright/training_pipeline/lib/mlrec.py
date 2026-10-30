@@ -40,7 +40,8 @@ replaces the header tail with:
                                    family-wise non-temporal rule (only with
                                    bit 2; lib/feasibility.py), bit 6 trained
                                    on the table plus the bank, bit 7
-                                   trained-key gate, bit 8 CU floor
+                                   trained-key gate, bit 8 CU floor, bit 9
+                                   alignment veto (never with bit 2)
     u32      cascade_keys
     f64      min_cu_fraction, max_cu_fraction
                                    usable CUs / device CUs the model supports,
@@ -55,6 +56,9 @@ replaces the header tail with:
              are scored only for a problem none of them suits
     with bit 8 only: u32 min_effective_cus (>= 1): the fewest usable CUs the
              model supports on any device, whatever its CU count
+    with bit 9 only: u32 veto_k_min (>= 1), u32 veto_align_bits (a power of
+             two, >= 8): the alignment veto (lib/feasibility.py
+             `alignment_vetoed`), a serving rule stage06 adds at deploy
     optional provenance, present when header bytes remain:
     u16      n_provenance (1..5), then per entry u16+str key | u16+str value,
              each key of PROVENANCE_KEYS at most once
@@ -154,7 +158,8 @@ V3_NON_TEMPORAL_FAMILY_RULE = 0x20
 V3_BANK = 0x40
 V3_TRAINED_KEY_GATE = 0x80
 V3_CU_FLOOR = 0x100
-_V3_SERVING_FLAGS_KNOWN = 0x1FF
+V3_ALIGNMENT_VETO = 0x200
+_V3_SERVING_FLAGS_KNOWN = 0x3FF
 SCHEDULE_BITS: Dict[str, int] = {"default": 1, "dynamic": 2, "auto": 4}
 BOUND_KEYS: Tuple[str, ...] = ("q_lo", "q_hi", "i_lo", "i_hi", "x_lo", "x_hi")
 # Where an MLREC_v3 model came from: the training config's id, a hash of the
@@ -570,9 +575,10 @@ def _split_rules(
 
 def v3_serving_flags(serving: Mapping[str, Any]) -> int:
     """MLREC_v3 serving flags of a bundle's `serving` (soft rules, launch
-    keys, the bank and the trained-key gate off and the whitelist tier on
-    unless set). ValueError for the family-wise non-temporal rule without
-    the non-temporal rule."""
+    keys, the bank, the trained-key gate and the alignment veto off and the
+    whitelist tier on unless set). ValueError for the family-wise
+    non-temporal rule without the non-temporal rule, and for the alignment
+    veto with it."""
     flags = 0
     if serving.get("small_batched_rule", False):
         flags |= V3_SMALL_BATCHED_RULE
@@ -595,6 +601,13 @@ def v3_serving_flags(serving: Mapping[str, Any]) -> int:
         flags |= V3_BANK
     if serving.get("trained_key_gate", False):
         flags |= V3_TRAINED_KEY_GATE
+    if serving.get("alignment_veto"):
+        if flags & V3_NON_TEMPORAL_RULE:
+            raise ValueError(
+                "the alignment veto is a rule of models served without the "
+                "non-temporal rule"
+            )
+        flags |= V3_ALIGNMENT_VETO
     return flags
 
 
@@ -621,6 +634,29 @@ def cu_floor_bytes(cus: Any) -> bytes:
             f"got {cus!r}"
         )
     return struct.pack("<I", int(cus))
+
+
+def alignment_veto_bytes(veto: Mapping[str, Any]) -> bytes:
+    """The alignment-veto section of a serving `alignment_veto` ({k_min,
+    align_bits}). ValueError unless k_min is a whole number from 1 to
+    2**32 - 1 and align_bits a power of two from 8 to 2**31."""
+    k_min, bits = veto.get("k_min"), veto.get("align_bits")
+    for name, value in (("k_min", k_min), ("align_bits", bits)):
+        if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+            raise ValueError(
+                f"the alignment veto's {name} must be a whole number, got {value!r}"
+            )
+    if not 1 <= int(k_min) < 2**32:
+        raise ValueError(
+            f"the alignment veto's k_min {k_min} is not from 1 to 2**32 - 1"
+        )
+    bits = int(bits)
+    if bits < 8 or bits & (bits - 1) or bits >= 2**32:
+        raise ValueError(
+            f"the alignment veto's line of {bits} bits is not a power of two "
+            f"from 8 to 2**31"
+        )
+    return struct.pack("<II", int(k_min), bits)
 
 
 def schedule_mask(schedules: Iterable[str]) -> int:
@@ -815,6 +851,8 @@ def _v3_tail(
         tail.append(trained_keys_bytes(trained_keys or ()))
     if floor is not None:
         tail.append(cu_floor_bytes(floor))
+    if serving.get("alignment_veto"):
+        tail.append(alignment_veto_bytes(serving["alignment_veto"]))
     tail.append(_provenance_bytes(check_provenance(provenance)))
     return b"".join(tail)
 
@@ -835,8 +873,9 @@ def write_model_v3(
     `feature_bounds` {q_lo, ..., x_hi} and `view_key_hashes`; `serving`
     holds small_batched_rule / dot2_rule / non_temporal_rule /
     non_temporal_family_rule, launch_keys, bank and trained_key_gate
-    (default off), whitelist_tier (default on) and cascade_keys (default
-    32); with trained_key_gate, `trained_view_keys` lists the view-key
+    (default off), whitelist_tier (default on), cascade_keys (default
+    32) and alignment_veto ({k_min, align_bits}, or absent or None for
+    none); with trained_key_gate, `trained_view_keys` lists the view-key
     hashes of the keys with training data. The arch's
     bandwidth coefficients are not written. `provenance` (else the bundle's
     `provenance`) is recorded as `check_provenance` describes."""
@@ -1169,6 +1208,11 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
             f"serving flags {flags} ask for the family-wise non-temporal rule "
             f"without the non-temporal rule"
         )
+    if flags & V3_ALIGNMENT_VETO and flags & V3_NON_TEMPORAL_RULE:
+        raise FormatError(
+            f"serving flags {flags} ask for the alignment veto with the "
+            f"non-temporal rule"
+        )
     if not 0.0 < lo <= hi <= 1.0:
         raise FormatError("CU fraction range must satisfy 0 < min <= max <= 1")
     if schedules == 0 or schedules & ~0x07:
@@ -1209,6 +1253,17 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
         (floor,) = cur.unpack("<I", "CU floor")
         if floor == 0:
             raise FormatError("the CU floor must be at least 1")
+    veto: Optional[Dict[str, int]] = None
+    if flags & V3_ALIGNMENT_VETO:
+        veto_k_min, veto_bits = cur.unpack("<II", "alignment veto")
+        if veto_k_min == 0:
+            raise FormatError("the alignment veto's K must be at least 1")
+        if veto_bits < 8 or veto_bits & (veto_bits - 1):
+            raise FormatError(
+                f"the alignment veto's line of {veto_bits} bits is not a power "
+                f"of two of at least 8 bits"
+            )
+        veto = {"k_min": veto_k_min, "align_bits": veto_bits}
     provenance: Dict[str, str] = {}
     if cur.pos < cur.end:
         (n_prov,) = cur.unpack("<H", "n_provenance")
@@ -1249,6 +1304,19 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
     }
     if floor is not None:
         contexts["min_effective_cus"] = floor
+    serving: Dict[str, Any] = {
+        "small_batched_rule": bool(flags & V3_SMALL_BATCHED_RULE),
+        "dot2_rule": bool(flags & V3_DOT2_RULE),
+        "non_temporal_rule": bool(flags & V3_NON_TEMPORAL_RULE),
+        "whitelist_tier": not flags & V3_NO_WHITELIST_TIER,
+        "launch_keys": bool(flags & V3_LAUNCH_KEYS),
+        "non_temporal_family_rule": bool(flags & V3_NON_TEMPORAL_FAMILY_RULE),
+        "bank": bool(flags & V3_BANK),
+        "trained_key_gate": bool(flags & V3_TRAINED_KEY_GATE),
+        "cascade_keys": cascade,
+    }
+    if veto is not None:
+        serving["alignment_veto"] = veto
     return {
         "header_end": cur.pos,
         "serving_offset": serving_offset,
@@ -1270,17 +1338,7 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
             mi_table=table,
             mi_default=mi_default,
         ),
-        "serving": {
-            "small_batched_rule": bool(flags & V3_SMALL_BATCHED_RULE),
-            "dot2_rule": bool(flags & V3_DOT2_RULE),
-            "non_temporal_rule": bool(flags & V3_NON_TEMPORAL_RULE),
-            "whitelist_tier": not flags & V3_NO_WHITELIST_TIER,
-            "launch_keys": bool(flags & V3_LAUNCH_KEYS),
-            "non_temporal_family_rule": bool(flags & V3_NON_TEMPORAL_FAMILY_RULE),
-            "bank": bool(flags & V3_BANK),
-            "trained_key_gate": bool(flags & V3_TRAINED_KEY_GATE),
-            "cascade_keys": cascade,
-        },
+        "serving": serving,
         "trained_view_keys": trained,
         "contexts": contexts,
         "clip": bool(clip),
@@ -1409,6 +1467,11 @@ def _with_flags(data: bytes, edit: Any) -> bytes:
             "the family-wise non-temporal rule refines the non-temporal rule; "
             "serve with both"
         )
+    if flags & V3_ALIGNMENT_VETO and flags & V3_NON_TEMPORAL_RULE:
+        raise ValueError(
+            "the alignment veto is a rule of models served without the "
+            "non-temporal rule"
+        )
     struct.pack_into("<I", out, at, flags)
     return bytes(out)
 
@@ -1494,6 +1557,57 @@ def with_cu_floor(data: bytes, cus: Optional[int]) -> bytes:
     section = b"" if cus is None else cu_floor_bytes(cus)
     head = bytearray(data[:at] + section + data[end:header_size])
     flags = flags | V3_CU_FLOOR if cus is not None else flags & ~V3_CU_FLOOR
+    struct.pack_into("<I", head, h["serving_offset"], flags)
+    struct.pack_into("<I", head, 12, len(head))
+    return bytes(head) + data[header_size:]
+
+
+def with_alignment_veto(data: bytes, k_min: int, align_bits: int) -> bytes:
+    """An MLREC_v3 model file served with the alignment veto of K above
+    `k_min` and `align_bits`-bit lines (serving flag bit 9; lib/feasibility.py
+    `alignment_vetoed`), replacing any it has, and otherwise `data`: the
+    header changes size, the payload and its CRC do not, so a model can carry
+    the veto without retraining. ValueError for a model served with the
+    non-temporal rule and for values `alignment_veto_bytes` refuses."""
+    section = alignment_veto_bytes({"k_min": k_min, "align_bits": align_bits})
+    return _with_alignment_veto_section(data, section)
+
+
+def without_alignment_veto(data: bytes) -> bytes:
+    """An MLREC_v3 model file without the alignment veto and otherwise
+    `data`, which it returns unchanged when `data` has none."""
+    return _with_alignment_veto_section(data, None)
+
+
+def _with_alignment_veto_section(data: bytes, section: Optional[bytes]) -> bytes:
+    data = bytes(data)
+    if data[:8] != MAGIC_V3:
+        raise FormatError("the alignment veto is an MLREC_v3 serving option")
+    h = _v3_header(data, len(data))
+    header_size = h["header_size"]
+    flags = struct.unpack_from("<I", data, h["serving_offset"])[0]
+    if section is None and not flags & V3_ALIGNMENT_VETO:
+        return data
+    if section is not None and flags & V3_NON_TEMPORAL_RULE:
+        raise ValueError(
+            "the alignment veto is a rule of models served without the "
+            "non-temporal rule"
+        )
+    # The section follows the trained keys and the CU floor and precedes the
+    # provenance.
+    at = _attribute_spec_end(
+        _Cursor(data, _V2_FIXED.size, header_size), h["serving_offset"]
+    )
+    if flags & V3_TRAINED_KEY_GATE:
+        (n,) = struct.unpack_from("<I", data, at)
+        at += 4 + 8 * n
+    if flags & V3_CU_FLOOR:
+        at += 4
+    end = at + 8 if flags & V3_ALIGNMENT_VETO else at
+    head = bytearray(data[:at] + (section or b"") + data[end:header_size])
+    flags = (
+        flags | V3_ALIGNMENT_VETO if section is not None else flags & ~V3_ALIGNMENT_VETO
+    )
     struct.pack_into("<I", head, h["serving_offset"], flags)
     struct.pack_into("<I", head, 12, len(head))
     return bytes(head) + data[header_size:]

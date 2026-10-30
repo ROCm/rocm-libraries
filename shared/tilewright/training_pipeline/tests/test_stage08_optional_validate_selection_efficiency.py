@@ -545,3 +545,39 @@ def test_rows_enriched_without_the_bank_fail_the_dataset(trained, bank_world):
     assert ds["rc"] == 1
     assert "without the rows of the bank's library file(s)" in ds["reason"]
     assert BANK_STEM in ds["reason"]
+
+
+def test_a_v3_bundle_is_scored_with_the_configs_alignment_veto(tmp_path, monkeypatch):
+    """stage08 scores the bundle as stage06 stages it: an MLREC_v3 bundle
+    with the alignment veto of the config's deploy.alignment_veto, none
+    without the key."""
+    from lib import evaluate as ev
+    from lib import mlrec
+
+    data = write_round(tmp_path / "round_0" / "stage04", shapes_for(20, 24, CELLS3[:2]))
+    s5 = tmp_path / "round_0" / "stage05"
+    train(tmp_path, [data], s5, "--catalog", "v3")
+    write_round(tmp_path / "heldout", shapes_for(21, 15, CELLS3))
+    plain = write_config(tmp_path / "config.yaml")
+    doc = yaml.safe_load(plain.read_text())
+    doc["deploy"] = {"alignment_veto": {"k_min": 512, "align_bytes": 128}}
+    vetoed = tmp_path / "vetoed.yaml"
+    vetoed.write_text(yaml.safe_dump(doc))
+    seen = []
+    real = ev.evaluate_model
+
+    def capture(model, *a, **kw):
+        seen.append(mlrec.read_header(model)["serving"].get("alignment_veto"))
+        return real(model, *a, **kw)
+
+    monkeypatch.setattr(ev, "evaluate_model", capture)
+    for cfg, want in ((plain, None), (vetoed, {"k_min": 512, "align_bits": 1024})):
+        seen.clear()
+        out = tmp_path / cfg.stem
+        argv = ["stage08", "--train-dir", s5, "--arch", "gfx950"]
+        argv += ["--config-yaml", cfg, "--out-dir", out]
+        argv += ["--dataset", f"heldout={tmp_path / 'heldout'}", "--bootstrap", 0]
+        argv += ["--quiet"]
+        monkeypatch.setattr(sys, "argv", [str(a) for a in argv])
+        assert s08.main() == 0
+        assert seen and all(v == want for v in seen)

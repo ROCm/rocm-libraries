@@ -24,14 +24,23 @@ hint-free member if any, else its lowest (cache_hints_a, cache_hints_b). Like
 non-temporal availability, a family is the caller's whole pool
 (`non_temporal_families`).
 
+An MLREC_v3 model served without the non-temporal rule may declare an
+alignment veto (`alignment_vetoed`), a serving rule of its rankings alone: it
+is never one of `passes_gates`' rules, which the planner applies, and
+stage06 adds it to the model file it stages (`deployed_alignment_veto`). It
+counts the bits of an operand at the non-temporal rule's widths, which are
+the element widths of the data types that rule lists by name
+(`ALIGNMENT_VETO_DTYPES`); a configuration whose K-contiguous operand has
+another data type cannot set it.
+
 Dtypes are catalog names (`lib.features.normalize_dtype_name`).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from .features import normalize_dtype_name
+from .features import dtype_from_hipblaslt, normalize_dtype_name
 
 _RULE_BITS = {
     "float": 32,
@@ -44,6 +53,9 @@ _RULE_BITS = {
     "bfloat8_fnuz": 8,
 }
 _RULE_BITS_DEFAULT = 16
+# The data types whose element width is the non-temporal rule's width for
+# them: the alignment veto counts whole lines right only for these.
+ALIGNMENT_VETO_DTYPES = tuple(sorted(_RULE_BITS))
 
 _LDS_BITS = {
     "float": 32,
@@ -339,3 +351,122 @@ def soft_rules(serving: Mapping[str, Any], version: int) -> Dict[str, bool]:
         "dot2_rule": True,
         "non_temporal_rule": bool(serving.get("non_temporal_rule", True)),
     }
+
+
+def alignment_veto_operand(
+    problem: Mapping[str, Any], veto: Optional[Mapping[str, Any]]
+) -> Optional[str]:
+    """The operand, "a" or "b", whose non-temporal cache hint the alignment
+    veto `veto` (a model's serving `alignment_veto`: `k_min` and
+    `align_bits`; None for a model without one) rejects for `problem`, or
+    None where it does not apply. It applies to a layout with exactly one
+    K-contiguous operand (A transposed with B transposed: A; neither
+    transposed: B) when K exceeds `k_min` and K elements of that operand, at
+    the widths of the non-temporal rule (`rule_bits`), are not a whole number
+    of `align_bits`-bit lines; as the engine's Feasibility."""
+    if not veto:
+        return None
+    k = int(problem["k"])
+    if k <= int(veto["k_min"]):
+        return None
+    a = _is_t(problem["a_transpose"])
+    b = not _is_t(problem["b_transpose"])
+    if a == b:
+        return None
+    bits = rule_bits(problem["a_dtype"] if a else problem["b_dtype"])
+    if (k * bits) % int(veto["align_bits"]) == 0:
+        return None
+    return "a" if a else "b"
+
+
+def alignment_vetoed(
+    problem: Mapping[str, Any], config: Any, veto: Optional[Mapping[str, Any]]
+) -> bool:
+    """Whether the alignment veto `veto` rejects `config` (a mapping or object
+    carrying cache_hints_a / cache_hints_b) for `problem`: its cache hint on
+    the operand of `alignment_veto_operand` is the non-temporal one."""
+    op = alignment_veto_operand(problem, veto)
+    return op is not None and _field(config, f"cache_hints_{op}") == NON_TEMPORAL
+
+
+def alignment_veto_served(
+    problem: Mapping[str, Any],
+    ranked: Sequence[Any],
+    veto: Optional[Mapping[str, Any]],
+) -> List[int]:
+    """The positions of `ranked` (configs best first, as a model without the
+    veto scores them) that remain for `problem` once the alignment veto
+    `veto` removes the configs it rejects, in order: those it does not
+    reject, or all of them when it rejects every one (the veto then does not
+    apply). The first is the pick.
+
+    This is what a model with the veto serves where its ranking has no
+    whitelist tier, trained-key gate or cascade that the veto changes: under
+    the scorer's serving, or where the tier keeps a config the veto does not
+    reject and no cascade cuts the ranking short. The engine fails a
+    rejected config in the rules its tiers are built with, so a whitelist
+    tier or trained-key gate whose every feasible key the veto rejects falls
+    back to the other feasible (or untrained) keys, and a cascade keeps the
+    best of the keys left; rank the model file with the veto in the engine to
+    read what it serves there."""
+    kept = [i for i, c in enumerate(ranked) if not alignment_vetoed(problem, c, veto)]
+    return kept if kept else list(range(len(ranked)))
+
+
+def alignment_veto_bits(veto: Mapping[str, Any]) -> Dict[str, int]:
+    """`deploy.alignment_veto` ({k_min, align_bytes}) as a model's serving
+    `alignment_veto` ({k_min, align_bits}). ValueError unless k_min is a
+    whole number from 1 to 2**32 - 1 and align_bytes a power of two whose
+    bits fit in 32 bits."""
+    k_min, align = veto.get("k_min"), veto.get("align_bytes")
+    for name, value in (("k_min", k_min), ("align_bytes", align)):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(
+                f"deploy.alignment_veto.{name} must be a whole number, got {value!r}"
+            )
+    if not 1 <= k_min < 2**32:
+        raise ValueError(
+            f"deploy.alignment_veto.k_min {k_min} is not from 1 to 2**32 - 1"
+        )
+    if align < 1 or align & (align - 1) or 8 * align >= 2**32:
+        raise ValueError(
+            f"deploy.alignment_veto.align_bytes {align} is not a power of two below 2**29"
+        )
+    return {"k_min": int(k_min), "align_bits": 8 * int(align)}
+
+
+def deployed_alignment_veto(
+    cfg: Optional[Mapping[str, Any]],
+) -> Optional[Dict[str, int]]:
+    """The alignment veto stage06 packs into every MLREC_v3 model it stages
+    under config `cfg` (`deploy.alignment_veto`, absent or null for none), as
+    a serving `alignment_veto`; ValueError for an invalid one
+    (`alignment_veto_bits`) and for a config whose K-contiguous operand
+    (`hipblaslt.a_type` with transA T and transB T, `hipblaslt.b_type` with
+    both N) has a data type outside `ALIGNMENT_VETO_DTYPES`, whose lines the
+    veto would count at another width than its elements'."""
+    veto = ((cfg or {}).get("deploy") or {}).get("alignment_veto")
+    if veto is None:
+        return None
+    if not isinstance(veto, Mapping):
+        raise ValueError(f"deploy.alignment_veto must be a mapping, got {veto!r}")
+    out = alignment_veto_bits(veto)
+    h = (cfg or {}).get("hipblaslt") or {}
+    a = _is_t(h.get("transA", "N"))
+    b = not _is_t(h.get("transB", "T"))
+    if a != b:
+        side = "a" if a else "b"
+        name = h.get(f"{side}_type")
+        if name is not None:
+            try:
+                dtype = dtype_from_hipblaslt(name)
+            except ValueError:
+                dtype = normalize_dtype_name(name)
+            if dtype not in _RULE_BITS:
+                raise ValueError(
+                    f"deploy.alignment_veto: hipblaslt.{side}_type {name} is the "
+                    f"K-contiguous operand's data type, whose element width the "
+                    f"veto does not count (it counts "
+                    f"{', '.join(ALIGNMENT_VETO_DTYPES)} only)"
+                )
+    return out

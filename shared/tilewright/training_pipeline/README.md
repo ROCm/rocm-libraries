@@ -3659,7 +3659,40 @@ date describe the run rather than the model and stay in `models.pt` and
 The audit set's evaluations write a `models.pt` with the same provenance
 (lib/provenance.py `deployed_provenance`), so that they score the bytes,
 and the sha256, that stage06 deploys. `deploy_record.json` names the mode
-and what the file records (`provenance`). With
+and what the file records (`provenance`). With `deploy.alignment_veto`
+(`{k_min, align_bytes}`, absent or null for none) every MLREC_v3 model file
+stage06 stages carries the engine's alignment veto (the engine README's
+*Filtering*; lib/feasibility.py `alignment_vetoed` mirrors it): for a
+layout with exactly one K-contiguous operand, a problem with K above
+`k_min` whose K elements of that operand fill no whole number of
+`align_bytes`-byte lines ranks no kernel whose cache hint on that operand
+is the non-temporal one, unless that would leave it no kernel. The values
+are the device's: a recipe for another architecture or data type sets its
+own. The config check refuses the key with a `train.catalog` other than
+v3, with `train.non_temporal_rule`, and for a K-contiguous operand whose
+data type the veto does not count at its element width
+(lib/feasibility.py `ALIGNMENT_VETO_DTYPES`), and warns for a layout it
+never applies to (TN, NT). The veto is a serving rule of the staged file,
+and no decision of the rounds sees it: no round's bundle, no stage04b
+evaluation (which picks the data a run collects, its audit run included)
+and no planner applies it (the planner ranks without it, lib/planner.py),
+a round's stage06 scores its deploy gate, its audit record and its
+per-cell gate without it (`--score-without-alignment-veto`), and so do the
+round's repair (lib/cell_merge.py), its protocol v2 registration and the
+audit evaluations of rounds (`--without-alignment-veto` of
+scripts/audit_eval.py and scripts/audit_v2.py). A run therefore benches
+the siblings the veto rejects, and deploys, repairs, splits and trains its
+rounds, as without it. The final retrain's decision and its stage06 score
+the model with it (lib/audit.py `model_bytes`), against the staged file of
+the bundle the run ships, which protocol v2 registers with the veto for
+that decision, and a final-retrain recipe cannot set it
+(`RECIPE_DEPLOYED_KEYS`). An engine that predates the veto refuses a model
+that declares it (`unknown serving flags`), and hipBLASLt then ranks with
+Origami, so port the engine to the deploy checkout and the stage-7 build
+before such a model ships: preflight refuses a tilewright module and a
+stage-7 TensileLite without it. `mlrec.with_alignment_veto` and
+`without_alignment_veto` add it to a model file or remove it without
+retraining. With
 `deploy.apply_patch` it installs the model into the `Tilewright` directory of
 every subtree `t` of `deploy.targets`, `<arch>/<t>/Tilewright/` of hipBLASLt's
 library logic (`projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full`;
@@ -4343,8 +4376,9 @@ are all complete retrains every cell once more, in `final_retrain/`:
   is neither a train key nor an option of this stage05, or is one the
   orchestrator sets (the run's data, rounds, library and device, the cells,
   the catalog and attribute spec), or sets the trained-key gate
-  (`trained_key_gate`, `no_trained_key_gate`): stage06 deploys every bundle
-  with the run's, and the gate must score the bytes stage06 deploys. The
+  (`trained_key_gate`, `no_trained_key_gate`) or the alignment veto
+  (`alignment_veto`): stage06 deploys every bundle with the run's, and the
+  gate must score the bytes stage06 deploys. The
   train section with the overrides goes through the train section's own
   checks (pseudo-negatives against their sample count and the catalog,
   `pooled_ft` against `boundary_margin`, `qat_frac` and a `validation_frac`
@@ -5416,7 +5450,12 @@ default `[arch]`; an entry is a directory name or `{dir, library_stem}`),
 `<deploy root>/projects/hipblaslt/build/release`), `build_jobs`,
 `provenance` (`neutral`: the model file records the library stem as its
 `config_id`, the training data hash and the launch model; `full`: the
-bundle's provenance as stage05 wrote it).
+bundle's provenance as stage05 wrote it), `alignment_veto` (null: none;
+`{k_min, align_bytes}`: the MLREC_v3 serving rule every model file stage06
+stages carries, for models served without the non-temporal rule, which
+the final retrain's decision scores and no decision of the rounds does;
+refused with another catalog, the non-temporal rule or a K-contiguous
+operand of a data type it does not count; see *Deployment*).
 
 **`stage07`**: `build_dir` (null: the deploy build; a hipBLASLt build
 whose TensileLite serves the trained format, see *Validation*), `cpus` (null;

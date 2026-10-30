@@ -49,17 +49,31 @@ metrics.json; `deploy.provenance: full` records the bundle's provenance as
 stage05 wrote it. The deploy record names what the file records
 (`provenance`).
 
-An MLREC_v3 model is packed with two serving flags stage06 decides
+An MLREC_v3 model is packed with three serving options stage06 decides
 (`deployed_serving`): the bank flag, when the pool the bundle was trained on
 held the bank (stage05 records it; for a bundle that predates the record,
-when the config's kernel pool has a bank, lib/library_pool.py), and the
+when the config's kernel pool has a bank, lib/library_pool.py), the
 trained-key gate with the view keys the bundle records as trained, when
-`train.trained_key_gate` is on (the default). A bundle that records no
-trained keys is packed without the gate.
+`train.trained_key_gate` is on (the default), and the alignment veto of
+`deploy.alignment_veto` (lib/feasibility.py `deployed_alignment_veto`), when
+the config sets it. A bundle that records no trained keys is packed without
+the gate. The veto is a serving rule of the staged file: no round's bundle,
+no stage04b evaluation and no planner reads it, and with
+--score-without-alignment-veto, which the orchestrator passes for a round,
+the deploy gate, the audit record and the per-cell gate score the model, and
+the bundles they compare it with, without it, so that no decision of a
+run's rounds, and none of the data they collect, depends on it; without the
+option (a final retrain, a deploy outside a run) they score the bytes
+staged, veto included, as the audit set's evaluations do (lib/audit.py
+`model_bytes`). The deploy record names the veto the staged file carries
+(`alignment_veto`), its sha256 without the veto (`veto_free_sha256`, by which
+a later repair finds the bundle) and whether the gates scored it without
+(`scored_without_alignment_veto`).
 
 Deploy gate (--gate-csv-dir): the model file, exactly the bytes that would be
-installed, is evaluated (lib/evaluate.py) on enriched GEMMs its bundle never
-trained on (stage04b's gate/ of the round). With --gate-target T it is
+installed (less the alignment veto with --score-without-alignment-veto), is
+evaluated (lib/evaluate.py) on enriched GEMMs its bundle never trained on
+(stage04b's gate/ of the round). With --gate-target T it is
 installed only when its selection efficiency there reaches T; with
 --gate-fallback not-worse a model below T is still installed when no
 --gate-baseline-train-dir is given (nothing deployed yet), or when it is at
@@ -171,6 +185,7 @@ from lib import bank_pool  # noqa: E402
 from lib import cell_merge as cm  # noqa: E402
 from lib import correctness as cx  # noqa: E402
 from lib import evaluate as ev  # noqa: E402
+from lib import feasibility as feas  # noqa: E402
 from lib import features as fs  # noqa: E402
 from lib import grid  # noqa: E402
 from lib import hardware  # noqa: E402
@@ -581,9 +596,10 @@ def deployed_serving(
 ) -> Dict[str, Any]:
     """`bundle` with the serving options an MLREC_v3 model deploys with: the
     bank flag (as stage05 recorded it, else whether the config's planner has
-    a bank) and the trained-key gate (`train.trained_key_gate`, when the
-    bundle records trained view keys). Other bundles are returned as they
-    are."""
+    a bank), the trained-key gate (`train.trained_key_gate`, when the bundle
+    records trained view keys) and the alignment veto
+    (`deploy.alignment_veto`; DeployError for a bundle served with the
+    non-temporal rule). Other bundles are returned as they are."""
     if str(bundle.get("catalog") or "v2") != "v3":
         return dict(bundle)
     serving = dict(bundle.get("serving") or {})
@@ -598,6 +614,18 @@ def deployed_serving(
             f"existed): it is packed without the trained-key gate",
         )
     serving["trained_key_gate"] = gate and bool(keys)
+    try:
+        veto = feas.deployed_alignment_veto(cfg)
+    except ValueError as e:
+        raise DeployError(str(e)) from None
+    serving.pop("alignment_veto", None)
+    if veto is not None:
+        if serving.get("non_temporal_rule"):
+            raise DeployError(
+                f"deploy.alignment_veto: {what} is served with the non-temporal "
+                f"rule, which the alignment veto is never served with"
+            )
+        serving["alignment_veto"] = veto
     return dict(bundle, serving=serving)
 
 
@@ -1052,9 +1080,12 @@ def measure_gate(
     gate: Gate,
     tw: Any,
     quiet: bool,
+    alignment_veto: bool = True,
 ) -> Dict[str, Any]:
     """The model file `data` on the gate GEMMs, and the baseline bundle on
-    the same GEMMs; DeployError when the measurement cannot be made."""
+    the same GEMMs (packed as stage06 stages it, without the alignment veto
+    unless `alignment_veto`); DeployError when the measurement cannot be
+    made."""
     if tw is None:
         raise DeployError(
             "the deploy gate evaluates the model with the engine; install the "
@@ -1131,6 +1162,8 @@ def measure_gate(
             base_data = mlrec.write_model(
                 bundle, None, arch, hardware.arch_constants(arch), dtype
             )
+            if not alignment_veto:
+                base_data = auditlib.without_alignment_veto(base_data)
         except (DeployError, mlrec.FormatError, ValueError) as e:
             base["error"] = str(e)
         else:
@@ -1319,12 +1352,14 @@ def measure_cell_gate(
     arch: str,
     dtype: str,
     tw: Any,
+    alignment_veto: bool = True,
 ) -> Dict[str, Any]:
     """`lib.audit.cell_gate` of the bundle's audit record `audited` against
     the baseline's, which is scored here with `spec` (leaving out the shapes
-    of the rounds it trained on, `lib.audit.bundle_trained_rounds`), with
-    `baseline`: where its model came from and its record's status. `passed`
-    is None, with why, when the audit set did not measure both."""
+    of the rounds it trained on, `lib.audit.bundle_trained_rounds`; without
+    the alignment veto unless `alignment_veto`, `lib.audit.model_bytes`),
+    with `baseline`: where its model came from and its record's status.
+    `passed` is None, with why, when the audit set did not measure both."""
     base_dir = Path(gate.baseline_dir)
     path, source = auditlib.bundle_model(base_dir)
     out: Dict[str, Any] = {
@@ -1349,7 +1384,9 @@ def measure_cell_gate(
     if not path.is_file():
         return unmeasured(f"the model of {gate.baseline_name} ({path}) does not exist")
     try:
-        data = auditlib.model_bytes(path, arch, dtype, cfg)
+        data = auditlib.model_bytes(
+            path, arch, dtype, cfg, alignment_veto=alignment_veto
+        )
         base = auditlib.evaluate(
             data,
             replace(spec, trained_rounds=auditlib.bundle_trained_rounds(base_dir)),
@@ -1631,6 +1668,7 @@ def deploy(
     library_dir: Optional[Path] = None,
     hardware_device: int = 0,
     cell_gate: Optional[CellGate] = None,
+    score_without_alignment_veto: bool = False,
 ) -> int:
     try:
         return _deploy(
@@ -1652,6 +1690,7 @@ def deploy(
             library_dir=library_dir,
             hardware_device=hardware_device,
             cell_gate=cell_gate,
+            score_without_alignment_veto=score_without_alignment_veto,
         )
     except (DeployError, ConfigError, ValueError, mlrec.FormatError) as e:
         ui.err("deploy", str(e))
@@ -1678,6 +1717,7 @@ def _deploy(
     library_dir: Optional[Path],
     hardware_device: int,
     cell_gate: Optional[CellGate] = None,
+    score_without_alignment_veto: bool = False,
 ) -> int:
     train_dir, out_dir = train_dir.resolve(), out_dir.resolve()
     repo = repo.resolve() if repo is not None else None
@@ -1738,6 +1778,11 @@ def _deploy(
     if engine_ok:
         engine_check(data, n_cells, n_splits, tw)
     sha = sha256_bytes(data)
+    veto = (parsed.get("serving") or {}).get("alignment_veto")
+    # The bytes the gates and the audit score: without the veto for a
+    # round's bundle (--score-without-alignment-veto), else the staged ones.
+    plain = auditlib.without_alignment_veto(data) if veto else data
+    scored = plain if score_without_alignment_veto else data
     if not quiet:
         ui.ok(
             "pack",
@@ -1790,7 +1835,7 @@ def _deploy(
     passed, why = True, "no gate"
     if gate is not None:
         measured = measure_gate(
-            data,
+            scored,
             labels,
             cfg=cfg,
             arch=arch,
@@ -1799,6 +1844,7 @@ def _deploy(
             gate=gate,
             tw=tw,
             quiet=quiet,
+            alignment_veto=not score_without_alignment_veto,
         )
         passed, why = gate_decision(measured, gate)
     deploy_gate = {"passed": passed, "reason": why}
@@ -1807,7 +1853,7 @@ def _deploy(
     if audit is not None:
         audited = auditlib.run_for_stage(
             out_dir / auditlib.RESULT_FILE,
-            data,
+            scored,
             replace(audit, library_stem=audit.library_stem or stem),
             cfg,
             hardware=hardware.device_hardware(cfg, audit.hardware_device),
@@ -1831,6 +1877,7 @@ def _deploy(
             arch=arch,
             dtype=dtype,
             tw=tw,
+            alignment_veto=not score_without_alignment_veto,
         )
         passed, why = cell_gate_decision(passed, why, cells, cell_gate)
         write_atomic(
@@ -2049,6 +2096,12 @@ def _deploy(
             for t in targets
         ],
     }
+    if veto:
+        record.update(
+            alignment_veto=dict(veto),
+            veto_free_sha256=sha256_bytes(plain),
+            scored_without_alignment_veto=bool(score_without_alignment_veto),
+        )
 
     def _write_record() -> None:
         write_atomic(
@@ -2323,6 +2376,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="measure and record the per-cell gate without keeping the bundle out",
     )
     ap.add_argument(
+        "--score-without-alignment-veto",
+        action="store_true",
+        help="the deploy gate, the audit record and the per-cell gate score the "
+        "model and the bundles they compare it with without the alignment veto "
+        "(deploy.alignment_veto), as a run scores its rounds' bundles; the "
+        "staged file carries it",
+    )
+    ap.add_argument(
         "--origami-reference",
         action="store_true",
         help="also print Origami's numbers on the gate GEMMs (an external "
@@ -2413,6 +2474,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         library_dir=args.library_dir,
         hardware_device=args.hardware_device,
         cell_gate=cell_gate,
+        score_without_alignment_veto=args.score_without_alignment_veto,
     )
 
 

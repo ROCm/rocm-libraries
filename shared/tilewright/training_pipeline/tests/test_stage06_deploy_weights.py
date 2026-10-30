@@ -1251,3 +1251,177 @@ def test_the_per_cell_gate_options_reach_the_gate(tmp_path, trained, monkeypatch
             s6.main(argv + bad)
         assert e.value.code == 2, bad
     assert s6.main(argv + ["--audit-bootstrap", "10", "--cell-gate-alpha", "0.2"]) == 0
+
+
+VETO_KEY = {"k_min": 512, "align_bytes": 128}
+
+
+def test_deployed_serving_adds_the_alignment_veto_only_with_its_key():
+    """deploy.alignment_veto is the only source of the veto: it is set from
+    the key, removed without it, refused for a bundle served with the
+    non-temporal rule, and never added to a v2 bundle."""
+    base = {"catalog": "v3", "serving": {"cascade_keys": 8, "bank": False}}
+    cfg = {"train": {"trained_key_gate": False}}
+    plain = s6.deployed_serving(base, cfg, "the bundle", True)
+    assert "alignment_veto" not in plain["serving"]
+    vetoed = dict(cfg, deploy={"alignment_veto": VETO_KEY})
+    got = s6.deployed_serving(base, vetoed, "the bundle", True)
+    assert got["serving"]["alignment_veto"] == {"k_min": 512, "align_bits": 1024}
+    assert {k: v for k, v in got["serving"].items() if k != "alignment_veto"} == (
+        plain["serving"]
+    )
+    carried = dict(
+        base, serving={"bank": False, "alignment_veto": {"k_min": 1, "align_bits": 8}}
+    )
+    assert (
+        "alignment_veto" not in s6.deployed_serving(carried, cfg, "b", True)["serving"]
+    )
+    nulled = dict(cfg, deploy={"alignment_veto": None})
+    assert (
+        "alignment_veto" not in s6.deployed_serving(base, nulled, "b", True)["serving"]
+    )
+    with pytest.raises(s6.DeployError, match="non-temporal"):
+        s6.deployed_serving(
+            dict(base, serving={"bank": False, "non_temporal_rule": True}),
+            vetoed,
+            "the bundle",
+            True,
+        )
+    with pytest.raises(s6.DeployError, match="power of two"):
+        s6.deployed_serving(
+            base, dict(cfg, deploy={"alignment_veto": {"k_min": 512, "align_bytes": 96}}),
+            "the bundle", True,
+        )  # fmt: skip
+    v2 = {"serving": {"non_temporal_rule": True}}
+    assert s6.deployed_serving(v2, vetoed, "the bundle", True) == v2
+
+
+def test_a_deployed_model_carries_the_alignment_veto_the_audit_scores(tmp_path):
+    """With deploy.alignment_veto the staged model carries the veto, the
+    deploy record and manifest say so, the audit set scores those bytes, and
+    the bundle stage05 wrote stays without it; without the key the staged
+    model is the bytes of the bundle as it is."""
+    from lib import audit as auditlib
+
+    train = tmp_path / "v3" / "stage05"
+    write_v3_bundle(train, LABELS)
+    before = (train / "models.pt").read_bytes()
+    out = tmp_path / "out"
+    assert deploy(train, write_cfg(tmp_path / "plain.yaml", dtype="bf16"), out) == 0
+    plain = Path(json.loads((out / "deploy_record.json").read_text())["staged_model"])
+    plain = plain.read_bytes()
+    cfg = yaml.safe_load((tmp_path / "plain.yaml").read_text())
+    cfg["deploy"]["alignment_veto"] = dict(VETO_KEY)
+    (tmp_path / "veto.yaml").write_text(yaml.safe_dump(cfg))
+    vout = tmp_path / "vout"
+    assert deploy(train, tmp_path / "veto.yaml", vout) == 0
+    rec = json.loads((vout / "deploy_record.json").read_text())
+    data = Path(rec["staged_model"]).read_bytes()
+    veto = {"k_min": 512, "align_bits": 1024}
+    assert mlrec.read_model(data)["serving"]["alignment_veto"] == veto
+    assert "alignment_veto" not in mlrec.read_model(plain)["serving"]
+    assert mlrec.without_alignment_veto(data) == plain
+    assert mlrec.with_alignment_veto(plain, 512, 1024) == data
+    manifest = json.loads((vout / "manifest.json").read_text())
+    assert manifest["serving"]["alignment_veto"] == veto
+    pt = train / "models.pt"
+    assert auditlib.model_bytes(pt, "gfx950", "bf16", cfg) == data
+    assert (
+        auditlib.model_bytes(
+            pt, "gfx950", "bf16", yaml.safe_load((tmp_path / "plain.yaml").read_text())
+        )
+        == plain
+    )
+    assert (train / "models.pt").read_bytes() == before
+    tw = pytest.importorskip("tilewright")
+    info = tw.describe(tw.load_model_from_memory(data)).alignment_veto
+    assert (info.on, info.k_min, info.align_bits) == (True, 512, 1024)
+
+
+def test_a_rounds_gates_score_the_model_without_the_alignment_veto(
+    tmp_path, gate_dir, monkeypatch
+):
+    """--score-without-alignment-veto, which the orchestrator passes for a
+    round: the deploy gate (the model and its baseline bundle), the audit
+    record and the per-cell gate (the staged model of the bundle the run
+    ships) hand the engine the bytes without the veto, while the staged file
+    carries it; the deploy record names the veto, the sha256 without it, by
+    which a round's repair finds the bundle, and how the gates scored.
+    Without the option every one of them scores the bytes with the veto."""
+    pytest.importorskip("tilewright")
+    from lib import audit as al
+    from lib import evaluate as ev
+
+    rounds = [tmp_path / "run" / f"round_{i}" for i in range(2)]
+    write_v3_bundle(rounds[0] / "stage05", LABELS)
+    write_v3_bundle(rounds[1] / "stage05", LABELS, seed=1)
+    cfg = yaml.safe_load(gate_cfg(tmp_path / "veto.yaml").read_text())
+    cfg["deploy"].update(weight_dtype="bf16", alignment_veto=dict(VETO_KEY))
+    (tmp_path / "veto.yaml").write_text(yaml.safe_dump(cfg))
+    veto_yaml = tmp_path / "veto.yaml"
+    # the bundle the run ships, staged with the veto
+    assert deploy(rounds[0] / "stage05", veto_yaml, rounds[0] / "stage06") == 0
+    shipped = json.loads((rounds[0] / "stage06" / "deploy_record.json").read_text())
+    assert mlrec.read_model(Path(shipped["staged_model"]).read_bytes())["serving"][
+        "alignment_veto"
+    ]
+    seen = []
+    real = ev.evaluate_model
+
+    def gate_eval(data, *a, **kw):
+        seen.append(("gate", bytes(data)))
+        return real(data, *a, **kw)
+
+    def run_for_stage(path, data, spec, cfg, **kw):
+        seen.append(("audit", bytes(data)))
+        rec = dict(audit_record(0.95), model_sha256=hashlib.sha256(data).hexdigest())
+        path.write_text(json.dumps(rec))
+        return rec
+
+    def evaluate(data, spec, cfg, **kw):
+        seen.append(("baseline", bytes(data)))
+        return dict(audit_record(0.95), model_sha256=hashlib.sha256(data).hexdigest())
+
+    monkeypatch.setattr(ev, "evaluate_model", gate_eval)
+    monkeypatch.setattr(s6.auditlib, "run_for_stage", run_for_stage)
+    monkeypatch.setattr(s6.auditlib, "evaluate", evaluate)
+    for plain in (True, False):
+        seen.clear()
+        out = tmp_path / f"out_{plain}"
+        gate = s6.Gate(
+            csv_dirs=[gate_dir], baseline_train_dir=rounds[0] / "stage05", bootstrap=0
+        )
+        cells = s6.CellGate(rounds[0], dict(al.CELL_GATE_DEFAULTS))
+        spec = al.Spec(audit_dir=tmp_path / "audit", library_dir=None, library_stem="")
+        rc = s6.deploy(
+            train_dir=rounds[1] / "stage05",
+            config_yaml=veto_yaml,
+            out_dir=out,
+            quiet=True,
+            gate=gate,
+            audit=spec,
+            cell_gate=cells,
+            score_without_alignment_veto=plain,
+        )
+        assert rc == 0
+        rec = json.loads((out / "deploy_record.json").read_text())
+        staged = Path(rec["staged_model"]).read_bytes()
+        assert mlrec.read_model(staged)["serving"]["alignment_veto"] == {
+            "k_min": 512,
+            "align_bits": 1024,
+        }
+        assert rec["alignment_veto"] == {"k_min": 512, "align_bits": 1024}
+        assert rec["sha256"] == hashlib.sha256(staged).hexdigest()
+        assert (
+            rec["veto_free_sha256"]
+            == hashlib.sha256(mlrec.without_alignment_veto(staged)).hexdigest()
+        )
+        assert rec["scored_without_alignment_veto"] is plain
+        kinds = sorted({k for k, _ in seen})
+        assert kinds == ["audit", "baseline", "gate"]
+        for kind, data in seen:
+            carries = "alignment_veto" in mlrec.read_header(data)["serving"]
+            assert carries is not plain, kind
+        base = json.loads((out / s6.CELL_GATE_FILE).read_text())["baseline"]
+        want = shipped["veto_free_sha256"] if plain else shipped["sha256"]
+        assert base["sha256"] == want

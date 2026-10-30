@@ -441,3 +441,159 @@ def test_family_rule_matches_engine():
                 )  # fmt: skip
             }
             assert engine == python, (p, pool, family)
+
+
+VETO = {"k_min": 512, "align_bits": 1024}
+# K at which the gfx950 veto applies to a layout with one K-contiguous
+# operand, per element width of that operand.
+VETO_K = {32: {513, 1000, 4100}, 16: {513, 1000, 4100}, 8: {513, 576, 1000, 4100}}
+
+
+@pytest.mark.parametrize("dt, bits", [("float", 32), ("xfloat32", 32), ("bfloat16", 16),
+                                      ("half", 16), ("float8", 8), ("bfloat8_fnuz", 8),
+                                      ("float4", 16), ("int8", 16)])  # fmt: skip
+def test_alignment_veto_truth_table(dt, bits):
+    """The operand the veto reads is A for TT and B for NN, none for TN and
+    NT; it applies above 512 where K elements of it, at the widths of the
+    non-temporal rule (rule_bits), leave a partial 128-byte line; it rejects
+    a kernel whose cache hint on that operand is 4, and nothing without a
+    veto."""
+    assert fz.rule_bits(dt) == bits
+    for ta, tb, op in (
+        ("T", "T", "a"),
+        ("N", "N", "b"),
+        ("T", "N", None),
+        ("N", "T", None),
+    ):
+        for k in (1, 64, 511, 512, 513, 576, 640, 1000, 1024, 4096, 4100, 2**40 + 1):
+            p = prob(4096, 4096, k, ta=ta, tb=tb, dt=dt)
+            applies = op is not None and (
+                k in VETO_K[bits] or (k > 4100 and k * bits % 1024)
+            )
+            assert fz.alignment_veto_operand(p, VETO) == (op if applies else None), (
+                ta,
+                tb,
+                k,
+            )
+            assert fz.alignment_veto_operand(p, None) is None
+            for cha in (0, 1, 2, 3, 4):
+                for chb in (0, 1, 2, 3, 4):
+                    c = cfg(cha=cha, chb=chb)
+                    want = applies and (cha if op == "a" else chb) == 4
+                    assert fz.alignment_vetoed(p, c, VETO) == want
+                    assert not fz.alignment_vetoed(p, c, None)
+                    assert not fz.alignment_vetoed(p, c, {})
+    # The veto's K and line are the model's.
+    p = prob(64, 64, 1000, ta="T", tb="T", dt=dt)
+    assert fz.alignment_veto_operand(p, {"k_min": 1000, "align_bits": 1024}) is None
+    assert fz.alignment_veto_operand(p, {"k_min": 999, "align_bits": 8 * bits}) is None
+    assert fz.alignment_veto_operand(p, {"k_min": 999, "align_bits": 2**20}) == "a"
+
+
+def test_alignment_veto_served_skips_vetoed_kernels_unless_all_are():
+    p = prob(4096, 4096, 1000, ta="T", tb="T")
+    ranked = [cfg(cha=4), cfg(chb=4), cfg(cha=4, chb=4), cfg(), cfg(cha=1)]
+    assert fz.alignment_veto_served(p, ranked, VETO) == [1, 3, 4]
+    assert fz.alignment_veto_served(p, ranked, None) == [0, 1, 2, 3, 4]
+    assert fz.alignment_veto_served(p, ranked[:1] + ranked[2:3], VETO) == [0, 1]
+    assert fz.alignment_veto_served(prob(4096, 4096, 1024, ta="T", tb="T"), ranked, VETO) == [
+        0, 1, 2, 3, 4
+    ]  # fmt: skip
+    assert fz.alignment_veto_served(p, [], VETO) == []
+
+
+def test_passes_gates_and_soft_rules_never_read_the_veto():
+    """The veto is a serving rule of rankings alone: the rules the planner
+    applies (soft_rules of the serving options, passes_gates) are those of
+    the same serving options without it."""
+    for serving in ({}, {"dot2_rule": True}, {"small_batched_rule": True}):
+        with_veto = dict(serving, alignment_veto=VETO)
+        assert fz.soft_rules(with_veto, 3) == fz.soft_rules(serving, 3)
+        rules = fz.soft_rules(with_veto, 3)
+        for k in (513, 1000, 1024):
+            p = prob(4096, 4096, k, ta="T", tb="T")
+            for c in (cfg(cha=4), cfg(chb=4), cfg()):
+                assert fz.passes_gates(
+                    p, c, lds_bytes=65536, nt_a_available=True, nt_b_available=True, **rules
+                )  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "veto, why",
+    [({"k_min": 0, "align_bytes": 128}, "k_min"), ({"k_min": 512, "align_bytes": 96}, "power of two"),
+     ({"k_min": 512, "align_bytes": 0}, "power of two"), ({"k_min": 512, "align_bytes": 2**29}, "power of two"),
+     ({"k_min": 512}, "align_bytes"), ({"k_min": "512", "align_bytes": 128}, "k_min"),
+     ({"k_min": 512, "align_bytes": True}, "align_bytes"), ([512, 128], "mapping")],
+)  # fmt: skip
+def test_deployed_alignment_veto(veto, why):
+    assert fz.deployed_alignment_veto(None) is None
+    assert fz.deployed_alignment_veto({"deploy": {}}) is None
+    assert fz.deployed_alignment_veto({"deploy": {"alignment_veto": None}}) is None
+    good = {"deploy": {"alignment_veto": {"k_min": 512, "align_bytes": 128}}}
+    assert fz.deployed_alignment_veto(good) == VETO
+    with pytest.raises(ValueError, match=why):
+        fz.deployed_alignment_veto({"deploy": {"alignment_veto": veto}})
+
+
+def test_the_veto_refuses_data_types_it_does_not_count_at_their_width():
+    """The veto counts bits at the non-temporal rule's widths, which are the
+    element widths of the types that rule lists by name: the K-contiguous
+    operand (A in TT, B in NN) of a config with the key must be one of them;
+    the other operand, and a layout the veto never applies to, are not
+    checked."""
+    key = {"k_min": 512, "align_bytes": 128}
+
+    def cfg_of(ta, tb, a, b):
+        h = {"transA": ta, "transB": tb, "a_type": a, "b_type": b}
+        return {"hipblaslt": h, "deploy": {"alignment_veto": key}}
+
+    for t in ("bf16_r", "f16_r", "f32_r", "f8_r", "bf8_r", "f8_fnuz_r", "bf8_fnuz_r"):
+        assert fz.deployed_alignment_veto(cfg_of("T", "T", t, "bf16_r")) == VETO
+        assert fz.deployed_alignment_veto(cfg_of("N", "N", "bf16_r", t)) == VETO
+    assert set(fz.ALIGNMENT_VETO_DTYPES) == set(fz._RULE_BITS)
+    for t in ("i8_r", "f4_r", "f6_r", "bf6_r", "f64_r", "i32_r"):
+        with pytest.raises(ValueError, match=f"hipblaslt.a_type {t}"):
+            fz.deployed_alignment_veto(cfg_of("T", "T", t, "bf16_r"))
+        with pytest.raises(ValueError, match=f"hipblaslt.b_type {t}"):
+            fz.deployed_alignment_veto(cfg_of("N", "N", "bf16_r", t))
+        # the operand the veto does not read, and layouts it never reads
+        assert fz.deployed_alignment_veto(cfg_of("T", "T", "bf16_r", t)) == VETO
+        assert fz.deployed_alignment_veto(cfg_of("N", "N", t, "bf16_r")) == VETO
+        assert fz.deployed_alignment_veto(cfg_of("T", "N", t, t)) == VETO
+        assert fz.deployed_alignment_veto(cfg_of("N", "T", t, t)) == VETO
+
+
+def test_the_run_analysis_soft_level_honours_the_alignment_veto():
+    """lib/run_analysis.py's `soft` level (the kernels the engine admits) of a
+    model file with the veto leaves out the kernels the veto rejects, unless
+    it rejects every kernel the hard rules pass."""
+    from lib import run_analysis as ra
+
+    hints = ((0, 0), (4, 0), (0, 4), (4, 4), (1, 0))
+    kernels = [
+        dict(sol_idx_global=i, mt_m=64, mt_n=64, mt_k=64, mi_m=16, mi_n=16, mi_k=32,
+             occupancy=1, cache_hints_a=a, cache_hints_b=b, grvw_a=8, grvw_b=8,
+             gwvw_d=4)
+        for i, (a, b) in enumerate(hints)
+    ]  # fmt: skip
+    pool = ra.Pool(kernels, "test")
+    rules = {"non_temporal_rule": False, "leading_free_rule": False}
+    applied = 0
+    for ta, tb in (("T", "T"), ("N", "N"), ("T", "N"), ("N", "T")):
+        for k in (512, 576, 1000, 1024, 4100):
+            for dt in ("bfloat16", "float", "float8"):
+                p = prob(4096, 4096, k, ta=ta, tb=tb, dt=dt)
+                hard, soft = ra.gate_masks(
+                    pool, p, lds_bytes=65536, rules=rules, veto=VETO
+                )
+                vetoed = [fz.alignment_vetoed(p, c, VETO) for c in kernels]
+                applied += any(vetoed)
+                assert soft.tolist() == [h and not v for h, v in zip(hard, vetoed)]
+                assert ra.gate_masks(pool, p, lds_bytes=65536, rules=rules)[
+                    1
+                ].tolist() == (hard.tolist())
+                only = ra.Pool([kernels[1], kernels[3]], "nt-a")
+                h1, s1 = ra.gate_masks(only, p, lds_bytes=65536, rules=rules, veto=VETO)
+                if ta == tb == "T" and any(vetoed):
+                    assert s1.tolist() == h1.tolist()
+    assert applied > 0

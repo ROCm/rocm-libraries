@@ -21,7 +21,9 @@ are the cheapest cost among
            rules when the bundle serves with them (`serving_rules`: always
            for MLREC_v2, by its serving flags for MLREC_v3);
   soft     those that also pass the non-temporal rule, when the bundle serves
-           with it (else the same as `hard`);
+           with it, or the alignment veto, when its model file declares one
+           and leaves a kernel (lib/feasibility.py `alignment_vetoed`; else
+           the same as `hard`);
   tier     those of tier 1: the kernels the engine admits under the bundle's
            rules that are on the serving cell's whitelist, or every one it
            admits when the whitelist keeps none of the pool, less those that
@@ -117,7 +119,7 @@ ENGINE_STEPS = ("cascade", "ranking")
 STEP_TITLES = {
     "library": "library pool",
     "hard_rules": "hard validity rules",
-    "soft_rules": "non-temporal rule",
+    "soft_rules": "non-temporal rule or alignment veto",
     "whitelist": "tier 1 (whitelist)",
     "cascade": "cascade",
     "ranking": "ranking",
@@ -919,6 +921,7 @@ def gate_masks(
     *,
     lds_bytes: int,
     rules: Mapping[str, bool],
+    veto: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """(hard, soft) pass masks over `pool` for one problem (`lib.features`
     problem kwargs) under the rules a bundle serves with (`rules`:
@@ -926,8 +929,10 @@ def gate_masks(
     LDS gate and the small-batched, Dot2 and leading-free rules where
     `rules` applies them (an absent keyword applies the rule, as
     `passes_gates` does), `soft` = `hard` and the non-temporal rule (refined
-    family-wise) where `rules` applies it; `soft` is
-    `lib.feasibility.passes_gates`, the kernels the engine admits."""
+    family-wise) where `rules` applies it, or without it `hard` less the
+    kernels the model file's alignment veto `veto` rejects, unless it
+    rejects all of them; `soft` is `lib.feasibility.passes_gates` (with the
+    veto), the kernels the engine admits."""
     f = pool.f
     M, N, K, B = (int(problem[x]) for x in ("m", "n", "k", "batch"))
     a_dt, b_dt = problem["a_dtype"], problem["b_dtype"]
@@ -946,7 +951,13 @@ def gate_masks(
     if rules.get("leading_free_rule", True):
         ok &= leading_free_mask(pool, problem)
     if not rules.get("non_temporal_rule", True):
-        return ok, ok.copy()
+        soft = ok.copy()
+        op = feasibility.alignment_veto_operand(problem, veto)
+        if op is not None:
+            kept = ok & (f[f"cache_hints_{op}"] != feasibility.NON_TEMPORAL)
+            if kept.any():
+                soft = kept
+        return ok, soft
     ra, rb = feasibility.rule_bits(a_dt), feasibility.rule_bits(b_dt)
     a_t = feasibility._is_t(problem["a_transpose"])
     cha, chb = f["cache_hints_a"], f["cache_hints_b"]
@@ -1007,10 +1018,11 @@ class ModelInfo:
     # retrain's); None for a round's bundle.
     trained_rounds: Optional[List[str]] = None
     # The model file's format version and the rules it serves with
-    # (`lib.feasibility.soft_rules` of its serving flags); None when the
-    # file was not read.
+    # (`lib.feasibility.soft_rules` of its serving flags, and its alignment
+    # veto); None when the file was not read.
     version: Optional[int] = None
     rules: Optional[Dict[str, bool]] = None
+    alignment_veto: Optional[Dict[str, int]] = None
 
 
 def serving_rules(model: Optional[ModelInfo]) -> Dict[str, bool]:
@@ -1182,6 +1194,7 @@ def final_model(
             serving = parsed.get("serving") or {}
             info.version = int(parsed.get("version") or 2)
             info.rules = feasibility.soft_rules(serving, info.version)
+            info.alignment_veto = serving.get("alignment_veto")
             if parsed.get("version") == 3 and serving.get("whitelist_tier"):
                 info.view_keys = {
                     str(c["label"]): [int(h) for h in c.get("view_key_hashes") or []]
@@ -1251,6 +1264,12 @@ def _model_bytes(
         from .hardware import arch_constants
 
         bundle = torch.load(str(pt), map_location="cpu", weights_only=True)
+        # The alignment veto of the run's config, which the staged model of
+        # a deployed bundle carries too.
+        veto = feasibility.deployed_alignment_veto(_read_yaml(args.get("config_yaml")))
+        if veto is not None and str(bundle.get("catalog") or "v2") == "v3":
+            bundle = dict(bundle, serving=dict(bundle.get("serving") or {}))
+            bundle["serving"]["alignment_veto"] = veto
         data = mlrec.write_model(
             bundle, None, str(arch), arch_constants(str(arch)), str(info.weight_dtype)
         )
@@ -1553,7 +1572,13 @@ def evaluate(
             levels[i, :2] = lv
             blocked[i] = "hard"
             continue
-        hard, soft = gate_masks(pool, prob, lds_bytes=lds, rules=rules)
+        hard, soft = gate_masks(
+            pool,
+            prob,
+            lds_bytes=lds,
+            rules=rules,
+            veto=model.alignment_veto if model else None,
+        )
         runnable = leading_free_mask(pool, prob)
         masks = [hard & runnable, soft & runnable]
         admitted = soft
@@ -2421,6 +2446,7 @@ def summarize_evaluation(
                 "non_temporal_rule": m.non_temporal_rule,
                 "version": m.version,
                 "rules": serving_rules(m),
+                "alignment_veto": m.alignment_veto,
                 "cascade_keys": m.cascade_keys,
                 "launch_keys": m.launch_keys,
                 "weight_dtype": m.weight_dtype,

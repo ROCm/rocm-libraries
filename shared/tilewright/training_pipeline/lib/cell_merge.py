@@ -582,12 +582,13 @@ def find_incumbent(
     hint: Optional[Path] = None,
 ) -> Optional[Incumbent]:
     """The bundle directory of the run (`hint` first, then `bundle_dirs`)
-    whose stage06 deployed the model of sha256 `staged_sha256` and whose
-    stage05/models.pt is the one that deploy packed (its deploy record's
-    `models_sha256`, when it records one) and has sha256 `models_sha256`
-    when given; None when none has. Never a directory by its name: a final
-    retrain a later one replaced moves to stale/, and its place holds
-    another bundle."""
+    whose stage06 deployed the model of sha256 `staged_sha256` (the staged
+    file's, or that file's without its alignment veto, `veto_free_sha256`,
+    which a round's gates score) and whose stage05/models.pt is the one that
+    deploy packed (its deploy record's `models_sha256`, when it records one)
+    and has sha256 `models_sha256` when given; None when none has. Never a
+    directory by its name: a final retrain a later one replaced moves to
+    stale/, and its place holds another bundle."""
     if not staged_sha256 and not models_sha256:
         return None
     seen = set()
@@ -597,7 +598,10 @@ def find_incumbent(
             continue
         seen.add(key)
         rec = _read(Path(d) / "stage06" / rb.DEPLOY_RECORD) or {}
-        if staged_sha256 and rec.get("sha256") != staged_sha256:
+        if staged_sha256 and staged_sha256 not in (
+            rec.get("sha256"),
+            rec.get("veto_free_sha256"),
+        ):
             continue
         m = sha256_file(Path(d) / "stage05" / "models.pt")
         if m is None or (models_sha256 and m != models_sha256):
@@ -610,7 +614,9 @@ def find_incumbent(
             if packed
             else ("deploy record: staged model" if staged_sha256 else "models.pt")
         )
-        return Incumbent(Path(d), rec.get("sha256") or staged_sha256, m, how)
+        if staged_sha256 and staged_sha256 != rec.get("sha256"):
+            how = how.replace("staged model", "staged model without its alignment veto")
+        return Incumbent(Path(d), staged_sha256 or rec.get("sha256"), m, how)
     return None
 
 
@@ -1136,7 +1142,12 @@ class RoundRepair:
             )
             return 0, rec
         if p.get("audit.v2") == "rounds":
-            p.audit_v2(d, [(p.v2_name(rd), d / "models.pt")], self.index)
+            p.audit_v2(
+                d,
+                [(p.v2_name(rd), d / "models.pt")],
+                self.index,
+                **_round_scoring(p),
+            )
         recs = self.evaluate(inc)
         if recs is None:
             why = (
@@ -1218,9 +1229,10 @@ class RoundRepair:
         self, inc: Incumbent
     ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
         """(the incumbent's audit record, the repaired bundle's), scored by
-        scripts/audit_eval.py as stage06 scores them: the incumbent as its
-        bundle directory, the repaired bundle leaving out the shapes of the
-        rounds up to this one."""
+        scripts/audit_eval.py as the round's stage06 scores them (without the
+        alignment veto: `round_scoring_args`): the incumbent as its bundle
+        directory, the repaired bundle leaving out the shapes of the rounds
+        up to this one."""
         p, d = self.p, self.d
         out = d / "audit.json"
         cmd = [sys.executable, "-u", str(self.audit_eval_script)]
@@ -1228,6 +1240,7 @@ class RoundRepair:
         for r in auditlib.rounds_until(self.rd, True):
             cmd += ["--trained-round-dir", str(r)]
         cmd += ["--out", str(out), *p.audit_eval_common()]
+        cmd += round_scoring_args(p)
         rc = p.run_tool(d, "audit_eval", cmd, self.index)
         doc = _read(out)
         recs = doc.get("models") if isinstance(doc, dict) else None
@@ -1236,6 +1249,20 @@ class RoundRepair:
         if not all(auditlib.is_measured(r) for r in recs):
             return None
         return recs[0], recs[1]
+
+
+def round_scoring_args(pipeline: Any) -> List[str]:
+    """The option of scripts/audit_eval.py that scores bundles as the run
+    scores its rounds' (`Pipeline.round_scoring_args`: without the alignment
+    veto); none from a pipeline without it."""
+    fn = getattr(pipeline, "round_scoring_args", None)
+    return list(fn()) if callable(fn) else []
+
+
+def _round_scoring(pipeline: Any) -> Dict[str, Any]:
+    """The keyword of `Pipeline.audit_v2` that registers bundles as the run
+    scores its rounds' (without the alignment veto), when it sets the veto."""
+    return {"without_veto": True} if round_scoring_args(pipeline) else {}
 
 
 def scored_elsewhere(rec: Mapping[str, Any], inc: Incumbent) -> Optional[str]:

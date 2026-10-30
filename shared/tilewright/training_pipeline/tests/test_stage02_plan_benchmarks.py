@@ -780,3 +780,44 @@ def test_library_kind_plans_the_same_pool(round_dir):
     plan = json.loads((rd / "stage02" / "plan.json").read_text())
     assert plan["library_kind"] == ["origami", "bok"]
     assert plan["bank_stems_used"] == [accepted]
+
+
+def test_the_alignment_veto_never_changes_a_plan(round_dir):
+    """deploy.alignment_veto is a serving rule of deployed models alone: the
+    rules stage02 plans with and the bench lines it writes are, byte for
+    byte, those of the config without it."""
+    rd, pipe, cfg_path = round_dir
+    cfg = yaml.safe_load(cfg_path.read_text())
+    veto = dict(cfg, deploy={"alignment_veto": {"k_min": 512, "align_bytes": 128}})
+    for train in ({}, {"catalog": "v3"}, {"catalog": "v3", "non_temporal_rule": False}):
+        assert s02.config_rules(dict(veto, train=train)) == s02.config_rules(
+            dict(cfg, train=train)
+        )
+    vpath = cfg_path.with_name("veto.yaml")
+    vpath.write_text(yaml.safe_dump(veto))
+    step = ro.RoundStep(0, "initial", [], None, False)
+    out = rd / "stage02"
+    plans = {}
+    for path in (cfg_path, vpath):
+        loaded, _ = ro.load_config(path)
+        p = ro.Pipeline(
+            cfg=loaded,
+            snapshot=path,
+            run_dir=pipe.run_dir,
+            paths=ro.derive_paths(loaded),
+            stages_dir=ro.THIS_DIR / "stages",
+            timing=ro.Timing(),
+            force_deploy=False,
+        )
+        if out.exists():
+            shutil.rmtree(out)
+        assert s02.main(p.args_stage02(rd, step) + ["--quiet"]) == 0
+        plan = json.loads((out / "plan.json").read_text())
+        plans[path.name] = (
+            (out / "shapes.yaml").read_bytes(),
+            (out / "seed" / "shapes.yaml").read_bytes(),
+            plan["shapes"],
+            plan["mode"],
+            plan["params"],
+        )
+    assert plans[cfg_path.name] == plans[vpath.name]

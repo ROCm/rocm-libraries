@@ -360,6 +360,11 @@ def test_the_recipe_sets_the_distillation_by_train_key_or_stage05_option(tmp_pat
             {"no_trained_key_gate": True},
             "the final retrain keeps train.trained_key_gate",
         ),
+        # and with the run's alignment veto
+        (
+            {"alignment_veto": True},
+            "the final retrain keeps deploy.alignment_veto",
+        ),
         ({"output_dir": "x"}, "the orchestrator sets this stage05 option"),
         ({"only_cells": "x"}, "the orchestrator sets this stage05 option"),
         (
@@ -660,6 +665,71 @@ def test_the_final_retrain_trains_every_cell_on_every_rounds_data_and_ships(
     assert arg(st["stage07"][0], "--deploy-record") == str(
         final / "stage06" / "deploy_record.json"
     )
+
+
+def test_with_the_alignment_veto_only_the_final_retrain_scores_it(
+    tmp_path, audit_stubs, env, monkeypatch
+):
+    """deploy.alignment_veto: every decision of the rounds scores their
+    bundles without the veto (their stage06, the audit evaluations and the
+    v2 registrations of rounds), so that the data the rounds collect are as
+    without it; the final retrain's decision and stage06 score it, and v2
+    registers, with the final retrain, the staged file of the bundle it is
+    compared with. Without the key the commands are as before."""
+    monkeypatch.setenv("STUB_GATE", "1")
+    monkeypatch.setenv("STUB_GATE_SE", "0.97")
+    monkeypatch.setenv("STUB_AUDIT_V2", "1")
+    monkeypatch.setenv("STUB_STAGED", "gfx950")
+    monkeypatch.setenv(
+        "STUB_AUDIT",
+        json.dumps({"models.pt": 0.95, ro.FINAL_RETRAIN_DIR: 0.96, "default": 0.9}),
+    )
+    veto = {"k_min": 512, "align_bytes": 128}
+    runs = {}
+    for name, extra in (("plain", {}), ("veto", {"deploy.alignment_veto": veto})):
+        (tmp_path / name).mkdir()
+        cfg = _final_config(
+            tmp_path / name,
+            **{"audit.v2": "rounds", "train.catalog": "v3", **extra},
+        )
+        run_dir = tmp_path / name / "run"
+        n = len(calls(env))
+        assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
+        runs[name] = (run_dir, by_stage(calls(env)[n:]))
+    run_dir, st = runs["veto"]
+    final = run_dir / ro.FINAL_RETRAIN_DIR
+    rounds = [run_dir / f"round_{i}" for i in range(3)]
+    s06 = {arg(c, "--train-dir"): c for c in st["stage06"]}
+    assert set(s06) == {str(rd / "stage05") for rd in rounds[1:]} | {
+        str(final / "stage05")
+    }
+    for train, c in s06.items():
+        rounds_own = train != str(final / "stage05")
+        assert ("--score-without-alignment-veto" in c["argv"]) is rounds_own
+    for c in st["audit_eval"]:
+        decides = arg(c, "--out") == str(final / "audit.json")
+        assert ("--without-alignment-veto" in c["argv"]) is not decides, c["argv"]
+    assert any(arg(c, "--out") == str(final / "audit.json") for c in st["audit_eval"])
+    plain_v2 = [c for c in st["audit_v2"] if "--without-alignment-veto" in c["argv"]]
+    staged_v2 = [c for c in st["audit_v2"] if c not in plain_v2]
+    assert [values(c, "--model") for c in plain_v2] == [
+        [f"run.{rd.name}={rd / 'stage05' / 'models.pt'}"] for rd in rounds
+    ]
+    (c,) = staged_v2
+    shipped = json.loads((rounds[2] / "stage06" / "deploy_record.json").read_text())
+    assert values(c, "--model") == [
+        f"run.{ro.FINAL_RETRAIN_DIR}={final / 'stage05' / 'models.pt'}",
+        f"run.round_2={shipped['staged_model']}",
+    ]
+    # without the key: one v2 registration at the end, nothing scored apart
+    run_dir, st = runs["plain"]
+    every = [c for k in ("stage06", "audit_eval", "audit_v2") for c in st[k]]
+    assert not [c for c in every if any("alignment-veto" in a for a in c["argv"])]
+    (c,) = st["audit_v2"][3:]
+    assert values(c, "--model") == [
+        f"run.{ro.FINAL_RETRAIN_DIR}="
+        f"{run_dir / ro.FINAL_RETRAIN_DIR / 'stage05' / 'models.pt'}"
+    ]
 
 
 def test_every_reader_describes_the_shipped_final_retrain(
@@ -3033,7 +3103,9 @@ def test_preflight_refuses_an_audit_set_the_run_could_not_build(
         return ro.preflight(cfg, paths, "full")
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(ro, "_tilewright_errors", lambda catalog="v2": [])
+        mp.setattr(
+            ro, "_tilewright_errors", lambda catalog="v2", alignment_veto=False: []
+        )
         assert errors() == []
         benching = _benching_copy(w["audit"], tmp_path / "benching")
         assert errors(dir=str(benching)) == []
@@ -3094,7 +3166,9 @@ def test_preflight_refuses_a_complete_audit_set_of_other_settings_or_contexts(
     w = one_command
     paths = ro.derive_paths(w["cfg"])
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(ro, "_tilewright_errors", lambda catalog="v2": [])
+        mp.setattr(
+            ro, "_tilewright_errors", lambda catalog="v2", alignment_veto=False: []
+        )
         cfg = json.loads(json.dumps(w["cfg"]))
         assert ro.preflight(cfg, paths, "full") == []
         cfg["audit"]["seed"] = 12

@@ -338,6 +338,30 @@ def test_the_incumbent_is_found_by_the_sha256_of_its_models_not_its_name(
     assert got.dir == legacy and got.verified == "deploy record: staged model"
 
 
+def test_the_incumbent_is_found_by_the_sha256_a_rounds_gate_scored(tmp_path):
+    """A round's per-cell gate scores the bundle the run ships without the
+    alignment veto, so the incumbent is found by its staged file's sha256
+    without the veto (`veto_free_sha256`) as well, and named by the sha256
+    the gate scored, which the audit evaluation of the repair must find
+    again (`scored_elsewhere`)."""
+    run = tmp_path / "run"
+    d = _bundle_dir(run / "round_1", b"one", "flagged")
+    rec = json.loads((d / "stage06" / rb.DEPLOY_RECORD).read_text())
+    rec["veto_free_sha256"] = "plain"
+    (d / "stage06" / rb.DEPLOY_RECORD).write_text(json.dumps(rec))
+    got = cm.find_incumbent(run, staged_sha256="plain", hint=d)
+    assert got is not None and got.dir == d and got.staged_sha256 == "plain"
+    assert got.verified == (
+        "deploy record: staged model without its alignment veto and models.pt"
+    )
+    assert cm.scored_elsewhere({"model_sha256": "plain"}, got) is None
+    assert cm.scored_elsewhere({"model_sha256": "flagged"}, got)
+    staged = cm.find_incumbent(run, staged_sha256="flagged")
+    assert staged.staged_sha256 == "flagged"
+    assert staged.verified == "deploy record: staged model and models.pt"
+    assert cm.find_incumbent(run, staged_sha256="neither") is None
+
+
 def test_the_repair_script_refuses_a_baseline_of_other_content(tmp_path, capsys):
     import repair_bundle
     from test_run_orchestrator import make_config

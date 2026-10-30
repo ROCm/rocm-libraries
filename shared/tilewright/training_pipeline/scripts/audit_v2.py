@@ -16,7 +16,9 @@ plan registers the models (a round's candidate as audit_eval.py picks it,
 named `<run>.<round>`; a model file by the name given; with --name-with-sha
 each name ends in the first 12 hex digits of its file's sha256, so that a
 retrained model never clashes with the one registered before it) with
-their top-1 picks on every audit GEMM, and plans the generation that
+their top-1 picks on every audit GEMM (with --without-alignment-veto the
+picks of each model without the alignment veto, as a run scores its rounds'
+bundles: audit_eval.py), and plans the generation that
 benches the GEMMs whose sets lack a pick: all of them the first time, with
 the candidates of the exhaustive pass. Settings (--repetitions,
 --canary-attempts, --kernel-order, ...) apply to a first plan only; the
@@ -182,6 +184,12 @@ def add_model_arguments(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--weight-dtype", default=None)
     ap.add_argument("--library-dir", type=Path, default=None)
     ap.add_argument("--hardware-device", type=int, default=None)
+    ap.add_argument(
+        "--without-alignment-veto",
+        action="store_true",
+        help="register each model's picks without the alignment veto "
+        "(deploy.alignment_veto), as the run scores its rounds' bundles",
+    )
 
 
 def _parse_args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
@@ -448,7 +456,13 @@ def plan(args: argparse.Namespace) -> Optional[int]:
     for name, path, source in model_jobs(args):
         if not path.is_file():
             raise v2.V2Error(f"{path} does not exist")
-        data = auditlib.model_bytes(path, str(cfg["arch"]), dtype, cfg)
+        data = auditlib.model_bytes(
+            path,
+            str(cfg["arch"]),
+            dtype,
+            cfg,
+            alignment_veto=not getattr(args, "without_alignment_veto", False),
+        )
         sha = v2.sha256_of(data)
         if getattr(args, "name_with_sha", False):
             name = f"{name}.{sha[:12]}"

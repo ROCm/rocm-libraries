@@ -218,6 +218,130 @@ def test_serving_options_round_trip():
         mlrec.write_model(bundle, None, "gfx950", arch_constants("gfx950"), "fp32")
 
 
+VETO = {"k_min": 512, "align_bits": 1024}
+
+
+def test_alignment_veto_round_trips_and_rewrites():
+    """The alignment veto's two header fields follow the trained keys and
+    the CU floor and precede the provenance; a file without the veto is
+    byte for byte what a writer without it wrote, with_alignment_veto and
+    without_alignment_veto add and remove it without retraining, and the
+    other header editors keep it."""
+    from test_v3 import FLOORED, LARGE, PROVENANCE, v3_bundle, write
+
+    serving = {"trained_key_gate": True, "cascade_keys": 8}
+    bundle = v3_bundle(
+        labels=[LARGE], contexts=FLOORED,
+        serving=dict(serving, alignment_veto=VETO), trained_view_keys=[9, 5],
+    )  # fmt: skip
+    data = write(bundle, provenance=PROVENANCE)
+    parsed = mlrec.read_model(data)
+    assert parsed["serving"]["alignment_veto"] == VETO
+    assert mlrec.read_header(data)["serving"]["alignment_veto"] == VETO
+    assert write(mlrec.bundle_from_model(parsed), provenance=PROVENANCE) == data
+    h = mlrec._v3_header(data, len(data))
+    assert struct.unpack_from("<I", data, h["serving_offset"])[0] == 0x380
+    tail = mlrec._provenance_bytes(mlrec.check_provenance(PROVENANCE))
+    end = h["header_end"]
+    assert data[end - len(tail) - 28 : end - len(tail)] == struct.pack(
+        "<QQIII", 5, 9, 64, 512, 1024
+    )
+
+    old = write(dict(bundle, serving=serving), provenance=PROVENANCE)
+    assert "alignment_veto" not in mlrec.read_model(old)["serving"]
+    assert struct.unpack_from("<I", old, h["serving_offset"])[0] == 0x180
+    assert len(old) == len(data) - 8
+    assert mlrec.with_alignment_veto(old, 512, 1024) == data
+    assert mlrec.without_alignment_veto(data) == old
+    assert mlrec.without_alignment_veto(old) == old
+    assert (
+        mlrec.with_alignment_veto(mlrec.with_alignment_veto(data, 1, 8), 512, 1024)
+        == data
+    )
+    assert mlrec.read_model(mlrec.with_alignment_veto(data, 4096, 2048))["serving"][
+        "alignment_veto"
+    ] == {"k_min": 4096, "align_bits": 2048}
+    assert write(dict(bundle, serving=dict(serving, alignment_veto=None)),
+                 provenance=PROVENANCE) == old  # fmt: skip
+    assert mlrec.with_cu_floor(mlrec.with_cu_floor(data, None), 64) == data
+    assert mlrec.with_trained_keys(mlrec.with_trained_keys(data, None), [5, 9]) == data
+    assert mlrec.with_bank(mlrec.with_bank(data, True), False) == data
+    assert parsed["payload_crc32"] == mlrec.read_model(old)["payload_crc32"]
+    with pytest.raises(mlrec.FormatError, match="MLREC_v3"):
+        mlrec.with_alignment_veto(b"MLREC_v2" + data[8:], 512, 1024)
+    tw = pytest.importorskip("tilewright")
+    for d, on in ((data, True), (old, False)):
+        info = tw.describe(tw.load_model_from_memory(d)).alignment_veto
+        assert (info.on, info.k_min, info.align_bits) == (
+            (True, 512, 1024) if on else (False, 0, 0)
+        )
+
+
+@pytest.mark.parametrize(
+    "k_min, align_bits",
+    [(0, 1024), (2**32, 1024), (-1, 1024), (512, 0), (512, 4), (512, 1000),
+     (512, 2**32), (True, 1024), (512, 1024.0), ("512", 1024)],
+)  # fmt: skip
+def test_alignment_veto_values_are_checked(k_min, align_bits):
+    from test_v3 import v3_bundle, write
+
+    veto = {"k_min": k_min, "align_bits": align_bits}
+    with pytest.raises(ValueError, match="alignment veto"):
+        write(v3_bundle(serving={"alignment_veto": veto}))
+    with pytest.raises(ValueError, match="alignment veto"):
+        mlrec.with_alignment_veto(write(v3_bundle()), k_min, align_bits)
+
+
+def test_alignment_veto_defects_and_unknown_bits_are_rejected():
+    """The reader and the engine refuse a K of 0, a line that is not a
+    power of two of at least 8 bits, the veto with the non-temporal rule,
+    its fields without its flag, and serving flags no format defines; the
+    writer and the flag editors never write the veto with the non-temporal
+    rule."""
+    from test_v3 import LARGE, v3_bundle, write
+
+    assert mlrec._V3_SERVING_FLAGS_KNOWN == 0x3FF
+    assert mlrec.V3_ALIGNMENT_VETO == 0x200
+    data = write(v3_bundle(labels=[LARGE], serving={"alignment_veto": VETO}))
+    h = mlrec._v3_header(data, len(data))
+    at, end = h["serving_offset"], h["header_end"]
+    assert struct.unpack_from("<II", data, end - 8) == (512, 1024)
+    flags = struct.unpack_from("<I", data, at)[0]
+
+    def with_flags(value):
+        out = bytearray(data)
+        struct.pack_into("<I", out, at, value)
+        return bytes(out)
+
+    bad = [
+        (data[: end - 8] + struct.pack("<II", 0, 1024) + data[end:], "at least 1"),
+        (data[: end - 8] + struct.pack("<II", 512, 1000) + data[end:], "power of two"),
+        (data[: end - 8] + struct.pack("<II", 512, 4) + data[end:], "power of two"),
+        (with_flags(flags | 0x04), "with the non-temporal rule"),
+        (with_flags(flags | 0x400), "unknown serving flags"),
+        (with_flags(flags | 0x80000000), "unknown serving flags"),
+    ]
+    for corrupt, why in bad:
+        with pytest.raises(mlrec.FormatError, match=why):
+            mlrec.read_model(corrupt)
+    unflagged = with_flags(flags & ~0x200)
+    with pytest.raises(mlrec.FormatError):
+        mlrec.read_model(unflagged)
+    with pytest.raises(ValueError, match="non-temporal"):
+        write(v3_bundle(serving={"non_temporal_rule": True, "alignment_veto": VETO}))
+    nt = write(v3_bundle(labels=[LARGE], serving={"non_temporal_rule": True}))
+    with pytest.raises(ValueError, match="non-temporal"):
+        mlrec.with_alignment_veto(nt, 512, 1024)
+    with pytest.raises(ValueError, match="non-temporal"):
+        mlrec.with_soft_rules(data, {"non_temporal_rule": True})
+    tw = pytest.importorskip("tilewright")
+    for corrupt, why in bad:
+        with pytest.raises(ValueError, match=why):
+            tw.load_model_from_memory(corrupt)
+    with pytest.raises(ValueError):
+        tw.load_model_from_memory(unflagged)
+
+
 def test_read_rejects_corruption():
     data = mlrec.write_model(
         random_bundle(LABELS[:1]), None, "gfx950", arch_constants("gfx950"), "fp32"

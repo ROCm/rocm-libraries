@@ -477,6 +477,144 @@ def test_the_served_ceiling_costs_each_key_by_the_kernel_the_runtime_runs():
     assert lk[1] != lk[2]
 
 
+def test_a_model_with_the_alignment_veto_has_ceilings_without_the_kernels_it_rejects():
+    """The audit's rule and served ceilings honour the model file's alignment
+    veto, a serving rule: a kernel it rejects is no ceiling, unless it
+    rejects every kernel the other rules pass."""
+    from types import SimpleNamespace
+
+    from lib import features as fs
+
+    pool = [_kernel(1, 64), _kernel(2, 64, cache_hints_a=4), _kernel(3, 128)]
+    v3 = {"version": 3, "arch": "gfx950", "attribute_spec": fs.DEFAULT_ATTRIBUTE_SPEC}
+
+    def scorer(veto):
+        sc = object.__new__(al._Scorer)
+        sc.header = dict(v3, serving={"alignment_veto": veto} if veto else {})
+        sc.rules = {"non_temporal_rule": False}
+        sc.veto = veto
+        sc.nt, sc.families = (True, False), None
+        sc.table_ids = {1, 2, 3}
+        sc.key_of, sc.members = al.candidate_keys(pool, sc.header)
+        sc.hardware = SimpleNamespace(lds_bytes=65536)
+        sc.labels = {}
+        return sc
+
+    def gemm(k, sids):
+        us = {1: 12.0, 2: 10.0, 3: 15.0}
+        return {
+            "m": 4096, "n": 4096, "k": k, "batch_count": 1, "transA": "T",
+            "transB": "T", "a_type": "bf16_r", "b_type": "bf16_r",
+            "c_type": "bf16_r", "d_type": "bf16_r", "compute_type": "c_f32_r",
+            "winner_us": 10.0,
+            "candidates": [
+                dict(next(k for k in pool if k["sol_idx_global"] == s), us=us[s],
+                     is_skip=0)
+                for s in sids
+            ],
+        }  # fmt: skip
+
+    veto = {"k_min": 512, "align_bits": 1024}
+    r = SimpleNamespace(pick_sol_idx=1, miss=None)
+    # K 1000 in TT bf16: the veto rejects kernel 2, the winner
+    plain = scorer(None).row(gemm(1000, [1, 2, 3]), r, 0.8)
+    vetoed = scorer(veto).row(gemm(1000, [1, 2, 3]), r, 0.8)
+    assert plain.ceiling_rules == 1.0 and plain.ceiling_served == 1.0
+    assert vetoed.ceiling_rules == pytest.approx(10.0 / 12.0)
+    assert vetoed.ceiling_served == pytest.approx(10.0 / 12.0)
+    # at an aligned K, or when it rejects every kernel, the veto keeps them
+    assert scorer(veto).row(gemm(1024, [1, 2, 3]), r, 0.8).ceiling_rules == 1.0
+    assert scorer(veto).row(gemm(1000, [2]), r, 0.8).ceiling_rules == 1.0
+
+
+def test_model_bytes_without_the_alignment_veto(tmp_path):
+    """model_bytes(..., alignment_veto=False) gives the bytes a round's
+    decisions score: an MLREC_v3 file without its veto, a models.pt packed
+    without the config's, anything else as it is."""
+    from lib import feasibility as fz
+
+    from test_v3 import v3_bundle
+
+    cfg = {"deploy": {"alignment_veto": {"k_min": 512, "align_bytes": 128}}}
+    plain = mlrec_write(v3_bundle(), None)
+    flagged = mlrec_write(v3_bundle(), fz.deployed_alignment_veto(cfg))
+    f = tmp_path / "m.tilewright.bin"
+    f.write_bytes(flagged)
+    assert al.model_bytes(f, "gfx950", "bf16", cfg) == flagged
+    assert al.model_bytes(f, "gfx950", "bf16", cfg, alignment_veto=False) == plain
+    other = tmp_path / "other.bin"
+    other.write_bytes(b"not a model")
+    assert al.model_bytes(other, "gfx950", "bf16", alignment_veto=False) == (
+        b"not a model"
+    )
+    assert al.without_alignment_veto(plain) == plain
+
+
+def test_audit_eval_scores_without_the_veto_when_asked(tmp_path, monkeypatch):
+    """scripts/audit_eval.py --without-alignment-veto (the rounds' audit
+    evaluations) hands the audit evaluation a staged model file without its
+    veto, and a models.pt packed without the config's; without the option
+    both carry the config's veto."""
+    import types
+
+    import audit_eval
+    from lib import feasibility as fz
+    from lib import mlrec
+
+    from test_v3 import v3_bundle
+
+    cfg = {
+        "arch": "gfx950",
+        "hipblaslt": {"library_stem": "stem"},
+        "runtime": {"devices": [0]},
+        "deploy": {"alignment_veto": {"k_min": 512, "align_bytes": 128}},
+    }
+    staged = tmp_path / "round_1" / "stage06" / "m.tilewright.bin"
+    staged.parent.mkdir(parents=True)
+    staged.write_bytes(mlrec_write(v3_bundle(), fz.deployed_alignment_veto(cfg)))
+    (staged.parent / "deploy_record.json").write_text(
+        json.dumps({"staged_model": str(staged)})
+    )
+    monkeypatch.setattr(ro, "load_config", lambda path: (cfg, ""))
+    monkeypatch.setattr(ro, "resolve_contexts", lambda c, d: (c, None))
+    monkeypatch.setattr(
+        ro, "derive_paths", lambda c: types.SimpleNamespace(library_dir=tmp_path)
+    )
+    monkeypatch.setattr(audit_eval.hwlib, "device_hardware", lambda c, d: None)
+
+    def evaluate(data, spec, cfg, **kw):
+        veto = mlrec.read_header(data)["serving"].get("alignment_veto")
+        return {"status": "ok", "veto": veto}
+
+    monkeypatch.setattr(al, "evaluate", evaluate)
+    argv = ["--audit-dir", str(tmp_path / "audit"), "--config", "c.yaml"]
+    argv += ["--round-dir", str(tmp_path / "round_1"), "--weight-dtype", "bf16"]
+    argv.append("--quiet")
+    for flag, want in (
+        ([], {"k_min": 512, "align_bits": 1024}),
+        (["--without-alignment-veto"], None),
+    ):
+        out = tmp_path / f"out{len(flag)}.json"
+        assert audit_eval.main([*argv, "--out", str(out), *flag]) == 0
+        assert json.loads(out.read_text())["veto"] == want
+
+
+def mlrec_write(bundle, veto):
+    from lib import hardware as hwlib
+    from lib import mlrec
+
+    serving = dict(bundle.get("serving") or {})
+    if veto:
+        serving["alignment_veto"] = veto
+    return mlrec.write_model(
+        dict(bundle, serving=serving),
+        None,
+        "gfx950",
+        hwlib.arch_constants("gfx950"),
+        "bf16",
+    )
+
+
 def test_ceilings_cost_kernels_like_picks_and_cap_at_one():
     timed = {"us": 10.0, "is_skip": 0}
     warm = {"us": 8.0, "is_skip": 1}

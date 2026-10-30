@@ -902,3 +902,218 @@ def test_shipped_models():
             at = tw.scoring_context(m, small, hw)
             assert at is not None
             assert cs.rank(p, hw, context=small) == cs.rank(p, hw, context=at)
+
+
+# The training pipeline beside the package, whose lib/feasibility.py mirrors
+# the engine's serving rules and whose lib/mlrec.py writes MLREC_v3 files.
+PIPELINE = Path(__file__).resolve().parents[2] / "training_pipeline"
+
+
+def _pipeline():
+    if not (PIPELINE / "lib" / "feasibility.py").is_file():
+        pytest.skip(f"no training pipeline at {PIPELINE}")
+    if str(PIPELINE) not in sys.path:
+        sys.path.insert(0, str(PIPELINE))
+    from lib import feasibility, features, hardware, mlrec
+
+    return feasibility, features, hardware, mlrec
+
+
+def _v3_grid_model(features, hardware, mlrec, seed=3):
+    """MLREC_v3 bytes of a model with a small random cell per base grid
+    label, no whitelist tier and no cascade."""
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    q = features.v3_query_feature_names()
+    i = features.v3_item_feature_names(())
+    x = features.v3_interaction_feature_names()
+    models = {}
+    for m in ("Tiny", "Small", "Mid", "Large"):
+        for n in ("Tiny", "Small", "Mid", "Large"):
+            for k in ("TinyK", "MidK", "LargeK"):
+                for b in ("Bnone", "Bany"):
+                    shapes = mlrec.tensor_shapes(len(q), len(i), len(x), 4, 6, 5)
+                    sd = {
+                        name: rng.standard_normal(shape).astype(np.float32)
+                        for name, shape in shapes.items()
+                    }
+                    sd["temperature"] = np.float32([1.0])
+                    models[f"{m}|{n}|{k}|{b}"] = {
+                        "state_dict": sd,
+                        "embed_dim": 4,
+                        "hidden_dim": 6,
+                        "inter_hidden": 5,
+                        "feature_norms": {
+                            "q_mean": [0.0] * len(q),
+                            "q_std": [1.0] * len(q),
+                            "i_mean": [0.0] * len(i),
+                            "i_std": [1.0] * len(i),
+                            "x_mean": [0.0] * len(x),
+                            "x_std": [1.0] * len(x),
+                        },
+                        "smart_k_signatures": [],
+                        "view_key_hashes": [],
+                    }
+    bundle = {
+        "catalog": "v3",
+        "attribute_spec": [],
+        "contexts": {"min_cu_fraction": 1.0, "max_cu_fraction": 1.0},
+        "serving": {"whitelist_tier": False, "cascade_keys": 0},
+        "models": models,
+    }
+    return mlrec.write_model(
+        bundle, None, "gfx950", hardware.arch_constants("gfx950"), "fp32"
+    )
+
+
+def test_alignment_veto_matches_the_pipeline_mirror():
+    """A model with the alignment veto leaves unscored exactly the configs
+    lib/feasibility.py's alignment_vetoed names, unless it names them all,
+    over every layout, bf16, f32 and f8 data and K around 512 and the
+    128-byte lines; its pick is alignment_veto_served's first of the model
+    without the veto's ranking; describe() reads back what mlrec wrote."""
+    feasibility, features, hardware, mlrec = _pipeline()
+    plain_bytes = _v3_grid_model(features, hardware, mlrec)
+    veto = {"k_min": 512, "align_bits": 1024}
+    veto_bytes = mlrec.with_alignment_veto(plain_bytes, 512, 1024)
+    assert mlrec.read_header(veto_bytes)["serving"]["alignment_veto"] == veto
+    assert mlrec.without_alignment_veto(veto_bytes) == plain_bytes
+    plain = tw.load_model_from_memory(plain_bytes)
+    with_veto = tw.load_model_from_memory(veto_bytes)
+    assert not tw.describe(plain).alignment_veto.on
+    info = tw.describe(with_veto).alignment_veto
+    assert (info.on, info.k_min, info.align_bits) == (True, 512, 1024)
+    assert isinstance(info, tw.AlignmentVeto) and "k_min=512" in repr(info)
+
+    pool, kwargs = [], []
+    for mt in ((64, 64, 32), (128, 64, 64), (32, 32, 64)):
+        for hints in ((0, 0), (4, 0), (0, 4), (4, 4), (1, 0)):
+            c = tw.Config(
+                mt=tw.Dim3(*mt),
+                mi=tw.Dim3(16, 16, 32),
+                cache_hints_a=hints[0],
+                cache_hints_b=hints[1],
+                grvw_a=8,
+                grvw_b=8,
+                gwvw_d=4,
+                index=len(pool),
+            )
+            pool.append(c)
+            kwargs.append({"cache_hints_a": hints[0], "cache_hints_b": hints[1]})
+    nt_a = [i for i, k in enumerate(kwargs) if k["cache_hints_a"] == 4]
+    names = {
+        tw.DataType.BFloat16: "bfloat16",
+        tw.DataType.Float: "float",
+        tw.DataType.Float8: "float8",
+    }
+    applied = 0
+    for ta in (tw.Transpose.T, tw.Transpose.N):
+        for tb in (tw.Transpose.T, tw.Transpose.N):
+            for dt, name in names.items():
+                for k in (512, 513, 576, 640, 1000, 1024, 4096, 4100):
+                    p = tw.Problem(
+                        size=tw.Dim3(4096, 4096, k),
+                        batch=1,
+                        a_transpose=ta,
+                        b_transpose=tb,
+                        a_dtype=dt,
+                        b_dtype=dt,
+                        c_dtype=dt,
+                        d_dtype=dt,
+                        mi_dtype=dt,
+                    )
+                    problem = {
+                        "k": k,
+                        "a_transpose": "T" if ta == tw.Transpose.T else "N",
+                        "b_transpose": "T" if tb == tw.Transpose.T else "N",
+                        "a_dtype": name,
+                        "b_dtype": name,
+                    }
+                    vetoed = {
+                        i
+                        for i, c in enumerate(kwargs)
+                        if feasibility.alignment_vetoed(problem, c, veto)
+                    }
+                    applied += bool(vetoed)
+                    base = tw.rank_configs(plain, p, HW, pool, len(pool))
+                    got = tw.rank_configs(with_veto, p, HW, pool, len(pool))
+                    assert {r.config_index for r in got if r.scored} == {
+                        r.config_index for r in base if r.scored
+                    } - vetoed
+                    ranked = [kwargs[r.config_index] for r in base if r.scored]
+                    served = feasibility.alignment_veto_served(problem, ranked, veto)
+                    picks = [r.config_index for r in base if r.scored]
+                    assert got[0].scored and got[0].config_index == picks[served[0]]
+                    # A pool the veto would empty ranks as without it.
+                    only = [pool[i] for i in nt_a]
+                    base = tw.rank_configs(plain, p, HW, only, len(only))
+                    got = tw.rank_configs(with_veto, p, HW, only, len(only))
+                    out = {j for j, i in enumerate(nt_a) if i in vetoed}
+                    if len(out) == len(only):
+                        assert got == base
+                    else:
+                        assert {r.config_index for r in got if r.scored} == {
+                            r.config_index for r in base if r.scored
+                        } - out
+    assert applied > 0
+
+
+def test_alignment_veto_reads_the_width_of_the_operand_it_applies_to():
+    """With operands of different widths the engine and lib/feasibility.py
+    read the K-contiguous operand's (A in TT, B in NN): at K 576 the 8-bit
+    operand's elements fill no whole 128-byte line and the 16-bit one's do."""
+    feasibility, features, hardware, mlrec = _pipeline()
+    plain_bytes = _v3_grid_model(features, hardware, mlrec)
+    plain = tw.load_model_from_memory(plain_bytes)
+    with_veto = tw.load_model_from_memory(
+        mlrec.with_alignment_veto(plain_bytes, 512, 1024)
+    )
+    veto = {"k_min": 512, "align_bits": 1024}
+    pool, kwargs = [], []
+    for mt in ((64, 64, 32), (128, 64, 64)):
+        for hints in ((0, 0), (4, 0), (0, 4), (4, 4)):
+            pool.append(
+                tw.Config(
+                    mt=tw.Dim3(*mt),
+                    mi=tw.Dim3(16, 16, 32),
+                    cache_hints_a=hints[0],
+                    cache_hints_b=hints[1],
+                    grvw_a=8,
+                    grvw_b=8,
+                    gwvw_d=4,
+                    index=len(pool),
+                )
+            )
+            kwargs.append({"cache_hints_a": hints[0], "cache_hints_b": hints[1]})
+    types = {"float8": tw.DataType.Float8, "bfloat16": tw.DataType.BFloat16}
+    for ta, tb, a, b, applies in (
+        ("T", "T", "float8", "bfloat16", True),
+        ("T", "T", "bfloat16", "float8", False),
+        ("N", "N", "bfloat16", "float8", True),
+        ("N", "N", "float8", "bfloat16", False),
+    ):
+        p = tw.Problem(
+            size=tw.Dim3(4096, 4096, 576),
+            batch=1,
+            a_transpose=tw.Transpose.T if ta == "T" else tw.Transpose.N,
+            b_transpose=tw.Transpose.T if tb == "T" else tw.Transpose.N,
+            a_dtype=types[a],
+            b_dtype=types[b],
+            c_dtype=types[a],
+            d_dtype=types[a],
+            mi_dtype=types[a],
+        )
+        problem = {"k": 576, "a_transpose": ta, "b_transpose": tb}
+        problem.update(a_dtype=a, b_dtype=b)
+        vetoed = {
+            i
+            for i, c in enumerate(kwargs)
+            if feasibility.alignment_vetoed(problem, c, veto)
+        }
+        assert bool(vetoed) is applies, (ta, tb, a, b)
+        base = tw.rank_configs(plain, p, HW, pool, len(pool))
+        got = tw.rank_configs(with_veto, p, HW, pool, len(pool))
+        assert {r.config_index for r in got if r.scored} == {
+            r.config_index for r in base if r.scored
+        } - vetoed

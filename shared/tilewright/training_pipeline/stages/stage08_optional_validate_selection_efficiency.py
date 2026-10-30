@@ -17,8 +17,10 @@ A dataset is one of
   (3) a directory of stage04 chunk_*.csv files: evaluated as is.
 
 The bundle is evaluated exactly as deployed (lib/evaluate.py): MLREC_v2 at
---weight-dtype, the engine's routing over the split tree rebuilt from the
-bundle's cell labels, the whitelists, and the library pool (--library-dir /
+--weight-dtype (an MLREC_v3 bundle with the alignment veto of the config's
+deploy.alignment_veto, as stage06 stages it), the engine's routing over the
+split tree rebuilt from the bundle's cell labels, the whitelists, and the
+library pool (--library-dir /
 --library-stem, followed by the bank of the config's planner section,
 lib/bank_pool.py; candidates outside the pool are dropped). Logs are
 enriched with the rows of the library and of the bank's files (stage04
@@ -88,6 +90,7 @@ import yaml  # noqa: E402
 from lib import bank_pool  # noqa: E402
 from lib import evaluate as ev  # noqa: E402
 from lib import external_sets as xs  # noqa: E402
+from lib import feasibility as feas  # noqa: E402
 from lib import hardware as hwlib  # noqa: E402
 from lib import kernel_identity as ki  # noqa: E402
 from lib import miss_rebench as mr  # noqa: E402
@@ -903,6 +906,14 @@ def main() -> int:
     import torch
 
     bundle = torch.load(str(models_pt), map_location="cpu", weights_only=True)
+    try:
+        veto = feas.deployed_alignment_veto(cfg)
+    except ValueError as e:
+        ui.err("cfg", str(e))
+        return 1
+    if veto is not None and str(bundle.get("catalog") or "v2") == "v3":
+        bundle = dict(bundle, serving=dict(bundle.get("serving") or {}))
+        bundle["serving"]["alignment_veto"] = veto
     model_bytes = mlrec.write_model(
         bundle, None, args.arch, constants, args.weight_dtype
     )

@@ -515,6 +515,46 @@ def test_v3_model_ranker_ranks_under_the_given_soft_rules():
     assert set(other.rank(shape)) - set(own.rank(shape)) == {200, 201, 202}
 
 
+def test_a_model_with_the_alignment_veto_plans_as_without_it():
+    """A plan never applies the alignment veto: a planning model that
+    carries it ranks every kernel the model without it ranks, the siblings
+    the veto names included, for the shapes where the engine itself would
+    leave those out."""
+    tw = pytest.importorskip("tilewright")
+    from lib import evaluate as ev
+    from lib import features as fs
+    from lib import mlrec
+    from lib.hardware import DeviceHardware
+    from test_v3 import LARGE, v3_bundle, write
+
+    tt = pl.ProblemType("T", "T", "bf16_r", "bf16_r", "bf16_r", "bf16_r", "c_f32_r")
+    nn = pl.ProblemType("N", "N", "bf16_r", "bf16_r", "bf16_r", "bf16_r", "c_f32_r")
+    hinted = [kern(400, cha=4), kern(401, mt=(128, 64, 64), cha=4),
+              kern(402, chb=4), kern(403, mt=(128, 64, 64), chb=4)]  # fmt: skip
+    cat, _ = make(pool=pool_kernels() + hinted)
+    plain = write(v3_bundle(labels=[LARGE], serving={"cascade_keys": 0}))
+    flagged = mlrec.with_alignment_veto(plain, 512, 1024)
+    hw = DeviceHardware(n_cu=256, lds_bytes=LDS, l2_bytes=4 << 20)
+    for ptype, named in ((tt, {400, 401}), (nn, {402, 403})):
+        own = pl.ModelRanker(plain, cat, ptype, hw, tw=tw)
+        carried = pl.ModelRanker(flagged, cat, ptype, hw, tw=tw)
+        assert carried.rules == own.rules
+        for k in (1000, 1024, 4100, 512):
+            shape = (2048, 2048, k, 1)
+            assert carried.rank(shape) == own.rank(shape)
+            assert named <= set(carried.rank(shape))
+        # The engine itself serves without them for an unaligned K above 512.
+        served = ev.candidate_set(tw, ev.load_model_bytes(flagged, tw), own.pool, hw)
+        problem = ev.make_problem(
+            tw, fs.problem_kwargs_from_row(ptype.row((2048, 2048, 1000, 1)))
+        )
+        ranked = served.rank(problem, own.hw, len(own.pool), own.context)
+        sids = {
+            int(own.pool[r.config_index]["sol_idx_global"]) for r in ranked if r.scored
+        }
+        assert sids and not sids & named
+
+
 # ── bench line knobs ─────────────────────────────────────────────────────────
 
 LINE = (

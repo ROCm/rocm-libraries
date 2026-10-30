@@ -15,9 +15,12 @@ that round or an earlier one (for a final retrain's directory, in the rounds
 its final_retrain.json names); --model-file evaluates a models.pt or MLREC
 file, leaving out the shapes of the --trained-round-dir rounds. A models.pt
 is written at --weight-dtype (default deploy.weight_dtype) with the
-provenance stage06 records (deploy.provenance), as stage06 deploys it; the
-pool is the config's library and bank, the pick rule
-validate.pick_measurement.
+provenance stage06 records (deploy.provenance) and the config's alignment
+veto (deploy.alignment_veto), as stage06 stages it; the pool is the config's
+library and bank, the pick rule validate.pick_measurement.
+--without-alignment-veto scores every model without the alignment veto, as
+a run scores its rounds' bundles: a models.pt is written without it and a
+staged model file has it removed (lib/audit.py `model_bytes`).
 
 While the audit set is benched a record is `partial`: the groups whose
 parts are all benched and enriched are evaluated, the others are null with
@@ -115,6 +118,12 @@ def _parse_args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
         metavar="GPUS",
         help="register the models with the v2 measurement and bench what "
         "their picks need on these physical GPUs (e.g. 1,2) before scoring",
+    )
+    ap.add_argument(
+        "--without-alignment-veto",
+        action="store_true",
+        help="score every model without the alignment veto (deploy."
+        "alignment_veto), as the run scores its rounds' bundles",
     )
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--quiet", action="store_true")
@@ -222,7 +231,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
         else:
             try:
-                data = auditlib.model_bytes(path, str(cfg["arch"]), dtype, cfg)
+                data = auditlib.model_bytes(
+                    path,
+                    str(cfg["arch"]),
+                    dtype,
+                    cfg,
+                    alignment_veto=not args.without_alignment_veto,
+                )
                 rec = auditlib.evaluate(data, s, cfg, hardware=hardware)
             except Exception as e:  # noqa: BLE001
                 rec = auditlib.null_record(
@@ -277,9 +292,14 @@ def _v2_bench(args: argparse.Namespace) -> int:
     argv += ["--gpus", str(args.v2_bench)]
     for rd in args.round_dir:
         argv += ["--round-dir", str(rd)]
+    veto = not args.without_alignment_veto
     for f in args.model_file:
-        data = auditlib.model_bytes(f, str(cfg["arch"]), dtype, cfg)
+        data = auditlib.model_bytes(
+            f, str(cfg["arch"]), dtype, cfg, alignment_veto=veto
+        )
         argv += ["--model", f"{model_file_name(f, data)}={f}"]
+    if not veto:
+        argv.append("--without-alignment-veto")
     for key in ("weight_dtype", "library_dir", "hardware_device"):
         if getattr(args, key) is not None:
             argv += ["--" + key.replace("_", "-"), str(getattr(args, key))]
