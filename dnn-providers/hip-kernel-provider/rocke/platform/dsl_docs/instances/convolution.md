@@ -1118,6 +1118,54 @@ C++ engine twin: `rocke_build_direct_conv_nongrouped` in
 `conv_direct_nongrouped/*` in `tests/instances/rocke_ir_parity_harness.py`, binding
 `rocke_engine.conv_direct_nongrouped_*` / `rocke.core.backend.lower_conv_direct_nongrouped`.
 
+## Stem Dgrad on WMMA (gfx1250)
+
+Two wave32 WMMA dgrad kernels for stem convolutions (ungrouped, `C <= 4` dX
+channels), where the dX-channel GEMM of the direct WMMA dgrad below would
+leave almost every MMA tile empty. Both fold the filter taps into the GEMM
+column dimension instead, and stage their operands like the direct WMMA dgrad
+with a 1x1 filter: per dY channel chunk of `ck`, one 3-D TDM transfer of the dY
+pixels and one of the weights into an LDS ring of `stages` slots, the KRSC
+weights read transposed (`ds_read_tr16_b128`) as the `[K][R*S*C]` A operand.
+
+`library/kernels/common/conv_dgrad_patch_wmma.py`, spec `DgradPatchWmmaSpec`,
+builder `build_dgrad_patch_wmma` (C++ twin `instance_conv_dgrad_patch_wmma.h`).
+A patch embedding (stride == square filter `P`, no padding) has no tap
+reduction, so its dgrad is one GEMM:
+
+    dX[n, i*P + r, j*P + s, c] = sum_k dY[n, i, j, k] * W[k, r, s, c]
+
+A workgroup owns `tile_h x tile_w` dY pixels (`waves_p * tiles_p * 16`) and
+`r_blk` patch rows (`r_blk*P*C` GEMM columns, padded to `waves_c * tiles_c * 16`
+with at most an eighth of padding). The epilogue pixel-shuffles the tile in
+LDS as `[i][r][j][s, c]` and stores it with one rank-3 TDM transfer, clipped to
+the image. When `P` does not divide the image, `N` extra workgroups at the end
+of the grid zero the dX border no patch covers.
+
+`library/kernels/common/conv_dgrad_smallc_wmma.py`, spec `DgradSmallcWmmaSpec`,
+builder `build_dgrad_smallc_wmma` (C++ twin `instance_conv_dgrad_smallc_wmma.h`).
+An overlapping stem computes `Z[q, (r, s, c)] = sum_k dY[q, k] * W[k, r, s, c]`
+for every dY pixel `q` that reaches the block's `out_h x out_w` dX tile (both
+multiples of the stride), stages `Z` in LDS as fp32 and overlap-adds it phase
+by phase (output row / column mod S, a compile-time tap list per phase) into a
+dX tile that one TDM transfer stores.
+
+Runtime (kernargs): batch, extents and the dY channel count. Build-time: the
+filter, stride, padding, the dX channel count, dtype and the tile geometry.
+Constraints: `kpg` a multiple of 8, every tensor below 2 GiB (i32 byte
+offsets), the ring and the staged tiles within the 320 KB LDS. The AOT grids
+are `DGRAD_PATCH_KNOBS` over `DGRAD_PATCH_SIZES` and `DGRAD_SMALLC_KNOBS` over
+`DGRAD_SMALLC_STEMS` (`kernels/conv/direct_aot_jobs.py`, variants
+`direct_dgrad_patch_wmma` / `direct_dgrad_smallc_wmma`).
+
+C++ engine twins: `cpp/instances/common/conv_dgrad_{patch,smallc}_wmma.cpp`
+(shared staging in `instance_conv_dgrad_stem_wmma_internal.hpp`); byte-identity
+gated by `library/tests/parity/conv_dgrad_{patch,smallc}_wmma_emit.{c,py}`
+(llvm23 lane), Python IR golden `conv_dgrad_{patch,smallc}_wmma/*` in
+`tests/instances/rocke_ir_parity_harness.py`, bindings
+`rocke_engine.conv_dgrad_{patch,smallc}_wmma_*` /
+`rocke.core.backend.lower_conv_dgrad_{patch,smallc}_wmma`.
+
 ## Direct Dgrad on WMMA (gfx1250)
 
 `library/kernels/common/conv_direct_dgrad_wmma.py`, spec `DirectDgradWmmaSpec`,

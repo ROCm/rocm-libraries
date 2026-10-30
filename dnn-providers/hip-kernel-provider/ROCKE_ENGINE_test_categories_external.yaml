@@ -69,6 +69,8 @@ test_categories:
       - "rocke_library_conv_pytest"
       - "rocke_library_attention_cpu_pytest"
       - "rocke_library_attention_pytest"
+      # Not registered on Windows (see rocke/platform/CMakeLists.txt); the
+      # parser ignores a listed name that has no registered test.
       - "rocke_library_gdn_pytest"
       - "rocke_library_attention_gpu_pytest"
       - "rocke_library_attention_bias_gpu_pytest"
@@ -111,6 +113,8 @@ test_categories:
       - "rocke_library_conv_pytest"
       - "rocke_library_attention_cpu_pytest"
       - "rocke_library_attention_pytest"
+      # Not registered on Windows (see rocke/platform/CMakeLists.txt); the
+      # parser ignores a listed name that has no registered test.
       - "rocke_library_gdn_pytest"
       - "rocke_library_attention_gpu_pytest"
       - "rocke_library_attention_bias_gpu_pytest"
