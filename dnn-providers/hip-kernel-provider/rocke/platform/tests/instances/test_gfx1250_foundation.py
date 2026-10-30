@@ -76,6 +76,7 @@ class TestGfx1250Arch(unittest.TestCase):
                 has_global_prefetch=True,
                 has_cluster_launch=True,
                 has_multicast_load=True,
+                has_global_float_atomic_add=True,
             ),
             "gfx90a": MemoryCapabilities(**none),
             "gfx942": MemoryCapabilities(**dict(cdna_async, async_lds_max_dwords=1)),
