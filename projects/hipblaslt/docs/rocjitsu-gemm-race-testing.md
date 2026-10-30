@@ -1,8 +1,8 @@
 # Nightly GEMM race detection with rocJITsu
 
 The nightly job runs 1,000 sampled hipBLASLt GEMMs through rocJITsu with race
-detection enabled. A 100-input subset runs on relevant PRs. Both execute gfx950
-GPU instructions on CPUs and check the numerical output with `hipblaslt-bench`.
+detection enabled. It executes gfx950 GPU instructions on CPUs and checks the
+numerical output with `hipblaslt-bench`.
 
 See [rocJITsu's race detector documentation](https://github.com/ROCm/rocm-systems/blob/6f5d9658a4b13656e0c1a3719d86a320c9206dbe/emulation/rocjitsu/docs/race-detector.md)
 for how detection works and its coverage limits.
@@ -57,16 +57,19 @@ GELU apply a function to each output value.
 
 ## Automated runs and reproduction
 
-The existing Multi-Arch workflows run 1,000 samples nightly. A PR runs the
-first 100 of those samples when it changes hipBLASLt or the race-check job, or
-has the `test:hipblaslt` label. Both use seed 0 and eight concurrent
-GEMMs, and both emulate gfx950, the GPU instruction set used by the MI350 family.
+The nightly Multi-Arch workflow runs 1,000 samples with seed 0 and eight
+concurrent GEMMs. It emulates gfx950, the GPU instruction set used by the MI350
+family.
 
 The [CPU test job](../../../.github/workflows/therock-rocjitsu-race-check-linux.yml)
 uses the library and benchmark built by the same workflow, then builds a fixed
 version of rocJITsu. It attempts every sample and uploads reports even after a
 failure. The job is advisory: its failure is visible, but does not fail the
 required Multi-Arch summary.
+
+The same job can be dispatched manually with the ID of a completed Multi-Arch
+run. It then tests that run's artifacts with the requested sample count, seed
+and number of concurrent GEMMs.
 
 To run locally, provide a matching library and benchmark, rocJITsu, and its
 gfx950 configuration. The Python environment needs PyYAML, and the benchmark
