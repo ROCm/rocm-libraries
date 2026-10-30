@@ -23,6 +23,8 @@ stages.
 - [Core tests and compiled usage example](tests/core_test.cpp).
 - [Logical tensor shapes](include/roc/hostnumerics/shape.hpp) and the Python
   `Shape` docstrings.
+- [Tensor layouts](include/roc/hostnumerics/layout.hpp), which map coordinates
+  to element offsets, and the Python `Layout` docstrings.
 
 ## Contributing
 

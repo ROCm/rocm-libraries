@@ -38,6 +38,7 @@
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, has_shape */
 #include "rocke/helper_rocke.helpers.fuse.h" /* rocke_fuse_dtype_to_ir_str          */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, sig entry   */
+#include "rocke/instance_conv_direct_grouped_dw_dgrad.h" /* tiled dgrad padding */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* ROCKE_DCONV4C_* bounds */
 
 /* ===================================================================== *
@@ -63,6 +64,7 @@ rocke_direct_conv_problem_t rocke_direct_conv_problem_default(void)
     p.dtype = "fp16";
     p.dil_h = 1;
     p.dil_w = 1;
+    p.pad_w = -1;
     return p;
 }
 
@@ -91,7 +93,9 @@ int rocke_direct_conv_problem_Ho(const rocke_direct_conv_problem_t* p)
 
 int rocke_direct_conv_problem_Wo(const rocke_direct_conv_problem_t* p)
 {
-    return (p->W + 2 * p->PAD - dconv_dilated_extent(p->KW, p->dil_w)) / p->stride + 1;
+    return (p->W + 2 * rocke_direct_conv_problem_pad_w(p) - dconv_dilated_extent(p->KW, p->dil_w))
+               / p->stride
+           + 1;
 }
 
 long long rocke_direct_conv_problem_flops(const rocke_direct_conv_problem_t* p)
@@ -1268,6 +1272,7 @@ rocke_direct_depthwise_spec_t rocke_direct_depthwise_spec_default(void)
     spec.block_w = 8;
     spec.block_waves = 1;
     spec.wave_size = 64;
+    spec.cpl = 1;
     return spec;
 }
 
@@ -1278,7 +1283,7 @@ int rocke_direct_depthwise_threads_per_block(const rocke_direct_depthwise_spec_t
 
 int rocke_direct_depthwise_block_ch(const rocke_direct_depthwise_spec_t* spec)
 {
-    return spec->block_waves * spec->wave_size;
+    return spec->block_waves * spec->wave_size * spec->cpl;
 }
 
 rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_spec_t* spec,
@@ -1286,9 +1291,11 @@ rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_s
                                                   size_t out_cap)
 {
     char prob_short[128];
-    const char* parts[3];
+    const char* parts[4];
     char bw_buf[24];
     char bwv_buf[24];
+    char cpl_buf[24];
+    int n_parts = 3;
 
     if(spec == NULL || out == NULL || out_cap == 0)
     {
@@ -1305,13 +1312,18 @@ rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_s
     parts[0] = prob_short;
     parts[1] = bw_buf;
     parts[2] = bwv_buf;
+    if(spec->cpl > 1)
+    {
+        snprintf(cpl_buf, sizeof(cpl_buf), "cpl%d", spec->cpl);
+        parts[n_parts++] = cpl_buf;
+    }
     {
         const char* flag_names[1] = {"bf16"};
         int flag_on[1];
         const char* dt = spec->problem.dtype ? spec->problem.dtype : "fp16";
         flag_on[0] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
         return rocke_kernel_name_join(
-            spec->name, parts, 3, flag_names, flag_on, 1, out, out_cap, NULL);
+            spec->name, parts, n_parts, flag_names, flag_on, 1, out, out_cap, NULL);
     }
 }
 
@@ -1364,6 +1376,28 @@ rocke_status_t rocke_direct_depthwise_validate(const rocke_direct_depthwise_spec
 /* Mirrors Python _DW_MAX_PRELOAD_TAPS in
  * library/kernels/common/conv_direct_grouped.py. */
 #define ROCKE_DCONV_DW_MAX_PRELOAD_TAPS 200
+/* Mirrors Python _DW_CPL_MAX_ACC: bound on cpl * block_w * KH for the
+ * channel-packed row-streaming depthwise kernel. */
+#define ROCKE_DCONV_DW_CPL_MAX_ACC 192
+
+/* Python _depthwise_cpl_reason(cpl, groups): true (and the reason) when a
+ * depthwise kernel cannot pack `cpl` channels per lane. */
+bool rocke_dconv_depthwise_cpl_reason(int cpl, int groups, char* reason, size_t reason_cap)
+{
+    if(cpl != 1 && cpl != 2 && cpl != 4)
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason, reason_cap, "cpl must be 1, 2 or 4 (got %d)", cpl);
+        return true;
+    }
+    if(groups % cpl)
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason, reason_cap, "%d channels are not a multiple of cpl=%d", groups, cpl);
+        return true;
+    }
+    return false;
+}
 
 bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* spec,
                                           const char* arch,
@@ -1447,6 +1481,27 @@ bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* s
                      p->KH,
                      p->KW,
                      ROCKE_DCONV_DW_MAX_PRELOAD_TAPS);
+        }
+        return false;
+    }
+    if(rocke_dconv_depthwise_cpl_reason(spec->cpl, p->groups, reason, reason_cap))
+        return false;
+    if(spec->cpl > 1
+       && (spec->cpl * taps > ROCKE_DCONV_DW_MAX_PRELOAD_TAPS
+           || spec->cpl * spec->block_w * p->KH > ROCKE_DCONV_DW_CPL_MAX_ACC))
+    {
+        /* Past these the packed weights or accumulator slots spill. */
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "cpl=%d holds %d weights and %d accumulator-rows per lane "
+                     "(max %d / %d)",
+                     spec->cpl,
+                     spec->cpl * taps,
+                     spec->cpl * spec->block_w * p->KH,
+                     ROCKE_DCONV_DW_MAX_PRELOAD_TAPS,
+                     ROCKE_DCONV_DW_CPL_MAX_ACC);
         }
         return false;
     }
@@ -1686,7 +1741,9 @@ static int rocke_dconv_col__Ho(const rocke_direct_conv_problem_t* p)
 
 static int rocke_dconv_col__Wo(const rocke_direct_conv_problem_t* p)
 {
-    return rocke_dconv_col__floor_div(p->W + 2 * p->PAD - p->KW, p->stride) + 1;
+    return rocke_dconv_col__floor_div(p->W + 2 * rocke_direct_conv_problem_pad_w(p) - p->KW,
+                                      p->stride)
+           + 1;
 }
 
 /* Python `f"dtype {spec.dtype!r}"`: repr of a str is quoted, repr of None is
@@ -2878,6 +2935,8 @@ rocke_direct_depthwise_tiled_spec_t rocke_direct_depthwise_tiled_spec_default(vo
     spec.block_waves = 1;
     spec.unroll_rows = false;
     spec.wave_size = 64;
+    spec.dgrad = false;
+    spec.cpl = 1;
     return spec;
 }
 
@@ -2888,7 +2947,7 @@ int rocke_direct_depthwise_tiled_threads_per_block(const rocke_direct_depthwise_
 
 int rocke_direct_depthwise_tiled_block_ch(const rocke_direct_depthwise_tiled_spec_t* spec)
 {
-    return spec->block_waves * spec->wave_size;
+    return spec->block_waves * spec->wave_size * spec->cpl;
 }
 
 int rocke_direct_depthwise_tiled_n_cols(const rocke_direct_depthwise_tiled_spec_t* spec)
@@ -2898,8 +2957,9 @@ int rocke_direct_depthwise_tiled_n_cols(const rocke_direct_depthwise_tiled_spec_
 
 int rocke_direct_depthwise_tiled_live_regs(const rocke_direct_depthwise_tiled_spec_t* spec)
 {
-    return spec->block_h * spec->block_w + spec->block_h * rocke_direct_depthwise_tiled_n_cols(spec)
-           + 2 * spec->problem.KW;
+    return spec->cpl
+           * (spec->block_h * spec->block_w
+              + spec->block_h * rocke_direct_depthwise_tiled_n_cols(spec) + 2 * spec->problem.KW);
 }
 
 int rocke_direct_depthwise_tiled_unrolled_fmas(const rocke_direct_depthwise_tiled_spec_t* spec)
@@ -2911,11 +2971,15 @@ rocke_status_t rocke_direct_depthwise_tiled_kernel_name(
     const rocke_direct_depthwise_tiled_spec_t* spec, char* out, size_t out_cap)
 {
     char prob_short[128];
-    const char* parts[5];
+    const char* parts[7];
     char f_buf[32];
+    char pad_buf[32];
     char bw_buf[24];
     char bh_buf[24];
     char bwv_buf[24];
+    int n_parts = 0;
+    int pad_w;
+    char cpl_buf[24];
 
     if(spec == NULL || out == NULL || out_cap == 0)
     {
@@ -2925,26 +2989,42 @@ rocke_status_t rocke_direct_depthwise_tiled_kernel_name(
     {
         return ROCKE_ERR_VALUE;
     }
-    /* kernel_name_join(name, p.short(), f"f{KH}x{KW}", f"bw{block_w}",
-     *                  f"bh{block_h}", f"bw{block_waves}wv",
-     *                  flags={"ur": unroll_rows, "bf16": dtype=="bf16"}) */
+    /* kernel_name_join(name, p.short(), f"f{KH}x{KW}",
+     *                  f"p{PAD}x{PAD_W}" if PAD_W != PAD else "",
+     *                  f"bw{block_w}", f"bh{block_h}", f"bw{block_waves}wv",
+     *                  f"cpl{cpl}" if cpl > 1 else "",
+     *                  flags={"ur": unroll_rows, "dg": dgrad,
+     *                         "bf16": dtype=="bf16"}) */
     snprintf(f_buf, sizeof(f_buf), "f%dx%d", spec->problem.KH, spec->problem.KW);
     snprintf(bw_buf, sizeof(bw_buf), "bw%d", spec->block_w);
     snprintf(bh_buf, sizeof(bh_buf), "bh%d", spec->block_h);
     snprintf(bwv_buf, sizeof(bwv_buf), "bw%dwv", spec->block_waves);
-    parts[0] = prob_short;
-    parts[1] = f_buf;
-    parts[2] = bw_buf;
-    parts[3] = bh_buf;
-    parts[4] = bwv_buf;
+    parts[n_parts++] = prob_short;
+    parts[n_parts++] = f_buf;
+    /* Only a per-axis padding is named: an equal one keeps its historical name. */
+    pad_w = rocke_direct_conv_problem_pad_w(&spec->problem);
+    if(pad_w != spec->problem.PAD)
     {
-        const char* flag_names[2] = {"ur", "bf16"};
-        int flag_on[2];
+        snprintf(pad_buf, sizeof(pad_buf), "p%dx%d", spec->problem.PAD, pad_w);
+        parts[n_parts++] = pad_buf;
+    }
+    parts[n_parts++] = bw_buf;
+    parts[n_parts++] = bh_buf;
+    parts[n_parts++] = bwv_buf;
+    if(spec->cpl > 1)
+    {
+        snprintf(cpl_buf, sizeof(cpl_buf), "cpl%d", spec->cpl);
+        parts[n_parts++] = cpl_buf;
+    }
+    {
+        const char* flag_names[3] = {"ur", "dg", "bf16"};
+        int flag_on[3];
         const char* dt = spec->problem.dtype ? spec->problem.dtype : "fp16";
         flag_on[0] = spec->unroll_rows ? 1 : 0;
-        flag_on[1] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
+        flag_on[1] = spec->dgrad ? 1 : 0;
+        flag_on[2] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
         return rocke_kernel_name_join(
-            spec->name, parts, 5, flag_names, flag_on, 2, out, out_cap, NULL);
+            spec->name, parts, n_parts, flag_names, flag_on, 3, out, out_cap, NULL);
     }
 }
 
@@ -2955,6 +3035,8 @@ rocke_status_t rocke_direct_depthwise_tiled_validate(
     if(spec == NULL)
         return ROCKE_ERR_VALUE;
     p = &spec->problem;
+    if(rocke_dconv_dw_tiled_padding_reason(spec, reason, reason_cap))
+        return ROCKE_ERR_VALUE;
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
         if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
@@ -3062,19 +3144,31 @@ bool rocke_direct_depthwise_tiled_is_valid_spec(const rocke_direct_depthwise_til
             return false;
         }
     }
-    if(p->KH < 1 || p->KH > ROCKE_DCONV_DW_MAX_KH)
+    /* The dgrad mode's filter-row loop is a runtime loop with one row
+     * register-resident: it is bounded by ROCKE_DCONV_DW_TILED_DGRAD_MAX_K
+     * (and the register budget) rather than by the forward filter limit. */
+    if(!(spec->dgrad && (p->KH > p->KW ? p->KH : p->KW) <= ROCKE_DCONV_DW_TILED_DGRAD_MAX_K))
     {
-        if(reason && reason_cap > 0)
-            snprintf(
-                reason, reason_cap, "KH must be in 1..%d (got %d)", ROCKE_DCONV_DW_MAX_KH, p->KH);
-        return false;
-    }
-    if(p->KW < 1 || p->KW > ROCKE_DCONV_DW_MAX_KW)
-    {
-        if(reason && reason_cap > 0)
-            snprintf(
-                reason, reason_cap, "KW must be in 1..%d (got %d)", ROCKE_DCONV_DW_MAX_KW, p->KW);
-        return false;
+        if(p->KH < 1 || p->KH > ROCKE_DCONV_DW_MAX_KH)
+        {
+            if(reason && reason_cap > 0)
+                snprintf(reason,
+                         reason_cap,
+                         "KH must be in 1..%d (got %d)",
+                         ROCKE_DCONV_DW_MAX_KH,
+                         p->KH);
+            return false;
+        }
+        if(p->KW < 1 || p->KW > ROCKE_DCONV_DW_MAX_KW)
+        {
+            if(reason && reason_cap > 0)
+                snprintf(reason,
+                         reason_cap,
+                         "KW must be in 1..%d (got %d)",
+                         ROCKE_DCONV_DW_MAX_KW,
+                         p->KW);
+            return false;
+        }
     }
     if(p->stride > p->KH)
     {
@@ -3131,6 +3225,8 @@ bool rocke_direct_depthwise_tiled_is_valid_spec(const rocke_direct_depthwise_til
                      rocke_direct_depthwise_tiled_threads_per_block(spec));
         return false;
     }
+    if(rocke_dconv_depthwise_cpl_reason(spec->cpl, p->groups, reason, reason_cap))
+        return false;
     live = rocke_direct_depthwise_tiled_live_regs(spec);
     if(live > ROCKE_DCONV_DW_TILED_REG_BUDGET)
     {
