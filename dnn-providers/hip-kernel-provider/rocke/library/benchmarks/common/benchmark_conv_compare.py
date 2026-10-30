@@ -99,11 +99,14 @@ def _tee(stream, sink, lines: list) -> None:
 
 def _run_script(
     script: Path, extra_args: list[str], timeout: "float | None" = None
-) -> tuple[float | None, str, str]:
-    """Run *script* with *extra_args*; return (best_tflops, kernel_name, output).
+) -> tuple[float | None, str, str, int]:
+    """Run *script* with *extra_args*; return (best_tflops, kernel_name, output,
+    returncode).
 
     The script's stdout and stderr are echoed live, as it prints them; ``output``
-    is the captured stdout followed by stderr."""
+    is the captured stdout followed by stderr. ``returncode`` is the child's exit
+    status, negative when it was killed by a signal (including the timeout
+    above); the caller decides what a nonzero status means for the shard."""
     import os
     import signal
     import threading
@@ -153,10 +156,23 @@ def _run_script(
 
     raw_out = "".join(out_lines)
     output = raw_out + "".join(err_lines)
+    returncode = popen.returncode
     m = _BEST_RE.search(raw_out)
     if m:
-        return float(m.group(1)), m.group(2).strip(), output
-    return None, "", output
+        return float(m.group(1)), m.group(2).strip(), output, returncode
+    return None, "", output, returncode
+
+
+def _sweep_failure_message(script: Path, returncode: int) -> str:
+    """One line for a sweep that did not exit 0, for the shard's stderr.
+
+    ``returncode`` is negative when the child was killed by a signal (the
+    timeout path above among them); that case names the signal rather than
+    the raw negative status, which is a value nobody reading the log expects.
+    """
+    if returncode < 0:
+        return f"[error] {script.name} killed by signal {-returncode}"
+    return f"[error] {script.name} exited {returncode}"
 
 
 def _cpg_valid_for_direct(C: int, K: int, groups: int) -> tuple[bool, str]:
@@ -708,17 +724,32 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         # Direct conv's best time per case, handed to the implicit-GEMM sweep
-        # as its starting early-stop bound.
+        # as its starting early-stop bound. Scratch, not an artifact anyone
+        # reads back: a plain tempdir is fine for it.
         seed_file = str(Path(tmp) / "direct_best.json")
         seed = not args.skip_direct and not args.no_seed_from_direct
         if seed:
             direct_args += ["--early-stop-record", seed_file]
 
-        # Each sweep writes its own per-case rows; they are joined below on
-        # the case key both of them record. The files are the children's, not
-        # the user's: --results names the merged table.
-        rows_direct = str(Path(tmp) / "direct_rows.jsonl")
-        rows_implicit = str(Path(tmp) / "implicit_rows.jsonl")
+        # Each sweep writes its own per-case rows, flushed per case; they are
+        # joined below on the case key both of them record. The files are the
+        # children's, not the user's: --results names the merged table. With
+        # --results given, they are named from it and left beside it rather
+        # than under the tempdir this ``with`` block deletes on exit, so a run
+        # killed mid-sweep -- a sharded run's SIGKILL among them -- leaves the
+        # completed cases' rows somewhere the caller can find and resume from,
+        # not inside a tempdir whose name died with the process.
+        if args.results:
+            results_path = Path(args.results)
+            rows_direct = str(
+                results_path.with_name(results_path.stem + ".direct.jsonl")
+            )
+            rows_implicit = str(
+                results_path.with_name(results_path.stem + ".implicit.jsonl")
+            )
+        else:
+            rows_direct = str(Path(tmp) / "direct_rows.jsonl")
+            rows_implicit = str(Path(tmp) / "implicit_rows.jsonl")
         if args.results:
             direct_args += ["--results", rows_direct]
             implicit_args += ["--results", rows_implicit]
@@ -729,23 +760,30 @@ def main() -> int:
             direct_args += ["--skip-measured", args.skip_measured]
             implicit_args += ["--skip-measured", args.skip_measured]
 
+        overall_rc = 0
+
         if not args.skip_direct:
-            tflops, name, _ = _run_script(
-                _SCRIPT_DIR / "benchmark_direct_conv.py",
+            script = _SCRIPT_DIR / "benchmark_direct_conv.py"
+            tflops, name, _, rc = _run_script(
+                script,
                 direct_args,
                 # The JIT sweep compiles; a cache run only launches.
                 timeout=None if args.run_from_cache else 240,
             )
             direct_result = (tflops, name)
+            if rc != 0:
+                overall_rc = 1
+                print(_sweep_failure_message(script, rc), file=sys.stderr)
 
         if not args.skip_implicit:
             if seed and Path(seed_file).is_file():
                 implicit_args += ["--early-stop-seed", seed_file]
-            tflops, name, output = _run_script(
-                _SCRIPT_DIR / "benchmark_implicit_gemm_conv.py",
-                implicit_args,
-            )
+            script = _SCRIPT_DIR / "benchmark_implicit_gemm_conv.py"
+            tflops, name, output, rc = _run_script(script, implicit_args)
             implicit_result = (tflops, name)
+            if rc != 0:
+                overall_rc = 1
+                print(_sweep_failure_message(script, rc), file=sys.stderr)
             m = _ALL_STOPPED_RE.search(output)
             if tflops is None and m:
                 implicit_note = m.group(0)
@@ -761,7 +799,7 @@ def main() -> int:
             )
 
     _print_summary(direct_result, implicit_result, implicit_note)
-    return 0
+    return overall_rc
 
 
 if __name__ == "__main__":

@@ -453,10 +453,19 @@ class _Selection:
 
 
 def _select(args, problem, dtype: str, case_idx: int) -> _Selection:
-    from dispatch.grouped_convolution import dispatch_conv_grouped_all
+    from dispatch.grouped_convolution import (
+        ConvInstanceSpec,
+        dispatch_conv_grouped_all,
+    )
 
     req = _request_for(problem, dtype, args.arch, args.direction)
-    admitted = list(dispatch_conv_grouped_all(req))
+    # AOT instances only: the per-problem Winograd plans (opt-in) have no
+    # cached binary to time here.
+    admitted = [
+        r
+        for r in dispatch_conv_grouped_all(req)
+        if isinstance(r.spec, ConvInstanceSpec)
+    ]
     keep = _filters(args)
     results = [r for r in admitted if keep(r.spec)]
     if args.sample is not None and results:

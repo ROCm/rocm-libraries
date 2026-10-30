@@ -149,6 +149,33 @@ def test_clear_unloads_every_module(fake_hip, blobs, monkeypatch):
     assert len(cache) == 0 and cache.nbytes == 0
 
 
+def test_over_budget_launchers_stay_alive_until_end_of_case(fake_hip, blobs):
+    """--fast-rank binds a whole chunk before timing it, so an over-budget
+    launcher must outlive every other miss of the same case; only
+    :meth:`ModuleCache.end_case` -- called once the case has drained -- may
+    unload it."""
+    cache = ModuleCache(1)
+    first_overflow = cache.launcher(
+        hsaco_path=blobs[1], kernel_name="k", signature=_SIG
+    )
+    second_overflow = cache.launcher(
+        hsaco_path=blobs[2], kernel_name="k", signature=_SIG
+    )
+    assert not first_overflow.unloaded
+    assert not second_overflow.unloaded
+    cache.end_case()
+    assert first_overflow.unloaded
+    assert second_overflow.unloaded
+
+
+def test_end_case_on_a_case_under_budget_unloads_nothing(fake_hip, blobs):
+    cache = ModuleCache()
+    held = cache.launcher(hsaco_path=blobs[0], kernel_name="k", signature=_SIG)
+    cache.end_case()
+    assert not held.unloaded
+    assert len(cache) == 1
+
+
 def test_an_unhashable_signature_is_not_a_crash(fake_hip, blobs):
     """A signature the key cannot be built from loads per use instead of
     raising: the cache is an optimisation, not a dependency."""

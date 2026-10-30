@@ -431,19 +431,30 @@ ap.add_argument("--miopen-file")
 ap.add_argument("--results")
 ap.add_argument("--run-from-cache")
 args = ap.parse_args()
+# --script compare's real shards write already-merged rows (both engines,
+# winner, speedup) through case_results._write_results, not one row per
+# engine -- this stub mimics that so the runner's own merge of merged rows
+# is what the test exercises.
 with open(args.results, "w") as out:
     for line in open(args.miopen_file):
         line = line.strip()
         if not line:
             continue
         n = int(line.split()[-1])
-        for engine, ms in (("direct", 1.0 + n), ("implicit", 2.0 + n)):
-            out.write(json.dumps({
-                "key": f"fwd/bf16/case{n}", "engine": engine, "case": n,
-                "shape": f"s{n}", "dtype": "bf16", "direction": "fwd",
-                "tflops": 100.0, "ms": ms, "gbps": 1.0,
-                "kernel": f"{engine}-kernel-{n}", "candidates": 3, "timing": "staged",
-            }) + "\\n")
+        direct_ms, implicit_ms = 1.0 + n, 2.0 + n
+        out.write(json.dumps({
+            "key": f"fwd/bf16/case{n}", "miopen_cmd": None, "shape": f"s{n}",
+            "dtype": "bf16", "direction": "fwd",
+            "direct_tflops": 100.0, "direct_ms": direct_ms,
+            "direct_kernel": f"direct-kernel-{n}",
+            "direct_kernel_2": None, "direct_kernel_3": None,
+            "implicit_tflops": 100.0, "implicit_ms": implicit_ms,
+            "implicit_kernel": f"implicit-kernel-{n}",
+            "implicit_kernel_2": None, "implicit_kernel_3": None,
+            "winner": "direct", "winner_ms": direct_ms,
+            "winner_kernel": f"direct-kernel-{n}",
+            "speedup": round(implicit_ms / direct_ms, 3), "timing": "staged",
+        }) + "\\n")
 print("stub done")
 """
 
@@ -619,25 +630,30 @@ if args.skip_measured:
         done.add(json.loads(line)["key"])
 limit = int(os.environ.get("STUB_LIMIT", "999"))
 ran = []
+rows = []
+for n_done, line in enumerate(open(args.miopen_file)):
+    line = line.strip()
+    if not line:
+        continue
+    n = int(line.split()[-1])
+    key = f"fwd/bf16/case{n}"
+    if key in done:
+        continue
+    if n_done >= limit:
+        break
+    ran.append(key)
+    rows.append({
+        "key": key, "miopen_cmd": None, "shape": f"s{n}", "dtype": "bf16",
+        "direction": "fwd", "direct_tflops": 1.0, "direct_ms": 1.0,
+        "direct_kernel": f"direct-{n}", "direct_kernel_2": None,
+        "direct_kernel_3": None, "implicit_tflops": 1.0, "implicit_ms": 2.0,
+        "implicit_kernel": f"implicit-{n}", "implicit_kernel_2": None,
+        "implicit_kernel_3": None, "winner": "direct", "winner_ms": 1.0,
+        "winner_kernel": f"direct-{n}", "speedup": 2.0, "timing": "staged",
+    })
 with open(args.results, "w") as out:
-    for n_done, line in enumerate(open(args.miopen_file)):
-        line = line.strip()
-        if not line:
-            continue
-        n = int(line.split()[-1])
-        key = f"fwd/bf16/case{n}"
-        if key in done:
-            continue
-        if n_done >= limit:
-            break
-        ran.append(key)
-        for engine in ("direct", "implicit"):
-            out.write(json.dumps({
-                "key": key, "engine": engine, "case": n, "shape": f"s{n}",
-                "dtype": "bf16", "direction": "fwd", "tflops": 1.0,
-                "ms": 1.0 if engine == "direct" else 2.0, "gbps": 1.0,
-                "kernel": f"{engine}-{n}", "candidates": 1, "timing": "staged",
-            }) + "\\n")
+    for row in rows:
+        out.write(json.dumps(row) + "\\n")
 log = pathlib.Path(args.results).parent / "ran.json"
 prev = json.loads(log.read_text()) if log.is_file() else []
 log.write_text(json.dumps(prev + ran))

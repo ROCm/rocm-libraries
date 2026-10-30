@@ -159,6 +159,21 @@ def add_skip_measured_arg(parser) -> None:
     )
 
 
+def same_results_file(results_path, skip_measured_path) -> bool:
+    """Whether ``--results`` and ``--skip-measured`` name the same file.
+
+    Call before constructing :class:`ResultsWriter`: a sweep resuming into its
+    own results file must open it for append, not truncate it out from under
+    the skip set it was just read for.
+    """
+    if not results_path or not skip_measured_path:
+        return False
+    try:
+        return Path(results_path).resolve() == Path(skip_measured_path).resolve()
+    except OSError:
+        return Path(results_path) == Path(skip_measured_path)
+
+
 def row_timing(row: dict) -> str:
     """How ``row``'s time was measured; rows older than the field are block."""
     return row.get("timing") or BLOCK_TIMING
@@ -182,6 +197,31 @@ def measured_keys(path, engine: str, timing: str = BLOCK_TIMING) -> set:
     }
 
 
+def expand_merged_for_skip(rows: Iterable[dict]) -> List[dict]:
+    """Per-engine skip rows from already-merged (:data:`MERGED_FIELDS`) rows.
+
+    A merged row carries both engines' times under ``{engine}_ms`` and no
+    ``engine`` field of its own, so it is not what :func:`measured_keys` (and
+    the sweeps' own ``--skip-measured`` reader) looks for. One output row per
+    engine side the merged row actually has a time for -- :func:`merge` leaves
+    a side ``None`` when that engine never reached the case, and that side is
+    not "measured" to skip.
+    """
+    out: List[dict] = []
+    for row in rows:
+        key = row.get("key")
+        if not key:
+            continue
+        for engine in ENGINES:
+            ms = row.get(f"{engine}_ms")
+            if ms is None:
+                continue
+            out.append(
+                {"key": key, "engine": engine, "ms": ms, "timing": row.get("timing")}
+            )
+    return out
+
+
 class ResultsWriter:
     """Appends one row per case to a JSON Lines file.
 
@@ -192,7 +232,12 @@ class ResultsWriter:
     """
 
     def __init__(
-        self, path: Optional[str], engine: str, timing: str = BLOCK_TIMING
+        self,
+        path: Optional[str],
+        engine: str,
+        timing: str = BLOCK_TIMING,
+        *,
+        append: bool = False,
     ) -> None:
         if engine not in ENGINES:
             raise ValueError(f"engine must be one of {ENGINES}, got {engine!r}")
@@ -205,7 +250,10 @@ class ResultsWriter:
         self._n = 0
         if self._path is not None:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._fh = self._path.open("w", encoding="utf-8")
+            # ``append``: ``--results`` and ``--skip-measured`` name the same
+            # file, so the rows ``measured_keys`` already read for this run's
+            # skip set are the run's own history, not scratch to discard.
+            self._fh = self._path.open("a" if append else "w", encoding="utf-8")
 
     @property
     def n_rows(self) -> int:
@@ -448,7 +496,12 @@ def merge(
     for row in rows:
         key = row.get("key")
         engine = row.get("engine")
-        if not key or engine not in ENGINES or row_timing(row) != timing:
+        if (
+            not key
+            or engine not in ENGINES
+            or row_timing(row) != timing
+            or row.get("passed") is False
+        ):
             continue
         merged = by_key.setdefault(
             key,

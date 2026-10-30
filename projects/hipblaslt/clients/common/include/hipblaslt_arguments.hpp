@@ -226,11 +226,13 @@ struct Arguments
     bool    use_ext;
     bool    use_ext_setproblem;
     int     algo_method; // 0 for getheuristic, 1 for get all algos, 2 for algo index
-    int     api_method; // 0 for c, 1 for mix, 2 for cpp
+    int     api_method; // 0 for c, 1 for mix, 2 for cpp, 3 for the grouped C API
     bool    use_user_args;
     int32_t rotating;
     bool    use_gpu_timer;
     float   skip_slow_solution_ratio;
+    // -1 inherits the handle. 0/1 set HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT.
+    int32_t uniform_summation_order;
     // tuning
     int32_t gsu_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
     int32_t wgm_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
@@ -365,6 +367,7 @@ struct Arguments
     OPER(rotating) SEP               \
     OPER(use_gpu_timer) SEP          \
     OPER(skip_slow_solution_ratio) SEP\
+    OPER(uniform_summation_order) SEP\
     OPER(gsu_vector) SEP             \
     OPER(wgm_vector) SEP             \
     OPER(print_solution_found) SEP   \

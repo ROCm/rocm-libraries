@@ -53,9 +53,11 @@ prunes them.
 kernel_source.kind>, "arch": <the pass the UKD packs under: `--arch` or a generic>},
 one entry per kept UKD, for hkp_probe_assert.py. Entries of kinds whose packed output is
 a pass-through also carry the authored "kernel_source". An entry whose UKD authors `sources`
-(a multi-launch kernel) instead carries "launches": {<launch name>: <authored role or null>}.
-Such a UKD is one compile group keyed by every launch's group fields, and a sweep field
-covers the values of each launch's block, keyed `<launch>.<field>`.
+(a multi-launch kernel) instead carries "launches": {<launch name>: <authored role or
+null>}; the role is null for every launch of a hip or hsaco UKD, which has none.
+Such a UKD is one compile group keyed by every launch's group fields (hip: source and
+build; hsaco: none), and a sweep field covers the values of each launch's block, keyed
+`<launch>.<field>`.
 
 Files are written only when their content differs and files absent from the
 derived set are removed, so deriving twice leaves every mtime of the derived root
@@ -173,7 +175,7 @@ def _check_kind(ukd, where):
     """Return (entries, kind); DeriveError when the kind is unregistered.
 
     `entries` is `_entries(ukd)`; the kind is that of its first. The packer's loader has
-    already refused a UKD whose launches are not all `rocke`, so one kind covers a UKD.
+    already refused a UKD whose launches are not all of one kind, so one kind covers a UKD.
     """
     entries = _entries(ukd)
     source = entries[0][1] if entries else None

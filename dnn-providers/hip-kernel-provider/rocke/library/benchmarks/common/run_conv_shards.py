@@ -27,9 +27,9 @@ however long the unluckiest shard runs over. ``--shards`` defaults to four per
 card and a card takes the next shard off the queue when it frees up, which
 bounds the tail at roughly one shard rather than one quarter of the run.
 
-The cost is that each shard re-reads the kernel cache: ~18 s for a 447k-entry
-cache, so ~72 s per card over a run. Lower ``--shards`` to one per card to pay
-it once, at the price of the tail.
+Each shard re-reads the kernel cache, so more shards add startup overhead.
+Lower ``--shards`` to one per card to pay it once, at the price of a longer
+tail.
 
 Lines are dealt round-robin (line *i* to shard *i mod shards*) rather than in
 blocks: a case file is usually grouped by model and resolution, so contiguous
@@ -486,8 +486,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"[info] --resume: no rows in {log_dir}; running everything")
         else:
             measured = log_dir / "measured.jsonl"
+            # --script compare's shard rows are already merged (case/winner per
+            # row, no "engine"), but --skip-measured is read by the per-engine
+            # sweeps underneath it -- expand before writing, or every row is
+            # silently not-measured to them and --resume re-runs everything.
+            skip_rows = (
+                case_results.expand_merged_for_skip(carried)
+                if args.script == "compare"
+                else carried
+            )
             measured.write_text(
-                "".join(json.dumps(row, sort_keys=True) + "\n" for row in carried),
+                "".join(json.dumps(row, sort_keys=True) + "\n" for row in skip_rows),
                 encoding="utf-8",
             )
             forwarded = list(forwarded) + ["--skip-measured", str(measured)]
@@ -555,18 +564,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"\nshard {index} failed (rc={rc}); last lines of its log:")
             print(_tail(shard_paths(log_dir, index, width)["log"]))
 
-    rows = case_results.merge(
-        carried
-        + [
-            row
-            for _index, paths in plan
-            for row in case_results.read_rows(paths["rows"])
-        ],
-        # The shards' rows are keyed by geometry; the case file is what puts
-        # each row's MIOpenDriver line back on it.
-        case_results.miopen_cmds_by_key(miopen_file=args.miopen_file),
-        timing=timing,
-    )
+    shard_rows = [
+        row for _index, paths in plan for row in case_results.read_rows(paths["rows"])
+    ]
+    if args.script == "compare":
+        # Each shard ran benchmark_conv_compare.py, whose own --results is
+        # already a merged row (both engines, winner, MIOpenDriver command):
+        # case_results.merge() expects the raw per-engine rows the "direct"
+        # and "implicit" scripts write, so handing it these would see no
+        # "engine" field on any row and silently drop them all. A fresh row
+        # replaces a carried one of the same key -- resume only reaches this
+        # case again because --skip-measured did not cover it.
+        by_key = {row["key"]: row for row in carried}
+        by_key.update({row["key"]: row for row in shard_rows})
+        rows = [by_key[key] for key in sorted(by_key)]
+    else:
+        rows = case_results.merge(
+            carried + shard_rows,
+            # The shards' rows are keyed by geometry; the case file is what
+            # puts each row's MIOpenDriver line back on it.
+            case_results.miopen_cmds_by_key(miopen_file=args.miopen_file),
+            timing=timing,
+        )
     if rows:
         out = Path(args.results or (log_dir / "results.jsonl"))
         csv_path = case_results.write(rows, out)

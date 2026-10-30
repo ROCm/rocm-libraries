@@ -430,11 +430,21 @@ class DirectPlan:
 def _conv_step(identity, hsaco_path, meta, spec, problem, direction, buffers):
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_dgrad_patch_wmma import DgradPatchWmmaSpec
+    from kernels.common.conv_dgrad_smallc_wmma import DgradSmallcWmmaSpec
     from kernels.common.conv_direct_dgrad_wmma import DirectDgradWmmaSpec
     from kernels.common.conv_direct_grouped import direct_launch_geometry
     from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
 
-    if isinstance(spec, (DirectNongroupedConvSpec, DirectDgradWmmaSpec)):
+    if isinstance(
+        spec,
+        (
+            DirectNongroupedConvSpec,
+            DirectDgradWmmaSpec,
+            DgradPatchWmmaSpec,
+            DgradSmallcWmmaSpec,
+        ),
+    ):
         grid, block = spec.grid(), (spec.threads_per_block, 1, 1)
     elif hasattr(spec, "launch_geometry"):
         grid, block = spec.launch_geometry()

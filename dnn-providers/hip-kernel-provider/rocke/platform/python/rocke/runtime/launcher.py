@@ -566,6 +566,7 @@ class KernelLauncher:
             self._packer(values),
             shared_bytes=config.shared_bytes,
             stream=resolve_stream(config.stream),
+            cluster=self._resolve_cluster(config),
         )
         keep = tuple(values.values())
 

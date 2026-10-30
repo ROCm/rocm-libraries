@@ -730,6 +730,43 @@ class Runtime:
             )
             return ()
 
+        cfg, attr = Runtime._cluster_launch_config(
+            grid, block, shared_bytes, stream, cluster, where
+        )
+        Runtime._launch_cluster(ctypes.byref(cfg), fn, params, extra, where)
+        return (cfg, attr)
+
+    @staticmethod
+    def _launch_cluster(
+        cfg_ref: Any, fn: _HipFunctionHandle, params: Any, extra: Any, where: str
+    ) -> None:
+        """Issue a cluster launch built by :meth:`_cluster_launch_config`.
+
+        The one ``hipDrvLaunchKernelEx`` call site: :meth:`_enqueue` and the
+        callables of :meth:`prepare_launch` both go through it, so the two
+        paths cannot drift apart.
+        """
+        _check(
+            _hipDrvLaunchKernelEx(cfg_ref, fn, params, extra),
+            f"hipDrvLaunchKernelEx({where})",
+        )
+
+    @staticmethod
+    def _cluster_launch_config(
+        grid: Tuple[int, int, int],
+        block: Tuple[int, int, int],
+        shared_bytes: int,
+        stream: int,
+        cluster: Tuple[int, int, int],
+        where: str,
+    ) -> Tuple[Any, Any]:
+        """Validate ``cluster`` and build the ``hipDrvLaunchKernelEx`` config.
+
+        Returns ``(cfg, attr)``: the launch config and the cluster-dimension
+        attribute it points at, which must stay alive together. Raises before
+        HIP sees anything for a bad shape (see :func:`check_launch_cluster`)
+        or a device that reports no cluster launch support.
+        """
         shape = check_launch_cluster(grid, cluster)
         device = current_device()
         if device_supports_cluster_launch(device) is False:
@@ -752,11 +789,7 @@ class Runtime:
             attrs=ctypes.pointer(attr),
             numAttrs=1,
         )
-        _check(
-            _hipDrvLaunchKernelEx(ctypes.byref(cfg), fn, params, extra),
-            f"hipDrvLaunchKernelEx({where})",
-        )
-        return (cfg, attr)
+        return cfg, attr
 
     def launch(
         self,
@@ -849,9 +882,13 @@ class Runtime:
         *,
         shared_bytes: int = 0,
         stream: int = 0,
+        cluster: Optional[Tuple[int, int, int]] = None,
     ) -> "Callable[[], None]":
         """Build every ctypes argument of one launch once; return a
         zero-argument callable that only enqueues it.
+
+        ``cluster`` launches workgroup clusters of that shape, as in
+        :meth:`launch` (``hipDrvLaunchKernelEx`` with a cluster attribute).
 
         For loops that launch the same kernel with the same arguments
         over and over -- the timed loop of a benchmark. :meth:`launch`
@@ -887,6 +924,20 @@ class Runtime:
             extra,
         )
         keep = (args_buf, size_buf, extra)
+
+        if cluster is not None:
+            # Validated, device-checked and built once, like the plain path's
+            # ctypes arguments: the callable only enqueues, through the same
+            # launch helper as :meth:`_enqueue`.
+            cfg, attr = self._cluster_launch_config(
+                grid, block, shared_bytes, int(stream), cluster, "prepare_launch"
+            )
+            cfg_ref = ctypes.byref(cfg)
+
+            def enqueue_cluster(_keep=keep + (cfg, attr)) -> None:
+                Runtime._launch_cluster(cfg_ref, fn, None, extra, "prepare_launch")
+
+            return enqueue_cluster
 
         def enqueue(_keep=keep) -> None:
             _check(_hipModuleLaunchKernel(*call_args), "hipModuleLaunchKernel")

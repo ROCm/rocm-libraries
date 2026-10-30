@@ -20,17 +20,17 @@
  * Static reproduction of the MfmaAtom factory class-methods, in the EXACT order
  * of the Python MFMA_ATOMS tuple:
  *
- *     MFMA_ATOMS = MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_BF16_ATOMS
- *                  + MFMA_FP8_ATOMS + MFMA_MX_ATOMS
+ *     MFMA_ATOMS = MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_F64_ATOMS
+ *                  + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS
  *
  *   MFMA_F16_ATOMS  = (f16_4x4x4, f16_16x16x16, f16_16x16x32,
  *                      f16_32x32x8, f16_32x32x16)
  *   MFMA_F32_ATOMS  = (f32_16x16x4, f32_32x32x2)
+ *   MFMA_F64_ATOMS  = (f64_16x16x4,)
  *   MFMA_BF16_ATOMS = (bf16_16x16x16, bf16_16x16x32, bf16_32x32x8,
  *                      bf16_32x32x16)
  *   MFMA_FP8_ATOMS  = (fp8_16x16x32, fp8_32x32x16, bf8_16x16x32,
  *                      bf8_32x32x16, fp8_16x16x128)
- *   MFMA_MX_ATOMS   = (fp4_16x16x128, fp6_16x16x96)
  *
  * _BY_SHAPE keys each by (dtype_in, m, n, k). All keys are unique, so the linear
  * scan below is order-independent for correctness, but the catalog order is
@@ -50,6 +50,8 @@ static const rocke_mfma_atom_t ROCKE_MFMA_ATOMS[] = {
     /* ---- MFMA_F32_ATOMS (#8348) ---- */
     {16, 16, 4, 1, 1, 4, "fp32", "f32", "mfma_f32_16x16x4_f32"},
     {32, 32, 2, 1, 1, 16, "fp32", "f32", "mfma_f32_32x32x2_f32"},
+    /* ---- MFMA_F64_ATOMS ---- */
+    {16, 16, 4, 1, 1, 4, "fp64", "f64", "mfma_f64_16x16x4_f64"},
     /* ---- MFMA_BF16_ATOMS ---- */
     {16, 16, 16, 4, 4, 4, "bf16", "f32", "mfma_f32_16x16x16_bf16"},
     {16, 16, 32, 8, 8, 4, "bf16", "f32", "mfma_f32_16x16x32_bf16"},
@@ -61,9 +63,6 @@ static const rocke_mfma_atom_t ROCKE_MFMA_ATOMS[] = {
     {16, 16, 32, 8, 8, 4, "bf8e5m2", "f32", "mfma_f32_16x16x32_bf8"},
     {32, 32, 16, 8, 8, 16, "bf8e5m2", "f32", "mfma_f32_32x32x16_bf8"},
     {16, 16, 128, 32, 32, 4, "fp8e4m3", "f32", "mfma_f32_16x16x128_fp8"},
-    /* ---- MFMA_MX_ATOMS ---- */
-    {16, 16, 128, 16, 16, 4, "fp4", "f32", "mfma_f32_16x16x128_fp4"},
-    {16, 16, 96, 12, 12, 4, "fp6", "f32", "mfma_f32_16x16x96_fp6"},
 };
 
 #define ROCKE_NUM_MFMA_ATOMS ((int)(sizeof(ROCKE_MFMA_ATOMS) / sizeof(ROCKE_MFMA_ATOMS[0])))
@@ -73,6 +72,7 @@ static const rocke_mfma_atom_t ROCKE_MFMA_ATOMS[] = {
  *     bf8 -> bf8e5m2, bf8e5m2 -> bf8e5m2,
  *     f16 -> f16, fp16 -> f16,
  *     f32 -> fp32, fp32 -> fp32, float -> fp32,
+ *     f64 -> fp64, fp64 -> fp64, double -> fp64,
  *     bf16 -> bf16, bfloat16 -> bf16.
  * Any key not in the table maps to itself (Python dict.get(dtype, dtype)). */
 static const char* rocke_canon_dtype(const char* dtype)
@@ -91,6 +91,9 @@ static const char* rocke_canon_dtype(const char* dtype)
         {"f32", "fp32"},
         {"fp32", "fp32"},
         {"float", "fp32"},
+        {"f64", "fp64"},
+        {"fp64", "fp64"},
+        {"double", "fp64"},
         {"bf16", "bf16"},
         {"bfloat16", "bf16"},
     };
@@ -164,6 +167,7 @@ bool rocke_mfma_atom_is_f4f6(const rocke_mfma_atom_t* atom)
 }
 
 /* @property mfma_cycle -> C_MFMA_Inst_Cycle (blkgemmpipe_scheduler.hpp:63-74).
+ *   dtype_in == "fp64" and n == 16: 32
  *   speedup = 2 if is_f4f6 else 1
  *   n == 16: (32 if k == 128 else 16) // speedup
  *   n == 32: (64 if k ==  64 else 32) // speedup
@@ -171,7 +175,12 @@ bool rocke_mfma_atom_is_f4f6(const rocke_mfma_atom_t* atom)
  */
 int rocke_mfma_atom_mfma_cycle(const rocke_mfma_atom_t* atom)
 {
-    int speedup = rocke_mfma_atom_is_f4f6(atom) ? 2 : 1;
+    int speedup;
+    if(strcmp(atom->dtype_in, "fp64") == 0 && atom->n == 16)
+    {
+        return 32;
+    }
+    speedup = rocke_mfma_atom_is_f4f6(atom) ? 2 : 1;
     if(atom->n == 16)
     {
         return (atom->k == 128 ? 32 : 16) / speedup;
@@ -210,11 +219,25 @@ const rocke_mfma_atom_t*
 
 /* ------------------------------------------------------------------ c_warp_params *
  *
- * _C_WARP_PARAMS = { (16,16): (1,4,4,16), (32,32): (4,2,4,32) }
+ * _C_WARP_PARAMS = { (16,16,"f32"): (1,4,4,16), (32,32,"f32"): (4,2,4,32),
+ *                    (16,16,"f64"): (4,4,1,16) }
  *   tuple order is (kCM0PerLane, kCMLane, kCM1PerLane, kCNLane).
  */
-static bool rocke_c_warp_params_lookup(int m, int n, int* m0, int* m_lane, int* m1, int* n_lane)
+static bool rocke_c_warp_params_lookup(
+    int m, int n, const char* dtype_out, int* m0, int* m_lane, int* m1, int* n_lane)
 {
+    if(m == 16 && n == 16 && strcmp(dtype_out, "f64") == 0)
+    {
+        *m0 = 4;
+        *m_lane = 4;
+        *m1 = 1;
+        *n_lane = 16;
+        return true;
+    }
+    if(strcmp(dtype_out, "f32") != 0)
+    {
+        return false;
+    }
     if(m == 16 && n == 16)
     {
         *m0 = 1;
@@ -245,7 +268,7 @@ rocke_status_t rocke_c_warp_params(const rocke_mfma_atom_t* atom,
     {
         return ROCKE_ERR_VALUE;
     }
-    if(!rocke_c_warp_params_lookup(atom->m, atom->n, &m0, &m_lane, &m1, &n_lane))
+    if(!rocke_c_warp_params_lookup(atom->m, atom->n, atom->dtype_out, &m0, &m_lane, &m1, &n_lane))
     {
         return ROCKE_ERR_NOTIMPL; /* raise NotImplementedError */
     }
@@ -289,14 +312,15 @@ rocke_status_t rocke_b_c_warp_params(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "c_warp_params: NULL atom");
         return ROCKE_ERR_VALUE;
     }
-    if(!rocke_c_warp_params_lookup(atom->m, atom->n, &m0, &m_lane, &m1, &n_lane))
+    if(!rocke_c_warp_params_lookup(atom->m, atom->n, atom->dtype_out, &m0, &m_lane, &m1, &n_lane))
     {
         rocke_i_set_err(b,
                         ROCKE_ERR_NOTIMPL,
-                        "no CWarpDstrEncoding for atom %dx%d "
+                        "no CWarpDstrEncoding for atom %dx%d %s "
                         "(only the 16x16 and 32x32 MFMA C tiles are supported)",
                         atom->m,
-                        atom->n);
+                        atom->n,
+                        atom->dtype_out);
         return ROCKE_ERR_NOTIMPL;
     }
     if(m0 * m1 != atom->c_per_lane)

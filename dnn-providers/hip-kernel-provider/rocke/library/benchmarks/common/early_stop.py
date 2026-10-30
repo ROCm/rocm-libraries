@@ -176,6 +176,10 @@ class EarlyStop:
         # (HOPELESS_MARGIN past the bound) rather than the full warmup.
         self.last_hopeless = False
         self.record_key = record_key
+        # Checked once, lazily, so a device without hipStreamWaitValue32 fails
+        # with one clear error instead of retrying the gate's construction (and
+        # printing nothing to say why) on every kernel of the case.
+        self._gate_checked = False
 
     @classmethod
     def for_case(cls, args, problem: object, dtype: str, direction: str) -> "EarlyStop":
@@ -260,7 +264,18 @@ class EarlyStop:
             from statistics import median
 
             from rocke.runtime import time_launches_staged
+            from rocke.runtime.hip_module import HipError
+            from rocke.runtime.stall_gate import default_gate
 
+            if not self._gate_checked:
+                self._gate_checked = True
+                try:
+                    default_gate()
+                except HipError as e:
+                    raise HipError(
+                        f"{e}; this device cannot be timed with --timing "
+                        f"staged, rerun with --timing block"
+                    ) from e
             return median(
                 time_launches_staged(fn, warmup=warmup, iters=iters, stream=stream)
             )

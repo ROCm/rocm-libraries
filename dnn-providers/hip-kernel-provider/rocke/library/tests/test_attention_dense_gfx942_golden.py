@@ -296,11 +296,12 @@ def _run(flavor):
 
 
 def _build_doc():
-    from rocke.core.ir_golden import GOLDEN_FLAVORS
+    from rocke.core.ir_golden import GOLDEN_ALIASES, GOLDEN_PROFILE_FLAVORS
 
     return {
         "schema": "attention_dense_gfx942.ir_golden_sha256/v1",
-        "flavors": {fl: _run(fl) for fl in GOLDEN_FLAVORS},
+        "aliases": GOLDEN_ALIASES,
+        "flavors": {fl: _run(fl) for fl in GOLDEN_PROFILE_FLAVORS},
     }
 
 
