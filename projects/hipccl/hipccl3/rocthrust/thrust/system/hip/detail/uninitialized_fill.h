@@ -40,11 +40,13 @@
 #if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/distance.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
+#  include <thrust/system/hip/detail/fill.h>
 #  include <thrust/system/hip/detail/parallel_for.h>
 #  include <thrust/system/hip/detail/util.h>
 
 #  include _THRUST_STD_INCLUDE(__iterator/distance.h)
 #  include _THRUST_STD_INCLUDE(__new/device_new.h)
+#  include _THRUST_STD_INCLUDE(type_traits)
 
 #  include <iterator>
 
@@ -77,7 +79,19 @@ template <class Derived, class Iterator, class Size, class T>
 Iterator THRUST_HOST_DEVICE
 uninitialized_fill_n(execution_policy<Derived>& policy, Iterator first, Size count, T const& x)
 {
-  hip_rocprim::parallel_for(policy, __uninitialized_fill::functor<Iterator, T>{first, x}, count);
+  // if the output type is trivially constructible from the input, it has no side effect, and we can skip placement new
+  // and calling a constructor. Furthermore, if assigning the input value to an output element is also trivial, there is
+  // no copy constructor which could have a side effect and we can delegate to fill_n.
+  using value_t = thrust::detail::it_value_t<Iterator>;
+  if constexpr (_THRUST_STD::is_trivially_constructible_v<value_t, T const&>
+                && _THRUST_STD::is_trivially_assignable_v<value_t, T const&>)
+  {
+    hip_rocprim::fill_n(policy, first, count, x);
+  }
+  else
+  {
+    hip_rocprim::parallel_for(policy, __uninitialized_fill::functor<Iterator, T>{first, x}, count);
+  }
   return first + count;
 }
 
