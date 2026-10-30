@@ -1,0 +1,224 @@
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/core/TestApplicabilityManager.cpp:1212: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/core/TestContainer.cpp:372: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/core/TestContainer.cpp:415: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestProgramAndKernel.cpp:24: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestProgramAndKernel.cpp:33: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestProgramAndKernel.cpp:40: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestProgramAndKernel.cpp:48: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestProgramAndKernel.cpp:106: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestProgramAndKernel.cpp:106: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/device/TestScopedDevice.cpp:40: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/device/TestScopedDevice.cpp:58: Skipped
+needs two devices: with one, ScopedDevice never switches
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/device/TestScopedDevice.cpp:76: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/hip_mlops_engine/TestHipMlopsKernelCompiler.cpp:16: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/hip_mlops_engine/TestHipMlopsKernelCompiler.cpp:25: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/hip_mlops_engine/TestHipMlopsModuleCache.cpp:78: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/hip_mlops_engine/TestHipMlopsModuleCache.cpp:96: Skipped
+No devices available. Skipping test.
+
+
+GMOCK WARNING:
+Uninteresting mock function call - taking default action specified at:
+/tmp/mkeng/src/projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/MockGraph.hpp:25:
+    Function call: getGraph()
+          Returns: 1-byte object <06>
+NOTE: You can safely ignore the above warning unless this call should not happen.  Do not suppress it by blindly adding an EXPECT_CALL() if you don't mean to enforce the call.  See https://github.com/google/googletest/blob/main/docs/gmock_cook_book.md#knowing-when-to-expect-useoncall for details.
+
+GMOCK WARNING:
+Uninteresting mock function call - taking default action specified at:
+/tmp/mkeng/src/projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/MockGraph.hpp:25:
+    Function call: getGraph()
+          Returns: 1-byte object <06>
+NOTE: You can safely ignore the above warning unless this call should not happen.  Do not suppress it by blindly adding an EXPECT_CALL() if you don't mean to enforce the call.  See https://github.com/google/googletest/blob/main/docs/gmock_cook_book.md#knowing-when-to-expect-useoncall for details.
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/hip_mlops_engine/plans/Layernorm/TestLayernormPlanBuilder.cpp:214: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/hip_mlops_engine/plans/Layernorm/TestLayernormPlanBuilder.cpp:226: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/hip_mlops_engine/plans/Layernorm/TestLayernormPlanBuilder.cpp:246: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/hip_mlops_engine/plans/Layernorm/TestLayernormBwdPlan.cpp:140: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/hip_mlops_engine/plans/Layernorm/TestLayernormBwdPlan.cpp:149: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/hip_mlops_engine/plans/Layernorm/TestLayernormBwdPlan.cpp:165: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/hip_mlops_engine/plans/Layernorm/TestLayernormBwdPlan.cpp:189: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestHandleDeviceResolver.cpp:130: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestHandleDeviceResolver.cpp:176: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestHandleDeviceResolver.cpp:196: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestHandleDeviceResolver.cpp:245: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestKernelIngestorEngine.cpp:186: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestKernelIngestorEngine.cpp:203: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestKernelIngestorEngine.cpp:229: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestKernelIngestorEngine.cpp:247: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestKernelIngestorEngine.cpp:276: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestKernelIngestorEngine.cpp:302: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestKernelIngestorEngine.cpp:566: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestLaunchKernelDefinition.cpp:343: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestLaunchKernelDefinition.cpp:343: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestMultiLaunchEndToEnd.cpp:481: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestPointwiseAddDispatchHandler.cpp:228: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestPointwiseAddDispatchHandler.cpp:251: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestPointwiseAddDispatchHandler.cpp:276: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestConvFwdPack.cpp:724: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestCodeObjectLoad.cpp:96: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestCodeObjectLoad.cpp:120: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestKpackCodeObjectRead.cpp:109: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestKpackCodeObjectRead.cpp:198: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestKpackKernelLoader.cpp:225: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestKpackKernelLoader.cpp:273: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestKpackKernelLoader.cpp:323: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestKpackKernelLoader.cpp:371: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestKpackModuleCache.cpp:418: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestKpackModuleCache.cpp:572: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestIngestorPlanCapture.cpp:317: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestIngestorPlanRoundTrip.cpp:112: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestIngestorPlanRoundTrip.cpp:140: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestProgramAndKernel.cpp:106: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestProgramAndKernel.cpp:106: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestProgramAndKernel.cpp:106: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestProgramAndKernel.cpp:106: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestProgramAndKernel.cpp:106: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestProgramAndKernel.cpp:106: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestProgramAndKernel.cpp:106: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/compilation/TestProgramAndKernel.cpp:106: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestPointwiseAddDispatchHandler.cpp:183: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestPointwiseAddDispatchHandler.cpp:183: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/core/TestPluginSerialization.cpp:299: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/core/TestPluginSerialization.cpp:299: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestIngestorPlanCapture.cpp:246: Skipped
+No devices available. Skipping test.
+
+/tmp/mkeng/src/dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestIngestorPlanCapture.cpp:246: Skipped
+No devices available. Skipping test.
+
+[==========] 1187 tests from 154 test suites ran. (291 ms total)
+[  PASSED  ] 1119 tests.
+[  SKIPPED ] 68 tests.
+
+  YOU HAVE 1 DISABLED TEST
+

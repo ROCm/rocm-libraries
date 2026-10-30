@@ -1,0 +1,29 @@
+Note: Google Test filter = TestMegakernel*
+[==========] Running 10 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 10 tests from TestMegakernelMatchers
+[ RUN      ] TestMegakernelMatchers.AcceptsThePayloadOfTheObjectsBinaryKey
+[       OK ] TestMegakernelMatchers.AcceptsThePayloadOfTheObjectsBinaryKey (0 ms)
+[ RUN      ] TestMegakernelMatchers.DeclinesACuCountOtherThanTheDevices
+[       OK ] TestMegakernelMatchers.DeclinesACuCountOtherThanTheDevices (0 ms)
+[ RUN      ] TestMegakernelMatchers.DeclinesADeviceWhoseCuCountIsNotTheObjects
+[       OK ] TestMegakernelMatchers.DeclinesADeviceWhoseCuCountIsNotTheObjects (0 ms)
+[ RUN      ] TestMegakernelMatchers.DeclinesASrcNoObjectCarries
+[       OK ] TestMegakernelMatchers.DeclinesASrcNoObjectCarries (0 ms)
+[ RUN      ] TestMegakernelMatchers.DeclinesAWidthOtherThanTheObjects
+[       OK ] TestMegakernelMatchers.DeclinesAWidthOtherThanTheObjects (0 ms)
+[ RUN      ] TestMegakernelMatchers.DeclinesAnotherSchemaVersion
+[       OK ] TestMegakernelMatchers.DeclinesAnotherSchemaVersion (0 ms)
+[ RUN      ] TestMegakernelMatchers.DeclinesMalformedJson
+[       OK ] TestMegakernelMatchers.DeclinesMalformedJson (0 ms)
+[ RUN      ] TestMegakernelMatchers.DeclinesAKeyOfTheWrongType
+[       OK ] TestMegakernelMatchers.DeclinesAKeyOfTheWrongType (0 ms)
+[ RUN      ] TestMegakernelMatchers.DeclinesAnOpIdThatNamesAnotherModel
+[       OK ] TestMegakernelMatchers.DeclinesAnOpIdThatNamesAnotherModel (0 ms)
+[ RUN      ] TestMegakernelMatchers.IgnoresCustomOpsOfOtherPluginsSilently
+[       OK ] TestMegakernelMatchers.IgnoresCustomOpsOfOtherPluginsSilently (0 ms)
+[----------] 10 tests from TestMegakernelMatchers (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 10 tests from 1 test suite ran. (1 ms total)
+[  PASSED  ] 10 tests.
