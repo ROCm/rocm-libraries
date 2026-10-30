@@ -251,6 +251,20 @@ const char* rocke_i_global_ptr_to_i64_error(const rocke_type_t* ptr_type,
  * The verifier and both lowerings use it. */
 const char* rocke_i_global_ptr_to_i64_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
+/* The error for math.ldexp on these types, or NULL: an f32 value and an i32
+ * exponent give an f32 (Python core/ir.py::_ldexp_types_error, same text). A
+ * returned error is written to `buf`. */
+const char* rocke_i_ldexp_types_error(const rocke_type_t* value_type,
+                                      const rocke_type_t* exponent_type,
+                                      const rocke_type_t* result_type,
+                                      char* buf,
+                                      size_t cap);
+
+/* rocke_i_ldexp_types_error for a built math.ldexp op, after its operand,
+ * result and region counts (Python core/ir.py::_ldexp_op_error, same text).
+ * The verifier and both lowerings use it. */
+const char* rocke_i_ldexp_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
 /* The error for a built tile.trap op that has operands, results or regions,
  * or NULL when it is bare (Python core/ir.py::_trap_op_error, same text): the
  * lowerings emit only the trap call, so a result would reach its uses

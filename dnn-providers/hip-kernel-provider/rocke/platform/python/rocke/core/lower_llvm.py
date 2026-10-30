@@ -71,6 +71,7 @@ from .ir import (
     _gpu_check_failed_op_error,
     _if_else_branch_yield,
     _is_unsigned,
+    _ldexp_op_error,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
@@ -318,6 +319,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<4 x i32>, <8 x i32>, <4 x i32>, <4 x i32>, <8 x i32>, i32 immarg)"
     ),
     "exp2.f32": "declare float @llvm.exp2.f32(float)",
+    "ldexp.f32.i32": "declare float @llvm.ldexp.f32.i32(float, i32)",
     "amdgcn.exp2.f32": "declare float @llvm.amdgcn.exp2.f32(float)",
     "log2.f32": "declare float @llvm.log2.f32(float)",
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
@@ -3345,6 +3347,17 @@ class _Lowerer:
         self._need("exp2.f32")
         self._current().emit(
             f"  {op.result.name} = call float @llvm.exp2.f32(float {self._operand(v)})"
+        )
+
+    def _op_math_ldexp(self, op: Op) -> None:
+        error = _ldexp_op_error(op)
+        if error:
+            raise ValueError(error)
+        value, exponent = op.operands
+        self._need("ldexp.f32.i32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.ldexp.f32.i32("
+            f"float {self._operand(value)}, i32 {self._operand(exponent)})"
         )
 
     def _op_math_exp2_fast(self, op: Op) -> None:

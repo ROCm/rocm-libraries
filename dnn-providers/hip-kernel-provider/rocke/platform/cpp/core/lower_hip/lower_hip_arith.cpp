@@ -879,6 +879,26 @@ static rocke_status_t rocke_h_op_math_exp2(rocke_h_lowerer_t* lw, const rocke_op
     return lw->status;
 }
 
+/* Python _op_math_ldexp. */
+static rocke_status_t rocke_h_op_math_ldexp(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    char err[256];
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(const char* error = rocke_i_ldexp_op_error(op, err, sizeof err))
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+    }
+    rocke_h_emitf(lw,
+                  "float %s = __builtin_ldexpf(%s, %s);",
+                  rocke_h_name(lw, op->results[0]),
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]));
+    return lw->status;
+}
+
 /* def _op_math_log2(self, op): self._math1(op, "log2f") */
 static rocke_status_t rocke_h_op_math_log2(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
@@ -971,6 +991,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_arith(void)
         {ROCKE_OP_ARITH_FMIN, rocke_h_op_arith_fmin},
         {ROCKE_OP_ARITH_FCMP, rocke_h_op_arith_fcmp},
         {ROCKE_OP_MATH_EXP2, rocke_h_op_math_exp2},
+        {ROCKE_OP_MATH_LDEXP, rocke_h_op_math_ldexp},
         {ROCKE_OP_MATH_LOG2, rocke_h_op_math_log2},
         {ROCKE_OP_MATH_RCP, rocke_h_op_math_rcp},
         {ROCKE_OP_MATH_RCP_FAST, rocke_h_op_math_rcp_fast},

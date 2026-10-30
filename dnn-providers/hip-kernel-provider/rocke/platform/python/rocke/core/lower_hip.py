@@ -46,6 +46,7 @@ from .ir import (
     _global_ptr_to_i64_op_error,
     _gpu_check_failed_op_error,
     _if_else_branch_yield,
+    _ldexp_op_error,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
@@ -1933,6 +1934,15 @@ class _Lowerer:
         # ``__exp2f`` is HIP's device runtime exp2 entry point; for fp16/bf16
         # we promote to f32 first.
         self._math1(op, "exp2f")
+
+    def _op_math_ldexp(self, op: Op) -> None:
+        error = _ldexp_op_error(op)
+        if error:
+            raise ValueError(error)
+        value, exponent = op.operands
+        self._emit(
+            f"float {_name(op.result)} = __builtin_ldexpf({_name(value)}, {_name(exponent)});"
+        )
 
     def _op_math_log2(self, op: Op) -> None:
         # ``log2f`` is HIP's device runtime base-2 log entry point; for
