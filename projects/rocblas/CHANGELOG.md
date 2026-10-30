@@ -5,6 +5,10 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.9.0
 
+### Added
+
+* CMake `ROCBLAS_TENSILE_ARCH_SKIPLIST` to skip GPU targets during Tensile library generation while still compiling the rocBLAS library for all `GPU_TARGETS`. If every `GPU_TARGETS` entry is skipped, Tensile is invoked with its stub `gfx000` target when that logic exists, but `gfx000` catalogs are never packaged. GEMM on a skipped architecture uses hipBLASLt or source kernels instead of aborting Tensile initialization.
+
 ## rocBLAS 5.8.0 
 
 ### Added

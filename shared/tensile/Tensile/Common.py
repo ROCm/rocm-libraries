@@ -33,7 +33,7 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, NamedTuple, Optional, Tuple
+from typing import Any, Dict, NamedTuple, Optional, Set, Tuple
 
 from . import Parallel, __version__
 from .AsmCaps import getCapabilitiesCache
@@ -399,9 +399,28 @@ globalParameters["ExperimentalLogicDir"] = "/experimental/"
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 defaultGlobalParameters = deepcopy(globalParameters)
 
+# Placeholder gfx target used when a client requests a Tensile library with no
+# real GPU ISA (maps to logic name "none"; HIP fallback YAML still matches).
+STUB_GFX_TARGET = "gfx000"
+
+def isStubGfxTarget(arch: str) -> bool:
+  """Return True if *arch* is Tensile's stub gfx target (gfx000)."""
+  if not arch:
+    return False
+  base = arch.replace(":", "-").split("-", 1)[0]
+  return base == STUB_GFX_TARGET
+
+def isStubOnlyArchitecture(architecture: str) -> bool:
+  """Return True if *architecture* (raw ``;``/``_``-delimited CLI value) requests
+  only Tensile's stub gfx target (gfx000) and nothing else."""
+  if not architecture:
+    return False
+  wantedArchs = architecture.split(";") if ";" in architecture else architecture.split("_")
+  return bool(wantedArchs) and all(isStubGfxTarget(a) for a in wantedArchs)
+
 # Translate GPU targets to filter filenames in Tensile_LOGIC directory
 architectureMap = {
-  'all':'_', 'gfx000':'none', 'fallback':'hip',
+  'all':'_', STUB_GFX_TARGET:'none', 'fallback':'hip',
   'gfx803':'r9nano', 'gfx900':'vega10', 'gfx900:xnack-':'vega10', 'gfx90c':'vega10',
   'gfx906':'vega20', 'gfx906:xnack+':'vega20', 'gfx906:xnack-':'vega20',
   'gfx908':'arcturus','gfx908:xnack+':'arcturus', 'gfx908:xnack-':'arcturus',
@@ -2444,8 +2463,44 @@ def splitArchs():
     return archs, cmdlineArchs
 
 
+class _DisabledAsmCaps(dict):
+  """Placeholder AsmCaps entry for an ISA that was not probed because no kernel
+  will be generated for it. Every capability queried (HasMFMA, MaxVmcnt, ...)
+  is reported as unsupported/False."""
+  def __missing__(self, key):
+    return False
+
+
+def isUnprobedAsmCaps(caps: dict) -> bool:
+  """Return True if *caps* is a placeholder for an ISA whose assembler was not probed."""
+  return isinstance(caps, _DisabledAsmCaps)
+
+
+def asmCapsProbeIsas(architecture: str) -> Optional[Set[IsaVersion]]:
+  """Return the ISAs whose assembler capabilities must be probed for *architecture*
+  (raw ``;``/``_``-delimited CLI value), or None if every ISA must be probed.
+
+  Kernels are only generated for ISAs of the logic files that are loaded, which are
+  selected by logic name, so the set covers each requested ISA, every ISA sharing a
+  logic name with one (for example gfx900 for gfx90c), and (0,0,0) for source kernels.
+  """
+  if not architecture:
+    return None
+  wantedArchs = [a for a in re.split(r"[;_]", architecture) if a]
+  if not wantedArchs or "all" in wantedArchs:
+    return None
+  logicNames = {getArchitectureName(a) for a in wantedArchs} - {None}
+  isas = {(0, 0, 0)}
+  for arch in wantedArchs + [k for k, v in architectureMap.items() if v in logicNames]:
+    isa = gfxArch(arch)
+    if isa:
+      isas.add(isa)
+  return isas
+
+
 def populateCapabilities(
-    globalParameters: Dict[str, Any], cachedAsmCaps: Dict[IsaVersion, dict], hipVer: SemanticVersion
+    globalParameters: Dict[str, Any], cachedAsmCaps: Dict[IsaVersion, dict], hipVer: SemanticVersion,
+    probeIsas: Optional[Set[IsaVersion]] = None,
 ):
     """Populates the assembler and archiecture capabilities based on the compiler and ISA.
 
@@ -2460,6 +2515,10 @@ def populateCapabilities(
         cachedAsmCaps: A dictionary to be populated with the assembler
             capabilities for each ISA version.
         hipVer: The hip compiler version.
+        probeIsas: ISAs whose assembler capabilities are derived (GetAsmCaps).
+            Every other ISA gets an unsupported placeholder (see isUnprobedAsmCaps)
+            instead of invoking the assembler. None probes every ISA; an empty set
+            probes none (stub-only gfx000 library generation).
 
     Note:
         This function modifies `globalParameters` and `cachedAsmCaps` in place.
@@ -2477,7 +2536,9 @@ def populateCapabilities(
             to_remove.append(v)
             continue
 
-        if emptyCache or not globalParameters["CacheAsmCaps"]:
+        if probeIsas is not None and v not in probeIsas:
+            globalParameters["AsmCaps"][v] = _DisabledAsmCaps(SupportedISA=False)
+        elif emptyCache or not globalParameters["CacheAsmCaps"]:
             globalParameters["AsmCaps"][v] = GetAsmCaps(v, hipVer, cachedAsmCaps)
 
         globalParameters["ArchCaps"][v] = GetArchCaps(v)
@@ -2598,17 +2659,32 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
     *[int(c.split("-")[0]) for c in globalParameters["HipClangVersion"].split(".")[:3]]
   )
   cachedAsmCaps = getCapabilitiesCache(hipVersion)
-  populateCapabilities(globalParameters, cachedAsmCaps, hipVersion)
+  # "Architecture" isn't copied from config into globalParameters until after this
+  # call, so read it from config directly. A caller-provided capabilities cache may
+  # be written back to disk, so it is never filled with placeholders.
+  architecture = config.get("Architecture", "")
+  probeIsas = None
+  if capabilitiesCache is None:
+    if isStubOnlyArchitecture(architecture):
+      tPrint(1, "# Requested only Tensile stub gfx target(s); skipping assembler capability probing")
+      probeIsas = set()
+    else:
+      probeIsas = asmCapsProbeIsas(architecture)
+      if probeIsas is not None:
+        tPrint(1, "# Probing assembler capabilities only for: "
+                  + ", ".join(gfxName(v) for v in sorted(probeIsas) if v != (0, 0, 0)))
+  populateCapabilities(globalParameters, cachedAsmCaps, hipVersion, probeIsas=probeIsas)
 
   if globalParameters["PrintLevel"] >= 2:
     printCapTable(globalParameters)
 
-  if globalParameters["AsmCaps"] != cachedAsmCaps and globalParameters["PrintLevel"] >= 1:
+  probedAsmCaps = {v: c for v, c in globalParameters["AsmCaps"].items() if not isUnprobedAsmCaps(c)}
+  if probedAsmCaps != {v: cachedAsmCaps.get(v) for v in probedAsmCaps} and globalParameters["PrintLevel"] >= 1:
     import pprint
     printWarning("ASM Caps differ from cache. New caps:")
     print("####################")
     print("CACHED_ASM_CAPS = \\\n")
-    pprint.pprint(globalParameters["AsmCaps"])
+    pprint.pprint(probedAsmCaps)
     print("####################")
 
   globalParameters["SupportedISA"] = list([i for i in globalParameters["SupportedISA"] if globalParameters["AsmCaps"][i]["SupportedISA"]])
