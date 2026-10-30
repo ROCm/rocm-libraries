@@ -38,6 +38,8 @@ GFX1250_FAMILY = "gfx1250_lowering"
 # with TDM). Under another flavor both engines reject all of them, which the
 # gate reads as ALL_REJECTED, so they are compared in the llvm23 lane only.
 TARGET_OP_PROFILE_FAMILIES = (
+    "conv_dgrad_patch_wmma",
+    "conv_dgrad_smallc_wmma",
     "conv_direct_dgrad_wmma",
     "conv_direct_fwd_wmma",
     "conv_fwd_small_wmma",

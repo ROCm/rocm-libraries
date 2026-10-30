@@ -101,7 +101,7 @@ ROCKE_BACKEND=both ROCKE_CPP_STRICT=1 python -m pytest -q \
     tests/core/test_gfx1250_nvfp4.py tests/test_rocke_ci_static.py \
     tests/instances/test_gfx1250_nvfp4_example.py tests/core/test_optimization_barrier.py
 python tests/instances/rocke_ir_parity_harness.py \
-    --check tests/golden/rocke_representative_ir_sha256.json
+    --check tests/golden/rocke_representative_ir_sha256
 ```
 
 The representative registry includes BF16/FP16 outputs at M32/N48 and
