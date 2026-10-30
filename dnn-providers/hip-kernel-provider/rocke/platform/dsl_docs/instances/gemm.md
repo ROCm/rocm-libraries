@@ -411,7 +411,10 @@ details packing, factor validation, scale-buffer layout, and verifier commands.
 The builder selects the shared FP4/E4M3/SCALE16 tensor-scale path.
 It is an untuned standalone builder/example; dispatcher registration and
 production routing are deferred. The complete spec-to-kernel builder is
-Python-only; C++ lowers its serialized IR. NVFP4 LLVM emission uses `llvm23`;
+Python-only; C++ lowers its serialized IR through LLVM. HIP compilation uses
+Python-generated source only; native HIP is outside this NVFP4 API's scope, and
+its FP16 inline-assembly barrier remains unsupported by that backend.
+NVFP4 LLVM emission uses `llvm23`;
 older emission flavors reject this path. Numerical verification uses bounded
 exact fixtures and establishes neither arbitrary-input accumulation behavior
 nor performance. Quantization, foreign scale-layout conversion, partial tiles,

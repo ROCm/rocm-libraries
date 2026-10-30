@@ -3,7 +3,6 @@
 /* Native C counterpart of optimization_barrier_emit.py. */
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
-#include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
 #include <stdio.h>
@@ -39,55 +38,37 @@ static const char* ARCHES[]
     = {"gfx1250", "gfx950", "gfx90a", "gfx942", "gfx1151", "gfx1201", "gfx11-generic"};
 static const int NUM_CONFIGS = sizeof(ARCHES) / sizeof(ARCHES[0]);
 
-static void build_hip_epilogue(rocke_ir_builder_t* b, int idx)
-{
-    const rocke_type_t* dtype = (idx / 2) % 2 ? rocke_bf16() : rocke_f16();
-    auto* output = rocke_b_param(b, "output", rocke_ptr_type(b, dtype, "global"), NULL);
-    auto* acc = rocke_b_param(b, "acc", rocke_f32(), NULL);
-    auto* factor_a = rocke_b_param(b, "factor_a", rocke_f32(), NULL);
-    auto* factor_b = rocke_b_param(b, "factor_b", rocke_f32(), NULL);
-    auto* factors = rocke_b_fmul(b, factor_a, factor_b);
-    auto* scaled = rocke_b_fmul(b, acc, factors);
-    auto* opaque = rocke_b_optimization_barrier(b, scaled);
-    if(idx % 2)
-        rocke_attr_set_str(b, &opaque->op->attrs, "clobber", "");
-    auto* tid = rocke_b_thread_id_x(b);
-    auto* converted = rocke_b_cast_f32_to(b, opaque, dtype);
-    rocke_b_global_store(b, output, tid, converted, 2);
-    rocke_b_ret(b);
-}
-
 int main(int argc, char** argv)
 {
-    /* Installed CTest invokes native tests without arguments. */
-    int idx = argc > 1 ? atoi(argv[1]) : 0;
-    const char* mode = argc > 2 ? argv[2] : (argc > 1 ? "ll" : "hip");
+    if(argc < 2)
+    {
+        fprintf(
+            stderr, "usage: %s <config_index 0..%d> [ll|ir|verify]\n", argv[0], NUM_CONFIGS - 1);
+        return 2;
+    }
+    int idx = atoi(argv[1]);
+    const char* mode = (argc > 2) ? argv[2] : "ll";
 
-    const bool hip = strcmp(mode, "hip") == 0;
-    if(strcmp(mode, "ll") != 0 && strcmp(mode, "ir") != 0 && strcmp(mode, "verify") != 0 && !hip)
+    if(strcmp(mode, "ll") != 0 && strcmp(mode, "ir") != 0 && strcmp(mode, "verify") != 0)
     {
         fprintf(stderr, "unknown mode %s\n", mode);
         return 2;
     }
-    if(idx < 0 || idx >= (hip ? 8 : NUM_CONFIGS))
+    if(idx < 0 || idx >= NUM_CONFIGS)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
 
     rocke_ir_builder_t b;
-    if(rocke_ir_builder_init(&b, hip ? "optimization_barrier_hip" : "optimization_barrier")
-       != ROCKE_OK)
+    if(rocke_ir_builder_init(&b, "optimization_barrier") != ROCKE_OK)
     {
         fprintf(stderr, "builder init failed\n");
         return 1;
     }
     /* Python: b.kernel.attrs["max_workgroup_size"] = 64 */
     rocke_attr_set_int(&b, &b.kernel->attrs, "max_workgroup_size", 64);
-    if(hip)
-        build_hip_epilogue(&b, idx);
-    else
-        build_optimization_barriers(&b);
+    build_optimization_barriers(&b);
 
     if(!rocke_ir_builder_ok(&b))
     {
@@ -97,23 +78,7 @@ int main(int argc, char** argv)
     }
 
     rocke_kernel_def_t* kernel = rocke_ir_builder_kernel(&b);
-    if(hip)
-    {
-        rocke_lower_hip_opts_t opts = {};
-        opts.arch = idx / 4 ? "gfx1250" : "gfx950";
-        rocke_strbuf_t text = {};
-        rocke_status_t st = rocke_lower_kernel_to_hip(&b, kernel, &opts, &text);
-        if(st != ROCKE_OK || !text.cstr())
-        {
-            fprintf(stderr, "HIP lower failed: status=%d\n", (int)st);
-            text.free_buffer();
-            rocke_ir_builder_free(&b);
-            return 1;
-        }
-        fputs(text.cstr(), stdout);
-        text.free_buffer();
-    }
-    else if(strcmp(mode, "ll") == 0)
+    if(strcmp(mode, "ll") == 0)
     {
         char* llvm_text = NULL;
         char err[ROCKE_ERR_MSG_CAP];

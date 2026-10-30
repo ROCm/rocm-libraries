@@ -21,10 +21,9 @@
  *   - the IR side-table machinery is wired: the ds_read transpose loads
  *     (ds_read_tr16_b64/b128) resolve their LDS storage via rocke_h_smem_storage,
  *     and scf.yield walks the enclosing scf.for via h_find_enclosing_for.
- * The remaining ROCKE_ERR_NOTIMPL handlers here are NOT stubs but FAITHFUL parity
- * for unsupported inline-asm forms and tile.ds_read_tr_b8. The empty tied-VGPR
- * optimization barrier is supported; other raw inline-asm payloads retain
- * their existing rejection.
+ * ROCKE_ERR_NOTIMPL marks unsupported native inline-asm forms and
+ * tile.ds_read_tr_b8. Unlike Python, this backend does not lower raw inline-asm
+ * payloads, including the empty tied-VGPR optimization barrier.
  * Every opcode is registered in the dispatch table; none is dropped.
  */
 #include <ctype.h>
@@ -344,30 +343,11 @@ static rocke_status_t rocke_h_op_tile_register_p_from_qk_c(rocke_h_lowerer_t* lw
     return lw->status;
 }
 
-/* Match Python's HIP emission for the optimization-barrier form. */
+/* Native HIP inline-asm lowering remains unsupported, including value barriers. */
 static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     if(!rocke_h_live(lw))
     {
-        return lw->status;
-    }
-    const char* tmpl = rocke_attr_get_str(&op->attrs, "template");
-    const char* constraints = rocke_attr_get_str(&op->attrs, "constraints");
-    const rocke_attr_value_t* sideeffect = rocke_attr_get(&op->attrs, "sideeffect");
-    const rocke_attr_value_t* clobber = rocke_attr_get(&op->attrs, "clobber");
-    if(op->num_results == 1 && op->num_operands == 1 && tmpl && tmpl[0] == '\0' && constraints
-       && strcmp(constraints, "=v,0") == 0 && sideeffect && sideeffect->kind == ROCKE_ATTR_BOOL
-       && !sideeffect->u.b
-       && (!clobber
-           || (clobber->kind == ROCKE_ATTR_STR && clobber->u.s && clobber->u.s[0] == '\0')))
-    {
-        const rocke_value_t* result = h_res(op);
-        const char* result_name = rocke_h_name(lw, result);
-        rocke_h_emitf(lw, "%s %s;", rocke_h_type_to_hip(lw, result->type), result_name);
-        rocke_h_emitf(lw,
-                      "asm (\"\" : \"=v\"(%s) : \"0\"(%s));",
-                      result_name,
-                      rocke_h_name(lw, op->operands[0]));
         return lw->status;
     }
     return rocke_h_fail(lw,

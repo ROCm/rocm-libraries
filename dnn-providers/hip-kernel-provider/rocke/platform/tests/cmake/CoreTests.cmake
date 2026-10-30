@@ -51,31 +51,6 @@ if(BUILD_TESTING)
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                rocke_optimization_barrier)
 
-  set_source_files_properties(instances/parity/optimization_barrier_emit.c
-                              PROPERTIES LANGUAGE CXX)
-  add_executable(rocke_optimization_barrier_emit
-                 instances/parity/optimization_barrier_emit.c)
-  # Keep the .c/.py pair for differential discovery, but force C++ input.
-  # LANGUAGE CXX alone does not add a language flag under older CMake policies.
-  if(MSVC)
-    target_compile_options(rocke_optimization_barrier_emit PRIVATE /TP)
-  else()
-    target_compile_options(rocke_optimization_barrier_emit PRIVATE -x c++)
-  endif()
-  target_link_libraries(rocke_optimization_barrier_emit PRIVATE rocke_core)
-  add_test(NAME rocke_optimization_barrier_emit
-           COMMAND rocke_optimization_barrier_emit)
-  set_tests_properties(rocke_optimization_barrier_emit
-                       PROPERTIES LABELS "ckc;unit;host")
-  rocke_cxx_test_installed_name(_rocke_installed_name
-                               rocke_optimization_barrier_emit)
-  set_target_properties(rocke_optimization_barrier_emit
-                         PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
-  install(TARGETS rocke_optimization_barrier_emit
-          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
-  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
-               rocke_optimization_barrier_emit)
-
   add_executable(rocke_tf32 core/test_tf32.cpp)
   target_link_libraries(rocke_tf32 PRIVATE rocke_core)
   add_test(NAME rocke_tf32 COMMAND rocke_tf32)

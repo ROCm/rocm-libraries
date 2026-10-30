@@ -67,7 +67,10 @@ and object arrays are rejected. The launcher rejects malformed factors and
 factors supplied for plain specs before allocating GPU memory.
 Scale selection is mirrored by Python `IRBuilder.mma` and C
 `rocke_b_mma_scaled`; the complete spec-to-kernel builder remains Python-only.
-C++ lowers its serialized IR, including the tensor-scale epilogue.
+C++ lowers its serialized IR through LLVM, including the tensor-scale epilogue.
+HIP compilation uses Python-generated source only; native HIP support is outside
+this NVFP4 API's scope. Native inline-assembly lowering remains unsupported, so
+the FP16 tensor-epilogue barrier rejects through native HIP.
 
 ## Validation and scope
 
@@ -81,7 +84,9 @@ describes a different scale-buffer layout; this builder does not consume that
 layout directly.
 
 CPU tests cover the scale encodings, parameter/signature contract, scale direction,
-epilogue placement, invalid specs, and preserved defaults. The GPU verifier covers
+epilogue placement, invalid specs, and preserved defaults. The native barrier
+CTest also pins direct/serialized HIP rejection of the FP16 tensor epilogue
+while preserving its LLVM support. The GPU verifier covers
 K=128/256, BF16/FP16 outputs, independent block scales, non-power-of-two tensor
 factors, zero scales, isolated K groups, and all FP4 code products at lane/K
 boundaries. Exact fixtures use bounded products and explicitly rounded FP32
