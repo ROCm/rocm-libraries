@@ -298,7 +298,7 @@ namespace TensileLite::Client
         {
             StructuredSparsityPattern pattern;
             pattern.indexOrder = roc::hostnumerics::Permutation::identity(rank);
-            pattern.axis = sparseAxis;
+            pattern.axis       = sparseAxis;
             switch(mode)
             {
             case PruneSparseMode::PruneRandom:

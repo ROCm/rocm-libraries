@@ -8,8 +8,8 @@
 #include <TensileLite/Client/hostnumerics/GemmInvocationAdapter.hpp>
 #include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
 #include <TensileLite/Client/hostnumerics/Reference.hpp>
-#include <roc/hostnumerics/validation.hpp>
 #include <roc/hostnumerics/sampling.hpp>
+#include <roc/hostnumerics/validation.hpp>
 
 #include <array>
 #include <cmath>
@@ -671,9 +671,9 @@ TEST(ReferenceGemmSelection, UsesBlockedForSparseFloatValidation)
 
     SolveGemmCPU(problem, inputs, elementsToValidate);
 
-    const auto selection = roc::hostnumerics::primeIndexRange(
-        {.logicalElements   = problem.d().totalLogicalElements(),
-         .requestedElements = elementsToValidate});
+    const auto selection
+        = roc::hostnumerics::primeIndexRange({.logicalElements = problem.d().totalLogicalElements(),
+                                              .requestedElements = elementsToValidate});
     const std::vector<size_t> selected = selection.indices();
     ASSERT_EQ(selected.size(), elementsToValidate);
 

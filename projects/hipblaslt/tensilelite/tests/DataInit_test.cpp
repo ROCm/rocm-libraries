@@ -1158,7 +1158,7 @@ TEST_P(TensileMxBlockScaleGranularity, BlockSharesOneScale)
                                                   false);
     ASSERT_EQ(generated.scales.elementCount(), (K / mxBlock) * M);
 
-    const std::array<double, 8> grid{0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0};
+    const std::array<double, 8>          grid{0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0};
     const roc::hostnumerics::Permutation order{0, 1};
     for(size_t m = 0; m < M; ++m)
         for(size_t k = 0; k < K; ++k)

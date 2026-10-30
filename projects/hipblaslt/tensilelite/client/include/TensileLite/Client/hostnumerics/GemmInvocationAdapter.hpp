@@ -187,30 +187,30 @@ namespace TensileLite::Client::hostnumerics
         explicit GemmInvocationAdapter(std::unique_ptr<const State> state);
 
         friend std::variant<GemmInvocationAdapter, TranslationFailure>
-            translateGemmInvocation(ContractionProblemGemm const&        problem,
-                                    ContractionInputs const&             inputs,
-                                    const roc::hostnumerics::IndexRange& indices,
-                                    const roc::hostnumerics::Permutation&       order);
+            translateGemmInvocation(ContractionProblemGemm const&         problem,
+                                    ContractionInputs const&              inputs,
+                                    const roc::hostnumerics::IndexRange&  indices,
+                                    const roc::hostnumerics::Permutation& order);
 
         friend std::variant<GemmInvocationAdapter, TranslationFailure>
-            translateGemmInvocation(ContractionProblemGemm const& problem,
-                                    ContractionInputs const&      inputs,
-                                    const std::set<size_t>&       indices,
+            translateGemmInvocation(ContractionProblemGemm const&         problem,
+                                    ContractionInputs const&              inputs,
+                                    const std::set<size_t>&               indices,
                                     const roc::hostnumerics::Permutation& order);
 
         std::unique_ptr<const State> m_state;
     };
 
     std::variant<GemmInvocationAdapter, TranslationFailure>
-        translateGemmInvocation(ContractionProblemGemm const&        problem,
-                                ContractionInputs const&             inputs,
-                                const roc::hostnumerics::IndexRange& indices,
-                                const roc::hostnumerics::Permutation&       order);
+        translateGemmInvocation(ContractionProblemGemm const&         problem,
+                                ContractionInputs const&              inputs,
+                                const roc::hostnumerics::IndexRange&  indices,
+                                const roc::hostnumerics::Permutation& order);
 
     std::variant<GemmInvocationAdapter, TranslationFailure>
-        translateGemmInvocation(ContractionProblemGemm const& problem,
-                                ContractionInputs const&      inputs,
-                                const std::set<size_t>&       indices,
+        translateGemmInvocation(ContractionProblemGemm const&         problem,
+                                ContractionInputs const&              inputs,
+                                const std::set<size_t>&               indices,
                                 const roc::hostnumerics::Permutation& order);
 
     template <typename Indices>
