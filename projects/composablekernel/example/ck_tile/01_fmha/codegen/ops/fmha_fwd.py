@@ -1602,7 +1602,7 @@ GFX125_QR_TDM_PINGPONG_RANGE = (
 # scheduled trait in FmhaFwdKernel.api_trait, so a custom-tune tile cannot bypass it.
 _LL = "static_cast<long long>"
 GFX125_D64_N128_CONSTRAINT = CppConstraint(
-    "a.seqlen_q == a.seqlen_k && a.seqlen_q % 256 == 0"
+    "!t.is_group_mode && a.seqlen_q == a.seqlen_k && a.seqlen_q % 256 == 0"
     " && a.seqlen_q_ptr == nullptr && a.cu_seqlen_q_ptr == nullptr"
     " && a.seqlen_k_ptr == nullptr && a.cu_seqlen_k_ptr == nullptr"
     f" && {_LL}(a.stride_q) == {_LL}(a.nhead_q) * a.hdim_q && a.nhead_stride_q == a.hdim_q"
@@ -1719,13 +1719,14 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 return False
 
             if problem_ctx.hdim == 64:
-                # N128 is measured for FP16/BF16, for simplified masks, and only
-                # as the unpadded batch specialization; the runtime constraint
-                # excludes group lengths, tails and finite windows.
-                if kernel_ctx.tile.F_bn0 == 128 and (
-                    problem_ctx.mode == "group"
-                    or kernel_ctx.pipeline.F_spad != "f"
-                    or kernel_ctx.pipeline.F_mask not in ("s_no", "s_mask")
+                # N128 shares the existing D64 sequence-padding contract. Emit
+                # padded batch/group and generic dense/causal candidates; their
+                # profitability belongs to the per-trait runtime constraint.
+                # Generic finite windows retain N64: the wider tile regresses
+                # those measured workloads despite supporting their geometry.
+                if (
+                    kernel_ctx.tile.F_bn0 == 128
+                    and kernel_ctx.pipeline.F_mask == "generic"
                 ):
                     return False
                 # Match qr_tdm's exact D64/V64 head traits. Aligned batch can
