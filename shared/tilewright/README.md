@@ -732,11 +732,13 @@ wherever their memory comes from.
   It asks for data that a call with warm caches already holds, so it costs
   such a call a little; turn it off where warm calls matter more.
 - `TW_LEVER_MEMO`: when the thread's last ranking scored a cell whitelist
-  alone, a ranking of the same problem, hardware and context over the same
-  candidate set and launch model that needs no more configs than that tier
-  holds (no prior) orders the remembered scores instead of computing them
-  again. The memo serves once and is forgotten by the thread's next ranking
-  that scores. This is TensileLite's re-rank, which asks
+  alone, a ranking of the same problem, hardware and scoring context
+  (`scoring_context`: calls outside the model's CU range that are scored at
+  one budget rank alike) over the same candidate set and launch model that
+  needs no more configs than that tier holds (no prior) orders the
+  remembered scores instead of computing them again. The memo serves once
+  and is forgotten by the thread's next ranking that scores. This is
+  TensileLite's re-rank, which asks
   `rank(..., min_scored = 1)` right after `rank_top(k = 1)` when its own
   predicates reject the top kernel. The two rankings need not belong to one
   call, though: the memo can also answer the first ranking of TensileLite's

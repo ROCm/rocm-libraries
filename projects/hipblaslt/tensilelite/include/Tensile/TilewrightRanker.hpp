@@ -413,12 +413,12 @@ namespace TensileLite
 
         // tilewright's re-rank memo (TW_LEVER_MEMO) may answer a ranking with
         // the scores of the thread's last one when both rank this pool for
-        // equal tilewright inputs (problem, hardware, context), which assumes
-        // that plan() returns equal plans for both. plan() also reads, of the
-        // scope's device, its persistent settings, its CU count and its whole
-        // analytical hardware, of which the tilewright hardware holds only the
-        // CU count and the LDS and L2 sizes, and, for a kernel it does not
-        // plan from its record, the scope's whole problem. TensileLite gives
+        // equal tilewright inputs (problem, hardware, scoring context), which
+        // assumes that plan() returns equal plans for both. plan() also reads,
+        // of the scope's device, its persistent settings, its CU count and its
+        // whole analytical hardware, of which the tilewright hardware holds
+        // only the CU count and the LDS and L2 sizes, and, for a kernel it does
+        // not plan from its record, the scope's whole problem. TensileLite gives
         // every device it builds the persistent settings it reads once per
         // process, so only devices whose CU count or analytical hardware
         // differ beyond what the tilewright hardware holds can plan
