@@ -104,6 +104,8 @@ rocke/platform/
     core/ helpers/ instances/ support/
     bindings/           # rocke_engine pybind module -> links librocke_core.a
   tests/                # by-layer, language-agnostic (see tests/README.md)
+    CMakeLists.txt       # stable C++ test-registration orchestrator
+    cmake/               # concern-owned core / portable-IR / instance registrations
   tools/                # check_byte_identity.py and other cross-platform entry points
   cmake/  CMakeLists.txt  pyproject.toml
 ```
@@ -142,6 +144,17 @@ python tests/run_all.py
 python tests/run_all.py --build-root /tmp/rocke
 python -m pytest tests/instances/test_rocke_multiarch.py   # a fast CPU-only suite
 ```
+
+C++ test registration is deliberately distributed to reduce PR contention.
+Keep `tests/CMakeLists.txt` as a stable orchestrator: add or change registrations
+in `tests/cmake/CoreTests.cmake`, `PortableIrTests.cmake`, or
+`InstanceTests.cmake`. `TestCategoryLabels.cmake` must remain last because it
+labels tests after registration and must execute in the same CMake directory
+scope. Use `include()`, not `add_subdirectory()`: with the project's pre-3.28
+CMake minimum, test properties can only be changed from the directory that
+called `add_test()`. Installed Python and library CTest entries still belong in
+`platform/CMakeLists.txt`. The ownership map and inventory-comparison recipe are
+in [`tests/README.md`](tests/README.md#cmake-registration-ownership).
 
 Before updating a PR, run the top-level pre-commit hooks over the PR range from
 the repository root:

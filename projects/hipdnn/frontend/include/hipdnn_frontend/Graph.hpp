@@ -2863,6 +2863,9 @@ public:
      * execution plan is restored too, and keeps a copy of its plan bytes, which
      * include any GPU code object, for as long as the plan lives.
      *
+     * An embedded execution plan is restored bound to the device of @p handle's
+     * stream, and executes only on handles whose stream is on that device.
+     *
      * @param handle The hipDNN handle for finalization.
      * @param data The binary data to deserialize.
      * @return Error indicating success or failure.
@@ -3005,6 +3008,10 @@ public:
      *
      * The restored plan keeps a copy of its plan bytes, which include any GPU
      * code object, for as long as it lives. A later save returns those bytes.
+     *
+     * The plan is bound to the device of @p handle's stream and executes only on
+     * handles whose stream is on that device. To run it on another device,
+     * deserialize the same bytes with a handle on that device.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error deserialize_compiled_plan(hipdnnHandle_t handle, const std::vector<uint8_t>& data)
@@ -4864,6 +4871,11 @@ public:
 
     /**
      * @brief Execute the graph with tensor pointers mapped by UID
+     *
+     * The handle's stream must be on the device the plan was built or
+     * deserialized for; a handle on another device fails with
+     * HIPDNN_BACKEND_ERROR. To run on another device, serialize the plan and
+     * deserialize it with a handle on that device.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers
