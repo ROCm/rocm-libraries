@@ -8,6 +8,7 @@
  *   _mask_label                            rocke_attn_unified_mask_label
  *   _reject_mask_semantics                 rocke_attn_unified_reject_mask_semantics
  *   _reject_mask_on_arch                   (static)
+ *   _reject_lse                            (static)
  *   _reject_fp8_format_arch_mismatch       rocke_attn_unified_reject_fp8_format_arch_mismatch
  *   supports_native_unified_attention_tiled
  *                                          rocke_unified_attention_supports_tiled_2d
@@ -116,6 +117,38 @@ static bool reject_mask_on_arch(const rocke_unified_attention_problem_t* p,
     return false;
 }
 
+/* path is "3d" for split-KV, else a label for the refused path. */
+static bool reject_lse(const rocke_unified_attention_problem_t* p,
+                       const char* arch,
+                       const char* path,
+                       char* reason,
+                       size_t reason_cap)
+{
+    if(!p->emit_lse)
+        return false;
+    if(!streq(path, "3d"))
+    {
+        gate_reason(
+            reason, reason_cap, "LSE output is not implemented on the %s attention path", path);
+        return true;
+    }
+    if(!streq(arch, "gfx942") && !streq(arch, "gfx950"))
+    {
+        gate_reason(
+            reason, reason_cap, "LSE output is not implemented on %s split-KV attention", arch);
+        return true;
+    }
+    if(p->use_sinks)
+    {
+        gate_reason(reason,
+                    reason_cap,
+                    "LSE output with attention sinks is not implemented on split-KV "
+                    "attention (keyless rows would drop the sink)");
+        return true;
+    }
+    return false;
+}
+
 bool rocke_attn_unified_reject_fp8_format_arch_mismatch(const rocke_unified_attention_problem_t* p,
                                                         const char* arch,
                                                         char* reason,
@@ -161,13 +194,6 @@ static bool reject_tiled_2d_not_ported(const rocke_unified_attention_problem_t* 
     if(p->use_additive_bias)
     {
         gate_reason(reason, reason_cap, "tiled 2D additive bias is not ported to C++ yet");
-        return true;
-    }
-    if(!rocke_unified_attention_problem_default_mask(p))
-    {
-        char label[64];
-        rocke_attn_unified_mask_label(p, label, sizeof(label));
-        gate_reason(reason, reason_cap, "tiled 2D %s masks are not ported to C++ yet", label);
         return true;
     }
     return false;
@@ -288,7 +314,8 @@ bool rocke_unified_attention_supports_tiled_2d(const rocke_unified_attention_pro
     char arch[ROCKE_ATTN_GATE_ARCH_CAP];
     rocke_unified_attention_canonical_arch(arch_in, arch, sizeof(arch));
 
-    if(rocke_attn_unified_reject_mask_semantics(p, reason, reason_cap)
+    if(reject_lse(p, arch, "tiled 2D", reason, reason_cap)
+       || rocke_attn_unified_reject_mask_semantics(p, reason, reason_cap)
        || reject_mask_on_arch(p, arch, reason, reason_cap))
         return false;
     if(streq(arch, "gfx1250") && p->softcap > 0)
@@ -334,7 +361,8 @@ bool rocke_unified_attention_supports_tiled_3d(const rocke_unified_attention_pro
     char arch[ROCKE_ATTN_GATE_ARCH_CAP];
     rocke_unified_attention_canonical_arch(arch_in, arch, sizeof(arch));
 
-    if(rocke_attn_unified_reject_mask_semantics(p, reason, reason_cap)
+    if(reject_lse(p, arch, "3d", reason, reason_cap)
+       || rocke_attn_unified_reject_mask_semantics(p, reason, reason_cap)
        || reject_mask_on_arch(p, arch, reason, reason_cap)
        || rocke_attn_unified_reject_fp8_format_arch_mismatch(p, arch, reason, reason_cap))
         return false;
@@ -395,15 +423,8 @@ bool rocke_unified_attention_supports_tiled_3d(const rocke_unified_attention_pro
         return false;
     }
 
-    /* Python admits these on gfx950; the C++ tiled 3D builder does not
-     * implement them. */
-    if(!rocke_unified_attention_problem_default_mask(p))
-    {
-        char label[64];
-        rocke_attn_unified_mask_label(p, label, sizeof(label));
-        gate_reason(reason, reason_cap, "tiled 3D %s masks are not ported to C++ yet", label);
-        return false;
-    }
+    /* Python admits this on gfx950; the C++ tiled 3D builder does not
+     * implement it. */
     if(p->use_additive_bias)
     {
         gate_reason(reason, reason_cap, "tiled 3D additive bias is not ported to C++ yet");

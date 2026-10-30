@@ -1526,6 +1526,8 @@ static rocke_attention_tiled_2d_spec_t
         s.use_softmax_mfma_interleave = true;
         s.softmax_interleave_mode = 1;
     }
+    s.causal_top_left = p->causal_top_left;
+    s.right_bound = p->right_bound;
 
     /* D256 bf16 prefill fast route: pin the 32x32 transposed stack, the
      * direct-to-register Q gather, the mask phase split, the K-slab LDS pad and

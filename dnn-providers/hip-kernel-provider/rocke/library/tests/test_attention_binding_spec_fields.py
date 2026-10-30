@@ -25,12 +25,8 @@ from kernels.gfx950.attention_tiled_2d import (
 )
 from kernels.gfx950.attention_tiled_3d import UnifiedAttention3DTiledSpec
 
-# Python spec fields the shared C tiled-2D struct has no slot for.
-_UNPORTED_2D = {
-    "use_additive_bias",
-    "causal_top_left",
-    "right_bound",
-}
+# Python spec fields the tiled-2D spec-from-problem hooks do not return.
+_UNPORTED_2D = {"use_additive_bias"}
 
 _REQUIRED_2D = {
     "head_size": 64,
@@ -96,15 +92,65 @@ def test_gfx950_2d_default_spec_round_trips(engine):
     )
 
 
-@pytest.mark.parametrize(
-    "field, value",
-    [("use_additive_bias", True), ("causal_top_left", True), ("right_bound", -1)],
-)
-def test_2d_binding_rejects_unported_fields(engine, field, value):
+def test_2d_binding_rejects_unported_fields(engine):
     d = asdict(Gfx950Spec2D(**_REQUIRED_2D, dtype="bf16"))
-    d[field] = value
-    with pytest.raises(NotImplementedError, match=field):
+    d["use_additive_bias"] = True
+    with pytest.raises(NotImplementedError, match="use_additive_bias"):
         engine.gfx950_attention_tiled_2d_lower_llvm(d, "gfx950")
+
+
+@pytest.mark.parametrize(
+    "band",
+    [
+        {"causal_top_left": True},
+        {"right_bound": 5, "sliding_window": 64},
+        {"causal_top_left": True, "right_bound": -1},
+    ],
+)
+def test_gfx950_2d_binding_reads_mask_band(engine, band):
+    spec = Gfx950Spec2D(**dict(_REQUIRED_2D, dtype="bf16", **band))
+    expected = _lower_python(build_gfx950_2d(spec, arch="gfx950"), "gfx950")
+    assert (
+        engine.gfx950_attention_tiled_2d_lower_llvm(asdict(spec), "gfx950") == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"right_bound": -2},
+        {"right_bound": 3, "use_alibi": True},
+        {"right_bound": -1, "use_qq_bias": True},
+    ],
+)
+def test_gfx950_2d_mask_band_rejects_match_python(engine, changes):
+    d = dict(_REQUIRED_2D, dtype="bf16", **changes)
+    with pytest.raises(ValueError) as py_err:
+        Gfx950Spec2D(**d)
+    full = asdict(Gfx950Spec2D(**_REQUIRED_2D, dtype="bf16"))
+    full.update(d)
+    with pytest.raises((ValueError, RuntimeError), match=re.escape(str(py_err.value))):
+        engine.gfx950_attention_tiled_2d_lower_llvm(full, "gfx950")
+
+
+@pytest.mark.parametrize(
+    "band, label",
+    [
+        ({"causal_top_left": True}, "top-left/causal"),
+        ({"right_bound": -1}, "bottom-right/unbounded"),
+        ({"right_bound": 4}, "bottom-right/right_bound=4"),
+    ],
+)
+def test_gfx942_2d_binding_rejects_mask_band(engine, band, label):
+    # The gfx942 Python spec has no band fields; only a hand-built dict reaches
+    # the C++ validator with one.
+    d = asdict(Gfx942Spec2D(**_REQUIRED_2D, dtype="fp16"))
+    d.update(band)
+    with pytest.raises(
+        (ValueError, RuntimeError),
+        match=re.escape(f"gfx942 tiled attention does not implement {label} masks"),
+    ):
+        engine.gfx942_attention_tiled_2d_lower_llvm(d, "gfx942")
 
 
 _TRANSPOSED_32X32 = {
@@ -160,9 +206,90 @@ def test_3d_binding_rejects_unported_fields(engine):
         num_segments=8,
     )
     d = asdict(spec)
-    d["right_bound"] = 5
-    with pytest.raises(NotImplementedError, match="right_bound"):
+    d["use_additive_bias"] = True
+    with pytest.raises(NotImplementedError, match="use_additive_bias"):
         engine.gfx950_attention_tiled_3d_lower_llvm(d, "gfx950")
+
+
+_REQUIRED_3D = {
+    "head_size": 64,
+    "block_size": 16,
+    "num_query_heads": 8,
+    "num_kv_heads": 8,
+    "dtype": "fp16",
+    "use_sinks": False,
+    "sliding_window": 0,
+    "has_softcap": False,
+    "num_segments": 8,
+}
+
+
+@pytest.mark.parametrize(
+    "band",
+    [
+        {"causal_top_left": True},
+        {"right_bound": 6, "sliding_window": 64},
+        {"causal_top_left": True, "right_bound": -1},
+    ],
+)
+def test_gfx950_3d_binding_reads_mask_band(engine, band):
+    from kernels.gfx950.attention_tiled_3d import (
+        UnifiedAttentionReduceTiledSpec,
+        build_unified_attention_3d_tiled,
+        build_unified_attention_reduce_tiled,
+    )
+
+    spec = UnifiedAttention3DTiledSpec(**dict(_REQUIRED_3D, **band))
+    reduce_spec = UnifiedAttentionReduceTiledSpec(
+        head_size=spec.head_size,
+        num_query_heads=spec.num_query_heads,
+        num_kv_heads=spec.num_kv_heads,
+        dtype=spec.dtype,
+        num_segments=spec.num_segments,
+    )
+    expected = _lower_python(
+        build_unified_attention_3d_tiled(spec, arch="gfx950"), "gfx950"
+    ) + _lower_python(
+        build_unified_attention_reduce_tiled(reduce_spec, arch="gfx950"), "gfx950"
+    )
+    assert (
+        engine.gfx950_attention_tiled_3d_lower_llvm(asdict(spec), "gfx950") == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"right_bound": -2},
+        {"right_bound": 3, "use_alibi": True},
+        {"right_bound": -1, "use_qq_bias": True},
+    ],
+)
+def test_gfx950_3d_mask_band_rejects_match_python(engine, changes):
+    d = dict(_REQUIRED_3D, **changes)
+    with pytest.raises(ValueError) as py_err:
+        UnifiedAttention3DTiledSpec(**d)
+    full = asdict(UnifiedAttention3DTiledSpec(**_REQUIRED_3D))
+    full.update(d)
+    with pytest.raises((ValueError, RuntimeError), match=re.escape(str(py_err.value))):
+        engine.gfx950_attention_tiled_3d_lower_llvm(full, "gfx950")
+
+
+@pytest.mark.parametrize(
+    "band, label",
+    [
+        ({"causal_top_left": True}, "top-left/causal"),
+        ({"right_bound": -1}, "bottom-right/unbounded"),
+        ({"right_bound": 4}, "bottom-right/right_bound=4"),
+    ],
+)
+def test_gfx942_3d_binding_rejects_mask_band(engine, band, label):
+    d = dict(_REQUIRED_3D, **band)
+    with pytest.raises(
+        (ValueError, RuntimeError),
+        match=re.escape(f"gfx942 tiled attention does not implement {label} masks"),
+    ):
+        engine.gfx942_attention_tiled_3d_lower_llvm(d, "gfx942")
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
@@ -211,6 +338,28 @@ def test_scalar_binding_rejects_fp8_kv(engine):
         engine.attention_unified_lower_llvm(dict(problem, use_fp8=True), "gfx950")
 
 
+def test_scalar_binding_reads_mask_band(engine):
+    import kernels.common.attention_unified as au
+
+    problem = au.UnifiedAttentionProblem(
+        total_q=16,
+        num_seqs=1,
+        num_query_heads=4,
+        num_kv_heads=2,
+        head_size=64,
+        block_size=16,
+        max_seqlen_q=16,
+        max_seqlen_k=64,
+        dtype="fp16",
+        causal_top_left=True,
+        right_bound=5,
+    )
+    kernel = au.build_unified_attention_2d(au.UnifiedAttention2DSpec(problem))
+    expected = _lower_python(kernel, "gfx950")
+    assert "tl_rb5" in expected
+    assert engine.attention_unified_lower_llvm(asdict(problem), "gfx950") == expected
+
+
 _PROBLEM = {
     "total_q": 512,
     "num_seqs": 1,
@@ -245,8 +394,7 @@ def test_3d_selector_hook_returns_every_spec_field(engine, arch):
     python_fields = {f.name for f in fields(Gfx942Spec3D)} | {
         f.name for f in fields(UnifiedAttention3DTiledSpec)
     }
-    unported = {"use_additive_bias", "causal_top_left", "right_bound"}
-    assert set(spec) == python_fields - unported
+    assert set(spec) == python_fields - {"use_additive_bias"}
     assert spec["kv_layout"] == "paged"
 
 

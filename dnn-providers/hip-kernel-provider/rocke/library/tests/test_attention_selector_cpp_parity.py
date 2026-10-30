@@ -221,8 +221,6 @@ def test_selectors_follow_env(engine, monkeypatch, env):
 # field-set test fails until the entry is removed here and the field compared.
 _PY_ONLY_SPEC_FIELDS = {
     "use_additive_bias": "additive bias is not in the C++ tiled-2D spec",
-    "causal_top_left": "the top-left mask band is not in the C++ tiled-2D spec",
-    "right_bound": "the right-bound mask band is not in the C++ tiled-2D spec",
 }
 
 # gfx942 knobs carried by the C spec struct both arches share; the gfx950
@@ -338,6 +336,11 @@ def _matrix_problems():
         p(512, 2, 64, 8, 64, 32, 512, 4096, num_kv_blocks=1 << 20),
         # D256 gfx950 fast path
         p(2048, 1, 32, 8, 256, 64, 2048, 2048),
+        # mask band (gfx950 only), incl. the D256 fast path
+        p(512, 2, 64, 8, 64, 32, 512, 4096, causal_top_left=True),
+        p(512, 4, 32, 32, 128, 32, 512, 4096, right_bound=5),
+        p(512, 1, 32, 32, 64, 32, 512, 4096, causal_top_left=True, right_bound=-1),
+        p(2048, 1, 32, 8, 256, 64, 2048, 2048, right_bound=-1),
     ]
 
 
@@ -433,9 +436,14 @@ _PY_ONLY_3D_SPEC_FIELDS = {
     "gfx942": {},
     "gfx950": {
         "use_additive_bias": "additive bias is not in the C++ tiled-3D spec",
-        "causal_top_left": "the top-left mask band is not in the C++ tiled-3D spec",
-        "right_bound": "the right-bound mask band is not in the C++ tiled-3D spec",
     },
+}
+
+
+# The C 3D spec struct both arches share carries the gfx950 mask band.
+_CPP_ONLY_3D_SPEC_FIELDS = {
+    "gfx942": {"causal_top_left", "right_bound"},
+    "gfx950": set(),
 }
 
 
@@ -444,18 +452,25 @@ def test_tiled_3d_spec_matches_python(engine, arch):
     bad = []
     for p in _matrix_problems():
         p = replace(p, max_seqlen_q=1, total_q=p.num_seqs)
+        hook = getattr(engine, f"{arch}_attn_tiled_3d_spec_from_problem")
+        if arch == "gfx942" and not p.default_mask:
+            # Python's gfx942 spec class has no band fields (TypeError); the
+            # C++ gfx942 validator rejects the band instead.
+            with pytest.raises(TypeError):
+                au._tiled_3d_spec_from_problem(p, arch)
+            with pytest.raises(ValueError, match="gfx942 tiled attention does not"):
+                hook(asdict(p), arch)
+            continue
         py, py_err = _outcome(au._tiled_3d_spec_from_problem, p, arch)
-        cpp, cpp_err = _outcome(
-            getattr(engine, f"{arch}_attn_tiled_3d_spec_from_problem"), asdict(p), arch
-        )
+        cpp, cpp_err = _outcome(hook, asdict(p), arch)
         if py_err or cpp_err:
             if py_err != cpp_err:
                 bad.append(f"raises {py_err} in Python, {cpp_err} in C++: {p}")
             continue
         py = asdict(py)
         assert set(py) - set(cpp) == set(_PY_ONLY_3D_SPEC_FIELDS[arch])
-        assert set(cpp) <= set(py)
-        diff = _diff(py, cpp, set(cpp))
+        assert set(cpp) - set(py) == _CPP_ONLY_3D_SPEC_FIELDS[arch]
+        diff = _diff(py, cpp, set(py) & set(cpp))
         if diff:
             bad.append(f"{diff}: {p}")
     assert not bad, "\n".join(bad[:10])

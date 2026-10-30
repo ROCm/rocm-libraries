@@ -179,6 +179,11 @@ typedef struct rocke_attention_tiled_2d_spec
     bool use_v_hbm_direct; /* False */
     bool use_k_hbm_direct; /* False */
     bool use_causal_mask_phase_split; /* False */
+    /* gfx950-only mask band (gfx942 rejects a non-default band). causal_top_left
+     * pins context_len = 0; right_bound is the lookahead past the diagonal
+     * (0 = causal, R > 0 = R keys ahead, -1 = unbounded). */
+    bool causal_top_left; /* False */
+    int right_bound; /* 0 */
 } rocke_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required

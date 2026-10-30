@@ -151,6 +151,8 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     s.use_kv_lds_swizzle = false;
     s.use_wave_page_id_load = false;
     s.kv_layout = "paged";
+    s.causal_top_left = false;
+    s.right_bound = 0;
     return s;
 }
 
@@ -190,6 +192,22 @@ bool rocke_gfx950_unified_attention_3d_tiled_spec_validate(
         rocke_i_set_err(b,
                         ROCKE_ERR_VALUE,
                         "strided KV requires fp16/bf16 async loads without paged i64 addressing");
+        return false;
+    }
+    if(s->right_bound < -1)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "right_bound must be >= -1 (-1 = unbounded), got %d",
+                        s->right_bound);
+        return false;
+    }
+    if(s->right_bound != 0 && (s->use_alibi || s->use_qq_bias))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "right_bound != 0 is incompatible with use_alibi / use_qq_bias "
+                        "(their offsets are defined on the causal diagonal)");
         return false;
     }
     if(s->kv_storage_dtype != NULL && !rocke_attn3d950_streq(s->kv_storage_dtype, "fp8e4m3"))
@@ -340,7 +358,8 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
      *   "kvcp<policy>" if kv_cache_policy != "all" else "",
      *   "kvswz" if use_kv_lds_swizzle else "",
      *   "wpid" if use_wave_page_id_load else "",
-     *   "stridedkv" if kv_layout == "strided" else "")
+     *   "stridedkv" if kv_layout == "strided" else "",
+     *   "tl" if causal_top_left else "", "rbu" / "rb<R>" if right_bound != 0)
      *
      * Positional parts list (NOT flags=...): empty parts are skipped by
      * kernel_name_join. We materialise each part and feed the non-empty ones in
@@ -354,6 +373,7 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     char kv_part[32];
     char sw_part[32];
     char kvcp_part[32];
+    char rb_part[32];
     const char* parts[24];
     size_t np = 0;
     size_t out_len = 0;
@@ -434,6 +454,22 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     {
         parts[np++] = "stridedkv";
     }
+    if(s->causal_top_left)
+    {
+        parts[np++] = "tl";
+    }
+    if(s->right_bound != 0)
+    {
+        if(s->right_bound < 0)
+        {
+            parts[np++] = "rbu";
+        }
+        else
+        {
+            snprintf(rb_part, sizeof(rb_part), "rb%d", s->right_bound);
+            parts[np++] = rb_part;
+        }
+    }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
     if(st != ROCKE_OK)
@@ -461,7 +497,7 @@ int rocke_gfx950_unified_attention_reduce_tiled_spec_kernel_name(
     const rocke_unified_attention_reduce_tiled_spec_t* s, char* buf, size_t cap)
 {
     /* kernel_name_join("rocke_uattn_reduce_tiled", d<HD>, h<NUM_QH>,
-     *   seg<NUM_SEG>, dtype) */
+     *   seg<NUM_SEG>, dtype[, "lse"]) */
     char d_part[32];
     char h_part[32];
     char seg_part[32];
@@ -484,6 +520,10 @@ int rocke_gfx950_unified_attention_reduce_tiled_spec_kernel_name(
     parts[np++] = h_part;
     parts[np++] = seg_part;
     parts[np++] = (s->dtype != NULL) ? s->dtype : "";
+    if(s->emit_lse)
+    {
+        parts[np++] = "lse";
+    }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
     if(st != ROCKE_OK)
@@ -672,6 +712,8 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
     out->DECODE_GRID = spec->use_decode_grid;
     out->KV_SWZ = spec->use_kv_lds_swizzle;
     out->WAVE_PAGE_ID_LOAD = spec->use_wave_page_id_load;
+    out->TOP_LEFT = spec->causal_top_left;
+    out->RIGHT = spec->right_bound;
     {
         /* KV_CACHE_BITS = cache_policy_from_name(spec.kv_cache_policy) (validated). */
         rocke_cache_policy_t bits = ROCKE_CACHE_ALL;

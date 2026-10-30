@@ -255,12 +255,22 @@ void rocke_gfx950_attn2d_emit_loop_bounds_and_inits(rocke_gfx950_attn2d_build_ct
     const int SOFTMAX_STATE_SLOTS = ctx->SOFTMAX_STATE_SLOTS;
 
     /* ---- max_seq_prefix_len (1221-1223) ---- */
+    const int RIGHT = ctx->spec->right_bound;
     int bm1_div_nqk = (BLOCK_M - 1) / NQK;
-    /* Python emits the inner add before the outer const; sequence via a temp. */
-    rocke_value_t* msp_inner = rocke_b_add(B, ctx->context_len, ctx->qb_start_pos);
-    rocke_value_t* msp_raw = rocke_b_add(B, msp_inner, rocke_b_const_i32(B, bm1_div_nqk + 1));
-    rocke_value_t* max_seq_prefix_len
-        = rocke_b_select(B, rocke_b_cmp_lt(B, msp_raw, ctx->seq_len), msp_raw, ctx->seq_len);
+    rocke_value_t* max_seq_prefix_len;
+    if(RIGHT < 0)
+    {
+        max_seq_prefix_len = ctx->seq_len; /* unbounded: every key of the sequence */
+    }
+    else
+    {
+        /* Python emits the inner add before the outer const; sequence via a temp. */
+        rocke_value_t* msp_inner = rocke_b_add(B, ctx->context_len, ctx->qb_start_pos);
+        rocke_value_t* msp_raw
+            = rocke_b_add(B, msp_inner, rocke_b_const_i32(B, bm1_div_nqk + 1 + RIGHT));
+        max_seq_prefix_len
+            = rocke_b_select(B, rocke_b_cmp_lt(B, msp_raw, ctx->seq_len), msp_raw, ctx->seq_len);
+    }
     /* Cache for the KV-loop body (Python keeps one local; the body must reuse
      * this exact SSA value instead of recomputing it). */
     ctx->max_seq_prefix_len_v = max_seq_prefix_len;
@@ -287,7 +297,17 @@ void rocke_gfx950_attn2d_emit_loop_bounds_and_inits(rocke_gfx950_attn2d_build_ct
         rocke_value_t* fak_inner
             = rocke_b_sub(B, rocke_b_add(B, ctx->context_len, ctx->qb_start_pos), sw_const);
         rocke_value_t* first_allowed_key = rocke_b_add(B, fak_inner, rocke_b_const_i32(B, 1));
-        rocke_value_t* last_allowed_key = rocke_b_add(B, ctx->context_len, qpos_hi);
+        rocke_value_t* last_allowed_key;
+        if(RIGHT < 0)
+        {
+            last_allowed_key = rocke_b_sub(B, ctx->seq_len, rocke_b_const_i32(B, 1));
+        }
+        else
+        {
+            last_allowed_key = rocke_b_add(B, ctx->context_len, qpos_hi);
+            if(RIGHT > 0)
+                last_allowed_key = rocke_b_add(B, last_allowed_key, rocke_b_const_i32(B, RIGHT));
+        }
         rocke_value_t* tile_start_raw = rocke_b_div(B, first_allowed_key, rocke_b_const_i32(B, T));
         /* Bind the cmp_lt predicate first so C does not allocate the select's
          * second const ahead of the compare under right-to-left arg eval. */

@@ -95,6 +95,7 @@ typedef struct rocke_unified_attention_problem
     int num_kv_blocks; /* default 0                                  */
     bool causal_top_left; /* default false (bottom-right diagonal)       */
     int right_bound; /* default 0 (causal); -1 = unbounded           */
+    bool emit_lse; /* default false; FP32 LSE output, split-KV only */
 } rocke_unified_attention_problem_t;
 
 /* Default-constructed problem (Python field defaults). The required positional

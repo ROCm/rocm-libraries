@@ -107,12 +107,42 @@ static rocke_value_t* fh_max_seq_prefix_len(rocke_gfx950_attn2d_build_ctx_t* ctx
 {
     if(ctx->max_seq_prefix_len_v != NULL)
         return ctx->max_seq_prefix_len_v;
+    const int RIGHT = ctx->spec->right_bound;
+    if(RIGHT < 0)
+        return ctx->seq_len;
     int bm1_div_nqk = (ctx->BLOCK_M - 1) / ctx->NQK;
-    rocke_value_t* msp_raw = rocke_b_add(ctx->b,
-                                         rocke_b_add(ctx->b, ctx->context_len, ctx->qb_start_pos),
-                                         rocke_b_const_i32(ctx->b, bm1_div_nqk + 1));
+    rocke_value_t* msp_inner = rocke_b_add(ctx->b, ctx->context_len, ctx->qb_start_pos);
+    rocke_value_t* msp_raw
+        = rocke_b_add(ctx->b, msp_inner, rocke_b_const_i32(ctx->b, bm1_div_nqk + 1 + RIGHT));
     return rocke_b_select(
         ctx->b, rocke_b_cmp_lt(ctx->b, msp_raw, ctx->seq_len), msp_raw, ctx->seq_len);
+}
+
+static rocke_value_t* fh_upper_lim(rocke_gfx950_attn2d_build_ctx_t* ctx, rocke_value_t* causal_lim)
+{
+    const int RIGHT = ctx->spec->right_bound;
+    return RIGHT > 0 ? rocke_b_add(ctx->b, causal_lim, rocke_b_const_i32(ctx->b, RIGHT))
+                     : causal_lim;
+}
+
+/* Band upper bound: ``col <= d + right_bound``; NULL when unbounded. */
+static rocke_value_t* fh_upper_ok(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                  rocke_value_t* col_abs,
+                                  rocke_value_t* causal_lim)
+{
+    if(ctx->spec->right_bound < 0)
+        return NULL;
+    return rocke_b_cmp_le(ctx->b, col_abs, fh_upper_lim(ctx, causal_lim));
+}
+
+static rocke_value_t* fh_band_row_mask(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                       rocke_value_t* row_ok,
+                                       rocke_value_t* upper_ok,
+                                       rocke_value_t* in_prefix)
+{
+    if(upper_ok == NULL)
+        return rocke_b_land(ctx->b, row_ok, in_prefix);
+    return rocke_b_land(ctx->b, rocke_b_land(ctx->b, row_ok, upper_ok), in_prefix);
 }
 
 static rocke_value_t* fh_warp_xor_reduce_max(rocke_gfx950_attn2d_build_ctx_t* ctx, rocke_value_t* v)
@@ -797,8 +827,13 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 = ctx->TRANSPOSED_INVARIANT_HOIST ? ctx->st_causal_lim_hoist : st_causal_lim_iter;
             rocke_value_t* prefix_tail
                 = rocke_b_sub(b, max_seq_prefix_len, rocke_b_const_i32(b, 1));
-            rocke_value_t* valid_tail = rocke_b_select(
-                b, rocke_b_cmp_lt(b, mlim_causal_lim, prefix_tail), mlim_causal_lim, prefix_tail);
+            rocke_value_t* valid_tail = prefix_tail;
+            if(ctx->spec->right_bound >= 0)
+            {
+                rocke_value_t* upper_lim = fh_upper_lim(ctx, mlim_causal_lim);
+                valid_tail = rocke_b_select(
+                    b, rocke_b_cmp_lt(b, upper_lim, prefix_tail), upper_lim, prefix_tail);
+            }
             st_row_half_base = rocke_b_mul(b, fh_lane_half32(ctx), rocke_b_const_i32(b, 4));
             rocke_value_t* neg_big = rocke_b_const_i32(b, -(1 << 30));
             rocke_value_t* valid_tail_eff = rocke_b_select(b, mlim_row_ok, valid_tail, neg_big);
@@ -934,9 +969,9 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                             col_abs = rocke_b_add(b, group_tile_off, k_local);
                             causal_lim = rocke_b_add(b, ctx->context_len, qp_r);
                         }
-                        causal_ok = rocke_b_cmp_le(b, col_abs, causal_lim);
+                        causal_ok = fh_upper_ok(ctx, col_abs, causal_lim);
                         in_prefix = rocke_b_cmp_lt(b, col_abs, max_seq_prefix_len);
-                        m_ok = rocke_b_land(b, rocke_b_land(b, row_ok, causal_ok), in_prefix);
+                        m_ok = fh_band_row_mask(ctx, row_ok, causal_ok, in_prefix);
                         if(ctx->SLIDING_WINDOW > 0)
                         {
                             rocke_value_t* dist = rocke_b_sub(b, causal_lim, col_abs);
@@ -1087,10 +1122,9 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
             for(int n = 0; n < QK_N_TILES; ++n)
             {
                 rocke_value_t* col_abs = rocke_b_add(b, tile_off, fh_c32_col(ctx, n));
-                rocke_value_t* causal_ok = rocke_b_cmp_le(b, col_abs, causal_lim);
+                rocke_value_t* causal_ok = fh_upper_ok(ctx, col_abs, causal_lim);
                 rocke_value_t* in_prefix = rocke_b_cmp_lt(b, col_abs, max_seq_prefix_len);
-                rocke_value_t* m_ok
-                    = rocke_b_land(b, rocke_b_land(b, row_ok, causal_ok), in_prefix);
+                rocke_value_t* m_ok = fh_band_row_mask(ctx, row_ok, causal_ok, in_prefix);
                 rocke_value_t* s_raw;
                 rocke_value_t* s_scaled;
                 rocke_value_t* score;
@@ -1257,10 +1291,9 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 rocke_value_t* ca_16 = rocke_b_const_i32(b, 16);
                 rocke_value_t* col_abs = rocke_b_add(
                     b, rocke_b_add(b, tile_off, rocke_b_mul(b, ca_n, ca_16)), lane_col);
-                rocke_value_t* causal_ok = rocke_b_cmp_le(b, col_abs, causal_lim);
+                rocke_value_t* causal_ok = fh_upper_ok(ctx, col_abs, causal_lim);
                 rocke_value_t* in_prefix = rocke_b_cmp_lt(b, col_abs, max_seq_prefix_len);
-                rocke_value_t* m_ok
-                    = rocke_b_land(b, rocke_b_land(b, row_ok, causal_ok), in_prefix);
+                rocke_value_t* m_ok = fh_band_row_mask(ctx, row_ok, causal_ok, in_prefix);
                 if(ctx->SLIDING_WINDOW > 0)
                 {
                     rocke_value_t* dist = rocke_b_sub(b, causal_lim, col_abs);

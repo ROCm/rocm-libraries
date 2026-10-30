@@ -749,15 +749,27 @@ rocke_for_t rocke_gfx950_attn2d_drive_kv_loop(rocke_gfx950_attn2d_build_ctx_t* c
 
     /* A tile needs no masking iff its last key is within the causal bound of
      * the block's first query row and below max_seq_prefix_len, so the first
-     * masked tile is min((context_len + qb_start_pos + 1) / T,
-     * max_seq_prefix_len / T), clamped into [tile_start, tile_end]. */
-    rocke_value_t* min_causal_lim = rocke_b_add(b, ctx->context_len, ctx->qb_start_pos);
-    rocke_value_t* causal_p1 = rocke_b_add(b, min_causal_lim, rocke_b_const_i32(b, 1));
-    rocke_value_t* full_by_causal = rocke_b_div(b, causal_p1, rocke_b_const_i32(b, ctx->T));
-    rocke_value_t* full_by_prefix
-        = rocke_b_div(b, ctx->max_seq_prefix_len_v, rocke_b_const_i32(b, ctx->T));
-    rocke_value_t* split_raw = rocke_b_select(
-        b, rocke_b_cmp_lt(b, full_by_causal, full_by_prefix), full_by_causal, full_by_prefix);
+     * masked tile is min((context_len + qb_start_pos + right_bound + 1) / T,
+     * max_seq_prefix_len / T), clamped into [tile_start, tile_end]. With no
+     * upper bound only the prefix ends a full tile. */
+    const int RIGHT = ctx->spec->right_bound;
+    rocke_value_t* split_raw;
+    if(RIGHT < 0)
+    {
+        split_raw = rocke_b_div(b, ctx->max_seq_prefix_len_v, rocke_b_const_i32(b, ctx->T));
+    }
+    else
+    {
+        rocke_value_t* min_causal_lim = rocke_b_add(b, ctx->context_len, ctx->qb_start_pos);
+        if(RIGHT > 0)
+            min_causal_lim = rocke_b_add(b, min_causal_lim, rocke_b_const_i32(b, RIGHT));
+        rocke_value_t* causal_p1 = rocke_b_add(b, min_causal_lim, rocke_b_const_i32(b, 1));
+        rocke_value_t* full_by_causal = rocke_b_div(b, causal_p1, rocke_b_const_i32(b, ctx->T));
+        rocke_value_t* full_by_prefix
+            = rocke_b_div(b, ctx->max_seq_prefix_len_v, rocke_b_const_i32(b, ctx->T));
+        split_raw = rocke_b_select(
+            b, rocke_b_cmp_lt(b, full_by_causal, full_by_prefix), full_by_causal, full_by_prefix);
+    }
     rocke_value_t* split_lo = rocke_b_select(
         b, rocke_b_cmp_lt(b, split_raw, ctx->tile_start), ctx->tile_start, split_raw);
     rocke_value_t* split

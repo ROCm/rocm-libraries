@@ -177,6 +177,11 @@ typedef struct rocke_unified_attention_3d_tiled_spec
     /* K/V addressing: "paged" (block table) or "strided" (direct [B,H,S,D]
      * with runtime byte strides; fp16/bf16 async loads only). NULL == "paged". */
     const char* kv_layout; /* "paged" */
+    /* gfx950-only mask band (gfx942 rejects a non-default band). causal_top_left
+     * pins context_len = 0; right_bound is the lookahead past the diagonal
+     * (0 = causal, R > 0 = R keys ahead, -1 = unbounded). */
+    bool causal_top_left; /* False */
+    int right_bound; /* 0 */
 } rocke_unified_attention_3d_tiled_spec_t;
 
 /* Materialise every defaulted field. Required fields are zero/NULL-init; the
@@ -227,6 +232,8 @@ typedef struct rocke_unified_attention_reduce_tiled_spec
 
     bool has_waves_per_eu; /* Optional[int] None */
     int waves_per_eu;
+    /* Trailing FP32 lse_ptr param and a natural-log LSE store per row. */
+    bool emit_lse; /* False */
 } rocke_unified_attention_reduce_tiled_spec_t;
 
 rocke_unified_attention_reduce_tiled_spec_t rocke_unified_attention_reduce_tiled_spec_default(void);

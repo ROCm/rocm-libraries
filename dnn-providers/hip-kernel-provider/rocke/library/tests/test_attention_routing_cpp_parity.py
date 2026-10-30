@@ -21,6 +21,7 @@ from kernels.common.attention_unified import (
     _canonical_arch_for_selection,
     _gfx942_4warp_fast,
     _mask_label,
+    _reject_lse,
     _reject_mask_on_arch,
     _reject_mask_semantics,
     supports_native_unified_attention,
@@ -164,10 +165,19 @@ def _shape_variants():
         )
 
 
+def _lse_variants():
+    for base, kw in itertools.product(
+        (_problem(), _problem(head_size=96), _problem(dtype="fp16", head_size=64)),
+        ({}, {"use_sinks": True}, {"right_bound": -1}, {"use_fp8": True}),
+    ):
+        yield replace(base, emit_lse=True, **kw)
+
+
 def _gate_problems():
     yield from _shape_variants()
     for base in (_problem(), _problem(head_size=96)):
         yield from _flag_variants(base)
+    yield from _lse_variants()
 
 
 def _python_gate(fn, p, arch):
@@ -191,8 +201,6 @@ def test_tiled_3d_gate_matches_python(engine):
         ctx = (p, arch, py_ok, py_reason)
         if reason == "gfx1250 tiled 3D is not ported to C++":
             assert not ok and canon == "gfx1250", ctx
-        elif reason == f"tiled 3D {_mask_label(p)} masks are not ported to C++ yet":
-            assert not ok and py_ok and canon == "gfx950" and not p.default_mask, ctx
         elif reason == "tiled 3D additive bias is not ported to C++ yet":
             assert not ok and py_ok and canon == "gfx950" and p.use_additive_bias, ctx
         else:
@@ -246,8 +254,6 @@ def _tiled_2d_not_ported(p: UnifiedAttentionProblem, arch: str):
         return None
     if p.use_additive_bias:
         return "tiled 2D additive bias is not ported to C++ yet"
-    if not p.default_mask:
-        return f"tiled 2D {_mask_label(p)} masks are not ported to C++ yet"
     return None
 
 
@@ -256,7 +262,11 @@ def _expected_tiled_2d(p: UnifiedAttentionProblem, arch: str):
     canon = _canonical_arch_for_selection(arch)
     if canon == "gfx1250":
         # C++ has no gfx1250 tiled 2D: only the shared rejects run first.
-        rejected = _reject_mask_semantics(p) or _reject_mask_on_arch(p, canon)
+        rejected = (
+            _reject_lse(p, canon, "tiled 2D")
+            or _reject_mask_semantics(p)
+            or _reject_mask_on_arch(p, canon)
+        )
         if rejected is not None:
             return rejected
         if p.softcap > 0:

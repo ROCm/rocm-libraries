@@ -380,23 +380,6 @@ typedef struct rocke_gfx950_attn2d_build_ctx
 } rocke_gfx950_attn2d_build_ctx_t;
 
 /* ===================================================================== *
- *  DRIVER-INTERNAL ctx population (the build prologue, lines 711-1912).
- *
- *  Splitting the long prologue out of the public entry keeps the glue TU small.
- *  Reproduces require_tiled_attention_arch(arch) (748) -> dtype gate (750) ->
- *  WIDE-atom select (813-814) -> the whole ALL-CAPS config derivation -> kernel /
- *  param decls -> grid / seq-idx / Q-block geometry -> LDS layout + smem_alloc ->
- *  PV TransposeLdsReader bind (1128) -> SSA constants. On any ValueError /
- *  NotImplementedError / arch reject it sets the builder error and returns false.
- *  After this returns true the LDS/descriptor/Q-gather/loop phases can run against
- *  the fully-populated ctx.
- * ===================================================================== */
-bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* ctx,
-                                        rocke_ir_builder_t* b,
-                                        const rocke_attention_tiled_2d_spec_t* spec,
-                                        const char* arch);
-
-/* ===================================================================== *
  *  PHASE FUNCTIONS -- one per Python closure / build section.
  *  Each reads/writes only ctx (and the builder it carries) and emits IR in the
  *  byte-identical Python order.

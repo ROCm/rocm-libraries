@@ -367,5 +367,9 @@ rocke_unified_attention_3d_tiled_spec_t
         s.use_kv_lds_swizzle = rocke_unified_attn_kv_lds_swizzle_3d(p, arch);
         s.use_wave_page_id_load = rocke_unified_attn_wave_page_id_load_3d(p, arch);
     }
+    /* Only gfx950 implements the band: the gfx942 spec validator rejects a
+     * non-default one (Python's gfx942 spec class has no such field). */
+    s.causal_top_left = p->causal_top_left;
+    s.right_bound = p->right_bound;
     return s;
 }

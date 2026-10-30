@@ -28,6 +28,7 @@
 #include <stdio.h> /* snprintf  */
 #include <string.h>
 
+#include "rocke/helper_rocke.instances.common._lse_store.h"
 #include "rocke/instance_gfx942_attention_tiled_3d_internal.h"
 
 /* ============================================================ *
@@ -187,6 +188,20 @@ void rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
     /* seq_lens_ptr : ptr<i32, global>, readonly, align=4 (unused in body) */
     ctx->red_seq_lens
         = rocke_b_param(b, "seq_lens_ptr", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
+
+    /* lse_ptr : ptr<f32, global>, noalias, writeonly, align=4 (emit_lse only) */
+    ctx->red_lse = NULL;
+    if(spec != NULL && spec->emit_lse)
+    {
+        memset(&opts, 0, sizeof(opts));
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->red_lse = rocke_b_param(b, "lse_ptr", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
+    }
 
     /* ---- grid ids + thread (lines 1032-1034) ---- */
     ctx->q_token = rocke_b_block_id_x(b);
@@ -507,5 +522,23 @@ void rocke_gfx942_attention_tiled_3d_reduce_normalize_pass(
 
         out_idx = rocke__red_out_offset(ctx, ctx->q_token, ctx->q_head, d);
         rocke_b_global_store(b, ctx->out, out_idx, scalar_out, 2);
+    }
+
+    /* Every lane holds the same butterfly-reduced overall_max/expsum, so lane 0
+     * writes. overall_max is in log2 units; a row with no mass stores -inf. */
+    if(ctx->red_lse != NULL)
+    {
+        rocke_value_t* is_lane0 = rocke_b_cmp_eq(b, ctx->tid, rocke_b_const_i32(b, 0));
+        rocke_if_t guard = rocke_b_scf_if(b, is_lane0);
+        rocke_b_region_enter(b, guard.then_region);
+        {
+            rocke_value_t* tok_rows
+                = rocke_b_mul(b, ctx->q_token, rocke_b_const_i32(b, cfg->NUM_QH));
+            rocke_value_t* lse_index = rocke_b_add(b, tok_rows, ctx->q_head);
+            rocke_value_t* has_mass = rocke_b_fcmp(b, "ogt", ctx->overall_expsum, ctx->zero_f);
+            rocke_lse_store(
+                b, ctx->red_lse, lse_index, ctx->overall_max, ctx->overall_expsum, has_mass);
+        }
+        rocke_b_region_leave(b);
     }
 }

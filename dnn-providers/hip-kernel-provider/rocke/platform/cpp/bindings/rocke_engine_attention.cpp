@@ -246,8 +246,6 @@ const unported_field k_au_unported[] = {
     {"use_fp8", false, 0},
     {"fp8_fnuz", false, 0},
     {"target_ctas", false, 0},
-    {"causal_top_left", false, 0},
-    {"right_bound", false, 0},
 };
 
 rocke_unified_attention_problem_t au_build(const py::dict& d, Store& st)
@@ -270,6 +268,8 @@ rocke_unified_attention_problem_t au_build(const py::dict& d, Store& st)
     p.use_qq_bias = a_bool(d, "use_qq_bias", p.use_qq_bias);
     p.num_cus = a_int(d, "num_cus", p.num_cus);
     p.num_kv_blocks = a_int(d, "num_kv_blocks", p.num_kv_blocks);
+    p.causal_top_left = a_bool(d, "causal_top_left", p.causal_top_left);
+    p.right_bound = a_int(d, "right_bound", p.right_bound);
     if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
     {
         p.waves_per_eu_set = true;
@@ -846,8 +846,6 @@ std::vector<std::string> sage_verify(const py::dict& d, const std::string& arch)
  * shared C spec struct has no slot for. */
 const unported_field k_t2d_unported[] = {
     {"use_additive_bias", false, 0},
-    {"causal_top_left", false, 0},
-    {"right_bound", false, 0},
 };
 
 /* Overlay every spec field present in `d` onto `s` (absent or None keeps the
@@ -939,6 +937,8 @@ void t2d_read(const py::dict& d, Store& st, rocke_attention_tiled_2d_spec_t& s)
     s.use_k_hbm_direct = a_bool(d, "use_k_hbm_direct", s.use_k_hbm_direct);
     s.use_causal_mask_phase_split
         = a_bool(d, "use_causal_mask_phase_split", s.use_causal_mask_phase_split);
+    s.causal_top_left = a_bool(d, "causal_top_left", s.causal_top_left);
+    s.right_bound = a_int(d, "right_bound", s.right_bound);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -1225,8 +1225,6 @@ std::vector<std::string> fkv_verify(const py::dict& d, const std::string& arch)
  * for. */
 const unported_field k_t3d_unported[] = {
     {"use_additive_bias", false, 0},
-    {"causal_top_left", false, 0},
-    {"right_bound", false, 0},
 };
 
 rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
@@ -1263,6 +1261,8 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
     s.use_decode_grid = a_bool(d, "use_decode_grid", s.use_decode_grid);
     s.use_kv_lds_swizzle = a_bool(d, "use_kv_lds_swizzle", s.use_kv_lds_swizzle);
     s.use_wave_page_id_load = a_bool(d, "use_wave_page_id_load", s.use_wave_page_id_load);
+    s.causal_top_left = a_bool(d, "causal_top_left", s.causal_top_left);
+    s.right_bound = a_int(d, "right_bound", s.right_bound);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -1457,25 +1457,12 @@ static const unported_field k_problem_unported[] = {
     {"fp8_fnuz", false, 0},
     {"target_ctas", false, 0},
     {"compile_backend", true, 0},
-    {"causal_top_left", false, 0},
-    {"right_bound", false, 0},
-};
-
-/* The C problem struct has no slot for these: dropping one would answer for a
- * different problem, so every problem binding refuses it. emit_lse steers the
- * support gates and the split-KV reduce spec (known_gaps.md section 7). */
-static const unported_field k_problem_no_c_field[] = {
-    {"emit_lse", false, 0},
 };
 
 /* Convert every field of a Python UnifiedAttentionProblem dict to the C
  * struct. */
 static rocke_unified_attention_problem_t problem_fields_from_dict(const py::dict& d, Store& st)
 {
-    reject_unported(d,
-                    "unified_attention_problem",
-                    k_problem_no_c_field,
-                    sizeof(k_problem_no_c_field) / sizeof(k_problem_no_c_field[0]));
     rocke_unified_attention_problem_t p{};
     p.total_q = a_int(d, "total_q", 0);
     p.num_seqs = a_int(d, "num_seqs", 0);
@@ -1500,6 +1487,7 @@ static rocke_unified_attention_problem_t problem_fields_from_dict(const py::dict
     p.num_kv_blocks = a_int(d, "num_kv_blocks", 0);
     p.causal_top_left = a_bool(d, "causal_top_left", false);
     p.right_bound = a_int(d, "right_bound", 0);
+    p.emit_lse = a_bool(d, "emit_lse", false);
     std::string v;
     if(a_str(d, "dtype", v))
         p.dtype = st.keep(v);
@@ -1595,6 +1583,8 @@ static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
     d["use_v_hbm_direct"] = s.use_v_hbm_direct;
     d["use_k_hbm_direct"] = s.use_k_hbm_direct;
     d["use_causal_mask_phase_split"] = s.use_causal_mask_phase_split;
+    d["causal_top_left"] = s.causal_top_left;
+    d["right_bound"] = s.right_bound;
     return d;
 }
 
@@ -1709,12 +1699,10 @@ static py::dict tiled_2d_selectors(const py::dict& d, const std::string& arch)
     return r;
 }
 
-/* UnifiedAttentionProblem fields the C 3D spec has no slot for (they set the
- * gfx950-only spec fields of the same name). */
+/* UnifiedAttentionProblem fields the C 3D spec has no slot for (it sets the
+ * gfx950-only spec field of the same name). */
 static const unported_field k_problem_3d_unported[] = {
     {"use_additive_bias", false, 0},
-    {"causal_top_left", false, 0},
-    {"right_bound", false, 0},
 };
 
 static py::dict spec_3d_to_dict(const rocke_unified_attention_3d_tiled_spec_t& s)
@@ -1746,6 +1734,8 @@ static py::dict spec_3d_to_dict(const rocke_unified_attention_3d_tiled_spec_t& s
     d["use_kv_lds_swizzle"] = s.use_kv_lds_swizzle;
     d["use_wave_page_id_load"] = s.use_wave_page_id_load;
     d["kv_layout"] = std::string(s.kv_layout ? s.kv_layout : "paged");
+    d["causal_top_left"] = s.causal_top_left;
+    d["right_bound"] = s.right_bound;
     return d;
 }
 
