@@ -3,7 +3,7 @@
 **Status:** Draft
 **Owner:** @doctorcolinsmith
 **Technical Lead:** @ntrost57
-**Last Updated:** 2026-10-29
+**Last Updated:** 2026-10-30
 
 This document describes how rocALUTION is tested today, which signals actually gate a merge, and where
 the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of the
@@ -283,6 +283,12 @@ suites.
 Laplacian) across backends and both precisions; the emulation tiers shrink parameter lists rather than
 running exhaustive size sweeps. The strategy prefers cross-backend correctness over large problem sizes.
 
+**Overlap with the unit tests:** the `local_matrix*`, `local_vector`, `local_stencil` and `backend`
+suites skip in every TheRock tier, and they test operations that the unit tests now check against
+independent references. They are kept until a review of each suite confirms that the unit tests
+cover all of its checks. A suite that is covered is then deleted, not maintained next to the unit
+tests. The solver, preconditioner and AMG suites stay as the integration layer.
+
 ---
 
 ### Performance and Benchmarking Testing
@@ -316,10 +322,13 @@ numbers are not comparable across GFX targets.
 ## Why rocALUTION is Tested This Way
 
 rocALUTION implements the same solver and preconditioner algorithms across host, OpenMP, and HIP
-backends. The cheapest, strongest signal is cross-backend agreement: run an algorithm on the host
-reference and on the GPU and require they converge to the same answer. That is why a large share of
-the suite is genuinely host-testable (build `--host`) while the GPU and `local_*` structure paths need
-hardware.
+backends. The primary signal is a check against an independent reference: the unit tests compare each
+operation with a reference that is written separately from the library, so they show that the result
+is right, not only that two implementations agree. Cross-backend agreement, running an algorithm on
+the host and on the GPU and requiring the same answer, is the secondary signal. It is cheap and
+catches bugs of one backend, but not a design error that both backends share, and a disagreement does
+not say which backend is wrong. A large share of the suite is host-testable (build `--host`), while
+the GPU and `local_*` structure paths need hardware.
 
 Tiering is driven by environment variables (`ROCALUTION_EMULATION_*`) rather than GTest name prefixes
 because the same test bodies serve every tier — the tier just shrinks parameter lists and skips the
@@ -513,6 +522,7 @@ device configurations are not ASAN-covered.
 | Tier not encoded in test names; legacy `*checkin*`/`*nightly*` filters match nothing | Medium | Medium | Tiering works via `ROCALUTION_EMULATION_*`; Jenkins runs full suite |
 | No `known_bugs.yaml` / quarantine mechanism for `rocalution-test` | Medium | Medium | The unit tests skip known bugs with `KNOWN_BUG`; flaky tests handled ad-hoc |
 | Unit tests not wired into the TheRock CI categories | Medium | Medium | CTest label `quick`; they run in the Jenkins coverage job |
+| `rocalution-test` structure suites duplicate unit tests (see Integration Testing Strategy) | Low | Low | Both run; each suite is deleted once a review confirms that the unit tests cover it |
 | Unit tests not built on Windows (they use POSIX calls such as `alarm`, and some helpers do not compile there) | Medium | Medium | Windows runs `rocalution-test` only |
 | Device-code coverage not captured | Medium | Medium | Host-only LLVM coverage |
 | MPI/multi-node validation is partial; global stencil test commented out | Medium | Medium | Nightly MPI variant build |
