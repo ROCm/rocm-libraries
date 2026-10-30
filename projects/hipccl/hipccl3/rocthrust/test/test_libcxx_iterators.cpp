@@ -18,6 +18,7 @@
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 
 #  include _THRUST_LIBCXX_INCLUDE(iterator)
+#  include _THRUST_STD_INCLUDE(functional)
 
 #  include <vector>
 
@@ -262,6 +263,37 @@ TEST(LibcxxIteratorTests, TestLibcxxTransformIterator)
     thrust::copy(_THRUST_LIBCXX::make_transform_iterator(vec.begin(), plus_one{}),
                  _THRUST_LIBCXX::make_transform_iterator(vec.end(), plus_one{}),
                  discard);
+  }
+}
+
+TEST(LibcxxIteratorTests, TestLibcxxZipIterator)
+{
+  _THRUST_LIBCXX::zip_function<_THRUST_STD::plus<void>> fun{};
+  { // device system
+    thrust::device_vector<int> vec{-1, -1, -1, -1};
+    auto iter = _THRUST_LIBCXX::make_transform_iterator(
+      _THRUST_LIBCXX::make_zip_iterator(vec.begin(), _THRUST_LIBCXX::counting_iterator{4}), fun);
+    thrust::copy(iter, iter + 4, vec.begin());
+    thrust::device_vector<int> expected{3, 4, 5, 6};
+    ASSERT_TRUE(thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{-1, -1, -1, -1};
+    auto iter = _THRUST_LIBCXX::make_transform_iterator(
+      _THRUST_LIBCXX::make_zip_iterator(vec.begin(), _THRUST_LIBCXX::counting_iterator{4}), fun);
+    thrust::copy(iter, iter + 4, vec.begin());
+    thrust::host_vector<int> expected{3, 4, 5, 6};
+    ASSERT_TRUE(thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{-1, -1, -1, -1};
+    auto iter = _THRUST_LIBCXX::make_transform_iterator(
+      _THRUST_LIBCXX::make_zip_iterator(vec.begin(), _THRUST_LIBCXX::counting_iterator{4}), fun);
+    thrust::copy(iter, iter + 4, vec.begin());
+    std::vector<int> expected{3, 4, 5, 6};
+    ASSERT_TRUE(thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 }
 
