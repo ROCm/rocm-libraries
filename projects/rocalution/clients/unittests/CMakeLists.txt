@@ -28,7 +28,10 @@ if(NOT TARGET rocalution_objects)
   return()
 endif()
 
-find_package(GTest REQUIRED)
+# clients/tests defines GTest::gtest when it builds googletest from source
+if(NOT TARGET GTest::gtest)
+  find_package(GTest REQUIRED)
+endif()
 
 set(ROCALUTION_UNIT_TEST_SOURCES
   rocalution_unit_test_main.cpp
