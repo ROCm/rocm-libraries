@@ -147,16 +147,27 @@ class TestRouting(unittest.TestCase):
             )
 
     def test_unsupported_bias_requests_are_refused(self):
+        # The dispatcher error lists every candidate's reason; pin the unified
+        # 2D candidate's own reason so a refusal for an unrelated cause fails.
         cases = {
-            "q_dtype_bias": _req(attn_bias_dtype="q"),
-            "gfx942": _req(arch="gfx942"),
+            "q_dtype_bias": (
+                _req(attn_bias_dtype="q"),
+                r"attention_unified_2d: [^;]*f32 additive bias only",
+            ),
+            "gfx942": (
+                _req(arch="gfx942"),
+                r"attention_unified_2d: [^;]*additive bias is only implemented on gfx950",
+            ),
             # gfx950 decodes fp8 K/V as OCP; declaring fnuz-quantised K/V here
             # is a format mismatch that must be refused with or without bias
             # (the 2D tiled gate used to skip this check for bias requests).
-            "fp8_fnuz_mismatch": _req(use_fp8=True, fp8_fnuz=True),
+            "fp8_fnuz_mismatch": (
+                _req(use_fp8=True, fp8_fnuz=True),
+                r"attention_unified_2d: fp8 K/V on gfx950 [^;]*fnuz-quantised",
+            ),
         }
-        for label, request in cases.items():
-            with self.subTest(case=label), self.assertRaises(ValueError):
+        for label, (request, reason) in cases.items():
+            with self.subTest(case=label), self.assertRaisesRegex(ValueError, reason):
                 dispatch_attention(request)
 
     def test_strided_decode_refuses_bias(self):
@@ -169,7 +180,10 @@ class TestRouting(unittest.TestCase):
         )
         plain = dispatch_attention(_req(use_attn_bias=False, **strided_kw))
         self.assertEqual(plain.candidate.name, "attention_strided_decode")
-        with self.assertRaisesRegex(ValueError, "attn_bias|gfx950"):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"attention_strided_decode: capability: cannot serve features \['attn_bias'\]",
+        ):
             dispatch_attention(_req(**strided_kw))
 
 

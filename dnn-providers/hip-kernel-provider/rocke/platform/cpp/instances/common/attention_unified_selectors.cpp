@@ -305,9 +305,8 @@ static bool d256_gfx942_fast(const rocke_unified_attn_problem_t* p)
     /* d192 rides the same lean 4-warp body as d256. */
     return arch_is("gfx942") && (p->head_size == 192 || p->head_size == 256)
            && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8 && p->sliding_window == 0
-           && p->softcap == 0 && !p->use_sinks && !has_score_bias(p)
-           && p->max_seqlen_q > 1 && (p->block_size == 16 || p->block_size == 32)
-           && !enable_i64_kv_addr(p);
+           && p->softcap == 0 && !p->use_sinks && !has_score_bias(p) && p->max_seqlen_q > 1
+           && (p->block_size == 16 || p->block_size == 32) && !enable_i64_kv_addr(p);
 }
 
 /* Python: _enable_transposed_qk_32x32(problem). */
@@ -1443,12 +1442,10 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
         int i;
         for(i = 0; i < VEC; ++i)
         {
-            score
-                = rocke_b_fadd(b,
-                               score,
-                               rocke_b_fmul(b,
-                                            rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i)),
-                                            rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i))));
+            /* Bound in Python's left-to-right order. */
+            rocke_value_t* q_i = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i));
+            rocke_value_t* k_i = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i));
+            score = rocke_b_fadd(b, score, rocke_b_fmul(b, q_i, k_i));
         }
     }
     /* Tail scalar fold for head_size not a multiple of VEC (empty for the

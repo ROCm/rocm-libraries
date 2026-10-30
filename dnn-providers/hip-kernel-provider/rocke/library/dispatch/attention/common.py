@@ -822,24 +822,30 @@ def _unified_path_coverage(
 ) -> Tuple[bool, str]:
     """Whether the unified ``path`` ("2d" / "3d") can run ``problem``.
 
-    The scalar coverage check refuses additive bias, which only the tiled
-    kernels implement, so a bias problem is judged by the path's tiled gate
-    instead. That gate also limits bias to the arches that implement it. The
+    The single owner of which gate judges a unified problem. The scalar gate
+    knows nothing about the tiled-only features (additive bias, the LSE
+    output), so a problem with either is judged by the path's own tiled gate:
+    instead of the scalar gate for bias (which the scalar gate refuses), after
+    it for LSE. The tiled gate limits each feature to the arches that
+    implement it; the split-KV gate owns LSE and the 2D gate refuses it. The
     unified kernels take an fp32 bias only.
     """
+    path_gate = (
+        supports_native_unified_attention_3d_tiled
+        if path == "3d"
+        else supports_native_unified_attention_tiled
+    )
     if problem.use_additive_bias:
         if str(req.attn_bias_dtype).strip().lower() != "f32":
             return False, (
                 "unified attention takes an f32 additive bias only, got "
                 f"attn_bias_dtype={req.attn_bias_dtype!r}"
             )
-        gate = (
-            supports_native_unified_attention_3d_tiled
-            if path == "3d"
-            else supports_native_unified_attention_tiled
-        )
-        return gate(problem, arch=arch)
-    return supports_native_unified_attention(problem, arch=arch)
+        return path_gate(problem, arch=arch)
+    ok, why = supports_native_unified_attention(problem, arch=arch)
+    if ok and problem.emit_lse:
+        return path_gate(problem, arch=arch)
+    return ok, why
 
 
 def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:

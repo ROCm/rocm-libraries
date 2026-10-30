@@ -352,6 +352,21 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_additive_bias = true;
         s->kv_storage_dtype = "fp8e4m3";
         break;
+    case 21:
+        /* QQ bias alone, so the bound cmp_ge/cmp_lt order of the QQ mask is
+         * pinned without additive bias, ALiBi or softcap riding along. */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 4;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_qq_bias = true;
+        s->kv_storage_dtype = NULL;
+        break;
     default:
         return -1;
     }

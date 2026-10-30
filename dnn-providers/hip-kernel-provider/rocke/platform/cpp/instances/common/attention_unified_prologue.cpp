@@ -349,10 +349,13 @@ void rocke_attn_unified_emit_prologue(rocke_attn_unified_build_ctx_t* ctx)
 
         /* seg_stop_i = b.mul(b.add(segm_idx, 1),
          *                    b.mul(tiles_per_segment, const_i32(block_size))) */
-        seg_stop_raw = rocke_b_mul(
-            b,
-            rocke_b_add(b, ctx->segm_idx, rocke_b_const_i32(b, 1)),
-            rocke_b_mul(b, ctx->tiles_per_segment, rocke_b_const_i32(b, ctx->p->block_size)));
+        {
+            /* Bound in Python's left-to-right order. */
+            rocke_value_t* segm_next = rocke_b_add(b, ctx->segm_idx, rocke_b_const_i32(b, 1));
+            rocke_value_t* seg_tokens
+                = rocke_b_mul(b, ctx->tiles_per_segment, rocke_b_const_i32(b, ctx->p->block_size));
+            seg_stop_raw = rocke_b_mul(b, segm_next, seg_tokens);
+        }
 
         /* seg_stop_i = b.select(b.cmp_lt(seg_stop_i, kv_len), seg_stop_i, kv_len) */
         lt = rocke_b_cmp_lt(b, seg_stop_raw, ctx->kv_len);

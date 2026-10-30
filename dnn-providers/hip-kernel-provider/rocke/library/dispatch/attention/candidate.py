@@ -12,10 +12,6 @@ from __future__ import annotations
 
 from typing import Callable, Mapping, Optional
 
-from kernels.common.attention_unified import (
-    supports_native_unified_attention_3d_tiled,
-    supports_native_unified_attention_tiled,
-)
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
 from rocke.dispatch.tuning import make_tuned_candidate
 
@@ -44,25 +40,13 @@ DENSE_PERSIST_ALGORITHM = "attention_dense_persist"
 
 
 def _tuning_precheck(variant: AttentionGeometryVariant):
-    """Coverage for one geometry variant. The coverage check (the scalar
-    gate, or for a bias problem the path's own tiled gate -- see
-    _unified_path_coverage) knows nothing about the LSE output, so an LSE
-    request also has to pass the gate of the variant's own path: the
-    split-KV gate owns which arches and features can write LSE, and the 2D
-    gate refuses it. That holds even if a 2D variant ever declared the
-    ``lse`` feature by mistake."""
-    path_gate = (
-        supports_native_unified_attention_3d_tiled
-        if variant.path == "3d"
-        else supports_native_unified_attention_tiled
-    )
+    """Coverage for one geometry variant, judged by ``_unified_path_coverage``
+    on the variant's own path, so an LSE or bias request on a 2D variant is
+    refused even if that variant ever declared the feature by mistake."""
 
     def precheck(req):
         problem = _tuning_problem(req)
-        ok, why = _unified_path_coverage(req, problem, variant.path, variant.arch)
-        if ok and problem.emit_lse:
-            return path_gate(problem, arch=variant.arch)
-        return ok, why
+        return _unified_path_coverage(req, problem, variant.path, variant.arch)
 
     return precheck
 

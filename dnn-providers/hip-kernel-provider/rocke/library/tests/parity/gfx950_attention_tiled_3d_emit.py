@@ -345,6 +345,21 @@ _CONFIGS = {
         use_additive_bias=True,
         kv_storage_dtype="fp8e4m3",
     ),
+    # idx21: QQ bias alone, so the bound cmp_ge/cmp_lt order of the QQ mask is
+    # pinned without additive bias, ALiBi or softcap riding along.
+    21: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_qq_bias=True,
+        kv_storage_dtype=None,
+    ),
 }
 
 

@@ -14,10 +14,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Tuple
 
-from kernels.common.attention_unified import (
-    supports_native_unified_attention,
-    supports_native_unified_attention_3d_tiled,
-)
+from kernels.common.attention_unified import supports_native_unified_attention
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import (
     Capability,
@@ -93,14 +90,6 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             return False, (
                 f"problem routes to {problem.select_path(req.arch)!r} path, not {path!r}"
             )
-        if problem.emit_lse:
-            # The coverage check above (the scalar gate, or for a bias
-            # problem the path's own tiled gate -- see
-            # _unified_path_coverage) knows nothing about LSE; the split-KV
-            # gate owns which arches and features can write it.
-            ok, why = supports_native_unified_attention_3d_tiled(problem, arch=req.arch)
-            if not ok:
-                return False, why
         return True, "ok"
 
     def select(req: OperatorRequest) -> AttentionSpec:

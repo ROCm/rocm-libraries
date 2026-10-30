@@ -1786,6 +1786,10 @@ def problems_gfx950_attention_tiled_2d():
             sliding_window=4096,
             use_additive_bias=True,
         ),
+        # The fp8 K/V single-batch combo cohort (above, without bias) turns on
+        # mask-once / mask-limit, which refuse bias: the selector must drop them.
+        p(2048, 1, 64, 8, 128, 64, 2048, 2048, use_fp8=True, use_additive_bias=True),
+        p(2048, 1, 64, 8, 64, 64, 2048, 2048, use_fp8=True, use_additive_bias=True),
     ]
 
 

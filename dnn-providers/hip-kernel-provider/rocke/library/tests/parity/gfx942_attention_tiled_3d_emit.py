@@ -348,6 +348,22 @@ _CONFIGS = {
         use_qq_bias=True,
         kv_storage_dtype=None,
     ),
+    # idx21: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
+    # The gfx942 Python spec has no use_additive_bias field (TypeError); the C
+    # twin rejects it in rocke_unified_attention_3d_tiled_spec_validate.
+    21: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        kv_storage_dtype=None,
+    ),
 }
 
 

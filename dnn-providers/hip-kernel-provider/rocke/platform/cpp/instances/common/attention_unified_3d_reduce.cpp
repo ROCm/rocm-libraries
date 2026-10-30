@@ -181,7 +181,12 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
                                         kpos,
                                         ctx->dim);
 
-    new_acc = rocke_b_fadd(b, rocke_b_fmul(b, acc_val, alpha), rocke_b_fmul(b, prob, vv));
+    {
+        /* Bound in Python's left-to-right order. */
+        rocke_value_t* acc_scaled = rocke_b_fmul(b, acc_val, alpha);
+        rocke_value_t* pv = rocke_b_fmul(b, prob, vv);
+        new_acc = rocke_b_fadd(b, acc_scaled, pv);
+    }
 
     yields[0] = new_m;
     yields[1] = new_l;

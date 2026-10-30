@@ -837,11 +837,14 @@ if(ROCKE_INSTALL_TESTS)
     # gfx950 additive-bias numeric lane. Its own entry (selected by name, like the
     # one above) so its runtime does not eat into that entry's timeout.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_attention_bias_gpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" -v -rs)\n")
+           "add_test(rocke_library_attention_bias_gpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" -v -rs --rocke-exit-77-if-gpu-skipped)\n")
+    # Without a gfx950 GPU every gpu-marked case skips; report the entry as
+    # skipped (77) rather than Passed on the host-only checks alone.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_attention_bias_gpu_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  SKIP_RETURN_CODE 77\n"
            "  TIMEOUT 1200)\n")
 
     # Library GPU numeric suites: convolution, attention, KDA, and GDN. The gfx950

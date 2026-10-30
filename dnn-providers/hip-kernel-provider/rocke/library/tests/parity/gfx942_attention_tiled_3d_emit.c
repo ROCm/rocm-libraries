@@ -346,6 +346,20 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->use_qq_bias = true;
         s->kv_storage_dtype = NULL;
         break;
+    case 21:
+        /* Additive bias on gfx942; both engines reject it (BOTH_REJECTED). */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 4;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->kv_storage_dtype = NULL;
+        break;
     default:
         return -1;
     }
