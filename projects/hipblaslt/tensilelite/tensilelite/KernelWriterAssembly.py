@@ -17118,8 +17118,11 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprPool.checkIn(tmpV0)
 
       nElements = kernel["MacroTile0"]*kernel["MatrixInstN"]//kernel["MIWaveGroup"][0]//self.states.kernel["WavefrontSize"]
-      # Readback buffers serve both final output and wider accumulation stores.
-      rpe = max(self.states.bpeCexternal, self.states.bpeCinternal) / self.states.bpr
+      # Accumulation workspace stores may use wider elements than the final output.
+      bpe = self.states.bpeCexternal
+      if kernel["_GlobalAccumulation"]:
+        bpe = max(bpe, self.states.bpeCinternal)
+      rpe = bpe / self.states.bpr
       rpv = rpe * gwvw
       self.vgprs.storeRemapAS = []
       for i in range(0, nElements, gwvw):
