@@ -579,6 +579,10 @@ namespace rocblaslt
          * for this call is first recorded there once, inverted, so that no pair
          * the tuner ever reads back is one HIP has never seen recorded; see
          * acquireEvents().
+         *
+         * On true the caller owns the pair until it calls endMeasurement(),
+         * which it must do once the launch has returned, whether or not the
+         * launch recorded anything.
          */
         bool beginMeasurement(size_t      problemKey,
                               int         solutionIndex,
@@ -599,6 +603,25 @@ namespace rocblaslt
             return beginMeasurementImpl(problemKey, solutionIndex, stream, start, stop);
         }
 
+        /**
+         * @brief Hand back the pair beginMeasurement() gave the launch, once the
+         * launch has returned. start is the start event it was given.
+         *
+         * Until then the pair is the launch's: nothing reads it back, pools it
+         * or destroys it, however many other dispatches of the problem, on any
+         * thread, harvest in the meantime. A pair that has been handed out and
+         * not yet recorded reads exactly like one whose launch failed to record
+         * it, and only the second may be destroyed; this call is what tells
+         * them apart. See PendingMeasurement::m_launched.
+         */
+        void endMeasurement(size_t problemKey, hipEvent_t start)
+        {
+            if(!m_enabled || !start)
+                return;
+
+            endMeasurementImpl(problemKey, start);
+        }
+
     private:
         // A pooled pair, kept whole so two handles from different measurements
         // can never be paired up with each other. Pairs in the pool obey one
@@ -615,12 +638,19 @@ namespace rocblaslt
         // One launch the GPU has not been observed to finish yet. m_device is
         // the device the pair was created on, carried so recycleEvents() can
         // put it back where it came from.
+        //
+        // m_launched is set by endMeasurement(), once the launch the pair was
+        // handed to has returned. Until then the pair is not read at all: the
+        // launch records it outside the lock, so a harvest by another dispatch
+        // of the same problem could otherwise reject it and destroy it just
+        // before the launch records it.
         struct PendingMeasurement
         {
             hipEvent_t m_start     = nullptr;
             hipEvent_t m_stop      = nullptr;
             int        m_candidate = -1;
             int        m_device    = 0;
+            bool       m_launched  = false;
         };
 
         // m_pending holds the outstanding measurements in launch order, capped
@@ -782,6 +812,7 @@ namespace rocblaslt
                                   hipStream_t stream,
                                   hipEvent_t& start,
                                   hipEvent_t& stop);
+        void endMeasurementImpl(size_t problemKey, hipEvent_t start);
 
         // The remainder require m_mutex, held shared where they only read and
         // exclusively where they mutate state or the event pool.

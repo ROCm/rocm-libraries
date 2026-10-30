@@ -6369,6 +6369,21 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 static_cast<void>(onlineTuner.beginMeasurement(
                     onlineKey, solution->index, prob.stream, measureStart, measureStop));
 
+            // Handed back once the launch below has returned, by any route, so
+            // no other dispatch of the problem reads or retires the pair while
+            // this one may still be recording it. Nothing when there is no pair.
+            struct MeasuredLaunch
+            {
+                rocblaslt::OnlineTuner& tuner;
+                size_t                  key;
+                hipEvent_t              start;
+
+                ~MeasuredLaunch()
+                {
+                    tuner.endMeasurement(key, start);
+                }
+            } const measuredLaunch{onlineTuner, onlineKey, measureStart};
+
             // The pair is passed best effort, which is the difference between
             // a tuner that stops measuring and one that breaks the call it was
             // measuring. launchKernel returns hipEventRecord's error, and this

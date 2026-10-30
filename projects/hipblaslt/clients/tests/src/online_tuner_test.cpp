@@ -30,11 +30,13 @@
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
+#include <cstdlib>
 #include <functional>
 #include <future>
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -955,12 +957,13 @@ namespace
         }
 
         // What the kernel launch does for the library: record both ends around
-        // something, and leave the pair readable by the next harvest.
-        void bracket(hipEvent_t start, hipEvent_t stop) const
+        // something, return, and leave the pair readable by the next harvest.
+        void bracket(size_t key, hipEvent_t start, hipEvent_t stop) const
         {
             EXPECT_EQ(hipEventRecord(start, m_stream), hipSuccess);
             EXPECT_EQ(hipMemsetAsync(m_scratch, 0, c_scratchBytes, m_stream), hipSuccess);
             EXPECT_EQ(hipEventRecord(stop, m_stream), hipSuccess);
+            tuner().endMeasurement(key, start);
             EXPECT_EQ(hipStreamSynchronize(m_stream), hipSuccess);
         }
 
@@ -990,7 +993,7 @@ namespace
 
         if(start && stop)
         {
-            device.bracket(start, stop);
+            device.bracket(key, start, stop);
             tuner().harvestPending(key);
         }
 
@@ -1018,7 +1021,7 @@ namespace
         if(!tuner().beginMeasurement(key, ranked[position], device.stream(), start, stop))
             return false;
 
-        device.bracket(start, stop);
+        device.bracket(key, start, stop);
         return true;
     }
 
@@ -1059,11 +1062,12 @@ namespace
         HeldStream(const HeldStream&)            = delete;
         HeldStream& operator=(const HeldStream&) = delete;
 
-        // A launch's two records, behind the wait.
-        void bracket(hipEvent_t start, hipEvent_t stop) const
+        // A launch's two records, behind the wait, and its return.
+        void bracket(size_t key, hipEvent_t start, hipEvent_t stop) const
         {
             EXPECT_EQ(hipEventRecord(start, m_stream), hipSuccess);
             EXPECT_EQ(hipEventRecord(stop, m_stream), hipSuccess);
+            tuner().endMeasurement(key, start);
         }
 
         void release()
@@ -1317,7 +1321,7 @@ namespace
             ASSERT_TRUE(tuner().beginMeasurement(key, ranked[0], device.stream(), start, stop))
                 << "the registrant was refused the launch its own offer named";
 
-            device.bracket(start, stop);
+            device.bracket(key, start, stop);
             tuner().harvestPending(key);
         });
 
@@ -1377,7 +1381,7 @@ namespace
                 tuner().beginMeasurement(key, ranked[position], device.stream(), start, stop))
                 << "a sibling's visit cancelled the offer the registrant held, on visit " << visits;
 
-            device.bracket(start, stop);
+            device.bracket(key, start, stop);
             tuner().harvestPending(key);
         }
 
@@ -1418,7 +1422,7 @@ namespace
         hipEvent_t start = nullptr;
         hipEvent_t stop  = nullptr;
         ASSERT_TRUE(tuner().beginMeasurement(key, ranked[0], device.stream(), start, stop));
-        device.bracket(start, stop);
+        device.bracket(key, start, stop);
         tuner().harvestPending(key);
 
         const auto pooled = OnlineTunerTestAccess::pooledPairs(tuner(), device.id());
@@ -1460,6 +1464,7 @@ namespace
                 << key;
 
             record(start, stop);
+            tuner().endMeasurement(key, start);
             EXPECT_EQ(hipStreamSynchronize(device.stream()), hipSuccess);
 
             const int liveBefore = OnlineTunerTestAccess::livePairs(tuner(), id);
@@ -1493,7 +1498,7 @@ namespace
             hipEvent_t start = nullptr;
             hipEvent_t stop  = nullptr;
             ASSERT_TRUE(tuner().beginMeasurement(warm, ranked[0], device.stream(), start, stop));
-            device.bracket(start, stop);
+            device.bracket(warm, start, stop);
             tuner().harvestPending(warm);
         }
 
@@ -1522,7 +1527,7 @@ namespace
             hipEvent_t start = nullptr;
             hipEvent_t stop  = nullptr;
             ASSERT_TRUE(tuner().beginMeasurement(warm, ranked[0], device.stream(), start, stop));
-            device.bracket(start, stop);
+            device.bracket(warm, start, stop);
             tuner().harvestPending(warm);
         }
         EXPECT_TRUE(measure(0x1026, recordStartOnly))
@@ -1588,7 +1593,7 @@ namespace
             }
 
             ++measured;
-            held.bracket(start, stop);
+            held.bracket(key, start, stop);
         }
 
         EXPECT_EQ(measured, cap) << "launches in flight held more live event pairs than the cap";
@@ -1612,7 +1617,7 @@ namespace
         hipEvent_t stop  = nullptr;
         ASSERT_TRUE(tuner().beginMeasurement(late, ranked[0], device.stream(), start, stop))
             << "a pair handed back to the pool could not be measured with";
-        device.bracket(start, stop);
+        device.bracket(late, start, stop);
 
         // Leave nothing outstanding for the cases after this one.
         tuner().reloadForTest();
@@ -1802,7 +1807,7 @@ namespace
         // sample: nothing was taken, pooled or destroyed underneath it.
         for(const Taken& pair : taken)
         {
-            device.bracket(pair.start, pair.stop);
+            device.bracket(pair.key, pair.start, pair.stop);
             tuner().harvestPending(pair.key);
             EXPECT_EQ(OnlineTunerTestAccess::samples(tuner(), pair.key), 1u)
                 << "key " << pair.key << " lost the launch it had a pair for";
@@ -1811,12 +1816,150 @@ namespace
         tuner().reloadForTest();
     }
 
+    // Two dispatches of one shape on two threads. One has been handed a pair
+    // and has not recorded it yet when the other harvests the shape. Such a
+    // pair reads exactly like one whose launch failed to record it, and those
+    // are retired -- but this one is about to be recorded, and recording a
+    // destroyed event is a use after free inside the caller's matmul. It must
+    // be left alone until its launch returns, and then be read back as usual.
+    // Twice, so the pair handed out is a pooled one at least once.
+    TEST(OnlineTuner, AnotherDispatchOfTheShapeLeavesAPairItsLaunchHasNotRecorded)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        const Device device(0);
+        const int    id = device.id();
+
+        tuner().reloadForTest();
+
+        constexpr size_t       key     = 0x79000;
+        const size_t           problem = identityOf(key);
+        const std::vector<int> ranked{221, 222, 223};
+
+        Worker other;
+
+        for(size_t round = 1; round <= 2; ++round)
+        {
+            SCOPED_TRACE("round " + std::to_string(round));
+
+            const int position = tuner().selectCandidate(key, problem, ranked);
+            ASSERT_GE(position, 0);
+
+            hipEvent_t start = nullptr;
+            hipEvent_t stop  = nullptr;
+            ASSERT_TRUE(
+                tuner().beginMeasurement(key, ranked[position], device.stream(), start, stop));
+
+            // Whatever the pair already holds is complete, so a harvest that
+            // reads it gets an answer rather than "outstanding".
+            ASSERT_EQ(hipStreamSynchronize(device.stream()), hipSuccess);
+
+            const int live = OnlineTunerTestAccess::livePairs(tuner(), id);
+            other.run([&] {
+                ASSERT_EQ(hipSetDevice(id), hipSuccess);
+                tuner().harvestPending(key);
+            });
+
+            // Asserted before the record below, which on a destroyed pair
+            // would fault rather than fail.
+            ASSERT_EQ(OnlineTunerTestAccess::livePairs(tuner(), id), live)
+                << "another dispatch retired a pair whose launch had not recorded it";
+
+            device.bracket(key, start, stop);
+            other.run([&] { tuner().harvestPending(key); });
+
+            EXPECT_EQ(OnlineTunerTestAccess::samples(tuner(), key), round)
+                << "the launch's sample was lost";
+        }
+
+        tuner().reloadForTest();
+    }
+
+    // Several threads dispatching one shape at a time, as a server's workers
+    // do, through many shapes. Launches record nothing between their two
+    // events, so most samples are rejected and their pairs retired, which is
+    // what puts a retire next to a record. Returns 0, or 3 if a record failed,
+    // or 4 if the shapes were not all resolved within the step bound.
+    int dispatchOneShapeFromManyThreads()
+    {
+        tuner().reloadForTest();
+
+        constexpr int    kThreads = 8;
+        constexpr int    kSteps   = 20000;
+        constexpr size_t kFirst   = 0x7A000;
+        constexpr size_t kLast    = kFirst + 200;
+
+        const std::vector<int> ranked{211, 212, 213};
+
+        std::atomic<size_t>      current{kFirst};
+        std::atomic<int>         failures{0};
+        std::vector<std::thread> threads;
+
+        for(int thread = 0; thread < kThreads; ++thread)
+            threads.emplace_back([&] {
+                hipStream_t stream = nullptr;
+                if(hipSetDevice(0) != hipSuccess || hipStreamCreate(&stream) != hipSuccess)
+                {
+                    ++failures;
+                    return;
+                }
+
+                for(int step = 0; step < kSteps; ++step)
+                {
+                    const size_t key = current.load();
+                    if(key >= kLast)
+                        break;
+
+                    tuner().harvestPending(key);
+
+                    const int position = tuner().selectCandidate(key, identityOf(key), ranked);
+
+                    hipEvent_t start = nullptr;
+                    hipEvent_t stop  = nullptr;
+                    if(position >= 0
+                       && tuner().beginMeasurement(key, ranked[position], stream, start, stop))
+                    {
+                        std::this_thread::yield();
+                        if(hipEventRecord(start, stream) != hipSuccess
+                           || hipEventRecord(stop, stream) != hipSuccess)
+                            ++failures;
+                        tuner().endMeasurement(key, start);
+                    }
+
+                    size_t expected = key;
+                    if(tuner().resolution(key))
+                        current.compare_exchange_strong(expected, key + 1);
+                }
+
+                if(hipStreamSynchronize(stream) != hipSuccess)
+                    ++failures;
+                static_cast<void>(hipStreamDestroy(stream));
+            });
+
+        for(std::thread& thread : threads)
+            thread.join();
+
+        return failures.load() != 0 ? 3 : current.load() < kLast ? 4 : 0;
+    }
+
+    // The same race as above, left to the scheduler. In a child process,
+    // because losing it records a destroyed event, which faults rather than
+    // failing an assertion.
+    TEST(OnlineTuner, ThreadsDispatchingOneShapeNeverRecordARetiredPair)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        EXPECT_EXIT(std::exit(dispatchOneShapeFromManyThreads()), ::testing::ExitedWithCode(0), "");
+    }
+
     // The reclaim reads other shapes' pairs on the caller's thread, inside the
     // caller's matmul, so it must leave that thread's HIP state as it found it
-    // -- including when what it reads is a fresh pair whose launch has not
-    // recorded it, the case that used to fail hipEventElapsedTime with an
-    // error the caller's next hipGetLastError() would have reported. And such
-    // a pair is still never taken.
+    // -- including when what it reads is a fresh pair whose launch returned
+    // without recording it, which holds only the records it was created with.
+    // Such a pair is never taken, and its own harvest later retires it.
     TEST(OnlineTuner, AReclaimLeavesNoErrorInTheCallersHipState)
     {
         if(deviceCount() < 1)
@@ -1830,8 +1973,9 @@ namespace
         const int              cap = tuner().livePairCap();
         const std::vector<int> ranked{231, 232, 233};
 
-        // Empty the pool by retiring what it holds: a pooled pair taken and
-        // never recorded reads negative, and its own harvest retires it.
+        // Empty the pool by retiring what it holds: a pooled pair whose launch
+        // returns without recording it reads negative, and its own harvest
+        // retires it.
         size_t key = 0x78000;
         while(!OnlineTunerTestAccess::pooledPairs(tuner(), id).empty())
         {
@@ -1839,27 +1983,24 @@ namespace
             hipEvent_t start = nullptr;
             hipEvent_t stop  = nullptr;
             ASSERT_TRUE(tuner().beginMeasurement(key, ranked[0], device.stream(), start, stop));
+            tuner().endMeasurement(key, start);
             tuner().harvestPending(key);
             ++key;
         }
         ASSERT_EQ(OnlineTunerTestAccess::livePairs(tuner(), id), 0);
         ASSERT_EQ(hipStreamSynchronize(device.stream()), hipSuccess);
 
-        // The whole cap in fresh pairs, handed out and not recorded yet.
-        struct Taken
-        {
-            size_t     key;
-            hipEvent_t start;
-            hipEvent_t stop;
-        };
-        std::vector<Taken> taken;
+        // The whole cap in fresh pairs, each handed to a launch that returned
+        // without recording it.
+        std::vector<size_t> keys;
         for(int shape = 0; shape < cap; ++shape, ++key)
         {
             ASSERT_EQ(tuner().selectCandidate(key, identityOf(key), ranked), 0);
-            Taken pair{key, nullptr, nullptr};
-            ASSERT_TRUE(
-                tuner().beginMeasurement(key, ranked[0], device.stream(), pair.start, pair.stop));
-            taken.push_back(pair);
+            hipEvent_t start = nullptr;
+            hipEvent_t stop  = nullptr;
+            ASSERT_TRUE(tuner().beginMeasurement(key, ranked[0], device.stream(), start, stop));
+            tuner().endMeasurement(key, start);
+            keys.push_back(key);
         }
         ASSERT_EQ(hipStreamSynchronize(device.stream()), hipSuccess);
         ASSERT_EQ(hipGetLastError(), hipSuccess);
@@ -1869,18 +2010,21 @@ namespace
         hipEvent_t start = nullptr;
         hipEvent_t stop  = nullptr;
         EXPECT_FALSE(tuner().beginMeasurement(key, ranked[0], device.stream(), start, stop))
-            << "a pair handed out for a launch not yet recorded was taken back";
+            << "a pair no launch recorded was taken back as a sample";
         EXPECT_EQ(hipGetLastError(), hipSuccess)
             << "the reclaim left an error in the caller's HIP state";
+        EXPECT_EQ(OnlineTunerTestAccess::livePairs(tuner(), id), cap)
+            << "the reclaim retired a pair";
 
-        for(const Taken& pair : taken)
+        for(size_t owner : keys)
         {
-            device.bracket(pair.start, pair.stop);
-            tuner().harvestPending(pair.key);
-            EXPECT_EQ(OnlineTunerTestAccess::samples(tuner(), pair.key), 1u)
-                << "key " << pair.key << " lost the launch it had a pair for";
+            tuner().harvestPending(owner);
+            EXPECT_EQ(OnlineTunerTestAccess::samples(tuner(), owner), 0u)
+                << "key " << owner << ": a pair no launch recorded was taken as a sample";
         }
         EXPECT_EQ(hipGetLastError(), hipSuccess);
+        EXPECT_EQ(OnlineTunerTestAccess::livePairs(tuner(), id), 0)
+            << "a pair no launch recorded was not retired by its own harvest";
 
         tuner().reloadForTest();
     }
@@ -1925,7 +2069,7 @@ namespace
                 hipEvent_t start = nullptr;
                 hipEvent_t stop  = nullptr;
                 if(tuner().beginMeasurement(key, ranked[0], device.stream(), start, stop))
-                    held.bracket(start, stop);
+                    held.bracket(key, start, stop);
                 else
                     ++untimed;
             }
@@ -1965,7 +2109,7 @@ namespace
         ASSERT_EQ(tuner().selectCandidate(keyZero, identityOf(keyZero), ranked), 0);
         ASSERT_TRUE(
             tuner().beginMeasurement(keyZero, ranked[0], zero.stream(), startZero, stopZero));
-        zero.bracket(startZero, stopZero);
+        zero.bracket(keyZero, startZero, stopZero);
         tuner().harvestPending(keyZero);
 
         // Device 1 now explores a shape of its own.

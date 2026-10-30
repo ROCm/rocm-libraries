@@ -395,10 +395,15 @@ namespace rocblaslt
             // measurement in between, and recycling events the GPU is still
             // writing to would corrupt that measurement.
             //
+            // A pair whose launch has not returned is not read at all. It may
+            // not be recorded yet, and would then be rejected and destroyed
+            // under the launch about to record it. See m_launched.
+            //
             // Records the GPU has not finished are compacted to the front, which
             // keeps the launch order the rest of this loop reports in.
             float             milliseconds = 0.0f;
-            const PairReading reading      = readPair(pending, milliseconds);
+            const PairReading reading
+                = pending.m_launched ? readPair(pending, milliseconds) : PairReading::Outstanding;
             if(reading == PairReading::Outstanding)
             {
                 state.m_pending[outstanding++] = pending;
@@ -528,15 +533,13 @@ namespace rocblaslt
      * exploration. requester is skipped because its own harvest has just run.
      *
      * Only a pair that reads as a sample is taken, which is what keeps this
-     * away from launches that are not finished. A stop the GPU has not reached
-     * queries as outstanding. A pair handed out by beginMeasurement() whose
-     * launch has not recorded it yet -- another thread can be between the two
-     * right now, outside the lock -- reads non-positive, by the same
-     * invariant the sign test relies on: a pooled pair is inverted and a fresh
-     * one has no timestamps. So does a pair whose launch failed to record it,
-     * which is indistinguishable from that and is left for its own problem's
-     * harvest to retire. Nothing here retires or destroys a pair, so a launch
-     * about to record one can never be handed a destroyed handle.
+     * away from launches that are not finished. A pair handed out by
+     * beginMeasurement() whose launch has not returned -- another thread can
+     * be between the two right now, outside the lock -- is not read at all.
+     * A stop the GPU has not reached queries as outstanding. A pair whose
+     * launch returned without recording it reads non-positive, by the
+     * invariant the sign test relies on, and is left for its own problem's
+     * harvest to retire. Nothing here retires or destroys a pair.
      *
      * Under the write lock, like the harvest, for the same reason: the events
      * are queried and the pending lists rewritten together, and nothing else
@@ -558,7 +561,7 @@ namespace rocblaslt
                 const PendingMeasurement pending = state.m_pending[i];
 
                 float milliseconds = 0.0f;
-                if(pending.m_device != device
+                if(pending.m_device != device || !pending.m_launched
                    || readPair(pending, milliseconds) != PairReading::Sample)
                 {
                     state.m_pending[kept++] = pending;
@@ -671,6 +674,31 @@ namespace rocblaslt
         ++state.m_issued[candidate];
 
         return true;
+    }
+
+    // The pair is still on the problem's pending list: nothing removes an
+    // entry before it is marked here, and the problem cannot resolve while it
+    // holds one. Under the write lock like every other change to that list,
+    // so a harvest that sees the mark also sees the launch's records, which
+    // were made before this call.
+    //
+    // Costs one more exclusive acquisition per measured launch, which happens
+    // at most topK() * repeats() times per problem and never once it is
+    // resolved, or with the tuner off.
+    void OnlineTuner::endMeasurementImpl(size_t problemKey, hipEvent_t start)
+    {
+        std::unique_lock<std::shared_timed_mutex> lock(m_mutex);
+
+        auto iter = m_problems.find(problemKey);
+        if(iter == m_problems.end())
+            return;
+
+        for(PendingMeasurement& pending : iter->second.m_pending)
+            if(pending.m_start == start && !pending.m_launched)
+            {
+                pending.m_launched = true;
+                return;
+            }
     }
 
     void OnlineTuner::registerProblem(size_t                  problemKey,
