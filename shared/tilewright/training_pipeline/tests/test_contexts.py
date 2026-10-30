@@ -103,11 +103,8 @@ def test_context_errors(sec, n_cu, needle):
 def test_fraction_budget_is_a_multiple_of_the_budget_granule(
     fraction, n_cu, floor, budget
 ):
-    from lib.hipblaslt_launch import SM_TARGET_GRANULE
-
     got = cx.fraction_budget(fraction, n_cu, floor)
     assert got == budget and got % cx.CU_BUDGET_GRANULE == 0 and 0 < got < n_cu
-    assert got % SM_TARGET_GRANULE == 0
 
 
 def test_a_device_without_a_granule_below_its_cus_has_no_budget():
@@ -138,10 +135,8 @@ def test_shares_from_an_eighth_resolve_to_whole_granules_from_one_granule_up():
     eighth exactly on a device of eight granules, one granule where an
     eighth is less. However small a share, its budget is never below one
     granule, and it is an SM target hipBLASLt takes as it is."""
-    from lib.hipblaslt_launch import SM_TARGET_GRANULE
-
     granule = cx.CU_BUDGET_GRANULE
-    assert granule == 32 and granule % SM_TARGET_GRANULE == 0
+    assert granule == 32
     cfg = {"contexts": {"list": EIGHTHS}}
     assert cx.budget_granule(cfg) == granule == cx.budget_granule({})
     assert _budgets(cfg, 256) == [192, 128, 64, 32]
@@ -158,29 +153,26 @@ def test_shares_from_an_eighth_resolve_to_whole_granules_from_one_granule_up():
         assert lowest == granule or n_cu >= 12 * granule, n_cu
 
 
-def test_the_budgets_keep_their_granule_when_the_sm_target_is_exact(monkeypatch):
-    """The budget granule is the budgets' own: were hipBLASLt's launch rule to
-    take the SM target as it is (a granule of one CU), launches would follow
-    every budget exactly, and the shares would still resolve to the same
-    whole granules, the eighth's to one granule on a device of 192 CUs."""
+def test_the_budgets_keep_their_granule_though_the_sm_target_is_exact():
+    """The budget granule is the budgets' own: hipBLASLt's launch rule takes
+    the SM target as it is (a granule of one CU), so launches follow every
+    budget exactly, and the shares still resolve to the same whole granules,
+    the eighth's to one granule on a device of 192 CUs."""
     from lib import hipblaslt_launch as hl
 
     cfg = {"contexts": {"list": EIGHTHS}}
-    assert cx.sm_target(40, 112) == 32
-    monkeypatch.setattr(hl, "SM_TARGET_GRANULE", 1)
-    monkeypatch.setattr(cx, "SM_TARGET_GRANULE", 1)
-    assert cx.sm_target(40, 112) == 40
+    assert hl.SM_TARGET_GRANULE == 1
     assert _budgets(cfg, 256) == [192, 128, 64, 32]
     assert _budgets(cfg, 192) == [160, 96, 64, 32]
     assert cx.fraction_budget(0.125, 192) == 32 == cx.fraction_budget(0.01, 256)
     assert cx.context_errors(cfg, 192) == []
 
 
-def test_a_config_granule_sets_the_budgets_and_must_be_an_sm_target():
+def test_a_config_granule_sets_the_budgets_and_must_be_one_cu_or_more():
     """`contexts.granule` replaces the default granule for every budget a
     share resolves to, and for the check of a budget given beside its
-    share; it must be a multiple of the SM-target granule, the only error
-    reported then."""
+    share; any granule of one CU or more sizes the kernels for exactly the
+    CUs of each budget, and one of none is the only error reported then."""
     coarse = {"contexts": {"list": EIGHTHS, "granule": 64}}
     assert cx.budget_granule(coarse) == 64
     assert _budgets(coarse, 256) == [192, 128, 64]
@@ -200,24 +192,18 @@ def test_a_config_granule_sets_the_budgets_and_must_be_an_sm_target():
     assert cx.context_errors({"contexts": dict(given, granule=64)}, 256) == []
     (err,) = cx.context_errors({"contexts": given}, 256)
     assert err.endswith("is not cu_fraction 0.125 of the device's 256 CUs (32)")
-    for bad in (16, 48):
-        cfg = {"contexts": {"list": EIGHTHS, "granule": bad}}
-        want = [
-            f"contexts.granule {bad}: must be a multiple of 32, the SM-target "
-            f"granule of hipBLASLt's launch rule, so that hipBLASLt sizes the "
-            f"kernels for exactly the CUs of each budget"
-        ]
-        assert cx.context_errors(cfg, 256) == want == cx.context_errors(cfg)
+    for fine, budgets in ((16, [192, 128, 64, 32]), (48, [192, 144, 48])):
+        cfg = {"contexts": {"list": EIGHTHS, "granule": fine}}
+        assert cx.context_errors(cfg, 256) == [] == cx.context_errors(cfg)
+        assert _budgets(cfg, 256) == budgets
     with pytest.raises(ValueError, match="must be positive"):
         cx.resolve_fractions({"contexts": {"list": EIGHTHS, "granule": 0}}, 256)
-    # a granule of no CUs, or fewer, is no multiple of the SM-target granule
     for bad in (0, -32):
         cfg = {"contexts": {"list": EIGHTHS, "granule": bad}}
-        (err,) = cx.granule_errors(cfg)
-        assert err.startswith(f"contexts.granule {bad}: must be a multiple of 32")
-        assert cx.context_errors(cfg) == [err]
-    assert cx.granule_errors({"contexts": {"granule": 32}}) == []
-    assert cx.granule_errors({"contexts": {"granule": 96}}) == []
+        want = [f"contexts.granule {bad}: must be at least one CU"]
+        assert cx.granule_errors(cfg) == want == cx.context_errors(cfg)
+    for fine in (1, 32, 96):
+        assert cx.granule_errors({"contexts": {"granule": fine}}) == []
 
 
 FRACTIONS = {
@@ -658,30 +644,11 @@ def test_preflight_needs_the_cotenant_kernel(tmp_path, monkeypatch):
     assert ro._cotenant_errors(launcher) == []
 
 
-def test_a_held_out_context_sized_as_a_trained_one_collapses():
-    assert [cx.sm_target(b, 112) for b in (0, 16, 32, 40, 84, 112, 128)] == [
-        112,
-        112,
-        32,
-        32,
-        64,
-        96,
-        112,
-    ]
-    trained = [cx.BenchContext(cu_budget=64, cotenant=True)]
-    held = [
-        cx.BenchContext(cu_budget=84, cotenant=True, holdout=True),
-        cx.BenchContext(cu_budget=40, cotenant=True, holdout=True),
-        cx.BenchContext(cu_budget=16, cotenant=True, holdout=True),
-        cx.BenchContext(cu_budget=72, schedule="dynamic", holdout=True),
-    ]
-    got = [
-        (c.cu_budget, onto) for c, onto in cx.collapsed_holdouts(trained + held, 112)
-    ]
-    assert got == [(84, "cu64_cot"), (16, "exclusive")]
+def test_held_out_budgets_between_trained_ones_launch_as_their_own(capsys):
+    """hipBLASLt takes every budget as its SM target as it is, so a held-out
+    budget between trained ones holds out a launch of its own: preflight
+    has nothing to warn about it, whatever the schedule."""
 
-
-def test_preflight_warns_when_every_held_out_context_collapses(capsys):
     def preflight(holdout):
         cfg = {
             "runtime": {"devices": [0]},
@@ -694,12 +661,11 @@ def test_preflight_warns_when_every_held_out_context_collapses(capsys):
         assert ro._context_preflight(cfg, None) == []
         return capsys.readouterr().err
 
-    err = preflight([{"cu_budget": 84}, {"cu_budget": 40}])
-    assert "held-out context cu84 (cu_budget 84): hipBLASLt sizes its kernels" in err
-    assert "64 of 112 CUs" in err and "as for the trained context cu64" in err
-    assert "every held-out context collapses under the 32-CU SM-target" in err
-    err = preflight([{"cu_budget": 84}, {"cu_budget": 40, "schedule": "dynamic"}])
-    assert "as for the trained context cu64" in err and "every held-out" not in err
+    for holdout in (
+        [{"cu_budget": 84}, {"cu_budget": 40}],
+        [{"cu_budget": 84}, {"cu_budget": 40, "schedule": "dynamic"}],
+    ):
+        assert "held-out" not in preflight(holdout)
 
 
 # ── shape selection ──────────────────────────────────────────────────────────

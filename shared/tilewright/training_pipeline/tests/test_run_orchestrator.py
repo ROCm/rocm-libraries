@@ -2954,8 +2954,9 @@ def test_the_cu_budget_granule_is_pinned_only_away_from_its_default(tmp_path):
     """contexts.granule defaults to lib/contexts.py's budget granule, today
     the one a pin written before the key existed means: a config that leaves
     it out or sets the default keeps that pin, in an audit directory too,
-    and one that sets another granule pins it. It must be positive (schema)
-    and a multiple of the SM-target granule (contexts rule)."""
+    and one that sets another granule pins it. It must be positive (schema
+    and contexts rule); hipBLASLt takes every budget as its SM target as it
+    is, so a finer granule is valid too."""
     from lib import contexts as ctxlib
     from lib import pinning
 
@@ -2981,11 +2982,7 @@ def test_the_cu_budget_granule_is_pinned_only_away_from_its_default(tmp_path):
     assert ro.validate_config(with_granule(0))[0] == [
         "contexts.granule: must be >= 1, got 0"
     ]
-    assert ro.validate_config(with_granule(16))[0] == [
-        "contexts.granule 16: must be a multiple of 32, the SM-target granule of "
-        "hipBLASLt's launch rule, so that hipBLASLt sizes the kernels for exactly "
-        "the CUs of each budget"
-    ]
+    assert ro.validate_config(with_granule(16))[0] == []
 
 
 def test_a_pin_without_the_granule_means_32_whatever_the_default(tmp_path):

@@ -33,10 +33,9 @@ with its own KFD node and HIP device, so the shares are sized for it. The
 budget is the multiple of the budget granule (`budget_granule`) nearest the
 share, at least one granule, and for a trained entry not below
 `train.min_cu_fraction` where the device allows. The granule is the
-budgets' own, apart from the rounding of the SM target in hipBLASLt's
-launch rule (`hipblaslt_launch.SM_TARGET_GRANULE`), and a multiple of it, so
-that hipBLASLt takes every budget as its SM target as it is and the kernels
-size their grids for exactly the CUs the cotenant leaves them. An entry is
+budgets' own: hipBLASLt takes every budget as its SM target as it is
+(`hipblaslt_launch.SM_TARGET_GRANULE`), so the kernels size their grids for
+exactly the CUs the cotenant leaves them, whatever the granule. An entry is
 left out (`left_out` names them) when it resolves to the budget and
 schedule of another (one with a budget of its own, or an earlier one:
 trained entries come before held-out ones), or when the device has no
@@ -59,15 +58,10 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set
 from typing import Tuple
 
-from .hipblaslt_launch import SM_TARGET_GRANULE
-
 # The CU budgets a cu_fraction resolves to are whole multiples of this many
 # CUs (WGPs on gfx1250), and at least one, so the smallest budget a run
 # trains is one granule however small its share: one XCD's worth of CUs on
-# gfx950. It must stay a multiple of the launch rule's rounding of the SM
-# target (SM_TARGET_GRANULE), so that hipBLASLt sizes the kernels for exactly
-# the CUs the cotenant leaves them; `contexts.granule` sets another for a
-# config.
+# gfx950. `contexts.granule` sets another for a config.
 CU_BUDGET_GRANULE = 32
 # The granule of the budgets of a run or audit directory pinned before
 # `contexts.granule` existed, whose budgets were whole multiples of 32 CUs:
@@ -214,16 +208,11 @@ def budget_granule(cfg: Mapping[str, Any]) -> int:
 
 def granule_errors(cfg: Mapping[str, Any], where: str = "contexts") -> List[str]:
     """The budget granule of `cfg` (`budget_granule`) as an error unless it
-    is a whole multiple of SM_TARGET_GRANULE, so that hipBLASLt takes every
-    budget as its SM target as it is."""
+    is at least one CU."""
     granule = budget_granule(cfg)
-    if granule >= SM_TARGET_GRANULE and granule % SM_TARGET_GRANULE == 0:
+    if granule >= 1:
         return []
-    return [
-        f"{where}.granule {granule}: must be a multiple of {SM_TARGET_GRANULE}, "
-        f"the SM-target granule of hipBLASLt's launch rule, so that hipBLASLt "
-        f"sizes the kernels for exactly the CUs of each budget"
-    ]
+    return [f"{where}.granule {granule}: must be at least one CU"]
 
 
 def fraction_budget(
@@ -398,8 +387,8 @@ def context_errors(
     resolves fractions; without it an entry that gives only a cu_fraction
     is checked for what needs no budget. Of the entries the config turns
     off only the exclusive one is an error: it is the round's own bench. A
-    budget granule that is no multiple of the SM-target granule is the only
-    error reported, since every budget follows from it."""
+    budget granule of no CU is the only error reported, since every budget
+    follows from it."""
     bad = granule_errors(cfg, where)
     if bad:
         return bad
@@ -492,35 +481,6 @@ def context_errors(
             errors.append(f"{at}: name {c.label!r} is also {labels[c.label]}")
         labels[c.label] = at
     return errors
-
-
-def sm_target(cu_budget: int, n_cu: int) -> int:
-    """The CUs hipBLASLt sizes kernels for under `cu_budget` on a device of
-    `n_cu` CUs: the budget rounded down to a multiple of SM_TARGET_GRANULE,
-    and the whole device when that is 0 or not below the device's CUs
-    (lib/hipblaslt_launch.py)."""
-    target = int(cu_budget) // SM_TARGET_GRANULE * SM_TARGET_GRANULE
-    return target if 0 < target < int(n_cu) else int(n_cu)
-
-
-def collapsed_holdouts(
-    contexts: Sequence[BenchContext], n_cu: int
-) -> List[Tuple[BenchContext, str]]:
-    """(held-out context, the trained one it collapses onto) for every
-    held-out context of `contexts` whose kernels hipBLASLt sizes as a
-    trained context's (`sm_target`, same schedule; the exclusive context,
-    every CU and the default schedule, is a trained one): it holds out no
-    launch the run does not train on."""
-    trained: Dict[Tuple[int, str], str] = {(int(n_cu), "default"): "exclusive"}
-    for c in contexts:
-        if not c.holdout:
-            trained.setdefault((sm_target(c.cu_budget, n_cu), c.schedule), c.label)
-    out: List[Tuple[BenchContext, str]] = []
-    for c in contexts:
-        key = (sm_target(c.cu_budget, n_cu), c.schedule)
-        if c.holdout and key in trained:
-            out.append((c, trained[key]))
-    return out
 
 
 def trained_fractions(contexts: Sequence[BenchContext], n_cu: int) -> List[float]:

@@ -3080,23 +3080,6 @@ def _context_preflight(cfg: Mapping[str, Any], paths: Paths) -> List[str]:
                 f"held-out context {c.label} is below the smallest trained "
                 f"budget fraction {lo:.3g}: the model does not declare it",
             )
-    held = [c for c in contexts if c.holdout]
-    collapsed = ctxlib.collapsed_holdouts(contexts, n_cu)
-    for c, onto in collapsed:
-        ui.warn(
-            "contexts",
-            f"held-out context {c.label} (cu_budget {c.cu_budget}): hipBLASLt "
-            f"sizes its kernels for {ctxlib.sm_target(c.cu_budget, n_cu)} of "
-            f"{n_cu} CUs (a multiple of the {hllib.SM_TARGET_GRANULE}-CU SM-target "
-            f"granule), as for the trained context {onto}",
-        )
-    if held and len(collapsed) == len(held):
-        ui.warn(
-            "contexts",
-            f"every held-out context collapses under the {hllib.SM_TARGET_GRANULE}-CU "
-            f"SM-target granule onto a trained context on this device's {n_cu} "
-            f"CUs: the run measures the models on no held-out launch",
-        )
     return errs
 
 

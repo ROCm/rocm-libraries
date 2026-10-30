@@ -2738,11 +2738,10 @@ count, at least one granule and below the CU count, and for a trained
 entry raised to `train.min_cu_fraction` of the CUs where a multiple below
 the CU count allows. The granule is `contexts.granule`, by default 32
 (`CU_BUDGET_GRANULE` of `lib/contexts.py`), in CUs, which are WGPs on
-gfx1250. It is the budgets' own, apart from the launch rule's rounding of
-the SM target (`SM_TARGET_GRANULE` of `lib/hipblaslt_launch.py`), and must
-be a multiple of that (a config error otherwise), so that hipBLASLt takes
-every budget as its SM target as it is and the kernels size their grids
-for exactly the CUs the cotenant leaves them. One granule is one XCD's
+gfx1250, and at least one. It is the budgets' own: hipBLASLt takes every
+budget as its SM target as it is (`SM_TARGET_GRANULE` of
+`lib/hipblaslt_launch.py` is one CU), so the kernels size their grids for
+exactly the CUs the cotenant leaves them. One granule is one XCD's
 worth of CUs on gfx950 and on gfx1250's 256-WGP part: there the smallest
 budget a share resolves to is one XCD's worth, however small the share,
 and every compute-partition size of the device is a whole number of
@@ -2754,13 +2753,9 @@ the exclusive context alone, and the run warns when every context of
 fewer CUs is left out. Trained entries come before held-out ones, so a
 small device leaves out held-out entries first; when it leaves out every
 one, the run warns that it measures the models on no held-out context, and
-the report says so in its notes. Preflight also warns for each held-out
-context whose kernels hipBLASLt sizes as a trained context's (its SM target,
-a multiple of 32 CUs, and its schedule are a trained context's, the
-exclusive one included), and again when every held-out context does: the run
-then measures the models on no held-out launch. The report's Execution
-contexts section names every entry left out, from the run's source config
-and its latest snapshot. The snapshot keeps every resolved entry's
+the report says so in its notes. The report's Execution contexts section
+names every entry left out, from the run's source config and its latest
+snapshot. The snapshot keeps every resolved entry's
 `cu_fraction` beside its `cu_budget` and its first comment lines say what
 each became; a config that gives both must give the budget the fraction
 resolves to. The budgets are then checked like configured ones (below the
@@ -5331,8 +5326,8 @@ warning threshold, unpinned; see *Seed recall*).
 enabled}`; a run resolves a `cu_fraction` when it starts, as a share of the
 bench device's CUs, a partition's inside one, and leaves out an entry with
 `enabled: false`), `granule` (32: the CUs every budget a `cu_fraction`
-resolves to is a whole multiple of, at least one; a multiple of the
-launch rule's SM-target granule; pinned only at another value),
+resolves to is a whole multiple of, at least one; pinned only at another
+value),
 `seed` (42),
 `cotenant_binary` (default: `hipblaslt-cotenant` next to the bench),
 `path_append` (directories appended to the wrapped bench's `PATH`; default

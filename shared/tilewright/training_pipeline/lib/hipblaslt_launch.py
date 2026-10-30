@@ -30,8 +30,8 @@ getSKReduction, getPersistentGridImpl) and the Stream-K arithmetic it calls
 (select_hybrid_mode, select_reduction, select_grid_size with
 k_split_aware), with the default TENSILE_PERSISTENT_* settings, no uniform
 summation order and a workspace that holds every partial tile. The SM target
-is `context.cu_budget` rounded down to a multiple of 32 (ContractionProblem.hpp
-setSmCountTarget without TENSILE_PRECISE_SM_TARGET); 0 means none.
+is `context.cu_budget` as ContractionProblem.hpp setSmCountTarget keeps it,
+every CU it names; 0 means none.
 
 TensileLite launches a hand-written kernel (attribute `hand_written`: its
 logic file's customKernel names a kernel that was not generated) through
@@ -79,7 +79,9 @@ LAUNCH_CONFIG_FIELDS = ("occupancy",)
 # Signature fields the rule reads.
 LAUNCH_SIGNATURE_FIELDS = ("mt_m", "mt_n", "mt_k")
 
-SM_TARGET_GRANULE = 32
+# The CUs an SM target is rounded down to a multiple of: one, since hipBLASLt
+# takes every CU budget as its SM target as it is.
+SM_TARGET_GRANULE = 1
 # select_hybrid_mode: a Hybrid kernel turns dynamic only with more tiles than
 # MIN_TILES_FOR_DYNAMIC, fewer usable CUs than the device has, and either an
 # occupancy of at most MAX_OCCUPANCY_ALWAYS_DYNAMIC or more than

@@ -23,7 +23,7 @@ namespace hipblaslt_launch {
 
 inline constexpr int kRuleVersion = 1;
 
-inline constexpr std::int64_t kSmTargetGranule           = 32;
+inline constexpr std::int64_t kSmTargetGranule           = 1;
 inline constexpr std::int64_t kMinTilesForDynamic        = 480;
 inline constexpr std::int64_t kMaxOccupancyAlwaysDynamic = 3;
 inline constexpr double kTilesPerCuDynamic               = 8.41;

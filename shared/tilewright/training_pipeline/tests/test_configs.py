@@ -632,13 +632,14 @@ def test_gfx1250_models_declare_no_budget_below_the_smallest_they_trained(
 ):
     """A v3 model declares the CU fractions from the smallest budget it
     trained, or train.min_cu_fraction when that is larger (stage05
-    declared_contexts), up to 1. On no device of 3 to 16 SM-target granules
-    may that floor reach a budget the SM target takes below the smallest
-    trained one, which the model would serve without data."""
+    declared_contexts), up to 1. On no device of 3 to 16 budget granules
+    may that floor reach a budget below the smallest trained one, which the
+    model would serve without data: hipBLASLt takes every budget as its SM
+    target as it is."""
     import stage05_train as s5
     from lib import contexts as ctxlib
-    from lib.hipblaslt_launch import SM_TARGET_GRANULE as granule
 
+    granule = ctxlib.CU_BUDGET_GRANULE
     cfg = _load(path)
     floor = ro.cfg_get(cfg, "train.min_cu_fraction")
     for n_cu in range(3 * granule, 16 * granule + 1):
@@ -647,7 +648,7 @@ def test_gfx1250_models_declare_no_budget_below_the_smallest_they_trained(
         gemms = [{}] + [{"cu_budget": c.cu_budget} for c in trained]
         declared = s5.declared_contexts(gemms, n_cu, floor)["min_cu_fraction"]
         lowest = min(c.cu_budget for c in trained)
-        first = math.ceil(declared * n_cu / granule - 1e-9) * granule
+        first = math.ceil(declared * n_cu - 1e-9)
         assert first >= lowest, (n_cu, declared, lowest)
 
 

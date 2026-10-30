@@ -40,8 +40,8 @@ def test_sm_target_and_schedules():
         return _plan(4096, 4096, 512, 2, HYBRID, ctx, arch)
 
     assert plan(256) == (False, 512, "none")
-    assert plan(224) == plan(240) == plan(255) == (True, 512, "none")
-    assert plan(31) == plan(0) == (False, 512, "none")
+    assert plan(224) == plan(240) == plan(255) == plan(31) == (True, 512, "none")
+    assert plan(0) == (False, 512, "none")
     assert plan(224, "auto") == (True, 512, "none")
     assert plan(0, "auto") == (False, 512, "none")
     assert plan(0, "dynamic") == (True, 512, "none")
@@ -49,6 +49,16 @@ def test_sm_target_and_schedules():
     assert plan(224, "dynamic", "gfx942") == (True, 512, "none")
     assert hl.hybrid_runtime_choice("gfx950:xnack-")
     assert not hl.hybrid_runtime_choice("gfx9500")
+
+
+def test_the_sm_target_is_the_cu_budget_as_it_is():
+    """hipBLASLt takes a CU budget as its SM target as it is, every CU it
+    names: 300 tiles of 300 K iterations spread over 100 CUs whole, and
+    over 96 CUs on a streaming grid with partial tiles."""
+    assert hl.SM_TARGET_GRANULE == 1
+    prob = (128 * 300, 128, 64 * 300, 1, HYBRID)
+    assert _plan(*prob, fs.ExecutionContext(cu_budget=100)) == (False, 100, "none")
+    assert _plan(*prob, fs.ExecutionContext(cu_budget=96)) == (False, 86, "tree")
 
 
 def test_stream_k_grids():
@@ -717,7 +727,7 @@ PINNED = [
     (4096, 4096, 512, 2, HYBRID, _ctx(224), "gfx950", 1, (True, 512, "none")),
     (4096, 4096, 512, 2, HYBRID, _ctx(240), "gfx950", 1, (True, 512, "none")),
     (4096, 4096, 512, 2, HYBRID, _ctx(255), "gfx950", 1, (True, 512, "none")),
-    (4096, 4096, 512, 2, HYBRID, _ctx(31), "gfx950", 1, (False, 512, "none")),
+    (4096, 4096, 512, 2, HYBRID, _ctx(31), "gfx950", 1, (True, 512, "none")),
     (4096, 4096, 512, 2, HYBRID, _ctx(0), "gfx950", 1, (False, 512, "none")),
     (4096, 4096, 512, 2, HYBRID, _ctx(224, "auto"), "gfx950", 1, (True, 512, "none")),
     (4096, 4096, 512, 2, HYBRID, _ctx(0, "auto"), "gfx950", 1, (False, 512, "none")),
