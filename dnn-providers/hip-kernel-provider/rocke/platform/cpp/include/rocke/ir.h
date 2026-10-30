@@ -55,7 +55,10 @@ typedef enum rocke_status
     ROCKE_ERR_TYPE, /* maps to Python TypeError                           */
     ROCKE_ERR_KEY, /* maps to Python KeyError (unknown op_id / param)    */
     ROCKE_ERR_OOM, /* allocation failure                                 */
-    ROCKE_ERR_NOTIMPL /* maps to Python NotImplementedError                 */
+    ROCKE_ERR_NOTIMPL, /* maps to Python NotImplementedError                 */
+    ROCKE_ERR_ARCH_DOMAIN /* maps to Python ArchDomainError: the committed    */
+    /* arch-domain table says the target cannot lower  */
+    /* an intrinsic the kernel demands                  */
 } rocke_status_t;
 
 #define ROCKE_ERR_MSG_CAP 256
@@ -465,6 +468,28 @@ typedef enum rocke_opcode
     ROCKE_OP_ARITH_UITOFP_F32,
     ROCKE_OP_ARITH_CVT_F32_TO_U8_SAT,
 
+    /* Range marker (Python IRBuilder._assume_range): its result is its first
+     * operand; it emits no instruction. Appended so no existing index shifts. */
+    ROCKE_OP_ARITH_ASSUME_RANGE,
+
+    /* arith.fdot2 (appended: keeps every earlier opcode value stable) */
+    ROCKE_OP_ARITH_FDOT2,
+
+    /* tile.buffer_load: dtype-generic scalar buffer load (appended). */
+    ROCKE_OP_TILE_BUFFER_LOAD,
+
+    /* Dtype-generic buffer store (Python IRBuilder.buffer_store_vN). Appended
+     * so no existing index shifts. */
+    ROCKE_OP_TILE_BUFFER_STORE_VN,
+
+    /* Global pointer offset without inbounds (Python
+     * IRBuilder.global_ptr_offset). Appended so no existing index shifts. */
+    ROCKE_OP_TILE_GLOBAL_PTR_OFFSET,
+
+    /* Kernel abort (Python IRBuilder.trap). Appended so no existing index
+     * shifts. */
+    ROCKE_OP_TILE_TRAP,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -584,7 +609,8 @@ typedef struct rocke_if
     rocke_region_t* then_region;
 } rocke_if_t;
 
-/* If/else handle: the C analog of _IfElseBuilder (scf.if_else). */
+/* If/else handle: the C analog of _IfElseBuilder (scf.if_else). The values
+ * the branch that ran yields (rocke_b_scf_if_else_results) are op->results. */
 typedef struct rocke_if_else
 {
     rocke_op_t* op;
@@ -798,6 +824,9 @@ rocke_value_t* rocke_b_zero_vec(rocke_ir_builder_t* b, const rocke_type_t* elem,
 
 /* ----- arith integer / logic ----- */
 rocke_value_t* rocke_b_add(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Python add_nuw: integer a + c that does not wrap as unsigned ("add nuw").
+ * Operands are two i32 or two i64 values. */
+rocke_value_t* rocke_b_add_nuw(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_sub(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_mul(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_div(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
@@ -825,6 +854,9 @@ rocke_value_t* rocke_b_fneg(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_fabs(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t*
     rocke_b_fma(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
+/* fdot2(a, c, d) = a.x*c.x + a.y*c.y + d; a, c: vec<f16|bf16 x2>, d: f32 -> f32. */
+rocke_value_t*
+    rocke_b_fdot2(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
 rocke_value_t* rocke_b_fmax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_fmin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t*
@@ -843,6 +875,9 @@ rocke_value_t* rocke_b_cmp_gt(rocke_ir_builder_t* b, rocke_value_t* a, rocke_val
 rocke_value_t* rocke_b_cmp_ge(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_cmp_eq(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_cmp_ne(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Python cmp_ult: unsigned a < c ("icmp ult"). Operands are two i32 or two i64
+ * values. */
+rocke_value_t* rocke_b_cmp_ult(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 /* pred in {olt,ole,ogt,oge,oeq,one,ord,uno} */
 rocke_value_t*
     rocke_b_fcmp(rocke_ir_builder_t* b, const char* pred, rocke_value_t* a, rocke_value_t* c);
@@ -888,6 +923,9 @@ rocke_value_t* rocke_b_cvt_fp8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_bf8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_fp8x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_bf8x4(rocke_ir_builder_t* b, rocke_value_t* v);
+/* Fused E8M0-scaled convert (v_cvt_scalef32_pk_f32_fp8 / _bf8). Only gfx950
+ * has the instruction, so lowering for any other target fails with
+ * ROCKE_ERR_VALUE (the builder has no target to check against). */
 rocke_value_t* rocke_b_cvt_scalef32_pk_f32_fp8x4(rocke_ir_builder_t* b,
                                                  rocke_value_t* v,
                                                  rocke_value_t* scale);
@@ -896,6 +934,10 @@ rocke_value_t* rocke_b_cvt_scalef32_pk_f32_bf8x4(rocke_ir_builder_t* b,
                                                  rocke_value_t* scale);
 /* Explicit RNE conversion; bitcast preserves raw FP32 payloads instead. */
 rocke_value_t* rocke_b_cvt_f32_to_tf32(rocke_ir_builder_t* b, rocke_value_t* v);
+/* f32 -> fp8 / bf8 (scalar and packed): round to nearest even, no saturation.
+ * A value past the largest finite value becomes NaN (fp8, and bf8 on gfx942)
+ * or +-inf (bf8 on gfx950); clamp first for a saturating conversion. See the
+ * Python builders for the per-target encodings. */
 rocke_value_t* rocke_b_cvt_f32_to_fp8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_bf8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_i8_sat(rocke_ir_builder_t* b, rocke_value_t* v);
@@ -1005,6 +1047,10 @@ rocke_value_t* rocke_b_global_load_bf16(rocke_ir_builder_t* b,
                                         rocke_value_t* ptr,
                                         rocke_value_t* idx,
                                         int align);
+rocke_value_t* rocke_b_global_load_f64(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align);
 rocke_value_t* rocke_b_global_load_i8(rocke_ir_builder_t* b,
                                       rocke_value_t* ptr,
                                       rocke_value_t* idx,
@@ -1223,20 +1269,65 @@ rocke_value_t* rocke_b_mfma_f32_4x4x4_f16(rocke_ir_builder_t* b,
                                           rocke_value_t* a,
                                           rocke_value_t* bb,
                                           rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_16x16x128_fp4(rocke_ir_builder_t* b,
-                                              rocke_value_t* a,
-                                              rocke_value_t* bb,
-                                              rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_16x16x96_fp6(rocke_ir_builder_t* b,
-                                             rocke_value_t* a,
-                                             rocke_value_t* bb,
-                                             rocke_value_t* c);
+/* gfx950 unscaled 16x16x128 MFMA for fp8, bf8, fp6 and fp4. The instruction
+ * applies no scale. The lowering passes literal 0 for both scale operands of the
+ * f8f6f4 intrinsic, and the backend then selects the unscaled instruction
+ * v_mfma_f32_16x16x128_f8f6f4. A loaded or computed 0 would mean the factor
+ * 2^-127, so use the MX op when the scale is not a literal.
+ *
+ * a_format and b_format name the data type: "fp8e4m3", "bf8e5m2", "fp6e2m3",
+ * "fp6e3m2" or "fp4e2m1". NULL means "fp8e4m3". They set the cbsz and blgp
+ * format selectors.
+ *
+ * A and B must use the same format in this version. A call with different
+ * formats records ROCKE_ERR_VALUE and returns NULL. The signature already has
+ * both arguments, so a later change can allow mixed formats without changing it.
+ *
+ * a and bb hold 256 bits per lane for every format (an <8 x i32> or any type of
+ * that width). fp8 and bf8 data fill all 8 dwords. fp6 data fills the low 6 and
+ * fp4 data the low 4; the instruction ignores the remaining dwords. Any other
+ * width, or an unknown format name, records ROCKE_ERR_VALUE and returns NULL. */
+rocke_value_t* rocke_b_mfma_f32_16x16x128_fp4fp6fp8(rocke_ir_builder_t* b,
+                                                    rocke_value_t* a,
+                                                    rocke_value_t* bb,
+                                                    rocke_value_t* c,
+                                                    const char* a_format,
+                                                    const char* b_format);
+/* gfx950 16x16x128 MFMA with in-instruction E8M0 scales (the MX op), fp8e4m3
+ * for A and B. Same as the _fmt variant with both formats NULL. */
+rocke_value_t* rocke_b_mfma_f32_4x4x4_bf16(rocke_ir_builder_t* b,
+                                           rocke_value_t* a,
+                                           rocke_value_t* bb,
+                                           rocke_value_t* c);
 rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,
                                                        rocke_value_t* a,
                                                        rocke_value_t* bb,
                                                        rocke_value_t* c,
                                                        rocke_value_t* a_scale,
                                                        rocke_value_t* b_scale);
+/* The MX op with a selectable data type for A and B. a_format and b_format name
+ * the format: "fp8e4m3", "bf8e5m2", "fp6e2m3", "fp6e3m2" or "fp4e2m1". NULL
+ * means "fp8e4m3". They set the cbsz and blgp format selectors.
+ *
+ * A and B must use the same format in this version. A call with different
+ * formats records ROCKE_ERR_VALUE and returns NULL. The signature already has
+ * both arguments, so a later change can allow mixed formats without changing it.
+ *
+ * a and bb hold 256 bits per lane for every format (an <8 x i32> or any type of
+ * that width). fp8 and bf8 data fill all 8 dwords. fp6 data fills the low 6 and
+ * fp4 data the low 4; the instruction ignores the remaining dwords. Any other
+ * width, or an unknown format name, records ROCKE_ERR_VALUE and returns NULL.
+ * The instruction multiplies by 2^(e - 127) for each scale byte e; e = 0 gives
+ * 2^-127, not 1.0. If both scales are literal 0, the backend selects the
+ * unscaled instruction instead. */
+rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4_fmt(rocke_ir_builder_t* b,
+                                                           rocke_value_t* a,
+                                                           rocke_value_t* bb,
+                                                           rocke_value_t* c,
+                                                           rocke_value_t* a_scale,
+                                                           rocke_value_t* b_scale,
+                                                           const char* a_format,
+                                                           const char* b_format);
 rocke_value_t* rocke_b_wmma_f32_16x16x16_f16(rocke_ir_builder_t* b,
                                              rocke_value_t* a,
                                              rocke_value_t* bb,
@@ -1456,6 +1547,10 @@ void rocke_b_global_load_lds(rocke_ir_builder_t* b,
 /* ----- global pointer arithmetic + buffer resource descriptors ----- */
 rocke_value_t*
     rocke_b_global_ptr_add(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* byte_off);
+/* `ptr` moved by the i64 `byte_off` bytes, without inbounds: the result may
+ * point outside the allocation (Python IRBuilder.global_ptr_offset). */
+rocke_value_t*
+    rocke_b_global_ptr_offset(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* byte_off);
 /* 64-bit address of a global pointer (``ptrtoint``). */
 rocke_value_t* rocke_b_global_ptr_to_i64(rocke_ir_builder_t* b, rocke_value_t* ptr);
 rocke_value_t*
@@ -1466,8 +1561,10 @@ rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
                                           rocke_value_t* soffset,
                                           int dwords);
 /* Dtype-generic vectorised buffer load (Python IRBuilder.buffer_load_vN):
- * f16/bf16 with n in {2, 4, 8}, f32/i32 with n in {1, 2, 4}. Returns
- * <n x dtype>; out-of-range offsets read zero. */
+ * `dtype` is any scalar whose width is whole bytes, and the `n` elements move
+ * 1, 2, 4, 8 or 16 bytes together. Returns <n x dtype>; out-of-range bytes
+ * read zero. A refused dtype or width sets ROCKE_ERR_VALUE with the Python
+ * builder's text. */
 rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
                                       rocke_value_t* rsrc,
                                       rocke_value_t* voffset,
@@ -1478,6 +1575,14 @@ rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* rsrc,
                                        rocke_value_t* voffset,
                                        rocke_value_t* soffset);
+/* Dtype-generic scalar buffer load (one element, out-of-range reads 0): f16 and
+ * bf16 through the i16 intrinsic, f32 and i32 through the i32 one. Port of
+ * Python IRBuilder.buffer_load (op tile.buffer_load, attr elem_type). */
+rocke_value_t* rocke_b_buffer_load(rocke_ir_builder_t* b,
+                                   rocke_value_t* rsrc,
+                                   rocke_value_t* voffset,
+                                   rocke_value_t* soffset,
+                                   const rocke_type_t* dtype);
 /* D16-form scalar half buffer load: raw.ptr.buffer.load.f16 returns `half`
  * directly (no i16 bitcast). Port of Python IRBuilder.buffer_load_f16_d16 /
  * the pinned PR9710 tile.buffer_load_f16_d16 op. */
@@ -1516,6 +1621,37 @@ void rocke_b_buffer_store_vN_bf16(rocke_ir_builder_t* b,
                                   rocke_value_t* soffset,
                                   rocke_value_t* value,
                                   int dwords);
+/* The four f16/bf16 buffer stores above with the raw buffer store's aux
+ * immediate `cachepolicy` (on gfx12: bits[0:2] = th, bits[3:4] = scope; 1 is
+ * th:TH_STORE_NT). 0 records no attribute, i.e. the plain form. Port of the
+ * Python keyword `cachepolicy=` of IRBuilder.buffer_store_{f16,bf16,vN_f16,
+ * vN_bf16}. */
+void rocke_b_buffer_store_vN_f16_ex(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* voffset,
+                                    rocke_value_t* soffset,
+                                    rocke_value_t* value,
+                                    int dwords,
+                                    int cachepolicy);
+void rocke_b_buffer_store_f16_ex(rocke_ir_builder_t* b,
+                                 rocke_value_t* rsrc,
+                                 rocke_value_t* voffset,
+                                 rocke_value_t* soffset,
+                                 rocke_value_t* value,
+                                 int cachepolicy);
+void rocke_b_buffer_store_bf16_ex(rocke_ir_builder_t* b,
+                                  rocke_value_t* rsrc,
+                                  rocke_value_t* voffset,
+                                  rocke_value_t* soffset,
+                                  rocke_value_t* value,
+                                  int cachepolicy);
+void rocke_b_buffer_store_vN_bf16_ex(rocke_ir_builder_t* b,
+                                     rocke_value_t* rsrc,
+                                     rocke_value_t* voffset,
+                                     rocke_value_t* soffset,
+                                     rocke_value_t* value,
+                                     int dwords,
+                                     int cachepolicy);
 void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
                               rocke_value_t* rsrc,
                               rocke_value_t* voffset,
@@ -1527,6 +1663,16 @@ void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
                                  rocke_value_t* soffset,
                                  rocke_value_t* value,
                                  int n);
+/* Dtype-generic vectorised buffer store (Python IRBuilder.buffer_store_vN),
+ * the store twin of rocke_b_buffer_load_vN: `value` is a vector of any scalar
+ * whose width is whole bytes, 1, 2, 4, 8 or 16 bytes in all. Out-of-range
+ * bytes are not written. A refused value sets ROCKE_ERR_VALUE with the Python
+ * builder's text. */
+void rocke_b_buffer_store_vN(rocke_ir_builder_t* b,
+                             rocke_value_t* rsrc,
+                             rocke_value_t* voffset,
+                             rocke_value_t* soffset,
+                             rocke_value_t* value);
 
 /* ----- f32 LDS ops (cshuffle epilogue) ----- */
 rocke_value_t* rocke_b_smem_alloc_f32(rocke_ir_builder_t* b,
@@ -1663,6 +1809,9 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
                               int pad_amount,
                               rocke_value_t* out[5]);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
+/* Abort the kernel (Python IRBuilder.trap): llvm.trap, s_trap 2. After a trap
+ * every later HIP call in the process fails, so it is a last resort. */
+void rocke_b_trap(rocke_ir_builder_t* b);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);
 void rocke_b_sched_group_barrier(rocke_ir_builder_t* b, int mask, int count, int group);
@@ -1691,6 +1840,15 @@ rocke_if_t rocke_b_scf_if(rocke_ir_builder_t* b, rocke_value_t* cond);
 /* scf.if_else: both then and else converge at the same join block.
  * Use rocke_b_region_enter/leave to emit into then_region then else_region. */
 rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond);
+/* scf.if_else that yields one value per type in `result_types` (Python
+ * scf_if_else(cond, result_types)): each region ends in rocke_b_scf_yield of
+ * values of those types, and the op's results (handle.op->results) are the
+ * values of the branch that ran. The verifier and the lowerings refuse a region
+ * that does not end that way. */
+rocke_if_else_t rocke_b_scf_if_else_results(rocke_ir_builder_t* b,
+                                            rocke_value_t* cond,
+                                            const rocke_type_t* const* result_types,
+                                            int num_results);
 void rocke_b_ret(rocke_ir_builder_t* b);
 
 /* ---- tile.exec_* (wavelet exec-mask split, MFMA path) ----

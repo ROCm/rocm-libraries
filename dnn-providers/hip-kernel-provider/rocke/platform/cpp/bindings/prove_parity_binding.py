@@ -17,9 +17,9 @@ rejects) is reported separately and does NOT count toward a family being
 least one buildable config and ALL its buildable configs match NON-EMPTY.
 
 Freshness / stale-build guard:
-  The .so and the standalone emitters MUST come from the same engine source
-  snapshot. When the emit dir was built it records the engine build-id it was
-  linked against in <EMIT>/BUILD_ID. Before comparing anything, this harness
+  The .so and the standalone emitters MUST come from the same portable-IR native
+  bundle snapshot. When the emit dir was built it records the bundle build-id it
+  was linked against in <EMIT>/BUILD_ID. Before comparing anything, this harness
   asserts rocke_engine.build_id() (from the loaded .so) equals that file. On a
   mismatch it FAILS LOUD with a clear "stale/mixed build" message rather than
   reporting a flood of spurious 'mismatched' configs (the exact trap that once
@@ -54,7 +54,7 @@ def _assert_build_id_match():
     if not os.path.exists(bid_path):
         print(
             f"WARNING: no {bid_path} -- cannot verify the emitters and the .so "
-            f"were built from the same engine source. .so build-id={so_id}. "
+            f"were built from the same native bundle. .so build-id={so_id}. "
             "Build the emitters with a driver that writes <EMIT>/BUILD_ID "
             "(see ci/tiers/tier2_differential.sh) to enable the stale-build guard.",
             file=sys.stderr,
@@ -638,304 +638,6 @@ def cfgs_gfx1201_wmma_gemm():
     ]
 
 
-def cfgs_gfx1151_wmma_fmha_fwd():
-    rows = [
-        (64, 4, 0, "none", False),
-        (128, 8, 0, "none", False),
-        (64, 4, 0, "causal", False),
-        (256, 8, 2, "none", False),
-        (128, 4, 4, "causal", False),
-        (64, 6, 0, "none", True),
-    ]
-    configs = [
-        dict(head_size=h, mask_mode=m, v_lds_stage=v, dtype=dtype)
-        for dtype in ("fp16", "bf16")
-        for (h, _q, _k, m, v) in rows
-    ]
-    # Bottom-right alignment is runtime state, so these intentionally reuse
-    # the ordinary causal code objects represented by the standalone emitter.
-    configs += [dict(configs[index]) for index in (2, 8, 3, 9, 5, 11)]
-    tails = (
-        (12, True, False),
-        (13, True, False),
-        (3, False, True),
-        (9, False, True),
-        (12, True, True),
-        (13, True, True),
-        (16, True, True),
-        (17, True, True),
-    )
-    configs += [
-        dict(configs[index], query_tail=query_tail, kv_tail=kv_tail)
-        for index, query_tail, kv_tail in tails
-    ]
-    features = (
-        (12, dict(mask_mode="window")),
-        (13, dict(mask_mode="window")),
-        (2, dict(use_softcap=True)),
-        (8, dict(use_softcap=True)),
-        (2, dict(use_sinks=True)),
-        (8, dict(use_sinks=True)),
-        (12, dict(use_alibi=True)),
-        (13, dict(use_alibi=True)),
-        (0, dict(use_qq_bias=True)),
-        (6, dict(use_qq_bias=True)),
-        (18, dict(mask_mode="window", use_sinks=True)),
-        (19, dict(mask_mode="window", use_sinks=True)),
-        (
-            24,
-            dict(
-                mask_mode="window",
-                use_softcap=True,
-                use_sinks=True,
-                use_alibi=True,
-                use_qq_bias=True,
-            ),
-        ),
-        (
-            25,
-            dict(
-                mask_mode="window",
-                use_softcap=True,
-                use_sinks=True,
-                use_alibi=True,
-                use_qq_bias=True,
-            ),
-        ),
-        (2, dict(use_softcap=True, use_alibi=True)),
-        (8, dict(use_softcap=True, use_alibi=True)),
-    )
-    configs += [dict(configs[index], **flags) for index, flags in features]
-    layouts = (
-        (0, 0),
-        (7, 0),
-        (12, 0),
-        (15, 0),
-        (16, 0),
-        (39, 0),
-        (0, 16),
-        (7, 64),
-        (12, 16),
-        (15, 32),
-        (16, 32),
-        (17, 64),
-        (26, 64),
-        (33, 32),
-        (38, 16),
-        (39, 64),
-    )
-    configs += [
-        dict(configs[index], layout="paged" if page else "ragged", page_block_size=page)
-        for index, page in layouts
-    ]
-    configs += [
-        dict(configs[index], kv_dtype="fp8e4m3")
-        for index in (0, 7, 14, 15, 22, 23, 24, 25, 44, 47, 51, 57)
-    ]
-    transposed = [
-        dict(
-            head_size=head,
-            mask_mode=mask,
-            transposed_qk=True,
-            block_n=block,
-            num_waves=waves,
-        )
-        for head in (64, 128)
-        for mask in ("none", "causal")
-        for block in (32, 64)
-        for waves in (1, 2)
-    ]
-    standard = (
-        configs
-        + transposed
-        + [dict(config) for config in transposed if config["mask_mode"] == "causal"]
-        + [
-            dict(
-                head_size=64,
-                mask_mode="window",
-                layout="ragged",
-                query_tail=True,
-                kv_tail=True,
-                v_lds_stage=True,
-                scheduler_strategy=strategy,
-            )
-            for strategy in (
-                "max-ilp",
-                "max-memory-clause",
-                "iterative-ilp",
-                "iterative-minreg",
-                "iterative-maxocc",
-            )
-        ]
-        + [
-            dict(
-                head_size=256,
-                dtype=dtype,
-                mask_mode="causal" if vlds else "none",
-                query_tail=vlds,
-                kv_tail=vlds,
-                v_lds_stage=vlds,
-                value_tile_size=tile,
-            )
-            for dtype in ("fp16", "bf16")
-            for tile in (16, 32, 64, 128)
-            for vlds in (False, True)
-        ]
-        + [
-            dict(
-                head_size=256,
-                dtype=dtype,
-                mask_mode="causal",
-                query_tail=True,
-                kv_tail=True,
-                layout="paged" if paged else "ragged",
-                page_block_size=32 if paged else 0,
-                kv_dtype="fp8e4m3",
-                value_tile_size=128,
-                v_lds_stage=paged,
-            )
-            for dtype in ("fp16", "bf16")
-            for paged in (False, True)
-        ]
-        + [
-            dict(
-                head_size=head,
-                mask_mode="causal",
-                query_tail=tails,
-                kv_tail=tails,
-                v_lds_stage=tails,
-                causal_tile_skip=True,
-            )
-            for head in (64, 128)
-            for tails in (False, True)
-        ]
-        + [
-            dict(
-                head_size=head,
-                mask_mode=mask,
-                v_lds_stage=vlds,
-                v_head_size=v_head,
-                value_tile_size=tile,
-            )
-            for (head, v_head, tile, mask, vlds) in (
-                (128, 64, 0, "none", False),
-                (64, 128, 0, "causal", True),
-                (192, 128, 0, "none", True),
-                (128, 256, 64, "none", False),
-            )
-        ]
-        + [
-            dict(
-                head_size=head,
-                dtype=dtype,
-                mask_mode=mask,
-                query_tail=tails,
-                kv_tail=tails,
-                v_lds_stage=tails,
-                use_sinks=sinks,
-                use_softcap="s" in extras,
-                use_alibi="a" in extras,
-                use_qq_bias="q" in extras,
-                layout=layout,
-                page_block_size=page,
-                value_tile_size=tile,
-                use_attn_bias=True,
-                bias_dtype=bdt,
-            )
-            for (layout, page, head, mask, tails, sinks, bdt, extras, tile, dtype) in (
-                ("dense", 0, 64, "none", False, False, "f32", "", 0, "fp16"),
-                ("dense", 0, 64, "causal", True, True, "q", "", 0, "fp16"),
-                ("dense", 0, 128, "none", False, False, "q", "", 0, "fp16"),
-                ("ragged", 0, 64, "causal", True, True, "f32", "", 0, "fp16"),
-                ("paged", 16, 64, "causal", True, False, "q", "", 0, "fp16"),
-                ("dense", 0, 64, "causal", True, False, "f32", "saq", 0, "fp16"),
-                ("dense", 0, 256, "none", False, False, "f32", "", 64, "fp16"),
-                ("dense", 0, 128, "causal", True, True, "q", "saq", 0, "fp16"),
-                ("dense", 0, 64, "none", False, False, "q", "", 0, "bf16"),
-            )
-        ]
-    )
-    # (dict, arch) pairs aligned with the standalone emitter indices: 0..135 at
-    # gfx1151, 136..142 replay representative configs at gfx11-generic, and
-    # 143..156 exercise runtime_head_dims on gfx1151 and both generic targets.
-    flag_fields = (
-        ("t", "query_tail"),
-        ("t", "kv_tail"),
-        ("l", "v_lds_stage"),
-        ("s", "use_softcap"),
-        ("k", "use_sinks"),
-        ("a", "use_alibi"),
-        ("q", "use_qq_bias"),
-        ("c", "causal_tile_skip"),
-    )
-    rtdim = [
-        (
-            dict(
-                head_size=head,
-                v_head_size=v_head,
-                dtype=dtype,
-                mask_mode=mask,
-                layout=layout,
-                page_block_size=page,
-                kv_dtype="fp8e4m3" if "8" in flags else "",
-                use_attn_bias=bool(bias),
-                bias_dtype=bias or "f32",
-                runtime_head_dims=True,
-                **{field: flag in flags for flag, field in flag_fields},
-            ),
-            arch,
-        )
-        for (arch, dtype, head, v_head, mask, flags, layout, page, bias) in (
-            ("gfx1151", "fp16", 64, 0, "none", "", "dense", 0, ""),
-            ("gfx1151", "bf16", 128, 0, "causal", "tlc", "dense", 0, ""),
-            ("gfx1151", "fp16", 256, 0, "none", "l", "dense", 0, ""),
-            ("gfx1151", "fp16", 128, 64, "window", "t", "dense", 0, ""),
-            ("gfx1151", "fp16", 128, 0, "window", "tl", "dense", 0, "f32"),
-            ("gfx1151", "fp16", 128, 0, "causal", "t8", "paged", 16, ""),
-            ("gfx1151", "bf16", 64, 0, "window", "tlskaq", "ragged", 0, "q"),
-            ("gfx11-generic", "fp16", 128, 0, "causal", "tl", "dense", 0, ""),
-            ("gfx11-generic", "bf16", 256, 128, "none", "", "dense", 0, "f32"),
-            ("gfx12-generic", "fp16", 128, 0, "causal", "tl", "dense", 0, ""),
-            ("gfx12-generic", "bf16", 128, 64, "window", "t", "dense", 0, "f32"),
-            ("gfx12-generic", "fp16", 256, 0, "causal", "tl8", "paged", 32, ""),
-            ("gfx12-generic", "fp16", 64, 0, "none", "", "dense", 0, ""),
-            ("gfx12-generic", "bf16", 192, 0, "window", "tska", "ragged", 0, ""),
-        )
-    ]
-    # Emitter replay index 85 is the BF16 D128 causal bn64/w2 transposed config,
-    # which this list's FP16-only transposed rows do not carry at index 85.
-    replay = [dict(standard[index]) for index in (0, 70)]
-    replay.append(
-        dict(
-            head_size=128,
-            dtype="bf16",
-            mask_mode="causal",
-            transposed_qk=True,
-            block_n=64,
-            num_waves=2,
-        )
-    )
-    replay += [dict(standard[index]) for index in (115, 123, 128, 133)]
-    return (
-        [(dict(config), "gfx1151") for config in standard]
-        + [(config, "gfx11-generic") for config in replay]
-        + rtdim
-    )
-
-
-def cfgs_gfx1201_wmma_fmha_fwd():
-    # The gfx1201 emitters carry the first 12 gfx1151 configs: 0-5 are the fp16
-    # specs and 6-11 repeat them as bf16. Config 11 is bf16 crossed with
-    # v_lds_stage, the one knob whose LDS allocation, stores and loads are typed
-    # by dtype. Without the bf16 rows a dropped or misparsed ``dtype`` in the
-    # binding would still report VALIDATED on this arch, because fp16 is what an
-    # unset dtype falls back to.
-    #
-    # The gfx1151 list holds (config, arch) pairs. This family sets its arch in
-    # FAMILIES, so it takes plain configs: keep each config, drop its arch.
-    return [config for config, _arch in cfgs_gfx1151_wmma_fmha_fwd()[:12]]
-
-
 def cfgs_gfx1151_wmma_fmha_fwd_v2():
     # mirrors gfx1151_wmma_fmha_fwd_v2_emit.{py,c} index for index; (dict, arch).
     archs = ("gfx11-generic", "gfx12-generic")
@@ -1428,6 +1130,17 @@ def cfgs_sparse_attention():
             max_blocks_per_q=24,
             use_wave_ballot_scatter=False,
         ),
+        dict(
+            kind="jenga",
+            head_size=64,
+            num_query_heads=8,
+            num_kv_heads=8,
+            dtype="f16",
+            seqlen_q=48,
+            seqlen_k=144,
+            block_q=3,
+            block_k=48,
+        ),
     ]
 
 
@@ -1535,6 +1248,20 @@ def cfgs_sage_attention():
             seqlen_q=32,
             seqlen_k=128,
         ),
+        dict(
+            head_size=64,
+            num_query_heads=8,
+            num_kv_heads=8,
+            block_size_q=16,
+            block_size_k=64,
+            dtype="f16",
+            mask_mode="none",
+            quant_mode="fp16_bf16",
+            q_scale=pb(48, 128, 8, 1),
+            k_scale=pb(48, 128, 8, 1),
+            seqlen_q=96,
+            seqlen_k=144,
+        ),
     ]
 
 
@@ -1633,7 +1360,7 @@ def cfgs_fmha_varlen():
 
 
 def cfgs_fmha_splitkv_decode():
-    # mirrors fmha_splitkv_decode_emit.c make_spec (0..5); harness compares the
+    # mirrors fmha_splitkv_decode_emit.c make_spec (0..6); harness compares the
     # segment phase (the emitter's `<idx> ll` => mode=ll/phase=seg). The binding
     # defaults to "seg" so no explicit phase key is needed.
     rows = [
@@ -1643,6 +1370,7 @@ def cfgs_fmha_splitkv_decode():
         (256, 32, 4, "f16", "sliding_window", 2048, 1, 32, True),
         (64, 12, 3, "bf16", "none", 0, 8, 64, True),
         (128, 16, 8, "f16", "causal", 0, 2, 128, True),
+        (128, 40, 8, "f16", "none", 0, 2, 8, True),
     ]
     out = []
     for h, q, kv, dt, m, sw, b, segs, mfma in rows:
@@ -1971,6 +1699,17 @@ def problems_gfx950_attention_tiled_2d():
         ),  # single-batch d128 block_size=64 (d128 small tile path)
         p(512, 1, 32, 32, 64, 32, 512, 4096, use_qq_bias=True),  # single-batch + bias
         p(512, 1, 32, 32, 64, 32, 512, 4096, sliding_window=256),  # single-batch + SW
+        # ---- single-batch d128 b16 SW combo (head_size=128 AND
+        # sliding_window>0 together -- previously absent from this matrix, so
+        # the C++ selector's admission of this cohort into the wide
+        # transposed-32x32 combo (_enable_single_batch_combo /
+        # _select_2d_tile_size) was never compared against Python here).
+        # Mirrors the exact production scenario (gfx950, Hq32/Hkv8, D128,
+        # block_size=16, sliding_window=4096) verified on-silicon.
+        p(8192, 1, 32, 8, 128, 16, 8192, 8192, sliding_window=4096),  # bf16: new cohort
+        p(
+            8192, 1, 32, 8, 128, 16, 8192, 8192, sliding_window=4096, dtype="fp16"
+        ),  # fp16: same cohort, pre-existing combo (regression pin)
         # ---- transposed_qk_32x32 multi-batch path ----
         p(512, 4, 32, 32, 64, 32, 512, 4096),  # multi-batch d64 long
         p(512, 4, 32, 32, 128, 32, 512, 4096),  # multi-batch d128 long
@@ -2310,21 +2049,6 @@ FAMILIES = [
         "gfx1151_wmma_gemm_iu8_dequant_lower_llvm",
         cfgs_gfx1151_wmma_gemm_iu8_dequant(),
         "gfx1151",
-    ),
-    (
-        "gfx1151_wmma_fmha_fwd",
-        "gfx1151_wmma_fmha_fwd_lower_llvm",
-        cfgs_gfx1151_wmma_fmha_fwd(),
-        None,
-    ),
-    (
-        "gfx1201_wmma_fmha_fwd",
-        # Same binding entry point as gfx1151: the spec is arch-parameterised,
-        # and gfx1201 selects the gfx12 WMMA atoms, so the gfx12 bf16 atom gets
-        # binding coverage too, not just the gfx11 one.
-        "gfx1151_wmma_fmha_fwd_lower_llvm",
-        cfgs_gfx1201_wmma_fmha_fwd(),
-        "gfx1201",
     ),
     (
         "gfx1151_wmma_fmha_fwd_v2",

@@ -29,8 +29,10 @@ Prove it — GREEN for every family at every LLVM flavor:
 
 ```bash
 cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
-python tools/check_byte_identity.py                            # llvm20
+ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # llvm20
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22
+ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23
+ROCKE_LLVM_FLAVOR=llvm24 python tools/check_byte_identity.py   # llvm24
 python tools/check_byte_identity.py --only gemm                # scope to a family
 ```
 
@@ -81,6 +83,9 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
 ## Hard rules (digest)
 
 - **Byte-identity** — mirror every emission change in both engines; re-run the gate.
+- **Helpers** — reuse them, write the missing ones, fix the broken ones, each
+  with a test, in the kernel's PR. New families too; the C++ mirror is not a
+  reason to inline. Rule: [`platform/AGENTS.md`](platform/AGENTS.md#helpers-placement).
 - **Relative paths only** — no file under `platform/` may hardcode an absolute repo
   path or escape the tree; `tests/run_all.py` enforces this. Anchor on `__file__` /
   `CMAKE_CURRENT_SOURCE_DIR` / `rocke.assets`.
@@ -103,7 +108,10 @@ A change is not done until it clears [`KERNEL_AUTHORING.md`](KERNEL_AUTHORING.md
 for its change type (new family / new knob / new feature / perf optimization) — the
 single doc for the Definition of Done, the process map, and commit/branch
 conventions. Build and test references: [`BUILDING.md`](BUILDING.md),
-[`TESTING.md`](TESTING.md). Language style:
+[`TESTING.md`](TESTING.md). Kernel changes that enrolled pinned GPU reference
+cases reach must keep those suites green, and new pinned coverage starts at the
+[pinned reference quickstart](library/tests/reference_common/docs/quickstart.md).
+Language style:
 [`style/PYTHON_STYLE.md`](style/PYTHON_STYLE.md),
 [`style/CPP_STYLE.md`](style/CPP_STYLE.md).
 

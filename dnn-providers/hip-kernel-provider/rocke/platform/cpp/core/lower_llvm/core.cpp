@@ -19,6 +19,7 @@
  * Every spine helper below is fully ported from its Python counterpart; no
  * stub bodies remain in this file.
  */
+#include "rocke/arch_domain.h"
 #include "rocke/arch_target.h"
 #include "rocke/lower_llvm_internal.h"
 #include "rocke/tf32_internal.h"
@@ -35,102 +36,10 @@
 #include <exception>
 #include <new>
 
-/* ====================================================================== */
-/* Flavor ladder -- the single source for the C++ side                    */
-/* ====================================================================== */
-
-/* One rung: the flavor, its canonical name, and its minimum LLVM major.
- * Mirrors the Python LLVM_FLAVORS tuple and _LLVM_FLAVOR_LADDER, which
- * are a single source enforced by test_no_hand_rolled_flavor_membership_lists.
- * Everything on this side that names, parses, validates, enumerates, or
- * version-maps a flavor reads this table, so adding a rung is one row here
- * plus the enumerator in lower_llvm.h -- previously it was five coordinated
- * edits across three files, which is exactly the drift the Python lint bans.
- *
- * Ordered oldest first to match LLVM_FLAVORS, so error messages listing the
- * set read the same in both engines. */
-static const struct
-{
-    rocke_llvm_flavor_t flavor;
-    const char* name;
-    unsigned min_llvm_major;
-    /* Datalayout generation: false = the LLVM20 plain-p8 shape, true = the
-     * LLVM21+ indexed-p8 shape. Python's _DATALAYOUT_KIND_FLAVORS partition,
-     * as a column. */
-    bool modern;
-} ROCKE_LL_FLAVOR_LADDER[] = {
-    {ROCKE_LLVM_FLAVOR_LLVM20, "llvm20", 0, false},
-    {ROCKE_LLVM_FLAVOR_LLVM22, "llvm22", 21, true},
-    {ROCKE_LLVM_FLAVOR_LLVM23, "llvm23", 23, true},
-};
-
-static const int ROCKE_LL_FLAVOR_LADDER_COUNT
-    = (int)(sizeof(ROCKE_LL_FLAVOR_LADDER) / sizeof(ROCKE_LL_FLAVOR_LADDER[0]));
-
-int rocke_llvm_flavor_count(void)
-{
-    return ROCKE_LL_FLAVOR_LADDER_COUNT;
-}
-
-const char* rocke_llvm_flavor_at(int index)
-{
-    if(index < 0 || index >= ROCKE_LL_FLAVOR_LADDER_COUNT)
-        return "";
-    return ROCKE_LL_FLAVOR_LADDER[index].name;
-}
-
-const char* rocke_llvm_flavor_name(rocke_llvm_flavor_t flavor)
-{
-    int i;
-    for(i = 0; i < ROCKE_LL_FLAVOR_LADDER_COUNT; ++i)
-    {
-        if(ROCKE_LL_FLAVOR_LADDER[i].flavor == flavor)
-            return ROCKE_LL_FLAVOR_LADDER[i].name;
-    }
-    return ""; /* AUTO, or a value outside the enum */
-}
-
-rocke_llvm_flavor_t rocke_llvm_flavor_from_name(const char* name)
-{
-    int i;
-    if(name)
-    {
-        for(i = 0; i < ROCKE_LL_FLAVOR_LADDER_COUNT; ++i)
-        {
-            if(strcmp(name, ROCKE_LL_FLAVOR_LADDER[i].name) == 0)
-                return ROCKE_LL_FLAVOR_LADDER[i].flavor;
-        }
-    }
-    return ROCKE_LLVM_FLAVOR_AUTO;
-}
-
-bool rocke_llvm_flavor_is_known(rocke_llvm_flavor_t flavor)
-{
-    int i;
-    for(i = 0; i < ROCKE_LL_FLAVOR_LADDER_COUNT; ++i)
-    {
-        if(ROCKE_LL_FLAVOR_LADDER[i].flavor == flavor)
-            return true;
-    }
-    return false;
-}
-
-/* The lowerer's private symbols live in namespace ckc; the public entry points
- * (rocke_llvm_flavor_name/from_name above, rocke_lower_kernel_to_llvm[_ex] below)
- * stay at global scope under their extern "C" header declarations. */
+/* The lowerer's private symbols live in namespace ckc; public entry points stay
+ * at global scope under their extern "C" header declarations. */
 namespace ckc
 {
-
-bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor)
-{
-    int i;
-    for(i = 0; i < ROCKE_LL_FLAVOR_LADDER_COUNT; ++i)
-    {
-        if(ROCKE_LL_FLAVOR_LADDER[i].flavor == flavor)
-            return ROCKE_LL_FLAVOR_LADDER[i].modern;
-    }
-    return false; /* AUTO / out of range: the legacy shape, as before */
-}
 
 /* Resolve from the compiler loaded by COMGR. Explicit flavors keep offline
  * emission independent of a runtime installation. If no compiler can be
@@ -138,24 +47,15 @@ bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor)
  * Python-driven C++ lowering passes its resolved flavor explicitly. */
 static rocke_llvm_flavor_t ll_resolve_flavor(void)
 {
-    const char* env = getenv("ROCKE_LLVM_FLAVOR");
-    if(env)
-    {
-        rocke_llvm_flavor_t flavor = rocke_llvm_flavor_from_name(env);
-        if(flavor != ROCKE_LLVM_FLAVOR_AUTO)
-            return flavor;
-    }
+    rocke_llvm_flavor_t explicit_flavor = rocke_ll_explicit_flavor(getenv("ROCKE_LLVM_FLAVOR"));
+    if(explicit_flavor != ROCKE_LLVM_FLAVOR_AUTO)
+        return explicit_flavor;
     const ckc::CompilerInfo* info = ckc::candidate_compiler_info();
     if(!info || !info->llvm_major)
         throw ckc::ValueError(
             "Cannot determine LLVM flavor: COMGR could not be loaded or queried. "
             "Select a queryable COMGR library or an explicit LLVM flavor for offline IR emission.");
-    for(int i = ROCKE_LL_FLAVOR_LADDER_COUNT - 1; i >= 0; --i)
-    {
-        if(info->llvm_major >= ROCKE_LL_FLAVOR_LADDER[i].min_llvm_major)
-            return ROCKE_LL_FLAVOR_LADDER[i].flavor;
-    }
-    return ROCKE_LLVM_FLAVOR_LLVM20;
+    return rocke_ll_flavor_for_llvm_major(info->llvm_major);
 }
 
 /* ====================================================================== */
@@ -168,13 +68,12 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
  *
  * Written with designated initializers so a row reads as the set of Python
  * ISABackend overrides it stands for -- the defaults (legacy s_waitcnt, no
- * async counter, type-agnostic tr16) are what the Python base class supplies. */
+ * async counter, no wide tr16 read) are what the Python base class supplies. */
 #define LL_BACKEND_CDNA_DEFAULTS                                                              \
     .datalayout = NULL, .triple = NULL, .buffer_rsrc_word3 = ROCKE_LL_BUFFER_RSRC_WORD3_CDNA, \
     .encode_waitcnt = rocke_ll_encode_waitcnt_gfx9_10, .kind = ROCKE_LL_ISA_CDNA,             \
     .has_async_lds_counter = false, .emits_legacy_s_waitcnt = true,                           \
-    .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_legacy,                         \
-    .ds_tr16_b128_spec = rocke_ll_tr16_spec_b128_default
+    .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_legacy
 
 /* RDNA backends (Python Gfx11RdnaBackend / Gfx12RdnaBackend): same
  * datalayout/triple as CDNA on the ROCm releases we target, but the RDNA buffer
@@ -184,10 +83,10 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
     .datalayout = NULL, .triple = NULL, .buffer_rsrc_word3 = ROCKE_LL_BUFFER_RSRC_WORD3_RDNA, \
     .encode_waitcnt = rocke_ll_encode_waitcnt_gfx11, .kind = ROCKE_LL_ISA_RDNA,               \
     .has_async_lds_counter = false, .emits_legacy_s_waitcnt = true,                           \
-    .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_legacy,                         \
-    .ds_tr16_b128_spec = rocke_ll_tr16_spec_b128_default
+    .emit_lds_barrier_drain = rocke_ll_emit_lds_barrier_drain_legacy
 
-static const rocke_isa_backend_t LL_BACKEND_GFX950 = {.gfx = "gfx950", LL_BACKEND_CDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX950
+    = {.gfx = "gfx950", LL_BACKEND_CDNA_DEFAULTS, .has_fp8_scale_conversion = true};
 static const rocke_isa_backend_t LL_BACKEND_GFX942 = {.gfx = "gfx942", LL_BACKEND_CDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX908 = {.gfx = "gfx908", LL_BACKEND_CDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX90A = {.gfx = "gfx90a", LL_BACKEND_CDNA_DEFAULTS};
@@ -225,10 +124,6 @@ static const rocke_isa_backend_t LL_BACKEND_GFX1250
 
 #undef LL_BACKEND_CDNA_DEFAULTS
 #undef LL_BACKEND_RDNA_DEFAULTS
-
-/* Mutable copies so datalayout/triple (extern consts resolved at runtime) can
- * be patched in. backend_for fills them from ROCKE_LL_DATALAYOUT/TRIPLE. */
-static rocke_isa_backend_t LL_BACKEND_RESOLVED;
 
 const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st)
 {
@@ -288,14 +183,11 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
         }
         return NULL;
     }
-    LL_BACKEND_RESOLVED = *base;
-    LL_BACKEND_RESOLVED.datalayout = ROCKE_LL_DATALAYOUT;
-    LL_BACKEND_RESOLVED.triple = ROCKE_LL_TRIPLE;
     if(st)
     {
         *st = ROCKE_OK;
     }
-    return &LL_BACKEND_RESOLVED;
+    return base;
 }
 
 /* ====================================================================== */
@@ -321,6 +213,71 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
 bool rocke_ll_live(const rocke_lower_t* L)
 {
     return L != NULL;
+}
+
+static const char* ll_target_fact_name(rocke_ll_target_fact_t fact)
+{
+    switch(fact)
+    {
+    case ROCKE_LL_FACT_TDM:
+        return "memory.has_tdm";
+    case ROCKE_LL_FACT_CLUSTER_LAUNCH:
+        return "memory.has_cluster_launch";
+    case ROCKE_LL_FACT_MULTICAST_LOAD:
+        return "memory.has_multicast_load";
+    case ROCKE_LL_FACT_SCALAR_DATA_PREFETCH:
+        return "memory.has_scalar_data_prefetch";
+    case ROCKE_LL_FACT_GLOBAL_PREFETCH:
+        return "memory.has_global_prefetch";
+    case ROCKE_LL_FACT_GFX12_CDNA_FAMILY:
+        return "target_family gfx12_cdna";
+    }
+    return "(unknown fact)";
+}
+
+static bool ll_target_fact_holds(const rocke_arch_target_t* t, rocke_ll_target_fact_t fact)
+{
+    switch(fact)
+    {
+    case ROCKE_LL_FACT_TDM:
+        return t->memory.has_tdm;
+    case ROCKE_LL_FACT_CLUSTER_LAUNCH:
+        return t->memory.has_cluster_launch;
+    case ROCKE_LL_FACT_MULTICAST_LOAD:
+        return t->memory.has_multicast_load;
+    case ROCKE_LL_FACT_SCALAR_DATA_PREFETCH:
+        return t->memory.has_scalar_data_prefetch;
+    case ROCKE_LL_FACT_GLOBAL_PREFETCH:
+        return t->memory.has_global_prefetch;
+    case ROCKE_LL_FACT_GFX12_CDNA_FAMILY:
+        return strcmp(t->target_family, "gfx12_cdna") == 0;
+    }
+    return false;
+}
+
+void rocke_ll_require_llvm23_target_fact(rocke_lower_t* L,
+                                         const char* op,
+                                         rocke_ll_target_fact_t fact)
+{
+    const char* gfx = (L->backend && L->backend->gfx) ? L->backend->gfx : NULL;
+    const rocke_arch_target_t* target = gfx ? rocke_arch_target_from_gfx(gfx) : NULL;
+    if(!target || !ll_target_fact_holds(target, fact))
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s requires a target with %s, got %s",
+                      op,
+                      ll_target_fact_name(fact),
+                      gfx ? gfx : "(unknown)");
+    }
+    if(!rocke_ll_profile_has(L->flavor, ROCKE_LL_CAP_LLVM23_TARGET_OPS))
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s requires LLVM flavor llvm23, got %s",
+                      op,
+                      rocke_llvm_flavor_name(L->flavor));
+    }
 }
 
 /* ====================================================================== */
@@ -423,10 +380,13 @@ void rocke_ll_block_emitf(rocke_lower_t* L, rocke_ll_block_t* blk, const char* f
         rocke_ll_block_emit(L, blk, buf);
         return;
     }
-    /* Long line: format into the arena. */
+    /* Long line: size the buffer from vsnprintf's count rather than a fixed
+     * cap, which used to truncate lines past 8191 bytes silently (a long
+     * inline-asm template is one line). */
+    size_t need = (n >= 0) ? (size_t)n + 1 : 8192;
+    char* big = (char*)rocke_arena_alloc(&L->arena, need);
     va_start(ap, fmt);
-    char big[8192];
-    vsnprintf(big, sizeof big, fmt, ap);
+    vsnprintf(big, need, fmt, ap);
     va_end(ap);
     rocke_ll_block_emit(L, blk, big);
 }
@@ -453,9 +413,13 @@ void rocke_ll_emitf(rocke_lower_t* L, const char* fmt, ...)
         rocke_ll_block_emit(L, blk, buf);
         return;
     }
+    /* Long line: size the buffer from vsnprintf's count rather than a fixed
+     * cap, which used to truncate lines past 8191 bytes silently (a long
+     * inline-asm template is one line). */
+    size_t need = (n >= 0) ? (size_t)n + 1 : 8192;
+    char* big = (char*)rocke_arena_alloc(&L->arena, need);
     va_start(ap, fmt);
-    char big[8192];
-    vsnprintf(big, sizeof big, fmt, ap);
+    vsnprintf(big, need, fmt, ap);
     va_end(ap);
     rocke_ll_block_emit(L, blk, big);
 }
@@ -531,6 +495,28 @@ static bool ll_need_has(const rocke_lower_t* L, const char* key)
     return false;
 }
 
+/* Python: _Lowerer._check_arch_domain. Refuses the lowering when the committed
+ * arch-domain table says this target cannot lower `key`, the lane is in error
+ * mode, and no waiver covers the cell. Warn mode has nothing to do here: this
+ * engine has no warning channel, so the Python side reports what it emitted
+ * (lower_llvm.check_arch_domain_in_ir). Run once per key, as Python does. */
+static void ll_check_arch_domain(rocke_lower_t* L, const char* key)
+{
+    if(L->arch_domain_mode != ROCKE_ARCH_DOMAIN_ERROR)
+    {
+        return;
+    }
+    char msg[ROCKE_ERR_MSG_CAP];
+    const char* flavor = rocke_arch_domain_column_flavor(rocke_llvm_flavor_name(L->flavor));
+    const rocke_arch_domain_cell_t* cell = rocke_arch_domain_negative(flavor, key, L->backend->gfx);
+    if(cell == NULL || cell->waived)
+    {
+        return;
+    }
+    rocke_arch_domain_message(cell, flavor, msg, sizeof msg);
+    rocke_ll_fail(L, ROCKE_ERR_ARCH_DOMAIN, "%s", msg);
+}
+
 void rocke_ll_need(rocke_lower_t* L, const char* key)
 {
     if(!L || !key)
@@ -550,6 +536,7 @@ void rocke_ll_need(rocke_lower_t* L, const char* key)
     {
         rocke_ll_fail(L, ROCKE_ERR_OOM, "need push");
     }
+    ll_check_arch_domain(L, key);
 }
 
 void rocke_ll_need_dynamic(rocke_lower_t* L, const char* key, const char* decl)
@@ -905,6 +892,11 @@ const char* rocke_ll_operand(rocke_lower_t* L, const rocke_value_t* v)
     {
         return v->name;
     }
+    if(op->opcode == ROCKE_OP_ARITH_ASSUME_RANGE && op->num_operands >= 1)
+    {
+        /* A range marker is its first operand: it emits no instruction. */
+        return rocke_ll_operand(L, op->operands[0]);
+    }
     if(op->opcode == ROCKE_OP_ARITH_CONSTANT)
     {
         const char* ity = rocke_attr_get_str(&op->attrs, "ity");
@@ -1020,6 +1012,8 @@ const char* rocke_ll_icmp_predicate(rocke_lower_t* L,
         const char* signed_form;
         const char* unsigned_form;
     } k_icmp[] = {
+        /* "ult" is the explicit unsigned compare: unsigned whatever the type. */
+        {"ult", "ult", "ult"},
         {"lt", "slt", "ult"},
         {"le", "sle", "ule"},
         {"gt", "sgt", "ugt"},
@@ -1321,6 +1315,7 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
 
     /* Initialize offset vector to zero. */
     rocke_vec_init(&L->smem_offsets);
+    rocke_vec_init(&L->smem_sizes);
 
     size_t n = L->smem_globals.len;
     if(n == 0)
@@ -1397,6 +1392,10 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
     int* offsets = (int*)rocke_arena_calloc(&L->arena, n * sizeof(int));
     if(!offsets)
         rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: offsets alloc");
+    /* Bytes each placed allocation spans (Python _smem_sizes); 0 if dead. */
+    int* sizes = (int*)rocke_arena_calloc(&L->arena, n * sizeof(int));
+    if(!sizes)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: sizes alloc");
 
     for(size_t si = 0; si < n; si++)
     {
@@ -1412,6 +1411,7 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
             continue;
         const rocke_type_t* stype = L->smem_globals.data[gi].stype;
         int seg = ll_smem_seg_size(stype);
+        sizes[gi] = seg;
         int aln = ll_smem_align(stype);
         int first_seq = intervals[gi].first_seq;
         int last_seq = intervals[gi].last_seq;
@@ -1506,7 +1506,129 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
         rocke_vec_push(&L->arena, &L->smem_offsets, offsets[i], rc);
         if(rc != 0)
             rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: offsets push");
+        /* Python _smem_sizes: only allocations that got a pool slot. */
+        int sz = intervals[i].used ? ll_smem_seg_size(L->smem_globals.data[i].stype) : -1;
+        rocke_vec_push(&L->arena, &L->smem_sizes, sz, rc);
+        if(rc != 0)
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: sizes push");
     }
+}
+
+/* ---------------------------------------------------------------------- */
+/* LDS alias scopes (Python _lds_aa_names / _lds_aa_suffix / _lds_aa_render) */
+/* ---------------------------------------------------------------------- */
+
+#define ROCKE_LL_LDS_AA_BASE 900000
+
+/* Indices (into smem_globals) of the used allocations, sorted by gname. */
+static size_t ll_lds_aa_names(rocke_lower_t* L, size_t* idx)
+{
+    size_t n = 0;
+    for(size_t i = 0; i < L->smem_globals.len && i < L->smem_sizes.len; i++)
+    {
+        if(L->smem_sizes.data[i] < 0)
+            continue;
+        size_t k = n++;
+        while(k > 0
+              && strcmp(L->smem_globals.data[idx[k - 1]].gname, L->smem_globals.data[i].gname) > 0)
+        {
+            idx[k] = idx[k - 1];
+            k--;
+        }
+        idx[k] = i;
+    }
+    return n;
+}
+
+const char* rocke_ll_lds_aa_suffix(rocke_lower_t* L, const char* gname)
+{
+    if(!L || !L->lds_aa || !gname)
+        return "";
+    size_t* idx = (size_t*)rocke_arena_alloc(&L->arena, sizeof(size_t) * (L->smem_globals.len + 1));
+    size_t n = ll_lds_aa_names(L, idx);
+    for(size_t i = 0; i < n; i++)
+    {
+        if(strcmp(L->smem_globals.data[idx[i]].gname, gname) == 0)
+        {
+            L->lds_aa_used = true;
+            long long b = ROCKE_LL_LDS_AA_BASE;
+            return rocke_arena_printf(&L->arena,
+                                      ", !alias.scope !%lld, !noalias !%lld",
+                                      b + 1 + (long long)n + (long long)i,
+                                      b + 1 + 2 * (long long)n + (long long)i);
+        }
+    }
+    return "";
+}
+
+static void ll_lds_aa_render(rocke_lower_t* L, rocke_strbuf_t* out)
+{
+    size_t* idx = (size_t*)rocke_arena_alloc(&L->arena, sizeof(size_t) * (L->smem_globals.len + 1));
+    size_t n = ll_lds_aa_names(L, idx);
+    long long b = ROCKE_LL_LDS_AA_BASE;
+    rocke_strbuf_append(out, "\n");
+    rocke_strbuf_append(
+        out, rocke_arena_printf(&L->arena, "!%lld = distinct !{!%lld, !\"rocke.lds\"}\n", b, b));
+    for(size_t i = 0; i < n; i++)
+        rocke_strbuf_append(out,
+                            rocke_arena_printf(&L->arena,
+                                               "!%lld = distinct !{!%lld, !%lld, !\"%s\"}\n",
+                                               b + 1 + (long long)i,
+                                               b + 1 + (long long)i,
+                                               b,
+                                               L->smem_globals.data[idx[i]].gname));
+    for(size_t i = 0; i < n; i++)
+        rocke_strbuf_append(out,
+                            rocke_arena_printf(&L->arena,
+                                               "!%lld = !{!%lld}\n",
+                                               b + 1 + (long long)n + (long long)i,
+                                               b + 1 + (long long)i));
+    for(size_t i = 0; i < n; i++)
+    {
+        size_t gi = idx[i];
+        int lo = L->smem_offsets.data[gi];
+        int hi = lo + L->smem_sizes.data[gi];
+        rocke_strbuf_append(
+            out,
+            rocke_arena_printf(&L->arena, "!%lld = !{", b + 1 + 2 * (long long)n + (long long)i));
+        int first = 1;
+        for(size_t j = 0; j < n; j++)
+        {
+            if(j == i)
+                continue;
+            size_t gj = idx[j];
+            int lo2 = L->smem_offsets.data[gj];
+            int hi2 = lo2 + L->smem_sizes.data[gj];
+            if(lo2 >= hi || hi2 <= lo)
+            {
+                rocke_strbuf_append(
+                    out,
+                    rocke_arena_printf(
+                        &L->arena, "%s!%lld", first ? "" : ", ", b + 1 + (long long)j));
+                first = 0;
+            }
+        }
+        rocke_strbuf_append(out, "}\n");
+    }
+}
+
+void rocke_ll_lds_prov_set(rocke_lower_t* L, const rocke_value_t* v, const char* gname)
+{
+    int rc;
+    rocke_ll_lds_prov_t p;
+    p.value = v;
+    p.gname = gname;
+    rocke_vec_push(&L->arena, &L->lds_prov, p, rc);
+    if(rc != 0)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "lds_prov push");
+}
+
+const char* rocke_ll_lds_prov_get(rocke_lower_t* L, const rocke_value_t* v)
+{
+    for(size_t i = 0; i < L->lds_prov.len; i++)
+        if(L->lds_prov.data[i].value == v)
+            return L->lds_prov.data[i].gname;
+    return NULL;
 }
 
 const char*
@@ -1799,27 +1921,14 @@ const char* rocke_ll_format_agpr_alloc(rocke_lower_t* L, const rocke_attr_value_
 }
 
 /* gfx1250 workgroup-cluster shape; mirrors Python ir.check_cluster_dims (same
- * limits and messages) behind the gfx1250 + llvm23 gate. The backend copies
+ * limits and messages) behind the cluster-launch + llvm23 gate. The backend copies
  * the attribute to the code-object .cluster_dims metadata unchecked. */
 #define ROCKE_LL_MAX_CLUSTER_DIM 15
 #define ROCKE_LL_MAX_CLUSTER_WORKGROUPS 16
 
 static const char* rocke_ll_format_cluster_dims(rocke_lower_t* L, const rocke_attr_value_t* v)
 {
-    if(!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, "gfx1250") != 0)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "cluster_dims requires gfx1250, got %s",
-                      (L->backend && L->backend->gfx) ? L->backend->gfx : "(unknown)");
-    }
-    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "cluster_dims requires LLVM flavor llvm23, got %s",
-                      rocke_llvm_flavor_name(L->flavor));
-    }
+    rocke_ll_require_llvm23_target_fact(L, "cluster_dims", ROCKE_LL_FACT_CLUSTER_LAUNCH);
     if(!v || v->kind != ROCKE_ATTR_INT_LIST || v->u.ilist.count != 3)
     {
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "cluster_dims must be three integers (x, y, z)");
@@ -2083,6 +2192,10 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
     {
         rocke_strbuf_append(out, "\n!5 = !{i32 1}\n");
     }
+    if(L->lds_aa_used)
+    {
+        ll_lds_aa_render(L, out);
+    }
     if(L->debug)
     {
         rocke_ll_debug_render(L, L->debug, out);
@@ -2112,8 +2225,8 @@ static void ll_lower_into(rocke_lower_t* L,
 
     /* Resolve ISA backend. */
     rocke_status_t bst = ROCKE_OK;
-    L->backend = rocke_ll_backend_for(arch, &bst);
-    if(L->backend == NULL || bst != ROCKE_OK)
+    const rocke_isa_backend_t* row = rocke_ll_backend_for(arch, &bst);
+    if(row == NULL || bst != ROCKE_OK)
     {
         if(arch == NULL)
         {
@@ -2124,13 +2237,30 @@ static void ll_lower_into(rocke_lower_t* L,
         }
         rocke_ll_fail(L, bst != ROCKE_OK ? bst : ROCKE_ERR_KEY, "unknown arch backend %s", arch);
     }
-    /* The AMDGPU datalayout is FLAVOR-KEYED (Python backend.datalayout(flavor)
-     * via _datalayout_for_flavor): the p8 field drifts between LLVM20 and
-     * LLVM22. backend_for installs the LLVM20 form by default; rebind the
-     * resolved backend's datalayout to the form for the resolved flavor.
-     * L->backend points at the static LL_BACKEND_RESOLVED scratch copy, so this
-     * does not mutate the canonical per-arch descriptors. */
-    LL_BACKEND_RESOLVED.datalayout = rocke_ll_datalayout_for_flavor(L->flavor);
+    /* The lane's mode is read here, once, so a misspelled ROCKE_ARCH_DOMAIN
+     * fails every lowering and not only one that demands an intrinsic -- the
+     * same check lower_kernel_to_llvm makes on the Python side. Reading it per
+     * demand let one bad value pass or fail depending on what the kernel asked
+     * for, and parsed the environment again for every distinct intrinsic. */
+    {
+        char msg[ROCKE_ERR_MSG_CAP];
+        if(rocke_arch_domain_mode(
+               getenv(ROCKE_ARCH_DOMAIN_ENV), &L->arch_domain_mode, msg, sizeof msg)
+           != ROCKE_OK)
+        {
+            rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", msg);
+        }
+    }
+    /* This lowering's own copy of the target's row, with the triple and the
+     * AMDGPU datalayout filled in. The datalayout is FLAVOR-KEYED (Python
+     * backend.datalayout(flavor) via _datalayout_for_flavor): the p8 field
+     * drifts between LLVM20 and LLVM22. Copying keeps the shared per-arch rows
+     * read-only, so lowerings for different targets or flavors never see each
+     * other's fill-in. */
+    L->backend_resolved = *row;
+    L->backend_resolved.datalayout = rocke_ll_datalayout_for_flavor(L->flavor);
+    L->backend_resolved.triple = ROCKE_LL_TRIPLE;
+    L->backend = &L->backend_resolved;
 
     /* Debug metadata is opt-in: the kernel carries `debug_info` only when it was
      * built with location capture on, and an op's @loc rides the same
@@ -2142,7 +2272,6 @@ static void ll_lower_into(rocke_lower_t* L,
     {
         L->debug = rocke_ll_debug_create(L, kernel->name);
     }
-
     /* Entry block (ll_make_block raises on OOM). */
     ll_make_block(L, "entry");
 
@@ -2223,12 +2352,17 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     L.needs_fp_atomic_md = false;
     L.needs_av_scope_md = false;
     L.needs_nontemporal_md = false;
+    L.arch_domain_mode = ROCKE_ARCH_DOMAIN_WARN; /* replaced by ll_lower_into */
     rocke_vec_init(&L.blocks);
     rocke_vec_init(&L.needs);
     rocke_vec_init(&L.dyn_decls);
     rocke_vec_init(&L.smem_globals);
     rocke_vec_init(&L.smem_names);
     rocke_vec_init(&L.smem_offsets);
+    rocke_vec_init(&L.smem_sizes);
+    rocke_vec_init(&L.lds_prov);
+    L.lds_aa = rocke_attr_get_bool(&kernel->attrs, "lds_alias_scopes", false);
+    L.lds_aa_used = false;
     L.smem_pool_size = 0;
     L.smem_pool_name = NULL;
     rocke_vec_init(&L.yield_stack);

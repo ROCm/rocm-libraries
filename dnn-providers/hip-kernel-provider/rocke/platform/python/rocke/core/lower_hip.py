@@ -24,7 +24,10 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     F32,
+    F64,
     I32,
+    _int_add_wrap_error,
+    _scf_for_carried_descriptor_error,
     KernelDef,
     Op,
     PtrType,
@@ -33,12 +36,19 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _buffer_op_bytes,
+    _global_ptr_offset_op_error,
+    _global_ptr_to_i64_op_error,
+    _if_else_branch_yield,
+    _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
+    _trap_op_error,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
     require_streaming_arch,
 )
+from .isa.backend import backend_for
 from .mma_operand import (
     MmaOperandRole,
     mma_operand_needs_reinterpret,
@@ -166,7 +176,7 @@ _ROCKE_VEC(bf16, bf16x, 1); _ROCKE_VEC(bf16, bf16x, 2); _ROCKE_VEC(bf16, bf16x, 
 _ROCKE_VEC(bf16, bf16x, 8); _ROCKE_VEC(bf16, bf16x, 16);
 _ROCKE_VEC(float, f32x, 1); _ROCKE_VEC(float, f32x, 2); _ROCKE_VEC(float, f32x, 4);
 _ROCKE_VEC(float, f32x, 8); _ROCKE_VEC(float, f32x, 16);
-_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2);
+_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2); _ROCKE_VEC(double, f64x, 4);
 _ROCKE_VEC(int, i32x, 1); _ROCKE_VEC(int, i32x, 2); _ROCKE_VEC(int, i32x, 3);
 _ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8); _ROCKE_VEC(int, i32x, 16);
 _ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);
@@ -196,10 +206,6 @@ typedef short i16x4_raw __attribute__((ext_vector_type(4)));
 __device__ extern "C" i16x4_raw _llvm_amdgcn_ds_read_tr16_b64(
  const __attribute__((address_space(3))) void*)
  __asm("llvm.amdgcn.ds.read.tr16.b64");
-typedef short i16x8_raw __attribute__((ext_vector_type(8)));
-__device__ extern "C" i16x8_raw _llvm_amdgcn_ds_read_tr16_b128(
- const __attribute__((address_space(3))) void*)
- __asm("llvm.amdgcn.ds.read.tr16.b128");
 // ``__builtin_amdgcn_raw_ptr_buffer_load_lds`` restricts the size arg to
 // {1, 2, 4} bytes; the LLVM intrinsic itself accepts {1, 2, 4, 12, 16},
 // which is what async-DMA pipelines (compv4 / split-KV attention) need.
@@ -233,6 +239,17 @@ _VEC_PREFIX = {
     "i8": "i8x",
     "fp8e4m3": "i8x",
     "bf8e5m2": "i8x",
+}
+
+
+# One buffer access per width in bytes (core/ir.py _BUFFER_ACCESS_BYTES): the
+# raw buffer builtin's suffix and the integer type it loads or stores.
+_HIP_BUFFER_ACCESS = {
+    1: ("_b8", "unsigned char"),
+    2: ("_b16", "unsigned short"),
+    4: ("_b32", "int"),
+    8: ("_b64", "i32x2"),
+    16: ("_b128", "i32x4"),
 }
 
 
@@ -459,7 +476,28 @@ class _Lowerer:
         )
 
     def _op_arith_add(self, op: Op) -> None:
-        self._binary(op, "+")
+        wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), op.operands[0].type.name)
+        if wrap_error:
+            raise ValueError(wrap_error)
+        wrap = op.attrs.get("wrap", "nsw")
+        if wrap == "nsw":
+            self._binary(op, "+")
+            return
+        # Unsigned sum, cast back: a signed ``a + b`` that passes the signed
+        # maximum is undefined behaviour in C++, which clang emits as ``nsw``.
+        a, b = op.operands
+        width = op.result.type.name
+        unsigned = _HIP_UNSIGNED_INT_TYPE[width]
+        self._emit(
+            f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
+            f"(int{width[1:]}_t)(({unsigned}){_name(a)} + ({unsigned}){_name(b)});"
+        )
+
+    def _op_arith_assume_range(self, op: Op) -> None:
+        # A range marker is a copy of its first operand.
+        self._emit(
+            f"{_type_to_hip(op.result.type)} {_name(op.result)} = {_name(op.operands[0])};"
+        )
 
     def _op_arith_sub(self, op: Op) -> None:
         self._binary(op, "-")
@@ -475,10 +513,16 @@ class _Lowerer:
 
     def _op_arith_cmp(self, op: Op) -> None:
         pred = op.attrs.get("pred", "lt")
+        a, b = op.operands
+        if pred == "ult":
+            unsigned = _HIP_UNSIGNED_INT_TYPE[a.type.name]
+            self._emit(
+                f"bool {_name(op.result)} = ({unsigned}){_name(a)} < ({unsigned}){_name(b)};"
+            )
+            return
         c_op = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "eq": "==", "ne": "!="}[
             pred
         ]
-        a, b = op.operands
         self._emit(f"bool {_name(op.result)} = {_name(a)} {c_op} {_name(b)};")
 
     def _op_arith_select(self, op: Op) -> None:
@@ -743,6 +787,24 @@ class _Lowerer:
             return f"__builtin_bit_cast({_type_to_hip(register_type)}, {_name(value)})"
         return _name(value)
 
+    def _op_tile_mfma_f64_16x16x4_f64(self, op: Op) -> None:
+        op_id = "mfma_f64_16x16x4_f64"
+        a = self._mma_operand(op, op_id, "a", F64)
+        b = self._mma_operand(op, op_id, "b", F64)
+        self._emit(
+            f"f64x4 {_name(op.result)} = __builtin_amdgcn_mfma_f64_16x16x4f64("
+            f"{a}, {b}, {_name(op.operands[2])}, 0, 0, 0);"
+        )
+
+    def _op_tile_mfma_f64_4x4x4_f64(self, op: Op) -> None:
+        op_id = "mfma_f64_4x4x4_f64"
+        a = self._mma_operand(op, op_id, "a", F64)
+        b = self._mma_operand(op, op_id, "b", F64)
+        self._emit(
+            f"f64x1 {_name(op.result)} = {{__builtin_amdgcn_mfma_f64_4x4x4f64("
+            f"{a}, {b}, {_name(op.operands[2])}[0], 0, 0, 0)}};"
+        )
+
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
         op_id = "mfma_f32_16x16x4_f32"
         a = self._mma_operand(op, op_id, "a", F32)
@@ -800,6 +862,13 @@ class _Lowerer:
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4f16("
+            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+        )
+
+    def _op_tile_mfma_f32_4x4x4_bf16(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._emit(
+            f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4bf16_1k("
             f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
         )
 
@@ -1082,6 +1151,29 @@ class _Lowerer:
             f"(const char*){_name(ptr)} + (int64_t){_name(off)};"
         )
 
+    def _op_tile_global_ptr_offset(self, op: Op) -> None:
+        # ptr + byte_off in integer arithmetic: C++ pointer arithmetic that
+        # leaves the allocation is undefined, and clang marks it inbounds.
+        # The result keeps the pointer's element type, so indexing it counts
+        # elements as it does on the operand. byte_off is i64 and may be
+        # negative; the uint64_t sum wraps to the same address.
+        error = _global_ptr_offset_op_error(op)
+        if error:
+            raise ValueError(error)
+        ptr, off = op.operands
+        hip_type = _type_to_hip(op.result.type)
+        self._emit(
+            f"{hip_type} {_name(op.result)} = "
+            f"({hip_type})((uintptr_t){_name(ptr)} + (uint64_t){_name(off)});"
+        )
+
+    def _op_tile_global_ptr_to_i64(self, op: Op) -> None:
+        error = _global_ptr_to_i64_op_error(op)
+        if error:
+            raise ValueError(error)
+        (ptr,) = op.operands
+        self._emit(f"int64_t {_name(op.result)} = (int64_t)(uintptr_t){_name(ptr)};")
+
     def _op_tile_buffer_load_vN_f16(self, op: Op) -> None:
         # Lowers to ``__builtin_amdgcn_raw_buffer_load_b{32,64,128}``,
         # which on ROCm 7 / clang 20 takes ``__amdgpu_buffer_rsrc_t`` (aka
@@ -1118,26 +1210,33 @@ class _Lowerer:
         )
 
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
-        # Dtype-generic vectorised buffer load.
-        # Loads <dwords x i32> via __builtin_amdgcn_raw_buffer_load_b{32,64,128},
-        # then memcpy-punches to the target vector type (f16xN, bf16xN, f32xN).
+        # Dtype-generic vectorised buffer load: one raw buffer load of the
+        # result's width (_HIP_BUFFER_ACCESS), copied into the result vector.
+        nbytes = _buffer_op_bytes(op)
         rsrc, voffset, soffset = op.operands
-        dwords = int(op.attrs["dwords"])
-        elem_type = op.attrs["elem_type"]
-        n = op.result.type.count
-        # Map our IR elem name → HIP vector typedef prefix
-        _HIP_VEC = {"f16": "f16x", "bf16": "bf16x", "f32": "f32x", "i32": "i32x"}
-        hip_vec_t = f"{_HIP_VEC[elem_type]}{n}"
-        b_suffix = {1: "_b32", 2: "_b64", 4: "_b128"}[dwords]
-        raw_t = "int" if dwords == 1 else f"i32x{dwords}"
+        result_type = op.result.type
+        suffix, raw_t = _HIP_BUFFER_ACCESS[nbytes]
         tmp = f"_blraw_{_name(op.result).lstrip('%')}"
         self._emit(
-            f"{raw_t} {tmp} = __builtin_amdgcn_raw_buffer_load{b_suffix}("
+            f"{raw_t} {tmp} = __builtin_amdgcn_raw_buffer_load{suffix}("
             f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
         )
         self._emit(
-            f"{hip_vec_t} {_name(op.result)}; "
-            f"__builtin_memcpy(&{_name(op.result)}, &{tmp}, {dwords * 4});"
+            f"{_type_to_hip(result_type)} {_name(op.result)}; "
+            f"__builtin_memcpy(&{_name(op.result)}, &{tmp}, {nbytes});"
+        )
+
+    def _op_tile_buffer_store_vN(self, op: Op) -> None:
+        # Dtype-generic vectorised buffer store: the value copied into one
+        # integer of its width (_HIP_BUFFER_ACCESS) and stored. The braces
+        # scope the temporary, so two stores of one value do not redeclare it.
+        nbytes = _buffer_op_bytes(op)
+        rsrc, voffset, soffset, val = op.operands
+        suffix, raw_t = _HIP_BUFFER_ACCESS[nbytes]
+        self._emit(
+            f"{{ {raw_t} _bs; __builtin_memcpy(&_bs, &{_name(val)}, {nbytes}); "
+            f"__builtin_amdgcn_raw_buffer_store{suffix}(_bs, "
+            f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0); }}"
         )
 
     def _op_tile_buffer_load(self, op: Op) -> None:
@@ -1146,6 +1245,8 @@ class _Lowerer:
         # 4-byte types (f32, i32) → __builtin_amdgcn_raw_buffer_load_b32.
         rsrc, voffset, soffset = op.operands
         elem_type = op.attrs["elem_type"]
+        if elem_type not in ("f16", "bf16", "f32", "i32"):
+            raise ValueError(f"tile.buffer_load: unsupported elem_type {elem_type!r}")
         hip_t = _hip_scalar_type(elem_type)
         tmp = f"_bl_{_name(op.result).lstrip('%')}"
         if elem_type in ("f16", "bf16"):
@@ -1369,6 +1470,12 @@ class _Lowerer:
     def _op_tile_sched_barrier(self, op: Op) -> None:
         self._emit(f"__builtin_amdgcn_sched_barrier({int(op.attrs.get('mask', 0))});")
 
+    def _op_tile_trap(self, op: Op) -> None:
+        error = _trap_op_error(op)
+        if error:
+            raise ValueError(error)
+        self._emit("__builtin_trap();")
+
     def _op_tile_sched_group_barrier(self, op: Op) -> None:
         m = int(op.attrs["mask"])
         c = int(op.attrs["count"])
@@ -1459,7 +1566,11 @@ class _Lowerer:
     def _op_arith_fabs(self, op: Op) -> None:
         (v,) = op.operands
         ty = _type_to_hip(op.result.type)
-        _reject_f64(op, op.result.type.name)
+        if op.result.type.name == "f64":
+            # The double overload stays in double; routing it through the
+            # float helper below would round the value to f32.
+            self._emit(f"{ty} {_name(op.result)} = fabs({_name(v)});")
+            return
         # `__builtin_fabsf` lowers to a free `abs` modifier on AMDGPU
         # (exactly what the LLVM `llvm.fabs.f32` intrinsic produces);
         # for f16/bf16 the matching builtin yields the same modifier.
@@ -1690,6 +1801,7 @@ class _Lowerer:
 
     def _op_arith_uitofp_f32(self, op: Op) -> None:
         # u8 -> f32: a uint8_t converts exactly.
+        _refuse_non_u8_source(op)
         (v,) = op.operands
         self._emit(f"float {_name(op.result)} = (float){_name(v)};")
 
@@ -2003,36 +2115,6 @@ class _Lowerer:
             f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
         )
 
-    def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
-        """HIP debug shim for P15 MX MFMA scaled.
-
-        Hipcc 20 does not expose a builtin for the scaled MX MFMA;
-        emit an inline-asm stub that documents the shape so kernel
-        authors can read the HIP source to sanity-check the data
-        flow. Production runs go through the LLVM path which has
-        the real intrinsic.
-        """
-        a, b, c, a_scale, b_scale = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P15 MX MFMA stub:"
-            f" scale_a={_name(a_scale)} scale_b={_name(b_scale)}"
-            f" mantissa_a={_name(a)} mantissa_b={_name(b)}"
-        )
-
-    def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp4 MFMA stub: "
-            f"a={_name(a)} b={_name(b)}"
-        )
-
-    def _op_tile_mfma_f32_16x16x96_fp6(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp6 MFMA stub: "
-            f"a={_name(a)} b={_name(b)}"
-        )
-
     def _op_tile_register_p_from_qk_c(self, op: Op) -> None:
         """HIP debug shim for the P13 register permutation."""
         (qk_c,) = op.operands
@@ -2202,23 +2284,22 @@ class _Lowerer:
         # ``__builtin_amdgcn_make_buffer_rsrc(void*, short stride,
         # int num_records, int flags)``
         #
-        # The flags word is the rsrc DWORD3: it encodes
-        # ``TYPE=BUFFER_RESOURCE, DATA_FORMAT=32-bit dword, NUM_FORMAT=UINT``.
-        # Without it the AMDGPU compiler can lower buffer loads to
-        # "unbounded" single-dword loads (no bounds check) which then
-        # produce mismatching output for shapes whose OOB lanes need to
-        # see zero. Value matches the LLVM-direct path
-        # (``lower_llvm._op_tile_buffer_rsrc`` -> ``i32 159744`` =
-        # ``0x00027000``) and CK Tile's
-        # ``__builtin_amdgcn_make_buffer_rsrc(p, 0, bytes, 0x00027000)``
-        # in ``cktile_fixed_lean_kernel.hpp``.
+        # The flags word is the rsrc DWORD3. Its format / out-of-bounds
+        # encoding is ISA-specific (the gfx9 value makes every raw buffer
+        # access on gfx11 / gfx12 read 0 or drop the write), so it comes from
+        # the target's ISA backend -- the same ``buffer_rsrc_word3`` the
+        # LLVM-direct path (``lower_llvm._op_tile_buffer_rsrc``) emits. With
+        # the right word, out-of-range byte offsets return 0 on load and are
+        # dropped on store; without it the compiler can lower buffer loads to
+        # unbounded single-dword loads with no bounds check.
         ptr, num_bytes = op.operands
+        word3 = backend_for(self.arch).buffer_rsrc_word3
         self._emit(
             f"rsrc_t {_name(op.result)} = "
             f"__builtin_amdgcn_make_buffer_rsrc("
             f"(void*){_name(ptr)}, /*stride=*/(short)0, "
             f"/*num_records=*/(int){_name(num_bytes)}, "
-            f"/*flags=*/(int)0x00027000);"
+            f"/*flags=*/(int)0x{word3:08X});"
         )
 
     def _op_tile_async_buffer_load_lds(self, op: Op) -> None:
@@ -2418,26 +2499,6 @@ class _Lowerer:
             f"(const __attribute__((address_space(3))) void*)&{storage}[{idx_str}]);"
         )
         self._emit(f"{vec_prefix}4 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 8);")
-
-    def _op_tile_ds_read_tr16_b128(self, op: Op) -> None:
-        # ``ds_read_b128_tr_b16`` -- wide gfx950 transpose-read.
-        # Same shape as the b64 variant, ``<8 x i16>`` per lane.
-        self._require_ds_read_tr("ds_read_tr16_b128")
-        smem = op.operands[0]
-        indices = op.operands[1:]
-        storage = smem.op.attrs.get("_storage")
-        if storage is None:
-            raise RuntimeError("ds_read_tr16_b128 before smem_alloc was lowered")
-        idx_str = "][".join(_name(i) for i in indices)
-        elem = op.attrs.get("elem_type", "f16")
-        vec_prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem, "f16x")
-        nice = _name(op.result)
-        raw_tmp = f"_trraw_{nice.lstrip('%')}"
-        self._emit(
-            f"i16x8_raw {raw_tmp} = _llvm_amdgcn_ds_read_tr16_b128("
-            f"(const __attribute__((address_space(3))) void*)&{storage}[{idx_str}]);"
-        )
-        self._emit(f"{vec_prefix}8 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 16);")
 
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
         a, b, c = op.operands
@@ -2689,6 +2750,9 @@ class _Lowerer:
     # -------------------- control flow --------------------
 
     def _op_scf_for(self, op: Op) -> None:
+        descriptor_error = _scf_for_carried_descriptor_error(op)
+        if descriptor_error is not None:
+            raise ValueError(descriptor_error)
         num_iter = op.attrs.get("num_iter_args", 0)
         lower = op.operands[0]
         upper = op.operands[1]
@@ -2755,6 +2819,33 @@ class _Lowerer:
         self.lower_region(op.regions[0])
         self._pop_indent()
         self._emit("}")
+
+    def _op_scf_if_else(self, op: Op) -> None:
+        # The results are variables declared before the ``if``; the
+        # ``scf.yield`` that ends each branch assigns them.
+        # First: the rule checks the condition and branch counts read below.
+        yields = [_if_else_branch_yield(op, branch) for branch in range(2)]
+        (cond,) = op.operands
+        for result in op.results:
+            self._emit(f"{_type_to_hip(result.type)} {_name(result)};")
+        self._emit(f"if({_name(cond)}) {{")
+        self._lower_if_else_branch(op, op.regions[0], yields[0])
+        self._emit("} else {")
+        self._lower_if_else_branch(op, op.regions[1], yields[1])
+        self._emit("}")
+
+    def _lower_if_else_branch(self, op: Op, region: Region, yld: Optional[Op]) -> None:
+        """Lower one branch of the scf.if_else ``op``; its closing ``yld``
+        (None when ``op`` has no results) becomes assignments to the results."""
+        self._push_indent()
+        if yld is None:
+            self.lower_region(region)
+        else:
+            for body_op in region.ops[:-1]:
+                self.lower_op(body_op)
+            for result, value in zip(op.results, yld.operands):
+                self._emit(f"{_name(result)} = {_name(value)};")
+        self._pop_indent()
 
 
 def _find_enclosing_for(region: Region, target: Op) -> Optional[Op]:

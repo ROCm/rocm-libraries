@@ -673,9 +673,11 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('fused-gemm-a2a', problemType.fusedGemmA2A)
         if problemType.mxBlockA:
             param('mx-a-block', problemType.mxBlockA)
+            param('mx-a-free-block', problemType.mxBlockFreeA)
             param('mx-a-type', problemType.mxTypeA.toName())
         if problemType.mxBlockB:
             param('mx-b-block', problemType.mxBlockB)
+            param('mx-b-free-block', problemType.mxBlockFreeB)
             param('mx-b-type', problemType.mxTypeB.toName())
 
         if biasTypeArgs:
@@ -722,12 +724,17 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
           for policy in globalParameters["HybridAssignmentPolicy"]:
             param('hybrid-assignment-policy', policy)
 
+        if globalParameters["UniformSummationOrder"] != -1:
+          param('uniform-summation-order', globalParameters["UniformSummationOrder"])
+
         param("device-idx",               deviceId)
 
         param("init-seed",                globalParameters["DataInitSeed"])
 
         for key,value in dataInitParams(problemType):
             param(key, value)
+        if globalParameters["MXDataGenerator"] is not None:
+            param("mx-data-generator", int(globalParameters["MXDataGenerator"]))
 
         param("c-equal-d",                globalParameters["CEqualD"])
 
@@ -885,7 +892,7 @@ def getClientExecutablePath():
 
   if not os.path.isfile(clientExe):
     raise FileNotFoundError(
-        f"Tensile client executable not found at '{clientExe}'.\n"
+        f"TensileLite client executable not found at '{clientExe}'.\n"
         "Please ensure the client is built or provide a valid path using the --prebuilt-client flag.\n"
         "To build, run: `invoke build-client` (you may need to `pip3 install invoke` first).\n"
         "For custom cmake build instructions, please refer to the README in next-cmake."

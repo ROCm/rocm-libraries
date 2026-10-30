@@ -3,15 +3,17 @@
 
 """Comparator for flavor-keyed LLVM-IR golden fixtures.
 
-A golden stores one sub-document per LLVM flavor under ``flavors``, each
-holding a ``cases`` map (``case_id -> {"sha256": ...}``) and optionally an
-``expected_failures`` map (``case_id -> {"type", "message"}``). Lowering takes
-the flavor as an argument, so any host can verify every sub-document, not just
-the one its ROCm vintage autodetects.
+A golden stores one sub-document per distinct emission profile under
+``flavors``. ``aliases`` maps a compiler lane to another lane with the same
+profile, avoiding duplicate fixtures while still lowering and checking the
+aliased lane. Each sub-document holds a ``cases`` map and optionally an
+``expected_failures`` map. Lowering takes the lane as an argument, so any host
+can verify every qualified lane, not just the one it autodetects.
 
 :data:`GOLDEN_FLAVORS` is :data:`~rocke.core.lower_llvm.LLVM_FLAVORS` itself.
-Adding a flavor there makes every golden checked through :func:`check_golden`
-fail until it is re-blessed, with no edit to the golden test. This module is
+Adding a lane there makes every golden checked through :func:`check_golden`
+fail until it receives a profile document or an explicit shared-profile alias,
+with no edit to the golden test. This module is
 shipped so ``library/`` goldens can share it (the dependency stays
 ``library -> platform``).
 """
@@ -23,13 +25,28 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from .lower_llvm import LLVM_FLAVORS
+from .llvm_profile import LLVM_EMISSION_ALIASES, LLVM_EMISSION_FLAVORS, LLVM_FLAVORS
 
-#: Flavors every golden must record. Deliberately the same object as
+#: Lanes every golden must represent directly or through an alias. Same object as
 #: :data:`LLVM_FLAVORS`, never a copy.
 GOLDEN_FLAVORS = LLVM_FLAVORS
+GOLDEN_PROFILE_FLAVORS = LLVM_EMISSION_FLAVORS
+GOLDEN_ALIASES = LLVM_EMISSION_ALIASES
 
-__all__ = ["GOLDEN_FLAVORS", "check_golden", "compare"]
+__all__ = [
+    "GOLDEN_ALIASES",
+    "GOLDEN_FLAVORS",
+    "GOLDEN_PROFILE_FLAVORS",
+    "check_golden",
+    "compare",
+    "golden_subdocument",
+]
+
+
+def golden_subdocument(doc: Mapping[str, Any], flavor: str) -> Mapping[str, Any] | None:
+    """Return the baseline for ``flavor``, following one profile alias."""
+    source = doc.get("aliases", {}).get(flavor, flavor)
+    return doc.get("flavors", {}).get(source)
 
 
 def compare(base: Mapping[str, Any], cur: Mapping[str, Any]) -> list[str]:
@@ -74,21 +91,47 @@ def check_golden(
     """
     doc = json.loads(Path(golden_path).read_text())
     have = doc.get("flavors", {})
+    aliases = doc.get("aliases", {})
     wanted = [flavor] if flavor else list(GOLDEN_FLAVORS)
     errors: list[str] = []
+    if not flavor:
+        if aliases != GOLDEN_ALIASES:
+            errors.append(
+                f"golden aliases {aliases} do not match emission-profile aliases "
+                f"{GOLDEN_ALIASES}; re-bless it"
+            )
+        if set(have) != set(GOLDEN_PROFILE_FLAVORS):
+            errors.append(
+                f"golden profile documents {sorted(have)} do not match "
+                f"{list(GOLDEN_PROFILE_FLAVORS)}; re-bless it"
+            )
+        overlap = set(have) & set(aliases)
+        if overlap:
+            errors.append(
+                f"golden lanes are both direct and aliased: {sorted(overlap)}; "
+                "re-bless it"
+            )
+        if errors:
+            return errors
     for fl in wanted:
-        base = have.get(fl)
+        base = golden_subdocument(doc, fl)
         if base is None:
             errors.append(
-                f"golden has no entry for flavor {fl!r} (have {sorted(have)}); "
-                "re-bless it"
+                f"golden has no entry or valid alias for flavor {fl!r} "
+                f"(have {sorted(have)}); re-bless it"
             )
             continue
         prefix = "" if len(wanted) == 1 else f"[{fl}] "
         errors.extend(prefix + e for e in compare(base, run(fl)))
     if not flavor:
-        for fl in sorted(set(have) - set(GOLDEN_FLAVORS)):
+        represented = set(have) | set(aliases)
+        for fl in sorted(represented - set(GOLDEN_FLAVORS)):
             errors.append(
                 f"golden has stale flavor {fl!r} not in LLVM_FLAVORS; re-bless it"
             )
+        for fl, source in sorted(aliases.items()):
+            if source not in have:
+                errors.append(
+                    f"golden alias {fl!r} names missing flavor {source!r}; re-bless it"
+                )
     return errors

@@ -14,8 +14,9 @@ For setup and the most common flags in context, see
 | Variable | Values (default) | Purpose |
 |---|---|---|
 | `ROCKE_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = C++ engine (auto-falls back to Python if `rocke_engine` isn't built); `python` = native lowerer; `both` = run both and assert byte-identical (the differential check). |
-| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (auto) | Override the emitted LLVM IR flavor. AUTO loads COMGR, queries its compiler, and maps LLVM <=20 to `llvm20`, 21/22 to `llvm22`, and >=23 to `llvm23`. If no compiler can be queried, AUTO raises; select a flavor explicitly for offline IR emission. An override selects emission; it does not change or bypass validation against the loaded compiler. |
+| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` \| `llvm24` (auto) | Select a qualified compiler lane for emitted LLVM IR. AUTO loads COMGR, queries its compiler, and maps LLVM <=20 to `llvm20`, 21/22 to `llvm22`, 23 to `llvm23`, and 24 to `llvm24`. A newer compiler or unavailable evidence raises instead of silently inheriting the latest lane. Explicit selection supports offline emission but does not bypass runtime compiler validation. LLVM23 and LLVM24 currently share one structural emission profile. |
 | `ROCKE_CPP_STRICT` | `1` (unset) | Make `cpp` backend **raise** instead of silently falling back to Python when `rocke_engine` is unavailable. |
+| `ROCKE_ARCH_DOMAIN` | `error` \| `warn` \| `off` (**warn**) | What both engines do when a kernel demands an intrinsic the committed arch-domain table (`python/rocke/core/arch/data/intrinsic_arch_domain.<flavor>.json`) says the target cannot lower. Until it has its own measured column, the `llvm24` lane enforces the `llvm23` column that applied before the lanes were split; that column has not been measured on LLVM24, and a committed `llvm24` column automatically takes precedence. `error` refuses the lowering with `ArchDomainError` unless the cell is waived in `arch_domain_waivers.json`; `warn` reports it as `ArchDomainWarning` and keeps lowering; `off` skips the lookup. Case and surrounding whitespace are ignored; any other value raises. The C++ engine reads it too, and refuses in `error` mode with the same message. See [`../../../TESTING.md`](../../../TESTING.md), the arch-domain gate. |
 | `ROCKE_DEBUG` | `1` (unset) | Verbose engine diagnostics during build/lowering. |
 | `ROCKE_DEBUG_LOC` | `1` (unset) | Record the Python call stack behind every op while the kernel builds, and lower it to DWARF inlining scopes, so an ATT trace maps instructions back to the source that authored them. Off by default for two reasons: it costs a stack walk per op (material on sweeps that build thousands of kernels), and populating `op.loc` **changes the emitted `.ll` bytes**, so the byte-identity gate and the IR goldens run without it. The added metadata does not change the generated ISA, so a trace captured with it on is still representative. `IRBuilder(capture_loc=True)` is the per-builder equivalent. Set it on the process that **builds** the kernel, not on the compiler; [`capture_wavescope_trace.py`](../optimization/utilities/tools/wavescope/capture_wavescope_trace.py) does that and the rest of the capture in one command. The same DWARF is what lets `rocgdb` name the authoring line behind a memory fault — see [`../development/debugging_rocgdb.md`](../development/debugging_rocgdb.md). |
 | `ROCKE_TIME` | `1` (unset) | Print phase timings for the build/lower/compile pipeline. |
@@ -26,6 +27,12 @@ For setup and the most common flags in context, see
 | Variable | Values (default) | Purpose |
 |---|---|---|
 | `ROCKE_GEMM_SPLIT_K` | `auto` \| `off` \| `<n>` (**auto**) | Split-K degree for CDNA UniversalGemm dispatch. `auto` runs the selection heuristic (engages split-K only for skinny / tall-N decode shapes whose grid leaves the CU-rich device idle; `1` for shapes that already fill it, keeping the default/square path byte-identical). `off` (or `0`/`1`) forces split-K disabled. `<n>` (>= 2) forces that degree, snapped down to the largest factor that evenly slices K. When engaged, the dispatcher launches a `(N_tiles, M_tiles, split_k)` grid and the caller must zero-init an f32 `[M, N]` workspace before launch and cast it back to the output dtype after. |
+
+## Convolution benchmark
+
+| Variable | Values (default) | Purpose |
+|---|---|---|
+| `ROCKE_CONV_SPLIT_K` | `auto` \| `off` \| `<n>` (**auto**) | Read by `library/benchmarks/common/benchmark_implicit_gemm_conv.py` only: forces the split-K degree of implicit-GEMM conv wgrad/dgrad combos that ask for auto (`--split-k -1`, and the resolver's degree in a sweep). The benchmark passes it to `kernels.common.conv_split_k.resolve_conv_split_k` as the explicit `override` argument; the resolver, dispatch and the kernel builders read no environment. `auto` uses the split-K cost model (`rocke.helpers.split_k_planner`) on arches that have one and the CK-formula heuristic elsewhere. `off` (or `0`/`1`) forces no split. `<n>` (>= 2) forces that degree, held to what the kernel can build (gridDim.z budget, reduction availability, and at most 128 for the packed bf16/fp16 atomic -- wgrad moves above that to the f32 workspace when it can); any other value is an error. An explicit `--split-k` degree is never overridden. Forward conv has no split-K path. |
 
 ## hipDNN provider
 
@@ -162,6 +169,7 @@ their explicit argument/environment precedence is unchanged. Offline IR emission
 requires an explicit flavor. COMGR compilation requires a known compiler version
 even with an emission override or an unrecognised input datalayout.
 
-The detected LLVM version selects a baseline flavor; it does not prove that
-all builds of that version share an exact DataLayout or intrinsic catalog.
-Toolchain-specific compilation and drift tests remain necessary.
+The detected LLVM version selects a qualified compiler lane, which then selects
+an emission profile. LLVM23 and LLVM24 currently share one profile. That does not
+prove every build of either major has an identical DataLayout or intrinsic
+catalog; toolchain-specific compilation and drift tests remain necessary.
