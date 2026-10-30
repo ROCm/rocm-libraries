@@ -2541,9 +2541,9 @@ def _select_gfx942_flash_num_warps(problem: UnifiedAttentionProblem, arch: str) 
     Mirrors attention_spec_builder._tiled_spec_from_problem so the launch-meta
     grid/block matches the geometry the launcher actually builds:
       * ring active (fp16, or bf16 D64/D128 prefill): the wide sliced-K ring
-        geometry -> _gfx942_flash_wide_setting() (nw=4 by default; 2 or 0 via
-        HIPDNN_GFX942_FLASH_WIDE). A 0/disabled setting means the L4 (WG=64)
-        fallback, i.e. num_warps=1.
+        geometry -> _gfx942_flash_wide_setting() (nw=4 by default; 2 via
+        HIPDNN_GFX942_FLASH_WIDE). A 0/disabled setting turns the ring off and
+        selects the L4 (WG=64) fallback, i.e. num_warps=1 for fp16.
       * bf16 without the ring: the legacy bf16-wide geometry (nw=2, or the
         smalltile double-K nw).
     D64 and D128 prefill share the wide (num_warps=4) sliced-K ring path (the ring
@@ -2663,6 +2663,10 @@ def _enable_gfx942_flash_k_sliced_ring(
         )
         and problem.head_size in (64, 128)
     ):
+        return False
+    # The ring needs the wide cfvst geometry; HIPDNN_GFX942_FLASH_WIDE=0 selects
+    # the non-ring L4 fallback, so the ring is off even when forced on.
+    if _gfx942_flash_wide_setting() == 0:
         return False
     env = (
         __import__("os").environ.get("HIPDNN_GFX942_K_SLICED_RING", "").strip().lower()
