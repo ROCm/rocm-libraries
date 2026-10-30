@@ -295,7 +295,29 @@ void sytf2_sytrf_getError(const rocblas_handle handle,
     *max_err = 0;
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        err = norm_error('F', n, n, lda, hA[b], hARes[b]);
+        // singular = 2: the factorization of the matrix with a NaN pivot has NaN entries, which
+        // must be where LAPACK's are (each other position counts as an error); the other entries
+        // are compared as usual
+        double nan_err = 0;
+        if(singular == 2 && b == bc / 2)
+        {
+            auto is_nan
+                = [](const T x) { return std::isnan(std::real(x)) || std::isnan(std::imag(x)); };
+            for(rocblas_int j = 0; j < n; j++)
+            {
+                for(rocblas_int i = 0; i < n; i++)
+                {
+                    T& x = hA[b][i + j * lda];
+                    T& y = hARes[b][i + j * lda];
+                    if(is_nan(x) != is_nan(y))
+                        nan_err++;
+                    if(is_nan(x) || is_nan(y))
+                        x = y = 0;
+                }
+            }
+        }
+
+        err = norm_error('F', n, n, lda, hA[b], hARes[b]) + nan_err;
         *max_err = rocblas_max_nan(err, *max_err);
 
         // also check pivoting (count the number of incorrect pivots)
