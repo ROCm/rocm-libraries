@@ -38,6 +38,8 @@
 
 #include <stdint.h>
 
+#include _HIPCUB_STD_INCLUDE(mdspan)
+
 template<class ValueType,
          class SizeType,
          bool     Shuffled   = false,
@@ -228,7 +230,8 @@ TYPED_TEST(DeviceBatchCopyTests, SizeAndTypeVariation)
                                           d_buffer_srcs,
                                           d_buffer_dsts,
                                           d_buffer_sizes,
-                                          num_buffers));
+                                          num_buffers,
+                                          hipStreamDefault));
 
     void* d_temp_storage{};
 
@@ -332,4 +335,249 @@ TYPED_TEST(DeviceBatchCopyTests, SizeAndTypeVariation)
     HIP_CHECK(hipFree(d_buffer_sizes));
 
     HIP_CHECK(hipFree(d_temp_storage));
+}
+
+template<class Dims, class InLayout = _HIPCUB_STD::layout_right, class OutLayout = InLayout>
+struct DeviceCopyParams
+{
+    using dims_type       = Dims;
+    using in_layout_type  = InLayout;
+    using out_layout_type = OutLayout;
+};
+
+template<class Params>
+struct DeviceCopyTests : public ::testing::Test
+{
+    using dims_type       = typename Params::dims_type;
+    using in_layout_type  = typename Params::in_layout_type;
+    using out_layout_type = typename Params::out_layout_type;
+};
+
+using DeviceCopyTestsParams = ::testing::Types<
+    // Matching layouts
+    DeviceCopyParams<_HIPCUB_STD::dims<1, int>>,
+    DeviceCopyParams<_HIPCUB_STD::dims<2, int>>,
+    DeviceCopyParams<_HIPCUB_STD::dims<4, int>>,
+    // Compatible layouts
+    DeviceCopyParams<_HIPCUB_STD::dims<2, int>,
+                     _HIPCUB_STD::layout_left,
+                     _HIPCUB_STD::layout_stride>,
+    DeviceCopyParams<_HIPCUB_STD::dims<4, int>,
+                     _HIPCUB_STD::layout_right,
+                     _HIPCUB_STD::layout_stride>,
+    // Strided layouts
+    DeviceCopyParams<_HIPCUB_STD::dims<2, int>,
+                     _HIPCUB_STD::layout_stride,
+                     _HIPCUB_STD::layout_stride>,
+    // Strided + contiguous layouts
+    DeviceCopyParams<_HIPCUB_STD::dims<2, int>,
+                     _HIPCUB_STD::layout_stride,
+                     _HIPCUB_STD::layout_right>>;
+
+TYPED_TEST_SUITE(DeviceCopyTests, DeviceCopyTestsParams);
+
+TEST(DeviceCopyTests, CopyAPI)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using value_type                   = int;
+    constexpr unsigned int N           = 10;
+    constexpr unsigned int M           = 8;
+    constexpr auto         num_items   = N * M;
+    constexpr auto         memory_size = num_items * sizeof(value_type);
+
+    using extents_type   = _HIPCUB_STD::extents<value_type, N, M>;
+    using mdspan_in_type = _HIPCUB_STD::mdspan<value_type, extents_type, _HIPCUB_STD::layout_right>;
+    using mdspan_out_type = _HIPCUB_STD::mdspan<value_type, extents_type, _HIPCUB_STD::layout_left>;
+
+    std::vector<value_type> h_input(num_items, static_cast<value_type>(0));
+
+    // Device pointers
+    value_type* d_input  = nullptr;
+    value_type* d_output = nullptr;
+
+    // Allocate and initialize memory
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, memory_size));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, memory_size));
+    HIP_CHECK(hipMemcpy(d_input, h_input.data(), memory_size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemset(d_output, static_cast<value_type>(42), memory_size));
+
+    mdspan_in_type  mdspan_in(d_input, extents_type{});
+    mdspan_out_type mdspan_out(d_output, extents_type{});
+
+    // Calculate temporary storage
+    size_t temp_storage_bytes = 0;
+    HIP_CHECK(hipcub::DeviceCopy::Copy(nullptr,
+                                       temp_storage_bytes,
+                                       mdspan_in,
+                                       mdspan_out,
+                                       hipStreamDefault));
+    void* d_temp_storage{};
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+
+    // Run copy
+    HIP_CHECK(hipcub::DeviceCopy::Copy(d_temp_storage,
+                                       temp_storage_bytes,
+                                       mdspan_in,
+                                       mdspan_out,
+                                       hipStreamDefault));
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    std::vector<value_type> output(num_items);
+    HIP_CHECK(hipMemcpy(output.data(), d_output, memory_size, hipMemcpyDeviceToHost));
+
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_temp_storage));
+
+    // Check if output values are as expected
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, h_input));
+}
+
+TEST(DeviceCopyTests, CopyEmpty)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using value_type      = int;
+    using dims_type       = _HIPCUB_STD::dims<1, int>;
+    using mdspan_in_type  = _HIPCUB_STD::mdspan<value_type, dims_type>;
+    using mdspan_out_type = _HIPCUB_STD::mdspan<value_type, dims_type>;
+
+    mdspan_in_type  mdspan_in(nullptr, 0);
+    mdspan_out_type mdspan_out(nullptr, 0);
+
+    // Calculate temporary storage
+    size_t temp_storage_bytes = 0;
+    HIP_CHECK(hipcub::DeviceCopy::Copy(nullptr,
+                                       temp_storage_bytes,
+                                       mdspan_in,
+                                       mdspan_out,
+                                       hipStreamDefault));
+    void* d_temp_storage{};
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+
+    // Run copy
+    HIP_CHECK(hipcub::DeviceCopy::Copy(d_temp_storage,
+                                       temp_storage_bytes,
+                                       mdspan_in,
+                                       mdspan_out,
+                                       hipStreamDefault));
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    HIP_CHECK(hipFree(d_temp_storage));
+}
+
+template<class DimsT, class LayoutT, class OtherLayoutT, class T>
+auto init_mdspan(T* handle, T init_value)
+{
+    constexpr size_t rank = DimsT::rank();
+    using array_type      = _HIPCUB_STD::array<T, DimsT::rank()>;
+    using mdspan_type     = _HIPCUB_STD::mdspan<T, DimsT, LayoutT>;
+    using mapping_type    = typename mdspan_type::mapping_type;
+
+    array_type dims{};
+    dims.fill(init_value);
+    DimsT extents(dims);
+    if constexpr(std::is_same_v<LayoutT, _HIPCUB_STD::layout_stride>)
+    {
+        array_type     strides{};
+        constexpr bool is_other_stride = std::is_same_v<OtherLayoutT, _HIPCUB_STD::layout_stride>;
+        constexpr bool is_other_left   = std::is_same_v<OtherLayoutT, _HIPCUB_STD::layout_left>;
+        if constexpr(is_other_stride || is_other_left)
+        {
+            strides[0] = 1;
+            for(size_t i = 1; i < DimsT::rank(); ++i)
+            {
+                strides[i] = strides[i - 1] * init_value;
+            }
+        }
+        else
+        {
+            strides[rank - 1] = 1;
+            for(int i = rank - 2; i >= 0; --i)
+            {
+                strides[i] = strides[i + 1] * init_value;
+            }
+        }
+        mapping_type mapping{extents, strides};
+        return mdspan_type(handle, mapping);
+    }
+    else
+    {
+        mapping_type mapping{extents};
+        return mdspan_type(handle, mapping);
+    }
+};
+
+TYPED_TEST(DeviceCopyTests, CopyLayout)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using value_type      = int;
+    using dims_type       = typename TestFixture::dims_type;
+    using in_layout_type  = typename TestFixture::in_layout_type;
+    using out_layout_type = typename TestFixture::out_layout_type;
+
+    constexpr size_t num_items   = 10000;
+    constexpr size_t memory_size = num_items * sizeof(value_type);
+    double           pow         = 1.0 / dims_type::rank();
+    const size_t     rank_dim    = std::pow(num_items, pow);
+    std::cout << "using ranks_dim=" << rank_dim << " for " << dims_type::rank() << " ranks "
+              << std::endl;
+
+    std::vector<value_type> h_input(num_items, static_cast<value_type>(0));
+    std::iota(h_input.begin(), h_input.end(), 0);
+
+    // Device pointers
+    value_type* d_input  = nullptr;
+    value_type* d_output = nullptr;
+
+    // Allocate and initialize memory
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, memory_size));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, memory_size));
+    HIP_CHECK(hipMemcpy(d_input, h_input.data(), memory_size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemset(d_output, static_cast<value_type>(42), memory_size));
+
+    auto mdspan_in = init_mdspan<dims_type, in_layout_type, out_layout_type>(
+        d_input,
+        static_cast<value_type>(rank_dim));
+    auto mdspan_out = init_mdspan<dims_type, out_layout_type, in_layout_type>(
+        d_output,
+        static_cast<value_type>(rank_dim));
+
+    // Calculate temporary storage
+    size_t temp_storage_bytes = 0;
+    HIP_CHECK(hipcub::DeviceCopy::Copy(nullptr,
+                                       temp_storage_bytes,
+                                       mdspan_in,
+                                       mdspan_out,
+                                       hipStreamDefault));
+    void* d_temp_storage{};
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+
+    // Run copy
+    HIP_CHECK(hipcub::DeviceCopy::Copy(d_temp_storage,
+                                       temp_storage_bytes,
+                                       mdspan_in,
+                                       mdspan_out,
+                                       hipStreamDefault));
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    std::vector<value_type> h_output(num_items);
+    HIP_CHECK(hipMemcpy(h_output.data(), d_output, memory_size, hipMemcpyDeviceToHost));
+
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_temp_storage));
+
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(h_output, h_input));
 }

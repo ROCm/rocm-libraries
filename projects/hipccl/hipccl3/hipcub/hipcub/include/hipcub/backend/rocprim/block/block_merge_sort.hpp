@@ -39,6 +39,8 @@
 #include <rocprim/detail/various.hpp> // IWYU pragma: export
 #include <rocprim/functional.hpp> // IWYU pragma: export
 
+#include _HIPCUB_LIBCXX_INCLUDE(__cmath/pow2.h)
+
 BEGIN_HIPCUB_NAMESPACE
 
 
@@ -80,15 +82,15 @@ HIPCUB_DEVICE __forceinline__ OffsetT MergePath(KeyIteratorT keys1,
    return keys1_begin;
 }
 
-template<typename KeyIt, typename KeyT, typename CompareOp, int ITEMS_PER_THREAD>
+template<typename KeyIt, typename KeyT, typename CompareOp, int ItemsPerThread>
 HIPCUB_DEVICE __forceinline__
 void SerialMerge(KeyIt keys_shared,
                  int   keys1_beg,
                  int   keys2_beg,
                  int   keys1_count,
                  int   keys2_count,
-                 KeyT (&output)[ITEMS_PER_THREAD],
-                 int (&indices)[ITEMS_PER_THREAD],
+                 KeyT (&output)[ItemsPerThread],
+                 int (&indices)[ItemsPerThread],
                  CompareOp compare_op,
                  KeyT      oob_default)
 {
@@ -99,7 +101,7 @@ void SerialMerge(KeyIt keys_shared,
    KeyT key2 = keys2_count != 0 ? keys_shared[keys2_beg] : oob_default;
 
    HIPCUB_SORT_MAYBE_UNROLL()
-   for (int item = 0; item < ITEMS_PER_THREAD; ++item)
+   for(int item = 0; item < ItemsPerThread; ++item)
    {
        bool p = (keys2_beg < keys2_end) &&
                 ((keys1_beg >= keys1_end)
@@ -119,15 +121,15 @@ void SerialMerge(KeyIt keys_shared,
    }
 }
 
-template<typename KeyIt, typename KeyT, typename CompareOp, int ITEMS_PER_THREAD>
+template<typename KeyIt, typename KeyT, typename CompareOp, int ItemsPerThread>
 HIPCUB_DEVICE __forceinline__
 void SerialMerge(KeyIt keys_shared,
                  int   keys1_beg,
                  int   keys2_beg,
                  int   keys1_count,
                  int   keys2_count,
-                 KeyT (&output)[ITEMS_PER_THREAD],
-                 int (&indices)[ITEMS_PER_THREAD],
+                 KeyT (&output)[ItemsPerThread],
+                 int (&indices)[ItemsPerThread],
                  CompareOp compare_op)
 {
     SerialMerge(keys_shared,
@@ -155,20 +157,20 @@ void SerialMerge(KeyIt keys_shared,
  * @code
  * #include <hipcub/hipcub.hpp> // or equivalently <hipcub/block/block_merge_sort.hpp>
  *
- * constexpr int BLOCK_THREADS = 256;
- * constexpr int ITEMS_PER_THREAD = 9;
+ * constexpr int BlockThreads = 256;
+ * constexpr int ItemsPerThread = 9;
  *
  * class BlockMergeSort : public BlockMergeSortStrategy<int,
  *                                                      hipcub::NullType,
- *                                                      BLOCK_THREADS,
- *                                                      ITEMS_PER_THREAD,
+ *                                                      BlockThreads,
+ *                                                      ItemsPerThread,
  *                                                      BlockMergeSort>
  * {
  *   using BlockMergeSortStrategyT =
  *     BlockMergeSortStrategy<int,
  *                            hipcub::NullType,
- *                            BLOCK_THREADS,
- *                            ITEMS_PER_THREAD,
+ *                            BlockThreads,
+ *                            ItemsPerThread,
  *                            BlockMergeSort>;
  * public:
  *   __device__ __forceinline__ explicit BlockMergeSort(
@@ -193,30 +195,28 @@ void SerialMerge(KeyIt keys_shared,
  *   Provides a way of synchronizing threads. Should be derived from
  *   `BlockMergeSortStrategy`.
  */
-template <typename KeyT,
-          typename ValueT,
-          int NUM_THREADS,
-          int ITEMS_PER_THREAD,
-          typename SynchronizationPolicy,
-          bool WARP_SORT = false>
+template<typename KeyT,
+         typename ValueT,
+         int NumThreads,
+         int ItemsPerThread,
+         typename SynchronizationPolicy,
+         bool WARP_SORT = false>
 class BlockMergeSortStrategy
 {
-  static_assert(PowerOfTwo<NUM_THREADS>::VALUE,
-                "NUM_THREADS must be a power of two");
+    static_assert(_HIPCUB_LIBCXX::is_power_of_two(NumThreads), "NumThreads must be a power of two");
 
 private:
+    static constexpr int ITEMS_PER_TILE = ItemsPerThread * NumThreads;
 
-  static constexpr int ITEMS_PER_TILE = ITEMS_PER_THREAD * NUM_THREADS;
+    // Whether or not there are values to be trucked along with keys
+    static constexpr bool KEYS_ONLY = ::rocprim::Equals<ValueT, NullType>::VALUE;
 
-  // Whether or not there are values to be trucked along with keys
-  static constexpr bool KEYS_ONLY = ::rocprim::Equals<ValueT, NullType>::VALUE;
-
-  /// Shared memory type required by this thread block
-  union _TempStorage
-  {
-    KeyT keys_shared[ITEMS_PER_TILE + 1];
-    ValueT items_shared[ITEMS_PER_TILE + 1];
-  }; // union TempStorage
+    /// Shared memory type required by this thread block
+    union _TempStorage
+    {
+        KeyT   keys_shared[ITEMS_PER_TILE + 1];
+        ValueT items_shared[ITEMS_PER_TILE + 1];
+    }; // union TempStorage
 
   /// Shared storage reference
   _TempStorage &temp_storage;
@@ -273,12 +273,12 @@ public:
    *
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
-  template <typename CompareOp>
-  HIPCUB_DEVICE __forceinline__ void Sort(KeyT (&keys)[ITEMS_PER_THREAD],
-                                       CompareOp compare_op)
+  template<typename CompareOp>
+  HIPCUB_DEVICE __forceinline__
+  void Sort(KeyT (&keys)[ItemsPerThread], CompareOp compare_op)
   {
-    ValueT items[ITEMS_PER_THREAD];
-    Sort<CompareOp, false>(keys, items, compare_op, ITEMS_PER_TILE, keys[0]);
+      ValueT items[ItemsPerThread];
+      Sort<CompareOp, false>(keys, items, compare_op, ITEMS_PER_TILE, keys[0]);
   }
 
   /**
@@ -293,7 +293,7 @@ public:
    *   `valid_items` boundaries. It's expected that `oob_default` is ordered
    *   after any value in the `valid_items` boundaries. The algorithm always
    *   sorts a fixed amount of elements, which is equal to
-   *   `ITEMS_PER_THREAD * BLOCK_THREADS`. If there is a value that is ordered
+   *   `ItemsPerThread * BlockThreads`. If there is a value that is ordered
    *   after `oob_default`, it won't be placed within `valid_items` boundaries.
    *
    * @tparam CompareOp
@@ -315,14 +315,12 @@ public:
    *
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
-  template <typename CompareOp>
-  HIPCUB_DEVICE __forceinline__ void Sort(KeyT (&keys)[ITEMS_PER_THREAD],
-                                       CompareOp compare_op,
-                                       int valid_items,
-                                       KeyT oob_default)
+  template<typename CompareOp>
+  HIPCUB_DEVICE __forceinline__
+  void Sort(KeyT (&keys)[ItemsPerThread], CompareOp compare_op, int valid_items, KeyT oob_default)
   {
-    ValueT items[ITEMS_PER_THREAD];
-    Sort<CompareOp, true>(keys, items, compare_op, valid_items, oob_default);
+      ValueT items[ItemsPerThread];
+      Sort<CompareOp, true>(keys, items, compare_op, valid_items, oob_default);
   }
 
   /**
@@ -349,10 +347,9 @@ public:
    *
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
-  template <typename CompareOp>
-  HIPCUB_DEVICE __forceinline__ void Sort(KeyT (&keys)[ITEMS_PER_THREAD],
-                                       ValueT (&items)[ITEMS_PER_THREAD],
-                                       CompareOp compare_op)
+  template<typename CompareOp>
+  HIPCUB_DEVICE __forceinline__
+  void Sort(KeyT (&keys)[ItemsPerThread], ValueT (&items)[ItemsPerThread], CompareOp compare_op)
   {
     Sort<CompareOp, false>(keys, items, compare_op, ITEMS_PER_TILE, keys[0]);
   }
@@ -369,7 +366,7 @@ public:
    *   `valid_items` boundaries. It's expected that `oob_default` is ordered
    *   after any value in the `valid_items` boundaries. The algorithm always
    *   sorts a fixed amount of elements, which is equal to
-   *   `ITEMS_PER_THREAD * BLOCK_THREADS`. If there is a value that is ordered
+   *   `ItemsPerThread * BlockThreads`. If there is a value that is ordered
    *   after `oob_default`, it won't be placed within `valid_items` boundaries.
    *
    * @tparam CompareOp
@@ -397,101 +394,99 @@ public:
    *
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
-  template <typename CompareOp,
-            bool IS_LAST_TILE = true>
-  HIPCUB_DEVICE __forceinline__ void Sort(KeyT (&keys)[ITEMS_PER_THREAD],
-                                       ValueT (&items)[ITEMS_PER_THREAD],
-                                       CompareOp compare_op,
-                                       int valid_items,
-                                       KeyT oob_default)
+  template<typename CompareOp, bool IS_LAST_TILE = true>
+  HIPCUB_DEVICE __forceinline__
+  void Sort(KeyT (&keys)[ItemsPerThread],
+            ValueT (&items)[ItemsPerThread],
+            CompareOp compare_op,
+            int       valid_items,
+            KeyT      oob_default)
   {
-    if (IS_LAST_TILE)
-    {
-      // if last tile, find valid max_key
-      // and fill the remaining keys with it
-      //
-      KeyT max_key = oob_default;
-
-      HIPCUB_SORT_MAYBE_UNROLL()
-      for (int item = WARP_SORT ? 1 : 0; item < ITEMS_PER_THREAD; ++item)
+      if constexpr(IS_LAST_TILE)
       {
-        if (ITEMS_PER_THREAD * static_cast<int>(linear_tid) + item < valid_items)
-        {
-          max_key = compare_op(max_key, keys[item]) ? keys[item] : max_key;
-        }
-        else
-        {
-          keys[item] = max_key;
-        }
+          // if last tile, find valid max_key
+          // and fill the remaining keys with it
+          //
+          KeyT max_key = oob_default;
+
+          HIPCUB_SORT_MAYBE_UNROLL()
+          for(int item = WARP_SORT ? 1 : 0; item < ItemsPerThread; ++item)
+          {
+              if(ItemsPerThread * static_cast<int>(linear_tid) + item < valid_items)
+              {
+                  max_key = compare_op(max_key, keys[item]) ? keys[item] : max_key;
+              }
+              else
+              {
+                  keys[item] = max_key;
+              }
+          }
       }
-    }
 
     // if first element of thread is in input range, stable sort items
     //
-    if (!IS_LAST_TILE || ITEMS_PER_THREAD * static_cast<int>(linear_tid) < valid_items)
-    {
-      StableOddEvenSort(keys, items, compare_op);
-    }
+      if(!IS_LAST_TILE || ItemsPerThread * static_cast<int>(linear_tid) < valid_items)
+      {
+          StableOddEvenSort(keys, items, compare_op);
+      }
 
     // each thread has sorted keys
     // merge sort keys in shared memory
     //
     HIPCUB_PRAGMA_NOUNROLL()
-    for (int target_merged_threads_number = 2;
-         target_merged_threads_number <= NUM_THREADS;
-         target_merged_threads_number *= 2)
+    for(int target_merged_threads_number = 2; target_merged_threads_number <= NumThreads;
+        target_merged_threads_number *= 2)
     {
-      int merged_threads_number = target_merged_threads_number / 2;
-      int mask = target_merged_threads_number - 1;
+        const int merged_threads_number = target_merged_threads_number / 2;
+        const int mask                  = target_merged_threads_number - 1;
+
+        Sync();
+
+        // store keys in shmem
+        //
+        HIPCUB_PRAGMA_NOUNROLL()
+        for(int item = 0; item < ItemsPerThread; ++item)
+        {
+            int idx                       = ItemsPerThread * linear_tid + item;
+            temp_storage.keys_shared[idx] = keys[item];
+        }
 
       Sync();
 
-      // store keys in shmem
-      //
-      HIPCUB_PRAGMA_NOUNROLL()
-      for (int item = 0; item < ITEMS_PER_THREAD; ++item)
-      {
-        int idx                       = ITEMS_PER_THREAD * linear_tid + item;
-        temp_storage.keys_shared[idx] = keys[item];
-      }
+      int indices[ItemsPerThread];
 
-      Sync();
+      const int first_thread_idx_in_thread_group_being_merged = ~mask & linear_tid;
+      const int start = ItemsPerThread * first_thread_idx_in_thread_group_being_merged;
+      const int size  = ItemsPerThread * merged_threads_number;
 
-      int indices[ITEMS_PER_THREAD];
+      const int thread_idx_in_thread_group_being_merged = mask & linear_tid;
 
-      int first_thread_idx_in_thread_group_being_merged = ~mask & linear_tid;
-      int start = ITEMS_PER_THREAD * first_thread_idx_in_thread_group_being_merged;
-      int size  = ITEMS_PER_THREAD * merged_threads_number;
+      const int COMPARE_NUM = WARP_SORT ? valid_items : ItemsPerThread * blockDim.x;
 
-      int thread_idx_in_thread_group_being_merged = mask & linear_tid;
+      const int diag
+          = (::rocprim::min)(COMPARE_NUM, ItemsPerThread * thread_idx_in_thread_group_being_merged);
 
-      const int COMPARE_NUM = WARP_SORT ? valid_items : ITEMS_PER_THREAD * blockDim.x;
+      const int keys1_beg = (::rocprim::min)(COMPARE_NUM, start);
+      const int keys1_end = (::rocprim::min)(COMPARE_NUM, keys1_beg + size);
+      const int keys2_beg = keys1_end;
+      const int keys2_end = (::rocprim::min)(COMPARE_NUM, keys2_beg + size);
 
-      int diag =
-        (::rocprim::min)(COMPARE_NUM,
-                   ITEMS_PER_THREAD * thread_idx_in_thread_group_being_merged);
+      const int keys1_count = keys1_end - keys1_beg;
+      const int keys2_count = keys2_end - keys2_beg;
 
-      int keys1_beg = (::rocprim::min)(COMPARE_NUM, start);
-      int keys1_end = (::rocprim::min)(COMPARE_NUM, keys1_beg + size);
-      int keys2_beg = keys1_end;
-      int keys2_end = (::rocprim::min)(COMPARE_NUM, keys2_beg + size);
+      const int partition_diag = MergePath<KeyT>(&temp_storage.keys_shared[keys1_beg],
+                                                 &temp_storage.keys_shared[keys2_beg],
+                                                 keys1_count,
+                                                 keys2_count,
+                                                 diag,
+                                                 compare_op);
 
-      int keys1_count = keys1_end - keys1_beg;
-      int keys2_count = keys2_end - keys2_beg;
-
-      int partition_diag = MergePath<KeyT>(&temp_storage.keys_shared[keys1_beg],
-                                           &temp_storage.keys_shared[keys2_beg],
-                                           keys1_count,
-                                           keys2_count,
-                                           diag,
-                                           compare_op);
-
-      int keys1_beg_loc   = keys1_beg + partition_diag;
-      int keys1_end_loc   = keys1_end;
-      int keys2_beg_loc   = keys2_beg + diag - partition_diag;
-      int keys2_end_loc   = keys2_end;
-      int keys1_count_loc = keys1_end_loc - keys1_beg_loc;
-      int keys2_count_loc = keys2_end_loc - keys2_beg_loc;
+      const int keys1_beg_loc   = keys1_beg + partition_diag;
+      const int keys1_end_loc   = keys1_end;
+      const int keys2_beg_loc   = keys2_beg + diag - partition_diag;
+      const int keys2_end_loc   = keys2_end;
+      const int keys1_count_loc = keys1_end_loc - keys1_beg_loc;
+      const int keys2_count_loc = keys2_end_loc - keys2_beg_loc;
       SerialMerge(&temp_storage.keys_shared[0],
                   keys1_beg_loc,
                   keys2_beg_loc,
@@ -501,17 +496,17 @@ public:
                   indices,
                   compare_op);
 
-      if (!KEYS_ONLY)
+      if constexpr(!KEYS_ONLY)
       {
         Sync();
 
         // store keys in shmem
         //
         HIPCUB_PRAGMA_NOUNROLL()
-        for (int item = 0; item < ITEMS_PER_THREAD; ++item)
+        for(int item = 0; item < ItemsPerThread; ++item)
         {
-          int idx = ITEMS_PER_THREAD * linear_tid + item;
-          temp_storage.items_shared[idx] = items[item];
+            int idx                        = ItemsPerThread * linear_tid + item;
+            temp_storage.items_shared[idx] = items[item];
         }
 
         Sync();
@@ -519,7 +514,7 @@ public:
         // gather items from shmem
         //
         HIPCUB_PRAGMA_NOUNROLL()
-        for (int item = 0; item < ITEMS_PER_THREAD; ++item)
+        for(int item = 0; item < ItemsPerThread; ++item)
         {
           items[item] = temp_storage.items_shared[indices[item]];
         }
@@ -550,9 +545,9 @@ public:
    *
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
-  template <typename CompareOp>
-  HIPCUB_DEVICE __forceinline__ void StableSort(KeyT (&keys)[ITEMS_PER_THREAD],
-                                             CompareOp compare_op)
+  template<typename CompareOp>
+  HIPCUB_DEVICE __forceinline__
+  void StableSort(KeyT (&keys)[ItemsPerThread], CompareOp compare_op)
   {
     Sort(keys, compare_op);
   }
@@ -583,10 +578,11 @@ public:
    *
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
-  template <typename CompareOp>
-  HIPCUB_DEVICE __forceinline__ void StableSort(KeyT (&keys)[ITEMS_PER_THREAD],
-                                             ValueT (&items)[ITEMS_PER_THREAD],
-                                             CompareOp compare_op)
+  template<typename CompareOp>
+  HIPCUB_DEVICE __forceinline__
+  void StableSort(KeyT (&keys)[ItemsPerThread],
+                  ValueT (&items)[ItemsPerThread],
+                  CompareOp compare_op)
   {
     Sort(keys, items, compare_op);
   }
@@ -604,7 +600,7 @@ public:
    *   `valid_items` boundaries. It's expected that `oob_default` is ordered
    *   after any value in the `valid_items` boundaries. The algorithm always
    *   sorts a fixed amount of elements, which is equal to
-   *   `ITEMS_PER_THREAD * BLOCK_THREADS`.
+   *   `ItemsPerThread * BlockThreads`.
    *   If there is a value that is ordered after `oob_default`, it won't be
    *   placed within `valid_items` boundaries.
    *
@@ -627,11 +623,12 @@ public:
    *
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
-  template <typename CompareOp>
-  HIPCUB_DEVICE __forceinline__ void StableSort(KeyT (&keys)[ITEMS_PER_THREAD],
-                                             CompareOp compare_op,
-                                             int valid_items,
-                                             KeyT oob_default)
+  template<typename CompareOp>
+  HIPCUB_DEVICE __forceinline__
+  void StableSort(KeyT (&keys)[ItemsPerThread],
+                  CompareOp compare_op,
+                  int       valid_items,
+                  KeyT      oob_default)
   {
     Sort(keys, compare_op, valid_items, oob_default);
   }
@@ -649,7 +646,7 @@ public:
    *   `valid_items` boundaries. It's expected that `oob_default` is ordered
    *   after any value in the `valid_items` boundaries. The algorithm always
    *   sorts a fixed amount of elements, which is equal to
-   *   `ITEMS_PER_THREAD * BLOCK_THREADS`. If there is a value that is ordered
+   *   `ItemsPerThread * BlockThreads`. If there is a value that is ordered
    *   after `oob_default`, it won't be placed within `valid_items` boundaries.
    *
    * @tparam CompareOp
@@ -677,13 +674,13 @@ public:
    *
    * [Strict Weak Ordering]: https://en.cppreference.com/w/cpp/concepts/strict_weak_order
    */
-  template <typename CompareOp,
-            bool IS_LAST_TILE = true>
-  HIPCUB_DEVICE __forceinline__ void StableSort(KeyT (&keys)[ITEMS_PER_THREAD],
-                                             ValueT (&items)[ITEMS_PER_THREAD],
-                                             CompareOp compare_op,
-                                             int valid_items,
-                                             KeyT oob_default)
+  template<typename CompareOp, bool IS_LAST_TILE = true>
+  HIPCUB_DEVICE __forceinline__
+  void StableSort(KeyT (&keys)[ItemsPerThread],
+                  ValueT (&items)[ItemsPerThread],
+                  CompareOp compare_op,
+                  int       valid_items,
+                  KeyT      oob_default)
   {
     Sort<CompareOp, IS_LAST_TILE>(keys,
                                   items,
@@ -707,21 +704,21 @@ private:
  * @tparam KeyT
  *   KeyT type
  *
- * @tparam BLOCK_DIM_X
+ * @tparam BlockDimX
  *   The thread block length in threads along the X dimension
  *
- * @tparam ITEMS_PER_THREAD
+ * @tparam ItemsPerThread
  *   The number of items per thread
  *
  * @tparam ValueT
  *   **[optional]** ValueT type (default: `hipcub::NullType`, which indicates
  *   a keys-only sort)
  *
- * @tparam BLOCK_DIM_Y
+ * @tparam BlockDimY
  *   **[optional]** The thread block length in threads along the Y dimension
  *   (default: 1)
  *
- * @tparam BLOCK_DIM_Z
+ * @tparam BlockDimZ
  *   **[optional]** The thread block length in threads along the Z dimension
  *   (default: 1)
  *
@@ -778,48 +775,38 @@ private:
  *
  * This example can be easily adapted to the storage required by BlockMergeSort.
  */
-template <typename KeyT,
-          int BLOCK_DIM_X,
-          int ITEMS_PER_THREAD,
-          typename ValueT = NullType,
-          int BLOCK_DIM_Y = 1,
-          int BLOCK_DIM_Z = 1>
+template<typename KeyT,
+         int BlockDimX,
+         int ItemsPerThread,
+         typename ValueT = NullType,
+         int BlockDimY   = 1,
+         int BlockDimZ   = 1>
 class BlockMergeSort
-    : public BlockMergeSortStrategy<KeyT,
-                                    ValueT,
-                                    BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
-                                    ITEMS_PER_THREAD,
-                                    BlockMergeSort<KeyT,
-                                                   BLOCK_DIM_X,
-                                                   ITEMS_PER_THREAD,
-                                                   ValueT,
-                                                   BLOCK_DIM_Y,
-                                                   BLOCK_DIM_Z>>
+    : public BlockMergeSortStrategy<
+          KeyT,
+          ValueT,
+          BlockDimX * BlockDimY * BlockDimZ,
+          ItemsPerThread,
+          BlockMergeSort<KeyT, BlockDimX, ItemsPerThread, ValueT, BlockDimY, BlockDimZ>>
 {
 private:
   // The thread block size in threads
-  static constexpr int BLOCK_THREADS = BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z;
-  static constexpr int ITEMS_PER_TILE = ITEMS_PER_THREAD * BLOCK_THREADS;
+    static constexpr int BlockThreads   = BlockDimX * BlockDimY * BlockDimZ;
+    static constexpr int ITEMS_PER_TILE = ItemsPerThread * BlockThreads;
 
-  using BlockMergeSortStrategyT =
-    BlockMergeSortStrategy<KeyT,
-                           ValueT,
-                           BLOCK_THREADS,
-                           ITEMS_PER_THREAD,
-                           BlockMergeSort>;
+    using BlockMergeSortStrategyT
+        = BlockMergeSortStrategy<KeyT, ValueT, BlockThreads, ItemsPerThread, BlockMergeSort>;
 
 public:
-  HIPCUB_DEVICE __forceinline__ BlockMergeSort()
-      : BlockMergeSortStrategyT(
-          RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
-  {}
+    HIPCUB_DEVICE __forceinline__
+    BlockMergeSort()
+        : BlockMergeSortStrategyT(RowMajorTid(BlockDimX, BlockDimY, BlockDimZ))
+    {}
 
-  HIPCUB_DEVICE __forceinline__ explicit BlockMergeSort(
-    typename BlockMergeSortStrategyT::TempStorage &temp_storage)
-      : BlockMergeSortStrategyT(
-          temp_storage,
-          RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
-  {}
+    HIPCUB_DEVICE __forceinline__
+    explicit BlockMergeSort(typename BlockMergeSortStrategyT::TempStorage& temp_storage)
+        : BlockMergeSortStrategyT(temp_storage, RowMajorTid(BlockDimX, BlockDimY, BlockDimZ))
+    {}
 
 private:
   HIPCUB_DEVICE __forceinline__ void SyncImplementation() const

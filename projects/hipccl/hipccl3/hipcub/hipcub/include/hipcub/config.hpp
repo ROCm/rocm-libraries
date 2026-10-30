@@ -259,14 +259,6 @@ END_HIPCUB_NAMESPACE
 /// if they are not.
 #define HIPCUB_TEMPLATE(...) _CCCL_TEMPLATE(__VA_ARGS__)
 
-#ifndef HIPCUB_TRAIT
-    #if defined(__HIP_PLATFORM_NVIDIA__)
-        #define HIPCUB_TRAIT(__TRAIT, ...) _CCCL_TRAIT(__TRAIT, __VA_ARGS__)
-    #else
-        #define HIPCUB_TRAIT(__TRAIT, ...) __TRAIT##_v<__VA_ARGS__>
-    #endif
-#endif // HIPCUB_TRAIT
-
 // This API needs to be deprecated once libhipcxx is available.
 #ifndef HIPCUB_PRAGMA_UNROLL_FULL
     #define HIPCUB_PRAGMA_UNROLL_FULL() _Pragma("unroll")
@@ -305,16 +297,20 @@ END_HIPCUB_NAMESPACE
         while(0)
 #endif // HIPCUB_TRY_CUDA_API
 
+#ifndef HIPCUB_ASSERT
+    #define HIPCUB_ASSERT(expression, message, ...) _CCCL_ASSERT(expression, message);
+#endif // HIPCUB_ASSERT
+
 #ifndef HIPCUB_ASSERT_CUDA_API
-    #define HIPCUB_ASSERT_CUDA_API(_NAME, _MSG, ...)     \
-        do                                               \
-        {                                                \
-            [[maybe_unused]]                             \
-            const ::hipError_t __status                  \
-                = _NAME(__VA_ARGS__);                    \
-            (void)::hipGetLastError();                   \
-            _CCCL_ASSERT(__status == cudaSuccess, _MSG); \
-        }                                                \
+    #define HIPCUB_ASSERT_CUDA_API(_NAME, _MSG, ...)      \
+        do                                                \
+        {                                                 \
+            [[maybe_unused]]                              \
+            const ::hipError_t __status                   \
+                = _NAME(__VA_ARGS__);                     \
+            (void)::hipGetLastError();                    \
+            HIPCUB_ASSERT(__status == cudaSuccess, _MSG); \
+        }                                                 \
         while(0)
 #endif // HIPCUB_ASSERT_CUDA_API
 

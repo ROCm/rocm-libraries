@@ -648,14 +648,11 @@ inline constexpr auto ceiling_div(const T a, const U b)
 
 #if defined(__HIP_PLATFORM_AMD__)
 
-template<typename IndexType, std::size_t... Dims>
-using extents = ::hipcub::extents<IndexType, Dims...>;
-
 template<typename Extents>
 struct extents_size;
 
 template<typename IndexType, std::size_t... Dims>
-struct extents_size<extents<IndexType, Dims...>>
+struct extents_size<_HIPCUB_STD::extents<IndexType, Dims...>>
 {
     static constexpr std::size_t value = (Dims * ... * 1);
 };
@@ -789,6 +786,28 @@ struct segments_index_to_offset_op
             return size;
         }
     }
+};
+
+template<class...>
+struct merge_sequence
+{};
+
+template<class... Args>
+struct merge_sequence<::testing::Types<Args...>>
+{
+    using type = ::testing::Types<Args...>;
+};
+
+template<class... Args1, class... Args2>
+struct merge_sequence<::testing::Types<Args1...>, ::testing::Types<Args2...>>
+{
+    using type = ::testing::Types<Args1..., Args2...>;
+};
+
+template<class T1, class T2, class... Ts>
+struct merge_sequence<T1, T2, Ts...>
+{
+    using type = typename merge_sequence<typename merge_sequence<T1, T2>::type, Ts...>::type;
 };
 
 } // namespace test_utils

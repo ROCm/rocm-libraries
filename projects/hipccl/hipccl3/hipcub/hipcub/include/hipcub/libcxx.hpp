@@ -59,40 +59,38 @@
 // clang-format off
 
 // If the '::cuda::std' namespace from 'libcudacxx' or 'libhipcxx' is available.
-#if HIPCUB_HAS_INCLUDE(<cuda/std/version>)
-    #include <cuda/std/version>
-    #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION) \
-        && (defined(_CUDA_VSTD) || defined(_CCCL_BEGIN_NAMESPACE_CUDA_STD))
+#if HIPCUB_HAS_INCLUDE(<cuda/std/__internal/version.h>)
+    #include <cuda/std/__internal/version.h>
+    #include <cuda/std/__internal/namespaces.h> // for _CCCL_[BEGIN,END]_NAMESPACE_CUDA_STD
+    // If version matches.
+    #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION)
         #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(cuda/LIB)
         #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(cuda/std/LIB)
         #define _HIPCUB_LIBCXX ::cuda
+        #define _HIPCUB_LIBCXX_EXEC _HIPCUB_LIBCXX::execution
+        #define _HIPCUB_STD _HIPCUB_LIBCXX::std
+        #define _HIPCUB_STD_EXEC _HIPCUB_STD::execution
         #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
+        #define _HIPCUB_STD_NAMESPACE_BEGIN _CCCL_BEGIN_NAMESPACE_CUDA_STD
+        #define _HIPCUB_STD_NAMESPACE_END _CCCL_END_NAMESPACE_CUDA_STD
     #endif
 #endif
 // Otherwise, if the '::hip::std' namespace from 'libhipcxx' is available.
-#if !defined(_HIPCUB_HAS_DEVICE_SYSTEM_STD) && HIPCUB_HAS_INCLUDE(<hip/std/version>)
-    #include <hip/std/version>
-    #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION) \
-        && (defined(_CUDA_VSTD) || defined(_CCCL_BEGIN_NAMESPACE_CUDA_STD))
+#if !defined(_HIPCUB_HAS_DEVICE_SYSTEM_STD) && HIPCUB_HAS_INCLUDE(<hip/std/__internal/version.h>)
+    #include <hip/std/__internal/version.h>
+    #include <cuda/std/__internal/namespaces.h> // for _CCCL_[BEGIN,END]_NAMESPACE_CUDA_STD
+    // If version matches and '_CUDA_VSTD' is available.
+    #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION)
         #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(hip/LIB)
         #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(hip/std/LIB)
         // In 'libhipcxx' the '::hip' namespace is synonymous with '::cuda'.
         #define _HIPCUB_LIBCXX ::hip
+        #define _HIPCUB_LIBCXX_EXEC _HIPCUB_LIBCXX::execution
+        #define _HIPCUB_STD _HIPCUB_LIBCXX::std
+        #define _HIPCUB_STD_EXEC _HIPCUB_STD::execution
         #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 1
-    #endif
-#endif
-
-#ifdef _HIPCUB_HAS_DEVICE_SYSTEM_STD
-    #ifdef _CCCL_BEGIN_NAMESPACE_CUDA_STD
-        #define _HIPCUB_STD ::cuda::std
-        #define _HIPCUB_STD_EXEC ::cuda::std::execution
         #define _HIPCUB_STD_NAMESPACE_BEGIN _CCCL_BEGIN_NAMESPACE_CUDA_STD
         #define _HIPCUB_STD_NAMESPACE_END _CCCL_END_NAMESPACE_CUDA_STD
-    #else
-        #define _HIPCUB_STD _CUDA_VSTD
-        #define _HIPCUB_STD_EXEC _CUDA_STD_EXEC
-        #define _HIPCUB_STD_NAMESPACE_BEGIN _LIBCUDACXX_BEGIN_NAMESPACE_STD
-        #define _HIPCUB_STD_NAMESPACE_END _LIBCUDACXX_END_NAMESPACE_STD
     #endif
 #endif
 

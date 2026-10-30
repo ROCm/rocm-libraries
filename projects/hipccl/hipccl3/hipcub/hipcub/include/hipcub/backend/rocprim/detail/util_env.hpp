@@ -28,9 +28,11 @@
 
 #include "temporary_storage.hpp"
 
-#include _HIPCUB_LIBCXX_INCLUDE(memory_resource)
-#include _HIPCUB_LIBCXX_INCLUDE(stream)
-#include _HIPCUB_STD_INCLUDE(execution)
+#include _HIPCUB_STD_INCLUDE(__execution/env.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__functional/call_or.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__memory_resource/get_memory_resource.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__stream/get_stream.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__stream/stream_ref.h)
 
 BEGIN_HIPCUB_NAMESPACE
 namespace detail
@@ -76,12 +78,12 @@ HIPCUB_RUNTIME_FUNCTION
 static hipError_t env_invoke(EnvT env, FuntionT&& func)
 {
     // Query properties from the environment
-    auto stream = _HIPCUB_STD_EXEC::__query_or(env,
-                                               _HIPCUB_LIBCXX::get_stream,
-                                               _HIPCUB_LIBCXX::stream_ref{hipStream_t{}});
-    auto mr     = _HIPCUB_STD_EXEC::__query_or(env,
-                                           _HIPCUB_LIBCXX::mr::__get_memory_resource,
-                                           detail::device_memory_resource{});
+    auto stream = _HIPCUB_LIBCXX::__call_or(_HIPCUB_LIBCXX::get_stream,
+                                            _HIPCUB_LIBCXX::stream_ref{hipStream_t{}},
+                                            env);
+    auto mr     = _HIPCUB_LIBCXX::__call_or(_HIPCUB_LIBCXX::mr::get_memory_resource,
+                                        detail::device_memory_resource{},
+                                        env);
 
     // Query and allocate temp storage
     void*  d_temp_storage     = nullptr;
@@ -105,6 +107,18 @@ static hipError_t env_invoke(EnvT env, FuntionT&& func)
     }
 
     return deallocate_error;
+}
+
+template<typename EnvT, typename FuntionT>
+HIPCUB_RUNTIME_FUNCTION
+static hipError_t legacy_invoke(EnvT env, FuntionT&& func)
+{
+    // Query properties from the environment/stream
+    auto stream = _HIPCUB_STD_EXEC::__query_or(env,
+                                               _HIPCUB_LIBCXX::get_stream,
+                                               _HIPCUB_LIBCXX::stream_ref{hipStream_t{}});
+    // Run
+    return func(stream.get());
 }
 } // namespace detail
 END_HIPCUB_NAMESPACE

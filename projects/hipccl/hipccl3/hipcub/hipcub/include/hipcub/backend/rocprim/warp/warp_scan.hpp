@@ -87,9 +87,33 @@ public:
 
     template<typename ScanOp>
     HIPCUB_DEVICE
+    inline void InclusiveScanPartial(T input, T& inclusive_output, ScanOp scan_op, int valid_items)
+    {
+        base_type::partial_inclusive_scan(input,
+                                          inclusive_output,
+                                          valid_items,
+                                          temp_storage_,
+                                          scan_op);
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE
     inline void InclusiveScan(T input, T& inclusive_output, T initial_value, ScanOp scan_op)
     {
         base_type::inclusive_scan(input, inclusive_output, temp_storage_, initial_value, scan_op);
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void InclusiveScanPartial(
+        T input, T& inclusive_output, T initial_value, ScanOp scan_op, int valid_items)
+    {
+        base_type::partial_inclusive_scan(input,
+                                          inclusive_output,
+                                          valid_items,
+                                          temp_storage_,
+                                          initial_value,
+                                          scan_op);
     }
 
     template<typename ScanOp>
@@ -100,6 +124,19 @@ public:
             input, inclusive_output, warp_aggregate,
             temp_storage_, scan_op
         );
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void InclusiveScanPartial(
+        T input, T& inclusive_output, ScanOp scan_op, int valid_items, T& warp_aggregate)
+    {
+        base_type::partial_inclusive_scan(input,
+                                          inclusive_output,
+                                          valid_items,
+                                          warp_aggregate,
+                                          temp_storage_,
+                                          scan_op);
     }
 
     template<typename ScanOp>
@@ -116,10 +153,39 @@ public:
     }
 
     template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void InclusiveScanPartial(T      input,
+                                     T&     inclusive_output,
+                                     T      initial_value,
+                                     ScanOp scan_op,
+                                     int    valid_items,
+                                     T&     warp_aggregate)
+    {
+        base_type::partial_inclusive_scan(input,
+                                          inclusive_output,
+                                          valid_items,
+                                          warp_aggregate,
+                                          temp_storage_,
+                                          initial_value,
+                                          scan_op);
+    }
+
+    template<typename ScanOp>
     HIPCUB_DEVICE inline
     void ExclusiveScan(T input, T& exclusive_output, ScanOp scan_op)
     {
         base_type::exclusive_scan(input, exclusive_output, temp_storage_, scan_op);
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void ExclusiveScanPartial(T input, T& exclusive_output, ScanOp scan_op, int valid_items)
+    {
+        base_type::partial_exclusive_scan(input,
+                                          exclusive_output,
+                                          valid_items,
+                                          temp_storage_,
+                                          scan_op);
     }
 
     template<typename ScanOp>
@@ -133,10 +199,36 @@ public:
     }
 
     template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void ExclusiveScanPartial(
+        T input, T& exclusive_output, T initial_value, ScanOp scan_op, int valid_items)
+    {
+        base_type::partial_exclusive_scan(input,
+                                          exclusive_output,
+                                          valid_items,
+                                          initial_value,
+                                          temp_storage_,
+                                          scan_op);
+    }
+
+    template<typename ScanOp>
     HIPCUB_DEVICE inline
     void ExclusiveScan(T input, T& exclusive_output, ScanOp scan_op, T& warp_aggregate)
     {
         base_type::exclusive_scan(input, exclusive_output, temp_storage_, warp_aggregate, scan_op);
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void ExclusiveScanPartial(
+        T input, T& exclusive_output, ScanOp scan_op, int valid_items, T& warp_aggregate)
+    {
+        base_type::partial_exclusive_scan(input,
+                                          exclusive_output,
+                                          valid_items,
+                                          temp_storage_,
+                                          warp_aggregate,
+                                          scan_op);
     }
 
     template<typename ScanOp>
@@ -150,11 +242,41 @@ public:
     }
 
     template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void ExclusiveScanPartial(T      input,
+                                     T&     exclusive_output,
+                                     T      initial_value,
+                                     ScanOp scan_op,
+                                     int    valid_items,
+                                     T&     warp_aggregate)
+    {
+        base_type::partial_exclusive_scan(input,
+                                          exclusive_output,
+                                          valid_items,
+                                          initial_value,
+                                          warp_aggregate,
+                                          temp_storage_,
+                                          scan_op);
+    }
+
+    template<typename ScanOp>
     HIPCUB_DEVICE inline
     void Scan(T input, T& inclusive_output, T& exclusive_output, ScanOp scan_op)
     {
-        base_type::inclusive_scan(input, inclusive_output, temp_storage_, scan_op);
-        base_type::to_exclusive(inclusive_output, exclusive_output, temp_storage_);
+        base_type::scan(input, inclusive_output, exclusive_output, temp_storage_, scan_op);
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void ScanPartial(
+        T input, T& inclusive_output, T& exclusive_output, ScanOp scan_op, int valid_items)
+    {
+        base_type::partial_scan(input,
+                                inclusive_output,
+                                exclusive_output,
+                                valid_items,
+                                temp_storage_,
+                                scan_op);
     }
 
     template<typename ScanOp>
@@ -167,13 +289,54 @@ public:
         );
         // rocPRIM's warp_scan::scan inclusive_output does not include initial_value,
         //   CUB's WarpScan::Scan inclusive_output does include initial_value.
-        inclusive_output = scan_op(initial_value, inclusive_output);
+        include_init(inclusive_output, inclusive_output, scan_op, initial_value);
     }
 
-    HIPCUB_DEVICE inline
-    T Broadcast(T input, unsigned int src_lane)
+    template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void ScanPartial(T      input,
+                            T&     inclusive_output,
+                            T&     exclusive_output,
+                            T      initial_value,
+                            ScanOp scan_op,
+                            int    valid_items)
+    {
+        base_type::partial_scan(input,
+                                inclusive_output,
+                                exclusive_output,
+                                valid_items,
+                                initial_value,
+                                temp_storage_,
+                                scan_op);
+        // rocPRIM's warp_scan::partial_scan inclusive_output does not include initial_value,
+        //   CUB's WarpScan::ScanPartial inclusive_output does include initial_value.
+        include_init(inclusive_output, inclusive_output, valid_items, scan_op, initial_value);
+    }
+
+    HIPCUB_DEVICE
+    inline T Broadcast(T input, unsigned int src_lane)
     {
         return base_type::broadcast(input, src_lane, temp_storage_);
+    }
+
+private:
+    // Include init value in scan results
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE void
+        include_init(T input, T& output, BinaryFunction scan_op, T init)
+    {
+        output = scan_op(init, input);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE void
+        include_init(T input, T& output, int valid_items, BinaryFunction scan_op, T initial_value)
+    {
+        const unsigned int lid = rocprim::detail::logical_lane_id<LOGICAL_WARP_THREADS>();
+        if(static_cast<int>(lid) < valid_items)
+        {
+            output = scan_op(initial_value, input);
+        }
     }
 };
 

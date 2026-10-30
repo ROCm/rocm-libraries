@@ -47,9 +47,12 @@
 #include <hip/hip_bfloat16.h> // hip_bfloat16
 #include <hip/hip_fp16.h> // __half
 
-#include _HIPCUB_LIBCXX_INCLUDE(functional)
-#include _HIPCUB_STD_INCLUDE(functional)
-#include _HIPCUB_STD_INCLUDE(limits)
+#include _HIPCUB_LIBCXX_INCLUDE(__execution/determinism.h)
+#include _HIPCUB_STD_INCLUDE(__execution/env.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__functional/maximum.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__functional/minimum.h)
+#include _HIPCUB_STD_INCLUDE(__functional/operations.h)
+#include _HIPCUB_STD_INCLUDE(__limits/numeric_limits.h)
 
 #include <iterator>
 
@@ -167,6 +170,63 @@ inline hip_bfloat16 get_max_special_value<hip_bfloat16>()
     return set_half_bits<hip_bfloat16>(0x7f80);
 }
 
+template<typename, typename = void>
+inline constexpr bool is_cuda_maximum_v = false;
+
+template<typename T>
+inline constexpr bool is_cuda_maximum_v<_HIPCUB_LIBCXX::maximum<T>, void> = true;
+
+template<typename T>
+inline constexpr bool is_cuda_maximum_v<_HIPCUB_LIBCXX::maximum<T>, T> = true;
+
+template<typename T>
+inline constexpr bool is_cuda_maximum_v<_HIPCUB_LIBCXX::maximum<>, T> = true;
+
+template<>
+inline constexpr bool is_cuda_maximum_v<_HIPCUB_LIBCXX::maximum<>, void> = true;
+
+template<typename, typename = void>
+inline constexpr bool is_cuda_minimum_v = false;
+
+template<typename T>
+inline constexpr bool is_cuda_minimum_v<_HIPCUB_LIBCXX::minimum<T>, void> = true;
+
+template<typename T>
+inline constexpr bool is_cuda_minimum_v<_HIPCUB_LIBCXX::minimum<T>, T> = true;
+
+template<typename T>
+inline constexpr bool is_cuda_minimum_v<_HIPCUB_LIBCXX::minimum<>, T> = true;
+
+template<>
+inline constexpr bool is_cuda_minimum_v<_HIPCUB_LIBCXX::minimum<>, void> = true;
+
+template<typename Op, typename T = void>
+inline constexpr bool is_cuda_minimum_maximum_v
+    = is_cuda_maximum_v<Op, T> || is_cuda_minimum_v<Op, T>;
+
+template<typename EnvT>
+HIPCUB_RUNTIME_FUNCTION
+static inline constexpr void check_supported_determinism()
+{
+    static_assert(
+        !_HIPCUB_STD_EXEC::__queryable_with<EnvT,
+                                            _HIPCUB_LIBCXX_EXEC::determinism::__get_determinism_t>,
+        "Determinism should be used inside requires to have an effect.");
+    using requirements_t
+        = _HIPCUB_STD_EXEC::__query_result_or_t<EnvT,
+                                                _HIPCUB_LIBCXX_EXEC::__get_requirements_t,
+                                                _HIPCUB_STD_EXEC::env<>>;
+
+    using requested_determinism_t = _HIPCUB_STD_EXEC::__query_result_or_t<
+        requirements_t,
+        _HIPCUB_LIBCXX_EXEC::determinism::__get_determinism_t,
+        _HIPCUB_LIBCXX_EXEC::determinism::run_to_run_t>;
+
+    // Static assert to reject gpu_to_gpu determinism since it's not properly implemented
+    static_assert(!_HIPCUB_STD::is_same_v<requested_determinism_t,
+                                          _HIPCUB_LIBCXX_EXEC::determinism::gpu_to_gpu_t>,
+                  "gpu_to_gpu determinism is not supported");
+}
 } // namespace detail
 
 class DeviceReduce
@@ -204,6 +264,7 @@ public:
              typename T,
              typename NumItemsT,
              typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    [[nodiscard]]
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t Reduce(InputIteratorT  d_in,
                              OutputIteratorT d_out,
@@ -212,21 +273,65 @@ public:
                              T               init,
                              EnvT            env = {})
     {
-        // Note: determinism is not yet supported in libhipcxx, so it is not checked here
+        // Check determinism
+        static_assert(
+            !_HIPCUB_STD_EXEC::
+                __queryable_with<EnvT, _HIPCUB_LIBCXX_EXEC::determinism::__get_determinism_t>,
+            "Determinism should be used inside requires to have an effect.");
+        using requirements_t
+            = _HIPCUB_STD_EXEC::__query_result_or_t<EnvT,
+                                                    _HIPCUB_LIBCXX_EXEC::__get_requirements_t,
+                                                    _HIPCUB_STD_EXEC::env<>>;
+        using default_determinism_t = _HIPCUB_STD_EXEC::__query_result_or_t<
+            requirements_t,
+            _HIPCUB_LIBCXX_EXEC::determinism::__get_determinism_t,
+            _HIPCUB_LIBCXX_EXEC::determinism::run_to_run_t>;
 
-        // Env-based reduce invoke
-        return detail::env_invoke(env,
-                                  [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
-                                  {
-                                      return Reduce(d_temp_storage,
-                                                    temp_storage_bytes,
-                                                    d_in,
-                                                    d_out,
-                                                    num_items,
-                                                    reduction_op,
-                                                    init,
-                                                    stream);
-                                  });
+        using accum_t = _HIPCUB_STD::
+            __accumulator_t<ReductionOpT, ::hipcub::detail::it_value_t<InputIteratorT>, T>;
+
+        constexpr auto gpu_gpu_determinism
+            = _HIPCUB_STD::is_same_v<default_determinism_t,
+                                     _HIPCUB_LIBCXX_EXEC::determinism::gpu_to_gpu_t>;
+
+        // Integral types are always gpu-to-gpu deterministic
+        constexpr auto gpu_to_gpu_integral
+            = gpu_gpu_determinism && _HIPCUB_STD::is_integral_v<accum_t>;
+
+        // Floating point types with _HIPCUB_LIBCXX::minimum<> or _HIPCUB_LIBCXX::maximum<> operators are always gpu-to-gpu deterministic
+        constexpr auto gpu_to_gpu_fp_min_max
+            = gpu_gpu_determinism
+              && (_HIPCUB_LIBCXX::is_floating_point_v<accum_t>
+                  && detail::is_cuda_minimum_maximum_v<ReductionOpT, accum_t>);
+
+        constexpr auto supported
+            = gpu_to_gpu_integral || gpu_to_gpu_fp_min_max || !gpu_gpu_determinism;
+
+        static_assert(supported, "gpu_to_gpu determinism is unsupported");
+
+        // Note: this is unneccessary since compilation will fail due to above static_assert
+        // when supported=false, but it is left here for parity with CUB
+        if constexpr(!supported)
+        {
+            return hipErrorNotSupported;
+        }
+        else
+        {
+            // Env-based reduce invoke, run-to-run deterministic
+            return detail::env_invoke(
+                env,
+                [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
+                {
+                    return Reduce(d_temp_storage,
+                                  temp_storage_bytes,
+                                  d_in,
+                                  d_out,
+                                  num_items,
+                                  reduction_op,
+                                  init,
+                                  stream);
+                });
+        }
     }
 
     template<typename InputIteratorT,
@@ -281,6 +386,7 @@ public:
              typename OutputIteratorT,
              typename NumItemsT,
              typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    [[nodiscard]]
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t
         Sum(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
@@ -291,9 +397,9 @@ public:
         using ReductionOpT      = _HIPCUB_STD::plus<>;
         const auto reduction_op = ReductionOpT{};
 
-        // Note: determinism is not yet supported in libhipcxx, so it is not checked here
+        detail::check_supported_determinism<EnvT>();
 
-        // Env-based reduce invoke
+        // Env-based reduce invoke, run-to-run deterministic
         return detail::env_invoke(env,
                                   [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
                                   {
@@ -353,6 +459,23 @@ public:
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
         return Min(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream);
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION [[nodiscard]]
+    static hipError_t
+        Min(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
+    {
+        detail::check_supported_determinism<EnvT>();
+
+        // Env-based reduce invoke, run-to-run deterministic
+        return detail::env_invoke(
+            env,
+            [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
+            { return Min(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream); });
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
@@ -439,6 +562,34 @@ public:
         HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 
+    template<typename InputIteratorT,
+             typename ExtremumOutIteratorT,
+             typename IndexOutIteratorT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION [[nodiscard]]
+    static hipError_t ArgMin(InputIteratorT       d_in,
+                             ExtremumOutIteratorT d_min_out,
+                             IndexOutIteratorT    d_index_out,
+                             NumItemsT            num_items,
+                             EnvT                 env = {})
+    {
+        detail::check_supported_determinism<EnvT>();
+
+        // Env-based reduce invoke, run-to-run deterministic
+        return detail::env_invoke(env,
+                                  [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
+                                  {
+                                      return ArgMin(d_temp_storage,
+                                                    temp_storage_bytes,
+                                                    d_in,
+                                                    d_min_out,
+                                                    d_index_out,
+                                                    num_items,
+                                                    stream);
+                                  });
+    }
+
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
     HIPCUB_RUNTIME_FUNCTION static hipError_t Max(void*           d_temp_storage,
                                                   size_t&         temp_storage_bytes,
@@ -470,6 +621,23 @@ public:
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
         return Max(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream);
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION [[nodiscard]]
+    static hipError_t
+        Max(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
+    {
+        detail::check_supported_determinism<EnvT>();
+
+        // Env-based reduce invoke, run-to-run deterministic
+        return detail::env_invoke(
+            env,
+            [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
+            { return Max(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream); });
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
@@ -560,6 +728,34 @@ public:
                       num_items,
                       stream);
         HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+    }
+
+    template<typename InputIteratorT,
+             typename ExtremumOutIteratorT,
+             typename IndexOutIteratorT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION [[nodiscard]]
+    static hipError_t ArgMax(InputIteratorT       d_in,
+                             ExtremumOutIteratorT d_max_out,
+                             IndexOutIteratorT    d_index_out,
+                             NumItemsT            num_items,
+                             EnvT                 env = {})
+    {
+        detail::check_supported_determinism<EnvT>();
+
+        // Env-based reduce invoke, run-to-run deterministic
+        return detail::env_invoke(env,
+                                  [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
+                                  {
+                                      return ArgMax(d_temp_storage,
+                                                    temp_storage_bytes,
+                                                    d_in,
+                                                    d_max_out,
+                                                    d_index_out,
+                                                    num_items,
+                                                    stream);
+                                  });
     }
 
     template<typename InputIteratorT,

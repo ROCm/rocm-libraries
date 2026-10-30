@@ -16,16 +16,29 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added env-based API for `hipcub::DeviceReduce::Reduce`.
 * Added env-based API for `hipcub::DeviceReduce::Sum`.
 * Feature parity with CCCL/CUB 3.1.4.
+* Added env-based API for `hipcub::DeviceReduce::(Arg)MinMax`.
+* Added env-based API for `hipcub::DeviceScan::ExclusiveScan` and `hipcub::DeviceScan::ExclusiveSum`.
+* Added `hipcub::DeviceFor::ForEachInLayout`.
+* Added `hipcub::DeviceCopy::Copy`.
+* Added `hipcub::WarpScan::InclusiveScanPartial`, `hipcub::WarpScan::ExclusiveScanPartial` and `hipcub::WarpScan::ScanPartial`.
+* Added `hipcub::DeviceTransform::TransformIf`, `hipcub::DeviceTransform::Generate` and `hipcub::DeviceTransform::Fill`.
+* Added env-based API for `hipcub::DeviceTransform::*`.
+* Removed `hipcub::DivideAndRoundUp` in favor of `hip::ceil_div`.
+* Feature parity with CCCL/CUB 3.2.0.
+* Feature parity with CCCL/CUB 3.2.1.
 
 ### Changed
 
 * Replaced `_CCCL_PRAGMA_UNROLL_FULL()` and `_CCCL_PRAGMA_NOUNROLL()` by `HIPCUB_PRAGMA_UNROLL_FULL()` and `HIPCUB_PRAGMA_NOUNROLL()`.
 * Replaced `_CCCL_SORT_MAYBE_UNROLL()` by `HIPCUB_SORT_MAYBE_UNROLL()`.
-* Changed `CCCL_MINIMUM_VERSION` to `3.1.4` to align with CUB.
+* Changed `CCCL_MINIMUM_VERSION` to `3.2.1` to align with CUB.
+* `::hipcub::extents` now points to `::hip::std::extents` from libhipcxx for rocPRIM's backend.
 
 ### Removed
 
-* Removed the deprecated thread operators `Equality`, `Inequality`, `Sum`, `Difference`, `Division`, `Max` and `Min`.
+* Removed the deprecated thread operators `Equality`, `Sum`, `Difference`, `Division`, `Max` and `Min`.
+* Removed the deprecated public AliasTemporaries.
+* Deprecated `hipcub::MergePathSearch`.
 
 ## hipCUB-5.0.0 for ROCm 10.2.0
  
@@ -47,6 +60,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Fixed a build failure when libhipcxx is not on the include path. `radix_rank_sort_operations.hpp` included the libhipcxx `bit` header unconditionally, which does not exist in the standard library fallback.
 
 ### Removed
+
 * The hipCUB migration to cccl3 has resulted in the following removals and deprecations:
   * Removed `hipcub::BaseTraits::CATEGORY`, `hipcub::BaseTraits::nullptr_TYPE` and `hipcub::BaseTraits::PRIMITIVE`.
   * Removed  `ConstantInputIterator`, `CountingInputIterator`, `DiscardOutputIterator` and `TransformInputIterator` which were deprecated in hipCUB-4.1.0.
