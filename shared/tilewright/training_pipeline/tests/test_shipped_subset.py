@@ -67,6 +67,9 @@ CONTEXTS = [
     fs.ExecutionContext(64, "dynamic"),
     fs.ExecutionContext(32),
 ]
+# A schedule the test model does not list: the engine ranks none of its
+# contexts.
+UNLISTED = fs.ExecutionContext(64, "auto")
 
 
 def kernels(rng, n, sid0, hints=((0, 0),)):
@@ -88,14 +91,14 @@ def kernels(rng, n, sid0, hints=((0, 0),)):
     return out
 
 
-def gemms(rng, kern, n_extra_rows=0):
-    """ra.Gemm rows over `kern`: random latencies, some screened rows, some
-    missing kernels, planned kernel lists on some GEMMs, a fallback pick on
-    most."""
+def gemms(rng, kern, n_extra_rows=0, contexts=CONTEXTS):
+    """ra.Gemm rows over `kern` in `contexts`: random latencies, some
+    screened rows, some missing kernels, planned kernel lists on some GEMMs,
+    a fallback pick on most."""
     out = []
     sids = [int(k["sol_idx_global"]) for k in kern]
     for m, n, k, b in SHAPES:
-        for ctx in CONTEXTS:
+        for ctx in contexts:
             measured = [s for s in sids if rng.random() < 0.7]
             us = np.array([rng.uniform(5.0, 30.0) for _ in measured])
             skip = np.array([rng.random() < 0.15 for _ in measured])
@@ -795,9 +798,10 @@ def test_stage05_split_is_recovered_exactly(tmp_path, tw):
     assert "validation_frac 0" in s5split.recover(s5dir, gemms).reason
 
 
-def write_run(tmp_path, tw, *, held_round=True):
+def write_run(tmp_path, tw, *, held_round=True, unlisted=False):
     """A run whose round_0 trained the bundle and (optionally) round_1
-    benched new GEMMs, with a library and a bank library."""
+    benched new GEMMs, with a library and a bank library; with `unlisted`,
+    also GEMMs of the schedule the model does not list."""
     import csv
 
     rng = random.Random(11)
@@ -840,6 +844,8 @@ def write_run(tmp_path, tw, *, held_round=True):
     by_sid = {int(k["sol_idx_global"]): k for k in kern}
     run = tmp_path / "run"
     all_g = gemms(rng, kern)
+    if unlisted:
+        all_g += gemms(random.Random(12), kern, contexts=[UNLISTED])
     rounds = {
         "round_0": [g for i, g in enumerate(all_g) if i % 5 != 2],
         "round_1": [g for i, g in enumerate(all_g) if i % 5 == 2],
@@ -897,7 +903,7 @@ def write_run(tmp_path, tw, *, held_round=True):
 def test_script_writes_the_subset_and_the_report_shows_it(tmp_path, tw, held_round):
     import make_report as mr
 
-    run, mf = write_run(tmp_path, tw, held_round=held_round is True)
+    run, mf = write_run(tmp_path, tw, held_round=held_round is True, unlisted=True)
     if held_round == "stage05":
         val_keys, _ = stage05_outputs(
             run / "round_0" / "stage05", run / "round_0" / "stage04", 0.3, 42
@@ -937,6 +943,7 @@ def test_script_writes_the_subset_and_the_report_shows_it(tmp_path, tw, held_rou
                 "cu128",
                 "cu64_dynamic",
                 "cu32",
+                "cu64_auto",
             }
     assert (
         doc["sizes"][1]["wins_baseline"]["bank_sol_idx"]
@@ -963,7 +970,12 @@ def test_script_writes_the_subset_and_the_report_shows_it(tmp_path, tw, held_rou
     sel = doc["sizes"][0]["selection"]
     if sel["n"] == doc["selection"]["n_gemms"]:
         assert math.isclose(obj[0], sel["sel_eff"], rel_tol=1e-9)
-    assert doc["sizes"][0]["selection"]["n_fallback"] > 0
+    # The engine scores every context of a schedule the model lists, a CU
+    # budget below its range at the nearest budget in it, and none of a
+    # schedule it does not list: only the GEMMs of that one fall back.
+    fallbacks = {c: v["n_fallback"] for c, v in sel["per_context"].items()}
+    assert fallbacks.pop("cu64_auto") == sel["n_fallback"] > 0
+    assert set(fallbacks.values()) == {0}
 
     html = ss.report_html(doc)
     assert "<table>" in html and "Recommended" in html
