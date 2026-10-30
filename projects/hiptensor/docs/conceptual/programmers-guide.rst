@@ -453,7 +453,8 @@ f64 route, which the f64 route (gfx90a has no f32 matrix-instruction GEMM) match
 f32 fma behaviour (one unrounded product per fma, no ``e`` term) on every target. ``x6`` and ``native`` rank their
 candidates with the selection models of the kernel pack trained on their route sets (classes
 ``contraction.s.native`` and ``contraction.c.native`` for ``native``, whose f32 strided GEMM has shape classes
-tuned for f32 words); the other recipes rank them by rocKE's rules. A plan-cache entry written under one recipe names a
+tuned for f32 words); the other recipes rank them by rocKE's rules (on gfx942 by the selection models
+``contraction.s.<recipe>`` and ``contraction.c.<recipe>`` of ``x3``, ``x4`` and ``x9``). A plan-cache entry written under one recipe names a
 kernel the other recipes do not list, so plans under another recipe select their kernel as if the entry were not
 there. On gfx942 the ``x6`` recipe also lists the native f32 route (at least as accurate as ``x6``); where no selection
 model scores them, it goes ahead of the GEMM bodies for problems below a size threshold that the kernel pack carries

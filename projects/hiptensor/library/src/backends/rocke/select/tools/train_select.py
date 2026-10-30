@@ -441,8 +441,11 @@ def cv(rows, probs, names, trees, leaves, folds=5, objective=None, bags=1):
     X = matrix(rows, names)
     y = target(rows, probs)
     groups = np.array([r["tag"] for r in rows])
+    # folds by problem: the sweeps of one problem ("<id>", "<id>#none", recipe
+    # suffixes) stay in one fold; the ranking queries stay per tag
+    problems = np.array([r["tag"].split("#")[0] for r in rows])
     pred = np.zeros(len(rows))
-    for tr, te in GroupKFold(n_splits=folds).split(X, y, groups):
+    for tr, te in GroupKFold(n_splits=folds).split(X, y, problems):
         m = fit_bagged(X[tr], y[tr], trees, leaves, groups[tr], objective, bags)
         pred[te] = m.predict(X[te])
     scores = {id(r): p for r, p in zip(rows, pred)}
@@ -733,7 +736,8 @@ def cmd_train(a):
     report["rows"] = len(rows)
     calib = None
     if a.calib:
-        calib = set(r["tag"] for r in read_lines(a.calib))
+        # problem ids (the tag before "#": plan-mode and recipe suffixes)
+        calib = set(r["tag"].split("#")[0] for r in read_lines(a.calib))
         report["calib"] = {"dumps": a.calib, "problems": len(calib)}
     out_dir = os.path.join(a.models, a.arch)
     os.makedirs(out_dir, exist_ok=True)

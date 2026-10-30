@@ -21,7 +21,8 @@ Classes: `contraction.h` (f16, bf16, and f32 with a 16-bit compute type), `contr
 `contraction.c` (complex f32), `contraction.d` (f64), `contraction.z` (complex f64),
 `reduction.s` (f16, bf16, f32), `reduction.d` (f64). Contractions of f32 and complex f32 data
 whose recipe (`HIPTENSOR_ROCKE_F32_RECIPE`, else the target's default: x6 on gfx950, native on gfx942 and
-gfx90a) is not `x6` look up `<class>.<recipe>`, for example `contraction.s.native` for `native`. The library also looks up `contraction` and
+gfx90a) is not `x6` look up `<class>.<recipe>`, for example `contraction.s.native` for `native` or
+`contraction.c.x9` for complex data under `x9`. The library also looks up `contraction` and
 `reduction` (one model for all data types of an operation) when there is no model of the class.
 
 ## Model format
@@ -98,7 +99,11 @@ with the target GPU and a hipTensor build with `-DHIPTENSOR_ENABLE_ROCKE_BACKEND
    HIPTENSOR_ROCKE_SELECT_DUMP=dump.jsonl sweep_driver c.txt --default --jit --cold 5 --cold-out
    cold.jsonl`, and the same without `--jit` and with `--tag-suffix '#none'` (the problems of a
    `HIPTENSOR_JIT_MODE_NONE` plan, whose elementwise launches are not specialized, with times of
-   their own). The library writes every
+   their own). Sweep the f32 and complex f32 problems of every f32 recipe that gets models under that
+   recipe (`HIPTENSOR_ROCKE_F32_RECIPE`; `x6` for `contraction.s` and `contraction.c`), with tags of
+   their own per recipe (`--tag-suffix '#<recipe>'`, in NONE mode `'#<recipe>#none'`): the
+   candidates of the f64 route and of the direct GETT have the same keys under every recipe, and
+   `train_select.py` joins features and times by tag and key. The library writes every
    candidate's features to the dump; the driver writes each candidate's cold time and whether its
    output agrees with the f64 route's. (Without `--cold`, `HIPTENSOR_ALGO_DEFAULT_PATIENT` plans
    with `HIPTENSOR_ROCKE_AUTOTUNE_TOPK=all` time the candidates in the library, back to back.)
@@ -111,15 +116,16 @@ with the target GPU and a hipTensor build with `-DHIPTENSOR_ENABLE_ROCKE_BACKEND
    approximation the NONE-mode sweeps replace), and `--ensemble K` averages K models on bootstrap
    samples (chosen against the single model on the calibration folds). It drops candidates whose
    output disagrees, reports the selection efficiency of the model on problems held out by group
-   k-fold next to rocKE's rules, and checks that the exported trees reproduce LightGBM's
-   predictions exactly.
+   k-fold (the sweeps of a problem in both plan modes stay in one fold) next to rocKE's rules, and
+   checks that the exported trees reproduce LightGBM's predictions exactly.
 4. Choose the next round's problems with the models (model-guided sweeps): write the features of a
    large problem pool without timing (`sweep_driver pool.txt --default --jit` with the dump and
    `HIPTENSOR_ROCKE_JIT_NO_COMPILE=1`, and in NONE mode with `--tag-suffix '#none'`), then
    `train_select.py propose --dumps ... --cold ...
    --pool 'pooldump*.jsonl' --n 2000 --out ids.txt --prev-models <target dir>`: bagged models pick
    the pool problems whose pick they disagree on or whose two best candidates are closest, plus a
-   random share; `gen_corpus.py pick --from pool.txt --worst ids.txt --out round2.txt` writes them.
+   random share; `gen_corpus.py pick --from pool.txt --worst ids.txt --out round2.txt` writes them
+   (ids of recipe-suffixed tags: the ids of one recipe, without the suffix).
    Time them (step 2), retrain on every round, and stop when the picks of the pool no longer change
    between rounds and the bagged models agree on the pool's picks.
 5. Check a held-out corpus with the new models, without a new pack: `HIPTENSOR_ROCKE_SELECT_MODELS=

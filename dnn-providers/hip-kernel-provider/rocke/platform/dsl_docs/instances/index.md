@@ -72,6 +72,16 @@ tile origins). Below half a wave of 256 x 256 tiles a fitted cost model
 scatter epilogue (complex partner column by one DPP lane swap), and a kernel N
 that is not a multiple of 8 takes a scatter-epilogue body at any size. Python
 engine only.
+On gfx942 the same routes run on the register-staged GEMM body
+(`TraitSpec.vgpr_prefetch`): the prologue's f32 pair view (every split recipe, and
+`Prologue.split_mode="trunc"`, which builds the parts by masking the low 16 bits
+where the target has no packed bf16 convert), the complex-B embedding (`cplx_b`), the
+batched form and `wide_addr` (64-bit operand and batch origins, C rebased per tile)
+apply to that body, and `TraitSpec.lds_swizzle_l` sets its LDS swizzle group. Named
+gfx942 bodies (`cf32_body`, `route_bodies`) with a per-body time model
+(`gemm_bodies_by_cost`) and launch limits (`gemm_launch_limits`) serve hipTensor's
+kernel pack. Both engines build these kernels (parity families `gemm_vp_*`,
+`gemm_cf32`).
 
 Multi-axis tiled N-D permute (2-, 4- and 8-byte elements, 16-byte accesses on
 both sides, in-register transpose + swizzled LDS stage):
