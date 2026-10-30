@@ -103,7 +103,9 @@ rocKE B/A/N.
 `python -m rocke.examples.gfx1250.gemm.mxfp4_tdm_gemm --yaml-tile --m 1024 --n
 1024 --k 2048 --variant all` checks the chain byte-exactly (`--saturation`
 adds the FP8 overflow check). `mxfp4_tdm_gemm_variants_bench` checks at beta 0
-and 0.5, then times beta 0 (host-timed batch and HIP-event median);
+and 0.5, then times beta 0 (host-timed batch and HIP-event median) on the
+Tensile client's inputs (A `TrigSin`, B `TrigCos`, `Random` scales, alpha 1;
+`--timing-inputs check` times the check inputs instead);
 `--host-only` reports resources without a device. Timings stay outside the
 repo.
 
@@ -116,9 +118,26 @@ repo.
 | 6.5 | `step6_5_mxfp4_gemm` | `scale_tdm` | `MXLoadInstr=TDM`, `MXSwizzle=InMemorySwizzle`, `VectorWidthB=4` |
 | 6.6 | `step6_6_mxfp4_gemm` | `lds_pad` | `LdsPad*`, `LdsBlockSizePerPad*` |
 | 6.7 | `step6_7_mxfp4_gemm` | `lds_segment_interleave` | `LDSSegmentInterleave=1` |
-| 6.8 | `step6_8_mxfp4_gemm` | `init_c_wmma` | `InitCWMMA` |
-| 6.9 | `step6_9_mxfp4_gemm` | `cluster_dim=(4,4,1)`, `tdm_multicast` | `ClusterDim=4x4`, `TDMMulticast` |
-| 6.10 | `step6_10_mxfp4_gemm` | `prefetch_gl2` | `PrefetchGlobalRead2` (cluster-split) |
+| 6.8 | `step6_8_mxfp4_gemm` | `cluster_dim=(4,4,1)`, `tdm_multicast` | `ClusterDim=4x4`, `TDMMulticast` |
+
+The chain keeps only steps that are faster than the step before them, or
+that a later faster step needs: 6.4 is slower on its own, but `scale_tdm`,
+`lds_segment_interleave` and `tdm_multicast` all build on it. Three YAML
+features were slower than the step before them on the YAML shape, so they
+are trials (`--trials`), not chain steps:
+
+| Trial | Variant | Adds to 6.8 | YAML parameter |
+| --- | --- | --- | --- |
+| T1 | `trial_prefetch_gl2_mxfp4_gemm` | `prefetch_gl2` | `PrefetchGL2` (cluster-split) |
+| T2 | `trial_init_c_wmma_mxfp4_gemm` | `init_c_wmma` | `InitCWMMA` |
+| T3 | `trial_tile_refill_mid_mxfp4_gemm` | `init_c_wmma`, `tile_refill_mid` | `PrefetchGlobalRead=2`, `SuppressNoLoadLoop=1` |
+
+T4 is not a YAML feature. It replaces 6.6 with CK Tile's `comp_tdm` LDS
+padding, so it builds on 6.5 and compares against 6.6:
+
+| Trial | Variant | Adds to 6.5 | Source |
+| --- | --- | --- | --- |
+| T4 | `trial_ck_lds_pad_mxfp4_gemm` | `lds_pad_ck` | CK Tile `GetLdsPaddingConfig` |
 
 Design of each step:
 
@@ -156,18 +175,15 @@ Design of each step:
   scales]`, so the second B component sits past A. The resulting offsets
   are the winner's: A at 33024, B1 at 99584, B scales at 132608, A scales at
   137216, and the second buffer at 141312.
-- **6.8 InitC WMMA.** The first K tile is peeled. Its first K-step multiplies
-  into C = 0 directly, so the kernel never zeroes 512 accumulators with moves.
-- **6.9 cluster and multicast.** The grid launches as 4x4 clusters. Every
+- **6.8 cluster and multicast.** The grid launches as 4x4 clusters. Every
   workgroup in a TDM multicast mask issues the same full-tile load:
   `0x1111 << x` for rocKE B, `0xF << 4y` for rocKE A. A fenceless cluster
   barrier replaces the workgroup barrier. It is the expansion of
   `llvm.amdgcn.s.cluster.barrier`, emitted as inline asm: LLVM expands the
   intrinsic into a real branch (only the first wave signals the cluster
   barrier). That branch splits the main loop into several blocks, and LLVM
-  then keeps about 35 LDS reads in flight instead of 62 (900 instead of
-  1008 VGPRs).
-- **6.10 GL2 prefetch.** The cluster's 16 workgroups split the GL2 prefetch
+  then keeps about 35 LDS reads in flight instead of 62.
+- **T1 GL2 prefetch.** The cluster's 16 workgroups split the GL2 prefetch
   of tile `k + 2`'s A, B and swizzled-scale lines, one 256 B line per thread,
   with `th:TH_LOAD_NT scope:SCOPE_SE` as in the winner. The A and B lines
   fill the 2048 threads exactly. The 128 scale lines take a second round, in
@@ -177,6 +193,45 @@ Design of each step:
   cluster barrier. Both scale prefetches use `global_prefetch` because
   rocKE IR has no global-to-flat pointer cast; the winner uses
   `flat_prefetch` for one of them.
+- **T2 InitC WMMA.** The first K tile is peeled. Its first K-step multiplies
+  into C = 0 directly, so the kernel never zeroes 512 accumulators with moves.
+  The chain clears them once before the loop, so this saves only those
+  moves. The extra peeled tile changes how LLVM schedules the unchanged loop:
+  it issues 70 LDS reads before a tile's first WMMA instead of 36, and the
+  tile start gets longer.
+- **T3 mid-tile refill.** The TDM runs two tiles ahead, as TensileLite's
+  `PrefetchGlobalRead=2` with two LDS buffers. With HalfPLR, the tile's last
+  LDS read is issued during K-step `steps-2`. Before the last K-step's
+  WMMAs, each tile waits for its LDS reads, barriers (the cluster barrier
+  with multicast), and issues tile `k + 2` into the buffer it just read. At
+  the tile boundary it waits for tile `k + 1` with `s_wait_tensorcnt 2`, so
+  tile `k + 2`'s two loads stay in flight, then barriers. TensileLite places
+  this second sync at unrolled iteration `LoopIters - PLR`, because its
+  `PrefetchLocalRead` reads the next tile there. Without those reads, a
+  mid-tile wait only adds an exposed barrier.
+
+  The refill sits between `~{memory}` fences and `sched_barrier`s that let
+  only ALU work cross. Without them LLVM reads the whole tile before the
+  first K-step's WMMAs and refills there, because the WMMAs are
+  register-only and the barriers do not access memory. A second such
+  barrier follows the first K-step's reads. Without it LLVM mixes K-step
+  1's reads in, and the first WMMA waits for 43 reads instead of 21. As with
+  `SuppressNoLoadLoop`, the tail has no peel or guard: past K the last tile
+  is loaded again into a buffer nobody reads. After the loop a
+  `s_wait_tensorcnt 0` (and the cluster barrier with multicast) keeps any
+  workgroup from exiting with a TDM write into its LDS in flight. If it is
+  combined with T1, the GL2 prefetch moves to four tiles ahead (PGR +
+  PrefetchGL2, TensileLite's `skipPGR`), and the prologue prefetches tiles 2
+  and 3.
+- **T4 CK LDS pad.** CK Tile pads A and B by 16 B after every
+  `max(256 B, row)`: one pad per sweep of the 64 LDS banks. With 256 B rows
+  that is one pad per row, set through the TDM pad fields on both operands
+  (`pad_interval = 5`, `pad_amount = 3`), with no iterate mode. The scales
+  stay unpadded, as in 6.5; CK keeps them in registers. The period follows
+  the bank count, not the read mapping. 6.5's lanes read every 4th A row
+  and every 8th B row, so 16 lanes of a `ds_load_b128` start at only 4
+  (A) or 2 (B) distinct 16 B bank slots. The 6.6 pads give 16 distinct
+  slots.
 
 Host resources at M=4096, N=4096, K=65536 (no VGPR/SGPR spills and no scratch
 for any step):
@@ -190,9 +245,11 @@ for any step):
 | 6.5 | 805 | 278528 |
 | 6.6 | 815 | 282624 |
 | 6.7 | 815 | 282624 |
-| 6.8 | 1016 | 282624 |
-| 6.9 | 1008 | 282624 |
-| 6.10 | 1008 | 282624 |
+| 6.8 | 819 | 282624 |
+| T1 | 826 | 282624 |
+| T2 | 1008 | 282624 |
+| T3 | 942 | 282624 |
+| T4 | 819 | 294912 |
 
 Host tests pin one LLVM-IR fact per step and check the LDS layout model.
 `MxFp4LdsLayout` is the single address model used by the builder. The test
@@ -204,7 +261,7 @@ Known differences from the winner, kept on purpose:
 
 - The FP8 pack uses two `cvt_pk_fp8_f32x4` calls instead of one 8-wide pack.
 - NaN is kept with a select instead of `v_maximumminimum`.
-- Both scale prefetches use `global_prefetch`, as noted under 6.10.
+- Both scale prefetches use `global_prefetch`, as noted under T1.
 
 StinkyTofu / SIA4 schedule fidelity (instruction interleave and
 assembly-level tuning) stays out of scope for Step 6. The base variant is

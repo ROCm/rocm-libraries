@@ -39,20 +39,33 @@ MXFP4_GEMM_VARIANTS, VARIANT_STEPS = _chain(
     ("6.5", "step6_5_mxfp4_gemm", {"scale_tdm": True}),
     ("6.6", "step6_6_mxfp4_gemm", {"lds_pad": True}),
     ("6.7", "step6_7_mxfp4_gemm", {"lds_segment_interleave": True}),
-    ("6.8", "step6_8_mxfp4_gemm", {"init_c_wmma": True}),
     (
-        "6.9",
-        "step6_9_mxfp4_gemm",
+        "6.8",
+        "step6_8_mxfp4_gemm",
         {"cluster_dim": (4, 4, 1), "tdm_multicast": True},
     ),
-    ("6.10", "step6_10_mxfp4_gemm", {"prefetch_gl2": True}),
 )
 
 # Trials build on the last chain entry and stay off the chain. The YAML's
 # VectorWidthB=4 (each lane owns 4 adjacent rocKE A rows) is not a trial: it
 # is the M mapping ``scale_tdm`` already uses from 6.5 on, just as
 # VectorWidthA=8 is the N mapping of ``vector_epilogue``.
-MXFP4_GEMM_TRIAL_VARIANTS: list[tuple[str, dict[str, Any]]] = []
+# prefetch_gl2, init_c_wmma and tile_refill_mid were chain steps; each was
+# slower than the step before it on the YAML shape, so they are trials now.
+# trial_ck_lds_pad replaces 6.6 instead: it is 6.5 with CK Tile's comp_tdm
+# padding (16 B after every 256 B LDS row on A and B, no B iterate mode,
+# unpadded scales), so it compares against 6.6 directly.
+_CHAIN_END = MXFP4_GEMM_VARIANTS[-1][1]
+_STEP6_5 = dict(MXFP4_GEMM_VARIANTS)["step6_5_mxfp4_gemm"]
+MXFP4_GEMM_TRIAL_VARIANTS: list[tuple[str, dict[str, Any]]] = [
+    ("trial_prefetch_gl2_mxfp4_gemm", {**_CHAIN_END, "prefetch_gl2": True}),
+    ("trial_init_c_wmma_mxfp4_gemm", {**_CHAIN_END, "init_c_wmma": True}),
+    (
+        "trial_tile_refill_mid_mxfp4_gemm",
+        {**_CHAIN_END, "init_c_wmma": True, "tile_refill_mid": True},
+    ),
+    ("trial_ck_lds_pad_mxfp4_gemm", {**_STEP6_5, "lds_pad_ck": True}),
+]
 
 MXFP4_GEMM_BLOCKED_VARIANTS: list[tuple[str, str]] = []
 

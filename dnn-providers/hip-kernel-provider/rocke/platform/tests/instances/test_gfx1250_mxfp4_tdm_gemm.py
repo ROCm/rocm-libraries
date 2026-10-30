@@ -50,7 +50,7 @@ def _chain_llvm() -> dict[str, str]:
                 arch="gfx1250",
                 llvm_flavor="llvm23",
             )
-            for name in variant_names()
+            for name in variant_names(trials=True)
         }
     return _chain_llvm.cache
 
@@ -214,7 +214,7 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
 
     def test_step6_dependencies_are_rejected(self):
         problem = {"M": 1024, "N": 1024, "K": 2048, **YAML_TILE}
-        chain = variant_flags("step6_10_mxfp4_gemm")
+        chain = variant_flags("step6_8_mxfp4_gemm")
         cases = (
             (
                 {"M": 128, "N": 96, "K": 256, "tile_n": 96, "vector_epilogue": True},
@@ -261,6 +261,14 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                 "lds_pad needs tile_k / 2 to divide",
             ),
             (
+                {**problem, "lds_pad": True, "lds_pad_ck": True},
+                "lds_pad_ck and lds_pad are alternative LDS paddings",
+            ),
+            (
+                {"M": 128, "N": 64, "K": 768, "tile_k": 384, "lds_pad_ck": True},
+                "lds_pad_ck needs tile_k / 2 to be a power of two",
+            ),
+            (
                 {**problem, "lds_pad": True, "lds_segment_interleave": True},
                 "lds_segment_interleave requires lds_pad and wave_parity_tdm",
             ),
@@ -296,6 +304,10 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                 },
                 "prefetch_gl2 needs tile_k / 2 to be a multiple of 256 B",
             ),
+            (
+                {**problem, **chain, "tile_refill_mid": True},
+                "tile_refill_mid requires local_read_prefetch, init_c_wmma and scale_tdm",
+            ),
         )
         for kwargs, message in cases:
             with self.subTest(message=message):
@@ -311,11 +323,11 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         self.assertEqual(names[0], BASE_VARIANT)
         self.assertEqual(
             [variant_step(name) for name in names],
-            [f"6.{i}" for i in range(1, 11)],
+            [f"6.{i}" for i in range(1, 9)],
         )
         self.assertEqual(
             [name for name in names[1:]],
-            [f"step6_{i}_mxfp4_gemm" for i in range(2, 11)],
+            [f"step6_{i}_mxfp4_gemm" for i in range(2, 9)],
         )
         self.assertEqual(MXFP4_GEMM_VARIANTS[0][1], {})
         for name in names:
@@ -371,6 +383,8 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
             with self.subTest(step=step):
                 self.assertEqual(spec.lds_bytes, expected.get(step, 282624))
                 self.assertLessEqual(spec.lds_bytes, 327680)
+        ck_pad = variant_spec("trial_ck_lds_pad_mxfp4_gemm", *_SMOKE, **YAML_TILE)
+        self.assertEqual(ck_pad.lds_bytes, 294912)
 
     def test_each_step_adds_its_ir_feature(self):
         llvm = _chain_llvm()
@@ -413,6 +427,13 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         for constant in (a_pad, 1 << 19, (16 - 1) << 16, b_scale_pad):
             self.assertNotRegex(by_step["6.5"], rf"\b{constant}\b")
             self.assertRegex(by_step["6.6"], rf"\b{constant}\b")
+        # Trial CK LDS pad: 6.5 plus a 16 B / 256 B pad on A and B (the
+        # word 6.6 uses for its B-scale pad), and no iterate mode.
+        ck_pad = by_step["T4"]
+        self.assertRegex(ck_pad, rf"\b{b_scale_pad}\b")
+        for constant in (a_pad, 1 << 19, (16 - 1) << 16):
+            self.assertNotRegex(ck_pad, rf"\b{constant}\b")
+        self.assertEqual(_count(tdm, ck_pad), _count(tdm, by_step["6.5"]))
         # 6.7: B component 1 moves past A.
         layout = mxfp4_lds_layout(
             variant_spec("step6_7_mxfp4_gemm", *_SMOKE, **YAML_TILE)
@@ -421,37 +442,58 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         self.assertEqual(b1, 99584)
         self.assertNotRegex(by_step["6.6"], rf"\b{b1}\b")
         self.assertRegex(by_step["6.7"], rf"\b{b1}\b")
-        # 6.8: the first K step of the peeled first tile multiplies into C = 0.
-        self.assertEqual(_count(zero_c, by_step["6.7"]), 0)
-        self.assertEqual(_count(zero_c, by_step["6.8"]), 32)
-        wmma = r"call <16 x float> @llvm\.amdgcn\.wmma\.scale\.f32\.32x16x128\.f4"
-        # Peeled first tile, loop body and peeled last tile.
-        self.assertEqual(_count(wmma, by_step["6.8"]), 32 * k_steps * 3)
-        self.assertGreaterEqual(k_tiles, 3)
-        # 6.9: cluster barriers without fences replace the workgroup barrier.
+        # 6.8: cluster barriers without fences replace the workgroup barrier.
         # They are inline asm, so LLVM sees no branch in the main loop: the
-        # prologue, the peeled first tile, the loop body and the last tile.
-        self.assertIn("@llvm.amdgcn.s.barrier()", by_step["6.8"])
-        self.assertNotIn("@llvm.amdgcn.s.barrier()", by_step["6.9"])
-        self.assertNotIn("@llvm.amdgcn.s.cluster.barrier", by_step["6.9"])
+        # prologue, the loop body and the peeled last tile.
+        self.assertIn("@llvm.amdgcn.s.barrier()", by_step["6.7"])
+        self.assertNotIn("@llvm.amdgcn.s.barrier()", by_step["6.8"])
+        self.assertNotIn("@llvm.amdgcn.s.cluster.barrier", by_step["6.8"])
         cluster_asm = re.escape(
             'asm sideeffect "s_barrier_signal_isfirst -1\\0As_barrier_wait -1'
             '\\0As_cbranch_scc0 1\\0As_barrier_signal -3\\0As_barrier_wait -3"'
         )
-        self.assertEqual(_count(cluster_asm, by_step["6.8"]), 0)
-        self.assertEqual(_count(cluster_asm, by_step["6.9"]), 4)
-        self.assertNotRegex(by_step["6.9"], r"\bfence\b")
-        # 6.10: two NT, SE-scope GL2 prefetches per call site (loop body and
-        # peeled tile), with no guard branch.
+        self.assertEqual(_count(cluster_asm, by_step["6.7"]), 0)
+        self.assertEqual(_count(cluster_asm, by_step["6.8"]), 3)
+        self.assertNotRegex(by_step["6.8"], r"\bfence\b")
+        # Trial prefetch_gl2: two NT, SE-scope GL2 prefetches in the loop
+        # body, with no guard branch.
+        prefetch_gl2, init_c, refill_mid = (by_step[t] for t in ("T1", "T2", "T3"))
         prefetch = r"call void @llvm\.amdgcn\.global\.prefetch\(ptr addrspace\(1\) %\w+, i32 9\)"
         self.assertEqual(
-            _count(r"@llvm\.amdgcn\.global\.prefetch\(", by_step["6.9"]), 0
+            _count(r"@llvm\.amdgcn\.global\.prefetch\(", by_step["6.8"]), 0
         )
-        self.assertEqual(_count(prefetch, by_step["6.10"]), 4)
+        self.assertEqual(_count(prefetch, prefetch_gl2), 2)
         branches = r"\bbr i1\b"
         self.assertEqual(
-            _count(branches, by_step["6.10"]), _count(branches, by_step["6.9"])
+            _count(branches, prefetch_gl2), _count(branches, by_step["6.8"])
         )
+        # Trial init_c_wmma: the first K step of the peeled first tile
+        # multiplies into C = 0 (peeled first tile, loop body, peeled last
+        # tile).
+        wmma = r"call <16 x float> @llvm\.amdgcn\.wmma\.scale\.f32\.32x16x128\.f4"
+        self.assertEqual(_count(zero_c, by_step["6.8"]), 0)
+        self.assertEqual(_count(zero_c, init_c), 32)
+        self.assertEqual(_count(wmma, by_step["6.8"]), 32 * k_steps * 2)
+        self.assertEqual(_count(wmma, init_c), 32 * k_steps * 3)
+        self.assertGreaterEqual(k_tiles, 3)
+        # Trial tile_refill_mid: the TDM runs two tiles ahead and refills
+        # mid-tile, so only the peeled first tile and the loop body remain
+        # (the clamped tail needs no peel). Tile k+1 is waited for at the
+        # tile boundary with tile k+2's two loads in flight; tensorcnt 0 is
+        # only the drain after the loop. Scheduling barriers that let only
+        # ALU work cross pin the refill and the first K-step's reads (three
+        # per tile copy), and no guard is added.
+        self.assertEqual(_count(wmma, refill_mid), 32 * k_steps * 2)
+        self.assertEqual(_count(tdm, refill_mid), 8)
+        wait_tensor = r"call void @llvm\.amdgcn\.s\.wait\.tensorcnt\(i16 {}\)"
+        self.assertEqual(_count(wait_tensor.format(0), init_c), 3)
+        self.assertEqual(_count(wait_tensor.format(0), refill_mid), 1)
+        self.assertEqual(_count(wait_tensor.format(2), refill_mid), 2)
+        sched = r"call void @llvm\.amdgcn\.sched\.barrier\(i32 1030\)"
+        self.assertEqual(_count(sched, init_c), 0)
+        self.assertEqual(_count(sched, refill_mid), 6)
+        self.assertEqual(_count(cluster_asm, refill_mid), 4)
+        self.assertEqual(_count(branches, refill_mid), _count(branches, init_c))
 
     def test_tdm_pad_fields_encoding(self):
         self.assertEqual(tdm_pad_fields(1024, 16), {"pad_interval": 7, "pad_amount": 3})
@@ -461,7 +503,7 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                 self.assertEqual(_tdm_pad(tdm_pad_fields(period, pad)), (period, pad))
 
     def test_lds_layout_matches_simulated_tdm_writes(self):
-        for name in variant_names():
+        for name in variant_names(trials=True):
             spec = variant_spec(name, *_SMOKE, **YAML_TILE)
             layout = mxfp4_lds_layout(spec)
             with self.subTest(step=variant_step(name)):
@@ -488,9 +530,14 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                     per_iter = layout.b_iterate_rows or layout.b_component_rows
                     iterations = layout.b_component_rows // per_iter
                     stride = layout.b_iterate_stride
+                    b_pad = (
+                        _tdm_pad(tdm_pad_fields(layout.b_pad_period, 16))
+                        if layout.b_pad_period
+                        else None
+                    )
                     for it in range(iterations):
                         rows, written = _tdm_write(
-                            base + it * stride, layout.row_bytes, per_iter, None
+                            base + it * stride, layout.row_bytes, per_iter, b_pad
                         )
                         chunks += written
                         for r, address in enumerate(rows):

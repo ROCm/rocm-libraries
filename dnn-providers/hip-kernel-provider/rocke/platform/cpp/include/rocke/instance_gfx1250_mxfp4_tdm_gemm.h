@@ -52,6 +52,7 @@ typedef struct rocke_mxfp4_tdm_gemm_spec
     int cluster_dim_z;
     bool tdm_multicast;
     bool prefetch_gl2;
+    bool tile_refill_mid;
 } rocke_mxfp4_tdm_gemm_spec_t;
 
 rocke_mxfp4_tdm_gemm_spec_t rocke_mxfp4_tdm_gemm_spec_default(void);

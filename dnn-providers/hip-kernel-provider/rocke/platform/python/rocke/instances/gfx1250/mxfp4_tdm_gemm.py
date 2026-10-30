@@ -32,11 +32,18 @@ _A_PAD_PERIOD = 1024  # LdsBlockSizePerPadB
 _B_PAD_PERIOD = 2048  # LdsBlockSizePerPadA; needs TDM iterate mode
 _B_SCALE_PAD_PERIOD = 256  # LdsPadMXSA
 _B_SCALE_REGION_ALIGN = 512
+# CK Tile comp_tdm rule (UniversalGemmBasePolicy::GetLdsPaddingConfig): one
+# 16 B pad per sweep of the 64 LDS banks, or per row if a row is longer.
+_CK_PAD_SWEEP = 64 * 4
+_TDM_PAD_PERIOD_MAX = 1024
 _SCALE_GROUPS_PER_STEP = _ATOM_K // 32
 _GL2_LINE_BYTES = 256
 # th:TH_LOAD_NT (bits 0..2) | scope:SCOPE_SE (bits 3..4), as in the winner.
 _GL2_PREFETCH_CPOL = 1 | (1 << 3)
 _FP8_MAX = 448.0
+# sched_barrier mask: VALU (0x2), SALU (0x4) and TRANS (0x400) may cross;
+# WMMAs and memory operations may not.
+_SCHED_ALU_ONLY = 0x2 | 0x4 | 0x400
 # The expansion of llvm.amdgcn.s.cluster.barrier (no fences): a workgroup
 # barrier, then the first wave to arrive signals the cluster barrier. As
 # inline asm the signal's skip branch is invisible to LLVM. LLVM expands the
@@ -85,11 +92,13 @@ class MxFp4TdmGemmSpec:
     wave_parity_tdm: bool = False
     scale_tdm: bool = False
     lds_pad: bool = False
+    lds_pad_ck: bool = False
     lds_segment_interleave: bool = False
     init_c_wmma: bool = False
     cluster_dim: tuple[int, int, int] | None = None
     tdm_multicast: bool = False
     prefetch_gl2: bool = False
+    tile_refill_mid: bool = False
 
     @property
     def wave_repeat_m(self) -> int:
@@ -157,11 +166,13 @@ class MxFp4TdmGemmSpec:
                 "wptdm": self.wave_parity_tdm,
                 "stdm": self.scale_tdm,
                 "ldsp": self.lds_pad,
+                "ldspck": self.lds_pad_ck,
                 "ldssi": self.lds_segment_interleave,
                 "initc": self.init_c_wmma,
                 "clu": cluster_on,
                 "mcast": self.tdm_multicast,
                 "pgl2": self.prefetch_gl2,
+                "rmid": self.tile_refill_mid,
             },
         )
 
@@ -172,10 +183,12 @@ _STEP6_BOOL_FLAGS = (
     "wave_parity_tdm",
     "scale_tdm",
     "lds_pad",
+    "lds_pad_ck",
     "lds_segment_interleave",
     "init_c_wmma",
     "tdm_multicast",
     "prefetch_gl2",
+    "tile_refill_mid",
 )
 
 
@@ -221,6 +234,7 @@ class MxFp4LdsLayout:
     b_component_rows: int
     b_base: int
     b_component_stride: int
+    b_pad_period: int
     b_iterate_rows: int
     b_iterate_stride: int
     a_scale_base: int
@@ -277,6 +291,10 @@ class MxFp4LdsLayout:
             )
         else:
             linear = ops.mul(local, self.row_bytes)
+            if self.b_pad_period:
+                linear = ops.add(
+                    linear, ops.mul(ops.div(linear, self.b_pad_period), _PAD_BYTES)
+                )
         return ops.add(self.b_component_base(ops, component), linear)
 
     def a_scale_offset(self, ops, step, row):
@@ -301,6 +319,11 @@ class MxFp4LdsLayout:
         return ops.add(self.b_scale_component_base(ops, ops.div(col, rows)), linear)
 
 
+def ck_pad_period(row_bytes: int) -> int:
+    """CK Tile's A/B pad period for ``row_bytes``-byte LDS rows."""
+    return max(_CK_PAD_SWEEP, row_bytes)
+
+
 def mxfp4_lds_layout(spec: MxFp4TdmGemmSpec) -> MxFp4LdsLayout:
     """LDS buffer layout for ``spec``: ``[B][A][B scales][A scales]``, or with
     ``lds_segment_interleave`` ``[B0][A][B1][B scales][A scales]``."""
@@ -308,7 +331,11 @@ def mxfp4_lds_layout(spec: MxFp4TdmGemmSpec) -> MxFp4LdsLayout:
     components = 2 if spec.wave_parity_tdm else 1
     a_rows = spec.tile_m // components
     b_rows = spec.tile_n // components
-    a_pad_period = _A_PAD_PERIOD if spec.lds_pad else 0
+    if spec.lds_pad_ck:
+        a_pad_period = b_pad_period = ck_pad_period(row_bytes)
+    else:
+        a_pad_period = _A_PAD_PERIOD if spec.lds_pad else 0
+        b_pad_period = 0
     a_component = a_rows * row_bytes
     if a_pad_period:
         a_component += a_component // a_pad_period * _PAD_BYTES
@@ -320,6 +347,8 @@ def mxfp4_lds_layout(spec: MxFp4TdmGemmSpec) -> MxFp4LdsLayout:
         b_iterate_rows = 0
         b_iterate_stride = 0
         b_component = b_rows * row_bytes
+        if b_pad_period:
+            b_component += b_component // b_pad_period * _PAD_BYTES
     steps = spec.k_steps
     a_scale_component = steps * a_rows * 4 if spec.scale_tdm else 0
     b_scale_pad_period = _B_SCALE_PAD_PERIOD if spec.scale_tdm and spec.lds_pad else 0
@@ -353,6 +382,7 @@ def mxfp4_lds_layout(spec: MxFp4TdmGemmSpec) -> MxFp4LdsLayout:
         b_component_rows=b_rows,
         b_base=b_base,
         b_component_stride=b_stride,
+        b_pad_period=b_pad_period,
         b_iterate_rows=b_iterate_rows,
         b_iterate_stride=b_iterate_stride,
         a_scale_base=a_scale_base,
@@ -454,6 +484,12 @@ def _step6_reason(spec: MxFp4TdmGemmSpec) -> str | None:
         row_bytes = spec.tile_k // 2
         if _A_PAD_PERIOD % row_bytes or _B_PAD_PERIOD % row_bytes:
             return "lds_pad needs tile_k / 2 to divide the 1024 B and 2048 B pad periods"
+    if spec.lds_pad_ck:
+        row_bytes = spec.tile_k // 2
+        if spec.lds_pad:
+            return "lds_pad_ck and lds_pad are alternative LDS paddings"
+        if not _is_pow2(row_bytes) or ck_pad_period(row_bytes) > _TDM_PAD_PERIOD_MAX:
+            return "lds_pad_ck needs tile_k / 2 to be a power of two of at most 1024 B"
     if spec.lds_segment_interleave and not (spec.lds_pad and spec.wave_parity_tdm):
         return "lds_segment_interleave requires lds_pad and wave_parity_tdm"
     if spec.init_c_wmma and spec.K < 2 * spec.tile_k:
@@ -476,6 +512,10 @@ def _step6_reason(spec: MxFp4TdmGemmSpec) -> str | None:
             return "prefetch_gl2 requires cluster_dim for the cooperative split"
         if (spec.tile_k // 2) % _GL2_LINE_BYTES:
             return "prefetch_gl2 needs tile_k / 2 to be a multiple of 256 B"
+    if spec.tile_refill_mid and not (
+        spec.local_read_prefetch and spec.init_c_wmma and spec.scale_tdm
+    ):
+        return "tile_refill_mid requires local_read_prefetch, init_c_wmma and scale_tdm"
     return None
 
 
@@ -911,6 +951,8 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
         tile_rows = rows
         if operand == "a" and layout.a_pad_period:
             extra.update(tdm_pad_fields(layout.a_pad_period, _PAD_BYTES))
+        if operand == "b" and layout.b_pad_period:
+            extra.update(tdm_pad_fields(layout.b_pad_period, _PAD_BYTES))
         if operand == "b" and layout.b_iterate_rows:
             tile_rows = layout.b_iterate_rows
             extra.update(
@@ -1156,8 +1198,11 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
             b_scales.append(b.bitcast(b.vec_pack(values, I8), I32))
         return a_scales, b_scales
 
-    def compute_tile(k0, parity, accumulators, *, seed_zero=False):
-        """One DepthU tile. ``seed_zero`` gives the first K-step's WMMAs C = 0."""
+    def compute_tile(k0, parity, accumulators, *, seed_zero=False, refill=None):
+        """One DepthU tile. ``seed_zero`` gives the first K-step's WMMAs C = 0.
+
+        ``refill`` runs before the last K-step's WMMAs, after the tile's last
+        LDS read (local_read_prefetch only)."""
         buffer = buffer_base(parity)
         out = list(accumulators)
         zero = b.zero_vec_f32(_ACCUMULATORS_PER_ATOM) if seed_zero else None
@@ -1196,12 +1241,18 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
 
         head = load_head(0)
         b_halves = [load_b_half(0, 0), load_b_half(0, 1)]
+        if refill is not None:
+            # Otherwise LLVM mixes K-step 1's reads into K-step 0's and the
+            # first WMMA waits for twice as many reads.
+            b.sched_barrier(_SCHED_ALU_ONLY)
         for step in range(steps):
             a_frags, a_scales, b_scales = head
             last = step + 1 == steps
             if not last:
                 head = load_head(step + 1)
                 next_first = load_b_half(step + 1, 0)
+            elif refill is not None:
+                refill()
             for which in (0, 1):
                 if which == 1 and not last:
                     next_second = load_b_half(step + 1, 1)
@@ -1234,45 +1285,124 @@ def _build_step6(spec: MxFp4TdmGemmSpec) -> KernelDef:
         else:
             b.s_barrier_bare()
 
+    def refill_mid_pipeline():
+        """PrefetchGlobalRead=2: the TDM runs two tiles ahead. Each tile
+        refills its own buffer with tile k+2 once its last LDS read is done,
+        before its last K-step's WMMAs. Tile k+1 is waited for at the tile
+        boundary, with tile k+2's loads still in flight.
+        SuppressNoLoadLoop: past the end the last tile is loaded again into
+        a buffer nobody reads, so the loop needs no guard or peeled tail."""
+        loads_per_tile = 2 if spec.scale_tdm else 1
+        # PGR + PrefetchGL2 = 4 tiles ahead, as TensileLite's skipPGR.
+        prefetch_ahead = 4
+
+        def clamp_k(k):
+            return b.select(b.cmp_lt(k, K), k, b.sub(K, tile_k_v))
+
+        def fence() -> None:
+            # Barrier and wait intrinsics do not access memory, and WMMAs
+            # are register-only: keep LLVM from moving LDS reads or WMMAs
+            # across the refill, or it reads the whole tile up front and
+            # refills after the first K-step. Scalar and vector ALU work
+            # (descriptor and address math) may cross.
+            b.inline_asm("", "~{memory}")
+            b.sched_barrier(_SCHED_ALU_ONLY)
+
+        def refill(k0, parity):
+            def run() -> None:
+                prefetch_gl2(ops.v(ops.add(k0, prefetch_ahead * spec.tile_k)))
+                fence()
+                b.s_waitcnt(lgkmcnt=0)
+                if spec.tdm_multicast:
+                    cluster_sync()
+                else:
+                    b.s_barrier_bare()
+                issue_tdm(clamp_k(ops.v(ops.add(k0, two_tiles))), parity)
+                fence()
+
+            return run
+
+        def wait_next_tile() -> None:
+            b.s_wait_tensorcnt(loads_per_tile)
+            b.s_barrier_bare()
+            b.inline_asm("", "~{memory}")
+
+        if spec.tdm_multicast:
+            cluster_sync()
+        issue_tdm(c0, c0)
+        issue_tdm(tile_k_v, c1)
+        for tile in range(2, prefetch_ahead):
+            prefetch_gl2(ops.v(tile * spec.tile_k))
+        wait_next_tile()
+        undef = [b.undef_vec(F32, _ACCUMULATORS_PER_ATOM) for _ in range(n_acc)]
+        accumulators = compute_tile(
+            c0, c0, undef, seed_zero=True, refill=refill(c0, c0)
+        )
+        loop = b.scf_for_iter(
+            tile_k_v,
+            K,
+            tile_k_v,
+            [("parity", c1)]
+            + [(f"acc{i}", value) for i, value in enumerate(accumulators)],
+            iv_name="k0",
+            elide_trailing_barrier=False,
+        )
+        with loop as (k0, carried):
+            parity = carried[0]
+            wait_next_tile()
+            updated = compute_tile(k0, parity, carried[1:], refill=refill(k0, parity))
+            b.scf_yield(b.sub(c1, parity), *updated)
+        # No workgroup may exit while a TDM load into its LDS is in flight:
+        # with multicast, peers' loads write here too.
+        b.s_wait_tensorcnt(0)
+        if spec.tdm_multicast:
+            cluster_sync()
+        return loop.results[1:]
+
     n_acc = rm_count * rn_count
     two_tiles = 2 * spec.tile_k
-    if spec.tdm_multicast:
-        cluster_sync()
-    issue_tdm(c0, c0)
-    if spec.init_c_wmma:
-        # InitCIterWmma: peel the first K tile so its first WMMAs read C = 0;
-        # the steady-state loop carries no accumulator clear.
-        # As in the winner, the GL2 prefetch is issued ahead of the cluster
-        # wait, so it overlaps the barrier.
-        prefetch_gl2(ops.v(two_tiles))
-        wait_tile_ready()
-        issue_tdm(tile_k_v, c1)
-        undef = [b.undef_vec(F32, _ACCUMULATORS_PER_ATOM) for _ in range(n_acc)]
-        accumulators = compute_tile(c0, c0, undef, seed_zero=True)
-        start, start_parity = tile_k_v, c1
+    if spec.tile_refill_mid:
+        final = refill_mid_pipeline()
     else:
-        accumulators = [b.zero_vec_f32(_ACCUMULATORS_PER_ATOM) for _ in range(n_acc)]
-        start, start_parity = c0, c0
-    upper = b.sub(K, tile_k_v)
-    loop = b.scf_for_iter(
-        start,
-        upper,
-        tile_k_v,
-        [("parity", start_parity)]
-        + [(f"acc{i}", value) for i, value in enumerate(accumulators)],
-        iv_name="k0",
-        elide_trailing_barrier=False,
-    )
-    with loop as (k0, carried):
-        parity = carried[0]
-        next_parity = b.sub(c1, parity)
-        prefetch_gl2(ops.v(ops.add(k0, two_tiles)))
+        if spec.tdm_multicast:
+            cluster_sync()
+        issue_tdm(c0, c0)
+        if spec.init_c_wmma:
+            # InitCIterWmma: peel the first K tile so its first WMMAs read C = 0;
+            # the steady-state loop carries no accumulator clear.
+            # As in the winner, the GL2 prefetch is issued ahead of the cluster
+            # wait, so it overlaps the barrier.
+            prefetch_gl2(ops.v(two_tiles))
+            wait_tile_ready()
+            issue_tdm(tile_k_v, c1)
+            undef = [b.undef_vec(F32, _ACCUMULATORS_PER_ATOM) for _ in range(n_acc)]
+            accumulators = compute_tile(c0, c0, undef, seed_zero=True)
+            start, start_parity = tile_k_v, c1
+        else:
+            accumulators = [
+                b.zero_vec_f32(_ACCUMULATORS_PER_ATOM) for _ in range(n_acc)
+            ]
+            start, start_parity = c0, c0
+        upper = b.sub(K, tile_k_v)
+        loop = b.scf_for_iter(
+            start,
+            upper,
+            tile_k_v,
+            [("parity", start_parity)]
+            + [(f"acc{i}", value) for i, value in enumerate(accumulators)],
+            iv_name="k0",
+            elide_trailing_barrier=False,
+        )
+        with loop as (k0, carried):
+            parity = carried[0]
+            next_parity = b.sub(c1, parity)
+            prefetch_gl2(ops.v(ops.add(k0, two_tiles)))
+            wait_tile_ready()
+            issue_tdm(ops.add(k0, spec.tile_k), next_parity)
+            updated = compute_tile(k0, parity, carried[1:])
+            b.scf_yield(next_parity, *updated)
         wait_tile_ready()
-        issue_tdm(ops.add(k0, spec.tile_k), next_parity)
-        updated = compute_tile(k0, parity, carried[1:])
-        b.scf_yield(next_parity, *updated)
-    wait_tile_ready()
-    final = compute_tile(upper, loop.results[0], loop.results[1:])
+        final = compute_tile(upper, loop.results[0], loop.results[1:])
 
     def saturate(value):
         # hipBLASLt's FP8 store: +-inf -> NaN (x * 0 + x), finite values

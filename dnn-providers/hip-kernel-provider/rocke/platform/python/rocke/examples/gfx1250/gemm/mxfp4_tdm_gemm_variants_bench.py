@@ -10,6 +10,12 @@ spills, scratch, LDS), check the FP8 output against the reference at
   hipBLASLt's bench reports a kernel;
 * median: the median of ``--iters`` single launches bracketed by HIP events.
 
+The check uses exactly representable inputs (FP4 0 and +1, alpha 1/K). With
+``--timing-inputs tensile`` (the default) the timed launches instead use the
+Tensile client's inputs for the YAML run: A ``TrigSin``, B ``TrigCos``, E8M0
+scales ``Random``, alpha 1. Those outputs saturate FP8 and have no exact FP32
+reference, so the timed launches are not checked.
+
 ``--host-only`` compiles and reports resources without touching a device.
 
 Absolute timings must not be committed to the repo. Use ``--out`` with a path
@@ -29,6 +35,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ....examples.common.scaled_gemm_reference import pack_fp4_codes
 from ....helpers.compile import compile_kernel
 from ....instances.gfx1250.mxfp4_tdm_gemm import (
     build_mxfp4_tdm_gemm,
@@ -154,6 +161,37 @@ def _check(spec, got, inputs, *, alpha, beta, verify: str, samples: int) -> bool
     return bool(np.array_equal(got[rows, cols], expected[rows, cols]))
 
 
+def _trig_fp4_codes(rows: int, cols: int, *, use_cos: bool) -> np.ndarray:
+    """E2M1 codes of ``sin`` or ``cos`` of the linear element index (K
+    fastest), rounded to nearest even: the client's ``initArrayTrig``."""
+    import ml_dtypes
+
+    codes = np.empty((rows, cols), dtype=np.uint8)
+    trig = np.cos if use_cos else np.sin
+    chunk = max(1, (1 << 24) // cols)
+    for begin in range(0, rows, chunk):
+        end = min(rows, begin + chunk)
+        index = np.arange(begin * cols, end * cols, dtype=np.float64)
+        values = trig(index).astype(np.float32).astype(ml_dtypes.float4_e2m1fn)
+        codes[begin:end] = values.view(np.uint8).reshape(end - begin, cols)
+    return codes
+
+
+def tensile_timing_inputs(spec, seed: int = 0x32F4):
+    """A, B and scales filled like the Tensile client's YAML run, in
+    ``make_inputs``' canonical layout. ``Random`` E8M0 scales are
+    ``rand() % 7 - 3 + 127`` there; this draws the same range, not the same
+    sequence."""
+    rng = np.random.default_rng(seed)
+    groups = spec.K // spec.block_k
+    return (
+        pack_fp4_codes(_trig_fp4_codes(spec.M, spec.K, use_cos=False)),
+        pack_fp4_codes(_trig_fp4_codes(spec.N, spec.K, use_cos=True)),
+        rng.integers(124, 131, (spec.M, groups), dtype=np.uint8),
+        rng.integers(124, 131, (groups, spec.N), dtype=np.uint8),
+    )
+
+
 def _bench_one(
     variant: str,
     *,
@@ -169,6 +207,7 @@ def _bench_one(
     warmup: int,
     iters: int,
     batch: int,
+    timing_inputs: str,
     host_only: bool,
     emit_dir: Path | None,
 ) -> dict:
@@ -220,14 +259,14 @@ def _bench_one(
         block = (spec.block_size, 1, 1)
         cluster = spec.cluster_dim
 
-        def _arguments(beta_value: float) -> bytes:
+        def _arguments(beta_value: float, alpha_value: float = alpha32) -> bytes:
             return struct.pack(
                 "<QQQQQQiiiff",
                 *allocations,
                 spec.M,
                 spec.N,
                 spec.K,
-                float(alpha32),
+                float(alpha_value),
                 float(beta_value),
             )
 
@@ -260,6 +299,11 @@ def _bench_one(
             )
 
         timed = _arguments(beta)
+        if timing_inputs == "tensile":
+            timing = kernel_inputs(spec, (*tensile_timing_inputs(spec), inputs[4]))
+            for pointer, array in zip(allocations, timing[:4]):
+                runtime.memcpy_h2d(pointer, _u8_buffer(array), array.nbytes)
+            timed = _arguments(beta, alpha_value=1.0)
         for _ in range(max(warmup, 1)):
             _launch(timed)
         runtime.sync()
@@ -337,6 +381,15 @@ def main(argv: list[str] | None = None) -> int:
         help="enqueues per sync for the host-timed number (0 disables)",
     )
     parser.add_argument(
+        "--timing-inputs",
+        choices=("tensile", "check"),
+        default="tensile",
+        help=(
+            "data of the timed launches: the Tensile client's YAML-run inputs "
+            "(TrigSin/TrigCos, Random scales, alpha 1) or the check inputs"
+        ),
+    )
+    parser.add_argument(
         "--host-only",
         action="store_true",
         help="compile and report resources only; no device is used",
@@ -369,6 +422,7 @@ def main(argv: list[str] | None = None) -> int:
             warmup=args.warmup,
             iters=args.iters,
             batch=args.batch,
+            timing_inputs=args.timing_inputs,
             host_only=args.host_only,
             emit_dir=args.emit_dir,
         )
