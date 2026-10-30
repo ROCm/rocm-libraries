@@ -3909,6 +3909,12 @@ extern "C" HIPBLASLT_EXPORT int hipblaslt_tuning_last_launch_for_test()
 //       Dispatches online tuning's measurement hook asked about under a key
 //       its selection hook never registered. Nonzero means the two hooks
 //       disagree on the key.
+//   14 online event-pair cap
+//       The most event pairs online tuning keeps alive on one device, as
+//       configured.
+//   15 online live event pairs
+//       Event pairs online tuning holds on the calling thread's current
+//       device, pooled and outstanding together.
 //
 // Fills up to count values in that order and returns how many there are, so a
 // test expecting a different list notices instead of misreading it. New values
@@ -3918,6 +3924,10 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_stats_for_test(uint64_t* val
     const auto& c      = TensileLite::TuningCounters::instance();
     uint64_t    shapes = 0, matched = 0, fellback = 0, tunedShapes = 0;
     TensileLite::tuningLookupTallyForTest(&shapes, &matched, &fellback, &tunedShapes);
+
+    auto& tuner  = rocblaslt::OnlineTuner::getInstance();
+    int   device = 0;
+    static_cast<void>(hipGetDevice(&device));
 
     const uint64_t all[] = {c.entriesLoaded.load(),
                             c.hits.load(),
@@ -3932,7 +3942,9 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_stats_for_test(uint64_t* val
                             tunedShapes,
                             c.unrecorded.load(),
                             c.rejected.load(),
-                            rocblaslt::OnlineTuner::getInstance().misses()};
+                            tuner.misses(),
+                            static_cast<uint64_t>(tuner.livePairCap()),
+                            static_cast<uint64_t>(tuner.livePairs(device))};
 
     constexpr size_t known = sizeof(all) / sizeof(all[0]);
     for(size_t i = 0; values && i < count && i < known; i++)

@@ -110,7 +110,8 @@ namespace
      * reached tuning-start; shapes, matched, fellback and tunedShapes count
      * distinct shapes, the way the summary line does. onlineMisses counts
      * dispatches online tuning's measurement hook could not find a
-     * registration for.
+     * registration for. onlinePairCap and onlineLivePairs are online's event-
+     * pair cap and the pairs it holds on the current device.
      */
     struct Counters
     {
@@ -118,13 +119,14 @@ namespace
         uint64_t shapes = 0, matched = 0, fellback = 0;
         uint64_t tuned = 0, skipped = 0, attempts = 0, tunedShapes = 0;
         uint64_t unrecorded = 0, rejected = 0, onlineMisses = 0;
+        uint64_t onlinePairCap = 0, onlineLivePairs = 0;
     };
 
     Counters counters()
     {
-        uint64_t     v[14] = {};
-        const size_t known = hipblaslt_tuning_stats_for_test(v, 14);
-        EXPECT_GE(known, 14u) << "the library reports fewer tallies than this reads";
+        uint64_t     v[16] = {};
+        const size_t known = hipblaslt_tuning_stats_for_test(v, 16);
+        EXPECT_GE(known, 16u) << "the library reports fewer tallies than this reads";
 
         Counters c;
         c.loaded       = v[0];
@@ -140,7 +142,9 @@ namespace
         c.tunedShapes  = v[10];
         c.unrecorded   = v[11];
         c.rejected     = v[12];
-        c.onlineMisses = v[13];
+        c.onlineMisses    = v[13];
+        c.onlinePairCap   = v[14];
+        c.onlineLivePairs = v[15];
         return c;
     }
 
@@ -2937,12 +2941,16 @@ namespace
      * pointerArray puts all four layouts in HIPBLASLT_BATCH_MODE_POINTER_ARRAY
      * and passes device arrays of per-batch pointers instead of a base and a
      * stride. That is the problem class the tuning cache will not key.
+     *
+     * m is the row count, so a case can make as many distinct shapes as it
+     * needs; every other dimension is fixed.
      */
     class OnlineProblem
     {
     public:
-        explicit OnlineProblem(bool pointerArray)
+        explicit OnlineProblem(bool pointerArray, int64_t m = kOnlineM)
             : m_pointerArray(pointerArray)
+            , m_m(m)
         {
         }
 
@@ -2969,9 +2977,9 @@ namespace
             if(hipblasLtCreate(&m_handle) != HIPBLAS_STATUS_SUCCESS)
                 return false;
 
-            const size_t elementsA = static_cast<size_t>(kOnlineM * kOnlineK);
+            const size_t elementsA = static_cast<size_t>(m_m * kOnlineK);
             const size_t elementsB = static_cast<size_t>(kOnlineK * kOnlineN);
-            const size_t elementsC = static_cast<size_t>(kOnlineM * kOnlineN);
+            const size_t elementsC = static_cast<size_t>(m_m * kOnlineN);
 
             if(!allocate(&m_a, elementsA) || !allocate(&m_b, elementsB)
                || !allocate(&m_c, elementsC) || !allocate(&m_d, elementsC)
@@ -2983,18 +2991,18 @@ namespace
                    || !pointers(&m_pc, m_c, elementsC) || !pointers(&m_pd, m_d, elementsC)))
                 return false;
 
-            if(hipblasLtMatrixLayoutCreate(&m_layoutA, HIP_R_16F, kOnlineM, kOnlineK, kOnlineM)
+            if(hipblasLtMatrixLayoutCreate(&m_layoutA, HIP_R_16F, m_m, kOnlineK, m_m)
                    != HIPBLAS_STATUS_SUCCESS
                || hipblasLtMatrixLayoutCreate(&m_layoutB, HIP_R_16F, kOnlineK, kOnlineN, kOnlineK)
                       != HIPBLAS_STATUS_SUCCESS
-               || hipblasLtMatrixLayoutCreate(&m_layoutC, HIP_R_16F, kOnlineM, kOnlineN, kOnlineM)
+               || hipblasLtMatrixLayoutCreate(&m_layoutC, HIP_R_16F, m_m, kOnlineN, m_m)
                       != HIPBLAS_STATUS_SUCCESS
-               || hipblasLtMatrixLayoutCreate(&m_layoutD, HIP_R_16F, kOnlineM, kOnlineN, kOnlineM)
+               || hipblasLtMatrixLayoutCreate(&m_layoutD, HIP_R_16F, m_m, kOnlineN, m_m)
                       != HIPBLAS_STATUS_SUCCESS)
                 return false;
 
-            const int64_t strides[] = {
-                kOnlineM * kOnlineK, kOnlineK * kOnlineN, kOnlineM * kOnlineN, kOnlineM * kOnlineN};
+            const int64_t strides[]
+                = {m_m * kOnlineK, kOnlineK * kOnlineN, m_m * kOnlineN, m_m * kOnlineN};
             hipblasLtMatrixLayout_t layouts[] = {m_layoutA, m_layoutB, m_layoutC, m_layoutD};
 
             const int32_t batchMode = 1; // HIPBLASLT_BATCH_MODE_POINTER_ARRAY
@@ -3184,6 +3192,7 @@ namespace
         }
 
         bool                        m_pointerArray = false;
+        int64_t                     m_m            = kOnlineM;
         hipblasLtHandle_t           m_handle       = nullptr;
         hipblasLtMatmulDesc_t       m_desc         = nullptr;
         hipblasLtMatmulPreference_t m_pref         = nullptr;
@@ -3212,7 +3221,8 @@ namespace
                                                 "HIPBLASLT_TUNING_OVERRIDE_FILE",
                                                 "HIPBLASLT_TUNING_MAX_CANDIDATES",
                                                 "HIPBLASLT_TUNING_COLD_ITERS",
-                                                "HIPBLASLT_TUNING_HOT_ITERS"};
+                                                "HIPBLASLT_TUNING_HOT_ITERS",
+                                                "HIPBLASLT_TUNING_MAX_EVENT_PAIRS"};
             for(const char* name : names)
             {
                 const char* value = getenv(name);
@@ -3805,5 +3815,63 @@ namespace
             else
                 unsetenv(name.c_str());
         }
+    }
+
+    // HIPBLASLT_TUNING_MAX_EVENT_PAIRS is read as the other counts are: unset
+    // or unparsable keeps the default, and a value below one counts as one.
+    // Then the value reaches the cap the measurement hook applies: shapes
+    // dispatched once each keep a pair apiece under the default, and share
+    // one under a cap of one.
+    //
+    // The second half runs in a fresh process, so the device holds no pair
+    // that an earlier case pooled and the count starts from zero.
+    TEST_F(TuningOnline_pre_checkin, TheEventPairCapComesFromItsVariable)
+    {
+        enterOnline(m_path);
+        EXPECT_EQ(counters().onlinePairCap, 4096u) << "the default cap was not applied";
+
+        const std::pair<const char*, uint64_t> readings[]
+            = {{"3", 3}, {"0", 1}, {"-7", 1}, {"pairs", 4096}};
+        for(const auto& [value, cap] : readings)
+        {
+            setenv("HIPBLASLT_TUNING_MAX_EVENT_PAIRS", value, 1);
+            hipblaslt_tuning_reset_for_test();
+            EXPECT_EQ(counters().onlinePairCap, cap)
+                << "HIPBLASLT_TUNING_MAX_EVENT_PAIRS=" << value;
+        }
+
+        // Three shapes, each dispatched once, and the pairs left live on the
+        // device afterwards.
+        auto oneShots = []() -> int {
+            for(int64_t m : {kOnlineM, kOnlineM + 64, kOnlineM + 128})
+            {
+                OnlineProblem problem(/*pointerArray=*/false, m);
+                int           launched = -1;
+                if(!problem.create() || problem.distinctCandidates(kOnlineTopK) < 2
+                   || !problem.dispatch(&launched))
+                    return -1;
+            }
+            return static_cast<int>(counters().onlineLivePairs);
+        };
+
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        EXPECT_EXIT(
+            {
+                unsetenv("HIPBLASLT_TUNING_MAX_EVENT_PAIRS");
+                hipblaslt_tuning_reset_for_test();
+                const int underDefault = oneShots();
+
+                // Retires the outstanding pairs of the shapes above, which
+                // were never pooled, so the device starts from none again.
+                setenv("HIPBLASLT_TUNING_MAX_EVENT_PAIRS", "1", 1);
+                hipblaslt_tuning_reset_for_test();
+                const int underOne = oneShots();
+
+                std::exit(underDefault < 0 || underOne < 0     ? 2
+                          : underDefault == 3 && underOne == 1 ? 0
+                                                               : 3);
+            },
+            ::testing::ExitedWithCode(0),
+            "");
     }
 } // namespace

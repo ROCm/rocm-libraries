@@ -4014,6 +4014,20 @@ namespace
         {
             return std::max(0, envInt("HIPBLASLT_TUNING_COLD_ITERS", 0));
         }
+        /**
+         * The most HIP event pairs online keeps alive on one device, and
+         * online's alone: tune keeps no pairs between calls. A positive
+         * count, read like MAX_CANDIDATES and
+         * HOT_ITERS, so a value below one counts as one and one that does not
+         * parse keeps the default. The default and why it is a flat number are
+         * on rocblaslt::OnlineTunerConfig::c_defaultLivePairCap.
+         */
+        static int onlineLivePairCap()
+        {
+            return std::max(1,
+                            envInt("HIPBLASLT_TUNING_MAX_EVENT_PAIRS",
+                                   rocblaslt::OnlineTunerConfig::c_defaultLivePairCap));
+        }
 
         /**
          * Invalidate the instruction cache between timed launches, as the bench
@@ -5560,8 +5574,10 @@ namespace rocblaslt
      *
      * MAX_CANDIDATES, HOT_ITERS and COLD_ITERS are the same three variables
      * tune mode reads, at defaults that suit a search spread over a live
-     * workload rather than one blocking search. ALL_KERNELS is not read at all:
-     * online reorders a ranking it was handed, so it is always a ranked prefix.
+     * workload rather than one blocking search. MAX_EVENT_PAIRS is online's
+     * alone: the cap on the event pairs it keeps per device. ALL_KERNELS is
+     * not read at all: online reorders a ranking it was handed, so it is always
+     * a ranked prefix.
      * BUDGET_MS_PER_SHAPE, ROTATING_MB, FLUSH_ICACHE and SCRATCH_MAX_BYTES have
      * no counterpart here -- online measures the caller's own dispatch on the
      * caller's own buffers, so there is no scratch to cap and no stall to bound.
@@ -5578,9 +5594,10 @@ namespace rocblaslt
         config.enabled
             = tuning.mode() == TensileLite::TuningMode::Online && !tuning.cachePath().empty();
 
-        config.topK      = TuningPolicy::onlineCandidateCap();
-        config.repeats   = TuningPolicy::onlineHotIterations();
-        config.coldCalls = TuningPolicy::onlineColdIterations();
+        config.topK        = TuningPolicy::onlineCandidateCap();
+        config.repeats     = TuningPolicy::onlineHotIterations();
+        config.coldCalls   = TuningPolicy::onlineColdIterations();
+        config.livePairCap = TuningPolicy::onlineLivePairCap();
 
         // The per-candidate trace is a diagnostic, so it rides the logging
         // level the rest of the tuning lifecycle reports at rather than a

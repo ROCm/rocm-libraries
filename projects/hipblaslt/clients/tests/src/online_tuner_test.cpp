@@ -111,6 +111,10 @@ namespace
     constexpr int kTopK    = 3;
     constexpr int kRepeats = 2;
 
+    // Far below the library's default, so a case reaches the cap with a
+    // handful of shapes rather than thousands.
+    constexpr int kLivePairCap = 16;
+
     // The host-only cases below record no event, so no candidate collects a
     // sample and exploration can only end by running out its visit budget.
     // Bounded well above that budget, so a tuner that never gives up fails an
@@ -188,6 +192,7 @@ namespace
         EXPECT_TRUE(tuner().enabled());
         EXPECT_EQ(tuner().topK(), kTopK);
         EXPECT_EQ(tuner().repeats(), kRepeats);
+        EXPECT_EQ(tuner().livePairCap(), kLivePairCap);
 
         // No cold visits, so every test below registers its problem on the
         // first offer.
@@ -1564,8 +1569,9 @@ namespace
 rocblaslt::OnlineTunerConfig rocblaslt::onlineTunerConfig()
 {
     OnlineTunerConfig config;
-    config.enabled = true;
-    config.topK    = kTopK;
-    config.repeats = kRepeats;
+    config.enabled     = true;
+    config.topK        = kTopK;
+    config.repeats     = kRepeats;
+    config.livePairCap = kLivePairCap;
     return config;
 }

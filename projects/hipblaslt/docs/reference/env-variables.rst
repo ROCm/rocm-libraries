@@ -184,6 +184,13 @@ closing summary. Replaying a cache adds no output per call. Where the notices go
         | Sets timed launches per candidate.
       - | Positive integer (``tune`` default: 1000, ``online`` default: 3)
 
+    * - | ``HIPBLASLT_TUNING_MAX_EVENT_PAIRS``
+        | Caps the HIP event pairs ``online`` mode keeps alive on each device to time its
+          candidates. A device at the cap with no pair free runs the call untimed.
+        | Read only in ``online`` mode.
+      - | Positive integer (default: 4096); a value below 1 counts as 1
+        | A pair holds a little host memory and no device memory
+
     * - | ``HIPBLASLT_TUNING_ROTATING_MB``
         | Sets the target rotating-buffer footprint.
         | Not read in ``online`` mode, which measures the caller's own buffers.

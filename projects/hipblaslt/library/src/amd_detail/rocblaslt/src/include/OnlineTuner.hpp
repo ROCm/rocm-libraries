@@ -60,6 +60,29 @@ namespace rocblaslt
         // whole call that goes untouched.
         int coldCalls = 0;
 
+        /**
+         * The live-pair cap a link that sets nothing gets.
+         *
+         * A fixed number of pairs rather than a multiple of the search depth,
+         * because what it bounds is per pair. A pair is a little host memory
+         * and two runtime handles; it holds no device memory and no file
+         * descriptor, and costs the same whatever topK and repeats are.
+         * Scaling the bound by them would let a deep search, configured for
+         * reasons of its own, lift the bound by orders of magnitude.
+         *
+         * Sized to the resolved table, OnlineTuner::c_resolutionSlots, which
+         * is already this design's statement of how many distinct problems a
+         * process is expected to explore. A pair for each of them fits, so a
+         * process inside that expectation is never refused a pair by one-shot
+         * shapes alone, and a device at the cap still holds only a small,
+         * fixed amount of host memory.
+         */
+        static constexpr int c_defaultLivePairCap = 4096;
+
+        // The most event pairs kept alive on one device; see
+        // OnlineTuner::livePairCap(). Below one counts as one.
+        int livePairCap = c_defaultLivePairCap;
+
         bool verbose = false;
     };
 
@@ -363,18 +386,25 @@ namespace rocblaslt
          * measurement starts there: beginMeasurement() declines, and the
          * launch runs exactly as an untuned one would.
          *
-         * Scaled by topK() * repeats(), which is one whole exploration and
-         * the most a single problem can have outstanding, so the configured
-         * depth is never what the cap starves; c_livePairExplorations of
-         * those is room for that many problems to have their entire
-         * exploration in flight on one device at once. At the defaults that
-         * is a few hundred pairs, a small, fixed number of runtime handles
-         * however many shapes the process goes through.
+         * Configured, as OnlineTunerConfig::livePairCap, and a fixed number of
+         * pairs rather than a multiple of topK() * repeats(): see
+         * OnlineTunerConfig::c_defaultLivePairCap for why, and for the
+         * default. A small, fixed number of runtime handles however many
+         * shapes the process goes through.
          */
         int livePairCap() const
         {
-            return c_livePairExplorations * m_topK * m_repeats;
+            return m_livePairCap;
         }
+
+        /**
+         * @brief Pairs created on device and not yet retired, pooled and
+         * outstanding together: what livePairCap() bounds.
+         *
+         * Takes the lock shared, so it is for tests and diagnostics, never
+         * for the dispatch path.
+         */
+        int livePairs(int device);
 
         /**
          * @brief Launches the measurement hook asked about under a key the
@@ -755,6 +785,7 @@ namespace rocblaslt
         int  m_topK      = 0;
         int  m_repeats   = 0;
         int  m_coldCalls = 0;
+        int  m_livePairCap = 1;
         bool m_verbose   = false;
 
         // Stamped onto every registration so a thread-held offer names one
@@ -783,9 +814,6 @@ namespace rocblaslt
         std::unordered_map<int, int> m_livePairs;
 
         // The resolved table, sized by c_resolutionSlots above.
-
-        // See livePairCap().
-        static constexpr int c_livePairExplorations = 16;
 
         std::vector<std::unique_ptr<Resolution>> m_resolutionPool;
         std::atomic<const Resolution*>           m_resolutions[c_resolutionSlots] = {};

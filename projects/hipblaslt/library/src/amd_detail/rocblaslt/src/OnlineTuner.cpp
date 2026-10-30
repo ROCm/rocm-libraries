@@ -92,8 +92,9 @@ namespace rocblaslt
 
         m_topK      = std::max(config.topK, 0);
         m_repeats   = std::max(config.repeats, 1);
-        m_coldCalls = std::max(config.coldCalls, 0);
-        m_verbose   = config.verbose;
+        m_coldCalls   = std::max(config.coldCalls, 0);
+        m_livePairCap = std::max(config.livePairCap, 1);
+        m_verbose     = config.verbose;
 
         // One candidate is nothing to choose between, so a depth below two is
         // the feature switched off however the mode is set.
@@ -876,6 +877,14 @@ namespace rocblaslt
         stop  = pair.m_stop;
 
         return true;
+    }
+
+    int OnlineTuner::livePairs(int device)
+    {
+        std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
+
+        const auto found = m_livePairs.find(device);
+        return found == m_livePairs.end() ? 0 : found->second;
     }
 
     // Inverted on purpose, and only ever reached for a pair a launch really did
