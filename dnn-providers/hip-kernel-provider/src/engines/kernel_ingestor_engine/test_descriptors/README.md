@@ -1,9 +1,10 @@
 # Test descriptors
 
-Authored descriptor sets for the hip-kernel-provider test suites. The build packs each set
-into one of two discovery roots. The unit binary reads the `unit` root. The integration
-binary reads the `integration` root. The two roots stay disjoint. The unit binary also reads
-its own copy of `archive_fixture/`, which stages beside the two roots.
+Authored descriptor sets for the hip-kernel-provider test suites. The build packs all but
+one set into one of two discovery roots. The unit binary reads the `unit` root. The
+integration binary reads the `integration` root. The two roots stay disjoint. The unit binary
+also reads its own copy of `archive_fixture/`, which stages beside the two roots. The one
+other set, `multi_launch/`, stages outside both roots and no Container loads it.
 
 Every set is a top-level folder here, and every one is packed whole.
 
@@ -13,8 +14,9 @@ Every set is a top-level folder here, and every one is packed whole.
 | `unit/` | `pointwise/` | `embedded_source` | `unit/unit/` | the unit binary |
 | `integration/` | `pointwise/` | `hip` | `integration/integration/` | the integration binary |
 | `archive_fixture/` | `pointwise/` | `hip` | `integration/archive_fixture/`, `unit_archive_fixture/` | both binaries |
+| `multi_launch/` | `two_stage/` | `hip` | `multi_launch/` | the unit binary, from a scratch tree |
 
-The packer runs six times over these four sets. `shared/` and `archive_fixture/` feed both
+The packer runs seven times over these five sets. `shared/` and `archive_fixture/` feed both
 binaries, and each other folder feeds one binary. Every descriptor in these sets applies to
 each packed architecture. Each set therefore stages one architecture folder for each packed
 architecture.
@@ -110,3 +112,32 @@ Two rules follow for a test author:
 
 - Name the engine id when you assert which engine served a graph.
 - Do not assert the size of the applicable-engine list for a pointwise ADD/f32 graph.
+
+## `multi_launch/`
+
+The inputs of the end-to-end case for a multi-launch kernel, `TestMultiLaunchEndToEnd.cpp`.
+A multi-launch kernel is a UKD 1.1 whose `sources` map names each of its launches. This set
+authors that form directly: one UKD whose `sources` map holds two `hip` entries, `produce`
+and `consume`. Both name `TwoStage.cpp` with the same `build` and differ in `entry`, so
+`hkp_pack` compiles the unit once. The two launches pack under one toc_key into one archive
+entry, each with its own symbol and the signature read from the code object. Keep the two
+`source` and `build` values equal: a difference would pack the launches under two toc_keys.
+
+The set stages to `multi_launch/<arch>/` beside the `unit` and `integration` roots rather than
+into either. Its engine, `hipkernel:multi_launch_probe`, names a dispatch symbol and a graph
+match symbol that only the test registers, so a Container that loaded this set would drop the
+engine at load. The set therefore sits where no Container looks, and the engine lists of both
+binaries do not change. The unit binary reaches the staged folder through a path relative to
+itself and gives the case the packed archive, the toc_key and the digest.
+
+The case copies one packed architecture folder into a scratch tree, so that the tree holds
+one architecture and nothing else, and loads the packed UKD as the packer wrote it. It asserts
+that the loaded kernel has two sources that share one toc_key and one archive. Both kernels
+take the same four arguments, so one marshalled argument list serves both launches.
+
+`MultiLaunchProduce` writes `2x + 1` to the workspace. `MultiLaunchConsume` reads the
+workspace and writes `3 * ws + x` to the output. The output is `7x + 3` only when both ran,
+the first ran first, and the second read the workspace the first wrote.
+
+Keep the descriptors in the `two_stage/` child folder, for the nesting reason given above.
+Edit the kernel arguments in step with `twoStageSignature()` in the test.
