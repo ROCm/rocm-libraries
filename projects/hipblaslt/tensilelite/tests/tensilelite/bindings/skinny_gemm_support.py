@@ -2,9 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Shared host helpers for the skinny MXFP8 GEMM tests.
 
-Ported from aster's kernels/test_gemm_mxfp8_skinny.py. The NumPy helpers need
-neither hip-python nor a GPU: hip is imported lazily by the device helpers,
-which need the HIP runtime directory in LD_LIBRARY_PATH.
+The NumPy helpers need neither hip-python nor a GPU: hip is imported lazily by
+the device helpers, which need the HIP runtime directory in LD_LIBRARY_PATH.
 
 The leading dimensions of Problem and of the buffer helpers are in elements; the
 kernels take them as byte strides, so the kernarg builders convert them.
@@ -56,7 +55,8 @@ MAX_WIDE = 2**30
 # keeps the splits below GRID_DIM_YZ_LIMIT, so the 1-D launch is never forced by
 # the split count.
 MAX_SPLITS = 2**20
-# A buffer descriptor addresses fewer than 2^31 bytes.
+# A buffer descriptor addresses fewer than 2^31 bytes; the mfma kernel also
+# uses the voffset 2^31 as its out-of-range sentinel, so no buffer may reach it.
 BUFFER_LIMIT = 2**31
 # (m, n, k) of the primary skinny target and the vLLM decode shapes (m = 1).
 PRIMARY_SHAPE = (5120, 1, 8192)
@@ -148,7 +148,7 @@ def encodeE4M3FN(x: np.ndarray) -> np.ndarray:
 
 
 def randomE4M3FN(rng: np.random.Generator, shape) -> np.ndarray:
-    """Random fp8 E4M3FN codes of the given shape, the driver's
+    """Random fp8 E4M3FN codes of the given shape,
     (rng.standard_normal(shape) * 2).astype(FP8)."""
     return encodeE4M3FN(rng.standard_normal(shape) * 2)
 
@@ -171,19 +171,22 @@ def scaleExtent(rows: int, k: int) -> int:
     return ceilDiv(rows, SCALE_ROWS) * roundUp(k, SCALE_COLS * MX_BLOCK)
 
 
-def preSwizzleScales(scales: np.ndarray) -> np.ndarray:
+def preSwizzleScales(scales: np.ndarray, pad: int = 0) -> np.ndarray:
     """Pre-swizzle [rows, C] scales into the layout of preSwizzleScalesGFX950
     (mxDataGenerator/PreSwizzle.hpp), the one the kernel loads.
 
     The scales are zero padded to roundUp(rows, 32) x roundUp(C, 8) and cut into
     32 x 8 tiles of 256 bytes. Within a tile the byte of row r, column c is
     (c % 4) * 64 + (r % 16) * 4 + ((c / 4) % 2) * 2 + (r / 16) % 2. The tiles of
-    a row group are contiguous along C.
+    a row group are contiguous along C. The padding is zero unless pad is given,
+    which fills the padded columns past C (the K blocks past the operand) with
+    that byte, such as an E8M0 NaN.
     """
     rows, cols = scales.shape
     paddedRows = roundUp(rows, SCALE_ROWS)
     paddedCols = roundUp(cols, SCALE_COLS)
     padded = np.zeros((paddedRows, paddedCols), dtype=np.uint8)
+    padded[:, cols:] = pad
     padded[:rows, :cols] = scales
     tiled = padded.reshape(
         paddedRows // SCALE_ROWS, 2, 16, paddedCols // SCALE_COLS, 2, 4
@@ -228,14 +231,17 @@ def dColumns(dBits: np.ndarray, m: int, n: int, ldD: int) -> np.ndarray:
     return dBits[np.arange(n)[:, None] * ldD + np.arange(m)]
 
 
-def makeOperand(rng: np.random.Generator, cols: int, k: int, ld: int):
+def makeOperand(
+    rng: np.random.Generator, cols: int, k: int, ld: int, scalePad: int = 0
+):
     """Random fp8 operand [k, cols], its scales, and the host buffers.
 
     The bytes of a column from k to ld are NaN, so a kernel that consumes them
     fails; the last column is padded with NaN to alignUp(k, 4), so the buffer
     holds exactly operandExtent(cols, k, ld) bytes and ends at the kernel's
     num_records. The scale buffer is the pre-swizzled one, exactly
-    scaleExtent(cols, k) bytes. Returns (codes, scales, aligned, swizzled).
+    scaleExtent(cols, k) bytes, its padded K blocks holding scalePad. Returns
+    (codes, scales, aligned, swizzled).
     """
     codes = randomE4M3FN(rng, (k, cols))
     scales = rng.integers(
@@ -244,7 +250,7 @@ def makeOperand(rng: np.random.Generator, cols: int, k: int, ld: int):
     padded = np.full((cols, ld), NAN_BYTE, dtype=np.uint8)
     padded[:, :k] = codes.T
     aligned = padded.ravel()[: operandExtent(cols, k, ld)].copy()
-    return codes, scales, aligned, preSwizzleScales(scales)
+    return codes, scales, aligned, preSwizzleScales(scales, scalePad)
 
 
 def makeC(rng: np.random.Generator, m: int, n: int, ldC: int, poison: bool):
@@ -489,7 +495,7 @@ def launchReduce(
     launchKernel(kernel, grid, block, args)
 
 
-# Skinny GEMM configuration, ported from the driver. The pick* functions choose
+# Skinny GEMM configuration. The pick* functions choose
 # the default knobs of a shape, fitted to sweeps over skinny shapes on MI355X.
 
 # One wave per SIMD on the 256 CUs of an MI355X.
@@ -523,11 +529,28 @@ GRID_DIM_YZ_LIMIT = 65535
 # at long K; K <= 8192 wins or ties. 16384 bounds the measured regimes and is not
 # an optimum.
 UP_FRONT_MAX_SPK = 16384
+# The MFMA kernel with LDS staging (see pickMfmaConfig) is the default for the
+# skinny extents in [MFMA_MIN_SKINNY, MFMA_MAX_SKINNY]: below the lower bound the
+# VALU kernel is as fast or faster, and above the upper one the MFMA kernel was
+# not measured.
+MFMA_MIN_SKINNY = 4
+MFMA_MAX_SKINNY = 32
+# A wide extent of at most this many columns is "small" for the MFMA defaults: with
+# two wide tiles per wave the grid would have 128 blocks or fewer, half the CUs.
+MFMA_SMALL_WIDE = 4096
 
 
-def blockCols(waves: int, lanesK: int, tn: int) -> int:
-    """Wide columns covered by one block (BN in the kernel)."""
+def blockCols(waves: int, lanesK: int, tn: int, mfma: bool = False) -> int:
+    """Wide columns covered by one block (BN in the kernel). With mfma the waves
+    split K, not the wide columns, so a block covers tn MFMA tiles of 16."""
+    if mfma:
+        return 16 * tn
     return waves * (64 // lanesK) * tn
+
+
+def iterationK(lanesK: int, mfma: bool) -> int:
+    """K extent of one kernel iteration (KI)."""
+    return 256 if mfma else 64 * lanesK
 
 
 def countTiles(m: int, n: int, k: int, spk: int, bm: int, bn: int) -> int:
@@ -562,6 +585,12 @@ class Problem:
     # Whether the GEMM is the useBeta variant, which adds beta * C itself with a
     # single split.
     use_beta: bool = False
+    # Whether the kernel is the scaled-MFMA one, whose knobs mean something else.
+    mfma: bool = False
+    # Whether the mfma kernel stages the operands through LDS.
+    lds: bool = False
+    # Test knob: the byte of the scale padding past the K blocks of the operands.
+    scale_pad: int = 0
 
     @property
     def skinny(self) -> int:
@@ -573,11 +602,11 @@ class Problem:
 
     @property
     def bn(self) -> int:
-        return blockCols(self.waves, self.lanes_k, self.tn)
+        return blockCols(self.waves, self.lanes_k, self.tn, self.mfma)
 
     @property
     def ki(self) -> int:
-        return 64 * self.lanes_k
+        return iterationK(self.lanes_k, self.mfma)
 
     @property
     def splits(self) -> int:
@@ -594,16 +623,16 @@ class Problem:
         """UP_ITERS in the kernel: the entries of the up-front scale vector, the
         most K iterations a split touches, ceilDiv(extent, KI) maximized over the
         splits (iterations are numbered from the split start); 0 for the ring
-        scales."""
-        if not self.up_scales:
+        scales; always 0 with mfma, which has no up-front scales."""
+        if self.mfma or not self.up_scales:
             return 0
         return int(np.max((self.extents + self.ki - 1) // self.ki))
 
     @property
     def partial_steps(self) -> int:
         """PARTIAL_STEPS in the kernel: 0 when every split extent is a multiple
-        of ki, else 1 (a tail step keeps the first extent % ki bytes of the
-        last iteration)."""
+        of ki (256 with mfma), else 1 (a tail step keeps the first extent % ki
+        bytes of the last iteration)."""
         return int(np.any(self.extents % self.ki != 0))
 
     @property
@@ -622,6 +651,8 @@ class Problem:
             f"K={self.k} SPK={self.spk} B={self.blocks} "
             f"GROUP={self.group} XCDS={self.xcds} UP={self.up_scales} "
             f"GRID3D={int(self.grid3d)} USE_BETA={int(self.use_beta)}"
+            f"{' MFMA=1' if self.mfma else ''}"
+            f"{' LDS=1' if self.lds else ''}"
         )
 
 
@@ -636,6 +667,8 @@ class Knobs(NamedTuple):
     group: int = 1
     xcds: int = 1
     up_scales: int = 0
+    mfma: bool = False
+    lds: bool = False
 
 
 def gridWaves(skinny: int, wide: int, tile: int, lanesK: int) -> int:
@@ -733,8 +766,8 @@ def pickSingleColumnConfig(wide: int, k: int) -> Knobs:
     return Knobs(1, 1, lanesK, waves, pf, 1, 1, pickUpScales(k))
 
 
-def pickConfig(m: int, n: int, k: int) -> Knobs:
-    """Defaults for a shape; k is the K extent of one block (spk).
+def pickValuConfig(m: int, n: int, k: int) -> Knobs:
+    """VALU defaults for a shape; k is the K extent of one block (spk).
 
     The grid targets one wave per SIMD with the largest tile (bm skinny x tn
     wide columns per lane) that still reaches TARGET_WAVES. A single skinny
@@ -758,6 +791,97 @@ def pickConfig(m: int, n: int, k: int) -> Knobs:
     return Knobs(bm, tn, lanesK, waves, pf, group, xcds, pickUpScales(k))
 
 
+def pickMfmaConfig(skinny: int, wide: int, k: int, lds: bool = False) -> Knobs:
+    """Defaults of the MFMA kernel for a shape (skinny and wide extents, k the K
+    extent of a block). Without lds the knobs are not tuned: the smallest skinny
+    block that covers the skinny extent (16 or 32 columns), two wide MFMA tiles
+    per wave, one wave and a ring of 2 iterations.
+
+    With lds (the kernel pickConfig selects), from knob sweeps (bm 16 and 32, tn
+    1..6, waves 1, 2, 4, ring 2..8) and many-launch minima on a loaded MI355X
+    over n = 4..32 with wide 1024..16384 and k = 4096..8292. The skinny block is
+    always 16 columns: for n = 32 two tile rows of 16 beat one of 32 by about
+    2 us (13.4 vs 15.3), and a block of 32 is 1 to 2 us slower for n <= 16. A wide
+    extent of more than MFMA_SMALL_WIDE columns takes two wide tiles per wave, one
+    wave and a ring of 4 (it fills the 256 CUs from wide = 8192, and 5120 is a
+    tie with one wide tile). At 5120 x n x 8192 that gives
+    12.3, 13.2 and 13.4 us for n = 8, 16, 32 (13.0, 14.6, 15.0 at k = 8292, where
+    the partial K adds one ring slot and the 4-byte aligned, not 128-byte
+    aligned, leading dimension costs 1 to 3 us); no sweep configuration is more
+    than 1 us faster, and the plateau is narrow: of the 114 whole-K configurations
+    2 to 14 lie within 10 % and 16 to 32 within 20 % of the best. A ring of 3 to 5
+    is the least sensitive to the alignment, and tn = 3 is no better at n = 32
+    (15.3 vs 15.4 at k = 8292). Smaller wide extents have too few tiles to feed
+    every CU with two wide tiles and take one wide tile per wave, two waves
+    splitting K and a ring of 3 (n = 8: 10.0 vs 12.6 us at wide 3072, 11.4 vs
+    14.4 at 4096, 10.8 vs 13.0 at 2048 with k = 8292); at 8192 x 8 x 4096 the
+    large choice wins instead (11.4 vs 12.1). Both choices fit the
+    budgets with the extra ring slot of a partial K: at most 65 KiB of the
+    160 KiB of LDS and 88 VGPRs.
+    """
+    if not lds:
+        return Knobs(
+            bm=16 if skinny <= 16 else 32,
+            tn=2,
+            lanes_k=FULL_LANES_K,
+            waves=1,
+            pf=2,
+            mfma=True,
+        )
+    small = wide <= MFMA_SMALL_WIDE
+    return Knobs(
+        bm=16,
+        tn=1 if small else 2,
+        lanes_k=FULL_LANES_K,
+        waves=2 if small else 1,
+        pf=3 if small else 4,
+        mfma=True,
+        lds=True,
+    )
+
+
+def mfmaFits(
+    m: int, n: int, k: int, splits: int, leading: tuple[int, int, int, int]
+) -> bool:
+    """Whether every buffer of the MFMA kernel stays below BUFFER_LIMIT, for the
+    leading dimensions (ldA, ldB, ldD, ldC) in elements."""
+    sizes = bufferSizes(m, n, k, splits, leading[:3], leading[3])
+    return max(sizes) < BUFFER_LIMIT
+
+
+def pickConfig(
+    m: int,
+    n: int,
+    k: int,
+    splits: int = 1,
+    leading: tuple[int, int, int, int] | None = None,
+    blockK: int | None = None,
+) -> Knobs:
+    """Defaults for a shape; k is the real K extent (it sizes the buffers), blockK
+    the K extent of one block (spk, k by default) that the knob picks use, splits
+    the number of K splits and leading the leading dimensions (ldA, ldB, ldD, ldC)
+    in elements, tight ones by default.
+
+    A skinny extent of MFMA_MIN_SKINNY..MFMA_MAX_SKINNY takes the MFMA kernel with
+    LDS staging (see pickMfmaConfig) when its buffers fit below 2 GiB, any other
+    shape the VALU kernel (see pickValuConfig). The crossover is at 4: with the
+    VALU kernel at its defaults and the best MFMA configuration (minimum of 500
+    launches, us), 5120 x n x 8192 takes 11.1 vs 12.2 for n = 1, 13.8 vs 12.4 for
+    2, 14.5 vs 12.3 for 3, 18.5 vs 12.8 for 4 and 25.3 vs 12.4 for 8; 8192 x n x
+    4096 takes 10.0 vs 11.5, 9.1 vs 11.8, 10.4 vs 11.3 and then 11.8 vs 11.1 for
+    4, with the gap widening beyond (n = 32: 40.9 vs 13.0). Small wide operands
+    lose a little at n = 4 (1024 x 4 x 8192: 7.6 vs 8.8), tie at n = 8 and win
+    from n = 16 on (2048: from n = 4).
+    """
+    skinny, wide = min(m, n), max(m, n)
+    blockK = k if blockK is None else blockK
+    leading = leading or (alignUp(k, 4), alignUp(k, 4), m, m)
+    inRange = MFMA_MIN_SKINNY <= skinny <= MFMA_MAX_SKINNY
+    if inRange and mfmaFits(m, n, k, splits, leading):
+        return pickMfmaConfig(skinny, wide, blockK, lds=True)
+    return pickValuConfig(m, n, blockK)
+
+
 def gemmKernelName(p) -> str:
     """Symbol of the GEMM kernel for the knobs of p (a Problem or any object
     with the same knob attributes): each compile-time parameter followed by its
@@ -775,7 +899,10 @@ def gemmKernelName(p) -> str:
         ("GRID_3D", int(p.grid3d)),
         ("USE_BETA", int(p.use_beta)),
     )
-    return "_".join(["gemm"] + [f"{name}{value}" for name, value in params])
+    name = "_".join(["gemm"] + [f"{name}{value}" for name, value in params])
+    if p.mfma:
+        name += "_MFMA1"
+    return name + "_LDS1" if p.lds else name
 
 
 def skinnyConfig(p: Problem):
@@ -795,6 +922,8 @@ def skinnyConfig(p: Problem):
         numXcds=p.xcds,
         grid3d=p.grid3d,
         useBeta=p.use_beta,
+        mfma=p.mfma,
+        lds=p.lds,
     )
 
 
@@ -823,10 +952,31 @@ def checkKernelRanges(p: Problem) -> None:
     assert p.splits <= MAX_SPLITS, f"splits={p.splits} exceeds {MAX_SPLITS}"
 
 
+def bufferSizes(
+    m: int, n: int, k: int, splits: int, lead: tuple[int, int, int], ldC: int | None
+) -> list[int]:
+    """Bytes of the buffers that must stay below BUFFER_LIMIT: A, B, D, the
+    split-K workspace and the two scales, and C unless ldC is None; lead is
+    (ldA, ldB, ldD) in elements."""
+    ldA, ldB, ldD = lead
+    sizes = [
+        operandExtent(m, k, ldA),
+        operandExtent(n, k, ldB),
+        2 * dElements(m, n, ldD),
+        4 * splits * m * n,
+        scaleExtent(m, k),
+        scaleExtent(n, k),
+    ]
+    if ldC is not None:
+        sizes.append(2 * dElements(m, n, ldC))
+    return sizes
+
+
 def checkConstraints(p: Problem) -> None:
     assert p.spk >= 1, f"spk={p.spk} must be positive"
     assert p.lanes_k in LANES_K_CHOICES, f"lanes_k must be in {LANES_K_CHOICES}"
     assert p.k >= 1, f"k={p.k} must be positive"
+    assert p.mfma or not p.lds, "lds needs mfma"
     assert p.k <= p.spk or p.spk % 256 == 0, (
         "spk must be a multiple of 256, the scale group, with several splits"
     )
@@ -841,17 +991,26 @@ def checkConstraints(p: Problem) -> None:
     # ldC and ldD need no alignment: the kernel relies on unaligned buffer access.
     assert p.ldA % 4 == 0 and p.ldB % 4 == 0, "ldA and ldB must be multiples of 4"
     checkKernelRanges(p)
-    assert (
-        max(
-            operandExtent(p.m, p.k, p.ldA),
-            operandExtent(p.n, p.k, p.ldB),
-            2 * dElements(p.m, p.n, p.ldD),
-            4 * p.splits * p.m * p.n,
-            scaleExtent(p.m, p.k),
-            scaleExtent(p.n, p.k),
-        )
-        < BUFFER_LIMIT
-    ), "buffers must stay below 2^31 bytes"
+    # The mfma kernel uses the voffset 2^31 for the accesses that must be out of
+    # range, so every buffer, C included, must stay below it.
+    sizes = bufferSizes(
+        p.m, p.n, p.k, p.splits, (p.ldA, p.ldB, p.ldD), p.ldC if p.mfma else None
+    )
+    assert max(sizes) < BUFFER_LIMIT, "buffers must stay below 2^31 bytes"
+    if p.mfma:
+        checkMfmaConstraints(p)
+
+
+def checkMfmaConstraints(p: Problem) -> None:
+    """The constraints of the scaled-MFMA kernel on top of the generic ones."""
+    assert p.bm in (16, 32), f"mfma needs bm 16 or 32, got {p.bm}"
+    assert p.lanes_k == FULL_LANES_K, f"mfma needs lanes_k={FULL_LANES_K}"
+    assert p.up_scales == 0, "mfma needs up_scales=0"
+    assert p.pf >= 1, f"mfma needs pf >= 1, got {p.pf}"
+
+
+# The tile knobs of makeProblem: giving one keeps the VALU defaults.
+TILE_KNOB_NAMES = ("bm", "tn", "lanes_k", "waves", "pf", "group", "xcds", "up_scales")
 
 
 def makeProblem(
@@ -876,28 +1035,54 @@ def makeProblem(
     alpha: float = 1.0,
     beta: float = 0.0,
     use_beta: bool = False,
+    mfma: bool | None = None,
+    lds: bool | None = None,
+    scale_pad: int = 0,
 ) -> Problem:
     """Resolves the knobs (explicit ones win over pickConfig), the block count
-    and the leading dimensions, and checks the constraints. The leading
-    dimensions are the smallest multiples of 4 covering k and m plus the padding;
-    the padding of A and B must be a multiple of 4, that of D may be anything. An
-    explicit ldD (or ldC) in elements replaces the D (or C) default and need not
-    be a multiple of 4. Without an explicit up_scales the
+    and the leading dimensions, and checks the constraints. ldA and ldB default
+    to the smallest multiple of 4 covering k plus the padding, which must be a
+    multiple of 4; ldD and ldC default to exactly m, plus padding[2] (D) or
+    paddingC (C) when given, and need no alignment, and an explicit ldD (or ldC)
+    in elements replaces them. Without an explicit up_scales the
     default rule applies, derived from the final spk: up-front only for a split
     of at most UP_FRONT_MAX_SPK and k % spk == 0, while an explicit up_scales = 1
     works for any spk and k. Without an explicit spk one split covers k, rounded
-    up to whole iterations. C has its own leading dimension, the smallest
-    multiple of 4 covering m plus paddingC, which may be anything.
+    up to whole iterations. The MFMA
+    kernel is explicit only (mfma=True); the unspecified knobs then take the
+    pickMfmaConfig defaults (with lds only if lds is true) and an invalid
+    explicit knob is rejected. mfma=False selects the VALU defaults. Without mfma
+    the defaults are those of pickConfig, which may pick the MFMA kernel, unless
+    a tile knob (every knob but spk, mfma and lds) is given: those are VALU
+    overrides, so the VALU defaults apply and the MFMA kernel stays explicit.
     """
-    given = Knobs(bm, tn, lanes_k, waves, pf, group, xcds, up_scales)
+    # mfma is not an override: it selects the defaults instead.
+    given = Knobs(
+        bm, tn, lanes_k, waves, pf, group, xcds, up_scales, mfma=None, lds=lds
+    )
     overrides = {
         name: value for name, value in given._asdict().items() if value is not None
     }
-    knobs = pickConfig(m, n, k if spk is None else spk)._replace(**overrides)
-    ki = 64 * knobs.lanes_k
+    leading = (
+        alignUp(k, 4) + padding[0],
+        alignUp(k, 4) + padding[1],
+        m + padding[2] if ldD is None else ldD,
+        m + paddingC if ldC is None else ldC,
+    )
+    blockK = k if spk is None else spk
+    splits = 1 if spk is None else ceilDiv(k, spk)
+    tuned = blocks is not None or any(name in overrides for name in TILE_KNOB_NAMES)
+    if mfma:
+        knobs = pickMfmaConfig(min(m, n), max(m, n), blockK, bool(lds))
+    elif mfma is None and not tuned:
+        knobs = pickConfig(m, n, k, splits, leading, blockK)
+    else:
+        knobs = pickValuConfig(m, n, blockK)
+    knobs = knobs._replace(**overrides)
+    ki = iterationK(knobs.lanes_k, knobs.mfma)
     # An empty K gets one iteration so checkConstraints reports it.
     spk = max(ceilDiv(k, ki), 1) * ki if spk is None else spk
-    if up_scales is None:
+    if up_scales is None and not knobs.mfma:
         upFits = k % spk == 0 and pickUpScales(spk)
         knobs = knobs._replace(up_scales=int(upFits))
     grid3d = useGrid3d(
@@ -907,23 +1092,29 @@ def makeProblem(
     # extra blocks find no tile).
     if blocks is None:
         blocks = countTiles(
-            m, n, k, spk, knobs.bm, blockCols(knobs.waves, knobs.lanes_k, knobs.tn)
+            m,
+            n,
+            k,
+            spk,
+            knobs.bm,
+            blockCols(knobs.waves, knobs.lanes_k, knobs.tn, knobs.mfma),
         )
     p = Problem(
         m,
         n,
         k,
         spk,
-        *knobs,
-        ldA=alignUp(k, 4) + padding[0],
-        ldB=alignUp(k, 4) + padding[1],
-        ldD=alignUp(m, 4) + padding[2] if ldD is None else ldD,
+        **knobs._asdict(),
+        ldA=leading[0],
+        ldB=leading[1],
+        ldD=leading[2],
         blocks=blocks,
         grid3d=grid3d,
-        ldC=alignUp(m, 4) + paddingC if ldC is None else ldC,
+        ldC=leading[3],
         alpha=alpha,
         beta=beta,
         use_beta=use_beta,
+        scale_pad=scale_pad,
     )
     checkConstraints(p)
     return p
@@ -941,12 +1132,16 @@ KNOB_OVERRIDE_NAMES = (
     "xcds",
     "up_scales",
     "blocks",
+    "mfma",
+    "lds",
 )
 
 
 def noKnobProblem(m: int, n: int, k: int, **knobs) -> Problem:
-    """A problem with the default knobs, except for the given ones."""
+    """A problem with the VALU default knobs, except for the given ones (mfma
+    must be given to get the MFMA kernel)."""
     resolved = {name: knobs.get(name) for name in KNOB_OVERRIDE_NAMES}
+    resolved["mfma"] = bool(resolved["mfma"])
     return makeProblem(m, n, k, padding=(0, 0, 0), **resolved)
 
 
@@ -967,8 +1162,8 @@ def makeInputs(p: Problem, seed: int, withReference: bool = True) -> Inputs:
     """Random operands for the problem and, unless withReference is False, the
     float64-derived reference (too expensive in memory for the largest shapes)."""
     rng = np.random.default_rng(seed=seed)
-    a, scalesA, aBuf, sclABuf = makeOperand(rng, p.m, p.k, p.ldA)
-    b, scalesB, bBuf, sclBBuf = makeOperand(rng, p.n, p.k, p.ldB)
+    a, scalesA, aBuf, sclABuf = makeOperand(rng, p.m, p.k, p.ldA, p.scale_pad)
+    b, scalesB, bBuf, sclBBuf = makeOperand(rng, p.n, p.k, p.ldB, p.scale_pad)
     # With beta 0 the C values are NaN, so a kernel that reads C fails; so they
     # are for the GEMM without useBeta, which never reads C, unless the split-K
     # reduce needs it.

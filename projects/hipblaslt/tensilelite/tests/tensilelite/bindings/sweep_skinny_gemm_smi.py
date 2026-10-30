@@ -175,10 +175,14 @@ class GpuStabilizer:
     exit, on SIGINT and SIGTERM and from an atexit handler, only for the GPUs
     where a lock attempt succeeded (a failed lock never restores anything).
 
+    Locking is opt-in through require_stable (--require-stable-clocks); when it
+    is not requested nothing is attempted, rocm-smi is never invoked and no
+    elevated rights are ever needed.
+
     The lock tries the performance determinism mode with the highest sclk,
     then the performance level high, which holds sclk and mclk at their
-    maximum; both need rights that an ordinary user may lack, in which case the
-    sweep goes on with its software noise reduction unless it must be stable.
+    maximum; both need rights that an ordinary user may lack, in which case
+    the sweep aborts.
     """
 
     def __init__(self, gpus: list[int], require_stable: bool):
@@ -210,10 +214,15 @@ class GpuStabilizer:
             self.previous_sigterm = None
 
     def lock_all(self) -> None:
+        if not self.require_stable:
+            # Not even a read: rocm-smi must never be invoked unless requested.
+            for gpu in self.gpus:
+                self.locks[gpu] = GpuLock(gpu, prior_level=None)
+            return
         for gpu in self.gpus:
             self.locks[gpu] = self.lock(gpu)
         unavailable = [gpu for gpu, lock in self.locks.items() if not lock.locked]
-        if unavailable and self.require_stable:
+        if unavailable:
             raise SweepAbort(f"cannot lock the clocks of GPU(s) {unavailable}")
 
     def lock(self, gpu: int) -> GpuLock:

@@ -562,6 +562,22 @@ public:
   void storeBuffer(RegisterRef data, RegisterRef rsrc, RegisterRef voffset,
                    Operand soffset, MemoryWidth width,
                    BufferAccess access = {});
+  /// Emits a buffer load of width straight into LDS (buffer_load_* ... lds,
+  /// gfx950), with the rules of loadBuffer except that there is no destination
+  /// register and width is b32, b96 or b128. Lane l writes its width bytes at
+  /// the LDS address ldsBase + ldsOffset + l * bytes, so the wave writes a
+  /// contiguous block in lane order, whatever its global addresses; ldsBase is
+  /// one SGPR and ldsOffset any value that keeps the block inside the kernel's
+  /// LDS allocation. An out-of-range lane writes zeros to its LDS bytes, as a
+  /// load returns zeros; a straddling access zeroes its out-of-range dwords.
+  /// The data has landed in LDS once vectorLoads waits for the load. The
+  /// builder writes M0 (the LDS base of the instruction) with s_add_u32 or
+  /// s_mov_b32 and the wait state that the load needs after it, so M0 and SCC
+  /// are clobbered, and it cancels the effect of access.offset, which the
+  /// hardware adds to the LDS address as well as to the global one.
+  void loadBufferToLds(RegisterRef rsrc, RegisterRef voffset, Operand soffset,
+                       RegisterRef ldsBase, int32_t ldsOffset,
+                       MemoryWidth width, BufferAccess access = {});
 
 private:
   void insertItem(const std::shared_ptr<rocisa::Item> &item);

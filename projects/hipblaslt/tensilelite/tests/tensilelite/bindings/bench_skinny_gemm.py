@@ -2,13 +2,12 @@
 # SPDX-License-Identifier: MIT
 """Benchmark of the emitted skinny MXFP8 GEMM (and the split-K reduce).
 
-Prints one SWEEP line per shape in the format of aster's
-kernels/test_gemm_mxfp8_skinny.py, with the same timing methodology: before
-each GEMM launch a read-only kernel streams a 256 MiB buffer to empty the LLC
-and the device is synchronised; HIP events on the null stream bracket a single
-launch whose kernel arguments were built once; the reported time is the minimum
-over the iterations (the first included). The split-K reduce is timed warm,
-without the flush, after the GEMM iterations.
+Prints one SWEEP line per shape. The timing methodology is: before each GEMM
+launch a read-only kernel streams a 256 MiB buffer to empty the LLC and the
+device is synchronised; HIP events on the null stream bracket a single launch
+whose kernel arguments were built once; the reported time is the minimum over
+the iterations (the first included). The split-K reduce is timed warm, without
+the flush, after the GEMM iterations.
 
 Run from the tensilelite directory:
 
@@ -28,9 +27,9 @@ from skinny_gemm_support import DeviceBuffer, LoadedKernel, Problem, hipCheck
 
 FLUSH_MB = 256
 FLUSH_KERNEL_NAME = "flush_llc_kernel"
-# The assembly of aster's flush_llc kernel: each thread of the workgroup loads
-# its slice of the buffer one dword at a time. Despite the name of the aster
-# class it only reads, so the LLC is left clean.
+# The assembly of the LLC flush kernel: each thread of the workgroup loads its
+# slice of the buffer one dword at a time. It only reads, so the LLC is left
+# clean.
 FLUSH_ASM = """
   .amdgcn_target "amdgcn-amd-amdhsa--gfx950"
   .text
@@ -204,7 +203,7 @@ def timeLaunches(
 
 
 class MissingAsm(Exception):
-    """The reference asm of a kernel is not in the asm directory."""
+    """The saved asm of a kernel is not in the asm directory."""
 
 
 def loadAsmKernel(stack: ExitStack, pattern: str, name: str) -> LoadedKernel:
@@ -214,7 +213,7 @@ def loadAsmKernel(stack: ExitStack, pattern: str, name: str) -> LoadedKernel:
 
     paths = sorted(glob.glob(pattern))
     if not paths:
-        raise MissingAsm(f"no reference asm matches {pattern}")
+        raise MissingAsm(f"no saved asm matches {pattern}")
     with open(paths[0]) as stream:
         asm = stream.read()
     if f".globl {name}\n" not in asm:
@@ -302,7 +301,7 @@ def benchProblem(
 
 
 def formatSweepLine(p: Problem, gemmTimes, reduceTimes) -> str:
-    """One SWEEP line in the format of the aster driver: times are minima over
+    """One SWEEP line: times are minima over
     the iterations in us; total_us is the minimum of the per-iteration gemm +
     reduce sums."""
     fields = {
@@ -321,6 +320,8 @@ def formatSweepLine(p: Problem, gemmTimes, reduceTimes) -> str:
         "up_scales": p.up_scales,
         "blocks": p.blocks,
         "grid3d": int(p.grid3d),
+        **({"mfma": 1} if p.mfma else {}),
+        **({"lds": 1} if p.lds else {}),
         "gemm_us": f"{min(gemmTimes) * 1e-3:.2f}",
     }
     if reduceTimes is not None:
@@ -354,7 +355,7 @@ def sweepShape(
 ) -> None:
     """Runs one shape and prints its SWEEP line, or with printOnly its emitted
     asm instead of benchmarking it; a shape that violates the constraints with
-    the overrides, or lacks reference asm, is reported as skipped."""
+    the overrides, or lacks saved asm, is reported as skipped."""
     knobs = {name: None for name in support.KNOB_OVERRIDE_NAMES}
     knobs.update(overrides)
     try:
@@ -418,6 +419,21 @@ def makeParser() -> argparse.ArgumentParser:
         help="Run the useBeta GEMM, which prefetches C and adds beta * C",
     )
     parser.add_argument(
+        "--mfma",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Force the scaled-MFMA kernel (with the untuned plain defaults "
+        "unless --lds) or, with --no-mfma, the VALU kernel; by default the "
+        "shape picks, and a knob option selects the VALU kernel",
+    )
+    parser.add_argument(
+        "--lds",
+        action="store_true",
+        default=None,
+        help="With --mfma, stage the operands through LDS (coalesced loads) "
+        "with the tuned defaults",
+    )
+    parser.add_argument(
         "--code-object-version",
         type=int,
         choices=support.CODE_OBJECT_VERSIONS,
@@ -448,9 +464,9 @@ def makeParser() -> argparse.ArgumentParser:
         "--asm-dir",
         metavar="DIR",
         default=None,
-        help="Harness validation: run the reference asm saved by the aster "
-        "driver's --save-tmps (DIR/<gemm kernel name>_*/kernel.s and "
-        "DIR/splitk_reduce_*/kernel.s) instead of the emitted kernels",
+        help="Run previously saved asm instead of the emitted kernels, e.g. "
+        "for an A/B comparison (DIR/<gemm kernel name>_*/kernel.s and "
+        "DIR/splitk_reduce_*/kernel.s)",
     )
     parser.add_argument(
         "--print-asm",

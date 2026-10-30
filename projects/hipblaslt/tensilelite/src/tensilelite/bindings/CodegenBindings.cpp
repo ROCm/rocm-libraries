@@ -47,30 +47,34 @@ NB_MODULE(tensilelite_codegen, m) {
   const SkinnyGEMMConfig defaults;
   nb::class_<SkinnyGEMMConfig>(
       m, "SkinnyGEMMConfig",
-      "Compile-time knobs of the skinny MXFP8 GEMM, named after the "
-      "constants of the MLIR reference: bm (BM), tn (TN), lanesK (LANES_K, one "
-      "of 4, 8, 16 and 64), waves (WAVES, so a block has 64 * waves lanes), "
+      "Compile-time knobs of the skinny MXFP8 GEMM: bm (BM), tn (TN), "
+      "lanesK (LANES_K, one of 4, 8, 16 and 64), waves (WAVES, so a block has "
+      "64 * waves lanes), "
       "prefetch (PF, 0 means no ring), upIters (UP_ITERS, 0 rings the scales, "
       "else the up-front vector size), partialSteps (PARTIAL_STEPS, 0 or "
       "1), group (GROUP), numXcds (NUM_XCDS), grid3d (GRID_3D, false "
       "selects a persistent 1-D launch) and useBeta (USE_BETA, true prefetches "
-      "C and adds beta * C).")
+      "C and adds beta * C), mfma (true selects the scaled-MFMA compute "
+      "path, whose knobs have the meanings documented in SkinnyGEMM.hpp) and "
+      "lds (true stages the operands of the MFMA path through LDS).")
       .def(
           "__init__",
           [](SkinnyGEMMConfig *self, int32_t bm, int32_t tn, int32_t lanesK,
              int32_t waves, int32_t prefetch, int32_t upIters,
              int32_t partialSteps, int32_t group, int32_t numXcds, bool grid3d,
-             bool useBeta) {
+             bool useBeta, bool mfma, bool lds) {
             new (self) SkinnyGEMMConfig{bm,       tn,      lanesK,       waves,
                                         prefetch, upIters, partialSteps, group,
-                                        numXcds,  grid3d,  useBeta};
+                                        numXcds,  grid3d,  useBeta,      mfma,
+                                        lds};
           },
           nb::kw_only(), "bm"_a = defaults.bm, "tn"_a = defaults.tn,
           "lanesK"_a = defaults.lanesK, "waves"_a = defaults.waves,
           "prefetch"_a = defaults.prefetch, "upIters"_a = defaults.upIters,
           "partialSteps"_a = defaults.partialSteps, "group"_a = defaults.group,
           "numXcds"_a = defaults.numXcds, "grid3d"_a = defaults.grid3d,
-          "useBeta"_a = defaults.useBeta)
+          "useBeta"_a = defaults.useBeta, "mfma"_a = defaults.mfma,
+          "lds"_a = defaults.lds)
       .def_rw("bm", &SkinnyGEMMConfig::bm)
       .def_rw("tn", &SkinnyGEMMConfig::tn)
       .def_rw("lanesK", &SkinnyGEMMConfig::lanesK)
@@ -81,11 +85,13 @@ NB_MODULE(tensilelite_codegen, m) {
       .def_rw("group", &SkinnyGEMMConfig::group)
       .def_rw("numXcds", &SkinnyGEMMConfig::numXcds)
       .def_rw("grid3d", &SkinnyGEMMConfig::grid3d)
-      .def_rw("useBeta", &SkinnyGEMMConfig::useBeta);
+      .def_rw("useBeta", &SkinnyGEMMConfig::useBeta)
+      .def_rw("mfma", &SkinnyGEMMConfig::mfma)
+      .def_rw("lds", &SkinnyGEMMConfig::lds);
 
   m.def("skinnyGEMMKernelName", &skinnyGEMMKernelName, "config"_a,
-        "Returns the symbol of the GEMM kernel for config, in the format of "
-        "the reference. Raises ValueError for invalid knobs.");
+        "Returns the symbol of the GEMM kernel for config, in the format "
+        "gemm_BM<v>_TN<v>_.... Raises ValueError for invalid knobs.");
 
   // The arch string is resolved here: Target keeps per-thread rocisa state, and
   // each call builds its kernel on the calling thread.

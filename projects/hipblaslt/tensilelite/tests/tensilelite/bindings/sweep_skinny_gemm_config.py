@@ -24,11 +24,11 @@ defaults are those of skinny_gemm_support.makeProblem without padding.
 A `sweep` is a mapping (or a list of mappings, whose configurations are
 unioned) from the compile-time knobs of SkinnyGEMMConfig to a scalar, a list or a
 range mapping {min, max, step} or {min, max, mul} (inclusive, arithmetic or
-geometric): bm, tn, lanesK, waves, prefetch, upScales, grid3d, group, numXcds and
-blocks. A knob that is not swept takes the default of DEFAULT_SWEEP, which is the
-one of the SkinnyGEMMConfig struct. When an entry's sweep and the default sweep
-are merged, the entry's value of a knob replaces the default's; a list of
-sweeps on either side is combined pairwise.
+geometric): bm, tn, lanesK, waves, prefetch, upScales, grid3d, group, numXcds,
+blocks, mfma and lds. A knob that is not swept takes the default of DEFAULT_SWEEP,
+which is the one of the SkinnyGEMMConfig struct. When an entry's sweep and the
+default sweep are merged, the entry's value of a knob replaces the default's; a
+list of sweeps on either side is combined pairwise.
 
 upScales is the support module's up_scales: 0 rings the scales (UP_ITERS 0), 1
 loads the scale vector up front, with UP_ITERS derived from the split extents.
@@ -38,6 +38,22 @@ configurations are launched on the 3-D grid and force group = numXcds = 1,
 which is what support.useGrid3d requires (the kernel ignores them there).
 grid3d false configurations are persistent and sweep group, numXcds and blocks;
 every block count is capped to the tile count and duplicates are dropped.
+
+mfma is a swept boolean knob (default false) that selects the scaled-MFMA kernel.
+With it bm is 16 or 32, tn counts the 16-column MFMA tiles of a wave, waves split
+K and prefetch is the ring depth in 256-K iterations; lanesK must be 64 and
+upScales 0, and any k is supported. The bm values of an mfma configuration are
+those of the sweep that are 16 or 32, or both when the sweep has none (the
+default bm of 1 or a VALU list such as [1, 2, 4, 8] does not apply to mfma), so
+a sweep over {mfma: [false, true]} can share its bm list with the VALU
+configurations; other invalid combinations are counted as constraint failures.
+
+lds is a swept boolean knob (default false) that, with mfma, stages the operands
+through a per-wave LDS ring (prefetch is then the ring depth in LDS). lds
+without mfma is a constraint failure, and so is an mfma configuration whose
+LDS ring or registers exceed the budget: the emitter rejects it when the kernel
+is built, which is recorded as a failure to build like the other register-budget
+rejections.
 
 useBeta defaults to [false, true]: every problem is swept with the kernel that
 never reads C and with the one that adds beta * C. alpha is a number (pinned),
@@ -89,6 +105,8 @@ SETTING_DEFAULTS = {
 }
 # Settings that may be zero; the others must be positive.
 ZERO_SETTINGS = ("warmup", "seed")
+# Ignored when the sweep runs with --one-shot; may be zero in the input YAML then.
+ONE_SHOT_ZERO_SETTINGS = ("refine_top", "refine_iters", "top")
 DEFAULT_KEYS = (
     "useBeta",
     "betaModes",
@@ -111,7 +129,13 @@ SWEEP_KEYS = (
     "group",
     "numXcds",
     "blocks",
+    "mfma",
+    "lds",
 )
+# Knobs that take booleans.
+BOOL_KEYS = ("grid3d", "mfma", "lds")
+# The skinny block sizes of the mfma kernel.
+MFMA_BMS = (16, 32)
 # The defaults of the SkinnyGEMMConfig struct, and a block count that covers the
 # 256 CUs of an MI355X.
 DEFAULT_SWEEP = {
@@ -125,6 +149,8 @@ DEFAULT_SWEEP = {
     "group": [1],
     "numXcds": [1],
     "blocks": [256],
+    "mfma": [False],
+    "lds": [False],
 }
 RANGE_KEYS = ("min", "max", "step", "mul")
 
@@ -227,10 +253,10 @@ def expand_range(where: str, spec: dict) -> list[int]:
 def expand_values(where: str, key: str, raw: Any) -> list:
     """The values of one swept knob: a scalar, a list or a range."""
     if isinstance(raw, dict):
-        if key == "grid3d":
-            raise SweepConfigError(f"{where}: grid3d takes booleans, not a range")
+        if key in BOOL_KEYS:
+            raise SweepConfigError(f"{where}: {key} takes booleans, not a range")
         values = expand_range(where, raw)
-    elif key == "grid3d":
+    elif key in BOOL_KEYS:
         values = [as_bool(where, value) for value in as_list(raw)]
     else:
         values = [as_int(where, value) for value in as_list(raw)]
@@ -318,14 +344,17 @@ class SweepInput:
     cases: list[Case]
 
 
-def parse_settings(raw: Any) -> dict:
+def parse_settings(raw: Any, *, one_shot: bool = False) -> dict:
     settings = dict(SETTING_DEFAULTS)
     if raw is None:
         return settings
     as_mapping("settings", raw)
     check_keys("settings", raw, tuple(SETTING_DEFAULTS))
     for key, value in raw.items():
-        minimum = 0 if key in ZERO_SETTINGS else 1
+        if key in ZERO_SETTINGS or (one_shot and key in ONE_SHOT_ZERO_SETTINGS):
+            minimum = 0
+        else:
+            minimum = 1
         settings[key] = as_int(f"settings.{key}", value, minimum)
     return settings
 
@@ -483,8 +512,8 @@ def parse_entry(index: int, entry: Any, defaults: dict, seed: int) -> list[Case]
                         spk,
                         lds["ld_a"] or support.alignUp(k, 4),
                         lds["ld_b"] or support.alignUp(k, 4),
-                        lds["ld_d"] or 2 * support.alignUp(m, 4),
-                        lds["ld_c"] or 2 * support.alignUp(m, 4),
+                        lds["ld_d"] or 2 * m,
+                        lds["ld_c"] or 2 * m,
                         use_beta,
                         alpha,
                         beta,
@@ -495,7 +524,9 @@ def parse_entry(index: int, entry: Any, defaults: dict, seed: int) -> list[Case]
     return cases
 
 
-def parse_input(data: Any, seed: int | None = None) -> SweepInput:
+def parse_input(
+    data: Any, seed: int | None = None, *, one_shot: bool = False
+) -> SweepInput:
     as_mapping("input", data)
     check_keys("input", data, TOP_KEYS)
     if "problems" not in data:
@@ -504,20 +535,22 @@ def parse_input(data: Any, seed: int | None = None) -> SweepInput:
     if not isinstance(entries, list) or not entries:
         raise SweepConfigError("problems: expected a non-empty list")
     defaults = parse_defaults(data.get("defaults"))
-    settings = parse_settings(data.get("settings"))
+    settings = parse_settings(data.get("settings"), one_shot=one_shot)
     if seed is not None:
         settings["seed"] = as_int("seed", seed, 0)
     cases = []
     for index, entry in enumerate(entries):
         cases += parse_entry(index, entry, defaults, settings["seed"])
-    if settings["refine_top"] < settings["top"]:
+    if not one_shot and settings["refine_top"] < settings["top"]:
         raise SweepConfigError("settings: refine_top must be at least top")
     return SweepInput(settings, cases)
 
 
-def load_input(path: str, seed: int | None = None) -> SweepInput:
+def load_input(
+    path: str, seed: int | None = None, *, one_shot: bool = False
+) -> SweepInput:
     with open(path) as stream:
-        return parse_input(yaml.safe_load(stream), seed)
+        return parse_input(yaml.safe_load(stream), seed, one_shot=one_shot)
 
 
 class RawConfig(NamedTuple):
@@ -534,15 +567,23 @@ class RawConfig(NamedTuple):
     group: int
     xcds: int
     blocks: int | None
+    mfma: bool = False
+    lds: bool = False
 
 
 def capped_blocks(case: Case, knobs: tuple, blocks: list[int]) -> list[int]:
     """The block counts capped to the tile count of the configuration, without
     duplicates: extra blocks would find no tile."""
-    bm, tn, lanes_k, waves = knobs
-    bn = support.blockCols(waves, lanes_k, tn)
+    bm, tn, lanes_k, waves, mfma = knobs
+    bn = support.blockCols(waves, lanes_k, tn, mfma)
     tiles = support.countTiles(case.m, case.n, case.k, case.spk, bm, bn)
     return unique([min(count, tiles) for count in blocks])
+
+
+def mfma_bms(bms: list[int]) -> list[int]:
+    """The bm values of the mfma configurations of a sweep over bms: its 16 and
+    32, else both."""
+    return [bm for bm in bms if bm in MFMA_BMS] or list(MFMA_BMS)
 
 
 def raw_configs(case: Case, sweep: dict[str, list]):
@@ -550,7 +591,8 @@ def raw_configs(case: Case, sweep: dict[str, list]):
     order, the persistent ones over group, numXcds and capped blocks."""
     values = {key: sweep.get(key, DEFAULT_SWEEP[key]) for key in SWEEP_KEYS}
     shape = itertools.product(
-        values["bm"],
+        values["mfma"],
+        values["lds"],
         values["tn"],
         values["lanesK"],
         values["waves"],
@@ -558,16 +600,19 @@ def raw_configs(case: Case, sweep: dict[str, list]):
         values["upScales"],
         values["grid3d"],
     )
-    for bm, tn, lanes_k, waves, pf, up_scales, grid3d in shape:
-        head = (bm, tn, lanes_k, waves, pf, up_scales)
-        if grid3d:
-            yield RawConfig(*head, True, 1, 1, None)
-            continue
-        blocks = capped_blocks(case, (bm, tn, lanes_k, waves), values["blocks"])
-        for group, xcds, count in itertools.product(
-            values["group"], values["numXcds"], blocks
-        ):
-            yield RawConfig(*head, False, group, xcds, count)
+    for mfma, lds, tn, lanes_k, waves, pf, up_scales, grid3d in shape:
+        for bm in mfma_bms(values["bm"]) if mfma else values["bm"]:
+            head = (bm, tn, lanes_k, waves, pf, up_scales)
+            if grid3d:
+                yield RawConfig(*head, True, 1, 1, None, mfma=mfma, lds=lds)
+                continue
+            blocks = capped_blocks(
+                case, (bm, tn, lanes_k, waves, mfma), values["blocks"]
+            )
+            for group, xcds, count in itertools.product(
+                values["group"], values["numXcds"], blocks
+            ):
+                yield RawConfig(*head, False, group, xcds, count, mfma=mfma, lds=lds)
 
 
 def raw_record(case: Case, raw: RawConfig) -> dict:
@@ -583,6 +628,8 @@ def raw_record(case: Case, raw: RawConfig) -> dict:
         "numXcds": raw.xcds,
         "spk": case.spk,
         "blocks": raw.blocks,
+        "mfma": raw.mfma,
+        "lds": raw.lds,
     }
 
 
@@ -603,6 +650,8 @@ def config_record(p: Problem) -> dict:
         "useBeta": bool(p.use_beta),
         "spk": p.spk,
         "blocks": p.blocks,
+        "mfma": bool(p.mfma),
+        "lds": bool(p.lds),
     }
 
 
@@ -634,6 +683,8 @@ def build_problem(case: Case, raw: RawConfig) -> Problem:
         alpha=case.alpha,
         beta=case.beta,
         use_beta=case.use_beta,
+        mfma=raw.mfma,
+        lds=raw.lds,
     )
 
 

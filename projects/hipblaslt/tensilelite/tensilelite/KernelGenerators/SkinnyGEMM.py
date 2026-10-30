@@ -44,8 +44,8 @@ _ARGS = (
     {"type": "int32", "semantic": "SizeFree0"},
     {"type": "int32", "semantic": "SizeFree1"},
     {"type": "int32", "semantic": "SizeSum"},
-    # The split-K slice length, which is the whole K without split-K.
-    {"type": "int32", "semantic": "SizeSum"},
+    # Split-K chunk (defaults to whole-K iterations when GSU is 1).
+    {"type": "int32", "semantic": "Spk"},
     {"type": "int32", "semantic": "StrideC0Bytes"},
     {"type": "float32", "semantic": "Alpha"},
     {"type": "float32", "semantic": "Beta"},

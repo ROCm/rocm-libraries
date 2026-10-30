@@ -2022,6 +2022,45 @@ void IRBuilder::loadBuffer(RegisterRef dst, RegisterRef rsrc,
       rsrc.container(), soffset, bufferModifiers(access, false));
 }
 
+// Throws std::invalid_argument unless base is a single SGPR.
+static void requireLdsBase(std::string_view opName, RegisterRef base) {
+  if (base.kind == RegisterKind::sgpr && base.count == 1)
+    return;
+  throw std::invalid_argument(std::string(opName) +
+                              " lds base must be a single sgpr, got " +
+                              registerText(base));
+}
+
+void IRBuilder::loadBufferToLds(RegisterRef rsrc, RegisterRef voffset,
+                                Operand soffset, RegisterRef ldsBase,
+                                int32_t ldsOffset, MemoryWidth width,
+                                BufferAccess access) {
+  static constexpr std::string_view opName = "loadBufferToLds";
+  if (width != MemoryWidth::b32 && width != MemoryWidth::b96 &&
+      width != MemoryWidth::b128)
+    throw std::invalid_argument(std::string(opName) +
+                                " width must be b32, b96 or b128");
+  requireRsrcRegister(opName, "resource", rsrc);
+  requireSingleVgpr(opName, "voffset", voffset);
+  requireSoffset(opName, soffset);
+  requireOffset(opName, access.offset, maxBufferOffset);
+  requireLdsBase(opName, ldsBase);
+  // The hardware adds the immediate offset to the LDS address too.
+  int32_t m0Offset = ldsOffset - access.offset;
+  std::shared_ptr<rocisa::RegisterContainer> m0 = rocisa::mgpr(0);
+  if (m0Offset == 0)
+    create<rocisa::SMovB32>(m0, ldsBase.container());
+  else
+    create<rocisa::SAddU32>(m0, ldsBase.container(), m0Offset);
+  // The load must not follow the M0 write directly.
+  create<rocisa::SNop>(0);
+  rocisa::MUBUFModifiers modifiers = bufferModifiers(access, false);
+  modifiers.lds = true;
+  create<rocisa::MUBUFReadInstruction>(memoryWidthInfo(width).loadType, nullptr,
+                                       voffset.container(), rsrc.container(),
+                                       soffset, modifiers);
+}
+
 void IRBuilder::storeBuffer(RegisterRef data, RegisterRef rsrc,
                             RegisterRef voffset, Operand soffset,
                             MemoryWidth width, BufferAccess access) {

@@ -57,7 +57,7 @@ def test_shapes_transpose_and_spk():
 
 def test_ld_defaults_and_validation():
     case = parse("problems: [{name: a, m: 5, n: 8, k: 4100}]").cases[0]
-    assert (case.ld_a, case.ld_d) == (4100, 16)
+    assert (case.ld_a, case.ld_d, case.ld_c) == (4100, 10, 10)
     with pytest.raises(config.SweepConfigError, match="multiple of 4"):
         parse("problems: [{name: a, m: 5, n: 8, k: 64, ldA: 66}]")
 
@@ -109,8 +109,207 @@ def test_derived_knobs_in_record():
 
 
 def test_default_inputs_parse():
-    for name in ("sweep_skinny_gemm_shapes.yaml", "sweep_skinny_gemm_smoke.yaml"):
-        assert config.load_input(os.path.join(HERE, name)).cases
+    assert config.load_input(
+        os.path.join(HERE, "sweep_skinny_gemm_shapes.yaml"), one_shot=True
+    ).cases
+    assert config.load_input(os.path.join(HERE, "sweep_skinny_gemm_smoke.yaml")).cases
+
+
+def test_one_shot_allows_zero_refine_settings():
+    text = (
+        "settings: {refine_top: 0, refine_iters: 0, top: 0}\n"
+        "problems: [{name: a, m: 1, n: 512, k: 1024}]"
+    )
+    assert config.parse_input(yaml.safe_load(text), one_shot=True).cases
+    try:
+        config.parse_input(yaml.safe_load(text), one_shot=False)
+    except config.SweepConfigError:
+        pass
+    else:
+        raise AssertionError("expected refine_top validation without one_shot")
+
+
+MFMA_SWEEP = {
+    "mfma": True,
+    "bm": 16,
+    "tn": 2,
+    "lanesK": 64,
+    "waves": 1,
+    "prefetch": 2,
+    "upScales": 0,
+}
+
+
+def mfma_case(k: int = 1024, spk="k", **sweep) -> config.Case:
+    """A case of a 4 x 4096 problem whose sweep is MFMA_SWEEP with the changes."""
+    knobs = {**MFMA_SWEEP, **sweep}
+    entry = {
+        "name": "a",
+        "m": 4,
+        "n": 4096,
+        "k": k,
+        "spk": spk,
+        "useBeta": False,
+        "sweep": knobs,
+    }
+    return parse(yaml.safe_dump({"problems": [entry]})).cases[0]
+
+
+def test_default_sweep_is_not_mfma():
+    assert config.DEFAULT_SWEEP["mfma"] == [False]
+    text = "problems: [{name: a, m: 4, n: 4096, k: 1024, useBeta: false}]"
+    expanded = config.expand_case(parse(text).cases[0])
+    assert expanded.problems
+    assert all(not config.config_record(p)["mfma"] for p in expanded.problems)
+    assert not any("MFMA" in support.gemmKernelName(p) for p in expanded.problems)
+
+
+def test_mfma_sweep_expands_to_the_valid_product():
+    case = mfma_case(bm=[16, 32], tn=[1, 2], waves=[1, 2], prefetch=[1, 2])
+    expanded = config.expand_case(case)
+    assert expanded.swept == 16 and not expanded.failures
+    assert len(expanded.problems) == 16
+    for p in expanded.problems:
+        assert p.mfma and support.gemmKernelName(p).endswith("_MFMA1")
+        assert p.bn == 16 * p.tn and p.ki == 256
+        record = config.config_record(p)
+        assert record["mfma"] is True
+        assert record["upIters"] == 0 and record["partialSteps"] == 0
+
+
+@pytest.mark.parametrize(
+    "KNOBS, K, REASON",
+    [
+        ({"lanesK": 16}, 1024, "lanes_k=64"),
+        ({"upScales": 1}, 1024, "up_scales=0"),
+        ({"prefetch": 0}, 1024, "pf >= 1"),
+    ],
+)
+def test_mfma_invalid_combinations_are_constraint_failures(KNOBS, K, REASON):
+    expanded = config.expand_case(mfma_case(k=K, **KNOBS))
+    assert not expanded.problems and expanded.swept == 1
+    assert [f.stage for f in expanded.failures] == ["constraint"]
+    assert REASON in expanded.failures[0].reason
+    assert expanded.failures[0].config["mfma"] is True
+
+
+@pytest.mark.parametrize("BM", [[1], [1, 2, 4, 8], [8, 16], [32, 1], [16, 32]])
+def test_mfma_bm_is_the_16_and_32_of_the_sweep_else_both(BM):
+    expanded = config.expand_case(mfma_case(bm=BM))
+    expected = sorted({16, 32} & set(BM)) or [16, 32]
+    assert not expanded.failures
+    assert sorted(p.bm for p in expanded.problems) == expected
+
+
+def test_mfma_default_bm_sweeps_both_block_sizes():
+    text = (
+        "problems: [{name: a, m: 4, n: 4096, k: 1024, useBeta: false, "
+        "sweep: {mfma: true}}]"
+    )
+    expanded = config.expand_case(parse(text).cases[0])
+    assert not expanded.failures
+    assert sorted(p.bm for p in expanded.problems) == [16, 32]
+
+
+def test_mixed_sweep_keeps_the_valu_bm_list_for_valu_only():
+    case = mfma_case(mfma=[False, True], bm=[1, 2, 16], lanesK=64, tn=1, waves=1)
+    problems = config.expand_case(case).problems
+    assert sorted(p.bm for p in problems if p.mfma) == [16]
+    assert sorted(p.bm for p in problems if not p.mfma) == [1, 2, 16]
+
+
+def test_mixed_valu_and_mfma_sweep_dedupes_by_kernel_name():
+    case = mfma_case(mfma=[False, True, True], bm=16)
+    expanded = config.expand_case(case)
+    names = [support.gemmKernelName(p) for p in expanded.problems]
+    assert len(set(names)) == len(names)
+    mfma = [p for p in expanded.problems if p.mfma]
+    assert len(mfma) == 1 and names[expanded.problems.index(mfma[0])].endswith("_MFMA1")
+    assert expanded.swept == 2
+
+
+def test_persistent_mfma_blocks_are_capped_with_the_mfma_block_width():
+    case = mfma_case(
+        k=1024, spk=512, grid3d=False, blocks=100000, tn=[1, 2], bm=[16, 32]
+    )
+    expanded = config.expand_case(case)
+    assert len(expanded.problems) == 4
+    for p in expanded.problems:
+        tiles = (
+            support.ceilDiv(4096, 16 * p.tn)
+            * support.ceilDiv(4, p.bm)
+            * support.ceilDiv(1024, 512)
+        )
+        assert p.mfma and not p.grid3d and p.blocks == tiles
+
+
+def test_default_sweep_is_not_lds():
+    assert config.DEFAULT_SWEEP["lds"] == [False]
+    expanded = config.expand_case(mfma_case())
+    assert [p.lds for p in expanded.problems] == [False]
+    assert config.config_record(expanded.problems[0])["lds"] is False
+    assert not support.gemmKernelName(expanded.problems[0]).endswith("_LDS1")
+
+
+def test_lds_sweep_expands_with_the_lds_kernel_names():
+    case = mfma_case(bm=[16, 32], tn=[1, 2], prefetch=[2, 3], lds=[False, True])
+    expanded = config.expand_case(case)
+    assert expanded.swept == 16 and not expanded.failures
+    lds = [p for p in expanded.problems if p.lds]
+    assert len(lds) == 8
+    for p in lds:
+        assert support.gemmKernelName(p).endswith("_MFMA1_LDS1")
+        assert config.config_record(p)["lds"] is True
+        assert p.bn == 16 * p.tn and p.ki == 256
+    names = [support.gemmKernelName(p) for p in expanded.problems]
+    assert len(set(names)) == 16
+
+
+def test_lds_without_mfma_is_a_constraint_failure():
+    case = mfma_case(mfma=False, bm=1, lds=True, lanesK=64, tn=1, waves=1)
+    expanded = config.expand_case(case)
+    assert not expanded.problems
+    assert [f.stage for f in expanded.failures] == ["constraint"]
+    assert "lds needs mfma" in expanded.failures[0].reason
+    assert expanded.failures[0].config["lds"] is True
+
+
+def test_mixed_mfma_lds_sweep_records_the_invalid_combination_only():
+    case = mfma_case(mfma=[False, True], lds=[False, True], bm=16)
+    expanded = config.expand_case(case)
+    assert expanded.swept == 4 and len(expanded.failures) == 1
+    assert len(expanded.problems) == 3
+    assert not any(p.lds and not p.mfma for p in expanded.problems)
+
+
+def test_lds_values_must_be_booleans_not_ranges():
+    prefix = "problems: [{name: a, m: 1, n: 2, k: 3, sweep: "
+    with pytest.raises(config.SweepConfigError, match="expected true or false"):
+        parse(prefix + "{lds: [true, 1]}}]")
+    with pytest.raises(config.SweepConfigError, match="lds takes booleans"):
+        parse(prefix + "{lds: {min: 0, max: 1, step: 1}}}]")
+
+
+def test_knob_sweep_input_with_mfma_and_lds_parses():
+    text = (
+        "problems: [{name: a, m: 5120, n: [8, 32], k: [8192, 8292], useBeta: false, "
+        "sweep: {bm: [1, 4], tn: {min: 1, max: 4, step: 1}, waves: [1, 2, 4], "
+        "prefetch: {min: 2, max: 8, step: 1}, mfma: true, lds: true, "
+        "lanesK: 64, upScales: 0}}]"
+    )
+    cases = parse(text).cases
+    assert len(cases) == 4
+    expanded = config.expand_case(cases[0])
+    assert expanded.swept == 2 * 4 * 3 * 7 and not expanded.failures
+    assert all(p.mfma and p.lds for p in expanded.problems)
+
+
+def test_mfma_values_must_be_booleans_not_ranges():
+    prefix = "problems: [{name: a, m: 1, n: 2, k: 3, sweep: "
+    with pytest.raises(config.SweepConfigError, match="expected true or false"):
+        parse(prefix + "{mfma: [true, 1]}}]")
+    with pytest.raises(config.SweepConfigError, match="mfma takes booleans"):
+        parse(prefix + "{mfma: {min: 0, max: 1, step: 1}}}]")
 
 
 def fake_smi(directory, fail: bool) -> str:
@@ -141,19 +340,23 @@ def calls(log: str) -> list[str]:
 def test_stabilizer_restores_only_successful_locks(tmp_path, monkeypatch):
     log = fake_smi(str(tmp_path), fail=False)
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
-    with smi.GpuStabilizer([1], require_stable=False) as stabilizer:
+    with smi.GpuStabilizer([1], require_stable=True) as stabilizer:
         assert stabilizer.summary()["status"] == "locked"
     assert "-d 1 --setperfdeterminism 2400" in calls(log)
     assert "-d 1 --resetperfdeterminism" in calls(log)
 
 
-def test_stabilizer_failed_lock_restores_nothing(tmp_path, monkeypatch):
+def test_stabilizer_not_required_never_invokes_smi(tmp_path, monkeypatch):
     log = fake_smi(str(tmp_path), fail=True)
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     with smi.GpuStabilizer([1], require_stable=False) as stabilizer:
         assert stabilizer.summary()["status"] == "unavailable"
-    assert not any("reset" in call for call in calls(log))
-    assert not any(call.endswith("--setperflevel auto") for call in calls(log))
+    assert not os.path.exists(log)
+
+
+def test_stabilizer_failed_lock_aborts(tmp_path, monkeypatch):
+    fake_smi(str(tmp_path), fail=True)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     with pytest.raises(smi.SweepAbort):
         with smi.GpuStabilizer([1], require_stable=True):
             pass
@@ -167,6 +370,8 @@ problems:
     m: 5
     n: 300
     k: 1000
+    ldD: 16
+    ldC: 16
     spk: {"k" if spk is None else spk}
     useBeta: {str(use_beta).lower()}
     alpha: 0.75
@@ -278,6 +483,33 @@ def test_operand_generation_is_deterministic_and_cached():
     )
     assert (first.raw == again.raw).all() and (first.swizzled == again.swizzled).all()
     assert not np.isnan(support.decodeE4M3FN(first.codes())).any()
+
+
+def test_rank_all_screened_lists_every_configuration():
+    timings = {
+        0: worker.Timing([3000], []),
+        1: worker.Timing([1000], []),
+        2: worker.Timing([2000], []),
+    }
+    outcome: dict = {"ranked": []}
+    worker.rank_all_screened(timings, outcome)
+    assert [entry["index"] for entry in outcome["ranked"]] == [1, 2, 0]
+    assert outcome["ranked"][0]["verified"] == "screening"
+    assert outcome["ranked"][0]["timeUs"] == outcome["ranked"][0]["screeningUs"]
+
+
+def test_results_msgpack_roundtrip(tmp_path):
+    import sweep_skinny_gemm_results as results_io
+
+    document = {
+        "meta": {"tool": "test", "oneShot": True},
+        "results": [{"problem": {"name": "a"}, "top": []}],
+    }
+    path = tmp_path / "out.msgpack"
+    results_io.write_results(str(path), document, results_io.FORMAT_MSGPACK)
+    loaded = results_io.read_results(str(path))
+    assert loaded["meta"]["oneShot"] is True
+    assert loaded["results"][0]["problem"]["name"] == "a"
 
 
 def test_wrong_result_is_dropped_and_next_promoted(monkeypatch):

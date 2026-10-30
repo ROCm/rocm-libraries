@@ -7377,6 +7377,103 @@ TEST_F(MemoryTest, ErrorMessagesNameTheOperationAndTheProblem) {
   }
 }
 
+static void ldsLoad(IRBuilder &target, RegisterRef base, int32_t ldsOffset,
+                    MemoryWidth width, BufferAccess access = {}) {
+  RegisterRef rsrc{sgpr, 4, 4};
+  RegisterRef voffset{vgpr, 0, 1};
+  target.loadBufferToLds(rsrc, voffset, 0, base, ldsOffset, width, access);
+}
+
+TEST_F(MemoryTest, BufferToLdsPrintsTheM0WriteAndTheLoad) {
+  RegisterRef base{sgpr, 9, 1};
+  EXPECT_EQ(emitted([&](IRBuilder &local) {
+              ldsLoad(local, base, 0, MemoryWidth::b128);
+            }),
+            "s_mov_b32 m0, s9\ns_nop 0\n"
+            "buffer_load_dwordx4 v0, s[4:7], 0 offen offset:0 lds\n");
+  EXPECT_EQ(emitted([&](IRBuilder &local) {
+              ldsLoad(local, base, 1024, MemoryWidth::b32);
+            }),
+            "s_add_u32 m0, s9, 1024\ns_nop 0\n"
+            "buffer_load_dword v0, s[4:7], 0 offen offset:0 lds\n");
+  EXPECT_EQ(emitted([&](IRBuilder &local) {
+              ldsLoad(local, base, 0, MemoryWidth::b96);
+            }),
+            "s_mov_b32 m0, s9\ns_nop 0\n"
+            "buffer_load_dwordx3 v0, s[4:7], 0 offen offset:0 lds\n");
+}
+
+// The immediate offset moves the LDS address with the global one, so M0
+// compensates for it.
+TEST_F(MemoryTest, BufferToLdsCancelsTheImmediateOffsetInM0) {
+  RegisterRef base{sgpr, 9, 1};
+  EXPECT_EQ(emitted([&](IRBuilder &local) {
+              ldsLoad(local, base, 1024, MemoryWidth::b128, {.offset = 128});
+            }),
+            "s_add_u32 m0, s9, 896\ns_nop 0\n"
+            "buffer_load_dwordx4 v0, s[4:7], 0 offen offset:128 lds\n");
+  EXPECT_EQ(emitted([&](IRBuilder &local) {
+              ldsLoad(local, base, 128, MemoryWidth::b128, {.offset = 128});
+            }),
+            "s_mov_b32 m0, s9\ns_nop 0\n"
+            "buffer_load_dwordx4 v0, s[4:7], 0 offen offset:128 lds\n");
+  EXPECT_EQ(emitted([&](IRBuilder &local) {
+              ldsLoad(local, base, 0, MemoryWidth::b128, {.offset = 128});
+            }),
+            "s_add_u32 m0, s9, -128\ns_nop 0\n"
+            "buffer_load_dwordx4 v0, s[4:7], 0 offen offset:128 lds\n");
+}
+
+TEST_F(MemoryTest, BufferToLdsRejectsInvalidArguments) {
+  RegisterRef base{sgpr, 9, 1};
+  for (MemoryWidth width :
+       {MemoryWidth::b8, MemoryWidth::b16, MemoryWidth::b64})
+    expectRejected([&] { ldsLoad(builder, base, 0, width); });
+  expectRejected(
+      [&] { ldsLoad(builder, RegisterRef{vgpr, 9, 1}, 0, MemoryWidth::b128); });
+  expectRejected(
+      [&] { ldsLoad(builder, RegisterRef{sgpr, 8, 2}, 0, MemoryWidth::b128); });
+  expectRejected(
+      [&] { ldsLoad(builder, base, 0, MemoryWidth::b128, {.offset = 4096}); });
+  expectRejected([&] {
+    RegisterRef rsrc{sgpr, 6, 4};
+    builder.loadBufferToLds(rsrc, RegisterRef{vgpr, 0, 1}, 0, base, 0,
+                            MemoryWidth::b128);
+  });
+  expectRejected([&] {
+    builder.loadBufferToLds(RegisterRef{sgpr, 4, 4}, RegisterRef{sgpr, 0, 1}, 0,
+                            base, 0, MemoryWidth::b128);
+  });
+  expectRejected([&] {
+    builder.loadBufferToLds(RegisterRef{sgpr, 4, 4}, RegisterRef{vgpr, 0, 1},
+                            65, base, 0, MemoryWidth::b128);
+  });
+}
+
+TEST(MemoryAssembly, BufferToLdsAssembles) {
+  Target target = Target::get("gfx950");
+  Kernel kernel(target, "codegen_lds_load", memoryWorkgroupSize,
+                KernelSignature());
+  IRBuilder &builder = kernel.builder();
+  kernel.setLdsSize(1 << 16);
+  RegisterRange rsrc = builder.allocateSgpr(4, 4);
+  RegisterRange base = builder.allocateSgpr(1);
+  RegisterRange soffsetReg = builder.allocateSgpr(1);
+  RegisterRange voffset = builder.allocateVgpr(1);
+  for (MemoryWidth width :
+       {MemoryWidth::b32, MemoryWidth::b96, MemoryWidth::b128})
+    for (Operand soffset : {Operand(soffsetReg), Operand(0), Operand(64)})
+      for (int32_t ldsOffset : {0, 1024, 40960})
+        for (int32_t offset : {0, 128, 4095})
+          builder.loadBufferToLds(rsrc.ref(), voffset.ref(), soffset,
+                                  base.ref(), ldsOffset, width,
+                                  {.offset = offset});
+  builder.createEndProgram();
+  std::string assembly = kernel.toAssembly();
+  SCOPED_TRACE(assembly);
+  EXPECT_NO_THROW(assembleToHSACO(assembly, target.isaName()));
+}
+
 // Emits every width, payload kind and option into one kernel.
 TEST(MemoryAssembly, AllWidthsAndOptionsAssemble) {
   Target target = Target::get("gfx950");

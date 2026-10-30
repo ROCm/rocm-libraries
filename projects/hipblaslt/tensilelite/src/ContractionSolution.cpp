@@ -113,6 +113,22 @@ namespace TensileLite
                 " requires mxDataGenerator; rebuild with HIPBLASLT_ENABLE_MXDATAGENERATOR=ON"));
 #endif
         }
+
+        // Default split-K chunk for skinny MXFP8 emitter kernels (matches
+        // tests/tensilelite/bindings/skinny_gemm_support.makeProblem when spk is
+        // not overridden).
+        size_t skinnyGemmSpkChunk(size_t k, CustomKernel const& customKernel)
+        {
+            if(customKernel.macrotile.z == 0)
+                throw std::runtime_error(
+                    concatenate("Skinny GEMM kernel ", customKernel.name, " has zero macrotile.z"));
+            size_t const wavefrontSize = 64;
+            size_t const lanesK        = std::max(size_t(1), customKernel.macrotile.z / wavefrontSize);
+            bool const   mfma          = customKernel.name.find("MFMA") != std::string::npos;
+            size_t const ki            = mfma ? 256 : wavefrontSize * lanesK;
+            size_t const nIter         = std::max(divideUp(k, ki), size_t(1));
+            return nIter * ki;
+        }
     }
 
     std::string toString(CustomArgSemantic arg)
@@ -3345,6 +3361,12 @@ namespace TensileLite
                             : 1,
                         arg.type);
                     break;
+                case CustomArgSemantic::Spk:
+                {
+                    size_t k = problem.problemSizes()[problem.problemSizes().size() - 1];
+                    rv.args.appendCustomType("Spk", skinnyGemmSpkChunk(k, customKernel), arg.type);
+                    break;
+                }
                 case CustomArgSemantic::StrideA0:
                     rv.args.appendCustomType("StrideA0", descriptorA.strides()[descriptorStrideAB], arg.type);
                     break;

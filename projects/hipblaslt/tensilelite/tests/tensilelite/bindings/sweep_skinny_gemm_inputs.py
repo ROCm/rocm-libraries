@@ -7,7 +7,7 @@ float64 search and builds the reference with float64 temporaries, which takes
 seconds and tens of GB for the largest shapes. Here the operands are generated
 in blocks, in parallel, straight into the layout the kernel reads, by indexing
 a table of fp8 codes with random 16-bit numbers (the table holds the quantiles
-of the driver's distribution, a standard normal times 2, so the data keep its
+of a standard normal times 2, so the data keep its
 character). An operand depends only on (cols, k, ld), so a worker keeps the
 generated operands of the recent shapes and shares them between cases.
 

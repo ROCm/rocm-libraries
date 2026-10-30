@@ -65,6 +65,7 @@ namespace TensileLite
         X_MACRO(SizeSumDiv2) \
         X_MACRO(SizeSum1) \
         X_MACRO(SizeSum2) \
+        X_MACRO(Spk) \
         X_MACRO(StrideA0) \
         X_MACRO(StrideA1) \
         X_MACRO(StrideA2) \

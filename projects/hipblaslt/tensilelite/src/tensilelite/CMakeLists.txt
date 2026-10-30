@@ -79,6 +79,11 @@ if(TENSILELITE_ENABLE_CODEGEN)
     target_sources(tensilelite-codegen
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/API/SkinnyGEMM.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/API/SkinnyGEMMMfma.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/API/SkinnyGEMMEpilogue.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/API/SkinnyGEMMKLoop.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/API/SkinnyGEMMTail.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/API/SkinnyGEMMValu.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/Codegen/IRBuilder.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/Codegen/Kernel.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/Codegen/Registers.cpp"

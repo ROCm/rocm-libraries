@@ -337,16 +337,16 @@ TEST_F(KernelTest, ExceedingRegisterLimitThrows) {
   EXPECT_THROW(kernel.toAssembly(), std::runtime_error);
 }
 
-static void addReferenceGemmExplicitArguments(KernelSignature &signature) {
+static void addGemmExplicitArguments(KernelSignature &signature) {
   for (const char *name : {"a", "b", "c", "d", "e", "f"})
     signature.addPointer(name);
   for (const char *name : {"s0", "s1", "s2", "s3", "s4", "s5", "s6"})
     signature.addScalar(name, 4);
 }
 
-TEST_F(KernelTest, ReplicatesReferenceGemmArgumentLayout) {
+TEST_F(KernelTest, ReplicatesGemmArgumentLayout) {
   KernelSignature signature;
-  addReferenceGemmExplicitArguments(signature);
+  addGemmExplicitArguments(signature);
   EXPECT_EQ(signature.arguments()[5].offset, 40);
   EXPECT_EQ(signature.arguments()[6].offset, 48);
   EXPECT_EQ(signature.arguments()[12].offset, 72);
@@ -387,7 +387,7 @@ TEST_F(KernelTest, ReplicatesReferenceGemmArgumentLayout) {
   EXPECT_TRUE(hasLine(assembly, "  .amdhsa_kernarg_size 104")) << assembly;
 }
 
-TEST_F(KernelTest, ReplicatesReferenceSplitkReduceArgumentLayout) {
+TEST_F(KernelTest, ReplicatesSplitkReduceArgumentLayout) {
   KernelSignature signature;
   signature.addPointer("a");
   signature.addPointer("b");
@@ -692,8 +692,8 @@ static constexpr int32_t idsBlockSize = idsBlock[0] * idsBlock[1] * idsBlock[2];
 // Workgroup ids x, y, z, group sizes x, y, z and block counts x, y, z.
 static constexpr int32_t idsDwords = 9;
 
-// Mimics the reference kernel: the hidden arguments start at offset 12, which
-// is not 8-aligned, and follow the explicit ones.
+// The hidden arguments start at offset 12, which is not 8-aligned, and follow
+// the explicit ones.
 static void addIdsSignature(KernelSignature &signature) {
   signature.addPointer("out");
   signature.addScalar("tag", 4);

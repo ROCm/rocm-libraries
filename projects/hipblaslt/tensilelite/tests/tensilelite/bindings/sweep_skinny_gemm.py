@@ -14,7 +14,8 @@ Run from the tensilelite directory:
   export PYTHONPATH=$PYTHONPATH:$PWD/tests/tensilelite/bindings
   export LD_LIBRARY_PATH=/opt/rocm/lib
   python tests/tensilelite/bindings/sweep_skinny_gemm.py [input.yaml] \\
-      [--gpus auto|1,3,6,7] [-o results.yaml] [--only SUBSTRING] [--list|--dry-run]
+      [--gpus auto|1,3,6,7] [-o results.yaml] [--one-shot] [--output-format msgpack] \\
+      [--only SUBSTRING] [--list|--dry-run]
 
 Stages, all driven by the main process, which never initializes HIP (so a
 spawned child can safely own a GPU):
@@ -45,12 +46,15 @@ spawned child can safely own a GPU):
      clock dips only add time. The operands are generated once per worker and
      shape in parallel blocks and cached (sweep_skinny_gemm_inputs.py). For
      split-K the score is the minimum over iterations of the flushed GEMM time
-     plus the warm reduce time. The refine_top best are then re-timed in
-     interleaved rounds so that slow drift hits them alike, and the winners are
-     ranked by that refined score and verified in rank order against the host
-     reference; a failing configuration is dropped and the next refined one
-     promoted. Every reported winner is verified (never skipped), but only the
-     winners: the screened candidates are not. The reference is dense ("full")
+     plus the warm reduce time. Unless --one-shot is set, the refine_top best are
+     re-timed in interleaved rounds so that slow drift hits them alike, and the
+     winners are ranked by that refined score and verified in rank order against
+     the host reference; a failing configuration is dropped and the next refined
+     one promoted. With --one-shot every screened configuration is written to
+     top (ranked by screening time), refinement and verification are skipped, and
+     --output-format msgpack (or a .msgpack path) stores the document in binary.
+     Every reported winner is verified (never skipped), but only the winners: the
+     screened candidates are not. The reference is dense ("full")
      when (m + n) * k <= verify_full_max_elems, else sampled (see
      sweep_skinny_gemm_inputs.py); --no-verify turns the verification off and
      marks the winners "no".
@@ -72,9 +76,10 @@ pins alpha or beta.
 Parallelism: builds are CPU-parallel across all unique kernels; timing is
 serialized per GPU and parallel across GPUs by case; builds overlap the timing.
 
-The clocks of the GPUs are locked for the timed stage when rocm-smi allows it
-(see GpuStabilizer); otherwise the sweep goes on without, unless
---require-stable-clocks. The sclk and mclk are sampled around every case.
+The clocks of the GPUs are locked for the timed stage only with
+--require-stable-clocks (see GpuStabilizer), and the sweep aborts if a lock is
+refused; otherwise the sweep never touches the clocks and needs no elevated
+rights. The sclk and mclk are sampled around every case.
 """
 
 import argparse
@@ -111,6 +116,12 @@ from sweep_skinny_gemm_smi import (
     script_dir,
     select_gpus,
 )
+from sweep_skinny_gemm_results import (
+    FORMAT_MSGPACK,
+    FORMAT_YAML,
+    output_format,
+    write_results,
+)
 from sweep_skinny_gemm_worker import Job, gpu_worker, hsaco_file
 
 TOOL = "sweep_skinny_gemm.py"
@@ -119,15 +130,6 @@ DEFAULT_BUILD_JOBS = 64
 # How long the main loop waits for an event before it looks at the other queue.
 POLL_S = 0.1
 BUILD_STATUS = "failed to build"
-HEADER = """\
-# Skinny GEMM sweep results written by sweep_skinny_gemm.py.
-# Times are microseconds: timeUs is the refined minimum of gemm (+ reduce for
-# split-K), screeningUs the minimum of the screening pass. verified is full (the
-# whole result was compared with a dense host reference), sampled(N) (N output
-# elements were compared, each over all its splits) or no (--no-verify); a
-# configuration that fails verification is dropped, not listed. phaseSeconds
-# splits the wall time of a case on its GPU.
-"""
 
 
 @dataclass
@@ -280,11 +282,12 @@ def dump(data, stream) -> None:
 
 
 class ResultWriter:
-    """The output YAML, rewritten atomically after every case, and the failed
-    configurations, appended to their own file."""
+    """The output document, rewritten atomically after every case, and the failed
+    configurations, appended to their own YAML file."""
 
-    def __init__(self, path: str, meta: dict):
+    def __init__(self, path: str, meta: dict, output_format: str):
         self.path = path
+        self.output_format = output_format
         self.failed_path = os.path.splitext(path)[0] + ".failed.yaml"
         self.meta = meta
         self.records: dict[int, dict] = {}
@@ -301,11 +304,7 @@ class ResultWriter:
     def write(self) -> None:
         results = [self.records[index] for index in sorted(self.records)]
         document = {"meta": self.meta, "results": results}
-        temporary = f"{self.path}.{os.getpid()}.tmp"
-        with open(temporary, "w") as stream:
-            stream.write(HEADER)
-            dump(document, stream)
-        os.replace(temporary, self.path)
+        write_results(self.path, document, self.output_format)
 
 
 def failure_entry(state: CaseState, failure: ConfigFailure, status: str) -> dict:
@@ -396,7 +395,9 @@ class Sweep:
     def start(self, gpus: list[int], stabilizer: GpuStabilizer) -> None:
         os.makedirs(self.hsaco_dir, exist_ok=True)
         self.meta = self.make_meta(gpus, stabilizer)
-        self.writer = ResultWriter(self.options.output, self.meta)
+        self.writer = ResultWriter(
+            self.options.output, self.meta, self.options.output_format
+        )
         self.builds = BuildStage(self.hsaco_dir, self.options.build_jobs)
         self.pool = GpuPool(gpus) if gpus else None
         self.submit_builds()
@@ -416,6 +417,8 @@ class Sweep:
             "gpuName": None,
             "inputFile": os.path.abspath(self.options.input),
             "settings": {**self.settings, "verify": not self.options.no_verify},
+            "oneShot": self.options.one_shot,
+            "outputFormat": self.options.output_format,
             "verification": self.verification_note(),
             "gpus": list(self.gpu_meta.values()),
             "clockLock": {key: v for key, v in locks.items() if key != "perGpu"},
@@ -429,6 +432,11 @@ class Sweep:
         }
 
     def verification_note(self) -> str:
+        if self.options.one_shot:
+            return (
+                "one-shot: every timed configuration is listed with "
+                "verified=screening (no host check)"
+            )
         if self.options.no_verify:
             return "disabled by --no-verify: winners are marked no"
         limit = self.settings["verify_full_max_elems"]
@@ -483,6 +491,7 @@ class Sweep:
                 self.hsaco_dir,
                 self.settings,
                 not self.options.no_verify,
+                self.options.one_shot,
             )
         )
 
@@ -605,6 +614,8 @@ def resolve_settings(settings: dict, options) -> dict:
         value = getattr(options, key)
         if value is not None:
             resolved[key] = value
+    if options.one_shot:
+        return resolved
     if resolved["refine_top"] < resolved["top"]:
         raise SweepConfigError("settings: refine_top must be at least top")
     return resolved
@@ -615,7 +626,18 @@ def make_parser() -> argparse.ArgumentParser:
         description="Sweep the knobs of the skinny MXFP8 GEMM over a list of shapes"
     )
     parser.add_argument("input", nargs="?", default=DEFAULT_INPUT, help="input YAML")
-    parser.add_argument("-o", "--output", default=None, help="output YAML")
+    parser.add_argument("-o", "--output", default=None, help="output YAML or msgpack")
+    parser.add_argument(
+        "--output-format",
+        choices=(FORMAT_YAML, FORMAT_MSGPACK),
+        default=None,
+        help="yaml or msgpack (default: yaml, or msgpack when -o ends with .msgpack)",
+    )
+    parser.add_argument(
+        "--one-shot",
+        action="store_true",
+        help="screen every configuration once, save all to top, skip refinement",
+    )
     parser.add_argument("--work-dir", default=None, help="hsaco cache directory")
     parser.add_argument("--gpus", default="auto", help="auto or a list such as 1,3")
     parser.add_argument("--max-busy", type=float, default=5.0, help="idle GPU use, %%")
@@ -630,7 +652,11 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--list", action="store_true", help="count, do not build")
     parser.add_argument("--dry-run", action="store_true", help="build, no GPU")
     parser.add_argument("--no-verify", action="store_true")
-    parser.add_argument("--require-stable-clocks", action="store_true")
+    parser.add_argument(
+        "--require-stable-clocks",
+        action="store_true",
+        help="lock the GPU clocks for the run; abort if any GPU cannot be locked",
+    )
     for name in ("iters", "warmup", "refine_top", "refine_iters", "top"):
         parser.add_argument("--" + name.replace("_", "-"), dest=name, type=int)
     parser.add_argument(
@@ -651,13 +677,15 @@ def prepare_directories(options) -> None:
     if options.work_dir is None:
         options.work_dir = tempfile.mkdtemp(prefix="skinny-sweep-")
     if options.output is None:
-        options.output = os.path.join(options.work_dir, "results.yaml")
+        name = "results.msgpack" if options.one_shot else "results.yaml"
+        options.output = os.path.join(options.work_dir, name)
+    options.output_format = output_format(options.output, options.output_format)
     os.makedirs(os.path.dirname(os.path.abspath(options.output)), exist_ok=True)
     os.makedirs(options.work_dir, exist_ok=True)
 
 
 def run(options) -> int:
-    sweep_input = load_input(options.input, options.seed)
+    sweep_input = load_input(options.input, options.seed, one_shot=options.one_shot)
     settings = resolve_settings(sweep_input.settings, options)
     cases = select_cases(sweep_input.cases, options.only, options.limit_shapes)
     expanded = [expand_case(case) for case in cases]
@@ -670,7 +698,11 @@ def run(options) -> int:
         else select_gpus(options.gpus, options.max_busy, options.allow_busy)
     )
     prepare_directories(options)
-    log(f"work dir {options.work_dir}, output {options.output}, GPUs {gpus}")
+    mode = "one-shot" if options.one_shot else "refine+top"
+    log(
+        f"work dir {options.work_dir}, output {options.output} "
+        f"({options.output_format}, {mode}), GPUs {gpus}"
+    )
     with GpuStabilizer(gpus, options.require_stable_clocks) as stabilizer:
         sweep = Sweep(options, settings, expanded)
         sweep.start(gpus, stabilizer)

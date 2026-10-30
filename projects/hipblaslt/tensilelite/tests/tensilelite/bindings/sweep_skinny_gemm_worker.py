@@ -47,6 +47,7 @@ class Job:
     hsaco_dir: str
     settings: dict
     verify: bool
+    one_shot: bool = False
 
 
 @dataclass
@@ -260,6 +261,26 @@ def check_result(
     verifier.check_reduced(p, d_out)
 
 
+def screening_only_entry(index: int, timing: Timing) -> dict:
+    """A ranked configuration from the screening pass only (--one-shot)."""
+    entry = {
+        "index": index,
+        "timeUs": round(timing.total_ns / NS_PER_US, 3),
+        "gemmUs": round(min(timing.gemm_ns) / NS_PER_US, 3),
+        "screeningUs": round(timing.total_ns / NS_PER_US, 3),
+        "verified": "screening",
+    }
+    if timing.reduce_ns:
+        entry["reduceUs"] = round(min(timing.reduce_ns) / NS_PER_US, 3)
+    return entry
+
+
+def rank_all_screened(screening: dict[int, Timing], outcome: dict) -> None:
+    """Fills outcome['ranked'] with every screened configuration, fastest first."""
+    for index in sorted(screening, key=lambda i: screening[i].total_ns):
+        outcome["ranked"].append(screening_only_entry(index, screening[index]))
+
+
 def winner_entry(index: int, refined: Timing, screened: Timing, verified: str) -> dict:
     entry = {
         "index": index,
@@ -325,6 +346,12 @@ def time_case(job: Job, gpu: int, flush, cache: OperandCache, outcome: dict) -> 
         screening = screen(job, buffers, flush, outcome)
         outcome["timed"] = len(screening)
         phases["screeningS"] = time.perf_counter() - start
+        if job.one_shot:
+            outcome["clocks"]["end"] = sample_clocks(gpu)
+            phases["refinementS"] = 0.0
+            phases["verificationS"] = 0.0
+            rank_all_screened(screening, outcome)
+            return
         start = time.perf_counter()
         refined = refine(job, buffers, flush, screening, outcome)
         outcome["clocks"]["end"] = sample_clocks(gpu)

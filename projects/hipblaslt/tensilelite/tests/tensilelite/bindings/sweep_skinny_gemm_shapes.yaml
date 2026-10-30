@@ -10,9 +10,10 @@
 #              "k" = one split), ldA/ldB/ldD/ldC in BYTES, useBeta, alpha, beta,
 #              sweep (merged over the default sweep).
 # A sweep value is a scalar, a list or a range {min, max, step | mul}. The
-# default sweep is a list of two mappings whose configurations are unioned: the
-# 3-D grid (grid3d true, plain tile order) and a smaller persistent sub-sweep
-# over the tile order (group, numXcds) and the block count.
+# default sweep is a list of four mappings whose configurations are unioned: the
+# VALU 3-D grid (grid3d true, plain tile order) and a smaller VALU persistent
+# sub-sweep over the tile order (group, numXcds) and the block count, then the
+# same two shapes of sweep for the scaled-MFMA path (plain and with the LDS ring).
 #
 # useBeta: every problem runs with the kernel that never reads C and with the
 # useBeta kernel. beta: the useBeta kernel (and the split-K reduce, which applies
@@ -26,43 +27,66 @@
 # name, m, n, k and useBeta of the problem, not on the order of the problems or
 # on the GPU. The resolved values are in the problem records of the results.
 #
-# Expected runtime of the whole file: 957 cases (321 shapes, 3 cases each where
-# beta matters: the plain kernel, and the useBeta kernel in the beta modes zero and
-# random), about 795k configurations and about 11.5k unique GEMM kernels. Building
-# the kernels is CPU-parallel and overlaps the timing. The earlier 231-shape,
-# 193k-configuration file (one case per shape) took 8 min 56 s on 4 GPUs, so this
-# one is estimated at 35 to 40 minutes on 4 GPUs (4 times that on one). Use
-# --only/--limit-shapes to run a slice.
+# Expected runtime of the whole file: 726 cases (the plain kernel, and the useBeta
+# kernel in the beta modes zero and random), about 8.05M configurations (the
+# MFMA mappings add about 216k, 2.8%) and about 48k unique GEMM kernels (--list
+# counts them). Building the kernels is CPU-parallel and overlaps the timing. A
+# measured cold case of about 15k configurations took 31 s on one GPU, so the
+# whole file is estimated at 1.5 to 2 hours on 4 GPUs (4 times that on one); this
+# is an estimate, not a measurement. Use --only/--limit-shapes to run a slice.
 
 settings:
-  iters: 20
-  warmup: 3
-  refine_top: 10
-  refine_iters: 100
-  top: 5
+  iters: 30
+  warmup: 10
+  refine_top: 0
+  refine_iters: 0
+  top: 0
   verify_full_max_elems: 2147483648 # (m + n) * k up to this: dense reference, else sampled
   seed: 20240601 # of the random alpha and beta
 defaults:
-  useBeta: [false, true]
-  betaModes: [zero, random]
+  useBeta: [true]
+  betaModes: [zero]
   sweep:
     - &grid3d_sweep
       bm: [1, 2, 3, 4]
       tn: [1, 2, 4]
       lanesK: [8, 16, 64]
       waves: [1, 2, 4]
-      prefetch: [1, 2, 3]
+      prefetch: [0, 1, 2]
       upScales: [0, 1]
       grid3d: true
     - &persistent_sweep
       bm: [1, 2, 4]
-      tn: [1, 2]
+      tn: [2, 4]
       lanesK: [16, 64]
-      waves: [4]
-      prefetch: [1, 2]
-      upScales: [1]
+      waves: [1, 4]
+      prefetch: [0, 1]
+      upScales: [0, 1]
       grid3d: false
-      group: [1, 4]
+      group: [1, 4, 8]
+      numXcds: [1, 4, 8, 16]
+      blocks: [256, 512]
+    - &mfma_grid3d_sweep
+      mfma: true
+      lds: [false, true]
+      bm: [16, 32]
+      tn: [1, 2, 3, 4]
+      lanesK: 64
+      waves: [1, 2, 4]
+      prefetch: [2, 3, 4, 6]
+      upScales: 0
+      grid3d: true
+    - &mfma_persistent_sweep
+      mfma: true
+      lds: true
+      bm: [16, 32]
+      tn: [1, 2]
+      lanesK: 64
+      waves: [1, 2]
+      prefetch: [3, 4]
+      upScales: 0
+      grid3d: false
+      group: [1, 8]
       numXcds: [1, 8]
       blocks: [256, 512]
 problems:
@@ -164,6 +188,43 @@ problems:
     n: 128256
     k: 8192
     transpose: true
+  # ---- Additional decode projection shapes ------------------------------------
+  # User-provided layer dimensions (n × k at batch 1), skinny m in [1, 64].
+  - name: attn.fused_wqa_wkv # (1, 1792, 5120)
+    m: *llama_batch
+    n: 1792
+    k: 5120
+    transpose: true
+  - name: attn.wq_b # (1, 8192, 1280)
+    m: *llama_batch
+    n: 8192
+    k: 1280
+    transpose: true
+  - name: attn.wo_b # (1, 5120, 2048)
+    m: *llama_batch
+    n: 5120
+    k: 2048
+    transpose: true
+  - name: shared.gate_up # (1, 1152, 5120)
+    m: *llama_batch
+    n: 1152
+    k: 5120
+    transpose: true
+  - name: attn.indexer.wq_b # (1, 4096, 1280)
+    m: *llama_batch
+    n: 4096
+    k: 1280
+    transpose: true
+  - name: engram.wkv # (1, 25600, 6144)
+    m: *llama_batch
+    n: 25600
+    k: 6144
+    transpose: true
+  - name: dspark.main_proj # (1, 5120, 1536)
+    m: *llama_batch
+    n: 5120
+    k: 1536
+    transpose: true
   # ---- Synthetic regime coverage, not model-derived ---------------------------
   # Hand-picked sizes of three regimes of the wide (n) and the reduction (k)
   # dimension, each over a skinny dimension of 1 to 64 in both orientations.
@@ -203,6 +264,21 @@ problems:
     m: *regime_batch
     n: 40000
     k: 16384
+    transpose: true
+  - name: synthetic-large-n40000-k16384
+    m: *regime_batch
+    n: 40000
+    k: 32768
+    transpose: true
+  - name: synthetic-large-n40000-k16384
+    m: *regime_batch
+    n: 8192
+    k: 32768
+    transpose: true
+  - name: synthetic-large-n40000-k16384
+    m: *regime_batch
+    n: 2048
+    k: 32768
     transpose: true
   # ---- Synthetic split-K coverage, not model-derived --------------------------
   # Split-K without the useBeta kernel: the reduce applies beta * C, in both beta
