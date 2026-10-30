@@ -119,12 +119,17 @@ Frontend API control flow
               [No engine details are loaded here; see get_knobs_for_engine()]
         e. initializeEngineConfig() [selects best engine config from heuristic results]
      4. graph.check_support()         [validates descriptors exist]
-     5. graph.build_plans()
+     5. graph.build_plans()          [finalizes the active plan; on failure tries the other ranked plans]
         a. Backend: hipdnnBackendSetAttribute(execPlan, ENGINE_CONFIG, engineConfig)
         b. Backend: hipdnnBackendFinalize(execPlan)
            -> ExecutionPlanDescriptor::finalize()
               -> Plugin: hipdnnEnginePluginCreateExecutionContext()
               -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
+              -> Record the device of the graph handle's stream
+        c. If finalize fails (any error), log a warning and repeat a-b for another
+           ranked plan (the list is scanned from the top) until one finalizes. If none
+           does, build_plans() returns GRAPH_EXECUTION_PLAN_CREATION_FAILED listing
+           every attempted engine's failure.
 
 
 ``graph.get_workspace_size()``
@@ -149,11 +154,21 @@ Frontend API control flow
      4. Backend: hipdnnBackendSetAttribute(variantPack, WORKSPACE, ...)
      5. Backend: hipdnnBackendFinalize(variantPackDesc)
      6. Backend: hipdnnBackendExecute(handle, execPlanDesc, variantPackDesc)
+        -> Check that the handle's stream is on the plan's device [else BAD_PARAM]
         -> EnginePluginResourceManager::executeOpGraph()
            -> Extract engine ID from execution plan chain
            -> Look up plugin handle for engine ID
            -> Plugin: hipdnnEnginePluginExecuteOpGraph(handle, ctx, workspace, buffers, count)
               [Actual GPU kernel execution happens here]
+
+An execution plan is bound to the device of the handle it was finalized on, or of the
+handle passed to ``hipdnnBackendCreateAndDeserializeExecutionPlan_ext()``. A concrete
+stream maps to the device that owns it; the null, ``hipStreamLegacy`` and
+``hipStreamPerThread`` streams map to the calling thread's current device. The plan can
+run on any handle whose stream is on that device, for example one handle per thread, at
+the cost of one HIP device query per execute. A handle on another device fails with
+``HIPDNN_STATUS_BAD_PARAM`` before any plugin is called. If the device could not be
+determined when the plan was created, the check is skipped.
 
 
 Handle destruction (implicit via RAII)
@@ -182,7 +197,7 @@ Handle destruction (implicit via RAII)
          -> Backend: hipdnnBackendSetAttribute(engine, GRAPH, graphDesc)
          -> Backend: hipdnnBackendSetAttribute(engine, ENGINE_ID, engineId)
          -> Backend: hipdnnBackendFinalize(engine)
-            -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
+            -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [only the plugin that owns the engine; its error is returned]
       -> detail::unpackKnobsFromDescriptors(engineDesc, knobs)
          -> Backend: hipdnnBackendGetAttribute(engine, KNOB_INFO, ...)
             -> Plugin: hipdnnEnginePluginGetEngineDetails(handle, engineId, graph, details*)
@@ -249,7 +264,7 @@ normal selector, ranking its kernels by the same metric, with
            -> Backend: hipdnnBackendSetAttribute(engine, GRAPH, graphDesc)
            -> Backend: hipdnnBackendSetAttribute(engine, ENGINE_ID, engineId)
            -> Backend: hipdnnBackendFinalize(engine)
-              -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
+              -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [only the plugin that owns the engine; its error is returned]
         2. Backend: hipdnnBackendCreateDescriptor(ENGINECFG)
            -> Backend: hipdnnBackendSetAttribute(engineConfig, ENGINE, engineDesc)
            -> Backend: hipdnnBackendSetAttribute(engineConfig, RANKING_METRIC_EXT, metric)
