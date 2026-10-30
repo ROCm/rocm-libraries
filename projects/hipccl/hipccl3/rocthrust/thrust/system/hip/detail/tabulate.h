@@ -40,39 +40,29 @@
 #if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/distance.h>
-#  include <thrust/system/hip/detail/parallel_for.h>
+#  include <thrust/system/hip/detail/transform.h>
 #  include <thrust/system/hip/execution_policy.h>
+
+#  include _THRUST_LIBCXX_INCLUDE(functional)
+#  include _THRUST_LIBCXX_INCLUDE(iterator)
+#  include _THRUST_STD_INCLUDE(iterator)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
-namespace __tabulate
-{
-template <class Iterator, class TabulateOp>
-struct functor
-{
-  Iterator items;
-  TabulateOp op;
-
-  template <typename Size>
-  void THRUST_DEVICE operator()(Size idx)
-  {
-    items[idx] = op(idx);
-  }
-};
-
-} // namespace __tabulate
-
 template <class Derived, class Iterator, class TabulateOp>
 void THRUST_HOST_DEVICE
 tabulate(execution_policy<Derived>& policy, Iterator first, Iterator last, TabulateOp tabulate_op)
 {
-  using size_type = thrust::detail::it_difference_t<Iterator>;
-  size_type count = _THRUST_STD::distance(first, last);
-  hip_rocprim::parallel_for(policy, __tabulate::functor<Iterator, TabulateOp>{first, tabulate_op}, count);
+  using size_type  = _THRUST_STD::iter_difference_t<Iterator>;
+  const auto count = _THRUST_STD::distance(first, last);
+  hip_rocprim::transform_n(
+    policy,
+    _THRUST_LIBCXX::counting_iterator<size_type>{},
+    count,
+    first,
+    _THRUST_LIBCXX::proclaim_copyable_arguments(tabulate_op));
 }
-
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
 #endif
