@@ -77,12 +77,13 @@ struct VoxelConfig {
     Roi roi;
     Roi3D roiType;
     VoxelSize size;
+    Rpp32u numThreads;  // passed to rppCreate; 0 = default
 };
 
 inline std::string voxel_config_name(const VoxelConfig& c) {
-    return backend_name(c.backend) + "_" + dtype_name(c.dtype) + "to" + dtype_name(c.dtype) + "_" +
-           voxel_layout_name(c.layout) + "_" + roi_name(c.roi) + "_" + roi3d_name(c.roiType) + "_" +
-           voxel_size_name(c.size);
+    return backend_name(c.backend, c.numThreads) + "_" + dtype_name(c.dtype) + "to" +
+           dtype_name(c.dtype) + "_" + voxel_layout_name(c.layout) + "_" + roi_name(c.roi) + "_" +
+           roi3d_name(c.roiType) + "_" + voxel_size_name(c.size);
 }
 
 namespace presets {
@@ -99,13 +100,14 @@ inline std::vector<VoxelConfig> make_voxel_configs(
     const std::vector<Roi>& rois, const std::vector<Roi3D>& roiTypes,
     const std::vector<VoxelSize>& sizes = {{2, 4, 12, 16}}) {
     std::vector<VoxelConfig> configs;
-    for (RppBackend backend : available_backends())
+    for (BackendVariant b : backend_variants())
         for (DType dtype : dtypes)
             for (VoxelLayout layout : layouts)
                 for (Roi roi : rois)
                     for (Roi3D roiType : roiTypes)
                         for (VoxelSize size : sizes)
-                            configs.push_back({backend, dtype, layout, roi, roiType, size});
+                            configs.push_back(
+                                {b.backend, dtype, layout, roi, roiType, size, b.numThreads});
     return configs;
 }
 

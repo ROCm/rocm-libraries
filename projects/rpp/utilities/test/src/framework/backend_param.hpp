@@ -47,6 +47,34 @@ inline std::string backend_name(RppBackend backend) {
     return backend == RPP_HIP_BACKEND ? "HIP" : "HOST";
 }
 
+// HOST thread counts tested on top of the default (numThreads = 0, one thread per image): a single
+// thread, and more threads than the default batch of 2. rppCreate caps the count at
+// std::thread::hardware_concurrency(), so a small machine may run the larger count with fewer.
+inline constexpr Rpp32u kHostThreadCounts[] = {1, 4};
+
+// A backend plus the numThreads its handle is created with. HIP ignores numThreads, so it only
+// gets the default.
+struct BackendVariant {
+    RppBackend backend;
+    Rpp32u numThreads;
+};
+
+inline std::vector<BackendVariant> backend_variants() {
+    std::vector<BackendVariant> variants;
+    for (RppBackend backend : available_backends()) {
+        variants.push_back({backend, 0});
+        if (backend == RPP_HOST_BACKEND)
+            for (Rpp32u n : kHostThreadCounts) variants.push_back({backend, n});
+    }
+    return variants;
+}
+
+// Backend label token: "HOST" for the default thread count, "HOST_T1" for an explicit one.
+inline std::string backend_name(RppBackend backend, Rpp32u numThreads) {
+    return numThreads == 0 ? backend_name(backend)
+                           : backend_name(backend) + "_T" + std::to_string(numThreads);
+}
+
 }  // namespace rpptest
 
 // Every parameter is already spelled out in the test name, so print nothing instead of gtest's

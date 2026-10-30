@@ -79,6 +79,7 @@ struct NdConfig {
     DType dtypeIn, dtypeOut;
     Rpp32u nDim;  // per-sample rank: 2, 3 or 4
     NdShape shape;
+    Rpp32u numThreads;  // passed to rppCreate; 0 = default
 };
 
 // Every axis has a distinct extent, so an axis mix-up cannot pass by coincidence.
@@ -117,11 +118,11 @@ inline std::vector<NdConfig> make_nd_configs(const std::vector<DTypeConv>& convs
                                              const std::vector<Rpp32u>& ranks,
                                              const std::vector<NdShape>& shapes) {
     std::vector<NdConfig> configs;
-    for (RppBackend backend : available_backends())
+    for (BackendVariant b : backend_variants())
         for (DTypeConv conv : convs)
             for (Rpp32u nDim : ranks)
                 for (NdShape shape : shapes)
-                    configs.push_back({backend, conv.in, conv.out, nDim, shape});
+                    configs.push_back({b.backend, conv.in, conv.out, nDim, shape, b.numThreads});
     return configs;
 }
 
@@ -139,8 +140,9 @@ inline std::string nd_label(const NdConfig& c, const std::string& opToken) {
     const NdDims dims = nd_extents(c);
     std::string shape = std::to_string(dims[0]);
     for (std::size_t i = 1; i < dims.size(); ++i) shape += "x" + std::to_string(dims[i]);
-    return backend_name(c.backend) + "_" + dtype_name(c.dtypeIn) + "to" + dtype_name(c.dtypeOut) +
-           "_" + std::to_string(c.nDim) + "D_" + (opToken.empty() ? "" : opToken + "_") + shape;
+    return backend_name(c.backend, c.numThreads) + "_" + dtype_name(c.dtypeIn) + "to" +
+           dtype_name(c.dtypeOut) + "_" + std::to_string(c.nDim) + "D_" +
+           (opToken.empty() ? "" : opToken + "_") + shape;
 }
 
 inline std::string nd_config_name(const NdConfig& c) {
