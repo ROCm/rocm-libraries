@@ -9,13 +9,13 @@ import contextlib
 import hashlib
 import json
 import traceback
-from collections import Counter
 from pathlib import Path
 
 from rocke.core.ir_golden import (
     GOLDEN_ALIASES,
     GOLDEN_FLAVORS,
     GOLDEN_PROFILE_FLAVORS,
+    golden_shard,
 )
 from rocke.core.ir_golden import check_golden as _check_golden
 
@@ -75,6 +75,8 @@ def gemm_spec(
     epilogue,
     wave_size,
     cshuffle_no_alias=False,
+    dtype="fp16",
+    **trait,
 ):
     from rocke.instances.common.gemm_universal import (
         DataSpec,
@@ -100,12 +102,14 @@ def gemm_spec(
             pipeline=pipeline,
             scheduler="intrawave",
             epilogue=epilogue,
-            pad_m=True,
-            pad_n=True,
-            pad_k=True,
             cshuffle_no_alias=cshuffle_no_alias,
+            **{"pad_m": True, "pad_n": True, "pad_k": True, **trait},
         ),
-        data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
+        data=(
+            DataSpec("fp64", "fp64", "fp64", "fp64")
+            if dtype == "fp64"
+            else DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16")
+        ),
         wave_size=wave_size,
     )
 
@@ -136,6 +140,8 @@ def build_conv(
     groups=1,
     vector_size_c=None,
     group_merge=1,
+    split_k=1,
+    split_k_cluster=0,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm import (
@@ -162,6 +168,8 @@ def build_conv(
             groups=groups,
             vector_size_c=vector_size_c,
             group_merge=group_merge,
+            split_k=split_k,
+            split_k_cluster=split_k_cluster,
         )
         return build_implicit_gemm_conv(spec, arch=arch)
 
@@ -303,6 +311,20 @@ def build_conv_wgrad_reduce(
             name=name,
         )
         return build_conv_wgrad_workspace_reduce(spec, arch=arch)
+
+    return _build
+
+
+def build_conv_fwd_split_k_reduce(arch, **spec_kw):
+    """Build the split-K forward Stage 2 (folds the fp32 slabs into D)."""
+
+    def _build():
+        from kernels.common.conv_fwd_split_k_reduce import (
+            FwdSplitKReduceSpec,
+            build_conv_fwd_split_k_reduce,
+        )
+
+        return build_conv_fwd_split_k_reduce(FwdSplitKReduceSpec(**spec_kw), arch=arch)
 
     return _build
 
@@ -667,8 +689,10 @@ def build_lightning_indexer_case(arch, **over):
     return _build
 
 
-def _d256_problem():
-    """Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16)."""
+def _d256_problem(head_size=256):
+    """Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16).
+
+    ``head_size=192`` gives the D192 point of the same cohort (same lean body)."""
     from kernels.common.attention_unified import UnifiedAttentionProblem
 
     return UnifiedAttentionProblem(
@@ -676,7 +700,7 @@ def _d256_problem():
         num_seqs=1,
         num_query_heads=16,
         num_kv_heads=2,
-        head_size=256,
+        head_size=head_size,
         block_size=16,
         max_seqlen_q=4096,
         max_seqlen_k=4096,
@@ -779,13 +803,15 @@ def build_attention_d256_gfx950(arch):
     return _build
 
 
-def build_attention_d256_gfx942(arch):
+def build_attention_d256_gfx942(arch, head_size=256):
     """D256 gfx942 4-warp GQA fast path.
 
     Mirrors ``build_attention_d256_gfx950`` but pins the *gfx942* cohort: raises
     if ``_d256_gfx942_fast`` is not selected (so this can never pin the fallback),
     then lowers the dedicated ``build_gfx942_4warp_gqa`` builder -- the
     byte-sensitive V wide-load -> ``V_lds`` transpose kernel worth pinning.
+    ``head_size=192`` pins the same lean body at D192, including its
+    head-size-derived V-fill stride and the K/V key and Q row bounds.
     """
 
     def _build():
@@ -795,7 +821,7 @@ def build_attention_d256_gfx942(arch):
         )
         from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
 
-        problem = _d256_problem()
+        problem = _d256_problem(head_size)
         with _pinned_attention_arch(arch):
             if not _d256_gfx942_fast(problem, arch):
                 raise RuntimeError(
@@ -813,7 +839,7 @@ def build_attention_d128_swa_fold_gfx942(arch):
 
     Mirrors ``build_attention_d256_gfx942`` but pins the *fold* cohort. The D256
     case above cannot stand in for this one: ``build_gfx942_4warp_gqa`` returns
-    ``_build_gfx942_4warp_gqa_lean`` at the ``HD == _4WGQA_LEAN_HEAD_SIZE`` (256)
+    ``_build_gfx942_4warp_gqa_lean`` at ``HD in _4WGQA_LEAN_HEAD_SIZES`` (192, 256)
     early-return, which is ~20 lines BEFORE the D128 fold body -- so the D256
     golden never lowers a single line of the folded kernel.
 
@@ -1284,6 +1310,39 @@ def build_direct_depthwise_dgrad(
     return _build
 
 
+def build_direct_depthwise_dgrad_stream(
+    name, arch, N, H, W, groups, KH, PAD, stride=1, dtype="fp16", **spec_kw
+):
+    """Row-streaming depthwise dgrad (DirectDepthwiseDgradStreamSpec);
+    ``spec_kw`` overrides its fields (block_w, block_waves, wave_size, cpl).
+    Mirrors parity/conv_direct_grouped_emit.* (indices 171+)."""
+
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectDepthwiseDgradStreamSpec,
+            build_direct_depthwise_dgrad_streaming,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=1,
+            kpg=1,
+            KH=KH,
+            KW=KH,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+        )
+        spec = DirectDepthwiseDgradStreamSpec(problem=p, name=name, **spec_kw)
+        return build_direct_depthwise_dgrad_streaming(spec, arch=arch)
+
+    return _build
+
+
 def build_direct_depthwise_dgrad_win(
     name, arch, N, H, W, groups, KH, PAD, dtype, **knobs
 ):
@@ -1415,11 +1474,24 @@ def build_direct_wgrad(name, arch, kind, problem, **spec_kw):
 
 
 def build_direct_depthwise_tiled(
-    name, arch, N, H, W, groups, KH, PAD, stride=1, dtype="bf16", **spec_kw
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    KH,
+    PAD,
+    stride=1,
+    dtype="bf16",
+    KW=None,
+    pad_w=-1,
+    **spec_kw,
 ):
     """Output-stationary depthwise direct conv; ``spec_kw`` overrides
     DirectDepthwiseTiledSpec fields. Configs mirror parity/conv_direct_grouped_emit.*
-    (indices 57+)."""
+    (indices 57+). ``KW`` defaults to ``KH``; ``pad_w`` (-1: ``PAD``) is the
+    column padding of the rotated-filter dgrad mode (``dgrad=True``)."""
 
     def _build():
         from kernels.common.conv_direct_grouped import (
@@ -1436,10 +1508,11 @@ def build_direct_depthwise_tiled(
             cpg=1,
             kpg=1,
             KH=KH,
-            KW=KH,
+            KW=KH if KW is None else KW,
             PAD=PAD,
             stride=stride,
             dtype=dtype,
+            pad_w=pad_w,
         )
         spec = DirectDepthwiseTiledSpec(problem=p, name=name, **spec_kw)
         return build_direct_depthwise_tiled(spec, arch=arch)
@@ -1917,6 +1990,53 @@ def cases():
         ),
     )
 
+    # fp64 GEMM on gfx942: 16x16x4 atom, plus the DTL + prefetch + swizzle path.
+    add(
+        "gemm",
+        "gemm/gfx942/f64_t64x64x16",
+        "gfx942",
+        build_gemm(
+            "irhash_gemm_942_f64",
+            "gfx942",
+            64,
+            64,
+            16,
+            2,
+            2,
+            16,
+            16,
+            4,
+            "compv4",
+            "default",
+            64,
+            dtype="fp64",
+        ),
+    )
+    add(
+        "gemm",
+        "gemm/gfx942/f64_t64x64x16/dtl_prefetch_swizzle",
+        "gfx942",
+        build_gemm(
+            "irhash_gemm_942_f64_dtl",
+            "gfx942",
+            64,
+            64,
+            16,
+            2,
+            2,
+            16,
+            16,
+            4,
+            "compv4",
+            "default",
+            64,
+            dtype="fp64",
+            direct_to_lds=True,
+            dtl_prefetch=True,
+            lds_swizzle=True,
+            pad_k=False,
+        ),
+    )
     # Homogeneous FP8/BF8 with E8M0 scales, shared by source and installed gates.
     for dtype in ("fp8e4m3", "bf8e5m2"):
         for matrix_path in ("wmma_scale", "wmma_scale16"):
@@ -2207,6 +2327,49 @@ def cases():
                 vector_size_c=vec_c,
                 group_merge=gm,
             ),
+        )
+
+    # gfx1250 split-K forward (WMMA): the two-stage binary (fp32 workspace
+    # slabs, degree as a kernarg) on mem/cshuffle and mem/default, and the
+    # single-launch cluster form (S=4) that folds the slabs through a cluster
+    # barrier. Small M, deep K: 9*256 reduction.
+    conv_small_m = (1, 7, 7, 256, 64, 3, 3, 1, 1, 1, 1, 1, 1)
+    for tag, epi, vec_c, skc in (
+        ("splitk_cshuffle", "cshuffle", None, 0),
+        ("splitk_default", "default", 1, 0),
+        ("splitk_cluster4", "cshuffle", None, 4),
+    ):
+        add(
+            "conv",
+            f"conv/gfx1250/n1h7c256k64r3/{tag}",
+            "gfx1250",
+            build_conv(
+                "irhash_conv_1250_" + tag,
+                "gfx1250",
+                conv_small_m,
+                wave_size=32,
+                wtm=16,
+                wtn=16,
+                wtk=32,
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                epilogue=epi,
+                vector_size_c=vec_c,
+                split_k=2,
+                split_k_cluster=skc,
+            ),
+        )
+    # Its Stage 2: the runtime slab loop and the degree-unrolled fold.
+    for tag, kw in (
+        ("bf16_v4", dict(dtype_d="bf16", vec=4)),
+        ("fp16_v2_s4", dict(dtype_d="fp16", vec=2, degree=4)),
+    ):
+        add(
+            "conv_fwd_split_k_reduce",
+            f"conv_fwd_split_k_reduce/gfx1250/{tag}",
+            "gfx1250",
+            build_conv_fwd_split_k_reduce("gfx1250", **kw),
         )
 
     # Conv wgrad: implicit-GEMM backward-weight direction (NHWK x NHWC -> KYXC).
@@ -3548,6 +3711,16 @@ def cases():
                 "geometry": "bm128",
             },
         ),
+        # KV-segment split of the default grid (segment epilogue + range).
+        (
+            "bottom_right_kvs4_bm128_sq512",
+            {
+                "seqlen_kv": 2048,
+                "causal_bottom_right": True,
+                "geometry": "bm128",
+                "kv_segments": 4,
+            },
+        ),
         # --- persistent (grid-stride) grid + decode variants ---
         ("persistent_causal_sq512", {"persistent": True, "num_persistent": 256}),
         (
@@ -3757,6 +3930,23 @@ def cases():
         ("persist_causal_sq512", _persist942),
         ("persist_hqswz_sq512", {**_persist942, "persist_decode": "hq_minor_swz"}),
         ("persist_hkvmaj_sq512", {**_persist942, "persist_decode": "hkv_major"}),
+        # Bottom-right causal: runtime diagonal offset on both grids, and the
+        # diagonal split with the KV-segment split.
+        ("bottom_right_sq512", {"seqlen_kv": 1024, "causal_bottom_right": True}),
+        (
+            "persist_bottom_right_sq512",
+            {**_persist942, "seqlen_kv": 1024, "causal_bottom_right": True},
+        ),
+        (
+            "bottom_right_dsplit_kvs4_sq512",
+            {
+                "seqlen_kv": 2048,
+                "causal_bottom_right": True,
+                "causal_diag_split": True,
+                "kv_segments": 4,
+                "block_m": 128,
+            },
+        ),
     ):
         add(
             "attention_dense",
@@ -3901,6 +4091,12 @@ def cases():
         "attention_d256/gfx942/4warp_gqa",
         "gfx942",
         build_attention_d256_gfx942("gfx942"),
+    )
+    add(
+        "attention_d256",
+        "attention_d256/gfx942/4warp_gqa_d192",
+        "gfx942",
+        build_attention_d256_gfx942("gfx942", head_size=192),
     )
 
     # conv_direct: parametric direct grouped convolution.
@@ -4752,6 +4948,100 @@ def cases():
             ),
         )
 
+    # --- conv_dgrad_{patch,smallc}_wmma: wave32 WMMA stem dgrad (gfx1250) ---
+    # Patch embeddings as one GEMM with a pixel-shuffle TDM store, and small-C
+    # stems as a GEMM over the flattened filter plus an LDS overlap-add. Every
+    # case needs llvm23 (TDM), so the other flavors record them as expected
+    # failures. The C++ twins are gated by
+    # library/tests/parity/conv_dgrad_{patch,smallc}_wmma_emit.*.
+    def build_dgrad_stem_wmma_case(kind, dtype, K, S, PAD, C, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            if kind == "patch":
+                from kernels.common.conv_dgrad_patch_wmma import (
+                    DgradPatchWmmaSpec as Spec,
+                    build_dgrad_patch_wmma as build,
+                )
+            else:
+                from kernels.common.conv_dgrad_smallc_wmma import (
+                    DgradSmallcWmmaSpec as Spec,
+                    build_dgrad_smallc_wmma as build,
+                )
+            p = DirectConvProblem(
+                N=2,
+                H=64,
+                W=64,
+                groups=1,
+                cpg=C,
+                kpg=64,
+                KH=K,
+                KW=K,
+                PAD=PAD,
+                stride=S,
+                dtype=dtype,
+            )
+            return build(Spec(problem=p, **spec_kw), arch="gfx1250")
+
+        return _build
+
+    for _kind, _case_id, _dtype, _conv, _over in (
+        (
+            "patch",
+            "bf16_p16_rb8",
+            "bf16",
+            (16, 16, 0, 3),
+            dict(waves_c=4, waves_p=2, tiles_c=6, tiles_p=4, tile_w=16, r_blk=8),
+        ),
+        (
+            "patch",
+            "fp16_p4_pf",
+            "fp16",
+            (4, 4, 0, 3),
+            dict(
+                waves_c=3,
+                waves_p=1,
+                tiles_c=1,
+                tiles_p=8,
+                tile_w=16,
+                r_blk=4,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+        ),
+        (
+            "smallc",
+            "bf16_3x3s1_c4_pf",
+            "bf16",
+            (3, 1, 1, 4),
+            dict(
+                waves_c=1,
+                waves_p=3,
+                tiles_c=3,
+                tiles_p=8,
+                out_h=8,
+                out_w=32,
+                ck=64,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+        ),
+        (
+            "smallc",
+            "fp16_7x7s2_c3",
+            "fp16",
+            (7, 2, 3, 3),
+            dict(waves_c=2, waves_p=4, tiles_c=5, tiles_p=6, out_h=32, out_w=32),
+        ),
+    ):
+        _fam = f"conv_dgrad_{_kind}_wmma"
+        add(
+            _fam,
+            f"{_fam}/gfx1250/{_case_id}",
+            "gfx1250",
+            build_dgrad_stem_wmma_case(_kind, _dtype, *_conv, **_over),
+        )
+
     # --- conv_direct_fwd_small{c,k}_wmma: wave32 WMMA forward of tiny channel
     # counts (gfx1250). TDM window / channel-chunk staging; every case needs
     # llvm23 (TDM), so the other flavors record them as expected failures. The
@@ -5152,6 +5442,95 @@ def cases():
             build_winograd_fused_1d_case(_c, _k, _ax, **_kw),
         )
 
+    # Stride 2 (3x3 phases and the 2x2 patch merge), dilation, packed small
+    # groups, the split barrier with and without the per-wave epilogue, and
+    # tile widths that are not a power of two. Also llvm23-only.
+    def build_direct_dgrad_wmma_ext_case(prob_kw, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_dgrad_wmma import (
+                DirectDgradWmmaSpec,
+                build_direct_dgrad_wmma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            pk = dict(
+                N=2,
+                H=20,
+                W=24,
+                groups=1,
+                cpg=64,
+                kpg=96,
+                KH=3,
+                PAD=1,
+                stride=1,
+                dtype="bf16",
+            )
+            pk.update(prob_kw)
+            pk["KW"] = pk["KH"]
+            return build_direct_dgrad_wmma(
+                DirectDgradWmmaSpec(problem=DirectConvProblem(**pk), **spec_kw),
+                arch="gfx1250",
+            )
+
+        return _build
+
+    _dgw_pf = dict(prefetch=True, sched="iterative-ilp")
+    for _case_id, _prob, _over in (
+        (
+            "bf16_dil2x2_p2",
+            dict(PAD=2, dil_h=2, dil_w=2),
+            dict(waves_c=2, waves_p=4, tiles_c=4, tiles_p=8, **_dgw_pf),
+        ),
+        (
+            "bf16_pg4_c8k8",
+            dict(groups=8, cpg=8, kpg=8),
+            dict(waves_c=1, waves_p=8, tiles_c=2, tiles_p=4, tile_n=2, pack_groups=4),
+        ),
+        (
+            "bf16_s2_3x3",
+            dict(stride=2),
+            dict(waves_c=2, waves_p=4, tiles_c=2, tiles_p=4, tile_w=8, tile_n=2, ck=64),
+        ),
+        (
+            "bf16_s2_patch2",
+            dict(KH=2, PAD=0, stride=2),
+            dict(waves_c=2, waves_p=4, tiles_c=2, tiles_p=4, ck=64),
+        ),
+        (
+            "bf16_sb_tw56",
+            {},
+            dict(
+                waves_c=1,
+                waves_p=7,
+                tiles_c=4,
+                tiles_p=10,
+                tile_w=56,
+                split_barrier=True,
+            ),
+        ),
+        (
+            "bf16_sb_we_tw24",
+            {},
+            dict(
+                waves_c=1,
+                waves_p=8,
+                tiles_c=4,
+                tiles_p=6,
+                tile_w=24,
+                tile_n=4,
+                split_barrier=True,
+                wave_epilogue=True,
+                **_dgw_pf,
+            ),
+        ),
+    ):
+        add(
+            "conv_direct_dgrad_wmma",
+            f"conv_direct_dgrad_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_direct_dgrad_wmma_ext_case(_prob, **_over),
+        )
+
     # --- conv_direct_wgrad: the direct wgrad kernels on gfx950 ---
     # Tiled (LDS-DMA row pipeline, swizzled transpose reads, atomics), the
     # depthwise partial-slot kernels and their fold, the small-C gather, and
@@ -5363,6 +5742,58 @@ def cases():
             cpl=4,
         ),
     )
+    # Depthwise dgrad on the wave32 gfx1250: the row-streaming kernel, scalar
+    # and channel-packed (cpl 2 / 8), and the rotated-filter tiled kernel on a
+    # large and a non-square filter with per-axis padding. Mirrors
+    # library/tests/parity/conv_direct_grouped_emit.* (indices 179+).
+    for _tag, _shape, _over in (
+        ("k3", dict(KH=3, PAD=1), dict(block_w=8, block_waves=2)),
+        ("k3_cpl2", dict(KH=3, PAD=1), dict(block_w=8, block_waves=2, cpl=2)),
+        (
+            "k5_s2_bf16_cpl8",
+            dict(KH=5, PAD=2, stride=2, dtype="bf16", groups=256),
+            dict(block_w=4, block_waves=1, cpl=8),
+        ),
+    ):
+        add(
+            "conv_direct",
+            f"conv_direct/gfx1250/dw_dgrad_stream_{_tag}_w32",
+            "gfx1250",
+            build_direct_depthwise_dgrad_stream(
+                f"irhash_dw_dgrad_stream_1250_{_tag}",
+                "gfx1250",
+                **{"N": 2, "H": 14, "W": 14, "groups": 64, **_shape},
+                wave_size=32,
+                **_over,
+            ),
+        )
+    for _tag, _shape, _over in (
+        (
+            "bf16_k31",
+            dict(H=16, W=16, groups=32, KH=31, PAD=15),
+            dict(block_w=4, block_h=1),
+        ),
+        (
+            "fp16_k51x5",
+            dict(H=24, W=24, groups=64, KH=51, KW=5, PAD=25, pad_w=2, dtype="fp16"),
+            dict(block_w=8, block_h=2),
+        ),
+    ):
+        add(
+            "conv_direct_depthwise_tiled",
+            f"conv_direct_depthwise_tiled/gfx1250/dgrad_{_tag}_w32",
+            "gfx1250",
+            build_direct_depthwise_tiled(
+                f"irhash_direct_dw_tiled_dgrad_1250_{_tag}",
+                "gfx1250",
+                N=2,
+                **_shape,
+                block_waves=1,
+                wave_size=32,
+                dgrad=True,
+                **_over,
+            ),
+        )
 
     # gfx942 GQA head-fold (D128 sliding-window bf16). Registered SEPARATELY from
     # the D256 case above because that one early-returns into the lean D256 kernel
@@ -5578,17 +6009,27 @@ def cases():
 # argument to lowering, so nothing about the running ROCm vintage limits which
 # sub-documents can be checked. The same committed golden is therefore valid,
 # and verified, on every ROCm vintage. GOLDEN_FLAVORS is LLVM_FLAVORS, so a new
-# flavor fails the gate until the golden is re-blessed.
+# flavor fails the gate until the golden is re-blessed. The committed golden is
+# a directory of per-family shards (see rocke.core.ir_golden.load_golden), so
+# changes to different families touch different files and merge cleanly.
 GOLDEN_SCHEMA = "ck.dsl.ir_golden_sha256/v2"
 
 
-def run(ir_dir: Path | None = None, *, flavor: str):
+def run(
+    ir_dir: Path | None = None,
+    *,
+    flavor: str,
+    shards: set[str] | None = None,
+):
+    """Lower every case (or only those in ``shards``) at ``flavor``."""
     results = {}
     failures = {}
     if ir_dir:
         ir_dir.mkdir(parents=True, exist_ok=True)
     for case in cases():
         cid = case["case_id"]
+        if shards is not None and golden_shard(cid) not in shards:
+            continue
         try:
             rec, llvm = lower_case(case, flavor)
             results[cid] = rec
@@ -5601,16 +6042,6 @@ def run(ir_dir: Path | None = None, *, flavor: str):
                 "trace": traceback.format_exc(limit=5),
             }
     return {
-        "summary": {
-            "ok_cases": len(results),
-            "expected_failures": len(failures),
-            "families": dict(
-                sorted(Counter(v["family"] for v in results.values()).items())
-            ),
-            "arches": dict(
-                sorted(Counter(v["arch"] for v in results.values()).items())
-            ),
-        },
         "cases": results,
         "expected_failures": {
             k: {"type": v["type"], "message": v["message"]} for k, v in failures.items()
@@ -5618,13 +6049,52 @@ def run(ir_dir: Path | None = None, *, flavor: str):
     }
 
 
-def build_golden() -> dict:
-    """Run every case under each golden flavor and return the flavor-keyed doc."""
+def build_golden(shards: set[str] | None = None) -> dict:
+    """Run every case (or only those in ``shards``) under each golden flavor
+    and return the flavor-keyed doc."""
     return {
         "schema": GOLDEN_SCHEMA,
         "aliases": GOLDEN_ALIASES,
-        "flavors": {fl: run(flavor=fl) for fl in GOLDEN_PROFILE_FLAVORS},
+        "flavors": {fl: run(flavor=fl, shards=shards) for fl in GOLDEN_PROFILE_FLAVORS},
     }
+
+
+def write_golden(golden_dir: Path, shards: set[str] | None = None) -> dict:
+    """Bless ``golden_dir`` as one ``<shard>.json`` per family.
+
+    With ``shards``, only those files are rewritten (a shard left with no cases
+    is deleted); the rest are untouched. Without it every shard is rewritten
+    and shard files for families that no longer exist are deleted. Returns the
+    flavor-keyed doc that was written.
+    """
+    doc = build_golden(shards)
+    by_shard: dict[str, dict] = {}
+    for fl, sub in doc["flavors"].items():
+        for section in ("cases", "expected_failures"):
+            for cid, rec in sub[section].items():
+                shard = by_shard.setdefault(
+                    golden_shard(cid),
+                    {
+                        "schema": doc["schema"],
+                        "aliases": doc["aliases"],
+                        "flavors": {
+                            f: {"cases": {}, "expected_failures": {}}
+                            for f in doc["flavors"]
+                        },
+                    },
+                )
+                shard["flavors"][fl][section][cid] = rec
+    golden_dir.mkdir(parents=True, exist_ok=True)
+    stale = {p.stem for p in golden_dir.glob("*.json")} - set(by_shard)
+    if shards is not None:
+        stale &= shards
+    for name in sorted(stale):
+        (golden_dir / f"{name}.json").unlink()
+    for name, shard in sorted(by_shard.items()):
+        (golden_dir / f"{name}.json").write_text(
+            json.dumps(shard, indent=2, sort_keys=True) + "\n"
+        )
+    return doc
 
 
 def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
@@ -5641,15 +6111,21 @@ def main():
     ap.add_argument(
         "--write",
         type=Path,
-        help="(re-)bless the profile-keyed golden: run every case under each of "
-        f"{GOLDEN_PROFILE_FLAVORS} and write lane aliases. Run only from a verified-good "
-        "tree; re-blessing should accompany a reviewed, expected output change.",
+        help="(re-)bless the profile-keyed golden directory: run every case under "
+        f"each of {GOLDEN_PROFILE_FLAVORS} and write one <family>.json shard per "
+        "family, with lane aliases. Run only from a verified-good tree; "
+        "re-blessing should accompany a reviewed, expected output change.",
+    )
+    ap.add_argument(
+        "--only",
+        help="with --write, re-bless only these comma-separated families "
+        "(shard names, the first case_id segment) and leave other shards alone.",
     )
     ap.add_argument(
         "--check",
         type=Path,
         help="compare a fresh run against EVERY golden sub-doc (narrow it with "
-        "--flavor); exit 1 on any drift.",
+        "--flavor); exit 1 on any drift. Accepts a golden file or shard directory.",
     )
     ap.add_argument(
         "--flavor",
@@ -5660,10 +6136,23 @@ def main():
     ap.add_argument("--ir-dir", type=Path)
     ns = ap.parse_args()
 
+    if ns.only is not None and not ns.write:
+        ap.error("--only requires --write")
     if ns.write:
-        doc = build_golden()
-        ns.write.parent.mkdir(parents=True, exist_ok=True)
-        ns.write.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
+        if ns.write.suffix == ".json" or ns.write.is_file():
+            ap.error(
+                f"--write takes the golden shard directory, not a file: {ns.write}"
+            )
+        shards = None
+        if ns.only is not None:
+            shards = {s.strip() for s in ns.only.split(",") if s.strip()}
+            if not shards:
+                ap.error("--only: no families given")
+            known = {golden_shard(c["case_id"]) for c in cases()}
+            known |= {p.stem for p in ns.write.glob("*.json")}
+            if shards - known:
+                ap.error(f"--only: unknown families {sorted(shards - known)}")
+        doc = write_golden(ns.write, shards)
         for fl, sub in doc["flavors"].items():
             print(
                 f"wrote {fl}: {len(sub['cases'])} ok, "

@@ -41,7 +41,17 @@ from typing import List
 
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
-from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg
+from benchmarks.common import batched_timing
+from benchmarks.common.case_results import (
+    RUNNERS_UP,
+    ResultsWriter,
+    add_results_arg,
+    add_skip_measured_arg,
+    measured_keys,
+    same_results_file,
+)
+from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg, case_key
+from benchmarks.common.module_cache import add_module_cache_arg
 from builders.common.conv_reference import conv_reference as _conv_reference
 from builders.common.conv_reference import dgrad_reference as _dgrad_reference_shared
 from builders.common.conv_reference import wgrad_reference as _wgrad_reference_shared
@@ -239,9 +249,10 @@ def parse_miopen_cmd_direct(cmd: str):
         )
 
     dilated = miopen_args.dH != 1 or miopen_args.dW != 1
-    if dilated and (miopen_args.forw != 1 or groups != 1):
+    # Dilated: the non-grouped forward kernel and the WMMA dgrad.
+    if dilated and (miopen_args.forw not in (1, 2) or groups != 1):
         raise ValueError(
-            f"direct conv computes a dilated convolution only forward and "
+            f"direct conv computes a dilated convolution only forward / dgrad and "
             f"ungrouped (got -l {miopen_args.dH} -j {miopen_args.dW}, "
             f"-F {miopen_args.forw}, -g {groups})"
         )
@@ -254,7 +265,10 @@ def parse_miopen_cmd_direct(cmd: str):
             f"direct conv takes one stride for both axes "
             f"(got -u {miopen_args.sH} -v {miopen_args.sW})"
         )
-    if miopen_args.pH != miopen_args.pW:
+    # A stride-1 depthwise dgrad is the one problem a direct kernel (the
+    # rotated-filter tiled kernel) computes with per-axis padding.
+    pad_w_ok = miopen_args.forw == 2 and cpg == 1 and kpg == 1 and miopen_args.sH == 1
+    if miopen_args.pH != miopen_args.pW and not pad_w_ok:
         raise ValueError(
             f"direct conv takes one padding for both axes "
             f"(got -p {miopen_args.pH} -q {miopen_args.pW})"
@@ -272,6 +286,7 @@ def parse_miopen_cmd_direct(cmd: str):
         KH=miopen_args.Y,
         KW=miopen_args.X,
         PAD=miopen_args.pH,
+        pad_w=-1 if miopen_args.pW == miopen_args.pH else miopen_args.pW,
         stride=sH,
         dtype=dtype if dtype in ("fp16", "bf16") else "fp16",
         dil_h=miopen_args.dH,
@@ -435,7 +450,7 @@ class _DirectConvProblemAdapter:
         self.sH = p.stride
         self.sW = p.stride
         self.pH = p.PAD
-        self.pW = p.PAD
+        self.pW = p.PAD_W
         self.dH = p.dil_h
         self.dW = p.dil_w
         self.groups = p.groups
@@ -1154,7 +1169,7 @@ def _run_nongrouped_sweep(
     )
 
     results: List[NonGroupedResult] = []
-    _stop = EarlyStop(args.early_stop, args.early_stop_after)
+    _stop = EarlyStop(args.early_stop, args.early_stop_after, timing=args.timing)
     n_run = 0
     for spec, kernel in pending:
         artifact = artifact_map.get(kernel.name)
@@ -2170,6 +2185,227 @@ def _no_plan_reason(rejected: list, dtype: str, variants: "frozenset[str]") -> s
     )
 
 
+def _measure_plans(
+    *,
+    args,
+    plans,
+    modules,
+    rt,
+    ptrs,
+    sizes,
+    inputs,
+    out_name,
+    Out_t,
+    ref_out,
+    flop,
+    bytes_xfer,
+    stop,
+    u8,
+    chunks,
+    per_chunk,
+):
+    """Time every plan of one case. Returns ``(results, rc)``.
+
+    ``results`` holds one ``(TFLOPS, GB/s, ms, passed, label)`` row per plan
+    that ran; ``rc`` is 1 when a plan failed verification. A plan is bound
+    here rather than by the caller because every plan of a case reads and
+    writes the same buffers: ``ptrs`` / ``sizes`` are the case's, shared.
+
+    ``--fast-rank`` swaps the per-plan protocol (warmup plus timed loop, each
+    its own device drain) for :func:`_fast_rank_plans`. Everything else about
+    the case -- the rows, the ranked table, the record file -- is unchanged.
+
+    ``modules`` is the run's loaded-binary cache: a plan's binaries are
+    shape-generic, so a step's module is loaded on the first case that uses
+    it and every later case binds against the same one.
+    """
+    import torch
+    from benchmarks.common.direct_kernel_sweep import launch_values
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import HipError
+    from rocke.runtime.launcher import LaunchConfig
+
+    results: list = []
+    rc = 0
+    n_plans = len(plans)
+    width = len(str(n_plans))
+
+    def bind(plan):
+        """The plan's launch, or ``None`` if a step cannot be loaded."""
+        try:
+            launches = [
+                (
+                    modules.launcher(
+                        hsaco_path=st.hsaco_path,
+                        kernel_name=st.kernel_name,
+                        signature=st.signature,
+                    ),
+                    launch_values(
+                        st, *_chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i)
+                    ),
+                    LaunchConfig(grid=st.grid, block=st.block, stream=0),
+                )
+                for i, chunk_plan in enumerate(per_chunk[plan.label])
+                for st in chunk_plan.steps
+            ]
+        except HipError as e:
+            print(f"  [skip] {plan.label}: {e}", flush=True)
+            return None
+
+        # Each step packed once: a timed loop that packs per launch times the
+        # host, not a short kernel.
+        bound = [
+            launcher.bind(values, config=cfg) for launcher, values, cfg in launches
+        ]
+
+        def run(bound=bound):
+            for launch in bound:
+                launch()
+
+        return run
+
+    def verify(plan, run) -> bool:
+        """Peak-normalised rel-err of one plan against the case's reference."""
+        nonlocal rc
+
+        rt.memset(ptrs[out_name], 0, Out_t.nbytes)
+        run()
+        synchronize_and_release(0)
+        out_cpu = torch.empty_like(Out_t)
+        rt.memcpy_d2h(u8(out_cpu), ptrs[out_name], Out_t.nbytes)
+        ref_f32 = ref_out.float().cpu()
+        rel_err = float(
+            (out_cpu.float() - ref_f32).abs().max() / ref_f32.abs().max().clamp(min=1.0)
+        )
+        passed = rel_err < 5e-2
+        if not passed:
+            rc = 1
+            print(f"  verify {plan.label}: FAIL(rel_err={rel_err:.2e})", flush=True)
+        return passed
+
+    def row(ms, passed, label, idx) -> None:
+        """Print one measured plan's status line, and rank it unless it failed.
+
+        A plan that failed verification is still printed (its FAIL belongs in
+        the log), but kept out of ``results`` -- the list the ranking and the
+        recorded winner are built from -- so a fast wrong answer cannot become
+        ``Best:``.
+        """
+        tflops = flop / ms / 1e9
+        if passed is not False:
+            results.append((tflops, bytes_xfer / ms / 1e6, ms, passed, label))
+        # One line per measured launch, as the implicit-GEMM sweep prints, so a
+        # long run shows its progress and partial results rather than only the
+        # ranked table at the end.
+        verdict = "" if passed is None else ("  PASS" if passed else "  FAIL")
+        print(
+            f"  [{idx:>{width}}/{n_plans}] "
+            f"{tflops:7.1f} TFLOPS  {ms:8.3f} ms{verdict}  {label}",
+            flush=True,
+        )
+
+    if args.fast_rank:
+        _fast_rank_plans(
+            args=args,
+            plans=plans,
+            bind=bind,
+            verify=verify if ref_out is not None else None,
+            stop=stop,
+            row=row,
+            width=width,
+        )
+        return results, rc
+
+    for plan_idx, plan in enumerate(plans, 1):
+        run = bind(plan)
+        if run is None:
+            continue
+
+        passed = None if ref_out is None else verify(plan, run)
+
+        try:
+            ms = stop.measure(
+                run,
+                warmup=args.warmup,
+                iters=args.iters,
+                stream=0,
+                passed=passed,
+            )
+        except (HipError, RuntimeError) as e:
+            print(f"  [skip] {plan.label}: {e}", flush=True)
+            # time_launches drained before raising, but it does not raise a
+            # failed drain (the launch error is the one it reports). Drain
+            # again so a failed drain ends the sweep here, before the shared
+            # buffers are freed with launches possibly still using them.
+            synchronize_and_release(0)
+            continue
+        if ms is None:
+            stop.report(plan.label)
+            continue
+        synchronize_and_release(0)
+        row(ms, passed, plan.label, plan_idx)
+
+    return results, rc
+
+
+def _fast_rank_plans(*, args, plans, bind, verify, stop, row, width) -> None:
+    """Rank one case's plans with :mod:`benchmarks.common.batched_timing`.
+
+    The probe times every plan with one device drain per chunk instead of
+    three per plan, and keeps only the best ``--fast-rank-finalists``; those
+    are timed again with the full ``--warmup``/``--iters``, so every reported
+    number comes from the same protocol the per-plan path uses. A plan the
+    probe ranked out is reported with its probe time and never measured again.
+
+    Two consequences worth knowing, both of them the point of the flag:
+    ``--verify`` checks the finalists rather than every plan (a plan that is
+    30x off the best is not worth a reference comparison), and the ranked
+    table holds at most ``--fast-rank-finalists`` rows.
+    """
+    from benchmarks.common import batched_timing
+
+    n = len(plans)
+
+    def _on_probe(r) -> None:
+        if r.failed:
+            return
+        print(
+            f"  [{r.index + 1:>{width}}/{n}] probe {r.probe_ms:8.3f} ms  "
+            f"{plans[r.index].label}",
+            flush=True,
+        )
+
+    def _on_finalist(i, run):
+        return None if verify is None else verify(plans[i], run)
+
+    ranked = batched_timing.rank(
+        n,
+        lambda i: bind(plans[i]),
+        warmup=args.warmup,
+        iters=args.iters,
+        probe_warmup=args.fast_rank_warmup,
+        probe_iters=args.fast_rank_iters,
+        finalists=args.fast_rank_finalists,
+        chunk=args.fast_rank_chunk,
+        primer=args.fast_rank_primer,
+        timing=args.timing,
+        on_probe=_on_probe,
+        on_finalist=_on_finalist,
+    )
+    n_probed = sum(1 for r in ranked if r.probe_ms is not None)
+    n_final = sum(1 for r in ranked if r.is_finalist)
+    print(
+        f"  probe: {n_probed}/{n} timed, {n_final} finalist(s) measured in full "
+        f"({args.timing} timing)",
+        flush=True,
+    )
+    for r in ranked:
+        if r.ms is None:
+            continue
+        stop.note(r.ms, passed=r.passed)
+        row(r.ms, r.passed, plans[r.index].label, r.index + 1)
+
+
 def _cache_dispatch(args, arch: str, cases: list) -> int:
     """Handle the two cache modes.
 
@@ -2311,13 +2547,29 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
 
     import torch
 
-    from benchmarks.common.direct_kernel_sweep import direct_plans, launch_values
-    from rocke.runtime import synchronize_and_release
-    from rocke.runtime.hip_module import HipError, Runtime
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+    from benchmarks.common.direct_kernel_sweep import direct_plans
+    from benchmarks.common.module_cache import ModuleCache
+    from rocke.runtime.hip_module import Runtime
 
     def _u8(t):
         return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
+
+    # The binaries are shape-generic, so their modules outlive a case.
+    modules = ModuleCache(args.module_cache_bytes)
+    # --skip-measured: cases a previous run of this sweep already recorded,
+    # timed the way this run times them. Read before opening --results below:
+    # when the two flags name the same file, the writer must not truncate it
+    # out from under this read.
+    done = measured_keys(args.skip_measured, "direct", args.timing)
+    # One row per case, for the comparison driver and the shard runner to
+    # merge. Does nothing without --results.
+    results_out = ResultsWriter(
+        args.results,
+        "direct",
+        args.timing,
+        append=same_results_file(args.results, args.skip_measured),
+    )
+    n_skipped = 0
 
     from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
 
@@ -2332,6 +2584,11 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
             continue
         torch_dt = torch.bfloat16 if dtype == "bf16" else torch.float16
         for direction in directions or (case_direction,):
+            if case_key(p, dtype, direction) in done:
+                # Counted, not printed: resuming a few thousand cases would
+                # otherwise open with a few thousand lines of nothing.
+                n_skipped += 1
+                continue
             # A problem whose tensors pass the kernels' 2 GiB (i32 offset)
             # limit runs as balanced batch chunks, each launch on its slice.
             chunks = _batch_chunks(p, direction)
@@ -2411,87 +2668,30 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
 
             flop = float(p.flops)
             bytes_xfer = float(sum(t.nbytes for t in inputs.values()) + Out_t.nbytes)
-            results = []
             _stop = EarlyStop.for_case(args, p, dtype, direction)
-            for plan in plans:
-                try:
-                    launches = [
-                        (
-                            KernelLauncher(
-                                hsaco=st.hsaco_path.read_bytes(),
-                                kernel_name=st.kernel_name,
-                                signature=st.signature,
-                            ),
-                            launch_values(
-                                st,
-                                *_chunk_buffers(
-                                    ptrs, sizes, inputs, out_name, chunks, i
-                                ),
-                            ),
-                            LaunchConfig(grid=st.grid, block=st.block, stream=0),
-                        )
-                        for i, chunk_plan in enumerate(per_chunk[plan.label])
-                        for st in chunk_plan.steps
-                    ]
-                except HipError as e:
-                    print(f"  [skip] {plan.label}: {e}", flush=True)
-                    continue
-
-                # Each step packed once: a timed loop that packs per launch
-                # times the host, not a short kernel.
-                bound = [
-                    launcher.bind(values, config=cfg)
-                    for launcher, values, cfg in launches
-                ]
-
-                def run(bound=bound):
-                    for launch in bound:
-                        launch()
-
-                passed = None
-                if ref_out is not None:
-                    rt.memset(ptrs[out_name], 0, Out_t.nbytes)
-                    run()
-                    synchronize_and_release(0)
-                    out_cpu = torch.empty_like(Out_t)
-                    rt.memcpy_d2h(_u8(out_cpu), ptrs[out_name], Out_t.nbytes)
-                    ref_f32 = ref_out.float().cpu()
-                    rel_err = float(
-                        (out_cpu.float() - ref_f32).abs().max()
-                        / ref_f32.abs().max().clamp(min=1.0)
-                    )
-                    passed = rel_err < 5e-2
-                    if not passed:
-                        overall_rc = 1
-                        print(
-                            f"  verify {plan.label}: FAIL(rel_err={rel_err:.2e})",
-                            flush=True,
-                        )
-
-                try:
-                    ms = _stop.measure(
-                        run,
-                        warmup=args.warmup,
-                        iters=args.iters,
-                        stream=0,
-                        passed=passed,
-                    )
-                except (HipError, RuntimeError) as e:
-                    print(f"  [skip] {plan.label}: {e}", flush=True)
-                    # time_launches drained before raising, but it does not
-                    # raise a failed drain (the launch error is the one it
-                    # reports). Drain again so a failed drain ends the sweep
-                    # here, before the shared buffers below are freed with
-                    # launches possibly still using them.
-                    synchronize_and_release(0)
-                    continue
-                if ms is None:
-                    _stop.report(plan.label)
-                    continue
-                synchronize_and_release(0)
-                results.append(
-                    (flop / ms / 1e9, bytes_xfer / ms / 1e6, ms, passed, plan.label)
-                )
+            results, case_rc = _measure_plans(
+                args=args,
+                plans=plans,
+                modules=modules,
+                rt=rt,
+                ptrs=ptrs,
+                sizes=sizes,
+                inputs=inputs,
+                out_name=out_name,
+                Out_t=Out_t,
+                ref_out=ref_out,
+                flop=flop,
+                bytes_xfer=bytes_xfer,
+                stop=_stop,
+                u8=_u8,
+                chunks=chunks,
+                per_chunk=per_chunk,
+            )
+            overall_rc = overall_rc or case_rc
+            # Safe only here: _measure_plans has drained the device by the
+            # time it returns, so no launch of this case can still be using a
+            # module end_case unloads.
+            modules.end_case()
 
             for ptr in ptrs.values():
                 rt.free(ptr)
@@ -2513,8 +2713,33 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                     f"  {rank:>4}  {tflops:>7.1f}  {ms:>8.3f}  {gbps:>7.1f}  {verdict:>6}  {label}"
                 )
             # The line benchmark_conv_compare.py reads, as the JIT sweep prints.
-            tflops, _, ms, _, label = results[0]
+            tflops, gbps, ms, passed, label = results[0]
             print(f"\nBest: {tflops:.1f} TFLOPS — {label}  {ms:.3f} ms", flush=True)
+            results_out.row(
+                key=case_key(p, dtype, direction),
+                case=case_idx,
+                shape=p.short(),
+                dtype=dtype,
+                direction=direction,
+                tflops=tflops,
+                ms=ms,
+                gbps=gbps,
+                kernel=label,
+                candidates=len(plans),
+                passed=passed,
+                # The tail of the ranking just printed, names only.
+                runners_up=[r[-1] for r in results[1 : 1 + RUNNERS_UP]],
+            )
+    results_out.close()
+    if n_skipped:
+        print(
+            f"\n{n_skipped} case(s) skipped: already in {args.skip_measured}",
+            flush=True,
+        )
+    if len(cases) > 1:
+        print(f"\n{modules.summary()}", flush=True)
+        if results_out.n_rows:
+            print(f"{results_out.n_rows} row(s) written to {args.results}", flush=True)
     return overall_rc
 
 
@@ -2562,6 +2787,7 @@ def main() -> int:
         "--warmup", type=int, default=3, help="warmup iterations (default: 3)"
     )
     add_early_stop_arg(parser)
+    batched_timing.add_timing_arg(parser)
     parser.add_argument(
         "--iters", type=int, default=10, help="timed iterations (default: 10)"
     )
@@ -2596,6 +2822,88 @@ def main() -> int:
         metavar="PATH",
         dest="dump_fail",
         help="on the first verify FAIL, dump tensors to PATH/ and stop the sweep.",
+    )
+
+    rank_grp = parser.add_argument_group(
+        "Fast ranking (AOT --run-from-cache only)",
+        "Time every cached kernel in batches between two device drains, then "
+        "spend the full --warmup/--iters only on the best few. Replaces "
+        "--early-stop for the run; --early-stop-record still gets the case's "
+        "best time.",
+    )
+    rank_grp.add_argument(
+        "--fast-rank",
+        action="store_true",
+        dest="fast_rank",
+        help="probe every cached kernel with a batched 1+N launch round and "
+        "measure only the finalists in full. --verify then checks the "
+        "finalists rather than every kernel.",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-finalists",
+        type=int,
+        default=batched_timing.DEFAULT_FINALISTS,
+        dest="fast_rank_finalists",
+        metavar="N",
+        help=f"kernels carried from the probe into the full-fidelity round "
+        f"(default: {batched_timing.DEFAULT_FINALISTS}). This also caps the "
+        f"ranked table and bounds what stays bound at once.",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-chunk",
+        type=int,
+        default=batched_timing.DEFAULT_CHUNK,
+        dest="fast_rank_chunk",
+        metavar="N",
+        help=f"kernels timed between two device drains "
+        f"(default: {batched_timing.DEFAULT_CHUNK})",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-warmup",
+        type=int,
+        default=batched_timing.DEFAULT_PROBE_WARMUP,
+        dest="fast_rank_warmup",
+        metavar="N",
+        help=f"probe warmup launches per kernel, covering its cold code object "
+        f"and scratch (default: {batched_timing.DEFAULT_PROBE_WARMUP})",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-iters",
+        type=int,
+        default=batched_timing.DEFAULT_PROBE_ITERS,
+        dest="fast_rank_iters",
+        metavar="N",
+        help=f"probe timed launches per kernel "
+        f"(default: {batched_timing.DEFAULT_PROBE_ITERS})",
+    )
+    rank_grp.add_argument(
+        "--fast-rank-primer",
+        type=int,
+        default=batched_timing.DEFAULT_PRIMER,
+        dest="fast_rank_primer",
+        metavar="N",
+        help=f"launches issued before the first measured chunk of a case, to "
+        f"bring the device's clocks up so the kernels probed first are not "
+        f"measured at idle clocks (default: {batched_timing.DEFAULT_PRIMER})",
+    )
+
+    add_results_arg(
+        parser.add_argument_group(
+            "Per-case results (AOT --run-from-cache only)",
+            "A machine-readable row per case, which benchmark_conv_compare.py "
+            "merges with the implicit-GEMM sweep's and run_conv_shards.py "
+            "concatenates across cards.",
+        ),
+        merged=False,
+    )
+    add_skip_measured_arg(parser)
+
+    add_module_cache_arg(
+        parser.add_argument_group(
+            "Loaded binaries (AOT --run-from-cache only)",
+            "A cached binary is shape-generic, so its HIP module is loaded "
+            "once per run instead of once per case.",
+        )
     )
 
     miopen_grp = parser.add_argument_group(
@@ -2713,6 +3021,31 @@ def main() -> int:
     )
 
     args = parser.parse_args()
+    if args.skip_measured and not args.run_from_cache:
+        print(
+            "error: --skip-measured resumes an AOT sweep; pass " "--run-from-cache DIR",
+            file=sys.stderr,
+        )
+        return 2
+    if args.results and not args.run_from_cache:
+        # The JIT sweep has no cached kernels to name, and its per-case best is
+        # a kernel it just built -- a different artifact. Saying so beats
+        # accepting the flag and writing an empty file.
+        print(
+            "error: --results records an AOT sweep; pass --run-from-cache DIR",
+            file=sys.stderr,
+        )
+        return 2
+    if args.fast_rank and not args.run_from_cache:
+        # The JIT sweep builds and loads its kernels one at a time, so
+        # batching their launches would save nothing; saying so beats
+        # accepting the flag and ignoring it.
+        print(
+            "error: --fast-rank ranks the kernels of an AOT cache; "
+            "pass --run-from-cache DIR",
+            file=sys.stderr,
+        )
+        return 2
     # --dtype unset: one fp16 run for shape flags, every dtype for --compile-all.
     from kernels.conv.direct_aot_jobs import DIRECT_DTYPES
 
@@ -2813,11 +3146,11 @@ def main() -> int:
             return 2
 
         if (args.dH != 1 or args.dW != 1) and (
-            args.direction != "fwd" or args.groups != 1
+            args.direction not in ("fwd", "dgrad") or args.groups != 1
         ):
             print(
-                f"error: direct conv computes a dilated convolution only forward "
-                f"and ungrouped (got dH={args.dH}, dW={args.dW})",
+                f"error: direct conv computes a dilated convolution only forward / "
+                f"dgrad and ungrouped (got dH={args.dH}, dW={args.dW})",
                 file=sys.stderr,
             )
             return 2
@@ -2849,6 +3182,20 @@ def main() -> int:
 
     if args.run_from_cache:
         return _cache_dispatch(args, arch, cases)
+
+    # A per-axis padding runs only from the cache, on the rotated-filter dgrad
+    # kernel: the sweeps below build kernels with one padding for both axes.
+    for prob, _, direction in cases:
+        if prob.PAD_W != prob.PAD:
+            print(
+                f"[skip] {prob.short()} dir={direction}: per-axis padding "
+                f"(PAD={prob.PAD}x{prob.PAD_W}) runs only with --run-from-cache",
+                file=sys.stderr,
+            )
+    cases = [c for c in cases if c[0].PAD_W == c[0].PAD]
+    if not cases:
+        print("error: no case left to sweep", file=sys.stderr)
+        return 2
 
     import ctypes
 

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -120,11 +120,11 @@ void managed_malloc_getError(const rocblas_handle handle,
     double err;
     *max_err = 0;
     err = norm_error('F', m, n, lda, dA, dARes);
-    *max_err = err > *max_err ? err : *max_err;
+    *max_err = rocblas_max_nan(err, *max_err);
     err = norm_error('F', m - nb, nb, ldx, dX + nb, dXRes + nb);
-    *max_err = err > *max_err ? err : *max_err;
+    *max_err = rocblas_max_nan(err, *max_err);
     err = norm_error('F', n - nb, nb, ldy, dY + nb, dYRes + nb);
-    *max_err = err > *max_err ? err : *max_err;
+    *max_err = rocblas_max_nan(err, *max_err);
 }
 
 template <typename T, typename S>

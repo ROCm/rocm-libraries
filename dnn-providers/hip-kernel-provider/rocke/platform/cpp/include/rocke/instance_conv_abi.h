@@ -60,9 +60,11 @@ typedef struct
 /* The Python kind string ("a", "b", "d", "f32*", "i32*", "i32"). */
 const char* rocke_conv_arg_kind_str(rocke_conv_arg_kind_t kind);
 
-/* Implicit-GEMM ABI for one direction ("fwd", "wgrad", "dgrad"). Returns
- * false -- leaving *out empty -- for an unknown direction or for two_stage
- * outside wgrad, the cases conv_arg_names() raises on. */
+/* Implicit-GEMM ABI for one direction ("fwd", "wgrad", "dgrad"). two_stage
+ * is wgrad's two-stage epilogue, and on fwd the split-K binary (a trailing
+ * ws_ptr, ws_bytes, ks, ks_count). Returns false -- leaving *out empty -- for
+ * an unknown direction or for two_stage on dgrad, the cases conv_arg_names()
+ * raises on. */
 bool rocke_conv_arg_names(const char* direction,
                           bool is_3d,
                           bool two_stage,
