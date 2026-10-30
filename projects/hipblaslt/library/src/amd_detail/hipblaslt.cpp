@@ -342,13 +342,27 @@ bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusedEpilogueDescriptor* de
     if(desc == nullptr)
         return false;
 
-    out.hasA2APrefix = fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX);
-    out.a2aSdmaQueues = desc->a2a_queues.empty() ? nullptr : desc->a2a_queues.data();
-    out.a2aRecvPtrs = desc->a2a_recv_ptrs.empty() ? nullptr : desc->a2a_recv_ptrs.data();
+    out.mode              = fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX)
+                                ? RocblasltFusedEpilogueInfo::Mode::GemmA2A
+                                : RocblasltFusedEpilogueInfo::Mode::Disabled;
+    out.a2aSdmaQueues     = desc->a2a_queues.empty() ? nullptr : desc->a2a_queues.data();
+    out.a2aRecvPtrs       = desc->a2a_recv_ptrs.empty() ? nullptr : desc->a2a_recv_ptrs.data();
     out.a2aExtent         = desc->a2a_extent;
     out.a2aCompletionMode = desc->a2a_completion;
     out.commChannel       = desc->comm_channel;
     return true;
+}
+
+rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle        handle,
+                                                            rocblaslt_matmul_desc   matmulDesc,
+                                                            rocblaslt_matrix_layout matD)
+{
+    return validate_fused_epilogue_dispatch((hipblasLtHandle_t)handle,
+                                            (hipblasLtMatmulDesc_t)matmulDesc,
+                                            (hipblasLtMatrixLayout_t)matD)
+                   == HIPBLAS_STATUS_SUCCESS
+               ? rocblaslt_status_success
+               : rocblaslt_status_invalid_value;
 }
 #endif
 

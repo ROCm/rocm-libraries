@@ -10,6 +10,7 @@
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2A.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/SolutionLibrary.hpp>
 
 #include <memory>
 #include <stdexcept>
@@ -75,6 +76,30 @@ TEST(FusedA2AProblem, ShapePredicate)
     auto plain
         = ContractionProblemGemm::GEMM(false, true, 3000, 500, 100, 3000, 500, 3000, 0.0, false, 1);
     EXPECT_TRUE(mt256(plain));
+}
+
+TEST(FusedA2AProblem, GemmTypeOnlyMatchesTheFusedMode)
+{
+    auto fused = fusedProblem(3072, 512, 3072, 2, 2048);
+    auto plain = fused;
+    plain.setFusedA2A(FusedA2A::Disabled);
+
+    ContractionSolution solution;
+    solution.problemType.transA      = fused.transA();
+    solution.problemType.transB      = fused.transB();
+    solution.problemType.aType       = fused.a().dataType();
+    solution.problemType.bType       = fused.b().dataType();
+    solution.problemType.cType       = fused.c().dataType();
+    solution.problemType.dType       = fused.d().dataType();
+    solution.problemType.computeType = fused.computeType();
+
+    solution.problemType.fusedA2A = FusedA2A::GemmA2A;
+    EXPECT_TRUE(isGemmTypeSame(solution, fused));
+    EXPECT_FALSE(isGemmTypeSame(solution, plain));
+
+    solution.problemType.fusedA2A = FusedA2A::Disabled;
+    EXPECT_FALSE(isGemmTypeSame(solution, fused));
+    EXPECT_TRUE(isGemmTypeSame(solution, plain));
 }
 
 namespace
