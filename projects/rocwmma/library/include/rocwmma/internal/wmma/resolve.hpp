@@ -26,6 +26,7 @@
 #ifndef ROCWMMA_WMMA_RESOLVE_HPP
 #define ROCWMMA_WMMA_RESOLVE_HPP
 
+#include "../config.hpp"
 #include "adapters.hpp"
 #include "descriptor.hpp"
 #include "target_traits.hpp"
@@ -92,6 +93,34 @@ namespace rocwmma
                                        typename wmma_find_op<Query, wmma_op_list<Ops...>>::type>;
         };
 
+        // Input and accumulator types under which an operation is served.
+        // hfloat16_t operations are served as their float16_t counterparts.
+        template <typename InputTA_In, typename InputTB_In, typename ComputeT_In>
+        struct wmma_served_types
+        {
+            using InputTA  = InputTA_In;
+            using InputTB  = InputTB_In;
+            using ComputeT = ComputeT_In;
+        };
+
+#if !ROCWMMA_NO_HALF
+        template <>
+        struct wmma_served_types<hfloat16_t, hfloat16_t, float32_t>
+        {
+            using InputTA  = float16_t;
+            using InputTB  = float16_t;
+            using ComputeT = float32_t;
+        };
+
+        template <>
+        struct wmma_served_types<hfloat16_t, hfloat16_t, hfloat16_t>
+        {
+            using InputTA  = float16_t;
+            using InputTB  = float16_t;
+            using ComputeT = float16_t;
+        };
+#endif // !ROCWMMA_NO_HALF
+
         template <typename Op, uint32_t BlockK>
         struct wmma_implement
         {
@@ -116,8 +145,14 @@ namespace rocwmma
         struct wmma_resolve
         {
         private:
-            using Ops   = wmma_target_ops_t<TargetId>;
-            using Query = wmma_key<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>;
+            using Ops    = wmma_target_ops_t<TargetId>;
+            using Served = wmma_served_types<InputTA, InputTB, ComputeT>;
+            using Query  = wmma_key<typename Served::InputTA,
+                                    typename Served::InputTB,
+                                    typename Served::ComputeT,
+                                    BlockM,
+                                    BlockN,
+                                    BlockK>;
 
             static_assert(wmma_ops_are_unique<Ops>::value,
                           "rocWMMA: the WMMA capability list of this target has two operations "

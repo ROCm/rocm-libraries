@@ -37,79 +37,17 @@ namespace rocwmma
     {
         struct Unsupported;
 
-        // Enabler for targets.
-        // Given a TargetId, enable if it exists in the TargetIds list
-        template <uint32_t TargetId, uint32_t... TargetIds>
-        using enable_target_id_t = enable_if_t<contains_number_v<uint32_t, TargetId, TargetIds...>>;
-
-        // Enabler for the legacy gfx11 WMMA register layout
-        template <uint32_t TargetId, bool Cond = true>
-        using enable_gfx11_t = enable_if_t<contains_number_v<uint32_t,
-                                                             TargetId,
-                                                             Constants::AMDGCN_ARCH_ID_GFX1100,
-                                                             Constants::AMDGCN_ARCH_ID_GFX1101,
-                                                             Constants::AMDGCN_ARCH_ID_GFX1102,
-                                                             Constants::AMDGCN_ARCH_ID_GFX1103,
-                                                             Constants::AMDGCN_ARCH_ID_GFX1150,
-                                                             Constants::AMDGCN_ARCH_ID_GFX1151,
-                                                             Constants::AMDGCN_ARCH_ID_GFX1152,
-                                                             Constants::AMDGCN_ARCH_ID_GFX1153>
-                                           && Cond>;
-
-        // Enabler for gfx117x and gfx12 WMMA register layouts
-        template <uint32_t TargetId, bool Cond = true>
-        using enable_gfx12_t
-            = enable_if_t<contains_number_v<uint32_t,
-                                            TargetId,
-                                            Constants::AMDGCN_ARCH_ID_GFX1170,
-                                            Constants::AMDGCN_ARCH_ID_GFX1171,
-                                            Constants::AMDGCN_ARCH_ID_GFX1200,
-                                            Constants::AMDGCN_ARCH_ID_GFX1201,
-                                            Constants::AMDGCN_ARCH_ID_GFX1250> && Cond>;
-
-        // Enabler for all of gfx11 and gfx12
-        template <uint32_t TargetId, bool Cond = true>
-        using enable_gfx11_gfx12_t
-            = enable_if_t<contains_number_v<uint32_t,
-                                            TargetId,
-                                            Constants::AMDGCN_ARCH_ID_GFX1100,
-                                            Constants::AMDGCN_ARCH_ID_GFX1101,
-                                            Constants::AMDGCN_ARCH_ID_GFX1102,
-                                            Constants::AMDGCN_ARCH_ID_GFX1103,
-                                            Constants::AMDGCN_ARCH_ID_GFX1150,
-                                            Constants::AMDGCN_ARCH_ID_GFX1151,
-                                            Constants::AMDGCN_ARCH_ID_GFX1152,
-                                            Constants::AMDGCN_ARCH_ID_GFX1153,
-                                            Constants::AMDGCN_ARCH_ID_GFX1170,
-                                            Constants::AMDGCN_ARCH_ID_GFX1171,
-                                            Constants::AMDGCN_ARCH_ID_GFX1200,
-                                            Constants::AMDGCN_ARCH_ID_GFX1201,
-                                            Constants::AMDGCN_ARCH_ID_GFX1250> && Cond>;
-
-        /*! \class amdgcn_wmma
-        *  \brief  Builtin wrapper for wmma instructions
-        *  @tparam InputTA Datatype of input A
-        *  @tparam InputTB Datatype of input B
-        *  @tparam ComputeT Datatype of accumulator
-        *  @tparam BlockM M-dimension of wmma block
-        *  @tparam BlockN N-dimension of wmma block
-        *  @tparam BlockK K-dimension of wmma block
-        *  @tparam GfxTarget The current gfx family target of interest being compiled
-        *  @tparam TargetEnable Enabler for the current target if supported
-        */
+        // Fallback for operations that a target does not implement. It carries the
+        // Unsupported tag that MmaTraits detects, and register types sized from the
+        // wave size of the pass being compiled.
         template <typename InputTA,
                   typename InputTB,
                   typename ComputeT,
                   uint32_t BlockM,
                   uint32_t BlockN,
-                  uint32_t BlockK,
-                  uint32_t GfxTargetId = Constants::AMDGCN_CURRENT_ARCH_ID,
-                  typename Enabler     = void>
-        struct amdgcn_wmma
+                  uint32_t BlockK>
+        struct wmma_unsupported
         {
-            // This is a pass-through implementation that isn't supported, and doesn't
-            // do anything practical. The following trait will allow us to identify
-            // unsupported instances, as we won't include it in the overloads to follow.
             using Unsupported = Unsupported;
 
         private:
@@ -131,9 +69,32 @@ namespace rocwmma
             using DRegsT = VecT<typename PackTraitsAcc::PackedT, AccumSize>;
         };
 
-        // Operations described in wmma/ (native descriptors, capability lists and
-        // K padding). Only Enabler = void resolves; other enablers keep selecting
-        // the unsupported primary template.
+        /*! \class amdgcn_wmma
+        *  \brief  Builtin wrapper for wmma instructions
+        *  @tparam InputTA Datatype of input A
+        *  @tparam InputTB Datatype of input B
+        *  @tparam ComputeT Datatype of accumulator
+        *  @tparam BlockM M-dimension of wmma block
+        *  @tparam BlockN N-dimension of wmma block
+        *  @tparam BlockK K-dimension of wmma block
+        *  @tparam GfxTargetId The gfx target of interest, by default the one being compiled
+        *  @tparam Enabler Only void selects an implementation; other types are unsupported
+        */
+        template <typename InputTA,
+                  typename InputTB,
+                  typename ComputeT,
+                  uint32_t BlockM,
+                  uint32_t BlockN,
+                  uint32_t BlockK,
+                  uint32_t GfxTargetId = Constants::AMDGCN_CURRENT_ARCH_ID,
+                  typename Enabler     = void>
+        struct amdgcn_wmma
+            : public wmma_unsupported<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>
+        {
+        };
+
+        // The operation from the target's capability list (wmma/target_traits.hpp),
+        // natively or by padding K, or the unsupported fallback.
         template <typename InputTA,
                   typename InputTB,
                   typename ComputeT,
@@ -141,76 +102,17 @@ namespace rocwmma
                   uint32_t BlockN,
                   uint32_t BlockK,
                   uint32_t GfxTargetId>
-        struct amdgcn_wmma<
-            InputTA,
-            InputTB,
-            ComputeT,
-            BlockM,
-            BlockN,
-            BlockK,
-            GfxTargetId,
-            enable_if_t<!is_void_v<
-                wmma_resolve_t<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK, GfxTargetId>>>>
-            : public wmma_resolve_t<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK, GfxTargetId>
-        {
-        };
-
-        enum struct WmmaCtrlFlags : bool
-        {
-            // Output register selection of WMMA.
-            // Low = bits [15:0]
-            // High = bits[31:16]
-            LOW  = false,
-            HIGH = true,
-
-            // Signage indicator of inputs / accum
-            UNSIGNED = false,
-            SIGNED   = true,
-
-            // Input matrix reuse indicators
-            NO_REUSE = false,
-            REUSE = true,
-        };
-
-        enum struct WmmaInputModifiers : int16_t
-        {
-            // A, B, C input modifiers
-            NONE = 0,
-            NEGATE = 1,
-
-            // C input only modifiers
-            ABS = 2,
-            NEG_ABS = 3
-        };
-
-        // gfx11 implementations
-        // gfx12 implementations
-        // f16
-        // bf16
-        // Derivative implementations
-        template <uint32_t GfxTargetId, uint32_t BlockK>
-        struct amdgcn_wmma<hfloat16_t,
-                           hfloat16_t,
-                           float32_t,
-                           16u,
-                           16u,
-                           BlockK,
-                           GfxTargetId,
-                           enable_gfx11_gfx12_t<GfxTargetId, !(bool)ROCWMMA_NO_HALF>>
-            : public amdgcn_wmma<float16_t, float16_t, float32_t, 16u, 16u, BlockK, GfxTargetId>
-        {
-        };
-
-        template <uint32_t GfxTargetId, uint32_t BlockK>
-        struct amdgcn_wmma<hfloat16_t,
-                           hfloat16_t,
-                           hfloat16_t,
-                           16u,
-                           16u,
-                           BlockK,
-                           GfxTargetId,
-                           enable_gfx11_gfx12_t<GfxTargetId, !(bool)ROCWMMA_NO_HALF>>
-            : public amdgcn_wmma<float16_t, float16_t, float16_t, 16u, 16u, BlockK, GfxTargetId>
+        struct amdgcn_wmma<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK, GfxTargetId, void>
+            : public conditional_t<
+                  is_void_v<wmma_resolve_t<InputTA,
+                                           InputTB,
+                                           ComputeT,
+                                           BlockM,
+                                           BlockN,
+                                           BlockK,
+                                           GfxTargetId>>,
+                  wmma_unsupported<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>,
+                  wmma_resolve_t<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK, GfxTargetId>>
         {
         };
 
