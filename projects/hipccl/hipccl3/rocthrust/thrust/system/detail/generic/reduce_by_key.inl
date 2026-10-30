@@ -37,10 +37,9 @@
 #include <thrust/scatter.h>
 #include <thrust/transform.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(iterator)
-#endif
-
+#include _THRUST_STD_INCLUDE(__functional/not_fn.h)
+#include _THRUST_STD_INCLUDE(__functional/operations.h)
+#include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
 #include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
@@ -172,11 +171,9 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   OutputIterator2 values_output,
   BinaryPredicate binary_pred)
 {
-  using T = ::internal::
-
-    If<thrust::detail::is_output_iterator<OutputIterator2>,
-       thrust::detail::it_value_t<InputIterator2>,
-       thrust::detail::it_value_t<OutputIterator2>>;
+  using T = ::internal::If<thrust::detail::is_output_iterator<OutputIterator2>,
+                           thrust::detail::it_value_t<InputIterator2>,
+                           thrust::detail::it_value_t<OutputIterator2>>;
 
   // use plus<T> as default BinaryFunction
   return thrust::reduce_by_key(

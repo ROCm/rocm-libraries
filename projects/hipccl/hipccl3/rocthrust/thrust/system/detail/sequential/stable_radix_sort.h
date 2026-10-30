@@ -35,8 +35,7 @@
 #include <thrust/scatter.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
 
-#include _THRUST_STD_INCLUDE(utility)
-
+#include _THRUST_STD_INCLUDE(__utility/declval.h)
 #include _THRUST_STD_INCLUDE(cstdint)
 #include _THRUST_STD_INCLUDE(limits)
 

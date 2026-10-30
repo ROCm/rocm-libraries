@@ -37,7 +37,10 @@
 #include <thrust/system/detail/generic/select_system.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(type_traits)
+#  include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
+#  include _THRUST_STD_INCLUDE(__utility/move.h)
 #endif
 
 #include <ostream>

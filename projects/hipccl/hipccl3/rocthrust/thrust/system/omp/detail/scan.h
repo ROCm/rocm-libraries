@@ -15,20 +15,21 @@
 #endif // no system header
 
 // OMP parallel scan implementation
-#include <thrust/advance.h>
 #include <thrust/detail/function.h>
 #include <thrust/detail/temporary_array.h>
-#include <thrust/distance.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/omp/detail/execution_policy.h>
 #include <thrust/system/omp/detail/pragma_omp.h>
 
 #include _THRUST_LIBCXX_INCLUDE(__cmath/ceil_div.h)
 #include _THRUST_STD_INCLUDE(__functional/invoke.h)
+#include _THRUST_STD_INCLUDE(__iterator/advance.h)
+#include _THRUST_STD_INCLUDE(__iterator/distance.h)
 #include _THRUST_STD_INCLUDE(__numeric/exclusive_scan.h)
 #include _THRUST_STD_INCLUDE(__numeric/inclusive_scan.h)
 #include _THRUST_STD_INCLUDE(__numeric/reduce.h)
-#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
 
 #include <omp.h>
 

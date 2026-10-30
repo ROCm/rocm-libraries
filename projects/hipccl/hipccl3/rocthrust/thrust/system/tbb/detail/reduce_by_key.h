@@ -23,13 +23,12 @@
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(__algorithm/max.h)
 #  include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#  include _THRUST_STD_INCLUDE(__iterator/reverse_iterator.h)
 #  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
 #  include _THRUST_STD_INCLUDE(cassert)
 #else
 #  include <algorithm>
 #endif
-
-#include _THRUST_STD_INCLUDE(iterator)
 
 #include <thread>
 

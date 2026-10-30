@@ -39,8 +39,13 @@
 #include <thrust/detail/type_traits/pointer_traits.h>
 
 #include _THRUST_STD_INCLUDE(__cccl/memory_wrapper.h)
+#include _THRUST_STD_INCLUDE(__type_traits/add_lvalue_reference.h)
+#include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_empty.h)
+#include _THRUST_STD_INCLUDE(__type_traits/make_unsigned.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
+#include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
 #include _THRUST_STD_INCLUDE(limits)
-#include _THRUST_STD_INCLUDE(type_traits)
 
 #include <new>
 

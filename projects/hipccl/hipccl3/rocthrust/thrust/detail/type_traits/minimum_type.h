@@ -26,7 +26,9 @@
 #  pragma system_header
 #endif // no system header
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
 
 THRUST_NAMESPACE_BEGIN
 

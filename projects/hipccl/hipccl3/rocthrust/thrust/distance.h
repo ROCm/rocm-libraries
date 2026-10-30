@@ -31,7 +31,8 @@
 #endif // no system header
 #include <thrust/iterator/iterator_traits.h>
 
-#include _THRUST_STD_INCLUDE(iterator)
+#include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#include _THRUST_STD_INCLUDE(__iterator/iterator_traits.h)
 
 THRUST_NAMESPACE_BEGIN
 

@@ -32,7 +32,14 @@
 #  pragma system_header
 #endif // no system header
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__functional/invoke.h)
+#include _THRUST_STD_INCLUDE(__type_traits/conjunction.h)
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/integral_constant.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_arithmetic.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_integral.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 
 #include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
 
@@ -124,7 +131,7 @@ template <typename T>
 inline constexpr bool is_proxy_reference_v = false;
 
 template <typename Boolean>
-struct not_ : public integral_constant<bool, !Boolean::value>
+struct not_ : public _THRUST_STD::integral_constant<bool, !Boolean::value>
 {}; // end not_
 
 template <bool, typename Then, typename Else>

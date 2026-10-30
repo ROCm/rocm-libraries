@@ -32,7 +32,7 @@
 #include <thrust/detail/execution_policy.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(utility)
+#  include _THRUST_STD_INCLUDE(__utility/swap.h)
 #endif
 
 THRUST_NAMESPACE_BEGIN

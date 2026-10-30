@@ -41,7 +41,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/advance.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/minimum_system.h>
 #include <thrust/iterator/detail/tuple_of_iterator_references.h>
@@ -55,9 +54,14 @@
 #endif
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__iterator/advance.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/is_constructible.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
+#  include _THRUST_STD_INCLUDE(__utility/declval.h)
+#  include _THRUST_STD_INCLUDE(__utility/forward.h)
 #  include _THRUST_STD_INCLUDE(tuple)
-#  include _THRUST_STD_INCLUDE(type_traits)
-#  include _THRUST_STD_INCLUDE(utility)
 #endif
 
 THRUST_NAMESPACE_BEGIN

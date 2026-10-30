@@ -48,10 +48,11 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/strided_iterator.h>
 
+#include _THRUST_STD_INCLUDE(__type_traits/is_integral.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
 #include _THRUST_STD_INCLUDE(cstddef)
-#include _THRUST_STD_INCLUDE(type_traits)
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_LIBCXX_INCLUDE(type_traits)
+#  include _THRUST_LIBCXX_INCLUDE(__type_traits/is_floating_point.h)
 #else
 #  include <rocprim/type_traits.hpp>
 #endif
@@ -70,7 +71,7 @@ using counting_iterator_difference_type =
 template <typename Incrementable, typename System, typename Traversal, typename Difference, typename StrideHolder>
 struct make_counting_iterator_base
 {
-  using system = typename eval_if<_THRUST_STD::is_same<System, use_default>::value,
+  using system = typename eval_if<_THRUST_STD::is_same_v<System, use_default>,
                                   _THRUST_STD::type_identity<any_system_tag>,
                                   _THRUST_STD::type_identity<System>>::type;
 

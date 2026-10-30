@@ -29,7 +29,7 @@
 #include <thrust/detail/config/memory_resource.h>
 #include <thrust/mr/memory_resource.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__type_traits/is_base_of.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace mr
@@ -37,7 +37,7 @@ namespace mr
 template <typename MR>
 struct validator
 {
-  static_assert(_THRUST_STD::is_base_of<memory_resource<typename MR::pointer>, MR>::value,
+  static_assert(_THRUST_STD::is_base_of_v<memory_resource<typename MR::pointer>, MR>,
                 "a type used as a memory resource must derive from memory_resource");
 };
 

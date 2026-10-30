@@ -48,7 +48,13 @@
 #  include _THRUST_LIBCXX_INCLUDE(__iterator/transform_input_output_iterator.h)
 #endif
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__tuple_dir/get.h)
+#include _THRUST_STD_INCLUDE(__tuple_dir/tuple_element.h)
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_const.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_reference.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -245,7 +251,7 @@ struct device_destroy_functor
 
 template <typename System, typename T>
 struct destroy_functor
-    : thrust::detail::eval_if<_THRUST_STD::is_convertible<System, thrust::host_system_tag>::value,
+    : thrust::detail::eval_if<_THRUST_STD::is_convertible_v<System, thrust::host_system_tag>,
                               _THRUST_STD::type_identity<host_destroy_functor<T>>,
                               _THRUST_STD::type_identity<device_destroy_functor<T>>>
 {};

@@ -31,7 +31,12 @@
 #include <thrust/detail/type_traits/has_nested_type.h>
 #include <thrust/tuple.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__tuple_dir/apply.h)
+#include _THRUST_STD_INCLUDE(__type_traits/add_lvalue_reference.h)
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_cv.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
+#include _THRUST_STD_INCLUDE(__utility/forward.h)
 #include _THRUST_STD_INCLUDE(utility)
 
 // the order of declarations and definitions in this file is totally goofy

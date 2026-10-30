@@ -38,8 +38,13 @@
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traversal_tags.h>
 
+#include _THRUST_STD_INCLUDE(__type_traits/is_reference.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_void.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_cv.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 #include _THRUST_STD_INCLUDE(cstddef)
-#include _THRUST_STD_INCLUDE(type_traits)
 
 #include <ostream>
 

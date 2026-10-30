@@ -33,7 +33,8 @@
 #  include <thrust/swap.h>
 #endif
 
-#include _THRUST_STD_INCLUDE(utility)
+#include _THRUST_STD_INCLUDE(__utility/move.h)
+#include _THRUST_STD_INCLUDE(__utility/swap.h)
 #include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 
 THRUST_NAMESPACE_BEGIN

@@ -23,8 +23,10 @@
 
 #include <thrust/random.h>
 
-#include <cuda/std/cstdint>
-#include <cuda/std/type_traits>
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_integral.h)
+#include _THRUST_STD_INCLUDE(__utility/forward.h)
+#include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail

@@ -29,7 +29,6 @@
 #include <thrust/detail/internal_functional.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits.h>
-#include <thrust/distance.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/scan.h>
@@ -37,6 +36,9 @@
 #include <thrust/system/detail/generic/copy_if.h>
 #include <thrust/transform.h>
 
+#include _THRUST_STD_INCLUDE(__functional/operations.h)
+#include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#include _THRUST_STD_INCLUDE(__type_traits/make_unsigned.h)
 #include _THRUST_STD_INCLUDE(limits)
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD

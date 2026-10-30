@@ -20,8 +20,8 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/decay.h)
 #  include _THRUST_STD_INCLUDE(cassert)
-#  include _THRUST_STD_INCLUDE(type_traits)
 #else
 #  include <algorithm>
 #  include <type_traits>

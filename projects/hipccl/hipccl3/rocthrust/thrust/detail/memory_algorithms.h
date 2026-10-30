@@ -25,14 +25,15 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(__memory/addressof.h)
+#  include _THRUST_STD_INCLUDE(__new/device_new.h)
+#  include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
 #endif
 
-#include <utility>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <new>
 #  include <type_traits>
+#  include <utility>
 #endif
-
-#include <new>
 
 #include <nv/target>
 

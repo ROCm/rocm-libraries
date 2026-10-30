@@ -22,7 +22,7 @@
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
-#include _THRUST_STD_INCLUDE(utility)
+#include _THRUST_STD_INCLUDE(__utility/declval.h)
 
 THRUST_NAMESPACE_BEGIN
 

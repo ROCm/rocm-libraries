@@ -39,8 +39,10 @@
 #include <thrust/detail/type_traits.h> // for internal::decay_t
 #include <thrust/tuple.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
-#include _THRUST_STD_INCLUDE(utility)
+#include _THRUST_STD_INCLUDE(__type_traits/decay.h)
+#include _THRUST_STD_INCLUDE(__type_traits/integral_constant.h)
+#include _THRUST_STD_INCLUDE(__utility/declval.h)
+#include _THRUST_STD_INCLUDE(__utility/move.h)
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <tuple>

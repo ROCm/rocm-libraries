@@ -21,7 +21,9 @@
 #include <thrust/detail/type_deduction.h>
 #include <thrust/detail/type_traits.h> // for internal::remove_cvref_t
 
-#include _THRUST_STD_INCLUDE(utility)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
+#include _THRUST_STD_INCLUDE(__utility/move.h)
+#include _THRUST_STD_INCLUDE(__utility/swap.h)
 
 THRUST_NAMESPACE_BEGIN
 

@@ -48,10 +48,12 @@
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(functional)
-#endif
+#include _THRUST_STD_INCLUDE(__functional/identity.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_copy_assignable.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_copy_constructible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_reference.h)
+#include _THRUST_STD_INCLUDE(__utility/declval.h)
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <iterator>

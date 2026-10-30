@@ -38,8 +38,10 @@
 #include <thrust/iterator/detail/normal_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#include _THRUST_STD_INCLUDE(iterator)
-#include _THRUST_STD_INCLUDE(utility)
+#include _THRUST_STD_INCLUDE(__iterator/reverse_iterator.h)
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__utility/move.h)
+#include _THRUST_STD_INCLUDE(__utility/swap.h)
 
 #include <vector>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD

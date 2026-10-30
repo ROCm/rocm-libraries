@@ -32,10 +32,9 @@
 #  pragma system_header
 #endif // no system header
 
-#include _THRUST_STD_INCLUDE(utility)
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__utility/integer_sequence.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
-#  include _THRUST_STD_INCLUDE(type_traits)
 #else
 #  include <cstddef>
 #endif

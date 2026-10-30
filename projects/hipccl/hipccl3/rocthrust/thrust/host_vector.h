@@ -33,8 +33,8 @@
 #include _THRUST_STD_INCLUDE(__cccl/memory_wrapper.h)
 #include <thrust/detail/vector_base.h>
 
+#include _THRUST_STD_INCLUDE(__utility/move.h)
 #include _THRUST_STD_INCLUDE(initializer_list)
-#include _THRUST_STD_INCLUDE(utility)
 
 #include <vector>
 

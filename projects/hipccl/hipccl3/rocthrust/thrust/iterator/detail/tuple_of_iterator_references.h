@@ -33,8 +33,9 @@
 #include <thrust/tuple.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#  include _THRUST_STD_INCLUDE(__utility/move.h)
 #  include _THRUST_STD_INCLUDE(tuple)
-#  include _THRUST_STD_INCLUDE(type_traits)
 #else
 #  include <utility>
 #endif
