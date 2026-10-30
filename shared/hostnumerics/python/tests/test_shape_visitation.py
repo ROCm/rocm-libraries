@@ -115,44 +115,37 @@ class ShapeVisitationTests(unittest.TestCase):
             with self.assertRaises(TypeError):
                 hn.IndexRange.all(value)
 
-    def test_inherited_prime_sampling(self):
-        for logical, allocated, requested, stride in (
-            (10, 10, 3, 3),
-            (20, 9, 1, 11),
-            (60, 49, 1, 53),
-            (128, 121, 1, 127),
-            (20, 0, 3, 2),
-        ):
-            interval = hn.prime_index_range(
-                logical_elements=logical,
-                allocated_elements=allocated,
-                requested_elements=requested,
-            )
-            self.assertEqual(
-                (interval.start, interval.stop, interval.stride), (0, logical, stride)
-            )
-            self.assertEqual(interval.indices(), list(range(0, logical, stride)))
+    def test_prime_sampling(self):
+        def next_prime(value):
+            candidate = max(value, 2)
+            while any(candidate % d == 0 for d in range(2, int(candidate**0.5) + 1)):
+                candidate += 1
+            return candidate
+
+        for logical in range(1, 200):
+            for requested in range(1, logical):
+                stride = next_prime(logical // requested)
+                interval = hn.prime_index_range(
+                    logical_elements=logical, requested_elements=requested
+                )
+                self.assertEqual(
+                    (interval.start, interval.stop, interval.stride),
+                    (0, logical, stride),
+                )
         self.assertEqual(
-            hn.prime_index_range(
-                logical_elements=10, allocated_elements=SIZE_MAX, requested_elements=0
-            ).count(),
-            0,
+            hn.prime_index_range(logical_elements=10, requested_elements=0).count(), 0
         )
         for requested in (10, 11):
             self.assertEqual(
                 hn.prime_index_range(
-                    logical_elements=10,
-                    allocated_elements=SIZE_MAX,
-                    requested_elements=requested,
+                    logical_elements=10, requested_elements=requested
                 ).count(),
                 10,
             )
         with self.assertRaisesRegex(RuntimeError, "Prime-stride"):
-            hn.prime_index_range(
-                logical_elements=2, allocated_elements=SIZE_MAX, requested_elements=1
-            )
+            hn.prime_index_range(logical_elements=SIZE_MAX, requested_elements=1)
         with self.assertRaises(TypeError):
-            hn.prime_index_range(10, 10, 3)
+            hn.prime_index_range(10, 3)
 
     def test_ranges_are_values(self):
         interval = hn.IndexRange(1, 8, 3)
