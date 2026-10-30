@@ -35,7 +35,7 @@ namespace rocwmma
 {
     namespace detail
     {
-        struct wmma_f32_16x16x32_f16_gfx1250
+        struct wmma_f32_16x16x32_f16_gfx125x
         {
             using Key       = wmma_key<float16_t, float16_t, float32_t, 16u, 16u, 32u>;
             using PaddableK = wmma_k_list<4u, 8u, 16u>;
@@ -79,7 +79,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_bf16_16x16x32_bf16_gfx1250
+        struct wmma_bf16_16x16x32_bf16_gfx125x
         {
             using Key       = wmma_key<bfloat16_t, bfloat16_t, bfloat16_t, 16u, 16u, 32u>;
             using PaddableK = wmma_k_list<4u, 8u, 16u>;
@@ -123,7 +123,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f16_16x16x32_f16_gfx1250
+        struct wmma_f16_16x16x32_f16_gfx125x
         {
             using Key       = wmma_key<float16_t, float16_t, float16_t, 16u, 16u, 32u>;
             using PaddableK = wmma_k_list<4u, 8u, 16u>;
@@ -167,7 +167,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f32_16x16x32_bf16_gfx1250
+        struct wmma_f32_16x16x32_bf16_gfx125x
         {
             using Key       = wmma_key<bfloat16_t, bfloat16_t, float32_t, 16u, 16u, 32u>;
             using PaddableK = wmma_k_list<4u, 8u, 16u>;
@@ -212,7 +212,7 @@ namespace rocwmma
         };
 
         // Signed 8-bit inputs
-        struct wmma_i32_16x16x64_i8_gfx1250
+        struct wmma_i32_16x16x64_i8_gfx125x
         {
             using Key       = wmma_key<int8_t, int8_t, int32_t, 16u, 16u, 64u>;
             using PaddableK = wmma_k_list<8u, 16u, 32u>;
@@ -257,7 +257,7 @@ namespace rocwmma
         };
 
         // Unsigned 8-bit inputs
-        struct wmma_i32_16x16x64_u8_gfx1250
+        struct wmma_i32_16x16x64_u8_gfx125x
         {
             using Key       = wmma_key<uint8_t, uint8_t, int32_t, 16u, 16u, 64u>;
             using PaddableK = wmma_k_list<8u, 16u, 32u>;
@@ -301,7 +301,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f32_16x16x4_f32_gfx1250
+        struct wmma_f32_16x16x4_f32_gfx125x
         {
             using Key       = wmma_key<float32_t, float32_t, float32_t, 16u, 16u, 4u>;
             using PaddableK = wmma_k_list<2u>;
@@ -345,7 +345,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f32_16x16x64_fp8_fp8_gfx1250
+        struct wmma_f32_16x16x64_fp8_fp8_gfx125x
         {
             using Key       = wmma_key<float8_t, float8_t, float32_t, 16u, 16u, 64u>;
             using PaddableK = wmma_k_list<8u, 16u, 32u>;
@@ -386,7 +386,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f32_16x16x128_fp8_fp8_gfx1250
+        struct wmma_f32_16x16x128_fp8_fp8_gfx125x
         {
             using Key       = wmma_key<float8_t, float8_t, float32_t, 16u, 16u, 128u>;
             using PaddableK = wmma_k_list<>;
@@ -427,7 +427,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f16_16x16x64_fp8_fp8_gfx1250
+        struct wmma_f16_16x16x64_fp8_fp8_gfx125x
         {
             using Key       = wmma_key<float8_t, float8_t, float16_t, 16u, 16u, 64u>;
             using PaddableK = wmma_k_list<16u, 32u>;
@@ -468,7 +468,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f16_16x16x128_fp8_fp8_gfx1250
+        struct wmma_f16_16x16x128_fp8_fp8_gfx125x
         {
             using Key       = wmma_key<float8_t, float8_t, float16_t, 16u, 16u, 128u>;
             using PaddableK = wmma_k_list<>;
@@ -509,7 +509,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f32_16x16x64_bf8_bf8_gfx1250
+        struct wmma_f32_16x16x64_bf8_bf8_gfx125x
         {
             using Key       = wmma_key<bfloat8_t, bfloat8_t, float32_t, 16u, 16u, 64u>;
             using PaddableK = wmma_k_list<8u, 16u, 32u>;
@@ -550,7 +550,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f32_16x16x128_bf8_bf8_gfx1250
+        struct wmma_f32_16x16x128_bf8_bf8_gfx125x
         {
             using Key       = wmma_key<bfloat8_t, bfloat8_t, float32_t, 16u, 16u, 128u>;
             using PaddableK = wmma_k_list<>;
@@ -591,7 +591,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f16_16x16x64_bf8_bf8_gfx1250
+        struct wmma_f16_16x16x64_bf8_bf8_gfx125x
         {
             using Key       = wmma_key<bfloat8_t, bfloat8_t, float16_t, 16u, 16u, 64u>;
             using PaddableK = wmma_k_list<16u, 32u>;
@@ -632,7 +632,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f16_16x16x128_bf8_bf8_gfx1250
+        struct wmma_f16_16x16x128_bf8_bf8_gfx125x
         {
             using Key       = wmma_key<bfloat8_t, bfloat8_t, float16_t, 16u, 16u, 128u>;
             using PaddableK = wmma_k_list<>;
@@ -673,7 +673,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f32_16x16x64_fp8_bf8_gfx1250
+        struct wmma_f32_16x16x64_fp8_bf8_gfx125x
         {
             using Key       = wmma_key<float8_t, bfloat8_t, float32_t, 16u, 16u, 64u>;
             using PaddableK = wmma_k_list<16u, 32u>;
@@ -714,7 +714,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f32_16x16x128_fp8_bf8_gfx1250
+        struct wmma_f32_16x16x128_fp8_bf8_gfx125x
         {
             using Key       = wmma_key<float8_t, bfloat8_t, float32_t, 16u, 16u, 128u>;
             using PaddableK = wmma_k_list<>;
@@ -755,7 +755,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f16_16x16x64_fp8_bf8_gfx1250
+        struct wmma_f16_16x16x64_fp8_bf8_gfx125x
         {
             using Key       = wmma_key<float8_t, bfloat8_t, float16_t, 16u, 16u, 64u>;
             using PaddableK = wmma_k_list<16u, 32u>;
@@ -796,7 +796,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f16_16x16x128_fp8_bf8_gfx1250
+        struct wmma_f16_16x16x128_fp8_bf8_gfx125x
         {
             using Key       = wmma_key<float8_t, bfloat8_t, float16_t, 16u, 16u, 128u>;
             using PaddableK = wmma_k_list<>;
@@ -837,7 +837,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f32_16x16x64_bf8_fp8_gfx1250
+        struct wmma_f32_16x16x64_bf8_fp8_gfx125x
         {
             using Key       = wmma_key<bfloat8_t, float8_t, float32_t, 16u, 16u, 64u>;
             using PaddableK = wmma_k_list<16u, 32u>;
@@ -878,7 +878,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f32_16x16x128_bf8_fp8_gfx1250
+        struct wmma_f32_16x16x128_bf8_fp8_gfx125x
         {
             using Key       = wmma_key<bfloat8_t, float8_t, float32_t, 16u, 16u, 128u>;
             using PaddableK = wmma_k_list<>;
@@ -919,7 +919,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f16_16x16x64_bf8_fp8_gfx1250
+        struct wmma_f16_16x16x64_bf8_fp8_gfx125x
         {
             using Key       = wmma_key<bfloat8_t, float8_t, float16_t, 16u, 16u, 64u>;
             using PaddableK = wmma_k_list<16u, 32u>;
@@ -960,7 +960,7 @@ namespace rocwmma
             }
         };
 
-        struct wmma_f16_16x16x128_bf8_fp8_gfx1250
+        struct wmma_f16_16x16x128_bf8_fp8_gfx125x
         {
             using Key       = wmma_key<bfloat8_t, float8_t, float16_t, 16u, 16u, 128u>;
             using PaddableK = wmma_k_list<>;
