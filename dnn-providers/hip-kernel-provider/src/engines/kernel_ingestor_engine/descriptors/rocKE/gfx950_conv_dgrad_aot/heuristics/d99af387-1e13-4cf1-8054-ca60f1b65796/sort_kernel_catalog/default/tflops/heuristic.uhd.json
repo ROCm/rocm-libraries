@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "id": "a50c7880-e4a5-436b-850b-5123f1bd4a4e",
-  "name": "hipkernel:Gfx950ConvDgradAot (gfx950, 8 contribution(s))",
+  "id": "81f666a1-6204-40f1-8e6d-ccad01bdbcae",
+  "name": "hipkernel:Gfx950ConvDgradAot (gfx950, 12 contribution(s))",
   "adapter": "tree_data",
   "features_signature": [
     "$device.memory_clock_rate",
@@ -109,7 +109,7 @@
   "features_hash": "sha256:397066f1cc11c7cc",
   "trained_against": {
     "ued": {
-      "id": "bcca4782-ddf5-4457-b12c-4eb09bc9e842",
+      "id": "d99af387-1e13-4cf1-8054-ca60f1b65796",
       "revision": "1.0"
     },
     "kmd": {
@@ -132,7 +132,7 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "bbd8b05f7babe2c28f0d0011a87bbbed3cff5cdcdbb6c367f99ccd9346210764"
+    "hash": "6f46cb91fe83e8494557157bafd4eb291d34b3be7b977a861f4cd816675641aa"
   },
   "categorical_encoding": {
     "$kernel.direct_variant": {
