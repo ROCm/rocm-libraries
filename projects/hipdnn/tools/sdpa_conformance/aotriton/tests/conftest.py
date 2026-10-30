@@ -71,11 +71,19 @@ def keep_pattern(B, Hq, max_sq, max_sk, p, seed, offset, device):
     return ((b * 7 + h * 5 + i * 3 + j + seed + offset) % 3 != 0).to(device)
 
 
+@dataclasses.dataclass(frozen=True)
+class _FakeCall(CallRecord):
+    """What the real runtime's call record adds to the contract's: the exhaustive pass-1 counts."""
+
+    candidates: dict = dataclasses.field(default_factory=dict)
+
+
 @pytest.fixture
 def fake_sdpa(monkeypatch):
     """The fake `hipdnn_sdpa` module; `.calls` lists (name, kwargs) of every sdpa_* call and
     `.decline` (a dict direction -> reason) makes a direction raise `EngineDeclined`;
-    `.engine_lists` (direction -> tuple of names) and `.kernels` (direction -> kernel id) fill the
+    `.engine_lists` (direction -> tuple of names), `.kernels` (direction -> kernel id) and `.candidates`
+    (direction -> {engine: count | message}) fill the
     `CallRecord` that `last_call(direction)` returns on the calling thread after a successful call
     (None after a decline). `.log_installs` counts `install_kernel_log()` calls; `.repros` lists the
     `(dir, directions, roles)` of every `save_repro` call, which also writes `<dir>/saved.json`.
@@ -92,6 +100,7 @@ def fake_sdpa(monkeypatch):
     module.decline = {}
     module.engine_lists = {}
     module.kernels = {}
+    module.candidates = {}
     module.log_installs = 0
     module.repros = []
     module.CallRecord = CallRecord
@@ -104,13 +113,14 @@ def fake_sdpa(monkeypatch):
         setattr(
             last,
             direction,
-            CallRecord(
+            _FakeCall(
                 direction,
                 engine,
                 module.kernels.get(direction, ""),
                 tuple(module.engine_lists.get(direction, ())),
                 "{}",
                 {},
+                dict(module.candidates.get(direction, {})),
             ),
         )
         return engine
