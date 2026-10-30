@@ -77,7 +77,7 @@ HIP_VISIBLE_DEVICES=0 gpu-run ./rocalution-unit-test
 ```
 
 > When any `ROCALUTION_EMULATION_*` var is set, GPU-heavy infrastructure suites (`local_matrix_*`,
-> `local_vector`, `local_stencil`, `backend`, `preconditioner`, MPI infra) call `GTEST_SKIP()`, and
+> `local_vector`, `local_stencil`, `backend`, `preconditioner` except its repeated-move test, MPI infra) call `GTEST_SKIP()`, and
 > solver suites shrink their parameter lists. If no emulation variables are set, the full set of parameter combinations is exercised.
 
 **3. Add the right kind of test:** see [Choosing the Right Test Type](#choosing-the-right-test-type).
