@@ -29,7 +29,12 @@ set(HKP_PACK_STAMP_NAME ".hkp-packed.stamp" CACHE INTERNAL
 # Descriptor families a build option switches on and off, as <folder>=<option>. A
 # family lives in a top-level child folder of any source root; with its option OFF
 # every root is packed with that folder excluded. A new family is one entry here.
-set(HKP_DESCRIPTOR_FAMILIES "rocKE=HIPKERNELPROVIDER_ENABLE_ROCKE")
+set(HKP_DESCRIPTOR_FAMILIES
+    "rocKE=HIPKERNELPROVIDER_ENABLE_ROCKE"
+    "megakernel=ENABLE_MEGAKERNEL_ENGINE")
+
+# Checks a megakernel bundle's code objects against its committed lock (manifest.json).
+set(HKP_MEGAKERNEL_LOCK_TOOL "${HKP_PKG_DIR}/tools/hkp_megakernel_lock.py")
 
 include(KpackPython)
 
@@ -406,6 +411,20 @@ function(hkp_wire_pack_target)
         list(APPEND _exclude_args --exclude-folder "${_folder}")
     endforeach()
 
+    # A megakernel bundle ships prebuilt code objects from DVC. Before anything is packed,
+    # each must be the one its committed lock names (sha256 and size), and the KDP the one
+    # the lock generates; a mismatch fails the build. Skipped with the family excluded.
+    set(_lock_commands "")
+    set(_lock_deps "")
+    if(NOT "megakernel" IN_LIST ARG_EXCLUDE_FOLDERS)
+        file(GLOB_RECURSE _locks "${ARG_SOURCE_ROOT}/megakernel/manifest.json")
+        foreach(_lock IN LISTS _locks)
+            list(APPEND _lock_commands COMMAND "${_interp}" "${HKP_MEGAKERNEL_LOCK_TOOL}"
+                 verify --lock "${_lock}")
+            set(_lock_deps "${HKP_MEGAKERNEL_LOCK_TOOL}")
+        endforeach()
+    endif()
+
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
     # Inside the output root, so the stamp shares the fate of the tree it vouches for.
     # A stamp kept anywhere else witnesses only the pack's own run: it can say "the pack
@@ -483,6 +502,7 @@ function(hkp_wire_pack_target)
         OUTPUT "${_stamp}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_inter_root}"
+        ${_lock_commands}
         COMMAND ${_tool_cmd}
                 --source-root "${ARG_SOURCE_ROOT}"
                 --out-root "${ARG_OUT_ROOT}"
@@ -498,7 +518,7 @@ function(hkp_wire_pack_target)
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
                 "${_input_manifest}" "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
-                ${_producer_deps}
+                ${_producer_deps} ${_lock_deps}
         COMMENT "hkp: packing root '${ARG_NAME}' for ${ARG_ARCHES}"
         VERBATIM)
 
@@ -1696,7 +1716,7 @@ function(hkp_add_packaging)
 
     # Test descriptors, one pack per authored set. The shared root is packed into both
     # test roots, so both test binaries see the same authored descriptors; the two need
-    # distinct NAMEs.
+    # distinct NAMEs. The archive_fixture set is also packed twice, once for each binary.
     set(_authored "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT}")
     set(_unit "${HIPKERNELPROVIDER_UNIT_BUILD_DIR}")
     set(_integration "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}")
@@ -1751,6 +1771,31 @@ function(hkp_add_packaging)
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
         OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}"
+        PACK_JOBS 1
+        ${_root_args})
+
+    # The unit binary's copy of the same set. It stages outside the unit root, so the unit
+    # engine does not discover it, and the integration suite cannot corrupt it.
+    _hkp_wire_root(
+        NAME unit_archive_fixture
+        SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}"
+        ARCHES "${_arches}"
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_BUILD_DIR}"
+        PACK_JOBS 1
+        ${_root_args})
+
+    # Not under the unit or the integration root: no Container loads this set, so its engine
+    # reaches no engine list. The unit binary reads the packed archive and builds its own
+    # descriptor tree from it at run time.
+    _hkp_wire_root(
+        NAME multi_launch
+        SOURCE_ROOT "${_authored}/${HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH}"
+        ARCHES "${_arches}"
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH}"
         PACK_JOBS 1
         ${_root_args})
 

@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "id": "3d9a1c55-0e7b-5f40-8c2d-7a51b0e94c11",
+  "name": "megakernel stand-in binary key and launch geometry",
+  "fields": [
+    {
+      "name": "model",
+      "type": "string"
+    },
+    {
+      "name": "src",
+      "type": "string"
+    },
+    {
+      "name": "cus",
+      "type": "int"
+    },
+    {
+      "name": "kv",
+      "type": "string"
+    },
+    {
+      "name": "block",
+      "type": "int"
+    },
+    {
+      "name": "M",
+      "type": "int"
+    },
+    {
+      "name": "tp",
+      "type": "int"
+    },
+    {
+      "name": "rt",
+      "type": "int"
+    },
+    {
+      "name": "lm_head",
+      "type": "bool"
+    },
+    {
+      "name": "block_threads",
+      "type": "int"
+    },
+    {
+      "name": "lds_bytes",
+      "type": "int"
+    }
+  ]
+}

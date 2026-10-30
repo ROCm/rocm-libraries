@@ -47,13 +47,30 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
-option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored rocKE descriptor is not pulled" OFF)
+option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored descriptor of an enabled family is not pulled" OFF)
+# A TheRock build compiles the committed serialization headers by default.
+if(DEFINED THEROCK_SUBPROJECT_TARGET)
+    set(_hkp_generate_serialize_default OFF)
+else()
+    set(_hkp_generate_serialize_default ON)
+endif()
+option(HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS
+       "Regenerate FlatBuffers serialization headers from schema during build"
+       ${_hkp_generate_serialize_default}
+)
 
 # Gates the generic kernel ingestor. The ingestor engine compiles its kernel
 # through the HIP kernel engine's compiler, so it only builds alongside that engine.
 option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
+# The megakernel descriptor family (descriptors/megakernel/, packs/MegakernelNative.cpp):
+# persistent decode megakernels served through a hipDNN custom op. The same name is the
+# HKP_DESCRIPTOR_FAMILIES entry and the compile definition that builds the native pack.
+option(ENABLE_MEGAKERNEL_ENGINE "Build the megakernel custom-op ingestor family" OFF)
+if(ENABLE_MEGAKERNEL_ENGINE AND NOT HIPDNN_ENABLE_KERNEL_INGESTOR)
+    message(FATAL_ERROR "ENABLE_MEGAKERNEL_ENGINE requires HIPDNN_ENABLE_KERNEL_INGESTOR=ON")
+endif()
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
@@ -314,8 +331,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     )
 
     # Two test descriptor roots, one per test binary. The unit root holds two packed
-    # subtrees and the integration root holds three, all five wired in
-    # descriptor-packaging/cmake/HkpPackaging.cmake. The packer stages each authored
+    # subtrees and the integration root holds three. Two more packed subtrees stage beside
+    # the two roots and not inside either: the unit binary's copy of archive_fixture, so the
+    # unit engine does not discover it, and multi_launch, which no Container loads. All seven
+    # are wired in descriptor-packaging/cmake/HkpPackaging.cmake. The packer stages each authored
     # subtree per architecture: it rewrites an authored hip descriptor to kpack and writes
     # the archive beside it. An embedded_source descriptor names a kernel compiled into a
     # binary and JIT-compiled at load; for one of those the packer stamps the shard
@@ -332,8 +351,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
     # Not a test root: the production tree's provenance sidecars install here. It shares
     # the folder with the test sets, so it must not reuse unit, integration,
-    # test_kpack_binary (src/tests/CMakeLists.txt) or the census folder HkpPackaging.cmake
-    # installs.
+    # unit_archive_fixture, multi_launch, test_kpack_binary (src/tests/CMakeLists.txt) or the
+    # census folder HkpPackaging.cmake installs.
     set(HIPKERNELPROVIDER_TEST_SET_PROVENANCE "provenance")
 
     set(HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT
@@ -344,20 +363,29 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
 
-    # Large rocKE bundle files (KDPs, kernel objects, heuristic models) are DVC outputs,
-    # each a file with a <file>.dvc pointer or a folder with a <folder>.dvc pointer. With
-    # ENABLE_ROCKE ON, warn when one is missing or differs from its pointer (file size, or
+    # Large bundle files of a DVC-stored family (rocKE: KDPs, kernel objects, heuristic
+    # models; megakernel: KDP and code objects) are DVC outputs, each a file with a
+    # <file>.dvc pointer or a folder with a <folder>.dvc pointer. For each family this
+    # build enables, warn when one is missing or differs from its pointer (file size, or
     # folder file count) so the shipped bundle is not silently left out; tests still
     # configure and run. REQUIRE_DVC_DESCRIPTORS turns the warning into an error for
-    # release builds. Only the root this build packs from is checked.
+    # release builds. Only the root this build packs from is checked. The megakernel pack
+    # step also checks each code object's sha256 against the family's committed lock.
+    set(_dvc_families "")
     if(HIPKERNELPROVIDER_ENABLE_ROCKE)
-        if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
-            set(_rocke_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
-        else()
-            set(_rocke_root "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
-        endif()
-        file(GLOB_RECURSE _rocke_pointers "${_rocke_root}/rocKE/*.dvc")
-        foreach(_pointer IN LISTS _rocke_pointers)
+        list(APPEND _dvc_families rocKE)
+    endif()
+    if(ENABLE_MEGAKERNEL_ENGINE)
+        list(APPEND _dvc_families megakernel)
+    endif()
+    if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
+        set(_dvc_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
+    else()
+        set(_dvc_root "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
+    endif()
+    foreach(_family IN LISTS _dvc_families)
+        file(GLOB_RECURSE _dvc_pointers "${_dvc_root}/${_family}/*.dvc")
+        foreach(_pointer IN LISTS _dvc_pointers)
             string(REGEX REPLACE "\\.dvc$" "" _output "${_pointer}")
             file(STRINGS "${_pointer}" _nfiles_line REGEX "^  nfiles: [0-9]+$")
             file(STRINGS "${_pointer}" _size_line REGEX "^  size: [0-9]+$")
@@ -381,18 +409,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                     set(_level WARNING)
                 endif()
                 message(${_level}
-                    "hip-kernel-provider: rocKE DVC output ${_output} is missing or "
+                    "hip-kernel-provider: ${_family} DVC output ${_output} is missing or "
                     "incomplete (found ${_actual}, expected ${_expected}; bytes for a "
-                    "file, file count for a folder). The shipped rocKE bundle will NOT "
+                    "file, file count for a folder). The shipped ${_family} bundle will NOT "
                     "be packed. Run: dvc pull -r ingestor ${_pointer}")
             endif()
         endforeach()
-    endif()
+    endforeach()
 
     # The name of each authored set, which is also the name it stages under. Named here
     # only because the test subdirectories compile these same segments into their binaries
-    # as a relative offset; the packing rules in HkpPackaging.cmake join them to the two
-    # roots above directly.
+    # as a relative offset; the packing rules in HkpPackaging.cmake join them to the roots
+    # above.
     #
     # Every set is a top-level folder under test_descriptors/, and every one is packed
     # WHOLE rather than by the set inside it. Each descriptor therefore lands in a CHILD of
@@ -408,6 +436,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # still serves, which needs the two archives to be separate files.
     set(HIPKERNELPROVIDER_TEST_SET_SHARED "shared")
     set(HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE "archive_fixture")
+    # Packed beside the unit and integration roots rather than into either: the engine it
+    # declares is loaded only from a scratch tree the unit binary writes at run time, so no
+    # Container may list it.
+    set(HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH "multi_launch")
+
+    # The unit binary's own packed copy of the archive_fixture set. The integration suite
+    # corrupts the integration copy in place, so the two binaries do not share an archive.
+    set(HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_SUBDIR "unit_archive_fixture")
+    set(HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_BUILD_DIR
+        "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_UNIT_ARCHIVE_FIXTURE_SUBDIR}")
 
     # The same binary-to-plugin-directory offset, extended to the test descriptor trees.
     file(RELATIVE_PATH HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR

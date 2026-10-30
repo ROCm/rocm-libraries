@@ -31,9 +31,6 @@
 #include "rocsparse_indextype_utils.hpp"
 #include "rocsparse_utility.hpp"
 
-// rocsparse_spmat_scale is gated behind the ROCSPARSE_WITH_SPMAT_SCALE build-time feature flag.
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
-
 namespace rocsparse
 {
     // Scale the value array of the target in place by alpha. The memory space of alpha is taken
@@ -296,5 +293,3 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
-
-#endif /* ROCSPARSE_WITH_SPMAT_SCALE */

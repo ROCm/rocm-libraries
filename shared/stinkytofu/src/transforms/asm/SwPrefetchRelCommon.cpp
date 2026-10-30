@@ -4,7 +4,10 @@
 #include "stinkytofu/transforms/asm/SwPrefetchRelCommon.hpp"
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <unordered_map>
@@ -20,6 +23,7 @@
 #include "stinkytofu/support/CFGTraversal.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/InstructionSizeCosting.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 namespace {
 using namespace stinkytofu;
@@ -998,6 +1002,18 @@ void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, AsmIRBuilder& b
 }  // namespace
 
 namespace stinkytofu {
+
+uint32_t absPrefetchEntrySgprBase(const Function& function) {
+    // Width of the burst's block (even-aligned pair s[base:base+1] + scratch
+    // s[base+2]) and of the prologue's SADDR pair, which sits above it.
+    constexpr uint32_t kBurstWidth = 3;
+    constexpr uint32_t kProloguePairWidth = 2;
+
+    const std::optional<uint32_t> prologuePair = reusableEvenSgprBase(function, kProloguePairWidth);
+    const std::optional<uint32_t> block = reusableEvenSgprBase(
+        function, kBurstWidth, prologuePair.value_or(std::numeric_limits<uint32_t>::max()));
+    return block.value_or(nextEvenRegisterBase(function, RegType::S));
+}
 
 /// \brief Place software prefetch (`s_prefetch_inst_pc_rel`) at
 /// fixed **global**

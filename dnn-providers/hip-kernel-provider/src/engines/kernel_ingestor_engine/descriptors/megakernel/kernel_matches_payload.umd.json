@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "f94e96df-ef3a-540e-b6a6-ff22077e5943",
+  "name": "every binary-key field of the kernel equals the custom op payload's",
+  "scope": "kernel",
+  "match_symbol": "megakernel.kernel_matches"
+}

@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "5b6947c5-91dc-563e-b6a3-a292361ddf2e",
+  "name": "megakernel dispatch",
+  "dispatch_symbol": "megakernel.dispatch"
+}

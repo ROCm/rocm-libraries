@@ -58,9 +58,22 @@ inline constexpr std::string_view GFX950_ATTENTION_DENSE_ENGINE_NAME
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();
 
-/// @see packs/Gfx1151WmmaAttentionNative.cpp
+/// @see packs/Gfx1151WmmaAttentionNative.cpp, which serves both engines
 void registerGfx1151WmmaAttentionSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx1151WmmaAttentionModuleCache();
+void registerGfx1151WmmaAttentionDecodeSymbols(
+    hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx1151WmmaAttentionDecodeModuleCache();
+
+/// The engine name descriptors/megakernel/megakernel.ued.json declares. The pack table and
+/// the pack's decline lines read it here.
+inline constexpr std::string_view MEGAKERNEL_ENGINE_NAME = "hipkernel:Megakernel";
+
+#ifdef ENABLE_MEGAKERNEL_ENGINE
+/// @see packs/MegakernelNative.cpp
+void registerMegakernelSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetMegakernelModuleCache();
+#endif
 
 /// Drops every pack's cached kpack modules and closes every kpack archive
 /// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases

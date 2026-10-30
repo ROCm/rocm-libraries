@@ -30,20 +30,20 @@ from collections import OrderedDict
 from copy import deepcopy
 from typing import Dict
 
-from Tensile import __version__
-from Tensile.Toolchain.Component import get_rocm_version
+from .. import __version__
+from ..Toolchain.Component import get_rocm_version
 
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
 from .Utilities import locateExe, versionIsCompatible, print1, print2, printExit, printWarning, \
      getVerbosity
-from .ValidParameters import validParameters
+from .ValidParameters import validISA, validParameters
 
 startTime = time.time()
 
 globalParameters = OrderedDict()
 globalParameters["MinimumRequiredVersion"] = (
-    "0.0.0"  # which version of tensile is required to handle all the features required by this configuration file
+    "0.0.0"  # which version of TensileLite is required to handle all the features required by this configuration file
 )
 globalParameters["PerformanceMetric"] = (
     "DeviceEfficiency"  # performance metric for benchmarking; one of {DeviceEfficiency, CUEfficiency}
@@ -100,17 +100,17 @@ globalParameters["ValidationMaxToPrint"] = 4  # maximum number of mismatches to 
 globalParameters["ValidationPrintValids"] = False  # print matches too
 # steps
 globalParameters["ForceRedoBenchmarkProblems"] = (
-    True  # if False and benchmarking already complete, then benchmarking will be skipped when tensile is re-run
+    True  # if False and benchmarking already complete, then benchmarking will be skipped when TensileLite is re-run
 )
 globalParameters["ForceRedoLibraryLogic"] = (
-    True  # if False and library logic already analyzed, then library logic will be skipped when tensile is re-run
+    True  # if False and library logic already analyzed, then library logic will be skipped when TensileLite is re-run
 )
 globalParameters["ForceRedoLibraryClient"] = (
-    True  # if False and library client already built, then building library client will be skipped when tensile is re-run
+    True  # if False and library client already built, then building library client will be skipped when TensileLite is re-run
 )
 
 globalParameters["ShowProgressBar"] = (
-    True  # if False and library client already built, then building library client will be skipped when tensile is re-run
+    True  # if False and library client already built, then building library client will be skipped when TensileLite is re-run
 )
 globalParameters["SolutionSelectionAlg"] = (
     1  # algorithm to determine which solutions to keep. 0=removeLeastImportantSolutions, 1=keepWinnerSolutions (faster)
@@ -135,7 +135,7 @@ globalParameters["CpuThreads"] = (
 # generated ``.s`` and participate in this check; that same encoding total feeds
 # ``.amdhsa_inst_pref_size`` in ``.amdhsa_kernel`` metadata for CP instruction prefetch.
 # Currently this applies to gfx1250 only (StinkyTofu gfx1250 emitter and CP prefetch on that arch).
-# Testing: ``tox`` turns on ``CheckASMCodeSize=True`` for the default Tensile pytest runs (see
+# Testing: ``tox`` turns on ``CheckASMCodeSize=True`` for the default TensileLite pytest runs (see
 # ``tox.ini``), so gfx1250 kernels built during those tests are verified automatically.
 globalParameters["CheckASMCodeSize"] = False
 globalParameters["NumWarmups"] = 0
@@ -221,6 +221,9 @@ globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # WorkAssignment values.
 globalParameters["StreamKHybridMode"] = [0]
 globalParameters["HybridAssignmentPolicy"] = ["Default"]
+# Runtime steering for USO guarantee
+# -1=use default, 0=off, 1=on
+globalParameters["UniformSummationOrder"] = -1
 # Runtime batch ABI used by the Tensile client: 0=strided, 1=pointer array.
 # This is intentionally independent of ProblemType.StridedBatched so universal
 # strided kernels can exercise their ArgType==3 general-batched path.
@@ -233,8 +236,8 @@ globalParameters["CheckSynchronizer"] = True
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
-# When this parameter is set to 0, the Tensile client will use srand(time(NULL)).
-# If not 0 the Tensile client will use srand(seed).
+# When this parameter is set to 0, the TensileLite client will use srand(time(NULL)).
+# If not 0 the TensileLite client will use srand(seed).
 globalParameters["DataInitSeed"] = 0
 globalParameters["PruneSparseMode"] = (
     0  # Prune mode for Sparse Matrix: 0=random, 1=XX00, 2=X0X0, 3=0XX0, 4=X00X, 5=0X0X, 6=00XX
@@ -266,6 +269,8 @@ globalParameters["PrintTensorBias"] = 0  # Print TensorBias after initialization
 globalParameters["PrintTensorGate"] = 0
 globalParameters["PrintTensorScaleAlphaVec"] = 0  # Print TensorScaleAlphaVec after initialization
 globalParameters["PrintTensorAmaxD"] = 0  # Print AmaxD after validation
+# Print final matrix-staging LDS addresses and the gfx1250 segment map during kernel generation.
+globalParameters["PrintLDSLayout"] = False
 globalParameters["PrintWinnersOnly"] = False  # Only print the solutions which become the fastest
 globalParameters["PrintCodeCommands"] = (
     False  # print the commands used to generate the code objects (asm,link,hip-clang, etc)
@@ -324,18 +329,18 @@ globalParameters["GranularityThreshold"] = 0.0
 globalParameters["PredictionThreshold"] = 2.0
 
 globalParameters["PristineOnGPU"] = (
-    True  # use Pristine memory on Tensile trainning verification or not
+    True  # use Pristine memory on TensileLite trainning verification or not
 )
 
 globalParameters["SeparateArchitectures"] = (
-    False  # write Tensile library metadata to separate files for each architecture
+    False  # write TensileLite library metadata to separate files for each architecture
 )
 
 globalParameters["LazyLibraryLoading"] = (
     False  # Load library and code object files when needed instead of at startup
 )
 
-globalParameters["EnableMarker"] = False  # Enable Tensile markers
+globalParameters["EnableMarker"] = False  # Enable TensileLite markers
 
 globalParameters["UseUserArgs"] = False
 
@@ -371,6 +376,9 @@ globalParameters["DisableAsmComments"] = False  # Set to True to disable assembl
 
 # Enable SQTT markers around mainloop iteration (subtile kernels only).
 globalParameters["EmitMainloopTraceMarker"] = False
+
+# Emit the CU-occupancy probe in StreamK hybrid-assignment kernels.
+globalParameters["EmitOccupancyProbe"] = False
 
 globalParameters["RocProfCounter"] = None # No rocprof counter
 
@@ -426,6 +434,13 @@ globalParameters["StinkyTofuModuleOptions"] = {}
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
 globalParameters["StinkyTofuCostOutputDir"] = ""
 
+# StinkyTofu register-allocation dump, for debugging a colouring. Each kernel that
+# runs allocation writes what it saw and did -- the IR before the lift, the SSA form,
+# its live ranges, and each attempt's placement table -- to
+# <StinkyTofuCostOutputDir>/<kernel>/ra/, or ./<kernel>/ra/ when that is unset.
+# Changes no code, so it is global rather than part of the kernel name.
+globalParameters["StinkyTofuRegisterAllocationDump"] = False
+
 globalParameters["DisableSTWaitCnt"] = True
 
 # Internal plumbing for the --cpu-only CLI switch (see tensilelite.py addCommonArguments).
@@ -450,7 +465,7 @@ defaultGlobalParameters = deepcopy(globalParameters)
 
 
 ################################################################################
-# Tensile internal parameters
+# TensileLite internal parameters
 ################################################################################
 # These parameters are not adjustable by the config yamls. They change with the
 # generator versions
@@ -483,6 +498,11 @@ defaultInternalSupportParams = {
     # and ignores bit 29 -- do not claim it; newly generated StreamK 3 / SK5
     # set it True in Solution.py.
     "SupportStreamKPerTileExtraIters": False,
+    # Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args and, when
+    # ProbeAddr is non-null, stores ProbeEpoch into the slot of the CU each WG
+    # runs on; WGs launched past ProbeGrid then end.
+    # Derived in Solution.py from EmitOccupancyProbe.
+    "SupportOccupancyProbe": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
     "UseSFC": False,
@@ -646,6 +666,7 @@ defaultBenchmarkCommonParameters = [
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
     {"TailloopInNll": [False]},
+    {"PostLoopStoreInNll": [True]},
     {"SwapGlobalReadOrder": [0]},
     {"ScheduleGROverBarrier": [-1]},
     {"DtlPlusLdsBuf": [-1]},
@@ -666,6 +687,10 @@ defaultBenchmarkCommonParameters = [
     # ahead of execution. Legacy booleans are accepted as a deprecated alias
     # (True -> Relative, False -> Off) so shipped library-logic YAMLs keep loading.
     {"SwInstructionPrefetch": [1]},
+    # StinkyTofuRegisterAllocation — per kernel: a mode 0..3, or a StinkyTofu config
+    # string such as "apply,classes=vs". See ValidParameters.py.
+    # 0 leaves the colouring Tensile emitted.
+    {"StinkyTofuRegisterAllocation": [0]},
     # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
@@ -720,12 +745,16 @@ libraryLogicTypeOverrides = {
 
 ################################################################################
 # Is query version compatible with current version
-# a yaml file is compatible with tensile if
-# tensile.major == yaml.major and tensile.minor.step > yaml.minor.step
+# a yaml file is compatible with TensileLite if
+# TensileLite.major == yaml.major and TensileLite.minor.step > yaml.minor.step
 ################################################################################
 def restoreDefaultGlobalParameters():
     """
     Restores `globalParameters` back to defaults.
+
+    ``assignGlobalParameters`` also rebinds ``validParameters["ISA"]`` to the
+    isa map it was given. Put the static ``validISA`` list back; callers that
+    narrowed the build targets must not leave that list in place.
     """
     global globalParameters
     global defaultGlobalParameters
@@ -734,6 +763,7 @@ def restoreDefaultGlobalParameters():
     globalParameters.clear()
     for key, value in deepcopy(defaultGlobalParameters).items():
         globalParameters[key] = value
+    validParameters["ISA"] = validISA
 
 
 # hopefully the isaInfoMap keys only contain isas we plan to build and not all
@@ -879,7 +909,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "BuildGfx1250v0",     # --gfx1250v0 toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
-    #     Tensile/Common/Types.py) directly from the raw config dict
+    #     tensilelite/Common/Types.py) directly from the raw config dict
     #     after assignGlobalParameters, bypassing the globalParameters
     #     registry:
     "ForceGenerateKernel",        # DebugConfig.forceGenerateKernel, read by makeDebugConfig
@@ -913,7 +943,7 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     if "MinimumRequiredVersion" in config:
         if not versionIsCompatible(config["MinimumRequiredVersion"]):
             printExit(
-                "Config file requires version=%s is not compatible with current Tensile version=%s"
+                "Config file requires version=%s is not compatible with current TensileLite version=%s"
                 % (config["MinimumRequiredVersion"], __version__)
             )
 

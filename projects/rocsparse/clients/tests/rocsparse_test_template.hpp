@@ -125,14 +125,27 @@ namespace
                 static bool query_device = true;
                 if(query_device)
                 {
-                    if(hipGetDevice(&dev) != hipSuccess)
+                    // main() has already selected and queried this device; this is a backstop.
+                    // Returning false here would filter out every test as another architecture,
+                    // and the binary would pass having run nothing.
+                    const hipError_t get_status = hipGetDevice(&dev);
+                    if(get_status != hipSuccess)
                     {
-                        return false;
+                        std::cerr << "rocsparse-test error: hipGetDevice failed: "
+                                  << hipGetErrorString(get_status) << " (" << get_status << ")"
+                                  << std::endl;
+                        exit(EXIT_FAILURE);
                     }
-                    if(hipGetDeviceProperties(&prop, dev) != hipSuccess)
+
+                    const hipError_t prop_status = hipGetDeviceProperties(&prop, dev);
+                    if(prop_status != hipSuccess)
                     {
-                        return false;
+                        std::cerr << "rocsparse-test error: cannot get properties of device ID "
+                                  << dev << ": " << hipGetErrorString(prop_status) << " ("
+                                  << prop_status << ")" << std::endl;
+                        exit(EXIT_FAILURE);
                     }
+
                     query_device = false;
                 }
 

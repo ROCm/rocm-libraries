@@ -722,6 +722,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
           for policy in globalParameters["HybridAssignmentPolicy"]:
             param('hybrid-assignment-policy', policy)
 
+        if globalParameters["UniformSummationOrder"] != -1:
+          param('uniform-summation-order', globalParameters["UniformSummationOrder"])
+
         param("device-idx",               deviceId)
 
         param("init-seed",                globalParameters["DataInitSeed"])
@@ -887,7 +890,7 @@ def getClientExecutablePath():
 
   if not os.path.isfile(clientExe):
     raise FileNotFoundError(
-        f"Tensile client executable not found at '{clientExe}'.\n"
+        f"TensileLite client executable not found at '{clientExe}'.\n"
         "Please ensure the client is built or provide a valid path using the --prebuilt-client flag.\n"
         "To build, run: `invoke build-client` (you may need to `pip3 install invoke` first).\n"
         "For custom cmake build instructions, please refer to the README in next-cmake."

@@ -140,3 +140,31 @@ git add artifacts.dvc .gitignore
   `ingestor/` prefix. Pass credentials as environment variables, never in a config file.
 - `dvc push -r ingestor` uploads everything in your local cache. Do not pull other remotes'
   data into the same worktree first.
+
+## The megakernel family
+
+`megakernel/` holds persistent decode megakernels (FlyDSL, gfx942) served through a hipDNN
+custom op `megakernel.<model>`. It is packed only with `-DENABLE_MEGAKERNEL_ENGINE=ON`
+(default OFF; the same name is the CMake option, the `HKP_DESCRIPTOR_FAMILIES` entry and
+the compile definition of `packs/MegakernelNative.cpp`).
+
+```
+megakernel/
+  megakernel.kmd.json, .ued.json, .udd.json, kernel_matches_payload.umd.json   in git
+  manifest.json      in git: the lock, the megakernels exporter's manifest
+  artifacts.dvc      in git: md5, nfiles, remote ingestor
+  artifacts/         git-ignored, from DVC
+    megakernel.kdp.json                      generated from manifest.json
+    <model>_M<M>_<src[:16]>.co               one per lock entry
+```
+
+The code objects are built outside this repository, so their bytes are pinned by the lock.
+The pack step runs `descriptor-packaging/tools/hkp_megakernel_lock.py verify` before it
+packs, and fails the build when a code object's sha256 or size differs from the lock, when
+`artifacts/` holds an object the lock does not name, or when the KDP is not the one the lock
+generates. Configure checks `artifacts.dvc` (file count) as it checks rocKE pointers.
+
+To replace the set: put the exporter's `manifest.json` and code objects in place, run
+`hkp_megakernel_lock.py generate --lock megakernel/manifest.json`, then from the repository
+root `dvc add <path>/megakernel/artifacts`, keep `remote: ingestor` in the pointer, and
+`dvc push -r ingestor <path>/megakernel/artifacts.dvc` (needs write access to the bucket).
