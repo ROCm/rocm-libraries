@@ -230,7 +230,7 @@ the provider can express.
 The gfx942 bf16 MLA prefill family has **no C++ twin** of its kernel builder,
 spec, or dispatch selector; it is built and selected in Python only. This
 follows the gfx942/gfx950 `attention_dense` family, which also ships without a
-C++ builder mirror.
+C++ builder mirror (§8).
 
 **What is gated:** the C++ *lowerer* is family-agnostic, so its byte-identity
 against the Python lowerer is checked on every MLA golden case at every
@@ -280,6 +280,48 @@ and selector parity cases with LSE on.
 
 **Sign-off:** avirgoel (owner), 2026-10-20 (reduce, Python-only); 2026-10-28
 (reduce and tiled 2D kernels mirrored in C; request side remains).
+
+---
+
+## 8. Dense attention prefill (`attention_dense`) — Python-only kernel builder
+
+**Subsystem:** `library/kernels/common/attention_dense_spec.py`,
+`library/kernels/common/attention_dense_decode.py`,
+`library/kernels/gfx9{42,50}/attention_dense.py`,
+`library/dispatch/attention/`
+
+The gfx942 / gfx950 dense prefill family has **no C++ twin** of its kernel
+builder, spec, or dispatch selector; it is built and selected in Python only.
+`grep -r attention_dense platform/cpp/` returns nothing. §6 already mentions
+this family in passing as precedent for the MLA prefill gap; this entry records
+it in its own right so the family is named debt rather than a subordinate clause.
+
+| What's missing | Where |
+|---|---|
+| A C builder for `build_attention_dense` | `cpp/instances/gfx9{42,50}/`; only `attention_tiled_2d` and `attention_tiled_3d` are ported |
+| A C twin of `AttentionDenseSpec` / `Gfx9{42,50}AttentionDenseSpec`, including the `runtime_shape`, `fastdiv_divisors` and `runtime_kernarg_fields` properties | no `rocke_attention_dense_spec_t` exists |
+| A C selector / spec builder | `cpp/instances/common/attention_unified_selectors.cpp` covers the unified tiled path only; dense has no selector to mirror into |
+| The runtime-shape kernarg ABI (`attention_dense_signature`, `attention_dense_runtime_args`) | Python only; the hipDNN provider packs these kernargs from its own C++ pack, not from a rocke C++ spec |
+
+**What is gated:** the C++ *lowerer* is family-agnostic, so its byte-identity
+against the Python lowerer is checked on every dense case at every
+`GOLDEN_FLAVORS` flavor with `ROCKE_CPP_STRICT=1` —  `attention_dense` is a
+member of `_FAMILIES` in
+`library/tests/test_attention_ir_cpp_parity.py::test_attention_ir_cpp_python_byte_identity`.
+The Python IR itself is pinned by
+`platform/tests/golden/rocke_representative_ir_sha256.json`. So a change to the
+dense kernel body cannot silently diverge the two engines even without a builder
+twin.
+
+**Why deferred:** the same owner decision as §6 — per-family C++ builder mirrors
+are not currently maintained for the attention families that post-date the port,
+and the C engine is expected to be deprecated (ROCm/rocm-libraries#13955).
+
+**What closes it:** a decision to restore per-family C++ builder mirrors, or
+retiring the C engine. Until then, keep dense emission changes gated by the
+cross-engine parity test and the representative golden above.
+
+**Sign-off:** arai713, 2026-10-30.
 
 ---
 
