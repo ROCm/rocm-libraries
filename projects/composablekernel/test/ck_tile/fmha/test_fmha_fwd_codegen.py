@@ -1445,9 +1445,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
             len(kernels),
             sum(
                 (
-                    {0: 12, 100: 8, 200: 4, 600: 12}[receipt]
-                    # D64 N128 is absent from receipt 200 for both dtypes.
-                    + (4 if receipt in (0, 100, 600) else 0)
+                    2 * {0: 12, 100: 8, 200: 4, 600: 12}[receipt]
                     if dim == 64
                     else count * (2 if dim == 192 else 1)
                 )
@@ -1496,18 +1494,20 @@ class TestGfx125V128Codegen(unittest.TestCase):
             n64 = [k for k in kernels if k.F_tile.F_bn0 == 64]
             n128 = [k for k in kernels if k.F_tile.F_bn0 == 128]
             self.assertEqual(len(n64), 12)
-            # N128 is emitted for both dtypes, as batch npad, simplified masks.
-            self.assertEqual(len(n128), 4)
+            # Both widths share aligned/padded batch and padded group traits.
+            self.assertEqual(len(n128), 12)
             for kernel in kernels:
                 self.assertEqual(kernel.F_tile.F_bm0, 128)
                 self.assertEqual(kernel.F_tile.F_bn1, 64)
                 self.assertEqual(kernel.F_pipeline.F_dpad, "f")
                 self.assertEqual(kernel.F_pipeline.F_dvpad, "f")
-            for kernel in n64:
+            for kernel in n64 + n128:
                 self.assertEqual(kernel.F_tile.F_occupancy, 3)
                 trait = kernel.api_trait()
                 if kernel.F_mode == "batch" and trait.skpad == "f":
-                    self.assertIn("a.seqlen_k % 64 == 0", trait.skcheck)
+                    self.assertIn(
+                        f"a.seqlen_k % {kernel.F_tile.F_bn0} == 0", trait.skcheck
+                    )
                     self.assertIn("a.seqlen_k != 0", trait.skcheck)
                     self.assertIn("a.cu_seqlen_k_ptr == nullptr", trait.skcheck)
                 else:
@@ -1515,14 +1515,27 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     self.assertEqual(trait.skpad, "t")
             for kernel in n128:
                 self.assertEqual(kernel.F_tile.F_occupancy, 3)
-                self.assertEqual(kernel.F_mode, "batch")
-                self.assertEqual(kernel.F_pipeline.F_spad, "f")
-                self.assertEqual(kernel.F_pipeline.F_skpad, "f")
                 self.assertIn(kernel.F_pipeline.F_mask, ("s_no", "s_mask"))
-                trait = kernel.api_trait()
-                self.assertIn("a.seqlen_k % 128 == 0", trait.skcheck)
-                self.assertIn("a.cu_seqlen_k_ptr == nullptr", trait.skcheck)
+            self.assertEqual({k.F_mode for k in n128}, {"batch", "group"})
+            self.assertEqual({k.F_pipeline.F_spad for k in n128}, {"f", "t"})
             self.assertIn("a.hdim_v == 64", pool.render("test"))
+
+    def test_d64_generic_wide_emission_keeps_local_windows_on_n64(self):
+        for dtype in ("fp16", "bf16"):
+            _, kernels = get_fwd_blobs(
+                ["gfx1250"], f"*d64_{dtype}*_qr_tdm_sched_*", 600, [64], "generic"
+            )
+            n64 = [k for k in kernels if k.F_tile.F_bn0 == 64]
+            n128 = [k for k in kernels if k.F_tile.F_bn0 == 128]
+            self.assertEqual(len(n64), 18)
+            self.assertEqual(len(n128), 12)
+            self.assertEqual({k.F_pipeline.F_mask for k in n128}, {"no", "causal"})
+            self.assertTrue(any(k.F_pipeline.F_mask == "generic" for k in n64))
+            self.assertEqual({k.F_mode for k in n128}, {"batch", "group"})
+            for kernel in n128:
+                self.assertEqual(kernel.F_pipeline.F_spad, kernel.F_pipeline.F_skpad)
+                if kernel.F_mode == "group":
+                    self.assertEqual(kernel.F_pipeline.F_spad, "t")
 
     def test_fp16_bf16_d128_sched_emission(self):
         for dtype in ("fp16", "bf16"):
@@ -1705,7 +1718,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 candidates.setdefault(key, kernel)
             else:
                 self.assertNotIn(diagnostic, kernel.render())
-        # D64 N128 is not part of receipt 200; check both dtypes separately.
+        # Retain the full-receipt check for both D64 widths and dtypes.
         _, d64_n128 = get_fwd_blobs(
             ["gfx1250"], "*d64_*16*_qr_tdm_sched_*", 600, [64], "simplified"
         )
