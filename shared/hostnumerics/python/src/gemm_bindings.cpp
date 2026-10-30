@@ -10,6 +10,7 @@
 #include <complex>
 #include <optional>
 #include <roc/hostnumerics/gemm.hpp>
+#include <roc/hostnumerics/permutation.hpp>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -64,12 +65,12 @@ void registerGemmBindings(nb::module_& module) {
 
     module.def("_matmul", &matmulOwned, "a"_a, "b"_a, "output_type"_a, "options"_a,
                "output_layout"_a, "backend"_a);
-    module.def("_matmul_into", &matmulIntoBound<IndexRange, std::vector<size_t>>, "a"_a, "b"_a,
-               "output"_a, "options"_a, "indices"_a, "index_order"_a, "backend"_a);
+    module.def("_matmul_into", &matmulIntoBound<IndexRange, Permutation>, "a"_a, "b"_a, "output"_a,
+               "options"_a, "indices"_a, "index_order"_a, "backend"_a);
     module.def("_matmul_into", &matmulIntoBound<IndexRange, LastDimensionFastest>, "a"_a, "b"_a,
                "output"_a, "options"_a, "indices"_a, "index_order"_a, "backend"_a);
-    module.def("_matmul_into", &matmulIntoBound<std::set<size_t>, std::vector<size_t>>, "a"_a,
-               "b"_a, "output"_a, "options"_a, "indices"_a, "index_order"_a, "backend"_a);
+    module.def("_matmul_into", &matmulIntoBound<std::set<size_t>, Permutation>, "a"_a, "b"_a,
+               "output"_a, "options"_a, "indices"_a, "index_order"_a, "backend"_a);
     module.def("_matmul_into", &matmulIntoBound<std::set<size_t>, LastDimensionFastest>, "a"_a,
                "b"_a, "output"_a, "options"_a, "indices"_a, "index_order"_a, "backend"_a);
 }

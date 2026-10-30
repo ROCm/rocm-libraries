@@ -190,13 +190,13 @@ namespace TensileLite::Client::hostnumerics
             translateGemmInvocation(ContractionProblemGemm const&        problem,
                                     ContractionInputs const&             inputs,
                                     const roc::hostnumerics::IndexRange& indices,
-                                    std::span<const size_t>              order);
+                                    const roc::hostnumerics::Permutation&       order);
 
         friend std::variant<GemmInvocationAdapter, TranslationFailure>
             translateGemmInvocation(ContractionProblemGemm const& problem,
                                     ContractionInputs const&      inputs,
                                     const std::set<size_t>&       indices,
-                                    std::span<const size_t>       order);
+                                    const roc::hostnumerics::Permutation& order);
 
         std::unique_ptr<const State> m_state;
     };
@@ -205,13 +205,13 @@ namespace TensileLite::Client::hostnumerics
         translateGemmInvocation(ContractionProblemGemm const&        problem,
                                 ContractionInputs const&             inputs,
                                 const roc::hostnumerics::IndexRange& indices,
-                                std::span<const size_t>              order);
+                                const roc::hostnumerics::Permutation&       order);
 
     std::variant<GemmInvocationAdapter, TranslationFailure>
         translateGemmInvocation(ContractionProblemGemm const& problem,
                                 ContractionInputs const&      inputs,
                                 const std::set<size_t>&       indices,
-                                std::span<const size_t>       order);
+                                const roc::hostnumerics::Permutation& order);
 
     template <typename Indices>
     std::variant<GemmInvocationAdapter, TranslationFailure>
@@ -224,7 +224,7 @@ namespace TensileLite::Client::hostnumerics
             problem,
             inputs,
             indices,
-            roc::hostnumerics::Shape(problem.d().sizes()).indexOrderLastDimensionFastest());
+            roc::hostnumerics::Permutation::identity(problem.d().sizes().size()));
     }
 
     std::variant<GemmInvocationAdapter, TranslationFailure>

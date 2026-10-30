@@ -19,14 +19,13 @@ enum class LayoutError {
     OffsetMultiplyOverflow,
     OffsetAddOverflow,
     OrderRankMismatch,
-    InvalidOrder,
     CoordinateRankMismatch,
     CoordinateOutOfRange,
 };
 
 // Rank failures carry the supplied and expected ranks in value and limit.
-// Other failures identify an axis, or an invalid order entry's position, in
-// dimension. Coordinate, extent and order failures also carry value and limit.
+// Other failures identify an axis in dimension. Coordinate and extent failures
+// also carry value and limit.
 struct LayoutFailure {
     LayoutError error;
     size_t dimension = 0;

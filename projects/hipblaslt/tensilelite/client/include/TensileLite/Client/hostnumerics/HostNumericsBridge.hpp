@@ -253,8 +253,7 @@ namespace TensileLite::Client
         for(size_t element = 0; element < extent; ++element)
             for(size_t block = 0; block < shape[1]; ++block)
                 selected.push_back((element / freeBlock) * shape[1] + block);
-        const std::array<size_t, 2> order{0, 1};
-        return scales.copySelectedElements(selected, order)
+        return scales.copySelectedElements(selected, roc::hostnumerics::Permutation{0, 1})
             .reshapeSharingStorage(roc::hostnumerics::Shape{extent, shape[1]});
     }
 
@@ -381,12 +380,9 @@ namespace TensileLite::Client
         return options;
     }
 
-    inline std::vector<size_t> referenceIndexOrder(const TensorDescriptor& descriptor)
+    inline roc::hostnumerics::Permutation referenceIndexOrder(const TensorDescriptor& descriptor)
     {
-        std::vector<size_t> order(descriptor.dimensions());
-        for(size_t axis = 0; axis < order.size(); ++axis)
-            order[axis] = order.size() - 1 - axis;
-        return order;
+        return roc::hostnumerics::Permutation::reverse(descriptor.dimensions());
     }
 
     inline hostnumerics::detail::Expected<roc::hostnumerics::IndexRange,
@@ -406,7 +402,7 @@ namespace TensileLite::Client
         if(elementsToValidate == 0)
             return roc::hostnumerics::IndexRange::all(*logicalCount);
         return roc::hostnumerics::primeIndexRange(
-            *logicalCount, descriptor.totalAllocatedElements(), elementsToValidate);
+            {.logicalElements = *logicalCount, .requestedElements = elementsToValidate});
     }
 
     inline roc::hostnumerics::IndexRange referenceIndexRange(TensorDescriptor const& descriptor,

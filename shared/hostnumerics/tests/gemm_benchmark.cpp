@@ -165,7 +165,8 @@ void runScalarOracle(const GemmTestCase& problem, const Tensor& destination) {
     const auto& indexOrder = problem.indicesOrder;
     for (size_t ordinal = 0; ordinal < problem.indicesCount; ++ordinal) {
         const size_t logicalIndex = problem.indexAt(ordinal);
-        const auto coordinates = problem.d.shape().coordinates(logicalIndex, indexOrder);
+        const auto coordinates =
+            problem.d.shape().coordinates(logicalIndex, Permutation(indexOrder));
         const size_t row = coordinates[0];
         const size_t column = coordinates[1];
         Accumulator accumulation = Accumulator(0);
@@ -242,7 +243,8 @@ int main(int argc, char** argv) {
         const size_t outputElements = options.rows * options.columns;
         const IndexRange selection =
             options.selectedOutputs
-                ? primeIndexRange(outputElements, outputElements, *options.selectedOutputs)
+                ? primeIndexRange({.logicalElements = outputElements,
+                                   .requestedElements = *options.selectedOutputs})
                 : IndexRange::all(outputElements);
 
         const ptrdiff_t aLeadingDimension =
@@ -294,7 +296,7 @@ int main(int argc, char** argv) {
 
         const IndexRange validationSelection =
             selection.count() == outputElements && outputElements > 128
-                ? primeIndexRange(outputElements, outputElements, 128)
+                ? primeIndexRange({.logicalElements = outputElements, .requestedElements = 128})
                 : selection;
         const Tensor expected(profile.outputType, outputLayout);
         GemmTestOptions expectedOptions = requestOptions;

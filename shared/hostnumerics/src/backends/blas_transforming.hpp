@@ -182,7 +182,7 @@ GemmExecutionInfo runTransforming(const GemmInvocation& problem) {
         GemmInvocation stagedProblem(
             std::move(stagedA), std::move(stagedB), stagedOutput, stagedOptions,
             roc::hostnumerics::IndexRange::all(stagedOutput.elementCount()),
-            stagedOutput.shape().indexOrderLastDimensionFastest());
+            Permutation::identity(stagedOutput.shape().rank()));
 
         blas.run(stagedProblem);
     }

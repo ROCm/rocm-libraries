@@ -128,7 +128,7 @@ class GenerationTests(unittest.TestCase):  # noqa: F405
 
         last_dimension_fastest = real_generation_recipe(
             hv.GenerationRecipe.constant(hv.ConstantGenerationParameters(value=7.0)),
-            index_order=[2, 1, 0],
+            index_order=hv.Permutation([2, 1, 0]),
             seed=0,
         )
         hv.generate_at(point, 3, last_dimension_fastest)
@@ -445,7 +445,7 @@ class PermutationGenerationTests(unittest.TestCase):
                 component = hv.GenerationRecipe.serial_index()
                 recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
                     component, seed=0
-                ).with_index_order(order)
+                ).with_index_order(hv.Permutation(order))
                 whole = hv.generate_tensor(scalar_type, layout, recipe)
                 pointwise = hv.Tensor(scalar_type, layout)
                 for linear in range(24):
@@ -465,7 +465,7 @@ class PermutationGenerationTests(unittest.TestCase):
     def test_arbitrary_selection_and_invalid_order(self):
         dimensions = (2, 3, 4)
         shape = hv.Shape(dimensions)
-        order = [1, 0, 2]
+        order = hv.Permutation([1, 0, 2])
         expected = hv.from_numpy(np.zeros(dimensions, dtype=np.float32))
         observed_values = np.zeros(dimensions, dtype=np.float32)
         point = shape.coordinates(13, order)
@@ -480,7 +480,7 @@ class PermutationGenerationTests(unittest.TestCase):
                 recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
                     hv.GenerationRecipe.serial_index(),
                     seed=0,
-                ).with_index_order(invalid)
+                ).with_index_order(hv.Permutation(invalid))
                 hv.generate_tensor(hv.ScalarType.Float32, dimensions, recipe)
             with self.assertRaises(RuntimeError):
                 hv.compare(
@@ -488,12 +488,12 @@ class PermutationGenerationTests(unittest.TestCase):
                     expected,
                     options,
                     hv.IndexRange.all(shape.element_count),
-                    invalid,
+                    hv.Permutation(invalid),
                 )
 
     def test_contiguous_axis_order_conversion_and_selections(self):
         dimensions = (2, 3, 4)
-        order = [1, 0, 2]
+        order = hv.Permutation([1, 0, 2])
         layout = hv.Layout(hv.Shape(dimensions), [4, 8, 1], 0)
         recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
             hv.GenerationRecipe.serial_index(),
@@ -528,7 +528,9 @@ class PermutationGenerationTests(unittest.TestCase):
                 lambda: set(),
             ):
                 with self.assertRaises(RuntimeError):
-                    hv.compare(tensor, tensor, options, factory(), [0, 0, 2])
+                    hv.compare(
+                        tensor, tensor, options, factory(), hv.Permutation([0, 0, 2])
+                    )
 
     def test_prepared_type_generation_matches_checked_pointwise(self):
         dimensions = (2, 3)
@@ -548,7 +550,7 @@ class PermutationGenerationTests(unittest.TestCase):
             recipe = hv.GenerationRecipe.real_only_last_dimension_fastest(
                 component.with_zero_outside_main_diagonal(),
                 seed=0,
-            ).with_index_order([1, 0])
+            ).with_index_order(hv.Permutation([1, 0]))
             whole = hv.generate_tensor(hv.ScalarType.Float32, layout, recipe)
             pointwise = hv.Tensor(hv.ScalarType.Float32, layout)
             for index in range(6):

@@ -364,6 +364,6 @@ class GemmApiTests(unittest.TestCase):  # noqa: F405
             np.asarray([[19.0, 0.0], [0.0, 50.0]], dtype=np.float32),
         )
         self.assertEqual(
-            hv.prime_index_range(10, 10, 3).indices(),
+            hv.prime_index_range(logical_elements=10, requested_elements=3).indices(),
             [0, 3, 6, 9],
         )

@@ -68,7 +68,7 @@ StructuredSparsityPlan validateStructuredSparsityProblem(
     if (problem.pattern.selection != StructuredSparsitySelection::Fixed &&
         problem.pattern.selection != StructuredSparsitySelection::Random)
         throw std::runtime_error("Structured sparsity selection is invalid.");
-    (void)validatedIndexOrder(inputShape.rank(), problem.pattern.indexOrder);
+    (void)validatedIndexOrder(inputShape.rank(), problem.pattern.indexOrder.entries());
 
     std::vector<size_t> compressedDimensions(inputShape.dimensions().begin(),
                                              inputShape.dimensions().end());

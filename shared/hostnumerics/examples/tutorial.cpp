@@ -173,7 +173,7 @@ void higherLevelOperations() {
           "LayerNorm statistics mismatch.");
 
     StructuredSparsityPattern pattern;
-    pattern.indexOrder = {0, 1};
+    pattern.indexOrder = Permutation{0, 1};
     pattern.axis = 1;
     pattern.fixedPositions = {0, 2};
     const StructuredSparseTensor sparse = applyStructuredSparsity(

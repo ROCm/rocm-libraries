@@ -28,7 +28,9 @@ def real_generation_recipe(
 ):
     return hv.GenerationRecipe.real_only(
         component,
-        hv.GenerationRecipeSettings(seed=seed, index_order=index_order),
+        hv.GenerationRecipeSettings(
+            seed=seed, index_order=hv.Permutation(list(index_order))
+        ),
     )
 
 

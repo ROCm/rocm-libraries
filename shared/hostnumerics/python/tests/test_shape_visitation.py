@@ -3,6 +3,7 @@
 
 import ctypes
 import itertools
+import sys
 import unittest
 
 import numpy as np
@@ -21,8 +22,8 @@ class ShapeVisitationTests(unittest.TestCase):
             hn.Shape([2]).selected_coordinates(hn.IndexRange.all(2))
         with self.assertRaisesRegex(RuntimeError, "stride must be nonzero"):
             hn.IndexRange(0, 3, 0)
-        interval = hn.IndexRange(start=1, end=7, stride=2)
-        self.assertEqual((interval.start, interval.end, interval.stride), (1, 7, 2))
+        interval = hn.IndexRange(start=1, stop=7, stride=2)
+        self.assertEqual((interval.start, interval.stop, interval.stride), (1, 7, 2))
         self.assertEqual(interval.indices(), [1, 3, 5])
 
     def test_coordinates_against_numpy(self):
@@ -50,28 +51,42 @@ class ShapeVisitationTests(unittest.TestCase):
                 interval = hn.IndexRange(start, end, stride)
                 self.assertEqual(interval.indices(), full_range)
                 self.assertEqual(interval.count(), len(full_range))
-                for positions in (interval, set(flat)):
+                self.assertEqual(
+                    shape.selected_coordinates(flat, hn.Permutation(order)), expected
+                )
+                if end <= shape.element_count:
                     self.assertEqual(
-                        shape.selected_coordinates(positions, order), expected
+                        shape.selected_coordinates(interval, hn.Permutation(order)),
+                        expected,
                     )
+                else:
+                    with self.assertRaisesRegex(
+                        RuntimeError, "exceeds the element count"
+                    ):
+                        shape.selected_coordinates(interval, hn.Permutation(order))
 
-    def test_sets_and_bounds(self):
+    def test_explicit_indices_and_bounds(self):
         shape = hn.Shape([2, 4])
         self.assertEqual(
-            shape.selected_coordinates({7, 0, 3, 7}, [0, 1]), [[0, 0], [0, 3], [1, 3]]
+            shape.selected_coordinates([7, 0, 3, 7], hn.Permutation([0, 1])),
+            [[1, 3], [0, 0], [0, 3], [1, 3]],
         )
-        with self.assertRaisesRegex(
-            RuntimeError, "index exceeds logical element count"
-        ):
-            shape.selected_coordinates({0, 8}, [0, 1])
+        self.assertEqual(
+            shape.selected_coordinates((7, 0), hn.Permutation([1, 0])), [[1, 3], [0, 0]]
+        )
+        with self.assertRaisesRegex(RuntimeError, r"index 8 is outside \[0, 8\)"):
+            shape.selected_coordinates([0, 8, 1], hn.Permutation([0, 1]))
         for bad in ([0, 0], [1], [0, 2]):
             with self.assertRaises(RuntimeError):
-                shape.selected_coordinates(set(), bad)
+                shape.selected_coordinates([], hn.Permutation(bad))
             with self.assertRaises(RuntimeError):
-                shape.selected_coordinates(hn.IndexRange(0, 0, 1), bad)
+                shape.selected_coordinates(hn.IndexRange(0, 0, 1), hn.Permutation(bad))
+        # Orders must be Permutations, so a list of indices is never read as one.
+        with self.assertRaises(TypeError):
+            shape.selected_coordinates([1, 0], [0, 1])
         for empty_shape in (hn.Shape(), hn.Shape([2, 0])):
             with self.assertRaisesRegex(RuntimeError, "rank"):
-                empty_shape.selected_coordinates(set(), [0])
+                empty_shape.selected_coordinates([], hn.Permutation([0]))
 
     def test_all_is_full_coverage(self):
         shape = hn.Shape([2, 4])
@@ -84,12 +99,9 @@ class ShapeVisitationTests(unittest.TestCase):
         for dimensions, expected in (([], [[]]), ([0], [])):
             shape = hn.Shape(dimensions)
             self.assertEqual(
-                shape.index_order_last_dimension_fastest(), list(range(len(dimensions)))
-            )
-            self.assertEqual(
                 shape.selected_coordinates(
                     hn.IndexRange.all(shape.element_count),
-                    shape.index_order_last_dimension_fastest(),
+                    hn.Permutation.identity(shape.rank),
                 ),
                 expected,
             )
@@ -110,28 +122,62 @@ class ShapeVisitationTests(unittest.TestCase):
                 with self.assertRaises(TypeError):
                     hn.IndexRange(*args)
             with self.assertRaises(TypeError):
-                hn.Shape([1]).selected_coordinates({value}, [0])
+                hn.Shape([1]).selected_coordinates([value], hn.Permutation([0]))
             with self.assertRaises(TypeError):
                 hn.IndexRange.all(value)
 
-    def test_inherited_prime_sampling(self):
-        for logical, allocated, requested, stride in (
-            (10, 10, 3, 3),
-            (20, 9, 1, 11),
-            (60, 49, 1, 53),
-            (128, 121, 1, 127),
-            (20, 0, 3, 2),
-        ):
-            interval = hn.prime_index_range(logical, allocated, requested)
-            self.assertEqual(
-                (interval.start, interval.end, interval.stride), (0, logical, stride)
-            )
-            self.assertEqual(interval.indices(), list(range(0, logical, stride)))
-        self.assertEqual(hn.prime_index_range(10, SIZE_MAX, 0).count(), 0)
+    def test_prime_sampling(self):
+        def next_prime(value):
+            candidate = max(value, 2)
+            while any(candidate % d == 0 for d in range(2, int(candidate**0.5) + 1)):
+                candidate += 1
+            return candidate
+
+        for logical in range(1, 200):
+            for requested in range(1, logical):
+                stride = next_prime(logical // requested)
+                interval = hn.prime_index_range(
+                    logical_elements=logical, requested_elements=requested
+                )
+                self.assertEqual(
+                    (interval.start, interval.stop, interval.stride),
+                    (0, logical, stride),
+                )
+        self.assertEqual(
+            hn.prime_index_range(logical_elements=10, requested_elements=0).count(), 0
+        )
         for requested in (10, 11):
-            self.assertEqual(hn.prime_index_range(10, SIZE_MAX, requested).count(), 10)
+            self.assertEqual(
+                hn.prime_index_range(
+                    logical_elements=10, requested_elements=requested
+                ).count(),
+                10,
+            )
         with self.assertRaisesRegex(RuntimeError, "Prime-stride"):
-            hn.prime_index_range(2, SIZE_MAX, 1)
+            hn.prime_index_range(logical_elements=SIZE_MAX, requested_elements=1)
+        with self.assertRaises(TypeError):
+            hn.prime_index_range(10, 3)
+
+    def test_ranges_are_values(self):
+        interval = hn.IndexRange(1, 8, 3)
+        self.assertEqual(list(interval), [1, 4, 7])
+        self.assertEqual(len(interval), 3)
+        self.assertEqual(len(hn.IndexRange(5, 5, 1)), 0)
+        self.assertEqual(repr(interval), "IndexRange(start=1, stop=8, stride=3)")
+        self.assertEqual(interval, hn.IndexRange(1, 8, 3))
+        self.assertNotEqual(interval, hn.IndexRange(1, 9, 3))
+        self.assertEqual(len({interval, hn.IndexRange(1, 8, 3)}), 1)
+        self.assertEqual(list(hn.IndexRange(SIZE_MAX - 2, SIZE_MAX, 2)), [SIZE_MAX - 2])
+
+    def test_len_is_limited_like_python_range(self):
+        self.assertEqual(len(hn.IndexRange.all(sys.maxsize)), sys.maxsize)
+        for stop in (sys.maxsize + 1, SIZE_MAX):
+            with self.assertRaises(OverflowError):
+                len(range(stop))
+            interval = hn.IndexRange.all(stop)
+            with self.assertRaises(OverflowError):
+                len(interval)
+            self.assertEqual(interval.count(), stop)
 
 
 if __name__ == "__main__":

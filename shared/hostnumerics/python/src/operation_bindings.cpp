@@ -8,6 +8,7 @@
 
 #include <complex>
 #include <optional>
+#include <roc/hostnumerics/permutation.hpp>
 #include <roc/hostnumerics/validation.hpp>
 #include <utility>
 #include <vector>
@@ -326,8 +327,8 @@ void registerOperationBindings(nb::module_& module) {
     module.def("reference_maximum_absolute_into", &referenceMaximumAbsoluteInto, "input"_a,
                "output"_a, "accumulator_type"_a);
 
-    module.def("reference_epilogue", &referenceEpilogueOwned<IndexRange, std::vector<size_t>>,
-               "input"_a, "output_type"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{},
+    module.def("reference_epilogue", &referenceEpilogueOwned<IndexRange, Permutation>, "input"_a,
+               "output_type"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{},
                "activation"_a, "activation_application"_a,
                "auxiliary_input"_a = std::optional<Tensor>{},
                "auxiliary_output_type"_a = std::optional<ScalarType>{},
@@ -335,8 +336,8 @@ void registerOperationBindings(nb::module_& module) {
                "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
                "include_raw_output"_a, "include_amax"_a, "indices"_a, "index_order"_a);
     module.def(
-        "reference_epilogue_into", &referenceEpilogueIntoBound<IndexRange, std::vector<size_t>>,
-        "input"_a, "output"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
+        "reference_epilogue_into", &referenceEpilogueIntoBound<IndexRange, Permutation>, "input"_a,
+        "output"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
         "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
         "raw_output"_a = std::optional<Tensor>{}, "auxiliary_output"_a = std::optional<Tensor>{},
         "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,
@@ -360,7 +361,7 @@ void registerOperationBindings(nb::module_& module) {
         "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
         "amax"_a = std::optional<Tensor>{}, "accumulate_amax"_a, "indices"_a, "index_order"_a);
 
-    module.def("reference_epilogue", &referenceEpilogueOwned<std::set<size_t>, std::vector<size_t>>,
+    module.def("reference_epilogue", &referenceEpilogueOwned<std::set<size_t>, Permutation>,
                "input"_a, "output_type"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{},
                "activation"_a, "activation_application"_a,
                "auxiliary_input"_a = std::optional<Tensor>{},
@@ -369,9 +370,8 @@ void registerOperationBindings(nb::module_& module) {
                "activation_parameter0"_a, "activation_parameter1"_a, "output_conversion"_a,
                "include_raw_output"_a, "include_amax"_a, "indices"_a, "index_order"_a);
     module.def(
-        "reference_epilogue_into",
-        &referenceEpilogueIntoBound<std::set<size_t>, std::vector<size_t>>, "input"_a, "output"_a,
-        "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
+        "reference_epilogue_into", &referenceEpilogueIntoBound<std::set<size_t>, Permutation>,
+        "input"_a, "output"_a, "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a,
         "activation_application"_a, "auxiliary_input"_a = std::optional<Tensor>{},
         "raw_output"_a = std::optional<Tensor>{}, "auxiliary_output"_a = std::optional<Tensor>{},
         "gate_residual"_a = std::optional<Tensor>{}, "output_scale"_a, "auxiliary_scale"_a,

@@ -312,7 +312,7 @@ namespace hipblaslt::hostnumerics
                 return GenerationRecipe::realOnly(std::move(component),
                                                   {
                                                       .seed       = seed,
-                                                      .indexOrder = std::vector<size_t>{1, 0},
+                                                      .indexOrder = roc::hostnumerics::Permutation{1, 0},
                                                   });
             };
 
@@ -503,12 +503,10 @@ namespace hipblaslt::hostnumerics
             constexpr size_t    terms   = 16;
             const size_t        spacing = kExtent / terms + (kExtent % terms != 0);
             const size_t        batches = shape.rank() == 3 ? shape[2] : 1;
-            std::vector<size_t> order(shape.rank());
-            for(size_t axis = 0; axis < order.size(); ++axis)
-                order[axis] = order.size() - 1 - axis;
+            const auto order = roc::hostnumerics::Permutation::reverse(shape.rank());
             const auto nonzero = GenerationRecipe::realOnly(
                 GenerationRecipe::uniformInteger({.lower = 1, .upper = 2}),
-                {.seed = seed, .indexOrder = std::move(order)});
+                {.seed = seed, .indexOrder = order});
             for(size_t batch = 0; batch < batches; ++batch)
                 for(size_t row = 0; row < shape[1 - reductionAxis]; ++row)
                 {
@@ -553,15 +551,13 @@ namespace hipblaslt::hostnumerics
                 }
                 throw std::runtime_error("Unsupported hipBLASLt one-special value.");
             }();
-            std::vector<size_t> order(view.shape().rank());
-            for(size_t axis = 0; axis < order.size(); ++axis)
-                order[axis] = order.size() - 1 - axis;
+            const auto order = roc::hostnumerics::Permutation::reverse(view.shape().rank());
             generateAt(
                 view,
                 specialLinearIndex,
                 sentinelRecipe(component,
                                scalarTypeInfo(view.type()).category == ScalarCategory::Complex)
-                    .withIndexOrder(std::move(order)));
+                    .withIndexOrder(order));
         }
     } // namespace
 
@@ -799,9 +795,7 @@ namespace hipblaslt::hostnumerics
             initializeSparseK(destination, seed, integerExact.reductionAxis);
             return;
         }
-        std::vector<size_t> order(destination.shape().rank());
-        for(size_t axis = 0; axis < order.size(); ++axis)
-            order[axis] = order.size() - 1 - axis;
+        const auto order = roc::hostnumerics::Permutation::reverse(destination.shape().rank());
         generate(destination,
                  matrixGenerationRecipe(destination,
                                         role,
@@ -810,7 +804,7 @@ namespace hipblaslt::hostnumerics
                                         forceNaN,
                                         positiveOnly,
                                         integerExact.pattern)
-                     .withIndexOrder(std::move(order)));
+                     .withIndexOrder(order));
 
         if(initialization == hipblaslt_initialization::norm_dist_one_special)
             injectOneSpecial(destination, oneSpecialValue);

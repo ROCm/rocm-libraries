@@ -6,7 +6,9 @@
 #include <cstddef>
 #include <optional>
 #include <roc/hostnumerics/operation_types.hpp>
+#include <roc/hostnumerics/permutation.hpp>
 #include <roc/hostnumerics/tensor.hpp>
+#include <set>
 #include <vector>
 
 namespace roc::hostnumerics {
@@ -55,17 +57,16 @@ struct MatmulOptions {
 // NumPy-style matrix multiplication. The owning form allocates output; the
 // `Into` form writes selected coordinates of caller-owned output.
 void matmulInto(const Tensor& a, const Tensor& b, Tensor output, const MatmulOptions& options,
-                const IndexRange& range, std::span<const size_t> order, GemmBackend backend);
+                const IndexRange& range, const Permutation& order, GemmBackend backend);
 void matmulInto(const Tensor& a, const Tensor& b, Tensor output, const MatmulOptions& options,
-                const std::set<size_t>& indices, std::span<const size_t> order,
-                GemmBackend backend);
+                const std::set<size_t>& indices, const Permutation& order, GemmBackend backend);
 Tensor matmul(const Tensor& a, const Tensor& b, ScalarType outputType, const MatmulOptions& options,
               std::optional<Layout> outputLayout, GemmBackend backend);
 
 template <typename Indices>
 void matmulInto(const Tensor& a, const Tensor& b, Tensor output, const MatmulOptions& options,
                 const Indices& indices, LastDimensionFastest, GemmBackend backend) {
-    matmulInto(a, b, output, options, indices, output.shape().indexOrderLastDimensionFastest(),
+    matmulInto(a, b, output, options, indices, Permutation::identity(output.shape().rank()),
                backend);
 }
 

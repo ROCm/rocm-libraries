@@ -133,8 +133,7 @@ int main(int argc, char** argv) {
         if (output.elementCount() != 0) {
             for (const size_t index :
                  {size_t{0}, output.elementCount() / 2, output.elementCount() - 1})
-                checksum +=
-                    output.loadAs<double>(shape.coordinates(index, std::vector<size_t>{1, 0}));
+                checksum += output.loadAs<double>(shape.coordinates(index, Permutation{1, 0}));
         }
         std::cout << std::setprecision(10) << "type=" << scalarTypeName(options.type)
                   << ",recipe=" << options.recipe << ",rows=" << options.rows

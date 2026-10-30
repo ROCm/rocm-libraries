@@ -24,12 +24,12 @@ class GenerationRecipeApiTests(unittest.TestCase):
             hv.UniformIntegerGenerationParameters(lower=-7, upper=7)
         )
         scalar = hv.GenerationRecipe.real_only(
-            component, hv.GenerationRecipeSettings(37, [])
+            component, hv.GenerationRecipeSettings(37, hv.Permutation([]))
         )
-        self.assertEqual(scalar.index_order(0), [])
+        self.assertEqual(scalar.index_order(0), hv.Permutation([]))
         with self.assertRaises(RuntimeError):
             hv.GenerationRecipe.real_only(
-                component, hv.GenerationRecipeSettings(37, [0, 0])
+                component, hv.GenerationRecipeSettings(37, hv.Permutation([0, 0]))
             )
         with self.assertRaises(RuntimeError):
             hv.generate_tensor(hv.ScalarType.Float32, [2, 3], scalar)
@@ -42,9 +42,9 @@ class GenerationRecipeApiTests(unittest.TestCase):
             ),
         ):
             named = factory(*components, seed=37)
-            explicit = named.with_index_order([0, 1])
-            self.assertEqual(named.index_order(2), [0, 1])
-            self.assertEqual(named.index_order(3), [0, 1, 2])
+            explicit = named.with_index_order(hv.Permutation([0, 1]))
+            self.assertEqual(named.index_order(2), hv.Permutation([0, 1]))
+            self.assertEqual(named.index_order(3), hv.Permutation([0, 1, 2]))
             self.assertEqual(named.seed, 37)
             for scalar_type in (hv.ScalarType.Float32, hv.ScalarType.ComplexFloat32):
                 left = hv.generate_tensor(scalar_type, [2, 3], named)
@@ -53,33 +53,34 @@ class GenerationRecipeApiTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 explicit.index_order(3)
             with self.assertRaises(RuntimeError):
-                named.with_index_order([0, 0])
+                named.with_index_order(hv.Permutation([0, 0]))
 
-    def test_recipes_copy_order_sequences(self):
+    def test_recipes_take_permutation_orders(self):
+        order = hv.Permutation([2, 1, 0])
+        settings = hv.GenerationRecipeSettings(index_order=order, seed=0)
+        base = hv.GenerationRecipe.real_only_last_dimension_fastest(
+            hv.GenerationRecipe.serial_index(),
+            seed=0,
+        )
+        recipe = base.with_index_order(order)
+        self.assertEqual(settings.index_order, order)
+        self.assertEqual(recipe.index_order(3), order)
+        tensor = hv.generate_tensor(hv.ScalarType.Float32, [2, 3, 4], recipe)
+        np.testing.assert_array_equal(
+            hv.to_numpy(tensor, dtype=None),
+            np.arange(24, dtype=np.float32).reshape((2, 3, 4), order="F"),
+        )
+        # Orders must be Permutations; plain sequences are rejected.
         for source in ([2, 1, 0], (2, 1, 0)):
-            settings = hv.GenerationRecipeSettings(index_order=source, seed=0)
-            base = hv.GenerationRecipe.real_only_last_dimension_fastest(
-                hv.GenerationRecipe.serial_index(),
-                seed=0,
-            )
-            recipe = base.with_index_order(source)
-            if isinstance(source, list):
-                source[:] = [0, 1, 2]
-            self.assertEqual(settings.index_order, [2, 1, 0])
-            self.assertEqual(recipe.index_order(3), [2, 1, 0])
-            returned_order = recipe.index_order(3)
-            returned_order[:] = [0, 1, 2]
-            self.assertEqual(recipe.index_order(3), [2, 1, 0])
-            tensor = hv.generate_tensor(hv.ScalarType.Float32, [2, 3, 4], recipe)
-            np.testing.assert_array_equal(
-                hv.to_numpy(tensor, dtype=None),
-                np.arange(24, dtype=np.float32).reshape((2, 3, 4), order="F"),
-            )
+            with self.assertRaises(TypeError):
+                hv.GenerationRecipeSettings(index_order=source, seed=0)
+            with self.assertRaises(TypeError):
+                base.with_index_order(source)
 
     def test_named_parameters_and_real_only_recipe(self):
         settings = hv.GenerationRecipeSettings(
             seed=37,
-            index_order=[0, 1],
+            index_order=hv.Permutation([0, 1]),
         )
         component = hv.GenerationRecipe.uniform_integer(
             hv.UniformIntegerGenerationParameters(lower=1, upper=1)
@@ -105,7 +106,7 @@ class GenerationRecipeApiTests(unittest.TestCase):
         self.assertEqual(recipe.seed, 37)
         self.assertEqual(
             recipe.index_order(2),
-            [0, 1],
+            hv.Permutation([0, 1]),
         )
 
     def test_explicit_complex_policy_factories(self):

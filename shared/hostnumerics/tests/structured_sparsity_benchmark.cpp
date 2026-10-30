@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
     const Layout metadataLayout(Shape{rows, columns / 8}, {static_cast<ptrdiff_t>(columns / 8), 1},
                                 0);
     StructuredSparsityPattern pattern;
-    pattern.indexOrder = {0, 1};
+    pattern.indexOrder = Permutation{0, 1};
     pattern.axis = 1;
     pattern.fixedPositions = {0, 1};
     Tensor prunedTensor =

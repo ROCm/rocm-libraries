@@ -111,7 +111,7 @@ namespace TensileLite
                     return GenerationRecipe::realOnly(std::move(component),
                                                       {
                                                           .seed       = seed,
-                                                          .indexOrder = std::vector<size_t>{1, 0},
+                                                          .indexOrder = roc::hostnumerics::Permutation{1, 0},
                                                       });
                 };
 
@@ -290,8 +290,8 @@ namespace TensileLite
                 tiledExtents[freeAxis] = tiles;
                 const roc::hostnumerics::Shape tiledShape(tiledExtents);
 
-                const std::array<size_t, 2> order{0, 1};
-                std::vector<size_t>         all(scales.elementCount());
+                const roc::hostnumerics::Permutation order{0, 1};
+                std::vector<size_t>                all(scales.elementCount());
                 std::iota(all.begin(), all.end(), size_t{0});
                 const auto flat  = scales.copySelectedElements(all, order);
                 const auto bytes = flat.rawEncodedBackingStorage();
@@ -332,8 +332,8 @@ namespace TensileLite
                 if(shape.rank() != 2 || freeAxis > 1 || !isUnsignedExponentScale(scales.type()))
                     throw std::invalid_argument(
                         "MX scale variation requires rank-two E8M0 scales and a valid free axis.");
-                const std::array<size_t, 2> order{0, 1};
-                std::vector<size_t>         all(scales.elementCount());
+                const roc::hostnumerics::Permutation order{0, 1};
+                std::vector<size_t>                all(scales.elementCount());
                 std::iota(all.begin(), all.end(), size_t{0});
                 auto       varied = scales.copySelectedElements(all, order);
                 const auto bytes  = varied.rawEncodedBackingStorage();

@@ -79,7 +79,7 @@ class MxTests(unittest.TestCase):  # noqa: F405
                             hv.UniformRealGenerationParameters(minimum, maximum)
                         ),
                         seed=seed,
-                        index_order=[1, 0],
+                        index_order=hv.Permutation([1, 0]),
                     ),
                     hv.MxRepresentedValueRange(minimum, maximum),
                 )

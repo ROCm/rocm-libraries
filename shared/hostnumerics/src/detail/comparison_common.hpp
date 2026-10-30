@@ -24,7 +24,7 @@ namespace detail {
 struct ComparisonInvocation : ComparisonOptions {
     template <typename Indices>
     ComparisonInvocation(const ComparisonOptions& options, const Shape& shape,
-                         const Indices& indices, std::span<const size_t> order)
+                         const Indices& indices, const Permutation& order)
         : ComparisonOptions(options) {
         bindIndices(*this, shape, indices, order);
     }

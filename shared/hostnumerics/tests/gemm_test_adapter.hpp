@@ -16,7 +16,7 @@ struct GemmTestCase : detail::GemmInvocation {
 
     GemmTestCase(Tensor a, Tensor b, Tensor d, const MatmulOptions& options)
         : detail::GemmInvocation(a, b, d, options, IndexRange::all(d.elementCount()),
-                                 d.shape().indexOrderLastDimensionFastest()) {}
+                                 Permutation::identity(d.shape().rank())) {}
 };
 
 using GemmSupportInfo = detail::GemmSupportInfo;

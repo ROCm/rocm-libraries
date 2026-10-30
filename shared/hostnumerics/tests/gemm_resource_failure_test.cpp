@@ -103,6 +103,7 @@ TEST(GemmResourceFailure, CheckedGeometryDoesNotAllocateButOwningFactoriesCan) {
         EXPECT_EQ(*bytes, 24);
         EXPECT_TRUE(noAllocation);
     });
-    EXPECT_THROW(withAllocationFailure([&] { (void)Layout::getContiguousLayout(shape, order); }),
+    EXPECT_THROW(withAllocationFailure(
+                     [&] { (void)Layout::getContiguousLayout(shape, Permutation(order)); }),
                  std::bad_alloc);
 }

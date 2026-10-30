@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -13,13 +14,12 @@
 
 namespace roc::hostnumerics {
 void matmulInto(const Tensor& a, const Tensor& b, Tensor output, const MatmulOptions& options,
-                const IndexRange& range, std::span<const size_t> order, GemmBackend backend) {
+                const IndexRange& range, const Permutation& order, GemmBackend backend) {
     (void)detail::executeGemm(GemmInvocation(a, b, std::move(output), options, range, order),
                               backend);
 }
 void matmulInto(const Tensor& a, const Tensor& b, Tensor output, const MatmulOptions& options,
-                const std::set<size_t>& indices, std::span<const size_t> order,
-                GemmBackend backend) {
+                const std::set<size_t>& indices, const Permutation& order, GemmBackend backend) {
     (void)detail::executeGemm(GemmInvocation(a, b, std::move(output), options, indices, order),
                               backend);
 }
@@ -40,7 +40,7 @@ Tensor matmul(const Tensor& a, const Tensor& b, ScalarType outputType, const Mat
                         ? Tensor::allocateUninitialized(outputType, layout)
                         : Tensor(outputType, layout);
     matmulInto(a, b, output, options, IndexRange::all(output.elementCount()),
-               output.shape().indexOrderLastDimensionFastest(), backend);
+               Permutation::identity(output.shape().rank()), backend);
     return output;
 }
 

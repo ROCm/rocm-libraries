@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <initializer_list>
 #include <numeric>
-#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -78,25 +77,21 @@ class Permutation {
 
     // Reorder values so that result[i] == values[(*this)[i]]. For example,
     // (2, 0, 1) applied to (a, b, c) gives (c, a, b).
-    // Accepts sized random-access ranges and returns a vector of copied values.
-    template <typename Values>
-        requires std::ranges::random_access_range<const Values> &&
-                 std::ranges::sized_range<const Values>
-    std::vector<std::ranges::range_value_t<const Values>> apply(const Values& values) const {
-        if (std::ranges::size(values) != size())
+    template <typename T>
+    std::vector<T> apply(std::span<const T> values) const {
+        if (values.size() != size())
             throw std::runtime_error("Cannot apply a permutation of size " +
                                      std::to_string(size()) + " to " +
-                                     std::to_string(std::ranges::size(values)) + " values.");
-        std::vector<std::ranges::range_value_t<const Values>> result;
+                                     std::to_string(values.size()) + " values.");
+        std::vector<T> result;
         result.reserve(size());
-        const auto first = std::ranges::begin(values);
-        for (size_t entry : m_entries) result.push_back(first[entry]);
+        for (size_t entry : m_entries) result.push_back(values[entry]);
         return result;
     }
 
     template <typename T>
-    std::vector<T> apply(std::initializer_list<T> values) const {
-        return apply(std::span<const T>(values.begin(), values.size()));
+    std::vector<T> apply(const std::vector<T>& values) const {
+        return apply(std::span<const T>(values));
     }
 
     bool operator==(const Permutation&) const noexcept = default;

@@ -110,7 +110,7 @@ void testComparisonProgram() {
         return compare(Tensor::copyNativeStorage(emptyLayout, std::span<const float>(emptyStorage)),
                        Tensor::copyNativeStorage(emptyLayout, std::span<const float>(emptyStorage)),
                        options, IndexRange::all(emptyLayout.shape().elementCount()),
-                       std::vector<size_t>{1, 0});
+                       Permutation{1, 0});
     };
     const ComparisonReport emptyResult = compareEmpty(emptyOptions);
     require(emptyResult.compared == 0 && emptyResult.allCloseEvaluated &&
@@ -325,10 +325,10 @@ void testComparisonProgram() {
     ComparisonOptions selected;
 
     selected.computeFrobenius = false;
-    const auto selectedResult = compare(
-        Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
-        Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)), selected,
-        IndexRange(0, std::numeric_limits<size_t>::max(), 2), std::vector<size_t>{1, 0});
+    const auto selectedResult =
+        compare(Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
+                Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)),
+                selected, IndexRange(0, layout.shape().elementCount(), 2), Permutation{1, 0});
     require(selectedResult.compared == 3 && selectedResult.mismatches == 1,
             "Selected comparison visited the wrong logical elements.");
     require(selectedResult.reportedMismatches[0].index == 4 &&
@@ -339,7 +339,7 @@ void testComparisonProgram() {
     const auto explicitSelectedResult =
         compare(Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
                 Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)),
-                selected, std::set<size_t>({4}), std::vector<size_t>{1, 0});
+                selected, std::set<size_t>({4}), Permutation{1, 0});
     require(
         explicitSelectedResult.compared == 1 && explicitSelectedResult.mismatches == 1 &&
             explicitSelectedResult.reportedMismatches[0].coordinates == std::vector<size_t>({0, 2}),
@@ -350,10 +350,10 @@ void testComparisonProgram() {
     paddedMetrics.computeFrobenius = true;
     paddedMetrics.maxReportedMismatches = 0;
 
-    const auto paddedMetricResult = compare(
-        Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
-        Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)), paddedMetrics,
-        IndexRange::all(layout.shape().elementCount()), std::vector<size_t>{1, 0});
+    const auto paddedMetricResult =
+        compare(Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
+                Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)),
+                paddedMetrics, IndexRange::all(layout.shape().elementCount()), Permutation{1, 0});
     require(paddedMetricResult.compared == 6 && paddedMetricResult.frobeniusDifference > 0.0,
             "Regular strided comparison produced incorrect evidence.");
 
@@ -521,13 +521,13 @@ void testComparisonProgram() {
 
     const ComparisonReport parallelResult =
         compare(largeObservedTensor, largeExpectedTensor, parallelOptions,
-                IndexRange::all(largeObservedTensor.elementCount()), std::vector<size_t>{1, 0});
+                IndexRange::all(largeObservedTensor.elementCount()), Permutation{1, 0});
 
     ComparisonOptions serialOptions = parallelOptions;
 
     const ComparisonReport serialResult =
         compare(largeObservedTensor, largeExpectedTensor, serialOptions,
-                IndexRange(0, std::numeric_limits<size_t>::max(), 1), std::vector<size_t>{1, 0});
+                IndexRange::all(largeObservedTensor.elementCount()), Permutation{1, 0});
     require(parallelResult.compared == serialResult.compared &&
                 parallelResult.mismatches == serialResult.mismatches &&
                 parallelResult.matchedNaNs == serialResult.matchedNaNs &&
@@ -578,7 +578,7 @@ void testComparisonProgram() {
     const ComparisonReport explicitSelectionResult =
         compare(Tensor::copyNativeStorage(std::span<const float>(explicitlySelectedObserved)),
                 Tensor::copyNativeStorage(std::span<const float>(explicitlySelectedExpected)),
-                allCloseOnly, std::set<size_t>({1, 2}), std::vector<size_t>{0});
+                allCloseOnly, std::set<size_t>({1, 2}), Permutation{0});
     require(explicitSelectionResult.passed() && explicitSelectionResult.compared == 2,
             "All-close comparison treated explicit indices as a contiguous prefix.");
 }

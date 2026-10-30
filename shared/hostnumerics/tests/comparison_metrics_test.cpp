@@ -63,7 +63,7 @@ void testComparisonMetrics() {
     const auto sampledMetricResult =
         compare(Tensor::copyNativeStorage(std::span<const double>(observed)),
                 Tensor::copyNativeStorage(std::span<const double>(expected)), sampledMetrics,
-                IndexRange(1, std::numeric_limits<size_t>::max(), 2), LastDimensionFastest{});
+                IndexRange(1, observed.size(), 2), LastDimensionFastest{});
     require(sampledMetricResult.compared == 1,
             "Irregular comparison selection visited the wrong element count.");
 
@@ -162,7 +162,7 @@ void testComparisonMetrics() {
                      Tensor::copyNativeStorage(
                          std::span<const std::complex<double>>(componentwiseExpected)),
                      magnitudeAllCloseOnly, IndexRange::all(componentwiseObserved.size()),
-                     std::vector<size_t>{0})
+                     Permutation{0})
                  .passed(),
             "The optimized all-close-only path ignored complex magnitude mode.");
 
