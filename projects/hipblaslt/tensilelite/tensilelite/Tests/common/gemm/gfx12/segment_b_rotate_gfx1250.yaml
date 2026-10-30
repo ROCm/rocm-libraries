@@ -4,9 +4,9 @@
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
 
-# Functional test for LDSSegmentBRotate on gfx1250: on top of the [2,2] aligned segment interleave
-# (seg0={A0,B0}, seg1={A1,B1}), SIMD pair 1 reads its B vIdx groups rotated by half and swaps its
-# accumulator halves back before the epilogue. Each problem runs B-rotate off (0) and on (1) vs the
+# Functional test for LDSSegmentBRotate on gfx1250: retain aligned layouts and pair tight layouts.
+# SIMD pair 1 reads its B vIdx groups rotated by half, and the accumulator halves
+# are restored before the epilogue. Each problem runs B-rotate off (0) and on (1) vs the
 # CPU reference; K covers one unroll iteration, several, and a tail loop.
 # Group 1: MT128x128x256 on the aligned layout (S = 64K).
 # Group 2: MT256x256x256 + HalfPLR on the tight layout (64K < S < 128K, StoreSwapAddr).
@@ -32,7 +32,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   NumWarmups: 0
-  EnqueuesPerSync: 1
+  EnqueuesPerSync: 0
   PrintWinnersOnly: False
   Architecture: gfx1250
   CpuThreads: 1
@@ -68,9 +68,9 @@ BenchmarkProblems:
         - TDMInst: [3]
         - HalfPLR: [0]
         - TDMSplit: [False]
-        - LDSSegmentInterleave: [1]             # aligned [2,2] layout (needs PGR=2)
+        - LDSSegmentInterleave: [1]             # aligned [2,2] layout (PGR1/PGR2)
         - LDSSegmentBRotate: [0, 1]
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [1, 2]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -135,7 +135,7 @@ BenchmarkProblems:
         - TDMSplit: [False]
         - LDSSegmentInterleave: [1]             # tight [2,2] layout (component stride 64K..128K)
         - LDSSegmentBRotate: [0, 1]
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [1, 2]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -264,14 +264,14 @@ BenchmarkProblems:
         - ForceDisableShadowInit: [True]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]  # MT256x256, wave tile 128x128
-        - DepthU: [256]
+        - DepthU: [256, 512]
         - TDMInst: [3]
         - TDMIterateMode: [-1]                  # A pad interval 2048B needs iterate mode
         - HalfPLR: [1]
         - TDMSplit: [False]
-        - LDSSegmentInterleave: [1]             # aligned [2,2] layout (S = 64K)
+        - LDSSegmentInterleave: [1]             # aligned/tight [2,2] layouts for DU256/512
         - LDSSegmentBRotate: [0, 1]
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [1, 2]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -332,14 +332,14 @@ BenchmarkProblems:
         - ForceDisableShadowInit: [True]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]  # MT256x256, wave tile 128x128
-        - DepthU: [256]
+        - DepthU: [256, 512]
         - TDMInst: [3]
         - TDMIterateMode: [-1]                  # A pad interval 2048B needs iterate mode
         - HalfPLR: [1]
         - TDMSplit: [False]
-        - LDSSegmentInterleave: [1]             # aligned [2,2] layout (S = 64K)
+        - LDSSegmentInterleave: [1]             # aligned/tight [2,2] layouts for DU256/512
         - LDSSegmentBRotate: [0, 1]
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [1, 2]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]

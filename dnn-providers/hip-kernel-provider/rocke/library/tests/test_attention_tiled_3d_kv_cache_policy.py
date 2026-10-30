@@ -50,6 +50,11 @@ def _problem(**kw) -> UnifiedAttentionProblem:
         ("gfx942", {"total_q": 64, "max_seqlen_q": 4}, "all"),
         ("gfx942", {"use_fp8": True}, "all"),
         ("gfx1250", {}, "all"),
+        # K/V read per call within the last-level cache (256 MiB) stays cached.
+        ("gfx950", {"total_q": 1, "num_seqs": 1, "max_seqlen_k": 16384}, "all"),
+        ("gfx942", {"total_q": 1, "num_seqs": 1, "max_seqlen_k": 16384}, "all"),
+        ("gfx950", {"max_seqlen_k": 4096}, "all"),
+        ("gfx942", {"max_seqlen_k": 4096}, "all"),
     ],
 )
 def test_dispatch_policy(arch, kw, expected):

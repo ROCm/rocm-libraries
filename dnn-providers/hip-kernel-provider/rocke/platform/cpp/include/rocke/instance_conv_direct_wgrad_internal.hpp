@@ -76,7 +76,9 @@ inline int problem_ho(const rocke_direct_conv_problem_t* p)
 
 inline int problem_wo(const rocke_direct_conv_problem_t* p)
 {
-    return pyfloordiv(p->W + 2 * p->PAD - (p->KW - 1) * p->dil_w - 1, p->stride) + 1;
+    return pyfloordiv(p->W + 2 * rocke_direct_conv_problem_pad_w(p) - (p->KW - 1) * p->dil_w - 1,
+                      p->stride)
+           + 1;
 }
 
 inline void set_reason(char* out, size_t cap, const char* msg)
