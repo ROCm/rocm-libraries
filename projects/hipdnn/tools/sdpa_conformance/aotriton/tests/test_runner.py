@@ -364,6 +364,10 @@ class Sim(FakePytest):
             "bwd": env.get("HIPDNN_BWD_ENGINE"),
             "capture": env.get(contract.REPRO_CAPTURE_ENV),
             "slug": env.get(contract.PASS_SLUG_ENV),
+            "fwd_cand": env.get(contract.CANDIDATE_ENV["fwd"]),
+            "bwd_cand": env.get(contract.CANDIDATE_ENV["bwd"]),
+            "exhaustive": env.get(contract.EXHAUSTIVE_ENV),
+            "prefix": env.get(contract.PREFIX_ENV),
         }
         self.runs.append((results, pins, ids))
         results.mkdir(parents=True, exist_ok=True)
@@ -855,3 +859,177 @@ def test_a_forward_that_dies_is_attributed_scheduled_around_and_captured_end_to_
     ]
     assert not [r for r in table if r["outcome"] == "not-run"]
     assert status != 0
+
+
+# ------------------------------------------------------------------ --exhaustive and EXTREME
+
+
+def run_with(monkeypatch, tmp_path, ids, behave, *flags):
+    sim = Sim([ids], behave)
+    monkeypatch.setattr(run_aotriton.subprocess, "run", sim)
+    status = run_aotriton.main(["--workers", "2", "--out", str(tmp_path), *flags])
+    return status, sim
+
+
+def cand_dirs(root):
+    base = root / "cand"
+    return (
+        sorted(p.relative_to(base).as_posix() for p in base.glob("*/*/*"))
+        if base.exists()
+        else []
+    )
+
+
+def candidate_behave(pass1, honored=True):
+    """Pass 1 returns ``pass1`` fields per case; a pinned pass returns a row naming its pins."""
+
+    def behave(nodeid, pins, results):
+        name = nodeid.split("::")[-1]
+        if pins["slug"] == "main":
+            return rows_of([nodeid], **pass1[name])[0]
+        fields = {}
+        if pins["fwd"] and pins["fwd"] != "reference":
+            fields.update(
+                fwd=f"hipdnn:{pins['fwd']}", fwd_candidate=pins["fwd_cand"] or ""
+            )
+        if pins["bwd"]:
+            fields.update(
+                bwd=f"hipdnn:{pins['bwd']}", bwd_candidate=pins["bwd_cand"] or ""
+            )
+        return rows_of([nodeid], **fields)[0]
+
+    return behave
+
+
+def test_exhaustive_runs_one_pass_per_candidate_index_over_the_cases_that_have_it(
+    monkeypatch, tmp_path
+):
+    ids = [f"{FWD}::f1", f"{FWD}::f2"]
+    pass1 = {
+        "f1": dict(fwd="hipdnn:A", fwd_engines="A", fwd_candidate='{"A": 3}'),
+        "f2": dict(fwd="hipdnn:A", fwd_engines="A", fwd_candidate='{"A": 2}'),
+    }
+    status, sim = run_with(
+        monkeypatch, tmp_path, ids, candidate_behave(pass1), "--exhaustive"
+    )
+    assert status == 0
+    assert cand_dirs(tmp_path) == ["fwd/A/0", "fwd/A/1", "fwd/A/2"]
+    assert not (tmp_path / "all-engines").exists()
+    for k, expected in enumerate([["f1", "f2"], ["f1", "f2"], ["f1"]]):
+        d = tmp_path / "cand" / "fwd" / "A" / str(k)
+        ((_, pins, given),) = [r for r in sim.runs if r[0] == d]
+        assert [i.split("::")[-1] for i in given] == expected
+        assert (pins["fwd"], pins["fwd_cand"], pins["bwd"], pins["bwd_cand"]) == (
+            "A", str(k), None, None,
+        )  # fmt: skip
+        assert (pins["slug"], pins["exhaustive"]) == (f"cand-fwd-A-{k}", None)
+        meta = json.loads((d / "pass.json").read_text())
+        assert (meta["kind"], meta["pin_fwd"], meta["fwd_candidate"]) == (
+            "candidate",
+            "A",
+            str(k),
+        )
+        assert len(reconcile.read_rows(d / "results.csv")) == len(expected)
+    main = [r for r in sim.runs if r[0] == tmp_path][0]
+    assert (main[1]["exhaustive"], main[1]["prefix"]) == ("1", "/opt/fake-rocm")
+
+
+def test_an_engine_that_cannot_enumerate_gets_not_enumerable_rows_and_no_pytest_pass(
+    monkeypatch, tmp_path
+):
+    ids = [f"{FWD}::f1", f"{FWD}::f2"]
+    message = "Engine does not support matched-catalog enumeration"
+    ambiguous = "Ambiguous enrolled knob tuple for candidates 'a' and 'b'"
+    pass1 = {
+        "f1": dict(fwd="hipdnn:A", fwd_engines="A;B", fwd_candidate=json.dumps({"A": 1, "B": message})),
+        "f2": dict(fwd="hipdnn:A", fwd_engines="A;B", fwd_candidate=json.dumps({"A": 1, "B": ambiguous})),
+    }  # fmt: skip
+    status, sim = run_with(
+        monkeypatch, tmp_path, ids, candidate_behave(pass1), "--exhaustive"
+    )
+    assert cand_dirs(tmp_path) == ["fwd/A/0", "fwd/B/not-enumerable"]
+    d = tmp_path / "cand" / "fwd" / "B" / "not-enumerable"
+    assert not any(r[0] == d for r in sim.runs)
+    got = {r["nodeid"]: r for r in reconcile.read_rows(d / "results.csv")}
+    assert {n.split("::")[-1]: (r["outcome"], r["reason"]) for n, r in got.items()} == {
+        "f1": ("not-enumerable", message),
+        "f2": ("not-enumerable", ambiguous),
+    }
+    meta = json.loads((d / "pass.json").read_text())
+    assert (meta["kind"], meta["pin_fwd"], meta["fwd_candidate"]) == (
+        "candidate",
+        "B",
+        "",
+    )
+    rows = [
+        r
+        for r in reconcile.engine_rows(tmp_path)
+        if r["engine"] == "B" and r["source"] == "candidate"
+    ]
+    assert sorted(r["outcome"] for r in rows) == ["not-enumerable"] * 2
+
+
+def test_without_candidate_counts_in_pass_one_no_candidate_pass_exists(
+    monkeypatch, tmp_path
+):
+    pass1 = {"f1": dict(fwd="hipdnn:A", fwd_engines="A")}
+    run_with(
+        monkeypatch, tmp_path, [f"{FWD}::f1"], candidate_behave(pass1), "--exhaustive"
+    )
+    assert cand_dirs(tmp_path) == []
+
+
+def test_extreme_runs_candidate_passes_over_every_enumerable_pair(
+    monkeypatch, tmp_path
+):
+    ids = [f"{BWD}::b1", f"{BWD}::b2"]
+    pass1 = {
+        n: dict(
+            fwd="hipdnn:A", bwd="hipdnn:X", fwd_engines="A;F", bwd_engines="X;Y",
+            fwd_candidate='{"A": 2, "F": "no enumeration"}', bwd_candidate='{"X": 2, "Y": 1}',
+        )
+        for n in ("b1", "b2")
+    }  # fmt: skip
+    status, sim = run_with(
+        monkeypatch,
+        tmp_path,
+        ids,
+        candidate_behave(pass1),
+        "--exhaustive",
+        "--all-engines",
+    )
+    assert status == 0
+    assert cand_dirs(tmp_path) == [
+        "bwd/X/0", "bwd/X/1", "bwd/Y/0",
+        "pair/A__X/0x0", "pair/A__X/0x1", "pair/A__X/1x0", "pair/A__X/1x1",
+        "pair/A__Y/0x0", "pair/A__Y/1x0",
+        "pair/F__X/not-enumerable", "pair/F__Y/not-enumerable",
+    ]  # fmt: skip
+    d = tmp_path / "cand" / "pair" / "A__X" / "1x0"
+    ((_, pins, given),) = [r for r in sim.runs if r[0] == d]
+    assert (pins["fwd"], pins["fwd_cand"], pins["bwd"], pins["bwd_cand"], pins["slug"]) == (
+        "A", "1", "X", "0", "cand-pair-A__X-1x0",
+    )  # fmt: skip
+    assert len(given) == 2
+    meta = json.loads((d / "pass.json").read_text())
+    assert (meta["kind"], meta["fwd_candidate"], meta["bwd_candidate"]) == (
+        "candidate-pair",
+        "1",
+        "0",
+    )
+    blocked = reconcile.read_rows(
+        tmp_path / "cand" / "pair" / "F__X" / "not-enumerable" / "results.csv"
+    )
+    assert {r["reason"] for r in blocked} == {"fwd F: no enumeration"}
+    # the all-engines passes still run first: the plain pair of the non-winning forward
+    assert (tmp_path / "all-engines" / "pair" / "F__X").exists()
+
+
+def test_exhaustive_is_refused_with_fake_or_a_preset_candidate(
+    runner, tmp_path, monkeypatch
+):
+    with pytest.raises(SystemExit, match="--fake"):
+        runner([], "--workers", "1", "--out", str(tmp_path), "--exhaustive", "--fake", "always-decline")  # fmt: skip
+    monkeypatch.setenv("HIPDNN_BWD_CANDIDATE", "1")
+    with pytest.raises(SystemExit, match="HIPDNN_BWD_CANDIDATE"):
+        runner([], "--workers", "1", "--out", str(tmp_path), "--exhaustive")
