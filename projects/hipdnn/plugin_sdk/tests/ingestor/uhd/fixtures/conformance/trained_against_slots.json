@@ -1,0 +1,34 @@
+{
+"bases": {
+"slot": {"version":"1.1","trained_against":{"ued":{"id":"20112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},"kmd":{"id":"30112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},"slot":"dkdv","umd":[]}},
+"kmds": {"version":"1.1","trained_against":{"ued":{"id":"20112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},"kmds":[{"slot":"prep","id":"31112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},{"slot":"dkdv","id":"32112233-4455-6677-8899-aabbccddeeff","revision":"1.2"}],"umd":[]}},
+"v10": {"version":"1.0","trained_against":{"ued":{"id":"20112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},"kmd":{"id":"30112233-4455-6677-8899-aabbccddeeff","revision":"1.0"},"umd":[]}}
+},
+"rows": [
+{"name":"slot_provenance","base":"slot","patch":[]},
+{"name":"kmds_provenance","base":"kmds","patch":[]},
+{"name":"slot_in_1_0","base":"v10","patch":[{"op":"add","path":"/trained_against/slot","value":"dkdv"}],"reject":true,"skip":["uhd_gen"]},
+{"name":"kmds_in_1_0","base":"kmds","patch":[{"op":"replace","path":"/version","value":"1.0"}],"reject":true,"skip":["uhd_gen"]},
+{"name":"kmds_names_a_slot_twice","base":"kmds","patch":[{"op":"add","path":"/trained_against/kmds/-","value":{"slot":"prep","id":"31112233-4455-6677-8899-aabbccddeeff","revision":"1.0"}}],"reject":true,"skip":["schema"],"uhd_gen":"kmds names slot 'prep' twice"},
+{"name":"kmd_beside_kmds","base":"kmds","patch":[{"op":"add","path":"/trained_against/kmd","value":{"id":"30112233-4455-6677-8899-aabbccddeeff","revision":"1.0"}}],"reject":true,"uhd_gen":"names both kmd and kmds"},
+{"name":"slot_with_kmds","base":"kmds","patch":[{"op":"add","path":"/trained_against/slot","value":"dkdv"}],"reject":true,"uhd_gen":"slot requires kmd, and excludes kmds"},
+{"name":"slot_without_kmd","base":"slot","patch":[{"op":"remove","path":"/trained_against/kmd"}],"reject":true,"uhd_gen":"slot requires kmd"},
+{"name":"kmds_slot_is_global","base":"kmds","patch":[{"op":"replace","path":"/trained_against/kmds/0/slot","value":"global"}],"reject":true,"uhd_gen":"kmds slot 'global' is not a valid slot name"},
+{"name":"kmds_slot_starts_with_a_digit","base":"kmds","patch":[{"op":"replace","path":"/trained_against/kmds/0/slot","value":"1prep"}],"reject":true,"uhd_gen":"kmds slot '1prep' is not a valid slot name"},
+{"name":"kmds_slot_starts_with_an_underscore","base":"kmds","patch":[{"op":"replace","path":"/trained_against/kmds/0/slot","value":"_prep"}],"reject":true,"uhd_gen":"kmds slot '_prep' is not a valid slot name"},
+{"name":"kmds_slot_has_an_uppercase_letter","base":"kmds","patch":[{"op":"replace","path":"/trained_against/kmds/1/slot","value":"dkDv"}],"reject":true,"uhd_gen":"kmds slot 'dkDv' is not a valid slot name"},
+{"name":"kmds_slot_is_empty","base":"kmds","patch":[{"op":"replace","path":"/trained_against/kmds/0/slot","value":""}],"reject":true,"uhd_gen":"kmds slot '' is not a valid slot name"},
+{"name":"empty_kmds","base":"kmds","patch":[{"op":"replace","path":"/trained_against/kmds","value":[]}],"reject":true,"uhd_gen":"kmds must be a non-empty array"},
+{"name":"kmds_is_not_an_array","base":"kmds","patch":[{"op":"replace","path":"/trained_against/kmds","value":{}}],"reject":true,"uhd_gen":"kmds must be a non-empty array"},
+{"name":"kmds_entry_with_an_unknown_key","base":"kmds","patch":[{"op":"add","path":"/trained_against/kmds/0/kmd","value":"x"}],"reject":true,"uhd_gen":"kmds entries require exactly slot, id and revision"},
+{"name":"kmds_without_slot_name","base":"kmds","patch":[{"op":"remove","path":"/trained_against/kmds/0/slot"}],"reject":true,"uhd_gen":"kmds entries require exactly slot, id and revision"},
+{"name":"kmds_entry_id_is_not_a_uuid","base":"kmds","patch":[{"op":"replace","path":"/trained_against/kmds/0/id","value":"prep"}],"reject":true},
+{"name":"kmds_entry_revision_is_not_major_minor","base":"kmds","patch":[{"op":"replace","path":"/trained_against/kmds/0/revision","value":"1"}],"reject":true,"uhd_gen":"expected semantic revision"},
+{"name":"kmds_without_ued","base":"kmds","patch":[{"op":"remove","path":"/trained_against/ued"}],"reject":true},
+{"name":"kmds_without_umd","base":"kmds","patch":[{"op":"remove","path":"/trained_against/umd"}],"reject":true,"uhd_gen":"requires exactly ued, kmds and umd"},
+{"name":"single_slot_is_global","base":"slot","patch":[{"op":"replace","path":"/trained_against/slot","value":"global"}],"reject":true,"uhd_gen":"trained_against.slot 'global' is not a valid slot name"},
+{"name":"single_slot_has_an_uppercase_letter","base":"slot","patch":[{"op":"replace","path":"/trained_against/slot","value":"Prep"}],"reject":true,"uhd_gen":"trained_against.slot 'Prep' is not a valid slot name"},
+{"name":"single_slot_is_not_a_string","base":"slot","patch":[{"op":"replace","path":"/trained_against/slot","value":3}],"reject":true,"uhd_gen":"is not a valid slot name"},
+{"name":"selector_revision_with_a_slot","base":"slot","patch":[{"op":"replace","path":"/trained_against","value":{"selector_revision":"r","slot":"dkdv"}}],"reject":true,"uhd_gen":"slot requires kmd"}
+]
+}

@@ -3,6 +3,7 @@
 """Tests that the packer resolves and carries the model file a trained UHD names."""
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import shutil
@@ -394,6 +395,7 @@ def _canonical_uhd_validator():
         "empty_feature",
         "invalid_hash",
         "unknown_header",
+        "format_1_1",
         "unsupported_format",
         "tflops_metric",
         "time_metric",
@@ -413,6 +415,7 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
     doc = _model_uhd("model.bin")
     valid = mutation in (
         "valid",
+        "format_1_1",
         "tflops_metric",
         "time_metric",
         "feature_semantics",
@@ -438,8 +441,10 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         doc["features_hash"] = "sha256:not-hex"
     elif mutation == "unknown_header":
         doc["unknown"] = True
-    elif mutation == "unsupported_format":
+    elif mutation == "format_1_1":
         doc["version"] = "1.1"
+    elif mutation == "unsupported_format":
+        doc["version"] = "1.2"
     elif mutation == "tflops_metric":
         doc["score"] = {"metric": "tflops", "calibrated": True, "transform": "log1p"}
     elif mutation == "time_metric":
@@ -471,6 +476,63 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
     _write_json(root / "heuristic.uhd.json", doc)
     (root / "model.bin").write_bytes(b"artifact")
     assert validator.is_valid(doc) == valid
+    if valid:
+        flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+        assert flat.descriptors[0].sidecars[0].source.read_bytes() == b"artifact"
+    else:
+        with pytest.raises(HkpPackError):
+            load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+
+
+_SLOT_CORPUS_PATH = (
+    "projects/hipdnn/plugin_sdk/tests/ingestor/uhd/fixtures/conformance/"
+    "trained_against_slots.json"
+)
+_ROOT = _repo_root()
+_SLOT_CORPUS = (
+    json.loads((_ROOT / _SLOT_CORPUS_PATH).read_text(encoding="utf-8"))
+    if _ROOT
+    else {"bases": {}, "rows": []}
+)
+
+
+def _patched(base: dict, patch: list) -> dict:
+    """@p base with the RFC 6902 add/replace/remove steps of @p patch applied."""
+    doc = copy.deepcopy(base)
+    for step in patch:
+        *parents, leaf = step["path"].split("/")[1:]
+        node = doc
+        for token in parents:
+            node = node[int(token) if isinstance(node, list) else token]
+        if isinstance(node, list):
+            leaf = len(node) if leaf == "-" else int(leaf)
+        if step["op"] == "remove":
+            del node[leaf]
+        elif step["op"] == "add" and isinstance(node, list):
+            node.insert(leaf, step["value"])
+        else:
+            node[leaf] = step["value"]
+    return doc
+
+
+@pytest.mark.parametrize("row", _SLOT_CORPUS["rows"], ids=lambda row: row["name"])
+def test_packaging_and_canonical_schema_agree_on_slot_provenance(tmp_path, row):
+    """The `trained_against` header grammar of RFC 0021 §9, from the corpus the runtime
+    parser and `uhd_gen` also run."""
+    validator = _canonical_uhd_validator()
+    patched = _patched(_SLOT_CORPUS["bases"][row["base"]], row["patch"])
+    doc = _model_uhd("model.bin")
+    doc["version"] = patched["version"]
+    doc["trained_against"] = patched["trained_against"]
+    valid = not row.get("reject")
+    skipped = row.get("skip", [])
+    root = tmp_path / "src"
+    _write_json(root / "heuristic.uhd.json", doc)
+    (root / "model.bin").write_bytes(b"artifact")
+    if "schema" not in skipped:
+        assert validator.is_valid(doc) == valid
+    if "packer" in skipped:
+        return
     if valid:
         flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
         assert flat.descriptors[0].sidecars[0].source.read_bytes() == b"artifact"

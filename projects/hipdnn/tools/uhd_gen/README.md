@@ -1074,6 +1074,75 @@ files cross attention correctly) is marked `excluded_by_constraints`: no engine 
 
 L1 (`predict_engine`) models only: within-X% is a per-row error, which is what an L1 predicts.
 
+## Slotted engines (RFC 0021)
+
+A UED that declares `slots` selects one kernel per slot, in slot order. Everything above
+holds for an unslotted engine, and for each slot of a slotted one unless stated here.
+
+| | Unslotted | Slotted |
+|---|---|---|
+| Candidate id | the kernel id | per-slot kernel ids in slot order, `prep=<id>\|dkdv=<id>\|dq=<id>` |
+| Knob id | `<field>` | `<slot>.<field>` |
+| Sweep kernel columns | `kernel.<field>` | `kernel.<slot>.<field>`, plus `kernel` (the composite id) and `slot_reference` |
+| Catalog ranker | one `sort_kernel_catalog` | one per slot, metric-less |
+| Engine estimate | `predict_engine` | `predict_engine`, engine-level; its `trained_against` names every slot's KMD in `kmds` |
+| Descriptor `version` | `1.0` | `1.1` for the UED, KDPs and slot-aware UHDs (`uhd.schema.json` accepts `1.0` and `1.1`) |
+
+**Training data.** `hipdnn_bench --sweep` times every composite candidate: the product of the
+slot catalogs. `slot_reference` names the slots whose training rows a row is, joined by `|`:
+the reference program (every slot at its first kernel in kernel-id order) is every slot's row,
+a candidate that varies exactly one slot is that slot's row, any other is empty. A slot's
+ranker therefore learns whole-program times with the other slots held at their reference
+kernels. These training reference picks can differ from the runtime's; the RFC's
+separability assumption covers the difference. A reference program that fails to time fails
+the sweep; no row is dropped and no other kernel substitutes. `ws.*` workspace tokens
+describe the engine's buffer, not the problem, and never reach a training row.
+
+```bash
+hipdnn_bench --graph g.json --engine-name <engine> --plugin-dir <dir> --sweep > sweep.csv
+python -m uhd_gen.dataset add --into store --csv sweep.csv --engine <engine> --engine-id <id> \
+    --arch gfx950 --selector-revision <rev> --collected-at <timestamp>
+python -m uhd_gen.dataset export --from store --purpose training --slot dkdv --out dkdv.json
+python -m uhd_gen generate --dataset store --slot dkdv --no-promote --target avgTimeMs \
+    --objective min --features q.seqlen kernel.tile --eval-fraction 0.25 \
+    --descriptor-tree <tree> --engine <UED name> --arch gfx950 \
+    --feature-evaluator <build>/bin/hipdnn_uhd_features --output-dir out/dkdv
+python -m uhd_gen promote --model-dir out/dkdv/model --descriptor-tree <tree> \
+    --engine <UED name> --role sort_kernel_catalog --arch gfx950 --corpus out/dkdv/corpus.json \
+    --feature-evaluator <build>/bin/hipdnn_uhd_features
+python -m uhd_gen knobs --input sweep.csv --slot dkdv
+```
+
+`--slot <name>` takes one slot's rows and rewrites them as an unslotted corpus: `kernel` is the
+slot's kernel id, `kernel.<slot>.<field>` becomes `kernel.<field>` (the ranker's
+`$kernel.<field>` signature), and the other slots' columns, `slot_reference` and `ws.*` are
+dropped. `generate --slot` also records the slot's provenance (`trained_against` with `slot`
+and that slot's KMD, from `--descriptor-tree` and `--engine`), and `train` writes a model whose
+`trained_against` carries `slot` or `kmds` as a `1.1` UHD (`1.0` otherwise). The dataset is a
+published one, so `generate` needs `--no-promote` and `--features` (or `--feature-signature`),
+needs at least five training problems plus held-out ones, and leaves installing to `promote`.
+
+`dataset export`, `generate` and `knobs` accept `--slot`, and each refuses a corpus that is
+not a slotted sweep; `generate` also needs `--dataset`. `generate` refuses to collect
+measurements for a slotted engine (the L2 `sort_kernel_catalog` path): sweep with
+`hipdnn_bench`, add the CSV, train per slot, and `promote` each model.
+
+A slot ranker is trained without `--metric`: a model that declares `score.metric` makes the
+loader drop the engine, and `generate --slot` and `promote` refuse it. `train` defaults
+`--metric` to `tflops` when `--target` is omitted or `tflops`, so give a slot ranker an
+explicit other target, such as `avgTimeMs`.
+
+**Installing.** A slot ranker records its slot in `trained_against.slot` and installs under
+`heuristics/<ued-id>/<slot>/sort_kernel_catalog/<arch>/`; `predict_engine` installs at the
+engine. `promote` refuses a `sort_kernel_catalog` model that records no slot, names a slot
+the engine lacks, declares `score.metric`, has a `kernel.<field>` feature outside the slot's
+KMD fields and knobs, or reads a shared-workspace token (`$ws.*`); it also refuses the
+`predict_applicable_kernels` role (slots carry none). `--remove-knob NAME` edits the knobs of the model's slot only.
+
+**Tests.** The slot tests (`tests/test_promote_slots.py`, `test_slot_ranker_install.py`,
+`test_slotted_sweep.py`) import pandas, pyarrow and lightgbm, which CI does not install: they
+skip there and run only locally.
+
 ## Output
 
 `train` generates:

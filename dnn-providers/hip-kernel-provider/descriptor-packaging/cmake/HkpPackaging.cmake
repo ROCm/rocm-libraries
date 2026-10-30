@@ -101,7 +101,8 @@ endfunction()
 #   <out_source_var> receives the name of the variable the
 #   targets came from, or empty when neither is set, so a caller can name it in a
 #   diagnostic. No intersection with a fixed fixture set: the tool compiles from
-#   authored sources for whatever arch is requested.
+#   authored sources for whatever arch is requested. Only the fixed-arch slotted fixture
+#   roots intersect, in _hkp_wire_fixed_arch_root().
 #
 #   The only consumer of GPU_TARGETS in dnn-providers/. The sibling kpack
 #   producer, src/engines/asm_sdpa_engine/CMakeLists.txt, declares an explicit
@@ -1634,6 +1635,33 @@ function(_hkp_wire_root)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_wire_fixed_arch_root(NAME <n> OUT_ROOT <dir> ARCH <arch> SELECTED "<list>"
+#                           [<other _hkp_wire_root arguments>])
+#   Wire one root as _hkp_wire_root() does, for the one arch <arch> its fixture is
+#   authored for: ARCHES is <arch> when it is in SELECTED (the build's arches, quoted as
+#   one value) and the root is dormant when it is not. The fixture's device-specific
+#   shard is then built only for its own arch and ships only in that arch's content. A
+#   dormant root is recorded through _hkp_record_dormant_pack(), its OUT_ROOT is
+#   removed so a tree from an earlier configuration is not installed, and no pack
+#   target exists. An empty ARCHES is never passed on.
+#   Like _hkp_wire_root(), EXCLUDE_FOLDERS must be the last keyword.
+# ---------------------------------------------------------------------------
+function(_hkp_wire_fixed_arch_root)
+    cmake_parse_arguments(PARSE_ARGV 0 F "" "NAME;OUT_ROOT;ARCH;SELECTED" "")
+    set(_selected ${F_SELECTED})
+    if(F_ARCH IN_LIST _selected)
+        _hkp_wire_root(NAME "${F_NAME}" OUT_ROOT "${F_OUT_ROOT}" ARCHES "${F_ARCH}"
+                       ${F_UNPARSED_ARGUMENTS})
+        return()
+    endif()
+    _hkp_record_dormant_pack("${F_NAME}")
+    file(REMOVE_RECURSE "${F_OUT_ROOT}")
+    message(STATUS
+        "hkp: root '${F_NAME}' is authored for ${F_ARCH}, not among this build's "
+        "architectures (${_selected}); ${F_NAME} packaging dormant.")
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_add_packaging()
 #   Gate production packaging on ONE source root; producer selection is per-UKD on
 #   kernel_source.kind, so every enabled producer is available to every root. Runs only
@@ -1780,6 +1808,48 @@ function(hkp_add_packaging)
         OUT_ROOT "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH}"
         PACK_JOBS 1
         ${_root_args})
+
+    # Shared by the three slotted roots; _root_args stays last (EXCLUDE_FOLDERS).
+    set(_slotted_args
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        PACK_JOBS 1
+        ${_root_args})
+
+    # The slotted fixture of the pytest suite (RFC 0021). A sibling of the unit and
+    # integration trees, not a subtree: hkp_verify_embedded_sources() walks the unit tree
+    # and the fixture's embedded sources name no kernel any binary registers. The wildcard
+    # arch packs it for every selected arch.
+    _hkp_wire_root(
+        NAME slotted
+        SOURCE_ROOT "${HKP_FIXTURES}/${HIPKERNELPROVIDER_TEST_SET_SLOTTED}"
+        ARCHES "${_arches}"
+        OUT_ROOT "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_SLOTTED}"
+        ${_slotted_args})
+
+    # The consumer-shaped slotted fixture: authored hsaco slots, `dq` a two-launch hsaco
+    # `sources` kernel with a generic-target pack. gfx950 only
+    # (see _hkp_wire_fixed_arch_root): a lone generic `dq` must not ship to another arch.
+    # hsaco runs no compiler, so rocKE state does not gate it.
+    _hkp_wire_fixed_arch_root(
+        NAME slotted_hsaco
+        ARCH gfx950
+        SELECTED "${_arches}"
+        SOURCE_ROOT "${HKP_FIXTURES}/${HIPKERNELPROVIDER_TEST_SET_SLOTTED_HSACO}"
+        OUT_ROOT "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_SLOTTED_HSACO}"
+        ${_slotted_args})
+
+    # The slotted multi-launch fixture: every slot is rocKE (develop's gfx1151 decode
+    # builders), so it needs rocKE on, and gfx1151 selected (_hkp_wire_fixed_arch_root).
+    if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+        _hkp_wire_fixed_arch_root(
+            NAME slotted_multi_launch
+            ARCH gfx1151
+            SELECTED "${_arches}"
+            SOURCE_ROOT "${HKP_FIXTURES}/${HIPKERNELPROVIDER_TEST_SET_SLOTTED_MULTI_LAUNCH}"
+            OUT_ROOT "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_SLOTTED_MULTI_LAUNCH}"
+            ${_slotted_args})
+    endif()
 
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
     if(HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES)
