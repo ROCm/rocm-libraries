@@ -483,6 +483,43 @@ CACHE_WGRAD_KLOOP_UNSPLIT_VARIANTS: Dict[str, Tuple[dict, ...]] = {
 # a device with n XCDs. The XCD count is a property of the part, not of the
 # arch (gfx942 ships with 6 and with 8), so it is opt-in per cache build.
 _WGRAD_XCD = int(_os.environ.get("ROCKE_AOT_WGRAD_XCD", "0") or 0)
+# ROCKE_AOT_WGRAD_PFS=<list> (e.g. "1,4") additionally builds each
+# register-prefetch variant (of a split-K kernel the xcd ones only, when
+# ROCKE_AOT_WGRAD_XCD is set) with WgradConvSpec.pfr_sched=<v>: 1 = early issue of the next tile's
+# reads, N > 1 = reads interleaved with N MFMAs each (mem pipeline only).
+# Which one wins is per kernel and per shape, so it is opt-in and swept.
+_WGRAD_PFS: Tuple[int, ...] = tuple(
+    int(v) for v in _os.environ.get("ROCKE_AOT_WGRAD_PFS", "").split(",") if v.strip()
+)
+# ROCKE_AOT_WGRAD_PFS_MIN_MN=<v> limits the pfr_sched variants to tile_m >= v,
+# tile_n >= v and tile_k >= 32 (where they were measured to win: the large
+# 1-2 wave/SIMD tiles; the M=64 tiles gain nothing from them).
+_WGRAD_PFS_MIN_MN = int(_os.environ.get("ROCKE_AOT_WGRAD_PFS_MIN_MN", "0") or 0)
+# ROCKE_AOT_WGRAD_BSWZ=1 additionally builds each register-prefetch variant
+# above (pfr_sched ones included) with WgradConvSpec.lds_bswz=1 (pad-free
+# XOR-swizzled B tile; the validator rejects tiles it does not cover).
+# ROCKE_AOT_WGRAD_BSWZ_MAX_M=<m> limits it to tile_m <= m: the pad it saves is
+# what moves the M=64 tiles over an LDS occupancy step.
+# ROCKE_AOT_WGRAD_KPL=8 doubles every k-packed register-prefetch variant above
+# (pfr_sched ones included) with WgradConvSpec.kp_line=8 (line-major decode of
+# the packed global reads); applied before the lds_bswz axis, so it stacks.
+_WGRAD_KPL = int(_os.environ.get("ROCKE_AOT_WGRAD_KPL", "0") or 0)
+# ROCKE_AOT_WGRAD_KPL_MAX_M=<m> limits it to tile_m <= m (measured: it helps the
+# M=64, C=64 wgrad tiles; the 128/256-row tiles are unchanged).
+_WGRAD_KPL_MAX_M = int(_os.environ.get("ROCKE_AOT_WGRAD_KPL_MAX_M", "0") or 0)
+# ROCKE_AOT_WGRAD_M64_MIN_N=<n> further limits the kp_line and lds_bswz axes
+# to tile_n >= n (the M=64 problems are served by 64 x 256 tiles).
+_WGRAD_M64_MIN_N = int(_os.environ.get("ROCKE_AOT_WGRAD_M64_MIN_N", "0") or 0)
+# ROCKE_AOT_WGRAD_M64_MIN_M=<m>: and tile_m >= m; ROCKE_AOT_WGRAD_M64_SPLIT_ONLY=1:
+# and split-K binaries only (the M=64 problems have huge reductions).
+_WGRAD_M64_MIN_M = int(_os.environ.get("ROCKE_AOT_WGRAD_M64_MIN_M", "0") or 0)
+_WGRAD_M64_SPLIT_ONLY = int(_os.environ.get("ROCKE_AOT_WGRAD_M64_SPLIT_ONLY", "0") or 0)
+_WGRAD_BSWZ = int(_os.environ.get("ROCKE_AOT_WGRAD_BSWZ", "0") or 0)
+_WGRAD_BSWZ_MAX_M = int(_os.environ.get("ROCKE_AOT_WGRAD_BSWZ_MAX_M", "0") or 0)
+# ROCKE_AOT_WGRAD_BSWZ_WPE=<n> also builds each tile_k=32 lds_bswz variant with
+# waves_per_eu=<n>: the pad-free tile fits 3 workgroups per CU by LDS, and the
+# 16x16 kernels need the VGPR cap (<= 168) to fit them by registers too.
+_WGRAD_BSWZ_WPE = int(_os.environ.get("ROCKE_AOT_WGRAD_BSWZ_WPE", "0") or 0)
 
 # ---- wgrad stream-K axis (opt-in) -------------------------------------------
 # Stream-K (WgradConvSpec.streamk) bakes its launch mode and its partial-sum
@@ -1685,6 +1722,52 @@ def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
         variants = variants + CACHE_WGRAD_KLOOP_UNSPLIT_VARIANTS.get(arch, ())
     if _WGRAD_XCD > 1 and cfg.get("split_k", 1) > 1:
         variants = variants + tuple(dict(v, xcd_remap=_WGRAD_XCD) for v in variants)
+    if _WGRAD_PFS and (
+        not _WGRAD_PFS_MIN_MN
+        or (
+            cfg.get("tile_m", 0) >= _WGRAD_PFS_MIN_MN
+            and cfg.get("tile_n", 0) >= _WGRAD_PFS_MIN_MN
+            and cfg.get("tile_k", 0) >= 32
+        )
+    ):
+        split = cfg.get("split_k", 1) > 1
+        variants = variants + tuple(
+            dict(v, pfr_sched=p)
+            for v in variants
+            for p in _WGRAD_PFS
+            if v.get("prefetch_regs") in (1, 3)
+            and (_WGRAD_XCD <= 1 or not split or v.get("xcd_remap"))
+            and (p == 1 or cfg.get("pipeline") == "mem")
+        )
+    _n_ok = (
+        cfg.get("tile_n", 0) >= _WGRAD_M64_MIN_N
+        and cfg.get("tile_m", 0) >= _WGRAD_M64_MIN_M
+        and (not _WGRAD_M64_SPLIT_ONLY or cfg.get("split_k", 1) > 1)
+    )
+    if _WGRAD_KPL and _n_ok and (
+        not _WGRAD_KPL_MAX_M or cfg.get("tile_m", 0) <= _WGRAD_KPL_MAX_M
+    ):
+        split = cfg.get("split_k", 1) > 1
+        variants = variants + tuple(
+            dict(v, kp_line=_WGRAD_KPL)
+            for v in variants
+            if v.get("prefetch_regs") in (1, 3)
+            and v.get("lds_kpack", 1) > 1
+            and (_WGRAD_XCD <= 1 or not split or v.get("xcd_remap"))
+        )
+    if _WGRAD_BSWZ and _n_ok and (
+        not _WGRAD_BSWZ_MAX_M or cfg.get("tile_m", 0) <= _WGRAD_BSWZ_MAX_M
+    ):
+        split = cfg.get("split_k", 1) > 1
+        bswz = tuple(
+            dict(v, lds_bswz=_WGRAD_BSWZ)
+            for v in variants
+            if v.get("prefetch_regs") in (1, 3)
+            and (_WGRAD_XCD <= 1 or not split or v.get("xcd_remap"))
+        )
+        if _WGRAD_BSWZ_WPE and cfg.get("tile_k") == 32:
+            bswz = bswz + tuple(dict(v, waves_per_eu=_WGRAD_BSWZ_WPE) for v in bswz)
+        variants = variants + bswz
     return variants
 
 

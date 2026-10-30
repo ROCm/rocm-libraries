@@ -150,6 +150,15 @@ class KernelIdentity:
     # wgrad only (WgradConvSpec.sep_addr): separable (1) / carried (2)
     # operand addressing. Left out of the hash at 0.
     sep_addr: int = 0
+    # wgrad only (WgradConvSpec.pfr_sched): issue schedule of the prefetch
+    # loop's reads (1 early, N>1 interleave). Left out of the hash at 0.
+    pfr_sched: int = 0
+    # wgrad only (WgradConvSpec.lds_bswz): pad-free XOR-swizzled B tile.
+    # Left out of the hash at 0.
+    lds_bswz: int = 0
+    # wgrad only (WgradConvSpec.kp_line): line-major decode of the k-packed
+    # reads. Left out of the hash at 0.
+    kp_line: int = 0
     # dgrad (DgradConvSpec.uniform_k_decode) and fwd
     # (ImplicitGemmConvSpec.uniform_k_decode): the per-tile reduction decode
     # K loop. Left out of the hash while False, like prefetch_addr.
@@ -326,6 +335,12 @@ class KernelIdentity:
             del fields["xcd_remap"]
         if not fields["sep_addr"]:
             del fields["sep_addr"]
+        if not fields["pfr_sched"]:
+            del fields["pfr_sched"]
+        if not fields["lds_bswz"]:
+            del fields["lds_bswz"]
+        if not fields["kp_line"]:
+            del fields["kp_line"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
         if not fields["reg_prefetch"]:

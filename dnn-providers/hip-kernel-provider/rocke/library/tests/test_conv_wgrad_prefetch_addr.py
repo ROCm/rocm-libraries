@@ -324,7 +324,7 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
         del fields["dy_halo"], fields["halo_max_wo"]  # dgrad dY halo, off
         del fields["dy_halo_setprio"], fields["dy_halo_kouter_pad"]
         del fields["streamk"], fields["streamk_reduction"]  # stream-K, off
-        del fields["prefetch_regs"], fields["lds_kpack"], fields["xcd_remap"], fields["sep_addr"]  # wgrad knobs, off
+        del fields["prefetch_regs"], fields["lds_kpack"], fields["xcd_remap"], fields["sep_addr"], fields["pfr_sched"], fields["lds_bswz"], fields["kp_line"]  # wgrad knobs, off
         del fields["tapk_prefetch"], fields["tapk_xhalo"], fields["b_kpack"]  # dgrad knobs, off
         del fields["reg_prefetch"], fields["lds_xor"]  # fwd K-loop knobs, off
         del fields["split_addr_k_decode"]

@@ -101,9 +101,10 @@ from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.layouts import ConvKOuterFragmentReader, LdsLayout
-from rocke.helpers.loads import AsyncTileLoader, CoalescedTileLoader
+from rocke.helpers.loads import AsyncTileLoader, CoalescedTileLoader, xor8_key
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.pipeline import SoftwarePipeline
+from rocke.helpers.schedule import MFMA as _SG_MFMA, VMEM_READ as _SG_VMEM_READ
 from rocke.helpers.schedule import SchedulePolicy
 from rocke.helpers.spec import kernel_name_join
 from rocke.helpers.tensor_view import make_buffer_resource
@@ -612,6 +613,40 @@ class WgradConvSpec:
     # Default 0: byte-identical IR and kernel name.
     sep_addr: int = 0
 
+    # Issue schedule of the next tile's global reads in the register-prefetch
+    # K loop (prefetch_regs 1/3). Left to itself the machine scheduler sinks
+    # the buffer_loads (they wait on their address VALU) to the middle of the
+    # MFMA phase, so the reads only get half of it to land and the next LDS
+    # store waits for them (vmcnt) at the loop top.
+    #   1    = "pfe": early issue -- a sched_barrier right after the reads
+    #          pins them ahead of the MFMA phase.
+    #   N>=2 = "ilv<N>": interleave -- one read, then N MFMAs, ... (a
+    #          sched_group_barrier chain): spreads the reads over the phase so
+    #          a wave with no co-resident wave does not stall on TA
+    #          back-pressure issuing them as one block. Plain "mem" pipeline
+    #          only (compv3/compv4 emit their own DS_READ/MFMA group hints).
+    #
+    # Default 0: byte-identical IR and kernel name.
+    pfr_sched: int = 0
+
+    # Pad-free, XOR-swizzled LDS for the B (X) tile: rows of exactly tile_k
+    # elements, the 8-byte unit of each element XORed by a per-row key and the
+    # rows permuted inside their bank line (loads.xor8_swizzle_rc); the B
+    # stores (kp2/kp4 transpose-on-store) and the B fragment reads use the
+    # same map. Drops the lds_k_pad row pad of B -- at t64x256x32 23040 ->
+    # 20992 B, i.e. 3 instead of 2 workgroups per CU -- and keeps the reads
+    # and stores bank-conflict free. Register-prefetch loops (pfr 1/3) only.
+    # Default 0: byte-identical IR and kernel name.
+    lds_bswz: int = 0
+
+    # Lane decode of the k-packed (lds_kpack > 1) global reads: 0 (default)
+    # column-group fastest -- one wave-wide 16-byte read touches 16 free-axis
+    # lines of 128 bytes, half of each; 8 = line-major
+    # (CoalescedTileLoader.kp_line): 8 lanes read the 8 chunks of one 128-byte
+    # line, so a read touches 8 whole lines. Same LDS image.
+    # Default 0: byte-identical.
+    kp_line: int = 0
+
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -836,6 +871,10 @@ class WgradConvSpec:
                 f"xcd{self.xcd_remap}": self.xcd_remap > 1,
                 "sepa": self.sep_addr == 1,
                 "sepa2": self.sep_addr == 2,
+                "pfe": self.pfr_sched == 1,
+                f"ilv{self.pfr_sched}": self.pfr_sched > 1,
+                "bswz": self.lds_bswz == 1,
+                f"kpl{self.kp_line}": self.kp_line > 0,
                 # Stream-K changes the grid decode, the K ranges and the
                 # epilogue, and the launch mode and the reduction both change
                 # the emitted body. The CTA pool does not: like the split-K
@@ -1307,6 +1346,21 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
         return "sep_addr covers the general (non-pointwise, unmerged) descriptors only"
     if spec.sep_addr == 2 and not (spec.prefetch_regs and spec.lds_kpack > 1):
         return "sep_addr=2 carries the address across the prefetch_regs loop with lds_kpack > 1"
+    if spec.kp_line:
+        if spec.kp_line != 8 or spec.lds_kpack < 2 or not spec.prefetch_regs:
+            return "kp_line=8 re-decodes the k-packed reads of the prefetch_regs loops"
+    if spec.lds_bswz:
+        if spec.lds_bswz != 1 or spec.prefetch_regs not in (1, 3):
+            return "lds_bswz=1 swizzles the B tile of the prefetch_regs=1/3 loop"
+        if spec.lds_k_outer or spec.async_dma or spec.unroll_k:
+            return "lds_bswz needs the M-outer synchronous tile"
+        if spec.tile_k not in (16, 32, 64) or spec.lds_kpack not in (2, 4):
+            return "lds_bswz needs tile_k 16/32/64 and lds_kpack 2/4"
+    if spec.pfr_sched:
+        if spec.pfr_sched < 0 or spec.prefetch_regs not in (1, 3):
+            return "pfr_sched schedules the prefetch_regs=1/3 loop's reads (>= 0)"
+        if spec.pfr_sched > 1 and spec.pipeline != "mem":
+            return "pfr_sched interleave (>1) needs the plain mem pipeline"
     if spec.lds_kpack != 1:
         if spec.lds_kpack not in (2, 4, 8) or spec.tile_k % spec.lds_kpack:
             return f"lds_kpack={spec.lds_kpack} must be 2/4/8 and divide tile_k"
@@ -2065,6 +2119,8 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     else:
         _a_shape = _lds_layout.storage_shape(spec.tile_m)
         _b_shape = _lds_layout.storage_shape(spec.tile_n)
+        if spec.lds_bswz:
+            _b_shape = (spec.tile_n, spec.tile_k)  # pad-free swizzled B
     _ab_bytes = (
         _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
     ) * _ab_dtype_bytes
@@ -2531,6 +2587,8 @@ def build_implicit_gemm_conv_wgrad(
         a_kouter_stride = b_kouter_stride = 0
         _a_shape = lds_layout.storage_shape(block_m)
         _b_shape = lds_layout.storage_shape(block_n)
+        if spec.lds_bswz:
+            _b_shape = (block_n, block_k)  # pad-free swizzled B
 
     if spec.prefetch_regs == 2:
         # Two M-outer tiles stacked along the rows; the K loop picks one with
@@ -2814,7 +2872,7 @@ def build_implicit_gemm_conv_wgrad(
         P = params
         c_one = b.const_i32(1)
         cz = b.const_i32(0)
-        col0 = b.mul(b.mod(tid, b.const_i32(block_k // kp)), b.const_i32(kp))
+        col0 = b_sync_loader.kp_col0(b, tid)
         # Uniform mixed-radix decomposition of the K step (prologue only).
         _bk = c_block_k
         sw = b.mod(_bk, p_Wo)
@@ -3060,6 +3118,8 @@ def build_implicit_gemm_conv_wgrad(
                     kpack=spec.lds_kpack,
                 ):
                     _extra["row_kpack"] = spec.lds_kpack
+                    if spec.kp_line:
+                        _extra["kp_line"] = spec.kp_line
         a_sync_loader = CoalescedTileLoader(
             tile_rows=a_tile_rows,
             tile_cols=a_tile_cols,
@@ -3069,6 +3129,13 @@ def build_implicit_gemm_conv_wgrad(
             vector_axis=a_axis,
             **_kp_extra_a,
         )
+        if spec.lds_bswz:
+            if b_axis != "row" or _kp_extra_b.get("row_kpack", 1) not in (2, 4):
+                raise ValueError(
+                    "lds_bswz needs the k-packed row-mode B store "
+                    f"(axis {b_axis!r}, row_kpack {_kp_extra_b.get('row_kpack', 1)})"
+                )
+            _kp_extra_b["lds_xor8"] = True
         b_sync_loader = CoalescedTileLoader(
             tile_rows=b_tile_rows,
             tile_cols=b_tile_cols,
@@ -3271,6 +3338,9 @@ def build_implicit_gemm_conv_wgrad(
         if b_row_off is not None:
             warp_n_off = b.add(warp_n_off, b_row_off)
         new_accs: List[Value] = list(iter_vars)
+        _bswz_key = None
+        if spec.lds_bswz:
+            _bswz_key = xor8_key(b, b.add(warp_n_off, n_in_atom), tile_cols=block_k)
 
         for kk in range(k_atoms):
             col_base = b.add(
@@ -3315,9 +3385,12 @@ def build_implicit_gemm_conv_wgrad(
                 b_row = b.add(
                     warp_n_off, b.add(b.const_i32(ni * spec.warp_tile_n), n_in_atom)
                 )
+                # The swizzle key is periodic in 16 rows and ni steps whole
+                # 16/32-row atoms: one per-lane key serves every ni.
+                b_col = b.xor(col_base, _bswz_key) if spec.lds_bswz else col_base
                 b_cols.append(
                     _emit_smem_load(
-                        b, B_src, b_row, col_base, b_per_lane, smem_dtype=_smem_dtype
+                        b, B_src, b_row, b_col, b_per_lane, smem_dtype=_smem_dtype
                     )
                 )
 
@@ -3745,10 +3818,24 @@ def build_implicit_gemm_conv_wgrad(
                 nxt = [v for _r, _c, v in _an] + [v for _r, _c, v in _bn]
                 if _inc is not None:
                     nxt += list(_inc["get"]())
+                if spec.pfr_sched == 1:
+                    b.sched_barrier(0)
             k_off_capture[0] = k0
             new = emit_mfma_phase(
                 A_smem, B_smem, list(acc_vals), a_row_off=_a_off, b_row_off=_b_off
             )
+            if prefetch and spec.pfr_sched > 1:
+                _n_mfma = k_atoms * mfmas_m * mfmas_n
+                _used = 0
+                for _i in range(len(_an) + len(_bn)):
+                    b.sched_group_barrier(_SG_VMEM_READ, 1, 0)
+                    _k = min(spec.pfr_sched, _n_mfma - _used)
+                    if _k > 0:
+                        b.sched_group_barrier(_SG_MFMA, _k, 0)
+                        _used += _k
+                if _used < _n_mfma:
+                    b.sched_group_barrier(_SG_MFMA, _n_mfma - _used, 0)
+                b.sched_barrier(0)
             if buf is None:
                 b.sync_lds_only()
             return new, nxt
