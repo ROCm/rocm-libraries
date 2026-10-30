@@ -21,22 +21,18 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardProfile.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250ReplayGroup.hpp"
 
 namespace {
 using namespace stinkytofu;
 
-enum class MemoryGroupKind {
-    None,
-    SMEM,
-    VMEM,
-    Other,
-};
-
-enum class ReplayMode {
-    SingleGroup,
-    MultiGroup,
-};
+using gfx1250::getReplayGroupKind;
+using gfx1250::isFullTranslationDrain;
+using gfx1250::isScalarPrefetch;
+using MemoryGroupKind = gfx1250::ReplayGroupKind;
+using ReplayMode = gfx1250::ReplayMode;
 
 // This pass currently implements only the single-group policy. Keep the
 // mapping explicit because gfx1250 categorizes tensor memory differently in
@@ -60,19 +56,6 @@ struct GroupState {
         sources.clear();
     }
 };
-
-MemoryGroupKind getMemoryGroupKind(const StinkyInstruction& inst, ReplayMode replayMode) {
-    if (isSMemLoad(inst) || isSMemStore(inst) || inst.is(InstFlag::IF_SMemAtomic))
-        return MemoryGroupKind::SMEM;
-    if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isFLATLoad(inst) ||
-        isFLATStore(inst) || isFLATAtomic(inst) || isGLOBALLoad(inst) || isGLOBALStore(inst) ||
-        isGLOBALAtomic(inst))
-        return MemoryGroupKind::VMEM;
-    if (isTensorLoad(inst))
-        return replayMode == ReplayMode::SingleGroup ? MemoryGroupKind::Other
-                                                     : MemoryGroupKind::VMEM;
-    return MemoryGroupKind::None;
-}
 
 bool isAtomic(const StinkyInstruction& inst) {
     return isGlobalMemAtomic(inst);
@@ -108,31 +91,6 @@ bool returnsMultipleDwords(const StinkyInstruction& inst) {
     return dwords > 1;
 }
 
-bool hasZeroWaitImmediate(const StinkyInstruction& inst) {
-    const auto& srcs = inst.getSrcRegs();
-    return srcs.size() == 1 && srcs.front().dataType == StinkyRegister::Type::LiteralInt &&
-           srcs.front().getLiteralInt() == 0;
-}
-
-// A zero-count data wait guarantees translation for the corresponding memory
-// operations. Nonzero waits leave work in flight and are not full drains.
-bool isFullTranslationDrain(const StinkyInstruction& inst) {
-    switch (inst.getUnifiedOpcode()) {
-        case GFX::s_wait_xcnt:
-        case GFX::s_wait_loadcnt:
-        case GFX::s_wait_kmcnt:
-        case GFX::s_wait_dscnt:
-        case GFX::s_wait_loadcnt_dscnt:
-        case GFX::s_wait_tensorcnt:
-        case GFX::s_wait_storecnt:
-        case GFX::s_wait_storecnt_dscnt:
-        case GFX::s_wait_asynccnt:
-            return hasZeroWaitImmediate(inst);
-        default:
-            return false;
-    }
-}
-
 bool isForeverSleep(const StinkyInstruction& inst) {
     if (inst.getUnifiedOpcode() != GFX::s_sleep) {
         return false;
@@ -144,17 +102,13 @@ bool isForeverSleep(const StinkyInstruction& inst) {
     return (static_cast<uint16_t>(srcs.front().getLiteralInt()) & 0x8000U) != 0;
 }
 
-bool isScalarPrefetch(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::s_prefetch_inst_pc_rel;
-}
-
 bool isImmediateMemorySuccessor(BasicBlock::iterator it, BasicBlock& bb, ReplayMode replayMode) {
     for (auto next = std::next(it); next != bb.end(); ++next) {
         auto* inst = dyn_cast<StinkyInstruction>(next.getNodePtr());
         if (inst == nullptr || isPseudoInst(inst)) {
             continue;
         }
-        return getMemoryGroupKind(*inst, replayMode) != MemoryGroupKind::None;
+        return getReplayGroupKind(*inst, replayMode) != MemoryGroupKind::None;
     }
     return false;
 }
@@ -267,9 +221,10 @@ class Gfx1250HazardPass : public Pass {
             }
 
             // SW-prefetch runs later and owns its hints' XCnt waits; handle only
-            // pre-existing scalar prefetches here.
+            // pre-existing scalar prefetches here. A prefetch joins the SMEM group,
+            // so hardware already drains XCNT when it follows any other group.
             if (isScalarPrefetch(*inst)) {
-                if (state.hasMemory)
+                if (state.hasMemory && state.kind == MemoryGroupKind::SMEM)
                     insertXcntDrain(builder, archId, inst, state, profile,
                                     XcntDrainReason::ScalarPrefetch);
                 state.clear();
@@ -286,7 +241,7 @@ class Gfx1250HazardPass : public Pass {
             }
         }
 
-        const MemoryGroupKind kind = getMemoryGroupKind(*inst, kReplayMode);
+        const MemoryGroupKind kind = getReplayGroupKind(*inst, kReplayMode);
         if (kind == MemoryGroupKind::None) {
             // In single-group mode hardware drains XCNT before every real
             // non-memory instruction, including control flow.
@@ -374,6 +329,11 @@ class Gfx1250HazardPass : public Pass {
    public:
     static void runOnFunction(Function& func, GfxArchID archId, XcntDrainProfileBase& profile,
                               bool enableXnackReplay) {
+        if (enableXnackReplay && gfx1250::mayEnableMultiGroupReplay(func)) {
+            report_fatal_error("Gfx1250HazardPass: '" + func.getName() +
+                               "' may set MODE.REPLAY_MODE (multi-group XNACK replay), but only "
+                               "the single-group replay policy is implemented");
+        }
         profile.beginFunction(func);
 
         GroupState state;

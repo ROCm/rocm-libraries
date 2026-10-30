@@ -61,21 +61,177 @@ st.func @at_p2_k2_buffer_store() {
   "st.buffer_store_b128"(v[624:627], v525, s[16:19], 0) { issueCycles = 1, latencyCycles = 1, mod.mubuf = { offen = true, offset12 = 608, glc = false, slc = false, nt = false, lds = false, scope = "SCOPE_CU" } }
 }
 
-#--- P(2)=40832: a zero-byte label does not break the same VMEM group, so xcnt
-# protection is still emitted before the prefetch.
-# CHECK-LABEL: function "same_vmem_group_needs_xcnt"
+#--- P(2)=40832: an open VMEM group reaches the prefetch. The prefetch is SMEM-family, so the
+# VMEM -> SMEM group switch already drains XCNT in hardware; no explicit wait.
+# CHECK-LABEL: function "vmem_group_no_xcnt"
 # CHECK: {{.*}}buffer_load_b32
+# CHECK-NOT: s_wait_xcnt
+# CHECK: {{.*}}total=40828 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=40840 bytes{{.*}}buffer_store_b128
+# CHECK: [AccumulateInstructionSizePass] total size = 40840 bytes
+
+st.func @vmem_group_no_xcnt() {
+^entry:
+  v100 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+  "st.asm_directive"(".align", "40820")
+label_vmem_group:
+  "st.buffer_store_b128"(v[624:627], v525, s[16:19], 0) { issueCycles = 1, latencyCycles = 1, mod.mubuf = { offen = true, offset12 = 608, glc = false, slc = false, nt = false, lds = false, scope = "SCOPE_CU" } }
+}
+
+#--- P(2)=40832: a zero-byte label does not end an SMEM group, so the prefetch still needs
+# the explicit wait (BUG #20).
+# CHECK-LABEL: function "smem_group_across_label_needs_xcnt"
+# CHECK: {{.*}}s_load_b64
 # CHECK: {{.*}}total=40824 bytes{{.*}}s_wait_xcnt{{.*}}(0)
 # CHECK: {{.*}}total=40832 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
 # CHECK: {{.*}}total=40844 bytes{{.*}}buffer_store_b128
 # CHECK: [AccumulateInstructionSizePass] total size = 40844 bytes
 
-st.func @same_vmem_group_needs_xcnt() {
+st.func @smem_group_across_label_needs_xcnt() {
 ^entry:
-  v100 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+  s[8:9] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 30 }
   "st.asm_directive"(".align", "40820")
-label_same_vmem_group:
+label_smem_group:
   "st.buffer_store_b128"(v[624:627], v525, s[16:19], 0) { issueCycles = 1, latencyCycles = 1, mod.mubuf = { offen = true, offset12 = 608, glc = false, slc = false, nt = false, lds = false, scope = "SCOPE_CU" } }
+}
+
+#--- P(0)=32640: SMEM load directly before a VALU anchor. The prefetch joins the open SMEM group,
+# so it needs the explicit wait even though the next instruction is not SMEM.
+# CHECK-LABEL: function "smem_then_valu_needs_xcnt"
+# CHECK: {{.*}}total=32636 bytes{{.*}}s_load_b64
+# CHECK: {{.*}}total=32640 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=32648 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=32652 bytes{{.*}}v_add_f32
+# CHECK: [AccumulateInstructionSizePass] total size = 32656 bytes
+
+st.func @smem_then_valu_needs_xcnt() {
+^entry:
+  v9 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "32628")
+  s[8:9] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 30 }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- P(0)=32640: SMEM load directly before another SMEM load.
+# CHECK-LABEL: function "smem_then_smem_needs_xcnt"
+# CHECK: {{.*}}total=8 bytes{{.*}}s_load_b64
+# CHECK: {{.*}}total=32636 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=32644 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=32652 bytes{{.*}}s_load_b64
+# CHECK: [AccumulateInstructionSizePass] total size = 32656 bytes
+
+st.func @smem_then_smem_needs_xcnt() {
+^entry:
+  s[8:9] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 30 }
+  "st.asm_directive"(".align", "32632")
+  s[10:11] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 30 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- P(0)=32640: s_set_vgpr_msb can issue with XCNT != 0 (DEMI400-9920), so it does not close the
+# SMEM group ahead of the prefetch.
+# CHECK-LABEL: function "smem_vgpr_msb_needs_xcnt"
+# CHECK: {{.*}}total=32632 bytes{{.*}}s_load_b64
+# CHECK: {{.*}}total=32636 bytes{{.*}}s_set_vgpr_msb
+# CHECK: {{.*}}total=32640 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=32648 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: [AccumulateInstructionSizePass] total size = 32656 bytes
+
+st.func @smem_vgpr_msb_needs_xcnt() {
+^entry:
+  v9 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "32624")
+  s[8:9] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 30 }
+  "st.s_set_vgpr_msb"(0) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- P(0)=32640: a SALU after the SMEM load ends the group, so no explicit wait.
+# CHECK-LABEL: function "smem_then_salu_no_xcnt"
+# CHECK: {{.*}}s_load_b64
+# CHECK: {{.*}}total=32636 bytes{{.*}}s_add_u32
+# CHECK-NOT: s_wait_xcnt
+# CHECK: {{.*}}total=32644 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: [AccumulateInstructionSizePass] total size = 32652 bytes
+
+st.func @smem_then_salu_no_xcnt() {
+^entry:
+  v9 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "32624")
+  s[8:9] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 30 }
+  s20 = "st.s_add_u32"(s2, s3) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- P(0)=32640: SMEM -> DS is a group change (DS counts as VMEM-class), so no explicit wait.
+# CHECK-LABEL: function "smem_then_ds_no_xcnt"
+# CHECK: {{.*}}s_load_b64
+# CHECK: {{.*}}total=32636 bytes{{.*}}ds_load_b32
+# CHECK-NOT: s_wait_xcnt
+# CHECK: {{.*}}total=32644 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: [AccumulateInstructionSizePass] total size = 32652 bytes
+
+st.func @smem_then_ds_no_xcnt() {
+^entry:
+  v9 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "32620")
+  s[8:9] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 30 }
+  v10 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- P(0)=32640: an SMEM load that ends a block falls through into the anchor block; the open
+# group crosses the block boundary.
+# CHECK-LABEL: function "smem_fallthrough_needs_xcnt"
+# CHECK: {{.*}}total=32636 bytes{{.*}}s_load_b64
+# CHECK: {{.*}}total=32640 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=32648 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: [AccumulateInstructionSizePass] total size = 32656 bytes
+
+st.func @smem_fallthrough_needs_xcnt() {
+^entry:
+  v9 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "32628")
+  s[8:9] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 30 }
+  Successors: ^next
+^next:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- P(0)=32640: raw text right before the anchor may hold an SMEM load the pass cannot see, so
+# the prefetch gets the explicit wait.
+# CHECK-LABEL: function "opaque_text_needs_xcnt"
+# CHECK: {{.*}}total=32640 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=32648 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: [AccumulateInstructionSizePass] total size = 32656 bytes
+
+st.func @opaque_text_needs_xcnt() {
+^entry:
+  v9 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "32636")
+  "st.asm_directive"("TEXTBLOCK", "  s_load_b32 s4, s[0:1], 0x0\n")
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- P(0)=32640: a comment-only text block is not code, so the VALU before it decides.
+# CHECK-LABEL: function "comment_text_no_xcnt"
+# CHECK-NOT: s_wait_xcnt
+# CHECK: {{.*}}total=32644 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: [AccumulateInstructionSizePass] total size = 32652 bytes
+
+st.func @comment_text_no_xcnt() {
+^entry:
+  v9 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "32636")
+  "st.asm_directive"("TEXTBLOCK", "/* s_load_b32 s4 */\n// note\n")
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
 }
 
 #--- P(4)=49024. No open replay group reaches the prefetch.

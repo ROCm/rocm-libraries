@@ -37,3 +37,26 @@ st.func @getpc_window_redirect() {
   s0 = "st.s_add_u32"(s0, 8) { issueCycles = 1, latencyCycles = 1 }
   v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
 }
+
+#--- getpc window redirect after an SMEM load: the redirected prefetch still joins the open SMEM
+# group, so the wait goes before it, and the getpc -> add chain stays contiguous.
+# CHECK-LABEL: function "getpc_window_redirect_after_smem"
+# CHECK: {{.*}}total=32628 bytes{{.*}}s_load_b64
+# CHECK: {{.*}}total=32632 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=32640 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=32644 bytes{{.*}}s_getpc_b64
+# CHECK-NOT: s_prefetch_inst_pc_rel
+# CHECK: {{.*}}total=32648 bytes{{.*}}s_add_u32
+# CHECK: {{.*}}total=32652 bytes{{.*}}s_add_u32
+# CHECK: [AccumulateInstructionSizePass] total size = 32656 bytes
+
+st.func @getpc_window_redirect_after_smem() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "32620")
+  s[8:9] = "st.s_load_b64"(s[2:3]) { issueCycles = 1, latencyCycles = 30 }
+  s[0:1] = "st.s_getpc_b64"() { issueCycles = 1, latencyCycles = 1 }
+  s0 = "st.s_add_u32"(s0, 4) { issueCycles = 1, latencyCycles = 1 }
+  s0 = "st.s_add_u32"(s0, 8) { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+}
