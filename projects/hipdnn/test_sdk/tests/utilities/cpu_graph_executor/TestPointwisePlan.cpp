@@ -4679,7 +4679,7 @@ TEST_F(TestPointwisePlan, GeluBwdProducesExpectedGradient)
 
     const auto gradient = [](double x) {
         return 0.5 * (1.0 + std::erf(x / std::sqrt(2.0)))
-               + x * std::exp(-x * x / 2.0) / std::sqrt(2.0 * std::acos(-1.0));
+               + x * std::exp(-x * x / 2.0) / std::sqrt(2.0 * 3.14159265);
     };
     for(int64_t width = 0; width < 4; ++width)
     {

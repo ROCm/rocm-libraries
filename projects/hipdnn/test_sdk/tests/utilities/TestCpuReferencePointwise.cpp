@@ -2824,8 +2824,9 @@ protected:
                         auto cdf
                             = ComputeType{0.5}
                               * (ComputeType{1} + std::erf(xCompute / std::sqrt(ComputeType{2})));
-                        auto pdf = std::exp(-xCompute * xCompute / ComputeType{2})
-                                   / std::sqrt(ComputeType{2} * std::acos(ComputeType{-1}));
+                        auto pdf
+                            = std::exp(-xCompute * xCompute / ComputeType{2})
+                              / std::sqrt(ComputeType{2} * static_cast<ComputeType>(3.14159265));
                         auto localGradient = cdf + xCompute * pdf;
                         expected.setHostValue(
                             safeTestTypeCast<OutputType>(dyCompute * localGradient), n, c, h, w);
@@ -2884,8 +2885,9 @@ protected:
                         auto cdf
                             = ComputeType{0.5}
                               * (ComputeType{1} + std::erf(xCompute / std::sqrt(ComputeType{2})));
-                        auto pdf = std::exp(-xCompute * xCompute / ComputeType{2})
-                                   / std::sqrt(ComputeType{2} * std::acos(ComputeType{-1}));
+                        auto pdf
+                            = std::exp(-xCompute * xCompute / ComputeType{2})
+                              / std::sqrt(ComputeType{2} * static_cast<ComputeType>(3.14159265));
                         auto localGradient = cdf + xCompute * pdf;
                         expected.setHostValue(
                             safeTestTypeCast<OutputType>(dyCompute * localGradient), n, c, h, w);
@@ -2936,8 +2938,9 @@ protected:
                         auto cdf
                             = ComputeType{0.5}
                               * (ComputeType{1} + std::erf(xCompute / std::sqrt(ComputeType{2})));
-                        auto pdf = std::exp(-xCompute * xCompute / ComputeType{2})
-                                   / std::sqrt(ComputeType{2} * std::acos(ComputeType{-1}));
+                        auto pdf
+                            = std::exp(-xCompute * xCompute / ComputeType{2})
+                              / std::sqrt(ComputeType{2} * static_cast<ComputeType>(3.14159265));
                         auto localGradient = cdf + xCompute * pdf;
                         expected.setHostValue(
                             safeTestTypeCast<OutputType>(dyCompute * localGradient), n, c, h, w);
@@ -2993,7 +2996,7 @@ protected:
                         auto dyCompute
                             = static_cast<ComputeType>(upstreamGrad.getHostValue(n, c, h, w));
                         const auto sqrt2OverPi
-                            = std::sqrt(ComputeType{2} / ComputeType{3.14159265});
+                            = std::sqrt(ComputeType{2} / static_cast<ComputeType>(3.14159265));
                         auto inner
                             = sqrt2OverPi
                               * (xCompute + ComputeType{0.044715} * xCompute * xCompute * xCompute);
@@ -3061,7 +3064,7 @@ protected:
                         auto dyCompute
                             = static_cast<ComputeType>(upstreamGrad.getHostValue(n, c, h, w));
                         const auto sqrt2OverPi
-                            = std::sqrt(ComputeType{2} / ComputeType{3.14159265});
+                            = std::sqrt(ComputeType{2} / static_cast<ComputeType>(3.14159265));
                         auto inner
                             = sqrt2OverPi
                               * (xCompute + ComputeType{0.044715} * xCompute * xCompute * xCompute);
@@ -3121,7 +3124,7 @@ protected:
                         auto dyCompute
                             = static_cast<ComputeType>(upstreamGrad.getHostValue(n, c, h, w));
                         const auto sqrt2OverPi
-                            = std::sqrt(ComputeType{2} / ComputeType{3.14159265});
+                            = std::sqrt(ComputeType{2} / static_cast<ComputeType>(3.14159265));
                         auto inner
                             = sqrt2OverPi
                               * (xCompute + ComputeType{0.044715} * xCompute * xCompute * xCompute);

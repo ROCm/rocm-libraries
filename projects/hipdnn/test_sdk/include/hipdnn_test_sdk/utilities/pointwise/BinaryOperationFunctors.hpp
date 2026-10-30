@@ -291,7 +291,7 @@ struct GeluBackward
         // d/dx [x * Phi(x)] = Phi(x) + x * phi(x), with Phi the standard normal CDF and phi its PDF
         static const ComputeType s_kSqrt2 = sqrt(ComputeType{2});
         static const ComputeType s_kInvSqrt2Pi
-            = ComputeType{1} / sqrt(ComputeType{2} * ComputeType{M_PI});
+            = ComputeType{1} / sqrt(ComputeType{2} * static_cast<ComputeType>(3.14159265));
         auto cdf = ComputeType{0.5} * (ComputeType{1} + erf(xCompute / s_kSqrt2));
         auto pdf = exp(ComputeType{-0.5} * xCompute * xCompute) * s_kInvSqrt2Pi;
         return static_cast<OutputType>(dyCompute * (cdf + xCompute * pdf));
@@ -310,8 +310,9 @@ struct GeluApproxTanhBackward
         auto xCompute = static_cast<ComputeType>(x);
 
         // Matches GeluApproxTanhForward: 0.5 * x * (1 + tanh(u)), u = sqrt(2/pi) * (x + c * x^3)
-        static const ComputeType s_kSqrt2OverPi = sqrt(ComputeType{2} / ComputeType{M_PI});
-        static const auto s_kCoeff = ComputeType{0.044715};
+        static const ComputeType s_kSqrt2OverPi
+            = sqrt(ComputeType{2} / static_cast<ComputeType>(3.14159265));
+        static const auto s_kCoeff = static_cast<ComputeType>(0.044715);
         auto inner = s_kSqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
         auto tanhVal = tanh(inner);
         auto innerGradient
