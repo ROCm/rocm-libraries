@@ -1171,7 +1171,7 @@ TEST_F(TestBundleDiscoveryFixture, SweepCaseAddedTensorWiredByNodePatchesBuildsG
     ASSERT_TRUE(attributes->generate_stats().has_value());
     EXPECT_TRUE(*attributes->generate_stats());
 
-    const auto tensorMap = graph.getTensorMap();
+    const auto& tensorMap = graph.getTensorMap();
     ASSERT_EQ(tensorMap.count(4), 1u);
     EXPECT_EQ(tensorMap.at(4)->data_type(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 

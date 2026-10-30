@@ -876,8 +876,13 @@ inline void applyNodePatches(nlohmann::json& expandedGraph, const nlohmann::json
         if(!target.node->is_object() || !target.node->contains(section)
            || !target.node->at(section).is_object())
         {
-            throw sweepPatchError(
-                caseJson, where + ": " + target.label + " has no '" + section + "' section");
+            std::string message = where;
+            message.append(": ")
+                .append(target.label)
+                .append(" has no '")
+                .append(section)
+                .append("' section");
+            throw sweepPatchError(caseJson, message);
         }
 
         auto& keys = target.node->at(section);
@@ -887,10 +892,15 @@ inline void applyNodePatches(nlohmann::json& expandedGraph, const nlohmann::json
             {
                 if(!keys.contains(key))
                 {
-                    throw sweepPatchError(caseJson,
-                                          where + ": set key '" + key + "' is not in the '"
-                                              + section + "' section of " + target.label
-                                              + " (set only overwrites existing keys)");
+                    std::string message = where;
+                    message.append(": set key '")
+                        .append(key)
+                        .append("' is not in the '")
+                        .append(section)
+                        .append("' section of ")
+                        .append(target.label)
+                        .append(" (set only overwrites existing keys)");
+                    throw sweepPatchError(caseJson, message);
                 }
                 keys[key] = value;
             }
@@ -902,9 +912,14 @@ inline void applyNodePatches(nlohmann::json& expandedGraph, const nlohmann::json
             {
                 if(!key.is_string() || !keys.contains(key.get<std::string>()))
                 {
-                    throw sweepPatchError(caseJson,
-                                          where + ": remove key " + key.dump() + " is not in the '"
-                                              + section + "' section of " + target.label);
+                    std::string message = where;
+                    message.append(": remove key ")
+                        .append(key.dump())
+                        .append(" is not in the '")
+                        .append(section)
+                        .append("' section of ")
+                        .append(target.label);
+                    throw sweepPatchError(caseJson, message);
                 }
                 keys.erase(key.get<std::string>());
             }
