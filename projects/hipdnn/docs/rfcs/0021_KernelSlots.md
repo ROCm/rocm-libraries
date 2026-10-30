@@ -106,8 +106,8 @@ what reads the graph. Four rules define the model:
 Kernels whose choices depend on each other belong in **one** slot, launched together by that slot's
 dispatch handler: either one multi-launch UKD (RFC 0017 § 15.1), or one UKD whose code object holds
 the dependent kernels, which the slot's native handler launches by symbol names its KMD records.
-The second form needs no `sources`, so it also serves code objects authored as `hsaco`, which a
-producer does not pack into `sources`. Examples are a backward kernel with an optional reduction or
+The second form needs no `sources` and no per-launch signatures, so it also serves a code object
+whose handler launches kernels outside the launch-name contract. Examples are a backward kernel with an optional reduction or
 output-conversion kernel, or a split-KV kernel with the reduction that consumes its splits.
 
 ## 4. Descriptor Format

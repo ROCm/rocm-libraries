@@ -3,7 +3,7 @@
 """A slotted engine of authored `hsaco` UKDs, shaped like the SDPA backward split
 engine (RFC 0021 §3): `prep`, `dkdv` and `dq`, each with its own KMD and dispatch
 descriptor; `dq` packed for gfx950 and for `gfx11-generic`, `prep` and `dkdv` for
-gfx950 only; `dq`'s KMD names a second kernel of its code object.
+gfx950 only; `dq` is a two-launch kernel (`add`, `scale`) of one code object.
 
 Compiler-free: the code objects are committed under `fixtures/slotted_hsaco/objects/`.
 """
@@ -29,12 +29,8 @@ GENERIC_MEMBER = "gfx1100"
 # does not read the object's arch.
 GFX950_OBJECT = FIXTURE / "objects" / "gfx950" / "HsacoFixture.co"
 GENERIC_OBJECT = FIXTURE / "objects" / "gfx942" / "HsacoFixture.co"
-SYMBOLS = {
-    "prep": "HsacoFixtureScale",
-    "dkdv": "HsacoFixtureAdd",
-    "dq": "HsacoFixtureAdd",
-}
-SECOND_SYMBOL = "HsacoFixtureScale"
+SYMBOLS = {"prep": "HsacoFixtureScale", "dkdv": "HsacoFixtureAdd"}
+LAUNCH_SYMBOLS = {"add": "HsacoFixtureAdd", "scale": "HsacoFixtureScale"}
 
 
 @pytest.fixture(scope="module")
@@ -81,18 +77,23 @@ def test_the_gfx950_shard_ships_every_slot(packed, rocm_kpack_dir):
         pack = read_shipped(shard / f"{stem}.kdp.json")
         assert pack["slot"] == slot
         (kernel,) = pack["kernelDescriptors"]
-        ks = kernel["kernel_source"]
-        assert ks["kind"] == "kpack"
-        assert ks["symbol"] == SYMBOLS[slot]
-        assert ks["sha256"] == hashlib.sha256(object_bytes).hexdigest()
-        assert bytes(archive.get_kernel(ks["toc_key"], ARCH)) == object_bytes
+        if slot == "dq":
+            launches = list(kernel["sources"].values())
+            assert {k["symbol"] for k in launches} == set(LAUNCH_SYMBOLS.values())
+        else:
+            launches = [kernel["kernel_source"]]
+            assert launches[0]["symbol"] == SYMBOLS[slot]
+        for ks in launches:
+            assert ks["kind"] == "kpack"
+            assert ks["sha256"] == hashlib.sha256(object_bytes).hexdigest()
+            assert bytes(archive.get_kernel(ks["toc_key"], ARCH)) == object_bytes
 
     # One object file serves the three slots: one archive entry.
     assert len(list(archive.toc)) == 1
     assert len({p.name for p in shard.glob("*.udd.json")}) == len(SLOTS)
 
 
-def test_the_dq_kmd_names_a_second_symbol_the_packed_object_exports(
+def test_dq_ships_two_launches_of_one_object_and_prep_and_dkdv_one_each(
     packed, rocm_kpack_dir
 ):
     out, results = packed
@@ -103,20 +104,24 @@ def test_the_dq_kmd_names_a_second_symbol_the_packed_object_exports(
             descriptor_context.Index(str(shard))
         )
     }
-    dq = bundles["dq"]
-    assert [field["name"] for field in dq.kmd["fields"]] == ["dtype", "reduce_symbol"]
-    (kernel,) = dq.entries
-    assert kernel.ukd["metadata"]["reduce_symbol"] == SECOND_SYMBOL
-    assert kernel.ukd["kernel_source"]["symbol"] != SECOND_SYMBOL
+    assert [f["name"] for f in bundles["dq"].kmd["fields"]] == ["dtype"]
 
-    ks = kernel.ukd["kernel_source"]
+    (kernel,) = bundles["dq"].entries
+    assert "kernel_source" not in kernel.ukd
+    assert kernel.ukd["version"] == "1.1"
+    sources = kernel.ukd["sources"]
+    assert {name: s["symbol"] for name, s in sources.items()} == LAUNCH_SYMBOLS
+    assert len({s["toc_key"] for s in sources.values()}) == 1
+
+    toc_key = sources["add"]["toc_key"]
     archive = _archive(rocm_kpack_dir, results[ARCH].kpack_path)
-    exported = exported_kernels(bytes(archive.get_kernel(ks["toc_key"], ARCH)), "dq")
-    assert {ks["symbol"], SECOND_SYMBOL} <= set(exported)
+    exported = exported_kernels(bytes(archive.get_kernel(toc_key, ARCH)), "dq")
+    assert set(LAUNCH_SYMBOLS.values()) <= set(exported)
 
-    # prep and dkdv complete against KMDs that have no such field.
+    # prep and dkdv stay single-launch.
     for slot in ("prep", "dkdv"):
-        assert [f["name"] for f in bundles[slot].kmd["fields"]] == ["dtype"]
+        (single,) = bundles[slot].entries
+        assert "sources" not in single.ukd and "kernel_source" in single.ukd
 
 
 def test_the_generic_member_shard_ships_dq_only_and_so_no_complete_engine(
@@ -128,12 +133,13 @@ def test_the_generic_member_shard_ships_dq_only_and_so_no_complete_engine(
 
     kernel = _kernel(shard, "dq_generic.kdp.json")
     assert kernel["arch"] == [GENERIC]
-    ks = kernel["kernel_source"]
-    assert ks["library"] == f"kpack/hip_kernel_provider_{GENERIC}.kpack"
-    archive = _archive(rocm_kpack_dir, shard / ks["library"])
-    assert bytes(archive.get_kernel(ks["toc_key"], GENERIC)) == (
-        GENERIC_OBJECT.read_bytes()
-    )
+    assert {n: k["symbol"] for n, k in kernel["sources"].items()} == LAUNCH_SYMBOLS
+    for ks in kernel["sources"].values():
+        assert ks["library"] == f"kpack/hip_kernel_provider_{GENERIC}.kpack"
+        archive = _archive(rocm_kpack_dir, shard / ks["library"])
+        assert bytes(archive.get_kernel(ks["toc_key"], GENERIC)) == (
+            GENERIC_OBJECT.read_bytes()
+        )
 
     # The engine's descriptors ship, but only dq of its three slots has a pack here.
     ued = json.loads((shard / "fixture.ued.json").read_text(encoding="utf-8"))

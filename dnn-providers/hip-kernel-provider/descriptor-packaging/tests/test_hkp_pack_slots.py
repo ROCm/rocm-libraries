@@ -31,6 +31,7 @@ pytestmark = pytest.mark.quick
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "slotted"
 MULTI_LAUNCH_FIXTURE = FIXTURE.parent / "slotted_multi_launch"
+HSACO_FIXTURE = FIXTURE.parent / "slotted_hsaco"
 ENGINE = "hipkernel:SlottedFixture"
 UED_ID = "d5a00000-0000-4000-8000-000000000001"
 KMD_IDS = {
@@ -681,6 +682,43 @@ def test_a_pack_of_a_slotted_engine_without_a_slot_is_refused_by_the_desk_check(
 
     with pytest.raises(HkpPackError, match=r"declares no slot, which every pack of"):
         descriptor_context.resolve_bundles(descriptor_context.Index(str(root)))
+
+
+def _pack_hsaco_slots(tmp_path, rocm_kpack_dir, share_dq_udd):
+    """Pack the `slotted_hsaco` fixture for gfx950, whose `dq` slot launches `add` and
+    `scale` and whose `prep` slot launches one kernel. With `share_dq_udd`, `prep`'s
+    pack names `dq`'s dispatch descriptor instead of its own."""
+    root = tmp_path / "src"
+    shutil.copytree(HSACO_FIXTURE, root)
+    if share_dq_udd:
+        dq_udd = _read(root / "dq.udd.json")["id"]
+        path = root / "prep.kdp.json"
+        doc = _read(path)
+        doc["dispatch"] = dq_udd
+        _write(path, doc)
+    run_pipeline(
+        source_root=root,
+        arches=["gfx950"],
+        out_root=tmp_path / "out",
+        hipcc="hipcc-not-invoked",
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+        source_label="slotted-test",
+    )
+
+
+def test_two_slots_sharing_one_udd_must_name_one_launch_set(tmp_path, rocm_kpack_dir):
+    """The launch set is the dispatch handler's, resolved from the UDD's symbol: two
+    slots whose packs share a UDD but launch different sets are refused at pack time,
+    and give each slot its own UDD and the pack succeeds."""
+    _pack_hsaco_slots(tmp_path / "own", rocm_kpack_dir, share_dq_udd=False)
+
+    with pytest.raises(
+        HkpPackError,
+        match=r"dispatch handler 'hipkernel\.slotted_hsaco\.dq_dispatch' serves "
+        r"kernels that name different launch sets",
+    ):
+        _pack_hsaco_slots(tmp_path / "shared", rocm_kpack_dir, share_dq_udd=True)
 
 
 def test_the_unedited_slotted_fixture_loads(tmp_path):

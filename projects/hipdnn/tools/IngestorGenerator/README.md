@@ -1020,12 +1020,13 @@ Each slot emits its own KMD, its own UDD (`<slug>_<slot>.udd.json`, dispatch sym
 `<namespace>.<slot>_dispatch`) and, when it ranks, its own UHD; a slot's KDPs name the slot's
 UDD. Packs with different launch sets need different dispatch descriptors (RFC 0021 §4), so
 a single-launch `prep` slot can sit beside a multi-launch `dkdv` slot. In the packaged
-dialect a slotted `rocke` pack accepts `launches` exactly as an unslotted one does and emits
-the authored UKD with a `sources` map (UKD 1.1); the launch-set check runs per slot, and a
-slot mixing single- and multi-launch kernels is a `ConfigError`. Kernels whose dependent
-launches live in one code object, as an `hsaco` UKD cannot carry `sources`, are launched by
-the slot's native handler by symbol names its KMD records, which needs no descriptor beyond
-the KMD field (RFC 0021 §3). Regenerating into an existing tree keeps ids as for an unslotted
+dialect a slotted `rocke`, `hip` or `hsaco` pack accepts `launches` exactly as an unslotted
+one does and emits the authored UKD with a `sources` map (UKD 1.1); the launch-set check
+runs per slot, and a slot mixing single- and multi-launch kernels is a `ConfigError`. For
+`hsaco`, `sources` is the default route to launches that live in one code object. The
+alternative is one single-launch UKD whose slot native handler launches the other kernels by
+symbol names its KMD records; it needs no launch set and no per-launch signature (RFC 0021
+§3). Regenerating into an existing tree keeps ids as for an unslotted
 engine ([Descriptor ids](#descriptor-ids)): each slot's KMD and UHD are matched by slot name,
 its kernels within the slot, and only a new slot or a retuned kernel gets a new id. A slotted
 engine is one bundle, so `--engine-ids-from` (sibling mode) is refused for it. Unslotted output

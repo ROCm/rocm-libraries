@@ -196,10 +196,9 @@ candidate is every slot's pick, named `prep=<id>|dkdv=<id>|dq=<id>`, and a knob 
 - **Dispatch and launches.** Each slot has its own UDD (dispatch symbol
   `<namespace>.<slot>_dispatch`), because packs with different launch sets need different
   dispatch descriptors. A slot's kernels may be multi-launch UKD 1.1 `sources` (a packaged
-  `rocke` pack with `launches`; the generator checks one launch set per slot). A dependent
-  kernel that lives in the selected UKD's own code object, as an `hsaco` UKD requires, is
-  launched by symbol: the KMD records its name and the slot's native handler launches it
-  (RFC 0021 §3); no `sources` entry is needed.
+  `rocke`, `hip` or `hsaco` pack with `launches`; the generator checks one launch set per
+  slot). Alternatively, the slot's native handler launches a dependent kernel of the same
+  code object by a symbol name its KMD records, with no `sources` entry (RFC 0021 §3).
 
 ## Decision rules
 

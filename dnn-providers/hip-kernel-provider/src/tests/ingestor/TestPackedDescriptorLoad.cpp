@@ -8,7 +8,6 @@
 #include <filesystem>
 #include <string>
 #include <system_error>
-#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -759,7 +758,7 @@ TEST(TestPackedDescriptorLoad, PackedSlottedModelsAreBoundToTheirSlots)
 
 /// The hsaco fixture loads whole: every slot keeps its pack, `dq` ships its gfx950 pack
 /// alone (its generic-target pack belongs to the generic's members), and `dq`'s kernel
-/// carries the field naming a second symbol of its code object.
+/// keeps its two launches as KPACK `sources` while `prep` and `dkdv` stay single-launch.
 TEST(TestPackedDescriptorLoad, PackedSlottedHsacoEngineLoadsWithEverySlotPopulated)
 {
     REQUIRE_PACKED_SLOTTED_HSACO_SHARDS(shards);
@@ -774,31 +773,31 @@ TEST(TestPackedDescriptorLoad, PackedSlottedHsacoEngineLoadsWithEverySlotPopulat
         ASSERT_EQ(engine->slots.size(), 3U) << shard;
 
         const std::vector<std::string> names{"prep", "dkdv", "dq"};
-        const std::vector<std::string> symbols{
-            "HsacoFixtureScale", "HsacoFixtureAdd", "HsacoFixtureAdd"};
+        const std::vector<std::string> symbols{"HsacoFixtureScale", "HsacoFixtureAdd"};
         for(size_t index = 0; index < names.size(); ++index)
         {
             const auto& slot = engine->slots[index];
-            EXPECT_EQ(slot.name, names[index]) << shard;
+            ASSERT_EQ(slot.name, names[index]) << shard;
             ASSERT_EQ(slot.packs.size(), 1U) << shard << ": slot '" << slot.name << "'";
             ASSERT_EQ(slot.packs.front().kernels.size(), 1U) << shard;
             const auto& kernel = slot.packs.front().kernels.front();
-            EXPECT_TRUE(kernel.sources.empty()) << "an authored hsaco kernel is one launch";
-            EXPECT_EQ(kernel.source.kind, KernelSourceKind::KPACK) << shard;
-            EXPECT_EQ(kernel.source.symbol, symbols[index]) << shard;
+            if(slot.name == "dq")
+            {
+                ASSERT_EQ(kernel.sources.size(), 2U) << shard;
+                ASSERT_EQ(kernel.sources.count("add"), 1U) << shard;
+                ASSERT_EQ(kernel.sources.count("scale"), 1U) << shard;
+                EXPECT_EQ(kernel.sources.at("add").kind, KernelSourceKind::KPACK) << shard;
+                EXPECT_EQ(kernel.sources.at("add").symbol, "HsacoFixtureAdd") << shard;
+                EXPECT_EQ(kernel.sources.at("scale").kind, KernelSourceKind::KPACK) << shard;
+                EXPECT_EQ(kernel.sources.at("scale").symbol, "HsacoFixtureScale") << shard;
+            }
+            else
+            {
+                EXPECT_TRUE(kernel.sources.empty()) << shard << ": slot '" << slot.name << "'";
+                EXPECT_EQ(kernel.source.kind, KernelSourceKind::KPACK) << shard;
+                EXPECT_EQ(kernel.source.symbol, symbols[index]) << shard;
+            }
         }
-
-        const auto& dq = engine->slots[2];
-        EXPECT_TRUE(std::any_of(dq.schema.fields.begin(),
-                                dq.schema.fields.end(),
-                                [](const auto& field) { return field.name == "reduce_symbol"; }))
-            << shard;
-        const auto& dqKernel = dq.packs.front().kernels.front();
-        const auto second = dqKernel.metadata.find("reduce_symbol");
-        ASSERT_NE(second, dqKernel.metadata.end()) << shard;
-        ASSERT_TRUE(std::holds_alternative<std::string>(second->second)) << shard;
-        EXPECT_EQ(std::get<std::string>(second->second), "HsacoFixtureScale") << shard;
-        EXPECT_NE(std::get<std::string>(second->second), dqKernel.source.symbol) << shard;
     }
 
     expectPackedLaunchesAreUsable(shards);

@@ -1825,8 +1825,8 @@ function(hkp_add_packaging)
         OUT_ROOT "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_SLOTTED}"
         ${_slotted_args})
 
-    # The consumer-shaped slotted fixture: authored hsaco slots, `dq` with a second
-    # symbol of its object named by a KMD field and a generic-target pack. gfx950 only
+    # The consumer-shaped slotted fixture: authored hsaco slots, `dq` a two-launch hsaco
+    # `sources` kernel with a generic-target pack. gfx950 only
     # (see _hkp_wire_fixed_arch_root): a lone generic `dq` must not ship to another arch.
     # hsaco runs no compiler, so rocKE state does not gate it.
     _hkp_wire_fixed_arch_root(

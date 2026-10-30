@@ -6,10 +6,6 @@
     {
       "name": "dtype",
       "type": "string"
-    },
-    {
-      "name": "reduce_symbol",
-      "type": "string"
     }
   ]
 }

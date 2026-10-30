@@ -303,6 +303,92 @@ def test_a_slotted_multi_launch_slot_emits_ukd_1_1_sources_and_its_own_udd(
     assert kdps["prep"]["dispatch"] != kdps["dkdv"]["dispatch"]
 
 
+def _hip_hsaco_launch_config(tmp_path):
+    """A packaged slotted config: slot `dkdv` authors `hip` launches and slot `dq`
+    authors `hsaco` launches."""
+    sources = {
+        "dkdv": {
+            "kind": "hip",
+            "source": "kernels/Pair.cpp",
+            "entry": "KernelAdd",
+            "launches": {"decode": {}, "merge": {"entry": "KernelScale"}},
+        },
+        "dq": {
+            "kind": "hsaco",
+            "file": "HsacoFixture.co",
+            "symbol": "HsacoFixtureAdd",
+            "launches": {"add": {}, "scale": {"symbol": "HsacoFixtureScale"}},
+        },
+    }
+    raw = {
+        "dialect": "packaged",
+        "kernel_source_kind": "hsaco",
+        "engine": {"name": "hipkernel:SlotHipHsaco", "sdk_version": "1.0.0"},
+        "slots": [
+            {
+                "name": slot,
+                "kmd_fields": [{"name": "dtype", "type": "string"}],
+                "specialization": {
+                    "metadata_fields": [],
+                    "matcher_only_fields": ["dtype"],
+                    "bindings": {},
+                    "vocabulary": {},
+                },
+            }
+            for slot in sources
+        ],
+        "packs": [
+            {
+                "name": slot,
+                "slot": slot,
+                "arch": ["gfx950"],
+                "kernels": [
+                    {
+                        "name": f"{slot}.k0",
+                        "kernel_source": source,
+                        "metadata": {"dtype": "FP16"},
+                    }
+                ],
+            }
+            for slot, source in sources.items()
+        ],
+    }
+    path = tmp_path / "hip_hsaco_launches.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    return load_config(path)
+
+
+def test_a_slot_authors_hip_and_hsaco_launches_as_ukd_1_1_sources(generator, tmp_path):
+    """`launches` work in a slot for `hip` and `hsaco` as they do unslotted: the two
+    slots name different launch sets, each agrees within its slot, and each emits a
+    1.1 UKD `sources`."""
+    config = _hip_hsaco_launch_config(tmp_path)
+    generator.render(config, tmp_path / "out")
+    ddir = tmp_path / "out" / config.descriptor_dir
+    kernels = {}
+    for path in ddir.glob("*.kdp.json"):
+        kdp = json.loads(path.read_text())
+        (kernels[kdp["slot"]],) = kdp["kernelDescriptors"]
+    for ukd in kernels.values():
+        assert ukd["version"] == "1.1" and "kernel_source" not in ukd
+    assert kernels["dkdv"]["sources"] == {
+        name: {"kind": "hip", "source": "kernels/Pair.cpp", "entry": entry, "build": {}}
+        for name, entry in (("decode", "KernelAdd"), ("merge", "KernelScale"))
+    }
+    assert kernels["dq"]["sources"] == {
+        "add": {
+            "kind": "hsaco",
+            "file": "HsacoFixture.co",
+            "symbol": "HsacoFixtureAdd",
+        },
+        "scale": {
+            "kind": "hsaco",
+            "file": "HsacoFixture.co",
+            "symbol": "HsacoFixtureScale",
+        },
+    }
+
+
 def _gate_slotted(tmp_path, generator, capsys, edit=None, slot_fields=None):
     """Render a packaged slotted bundle (single-launch `prep`, multi-launch `dkdv`
     with two kernels), apply `edit(documents by slot)` to its KDPs and run the
