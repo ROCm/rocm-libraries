@@ -170,6 +170,7 @@ void Arguments::init()
     rotating                 = 0;
     use_gpu_timer            = false;
     skip_slow_solution_ratio = 0.0;
+    uniform_summation_order  = -1;
 
     // tuning
     gsu_vector[0] = 0;

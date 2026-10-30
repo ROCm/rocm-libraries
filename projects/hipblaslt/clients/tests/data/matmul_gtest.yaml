@@ -104,20 +104,39 @@ Tests:
   matrix_size:
     - { M:  128,  N:  128,  K:  0  }
 
-# Skinny GEMMs that library logic routes to the rocBLAS wvSpltK custom kernels on
-# gfx950: padded leading dimensions they must honor, and general-batched
-# (pointer-array) problems they cannot run, which must fall back to other kernels.
+# Skinny TN GEMMs that library logic routes to the vLLM wvSplitK and rocBLAS
+# wvSpltK custom kernels on gfx950: padded leading dimensions they must honor
+# (ldb 1028 also keeps the tokens off 16-byte boundaries), m not a multiple of
+# the wave tile (12290 with YTILE = 3), n * K past the LDS stage (3 x 28672), and
+# general-batched (pointer-array) problems they cannot run, which must fall back
+# to other kernels.
 - name: matmul_skinny_bf16_tn
   category: pre_checkin
   function:
     matmul: *hpa_bf16_precision
   transA: T
   transB: N
-  matrix_size:
+  matrix_size: &skinny_tn_sizes
     - { M: 1024, N: 1, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
     - { M: 1024, N: 2, K: 1024, lda: 1032, ldb: 1040, ldc: 1048, ldd: 1056 }
     - { M: 1024, N: 3, K: 1024, lda: 1024, ldb: 1032, ldc: 1024, ldd: 1024 }
     - { M: 1024, N: 4, K: 1024, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 5, K: 1024, lda: 1024, ldb: 1028, ldc: 1024, ldd: 1032 }
+    - { M: 8192, N: 1, K: 1024, lda: 1024, ldb: 1024, ldc: 8192, ldd: 8192 }
+    - { M: 12290, N: 4, K: 10248, lda: 10248, ldb: 10248, ldc: 12290, ldd: 12290 }
+    - { M: 1024, N: 3, K: 28672, lda: 28672, ldb: 28680, ldc: 1024, ldd: 1024 }
+  alpha: 1
+  beta: [0, 2]
+  batch_mode: [0, 1]
+  batch_count: 1
+
+- name: matmul_skinny_f16_tn
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  transA: T
+  transB: N
+  matrix_size: *skinny_tn_sizes
   alpha: 1
   beta: [0, 2]
   batch_mode: [0, 1]
@@ -3265,6 +3284,9 @@ Tests:
   algo_method: [2]
   use_ext: [1]
   use_ext_setproblem: [0]
+  # Forced GSU is applied after selection. Leave USO off on this problem so the
+  # handle default does not filter out every algo.
+  uniform_summation_order: 0
   gsu_vector: [[0], [1], [4], [7], [38]]
   alpha: 1
   beta: 2.0
