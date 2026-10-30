@@ -25,15 +25,54 @@
 from rocisa.code import Module
 from rocisa.container import DSModifiers, vgpr, sgpr, SDWAModifiers, VOP3PModifiers, ContinuousRegister, VCC
 from rocisa.enum import HighBitSel, SelectBit, InstType
-from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftOrB32, \
+from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftOrB32, VAndB32, VAndOrB32, VLShiftLeftB32, \
                             VMovB32, VMovB64, VLShiftRightB32, VCvtFP8toF16, VCvtScalePkFP8toF16, VCvtFP8toF32, VCvtScaleFP8toF16, VCvtScalePkFP8toF16, \
                             VCvtPkF32toBF16, VCvtBF16toFP32, PVCvtBF16toFP32, VDot2CF32BF16, VSubF32, VSwapB32, MFMAInstruction, \
-                            VCmpClassF32, VCndMaskB32, \
+                            VCmpClassF32, VCndMaskB32, VCvtScalePk8FP4toF16, VCvtScalePk8F16toFP8, \
                             ECvtPkFP8toF32, ECvtF32toF16
 
 from ..Component import LocalRead
+from ..SolutionStructs.Problem import isF16Accumulation
+from ..SolutionStructs.segment_interleave import mn_major_b
 
 from math import ceil
+
+def fp4ToFp8Decode(src, dst0, dst1, tmp0, tmp1, sel, table):
+    """Eight e2m1 values in src to eight e4m3 bytes in dst0 (elements 0-3) and dst1 (4-7), for targets
+    without an fp4 convert. v_perm_b32 looks each magnitude up in an eight-byte table, whose high half is
+    a literal and low half is in table; even and odd nibbles are looked up separately, their sign bits
+    moved to bit 7, and the two results interleaved. src is read before dst0 or dst1 is written."""
+    return [
+        VMovB32(dst=table, src=hex(0x3c383000), comment="e4m3 of e2m1 magnitudes 0-3"),
+        VAndB32(dst=tmp0, src0=hex(0x07070707), src1=src, comment="even e2m1 magnitudes"),
+        VPermB32(dst=tmp0, src0=hex(0x4c484440), src1=table, src2=tmp0, comment="even e4m3 magnitudes"),
+        VLShiftLeftB32(dst=tmp1, shiftHex=4, src=src, comment="even signs to bit 7"),
+        VAndOrB32(dst=tmp0, src0=tmp1, src1=hex(0x80808080), src2=tmp0, comment="even e4m3"),
+        VLShiftRightB32(dst=tmp1, shiftHex=4, src=src, comment="odd nibbles"),
+        VAndB32(dst=tmp1, src0=hex(0x07070707), src1=tmp1, comment="odd e2m1 magnitudes"),
+        VPermB32(dst=tmp1, src0=hex(0x4c484440), src1=table, src2=tmp1, comment="odd e4m3 magnitudes"),
+        VAndOrB32(dst=tmp1, src0=src, src1=hex(0x80808080), src2=tmp1, comment="odd e4m3"),
+        VMovB32(dst=sel, src=hex(0x05010400), comment="interleave bytes 0-1"),
+        VPermB32(dst=dst0, src0=tmp1, src1=tmp0, src2=sel, comment="e4m3 0-3"),
+        VOrB32(dst=sel, src0=hex(0x02020202), src1=sel, comment="interleave bytes 2-3"),
+        VPermB32(dst=dst1, src0=tmp1, src1=tmp0, src2=sel, comment="e4m3 4-7"),
+    ]
+
+def widenFp4ToFp8(module, archCaps, valu, base, numVgpr):
+    """fp4 registers valu % base .. base+numVgpr-1 to fp8 registers valu % base .. base+2*numVgpr-1: fp4 register
+    base+i expands into base+2i and base+2i+1, from the last register so that no fp4 source is overwritten before
+    it is converted."""
+    for offset in reversed(range(numVgpr)):
+        src = vgpr(valu % (base + offset))
+        if archCaps.get("HasCvtScalePk8FP4", True):
+            # Each half-wave reads its scale from its own byte, so every byte holds 1.0.
+            module.add(VCvtScalePk8FP4toF16(dst=vgpr("CvtTemp", 4), src=src, scale=0x7f7f7f7f, comment="convert fp4 to f16"))
+            module.add(VCvtScalePk8F16toFP8(dst=vgpr(valu % (base + 2 * offset), 2), src=vgpr("CvtTemp", 4), scale=1.0, \
+                                            comment="convert f16 to fp8"))
+        else:
+            for inst in fp4ToFp8Decode(src, vgpr(valu % (base + 2 * offset)), vgpr(valu % (base + 2 * offset + 1)), \
+                                       vgpr("CvtTemp"), vgpr("CvtTemp+1"), vgpr("CvtTemp+2"), vgpr("CvtTemp+3")):
+                module.add(inst)
 
 class LocalReadVALU(LocalRead):
     kernel = {"EnableMatrixInstruction": False}
@@ -784,6 +823,10 @@ class LocalReadMFMA(LocalRead):
         LdsPad           = kernel["LdsPad%s"%tc] if kernel["LdsBlockSizePerPad%s"%tc] == 0 else 0
         tileStride       = 1
         UnrollStride     = kernel["MacroTile%s" % tP["tensorChar"]] + LdsPad
+        segMnB           = tc == "B" and mn_major_b(kernel)
+        if segMnB:
+            # An interleaved MN-major B component holds MT1/2 columns per K row.
+            UnrollStride = kernel["MacroTile1"] // 2 + LdsPad
         if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
             tileStride   = kernel["_DepthU%s"%tc] + LdsPad
             UnrollStride = 1
@@ -848,7 +891,12 @@ class LocalReadMFMA(LocalRead):
         else:
             raise Exception(f"unsupport tc %s{tc}")
 
-        numElementPerRead = 1 if kernel["ConvertAfterDS"] and not kernel["UseF32XEmulation"] else int(int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
+        cvtFP4 = kernel["ConvertAfterDS"] and tc in ("A", "B") and kernel["ProblemType"]["DataType%s"%tc].isFloat4()
+        if kernel["ConvertAfterDS"] and isF16Accumulation(kernel["ProblemType"]):
+            # f16 accumulation converts whole fp4 vectors, so LDS is read like an unconverted operand.
+            numElementPerRead = int(blockWidth * bpr / tP["bpeDS"]) // lrvwTile
+        else:
+            numElementPerRead = 1 if kernel["ConvertAfterDS"] and not kernel["UseF32XEmulation"] else int(int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
         perpStride = abmatrixinfo.gNLCPerpStride
 
         # pack register
@@ -906,29 +954,45 @@ class LocalReadMFMA(LocalRead):
             if writer.states.asmCaps["HasWMMA_V3"]:
                 if tP["bpeDS"] == 0.5:
                     LocalReadX = instruction.getInst(0)
-                    wtRegStride = int(MIInputPerThUnroll * tP["bpeDS"] // bpr)
+                    # Widened to fp8, each fp4 load fills the low half of registers twice its size.
+                    regScale = 2 if cvtFP4 else 1
+                    wtRegStride = int(MIInputPerThUnroll * tP["bpeDS"] // bpr) * regScale
                     outerUnrolledIncrements = 64
-                    innerUnrolledIncrements = 16
+                    # Widened to fp8, one load covers 32 consecutive K rows; for the fp4 WMMA it covers two groups of 16.
+                    innerUnrolledIncrements = 32 if cvtFP4 else 16
                     vwTrLoad = 16
 
                     for tIdx in range(numberMTilesPerWave):
+                        # Interleaved MN-major B: tiles 0..nT/2-1 are in component 0, the others in component 1.
+                        segComp, tInComp = divmod(tIdx, numberMTilesPerWave // 2) if segMnB else (0, tIdx)
                         for ti in range(0, numTilePerInst):
-                            constOffset = int((tP["localReadOffset"] + matrixInstTO * ti + MIWaveGroupShape[tile01] * tIdx) * tP["bpeDS"])
+                            constOffset = int((tP["localReadOffset"] + matrixInstTO * ti + MIWaveGroupShape[tile01] * tInComp) * tP["bpeDS"])
                             for outerIdx in range(MIInputPerThUnroll//kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]):
                                 for innerIdx in range(kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]//vwTrLoad):
                                     paddedOffset = constOffset
                                     paddedOffset += int((innerIdx * innerUnrolledIncrements + outerIdx * outerUnrolledIncrements) * UnrollStride * tP["bpeDS"])
                                     if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
                                         paddedOffset += int((paddedOffset // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
+                                    if segMnB:
+                                        # The component jump is post-pad: writeStrideBytes already includes pad.
+                                        paddedOffset += segComp * kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
+                                        # B-rotate swaps LocalReadAddrB+0/+1 per SIMD pair, so register h must serve component h.
+                                        assert not kernel.get("LDSSegmentBRotate") or paddedOffset // maxLDSConstOffset == segComp, \
+                                            "LDSSegmentBRotate: B tile %u uses LocalReadAddrB+%u" % (tIdx, paddedOffset // maxLDSConstOffset)
                                     paddedOffset, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, paddedOffset)
                                     ds = DSModifiers(na=1, offset=paddedOffset)
+                                    regOffset = 2 * regScale * (innerIdx + 2 * outerIdx)
                                     if halfPLR:
-                                        valuStr = writer.getHalfPLRValuStr(writer.states.halfPLRGroups, wtRegStride * (tIdx * numTilePerInst+ti)+ 2 * (innerIdx + 2 * outerIdx), tc)
+                                        assert not cvtFP4, "f16 accumulation rejects HalfPLR with MN-contiguous fp4"
+                                        valuStr = writer.getHalfPLRValuStr(writer.states.halfPLRGroups, wtRegStride * (tIdx * numTilePerInst+ti)+ regOffset, tc)
                                         destVgpr = vgpr(valuStr, blockWidth)
                                     else:
-                                        destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc, bufferIdx, iui, wtRegStride * (tIdx * numTilePerInst+ti), 2 * (innerIdx + 2 * outerIdx)), blockWidth)
+                                        destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc, bufferIdx, iui, wtRegStride * (tIdx * numTilePerInst+ti), regOffset), blockWidth)
                                     localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc, int(valufIdx))))
                                     self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCode, comment="LDS Transpose")
+                                    if cvtFP4:
+                                        widenFp4ToFp8(pack.add(Module("packCode")), writer.states.archCaps, "Valu%s_X%u_I%u+%%u"%(tc, bufferIdx, iui), \
+                                                      wtRegStride * (tIdx * numTilePerInst + ti) + regOffset, int(blockWidth))
                 elif tP["bpeDS"] == 0.75:
                     LocalReadX = instruction.getInst(0)
                     wtRegStride = (int(MIInputPerThUnroll * tP["bpeDS"] // bpr) + 15) // 16 * 16
@@ -1291,7 +1355,10 @@ class LocalReadMFMA(LocalRead):
                                                 packCodeT.add(VSwapB32(dst=swapVgpr1, src=swapVgpr2, comment=commentStr))
 
                                 if kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]):
-                                    if tP["bpe"] == 2 and tP["bpeDS"] == 4:
+                                    if cvtFP4:
+                                        widenFp4ToFp8(packCodeT, writer.states.archCaps, "Valu%s_X%u_I%u+%%u"%(tc, bufferIdx, iui), \
+                                                      valuiIdx, numVgpr)
+                                    elif tP["bpe"] == 2 and tP["bpeDS"] == 4:
                                         assert 0 # Doesn't support ConvertAfterDS
                                     else:
                                         highBitsForHalf = False

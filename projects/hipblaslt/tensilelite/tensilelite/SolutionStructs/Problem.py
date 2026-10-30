@@ -553,6 +553,9 @@ _validGEMMTypes = [
     ("B8", "B8", "H", "S"),
     ("F8", "B8", "H", "S"),
     ("B8", "F8", "H", "S"),
+    ("F8", "F8", "H", "H"),
+    ("F8", "F8", "F8", "H"),
+    ("F8", "F8", "B", "H"),
     ("B8", "B8", "B", "S"),
     ("H", "H", "F8", "S"),
     ("F8", "F8", "B", "S"),
@@ -723,6 +726,22 @@ _HPATypes = [
     ("B6", "F6", "F8", "S"),
     ("B6", "F6", "B8", "S"),
 ]
+
+# f16 accumulation types (HPA=F, Tc=H with 8-bit float MAC inputs); their names carry _TiToTc_ like the HPA types.
+_F16AccTypes = [
+    ("F8", "F8", "H", "H"),
+    ("F8", "F8", "F8", "H"),
+    ("F8", "F8", "B", "H"),
+]
+
+def isF16Accumulation(problemType) -> bool:
+  # Every field is read through .get: a partially built ProblemType (a solution-rule
+  # unit test, a characterization fixture) must answer False, not raise.
+  computeType = problemType.get("ComputeDataType")
+  macA = problemType.get("MacDataTypeA")
+  macB = problemType.get("MacDataTypeB")
+  return computeType is not None and computeType.isHalf() and not problemType.get("HighPrecisionAccumulate") \
+    and macA is not None and macA.is8bitFloat() and macB is not None and macB.is8bitFloat()
 
 def problemTypeToEnum(problemType):
   problemType["DataType"] = \
@@ -955,6 +974,12 @@ class ProblemType(Mapping):
       printWarning("Inconsistent DataTypes: DataType == bf16, DestType == bf16, ComputeDataType == bf16, but HPA == True (BBB+HPA, no such a type); Converting BBB+HPA to BBS_BH by setting compute data type to f32.")
       self["ComputeDataType"] = DataType('s')
 
+    # Modifying ComputeDataType for F8F8H+HPA: f16 compute means f16 accumulation, which is HPA == False.
+    if self["ComputeDataType"].isHalf() and self["MacDataTypeA"].is8bitFloat() and self["MacDataTypeB"].is8bitFloat() \
+        and self["HighPrecisionAccumulate"]:
+      printWarning("Inconsistent DataTypes: 8-bit float inputs with ComputeDataType == f16 and HPA == True (f16 accumulation needs HPA == False); Converting to f32 compute.")
+      self["ComputeDataType"] = DataType('s')
+
     # Modifying ComputeDataType for I8I8I_BH: if (I8I8I8+HPA), convert it to I8I8I_BH by setting ComputeDataType to i.
     if self["ComputeDataType"].isInt8() and DataType(config["DataType"]).isInt8() and self["HighPrecisionAccumulate"]:
       print2("DataType == i8 and HPA == True; setting compute data type to int32")
@@ -1096,6 +1121,16 @@ class ProblemType(Mapping):
     inTypeB = self["MacDataTypeB"]
     outType = self["DestDataType"]
     computeType = self["ComputeDataType"]
+
+    # The storage types DataTypeA/B are set independently of the MAC types.
+    if computeType.isHalf() and not self["HighPrecisionAccumulate"] and inTypeA.is8bitFloat() and inTypeB.is8bitFloat() \
+        and not (inTypeA.isFloat8() and inTypeB.isFloat8()
+                 and all(self["DataType%s" % tc].isFloat8() or self["DataType%s" % tc].isFloat4() for tc in "AB")):
+      raise Exception("f16 accumulation supports only F8 (OCP e4m3) and F4 (e2m1) inputs, not BF8 or the fnuz types.")
+    # The client's reference types for fp4 operands follow the DataType F8 spelling.
+    if computeType.isHalf() and not self["HighPrecisionAccumulate"] and inTypeA.is8bitFloat() and inTypeB.is8bitFloat() \
+        and self["DataType"].isFloat4():
+      raise Exception("f16 accumulation with fp4 operands takes DataType F8 with DataTypeA/DataTypeB F4, not DataType F4.")
 
     gemmType = ( inTypeA.toChar(), inTypeB.toChar(), outType.toChar(), computeType.toChar() )
     if gemmType not in _validGEMMTypes:
@@ -1316,7 +1351,7 @@ class ProblemType(Mapping):
     # TODO: Distinguish all kernels by _TiToTc_ to be more consistent with rocblas
     gemmType = (self["MacDataTypeA"].toChar(), self["MacDataTypeB"].toChar(),
                 self["DestDataType"].toChar(), self["ComputeDataType"].toChar())
-    if gemmType in _HPATypes:
+    if gemmType in _HPATypes or gemmType in _F16AccTypes:
       name[-1] += "".join([self["DestDataType"].toChar(), self["ComputeDataType"].toChar()])
 
     if not self["F32XdlMathOp"].isSingle() and self["DataType"].isSingle():

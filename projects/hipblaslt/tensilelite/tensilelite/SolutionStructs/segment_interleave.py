@@ -39,10 +39,30 @@ layout.
 
 Every layout is either tight (no extra LDS) or aligned (padded to a segment boundary, which uses more
 LDS and needs PrefetchGlobalRead=2).
+
+An MN-major B (see mn_major_b_requested) takes the [2,2] split layouts with each component a dense
+[DepthU][MT1/2] block: wave-separated TDM loads one N half per component, and the transposed reads
+use a K-row pitch of MT1/2.
 """
+
+from .Problem import isF16Accumulation
 
 # gfx1250 LDS segment size (5 x 64 KiB segments).
 SEG = 65536
+
+def mn_major_b_requested(state):
+    """An MN-major B is interleaved only on request, for f16 accumulation with an fp4 B read by ds_load_tr4_b64
+    one tile per vector. Each component holds half of B's tiles, so MIWaveTile[1] must be even."""
+    pt = state["ProblemType"]
+    wtB = (state.get("MIWaveTile") or [0, 0])[1]
+    return (state.get("LDSSegmentInterleave") == 1 and not state.get("UnrollMajorLDSB", True)
+            and isF16Accumulation(pt) and pt.get("DataTypeB", pt["DataType"]).isFloat4()
+            and bool(state.get("enableLDSTrB")) and state.get("VectorWidthB") == 1
+            and wtB > 0 and wtB % 2 == 0)
+
+def mn_major_b(kernel):
+    """True when the applied interleave holds B as two dense MN-major components."""
+    return kernel.get("LDSSegmentInterleave") == 1 and bool((kernel.get("LDSSegInterleaveOffsets") or {}).get("bMnMajor"))
 
 def _bpe(state, tc):
     # Float, not int -- fp4 is 0.5 B/elem; callers int() the byte counts.
@@ -253,7 +273,12 @@ def evaluate(state):
         return _no("not wave-separated TDM")
     if state.get("LocalSplitU", 1) > 1:
         return _no("LocalSplitU>1")
-    if not state.get("UnrollMajorLDSA") or not state.get("UnrollMajorLDSB"):
+    mnB = not state.get("UnrollMajorLDSB") and mn_major_b_requested(state)
+    if not state.get("UnrollMajorLDSA") or not (state.get("UnrollMajorLDSB") or mnB):
+        # An MN-major B that fails only the even-tile rule gets its own reason: each of the two
+        # components holds half of B's tiles, so an odd MIWaveTile[1] has no split.
+        if not state.get("UnrollMajorLDSB") and mn_major_b_requested(dict(state, MIWaveTile=[0, 2])):
+            return _no("MN-major B: needs an even MIWaveTile[1]")
         return _no("not unrollMajor")
     # DirectToVgpr operands are not in LDS, so segment placement does not apply.
     if state.get("DirectToVgprA") or state.get("DirectToVgprB"):
@@ -277,6 +302,8 @@ def evaluate(state):
 
     # [4,1]/[1,4]: exactly one MIWaveGroup dim is 1 -> one active + one shared tensor.
     wgM, wgN = state["MIWaveGroup"][0], state["MIWaveGroup"][1]
+    if mnB and ([wgM, wgN] != [2, 2] or state.get("TDMSplit") or not _b_readable(state)):
+        return _no("MN-major B: needs MIWaveGroup [2,2], no TDMSplit, and B reads within a component")
     if (wgM == 1) ^ (wgN == 1):
         return _evaluate_asymmetric(state)
     if [wgM, wgN] != [2, 2]:
@@ -351,6 +378,8 @@ def evaluate(state):
         }
         if _portSplit:
             offsets["portSplitA"] = True
+        if mnB:
+            offsets["bMnMajor"] = True
         # Per-buffer span: B1 ends at base + pre(=A1) + fA + fB.
         blockSpan = base + pre + fA + fB
         # mxf8: put the scale block after B1. Needs extra LDS, so extend the size below.
@@ -372,6 +401,8 @@ def evaluate(state):
     }
     if _portSplit:
         offsets["portSplitA"] = True
+    if mnB:
+        offsets["bMnMajor"] = True
     # mxf8: put the scale block after B1. Uses no more LDS than the non-interleaved layout.
     bMXSA, bMXSB, _ = _mx_scale_bases(state, base + 2 * (fA + fB))
     if bMXSA is not None: offsets["ldsBaseMXSA"] = bMXSA
@@ -433,9 +464,12 @@ def b_rotate_reason(state, persistent=False):
             return "MX: needs MatrixInstN == WavefrontSize/2"
         if wtb // vwb != 2:                                   return "MX: needs MIWaveTile[1]/VectorWidthB == 2"
     if pt.get("Sparse"):                                      return "sparse not supported"
+    # An MN-major B (bMnMajor) is read with ds_load_tr4_b64 and rotates by tile.
     for key in ("TDMSplit", "UseSubtileImpl", "DirectToVgprA", "DirectToVgprB", "DirectToLdsB",
                 "enableLDSTrA", "enableLDSTrB", "UseDotInstruction", "UseCustomMainLoopSchedule",
                 "PrefetchAcrossPersistent", "TDMFuse"):
+        if key == "enableLDSTrB" and o.get("bMnMajor"):
+            continue
         v = state.get(key)
         # -1 (auto) means unresolved/off for the tri-state knobs; only a positive value enables.
         if v is True or (isinstance(v, int) and v > 0):      return "%s not supported" % key
