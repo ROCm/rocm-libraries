@@ -59,10 +59,9 @@
 #
 # tensor_load_to_lds carries gfx12+ memory-hint modifiers like `th:TH_LOAD_NT`
 # (temporal hint, identifier-valued). parseModifiers stores `key:Identifier`
-# values in its generic fields collection, but TENSOR-format instructions
-# have no modKey mapping at all — so the existing `modKey.empty() &&
-# sawAnyModifier` check still routes them to TEXTBLOCK pass-through, keeping
-# the modifier text intact instead of silently dropping it.
+# values in its generic fields collection and maps the TENSOR-format th /
+# scope / nv onto TENSORModifiers (see raw_asm_tensor_cache_policy.s), so the
+# modifier text survives the round-trip.
 #
 # Arithmetic-expression modifier values like `offset:2*8704*2+32` are
 # evaluated to a single integer via the symbol table; the offset

@@ -1,0 +1,76 @@
+{
+  "version": "1.0",
+  "id": "1d65d36b-ced8-5d48-8fd9-8747969e0d2b",
+  "name": "flydsl sdpa_aiw variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_dim",
+      "type": "int"
+    },
+    {
+      "name": "causal",
+      "type": "int"
+    },
+    {
+      "name": "head_dim_max",
+      "type": "int"
+    },
+    {
+      "name": "head_dim_v",
+      "type": "int"
+    },
+    {
+      "name": "has_bias",
+      "type": "int"
+    },
+    {
+      "name": "bias_f32",
+      "type": "int"
+    },
+    {
+      "name": "bias_kstrided",
+      "type": "int"
+    },
+    {
+      "name": "has_sink",
+      "type": "int"
+    },
+    {
+      "name": "block_m",
+      "type": "int"
+    },
+    {
+      "name": "block_n",
+      "type": "int"
+    },
+    {
+      "name": "row_subtiles",
+      "type": "int"
+    },
+    {
+      "name": "waves_per_eu",
+      "type": "int"
+    },
+    {
+      "name": "k_prefetch_dist",
+      "type": "int"
+    },
+    {
+      "name": "v_prefetch_dist",
+      "type": "int"
+    },
+    {
+      "name": "kv_addr_hoist",
+      "type": "int"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    }
+  ]
+}
