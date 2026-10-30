@@ -327,4 +327,27 @@ struct SoftplusForward
     }
 };
 
+// Truthiness for logical operations; half/bfloat16 have no conversion to bool.
+template <typename X>
+bool isTrue(const X& x)
+{
+    if constexpr(std::is_same_v<X, bool>)
+    {
+        return x;
+    }
+    else
+    {
+        return static_cast<double>(x) != 0.0;
+    }
+}
+
+struct LogicalNot
+{
+    template <typename X>
+    bool operator()(const X& x) const
+    {
+        return !isTrue(x);
+    }
+};
+
 } // namespace hipdnn_test_sdk::utilities::pointwise

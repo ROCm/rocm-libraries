@@ -73,6 +73,30 @@ struct Min
     }
 };
 
+template <typename ComputeType, typename OutputType = ComputeType>
+struct Divide
+{
+    template <typename X0, typename X1>
+    OutputType operator()(const X0& x0, const X1& x1) const
+    {
+        auto result = static_cast<ComputeType>(x0) / static_cast<ComputeType>(x1);
+        return static_cast<OutputType>(result);
+    }
+};
+
+// ADD_SQUARE(x, y) = x + y^2
+template <typename ComputeType, typename OutputType = ComputeType>
+struct AddSquare
+{
+    template <typename X0, typename X1>
+    OutputType operator()(const X0& x0, const X1& x1) const
+    {
+        auto y = static_cast<ComputeType>(x1);
+        auto result = static_cast<ComputeType>(x0) + y * y;
+        return static_cast<OutputType>(result);
+    }
+};
+
 template <typename ComputeType>
 struct CompareGreater
 {
@@ -80,6 +104,74 @@ struct CompareGreater
     bool operator()(const X0& x0, const X1& x1) const
     {
         return static_cast<ComputeType>(x0) > static_cast<ComputeType>(x1);
+    }
+};
+
+template <typename ComputeType>
+struct CompareEqual
+{
+    template <typename X0, typename X1>
+    bool operator()(const X0& x0, const X1& x1) const
+    {
+        return static_cast<ComputeType>(x0) == static_cast<ComputeType>(x1);
+    }
+};
+
+template <typename ComputeType>
+struct CompareNotEqual
+{
+    template <typename X0, typename X1>
+    bool operator()(const X0& x0, const X1& x1) const
+    {
+        return static_cast<ComputeType>(x0) != static_cast<ComputeType>(x1);
+    }
+};
+
+template <typename ComputeType>
+struct CompareGreaterEqual
+{
+    template <typename X0, typename X1>
+    bool operator()(const X0& x0, const X1& x1) const
+    {
+        return static_cast<ComputeType>(x0) >= static_cast<ComputeType>(x1);
+    }
+};
+
+template <typename ComputeType>
+struct CompareLess
+{
+    template <typename X0, typename X1>
+    bool operator()(const X0& x0, const X1& x1) const
+    {
+        return static_cast<ComputeType>(x0) < static_cast<ComputeType>(x1);
+    }
+};
+
+template <typename ComputeType>
+struct CompareLessEqual
+{
+    template <typename X0, typename X1>
+    bool operator()(const X0& x0, const X1& x1) const
+    {
+        return static_cast<ComputeType>(x0) <= static_cast<ComputeType>(x1);
+    }
+};
+
+struct LogicalAnd
+{
+    template <typename X0, typename X1>
+    bool operator()(const X0& x0, const X1& x1) const
+    {
+        return isTrue(x0) && isTrue(x1);
+    }
+};
+
+struct LogicalOr
+{
+    template <typename X0, typename X1>
+    bool operator()(const X0& x0, const X1& x1) const
+    {
+        return isTrue(x0) || isTrue(x1);
     }
 };
 
