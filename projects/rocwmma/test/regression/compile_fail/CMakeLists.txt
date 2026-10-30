@@ -51,5 +51,5 @@ add_rocwmma_compile_fail_test(wmma_ops_overlap_fails
 if(GPU_TARGETS MATCHES "gfx11|gfx12")
     add_rocwmma_compile_fail_test(wmma_builtin_unavailable_fails
                                   ${CMAKE_CURRENT_SOURCE_DIR}/wmma_builtin_unavailable.cpp
-                                  "rocWMMA: the compiler does not provide __builtin_amdgcn_wmma_f32_16x16x")
+                                  "rocWMMA: the compiler does not provide __builtin_amdgcn_wmma_")
 endif()

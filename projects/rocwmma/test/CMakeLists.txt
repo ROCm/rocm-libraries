@@ -232,6 +232,7 @@ add_subdirectory(dlrm)
 
 if(ROCWMMA_BUILD_REGRESSION_TESTS)
     add_subdirectory(regression)
+    add_subdirectory(regression/compile_fail)
 endif()
 
 # Sharded smoke entry for load_store_matrix_coop_sync_test: runs 1/8 of
