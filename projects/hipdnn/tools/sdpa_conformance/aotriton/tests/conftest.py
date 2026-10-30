@@ -9,7 +9,9 @@ on request), and a deterministic `philox_mask`. The real package is never import
 """
 
 import dataclasses
+import json
 import sys
+import threading
 import types
 from pathlib import Path
 
@@ -20,6 +22,8 @@ AOTRITON_DIR = Path(__file__).resolve().parents[1]
 for entry in (AOTRITON_DIR, AOTRITON_DIR / "shim"):
     if str(entry) not in sys.path:
         sys.path.insert(0, str(entry))
+
+from conformance_contract import CallRecord  # noqa: E402
 
 pytest_plugins = ["pytester"]
 
@@ -71,8 +75,11 @@ def keep_pattern(B, Hq, max_sq, max_sk, p, seed, offset, device):
 def fake_sdpa(monkeypatch):
     """The fake `hipdnn_sdpa` module; `.calls` lists (name, kwargs) of every sdpa_* call and
     `.decline` (a dict direction -> reason) makes a direction raise `EngineDeclined`;
-    `.engine_lists` (direction -> tuple of names) is what `_runtime.take_engines()` hands over after
-    a successful call of that direction."""
+    `.engine_lists` (direction -> tuple of names) and `.kernels` (direction -> kernel id) fill the
+    `CallRecord` that `last_call(direction)` returns on the calling thread after a successful call
+    (None after a decline). `.log_installs` counts `install_kernel_log()` calls; `.repros` lists the
+    `(dir, directions, roles)` of every `save_repro` call, which also writes `<dir>/saved.json`.
+    """
     module = types.ModuleType("hipdnn_sdpa")
     module.EngineDeclined, module.Mask, module.Varlen, module.Dropout = (
         EngineDeclined,
@@ -84,10 +91,48 @@ def fake_sdpa(monkeypatch):
     module.calls = []
     module.decline = {}
     module.engine_lists = {}
-    pending = []
-    module._runtime = types.SimpleNamespace(
-        take_engines=lambda: tuple(pending.pop()) if pending else ()
-    )
+    module.kernels = {}
+    module.log_installs = 0
+    module.repros = []
+    module.CallRecord = CallRecord
+    last = threading.local()
+
+    def last_call(direction):
+        return getattr(last, direction, None)
+
+    def finish(direction, engine):
+        setattr(
+            last,
+            direction,
+            CallRecord(
+                direction,
+                engine,
+                module.kernels.get(direction, ""),
+                tuple(module.engine_lists.get(direction, ())),
+                "{}",
+                {},
+            ),
+        )
+        return engine
+
+    def install_kernel_log():
+        module.log_installs += 1
+        return True
+
+    def save_repro(dir, direction_records, tensors_by_role):
+        module.repros.append((dir, sorted(direction_records), sorted(tensors_by_role)))
+        dir.mkdir(parents=True, exist_ok=True)
+        (dir / "saved.json").write_text(
+            json.dumps(
+                {
+                    "directions": sorted(direction_records),
+                    "roles": sorted(tensors_by_role),
+                }
+            )
+        )
+
+    module.last_call, module.install_kernel_log = last_call, install_kernel_log
+    module.save_repro = save_repro
 
     def sdpa_fwd(
         q,
@@ -121,13 +166,13 @@ def fake_sdpa(monkeypatch):
                 ),
             )
         )
+        last.fwd = None
         if "fwd" in module.decline:
             raise EngineDeclined("fwd", module.decline["fwd"])
-        pending[:] = [module.engine_lists.get("fwd", ())]
         o.fill_(1.0)
         if stats is not None:
             stats.fill_(2.0)
-        return "fake_fwd"
+        return finish("fwd", "fake_fwd")
 
     def sdpa_bwd(
         q,
@@ -171,10 +216,10 @@ def fake_sdpa(monkeypatch):
                 ),
             )
         )
+        last.bwd = None
         if "bwd" in module.decline:
             raise EngineDeclined("bwd", module.decline["bwd"])
-        pending[:] = [module.engine_lists.get("bwd", ())]
-        return "fake_bwd"
+        return finish("bwd", "fake_bwd")
 
     module.sdpa_fwd, module.sdpa_bwd = sdpa_fwd, sdpa_bwd
     monkeypatch.setitem(sys.modules, "hipdnn_sdpa", module)
