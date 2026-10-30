@@ -405,6 +405,44 @@ every unsplit kernel (a whole-reduction K loop is long enough for the second
 tile in flight to pay for its registers; split-K slices are not). The two-stage (f32 workspace) kernels take the same loop; they are
 offered by `--run-from-cache` only with `--two-stage always` unless C is odd.
 
+### X-window reuse across the x taps (`xwin`)
+
+The B (X) operand of filter tap `(z, y, x)` at reduction index `k` is the
+input voxel `wo + x` of one output row: the three x taps of one `(z, y)` read
+the same input row shifted by one voxel along the reduction axis. With
+`WgradConvSpec.xwin = X` (the baked filter width) a B tile is one `(z, y)`
+filter row x `Cb = tile_n / X` channels x the X taps, and the K loop stages
+only the window of `tile_k + X - 1` voxels x `Cb` channels per K tile -- about
+X times fewer X reads and LDS stores than the `tile_n x tile_k` tile.
+
+* **Window layout.** `W[c][j]` (transposed, k-packed pairs written as
+  `ds_write_b32`), row stride `S` = the smallest `>= tile_k + X - 1` with
+  `S % 4 == 0` (8-byte aligned fragment reads) and `S / 2 = 2 (mod 4)` dwords (16
+  consecutive channel rows land on 16 distinct even banks: conflict-free 16-lane
+  `ds_read_b64`), plus 8 trash rows for the idle lanes of a partial load pass.
+* **Odd taps.** The shift moves the 4-element MFMA fragment along K by `x`
+  elements, i.e. to a 2-byte-aligned address for odd `x`. A misaligned
+  `ds_read_b64` returns the right data in unaligned mode but is serialised (16x
+  an aligned one with 8 waves); so per (channel, k-group) one aligned
+  `ds_read_b64` (dwords `d0, d1`) plus one `ds_read_b32` (`d2`) feed every tap:
+  even `x` takes `(d[x/2], d[x/2+1])`, odd `x` takes
+  `(alignbyte(d[h+1], d[h], 2), alignbyte(d[h+2], d[h+1], 2))`.
+* **Waves own (tap, channel sub-block) columns.** The two-stage epilogue maps an
+  accumulator column back to `dW` column `r*X*C + x*C + cb*Cb + c`.
+* **Addressing.** A K tile lies inside one output row (`Wo % tile_k == 0`), so
+  its X and dY offsets are a uniform per-tile base (decoded on the scalar unit)
+  plus per-lane constants; no per-chunk magic division in the loop.
+* **Knobs.** `xwin_rows = R` puts R filter rows in a tile (tile_n = R*X*Cb;
+  shares the dY tile over R x more columns, but the 3R-wave blocks lose on
+  barriers); `prefetch_regs` 2 (two LDS buffers) and 3 (two tiles in flight)
+  also apply. Measured on gfx942 the 2-wave `t64x192x32` and 4-wave
+  `t128x192x32` tiles with `waves_per_eu` 2-3 win.
+* **Serves** two-stage split-K, stride-1 / dilation-1 W, filter width X,
+  groups 1, `cpg % Cb == 0`, `Wo % tile_k == 0`
+  (`kernel_identity.identity_supports_problem`). AOT axis:
+  `ROCKE_AOT_WGRAD_XWIN` and its scope variables (`aot_jobs.py`). Python AOT path
+  only; the C++ engine twin is a follow-up.
+
 ## Next steps
 
 ### K0-M-K1 LDS layout

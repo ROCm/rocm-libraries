@@ -159,6 +159,12 @@ class KernelIdentity:
     # wgrad only (WgradConvSpec.kp_line): line-major decode of the k-packed
     # reads. Left out of the hash at 0.
     kp_line: int = 0
+    # wgrad only (WgradConvSpec.xwin): X-window reuse over the x taps; the
+    # value is the baked filter width. Left out of the hash at 0.
+    xwin: int = 0
+    # wgrad only (WgradConvSpec.xwin_rows): filter rows per xwin B tile.
+    # Left out of the hash at 1.
+    xwin_rows: int = 1
     # dgrad (DgradConvSpec.uniform_k_decode) and fwd
     # (ImplicitGemmConvSpec.uniform_k_decode): the per-tile reduction decode
     # K loop. Left out of the hash while False, like prefetch_addr.
@@ -351,6 +357,10 @@ class KernelIdentity:
             del fields["lds_bswz"]
         if not fields["kp_line"]:
             del fields["kp_line"]
+        if not fields["xwin"]:
+            del fields["xwin"]
+        if fields["xwin_rows"] == 1:
+            del fields["xwin_rows"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
         if not fields["reg_prefetch"]:
@@ -705,6 +715,27 @@ def identity_supports_problem(
     ):
         return False, f"fwd split-K with a 16-bit D needs even kpg (kpg={problem.kpg})"
 
+    # The wgrad X-window kernel bakes the filter width and walks one output
+    # row per K tile: stride/dilation 1 along W, whole channel blocks of
+    # tile_n / X, ungrouped.
+    if identity.direction == "wgrad" and identity.xwin:
+        xw = identity.xwin
+        xr = max(1, identity.xwin_rows)
+        cb = max(1, identity.tile_n // (xw * xr))
+        zy = int(getattr(problem, "Z", 1) or 1) * int(getattr(problem, "Y", 1))
+        if zy % xr:
+            return False, f"xwin_rows={xr} must divide the filter rows Z*Y={zy}"
+        if int(getattr(problem, "X", 0)) != xw:
+            return False, f"xwin bakes filter width {xw} (problem X={getattr(problem, 'X', None)})"
+        if int(getattr(problem, "sW", 1)) != 1 or int(getattr(problem, "dW", 1)) != 1:
+            return False, "xwin serves stride-1, dilation-1 W only"
+        if int(getattr(problem, "groups", 1)) != 1:
+            return False, "xwin serves groups == 1 only"
+        if cpg % cb:
+            return False, f"xwin needs cpg % {cb} == 0 (cpg={cpg})"
+        if int(getattr(problem, "Wo", 0)) % max(1, identity.tile_k):
+            return False, f"xwin needs Wo % tile_k == 0 (Wo={getattr(problem, 'Wo', None)})"
+
     # uk_nopad drops the per-tap bounds checks: unpadded problems only.
     if (
         identity.direction == "fwd"
@@ -924,6 +955,8 @@ IDENTITY_CAPABILITY_FIELDS = (
     "halo_max_wo",
     "split_addr_k_decode",
     "uk_nopad",
+    "xwin",
+    "xwin_rows",
 )
 
 #: Problem attributes the predicate reads when the identity is a *direct* one.

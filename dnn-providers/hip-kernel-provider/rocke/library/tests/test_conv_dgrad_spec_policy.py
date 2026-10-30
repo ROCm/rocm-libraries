@@ -369,6 +369,8 @@ class TestTapOuterKIdentity(unittest.TestCase):
             "pfr_sched",
             "lds_bswz",
             "kp_line",
+            "xwin",
+            "xwin_rows",
             "reg_prefetch",
             "lds_xor",
             "split_addr_k_decode",

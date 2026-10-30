@@ -520,6 +520,34 @@ _WGRAD_BSWZ_MAX_M = int(_os.environ.get("ROCKE_AOT_WGRAD_BSWZ_MAX_M", "0") or 0)
 # waves_per_eu=<n>: the pad-free tile fits 3 workgroups per CU by LDS, and the
 # 16x16 kernels need the VGPR cap (<= 168) to fit them by registers too.
 _WGRAD_BSWZ_WPE = int(_os.environ.get("ROCKE_AOT_WGRAD_BSWZ_WPE", "0") or 0)
+# ROCKE_AOT_WGRAD_XWIN=<X> (the filter width, 3) builds an X-window twin
+# (WgradConvSpec.xwin=X, sep_addr=0) of every k-packed prefetch_regs=1 split-K
+# two-stage variant above (pfr_sched ones included; xcd_remap ones only when
+# ROCKE_AOT_WGRAD_XCD is set) of the tiles whose tile_n is X channel blocks.
+# ROCKE_AOT_WGRAD_XWIN_TK=<k>: only tile_k == k (measured: 32 wins, 16 and 64
+# lose). ROCKE_AOT_WGRAD_XWIN_N384_MIN_M=<m>: also a tile_n=384 twin of the
+# tile_n=256 jobs with tile_m >= m (the 256-row tiles of the C >= 256
+# problems). ROCKE_AOT_WGRAD_XWIN_WPE=<n>[,<n>...] with
+# ROCKE_AOT_WGRAD_XWIN_WPE_MAX_M=<m>: also a waves_per_eu=<n> copy of the twins
+# with tile_m <= m (the 16x16x16 twins of the 64/128-row tiles need the VGPR
+# cap for 2-3 waves/SIMD).
+_WGRAD_XWIN = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN", "0") or 0)
+_WGRAD_XWIN_TK = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_TK", "0") or 0)
+_WGRAD_XWIN_N384_MIN_M = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_N384_MIN_M", "0") or 0)
+_WGRAD_XWIN_WPE: Tuple[int, ...] = tuple(
+    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_WPE", "") or "").split(",") if v
+)
+_WGRAD_XWIN_WPE_MAX_M = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_WPE_MAX_M", "0") or 0)
+# ROCKE_AOT_WGRAD_XWIN_M=<m>[,<m>...]: only these tile_m;
+# ROCKE_AOT_WGRAD_XWIN_CB=<c>: only channel blocks (tile_n / X) that are
+# multiples of c (64: the blocks that divide the power-of-two channel counts);
+# ROCKE_AOT_WGRAD_XWIN_N384_WT=<w>: the tile_n=384 twins only with
+# warp_tile_m == w (32: the 16x16 ones spill at 256 rows).
+_WGRAD_XWIN_M: Tuple[int, ...] = tuple(
+    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_M", "") or "").split(",") if v
+)
+_WGRAD_XWIN_N384_WT = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_N384_WT", "0") or 0)
+_WGRAD_XWIN_CB = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_CB", "0") or 0)
 
 # ---- wgrad stream-K axis (opt-in) -------------------------------------------
 # Stream-K (WgradConvSpec.streamk) bakes its launch mode and its partial-sum
@@ -1884,6 +1912,45 @@ def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
         if _WGRAD_BSWZ_WPE and cfg.get("tile_k") == 32:
             bswz = bswz + tuple(dict(v, waves_per_eu=_WGRAD_BSWZ_WPE) for v in bswz)
         variants = variants + bswz
+    if (
+        _WGRAD_XWIN
+        and cfg.get("split_k", 1) > 1
+        and cfg.get("two_stage")
+        and (not _WGRAD_XWIN_TK or cfg.get("tile_k") == _WGRAD_XWIN_TK)
+        and (not _WGRAD_XWIN_M or cfg.get("tile_m", 0) in _WGRAD_XWIN_M)
+    ):
+        tn = cfg.get("tile_n", 0)
+        over = None
+        if tn % _WGRAD_XWIN == 0 and (
+            not _WGRAD_XWIN_CB or (tn // _WGRAD_XWIN) % _WGRAD_XWIN_CB == 0
+        ):
+            over = {}
+        elif (
+            tn == 256
+            and _WGRAD_XWIN_N384_MIN_M
+            and cfg.get("tile_m", 0) >= _WGRAD_XWIN_N384_MIN_M
+            and (
+                not _WGRAD_XWIN_N384_WT
+                or cfg.get("warp_tile_m") == _WGRAD_XWIN_N384_WT
+            )
+        ):
+            over = {"tile_n": 384}
+        if over is not None:
+            xw = tuple(
+                dict(v, xwin=_WGRAD_XWIN, sep_addr=0, **over)
+                for v in variants
+                if v.get("prefetch_regs") == 1
+                and v.get("lds_kpack", 1) == 2
+                and not v.get("kp_line")
+                and not v.get("lds_bswz")
+                and not v.get("waves_per_eu")
+                and (_WGRAD_XCD <= 1 or v.get("xcd_remap"))
+            )
+            if _WGRAD_XWIN_WPE and cfg.get("tile_m", 0) <= _WGRAD_XWIN_WPE_MAX_M:
+                xw = xw + tuple(
+                    dict(v, waves_per_eu=w) for w in _WGRAD_XWIN_WPE for v in xw
+                )
+            variants = variants + xw
     return variants
 
 
