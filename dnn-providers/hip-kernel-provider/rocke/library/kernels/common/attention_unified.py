@@ -3055,7 +3055,6 @@ def _kv_addr_limit(
 _I32_KV_FLAT_BYTES = 0x8000_0000
 _I32_ONLY_KV_LOADERS = {
     "use_conflict_free_v": _I32_KV_FLAT_BYTES,  # gfx942 _issue_v_transposed
-    "use_conflict_free_v_store": _I32_KV_FLAT_BYTES,  # gfx942 _cfvst_load_v_regs
     "use_v_hbm_direct": _I32_KV_FLAT_BYTES,  # gfx942 _v_hbm_elem
     "use_k_hbm_direct": _I32_KV_BUFFER_BYTES,  # gfx942 _read_k8_mfma_operand
     # _issue_v_fp8_mfma_async is a buffer load, _issue_v_fp8_mfma_stripe a flat

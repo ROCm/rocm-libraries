@@ -271,11 +271,11 @@ rocke_value_t* rocke_gfx942_attn2d_apply_transposed_pv_regs(rocke_gfx942_attn2d_
                 /* CK technique #1: V stored K-contiguous in V_lds[HD, T+pad];
                  * the 4 tokens are contiguous along the inner axis -> one wide
                  * read (lines 4596-4628). The naive token base is
-                 * k*8 + lane_half32*4. */
-                rocke_value_t* tok_base
-                    = rocke_b_add(B,
-                                  rocke_b_const_i32(B, k * 8),
-                                  rocke_b_mul(B, lane_half32, rocke_b_const_i32(B, 4)));
+                 * k*8 + lane_half32*4. Python emits const(k*8) before the mul;
+                 * bind it first (C argument evaluation order is unspecified). */
+                rocke_value_t* tok_base_k = rocke_b_const_i32(B, k * 8);
+                rocke_value_t* tok_base = rocke_b_add(
+                    B, tok_base_k, rocke_b_mul(B, lane_half32, rocke_b_const_i32(B, 4)));
                 if(ctx->CFV_SCALAR_READ)
                 {
                     /* ISOLATION: 4 scalar n=1 reads, same values/order. */

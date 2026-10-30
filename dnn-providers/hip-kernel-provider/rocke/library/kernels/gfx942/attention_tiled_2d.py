@@ -2693,11 +2693,8 @@ def build_unified_attention_2d_tiled(
             )
         CALLS_PER_PAGE = (BS * HD) // KV_HALVES_PER_CALL
 
-        def _tile_pages(
-            src: Value, kv_tile_idx: Value
-        ) -> tuple[list[Value], list[Value], Value]:
-            """Base pointers and buffer resources of the tile's pages, and the
-            kv head's byte offset within a page."""
+        def _tile_page_ptrs(src: Value, kv_tile_idx: Value) -> list[Value]:
+            """Base pointers of the tile's pages, from one page-id load each."""
             first = b.add(seq_base, b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE)))
             ptrs = []
             for page in range(N_BLOCKS_PER_TILE):
@@ -2714,6 +2711,14 @@ def build_unified_attention_2d_tiled(
                     b.zext(b.to_sgpr_u32(physical), I64), b.const_i64(kv_stride_blk_b)
                 )
                 ptrs.append(b.global_ptr_add(src, base))
+            return ptrs
+
+        def _tile_pages(
+            src: Value, kv_tile_idx: Value
+        ) -> tuple[list[Value], list[Value], Value]:
+            """Base pointers and buffer resources of the tile's pages, and the
+            kv head's byte offset within a page."""
+            ptrs = _tile_page_ptrs(src, kv_tile_idx)
             rsrcs = [b.buffer_rsrc(ptr, kv_block_bytes_c) for ptr in ptrs]
             kv_head_b = b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
             return ptrs, rsrcs, kv_head_b
@@ -3068,28 +3073,73 @@ def build_unified_attention_2d_tiled(
         _v_t2_dim_pairs = HD // 2
         _v_t2_total_blocks = _v_t2_tok_pairs * _v_t2_dim_pairs
 
+    def _cfvst_call_pages() -> list[int] | None:
+        """The one page each cfvst call's token rows lie in, or None if a call
+        spans pages. Rows grow with the block index, so a call's first and last
+        block bound its tokens; guarded tail lanes read block 0."""
+        pages = []
+        for call in range(V_T_ITEMS_PER_THREAD):
+            lo = call * THREADS
+            hi = min((call + 1) * THREADS, _v_t2_total_blocks) - 1
+            tokens = {2 * (lo // _v_t2_dim_pairs), 2 * (hi // _v_t2_dim_pairs) + 1}
+            if hi < (call + 1) * THREADS - 1:
+                tokens.add(0)
+            call_pages = {tok // BS for tok in tokens}
+            if len(call_pages) != 1:
+                return None
+            pages.append(call_pages.pop())
+        return pages
+
+    # i64 K/V: address V from the tile's page pointers (scalar 64-bit bases)
+    # with i32 offsets within the page, so the V loads cost the same registers as
+    # the i32 path. Every geometry the selector and the tuning space build keeps
+    # each load call in one page; raised, not asserted, like the K/V copies above.
+    CFVST_PAGE_I64 = TRANSPOSED_V_STORE and PAGE_RSRC_I64
+    if CFVST_PAGE_I64:
+        _cfvst_pages = _cfvst_call_pages()
+        if _cfvst_pages is None:
+            raise ValueError(
+                f"i64 K/V cfvst needs each V load call within one page (T={T}, "
+                f"BS={BS}, HD={HD}, threads={THREADS})"
+            )
+
     def _cfvst_load_v_regs(kv_tile_idx: Value):
         """Issue cfvst VMEM loads and keep each thread's V tile in VGPRs."""
         zero_h = b.cast_f32_to(b.const_f32(0.0), dtype)
         zero_i32 = b.const_i32(0)
         tile_tok_base = b.mul(kv_tile_idx, b.const_i32(T))
         _dp = b.const_i32(_v_t2_dim_pairs)
+        if CFVST_PAGE_I64:
+            v_page_ptrs = _tile_page_ptrs(value, kv_tile_idx)
+            v_kv_head_b = b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
 
-        def _load_token_row_pair(t_row: Value, d0: Value) -> Value:
+        def _v_page_off(t_row: Value, d: Value) -> Value:
+            # Byte offset of V[t_row, d] within its page.
+            tok = b.mod(t_row, b.const_i32(BS)) if N_BLOCKS_PER_TILE > 1 else t_row
+            return b.add(
+                b.add(b.mul(tok, b.const_i32(kv_stride_tok_b)), v_kv_head_b),
+                b.mul(d, b.const_i32(KV_BYTES)),
+            )
+
+        def _load_token_row_pair(t_row: Value, d0: Value, src: Value) -> Value:
             """Load <2 x f16> = (V[t_row, d0], V[t_row, d0+1]) as i32, bounded.
 
             Contiguous dim pair -> coalesced 2-half VMEM load. Out-of-range
             tokens (past this CTA's valid KV length) are masked to 0 (matching
             the bounded async DMA's hardware zero-fill) so masked P*V stays 0,
-            never P(0)*V(inf)=nan.
+            never P(0)*V(inf)=nan. ``src`` is the V cache, or the row's page
+            pointer under CFVST_PAGE_I64.
             """
-            linear = b.add(b.mul(t_row, b.const_i32(HD)), d0)
-            voff, valid = paged_kv_desc.offset(
-                b,
-                tile_idx=kv_tile_idx,
-                linear_half=linear,
-                kv_head=kv_head_idx,
-            )
+            if CFVST_PAGE_I64:
+                voff, valid = _v_page_off(t_row, d0), None
+            else:
+                linear = b.add(b.mul(t_row, b.const_i32(HD)), d0)
+                voff, valid = paged_kv_desc.offset(
+                    b,
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear,
+                    kv_head=kv_head_idx,
+                )
             in_range = b.cmp_lt(b.add(tile_tok_base, t_row), max_seq_prefix_len)
             if valid is not None:
                 in_range = b.land(in_range, valid)
@@ -3102,35 +3152,41 @@ def build_unified_attention_2d_tiled(
                 # descriptor call instead of voff+1. Tests the dim-contiguity
                 # assumption (does the paged descriptor have dim element-stride
                 # 1?). Vehicle (a) always uses separate per-element offsets.
-                linear1 = b.add(
-                    b.mul(t_row, b.const_i32(HD)), b.add(d0, b.const_i32(1))
-                )
-                voff1, valid1 = paged_kv_desc.offset(
-                    b, tile_idx=kv_tile_idx, linear_half=linear1, kv_head=kv_head_idx
-                )
+                if CFVST_PAGE_I64:
+                    voff1 = _v_page_off(t_row, b.add(d0, b.const_i32(1)))
+                else:
+                    linear1 = b.add(
+                        b.mul(t_row, b.const_i32(HD)), b.add(d0, b.const_i32(1))
+                    )
+                    voff1, valid1 = paged_kv_desc.offset(
+                        b,
+                        tile_idx=kv_tile_idx,
+                        linear_half=linear1,
+                        kv_head=kv_head_idx,
+                    )
                 safe_voff1 = b.select(in_range, voff1, zero_i32)
                 safe_elem1 = (
                     b.div(safe_voff1, b.const_i32(KV_BYTES))
                     if KV_BYTES != 1
                     else safe_voff1
                 )
-                e0 = b.global_load(value, safe_elem, dtype, align=2)
-                e1 = b.global_load(value, safe_elem1, dtype, align=2)
+                e0 = b.global_load(src, safe_elem, dtype, align=2)
+                e1 = b.global_load(src, safe_elem1, dtype, align=2)
                 e0 = b.select(in_range, e0, zero_h)
                 e1 = b.select(in_range, e1, zero_h)
                 v2 = b.vec_pack([e0, e1], dtype)
             elif _CFV_STORE_SCALAR_LOAD:
                 # ISOLATION: read the 2 dims as 2 scalar n=1 loads + manual pack
                 # (rules out the vectorized global_load_vN lowering). Same values.
-                e0 = b.global_load(value, safe_elem, dtype, align=2)
+                e0 = b.global_load(src, safe_elem, dtype, align=2)
                 e1 = b.global_load(
-                    value, b.add(safe_elem, b.const_i32(1)), dtype, align=2
+                    src, b.add(safe_elem, b.const_i32(1)), dtype, align=2
                 )
                 e0 = b.select(in_range, e0, zero_h)
                 e1 = b.select(in_range, e1, zero_h)
                 v2 = b.vec_pack([e0, e1], dtype)
             else:
-                v2 = b.global_load_vN(value, safe_elem, dtype, 2, align=4)
+                v2 = b.global_load_vN(src, safe_elem, dtype, 2, align=4)
                 # Zero masked rows (whole pair belongs to one token).
                 zero_vec = b.vec_pack([zero_h, zero_h], dtype)
                 v2 = b.select(in_range, v2, zero_vec)
@@ -3158,8 +3214,9 @@ def build_unified_attention_2d_tiled(
                     b.const_i32(0),
                 )
             d0, d1, t0, t1 = _cfvst_block_coords(blk)
-            x0 = _load_token_row_pair(t0, d0)  # (V[t0,d0], V[t0,d1])
-            x1 = _load_token_row_pair(t1, d0)  # (V[t1,d0], V[t1,d1])
+            src = v_page_ptrs[_cfvst_pages[call]] if CFVST_PAGE_I64 else value
+            x0 = _load_token_row_pair(t0, d0, src)  # (V[t0,d0], V[t0,d1])
+            x1 = _load_token_row_pair(t1, d0, src)  # (V[t1,d0], V[t1,d1])
             payload.append((d0, d1, t0, t1, x0, x1))
         return payload
 

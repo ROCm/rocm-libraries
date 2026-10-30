@@ -780,6 +780,11 @@ field:
   `paged_kv_desc.offset_i64` (full per-lane i64 element offset; the GEP
   index width now follows the operand type).
 * **fp8-in-LDS** (decode) — per-block i64 buffer base.
+* **gfx942 cfvst** (conflict-free V store, per-thread flat V load; the
+  default gfx942 bf16 D64 and fp16 D64/D128 prefill V loader) — each load
+  call's rows lie in one page, so V loads index that page's 64-bit base
+  pointer (loaded once per tile) with an i32 offset within the page. The
+  builder refuses a geometry where a call would span pages.
 
 The dispatcher enables it automatically (`_enable_i64_kv_addr`) only when
 `num_kv_blocks × block_stride > 0x7FFF0000` bytes (filled from `k.shape[0]`),
@@ -807,7 +812,7 @@ from `_spec_kv_addr_limit(problem, spec)` for a hand-built spec. The tiled
 builders' i32 path stops at `0x7FFF0000` bytes (their buffer `num_records`), so
 the cache switches to i64 strictly above that. Some tiled K/V loaders have no
 i64 branch yet, so an i64 spec that enables one keeps that loader's i32 limit:
-2^31 bytes for the flat loads of gfx942 cfv, cfvst and vhbm, and `0x7FFF0000`
+2^31 bytes for the flat loads of gfx942 cfv and vhbm, and `0x7FFF0000`
 for the buffer loads of gfx942 khbm and of fp8-PV on both arches. The scalar,
 gfx942 4-warp GQA and gfx1250 kernels have no i64 path and index K/V with i32
 element offsets, so their limit is 2^31 elements. Not checked: the 3D split-KV

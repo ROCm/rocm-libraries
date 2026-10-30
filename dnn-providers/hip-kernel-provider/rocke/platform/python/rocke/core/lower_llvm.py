@@ -3340,11 +3340,14 @@ class _Lowerer:
     def _op_memref_global_load_typed(self, op: Op) -> None:
         ptr, idx = op.operands
         elem_ty = _llvm_type(op.result.type)
+        # The GEP index takes the operand's own width, as in global_load_vN, so
+        # an i64 element offset (paged caches past 2 GiB) stays valid IR.
+        idx_ty = _llvm_type(idx.type)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 1))
         self._current().emit(
             f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+            f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
         )
         self._current().emit(
             f"  {op.result.name} = load {elem_ty}, ptr addrspace(1) {gep}, align {align}"
