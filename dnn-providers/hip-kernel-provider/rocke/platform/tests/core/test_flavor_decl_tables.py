@@ -5,7 +5,8 @@
 
 A compiler lane's declaration table is the base table plus the overrides of
 every declaration ABI generation up to and including the one its emission
-profile selects, oldest first in ``_LlvmDeclarationAbi`` order. Each
+profile selects, oldest first in ``_LlvmDeclarationAbi`` order, then the
+declarations the matrix-call table derives for that lane. Each
 generation's override table holds only the entries whose text changed at that
 generation. These tests state the rule declaratively against the live tables,
 so a second spelling of it (an override table that copies an older one, a
@@ -19,6 +20,7 @@ the byte-identity gate holds the two engines together.
 from __future__ import annotations
 
 import pytest
+from rocke.core.isa.matrix_calls import MATRIX_CALLS
 from rocke.core.llvm_profile import _emission_profile, _LlvmDeclarationAbi
 from rocke.core.lower_llvm import (
     _INTRINSIC_DECL_OVERRIDES_BY_ABI,
@@ -48,15 +50,21 @@ def test_overrides_only_change_the_text_of_existing_keys():
 
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_a_flavor_resolves_the_newest_override_at_or_below_its_generation(flavor):
-    """Each key takes the text of the newest generation, up to the one
+    """Each base key takes the text of the newest generation, up to the one
     ``flavor``'s profile selects, that overrides it, else the base text; keys
-    keep the base table's order."""
+    keep the base table's order. The matrix-call declarations follow, each
+    derived for ``flavor``."""
     abi = _emission_profile(flavor).declaration_abi
     inherited = _GENERATIONS[: _GENERATIONS.index(abi) + 1]
     resolved = _decls_for_flavor(flavor)
+    base_count = len(_INTRINSIC_DECLS)
 
-    assert list(resolved) == list(_INTRINSIC_DECLS)
-    for key, text in resolved.items():
+    assert list(resolved)[:base_count] == list(_INTRINSIC_DECLS)
+    derived = {call.key: call.declaration(flavor) for call in MATRIX_CALLS.values()}
+    assert list(resolved.items())[base_count:] == [
+        (key, text) for key, text in derived.items() if key not in _INTRINSIC_DECLS
+    ]
+    for key, text in list(resolved.items())[:base_count]:
         owners = [g for g in inherited if key in _INTRINSIC_DECL_OVERRIDES_BY_ABI[g]]
         want = (
             _INTRINSIC_DECL_OVERRIDES_BY_ABI[owners[-1]][key]

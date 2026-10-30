@@ -33,6 +33,8 @@ from ..arch import ArchTarget
 from ..arch.wmma_scale import gfx1250_scaled_wmma
 from ..ir import I32, Op, VectorType
 from ..llvm_profile import _supports_llvm23_target_ops
+from .matrix_call_lowering import emit_matrix_call
+from .matrix_calls import MATRIX_CALLS
 from .wmma_scale import ScaledWmmaLLVM
 
 
@@ -123,33 +125,55 @@ class ISABackend:
     def emit_mma(self, lowerer, op) -> None:
         """Lower a target-neutral ``tile.mma`` op.
 
-        The ``op_id`` attribute selects the concrete atom. The base (CDNA)
-        implementation rebuilds the legacy ISA-named op (``tile.<op_id>``) and
-        dispatches it through the lowerer's existing per-op handler, so the
-        emitted text is **byte-identical** to the historical MFMA path. RDNA
-        backends override this to route through :meth:`emit_wmma`.
-
-        A WMMA ``op_id`` reaching a CDNA backend resolves to the WMMA handler,
-        which calls :meth:`emit_wmma` and correctly raises ``NotImplementedError``
-        (WMMA is an RDNA-only instruction).
+        The ``op_id`` attribute selects the concrete atom. An op_id listed in
+        :data:`~rocke.core.isa.matrix_calls.MATRIX_CALLS` is lowered from its
+        call description, and refused on a target whose MMA catalog does not
+        list it. Every other op_id is rebuilt as the legacy ISA-named
+        op (``tile.<op_id>``) and handed to :meth:`_emit_named_mma`, so the
+        emitted text is **byte-identical** to the historical path.
         """
         op_id = op.attrs["op_id"]
         from ..arch.mfma_scale import gfx950_scaled_mfma
 
-        if gfx950_scaled_mfma(op_id) is not None:
-            lowerer._emit_gfx950_scaled_mfma(op)
-            return
-        if gfx1250_scaled_wmma(op_id) is not None:
-            self.emit_scaled_wmma(lowerer, op)
-            return
-        legacy = Op(
+        named = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),
             results=list(op.results),
             attrs={k: v for k, v in op.attrs.items() if k != "op_id"},
             loc=op.loc,
         )
-        lowerer.lower_op(legacy)
+        call = MATRIX_CALLS.get(op_id)
+        if call is not None:
+            self._require_catalog_lists(op_id)
+            emit_matrix_call(lowerer, named, call)
+            return
+        if gfx950_scaled_mfma(op_id) is not None:
+            lowerer._emit_gfx950_scaled_mfma(op)
+            return
+        if gfx1250_scaled_wmma(op_id) is not None:
+            self.emit_scaled_wmma(lowerer, op)
+            return
+        self._emit_named_mma(lowerer, named)
+
+    def _require_catalog_lists(self, op_id: str) -> None:
+        """Refuse ``op_id`` unless this target's MMA catalog lists it -- the
+        rule the C++ engine applies too."""
+        if self.arch.mma.by_op_id(op_id) is None:
+            raise NotImplementedError(
+                f"tile.{op_id} is not available on {self.arch.gfx}: "
+                "its MMA catalog does not list it"
+            )
+
+    def _emit_named_mma(self, lowerer, op) -> None:
+        """Emit an MMA op named ``tile.<op_id>`` through its hand-written handler.
+
+        CDNA dispatches it to the lowerer's ``_op_tile_<op_id>`` method. A WMMA
+        ``op_id`` reaching a CDNA backend resolves to the WMMA handler, which
+        calls :meth:`emit_wmma` and correctly raises ``NotImplementedError``
+        (WMMA is an RDNA-only instruction). RDNA backends override this to route
+        through :meth:`emit_wmma`.
+        """
+        lowerer.lower_op(op)
 
     @property
     def emits_legacy_s_waitcnt(self) -> bool:
@@ -225,11 +249,7 @@ class ISABackend:
         if spec is None:
             raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
         name = f"tile.{spec.op_id}"
-        if self.arch.mma.by_op_id(spec.op_id) is None:
-            raise NotImplementedError(
-                f"{name} is not available on {self.arch.gfx}: "
-                "its MMA catalog does not list it"
-            )
+        self._require_catalog_lists(spec.op_id)
         if not _supports_llvm23_target_ops(lowerer._flavor):
             raise NotImplementedError(
                 f"{name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"
@@ -413,30 +433,13 @@ class Gfx11RdnaBackend(ISABackend):
         gfx1151 Strix Halo box."""
         return 0x31014000
 
-    def emit_mma(self, lowerer, op) -> None:
-        """Lower ``tile.mma`` to an RDNA WMMA call.
+    def _emit_named_mma(self, lowerer, op) -> None:
+        """Emit an MMA op named ``tile.<op_id>`` as an RDNA WMMA call.
 
-        Rebuilds the legacy ``tile.<op_id>`` op so :meth:`emit_wmma`'s
-        name-keyed lookup keeps working, then emits the WMMA call. This is the
-        RDNA half of the neutral-MMA contract; the CDNA base emits MFMA.
+        :meth:`emit_wmma`'s lookup is keyed by that name. This is the RDNA half
+        of the neutral-MMA contract; the CDNA base emits MFMA.
         """
-        op_id = op.attrs["op_id"]
-        from ..arch.mfma_scale import gfx950_scaled_mfma
-
-        if gfx950_scaled_mfma(op_id) is not None:
-            lowerer._emit_gfx950_scaled_mfma(op)
-            return
-        if gfx1250_scaled_wmma(op_id) is not None:
-            self.emit_scaled_wmma(lowerer, op)
-            return
-        legacy = Op(
-            name=f"tile.{op_id}",
-            operands=list(op.operands),
-            results=list(op.results),
-            attrs={k: v for k, v in op.attrs.items() if k != "op_id"},
-            loc=op.loc,
-        )
-        self.emit_wmma(lowerer, legacy)
+        self.emit_wmma(lowerer, op)
 
     def emit_wmma(self, lowerer, op) -> None:
         int_spec = _RDNA_WMMA_INT.get(op.name)

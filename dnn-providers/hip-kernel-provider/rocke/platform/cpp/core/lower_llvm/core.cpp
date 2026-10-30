@@ -2015,6 +2015,15 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
             any_need = true;
         }
     }
+    /* The matrix-call declarations follow the base keys, as in Python. */
+    for(int i = 0; const char* key = rocke_ll_matrix_decl_key_at(i); i++)
+    {
+        if(ll_need_has(L, key))
+        {
+            rocke_strbuf_appendf(out, "%s\n", rocke_ll_decl_text(L->flavor, key));
+            any_need = true;
+        }
+    }
     /* Dynamic decls not in either static table. */
     for(size_t i = 0; i < L->dyn_decls.len; i++)
     {

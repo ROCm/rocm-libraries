@@ -104,6 +104,8 @@ def _decls_for_flavor(flavor):
     decls = dict(_INTRINSIC_DECLS)                      # LLVM 20 shapes
     for inherited in generations[: generations.index(abi) + 1]:
         decls.update(_INTRINSIC_DECL_OVERRIDES_BY_ABI[inherited])
+    for call in MATRIX_CALLS.values():                  # MMA calls described as data
+        decls.setdefault(call.key, call.declaration(flavor))
     return decls
 ```
 
@@ -114,9 +116,10 @@ five (4 fp8/bf8 MFMA operand-width changes + `make.buffer.rsrc.p1`'s
 `i32`→`i64`); LLVM23 inherits them and has no text of its own today; LLVM24
 inherits them too and has four of its own (the named-barrier declarations,
 whose pointer moved to addrspace(15)). Lanes that share an emission profile
-share one table. The C++
+share one table. A `MatrixCall` derives its declaration for each flavor from its
+operand forms, so its per-flavor register types need no override entry. The C++
 engine walks the same chain along `rocke_ll_declaration_abi_t`
-(`rocke_ll_decl_text` / `rocke_ll_decl_at`).
+(`rocke_ll_decl_text` / `rocke_ll_decl_at` / `rocke_ll_matrix_decl_key_at`).
 
 Why it has to be emitted correctly up front rather than left to auto-upgrade:
 **comgr verifies the toplevel `declare` lines *before* running the auto-upgrade
