@@ -31,6 +31,16 @@
 
 using namespace rocalution;
 
+// Relative bound on the difference between two applications of the same
+// preconditioner on the host and the accelerator. The backends sum in a different
+// order, and the triangular solves and the iterative preconditioners amplify the
+// rounding differences, so the bound is far above the machine epsilon.
+template <typename T>
+static T host_accelerator_tolerance()
+{
+    return std::is_same<T, float>::value ? static_cast<T>(1e-4) : static_cast<T>(1e-10);
+}
+
 template <typename T>
 static void getLaplacianTestMatrix(Arguments argus, LocalMatrix<T>& matrix)
 {
@@ -363,8 +373,7 @@ void testing_preconditioner_all(Arguments argus)
     // VariablePreconditioner switches to its next preconditioner on every solve
     if(precond != "VariablePreconditioner")
     {
-        T tol = std::is_same<T, float>::value ? static_cast<T>(1e-4) : static_cast<T>(1e-10);
-        EXPECT_LE(diff, tol * x_acc.Norm())
+        EXPECT_LE(diff, host_accelerator_tolerance<T>() * x_acc.Norm())
             << precond << ": the host and accelerator solutions differ";
     }
 
@@ -509,51 +518,49 @@ void testing_preconditioner_repeated_move(const std::string& name, TriSolverAlg 
     s->SetOperator(matrix);
     s->Build();
 
-    LocalVector<T> e, b, x_once, x_twice;
+    LocalVector<T> e, b, x, x_ref;
 
     e.Allocate("e", matrix.GetN());
     b.Allocate("b", matrix.GetM());
-    x_once.Allocate("x_once", matrix.GetN());
-    x_twice.Allocate("x_twice", matrix.GetN());
+    x.Allocate("x", matrix.GetN());
+    x_ref.Allocate("x_ref", matrix.GetN());
 
     e.Ones();
     matrix.Apply(e, &b);
 
-    T tol = std::is_same<T, float>::value ? static_cast<T>(1e-4) : static_cast<T>(1e-10);
+    // The reference is the solve on the host before any move
+    x_ref.Zeros();
+    s->Solve(b, &x_ref);
+    EXPECT_GT(x_ref.Norm(), static_cast<T>(0)) << name << " before any move";
+
+    const T tol = host_accelerator_tolerance<T>();
+
+    auto expect_reference = [&](const std::string& when) {
+        x.Zeros();
+        s->Solve(b, &x);
+
+        LocalVector<T> diff;
+        diff.Allocate("diff", x_ref.GetSize());
+        diff.CopyFrom(x);
+        diff.ScaleAdd(static_cast<T>(-1), x_ref);
+        EXPECT_LE(diff.Norm(), tol * x_ref.Norm()) << name << " " << when;
+    };
 
     s->MoveToAccelerator();
     b.MoveToAccelerator();
-    x_once.MoveToAccelerator();
-    x_twice.MoveToAccelerator();
-
-    x_once.Zeros();
-    s->Solve(b, &x_once);
+    x.MoveToAccelerator();
+    expect_reference("after moving to the accelerator");
 
     s->MoveToAccelerator();
-
-    x_twice.Zeros();
-    s->Solve(b, &x_twice);
-
-    x_twice.ScaleAdd(static_cast<T>(-1), x_once);
-    EXPECT_LE(x_twice.Norm(), tol * x_once.Norm())
-        << name << " after moving to the accelerator a second time";
+    expect_reference("after moving to the accelerator a second time");
 
     s->MoveToHost();
     b.MoveToHost();
-    x_once.MoveToHost();
-    x_twice.MoveToHost();
-
-    x_once.Zeros();
-    s->Solve(b, &x_once);
+    x.MoveToHost();
+    expect_reference("after moving to the host");
 
     s->MoveToHost();
-
-    x_twice.Zeros();
-    s->Solve(b, &x_twice);
-
-    x_twice.ScaleAdd(static_cast<T>(-1), x_once);
-    EXPECT_LE(x_twice.Norm(), tol * x_once.Norm())
-        << name << " after moving to the host a second time";
+    expect_reference("after moving to the host a second time");
 
     s->Clear();
     delete s;
