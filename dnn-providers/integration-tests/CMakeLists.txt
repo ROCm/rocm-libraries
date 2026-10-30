@@ -300,6 +300,51 @@ target_compile_options(${GOLDEN_DATA_TESTS_EXE}
 
 clang_tidy_check(${GOLDEN_DATA_TESTS_EXE})
 
+# YAML test categorization has to be decided before the first add_*_test_target() call below:
+# _add_test_target_internal() (dnn-providers/cmake/Tests.cmake) skips the raw, unlabeled
+# add_test() for a target only while DNN_PROVIDER_TEST_CATEGORY_YAMLS is already set. Set
+# after hipdnn_golden_data_tests was registered, the binary ran twice: once as the tiered
+# *_suite entries and once as an unlabeled raw test.
+set(HIPDNN_IT_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+set(HIPDNN_IT_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml")
+set(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED FALSE)
+if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
+   AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    set(DNN_PROVIDER_TEST_CATEGORY_YAMLS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}")
+    set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${HIPDNN_IT_CTEST_CATEGORIES_YAML}")
+    set(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED TRUE)
+    message(STATUS "hipdnn-integration-tests: YAML-based CTest categorization enabled")
+    # Label the pre-registered bundle-verifier ctest test via the shared YAML path
+    # (it is registered directly above, not by _create_test_name_validation_target_internal).
+    if(HIPDNN_IT_BUNDLE_VERIFIER_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_VERIFIER_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_SIDECAR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_SIDECAR_TEST})
+    endif()
+    if(HIPDNN_IT_BUNDLE_DISCOVERY_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_DISCOVERY_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST})
+    endif()
+    if(HIPDNN_IT_SUPPORT_FEATURES_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_FEATURES_TEST})
+    endif()
+    if(HIPDNN_IT_GOLDEN_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_GENERATOR_TEST})
+    endif()
+else()
+    message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")
+endif()
+
 # SKIP_NAME_VALIDATION: every test this binary registers is named after a bundle's
 # directory path (deriveTestName() in BundleDiscovery.hpp), so the names are
 # lower_snake_case by construction -- `quick_SdpaFwd_bhsd_bf16_hd128_causal_batch_
@@ -340,46 +385,6 @@ clang_tidy_check(${INTEGRATION_TESTS_EXE})
 # they are driven by each provider's add_external_integration_test_target()
 # (see dnn-providers/miopen-provider) which runs this binary against a specific
 # engine and selects tests via that provider's test_categories_integration.yaml.
-
-set(HIPDNN_IT_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
-set(HIPDNN_IT_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml")
-set(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED FALSE)
-if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
-   AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
-    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
-    set(DNN_PROVIDER_TEST_CATEGORY_YAMLS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}")
-    set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${HIPDNN_IT_CTEST_CATEGORIES_YAML}")
-    set(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED TRUE)
-    message(STATUS "hipdnn-integration-tests: YAML-based CTest categorization enabled")
-    # Label the pre-registered bundle-verifier ctest test via the shared YAML path
-    # (it is registered directly above, not by _create_test_name_validation_target_internal).
-    if(HIPDNN_IT_BUNDLE_VERIFIER_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_VERIFIER_TEST})
-    endif()
-    if(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST})
-    endif()
-    if(HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_HARVEST_TEST})
-    endif()
-    if(HIPDNN_IT_SUPPORT_SIDECAR_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_SIDECAR_TEST})
-    endif()
-    if(HIPDNN_IT_BUNDLE_DISCOVERY_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_DISCOVERY_TEST})
-    endif()
-    if(HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_MATRIX_RENDERER_TEST})
-    endif()
-    if(HIPDNN_IT_SUPPORT_FEATURES_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_FEATURES_TEST})
-    endif()
-    if(HIPDNN_IT_GOLDEN_GENERATOR_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_GOLDEN_GENERATOR_TEST})
-    endif()
-else()
-    message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")
-endif()
 
 add_subdirectory(gpu-ref)
 add_subdirectory(tests)
