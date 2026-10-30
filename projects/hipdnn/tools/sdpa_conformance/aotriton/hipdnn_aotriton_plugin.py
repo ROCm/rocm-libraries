@@ -13,8 +13,10 @@ Load it with ``-p hipdnn_aotriton_plugin`` (``aotriton/`` on PYTHONPATH). It
 * applies the outcome table: a case ends as ``pass``, ``fail``, ``crash``, ``not-run``,
   ``declined``, ``native-skip`` or ``no-hipdnn`` (the test passed but hipDNN computed nothing),
   and any result that rests on reference tensors alone becomes a skip;
-* writes one CSV row per case, in the controller process only, flushed per row;
-* supports ``--shard i/N`` (1-based) and ``--fake always-decline``.
+* writes one CSV row per case, in the controller process only, flushed per row; ``fwd_engines`` /
+  ``bwd_engines`` hold the applicable engines (``;``-joined, heuristic rank order) of a direction
+  hipDNN planned unpinned, empty otherwise;
+* supports ``--shard i/N`` (1-based), ``--hipdnn-nodeids-file`` and ``--fake always-decline``.
 """
 
 import json
@@ -58,8 +60,9 @@ def record(direction, kind, detail=""):
     """Append one hipDNN call outcome for the running case; thread-safe.
 
     ``direction`` is ``'fwd'`` or ``'bwd'``; ``kind`` is ``'hipdnn'`` (``detail`` the engine),
-    ``'ref'`` (the reference forward ran; ``detail`` the decline reason) or ``'declined'``. A
-    ``'ref'`` entry replaces the ``'declined'`` entry of the call it falls back from.
+    ``'ref'`` (the reference forward ran; ``detail`` the decline reason), ``'declined'`` or
+    ``'engines'`` (``detail`` the ``;``-joined ranked engine names of the preceding ``'hipdnn'``
+    call). A ``'ref'`` entry replaces the ``'declined'`` entry of the call it falls back from.
     """
     with _LOCK:
         entries = _RECORDS.setdefault(_CURRENT, [])
@@ -79,7 +82,11 @@ def _fold(entries):
     """
     folded = {}
     for direction in ("fwd", "bwd"):
-        calls = [(kind, detail) for d, kind, detail in entries if d == direction]
+        calls = [
+            (kind, detail)
+            for d, kind, detail in entries
+            if d == direction and kind != "engines"
+        ]
         if not calls:
             folded[direction] = None
             continue
@@ -91,6 +98,16 @@ def _fold(entries):
         else:
             folded[direction] = ("hipdnn", "+".join(sorted({d for _, d in calls})))
     return folded
+
+
+def _engine_list(entries, folded, direction):
+    """``;``-joined ranked engines of ``direction``'s first call that has a list; '' unless hipDNN served it."""
+    state = folded[direction]
+    if state is None or state[0] != "hipdnn":
+        return ""
+    return next(
+        (e for d, k, e in entries if (d, k) == (direction, "engines") and e), ""
+    )
 
 
 def _state_text(state):
@@ -157,6 +174,8 @@ def _make_row(item, call, report):
         "fwd": _state_text(fwd),
         "bwd": _state_text(bwd),
         "reason": "",
+        "fwd_engines": _engine_list(entries, folded, "fwd"),
+        "bwd_engines": _engine_list(entries, folded, "bwd"),
     }
 
     declined = []
@@ -226,6 +245,11 @@ def pytest_addoption(parser):
     )
     group.addoption(
         "--shard", metavar="I/N", help="run every N-th node id (sorted), 1 <= I <= N"
+    )
+    group.addoption(
+        "--hipdnn-nodeids-file",
+        metavar="PATH",
+        help="run only the collected items whose node id is listed in PATH (one per line)",
     )
     group.addoption(
         "--fake",
@@ -323,15 +347,18 @@ def _install_wrappers(fake):
         return
 
     declined_type = hipdnn_sdpa.EngineDeclined
+    from hipdnn_sdpa import _runtime
 
     def make(direction, inner):
         def wrapper(*args, **kwargs):
+            _runtime.take_engines()
             try:
                 engine = inner(*args, **kwargs)
             except declined_type as declined:
                 record(direction, "declined", declined.reason)
                 raise
             record(direction, "hipdnn", engine)
+            record(direction, "engines", ";".join(_runtime.take_engines()))
             return engine
 
         wrapper._sdpa_conformance_inner = inner
@@ -419,11 +446,26 @@ def pytest_report_header(config):
 
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config, items):
+    listed = config.getoption("hipdnn_nodeids_file")
+    if listed:
+        wanted = {
+            line.strip()
+            for line in Path(listed).read_text().splitlines()
+            if line.strip()
+        }
+        _keep(config, items, wanted)
     spec = config.getoption("shard")
-    if not spec:
-        return
-    index, count = _parse_shard(spec)
-    chosen = set(sorted(item.nodeid for item in items)[index - 1 :: count])
+    if spec:
+        index, count = _parse_shard(spec)
+        _keep(
+            config,
+            items,
+            set(sorted(item.nodeid for item in items)[index - 1 :: count]),
+        )
+
+
+def _keep(config, items, chosen):
+    """Deselect every item whose node id is not in ``chosen``."""
     kept = [item for item in items if item.nodeid in chosen]
     dropped = [item for item in items if item.nodeid not in chosen]
     if dropped:
