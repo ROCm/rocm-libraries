@@ -1,10 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Removes each <stem>.tilewright.blocklist of LIBRARY_DIR that WEIGHTS_DIR does
-# not ship. TensileLite reads the blocklist next to the tilewright_index of every
-# library it ranks with a model, so a copy an earlier build left there would keep
-# leaving out kernels that the current model was trained with.
+# Removes each <stem>.tilewright.blocklist and <stem>.tilewright.guards of
+# LIBRARY_DIR that WEIGHTS_DIR does not ship. TensileLite reads the blocklist,
+# and for a model trained with kernel guards the guards, next to the
+# tilewright_index of every library it ranks with a model, so a copy an earlier
+# build left there would keep leaving out, or keep offering, kernels other than
+# the current model was trained with.
 #
 # Invoked as cmake -DWEIGHTS_DIR=<dir> -DLIBRARY_DIR=<dir> -P <this file>.
 
@@ -12,7 +14,8 @@ if(NOT IS_DIRECTORY "${WEIGHTS_DIR}" OR NOT IS_DIRECTORY "${LIBRARY_DIR}")
     message(FATAL_ERROR "WEIGHTS_DIR and LIBRARY_DIR must name directories")
 endif()
 
-file(GLOB _copies LIST_DIRECTORIES false "${LIBRARY_DIR}/*.tilewright.blocklist")
+file(GLOB _copies LIST_DIRECTORIES false "${LIBRARY_DIR}/*.tilewright.blocklist"
+     "${LIBRARY_DIR}/*.tilewright.guards")
 foreach(_copy IN LISTS _copies)
     cmake_path(GET _copy FILENAME _name)
     if(NOT EXISTS "${WEIGHTS_DIR}/${_name}")

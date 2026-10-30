@@ -654,8 +654,8 @@ if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
     # in Tensile/Logic/asm_full/<arch>/<subtree>/Tilewright/, where <arch> is
     # the logic the subtree is built from: the subtree itself, or
     # gfx1250-strict for gfx1250v0. TensileLite looks a model, and the
-    # blocklist of a library stem, up in the directory the library logic was
-    # loaded from, so each library subtree gets its own copy.
+    # blocklist and guards of a library stem, up in the directory the library
+    # logic was loaded from, so each library subtree gets its own copy.
     get_property(_tw_linked GLOBAL PROPERTY TENSILELITE_HAS_TILEWRIGHT)
     if(_tw_linked AND TARGET tensilelite-device-libraries)
         set(_tw_logic_root "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full")
@@ -696,7 +696,7 @@ if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
                 continue()
             endif()
             file(GLOB _tw_models CONFIGURE_DEPENDS "${_tw_src}/*.tilewright.bin"
-                 "${_tw_src}/*.tilewright.blocklist")
+                 "${_tw_src}/*.tilewright.blocklist" "${_tw_src}/*.tilewright.guards")
             set(_tw_dst "${HIPBLASLT_TENSILE_LIBPATH}/library/${_sub}")
             list(APPEND _tw_commands
                 COMMAND ${CMAKE_COMMAND} -E make_directory "${_tw_dst}"
