@@ -26,6 +26,7 @@ jobs:
       miopen: ${{ steps.configure.outputs.miopen }}
       tensilelite-coverage: ${{ steps.configure.outputs.tensilelite_coverage }}
       library-uniqueness: ${{ steps.configure.outputs.hipblaslt_library_uniqueness }}
+      random-gemm-runner: ${{ steps.configure.outputs.random_gemm_runner }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
       windows-runner: ${{ steps.env.outputs.windows-runner }}
@@ -98,6 +99,12 @@ jobs:
     if: needs.changes.outputs.library-uniqueness == 'true'
     uses: ./.github/workflows/component-ci-library-uniqueness.yml
 
+  random-gemm-runner:
+    name: "Random GEMM runner"
+    needs: changes
+    if: needs.changes.outputs.random-gemm-runner == 'true'
+    uses: ./.github/workflows/component-ci-random-gemm-runner.yml
+
   component-ci-summary:
     name: "Component CI Summary"
     if: always()
@@ -108,6 +115,7 @@ jobs:
       - miopen
       - tensilelite-coverage
       - library-uniqueness
+      - random-gemm-runner
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
