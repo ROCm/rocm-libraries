@@ -49,7 +49,12 @@ template <class Derived, class ItemsIt, class MapIt, class ResultIt>
 void THRUST_HOST_DEVICE
 scatter(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, MapIt map, ResultIt result)
 {
-  hip_rocprim::transform(policy, first, last, thrust::make_permutation_iterator(result, map), _THRUST_STD::identity{});
+  hip_rocprim::transform(
+    policy,
+    first,
+    last,
+    thrust::make_permutation_iterator(result, map),
+    _THRUST_LIBCXX::proclaim_copyable_arguments(_THRUST_STD::identity{}));
 }
 
 template <class Derived, class ItemsIt, class MapIt, class StencilIt, class ResultIt, class Predicate>
@@ -63,14 +68,21 @@ void THRUST_HOST_DEVICE scatter_if(
   Predicate predicate)
 {
   hip_rocprim::transform_if(
-    policy, first, last, stencil, thrust::make_permutation_iterator(result, map), _THRUST_STD::identity{}, predicate);
+    policy,
+    first,
+    last,
+    stencil,
+    thrust::make_permutation_iterator(result, map),
+    _THRUST_LIBCXX::proclaim_copyable_arguments(_THRUST_STD::identity{}),
+    predicate);
 }
 
-template <class Derived, class ItemsIt, class MapIt, class StencilIt, class ResultIt, class Predicate>
+template <class Derived, class ItemsIt, class MapIt, class StencilIt, class ResultIt>
 void THRUST_HOST_DEVICE scatter_if(
   execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, MapIt map, StencilIt stencil, ResultIt result)
 {
-  hip_rocprim::scatter_if(policy, first, last, map, stencil, result, _THRUST_STD::identity{});
+  hip_rocprim::scatter_if(
+    policy, first, last, map, stencil, result, _THRUST_LIBCXX::proclaim_copyable_arguments(_THRUST_STD::identity{}));
 }
 
 } // namespace hip_rocprim
