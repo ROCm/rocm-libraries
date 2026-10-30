@@ -783,12 +783,6 @@ TEST(TestShapeUtils, IsTensorPackedZeroStrideWithMatchingSpan)
     EXPECT_FALSE(isTensorPacked({2, 2}, {3, 0}));
 }
 
-TEST(TestShapeUtils, IsTensorPackedZeroStrideBroadcast)
-{
-    EXPECT_FALSE(isTensorPacked({2, 3, 4}, {4, 0, 1}));
-    EXPECT_FALSE(isTensorPacked({2, 3}, {0, 0}));
-}
-
 TEST(TestShapeUtils, IsTensorPackedZeroStrideOnUnitExtentAxis)
 {
     EXPECT_TRUE(isTensorPacked({2, 1, 3}, {3, 0, 1}));

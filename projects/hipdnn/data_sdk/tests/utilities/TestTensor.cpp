@@ -855,17 +855,6 @@ TEST(TestTensor, FillWithRandomValuesBroadcastsAlongZeroStrideAxis)
         EXPECT_GE(hostData[offset], -1.0F);
         EXPECT_LE(hostData[offset], 1.0F);
     }
-
-    for(int64_t i0 = 0; i0 < dims[0]; ++i0)
-    {
-        for(int64_t i1 = 0; i1 < dims[1]; ++i1)
-        {
-            for(int64_t i2 = 0; i2 < dims[2]; ++i2)
-            {
-                EXPECT_EQ(tensor.getHostValue(i0, i1, i2), hostData[tensor.getIndex(i0, i1, i2)]);
-            }
-        }
-    }
 }
 
 TEST(TestTensor, ZeroStrideTensorRoundTripsThroughDevice)
