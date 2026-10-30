@@ -131,7 +131,7 @@ def _run(arguments: list[str]) -> None:
             "__spec__": None,
             "__annotations__": {},
         }
-        exec(compile(code, "<string>", "exec"), namespace)
+        exec(compile(code, "<string>", "exec", dont_inherit=True), namespace)
         return
     if mode == "-m":
         runpy.run_module(module, run_name="__main__", alter_sys=True)
