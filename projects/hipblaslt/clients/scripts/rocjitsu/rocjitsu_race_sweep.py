@@ -32,7 +32,6 @@ from rocjitsu_sweep_plan import (
 from tensilelite.Utilities.ClientConfig import problemTypeOptions
 
 DEFAULT_BATCH_SIZES = {"bench": 32, "tensile": 1}
-MAX_WORKERS = 64
 CHECKPOINT_SECONDS = 5
 
 
@@ -1787,7 +1786,7 @@ def main():
         "--workers",
         type=int,
         default=4,
-        help=f"Concurrent native processes on distinct physical CPU cores (1–{MAX_WORKERS}; default: 4)",
+        help="Concurrent native processes, each on its own available physical CPU core (default: 4)",
     )
     parser.add_argument(
         "--batch-size",
@@ -1886,7 +1885,7 @@ def main():
     ):
         parser.error("Reduction blocks and scalar overrides require regular-v1")
     if (
-        not 1 <= args.workers <= MAX_WORKERS
+        args.workers < 1
         or not 0 <= args.solution_index_range_begin < (1 << 31)
         or (
             args.solution_index_range_end is not None
@@ -1903,7 +1902,7 @@ def main():
         )
     ):
         parser.error(
-            f"Require 1–{MAX_WORKERS} workers, 0 <= range begin < range end <= 2**31, "
+            "Require at least one worker, 0 <= range begin < range end <= 2**31, "
             "finite positive timeouts, positive reduction blocks, and finite scalars"
         )
     for key in ("rocjitsu", "client", "config", "library_dir", "reports", "resume_from"):

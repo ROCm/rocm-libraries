@@ -1852,6 +1852,7 @@ class SweepTests(unittest.TestCase):
                 16,
             ),
             ("bench", ["--workers", "64", "--recover-unexecuted"], 32),
+            ("bench", ["--workers", "96"], 32),
         ):
             with (
                 self.subTest(backend=backend, flags=flags),
@@ -1867,7 +1868,7 @@ class SweepTests(unittest.TestCase):
         for flags in (
             ["--backend", "tensile", "--batch-size", "2"],
             ["--backend", "bench", "--batch-size", "0"],
-            ["--backend", "bench", "--workers", "65"],
+            ["--backend", "bench", "--workers", "0"],
         ):
             with (
                 self.subTest(flags=flags),
