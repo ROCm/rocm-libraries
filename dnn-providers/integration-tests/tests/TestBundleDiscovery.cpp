@@ -253,6 +253,200 @@ protected:
         std::ofstream(dir / "sweep.json") << sweepJson.dump(2);
     }
 
+    // A one-node SDPA forward template shaped like quick/SdpaFwd/Default: the node keeps its
+    // flags under "attributes" and its tensor uids under "inputs" and "outputs", and lists
+    // every key, nulls included, because the JSON-to-flatbuffer converter reads each one.
+    static nlohmann::json makeSdpaTemplate()
+    {
+        return nlohmann::json::parse(R"json({
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "${case.io_data_type}",
+  "name": "",
+  "nodes": [
+    {
+      "attributes": {
+        "alibi_mask": false,
+        "attn_scale_value": 0.125,
+        "causal_mask": false,
+        "causal_mask_bottom_right": false,
+        "diagonal_alignment": "BOTTOM_RIGHT",
+        "dropout_probability": null,
+        "generate_stats": null,
+        "implementation": "AUTO",
+        "left_bound": null,
+        "max_seq_len_kv": null,
+        "mma_core_mode": "unset",
+        "padding_mask": false,
+        "right_bound": 0
+      },
+      "compute_data_type": "float",
+      "inputs": {
+        "attn_mask_tensor_uid": null,
+        "block_mask_tensor_uid": null,
+        "descale_k_tensor_uid": null,
+        "descale_q_tensor_uid": null,
+        "descale_s_tensor_uid": null,
+        "descale_v_tensor_uid": null,
+        "dropout_mask_tensor_uid": null,
+        "dropout_scale_tensor_uid": null,
+        "k_tensor_uid": 0,
+        "offset_tensor_uid": null,
+        "page_table_k_tensor_uid": null,
+        "page_table_v_tensor_uid": null,
+        "q_tensor_uid": 1,
+        "scale_o_tensor_uid": null,
+        "scale_s_tensor_uid": null,
+        "scale_tensor_uid": null,
+        "seed_tensor_uid": null,
+        "seq_len_kv_tensor_uid": null,
+        "seq_len_q_tensor_uid": null,
+        "sink_token_tensor_uid": null,
+        "v_tensor_uid": 3
+      },
+      "name": "SdpaFwd_0",
+      "outputs": {
+        "amax_o_tensor_uid": null,
+        "amax_s_tensor_uid": null,
+        "max_tensor_uid": null,
+        "o_tensor_uid": 2,
+        "rng_dump_tensor_uid": null,
+        "stats_tensor_uid": null,
+        "sum_exp_tensor_uid": null
+      },
+      "type": "SdpaAttributes"
+    }
+  ],
+  "tensors": [
+    {"alignment": 16, "data_type": "${case.data_type}", "dims": "${case.dims}",
+     "is_runtime_pass_by_value": false, "name": "K", "strides": "${case.strides}",
+     "uid": 0, "virtual": false},
+    {"alignment": 16, "data_type": "${case.data_type}", "dims": "${case.dims}",
+     "is_runtime_pass_by_value": false, "name": "Q", "strides": "${case.strides}",
+     "uid": 1, "virtual": false},
+    {"alignment": 16, "data_type": "${case.data_type}", "dims": "${case.dims}",
+     "is_runtime_pass_by_value": false, "name": "SdpaFwd_0::O", "strides": "${case.strides}",
+     "uid": 2, "virtual": false},
+    {"alignment": 16, "data_type": "${case.data_type}", "dims": "${case.dims}",
+     "is_runtime_pass_by_value": false, "name": "V", "strides": "${case.strides}",
+     "uid": 3, "virtual": false}
+  ]
+})json");
+    }
+
+    // A sweep case over makeSdpaTemplate() with no patch fields. Q, K, V and O are
+    // [batch 1, heads 2, seq 16, head dim 8].
+    static nlohmann::json makeSdpaCase(const std::string& id)
+    {
+        nlohmann::json tensors = nlohmann::json::array();
+        for(int64_t uid = 0; uid < 4; ++uid)
+        {
+            tensors.push_back(makeSweepTensor(uid, "half", {1, 2, 16, 8}, {256, 128, 8, 1}));
+        }
+        return {{"id", id},
+                {"values", {{"io_data_type", "half"}, {"tensors", tensors}}},
+                {"metadata", {{"format_version", 1}, {"operation", "SdpaFwd"}, {"seed", 42}}}};
+    }
+
+    // The softmax statistics (log-sum-exp) tensor a space adds to switch stats on.
+    static nlohmann::json makeStatsTensor(int64_t uid)
+    {
+        return {{"alignment", 16},
+                {"data_type", "float"},
+                {"dims", {1, 2, 16, 1}},
+                {"is_runtime_pass_by_value", false},
+                {"name", "SdpaFwd_0::Stats"},
+                {"ragged_offset_multiplier", 1},
+                {"strides", {32, 16, 1, 1}},
+                {"uid", uid},
+                {"virtual", false}};
+    }
+
+    static nlohmann::json expandSdpaCase(const nlohmann::json& caseJson)
+    {
+        DiscoveredBundle discovered;
+        discovered.jsonPath = "sweep.json";
+        return detail::expandTemplateGraph(makeSdpaTemplate(), caseJson, discovered);
+    }
+
+    // The graph a loaded case runs: expanded, then the patch fields in the harness's order.
+    static nlohmann::json patchedSdpaGraph(const nlohmann::json& caseJson)
+    {
+        auto graph = expandSdpaCase(caseJson);
+        detail::applyAddTensors(graph, caseJson);
+        detail::applyNodePatches(graph, caseJson);
+        detail::applyTensorPatches(graph, caseJson);
+        return graph;
+    }
+
+    static const nlohmann::json& findTensor(const nlohmann::json& graph, int64_t uid)
+    {
+        for(const auto& tensor : graph.at("tensors"))
+        {
+            if(tensor.at("uid").get<int64_t>() == uid)
+            {
+                return tensor;
+            }
+        }
+        throw std::out_of_range("no tensor with uid " + std::to_string(uid));
+    }
+
+    // Applies the patch fields of caseJson to graph and checks that the first failure names
+    // the case and every expected part of the cause.
+    static void expectPatchError(const nlohmann::json& graph,
+                                 const nlohmann::json& caseJson,
+                                 const std::vector<std::string>& expectedParts)
+    {
+        auto patched = graph;
+        try
+        {
+            detail::applyAddTensors(patched, caseJson);
+            detail::applyNodePatches(patched, caseJson);
+            detail::applyTensorPatches(patched, caseJson);
+            ADD_FAILURE() << "expected the patch fields to be rejected: " << caseJson.dump();
+        }
+        catch(const std::runtime_error& error)
+        {
+            const std::string message = error.what();
+            const auto caseId = caseJson.at("id").get<std::string>();
+            EXPECT_NE(message.find("sweep case '" + caseId + "'"), std::string::npos) << message;
+            for(const auto& part : expectedParts)
+            {
+                EXPECT_NE(message.find(part), std::string::npos)
+                    << "missing '" << part << "' in: " << message;
+            }
+        }
+    }
+
+    static void expectPatchError(const nlohmann::json& caseJson,
+                                 const std::vector<std::string>& expectedParts)
+    {
+        expectPatchError(expandSdpaCase(caseJson), caseJson, expectedParts);
+    }
+
+    // makeSdpaCase(id) with one node_patches entry parsed from patchJson.
+    static nlohmann::json makeSdpaCaseWithNodePatch(const std::string& id,
+                                                    const std::string& patchJson)
+    {
+        auto caseJson = makeSdpaCase(id);
+        caseJson["node_patches"] = nlohmann::json::array({nlohmann::json::parse(patchJson)});
+        return caseJson;
+    }
+
+    // Writes a one-case sweep over makeSdpaTemplate() and loads that case.
+    LoadResult loadSdpaCase(const nlohmann::json& caseJson) const
+    {
+        const auto sweepDir = _tempDir / "quick" / "SdpaFwd" / "Default";
+        std::filesystem::create_directories(sweepDir);
+        std::ofstream(sweepDir / "graph.template.json") << makeSdpaTemplate().dump(2);
+        const nlohmann::json sweepJson
+            = {{"version", 1}, {"cases", nlohmann::json::array({caseJson})}};
+        std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+        const auto discovered = discoverBundles(_tempDir);
+        return loadIntegrationTestBundle(discovered.at(0));
+    }
+
     static const DiscoveredBundle* findByTest(const std::vector<DiscoveredBundle>& bundles,
                                               const std::string& testName)
     {
@@ -952,6 +1146,311 @@ TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseWithBakedValueAndRuntime
 
     EXPECT_THROW(loadIntegrationTestBundle(discovered.front()),
                  detail::RuntimePassByValueInvariantError);
+}
+
+// A sweep case switches SDPA stats on by adding the statistics tensor and wiring it into the
+// node. The built graph has the tensor, and its node names it in outputs and sets the flag.
+TEST_F(TestBundleDiscoveryFixture, SweepCaseAddedTensorWiredByNodePatchesBuildsGraphWithItInTheNode)
+{
+    auto caseJson = makeSdpaCase("stats_on_case");
+    caseJson["add_tensors"] = nlohmann::json::array({makeStatsTensor(4)});
+    caseJson["node_patches"] = nlohmann::json::parse(R"([
+        {"node": "SdpaFwd_0", "section": "outputs", "set": {"stats_tensor_uid": 4}},
+        {"node": "SdpaFwd_0", "section": "attributes", "set": {"generate_stats": true}}])");
+
+    auto result = loadSdpaCase(caseJson);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    const auto& bundle = std::get<IntegrationTestBundle>(result);
+
+    const auto graph = bundle.graphWrapper();
+    ASSERT_EQ(graph.nodeCount(), 1u);
+    const auto* attributes = graph.getNode(0).attributes_as_SdpaAttributes();
+    ASSERT_NE(attributes, nullptr);
+    ASSERT_TRUE(attributes->stats_tensor_uid().has_value());
+    EXPECT_EQ(*attributes->stats_tensor_uid(), 4);
+    ASSERT_TRUE(attributes->generate_stats().has_value());
+    EXPECT_TRUE(*attributes->generate_stats());
+
+    const auto tensorMap = graph.getTensorMap();
+    ASSERT_EQ(tensorMap.count(4), 1u);
+    EXPECT_EQ(tensorMap.at(4)->data_type(), hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+
+    // The graph has a second output now, so the harness compares it.
+    auto outputs = bundle.outputTensorUids;
+    std::sort(outputs.begin(), outputs.end());
+    EXPECT_EQ(outputs, (std::vector<int64_t>{2, 4}));
+}
+
+// "set" overwrites keys of the node's sections, and the change reaches the flatbuffer.
+TEST_F(TestBundleDiscoveryFixture, SweepCaseNodePatchSetChangesTheBuiltGraph)
+{
+    auto caseJson = makeSdpaCase("scale_and_mask_case");
+    caseJson["node_patches"] = nlohmann::json::parse(R"([
+        {"node": "SdpaFwd_0", "section": "attributes",
+         "set": {"attn_scale_value": 0.25, "causal_mask": true, "left_bound": 5}},
+        {"node": 0, "section": "inputs", "set": {"k_tensor_uid": 3, "v_tensor_uid": 0}}])");
+
+    auto result = loadSdpaCase(caseJson);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    const auto graph = std::get<IntegrationTestBundle>(result).graphWrapper();
+    const auto* attributes = graph.getNode(0).attributes_as_SdpaAttributes();
+    ASSERT_NE(attributes, nullptr);
+    ASSERT_TRUE(attributes->attn_scale_value().has_value());
+    EXPECT_EQ(*attributes->attn_scale_value(), 0.25f);
+    EXPECT_TRUE(attributes->causal_mask());
+    ASSERT_TRUE(attributes->left_bound().has_value());
+    EXPECT_EQ(*attributes->left_bound(), 5);
+    EXPECT_EQ(attributes->k_tensor_uid(), 3);
+    EXPECT_EQ(attributes->v_tensor_uid(), 0);
+    // What the patch did not name keeps the template's value.
+    EXPECT_FALSE(attributes->alibi_mask());
+    EXPECT_EQ(attributes->q_tensor_uid(), 1);
+}
+
+// A case without the new fields expands and loads exactly as the template says.
+TEST_F(TestBundleDiscoveryFixture, SweepCaseWithoutPatchFieldsLoadsAsTheTemplateExpands)
+{
+    const auto caseJson = makeSdpaCase("plain_case");
+    EXPECT_EQ(patchedSdpaGraph(caseJson), expandSdpaCase(caseJson));
+
+    auto result = loadSdpaCase(caseJson);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    const auto graph = std::get<IntegrationTestBundle>(result).graphWrapper();
+    EXPECT_EQ(graph.getTensorMap().size(), 4u);
+    const auto* attributes = graph.getNode(0).attributes_as_SdpaAttributes();
+    ASSERT_NE(attributes, nullptr);
+    EXPECT_FALSE(attributes->stats_tensor_uid().has_value());
+    EXPECT_FALSE(attributes->generate_stats().has_value());
+}
+
+// add_tensors runs before tensor_patches, so a tensor patch can edit a tensor the case added.
+TEST_F(TestBundleDiscoveryFixture, SweepCaseTensorPatchAppliesToAnAddedTensor)
+{
+    auto caseJson = makeSdpaCase("patched_stats_case");
+    caseJson["add_tensors"] = nlohmann::json::array({makeStatsTensor(4)});
+    caseJson["tensor_patches"] = nlohmann::json::parse(
+        R"([{"uid": 4, "set": {"alignment": 4}, "remove": ["ragged_offset_multiplier"]}])");
+
+    const auto graph = patchedSdpaGraph(caseJson);
+    const auto& stats = findTensor(graph, 4);
+    EXPECT_EQ(stats.at("alignment").get<int64_t>(), 4);
+    EXPECT_FALSE(stats.contains("ragged_offset_multiplier"));
+    EXPECT_EQ(graph.at("tensors").size(), 5u);
+}
+
+// The same patch on a uid that no add_tensors entry provides is an error that names the case.
+TEST_F(TestBundleDiscoveryFixture, SweepCaseTensorPatchOnAnUnaddedUidNamesTheCase)
+{
+    auto caseJson = makeSdpaCase("patch_before_add_case");
+    caseJson["tensor_patches"] = nlohmann::json::parse(R"([{"uid": 4, "set": {"alignment": 4}}])");
+    expectPatchError(caseJson,
+                     {"sweep case 'patch_before_add_case'", "tensor_patch uid 4 not found"});
+}
+
+// A node is addressed by its name or by its index in nodes[], and only that node changes.
+TEST_F(TestBundleDiscoveryFixture, SweepCaseNodePatchAddressesANodeByNameAndByIndex)
+{
+    auto graph = expandSdpaCase(makeSdpaCase("two_nodes_case"));
+    graph["nodes"].push_back(graph.at("nodes").at(0));
+    graph["nodes"][1]["name"] = "SdpaFwd_1";
+
+    auto byName = makeSdpaCaseWithNodePatch(
+        "two_nodes_case",
+        R"({"node": "SdpaFwd_1", "section": "attributes", "set": {"causal_mask": true}})");
+    auto byIndex = makeSdpaCaseWithNodePatch(
+        "two_nodes_case", R"({"node": 1, "section": "attributes", "set": {"causal_mask": true}})");
+
+    for(const auto& caseJson : {byName, byIndex})
+    {
+        auto patched = graph;
+        detail::applyNodePatches(patched, caseJson);
+        EXPECT_TRUE(patched.at("nodes").at(1).at("attributes").at("causal_mask").get<bool>());
+        EXPECT_FALSE(patched.at("nodes").at(0).at("attributes").at("causal_mask").get<bool>());
+    }
+}
+
+// "remove" erases keys after "set" has run.
+TEST_F(TestBundleDiscoveryFixture, SweepCaseNodePatchRemoveErasesKeys)
+{
+    const auto caseJson
+        = makeSdpaCaseWithNodePatch("remove_case",
+                                    R"({"node": "SdpaFwd_0", "section": "attributes",
+            "set": {"causal_mask": true}, "remove": ["dropout_probability", "max_seq_len_kv"]})");
+
+    const auto graph = patchedSdpaGraph(caseJson);
+    const auto& attributes = graph.at("nodes").at(0).at("attributes");
+    EXPECT_FALSE(attributes.contains("dropout_probability"));
+    EXPECT_FALSE(attributes.contains("max_seq_len_kv"));
+    EXPECT_TRUE(attributes.at("causal_mask").get<bool>());
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepCaseNodePatchRejectsAnUnknownNodeAndABadIndex)
+{
+    const std::string tail = R"("section": "attributes", "set": {"causal_mask": true}})";
+
+    expectPatchError(
+        makeSdpaCaseWithNodePatch("unknown_node_case", R"({"node": "SdpaFwd_9", )" + tail),
+        {"node_patches[0]", "node 'SdpaFwd_9' not found"});
+    expectPatchError(makeSdpaCaseWithNodePatch("high_index_case", R"({"node": 1, )" + tail),
+                     {"node_patches[0]", "node index 1 is out of range", "nodes[] has 1 entries"});
+    expectPatchError(makeSdpaCaseWithNodePatch("negative_index_case", R"({"node": -1, )" + tail),
+                     {"node_patches[0]", "node index -1 is out of range"});
+}
+
+// A name two nodes share does not pick one of them: the case must use the index.
+TEST_F(TestBundleDiscoveryFixture, SweepCaseNodePatchRejectsAnAmbiguousNodeName)
+{
+    auto graph = expandSdpaCase(makeSdpaCase("ambiguous_case"));
+    graph["nodes"].push_back(graph.at("nodes").at(0));
+
+    const auto caseJson = makeSdpaCaseWithNodePatch(
+        "ambiguous_case",
+        R"({"node": "SdpaFwd_0", "section": "attributes", "set": {"causal_mask": true}})");
+    expectPatchError(graph, caseJson, {"node_patches[0]", "node name 'SdpaFwd_0' is ambiguous"});
+
+    // Neither node was edited.
+    auto patched = graph;
+    EXPECT_THROW(detail::applyNodePatches(patched, caseJson), std::runtime_error);
+    EXPECT_EQ(patched, graph);
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepCaseNodePatchRejectsAnUnknownAndAMissingSection)
+{
+    // "attribute" is a typo of a section name.
+    expectPatchError(
+        makeSdpaCaseWithNodePatch(
+            "unknown_section_case",
+            R"({"node": "SdpaFwd_0", "section": "attribute", "set": {"causal_mask": true}})"),
+        {"node_patches[0]", "unknown section \"attribute\""});
+    expectPatchError(makeSdpaCaseWithNodePatch(
+                         "numeric_section_case",
+                         R"({"node": "SdpaFwd_0", "section": 7, "set": {"causal_mask": true}})"),
+                     {"node_patches[0]", "unknown section 7"});
+
+    // "parameters" is a real section name, but the forward node keeps its flags under
+    // "attributes". The section is not created.
+    const auto caseJson = makeSdpaCaseWithNodePatch(
+        "missing_section_case",
+        R"({"node": "SdpaFwd_0", "section": "parameters", "set": {"causal_mask": true}})");
+    expectPatchError(caseJson, {"node_patches[0]", "node 'SdpaFwd_0' has no 'parameters' section"});
+    auto graph = expandSdpaCase(caseJson);
+    EXPECT_THROW(detail::applyNodePatches(graph, caseJson), std::runtime_error);
+    EXPECT_FALSE(graph.at("nodes").at(0).contains("parameters"));
+}
+
+// A misspelled key must fail: the converters ignore keys they do not know, so inserting it
+// would build the same graph and the case would pass without the feature it asked for.
+TEST_F(TestBundleDiscoveryFixture, SweepCaseNodePatchSetRejectsAnUnknownKey)
+{
+    const auto caseJson = makeSdpaCaseWithNodePatch(
+        "misspelled_key_case",
+        R"({"node": "SdpaFwd_0", "section": "attributes", "set": {"generate_stat": true}})");
+    expectPatchError(caseJson,
+                     {"node_patches[0]",
+                      "set key 'generate_stat' is not in the 'attributes' section of node "
+                      "'SdpaFwd_0'"});
+
+    auto graph = expandSdpaCase(caseJson);
+    EXPECT_THROW(detail::applyNodePatches(graph, caseJson), std::runtime_error);
+    EXPECT_FALSE(graph.at("nodes").at(0).at("attributes").contains("generate_stat"));
+
+    // Inputs and outputs follow the same rule: a uid key the node does not list is rejected.
+    expectPatchError(makeSdpaCaseWithNodePatch(
+                         "bwd_only_key_case",
+                         R"({"node": 0, "section": "inputs", "set": {"stats_tensor_uid": 4}})"),
+                     {"node_patches[0]",
+                      "set key 'stats_tensor_uid' is not in the 'inputs' section of node index 0"});
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepCaseNodePatchRemoveRejectsAMissingKey)
+{
+    expectPatchError(
+        makeSdpaCaseWithNodePatch(
+            "remove_missing_case",
+            R"({"node": "SdpaFwd_0", "section": "attributes", "remove": ["no_such_key"]})"),
+        {"node_patches[0]", "remove key \"no_such_key\" is not in the 'attributes' section"});
+    // Removing the same key twice: the second finds it gone.
+    expectPatchError(makeSdpaCaseWithNodePatch("remove_twice_case",
+                                               R"({"node": "SdpaFwd_0", "section": "attributes",
+                             "remove": ["left_bound", "left_bound"]})"),
+                     {"node_patches[0]", "remove key \"left_bound\" is not in the 'attributes'"});
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepCaseAddTensorsRejectsADuplicateUid)
+{
+    // uid 0 is the template's K.
+    auto inTemplate = makeSdpaCase("duplicate_template_uid_case");
+    inTemplate["add_tensors"] = nlohmann::json::array({makeStatsTensor(0)});
+    expectPatchError(inTemplate, {"add_tensors[0]", "uid 0 already exists in the graph"});
+
+    auto twice = makeSdpaCase("duplicate_added_uid_case");
+    twice["add_tensors"] = nlohmann::json::array({makeStatsTensor(4), makeStatsTensor(4)});
+    expectPatchError(twice, {"add_tensors[1]", "uid 4 already exists in the graph"});
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepCaseAddTensorsRejectsMalformedEntries)
+{
+    auto notArray = makeSdpaCase("add_tensors_object_case");
+    notArray["add_tensors"] = makeStatsTensor(4);
+    expectPatchError(notArray, {"add_tensors must be an array"});
+
+    const std::vector<std::pair<std::string, nlohmann::json>> badEntries{
+        {"entry_not_object_case", nlohmann::json(4)},
+        {"entry_without_uid_case", nlohmann::json{{"name", "stats"}, {"virtual", false}}},
+        {"entry_string_uid_case", nlohmann::json{{"uid", "4"}, {"name", "stats"}}},
+        {"entry_fractional_uid_case", nlohmann::json{{"uid", 4.5}, {"name", "stats"}}}};
+    for(const auto& [id, entry] : badEntries)
+    {
+        auto caseJson = makeSdpaCase(id);
+        caseJson["add_tensors"] = nlohmann::json::array({makeStatsTensor(4), entry});
+        expectPatchError(caseJson, {"add_tensors[1] must be an object with an integer uid"});
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepCaseNodePatchesRejectsMalformedEntries)
+{
+    auto notArray = makeSdpaCase("node_patches_object_case");
+    notArray["node_patches"] = nlohmann::json::parse(R"({"node": 0})");
+    expectPatchError(notArray, {"node_patches must be an array"});
+
+    const std::vector<std::pair<std::string, std::string>> badEntries{
+        {R"(3)", "node_patches[0] must be an object with node and section"},
+        {R"({"section": "attributes", "set": {"causal_mask": true}})",
+         "node_patches[0] must be an object with node and section"},
+        {R"({"node": 0, "set": {"causal_mask": true}})",
+         "node_patches[0] must be an object with node and section"},
+        {R"({"node": 0, "section": "attributes", "sets": {"causal_mask": true}})",
+         "node_patches[0]: unknown key 'sets'"},
+        {R"({"node": 0, "section": "attributes"})", "node_patches[0] has neither set nor remove"},
+        {R"({"node": 0, "section": "attributes", "set": [["causal_mask", true]]})",
+         "node_patches[0]: set must be an object"},
+        {R"({"node": 0, "section": "attributes", "remove": "causal_mask"})",
+         "node_patches[0]: remove must be an array of key names"},
+        {R"({"node": true, "section": "attributes", "set": {"causal_mask": true}})",
+         "node_patches[0]: node must be a node name or an index"},
+        {R"({"node": 0.5, "section": "attributes", "set": {"causal_mask": true}})",
+         "node_patches[0]: node must be a node name or an index"}};
+    int number = 0;
+    for(const auto& [patch, message] : badEntries)
+    {
+        SCOPED_TRACE(patch);
+        auto caseJson = makeSdpaCase("malformed_entry_case_" + std::to_string(number++));
+        caseJson["node_patches"] = nlohmann::json::array({nlohmann::json::parse(patch)});
+        expectPatchError(caseJson, {message});
+    }
+}
+
+// At run time the detail is not reported: a bad case is INVALID_SWEEP_CASE, like any other
+// authoring error in a sweep case.
+TEST_F(TestBundleDiscoveryFixture, SweepCaseWithABadNodePatchFailsToLoadAsInvalidSweepCase)
+{
+    const auto caseJson = makeSdpaCaseWithNodePatch(
+        "load_failure_case",
+        R"({"node": "SdpaFwd_0", "section": "attributes", "set": {"generate_stat": true}})");
+
+    const auto result = loadSdpaCase(caseJson);
+    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::INVALID_SWEEP_CASE);
 }
 
 // The same invariant must hold for a direct (non-sweep) bundle's graph.json,

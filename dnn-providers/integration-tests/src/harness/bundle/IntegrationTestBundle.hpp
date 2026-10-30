@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -10,6 +12,8 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -661,9 +665,257 @@ inline nlohmann::json expandTemplateGraph(const nlohmann::json& templateJson,
     return expanded;
 }
 
+// The error for a bad patch field of a sweep case. The message names the case, so a failure
+// in a sweep of thousands of cases can be found, and then the cause.
+inline std::runtime_error sweepPatchError(const nlohmann::json& caseJson, const std::string& cause)
+{
+    std::string id = "<no id>";
+    if(caseJson.is_object() && caseJson.contains("id") && caseJson.at("id").is_string())
+    {
+        id = caseJson.at("id").get<std::string>();
+    }
+    return std::runtime_error("sweep case '" + id + "': " + cause);
+}
+
+inline bool graphHasTensorUid(const nlohmann::json& tensors, int64_t uid)
+{
+    return std::any_of(tensors.begin(), tensors.end(), [uid](const nlohmann::json& tensor) {
+        return tensor.is_object() && tensor.contains("uid") && tensor.at("uid").is_number_integer()
+               && tensor.at("uid").get<int64_t>() == uid;
+    });
+}
+
+// Appends the literal tensor objects of a sweep case's "add_tensors" array to the expanded
+// graph's tensors[]. The entries are not template-expanded: they are final JSON. A uid that
+// the graph already has (from the template or from an earlier entry) is an error, and so is
+// an entry that is not an object with an integer uid. Runs before node_patches and
+// tensor_patches, so both can refer to the added uids.
+inline void applyAddTensors(nlohmann::json& expandedGraph, const nlohmann::json& caseJson)
+{
+    if(!caseJson.contains("add_tensors"))
+    {
+        return;
+    }
+
+    const auto& added = caseJson.at("add_tensors");
+    if(!added.is_array())
+    {
+        throw sweepPatchError(caseJson, "add_tensors must be an array");
+    }
+
+    if(added.empty())
+    {
+        return;
+    }
+
+    if(!expandedGraph.contains("tensors") || !expandedGraph.at("tensors").is_array())
+    {
+        throw sweepPatchError(caseJson, "add_tensors needs a tensors array in the expanded graph");
+    }
+
+    auto& tensors = expandedGraph.at("tensors");
+    for(size_t index = 0; index < added.size(); ++index)
+    {
+        const auto& tensor = added.at(index);
+        const auto where = "add_tensors[" + std::to_string(index) + "]";
+        if(!tensor.is_object() || !tensor.contains("uid") || !tensor.at("uid").is_number_integer())
+        {
+            throw sweepPatchError(caseJson, where + " must be an object with an integer uid");
+        }
+
+        const auto uid = tensor.at("uid").get<int64_t>();
+        if(graphHasTensorUid(tensors, uid))
+        {
+            throw sweepPatchError(
+                caseJson, where + ": uid " + std::to_string(uid) + " already exists in the graph");
+        }
+
+        tensors.push_back(tensor);
+    }
+}
+
+// The node a node_patches entry addresses, and how to name it in an error message.
+struct PatchedNode
+{
+    nlohmann::json* node = nullptr;
+    std::string label;
+};
+
+// Finds a node by its "name" (which must be unique in nodes[]) or by its index in nodes[].
+inline PatchedNode findPatchedNode(nlohmann::json& expandedGraph,
+                                   const nlohmann::json& caseJson,
+                                   const nlohmann::json& selector,
+                                   const std::string& where)
+{
+    if(!expandedGraph.contains("nodes") || !expandedGraph.at("nodes").is_array())
+    {
+        throw sweepPatchError(caseJson, where + ": the expanded graph has no nodes array");
+    }
+
+    auto& nodes = expandedGraph.at("nodes");
+    if(selector.is_number_integer())
+    {
+        const auto index = selector.get<int64_t>();
+        if(index < 0 || static_cast<size_t>(index) >= nodes.size())
+        {
+            throw sweepPatchError(caseJson,
+                                  where + ": node index " + std::to_string(index)
+                                      + " is out of range (nodes[] has "
+                                      + std::to_string(nodes.size()) + " entries)");
+        }
+        return {&nodes.at(static_cast<size_t>(index)), "node index " + std::to_string(index)};
+    }
+
+    if(!selector.is_string())
+    {
+        throw sweepPatchError(caseJson, where + ": node must be a node name or an index");
+    }
+
+    const auto name = selector.get<std::string>();
+    nlohmann::json* match = nullptr;
+    size_t matches = 0;
+    for(auto& node : nodes)
+    {
+        if(node.is_object() && node.contains("name") && node.at("name").is_string()
+           && node.at("name").get<std::string>() == name)
+        {
+            match = &node;
+            ++matches;
+        }
+    }
+
+    if(matches == 0)
+    {
+        throw sweepPatchError(caseJson,
+                              where + ": node '" + name + "' not found in expanded graph");
+    }
+    if(matches > 1)
+    {
+        throw sweepPatchError(caseJson,
+                              where + ": node name '" + name + "' is ambiguous ("
+                                  + std::to_string(matches)
+                                  + " nodes have it); address it by index");
+    }
+    return {match, "node '" + name + "'"};
+}
+
+// Applies the entries of a sweep case's "node_patches" array to the expanded graph. An entry
+// is {"node": <name|index>, "section": <section>, "set": {...}, "remove": [...]}, where the
+// section is the node object that holds the keys: "attributes" or "parameters" for the flags
+// and scalars, "inputs" or "outputs" for the tensor uids. The entry edits that one object:
+//
+//   * "set" overwrites keys that the section already has. A key it lacks is an error rather
+//     than an insert, because the JSON-to-flatbuffer converters ignore keys they do not know,
+//     so a misspelled key would silently do nothing. Templates list every key (null
+//     included), so every legal key is present.
+//   * "remove" then erases keys. Removing a key the section lacks is an error.
+//
+// A node or a section that does not exist is an error and is never created. Runs after
+// applyAddTensors, so an entry may wire in an added uid, and before applyTensorPatches.
+inline void applyNodePatches(nlohmann::json& expandedGraph, const nlohmann::json& caseJson)
+{
+    if(!caseJson.contains("node_patches"))
+    {
+        return;
+    }
+
+    const auto& patches = caseJson.at("node_patches");
+    if(!patches.is_array())
+    {
+        throw sweepPatchError(caseJson, "node_patches must be an array");
+    }
+
+    constexpr std::array<std::string_view, 4> SECTIONS{
+        "attributes", "parameters", "inputs", "outputs"};
+    constexpr std::array<std::string_view, 4> PATCH_KEYS{"node", "section", "set", "remove"};
+
+    for(size_t index = 0; index < patches.size(); ++index)
+    {
+        const auto& patch = patches.at(index);
+        const auto where = "node_patches[" + std::to_string(index) + "]";
+        if(!patch.is_object() || !patch.contains("node") || !patch.contains("section"))
+        {
+            throw sweepPatchError(caseJson, where + " must be an object with node and section");
+        }
+
+        for(const auto& item : patch.items())
+        {
+            if(std::find(PATCH_KEYS.begin(), PATCH_KEYS.end(), item.key()) == PATCH_KEYS.end())
+            {
+                throw sweepPatchError(caseJson, where + ": unknown key '" + item.key() + "'");
+            }
+        }
+
+        const auto& sectionName = patch.at("section");
+        if(!sectionName.is_string()
+           || std::find(SECTIONS.begin(), SECTIONS.end(), sectionName.get<std::string>())
+                  == SECTIONS.end())
+        {
+            throw sweepPatchError(caseJson,
+                                  where + ": unknown section " + sectionName.dump()
+                                      + " (expected attributes, parameters, inputs or outputs)");
+        }
+
+        const bool hasSet = patch.contains("set");
+        const bool hasRemove = patch.contains("remove");
+        if(!hasSet && !hasRemove)
+        {
+            throw sweepPatchError(caseJson, where + " has neither set nor remove");
+        }
+        if(hasSet && !patch.at("set").is_object())
+        {
+            throw sweepPatchError(caseJson, where + ": set must be an object");
+        }
+        if(hasRemove && !patch.at("remove").is_array())
+        {
+            throw sweepPatchError(caseJson, where + ": remove must be an array of key names");
+        }
+
+        const auto target = findPatchedNode(expandedGraph, caseJson, patch.at("node"), where);
+        const auto section = sectionName.get<std::string>();
+        if(!target.node->is_object() || !target.node->contains(section)
+           || !target.node->at(section).is_object())
+        {
+            throw sweepPatchError(
+                caseJson, where + ": " + target.label + " has no '" + section + "' section");
+        }
+
+        auto& keys = target.node->at(section);
+        if(hasSet)
+        {
+            for(const auto& [key, value] : patch.at("set").items())
+            {
+                if(!keys.contains(key))
+                {
+                    throw sweepPatchError(caseJson,
+                                          where + ": set key '" + key + "' is not in the '"
+                                              + section + "' section of " + target.label
+                                              + " (set only overwrites existing keys)");
+                }
+                keys[key] = value;
+            }
+        }
+
+        if(hasRemove)
+        {
+            for(const auto& key : patch.at("remove"))
+            {
+                if(!key.is_string() || !keys.contains(key.get<std::string>()))
+                {
+                    throw sweepPatchError(caseJson,
+                                          where + ": remove key " + key.dump() + " is not in the '"
+                                              + section + "' section of " + target.label);
+                }
+                keys.erase(key.get<std::string>());
+            }
+        }
+    }
+}
+
 // Applies structural tensor patches declared in a sweep case's "tensor_patches" array.
 // Each patch targets a tensor by uid and supports "set" (upsert fields) and "remove" (erase
-// fields). Called after expandTemplateGraph so placeholders are already resolved, and before
+// fields). Called after expandTemplateGraph, applyAddTensors and applyNodePatches, so
+// placeholders are already resolved and an added uid can be patched, and before
 // buildGraphBuffer so the flatbuffer has not yet been sealed.
 inline void applyTensorPatches(nlohmann::json& expandedGraph, const nlohmann::json& caseJson)
 {
@@ -681,7 +933,7 @@ inline void applyTensorPatches(nlohmann::json& expandedGraph, const nlohmann::js
     {
         if(!patch.is_object() || !patch.contains("uid") || !patch.at("uid").is_number_integer())
         {
-            throw std::runtime_error("tensor_patch entry is missing an integer uid");
+            throw sweepPatchError(caseJson, "tensor_patch entry is missing an integer uid");
         }
 
         const auto targetUid = patch.at("uid").get<int64_t>();
@@ -719,8 +971,9 @@ inline void applyTensorPatches(nlohmann::json& expandedGraph, const nlohmann::js
 
         if(!found)
         {
-            throw std::runtime_error("tensor_patch uid " + std::to_string(targetUid)
-                                     + " not found in expanded graph");
+            throw sweepPatchError(caseJson,
+                                  "tensor_patch uid " + std::to_string(targetUid)
+                                      + " not found in expanded graph");
         }
     }
 }
@@ -862,6 +1115,8 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
     {
         expandedGraph = detail::expandTemplateGraph(*templateJson, *caseJson, discovered);
         goldenDirectory = detail::resolveSweepGoldenDirectory(discovered.jsonPath, *caseJson);
+        detail::applyAddTensors(expandedGraph, *caseJson);
+        detail::applyNodePatches(expandedGraph, *caseJson);
         detail::applyTensorPatches(expandedGraph, *caseJson);
     }
     catch(const std::exception&)

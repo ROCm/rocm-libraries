@@ -199,6 +199,8 @@ Resolution rules (`IntegrationTestBundle.hpp`):
 | `cases[].metadata` | **yes** | Same schema as a [metadata sidecar](#metadata-sidecar--namemetajson). A case without it fails to load. |
 | `cases[].golden` | no | `{"path": "golden/<CaseId>/tensors.dvc"}`. If absent or `null`, the case is graph-only. If present without a string `path`, it is an error. |
 | `cases[].tensor_patches` | no | Structural per-tensor edits applied after placeholder expansion; see below. |
+| `cases[].add_tensors` | no | Literal tensor objects appended to the expanded graph's `tensors[]`; see [`add_tensors`](#add_tensors-and-node_patches). |
+| `cases[].node_patches` | no | Edits to one section of a node (flags, scalars, tensor uids), applied after `add_tensors`; see [`add_tensors` and `node_patches`](#add_tensors-and-node_patches). |
 
 Case ids are handles, not descriptions. `import_graph.py` generates them as
 `{shape}_{dtype}_{layout}_{≤3 salient attrs}[_{hash6}]`. It adds the `hash6`
@@ -240,6 +242,60 @@ A gauntlet [space](running-tests.md#gauntlet-fuzz-runs) writes this patch from i
 tensor alignment differs from the template's, so a frozen finding keeps the alignment
 it failed at. Pair it with [`placement`](#placement-and-placement_uid) to put the
 device pointers there.
+
+#### `add_tensors` and `node_patches`
+
+These two fields let a case change the graph's *topology* where a template cannot: switch an
+optional input or output on (an extra tensor and the node key that names it) or change a node
+flag. They are meant for generated cases (a gauntlet space switching an SDPA feature per
+sample) but any case can use them. A case that has neither field loads exactly as before.
+
+The harness applies a case's fields in this order, after placeholder expansion and before the
+flatbuffer is built:
+
+1. `add_tensors`
+2. `node_patches`
+3. [`tensor_patches`](#tensor_patches)
+
+So a node patch can wire in a tensor that `add_tensors` added, and a tensor patch can edit
+it. A patch on a uid that nothing has added is an error.
+
+**`add_tensors`** is an array of tensor objects, in the same JSON as a template tensor,
+with no placeholders (the values are final). Each is appended to `tensors[]`. A tensor
+without an integer `uid`, an entry that is not an object, or a `uid` the graph already has (from the
+template or from an earlier entry) is an error.
+
+**`node_patches`** is an array of entries:
+
+| Field | Required | Meaning |
+|---|---|---|
+| `node` | yes | The node to edit: its `name` (a string; it must be unique in `nodes[]`) or its index in `nodes[]` (an integer). An unknown name, an out-of-range index and a name that two nodes share are errors; use the index for the last. |
+| `section` | yes | The object of the node that holds the keys: `attributes`, `parameters`, `inputs` or `outputs`. The node must already have it; a missing section is an error and is never created. Look at the template: SDPA forward keeps its flags under `attributes` and SDPA backward under `parameters`; both keep tensor uids under `inputs` and `outputs`. |
+| `set` | one of `set`, `remove` | Object of key to new value. **Every key must already exist in the section**; setting a key the section lacks is an error, not an insert. A template lists each key of a node, nulls included, so every legal key is there. The harness refuses an unknown key because the JSON-to-flatbuffer converters ignore keys they do not know: a misspelled key would build the unchanged graph, and the case would pass without the feature it asked for. |
+| `remove` | one of `set`, `remove` | Array of key names to erase, after `set` has run. Removing a key the section lacks is an error. |
+
+Any other key in an entry is an error. Every error is an exception that names the sweep
+case and the cause, for example
+`sweep case 'stats_on': node_patches[1]: set key 'generate_stat' is not in the 'attributes'
+section of node 'SdpaFwd_0' (set only overwrites existing keys)`. When a case is loaded to
+run, the harness reports any such failure only as `INVALID_SWEEP_CASE`, as for any other bad
+case.
+
+Example: an SDPA forward case that switches stats on. It adds the log-sum-exp tensor, names
+it in the node's outputs, and sets the flag. The template's `outputs.stats_tensor_uid` and
+`attributes.generate_stats` are `null` and exist, so both `set`s are overwrites:
+
+```json
+"add_tensors": [
+  { "uid": 4, "name": "SdpaFwd_0::Stats", "data_type": "float",
+    "dims": [1, 2, 16, 1], "strides": [32, 16, 1, 1],
+    "alignment": 16, "is_runtime_pass_by_value": false, "virtual": false }
+],
+"node_patches": [
+  { "node": "SdpaFwd_0", "section": "outputs",    "set": { "stats_tensor_uid": 4 } },
+  { "node": "SdpaFwd_0", "section": "attributes", "set": { "generate_stats": true } }
+]
+```
 
 ## Metadata sidecar — `{Name}.meta.json`
 
