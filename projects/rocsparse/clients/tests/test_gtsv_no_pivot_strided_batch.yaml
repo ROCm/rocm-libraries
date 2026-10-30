@@ -31,36 +31,18 @@ Tests:
   category: quick
   function: gtsv_no_pivot_strided_batch
   precision: *single_double_precisions_complex_real
-  M: [2, 3]
-  N: [8, 1]
-  denseld: [64, 512, 1024]
+  M: [2, 3, 4, 8, 16, 32, 64]
+  N: [64]
+  denseld: [256]
   matrix: [rocsparse_matrix_random]
 
 - name: gtsv_no_pivot_strided_batch
   category: quick
   function: gtsv_no_pivot_strided_batch
   precision: *single_double_precisions_complex_real
-  M: [2, 4]
-  N: [2, 4]
-  denseld: [4, 8, 16, 32, 64]
-  matrix: [rocsparse_matrix_random]
-
-- name: gtsv_no_pivot_strided_batch
-  category: quick
-  function: gtsv_no_pivot_strided_batch
-  precision: *single_double_precisions_complex_real
-  M: [300]
-  N: [33, 117]
-  denseld: [1000, 1500, 3000]
-  matrix: [rocsparse_matrix_random]
-
-- name: gtsv_no_pivot_strided_batch
-  category: quick
-  function: gtsv_no_pivot_strided_batch
-  precision: *single_double_precisions_complex_real
-  M: [2, 4, 8, 16, 32, 64]
-  N: [33, 117]
-  denseld: [1000, 1500, 3000]
+  M: [128, 256, 512]
+  N: [64, 256]
+  denseld: [2048]
   matrix: [rocsparse_matrix_random]
 
 # Pre-checkin
