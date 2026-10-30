@@ -1,6 +1,6 @@
 # Nightly GEMM race detection with rocjitsu
 
-The nightly job runs 1,000 sampled hipBLASLt GEMMs through rocjitsu with race
+The nightly job runs 100 sampled hipBLASLt GEMMs through rocjitsu with race
 detection enabled. It executes gfx950 GPU instructions on CPUs and checks the
 numerical output with `hipblaslt-bench`.
 
@@ -57,9 +57,10 @@ GELU apply a function to each output value.
 
 ## Automated runs and reproduction
 
-The nightly Multi-Arch workflow runs 1,000 samples with seed 0 and eight
+The nightly Multi-Arch workflow runs 100 samples with seed 0 and eight
 concurrent GEMMs. It emulates gfx950, the GPU instruction set used by the MI350
-family.
+family. With a fixed seed, every night checks the same inputs against the
+latest library, so it works as a smoke test rather than a growing search.
 
 The [CPU test job](../../../.github/workflows/therock-rocjitsu-race-check-linux.yml)
 uses the library and benchmark built by the same workflow, then builds a fixed
