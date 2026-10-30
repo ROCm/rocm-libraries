@@ -51,10 +51,16 @@ class ShapeVisitationTests(unittest.TestCase):
                 interval = hn.IndexRange(start, end, stride)
                 self.assertEqual(interval.indices(), full_range)
                 self.assertEqual(interval.count(), len(full_range))
-                for positions in (interval, flat):
+                self.assertEqual(shape.selected_coordinates(flat, order), expected)
+                if end <= shape.element_count:
                     self.assertEqual(
-                        shape.selected_coordinates(positions, order), expected
+                        shape.selected_coordinates(interval, order), expected
                     )
+                else:
+                    with self.assertRaisesRegex(
+                        RuntimeError, "exceeds the element count"
+                    ):
+                        shape.selected_coordinates(interval, order)
 
     def test_explicit_indices_and_bounds(self):
         shape = hn.Shape([2, 4])
