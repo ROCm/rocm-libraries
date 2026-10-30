@@ -327,12 +327,13 @@ struct device_segmented_topk_air_impl : BaseType
         }
     }
 
+    // HistogramSize is the number of valid bins in this iteration while ActualSize is the allocated size of `block_local_histogram`, deduced from the argument.
 template<unsigned int Iteration, unsigned int HistogramSize, unsigned int ActualSize, class SharedStorageType>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
 choose_pivot_bin(
     SharedStorageType& storage,
     histogram_t<bins_per_thread> const& thread_bins,
-    histogram_t<ActualSize> const& block_local_histogram, 
+    histogram_t<ActualSize> const& block_local_histogram,
     SizeIn N,
     SizeOut K,
     unsigned int thread_id)
