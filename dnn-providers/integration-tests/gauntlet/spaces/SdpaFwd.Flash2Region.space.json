@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "operation": "SdpaFwd",
+  "description": "SDPA forward over the region HIP_FLASH2_ENGINE claims (gfx942 only; HipFlash2FwdPlanBuilder.cpp isApplicable, HipFlash2FwdPlanBuilder.hpp useFlash2ForShape): half only, head size 64 or 128 with V and O at the same width, no mask or top-left causal (right_bound 0), BSHD or BHSD (the builder asks only for a head-dim stride of 1, which both layouts have), grouped-query heads with Hq a multiple of Hkv, seqlen_q a multiple of 64 (the K3 gate, which holds for causal and non-causal samples alike) and above the shape crossover, seqlen_q * seqlen_kv > ceil(seqlen_q / 64) * 6000, which for a multiple of 64 is seqlen_kv >= 94 whatever seqlen_q is; seqlen_kv has no gate of its own below INT32_MAX - 64 and is drawn from 1 to 2048 with the sizes around 64 and the crossover as boundaries, and a causal sample with seqlen_kv below seqlen_q is drawn too (top-left causal: row i sees keys 0..i, and every row sees key 0). No stats, attn_mask, scale tensor, sliding window, bottom-right causal or other feature is drawn: the builder declines stats and the attn_mask tensor outright and the other masks by the NO_MASK/TOP_LEFT_CAUSAL gate; SdpaFwd/Default holds the feature axes. The slice axis keeps two decline probes just outside the region, about a quarter of the samples after the constraints reject the draws that land on the wrong side: below_crossover (seqlen_q a multiple of 64 and seqlen_q * seqlen_kv at or under ceil(seqlen_q / 64) * 6000, so only the crossover gate can decline) and partial_q (seqlen_q not a multiple of 64 but above the crossover, so only K3 can decline). The alignment axis declares one alignment on Q, K, V and O (tensor_patches on uids 1, 0, 3, 2) and the engine needs 8 bytes from Q and O and 2 from K and V (K_Q_ALIGNMENT_BYTES, K_KV_ALIGNMENT_BYTES, K_O_ALIGNMENT_BYTES), so alignments 1, 2 and 4 decline whatever the shape; the probe-only SdpaFwd/Flash2 space isolates that. The placement axis puts the device pointers at exactly that alignment (exact) or misaligns Q (placement_uid 1) below it, a case that passes only if the backend rejects it (under, drawn as exact at alignment 1). The domain axis fills Q, K and V as in SdpaFwd/Default: large uses scale 8, V keeps free(-2,2) under wide and scale 2 under large, the nan and inf domains put the special fill on V alone (2^-12 of its elements) and only where no mask applies, and an infinity is never drawn for half (it falls back to the default fill, as SdpaFwd/Default does for a half sample). Those domain choices are inherited from the gfx950 probes of the bfloat16 SdpaFwd spaces and have not been measured on FLASH2 or on fp16: a WRONG there is a lead for a tolerance or a kernel question, not yet evidence of a defect. The cost ceiling b*hq*sq*skv*d <= 2**31 is the one of SdpaFwd/Default and SdpaFwd/Gfx950Dense (GPU reference cost ceiling, RFC 0023 section 14). Run it with --test-engine HIP_FLASH2_ENGINE, --test-config hip_flash2_engine/config/HIP_FLASH2_ENGINE.toml and HIP_FLASH2_KERNEL_DIR set (docs/running-tests.md).",
+  "engine": "HIP_FLASH2_ENGINE",
+  "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
+  "axes": {
+    "dtype":  {"values": ["half"]},
+    "layout": {"values": ["bshd", "bhsd"]},
+    "b":      {"values": [1, 2, 3, 4]},
+    "hkv":    {"values": [1, 2, 4, 8]},
+    "group":  {"values": [1, 2, 4, 8]},
+    "d":      {"values": [64, 128]},
+    "slice":  {"values": ["region", "region", "region", "region", "region", "below_crossover", "below_crossover", "below_crossover", "partial_q"]},
+    "sq_m":   {"range": [1, 32], "boundaries": [1, 2, 4, 8, 16, 32]},
+    "sq_part": {"range": [1, 63], "boundaries": [1, 32, 63]},
+    "skv":    {"range": [1, 2048], "boundaries": [1, 2, 63, 64, 65, 93, 94, 95, 128, 256, 512, 1024, 2048]},
+    "causal": {"values": [false, true]},
+    "scale":  {"values": [0.0883883461356163, 0.07216878235340118, 0.125, 0.25, 0.5, 1.0]},
+    "domain": {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256]},
+    "placement": {"values": ["default", "exact", "under"]}
+  },
+  "derive": {
+    "hq":       "hkv * group",
+    "dv":       "d",
+    "sq":       "64 * sq_m + (sq_part if slice == 'partial_q' else 0)",
+    "above":    "sq * skv > ((sq + 63) // 64) * 6000",
+    "dims_q":   "[b, hq, sq, d]",
+    "dims_k":   "[b, hkv, skv, d]",
+    "dims_v":   "[b, hkv, skv, dv]",
+    "dims_o":   "[b, hq, sq, dv]",
+    "stride_q": "[sq*hq*d, d, hq*d, 1] if layout == 'bshd' else [hq*sq*d, sq*d, d, 1]",
+    "stride_k": "[skv*hkv*d, d, hkv*d, 1] if layout == 'bshd' else [hkv*skv*d, skv*d, d, 1]",
+    "stride_v": "[skv*hkv*dv, dv, hkv*dv, 1] if layout == 'bshd' else [hkv*skv*dv, skv*dv, dv, 1]",
+    "stride_o": "[sq*hq*dv, dv, hq*dv, 1] if layout == 'bshd' else [hq*sq*dv, sq*dv, dv, 1]",
+    "nf_ok":     "not causal and not (domain == 'inf' and (dtype == 'half' or scale > 1))",
+    "dom_poison": "domain in ['nan', 'inf'] and nf_ok",
+    "dom_kind":  "'fixed' if domain == 'constant' else ('special' if dom_poison else ('free' if domain in ['default', 'narrow', 'wide', 'positive', 'nan', 'inf'] else domain))",
+    "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
+    "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
+    "dom_value": "0.5 if domain == 'constant' else 0",
+    "dom_scale": "8 if domain == 'large' else 1",
+    "dom_special": "'inf' if domain == 'inf' else 'nan'",
+    "dom_fraction": "0.000244140625",
+    "dom_validator": "'match_nonfinite' if dom_poison else 'default'",
+    "dom_clean_kind": "'free' if domain in ['nan', 'inf'] else dom_kind",
+    "dom_v_lo": "-2 if domain == 'wide' else dom_lo",
+    "dom_v_hi": "2 if domain == 'wide' else dom_hi",
+    "dom_v_scale": "2 if domain == 'large' else dom_scale",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
+  },
+  "constraints": [
+    {"rule": "above or slice == 'below_crossover'", "reason": "useFlash2ForShape (HipFlash2FwdPlanBuilder.hpp) takes a shape only above seqlen_q * seqlen_kv > ceil(seqlen_q / 64) * 6000; only the below_crossover probe slice is drawn under it"},
+    {"rule": "not above or slice != 'below_crossover'", "reason": "the below_crossover slice must be under the crossover, or it is an ordinary region sample whose axis label would be wrong"},
+    {"rule": "b*hq*sq*skv*d <= 2**31", "reason": "GPU reference cost ceiling (RFC 0023 section 14), as SdpaFwd/Default"}
+  ],
+  "case": {
+    "values": {
+      "io_data_type": "${dtype}",
+      "tensors": [
+        {"uid": 0, "dims": "${dims_k}", "strides": "${stride_k}", "data_type": "${dtype}"},
+        {"uid": 1, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}"},
+        {"uid": 2, "dims": "${dims_o}", "strides": "${stride_o}", "data_type": "${dtype}"},
+        {"uid": 3, "dims": "${dims_v}", "strides": "${stride_v}", "data_type": "${dtype}"}
+      ],
+      "attributes": {
+        "attributes__attn_scale_value": "${scale}",
+        "attributes__diagonal_alignment": "TOP_LEFT",
+        "attributes__right_bound": "${0 if causal else None}"
+      }
+    },
+    "metadata": {
+      "purpose": "probe",
+      "validator": "${dom_validator}",
+      "inputs": {
+        "0": {"kind": "${dom_clean_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "1": {"kind": "${dom_clean_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "3": {"kind": "${dom_kind}", "lo": "${dom_v_lo}", "hi": "${dom_v_hi}", "value": "${dom_value}", "scale": "${dom_v_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
+      },
+      "placement": "${eff_placement}",
+      "placement_uid": 1
+    },
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 2, "set": {"alignment": "${alignment}"}},
+      {"uid": 3, "set": {"alignment": "${alignment}"}}
+    ]
+  }
+}

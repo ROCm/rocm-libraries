@@ -517,6 +517,7 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "SdpaBackward/Default",
         "SdpaFwd/Default",
         "SdpaFwd/Flash2",
+        "SdpaFwd/Flash2Region",
         "SdpaFwd/Gfx950Dense",
     ]
     for sp in SPACES:
@@ -537,6 +538,7 @@ def test_shipped_spaces_declare_cost_ceilings():
     }
     assert any("2**31" in r for r in rules["SdpaFwd/Default"])
     assert any("2**31" in r for r in rules["SdpaFwd/Gfx950Dense"])
+    assert any("2**31" in r for r in rules["SdpaFwd/Flash2Region"])
     assert any("2**26" in r for r in rules["SdpaBackward/Default"])
     assert any("2**30" in r for r in rules["RMSNorm/Default"])
     assert any("2**30" in r for r in rules["ResampleFwd/Default"])
@@ -771,6 +773,101 @@ def test_sdpa_forward_constraints_ignore_the_late_stats_and_window_axes():
                 ), varied
 
 
+def _flash2_crossover(sq, skv):
+    """``useFlash2ForShape`` (HipFlash2FwdPlanBuilder.hpp), written out again."""
+    return sq > 1 and sq * skv > -(-sq // 64) * 6000
+
+
+def test_flash2_region_space_draws_the_engine_region_and_two_probe_slices():
+    # bug caught: a sample inside the region that the engine's gates would decline (the on-device
+    # PASS count would then say nothing), a probe slice that fails more than the one gate it is
+    # named for, a layout or mask that never reaches the graph, a feature the builder declines
+    # outright (stats, attn_mask), and a slice or edge of the crossover the sampler never draws
+    sp = space_by_id("SdpaFwd/Flash2Region")
+    template = json.loads(sp.template_path.read_text())
+    seen, edges, claimable = set(), set(), 0
+    for seed in range(800):
+        s = sampler.sample(sp, seed)
+        axes = s.axis_values
+        env = sp.derive_env(axes)
+        assert sp.first_violation(env) is None
+        assert not {"add_tensors", "node_patches"} & set(s.row)
+        graph = expanded_graph(template, s.row)
+        assert len(graph["tensors"]) == 4
+        node = graph["nodes"][0]
+        attrs, ins, outs = node["attributes"], node["inputs"], node["outputs"]
+        by_name = {t["name"]: t for t in graph["tensors"]}
+        b, hkv, hq, sq, skv, d = (
+            axes["b"], axes["hkv"], env["hq"], env["sq"], axes["skv"], axes["d"]
+        )  # fmt: skip
+        assert hq % hkv == 0 and d in (64, 128)
+        assert {t["data_type"] for t in graph["tensors"]} == {"half"}
+        assert by_name["Q"]["dims"] == [b, hq, sq, d]
+        assert by_name["SdpaFwd_0::O"]["dims"] == [b, hq, sq, d]
+        assert by_name["K"]["dims"] == by_name["V"]["dims"] == [b, hkv, skv, d]
+        for t in graph["tensors"]:
+            assert t["strides"][3] == 1, (
+                seed,
+                t["name"],
+            )  # the builder's only stride gate
+            assert _packed(t["dims"], t["strides"])
+        bshd = axes["layout"] == "bshd"
+        assert (by_name["Q"]["strides"][1] == d) == bshd, seed
+        # no feature the builder declines outright
+        assert attrs["generate_stats"] is None and outs["stats_tensor_uid"] is None
+        assert ins["attn_mask_tensor_uid"] is None and attrs["left_bound"] is None
+        assert not (attrs["causal_mask"] or attrs["causal_mask_bottom_right"])
+        assert attrs["diagonal_alignment"] == "TOP_LEFT"
+        assert attrs["right_bound"] == (0 if axes["causal"] else None)
+
+        slice_ = axes["slice"]
+        assert _flash2_crossover(sq, skv) == (slice_ != "below_crossover"), seed
+        assert (sq % 64 == 0) == (slice_ != "partial_q"), seed  # K3
+        assert b * hq * sq * skv * d <= 2**31
+        seen.add((slice_, axes["layout"], axes["causal"], d))
+        if skv in (93, 94):
+            edges.add((skv, slice_))
+        claimable += slice_ == "region" and axes["alignment"] >= 8
+    assert seen == {
+        (slice_, layout, causal, d)
+        for slice_ in ("region", "below_crossover", "partial_q")
+        for layout in ("bshd", "bhsd")
+        for causal in (False, True)
+        for d in (64, 128)
+    }
+    # seqlen_kv 94 is the first one over the crossover for a multiple of 64, and 93 the last under it
+    assert (93, "below_crossover") in edges and (94, "region") in edges
+    assert (93, "region") not in edges and (94, "below_crossover") not in edges
+    # the region the engine claims at an alignment it accepts (Q and O need 8) stays the bulk
+    assert claimable > 200
+
+
+def test_flash2_region_crossover_constraint_follows_use_flash2_for_shape():
+    # bug caught: a constraint off by one from useFlash2ForShape (the crossover is strict, and
+    # the ceil is over 64-row query tiles), which would draw a region sample the engine declines
+    # or reject an edge it claims
+    sp = space_by_id("SdpaFwd/Flash2Region")
+    rng = random.Random(5)
+    legal = {True: 0, False: 0}
+    for _ in range(4000):
+        axes = {
+            name: (
+                axis.values[rng.randrange(len(axis.values))]
+                if not axis.is_range
+                else rng.randint(axis.lo, rng.choice([axis.hi, 200]))
+            )
+            for name, axis in sp.axes.items()
+        }
+        env = sp.derive_env(axes)
+        cost = axes["b"] * env["hq"] * env["sq"] * axes["skv"] * axes["d"] <= 2**31
+        crossover = _flash2_crossover(env["sq"], axes["skv"])
+        expected = cost and crossover == (axes["slice"] != "below_crossover")
+        got = sp.first_violation(env) is None
+        assert got == expected, (axes, env["sq"])
+        legal[got] += 1
+    assert legal[True] > 100 and legal[False] > 100
+
+
 def test_sdpa_backward_space_draws_every_feature_and_renders_it():
     # bug caught: a mask axis that never reaches the node's left_bound, right_bound or
     # diagonal_alignment, a scale patch that leaves the template's literal 1/sqrt(128), an
@@ -917,6 +1014,7 @@ LARGE_SCALE = {
     "SdpaFwd/Default": 8,
     "SdpaBackward/Default": 8,
     "SdpaFwd/Gfx950Dense": 8,
+    "SdpaFwd/Flash2Region": 8,
 }
 # The poisoned share of V: a non-finite element of V reaches only its own head-dim column of the
 # output, so the share keeps part of the columns finite for the non-finite mask to grade
@@ -925,6 +1023,7 @@ LARGE_SCALE = {
 POISON_FRACTION = {
     "SdpaFwd/Default": 2**-12,
     "SdpaFwd/Gfx950Dense": 2**-12,
+    "SdpaFwd/Flash2Region": 2**-12,
     # dscale and dbias sum over every normalization group, so one poisoned group (or stat) makes
     # every dscale element non-finite; one poisoned dy element (the fill plants at least one,
     # which this fraction rounds down to) leaves the other columns and rows finite
@@ -940,6 +1039,7 @@ POISON_FRACTION = {
 OPERAND_DOMAIN = {
     ("SdpaFwd/Default", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
     ("SdpaFwd/Gfx950Dense", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
+    ("SdpaFwd/Flash2Region", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
     # V and dO of the backward keep magnitude 1 where wide and large widen Q and K (the
     # outputs grow with |dO| * |V| and the engine tolerances are calibrated at magnitude 1)
     **{
@@ -954,7 +1054,11 @@ OPERAND_DOMAIN = {
 # The sample the domain test renders when seed 11 is not one the nan and inf domains poison (a
 # causal or window-masked sample, half, or a softmax scale above 1 falls back to the default
 # fill, see test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree): the first that is.
-POISONABLE_SEED = {"SdpaFwd/Default": 14, "SdpaFwd/Gfx950Dense": 12}
+POISONABLE_SEED = {
+    "SdpaFwd/Default": 14,
+    "SdpaFwd/Flash2Region": 13,
+    "SdpaFwd/Gfx950Dense": 12,
+}
 # the tensors (by template name) whose fill the domain axis drives, per space
 PRIMARY_OPERANDS = {
     "Batchnorm/Default": ["X"],
@@ -967,6 +1071,7 @@ PRIMARY_OPERANDS = {
     "ResampleFwd/Default": ["X"],
     "SdpaFwd/Default": ["Q", "K", "V"],
     "SdpaFwd/Gfx950Dense": ["Q", "K", "V"],
+    "SdpaFwd/Flash2Region": ["Q", "K", "V"],
     "SdpaBackward/Default": ["Q", "K", "V", "dO"],
 }
 # The operands that carry the `special` fill in the nan and inf domains, per space. The other
@@ -984,6 +1089,7 @@ POISONED_OPERANDS = {
     "SdpaFwd/Default": ["V"],
     "SdpaBackward/Default": [],  # nan and inf are not drawn: see that space's description
     "SdpaFwd/Gfx950Dense": ["V"],
+    "SdpaFwd/Flash2Region": ["V"],
 }
 # sha256 over seeds 0..299 of the pre-existing axes' draws, taken before the domain axis existed
 OLD_SHAPE_DIGESTS = {
@@ -1013,6 +1119,7 @@ PLACEMENT_OPERAND = {
     "SdpaBackward/Default": "Q",
     "SdpaFwd/Default": "Q",
     "SdpaFwd/Flash2": "Q",
+    "SdpaFwd/Flash2Region": "Q",
     "SdpaFwd/Gfx950Dense": "Q",
 }
 PATCHED_OPERANDS = (
@@ -1021,6 +1128,9 @@ PATCHED_OPERANDS = (
 
 # the spaces whose domain axis leaves out nan and inf (each space's description says why)
 NONFINITE_EXCLUDED = {"SdpaBackward/Default"}
+# the spaces that draw half only: an infinity never poisons there (P underflows), see
+# test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree
+HALF_ONLY_SPACES = {"SdpaFwd/Flash2Region"}
 
 
 def domains_of(space_id):
@@ -1107,6 +1217,16 @@ def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
         meta = metas[domain]
         inputs = meta["inputs"]
         assert meta["purpose"] == "probe"
+        if domain == "inf" and space_id in HALF_ONLY_SPACES:
+            # P underflows in half, so an infinity falls back to the default fill (the poison
+            # rule of test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree)
+            assert meta["validator"] == "default"
+            for uid in primary:
+                keep = ("kind", "lo", "hi", "value")
+                assert {k: inputs[uid][k] for k in keep} == {
+                    k: default[uid][k] for k in keep
+                }
+            continue
         assert meta["validator"] == validator
         if domain == "large":
             scale = LARGE_SCALE.get(space_id, scale)
@@ -1227,7 +1347,9 @@ def test_resample_nan_domain_plants_infinity_under_maxpool_only():
     assert seen == {("nan", True), ("nan", False), ("inf", True), ("inf", False)}
 
 
-@pytest.mark.parametrize("space_id", ["SdpaFwd/Default", "SdpaFwd/Gfx950Dense"])
+@pytest.mark.parametrize(
+    "space_id", ["SdpaFwd/Default", "SdpaFwd/Flash2Region", "SdpaFwd/Gfx950Dense"]
+)
 def test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree(space_id):
     # bug caught: a non-finite V under a causal or window mask (probed on gfx950 with a causal
     # mask: NaN in the reference where the kernel is finite) and an infinity where P underflows
@@ -1252,7 +1374,11 @@ def test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree(space_id)
             ), (seed, domain, leaf)  # fmt: skip
             assert (leaf["lo"], leaf["hi"]) == (-1, 1)
             seen.add((domain, poisoned))
-    assert seen == {("nan", True), ("nan", False), ("inf", True), ("inf", False)}
+    # a half-only space never poisons with an infinity: P underflows there
+    both = {("nan", True), ("nan", False), ("inf", True), ("inf", False)}
+    assert seen == (
+        both if "bfloat16" in sp.axes["dtype"].values else both - {("inf", True)}
+    )
 
 
 @pytest.mark.parametrize("space_id", DOMAIN_SPACE_IDS)
@@ -2220,6 +2346,7 @@ def test_default_run_covers_every_space_and_filter_narrows(run):
     assert run.summary["spaces"] == [
         "SdpaFwd/Default",
         "SdpaFwd/Flash2",
+        "SdpaFwd/Flash2Region",
         "SdpaFwd/Gfx950Dense",
     ]
 
