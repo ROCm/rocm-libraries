@@ -53,6 +53,8 @@ namespace hip_rocprim
 //! \addtogroup execution_policies
 //! \{
 
+// note: the tag and execution policy need to be defined in the same namespace as the algorithms for ADL to find them
+
 //! \p thrust::hip::tag is a type representing Thrust's HIP backend system in C++'s type system.
 //! Iterators "tagged" with a type which is convertible to \p hip::tag assert that they may be
 //! "dispatched" to algorithm implementations in the \p hip system.
