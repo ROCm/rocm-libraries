@@ -178,6 +178,7 @@ typedef struct rocke_attention_tiled_2d_spec
     const char* kv_cache_policy; /* "stream" */
     bool use_global_load_lds_k; /* False */
     bool use_q_major_grid; /* False */
+    bool use_qblock_reverse; /* False (gfx950: longest-first query blocks) */
 } rocke_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required

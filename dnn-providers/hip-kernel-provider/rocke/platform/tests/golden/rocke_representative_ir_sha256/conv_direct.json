@@ -13,6 +13,30 @@
           "sha256": "5bd2ed9a88d08c1d6732c7cc8d8af017cd66c2699c28f0d0ac0af9423db4aa5b",
           "status": "ok"
         },
+        "conv_direct/gfx1250/dw_dgrad_stream_k3_cpl2_w32": {
+          "arch": "gfx1250",
+          "bytes": 99017,
+          "family": "conv_direct",
+          "kernel_name": "irhash_dw_dgrad_stream_1250_k3_cpl2_N2H14W14_g64_c1k1_bw8_bw2wv_cpl2",
+          "sha256": "73c06aac6718aac0d77b0df3166018aa010dc506f34fa24e5eba7266e9d2bea5",
+          "status": "ok"
+        },
+        "conv_direct/gfx1250/dw_dgrad_stream_k3_w32": {
+          "arch": "gfx1250",
+          "bytes": 82525,
+          "family": "conv_direct",
+          "kernel_name": "irhash_dw_dgrad_stream_1250_k3_N2H14W14_g64_c1k1_bw8_bw2wv",
+          "sha256": "cdf9cb82b02e56d8f6073c7bf1bd21586af088019a88292c459c16d27c08b3b0",
+          "status": "ok"
+        },
+        "conv_direct/gfx1250/dw_dgrad_stream_k5_s2_bf16_cpl8_w32": {
+          "arch": "gfx1250",
+          "bytes": 695643,
+          "family": "conv_direct",
+          "kernel_name": "irhash_dw_dgrad_stream_1250_k5_s2_bf16_cpl8_N2H14W14_g256_c1k1_bw4_bw1wv_cpl8_bf16",
+          "sha256": "28eac6eadc71819c0c783de71d718a274d93dd5927e08cfd141cc8dd9ef2486c",
+          "status": "ok"
+        },
         "conv_direct/gfx1250/dw_n4h16_cpl2_w32": {
           "arch": "gfx1250",
           "bytes": 117694,
@@ -234,6 +258,30 @@
           "sha256": "62621e0eb6b76260681f1eec4c788af4bac078c4bcb51ee76b6e43895ead815d",
           "status": "ok"
         },
+        "conv_direct/gfx1250/dw_dgrad_stream_k3_cpl2_w32": {
+          "arch": "gfx1250",
+          "bytes": 99156,
+          "family": "conv_direct",
+          "kernel_name": "irhash_dw_dgrad_stream_1250_k3_cpl2_N2H14W14_g64_c1k1_bw8_bw2wv_cpl2",
+          "sha256": "39192e7ede924b6a3c801923e45f2b5d7f5f7be3916abc5bf72411c116ba51d5",
+          "status": "ok"
+        },
+        "conv_direct/gfx1250/dw_dgrad_stream_k3_w32": {
+          "arch": "gfx1250",
+          "bytes": 82664,
+          "family": "conv_direct",
+          "kernel_name": "irhash_dw_dgrad_stream_1250_k3_N2H14W14_g64_c1k1_bw8_bw2wv",
+          "sha256": "a1863774affdcab3ed93e3c7aa8977b8cb2830d8e601105067b945852bd02bef",
+          "status": "ok"
+        },
+        "conv_direct/gfx1250/dw_dgrad_stream_k5_s2_bf16_cpl8_w32": {
+          "arch": "gfx1250",
+          "bytes": 695788,
+          "family": "conv_direct",
+          "kernel_name": "irhash_dw_dgrad_stream_1250_k5_s2_bf16_cpl8_N2H14W14_g256_c1k1_bw4_bw1wv_cpl8_bf16",
+          "sha256": "8bbbca3faa0c749349cf0daaa602ae7459ea162597208aa14020ae3ea60c55e3",
+          "status": "ok"
+        },
         "conv_direct/gfx1250/dw_n4h16_cpl2_w32": {
           "arch": "gfx1250",
           "bytes": 117833,
@@ -453,6 +501,30 @@
           "family": "conv_direct",
           "kernel_name": "irhash_dwcol_1250_s2_fp16_N2H12W12_g96_c1k1_r3x3_p1_s2_f16_bh8_bw2_bw1wv",
           "sha256": "a99de13d4514270eb42aa70ddef56472516d675045d405815060cdaa7be15849",
+          "status": "ok"
+        },
+        "conv_direct/gfx1250/dw_dgrad_stream_k3_cpl2_w32": {
+          "arch": "gfx1250",
+          "bytes": 99220,
+          "family": "conv_direct",
+          "kernel_name": "irhash_dw_dgrad_stream_1250_k3_cpl2_N2H14W14_g64_c1k1_bw8_bw2wv_cpl2",
+          "sha256": "7b48308951c643bf0bd3697e896b17363723889ed489d0846e0b9211fa23bcb6",
+          "status": "ok"
+        },
+        "conv_direct/gfx1250/dw_dgrad_stream_k3_w32": {
+          "arch": "gfx1250",
+          "bytes": 82728,
+          "family": "conv_direct",
+          "kernel_name": "irhash_dw_dgrad_stream_1250_k3_N2H14W14_g64_c1k1_bw8_bw2wv",
+          "sha256": "738c7f37485cfd2f7f5d6c16c4cff46cf2bed4d17dd6e2d98b48956c597b2aa6",
+          "status": "ok"
+        },
+        "conv_direct/gfx1250/dw_dgrad_stream_k5_s2_bf16_cpl8_w32": {
+          "arch": "gfx1250",
+          "bytes": 695852,
+          "family": "conv_direct",
+          "kernel_name": "irhash_dw_dgrad_stream_1250_k5_s2_bf16_cpl8_N2H14W14_g256_c1k1_bw4_bw1wv_cpl8_bf16",
+          "sha256": "a11424394784ca4e5b78ba4d4e4fcbc987616c8942f61002ab8e629e5bb34ff1",
           "status": "ok"
         },
         "conv_direct/gfx1250/dw_n4h16_cpl2_w32": {
