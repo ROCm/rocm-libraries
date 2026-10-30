@@ -36,7 +36,7 @@ namespace rocwmma
         template <>
         struct wmma_target_ops<TestTargetId>
         {
-            using type = wmma_op_list<wmma_f32_16x16x16_f16_gfx12, wmma_f32_16x16x32_f16_gfx1250>;
+            using type = wmma_op_list<wmma_f32_16x16x16_f16_gfx12, wmma_f32_16x16x32_f16_gfx125x>;
         };
 
         static_assert(
