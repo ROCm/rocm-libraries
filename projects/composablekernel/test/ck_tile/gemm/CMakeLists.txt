@@ -180,6 +180,13 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
                 set_tests_properties(test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma
                     PROPERTIES TIMEOUT 900)
             endif()
+            add_gtest_executable(test_ck_tile_gemm_pipeline_tdm_atomic_wmma test_gemm_pipeline_comp_tdm_atomic_wmma.cpp)
+            target_compile_options(test_ck_tile_gemm_pipeline_tdm_atomic_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+            target_compile_definitions(test_ck_tile_gemm_pipeline_tdm_atomic_wmma PRIVATE BARRIER_ATOMIC_IN_TDM=1) # atomic barrier in TDM pipeline
+            get_target_property(_tdm_atomic_archs test_ck_tile_gemm_pipeline_tdm_atomic_wmma HIP_ARCHITECTURES)
+            list(FILTER _tdm_atomic_archs INCLUDE REGEX "^gfx125")
+            set_property(TARGET test_ck_tile_gemm_pipeline_tdm_atomic_wmma PROPERTY HIP_ARCHITECTURES ${_tdm_atomic_archs})
+            list(APPEND CK_TILE_GEMM_TEST_TARGETS test_ck_tile_gemm_pipeline_tdm_atomic_wmma)
             add_gtest_executable(test_ck_tile_gemm_pipeline_tdm_lds_padding_wmma test_gemm_pipeline_comp_tdm_lds_padding_wmma.cpp)
             target_compile_options(test_ck_tile_gemm_pipeline_tdm_lds_padding_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
             get_target_property(_tdm_lds_padding_archs test_ck_tile_gemm_pipeline_tdm_lds_padding_wmma HIP_ARCHITECTURES)
@@ -209,9 +216,12 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
         set_tests_properties(${test_target} PROPERTIES LABELS "CK_TILE_GEMM_TESTS")
     endforeach()
     # The loop above replaces the SMOKE_TEST label, and the gfx1250 CI stage only runs "ninja smoke".
-    # Keep the gfx125 async-LDS tests in that set.
-    foreach(test_target ${CK_TILE_GEMM_ASYNC_WMMA_TARGETS})
-        set_property(TEST ${test_target} APPEND PROPERTY LABELS "SMOKE_TEST")
+    # Keep the gfx125 async-LDS tests and the TDM LDS padding test in that set; all of them fit the
+    # smoke time budget on the gfx1250 emulator.
+    foreach(test_target ${CK_TILE_GEMM_ASYNC_WMMA_TARGETS} test_ck_tile_gemm_pipeline_tdm_lds_padding_wmma)
+        if(TEST ${test_target})
+            set_property(TEST ${test_target} APPEND PROPERTY LABELS "SMOKE_TEST")
+        endif()
     endforeach()
     # comp_tdm_pc is deliberately absent from the tile engine CI config (it is a shared contract
     # with the dispatcher bridge), so this gtest is the only CI coverage of

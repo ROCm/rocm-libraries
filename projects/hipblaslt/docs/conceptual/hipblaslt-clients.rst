@@ -56,6 +56,17 @@ For example, to run ``fp32`` GEMM with validation, use this command:
    transA,transB,M,N,K,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,d_type,compute_type,activation_type,bias_vector,hipblaslt-Gflops,us
    N,N,128,128,128,1,128,16384,0,128,16384,128,16384,128,16384,f32_r,f32_r,none,0, 415.278, 10.
 
+``-v`` compares the GPU result with a CPU reference computed from the same inputs and adds three columns to the output:
+
+* ``norm_error`` is the Frobenius norm of the difference divided by the Frobenius norm of the reference, summed over batches and gemms. It averages over each whole matrix, so a few wrong elements in a large result can still give a small value.
+* ``atol`` and ``rtol`` come from an element-wise check. It tries the pairs 1e-6, 1e-5, ..., 1e-1 for each, tightest ``atol`` first, and reports the first pair under which every element satisfies ``|reference - result| <= atol + rtol * |result|``. With several batches, or the gemms of a grouped GEMM, the columns show the loosest pair any one matrix needed. ``failed`` means at least one element is outside even ``atol 0.1 + rtol 0.1 * |result|``; the bench then also prints the number of such elements and the worst one to stderr.
+
+The norm check of D fails when any one batch's ``norm_error`` reaches the same limit ``hipblaslt-test`` uses for the GEMM. The limit is the largest tolerance among the output and both input types (1e-5 for f32, 0.01 for f16, 0.1 for bf16); f32 output with ``c_f32_fast_bf16_r`` uses at least 0.5. For example, f16 inputs with f32 output use 0.01. The limit applies to each batch; ``hipblaslt-test`` applies the same limit to the sum of the batches instead, so with many batches it can fail a result the bench passes. The bench then prints the failing batch and its error to stderr, and the solution it was for. If D's type has no norm limit, or isn't one the norm check can compare, the bench prints that D was not verified and counts it as a failed check. By default the exit code is 0 whether or not a check fails. With ``--verify_strict``, the bench exits with code 2 when any check of D failed. It checks D only: the checks of E, the bias gradient and amaxD, and ``--ulp``, don't affect the exit code. Only the first launch of each solution is compared with the reference; the launches timed by ``--iters`` and ``--cold_iters`` are not checked.
+
+Verification computes a CPU reference for each problem and copies and compares D on the host for each solution, including every selected datafile record. This work is outside the timed GEMM launches and can substantially increase the total runtime of ``--algo_method all`` sweeps.
+
+To catch a solution that is wrong only on some launches, add ``--post_bench_verify_iters N``. After timing each solution, the bench relaunches it N more times, untimed and without host synchronization between relaunches, and compares each relaunch's D bit for bit with the first launch's D on the GPU. The timed launches themselves are not checked. The option implies ``--verify``, so it also computes the CPU reference. When a relaunch differs, the bench prints how many relaunches differed and the first element that changed, with its old and new values, for the solution named by library index and kernel. A difference counts as a failed check for ``--verify_strict``, but the solution stays in the ranking and in the ``HIPBLASLT_TUNING_FILE`` output, so read stderr before using a tuning result. The comparison is bitwise, so it fits solutions that give the same bits on every launch; a solution whose summation order changes from launch to launch (some split-K kernels, for example) can differ slightly and still be right, and it will be reported. If the first launch already failed the CPU check, the relaunches still run and are compared with that D. Timings from a run with this option may not be comparable with timings from a run without it.
+
 For more information, run the command with the ``--help`` option. The output of this command is shown below.
 
 .. code-block:: bash
@@ -95,6 +106,8 @@ For more information, run the command with the ``--help`` option. The output of 
    --batch_count <value>              Number of matrices. Only applicable to batched and strided_batched routines         (Default value is: 1)
    --HMM                              Parameter requesting the use of HipManagedMemory
    --verify |-v                       Validate GPU results with CPU?
+   --verify_strict                    Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose failed). Checks D only. Implies --verify.
+   --post_bench_verify_iters <value>  After timing, relaunch each solution this many more times, untimed and without host synchronization between relaunches, and check on the GPU that every relaunch gives the same D, bit for bit, as the first launch. The timed launches are not checked. 0 turns it off. Implies --verify, so it also runs the CPU reference.  (Default value is: 0)
    --iters |-i <value>                Iterations to run inside timing loop                                                (Default value is: 10)
    --cold_iters |-j <value>           Cold Iterations to run before entering the timing loop                              (Default value is: 2)
    --algo_method <value>              Use different algorithm search API. Options: heuristic, all, index.                 (Default value is: heuristic)
@@ -123,7 +136,7 @@ For more information, run the command with the ``--help`` option. The output of 
    --workspace <value>                Set fixed workspace memory size (bytes) instead of using hipblaslt managed memory   (Default value is: 134217728)
    --log_function_name                Function name precedes other items.
    --function_filter <value>          Simple strstr filter on function name only without wildcards
-   --api_method <value>               Use extension API. c: C style API. mix: declaration with C hipblasLtMatmul Layout/Desc but set, initialize, and run the problem with C++ extension API. cpp: Using C++ extension API only. Options: c, mix, cpp.  (Default value is: c)
+   --api_method <value>               Use extension API. c: C style API. mix: declaration with C hipblasLtMatmul Layout/Desc but set, initialize, and run the problem with C++ extension API. cpp: Using C++ extension API only. grouped_gemm_c: with --grouped_gemm, grouped matrix layouts and hipblasLtMatmul instead of the C++ GroupedGemm class. Options: c, mix, cpp, grouped_gemm_c.  (Default value is: c)
    --print_kernel_info                Print solution, kernel name and solution index.
    --rotating <value>                 Use rotating memory blocks for each iteration, size in MB.                          (Default value is: 0)
    --use_gpu_timer                    Use hipEventElapsedTime to profile elapsed time.
@@ -139,7 +152,7 @@ For more information, run the command with the ``--help`` option. The output of 
 Building clients with prebuilt libraries
 ========================================
 
-Sometimes it is desirable to build or rebuild the clients without having to conduct a full build of the library. This can be done by passing ``--no-tensile`` to ``inv build``. For example, ``inv build --clients --architecture gfx942 --no-tensile`` will build the clients and host code, but will not build Tensile libraries.
+Sometimes it is desirable to build or rebuild the clients without having to conduct a full build of the library. This can be done by passing ``--no-tensile`` to ``inv build``. For example, ``inv build --clients --architecture gfx942 --no-tensile`` will build the clients and host code, but will not build TensileLite libraries.
 
 Internally, this passes the ``-DHIPBLASLT_ENABLE_DEVICE=OFF`` option to CMake. If you prefer to build hipBLASLt with CMake directly instead of through invoke, the same effect can be achieved with the following steps:
 
@@ -153,7 +166,7 @@ Internally, this passes the ``-DHIPBLASLT_ENABLE_DEVICE=OFF`` option to CMake. I
        -DTensile_SKIP_BUILD=ON ..
    make
 
-To run the clients with existing Tensile libraries, you must set the environment variable ``HIPBLASLT_TENSILE_LIBPATH`` to the path of the Tensile libraries. For example, if the Tensile libraries are in ``/mnt/build/release/Tensile/library/``, you would run the clients as follows:
+To run the clients with existing TensileLite libraries, you must set the environment variable ``HIPBLASLT_TENSILE_LIBPATH`` to the path of the TensileLite libraries. For example, if the TensileLite libraries are in ``/mnt/build/release/Tensile/library/``, you would run the clients as follows:
 
 .. code-block:: bash
 

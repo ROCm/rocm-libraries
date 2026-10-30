@@ -52,6 +52,7 @@ class Gfx950DenseVariant:
     persistent: bool
     wide_lds_dma: bool
     features: frozenset
+    nonpersist_decode: str = "auto"
 
     @property
     def candidate_name(self) -> str:
@@ -69,6 +70,16 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         persistent=False,
         wide_lds_dma=False,
         features=_FEATURES | {"causal_bottom_right"},
+    ),
+    # The grid body at the qb_minor block order: the grid the hipDNN kernel ingestor
+    # launches.
+    Gfx950DenseVariant(
+        "qbminor",
+        DENSE_GRID_ALGORITHM,
+        persistent=False,
+        wide_lds_dma=False,
+        features=_FEATURES | {"causal_bottom_right"},
+        nonpersist_decode="qb_minor",
     ),
     Gfx950DenseVariant(
         "persist",
@@ -190,6 +201,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         sliding_window=int(req.sliding_window),
         use_sinks=bool(req.use_sinks),
         wide_lds_dma=variant.wide_lds_dma,
+        nonpersist_decode=variant.nonpersist_decode,
         causal_bottom_right=moving_bottom_right,
         emit_lse=bool(req.emit_lse),
         right_bound=right_bound,

@@ -755,7 +755,7 @@ hardware-free description of claimed support. A contributor can regenerate or di
 from a plain checkout with no GPU, no plugin, and no DVC pull (only `.json`/`.support.json` are
 needed, and both live in git — §9.2).
 
-**Renderer.** `dnn-providers/integration-tests/tools/render_support_matrix.py` discovers every
+**Renderer.** `dnn-providers/integration-tests/scripts/render_support_matrix.py` discovers every
 support sidecar under the golden-data tree — each `{Name}.support.json` and each sweep
 `support.json` — joins each to its graph (`{Name}.json`, or the expanded `cases[].id` from
 `graph.template.json` + `sweep.json`), and emits one combined markdown matrix: engine columns,
@@ -763,10 +763,51 @@ one row per claimed graph keyed by `(operation, layout, dtype, scenario)`, each 
 verdict per `(arch, platform)`.
 The matrix is a **view** of the committed claims, not a second state to maintain.
 
+**One collection, then a projection.** The renderer resolves each sidecar into a flat list of
+claim units once, then renders that list as `dnn-providers/integration-tests/SUPPORT_MATRIX.md`:
+a human document that aggregates cases into `(operation, layout, dtype, scenario)` rows and
+annotates each row with an HTML comment naming the contributing bundle path, its tier, and its
+case count — coordinates back to the claim, not the claim itself. Collection is kept separate
+from rendering, so a richer consumer — a browsable or zoomable view of the matrix — needs only a
+new projection of the same units rather than a scraper of the rendered tables. Enumerating every case id inline in the markdown is available (`--max-case-ids`) but off by
+default: it multiplies the document size to no visual effect, and a large enough markdown file
+stops rendering on GitHub at all.
+
 **Sidecar as source of truth.** The `support.json` sidecars are authoritative; the matrix is
-derived. The matrix is regenerated (and its freshness checked) by a CI lint that fails if the
-committed matrix differs from a re-render of the current sidecars — so the committed doc can
-never silently drift from the claims.
+derived. The full matrix is **generated on demand and not committed** — a contributor who wants
+it runs the renderer against their checkout. This is deliberate: the rendered document is large
+and grows with every bundle and every gfx target added, which makes it both a large diff on every
+sidecar edit and close enough to the size at which GitHub stops rendering markdown to be a
+liability. Not committing it also removes its drift problem outright: there is no full second
+copy to go stale. The one committed projection, the overview below, is checked instead.
+
+The cost is that the full document is not in a pull request diff, and a reader cannot browse
+it on the web without a checkout. A compact overview recovers most of that:
+`support_features/feature_matrix.py` writes
+`dnn-providers/integration-tests/SUPPORT_MATRIX_OVERVIEW.md`, the share of each op's API
+options claimed per GPU family, engine and target, small enough to render on GitHub. The
+overview **is committed**, so a claim change shows in the diff as a changed percentage, and it
+is regenerated in the same commit as the sidecars it reflects — `harvest_support_claims.py
+--write` (§12.3) does so itself. Reviewers who want the per-graph detail regenerate the full
+matrix locally; `render_support_matrix.py --overview-only` gives its per-target graph counts
+alone.
+
+**Freshness.** Three checks keep the sidecars and the overview in step:
+
+- The `render-support-matrix` pre-commit hook renders the full matrix and discards it, failing
+  if any sidecar cannot be resolved: a malformed or orphaned sidecar, or a claim on an unknown
+  case.
+- The `check-support-matrix-overview` pre-commit hook runs `feature_matrix.py --check`,
+  failing if the committed overview differs from a fresh render.
+- Both hooks see only the files pre-commit passes them, and the top-level `exclude` in
+  `.pre-commit-config.yaml` hides `integration-test-bundles/` from every hook, so a commit
+  that changes only sidecars triggers neither. The `hipdnn_support_matrix_renderer_python_tests`
+  and `hipdnn_support_features_python_tests` ctests cover that case: they run in
+  `hipdnn-superbuild-ci` on every change under `dnn-providers/` and render the real tree, and
+  the second fails if the committed overview is stale.
+
+Claim *correctness* is enforced separately by `verify-support-claims` (§9.3) and by the
+integration tests themselves (§4).
 
 Two clarifications. (1) The matrix row key `(operation, layout, dtype, scenario)` is
 *coarser* than the actual claim key (the on-disk graph, §4): two bundles — or two sweep cases —

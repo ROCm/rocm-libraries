@@ -102,7 +102,7 @@ distinction those surveys exist to report. They now call `roll()` with
 
 | Flag | Meaning |
 |---|---|
-| `--kernel`, `--arch` | Module path (e.g. `kernels.gfx1151.wmma_fmha_fwd`) and target arch |
+| `--kernel`, `--arch` | Module path (e.g. `kernels.gfx1151.wmma_fmha_fwd_v2`) and target arch |
 | `--build`, `--spec` | Only needed if the module exposes more than one builder or spec class |
 | `--fixed PATH=V` | Spec fields held constant and baked into the recipe |
 | `--axis PATH=V1,V2` | A free integer axis and its sample values (≥2). Repeatable — that is the multi-axis case |
@@ -186,7 +186,7 @@ Points it rejects are reported as refusals like any other.
 ### Flat and nested specs
 
 `PATH` is a field name for a flat spec and a **dotted path** for a nested one.
-`WmmaFmhaFwdSpec` is flat, so `--fixed head_size=64`. `UniversalGemmSpec` nests
+`WmmaFmhaFwdV2Spec` is flat, so `--fixed head_dim=64`. `UniversalGemmSpec` nests
 `TileSpec`, `TraitSpec` and `DataSpec`, so `--fixed tile.tile_m=16` and
 `--axis tile.tile_n=32,64`.
 
@@ -227,13 +227,14 @@ relays the answer verbatim:
 ```
 REFUSED on gfx950: the kernel's own gate rejects every point.
 
-   {'num_query_heads': 8}
-      WMMA wmma_f32_16x16x16_f16 atom absent on gfx950 (WMMA is an RDNA
-      gfx11/gfx12 instruction; this kernel needs a wave32 RDNA target)
+   {'head_dim': 64}
+      gfx950 has no wave32 fp16 WMMA atom
+
+   the same spec is accepted on: gfx11-generic, gfx1151, gfx12-generic, gfx1201
 ```
 
 A partial refusal is reported the same way (`rejects 1/2`) and names the
-offending values, so `head_size=100` is an early "must be a multiple of 16"
+offending values, so `head_dim=100` is an early "must be a multiple of 16"
 rather than a traceback from inside the builder. If the module exposes no gate
 at all, the run says so instead of implying the arch was checked.
 
@@ -286,17 +287,17 @@ mistake claiming coverage it does not have.
 
 ```bash
 python3 -m rocke.portable_ir.drivers.roll_kernel \
-    --kernel kernels.gfx1151.wmma_fmha_fwd --arch gfx1151 \
-    --fixed head_size=64 --fixed mask_mode=causal \
-    --axis num_query_heads=8,16 --axis sliding_window=64,128 --axis head_size=64,128 \
+    --kernel kernels.gfx1151.wmma_fmha_fwd_v2 --arch gfx11-generic \
+    --fixed dtype=fp16 --fixed mask=causal --fixed block_n=32 \
+    --axis head_dim=64,128 --axis k_pad=8,16 --axis v_pad=8,16 \
     --probe
 ```
 
 ```
 axis                   verdict    detail
-num_query_heads        rolls      2 points verified
-sliding_window         VACUOUS    identical program at 64 and 128 — rolling it proves nothing
-head_size              declines   not constants-only: program: 672 instructions at base vs 1296 at probe 1
+head_dim               declines   not constants-only: program: 766 instructions at base vs 1199 at probe 1
+k_pad                  declines   kernel name shape changes with k_pad: 'rocke_wmma_fmha_fwd_v2_f16_d64_causal_m128n32' vs ...
+v_pad                  declines   kernel name shape changes with v_pad: 'rocke_wmma_fmha_fwd_v2_f16_d64_causal_m128n32' vs ...
 ```
 
 `--probe` answers two independent questions per axis: *does it roll*, and *does
@@ -307,60 +308,47 @@ programs detects that, which is why triage runs before the roll.
 
 ### 2. Roll what survived, and verify it
 
+Pass only the axes that `rolls`, hold out at least one value, and replay every
+point against the concrete path:
+
 ```bash
 python3 -m rocke.portable_ir.drivers.roll_kernel \
-    --kernel kernels.gfx1151.wmma_fmha_fwd --arch gfx1151 \
-    --fixed head_size=64 --fixed mask_mode=causal \
-    --axis num_query_heads=8,16 --holdout num_query_heads=32 \
+    --kernel <module> --arch <arch> --fixed <field>=<value> ... \
+    --axis <axis>=<v1>,<v2> --holdout <axis>=<v3> \
     --verify --hsaco
 ```
 
-```
-ROLLED in 101 ms
-   recorded 2 trace(s), verified 3 point(s)
-   CBOR     : 177.8 KiB parametric vs 533.1 KiB for the same points concrete
-
-point                     .ll      ll sha         HSACO
-num_query_heads=8         EXACT    af78af6a48fa   fc07e7ed2087 (12760 B)
-num_query_heads=16        EXACT    bf1890b486d9   0822d0caa862 (12776 B)
-num_query_heads=32        EXACT    015c0762e660   965366d292c4 (12776 B)
-```
-
-Two recordings, one recipe, byte-identical output at all three points —
-including the held-out 32, which nothing in the fit ever saw.
+Each point reports `EXACT` when the rolled `.ll` and HSACO bytes equal the
+concrete build, including the held-out values that nothing in the fit saw.
 
 ### 3. Ship it
 
 ```bash
 python3 -m rocke.portable_ir.drivers.roll_kernel \
-    --kernel kernels.gfx1151.wmma_fmha_fwd --arch gfx1151 \
-    --fixed head_size=64 --fixed mask_mode=causal \
-    --axis num_query_heads=8,16 --holdout num_query_heads=32 \
-    --domain num_query_heads=1,2,4,8,16,32,64,128 \
-    --verify --guard --out /tmp/wmma_fmha_gfx1151.cbor
+    --kernel <module> --arch <arch> --fixed <field>=<value> ... \
+    --axis <axis>=<v1>,<v2> --holdout <axis>=<v3> \
+    --domain <axis>=<every admitted value> \
+    --verify --guard --out /tmp/<kernel>.cbor
 ```
 
 The guard is derived from your kernel's own `is_valid_spec` / `supports_*`, so
 the bundle refuses illegal shapes before anything is compiled. The ABI stamp
 records which reader level the artifact needs.
 
-## Worked example, in full: `gfx1151 wmma_fmha_fwd`
+## Worked example: `gfx11 wmma_fmha_fwd_v2`
 
-Useful because most of its axes *don't* roll, and each declines for a different
-and instructive reason.
+Useful because none of its axes roll, for an instructive reason: the kernel is
+runtime-shape-generic. Batch, sequence lengths, head counts, strides and window
+bounds are kernel arguments, so the spec carries only compile-time choices, and
+each of those changes the program.
 
 | Axis | Verdict | Why |
 |---|---|---|
-| `num_query_heads` | **rolls** | Enters only as constants and in the kernel name |
-| `sliding_window` | **vacuous** | Identical recorded program at 0, 64 and 128 — the WMMA path never reads it |
-| `head_size` | declines | 672 → 1296 ops; structurally, the KV loop's `scf.for` iter-arg arity goes 20 → 24 as the softmax accumulators scale with `head_size / 16` |
-| `num_kv_heads` | declines | The GQA divisor is `num_query_heads // num_kv_heads`, a ratio the affine fitter cannot express |
+| `head_dim` | declines | 766 → 1199 instructions; the head-width bucket sizes the per-lane accumulators and the LDS tiles |
+| `k_pad`, `v_pad` | declines | LDS row padding is part of the kernel name, so each value is a separate object |
 
-`head_size` is the known limitation tracked as gap 12 (parametric `scf.for`
-iter-args). The workaround is one recipe per head size, with the other axes
-rolled inside each — the concrete path is unaffected.
-
-Its concrete path is already gated on this arch and passes today:
+Its concrete path is gated by the C/Python parity pair
+`gfx1151_wmma_fmha_fwd_v2_emit` and on this arch by:
 
 ```bash
 python3 -m rocke.portable_ir.drivers.parity_matrix --arches gfx1151 --verbose
@@ -368,8 +356,7 @@ python3 -m rocke.portable_ir.drivers.hsaco_parity  --arch gfx1151 --no-baseline
 ```
 
 Use `--no-baseline` for gfx1151: `hsaco_baseline.json` only carries gfx942 and
-gfx950. The `gfx1151_wmma_fmha_fwd` entries listed there under `refused` are
-`is_valid_spec` correctly rejecting WMMA on CDNA, not a compile failure.
+gfx950.
 
 ## Three ways this goes wrong
 

@@ -421,7 +421,7 @@ def generate_cpp_header(specs: Dict[str, Any], output_path: Path):
         "preshufflev2": "PreShuffleV2",
         "wavelet": "Wavelet",
     }
-    # comp_async and the gfx1250 TDM pipelines are emitted after the entries
+    # comp_async and the gfx1250 TDM pipelines (incl. preshuffle_tdm) are emitted after the entries
     # above so the case order of the pre-existing enumerators is unchanged. The
     # TDM pipelines resolve their budget through pipeline_lds_budget_aliases.
     async_pipeline_enum_map = {
@@ -429,6 +429,7 @@ def generate_cpp_header(specs: Dict[str, Any], output_path: Path):
         "comp_tdm": "CompTDMV1",
         "comp_tdm_v2": "CompTDMV2",
         "comp_tdm_pc": "CompTDMPC",
+        "preshuffle_tdm": "PreShuffleTDM",
     }
     lds_budget_aliases = resolve_pipeline_lds_budget_aliases(specs)
 

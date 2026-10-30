@@ -51,9 +51,10 @@ enum class Pipeline : std::uint8_t
     PreShuffleV2, // Weight preshuffle pipeline v2 (optimized)
     Wavelet,      // Wavelet pipeline (specialized math + load waves)
     CompAsync,    // Async global->LDS compute pipeline (always double-buffered)
-    CompTDMV1,    // Tensor Data Mover compute pipeline v1 (gfx1250 only)
-    CompTDMV2,    // Tensor Data Mover compute pipeline v2 (gfx1250 only, 4 waves)
-    CompTDMPC     // Tensor Data Mover producer/consumer pipeline (gfx1250 only)
+    CompTDMV1,     // Tensor Data Mover compute pipeline v1 (gfx1250 only)
+    CompTDMV2,     // Tensor Data Mover compute pipeline v2 (gfx1250 only, 4 waves)
+    CompTDMPC,     // Tensor Data Mover producer/consumer pipeline (gfx1250 only)
+    PreShuffleTDM  // Weight preshuffle pipeline, Tensor Data Mover (gfx1250 only)
 };
 
 /// Epilogue strategies for output processing
@@ -344,6 +345,7 @@ inline std::string to_string(Pipeline pipeline)
     case Pipeline::CompTDMV1: return "comp_tdm";
     case Pipeline::CompTDMV2: return "comp_tdm_v2";
     case Pipeline::CompTDMPC: return "comp_tdm_pc";
+    case Pipeline::PreShuffleTDM: return "preshuffle_tdm";
     default: return "unknown";
     }
 }
@@ -379,6 +381,8 @@ inline Pipeline string_to_pipeline(const std::string& str)
         return Pipeline::CompTDMV2;
     if(str == "comp_tdm_pc")
         return Pipeline::CompTDMPC;
+    if(str == "preshuffle_tdm")
+        return Pipeline::PreShuffleTDM;
     return Pipeline::Mem; // Default
 }
 
