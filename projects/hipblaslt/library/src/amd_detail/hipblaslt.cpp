@@ -232,9 +232,15 @@ namespace
         bool swapped = false;
     };
 
+    // Only called for HIPBLAS_OP_N and HIPBLAS_OP_T; rewrite_row_major refuses the rest.
     hipblasOperation_t flip(hipblasOperation_t op)
     {
         return op == HIPBLAS_OP_N ? HIPBLAS_OP_T : HIPBLAS_OP_N;
+    }
+
+    bool is_n_or_t(hipblasOperation_t op)
+    {
+        return op == HIPBLAS_OP_N || op == HIPBLAS_OP_T;
     }
 
     void to_column_major(_rocblaslt_matrix_layout& layout)
@@ -243,21 +249,18 @@ namespace
         layout.order = HIPBLASLT_ORDER_COL;
     }
 
-    // The mixed FP8 compute types name A's type first.
-    rocblaslt_compute_type swap_operand_types(rocblaslt_compute_type type)
+    // These compute types name A's and B's types separately.
+    bool is_mixed_operand_compute(rocblaslt_compute_type type)
     {
         switch(type)
         {
         case rocblaslt_compute_f32_fast_f8bf8_fnuz:
-            return rocblaslt_compute_f32_fast_bf8f8_fnuz;
         case rocblaslt_compute_f32_fast_bf8f8_fnuz:
-            return rocblaslt_compute_f32_fast_f8bf8_fnuz;
         case rocblaslt_compute_f32_fast_f8bf8:
-            return rocblaslt_compute_f32_fast_bf8f8;
         case rocblaslt_compute_f32_fast_bf8f8:
-            return rocblaslt_compute_f32_fast_f8bf8;
+            return true;
         default:
-            return type;
+            return false;
         }
     }
 
@@ -293,8 +296,10 @@ namespace
 
     // Sets `rewritten` and fills `out` when any layout is row-major. Leaves `rewritten`
     // false for an all-column-major call, a grouped call (the grouped path refuses
-    // row-major itself), or a null argument (the normal validation reports it).
+    // row-major itself), a null argument, or HIPBLASLT_OPERATION_INVALID (the normal
+    // validation reports both).
     hipblasStatus_t rewrite_row_major(const char*             caller,
+                                      rocblaslt_handle        handle,
                                       rocblaslt_matmul_desc   desc,
                                       rocblaslt_matrix_layout matA,
                                       rocblaslt_matrix_layout matB,
@@ -317,10 +322,13 @@ namespace
         if(!rowA && !rowB && !rowC && !rowD)
             return HIPBLAS_STATUS_SUCCESS;
 
+        if(desc->op_A == HIPBLASLT_OPERATION_INVALID || desc->op_B == HIPBLASLT_OPERATION_INVALID)
+            return HIPBLAS_STATUS_SUCCESS;
         if(rowC != rowD)
             return refuse_rewrite(caller, "C and D must have the same order");
-        if(desc->op_A == HIPBLAS_OP_C || desc->op_B == HIPBLAS_OP_C)
-            return refuse_rewrite(caller, "conjugate transpose has no row-major equivalent");
+        if(!is_n_or_t(desc->op_A) || !is_n_or_t(desc->op_B))
+            return refuse_rewrite(caller,
+                                  "only HIPBLAS_OP_N and HIPBLAS_OP_T have a row-major equivalent");
         if(!is_scalar_scale(desc->scaleAType) || !is_scalar_scale(desc->scaleBType))
             return refuse_rewrite(caller, "block and vector scale tensors have a fixed layout");
         if(matA->type == HIP_R_4I || matB->type == HIP_R_4I)
@@ -330,6 +338,16 @@ namespace
                                   "bias, aux and gradient epilogues index a fixed axis of D");
         if(rowD && desc->pointermode == rocblaslt_pointer_mode_alpha_device_vector_beta_host)
             return refuse_rewrite(caller, "an alpha vector holds one value per row of D");
+        if(rowD && effective_uniform_summation_order(handle, desc) != 0)
+            return refuse_rewrite(caller,
+                                  "uniform summation order holds across the M dimension of D, "
+                                  "which a row-major D moves to N; disable it to use a "
+                                  "row-major D");
+        if(rowD
+           && (matA->type != matB->type || desc->compute_input_typeA != desc->compute_input_typeB
+               || is_mixed_operand_compute(desc->compute_type)))
+            return refuse_rewrite(caller,
+                                  "a row-major D swaps A and B, so they must have the same type");
 
         out.desc.copy(*desc);
         out.desc.m_data = desc->m_data;
@@ -355,12 +373,10 @@ namespace
             const hipblasOperation_t opA = out.desc.op_A;
             out.desc.op_A                = flip(out.desc.op_B);
             out.desc.op_B                = flip(opA);
+            // Both scales are scalars here, and they scale the whole product.
             std::swap(out.desc.scaleA, out.desc.scaleB);
             std::swap(out.desc.scaleAType, out.desc.scaleBType);
-            std::swap(out.desc.compute_input_typeA, out.desc.compute_input_typeB);
-            out.desc.compute_type          = swap_operand_types(out.desc.compute_type);
-            out.desc.compute_type_original = swap_operand_types(out.desc.compute_type_original);
-            out.swapped                    = true;
+            out.swapped = true;
         }
         rewritten = true;
         return HIPBLAS_STATUS_SUCCESS;
@@ -1475,7 +1491,15 @@ try
     bool               rewritten = false;
     if(auto order_status
        = heuristic_arguments_present(handle, matmulDesc, pref, requestedAlgoCount, returnAlgoCount)
-             ? rewrite_row_major(__func__, desc, matA, matB, matC, matD, columnMajor, rewritten)
+             ? rewrite_row_major(__func__,
+                                 (rocblaslt_handle)handle,
+                                 desc,
+                                 matA,
+                                 matB,
+                                 matC,
+                                 matD,
+                                 columnMajor,
+                                 rewritten)
              : HIPBLAS_STATUS_SUCCESS;
        order_status != HIPBLAS_STATUS_SUCCESS)
     {
@@ -1562,8 +1586,15 @@ try
                                 matD,
                                 workspace,
                                 workspaceSizeInBytes))
-        return_status = rewrite_row_major(
-            __func__, desc, layoutA, layoutB, layoutC, layoutD, columnMajor, rewritten);
+        return_status = rewrite_row_major(__func__,
+                                          (rocblaslt_handle)handle,
+                                          desc,
+                                          layoutA,
+                                          layoutB,
+                                          layoutC,
+                                          layoutD,
+                                          columnMajor,
+                                          rewritten);
     if(return_status != HIPBLAS_STATUS_SUCCESS)
     {
         rocblaslt::Debug::Instance().markerStop();

@@ -9,6 +9,7 @@
 #include <hipblaslt/hipblaslt.h>
 
 #include <cstdint>
+#include <functional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -98,6 +99,13 @@ namespace
         return layout;
     }
 
+    hipblasStatus_t disableUniformSummationOrder(hipblasLtMatmulDesc_t desc)
+    {
+        const int32_t off = 0;
+        return hipblasLtMatmulDescSetAttribute(
+            desc, HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, &off, sizeof(off));
+    }
+
     struct Case
     {
         hipDataType        type;
@@ -159,6 +167,9 @@ namespace
         ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
                       desc, HIPBLASLT_MATMUL_DESC_TRANSB, &tc.opB, sizeof(tc.opB)),
                   HIPBLAS_STATUS_SUCCESS);
+        // Uniform summation order (on by default) is refused with a row-major D.
+        if(tc.orderCD == HIPBLASLT_ORDER_ROW)
+            ASSERT_EQ(disableUniformSummationOrder(desc), HIPBLAS_STATUS_SUCCESS);
         hipblasLtMatrixLayout_t lA = makeLayout(tc.type, sA), lB = makeLayout(tc.type, sB);
         hipblasLtMatrixLayout_t lC = makeLayout(tc.type, sC), lD = makeLayout(tc.type, sC);
 
@@ -274,6 +285,7 @@ namespace
         hipblasLtMatmulDesc_t desc = nullptr;
         ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
                   HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(disableUniformSummationOrder(desc), HIPBLAS_STATUS_SUCCESS);
         hipblasLtMatrixLayout_t lA = makeLayout(HIP_R_32F, {2, 3, 3, 1, HIPBLASLT_ORDER_ROW});
         hipblasLtMatrixLayout_t lB = makeLayout(HIP_R_32F, {3, 4, 4, 1, HIPBLASLT_ORDER_ROW});
         hipblasLtMatrixLayout_t lD = makeLayout(HIP_R_32F, {2, 4, 4, 1, HIPBLASLT_ORDER_ROW});
@@ -309,84 +321,371 @@ namespace
             static_cast<void>(hipFree(p));
     }
 
-    // A row-major D is computed as its transpose, so anything tied to an axis of D would land
-    // on the wrong axis and is refused. The same settings with a column-major D are the
-    // control: there only A is rewritten and nothing moves between axes.
+    struct Guard
+    {
+        std::string                                name;
+        hipblasComputeType_t                       compute;
+        std::function<void(hipblasLtMatmulDesc_t)> configure;
+        hipDataType                                typeA, typeB;
+        bool                                       rowA, rowB, rowC, rowD;
+        hipblasStatus_t                            expected;
+    };
+
+    template <typename T>
+    void setAttribute(hipblasLtMatmulDesc_t desc, hipblasLtMatmulDescAttributes_t attr, T value)
+    {
+        EXPECT_EQ(hipblasLtMatmulDescSetAttribute(desc, attr, &value, sizeof(value)),
+                  HIPBLAS_STATUS_SUCCESS);
+    }
+
+    // Every combination the rewrite refuses, each beside a control that differs in one setting
+    // and is accepted. A row-major D is computed as its transpose, so anything tied to an axis
+    // of D, or to A and B being distinct, is refused when D is row-major.
     TEST_F(RowOrderMatmul, smoke_RefusesWhatTheRewriteCannotExpress)
     {
-        const Stored            sq  = stored(64, 64, 1, HIPBLASLT_ORDER_COL);
-        const Stored            sr  = stored(64, 64, 1, HIPBLASLT_ORDER_ROW);
-        hipblasLtMatrixLayout_t col = makeLayout(HIP_R_32F, sq), row = makeLayout(HIP_R_32F, sr);
+        constexpr int64_t kSq = 64;
+        auto              set = [](auto attr, auto value) {
+            return [=](hipblasLtMatmulDesc_t desc) { setAttribute(desc, attr, value); };
+        };
+        auto both = [](std::function<void(hipblasLtMatmulDesc_t)> first,
+                       std::function<void(hipblasLtMatmulDesc_t)> second) {
+            return [=](hipblasLtMatmulDesc_t desc) {
+                first(desc);
+                second(desc);
+            };
+        };
+        const auto none     = [](hipblasLtMatmulDesc_t) {};
+        const auto usoOff   = set(HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, int32_t(0));
+        const auto usoOn    = set(HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, int32_t(1));
+        const auto opC      = set(HIPBLASLT_MATMUL_DESC_TRANSA, HIPBLAS_OP_C);
+        const auto opBC     = set(HIPBLASLT_MATMUL_DESC_TRANSB, HIPBLAS_OP_C);
+        const auto opJunk   = set(HIPBLASLT_MATMUL_DESC_TRANSA, hipblasOperation_t(5));
+        const auto epilogue = [&](hipblasLtEpilogue_t e) {
+            return both(usoOff, set(HIPBLASLT_MATMUL_DESC_EPILOGUE, e));
+        };
+        const auto alphaVector = set(HIPBLASLT_MATMUL_DESC_POINTER_MODE,
+                                     HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST);
+        const auto scaleA      = [&](hipblasLtMatmulMatrixScale_t m) {
+            return set(HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, m);
+        };
+        const auto scaleB = [&](hipblasLtMatmulMatrixScale_t m) {
+            return set(HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, m);
+        };
+        const auto     inputA = set(HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT, HIP_R_16F);
+        constexpr auto NS     = HIPBLAS_STATUS_NOT_SUPPORTED;
+        constexpr auto OK     = HIPBLAS_STATUS_SUCCESS;
+        constexpr auto F      = HIP_R_32F;
+        constexpr auto C32    = HIPBLAS_COMPUTE_32F;
+
+        const std::vector<Guard> guards = {
+            {"only C row-major", C32, none, F, F, false, false, true, false, NS},
+            {"only D row-major", C32, usoOff, F, F, false, false, false, true, NS},
+            {"control: C and D row-major", C32, usoOff, F, F, false, false, true, true, OK},
+            {"op C on A, A row-major", C32, opC, F, F, true, false, false, false, NS},
+            {"op C on B, B row-major", C32, opBC, F, F, false, true, false, false, NS},
+            {"unrecognized op on A, B row-major", C32, opJunk, F, F, false, true, false, false, NS},
+            {"block scale on A, A row-major",
+             C32,
+             scaleA(HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0),
+             F,
+             F,
+             true,
+             false,
+             false,
+             false,
+             NS},
+            {"block scale on B, A row-major",
+             C32,
+             scaleB(HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0),
+             F,
+             F,
+             true,
+             false,
+             false,
+             false,
+             NS},
+            {"vector scale on A, B row-major",
+             C32,
+             scaleA(HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F),
+             F,
+             F,
+             false,
+             true,
+             false,
+             false,
+             NS},
+            {"vector scale on B, B row-major",
+             C32,
+             scaleB(HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F),
+             F,
+             F,
+             false,
+             true,
+             false,
+             false,
+             NS},
+            {"int4 A, A row-major", C32, none, HIP_R_4I, F, true, false, false, false, NS},
+            {"int4 B, B row-major", C32, none, F, HIP_R_4I, false, true, false, false, NS},
+            {"bias, D row-major",
+             C32,
+             epilogue(HIPBLASLT_EPILOGUE_BIAS),
+             F,
+             F,
+             false,
+             false,
+             true,
+             true,
+             NS},
+            {"aux, D row-major",
+             C32,
+             epilogue(HIPBLASLT_EPILOGUE_GELU_AUX),
+             F,
+             F,
+             false,
+             false,
+             true,
+             true,
+             NS},
+            {"gradient, D row-major",
+             C32,
+             epilogue(HIPBLASLT_EPILOGUE_DGELU),
+             F,
+             F,
+             false,
+             false,
+             true,
+             true,
+             NS},
+            {"control: bias, A row-major",
+             C32,
+             epilogue(HIPBLASLT_EPILOGUE_BIAS),
+             F,
+             F,
+             true,
+             false,
+             false,
+             false,
+             OK},
+            {"control: RELU, D row-major",
+             C32,
+             epilogue(HIPBLASLT_EPILOGUE_RELU),
+             F,
+             F,
+             false,
+             false,
+             true,
+             true,
+             OK},
+            {"alpha vector, D row-major",
+             C32,
+             both(usoOff, alphaVector),
+             F,
+             F,
+             false,
+             false,
+             true,
+             true,
+             NS},
+            {"control: alpha vector, A row-major",
+             C32,
+             alphaVector,
+             F,
+             F,
+             true,
+             false,
+             false,
+             false,
+             OK},
+            {"uniform summation from the handle, D row-major",
+             C32,
+             none,
+             F,
+             F,
+             true,
+             true,
+             true,
+             true,
+             NS},
+            {"uniform summation on the descriptor, D row-major",
+             C32,
+             usoOn,
+             F,
+             F,
+             false,
+             false,
+             true,
+             true,
+             NS},
+            {"control: uniform summation, A and B row-major",
+             C32,
+             usoOn,
+             F,
+             F,
+             true,
+             true,
+             false,
+             false,
+             OK},
+            {"A and B types differ, D row-major",
+             C32,
+             usoOff,
+             HIP_R_16F,
+             F,
+             false,
+             false,
+             true,
+             true,
+             NS},
+            {"control: A and B types differ, A row-major",
+             C32,
+             none,
+             HIP_R_16F,
+             F,
+             true,
+             false,
+             false,
+             false,
+             OK},
+            {"compute input types differ, D row-major",
+             C32,
+             both(usoOff, inputA),
+             F,
+             F,
+             false,
+             false,
+             true,
+             true,
+             NS},
+            {"mixed FP8 compute type, D row-major",
+             HIPBLAS_COMPUTE_32F_FAST_8F8BF_FNUZ,
+             usoOff,
+             F,
+             F,
+             false,
+             false,
+             true,
+             true,
+             NS},
+        };
 
         hipblasLtMatmulPreference_t pref = nullptr;
         ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
-        auto heuristic = [&](hipblasLtMatmulDesc_t   desc,
-                             hipblasLtMatrixLayout_t a,
-                             hipblasLtMatrixLayout_t c,
-                             hipblasLtMatrixLayout_t d) {
+        void* buffer = nullptr;
+        ASSERT_EQ(hipMalloc(&buffer, kSq * kSq * sizeof(float)), hipSuccess);
+        const float alpha = 1.0f, beta = 0.0f;
+
+        for(const Guard& g : guards)
+        {
+            SCOPED_TRACE(g.name);
+            hipblasLtMatmulDesc_t desc = nullptr;
+            ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, g.compute, HIP_R_32F),
+                      HIPBLAS_STATUS_SUCCESS);
+            g.configure(desc);
+            auto layout = [&](hipDataType type, bool row) {
+                return makeLayout(
+                    type, stored(kSq, kSq, 1, row ? HIPBLASLT_ORDER_ROW : HIPBLASLT_ORDER_COL));
+            };
+            hipblasLtMatrixLayout_t lA = layout(g.typeA, g.rowA), lB = layout(g.typeB, g.rowB);
+            hipblasLtMatrixLayout_t lC = layout(F, g.rowC), lD = layout(F, g.rowD);
+
             hipblasLtMatmulHeuristicResult_t result{};
             int                              returned = -1;
-            const hipblasStatus_t            status   = hipblasLtMatmulAlgoGetHeuristic(
-                handle, desc, a, col, c, d, pref, 1, &result, &returned);
-            if(status != HIPBLAS_STATUS_SUCCESS)
+            EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                          handle, desc, lA, lB, lC, lD, pref, 1, &result, &returned),
+                      g.expected);
+            if(g.expected == NS)
+            {
                 EXPECT_EQ(returned, 0);
-            return status;
-        };
-        auto makeDesc = [] {
-            hipblasLtMatmulDesc_t desc = nullptr;
-            EXPECT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
-                      HIPBLAS_STATUS_SUCCESS);
-            return desc;
-        };
+                EXPECT_EQ(hipblasLtMatmul(handle,
+                                          desc,
+                                          &alpha,
+                                          buffer,
+                                          lA,
+                                          buffer,
+                                          lB,
+                                          &beta,
+                                          buffer,
+                                          lC,
+                                          buffer,
+                                          lD,
+                                          nullptr,
+                                          nullptr,
+                                          0,
+                                          nullptr),
+                          NS);
+            }
 
-        hipblasLtMatmulDesc_t plain = makeDesc();
-        EXPECT_EQ(heuristic(plain, col, col, row), HIPBLAS_STATUS_NOT_SUPPORTED)
-            << "only D row-major";
-        EXPECT_EQ(heuristic(plain, col, row, col), HIPBLAS_STATUS_NOT_SUPPORTED)
-            << "only C row-major";
-
-        hipblasLtMatmulDesc_t     bias     = makeDesc();
-        const hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_BIAS;
-        EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
-                      bias, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)),
-                  HIPBLAS_STATUS_SUCCESS);
-        EXPECT_EQ(heuristic(bias, col, row, row), HIPBLAS_STATUS_NOT_SUPPORTED)
-            << "bias, D row-major";
-        EXPECT_EQ(heuristic(bias, row, col, col), HIPBLAS_STATUS_SUCCESS) << "bias, A row-major";
-
-        hipblasLtMatmulDesc_t        alphaVector = makeDesc();
-        const hipblasLtPointerMode_t mode = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST;
-        EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
-                      alphaVector, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &mode, sizeof(mode)),
-                  HIPBLAS_STATUS_SUCCESS);
-        EXPECT_EQ(heuristic(alphaVector, col, row, row), HIPBLAS_STATUS_NOT_SUPPORTED)
-            << "alpha vector, D row-major";
-        EXPECT_NE(heuristic(alphaVector, row, col, col), HIPBLAS_STATUS_NOT_SUPPORTED)
-            << "alpha vector, A row-major";
-
-        hipblasLtMatmulDesc_t              blockScale = makeDesc();
-        const hipblasLtMatmulMatrixScale_t scaleMode  = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
-        EXPECT_EQ(
-            hipblasLtMatmulDescSetAttribute(
-                blockScale, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scaleMode, sizeof(scaleMode)),
-            HIPBLAS_STATUS_SUCCESS);
-        EXPECT_EQ(heuristic(blockScale, row, col, col), HIPBLAS_STATUS_NOT_SUPPORTED)
-            << "block scale, A row-major";
-
-        // A missing argument keeps its usual status even when the orders cannot be rewritten.
-        auto nullHandle = [&](hipblasLtMatrixLayout_t d) {
-            hipblasLtMatmulHeuristicResult_t result{};
-            int                              returned = 0;
-            return hipblasLtMatmulAlgoGetHeuristic(
-                nullptr, plain, col, col, col, d, pref, 1, &result, &returned);
-        };
-        EXPECT_NE(nullHandle(col), HIPBLAS_STATUS_SUCCESS);
-        EXPECT_EQ(nullHandle(row), nullHandle(col)) << "null handle, only D row-major";
-
-        for(auto desc : {plain, bias, alphaVector, blockScale})
+            for(auto l : {lA, lB, lC, lD})
+                hipblasLtMatrixLayoutDestroy(l);
             hipblasLtMatmulDescDestroy(desc);
+        }
+
+        static_cast<void>(hipFree(buffer));
         hipblasLtMatmulPreferenceDestroy(pref);
+    }
+
+    // HIPBLASLT_OPERATION_INVALID is reported by normal validation whatever the order, and a
+    // missing argument keeps its usual status even when the orders cannot be rewritten.
+    TEST_F(RowOrderMatmul, smoke_InvalidArgumentsKeepTheirStatus)
+    {
+        constexpr int64_t           kSq  = 64;
+        hipblasLtMatmulPreference_t pref = nullptr;
+        ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+        void* buffer = nullptr;
+        ASSERT_EQ(hipMalloc(&buffer, kSq * kSq * sizeof(float)), hipSuccess);
+        hipblasLtMatrixLayout_t col
+            = makeLayout(HIP_R_32F, stored(kSq, kSq, 1, HIPBLASLT_ORDER_COL));
+        hipblasLtMatrixLayout_t row
+            = makeLayout(HIP_R_32F, stored(kSq, kSq, 1, HIPBLASLT_ORDER_ROW));
+
+        hipblasLtMatmulDesc_t invalidOp = nullptr;
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&invalidOp, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                  HIPBLAS_STATUS_SUCCESS);
+        setAttribute(invalidOp, HIPBLASLT_MATMUL_DESC_TRANSA, HIPBLASLT_OPERATION_INVALID);
+
+        const float alpha = 1.0f, beta = 0.0f;
+        auto        heuristic
+            = [&](hipblasLtHandle_t h, hipblasLtMatrixLayout_t a, hipblasLtMatrixLayout_t d) {
+                  hipblasLtMatmulHeuristicResult_t result{};
+                  int                              returned = -1;
+                  const hipblasStatus_t            status   = hipblasLtMatmulAlgoGetHeuristic(
+                      h, invalidOp, a, col, col, d, pref, 1, &result, &returned);
+                  return std::make_pair(status, returned);
+              };
+        auto matmul = [&](hipblasLtMatrixLayout_t a, hipblasLtMatrixLayout_t d) {
+            return hipblasLtMatmul(handle,
+                                   invalidOp,
+                                   &alpha,
+                                   buffer,
+                                   a,
+                                   buffer,
+                                   col,
+                                   &beta,
+                                   buffer,
+                                   col,
+                                   buffer,
+                                   d,
+                                   nullptr,
+                                   nullptr,
+                                   0,
+                                   nullptr);
+        };
+
+        EXPECT_EQ(heuristic(handle, row, col), heuristic(handle, col, col))
+            << "invalid op, A row-major";
+        EXPECT_EQ(heuristic(handle, col, col).second, 0) << "invalid op gets no algorithms";
+        EXPECT_NE(matmul(col, col), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(matmul(row, col), matmul(col, col)) << "invalid op, A row-major";
+        EXPECT_EQ(matmul(col, row), matmul(col, col)) << "invalid op, only D row-major";
+
+        EXPECT_NE(heuristic(nullptr, col, col).first, HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(nullptr, col, row).first, heuristic(nullptr, col, col).first)
+            << "null handle, only D row-major";
+
+        hipblasLtMatmulDescDestroy(invalidOp);
         hipblasLtMatrixLayoutDestroy(col);
         hipblasLtMatrixLayoutDestroy(row);
+        static_cast<void>(hipFree(buffer));
+        hipblasLtMatmulPreferenceDestroy(pref);
     }
 } // namespace
