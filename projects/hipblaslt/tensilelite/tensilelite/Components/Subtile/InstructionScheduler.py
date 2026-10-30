@@ -469,7 +469,10 @@ class _SchedulingRules:
     Bound methods are passed as callbacks to _SlotPlacer.
     """
 
-    def __init__(self, totalSlots: int, minGapDsReadToWait: int = _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT):
+    def __init__(
+            self, totalSlots: int,
+            minGapDsReadToWait: int = _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
+            allowReadsAcrossWait: bool = False):
         # Cross-path state
         self.lastDsReadPos = -1
         self.earliestWaitCntPos = totalSlots
@@ -479,6 +482,7 @@ class _SchedulingRules:
         self.youngerP0OverwriteIds = set()
         self.partialP0OverwriteWaitIds = set()
         self.minGap = minGapDsReadToWait
+        self.allowReadsAcrossWait = allowReadsAcrossWait
         # Per-path state
         self._resetPath()
 
@@ -522,7 +526,7 @@ class _SchedulingRules:
             return True
         if id(inst) in self.youngerP0OverwriteIds:
             return True
-        if pos >= self.earliestWaitCntPos:
+        if self.allowReadsAcrossWait and pos >= self.earliestWaitCntPos:
             return True
         gap = self.minGap * placer.slotsPerInterval
         return self.earliestWaitCntPos - pos >= gap
@@ -531,7 +535,7 @@ class _SchedulingRules:
         """Reject waitcnt too close to the last placed ds_read."""
         if not _isWaitCnt(inst) or self.lastDsReadPos < 0:
             return True
-        if pos <= self.lastDsReadPos:
+        if self.allowReadsAcrossWait and pos <= self.lastDsReadPos:
             return True
         gap = self.minGap * placer.slotsPerInterval
         return pos - self.lastDsReadPos >= gap
@@ -1516,7 +1520,9 @@ def instructionSchedule(
 
     rules = _SchedulingRules(
         totalSlots=(len(mfmas) - 1) * slotsPerInterval,
-        minGapDsReadToWait=minGapDsReadToWait)
+        minGapDsReadToWait=minGapDsReadToWait,
+        allowReadsAcrossWait=(
+            partitionPrefetchPolicy or p0Split is not None))
     base_validators = [rules.oneDsReadPerInterval, rules.minGapDsReadBeforeWait,
                        rules.minGapDsReadToWait]
     if not (partitionPrefetchPolicy or p0Split is not None):

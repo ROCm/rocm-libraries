@@ -4028,6 +4028,34 @@ class TestInstructionSchedulerWrapPrefetch:
         assert physical_counts == [3] * 7
         assert not placer.leftovers
 
+    def test_reads_across_wait_require_partition_prefetch_policy(self):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SchedulingRules, _SlotPlacer)
+
+        self._schedule()
+        placer = _SlotPlacer(
+            intervals=6, numModules=1, pathOrders=[])
+        read = DSLoadB128(
+            dst=vgpr(8, 4), src=vgpr(1), ds=DSModifiers(offset=0))
+        wait = SWaitCnt(dscnt=0)
+
+        legacy = _SchedulingRules(totalSlots=placer.totalSlots)
+        legacy.earliestWaitCntPos = 3
+        legacy.lastDsReadPos = 4
+        assert not legacy.minGapDsReadBeforeWait(placer, 4, read)
+        assert not legacy.minGapDsReadToWait(placer, 3, wait)
+
+        partition_prefetch = _SchedulingRules(
+            totalSlots=placer.totalSlots, allowReadsAcrossWait=True)
+        partition_prefetch.earliestWaitCntPos = 3
+        partition_prefetch.lastDsReadPos = 4
+        assert partition_prefetch.minGapDsReadBeforeWait(
+            placer, 4, read)
+        assert partition_prefetch.minGapDsReadToWait(
+            placer, 3, wait)
+
     def test_partition_zero_wait_precedes_interleaved_prefetch_reads(
             self, monkeypatch):
         import shutil
