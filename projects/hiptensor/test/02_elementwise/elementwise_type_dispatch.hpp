@@ -99,7 +99,7 @@ namespace hiptensor
         std::pair<bool, double> result{false, 0.0};
         bool                    handled = dispatchElementwiseType(type, [&](auto tag) {
             using T = decltype(tag);
-            double tolerance = std::is_same_v<T, double> ? 1e-12 : 0.0;
+            double tolerance = std::is_same_v<T, double> ? fp64Tolerance : 0.0;
             result = compareEqualLaunchKernel<T>(static_cast<T*>(resource->deviceOutput().get()),
                                                  static_cast<T*>(resource->deviceReference().get()),
                                                  resource->getCurrentMatrixElement(),
