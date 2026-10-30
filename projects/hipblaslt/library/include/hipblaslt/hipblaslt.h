@@ -490,7 +490,8 @@ typedef enum {
    * Supported by ``hipblasLtMatrixTransform``, and by ``hipblasLtMatmul`` and
    * ``hipblasLtMatmulAlgoGetHeuristic`` for A and B. Matmul computes a row-major A or B as its
    * column-major transpose. C and D must be column-major: a row-major C or D returns
-   * ``HIPBLAS_STATUS_NOT_SUPPORTED``. Matmul also returns it for a row-major A or B combined with
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED``, except with a fused all-to-all epilogue, whose own check
+   * runs first and returns ``HIPBLAS_STATUS_INVALID_VALUE`` for a row-major D. Matmul also returns it for a row-major A or B combined with
    * an operation other than ``HIPBLAS_OP_N`` or ``HIPBLAS_OP_T``, a block or vector scale mode, or
    * an ``HIP_R_4I`` matrix.
    *
