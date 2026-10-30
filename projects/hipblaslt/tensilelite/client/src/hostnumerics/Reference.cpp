@@ -30,11 +30,11 @@ namespace TensileLite
         }
 
         template <typename Indices>
-        void executeTranslatedGemm(ContractionProblemGemm const& problem,
-                                   ContractionInputs const&      inputs,
-                                   const Indices&                indices,
+        void executeTranslatedGemm(ContractionProblemGemm const&         problem,
+                                   ContractionInputs const&              inputs,
+                                   const Indices&                        indices,
                                    const roc::hostnumerics::Permutation& order,
-                                   GemmBackend                   backend)
+                                   GemmBackend                           backend)
         {
             auto translation
                 = Client::hostnumerics::translateGemmInvocation(problem, inputs, indices, order);
@@ -47,20 +47,20 @@ namespace TensileLite
 
     namespace Client
     {
-        void executeReferenceGemm(const ContractionProblemGemm&        problem,
-                                  const ContractionInputs&             inputs,
-                                  const roc::hostnumerics::IndexRange& indices,
-                                  const roc::hostnumerics::Permutation&       order,
-                                  roc::hostnumerics::GemmBackend       backend)
+        void executeReferenceGemm(const ContractionProblemGemm&         problem,
+                                  const ContractionInputs&              inputs,
+                                  const roc::hostnumerics::IndexRange&  indices,
+                                  const roc::hostnumerics::Permutation& order,
+                                  roc::hostnumerics::GemmBackend        backend)
         {
             executeTranslatedGemm(problem, inputs, indices, order, backend);
         }
 
-        void executeReferenceGemm(const ContractionProblemGemm&  problem,
-                                  const ContractionInputs&       inputs,
-                                  const std::set<size_t>&        indices,
+        void executeReferenceGemm(const ContractionProblemGemm&         problem,
+                                  const ContractionInputs&              inputs,
+                                  const std::set<size_t>&               indices,
                                   const roc::hostnumerics::Permutation& order,
-                                  roc::hostnumerics::GemmBackend backend)
+                                  roc::hostnumerics::GemmBackend        backend)
         {
             executeTranslatedGemm(problem, inputs, indices, order, backend);
         }

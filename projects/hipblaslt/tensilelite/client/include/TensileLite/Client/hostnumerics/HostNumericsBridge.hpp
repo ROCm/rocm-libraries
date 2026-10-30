@@ -7,9 +7,9 @@
 
 #include <roc/hostnumerics/comparison.hpp>
 #include <roc/hostnumerics/detail/shape_access.hpp>
-#include <roc/hostnumerics/sampling.hpp>
 #include <roc/hostnumerics/epilogue.hpp>
 #include <roc/hostnumerics/operation_types.hpp>
+#include <roc/hostnumerics/sampling.hpp>
 #include <roc/hostnumerics/tensor.hpp>
 
 #include <Tensile/Activation.hpp>

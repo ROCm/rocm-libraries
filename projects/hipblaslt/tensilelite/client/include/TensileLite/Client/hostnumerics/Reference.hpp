@@ -57,17 +57,17 @@ namespace TensileLite
         // Translates and executes one ungrouped GEMM. Unsupported descriptors or
         // backends throw std::runtime_error before copying the current batch's
         // staged outputs to caller storage.
-        void executeReferenceGemm(const ContractionProblemGemm&        problem,
-                                  const ContractionInputs&             inputs,
-                                  const roc::hostnumerics::IndexRange& indices,
-                                  const roc::hostnumerics::Permutation&       order,
-                                  roc::hostnumerics::GemmBackend       backend);
-
-        void executeReferenceGemm(const ContractionProblemGemm&  problem,
-                                  const ContractionInputs&       inputs,
-                                  const std::set<size_t>&        indices,
+        void executeReferenceGemm(const ContractionProblemGemm&         problem,
+                                  const ContractionInputs&              inputs,
+                                  const roc::hostnumerics::IndexRange&  indices,
                                   const roc::hostnumerics::Permutation& order,
-                                  roc::hostnumerics::GemmBackend backend);
+                                  roc::hostnumerics::GemmBackend        backend);
+
+        void executeReferenceGemm(const ContractionProblemGemm&         problem,
+                                  const ContractionInputs&              inputs,
+                                  const std::set<size_t>&               indices,
+                                  const roc::hostnumerics::Permutation& order,
+                                  roc::hostnumerics::GemmBackend        backend);
 
         template <typename Indices>
         void executeReferenceGemm(const ContractionProblemGemm& problem,

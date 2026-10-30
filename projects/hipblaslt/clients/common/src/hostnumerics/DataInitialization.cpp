@@ -309,11 +309,12 @@ namespace hipblaslt::hostnumerics
                                           MatrixRole               role)
         {
             auto recipe = [&](GenerationRecipe::Component component) {
-                return GenerationRecipe::realOnly(std::move(component),
-                                                  {
-                                                      .seed       = seed,
-                                                      .indexOrder = roc::hostnumerics::Permutation{1, 0},
-                                                  });
+                return GenerationRecipe::realOnly(
+                    std::move(component),
+                    {
+                        .seed       = seed,
+                        .indexOrder = roc::hostnumerics::Permutation{1, 0},
+                    });
             };
 
             switch(initialization)
@@ -500,11 +501,11 @@ namespace hipblaslt::hostnumerics
                 return;
             // Each row retains one term per approximately sixteenth of K,
             // plus the final term. Vary the position by row to cover all of K.
-            constexpr size_t    terms   = 16;
-            const size_t        spacing = kExtent / terms + (kExtent % terms != 0);
-            const size_t        batches = shape.rank() == 3 ? shape[2] : 1;
-            const auto order = roc::hostnumerics::Permutation::reverse(shape.rank());
-            const auto nonzero = GenerationRecipe::realOnly(
+            constexpr size_t terms   = 16;
+            const size_t     spacing = kExtent / terms + (kExtent % terms != 0);
+            const size_t     batches = shape.rank() == 3 ? shape[2] : 1;
+            const auto       order   = roc::hostnumerics::Permutation::reverse(shape.rank());
+            const auto       nonzero = GenerationRecipe::realOnly(
                 GenerationRecipe::uniformInteger({.lower = 1, .upper = 2}),
                 {.seed = seed, .indexOrder = order});
             for(size_t batch = 0; batch < batches; ++batch)

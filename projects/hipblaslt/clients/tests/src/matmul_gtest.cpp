@@ -256,7 +256,8 @@ TEST(HostNumericsEpilogue, SupportsTensorBackedProductComposition)
     const std::array<float, 4> expectedAuxiliary{-3, 9, 12, -6};
     for(size_t index = 0; index < expectedOutput.size(); ++index)
     {
-        const auto coordinates = matrixLayout.shape().coordinates(index, roc::hostnumerics::Permutation{1, 0});
+        const auto coordinates
+            = matrixLayout.shape().coordinates(index, roc::hostnumerics::Permutation{1, 0});
         EXPECT_EQ(output.loadAs<float>(coordinates), expectedOutput[index]);
         EXPECT_EQ(rawOutput.loadAs<float>(coordinates), expectedOutput[index]);
         EXPECT_EQ(auxiliary.loadAs<float>(coordinates), expectedAuxiliary[index]);
@@ -284,7 +285,8 @@ TEST(HostNumericsEpilogue, RoutesGradientAuxiliaryInput)
     const std::array<float, 4> expected{0, 20, 30, 0};
     for(size_t index = 0; index < expected.size(); ++index)
     {
-        const auto coordinates = layout.shape().coordinates(index, roc::hostnumerics::Permutation{1, 0});
+        const auto coordinates
+            = layout.shape().coordinates(index, roc::hostnumerics::Permutation{1, 0});
         EXPECT_EQ(output.loadAs<float>(coordinates), expected[index]);
     }
     EXPECT_EQ(activationTensor.loadAs<float>({0, 0}), -1);
@@ -306,7 +308,8 @@ TEST(HostNumericsEpilogue, SaturatesInt8Output)
     const std::array<int8_t, 4> expected{-128, -128, 126, 127};
     for(size_t index = 0; index < expected.size(); ++index)
     {
-        const auto coordinates = layout.shape().coordinates(index, roc::hostnumerics::Permutation{1, 0});
+        const auto coordinates
+            = layout.shape().coordinates(index, roc::hostnumerics::Permutation{1, 0});
         EXPECT_EQ(output.loadAs<int8_t>(coordinates), expected[index]);
     }
 }
@@ -327,7 +330,8 @@ TEST(HostNumericsEpilogue, UsesIdentityScaleDefaults)
 
     for(size_t index = 0; index < input.size(); ++index)
     {
-        const auto coordinates = layout.shape().coordinates(index, roc::hostnumerics::Permutation{1, 0});
+        const auto coordinates
+            = layout.shape().coordinates(index, roc::hostnumerics::Permutation{1, 0});
         EXPECT_EQ(output.loadAs<float>(coordinates), input[index]);
         EXPECT_EQ(auxiliary.loadAs<float>(coordinates), input[index]);
     }
