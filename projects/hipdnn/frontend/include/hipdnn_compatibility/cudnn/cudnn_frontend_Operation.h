@@ -401,10 +401,10 @@ private:
     }
 
     // Places each value at its named slot of the convolution record.
-    template <typename T>
-    static constexpr std::array<T, 3> by_slot(std::pair<std::size_t, T> first,
-                                              std::pair<std::size_t, T> second,
-                                              std::pair<std::size_t, T> third)
+    template <typename Slots, typename T>
+    static constexpr std::array<T, 3> by_slot(std::pair<typename Slots::Slot, T> first,
+                                              std::pair<typename Slots::Slot, T> second,
+                                              std::pair<typename Slots::Slot, T> third)
     {
         std::array<T, 3> slots{};
         slots[first.first] = std::move(first.second);
@@ -440,11 +440,11 @@ private:
         auto dydesc_ = m_operation.dydesc != nullptr ? m_operation.dydesc : m_operation.ydesc;
         using Slots = detail::v8::ConvolutionBackwardDataOperationRecord::Slots;
         static constexpr detail::v8::ConvolutionOperationLabels labels = convolution_labels(
-            by_slot<std::string_view>({Slots::DY, "OperationBuilder: DY tensor"},
-                                      {Slots::W, "OperationBuilder: W tensor"},
-                                      {Slots::DX, "OperationBuilder: DX tensor"}));
+            by_slot<Slots, std::string_view>({Slots::DY, "OperationBuilder: DY tensor"},
+                                             {Slots::W, "OperationBuilder: W tensor"},
+                                             {Slots::DX, "OperationBuilder: DX tensor"}));
         if(commit_convolution<detail::v8::ConvolutionBackwardDataOperationRecord>(
-               by_slot<ManagedOpaqueDescriptor>(
+               by_slot<Slots, ManagedOpaqueDescriptor>(
                    {Slots::DY, dydesc_}, {Slots::W, m_operation.wdesc}, {Slots::DX, dxdesc_}),
                labels))
         {
@@ -509,11 +509,11 @@ private:
         auto dydesc_ = m_operation.dydesc != nullptr ? m_operation.dydesc : m_operation.ydesc;
         using Slots = detail::v8::ConvolutionBackwardFilterOperationRecord::Slots;
         static constexpr detail::v8::ConvolutionOperationLabels labels = convolution_labels(
-            by_slot<std::string_view>({Slots::DY, "OperationBuilder: DY tensor"},
-                                      {Slots::X, "OperationBuilder: X tensor"},
-                                      {Slots::DW, "OperationBuilder: DW tensor"}));
+            by_slot<Slots, std::string_view>({Slots::DY, "OperationBuilder: DY tensor"},
+                                             {Slots::X, "OperationBuilder: X tensor"},
+                                             {Slots::DW, "OperationBuilder: DW tensor"}));
         if(commit_convolution<detail::v8::ConvolutionBackwardFilterOperationRecord>(
-               by_slot<ManagedOpaqueDescriptor>(
+               by_slot<Slots, ManagedOpaqueDescriptor>(
                    {Slots::DY, dydesc_}, {Slots::X, m_operation.xdesc}, {Slots::DW, dwdesc_}),
                labels))
         {
@@ -752,13 +752,13 @@ private:
 
         using Slots = detail::v8::ConvolutionForwardOperationRecord::Slots;
         static constexpr detail::v8::ConvolutionOperationLabels labels = convolution_labels(
-            by_slot<std::string_view>({Slots::X, "OperationBuilder: X tensor"},
-                                      {Slots::W, "OperationBuilder: W tensor"},
-                                      {Slots::Y, "OperationBuilder: Y tensor"}));
+            by_slot<Slots, std::string_view>({Slots::X, "OperationBuilder: X tensor"},
+                                             {Slots::W, "OperationBuilder: W tensor"},
+                                             {Slots::Y, "OperationBuilder: Y tensor"}));
         if(commit_convolution<detail::v8::ConvolutionForwardOperationRecord>(
-               by_slot<ManagedOpaqueDescriptor>({Slots::X, m_operation.xdesc},
-                                                {Slots::W, m_operation.wdesc},
-                                                {Slots::Y, m_operation.ydesc}),
+               by_slot<Slots, ManagedOpaqueDescriptor>({Slots::X, m_operation.xdesc},
+                                                       {Slots::W, m_operation.wdesc},
+                                                       {Slots::Y, m_operation.ydesc}),
                labels))
         {
             CUDNN_FE_LOG_LABEL_ENDL("Extracting the feature vector");

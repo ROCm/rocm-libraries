@@ -505,11 +505,10 @@ void lowerConvolution(Attributes attributes, const Record& op, LoweringContext& 
 inline void lowerOperation(const ConvolutionForwardOperationRecord& op, LoweringContext& context)
 {
     using Slots = ConvolutionForwardOperationRecord::Slots;
-    const std::array<TensorPtr, 3>& tensors = op.tensors();
     fe_graph::ConvFpropAttributes attributes;
-    attributes.set_x(context.tensor(tensors[Slots::X]))
-        .set_w(context.tensor(tensors[Slots::W]))
-        .set_y(context.tensor(tensors[Slots::Y]));
+    attributes.set_x(context.tensor(op.tensor(Slots::X)))
+        .set_w(context.tensor(op.tensor(Slots::W)))
+        .set_y(context.tensor(op.tensor(Slots::Y)));
     lowerConvolution<fe_graph::ConvolutionFpropNode>(std::move(attributes), op, context);
 }
 
@@ -517,11 +516,10 @@ inline void lowerOperation(const ConvolutionBackwardDataOperationRecord& op,
                            LoweringContext& context)
 {
     using Slots = ConvolutionBackwardDataOperationRecord::Slots;
-    const std::array<TensorPtr, 3>& tensors = op.tensors();
     fe_graph::ConvDgradAttributes attributes;
-    attributes.set_dy(context.tensor(tensors[Slots::DY]))
-        .set_w(context.tensor(tensors[Slots::W]))
-        .set_dx(context.tensor(tensors[Slots::DX]));
+    attributes.set_dy(context.tensor(op.tensor(Slots::DY)))
+        .set_w(context.tensor(op.tensor(Slots::W)))
+        .set_dx(context.tensor(op.tensor(Slots::DX)));
     lowerConvolution<fe_graph::ConvolutionDgradNode>(std::move(attributes), op, context);
 }
 
@@ -529,11 +527,10 @@ inline void lowerOperation(const ConvolutionBackwardFilterOperationRecord& op,
                            LoweringContext& context)
 {
     using Slots = ConvolutionBackwardFilterOperationRecord::Slots;
-    const std::array<TensorPtr, 3>& tensors = op.tensors();
     fe_graph::ConvWgradAttributes attributes;
-    attributes.set_x(context.tensor(tensors[Slots::X]))
-        .set_dy(context.tensor(tensors[Slots::DY]))
-        .set_dw(context.tensor(tensors[Slots::DW]));
+    attributes.set_x(context.tensor(op.tensor(Slots::X)))
+        .set_dy(context.tensor(op.tensor(Slots::DY)))
+        .set_dw(context.tensor(op.tensor(Slots::DW)));
     lowerConvolution<fe_graph::ConvolutionWgradNode>(std::move(attributes), op, context);
 }
 

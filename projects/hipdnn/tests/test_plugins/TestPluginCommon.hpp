@@ -450,9 +450,6 @@ public:
         return {};
     }
 
-    // Throws to fail execution-context creation for `engineId`.
-    virtual void checkExecutionContextEngine(int64_t /*engineId*/) const {}
-
     // Sees every engine config a workspace-size query receives.
     virtual void onWorkspaceSizeQuery(const hipdnnPluginConstData_t& /*engineConfig*/) const {}
 
@@ -466,7 +463,7 @@ public:
     // Derived classes override this to simulate a plugin that accepts a graph in
     // GetApplicableEngineIds but then fails to build a plan for it (e.g. no solver,
     // out of memory).
-    virtual void onCreateExecutionContext() const {}
+    virtual void onCreateExecutionContext(int64_t /*engineId*/) const {}
 
     /// Returns the calling thread's mutable last-call record for this plugin.
     virtual TestPluginLastCallRecord& lastCallRecord() const
@@ -946,13 +943,11 @@ public:
                     "No engines available - cannot create execution context");
             }
 
-            getInstance()->onCreateExecutionContext();
-
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
                 opGraph->ptr, opGraph->size);
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
                 engineConfigWrapper(engineConfig->ptr, engineConfig->size);
-            getInstance()->checkExecutionContextEngine(engineConfigWrapper.engineId());
+            getInstance()->onCreateExecutionContext(engineConfigWrapper.engineId());
 
             auto context = std::make_unique<HipdnnEnginePluginExecutionContext>();
             context->engineId = engineConfigWrapper.engineId();

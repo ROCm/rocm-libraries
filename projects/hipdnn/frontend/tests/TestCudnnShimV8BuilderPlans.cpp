@@ -304,6 +304,7 @@ TEST_F(TestCudnnShimV8BuilderPlans, JsonMalformedRejected)
         version + R"("engine":{"globalIndex":1,"id":"7","behaviorNotes":[99]},)" + payload + "}",
         version + R"("engine":{"globalIndex":1,"id":"7","behaviorNotes":[-1]},)" + payload + "}",
         version + engine + R"(,"knobs":[{"type":3,"type":4,"value":1}],)" + payload + "}",
+        version + engine + R"(,"knobs":[{"type":3,"value":1,"value":2}],)" + payload + "}",
         version + engine + R"(,"requestedKnobs":[{"type":999,"value":1}],)" + payload + "}",
         version + engine + R"(,"requestedKnobs":[],"requestedKnobs":[],)" + payload + "}",
         version + R"("version":1,)" + engine + "," + payload + "}",

@@ -342,13 +342,19 @@ TEST(TestCudnnShimV8CoreFactories, TensorConstantCopiedAndWinsOverByValue)
 
 TEST(TestCudnnShimV8CoreFactories, WiderIntegerConstantNarrowsWhenItFits)
 {
-    const auto narrowed
+    const auto constantInputs
         = [](cudnnDataType_t dataType, std::vector<std::byte> bytes, v8::ConstantSource source) {
               v8::TensorInputs inputs = tensorInputs({1});
               inputs.dataType = dataType;
               inputs.constantValue = std::move(bytes);
               inputs.constantSource = source;
-              return *v8::makeTensorRecord(std::move(inputs), TENSOR_LABELS)->constantValue();
+              return inputs;
+          };
+    const auto narrowed
+        = [&](cudnnDataType_t dataType, std::vector<std::byte> bytes, v8::ConstantSource source) {
+              return *v8::makeTensorRecord(constantInputs(dataType, std::move(bytes), source),
+                                           TENSOR_LABELS)
+                          ->constantValue();
           };
     constexpr auto SIGNED = v8::ConstantSource::SIGNED_INTEGER;
     constexpr auto UNSIGNED = v8::ConstantSource::UNSIGNED_INTEGER;
@@ -362,19 +368,21 @@ TEST(TestCudnnShimV8CoreFactories, WiderIntegerConstantNarrowsWhenItFits)
     EXPECT_EQ(narrowed(CUDNN_DATA_INT32, bytesOf(std::int64_t{-5}), SIGNED),
               bytesOf(std::int32_t{-5}));
 
-    const auto expectRejected = [](cudnnDataType_t dataType,
-                                   std::vector<std::byte> bytes,
-                                   v8::ConstantSource source,
-                                   const std::string& message) {
-        v8::TensorInputs inputs = tensorInputs({1});
-        inputs.dataType = dataType;
-        inputs.constantValue = std::move(bytes);
-        inputs.constantSource = source;
-        expectShimError([&] { v8::makeTensorRecord(std::move(inputs), TENSOR_LABELS); },
-                        CUDNN_STATUS_BAD_PARAM,
-                        message);
+    const auto expectRejected = [&](cudnnDataType_t dataType,
+                                    std::vector<std::byte> bytes,
+                                    v8::ConstantSource source,
+                                    const std::string& message) {
+        expectShimError(
+            [&] {
+                v8::makeTensorRecord(constantInputs(dataType, std::move(bytes), source),
+                                     TENSOR_LABELS);
+            },
+            CUDNN_STATUS_BAD_PARAM,
+            message);
     };
-    const std::string doesNotFit = "; a wider integer must hold a value of an integer data type";
+    const std::string doesNotFit
+        = "; a wider integer is narrowed only to INT8, UINT8, INT32 or BOOLEAN, and only when its "
+          "value fits";
     expectRejected(CUDNN_DATA_UINT8,
                    bytesOf(std::int32_t{256}),
                    SIGNED,
@@ -387,6 +395,15 @@ TEST(TestCudnnShimV8CoreFactories, WiderIntegerConstantNarrowsWhenItFits)
                    bytesOf(std::uint32_t{128}),
                    UNSIGNED,
                    "constant has 4 bytes; the tensor data type needs 1" + doesNotFit);
+    // An unsigned value with its top bit set is not the negative number its bits spell.
+    expectRejected(CUDNN_DATA_INT8,
+                   bytesOf(std::numeric_limits<std::uint32_t>::max()),
+                   UNSIGNED,
+                   "constant has 4 bytes; the tensor data type needs 1" + doesNotFit);
+    expectRejected(CUDNN_DATA_INT32,
+                   bytesOf(std::numeric_limits<std::uint64_t>::max()),
+                   UNSIGNED,
+                   "constant has 8 bytes; the tensor data type needs 4" + doesNotFit);
     expectRejected(CUDNN_DATA_BOOLEAN,
                    bytesOf(std::int32_t{2}),
                    SIGNED,
@@ -399,6 +416,11 @@ TEST(TestCudnnShimV8CoreFactories, WiderIntegerConstantNarrowsWhenItFits)
                    bytesOf(std::int64_t{5}),
                    SIGNED,
                    "constant has 8 bytes; the tensor data type needs 4" + doesNotFit);
+    // INT4 is an integer type, but no wider integer is narrowed to it.
+    expectRejected(CUDNN_DATA_INT4,
+                   bytesOf(std::int32_t{3}),
+                   SIGNED,
+                   "constant has 4 bytes; the tensor data type needs 1" + doesNotFit);
     // cuDNN would read a narrower integer past its end.
     expectRejected(CUDNN_DATA_INT32,
                    bytesOf(std::int16_t{5}),

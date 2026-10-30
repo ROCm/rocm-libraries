@@ -79,6 +79,19 @@ protected:
         const fe::Operation_v8 op = builder.setdyDesc(gradient).setcDesc(conv).build();
         return graphOf(op);
     }
+
+    // Whether a shape rule for `operation` engine 0 blocks `graph`.
+    bool blocksShape(const fe::OperationGraph_v8& graph,
+                     const std::string& operation,
+                     const char* format,
+                     const char* key,
+                     const std::vector<std::int64_t>& shape)
+    {
+        json shaped = rule(operation, 0);
+        shaped["shape_format"] = format;
+        shaped[key] = shape;
+        return fe::check_errata(rules({shaped}), operation + "_eng0", _handle, graph, always);
+    }
 };
 
 // A rule names "<op>_eng<N>_" so engine 1 never blocks engine 10.
@@ -229,25 +242,17 @@ TEST_F(TestCudnnShimV8Errata, ShapeRuleReadsMissingDimensionAsZero)
 TEST_F(TestCudnnShimV8Errata, ShapeRuleReadsForwardSlots)
 {
     const fe::OperationGraph_v8 graph = convGraph();
-    const auto blocks
-        = [&](const char* format, const char* key, const std::vector<std::int64_t>& shape) {
-              json shaped = rule("ConvFwd", 0);
-              shaped["shape_format"] = format;
-              shaped[key] = shape;
-              return fe::check_errata(rules({shaped}), "ConvFwd_eng0", _handle, graph, always);
-          };
-
     for(const char* format : {"NCHW", "NHWC"})
     {
         SCOPED_TRACE(format);
-        EXPECT_TRUE(blocks(format, "input_shape", {4, 8, 8, 0}));
-        EXPECT_FALSE(blocks(format, "input_shape", {4, 3, 3, 0}));
-        EXPECT_FALSE(blocks(format, "input_shape", {8, 8, 8, 0}));
+        EXPECT_TRUE(blocksShape(graph, "ConvFwd", format, "input_shape", {4, 8, 8, 0}));
+        EXPECT_FALSE(blocksShape(graph, "ConvFwd", format, "input_shape", {4, 3, 3, 0}));
+        EXPECT_FALSE(blocksShape(graph, "ConvFwd", format, "input_shape", {8, 8, 8, 0}));
     }
     // A filter shape is always read as NCHW.
-    EXPECT_TRUE(blocks("NHWC", "filter_shape", {4, 3, 3, 0}));
-    EXPECT_FALSE(blocks("NCHW", "filter_shape", {4, 8, 8, 0}));
-    EXPECT_FALSE(blocks("NCHW", "filter_shape", {8, 8, 8, 0}));
+    EXPECT_TRUE(blocksShape(graph, "ConvFwd", "NHWC", "filter_shape", {4, 3, 3, 0}));
+    EXPECT_FALSE(blocksShape(graph, "ConvFwd", "NCHW", "filter_shape", {4, 8, 8, 0}));
+    EXPECT_FALSE(blocksShape(graph, "ConvFwd", "NCHW", "filter_shape", {8, 8, 8, 0}));
 }
 
 // ConvBwdFilter reads input X and filter DW; ConvBwdData reads input DX and filter W. With a
@@ -265,16 +270,11 @@ TEST_F(TestCudnnShimV8Errata, ShapeRuleReadsBackwardSlots)
         const std::string operation = name;
         SCOPED_TRACE(operation);
         const fe::OperationGraph_v8 graph = backwardGraph(kind);
-        const std::string tag = operation + "_eng0";
-        const auto blocksShape
-            = [&](const char* format, const char* key, const std::vector<std::int64_t>& shape) {
-                  json shaped = rule(operation, 0);
-                  shaped["shape_format"] = format;
-                  shaped[key] = shape;
-                  return fe::check_errata(rules({shaped}), tag, _handle, graph, always);
-              };
+        const auto shape = [&](const char* format, const std::vector<std::int64_t>& blocked) {
+            return blocksShape(graph, operation, format, "input_shape", blocked);
+        };
         const auto blocks = [&](const char* key, std::int64_t width) {
-            return blocksShape("NCHW", key, {-1, -1, -1, width});
+            return blocksShape(graph, operation, "NCHW", key, {-1, -1, -1, width});
         };
 
         EXPECT_TRUE(blocks("input_shape", 8));
@@ -282,27 +282,27 @@ TEST_F(TestCudnnShimV8Errata, ShapeRuleReadsBackwardSlots)
         EXPECT_TRUE(blocks("filter_shape", 3));
         EXPECT_FALSE(blocks("filter_shape", 8));
 
-        EXPECT_TRUE(blocksShape("NHWC", "input_shape", {-1, -1, 6, -1}));
-        EXPECT_FALSE(blocksShape("NHWC", "input_shape", {-1, -1, 8, -1}));
+        EXPECT_TRUE(shape("NHWC", {-1, -1, 6, -1}));
+        EXPECT_FALSE(shape("NHWC", {-1, -1, 8, -1}));
 
         // Fully specified, every entry decides.
-        EXPECT_TRUE(blocksShape("NCHW", "input_shape", {4, 5, 6, 8}));
-        EXPECT_FALSE(blocksShape("NCHW", "input_shape", {9, 5, 6, 8}));
-        EXPECT_FALSE(blocksShape("NCHW", "input_shape", {4, 9, 6, 8}));
-        EXPECT_FALSE(blocksShape("NCHW", "input_shape", {4, 5, 9, 8}));
-        EXPECT_FALSE(blocksShape("NCHW", "input_shape", {4, 5, 6, 9}));
+        EXPECT_TRUE(shape("NCHW", {4, 5, 6, 8}));
+        EXPECT_FALSE(shape("NCHW", {9, 5, 6, 8}));
+        EXPECT_FALSE(shape("NCHW", {4, 9, 6, 8}));
+        EXPECT_FALSE(shape("NCHW", {4, 5, 9, 8}));
+        EXPECT_FALSE(shape("NCHW", {4, 5, 6, 9}));
 
         // NHWC reads N, H, W, C from blocked_shape and dims[1], [2], [3], [4] in turn.
-        EXPECT_TRUE(blocksShape("NHWC", "input_shape", {4, 5, 6, 8}));
-        EXPECT_FALSE(blocksShape("NHWC", "input_shape", {9, 5, 6, 8}));
-        EXPECT_FALSE(blocksShape("NHWC", "input_shape", {4, 9, 6, 8}));
-        EXPECT_FALSE(blocksShape("NHWC", "input_shape", {4, 5, 9, 8}));
-        EXPECT_FALSE(blocksShape("NHWC", "input_shape", {4, 5, 6, 9}));
+        EXPECT_TRUE(shape("NHWC", {4, 5, 6, 8}));
+        EXPECT_FALSE(shape("NHWC", {9, 5, 6, 8}));
+        EXPECT_FALSE(shape("NHWC", {4, 9, 6, 8}));
+        EXPECT_FALSE(shape("NHWC", {4, 5, 9, 8}));
+        EXPECT_FALSE(shape("NHWC", {4, 5, 6, 9}));
 
         // NHWC checks C (blocked_shape[3]) before H and W, so their wildcards reset a C
         // mismatch; NCHW checks it last.
-        EXPECT_TRUE(blocksShape("NHWC", "input_shape", {-1, -1, -1, 9}));
-        EXPECT_FALSE(blocksShape("NCHW", "input_shape", {-1, -1, -1, 9}));
+        EXPECT_TRUE(shape("NHWC", {-1, -1, -1, 9}));
+        EXPECT_FALSE(shape("NCHW", {-1, -1, -1, 9}));
     }
 }
 

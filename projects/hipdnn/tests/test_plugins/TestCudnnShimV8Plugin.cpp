@@ -103,7 +103,7 @@ public:
         };
     }
 
-    void checkExecutionContextEngine(int64_t engineId) const override
+    void onCreateExecutionContext(int64_t engineId) const override
     {
         if(engineId == K_CONTEXT_FAILS_ENGINE_ID)
         {

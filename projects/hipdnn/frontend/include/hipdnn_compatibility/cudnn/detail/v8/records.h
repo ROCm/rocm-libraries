@@ -548,11 +548,12 @@ protected:
     }
 };
 
-// Positions in ConvolutionOperationRecordOf::tensors(): the two inputs, then the output. Readers
-// name a slot through the record's Slots, so a slot of another kind does not compile.
+// Positions in ConvolutionOperationRecordOf::tensors(): the two inputs, then the output. Each
+// kind's Slot is its own type, so tensor() and OperationBuilder's by_slot reject a slot of another
+// kind or a bare index.
 struct ConvolutionForwardSlots
 {
-    enum : std::size_t
+    enum Slot : std::size_t
     {
         X,
         W,
@@ -561,7 +562,7 @@ struct ConvolutionForwardSlots
 };
 struct ConvolutionBackwardDataSlots
 {
-    enum : std::size_t
+    enum Slot : std::size_t
     {
         DY,
         W,
@@ -570,7 +571,7 @@ struct ConvolutionBackwardDataSlots
 };
 struct ConvolutionBackwardFilterSlots
 {
-    enum : std::size_t
+    enum Slot : std::size_t
     {
         DY,
         X,
@@ -605,6 +606,11 @@ public:
     const std::array<TensorPtr, 3>& tensors() const noexcept
     {
         return _fields.tensors;
+    }
+
+    const TensorPtr& tensor(typename SlotsT::Slot slot) const noexcept
+    {
+        return _fields.tensors[slot];
     }
 
 private:

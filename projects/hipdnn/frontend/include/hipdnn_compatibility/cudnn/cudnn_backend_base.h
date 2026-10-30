@@ -43,8 +43,8 @@ Descriptor&& buildDescriptor(Descriptor& descriptor,
 
 // Upstream wraps one cuDNN descriptor. Here it pairs the shim record behind a builder object with a
 // non-owning view of the hipDNN descriptor (if any) that the record owns; get_backend_descriptor()
-// is what get_raw_desc() and cudnnBackendExecute see. The public members are upstream's; the record
-// and type are reached only through detail::v8::RecordAccess.
+// is what get_raw_desc() and cudnnBackendExecute see. The public members are upstream's plus a
+// keyed record constructor; the record and type are reached only through detail::v8::RecordAccess.
 class OpaqueBackendPointer
 {
     friend struct detail::v8::RecordAccess;

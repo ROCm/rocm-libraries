@@ -13,14 +13,12 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_VariantPack.h>
 
 #include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>

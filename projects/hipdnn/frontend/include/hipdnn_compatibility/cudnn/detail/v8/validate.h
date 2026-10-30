@@ -401,8 +401,9 @@ inline std::shared_ptr<const TensorRecord> makeTensorRecord(TensorInputs inputs,
                                 std::string(labels.constantValue) + " has "
                                     + std::to_string(inputs.constantValue->size())
                                     + " bytes; the tensor data type needs " + std::to_string(size)
-                                    + (widerInteger ? "; a wider integer must hold a value of an "
-                                                      "integer data type"
+                                    + (widerInteger ? "; a wider integer is narrowed only to INT8, "
+                                                      "UINT8, INT32 or BOOLEAN, and only when its "
+                                                      "value fits"
                                                     : ""));
             }
             inputs.constantValue = std::move(narrowed);

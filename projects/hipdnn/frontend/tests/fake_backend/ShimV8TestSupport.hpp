@@ -9,7 +9,6 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>

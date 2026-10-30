@@ -77,10 +77,11 @@ enum class ErrataTensorSlot
 
 // Null when op is not a `Record`.
 template <typename Record>
-v8::TensorPtr convolutionTensor(const ManagedOpaqueDescriptor& op, std::size_t index)
+v8::TensorPtr convolutionTensor(const ManagedOpaqueDescriptor& op,
+                                typename Record::Slots::Slot slot)
 {
     const auto record = v8::recordOf<Record>(op);
-    return record ? record->tensors()[index] : nullptr;
+    return record ? record->tensor(slot) : nullptr;
 }
 
 // Null when op is not the slot's operation kind.
