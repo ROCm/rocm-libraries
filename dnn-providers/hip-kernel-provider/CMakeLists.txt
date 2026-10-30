@@ -600,6 +600,7 @@ install(TARGETS hip_kernel_provider EXPORT hip-kernel-provider
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}")
 
 # .kpack archives are installed by src/engines/asm_sdpa_engine/CMakeLists.txt.
 
@@ -665,6 +666,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(HIPKERNELPROVIDER_ENABLE_TESTS)
         install(DIRECTORY "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/"
                 DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}"
-                PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE)
+                PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE
+                # A census shard also runs in place; the Testing/ directory CTest leaves
+                # beside it is a build-machine log, not content.
+                REGEX "/census/[^/]+/Testing$" EXCLUDE)
     endif()
 endif()
