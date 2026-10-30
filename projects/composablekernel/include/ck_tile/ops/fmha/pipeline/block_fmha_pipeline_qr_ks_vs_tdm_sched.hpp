@@ -626,35 +626,11 @@ struct BlockFmhaPipelineQRKSVSTdmSched
 
             auto begin_iteration = [&]() {
                 // Fixed boundary: start the current V TDM transfer.
-                auto next_su_window = make_tile_window(
-                    k_lds_read_view,
-                    make_tuple(number<Geometry::kQkSuColumns>{}, number<kQKHeaddim>{}),
-                    {Geometry::kQkSuColumns, 0},
-                    Policy::template MakeKSuRegTileDistribution<Problem>());
-                next_su_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
-                prepared_lds_reads.qk_stage0 = FmhaTdmPreparedKRead::Prepare<0>(next_su_window);
-                if constexpr(kEarlyLdsBases)
-                {
-                    // Form the tile's remaining LDS read bases here, ahead of every WMMA, and
-                    // keep each in a VGPR: otherwise the compiler recomputes them next to their
-                    // first read, where the VALU-write -> LDS-read wait must also drain the
-                    // WMMA issued in between.
-                    prepared_lds_reads.v0 = FmhaTdmPreparedKRead::Prepare<0>(v_lds_read_window);
-                    asm volatile("" : "+v"(prepared_lds_reads.qk_stage0.byte_address));
-                    asm volatile("" : "+v"(prepared_lds_reads.v0.byte_address));
-                    // With N64 the next-K reads of the last PV stage are not affine reads.
-                    if constexpr(Geometry::kN == 128)
-                    {
-                        auto pv_k_window = make_tile_window(
-                            k_lds_read_view,
-                            make_tuple(number<Geometry::kQkSuColumns>{}, number<kQKHeaddim>{}),
-                            {0, 0},
-                            Policy::template MakeKSuRegTileDistribution<Problem>());
-                        pv_k_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
-                        prepared_lds_reads.pv_k0 = FmhaTdmPreparedKRead::Prepare<0>(pv_k_window);
-                        asm volatile("" : "+v"(prepared_lds_reads.pv_k0.byte_address));
-                    }
-                }
+                Policy::template PrepareIterationLdsReads<Problem>(prepared_lds_reads,
+                                                                   k_lds_read_view,
+                                                                   k_lds_write_ptr,
+                                                                   v_lds_read_window,
+                                                                   k_lds_read_ptr);
                 __builtin_amdgcn_sched_barrier(0);
 
                 // Reuse the V LDS buffer only after the preceding reads have completed.
