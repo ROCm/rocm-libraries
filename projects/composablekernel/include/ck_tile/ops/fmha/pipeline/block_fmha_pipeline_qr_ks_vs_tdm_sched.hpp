@@ -483,8 +483,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
         // D192 only: the D64 read-first placement already forms its addresses ahead of the reads
         // (no measurable change), the D128 lead-first placement is not wired for prepared PV
         // bases, and masked D192 N128 runs out of VGPRs (scratch spills in the tile loop).
-        constexpr bool kEarlyLdsBases = !Policy::kLeadFirstLoad && Geometry::kHeadDimQK == 192 &&
-                                        (Geometry::kN == 64 || !FmhaMask::IsMasking);
+        constexpr bool kEarlyLdsBases = Policy::template UseEarlyLdsBases<Problem>();
         bool even_buffer           = true;
         index_t i_total_loops      = 0;
         index_t remaining_loops    = num_total_loop;
@@ -527,11 +526,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                             KDataType* __restrict__ k_lds_read_ptr,
                             KDataType* __restrict__ v_lds_write_ptr,
                             KDataType* __restrict__ v_lds_read_ptr) {
-            FmhaTdmPreparedKRead::Address qk_stage0_base{};
-            // kEarlyLdsBases: the QK tail stage's V access-0 base (the PV V stages are constant
-            // row offsets of it) and the last PV stage's next-K access-0 base.
-            [[maybe_unused]] FmhaTdmPreparedKRead::Address qk_v0_base{};
-            [[maybe_unused]] FmhaTdmPreparedKRead::Address pv_k0_base{};
+            typename Policy::PreparedLdsReadContext prepared_lds_reads{};
 
             decltype(load_tile_transpose(v_lds_read_window)) v_tile;
             [[maybe_unused]] float pv_output_scale_m0 = 1.0f;
@@ -595,34 +590,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                     rescale_fragment(ordinal);
                 };
 
-                // With N64 the last stage's next-K reads are not affine reads, so that stage has
-                // no prepared base and takes the ordinary path.
-                if constexpr(kEarlyLdsBases && (decltype(stage)::value < Geometry::kPvStages - 1 ||
-                                                Geometry::kN == 128))
-                {
-                    constexpr index_t kStage = decltype(stage)::value;
-                    // V stage s reads rows [(s+1)*kK1, (s+2)*kK1) of the buffer the QK tail
-                    // stage started on; the row offset folds into the ds_load immediates.
-                    FmhaTdmPreparedKRead::Address base = pv_k0_base;
-                    if constexpr(kStage < Geometry::kPvStages - 1)
-                    {
-                        base = qk_v0_base;
-                        base.byte_address +=
-                            (kStage + 1) * kK1 * Policy::kVPhysicalStride * sizeof(VDataType);
-                    }
-                    Policy::template RunPvScheduledStageWithWmma<kStage, Mode>(
-                        next_b_block_tensor,
-                        b_lds_window,
-                        emit_wmma,
-                        emit_rescale,
-                        &base,
-                        bool_constant<true>{});
-                }
-                else
-                {
-                    Policy::template RunPvScheduledStageWithWmma<decltype(stage)::value, Mode>(
-                        next_b_block_tensor, b_lds_window, emit_wmma, emit_rescale);
-                }
+                Policy::template RunPvScheduledStageWithWmma<decltype(stage)::value, Mode, Problem>(
+                    next_b_block_tensor, b_lds_window, emit_wmma, emit_rescale, prepared_lds_reads);
             };
 
             auto run_pv = [&](const auto& p_tile) {
@@ -663,16 +632,16 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                     {Geometry::kQkSuColumns, 0},
                     Policy::template MakeKSuRegTileDistribution<Problem>());
                 next_su_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
-                qk_stage0_base = FmhaTdmPreparedKRead::Prepare<0>(next_su_window);
+                prepared_lds_reads.qk_stage0 = FmhaTdmPreparedKRead::Prepare<0>(next_su_window);
                 if constexpr(kEarlyLdsBases)
                 {
                     // Form the tile's remaining LDS read bases here, ahead of every WMMA, and
                     // keep each in a VGPR: otherwise the compiler recomputes them next to their
                     // first read, where the VALU-write -> LDS-read wait must also drain the
                     // WMMA issued in between.
-                    qk_v0_base = FmhaTdmPreparedKRead::Prepare<0>(v_lds_read_window);
-                    asm volatile("" : "+v"(qk_stage0_base.byte_address));
-                    asm volatile("" : "+v"(qk_v0_base.byte_address));
+                    prepared_lds_reads.v0 = FmhaTdmPreparedKRead::Prepare<0>(v_lds_read_window);
+                    asm volatile("" : "+v"(prepared_lds_reads.qk_stage0.byte_address));
+                    asm volatile("" : "+v"(prepared_lds_reads.v0.byte_address));
                     // With N64 the next-K reads of the last PV stage are not affine reads.
                     if constexpr(Geometry::kN == 128)
                     {
@@ -682,8 +651,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                             {0, 0},
                             Policy::template MakeKSuRegTileDistribution<Problem>());
                         pv_k_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
-                        pv_k0_base = FmhaTdmPreparedKRead::Prepare<0>(pv_k_window);
-                        asm volatile("" : "+v"(pv_k0_base.byte_address));
+                        prepared_lds_reads.pv_k0 = FmhaTdmPreparedKRead::Prepare<0>(pv_k_window);
+                        asm volatile("" : "+v"(prepared_lds_reads.pv_k0.byte_address));
                     }
                 }
                 __builtin_amdgcn_sched_barrier(0);
@@ -741,7 +710,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                             k_su_tile,
                             k_su_tile_next,
                             k_lds_su_read_window,
-                            &qk_stage0_base);
+                            &prepared_lds_reads.qk_stage0);
 
                         k_su_tile = k_su_tile_next;
                     }
@@ -754,7 +723,7 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                             k_su_tile,
                             v_tile,
                             v_lds_read_window,
-                            &qk_v0_base,
+                            &prepared_lds_reads.v0,
                             bool_constant<true>{});
                     }
                     else
