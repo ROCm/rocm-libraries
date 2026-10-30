@@ -499,8 +499,10 @@ steps to a K / V head and page in 64 bits, so a paged cache may pass 2 GiB as
 long as one page of one head is I32-addressable in bytes (the decode kernel
 still needs the whole cache I32-addressable). A paged prefill spec with
 `dense_q` takes a batch-strided `[B, Sq, Hq, D]` Q / O and no `cu_seqlens_q`;
-one with `seqused_q` takes an INT32 `[B]` `seqused_q` of live query rows and
-writes the rows past it as O = 0, LSE = `-inf`. The request's
+one with `seqused_q` takes an INT32 `[B]` `seqused_q` of live query rows. With
+`dense_q` it writes the rows past it as O = 0, LSE = `-inf`; with `cu_seqlens_q`
+those rows belong to no sequence and are neither read nor written, and
+`cu_seqlens_q[B]` is not read, so origins may come in any order. The request's
 `dense_q` / `seqused_q` fields select these options (the `dense_q` / `seqused_q`
 features; the decode refuses them, so such a request always runs the prefill).
 Runtime kwargs are `softmax_scale`, positive `softcap` when selected, and
