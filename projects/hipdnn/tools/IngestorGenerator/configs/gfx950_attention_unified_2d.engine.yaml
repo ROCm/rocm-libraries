@@ -274,7 +274,7 @@ reduction:
       - {name: use_mfma_32x32}
       - {name: use_transposed_qk_32x32}
     # Codegen flag stacks and the occupancy hint the production sweep varies inside one
-    # geometry; held at the registry default (agreed at the knob checkpoint, 2026-10-22).
+    # geometry; held at the registry default.
     ignored: [waves_per_eu, use_v_double_buffer, use_staggered_iter_wait, use_sched_barrier, sched_barrier_mask, use_register_pv, use_early_v_schedule, kv_ring_depth, use_kq_lds_pad, kq_lds_pad_halves, use_transposed_scalar_state, use_transposed_invariant_hoist, use_transposed_mask_once, use_transposed_half_local_pv, use_mfma32_skip_legacy_qreg, use_transposed_mask_limit, use_grouped_kv2_softmax, use_agpr_alloc_zero, use_k_single_buffer, use_q_direct_reg, use_softmax_mfma_interleave, softmax_interleave_mode, use_mask_phase_split]
   aot_budget_per_arch: 1000
 

@@ -1722,9 +1722,11 @@ def reduce_spec_for(
 ) -> UnifiedAttentionReduceTiledSpec:
     """The reduce kernel that pairs with segment kernel ``spec``.
 
-    Every reduce field is a segment field: the dispatcher builds the pair from one problem
-    and one config (``make_explicit_attention_3d_specs``), so deriving the reduce from the
-    segment spec reproduces what it launches.
+    Every reduce field but ``emit_lse`` is a segment field: the dispatcher builds the pair
+    from one problem and one config (``make_explicit_attention_3d_specs``), so deriving the
+    reduce from the segment spec reproduces what it launches. ``emit_lse`` comes from the
+    problem, not the segment spec, so LSE output is out of scope here: the derived reduce
+    keeps ``emit_lse=False`` and its module carries no ``lse_ptr``.
     """
     return UnifiedAttentionReduceTiledSpec(
         head_size=spec.head_size,

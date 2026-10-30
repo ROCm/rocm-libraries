@@ -118,7 +118,10 @@ the `--config` (and `--manifest`, when given) path, plus `generator_commit` and
 It is informational: `catalog_diff` compares only `provenance.specialization_contract`, so
 a regeneration at a later commit still diffs clean. It is off by default because the
 commits change with every checkout, so a stamped KDP never regenerates byte-identical. A config kernel may carry `provenance.rocke_spec_id` /
-`rocke_tuning_id`, which `registry_enumerator.py` fills from the pin and the registry.
+`rocke_tuning_id`, which `registry_enumerator.py` fills from the pin and the registry. Only the
+expanded (`kernels:`) form carries it: the compact `variants:` form that `factorise_config.py`
+writes, and so `variant_reduce.py`'s reduced selection, has no per-kernel provenance, and neither
+do the shipped selections.
 
 Exit codes: `0` success; `1` a gate refusal or internal failure: with `--strict`, a pack
 arch over `reduction.aot_budget_per_arch` (checked before anything is written),
