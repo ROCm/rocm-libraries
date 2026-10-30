@@ -58,8 +58,10 @@ from .ir import (
     VectorType,
     PtrType,
     SmemType,
+    _gpu_check_failed_op_error,
     _trap_op_error,
 )
+from .value_sources import ASSUME_RANGE_OP
 
 ERROR = "error"
 WARNING = "warning"
@@ -140,7 +142,7 @@ _REQUIRED_ATTRS: Dict[str, List[str]] = {
     "arith.constant": ["value", "ity"],
     "arith.cmp": ["pred"],
     "arith.fcmp": ["pred"],
-    "arith.assume_range": ["multiple_of", "residue"],
+    ASSUME_RANGE_OP: ["multiple_of", "residue"],
     "tile.mma": ["op_id"],
     "scf.yield": ["num"],
     "tile.inline_asm": ["template", "constraints"],
@@ -385,10 +387,10 @@ class _Verifier:
                 pred_error = _int_cmp_pred_error(op.attrs.get("pred"), a.type.name)
                 if pred_error:
                     self.err(pred_error, op)
-        elif name == "arith.assume_range":
-            if len(op.operands) not in (1, 2) or len(op.results) != 1:
+        elif name == ASSUME_RANGE_OP:
+            if len(op.operands) not in (1, 2, 3) or len(op.results) != 1:
                 self.err(
-                    f"{name}: expected 1 or 2 operands / 1 result, got "
+                    f"{name}: expected 1 to 3 operands / 1 result, got "
                     f"{len(op.operands)} / {len(op.results)}",
                     op,
                 )
@@ -400,13 +402,7 @@ class _Verifier:
                     f"operand type {v.type.name}",
                     op,
                 )
-            if len(op.operands) == 2 and op.operands[1].type != v.type:
-                self.err(
-                    f"{name}: lt operand type {op.operands[1].type.name} != "
-                    f"operand type {v.type.name}",
-                    op,
-                )
-            for message in _assume_range_errors(op.attrs, len(op.operands)):
+            for message in _assume_range_errors(op.attrs, op.operands):
                 self.err(message, op)
         elif name == "arith.select":
             if len(op.operands) != 3 or len(op.results) != 1:
@@ -497,6 +493,10 @@ class _Verifier:
                 self.err(error, op)
         elif name == "tile.trap":
             error = _trap_op_error(op)
+            if error:
+                self.err(error, op)
+        elif name == "tile.gpu_check_failed":
+            error = _gpu_check_failed_op_error(op)
             if error:
                 self.err(error, op)
 

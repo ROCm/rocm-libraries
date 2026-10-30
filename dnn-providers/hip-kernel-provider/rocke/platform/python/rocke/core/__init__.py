@@ -24,6 +24,8 @@ Modules:
                      `int_type_limits`), their rules
                      (`declaration_errors`) and their resolved intervals.
   - ``ir_print``   : MLIR-style textual dump (`print_ir(kernel)`); human-only.
+  - ``value_sources``: who can see a Value and whether an unchecked load reaches
+                     it, the two walks `IRBuilder.gpu_checked_value` refuses by.
   - ``ir_serialize``: round-trippable ``ck.dsl.ir/v1`` machine format
                      (`serialize` / `parse`) with explicit SSA ids, plus
                      `canonicalize` / `canonical_equal` for semantic diff.

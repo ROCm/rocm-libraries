@@ -182,6 +182,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         "ROCKE_UNSIGNED_INT_OPS_CLI": native_artifact("rocke_unsigned_int_ops"),
         "ROCKE_INTEXPR_CLI": native_artifact("rocke_intexpr"),
         "ROCKE_PARAM_FACTS_CLI": native_artifact("rocke_param_facts"),
+        "ROCKE_GPU_CHECKED_VALUE_CLI": native_artifact("rocke_gpu_checked_value"),
         "ROCKE_ARCH_TARGET_TEST_EXE": native_artifact("rocke_arch_target_identity"),
         "ROCKE_BUFFER_RSRC_HIP_TEST": native_artifact("rocke_buffer_rsrc_hip"),
     }

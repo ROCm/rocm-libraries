@@ -250,6 +250,22 @@ const char* rocke_i_global_ptr_to_i64_op_error(const rocke_op_t* op, char* buf, 
  * lowerings use it. */
 const char* rocke_i_trap_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
+/* The error for a built tile.gpu_check_failed op that has operands, results or
+ * regions, or NULL when it is bare (Python
+ * core/ir.py::_gpu_check_failed_op_error, same text). A returned error is
+ * written to `buf`. The verifier and both lowerings use it. */
+const char* rocke_i_gpu_check_failed_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* The code-object symbol of `kernel_name`'s GPU-check word, allocated in
+ * `arena` (Python core/ir.py::gpu_check_word_symbol, same spelling). A wave
+ * whose gpu_checked_value fact is false stores 1 to it and returns; the host reads
+ * it after the launch. */
+const char* rocke_i_gpu_check_word_symbol(rocke_arena_t* arena, const char* kernel_name);
+
+/* The `by` of the range marker rocke_b_gpu_checked_value writes (Python
+ * core/ir.py::GPU_CHECKED_VALUE_WRITER). */
+#define ROCKE_GPU_CHECKED_VALUE_WRITER "gpu_checked_value"
+
 /* Whether an scf.if_else can carry a result `index` of type `result_type`
  * (Python core/ir.py::_if_else_result_type_error): not an LDS allocation.
  * Otherwise returns false and writes the Python engine's refusal into `err`.
@@ -344,6 +360,13 @@ int rocke_param_fact_errors(const rocke_param_t* const* params,
                             rocke_param_fact_sink_t sink,
                             void* ctx);
 
+/* The range of an integer type a fact may be stated on (Python
+ * param_facts.int_type_limits): for i8, i16, i32, i64 and u8
+ * (param_facts.FACT_INT_TYPES) writes the inclusive [lo, hi], derived from the
+ * type's dtype width and signedness, and returns true; returns false for any
+ * other type. */
+bool rocke_int_type_limits(const rocke_type_t* t, int64_t* lo, int64_t* hi);
+
 /* Mirrors ir_print._format_param's facts: appends " {ge = %N, le = 4096}" for
  * the facts `p` states, nothing when it states none. */
 void rocke_param_facts_print(const rocke_param_t* p, rocke_strbuf_t* out);
@@ -355,6 +378,80 @@ char* rocke_relation_canonical(const char* text,
                                rocke_arena_t* arena,
                                const char* (*rename)(void* ctx, const char* name),
                                void* ctx);
+
+/* Mirrors ir._declaration_text: `p`'s declaration as the author writes it,
+ * b.param("M", I32, ge=1, le=1048576), appended to `out`. */
+void rocke_param_declaration_text(const rocke_param_t* p, rocke_strbuf_t* out);
+
+/* Mirrors intexpr.relation_text with plain leaf names: the relation stored in
+ * `text` as the author writes it (product_of(M, ldc)), or `text` itself when it
+ * holds no relation, appended to `out`. */
+void rocke_relation_display(const char* text, rocke_strbuf_t* out);
+
+/* ------------------------------------------------------- range marker */
+
+/* One end of an arith.assume_range marker (Python IRBuilder._assume_range's ge /
+ * lt and ge_plus / lt_plus): an int when `set`, or the Value `end` plus `plus`
+ * for an end only known at run time. */
+typedef struct rocke_range_end
+{
+    bool set;
+    int64_t value;
+    rocke_value_t* end;
+    int64_t plus;
+} rocke_range_end_t;
+
+/* The facts an arith.assume_range marker records (Python _assume_range's
+ * keywords): ge + ge_plus <= v < lt + lt_plus, v == residue (mod multiple_of;
+ * 1 when unset), and `by`, the writer that checked them (NULL for none). */
+typedef struct rocke_assume_range_opts
+{
+    rocke_range_end_t ge;
+    rocke_range_end_t lt;
+    int64_t multiple_of;
+    bool multiple_of_set;
+    int64_t residue;
+    const char* by;
+} rocke_assume_range_opts_t;
+
+/* Python IRBuilder._assume_range: return `v` marked with facts its caller has
+ * checked or proved (an arith.assume_range marker, which emits nothing).
+ * Internal: a fact stated here is never checked, so only a caller that checked
+ * it first may state it (rocke_b_gpu_checked_value). Refuses bad facts with the
+ * verifier's texts. (cpp/core/ir/range_marker.cpp) */
+rocke_value_t* rocke_b_assume_range(rocke_ir_builder_t* b,
+                                    rocke_value_t* v,
+                                    const rocke_assume_range_opts_t* opts);
+
+/* Mirrors ir._assume_range_errors: hands `sink` every rule an arith.assume_range
+ * marker's attrs and Value ends break, in order, with the Python texts, and
+ * returns their count. `operands` are the marked value and its Value ends
+ * (`num_operands` of them, at least one). The rules include that each Value
+ * end has the marked value's type.
+ * (cpp/core/ir/range_marker.cpp) */
+int rocke_assume_range_errors(const rocke_attr_map_t* attrs,
+                              rocke_value_t* const* operands,
+                              int num_operands,
+                              rocke_param_fact_sink_t sink,
+                              void* ctx);
+
+/* Mirrors ir.assume_range_bound_operands: the marker's ge and lt operands, NULL
+ * for an end it does not state as a Value. */
+void rocke_assume_range_bound_operands(const rocke_op_t* op,
+                                       rocke_value_t** ge,
+                                       rocke_value_t** lt);
+
+/* Whether an op with `opcode` reads memory, so its result is a value no check
+ * has seen: the ops of Python value_sources.MEMORY_READ_OPS (global, buffer,
+ * LDS and cluster loads, LDS transposed reads, atomics). Listed by opcode, not
+ * inferred from purity. (cpp/core/ir/gpu_check.cpp) */
+bool rocke_i_opcode_reads_memory(rocke_opcode_t opcode);
+
+/* Mirrors ir.one_unsigned_compare_checks: whether 0 <= v < end is exactly
+ * v u< end for an i32 or i64 `t` and an end known to lie in [least, most].
+ * Throws ckc::ValueError, with the Python text, for any other `t`.
+ * (cpp/core/ir/gpu_check.cpp) */
+bool rocke_i_one_unsigned_compare_checks(int64_t least, int64_t most, const rocke_type_t* t);
 
 /* ------------------------------------------------------------- DPP helpers */
 
@@ -368,6 +465,12 @@ int64_t rocke_i_dpp_xor_ctrl(int64_t xor_mask, bool has_row_xmask);
 
 #ifdef __cplusplus
 }
+
+#include <string>
+
+/* `t`'s name in upper case, as a declaration text writes a type (I32): the
+ * Python texts' `t.name.upper()`. (cpp/core/ir/param_facts.cpp) */
+std::string rocke_i_upper_type_name(const rocke_type_t* t);
 #endif
 
 #endif /* ROCKE_IR_INTERNAL_H */

@@ -33,6 +33,7 @@ from pathlib import Path
 
 import pytest
 
+from rocke.core.dtypes import UNSIGNED_INTEGER_DTYPES
 from rocke.core.facts import StatedFacts, stated_facts_of
 from rocke.core.intexpr import difference_of, product_of, quotient_of, sum_of
 from rocke.core.ir import F16, I32, I64, IRBuilder, PtrType
@@ -471,6 +472,32 @@ def test_the_verifier_reports_every_broken_rule(case):
     build, messages = IR_CASES[case]
     kernel = parse(serialize(build()))
     assert [d.message for d in verify(kernel)] == messages
+
+
+def test_cpp_derives_the_same_int_type_limits():
+    """``rocke_int_type_limits`` gives every fact type the range
+    ``int_type_limits`` gives it and refuses every other scalar type, and
+    ``rocke_type_is_unsigned`` holds for exactly ``UNSIGNED_INTEGER_DTYPES``."""
+    executable = os.environ.get("ROCKE_PARAM_FACTS_CLI")
+    if not executable:
+        pytest.skip("Set ROCKE_PARAM_FACTS_CLI to the built rocke_param_facts")
+    path = Path(executable).resolve()
+    assert path.is_file(), f"ROCKE_PARAM_FACTS_CLI names {path}, not a file"
+    printed = subprocess.run(
+        [str(path), "--int-type-limits"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    ).stdout
+    rows = [line.split(" ", 2) for line in printed.splitlines()]
+    unsigned = {name for name, flag, _ in rows if flag == "unsigned=1"}
+    assert unsigned == set(UNSIGNED_INTEGER_DTYPES)
+    limits = {name: text for name, _, text in rows}
+    assert {t for t, text in limits.items() if text != "none"} == set(FACT_INT_TYPES)
+    for type_name in FACT_INT_TYPES:
+        lo, hi = int_type_limits(type_name)
+        assert limits[type_name] == f"{lo} {hi}"
 
 
 def test_int_type_limits_come_from_the_width_and_signedness():

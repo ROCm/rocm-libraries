@@ -18,6 +18,7 @@
 #include <map>
 #include <math.h>
 #include <optional>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <string>
@@ -25,6 +26,8 @@
 #include <vector>
 
 #include "rocke/arena.h"
+#include "rocke/dtypes.h"
+#include "rocke/dtypes_internal.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
 #include "rocke/json_dom.h"
@@ -45,44 +48,16 @@ const char* const kPointerAttrs[] = {"noalias",
                                      "addr_space"};
 const int64_t kExactFactInt = 9007199254740991LL; /* 2^53 - 1 */
 
-/* The range of each integer type a fact may be stated on (param_facts.INT_TYPE_LIMITS). */
-bool int_type_limits(const rocke_type_t* t, int64_t* lo, int64_t* hi)
-{
-    if(!t || t->kind != ROCKE_TYPE_SCALAR || !t->name)
-        return false;
-    const std::string n = t->name;
-    if(n == "i8")
-        *lo = -128, *hi = 127;
-    else if(n == "i16")
-        *lo = -32768, *hi = 32767;
-    else if(n == "i32")
-        *lo = INT32_MIN, *hi = INT32_MAX;
-    else if(n == "i64")
-        *lo = INT64_MIN, *hi = INT64_MAX;
-    else if(n == "u8")
-        *lo = 0, *hi = 255;
-    else
-        return false;
-    return true;
-}
-
 bool is_int_type(const rocke_type_t* t)
 {
     int64_t lo;
     int64_t hi;
-    return int_type_limits(t, &lo, &hi);
+    return rocke_int_type_limits(t, &lo, &hi);
 }
 
 std::string type_name(const rocke_type_t* t)
 {
     return (t && t->name) ? t->name : "";
-}
-
-std::string upper(std::string s)
-{
-    for(char& c : s)
-        c = (char)toupper((unsigned char)c);
-    return s;
 }
 
 /* ------------------------------------------------------------- relations */
@@ -410,7 +385,7 @@ interval_t resolver_t::param(const std::string& name)
         const rocke_param_t* p = params[i];
         int64_t tmin;
         int64_t tmax;
-        if(!p->name || name != p->name || !int_type_limits(p->type, &tmin, &tmax))
+        if(!p->name || name != p->name || !rocke_int_type_limits(p->type, &tmin, &tmax))
             continue;
         const auto ends = stated(p);
         const interval_t result{ends.first.stated ? ends.first.value : end_t{tmin},
@@ -473,10 +448,10 @@ struct checker_t
             declared = std::string("is declared with ") + word + "="
                        + bound_text(rocke_attr_get(&operand->attrs, word));
         }
-        errors.push_back("param " + name + ": " + text + " needs " + q + " ge "
-                         + std::to_string(least) + " -- " + q + " " + declared
-                         + ".\nFix: b.param(\"" + q + "\", " + upper(type_name(operand->type))
-                         + ", ge=" + std::to_string(least) + ", ...)");
+        errors.push_back(
+            "param " + name + ": " + text + " needs " + q + " ge " + std::to_string(least) + " -- "
+            + q + " " + declared + ".\nFix: b.param(\"" + q + "\", "
+            + rocke_i_upper_type_name(operand->type) + ", ge=" + std::to_string(least) + ", ...)");
     }
 
     void quotient_errors(const std::string& name, const jd_val_t* t, resolver_t* resolver)
@@ -637,7 +612,7 @@ void checker_t::run()
                          + std::to_string(value));
     int64_t tmin;
     int64_t tmax;
-    if(int_type_limits(p->type, &tmin, &tmax))
+    if(rocke_int_type_limits(p->type, &tmin, &tmax))
         for(const char* word : kFactWords)
         {
             const rocke_attr_value_t* v = rocke_attr_get(attrs, word);
@@ -672,6 +647,40 @@ void checker_t::run()
 }
 
 } // namespace
+
+extern "C" bool rocke_int_type_limits(const rocke_type_t* t, int64_t* lo, int64_t* hi)
+{
+    /* Python param_facts.FACT_INT_TYPES: the integer types a fact is stated on. */
+    static const char* const kFactIntTypes[] = {"i8", "i16", "i32", "i64", "u8"};
+    if(!t || t->kind != ROCKE_TYPE_SCALAR || !t->name)
+        return false;
+    bool known = false;
+    for(const char* name : kFactIntTypes)
+        known = known || strcmp(t->name, name) == 0;
+    if(!known)
+        return false;
+    const int bits = rocke_require_dtype_info(t->name)->encoded_bits;
+    if(rocke_type_is_unsigned(t))
+    {
+        /* No fact type is an unsigned 64-bit type, so the shift stays in range. */
+        *lo = 0;
+        *hi = (int64_t)((UINT64_C(1) << bits) - 1);
+    }
+    else
+    {
+        *hi = bits == 64 ? INT64_MAX : (INT64_C(1) << (bits - 1)) - 1;
+        *lo = -*hi - 1;
+    }
+    return true;
+}
+
+std::string rocke_i_upper_type_name(const rocke_type_t* t)
+{
+    std::string name = (t && t->name) ? t->name : "";
+    for(char& c : name)
+        c = (char)toupper((unsigned char)c);
+    return name;
+}
 
 extern "C" int rocke_param_fact_errors(const rocke_param_t* const* params,
                                        int count,
@@ -722,6 +731,42 @@ extern "C" void rocke_param_facts_print(const rocke_param_t* p, rocke_strbuf_t* 
         rocke_strbuf_append(out, inner.c_str());
         rocke_strbuf_append_char(out, '}');
     }
+}
+
+extern "C" void rocke_param_declaration_text(const rocke_param_t* p, rocke_strbuf_t* out)
+{
+    rocke_arena_t arena;
+    if(!p || rocke_arena_init(&arena, 0) != 0)
+        return;
+    std::string text
+        = "b.param(\"" + std::string(p->name) + "\", " + rocke_i_upper_type_name(p->type);
+    for(const char* word : kFactWords)
+    {
+        const rocke_attr_value_t* v = rocke_attr_get(&p->attrs, word);
+        if(!v)
+            continue;
+        std::string bound = "?";
+        if(v->kind == ROCKE_ATTR_INT)
+            bound = std::to_string(v->u.i);
+        else if(v->kind == ROCKE_ATTR_STR)
+        {
+            const jd_val_t* tree = stored_relation(v->u.s, &arena);
+            bound = tree ? relation_text(tree, "") : v->u.s;
+        }
+        text += ", " + std::string(word) + "=" + bound;
+    }
+    rocke_arena_destroy(&arena);
+    rocke_strbuf_append(out, (text + ")").c_str());
+}
+
+extern "C" void rocke_relation_display(const char* text, rocke_strbuf_t* out)
+{
+    rocke_arena_t arena;
+    if(!text || rocke_arena_init(&arena, 0) != 0)
+        return;
+    const jd_val_t* tree = stored_relation(text, &arena);
+    rocke_strbuf_append(out, tree ? relation_text(tree, "").c_str() : text);
+    rocke_arena_destroy(&arena);
 }
 
 extern "C" char* rocke_relation_canonical(const char* text,

@@ -349,10 +349,106 @@ bound computed in the kernel) with a `ValueError`; both verifiers apply the same
 takes the same facts in `rocke_param_opts_t.facts` (`rocke_int_facts_t`), a relation as its JSON
 text.
 
+A C++ caller may also pass a parameter's Value as a bound (`rocke_int_bound_t.value_bound`); it is
+stored as that parameter's relation.
+
+### Values only the GPU can see: `gpu_checked_value`
+
+```python
+gpu_checked_value(value, *, ge=None, gt=None, le=None, lt=None, multiple_of=None) -> Value
+```
+
+Always emitted: no build mode drops it; a false fact fails the launch. It is for a value the host
+cannot check -- one computed from a memory load or a block id -- and returns `value` carrying the
+stated facts. The facts live only on the returned Value, so pass that Value on:
+
+```python
+T     = b.param("T", I32, ge=0, le=MAX_T)
+start = b.gpu_checked_value(b.readfirstlane(b.global_load(cu, s, I32)), ge=0, le=T)
+end   = b.gpu_checked_value(b.readfirstlane(b.global_load(cu, s1, I32)), ge=0, le=T)
+seqlen = b.gpu_checked_value(b.sub(end, start), ge=0, le=T)
+```
+
+A lane whose value breaks a fact stops at the check, before anything uses the value: it stores 1
+to the kernel's GPU-check word (`rocke_gpu_check_failed_<kernel>`, an i32 global in the code
+object, zero at load) and returns from the kernel. A wave all of whose lanes have returned has
+ended, and an ended wave does not hold the others at a workgroup barrier, so the launch completes
+with no trap for any OS to handle. (Run on Linux on gfx90a, gfx1100 and gfx1201; the GPU tests
+are skipped on other GPUs until they have run there, and a workgroup returning before a gfx1250
+cluster barrier has not run on hardware yet.) `rocke.runtime` then fails the launch with
+`GpuCheckFailed`, and the process keeps the GPU.
+
+**A false fact fails the launch, and every output of that launch is undefined**, not only what the
+returned lanes would have written. The lanes that go on can read what a returned lane never wrote
+(LDS, a cross-lane read, a matrix-core operand) and compute wrong values, even wrong addresses,
+from it; a store made before the check is not undone.
+
+**Check before any cross-workgroup protocol, and in every wave that uses the value.** A wave or
+workgroup that returns at a check never signals anything after it, so a kernel in which one waits
+on another's flag, semaphore or counter (a stream-K fix-up, a persistent work queue, a hand-off
+between waves) hangs when the one it waits on has returned. Run the check before a wave or
+workgroup joins any such protocol, so that one that fails leaves before anyone waits on it. And run
+it in every wave that uses the value: a wave that only receives the value from one that checked it
+(through LDS, say) does not stop, and goes on to use the value or wait for the wave that left.
+
+**How the runtime reads the word.** `rocke.runtime` notes the word at each launch it makes and
+reads it, with a copy queued on the stream, at its next wait on that stream:
+`Runtime.launch_blocking`, a fenced `KernelLauncher` call, `stream_sync`, `wait_stream`, `sync`,
+`release_pending_for_stream` and `check_gpu_checks`. Every stream shares the one word, so when two
+streams both have an unread launch of the kernel, a set word fails both their waits: it cannot say
+which launch failed. The wait does not clear the word. The first launch after every noted launch
+has been read clears it, queued ahead of the launch on its stream, so no failure of a noted launch
+is lost between a read and a clear, and a word left set by a launch the runtime never saw is not
+blamed on the next one.
+
+**What is not checked.** A wait outside the runtime (`torch.cuda.synchronize()`, an event) reads
+nothing: call `Runtime.check_gpu_checks(stream)` after it. Nothing reads the word after a graph
+replay, so the runtime refuses to queue a checked kernel on a stream that is being captured
+(`GpuCheckCaptureRefused`). A launch of the code object outside `rocke.runtime` is never noted, so
+nothing reads the word for it and its failure is silent. That is why `hkp_pack` and
+`write_artifact` refuse a kernel that holds a check.
+
+The check does not trap. A trapped wave is parked by the trap handler (and on gfx11 `llvm.trap`
+ends in an `s_sethalt` loop); the launch ends only when the driver turns the trap's interrupt into a
+queue error. ROCm on Linux does and aborts the process; the Windows runtime does not, and its wait
+for the launch never returns.
+
+So the check is a last line of defence for a value the host cannot see, not a way to reject input;
+make bad input impossible upstream.
+
+The words are the parameter words without `eq`; at least one is required, and exactly the stated
+sides are checked. A bound is an int or one Value of the value's type whose facts are stated (a
+parameter, or a Value `gpu_checked_value` returned); `sum_of`, `product_of`, `quotient_of` and
+`difference_of` are host expressions and are refused. It emits one signed compare per stated side
+(one unsigned compare for `0 <= v < n` with an int `n`, by `one_unsigned_compare_checks`, the rule
+every emitted bound check follows: compare, never form a subtraction that can wrap), `scf.if` on
+the failure holding `tile.gpu_check_failed`, and an `arith.assume_range` marker with
+`by = "gpu_checked_value"`. `tile.gpu_check_failed` lowers to
+`store atomic i32 1, ptr addrspace(1) @rocke_gpu_check_failed_<kernel> syncscope("agent") monotonic`
+and `ret void`, ending its block like `cf.return` (HIP: `__hip_atomic_store` on a `__device__ int`
+and `return;`). A per-lane value is checked per lane; a wave-uniform value (`readfirstlane`) stops
+its whole wave.
+
+It refuses, naming the fix (`rocke.core.value_sources` holds the two walks):
+
+- a value the host already checks: a kernel parameter (state the fact on its declaration), a
+  value computed only from parameters and constants, or one computed from thread ids (state
+  `workgroup_size`). A value *depends on* a leaf through any operand, conditions and loop-carried
+  values included; one that depends on a load or a block id is GPU-only and accepted.
+- a value an unchecked load reaches through an `add`, `sub`, `mul`, `div` or `mod` on its data
+  path (every operand except a select's or branch's condition and a loop's upper bound): that
+  arithmetic can wrap, become poison or divide by zero before the check. Check the loaded value
+  first and compute with the returned Values. A load that only feeds a compare (the binary-search
+  shape) does not count.
+
+The C++ builder is `rocke_b_gpu_checked_value(b, value, &facts)` with a `rocke_int_facts_t`,
+giving the same IR and texts; it builds the marker through the internal `rocke_b_assume_range`
+(`ir_internal.h`).
+
 `rocke.core.facts.stated_facts_of(value)` reads the facts stated for a Value -- by its parameter
-declaration or by the range marker that produced it -- and resolves each Value bound to numbers
-through that Value's own facts: `ldc ge N` with `N ge 1` gives `ldc >= 1`. It never runs the IR
-range walk.
+declaration or by the range marker that produced it, `gpu_checked_value`'s included -- and
+resolves each Value bound to numbers through that Value's own facts: `ldc ge N` with `N ge 1`
+gives `ldc >= 1`. It never runs the IR range walk.
 
 ## IR Printer
 

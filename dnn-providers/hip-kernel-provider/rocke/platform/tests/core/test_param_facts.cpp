@@ -14,6 +14,12 @@
  * "-- canonical --" and the canonicalized text. test_param_facts.py prints the
  * same report with the Python engine for every kernel in its IR_CASES and
  * compares the two.
+ *
+ * Run with --int-type-limits it prints, for every scalar type, "<type>
+ * unsigned=<0|1> <lo> <hi>" from rocke_type_is_unsigned and
+ * rocke_int_type_limits, or "<type> unsigned=<0|1> none" for a type no fact is
+ * stated on; test_param_facts.py compares the lines with
+ * UNSIGNED_INTEGER_DTYPES and int_type_limits.
  */
 #include <cstdint>
 #include <cstdio>
@@ -58,12 +64,12 @@ rocke_param_opts_t no_opts()
 
 rocke_int_bound_t int_bound(int64_t value)
 {
-    return rocke_int_bound_t{true, value, nullptr};
+    return rocke_int_bound_t{true, value, nullptr, nullptr};
 }
 
 rocke_int_bound_t relation(const char* json)
 {
-    return rocke_int_bound_t{true, 0, json};
+    return rocke_int_bound_t{true, 0, json, nullptr};
 }
 
 /* The parameters every refusal case starts from: M with a lower bound and sb
@@ -326,12 +332,38 @@ int report_serialized_ir()
     return 0;
 }
 
+int print_int_type_limits()
+{
+    const rocke_type_t* const scalars[]
+        = {rocke_i1(),      rocke_i4(),      rocke_u4(),      rocke_u8(),      rocke_i8(),
+           rocke_i16(),     rocke_i32(),     rocke_i64(),     rocke_bf16(),    rocke_f16(),
+           rocke_f32(),     rocke_tf32(),    rocke_f64(),     rocke_fp8e4m3(), rocke_bf8e5m2(),
+           rocke_fp4e2m1(), rocke_fp6e2m3(), rocke_fp6e3m2(), rocke_e8m0(),    rocke_e5m3()};
+    /* Every scalar type, so a new one fails here until it is listed. */
+    static_assert(sizeof scalars / sizeof scalars[0] == ROCKE_SCALAR__COUNT,
+                  "list every scalar type");
+    for(const rocke_type_t* t : scalars)
+    {
+        int64_t lo = 0;
+        int64_t hi = 0;
+        const int is_unsigned = rocke_type_is_unsigned(t) ? 1 : 0;
+        if(rocke_int_type_limits(t, &lo, &hi))
+            printf(
+                "%s unsigned=%d %lld %lld\n", t->name, is_unsigned, (long long)lo, (long long)hi);
+        else
+            printf("%s unsigned=%d none\n", t->name, is_unsigned);
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
     if(argc > 1 && strcmp(argv[1], "--ir") == 0)
         return report_serialized_ir();
+    if(argc > 1 && strcmp(argv[1], "--int-type-limits") == 0)
+        return print_int_type_limits();
     case_stores_ints_and_canonical_relations();
     case_refusals_match_the_python_builder();
     if(g_failures)

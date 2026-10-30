@@ -502,6 +502,21 @@ const char* rocke_i_trap_op_error(const rocke_op_t* op, char* buf, size_t cap)
     return NULL;
 }
 
+const char* rocke_i_gpu_check_failed_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(op->num_operands != 0 || op->num_results != 0 || op->num_regions != 0)
+    {
+        snprintf(buf, cap, "gpu_check_failed takes no operands, results or regions");
+        return buf;
+    }
+    return NULL;
+}
+
+const char* rocke_i_gpu_check_word_symbol(rocke_arena_t* arena, const char* kernel_name)
+{
+    return rocke_arena_printf(arena, "rocke_gpu_check_failed_%s", kernel_name ? kernel_name : "");
+}
+
 /* Structural equality == Python frozen-dataclass __eq__: canonical name encodes
  * kind + all components, so a name compare is sufficient. NULL-safe. */
 bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b)
@@ -1223,7 +1238,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.global_ptr_offset",
 
     /* tile.* kernel abort */
-    "tile.trap"};
+    "tile.trap",
+
+    /* tile.* gpu_checked_value failure path */
+    "tile.gpu_check_failed"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1517,7 +1535,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* global_ptr_offset          */ true,
 
     /* tile.* kernel abort (effectful) */
-    /* trap                       */ false};
+    /* trap                       */ false,
+
+    /* tile.* gpu_checked_value failure path (effectful) */
+    /* gpu_check_failed           */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

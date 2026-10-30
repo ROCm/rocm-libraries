@@ -490,6 +490,11 @@ typedef enum rocke_opcode
      * shifts. */
     ROCKE_OP_TILE_TRAP,
 
+    /* A gpu_checked_value failure path: store 1 to the kernel's GPU-check word
+     * and return from the kernel (Python IRBuilder.gpu_checked_value). Appended so no
+     * existing index shifts. */
+    ROCKE_OP_TILE_GPU_CHECK_FAILED,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -532,14 +537,18 @@ typedef struct rocke_region
     int cap_ops;
 } rocke_region_t;
 
-/* One bound of an integer fact: an int, or a relation over earlier parameters
+/* One bound of an integer fact: an int, a relation over earlier parameters
  * (the intexpr JSON tree rocke.core.intexpr builds, e.g. {"param":"N"} or
- * {"mul":[{"param":"M"},{"param":"ldc"}]}). `relation` wins when non-NULL. */
+ * {"mul":[{"param":"M"},{"param":"ldc"}]}), or a Value. `value` wins when
+ * non-NULL, then `relation`. A Value bound is a parameter of this kernel on
+ * rocke_b_param (stored as its relation), and one Value with stated facts on
+ * rocke_b_gpu_checked_value. */
 typedef struct rocke_int_bound
 {
     bool set;
     int64_t value;
     const char* relation;
+    rocke_value_t* value_bound;
 } rocke_int_bound_t;
 
 /* The integer facts a declaration states (Python IRBuilder.param's ge / gt / le /
@@ -945,6 +954,15 @@ rocke_value_t* rocke_b_cmp_ne(rocke_ir_builder_t* b, rocke_value_t* a, rocke_val
 /* Python cmp_ult: unsigned a < c ("icmp ult"). Operands are two i32 or two i64
  * values. */
 rocke_value_t* rocke_b_cmp_ult(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Python IRBuilder.gpu_checked_value: always emitted; a false fact traps the
+ * kernel. Checks `v` against the facts' ge / gt / le / lt (an int or one Value
+ * with stated facts) and multiple_of on the GPU (compare, scf.if, tile.trap) and
+ * returns `v` marked with them (by = "gpu_checked_value"). eq and relations are
+ * refused, as are a value the host already checks and arithmetic on an
+ * unchecked load before the check, with the Python texts. */
+rocke_value_t* rocke_b_gpu_checked_value(rocke_ir_builder_t* b,
+                                         rocke_value_t* v,
+                                         const rocke_int_facts_t* facts);
 /* pred in {olt,ole,ogt,oge,oeq,one,ord,uno} */
 rocke_value_t*
     rocke_b_fcmp(rocke_ir_builder_t* b, const char* pred, rocke_value_t* a, rocke_value_t* c);

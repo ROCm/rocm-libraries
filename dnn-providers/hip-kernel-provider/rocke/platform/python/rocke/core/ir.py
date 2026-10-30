@@ -33,7 +33,26 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from .arch import target as _arch
 from .dtypes import UNSIGNED_INTEGER_DTYPES, dtype_info
 from .intexpr import IntExpr, relation_json
-from .param_facts import declaration_errors, stored_int
+from .param_facts import (
+    FACT_WORDS,
+    LOWER_WORDS,
+    UPPER_WORDS,
+    bound_text,
+    declaration_errors,
+    int_type_limits,
+    is_plain_int,
+    stored_int,
+)
+from .value_sources import (
+    ARITHMETIC,
+    ASSUME_RANGE_OP,
+    THREAD_ID_OP,
+    Sources,
+    first_unchecked_arithmetic,
+    loaded_directly,
+    sources_of,
+    value_text,
+)
 
 # ----------------------------- Types --------------------------------------
 
@@ -355,26 +374,141 @@ def _int_cmp_pred_error(pred: Any, operand_type: str) -> Optional[str]:
 
 
 # ``arith.assume_range`` integer attrs, in the order their type is checked.
-_ASSUME_RANGE_INT_ATTRS = ("multiple_of", "residue", "ge", "lt", "lt_plus")
+_ASSUME_RANGE_INT_ATTRS = ("multiple_of", "residue", "ge", "ge_plus", "lt", "lt_plus")
+# The ``by`` of a marker IRBuilder.gpu_checked_value writes: its facts are
+# checked on the GPU, and a false one fails the launch.
+GPU_CHECKED_VALUE_WRITER = "gpu_checked_value"
+# The writers a marker's ``by`` attr may name. Every marker states facts its
+# writer checked first; ``by`` names that writer, so a reader can tell which
+# check stands behind a fact.
+ASSUME_RANGE_WRITERS = (GPU_CHECKED_VALUE_WRITER,)
 
 
-def _assume_range_errors(attrs: Dict[str, Any], num_operands: int) -> List[str]:
-    """Every rule an ``arith.assume_range`` marker's attrs break, in order.
+def assume_range_bound_operands(op: Op) -> tuple[Value | None, Value | None]:
+    """The ``(ge, lt)`` operands of an ``arith.assume_range`` marker, ``None``
+    for an end the marker does not state as a Value.
 
-    The one home of the marker's attr rules: the builder raises the first
-    message and the verifier reports all of them. The C++ verifier emits the
-    same texts. ``num_operands`` is 2 when the upper end is a Value (the
-    ``lt`` operand) and 1 otherwise.
+    The ends are ``ge + ge_plus <= v < lt + lt_plus``.
     """
+    return _marker_end_operands(op.attrs, op.operands)
+
+
+def _marker_end_operands(
+    attrs: dict[str, Any], operands: Sequence[Value]
+) -> tuple[Value | None, Value | None]:
+    """The one home of the marker's operand layout: the marked value, then the
+    ``ge`` operand when ``ge_plus`` is present, then the ``lt`` operand when one
+    operand is left."""
+    rest = list(operands[1:])
+    ge = rest.pop(0) if "ge_plus" in attrs and rest else None
+    lt = rest.pop(0) if rest else None
+    return ge, lt
+
+
+@dataclass(frozen=True)
+class MarkerEnd:
+    """One stated end of an ``arith.assume_range`` marker: ``bound + plus``,
+    where ``bound`` is an int or a Value (whose own stated facts give its
+    number)."""
+
+    bound: int | Value
+    plus: int = 0
+
+
+@dataclass(frozen=True)
+class MarkerFacts:
+    """What an ``arith.assume_range`` marker states about its value ``v``:
+    ``lower <= v`` and ``v < upper`` (``None`` for a side it does not state),
+    and ``v % multiple_of == residue``."""
+
+    lower: MarkerEnd | None
+    upper: MarkerEnd | None
+    multiple_of: int
+    residue: int
+
+    @property
+    def states_facts(self) -> bool:
+        """Whether the marker states a bound or a divisibility (a marker may
+        state neither)."""
+        return self.lower is not None or self.upper is not None or self.multiple_of > 1
+
+
+def marker_facts(op: Op) -> MarkerFacts:
+    """The facts an ``arith.assume_range`` marker states, read from its attrs
+    and its Value ends (:func:`assume_range_bound_operands`): the one decoder
+    of the marker's facts."""
+    attrs = op.attrs
+    ge_operand, lt_operand = assume_range_bound_operands(op)
+    lower: MarkerEnd | None = None
+    if ge_operand is not None:
+        lower = MarkerEnd(ge_operand, attrs.get("ge_plus", 0))
+    elif "ge" in attrs:
+        lower = MarkerEnd(attrs["ge"])
+    upper: MarkerEnd | None = None
+    if lt_operand is not None:
+        upper = MarkerEnd(lt_operand, attrs.get("lt_plus", 0))
+    elif "lt" in attrs:
+        upper = MarkerEnd(attrs["lt"])
+    return MarkerFacts(
+        lower, upper, attrs.get("multiple_of", 1), attrs.get("residue", 0)
+    )
+
+
+def has_stated_facts(value: Value) -> bool:
+    """Whether ``value`` has facts stated for it: it is a kernel parameter whose
+    declaration states one of ``FACT_WORDS``, or the result of a range marker
+    that states a bound or a divisibility (:attr:`MarkerFacts.states_facts`).
+
+    These are the Values ``rocke.core.facts.stated_facts_of`` reads facts from,
+    and so the Values a bound may be over: a ``gpu_checked_value`` bound and a
+    range marker's Value end in the IR range walk. Defined here, beside the
+    marker decoder; ``rocke.core.facts`` re-exports it as its public home.
+    """
+    if value.param is not None:
+        return any(word in value.param.attrs for word in FACT_WORDS)
+    op = value.op
+    return (
+        op is not None and op.name == ASSUME_RANGE_OP and marker_facts(op).states_facts
+    )
+
+
+def _assume_range_errors(attrs: dict[str, Any], operands: Sequence[Value]) -> list[str]:
+    """Every rule an ``arith.assume_range`` marker's attrs and Value ends break,
+    in order.
+
+    The one home of the marker's rules: the builder raises the first message
+    and the verifier reports all of them. The C++ engine's
+    ``rocke_assume_range_errors`` gives the same texts. ``operands`` are the
+    marked value and its Value ends: a ``ge`` operand (present exactly when
+    ``ge_plus`` is) and an ``lt`` operand (the operand left after it). Each
+    Value end has the marked value's type.
+    """
+    value_type = operands[0].type
+    end_type_errors = [
+        f"arith.assume_range: {word} operand type {end.type.name} != operand type "
+        f"{value_type.name}"
+        for word, end in zip(("ge", "lt"), _marker_end_operands(attrs, operands))
+        if end is not None and end.type != value_type
+    ]
     errors = [
         f"arith.assume_range: {key} must be an integer"
         for key in _ASSUME_RANGE_INT_ATTRS
         if key in attrs
         and (not isinstance(attrs[key], int) or isinstance(attrs[key], bool))
     ]
+    if "by" in attrs:
+        by = attrs["by"]
+        if not isinstance(by, str):
+            errors.append("arith.assume_range: by must be a string")
+        elif by not in ASSUME_RANGE_WRITERS:
+            errors.append(
+                f"arith.assume_range: by names no marker writer: '{by}' "
+                f"(one of: {', '.join(ASSUME_RANGE_WRITERS)})"
+            )
     if errors:
         # The value rules below compare these attrs as integers.
-        return errors
+        return end_type_errors + errors
+    errors = end_type_errors
     multiple_of = attrs.get("multiple_of", 1)
     residue = attrs.get("residue", 0)
     if multiple_of < 1:
@@ -385,7 +519,21 @@ def _assume_range_errors(attrs: Dict[str, Any], num_operands: int) -> List[str]:
         errors.append(
             f"arith.assume_range: residue must be in [0, {multiple_of}), got {residue}"
         )
-    has_lt_operand = num_operands == 2
+    has_ge_operand = "ge_plus" in attrs
+    ends = len(operands) - 1
+    if has_ge_operand and ends < 1:
+        errors.append("arith.assume_range: ge_plus is given without a ge operand")
+    if ends > 1 and not has_ge_operand:
+        errors.append(
+            "arith.assume_range: two Value ends need ge_plus (the operands are the "
+            "value, the ge operand, then the lt operand)"
+        )
+    if "ge" in attrs and has_ge_operand and ends >= 1:
+        errors.append(
+            "arith.assume_range: ge is given both as an attr and as an operand; "
+            "state one lower end"
+        )
+    has_lt_operand = ends - (1 if has_ge_operand else 0) >= 1
     if "lt" in attrs and has_lt_operand:
         errors.append(
             "arith.assume_range: lt is given both as an attr and as an operand; "
@@ -398,6 +546,26 @@ def _assume_range_errors(attrs: Dict[str, Any], num_operands: int) -> List[str]:
             f"arith.assume_range: ge ({attrs['ge']}) must be below lt ({attrs['lt']})"
         )
     return errors
+
+
+def one_unsigned_compare_checks(end_least: int, end_most: int, t: Type) -> bool:
+    """Whether ``0 <= v < end`` is exactly ``v u< end`` for an i32 or i64 ``v``
+    and an ``end`` known to lie in ``[end_least, end_most]``.
+
+    The rule every emitted bound check follows: compare, and never form a
+    subtraction that can wrap (``v - lo`` overflows for a ``v`` far below
+    ``lo``). One unsigned compare decides both sides when ``end`` lies in
+    ``[0, 2^(bits-1))``: a negative ``v`` reads as at least ``2^(bits-1)``
+    unsigned, so it fails, and so does every ``v >= end``. Otherwise each side
+    takes its own signed compare. ``IRBuilder.gpu_checked_value`` and the
+    tiling layer's bound checks both ask this function.
+    """
+    if t not in (I32, I64):
+        raise ValueError(
+            f"one_unsigned_compare_checks failed - t={t.name}, expected i32 or i64"
+        )
+    # end_most < 2^(bits-1), i.e. end_most is at most the signed maximum.
+    return 0 <= end_least and end_most <= int_type_limits(t.name)[1]
 
 
 def param_fact_errors(params: Sequence[Param], index: int) -> list[str]:
@@ -989,6 +1157,30 @@ def _trap_op_error(op: "Op") -> Optional[str]:
     return None
 
 
+def gpu_check_word_symbol(kernel_name: str) -> str:
+    """The code-object symbol of ``kernel_name``'s GPU-check word.
+
+    A kernel that holds a ``gpu_checked_value`` defines this i32 global, zero
+    at load. A lane whose fact is false stores 1 to it and returns, so the
+    launch completes and the host reads the word to fail it (``rocke.runtime``).
+    Both lowerings emit it under this name, and the C++ engine
+    (``rocke_i_gpu_check_word_symbol``) spells it the same way.
+    """
+    return f"rocke_gpu_check_failed_{kernel_name}"
+
+
+def _gpu_check_failed_op_error(op: Op) -> str | None:
+    """The error for a built ``tile.gpu_check_failed`` op that is not bare, or
+    None (``rocke_i_gpu_check_failed_op_error`` in the C++ engine, same text).
+
+    The lowerings emit only the store to the kernel's check word and the end
+    of the wave, so an operand would be ignored and a result undefined.
+    """
+    if op.operands or op.results or op.regions:
+        return "gpu_check_failed takes no operands, results or regions"
+    return None
+
+
 # The two branches of an scf.if_else, in region order.
 _IF_ELSE_BRANCHES = ("then", "else")
 
@@ -1358,6 +1550,213 @@ def current_source_loc() -> Optional[str]:
             )
         frame = frame.f_back
     return join_loc(frames) if frames else None
+
+
+# ----------------------------- GPU checks ---------------------------------
+#
+# ``IRBuilder.gpu_checked_value``'s rules and messages. ``cpp/core/ir/gpu_check.cpp``
+# gives the same texts.
+
+
+def _declaration_text(param: Param) -> str:
+    """``param``'s declaration as the author writes it:
+    ``b.param("M", I32, ge=1, le=1048576)``."""
+    facts = "".join(
+        f", {word}={bound_text(param.attrs[word])}"
+        for word in FACT_WORDS
+        if word in param.attrs
+    )
+    return f'b.param("{param.name}", {param.type.name.upper()}{facts})'
+
+
+def _gpu_check_form(
+    value: Any, stated: dict[str, Any], multiple_of: Any
+) -> tuple[int | None, int | None]:
+    """Refuse a ``gpu_checked_value`` call that states no checkable fact.
+
+    Returns the inclusive ``(lower, upper)`` the int bounds give, ``None`` for
+    a side with no int bound.
+    """
+    if not isinstance(value, Value):
+        raise TypeError(f"gpu_checked_value: value is an IR Value, got {value!r}")
+    t = value.type
+    if t not in (I32, I64):
+        raise ValueError(
+            f"gpu_checked_value: the value is {t.name} -- a GPU check takes an i32 "
+            "or i64 value"
+        )
+    if not stated and multiple_of is None:
+        raise ValueError(
+            "gpu_checked_value: state at least one fact: ge, gt, le, lt or multiple_of"
+        )
+    for kind, words in (("lower", LOWER_WORDS), ("upper", UPPER_WORDS)):
+        if all(w in stated for w in words):
+            raise ValueError(
+                f"gpu_checked_value: states two {kind} bounds ({', '.join(words)}) "
+                "-- state one"
+            )
+    tmin, tmax = int_type_limits(t.name)
+    if multiple_of is not None:
+        if not is_plain_int(multiple_of):
+            raise TypeError(
+                f"gpu_checked_value: multiple_of is an int, got {multiple_of!r}"
+            )
+        if multiple_of < 1:
+            raise ValueError(
+                f"gpu_checked_value: multiple_of must be >= 1, got {multiple_of}"
+            )
+        if multiple_of > tmax:
+            raise ValueError(
+                f"gpu_checked_value: multiple_of={multiple_of} is outside the range of {t.name}"
+            )
+    for word, bound in stated.items():
+        if isinstance(bound, IntExpr):
+            text = bound.text(
+                lambda leaf: value_text(leaf) if isinstance(leaf, Value) else repr(leaf)
+            )
+            raise ValueError(
+                f"gpu_checked_value: {word}={text} is a host expression -- on the GPU a "
+                "bound is an int or one Value; compute it with b.add / b.mul, where the "
+                "instruction can be seen"
+            )
+        if isinstance(bound, Value):
+            shown = value_text(bound)
+            if bound.type != t:
+                raise ValueError(
+                    f"gpu_checked_value: {word}={shown} is {bound.type.name} and the "
+                    f"value is {t.name} -- a bound has the value's type"
+                )
+            if not has_stated_facts(bound):
+                raise ValueError(
+                    f"gpu_checked_value: {word}={shown} has no stated facts -- a Value "
+                    "bound is a kernel parameter whose declaration states facts, or a "
+                    "Value gpu_checked_value returned"
+                )
+        elif is_plain_int(bound):
+            if not tmin <= bound <= tmax:
+                raise ValueError(
+                    f"gpu_checked_value: {word}={bound} is outside the range of {t.name}"
+                )
+        else:
+            raise TypeError(
+                f"gpu_checked_value: {word} is an int or a Value, got {bound!r}"
+            )
+    lower = upper = None
+    if is_plain_int(stated.get("ge")):
+        lower = stated["ge"]
+    elif is_plain_int(stated.get("gt")):
+        lower = stated["gt"] + 1
+    if is_plain_int(stated.get("le")):
+        upper = stated["le"]
+    elif is_plain_int(stated.get("lt")):
+        upper = stated["lt"] - 1
+    least = tmin if lower is None else lower
+    most = tmax if upper is None else upper
+    if least > most:
+        ints = [
+            f"{word}={bound}" for word, bound in stated.items() if is_plain_int(bound)
+        ]
+        verb = "leave" if len(ints) > 1 else "leaves"
+        raise ValueError(
+            f"gpu_checked_value: {' and '.join(ints)} {verb} no {t.name} value"
+        )
+    return lower, upper
+
+
+def _stated_call_text(stated: dict[str, Any], multiple_of: int | None) -> str:
+    """The words of a ``gpu_checked_value`` call, as ``le=4096, multiple_of=8``."""
+    words = [
+        f"{word}={value_text(bound) if isinstance(bound, Value) else bound}"
+        for word, bound in stated.items()
+    ]
+    if multiple_of is not None:
+        words.append(f"multiple_of={multiple_of}")
+    return ", ".join(words)
+
+
+def _gpu_check_host_visible_text(
+    value: Value,
+    sources: Sources,
+    stated: dict[str, Any],
+    multiple_of: int | None,
+    upper: int | None,
+) -> str:
+    """Why the host already checks ``value``, and where its facts belong."""
+    text = value_text(value)
+    if value.param is not None:
+        name = value.param.name
+        count = len(stated) + (multiple_of is not None)
+        fact = "facts" if count > 1 else "fact"
+        return (
+            f"gpu_checked_value: {name} is a kernel parameter. The host checks every "
+            "fact of a kernel parameter before every launch and refuses the launch if "
+            "one fails, so a GPU check here would only repeat that check.\n"
+            f"Fix: state the {fact} where {name} is declared:\n"
+            f'    b.param("{name}", {value.type.name.upper()}, '
+            f"{_stated_call_text(stated, multiple_of)})\n"
+            f"{name} is declared today as: {_declaration_text(value.param)}"
+        )
+    if sources.thread_ids:
+        if (
+            value.op is not None
+            and value.op.name == THREAD_ID_OP
+            and value.op.attrs.get("axis") == "x"
+            and upper is not None
+        ):
+            return (
+                f"gpu_checked_value: {text} is bounded by the kernel's workgroup size, "
+                "which the host checks.\n"
+                f'Fix: b.kernel.attrs["workgroup_size"] = {upper + 1}'
+            )
+        names = ", ".join(p.param.name for p in sources.params)
+        params = f" and kernel parameters ({names})" if names else ""
+        declarations = (
+            ", and the parameters' facts on their declarations" if names else ""
+        )
+        return (
+            f"gpu_checked_value: {text} is computed only from thread ids{params}, which "
+            "the host bounds before every launch.\n"
+            'Fix: state the workgroup size, b.kernel.attrs["workgroup_size"] = '
+            f"<threads per workgroup>{declarations}; the IR range walk derives the "
+            f"facts of {text} from them."
+        )
+    if not sources.params:
+        return (
+            f"gpu_checked_value: {text} is computed only from constants, so it is "
+            "known when the kernel is built -- there is nothing to check on the GPU"
+        )
+    names = ", ".join(p.param.name for p in sources.params)
+    declarations = ", ".join(
+        f'b.param("{p.param.name}", {p.type.name.upper()}, ...)' for p in sources.params
+    )
+    if len(sources.params) == 1:
+        fix = f"state the bound on the parameter: {declarations}"
+        source = "it"
+    else:
+        fix = f"state the bounds on the parameters: {declarations}"
+        source = "them"
+    return (
+        f"gpu_checked_value: {text} is computed only from kernel parameters ({names}), "
+        f"which the host checks before every launch. Fix: {fix}. The IR range walk "
+        f"derives the facts of {text} from {source}."
+    )
+
+
+def _gpu_check_unchecked_text(op: Op, operand: Value) -> str:
+    """Why arithmetic on an unchecked loaded value comes too late to check."""
+    shown = value_text(operand)
+    origin = (
+        "is loaded from memory"
+        if loaded_directly(operand)
+        else "is computed from a value loaded from memory"
+    )
+    arithmetic = ARITHMETIC[op.name]
+    short = op.name.split(".", 1)[1]
+    return (
+        f"gpu_checked_value: {shown} {origin} and unchecked, and {short} uses it before "
+        f"this check ({arithmetic.hazard}). Fix: check {shown} with gpu_checked_value "
+        f"first, then {arithmetic.verb} the Values gpu_checked_value returned."
+    )
 
 
 # ----------------------------- Builder -----------------------------------
@@ -1829,19 +2228,24 @@ class IRBuilder:
         self,
         v: Value,
         *,
-        ge: int | None = None,
+        ge: int | Value | None = None,
+        ge_plus: int = 0,
         lt: int | Value | None = None,
         lt_plus: int = 0,
         multiple_of: int = 1,
         residue: int = 0,
+        by: str | None = None,
     ) -> Value:
         """Return ``v`` unchanged, marked with facts its caller has checked.
 
-        The marker records ``ge <= v``, ``v < lt`` (an int ``lt``, or a Value
-        ``lt`` plus ``lt_plus`` for an end only known at run time) and
-        ``v == residue (mod multiple_of)``. It emits no instruction: both
-        lowerings print ``v`` wherever the result is used. Its one reader is
-        the tiling layer's IR range walk, which trusts every marker.
+        The marker records ``ge <= v`` and ``v < lt``, each end an int or a
+        Value plus a constant (``ge + ge_plus``, ``lt + lt_plus``) for an end
+        only known at run time, and ``v == residue (mod multiple_of)``. ``by``
+        names the writer (``ASSUME_RANGE_WRITERS``) when the facts come from
+        one of the checks that name themselves. It emits no instruction: both
+        lowerings print ``v`` wherever the result is used. Its readers are
+        ``stated_facts_of`` and the tiling layer's IR range walk, which trust
+        every marker.
 
         Private on purpose: a fact stated here is never checked, so only
         callers that checked or proved it first may state it. Those callers
@@ -1849,32 +2253,175 @@ class IRBuilder:
         """
         if v.type not in (I32, I64):
             raise ValueError(f"_assume_range: v must be i32 or i64, got {v.type.name}")
-        if isinstance(lt, Value) and lt.type != v.type:
-            raise ValueError(
-                f"_assume_range: lt type {lt.type.name} != v type {v.type.name}"
-            )
         attrs: Dict[str, Any] = {"multiple_of": multiple_of, "residue": residue}
-        if ge is not None:
-            attrs["ge"] = ge
         operands = [v]
-        if isinstance(lt, Value):
-            operands.append(lt)
-            attrs["lt_plus"] = lt_plus
-        else:
-            if lt is not None:
-                attrs["lt"] = lt
-            if lt_plus != 0:
-                attrs["lt_plus"] = lt_plus
-        errors = _assume_range_errors(attrs, len(operands))
+        for word, end, plus in (("ge", ge, ge_plus), ("lt", lt, lt_plus)):
+            if isinstance(end, Value):
+                operands.append(end)
+                attrs[f"{word}_plus"] = plus
+            else:
+                if end is not None:
+                    attrs[word] = end
+                if plus != 0:
+                    attrs[f"{word}_plus"] = plus
+        if by is not None:
+            attrs["by"] = by
+        errors = _assume_range_errors(attrs, operands)
         if errors:
             raise ValueError(errors[0])
         return self._op(
-            "arith.assume_range",
+            ASSUME_RANGE_OP,
             operands,
             [v.type],
             attrs=attrs,
             result_name_hint="range",
         ).result
+
+    def gpu_checked_value(
+        self,
+        value: Value,
+        *,
+        ge: Any = None,
+        gt: Any = None,
+        le: Any = None,
+        lt: Any = None,
+        multiple_of: int | None = None,
+    ) -> Value:
+        """Always emitted: no build mode drops it; a false fact fails the launch.
+
+        A lane whose value breaks a fact stops at the check, before anything
+        uses the value: it stores 1 to the kernel's GPU-check word
+        (:func:`gpu_check_word_symbol`) and returns from the kernel. A wave
+        whose lanes have all returned has ended and does not hold the others
+        at a barrier, so the launch completes, and ``rocke.runtime`` fails it:
+        its next wait on the stream reads the word and raises
+        ``GpuCheckFailed`` (``rocke.runtime.hip_module.GpuCheckLedger`` says
+        when the word is read and cleared). The process keeps the GPU.
+
+        **A false fact fails the launch, and every output of that launch is
+        undefined**: the lanes that go on can read what a returned lane never
+        wrote (LDS, a cross-lane read) and compute wrong values or addresses
+        from it, and a store made before the check is not undone.
+
+        **Check before any cross-workgroup protocol, in every wave that uses
+        the value.** A returned wave or workgroup never signals again, so a
+        kernel in which one waits on another's flag, semaphore or counter
+        (stream-K fix-up, a persistent queue) hangs if the one it waits on
+        returned; and a wave that only receives the value from one that
+        checked it does not stop.
+
+        Not checked: a wait outside the runtime (a torch synchronize, an
+        event) reads nothing until ``Runtime.check_gpu_checks``; a launch
+        outside ``rocke.runtime`` is never read, and its failure is silent.
+        The runtime refuses to queue the kernel on a stream that is being
+        captured into a graph (``GpuCheckCaptureRefused``): nothing reads the
+        word after a replay.
+
+        The check does not trap (:meth:`trap`): on Windows the trap handler
+        parks a trapped wave and the launch never returns.
+
+        So the check is a last line of defence for a value the host cannot
+        see, not a way to reject input; make bad input impossible upstream.
+
+        Returns ``value`` carrying the stated facts, for a value only the GPU
+        can see: one computed from a memory load or a block id, such as a
+        sequence start read from ``cu_seqlens``. The facts live only on the
+        returned Value (``rocke.core.facts.stated_facts_of`` reads them), so
+        pass that Value on, not ``value``::
+
+            start = b.gpu_checked_value(b.readfirstlane(b.global_load(cu, s, I32)), ge=0, le=T)
+
+        * ``ge`` / ``gt`` -- value >= / > bound (at most one of the two).
+        * ``le`` / ``lt`` -- value <= / < bound (at most one of the two).
+        * ``multiple_of`` -- value % n == 0, an int n >= 1.
+
+        At least one word is required, and exactly the stated sides are
+        checked. A bound is an int, or one Value of the value's type whose
+        facts are stated (a kernel parameter or a Value this method returned):
+        ``le=T`` gives the one home of a maximum and states the true fact.
+        ``sum_of`` / ``product_of`` / ``quotient_of`` / ``difference_of`` are
+        host expressions and are refused; compute a GPU bound with ``b.add`` /
+        ``b.mul``, where the instruction can be seen.
+
+        Emitted as a compare per stated side (one unsigned compare for
+        ``0 <= v < n``, see :func:`one_unsigned_compare_checks`), ``scf.if`` on
+        the failure holding ``tile.gpu_check_failed``, and a range marker
+        naming ``by="gpu_checked_value"``. A per-lane value is checked per
+        lane; a wave-uniform value (``readfirstlane``) stops its whole wave.
+
+        Refused, with the fix in the message:
+
+        * a value the host already checks: a kernel parameter or a value
+          computed only from parameters and constants (state the facts on the
+          declaration), or from thread ids (state ``workgroup_size``);
+        * a value an unchecked load reaches through an ``add``, ``sub``,
+          ``mul``, ``div`` or ``mod``: that arithmetic can wrap, become poison
+          or divide by zero before this check sees it. Check the loaded value
+          first, then compute with the Values this method returns. A load that
+          reaches the value only through conditions (a compare, a select's
+          condition) does not count.
+        """
+        stated = {
+            word: bound
+            for word, bound in (("ge", ge), ("gt", gt), ("le", le), ("lt", lt))
+            if bound is not None
+        }
+        lower, upper = _gpu_check_form(value, stated, multiple_of)
+        sources = sources_of(value)
+        if not sources.gpu_only:
+            raise ValueError(
+                _gpu_check_host_visible_text(value, sources, stated, multiple_of, upper)
+            )
+        unchecked = first_unchecked_arithmetic(value)
+        if unchecked is not None:
+            raise ValueError(_gpu_check_unchecked_text(*unchecked))
+        const = self.const_i64 if value.type == I64 else self.const_i32
+        type_max = int_type_limits(value.type.name)[1]
+        lower_word = next((w for w in ("ge", "gt") if w in stated), None)
+        upper_word = next((w for w in ("le", "lt") if w in stated), None)
+        fails: list[Value] = []
+        if (
+            lower == 0
+            and upper is not None
+            and one_unsigned_compare_checks(upper + 1, upper + 1, value.type)
+        ):
+            fails.append(self.cmp_ult(const(upper), value))
+        else:
+            if lower_word is not None:
+                bound = stated[lower_word]
+                end = bound if isinstance(bound, Value) else const(bound)
+                compare = self.cmp_lt if lower_word == "ge" else self.cmp_le
+                fails.append(compare(value, end))
+            if upper_word is not None:
+                bound = stated[upper_word]
+                end = bound if isinstance(bound, Value) else const(bound)
+                compare = self.cmp_gt if upper_word == "le" else self.cmp_ge
+                fails.append(compare(value, end))
+        if multiple_of is not None and multiple_of > 1:
+            remainder = self.mod(value, const(multiple_of))
+            fails.append(self.cmp_ne(remainder, const(0)))
+        if fails:
+            fail = fails[0]
+            for other in fails[1:]:
+                fail = self.lor(fail, other)
+            with self.scf_if(fail):
+                self._op("tile.gpu_check_failed")
+        lower_bound = stated.get(lower_word) if lower_word is not None else None
+        upper_bound = stated.get(upper_word) if upper_word is not None else None
+        return self._assume_range(
+            value,
+            ge=lower_bound if isinstance(lower_bound, Value) else lower,
+            ge_plus=1 if lower_word == "gt" and isinstance(lower_bound, Value) else 0,
+            # An upper end at the type's maximum states nothing.
+            lt=(
+                upper_bound
+                if isinstance(upper_bound, Value)
+                else (None if upper is None or upper == type_max else upper + 1)
+            ),
+            lt_plus=1 if upper_word == "le" and isinstance(upper_bound, Value) else 0,
+            multiple_of=1 if multiple_of is None else multiple_of,
+            by=GPU_CHECKED_VALUE_WRITER,
+        )
 
     def fcmp(self, pred: str, a: Value, b: Value) -> Value:
         if pred not in ("olt", "ole", "ogt", "oge", "oeq", "one", "ord", "uno"):
