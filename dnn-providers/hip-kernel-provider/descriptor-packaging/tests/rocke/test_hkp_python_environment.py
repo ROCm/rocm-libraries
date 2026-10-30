@@ -517,6 +517,80 @@ def test_configure_and_pack_preserve_runtime_comgr_override(
     _assert_ctest_comgr_defaults(env, explicit)
 
 
+@pytest.mark.parametrize("relative", [False, True], ids=["absolute", "relative"])
+@pytest.mark.parametrize(
+    "layout", ["symlink-missing-decoy", "symlink-decoy", "directory"]
+)
+def test_configure_and_pack_preserve_comgr_parent_traversal(
+    build_environment, relative, layout
+):
+    env = build_environment()
+    fixture_library = _configure_comgr_consumer(env, sdk=True)
+    filename = "explicit.dll" if os.name == "nt" else "explicit.so"
+    installation = env.root / "compiler installation with spaces"
+    nested = installation / "nested"
+    nested.mkdir(parents=True)
+    intended = installation / filename
+    shutil.copyfile(fixture_library, intended)
+    alias = env.root / "compiler alias"
+    local = env.root / filename
+    if layout == "directory":
+        alias.mkdir()
+        shutil.copyfile(fixture_library, local)
+        intended = local
+    else:
+        try:
+            alias.symlink_to(nested, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"directory alias fixture requires symlink support: {exc}")
+        if layout == "symlink-decoy":
+            shutil.copyfile(fixture_library, local)
+            assert not os.path.samefile(local, intended)
+
+    traversal = f"./{alias.name}/../{filename}"
+    anchored = env.root / traversal
+    override = traversal if relative else str(anchored)
+    # Establish the direct filesystem/loader oracle before CMake handles the path.
+    # POSIX resolves the directory symlink before '..'; Windows may instead
+    # collapse '..' first, making the missing-decoy spelling genuinely unloadable.
+    loadable = anchored.is_file()
+    if os.name != "nt":
+        assert loadable
+        assert os.path.samefile(anchored, intended)
+    env.run(
+        env.python,
+        "-c",
+        "import ctypes, sys; ctypes.CDLL(sys.argv[1])",
+        override,
+        success=loadable,
+    )
+    expected = anchored.resolve(strict=True) if loadable else None
+    env.env["ROCKE_COMGR_LIB"] = override
+    proc = env.configure(comgr_lib="", success=loadable)
+    if not loadable:
+        diagnostic = " ".join((proc.stdout + proc.stderr).split())
+        assert str(anchored) in diagnostic
+        assert "1 candidate(s) failed" in diagnostic
+        return
+
+    selection = (env.build_dir / "comgr-selection.txt").read_text(encoding="utf-8")
+    cache = (env.build_dir / "CMakeCache.txt").read_text(encoding="utf-8")
+    assert "HIPKERNELPROVIDER_ROCKE_COMGR_LIB:PATH=\n" in cache
+    env.env.pop("ROCKE_COMGR_LIB")
+    env.run(env.cmake, "--build", env.build_dir, "--target", "hkp_packaging_first")
+    result = env.consumer()
+    for selected in (
+        selection.splitlines()[0],
+        selection.split("ROCKE_COMGR_LIB;", 1)[1].strip(),
+        result["env"]["ROCKE_COMGR_LIB"],
+    ):
+        assert os.path.samefile(selected, expected)
+        assert Path(selected) == anchored
+    # ctypes may rewrite its handle's name on Windows; identity is authoritative.
+    assert os.path.samefile(result["comgr"], expected)
+    _assert_ctest_comgr_defaults(env, anchored)
+
+
 def test_pth_runtime_and_parent_inventory_preserved(tmp_path, build_environment):
     env = build_environment()
     parent_wheels = tmp_path / "parent wheels"
