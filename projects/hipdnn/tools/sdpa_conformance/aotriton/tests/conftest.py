@@ -117,7 +117,8 @@ def fake_sdpa(monkeypatch):
         if "fwd" in module.decline:
             raise EngineDeclined("fwd", module.decline["fwd"])
         o.fill_(1.0)
-        stats.fill_(2.0)
+        if stats is not None:
+            stats.fill_(2.0)
         return "fake_fwd"
 
     def sdpa_bwd(
