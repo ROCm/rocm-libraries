@@ -62,7 +62,7 @@ int rocke_conv_choose_load_vec(const rocke_implicit_gemm_conv_spec_t* spec)
     /* spec.block_size = warp_m * warp_n * wave_size (the @property). */
     int block_size = rocke_implicit_gemm_conv_spec_block_size(spec);
     rocke_status_t st
-        = rocke_choose_load_vec(spec->tile_m, spec->tile_n, spec->tile_k, block_size, &out_vec);
+        = rocke_choose_load_vec(spec->tile_m, spec->tile_n, spec->tile_k, block_size, 2, &out_vec);
     /* On the Python ValueError path choose_load_vec raises; here the status is
      * ROCKE_ERR_VALUE and out_vec is left untouched (0). The prologue is the
      * gate that surfaces the spec validity error before this is reached. */
@@ -169,7 +169,18 @@ rocke_value_t* rocke_conv_a_descriptor(rocke_ir_builder_t* b,
     if(ctx->is_pointwise)
     {
         rocke_value_t* m_val = rocke_b_add(b, ctx->block_m_off_v, row);
-        rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, m_val, ctx->ir_c_C_pw), k_val);
+        rocke_value_t* off;
+        if(ctx->ir_pw_a_chan_base != NULL)
+        {
+            /* Grouped: offset = m * C + g*cpg + c; c stays bounded by cpg below.
+             * Python adds the channel base before the row multiply. */
+            rocke_value_t* chan = rocke_b_add(b, ctx->ir_pw_a_chan_base, k_val);
+            off = rocke_b_add(b, rocke_b_mul(b, m_val, ctx->p_C), chan);
+        }
+        else
+        {
+            off = rocke_b_add(b, rocke_b_mul(b, m_val, ctx->ir_c_C_pw), k_val);
+        }
         rocke_value_t* m_ok = rocke_b_cmp_lt(b, m_val, ctx->ir_c_M_pw);
         rocke_value_t* c_ok = rocke_b_cmp_lt(b, k_val, ctx->ir_c_C_pw);
         *out_valid = rocke_b_land(b, m_ok, c_ok);
@@ -377,8 +388,8 @@ static rocke_value_t* conv_b_offset_split(rocke_conv_build_ctx_t* ctx,
  *
  *  Python span: conv_implicit_gemm.py lines 976-982:
  *      def b_descriptor(b_, row, col):
- *          k_out = b_.add(block_n_off_v, row)
- *          if grouped: k_out = b_.add(k_out_group_base, k_out)
+ *          n_val = b_.add(block_n_off_v, row)
+ *          k_out = b_.add(k_out_group_base, n_val) if grouped else n_val
  *          kg = b_.add(k_off_capture[0], col)
  *          return B_desc.offset(b_, k_out=k_out, k_gemm=kg)
  * ===================================================================== */
@@ -390,17 +401,19 @@ rocke_value_t* rocke_conv_b_descriptor(rocke_ir_builder_t* b,
 {
     rocke_conv_build_ctx_t* ctx = (rocke_conv_build_ctx_t*)ctx_user;
 
-    rocke_value_t* k_out = rocke_b_add(b, ctx->block_n_off_v, row);
+    rocke_value_t* n_val = rocke_b_add(b, ctx->block_n_off_v, row);
     /* Grouped conv: fold in the absolute output-filter group base. */
-    if(ctx->k_out_group_base != NULL)
-        k_out = rocke_b_add(b, ctx->k_out_group_base, k_out);
+    rocke_value_t* k_out
+        = (ctx->k_out_group_base != NULL) ? rocke_b_add(b, ctx->k_out_group_base, n_val) : n_val;
     rocke_value_t* kg = rocke_b_add(b, ctx->k_off_capture, col);
 
-    /* Pointwise fast path: flat offset = k_out * C + c, valid = (k_out < K) & (c < C) */
+    /* Pointwise fast path: flat offset = k_out * cpg + c, valid = (n < kpg) & (c < cpg).
+     * The bound is on the within-group filter n, not the absolute k_out: every
+     * group past the first would otherwise load zeros. */
     if(ctx->is_pointwise)
     {
         rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, k_out, ctx->ir_c_C_pw), kg);
-        rocke_value_t* k_ok = rocke_b_cmp_lt(b, k_out, ctx->ir_c_K_pw);
+        rocke_value_t* k_ok = rocke_b_cmp_lt(b, n_val, ctx->ir_c_K_pw);
         rocke_value_t* c_ok = rocke_b_cmp_lt(b, kg, ctx->ir_c_C_pw);
         *out_valid = rocke_b_land(b, k_ok, c_ok);
         return off;

@@ -21,6 +21,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `arith.fneg`           | `fneg`                            | `fneg`                                 |
 | `arith.fmax`           | `fmax`                            | `llvm.maxnum.{f64,f32,f16,bf16}`       |
 | `arith.fmin`           | `fmin`                            | `llvm.minnum.{f64,f32,f16,bf16}`       |
+| `arith.fdot2`          | `fdot2`                           | `llvm.amdgcn.fdot2` (f16) / `llvm.amdgcn.fdot2.f32.bf16` (bf16), clamp off; f32 accumulator |
 | `arith.cmp`            | `cmp_lt`, `cmp_le`, `cmp_gt`, `cmp_ge`, `cmp_eq`, `cmp_ne`, `cmp_ult` | `icmp {slt,sle,sgt,sge,eq,ne,ult}` |
 | `arith.assume_range`   | (private `_assume_range`, for checked callers only) | nothing: uses of the result print the marked value; the attrs record a range and congruence for the tiling layer's range walk |
 | `arith.fcmp`           | `fcmp(pred, ...)`                 | `fcmp {olt,ole,ogt,oge,oeq,one,ord,uno}` |
@@ -142,6 +143,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `tile.mfma_f32_32x32x8_f16`      | `<4xhalf>`, `<4xhalf>`, `<16xfloat>` | `<16xfloat>`   |
 | `tile.mfma_f32_32x32x16_f16`     | `<8xhalf>`, `<8xhalf>`, `<16xfloat>` | `<16xfloat>`   |
 | `tile.mfma_f32_4x4x4_f16`        | `<4xhalf>`, `<4xhalf>`, `<4xfloat>` | `<4xfloat>`     |
+| `tile.mfma_f32_4x4x4_bf16`       | `<4xi16>` (bf16 bitcast), same, `<4xfloat>` | `<4xfloat>` |
 
 All MFMAs take three literal immarg constants (`cbsz=0, abid=0, blgp=0`) at the LLVM level.
 
@@ -168,6 +170,8 @@ All MFMAs take three literal immarg constants (`cbsz=0, abid=0, blgp=0`) at the 
 | `scf.if`     | `scf_if` (ctx manager) | conditional branch + then block + join block          |
 | `scf.yield`  | `scf_yield(*values)`   | records yielded values; consumed by enclosing for/if  |
 | `cf.return`  | (auto-emitted)         | `ret void`                                            |
+
+A loop cannot carry a buffer descriptor (`buffer_rsrc`), as an iter_arg's initial value or as a yielded value: it is `<4 x i32>` in the IR but an opaque `ptr addrspace(8)` (HIP `rsrc_t`) once lowered, which neither a phi nor a variable can hold. The builder, the verifier and every lowering refuse it; build the descriptor before the loop and advance the offset, or rebuild it inside the loop body.
 
 `static_for` and `unroll` are Python-time helpers that emit no `scf.for`; they execute their body in Python and emit straight-line IR.
 
