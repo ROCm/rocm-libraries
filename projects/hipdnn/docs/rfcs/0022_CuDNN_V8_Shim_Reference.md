@@ -1,7 +1,7 @@
-# RFC 0021 — Supporting Reference: Verified cuDNN FE v0.x and backend C API surface
+# RFC 0022 — Supporting Reference: Verified cuDNN FE v0.x and backend C API surface
 
 This document is the long-form companion to
-[RFC 0021: cuDNN v8 shim for hipDNN](./0021_CuDNN_V8_Shim.md). It collects the verified tables the
+[RFC 0022: cuDNN v8 shim for hipDNN](./0022_CuDNN_V8_Shim.md). It collects the verified tables the
 main RFC summarises: the cuDNN backend C API identifiers upstream's v0.x frontend uses, what hipDNN
 offers for each and what the shim does with them, the C surface the shim declares, the v0.x class
 inventory with the members the shim rewrites, per-operation setters, the consumer surfaces, NVIDIA's legacy
@@ -46,7 +46,7 @@ Legend for the "hipDNN" columns:
 | NS | hipDNN identifier exists, but its setter or getter returns `HIPDNN_STATUS_NOT_SUPPORTED` |
 | T! | hipDNN identifier exists but expects a different attribute type |
 
-The "Shim" column states what RFC 0021 does with the row; section references are to the main RFC.
+The "Shim" column states what RFC 0022 does with the row; section references are to the main RFC.
 
 ### 1.1 C entry points
 
@@ -369,7 +369,7 @@ in its own `tests/cudnn_samples/legacy/overlay/cudnn.h`, which is never installe
 
 ### 2.1 Header inventory
 
-Line counts are `wc -l`. Caption directory: `upstream:include/`. "Shim" is the RFC 0021 disposition
+Line counts are `wc -l`. Caption directory: `upstream:include/`. "Shim" is the RFC 0022 disposition
 (RFC §3.1).
 
 | Header | Lines | Main public contents | Shim |
@@ -494,7 +494,7 @@ pins the last column.
 | `ResampleDesc_v8` | `RESAMPLE`: `MODE` (RESAMPLE_MODE), `COMP_TYPE` (DATA_TYPE), `NAN_PROPAGATION`, `PADDING_MODE` (PADDING_MODE), `SPATIAL_DIMS` (INT64), `WINDOW_DIMS`, `PRE_PADDINGS`, `POST_PADDINGS`, `STRIDES` (FRACTION×n) | `ResampleRecord` | null |
 | `RngDesc_v8` | `RNG`: `DISTRIBUTION` (RNG_DISTRIBUTION), normal / uniform / Bernoulli parameters (DOUBLE) | `RngRecord` | null |
 | `Operation_v8` | `OPERATION_*`, chosen by mode: §3 | one `*OperationRecord` per lowered kind (convolution forward / backward data / backward filter, pointwise, matmul, reduction, resample forward / backward, norm forward / backward); unsupported kinds build none (§3.3) | null |
-| `OperationGraph_v8` | `OPERATIONGRAPH`: `OPS` (BACKEND_DESCRIPTOR×n), `HANDLE` (HANDLE), `IS_DYNAMIC_SHAPE_ENABLED`, `IS_OVERRIDE_SHAPE_ENABLED` (BOOLEAN); Get `ENGINE_GLOBAL_COUNT` (INT64) | `GraphCore`: the finalized hipDNN graph, its handle, tag and engine space | the hipDNN `OPERATIONGRAPH` |
+| `OperationGraph_v8` | `OPERATIONGRAPH`: `OPS` (BACKEND_DESCRIPTOR×n), `HANDLE` (HANDLE), `IS_DYNAMIC_SHAPE_ENABLED`, `IS_OVERRIDE_SHAPE_ENABLED` (BOOLEAN); Get `ENGINE_GLOBAL_COUNT` (INT64) | `GraphCore`: the finalized hipDNN graph, its tag and engine space | the hipDNN `OPERATIONGRAPH` |
 | `EngineHeuristics_v8` | `ENGINEHEUR`, results are pre-created `ENGINECFG`s: `OPERATION_GRAPH` (BACKEND_DESCRIPTOR), `MODE` (HEUR_MODE), `DEVICEPROP` (BACKEND_DESCRIPTOR), `SM_COUNT_TARGET` (INT32); Get `RESULTS` (BACKEND_DESCRIPTOR×n; n = 0 queries the count) | none; results are `ConfigRecord`s | null; each result: the engine's default `ENGINECFG` |
 | `EngineFallbackList_v8` | as heuristics, FALLBACK mode | none; results are `ConfigRecord`s | null; each result as heuristics |
 | `Engine_v8` | `ENGINE`, `KNOB_INFO` ×`CUDNN_KNOB_TYPE_COUNTS`: `OPERATION_GRAPH`, `GLOBAL_INDEX` (INT64); Get `KNOB_INFO`; Get `KNOB_INFO_TYPE` (KNOB_TYPE), `MAXIMUM_VALUE`, `MINIMUM_VALUE`, `STRIDE` (INT64) | `EngineRecord`: graph, dense index, engine ID | the graph's `ENGINE` for that ID |
@@ -515,7 +515,7 @@ keeping upstream's check order and statuses, or replace upstream logic as the ro
 
 | Header | Rewritten | Removed | Verbatim |
 |---|---|---|---|
-| `cudnn_backend_base.h` | `OpaqueBackendPointer`: holds a record and a non-owning view of its hipDNN descriptor; creates and destroys nothing. Its public members are upstream's; the record and type are private, reached only through `detail::v8::RecordAccess`, and the record constructor takes a key only `RecordAccess` creates. `BackendDescriptor::get_raw_desc` returns null when `build()` failed before creating the pointer (upstream dereferences it) | — | the rest of `BackendDescriptor`, `ManagedOpaqueDescriptor`, `make_shared_backend_pointer` (returns a pointer with no descriptor). Shim-own: `detail::v8::RecordAccess`, `makeManaged`, `recordOf` |
+| `cudnn_backend_base.h` | `OpaqueBackendPointer`: holds a record and a non-owning view of its hipDNN descriptor; creates and destroys nothing. Its public members are upstream's plus a record constructor that takes a key only `detail::v8::RecordAccess` creates; the record and type are private, reached only through `RecordAccess`. `BackendDescriptor::get_raw_desc` returns null when `build()` failed before creating the pointer (upstream dereferences it) | — | the rest of `BackendDescriptor`, `ManagedOpaqueDescriptor`, `make_shared_backend_pointer` (returns a pointer with no descriptor). Shim-own: `detail::v8::RecordAccess`, `makeManaged`, `recordOf` |
 | `cudnn_frontend_shim.h` (subset) | `get_backend_version` (returns `CUDNN_VERSION`; in `detail/frontend_types.h`); `NV_CUDNN_FE_DYNAMIC_CHECK_*` (empty) | `detail::create_descriptor`, `destroy_descriptor`, `set_attribute`, `get_attribute`, `finalize`; the `NV_FE_CALL_TO_*` macros and dynamic loading; the CUDA wrappers; `causal_conv1d_*`; `get_execution_plan_workspace_size`; `populate_cuda_graph`, `update_cuda_graph`; the v7 filter and reorder helpers | `create_handle`, `destroy_handle`, `get_compiled_version`, `convert_version_to_str`, `get_backend_version_string`, `execute` (calls `cudnnBackendExecute`), `get_error_string`, `get_last_error_string`, `get_last_error_string_`, `set_stream`, `get_stream`. Shim-own: `PlanTimer`, `deviceSynchronize`, `profilingStatus` (logs a failed profiling call's hipDNN message at INFO and clears it) |
 | `cudnn_frontend_Tensor.h` | `TensorBuilder_v8::build` (prechecks before the record, in upstream order; private `failPrecheck`; then the shared `detail::v8::buildDescriptor`, which also resets status and error on success); `setConstValue` and `setRaggedOffset` store into the builder, which `build()` copies from, so a fixed builder can build again | the `CUDNN_VERSION >= 8900` / `92200` gates; `Tensor_v8::hasConstValue` and `constValueBytes` (the builder holds the constant) | the rest of `Tensor_v8`, the other setters, `cloneFrom`, special members, aliases |
 | `cudnn_frontend_ConvDesc.h`, `_PointWiseDesc.h`, `_MatMulDesc.h`, `_ReductionDesc.h`, `_Resample.h`, `_Rng.h` | `<X>Builder_v8::build` through the shared `detail::v8::buildDescriptor` (also resets status and error on success); `RngDesc_v8::getUniformDistMin` (returns the uniform minimum; upstream returns the normal standard deviation) | version gates around plumbing only (`MatMulDesc` ≥ 8900, `ReductionDesc` ≥ 91100 branch, `Rng` ≥ 8700) | the rest of the `<X>_v8` class, every setter, special members, aliases |
@@ -626,7 +626,7 @@ Sources, each pinned to one commit (line numbers below refer to these exact file
 | Quantized ops | `quantized/cudnn/{Conv,Linear,BinaryOps}.cpp` and `utils.h` use v0.x builders; `Pooling.cpp` is legacy v7 API only | §4.3 |
 
 Under ROCm, PyTorch's own build uses MIOpen sources, so the shim targets hipified builds of these CUDA
-files (RFC 0021 Phase 10).
+files (RFC 0022 Phase 10).
 
 ### 4.2 `Conv_v8.cpp` surface
 
@@ -721,7 +721,7 @@ changes to the set of enumerated engines (provider added, removed or upgraded, d
 
 CUDA-only dependencies (all under `upstream:samples/legacy_samples/`):
 
-| Dependency | Where | Harness treatment (RFC 0021 Phase 9) |
+| Dependency | Where | Harness treatment (RFC 0022 Phase 9) |
 |---|---|---|
 | `cuda_runtime.h` | `conv_sample.h:30`, `fusion_sample.h:30`, `fp8_sample.h:30`, `utils/helpers.h:29` | existing overlay |
 | `driver_types.h`, `cuda_fp16.h`, `cuda_runtime_api.h` | `utils/fp16_emu.h:26-30` | shared overlay; adds `driver_types.h` |
@@ -738,7 +738,7 @@ CUDA-only dependencies (all under `upstream:samples/legacy_samples/`):
 Caption: `upstream:samples/legacy_samples/test_list.cpp`. Driver functions are in `conv_sample.cpp`
 (C), `fusion_sample.cpp` (F), `fp8_sample.cpp` (P) or `norm_samples.cpp` (N).
 
-Tiers (RFC 0021 Phase 9): each case runs in its own process and is judged against its manifest
+Tiers (RFC 0022 Phase 9): each case runs in its own process and is judged against its manifest
 entry. **RUN_CLEAN** must end `ran-clean`; **VACUOUS** must not crash or fail to run, and is reported
 Skipped because it never reaches the shim; **XFAIL_RUN** must end with a
 listed outcome and print that outcome's anchor. Outcomes below are for a gfx1151 Windows host with

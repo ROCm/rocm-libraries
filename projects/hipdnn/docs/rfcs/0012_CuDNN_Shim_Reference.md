@@ -424,7 +424,7 @@ defaults match upstream (logging off) — no decision needed.
 ## 6. The `<cudnn.h>` / v0.x umbrella-header problem
 
 The shim provides **source-level** compatibility for the cuDNN frontend v9
-graph API (this RFC) and the v0.x builders ([RFC 0021](./0021_CuDNN_V8_Shim.md)).
+graph API (this RFC) and the v0.x builders ([RFC 0022](./0022_CuDNN_V8_Shim.md)).
 Explicitly out of scope:
 
 - **ABI compatibility**: a `.so`/`.dll` built against real cuDNN cannot be
@@ -470,7 +470,7 @@ Consequences:
 
 The shim's `cudnn_frontend.h` includes `cudnn.h` and, as upstream, the
 v0.x headers and the `_v8` aliases, which
-[RFC 0021](./0021_CuDNN_V8_Shim.md) designs. This RFC covers the part of
+[RFC 0022](./0022_CuDNN_V8_Shim.md) designs. This RFC covers the part of
 `cudnn.h` the v9 graph API needs.
 
 `cudnn.h` covers the C-API **types** the v9 method signatures reference:
@@ -493,7 +493,7 @@ outside the frontend and to build the mirrored samples (§8.3):
 
 The remainder of the cuDNN C library (convolution descriptor APIs, the
 backend descriptor API, etc.) stays out of scope. The v0.x C++ surface,
-including `cudnn_frontend::Tensor` (`Tensor_v8`, as upstream), is RFC 0021's.
+including `cudnn_frontend::Tensor` (`Tensor_v8`, as upstream), is RFC 0022's.
 
 ### Options considered for v0.x source compatibility
 
@@ -510,5 +510,5 @@ including `cudnn_frontend::Tensor` (`Tensor_v8`, as upstream), is RFC 0021's.
   separate `<cudnn_frontend_v8.h>` (stubs). Functionally the same as (A)
   but with explicit consumer opt-in.
 
-[RFC 0021](./0021_CuDNN_V8_Shim.md) takes a functional variant of (A): the
+[RFC 0022](./0022_CuDNN_V8_Shim.md) takes a functional variant of (A): the
 v0.x builders run on hipDNN and are exposed through the existing umbrella.

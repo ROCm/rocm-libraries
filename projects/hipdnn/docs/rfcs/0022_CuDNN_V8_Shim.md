@@ -1,19 +1,18 @@
-# RFC: cuDNN v8 shim for hipDNN
+# RFC 0022: cuDNN v8 shim for hipDNN
 
 - **Authors**: Mitch Ousdahl
 - **Status**: In progress
 - **Status notes**: The v0.x builders, their `detail/v8` core and the C types, `cudnnBackendExecute`
   and `cudnnGetLastErrorString` ship in `frontend/include/hipdnn_compatibility/cudnn/` behind
   `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` (default `OFF`, #13970), with v8 GPU samples, the legacy-sample
-  corpus and a local PyTorch compile probe. The backend descriptor C API is not provided, and no
-  PyTorch build runs on the shim end to end. Plain ReLU after a matmul needs the hipBLASLt provider
-  change of #14363, and CI does not yet run the matmul, layer-norm and resample samples numerically
-  (see the Roadmap).
-- **Last verified**: 2026-10-27 against `develop` (ef0a22719e9)
+  corpus and a local PyTorch compile probe. The backend descriptor C API is not provided, no PyTorch
+  build runs on the shim end to end, and CI does not yet run the matmul, layer-norm and resample
+  samples numerically (see the Roadmap).
+- **Last verified**: 2026-10-30 against `develop` (d730d16216b)
 - **Follows**: [RFC 0012: cuDNN shim for hipDNN](./0012_CuDNN_Shim.md) §9
 - **Amends**: RFC 0012 §1 ("Not"), §4.2 (v9-only translation units), §4.3 (aliasing of
   `DescriptorType_t`, `NormMode_t`, `RngDistribution_t`), §4.7 (v9-only umbrella)
-- **Supporting reference**: [RFC 0021 Supporting Reference](./0021_CuDNN_V8_Shim_Reference.md) —
+- **Supporting reference**: [RFC 0022 Supporting Reference](./0022_CuDNN_V8_Shim_Reference.md) —
   identifier mapping, class inventory, per-op rules, consumer surfaces, legacy samples, version gates
 
 ## Table of Contents
@@ -42,7 +41,7 @@ frontend **v0.x builder API** (`TensorBuilder`, `OperationBuilder`, `ExecutionPl
 - PaddlePaddle's convolution path is v0.x.
 
 None of these compile against the v9 shim. See
-[Reference §4](./0021_CuDNN_V8_Shim_Reference.md#4-consumer-surfaces).
+[Reference §4](./0022_CuDNN_V8_Shim_Reference.md#4-consumer-surfaces).
 
 ### What
 
@@ -155,21 +154,22 @@ descriptor types are aliased, so plans and variant packs pass to hipDNN unchange
 Each builder's `build()` hands its values to the core, which applies the checks upstream's backend
 would apply at finalize, then lowers to hipDNN. Builders keep upstream's public API and every member
 that did not talk to the backend; the members that did are rewritten
-([Reference §2.6](./0021_CuDNN_V8_Shim_Reference.md#26-ported-headers-rewritten-and-verbatim-members)).
+([Reference §2.6](./0022_CuDNN_V8_Shim_Reference.md#26-ported-headers-rewritten-and-verbatim-members)).
 
 ### 3.3 Objects and ownership
 
 - Every built object holds an immutable record in its `ManagedOpaqueDescriptor`: tensor, parameter
   descriptor, operation, graph, engine, engine config, plan or variant pack. `OpaqueBackendPointer`
   pairs that record with a non-owning view of the hipDNN descriptor the record owns;
-  `get_raw_desc()` returns the view. `OpaqueBackendPointer` has upstream's public members only: the
-  record and the descriptor type are private, and the core reaches them through
-  `detail::v8::RecordAccess`.
+  `get_raw_desc()` returns the view. `OpaqueBackendPointer` adds one public member to upstream's: a
+  constructor that takes the record together with a key only `detail::v8::RecordAccess` creates, so
+  code outside the core cannot call it. The record and the descriptor type are private, and the core
+  reaches them through `detail::v8::RecordAccess`.
 - The view is null for tensors, parameter descriptors, operations, heuristics and fallback lists, and
   for any object whose `build()` failed. A graph shows its finalized hipDNN `OPERATIONGRAPH`, an
   engine and a knob-free config the graph's default `ENGINE` and `ENGINECFG`, a config with knob
   choices its own `ENGINECFG`, a plan its `EXECUTION_PLAN`, a variant pack its `VARIANT_PACK`
-  ([Reference §2.5](./0021_CuDNN_V8_Shim_Reference.md#25-class--record--raw-descriptor)).
+  ([Reference §2.5](./0022_CuDNN_V8_Shim_Reference.md#25-class--record--raw-descriptor)).
 - Records are shared through `shared_ptr`, and hipDNN's own reference counts (plan → config → engine →
   graph) keep a plan valid after its graph, heuristics and config are destroyed. Copies of an
   `ExecutionPlan` share one record.
@@ -321,7 +321,7 @@ runs no heuristics and needs no GPU.
   `ManagedOpaqueDescriptor` and a shim slot enum instead of a raw descriptor and an attribute name
   (`check_rule` and `check_errata` match upstream). Members
   that set or got backend attributes call the core instead, with upstream's check order and statuses;
-  [Reference §2.6](./0021_CuDNN_V8_Shim_Reference.md#26-ported-headers-rewritten-and-verbatim-members)
+  [Reference §2.6](./0022_CuDNN_V8_Shim_Reference.md#26-ported-headers-rewritten-and-verbatim-members)
   lists them per header for upstream re-diffs. Other edits:
   - namespace and include paths;
   - upstream's global `json` alias is declared in the shim namespace as `cudnn_frontend::json`, so it
@@ -412,7 +412,7 @@ runs no heuristics and needs no GPU.
 | Lifetime bugs | Records own hipDNN descriptors and objects hold views; tests destroy everything but the plan and execute it; ASan run |
 | Core exceptions escaping builders (PyTorch catches only `cudnnException`) | `guarded` at every public entry; tested in the throwing and the `NV_CUDNN_DISABLE_EXCEPTION` binaries |
 | A plan executed on another thread's handle (PyTorch's quantized ops cache plans process-wide) | Runs on that handle, pinned by unit and integration tests; documented in `KNOWN_DIVERGENCES.md` |
-| Plain ReLU and ReLU6 after a matmul need the hipBLASLt provider to read an unset lower clip as 0 (§9 R9) | The provider change ships separately (rocm-libraries#14363); until it is installed those graphs have no hipBLASLt engine |
+| Plain ReLU and ReLU6 after a matmul need the hipBLASLt provider to read an unset lower clip as 0 (§9 R9) | The hipBLASLt provider does so since rocm-libraries#14363; with an older provider those graphs have no hipBLASLt engine |
 | A plan executed on a handle for another device | The shim does not check it; hipDNN's `hipdnnBackendExecute` rejects it with `BAD_PARAM` before any provider call (rocm-libraries#14364). PyTorch keys every v8 plan cache on the device, so it never does this |
 | Upstream drift | Pin `static_assert`; re-diff in RFC 0012 §6.1's quarterly upstream review, guided by the Reference §2.6 member list |
 | `hipdnn_frontend` internals change | Same tree and version; GPU-free lowering tests catch breakage |
@@ -458,7 +458,7 @@ Each phase builds and is tested on its own. Each adds its own `KNOWN_DIVERGENCES
 | Integration, test plugins, GPU | Engine enumeration, plans, execute (including on another handle), knobs, multiple engines, plan search |
 | GPU samples (`samples/cudnn_shim/*V8.cpp`; MIOpen, hipBLASLt, hip-kernel) | Numerical results against a CPU reference for conv fprop / dgrad / wgrad, conv + bias + ReLU, pointwise ReLU, matmul + bias + activation, batch norm forward training and backward, layer norm forward and backward, and resample forward and backward. Each test fails when fewer variants run than its `--require-ran` floor or when a variant named by `--require-variant` (the fp32 NCHW variants of every sample with a non-zero floor) does not run. Variants with no engine are skipped: matmul (hipBLASLt only; none on gfx115x under Windows), layer norm and resample (hip-kernel-provider only), `CUDNN_CONVOLUTION` mode and asymmetric padding (MIOpen rejects them). The reduction sample is built but no provider runs reduction, so it always reports Skipped. TheRock's hipdnn-samples job loads only the MIOpen provider, so CI skips matmul, layer norm and resample (their floors are 0) until a TheRock change that loads the hipBLASLt and hip-kernel providers reaches this repository's pin; until then manual gfx942 runs cover them. Overhead (§2) is reported under ctest label `perf`. The v8 samples reject `--engine-id` and `--engine-name` |
 | v9 sample corpus | Existing v9 behavior unchanged |
-| NVIDIA legacy samples | Source compatibility; each case is judged against its manifest tier: `RUN_CLEAN`, `XFAIL_RUN`, or `VACUOUS`, which must run without crashing and is reported as skipped ([Reference §5](./0021_CuDNN_V8_Shim_Reference.md#5-legacy-sample-catalogue)). The corpus is pinned by commit: configure fails with E22 when a git checkout is at any other commit; a supplied corpus that is not a readable git checkout only warns, and the E20 version check still applies |
+| NVIDIA legacy samples | Source compatibility; each case is judged against its manifest tier: `RUN_CLEAN`, `XFAIL_RUN`, or `VACUOUS`, which must run without crashing and is reported as skipped ([Reference §5](./0022_CuDNN_V8_Shim_Reference.md#5-legacy-sample-catalogue)). The corpus is pinned by commit: configure fails with E22 when a git checkout is at any other commit; a supplied corpus that is not a readable git checkout only warns, and the E20 version check still applies |
 | PyTorch compile check | `Conv_v8.cpp` and the quantized cuDNN files compile with the PyTorch tree's flags, `AT_CUDNN_ENABLED()` forced on and two header substitutions: `ATen/cudnn/Descriptors.h` truncated before its v7 descriptor wrappers (they need the v7 C API the shim lacks) and `ATen/cudnn/Handle.h` replaced by the hipDNN integration header |
 
 ## 8. Future Considerations
@@ -474,10 +474,10 @@ Each phase builds and is tested on its own. Each adds its own `KNOWN_DIVERGENCES
 
 | # | Decision |
 |---|---|
-| R1 | No backend descriptor C API except `cudnnBackendExecute`: the builders reach hipDNN through the core. The only raw C caller found is XLA's autotune persistence, which reads plans and engine configs through `cudnnBackendCreateDescriptor` / `GetAttribute` / `DestroyDescriptor` (`cuda_dnn.cc` L5081-5199 at the [Reference §4](./0021_CuDNN_V8_Shim_Reference.md#4-consumer-surfaces) commit); it does not compile. PyTorch's, Paddle's and XLA's builder code is source compatible |
+| R1 | No backend descriptor C API except `cudnnBackendExecute`: the builders reach hipDNN through the core. The only raw C caller found is XLA's autotune persistence, which reads plans and engine configs through `cudnnBackendCreateDescriptor` / `GetAttribute` / `DestroyDescriptor` (`cuda_dnn.cc` L5081-5199 at the [Reference §4](./0022_CuDNN_V8_Shim_Reference.md#4-consumer-surfaces) commit); it does not compile. PyTorch's, Paddle's and XLA's builder code is source compatible |
 | R2 | `cudnnBackendExecute` is a passthrough: hipDNN runs a plan on whichever handle it is given, including one other than its graph's, provided the handle is on the plan's device. Pinned by unit and integration tests |
 | R3 | NVIDIA's legacy "Tensor creation comparison" calls the raw API. A harness-only `tests/cudnn_samples/legacy/overlay/cudnn.h` declares the calls it makes as `NOT_SUPPORTED` stubs, plus the five tensor attribute names and two attribute types it passes; the case is an expected failure. The stub is never installed under `include/` |
-| R4 | Identifiers the shim does not use are left out by whole function or whole enum only: the five descriptor functions, `cudnnBackendAttributeName_t`, `cudnnBackendAttributeType_t`, and `cudnnMoeGroupedMatmulMode_t` (named only by upstream's enum converters, which the shim omits for it). None of them was declared on `develop`, so relative to `develop` the change only adds API, as RFC 0012 §4.8 requires; `hipdnn_frontend` takes a minor version bump to 0.5.0 |
+| R4 | Identifiers are left out relative to the extracted list (§3.7). An excluded function or enum is left out whole: among them the five descriptor functions, `cudnnBackendAttributeName_t`, `cudnnBackendAttributeType_t`, and `cudnnMoeGroupedMatmulMode_t` (named only by upstream's enum converters, which the shim omits for it). An enumerator none of the sources names, such as `CUDNN_NOT_PROPAGATE_NAN`, is not declared. None of them was declared on `develop`, so relative to `develop` the change only adds API, as RFC 0012 §4.8 requires; `hipdnn_frontend` takes a minor version bump to 0.5.0 |
 | R5 | Builder error messages name the builder and the rule, not attribute enums, so they differ from cuDNN's; the legacy-corpus anchors and the tests' message checks pin the shim's messages |
 | R6 | `cudnnBackendDescriptorType_t` stays whole: PyTorch's plan-cache key, Paddle's template argument and `OperationBuilder`'s constructor argument |
 | R7 | `cudnnGetLastErrorString` is hipDNN's; see §3.6 |
