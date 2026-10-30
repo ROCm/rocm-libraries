@@ -31,7 +31,7 @@
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/for_each.h>
 
-#include <cuda/std/__cccl/memory_wrapper.h>
+#include _THRUST_STD_INCLUDE(__cccl/memory_wrapper.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
