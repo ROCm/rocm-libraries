@@ -647,9 +647,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int dsTotalThisRegion_ = 0;
     int dsIssuedThisRegion_ = 0;
     int wmmaTotalThisRegion_ = 0;
-    // Credit-wait cycles charged to DS placement in the current WMMA.
-    // Kept separate from coIssueCyclePos_, the real hardware/hazard timeline.
-    int dsSchedulingBudgetUsed_ = 0;
 
     // (A) RAW data-ready gate. Per reg index: remaining modeled latency until a
     // producer's result is safe to consume (e.g. ds_load LDS->VGPR, 56 cyc). Any
@@ -816,7 +813,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     //  ValuIssue - the same for a VALU, which can only issue in the window's co-issue slots.
     enum class TimeKind { Elapsed, Issue, ValuIssue };
     void advanceTime(int cycles, TimeKind kind);
-    void chargeDsCreditWait(int wait);
     int computeValuAdvanceCycles(int issueCycles) const;
     void updateWMMAStatus(DAGNode* node);
     void stampDataReady(const StinkyInstruction& inst, int extraDelay = 0);
@@ -1148,12 +1144,6 @@ int CDNA5ReadyQueue::freeCoIssueSpace() const {
     for (int pos = coIssueCyclePos_; pos < activeWmmaLatency_; ++pos)
         if (isBlockedCycle(pos)) return pos - coIssueCyclePos_;
     return activeWmmaLatency_ - coIssueCyclePos_;
-}
-
-// A ds_load that waits for a free credit charges the wait to the ds scheduling budget of the
-// current WMMA window. It is not elapsed time: the credit queue does not age.
-void CDNA5ReadyQueue::chargeDsCreditWait(int wait) {
-    dsSchedulingBudgetUsed_ += wait;
 }
 
 // Before the region's first WMMA there is no co-issue window, but the most-ready
@@ -1583,7 +1573,6 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     }
     nonWmmaFillsSinceActiveWmma_ = 0;  // new window: restart WMMA->WMMA fill count
     fillsThisWindow_ = 0;
-    dsSchedulingBudgetUsed_ = 0;
     // Advance by WMMA issue cycles after opening a new timeline window.
     // This keeps coIssueCyclePos_ aligned with elapsed cycles right after WMMA
     // issue.
@@ -1627,7 +1616,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     bool dsHeldBySpread = false;
 
     // Ordering, lowest key first: (1) genuinely free work; (2) a ds_load waiting
-    // for a credit that fits the active WMMA's scheduling budget; (3) work that
+    // for a credit that fits what is left of the active WMMA's window; (3) work that
     // still needs a real RAW/hazard stall. Within a tier, global_read beats
     // other non-WMMA kinds, then smallest id wins.
     // Producer-side hazard hoisting is handled separately by
@@ -1658,7 +1647,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     int dsCreditWait = 0;
     if (dsBaseOk) {
         dsCreditWait = dsReadInflight_.full() ? std::max(1, dsReadInflight_.minResidual()) : 0;
-        const int schedulingPos = coIssueCyclePos_ + dsSchedulingBudgetUsed_;
+        const int schedulingPos = coIssueCyclePos_;
         int schedulingSpace = activeWmmaLatency_ - schedulingPos;
         for (int pos = schedulingPos; pos < activeWmmaLatency_; ++pos) {
             if (isBlockedCycle(pos)) {
@@ -2619,14 +2608,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                 PASS_DEBUG(std::cerr << "[CDNA5 pickOne] NonWmmaFill picked dagId="
                                      << smallestPickable->id << " kind=" << pickKind
                                      << " wait=" << pickWait << " inWindow=" << inWindow << "\n");
-                // A ds credit wait is pacing-only; RAW/hazard waits are genuine elapsed stalls.
-                if (pickWait > 0) {
-                    if (pickKind == kLocalRead) {
-                        chargeDsCreditWait(pickWait);
-                    } else {
-                        advanceTime(pickWait, TimeKind::Elapsed);
-                    }
-                }
+                // Every wait (ds credit, RAW, hazard) is elapsed time.
+                if (pickWait > 0) advanceTime(pickWait, TimeKind::Elapsed);
                 return rememberPick(popNonWmma(smallestPickable, pickKind));
             }
             if (!inWindow) break;
@@ -2796,7 +2779,6 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     openBarrierIds_.clear();
     nonWmmaFillsSinceActiveWmma_ = 0;
     fillsThisWindow_ = 0;
-    dsSchedulingBudgetUsed_ = 0;
     globalReadInflight_ = InFlightQueue(globalReadQueueDepth());
     dsReadInflight_ = InFlightQueue(dsReadQueueDepth());
     currentBB_ = (regionStart != regionEnd) ? regionStart->getParent() : nullptr;
