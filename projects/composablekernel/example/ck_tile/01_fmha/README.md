@@ -56,7 +56,10 @@ placement. Other D64/V64 configurations retain the 128-by-64 tile and read-first
 placement. Both D64 variants use a compiler minimum-waves-per-EU hint of three.
 The launch API retains the historical `MinBlockPerCu` name; this hint does not
 establish achieved workgroup residency. Aligned batch K lengths use unpadded
-sequence traits; tails and group mode use padded traits. D64 uses compiler-scheduled
+sequence traits; tails and group mode use padded traits. Both D64 widths emit
+these sequence specializations for simplified masks and generic dense/causal masks.
+Generic finite-window N128 candidates are excluded because paired measurements
+regress; their N64 candidates remain available. D64 uses compiler-scheduled
 softmax maximum chains, preserving read counts and stage-tail waits. Generated D64/D128/D192
 scheduled sources enable expert scheduling mode. D128 uses a
 128-by-128 Q/K sequence tile. D192 tries a 128-by-128 tile when average K length
