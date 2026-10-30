@@ -437,6 +437,9 @@ def mergeLogic(oriData: dict[str, Any], incData: dict[str, Any], forceMerge, noE
 
     solutionPool = deepcopy(oriSolutions)
     solDict = {sol["SolutionNameMin"]: sol for sol in oriSolutions}
+    # Claim every copied base solution into the output. A unique non-zero UID
+    # is kept. A missing, zero, malformed, or duplicate base UID is replaced
+    # here and is not written back to the input file.
     seenUids: set[str] = set()
     for pooled in solutionPool:
         claim_solution_uid(pooled, seenUids)

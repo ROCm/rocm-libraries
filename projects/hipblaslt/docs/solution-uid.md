@@ -10,8 +10,13 @@ Runtime selection by UID is a later migration step.
 
 Geko assigns a fresh UID to solutions copied into `final_libs` or `full_libs`,
 including copies from Origami. These are new records, even when they describe
-the same GPU kernel. When `TensileMergeLibrary` reuses an existing Equality
-solution with the same `SolutionNameMin`, it retains the Equality record's UID.
+the same GPU kernel. `TensileMergeLibrary` matches `SolutionNameMin`. A matching
+name keeps the pooled Equality solution and ignores the incoming UID. The merge
+also claims a UID for every solution copied from the base file into the output.
+A base UID that is already unique and non-zero is kept. A base UID that is
+missing, zero, malformed, or duplicated inside that base file is replaced in
+the merged file. The input file is left unchanged unless the output path is
+that file.
 
 ## Solution indices and the UID
 
@@ -79,8 +84,12 @@ python3 -m tensilelite.TensileGenerateUID path/to/logic.yaml --index 5 --inplace
 `--inplace`, the command prints the new canonical `0u` UID without modifying
 the file.
 
-One Tensile process, one Geko generation, and one library merge each replace a
-zero, malformed, or colliding UID with a new one inside that run. Uniqueness
-across the shipped logic tree remains the ``library-uniqueness`` check, and
-`TensileCreateLibrary` fails when one architecture's assembled library maps a
-UID to two solution indices.
+One Tensile process and one Geko generation each replace a zero, malformed, or
+colliding UID in the files that run writes. A missing YAML field is not written
+back there: library generation assigns a UID for that build only.
+`TensileMergeLibrary` writes its output, and that output replaces a missing,
+zero, malformed, or colliding UID on every solution it contains, including
+solutions copied from the base file. A unique non-zero base UID is kept.
+Uniqueness across the shipped logic tree remains the ``library-uniqueness``
+check, and `TensileCreateLibrary` fails when one architecture's assembled
+library maps a UID to two solution indices.
