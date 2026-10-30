@@ -231,22 +231,50 @@ void rocsolver_larf_getMemorySize(const rocblas_side side,
     // the slower general kernel runs instead. The requirement is appended to Abyx, past
     // the order * batch_count elements holding W, so that the callers of this function
     // do not have to thread an additional buffer through; rocsolver_larf_template does
-    // the split.
-    //
-    // The factorizations that call larf do so over a shrinking trailing submatrix while
-    // sizing this workspace once from the full (m, n), and the rocBLAS requirement is not
-    // monotone in m and n, so one of those smaller calls can need scratch where the full
-    // problem needs none. Bound the requirement over every smaller call rather than
-    // querying (m, n) alone.
+    // the split. It covers this (m, n) only: callers that run larf on a sequence of
+    // shapes use rocsolver_larf_getMemorySize_seq.
     rocblas_operation trans = rocblas_operation_none;
     if(side == rocblas_side_left)
         trans = rocblas_is_complex<T> ? rocblas_operation_conjugate_transpose
                                       : rocblas_operation_transpose;
 
     size_t size_gemv_work;
-    rocblasCall_gemv_mem_max<BATCHED, T>(trans, rocblas_int(m), rocblas_int(n),
-                                         rocblas_int(batch_count), &size_gemv_work);
+    rocblasCall_gemv_mem<BATCHED, T>(trans, rocblas_int(m), rocblas_int(n),
+                                     rocblas_int(batch_count), &size_gemv_work);
     *size_Abyx += size_gemv_work;
+}
+
+/** Workspace for a sequence of larf calls on one side, where shape(j) gives the (m, n) of
+    call j for j = 0 to count - 1. The rocBLAS gemv scratch is not monotone in m and n, so
+    the size of the first or largest call is not enough; each shape the caller will use is
+    queried instead, which costs O(count).
+
+    Callers that are themselves run on a smaller matrix than they were sized for (geqr2
+    inside geqrf, for example) rely on the requirement not decreasing as the dimension that
+    shrinks grows: m for a left larf, whose gemv is transposed, and n for a right larf.
+    clients/gtest/unit/gemv_mem_gtest.cpp checks this. **/
+template <bool BATCHED, typename T, typename I, typename F>
+void rocsolver_larf_getMemorySize_seq(const rocblas_side side,
+                                      const I count,
+                                      const I batch_count,
+                                      F shape,
+                                      size_t* size_scalars,
+                                      size_t* size_Abyx,
+                                      size_t* size_workArr)
+{
+    *size_scalars = 0;
+    *size_Abyx = 0;
+    *size_workArr = 0;
+
+    for(I j = 0; j < count; ++j)
+    {
+        const auto [mj, nj] = shape(j);
+        size_t s, a, w;
+        rocsolver_larf_getMemorySize<BATCHED, T>(side, I(mj), I(nj), batch_count, &s, &a, &w);
+        *size_scalars = std::max(*size_scalars, s);
+        *size_Abyx = std::max(*size_Abyx, a);
+        *size_workArr = std::max(*size_workArr, w);
+    }
 }
 
 template <typename T, typename I, typename U>
