@@ -4803,6 +4803,100 @@ def cases():
             ),
         )
 
+    # --- conv_dgrad_{patch,smallc}_wmma: wave32 WMMA stem dgrad (gfx1250) ---
+    # Patch embeddings as one GEMM with a pixel-shuffle TDM store, and small-C
+    # stems as a GEMM over the flattened filter plus an LDS overlap-add. Every
+    # case needs llvm23 (TDM), so the other flavors record them as expected
+    # failures. The C++ twins are gated by
+    # library/tests/parity/conv_dgrad_{patch,smallc}_wmma_emit.*.
+    def build_dgrad_stem_wmma_case(kind, dtype, K, S, PAD, C, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            if kind == "patch":
+                from kernels.common.conv_dgrad_patch_wmma import (
+                    DgradPatchWmmaSpec as Spec,
+                    build_dgrad_patch_wmma as build,
+                )
+            else:
+                from kernels.common.conv_dgrad_smallc_wmma import (
+                    DgradSmallcWmmaSpec as Spec,
+                    build_dgrad_smallc_wmma as build,
+                )
+            p = DirectConvProblem(
+                N=2,
+                H=64,
+                W=64,
+                groups=1,
+                cpg=C,
+                kpg=64,
+                KH=K,
+                KW=K,
+                PAD=PAD,
+                stride=S,
+                dtype=dtype,
+            )
+            return build(Spec(problem=p, **spec_kw), arch="gfx1250")
+
+        return _build
+
+    for _kind, _case_id, _dtype, _conv, _over in (
+        (
+            "patch",
+            "bf16_p16_rb8",
+            "bf16",
+            (16, 16, 0, 3),
+            dict(waves_c=4, waves_p=2, tiles_c=6, tiles_p=4, tile_w=16, r_blk=8),
+        ),
+        (
+            "patch",
+            "fp16_p4_pf",
+            "fp16",
+            (4, 4, 0, 3),
+            dict(
+                waves_c=3,
+                waves_p=1,
+                tiles_c=1,
+                tiles_p=8,
+                tile_w=16,
+                r_blk=4,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+        ),
+        (
+            "smallc",
+            "bf16_3x3s1_c4_pf",
+            "bf16",
+            (3, 1, 1, 4),
+            dict(
+                waves_c=1,
+                waves_p=3,
+                tiles_c=3,
+                tiles_p=8,
+                out_h=8,
+                out_w=32,
+                ck=64,
+                prefetch=True,
+                sched="iterative-ilp",
+            ),
+        ),
+        (
+            "smallc",
+            "fp16_7x7s2_c3",
+            "fp16",
+            (7, 2, 3, 3),
+            dict(waves_c=2, waves_p=4, tiles_c=5, tiles_p=6, out_h=32, out_w=32),
+        ),
+    ):
+        _fam = f"conv_dgrad_{_kind}_wmma"
+        add(
+            _fam,
+            f"{_fam}/gfx1250/{_case_id}",
+            "gfx1250",
+            build_dgrad_stem_wmma_case(_kind, _dtype, *_conv, **_over),
+        )
+
     # --- conv_direct_fwd_small{c,k}_wmma: wave32 WMMA forward of tiny channel
     # counts (gfx1250). TDM window / channel-chunk staging; every case needs
     # llvm23 (TDM), so the other flavors record them as expected failures. The
