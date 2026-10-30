@@ -289,7 +289,7 @@ INSTANTIATE_TEST_SUITE_P(weekly_lapack,
                                  ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(weekly_lapack,
-                         HEGVD,
+                         HEGVD_LARGE_BATCH,
                          Combine(ValuesIn(large_batch_size_range),
                                  ValuesIn(type_range),
                                  ValuesIn(hetrd_stage_range)));
