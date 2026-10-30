@@ -159,4 +159,6 @@ def build_unified_attention_2d_fastkv_register_p(
         raise ValueError("fastKV register-P experiment requires transposed R4")
     if spec.kv_storage_dtype is not None:
         raise ValueError("fastKV register-P experiment does not support FP8 KV cache")
+    if spec.use_additive_bias:
+        raise ValueError("fastKV register-P experiment does not support additive bias")
     return build_unified_attention_2d_tiled(_FastKvRegisterPProxy(spec), arch=arch)

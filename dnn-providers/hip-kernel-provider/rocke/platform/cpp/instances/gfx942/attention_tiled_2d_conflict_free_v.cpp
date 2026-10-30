@@ -239,9 +239,10 @@ rocke_value_t* rocke_gfx942_attn2d_load_token_row_pair(rocke_gfx942_attn2d_build
     if(ctx->CFV_STORE_SEPOFF)
     {
         /* Separate descriptor call for (t_row, d0+1) instead of voff+1. */
-        rocke_value_t* linear1 = rocke_b_add(b,
-                                             rocke_b_mul(b, t_row, rocke_b_const_i32(b, ctx->HD)),
-                                             rocke_b_add(b, d0, rocke_b_const_i32(b, 1)));
+        /* Bound in Python's left-to-right order. */
+        rocke_value_t* row_base = rocke_b_mul(b, t_row, rocke_b_const_i32(b, ctx->HD));
+        rocke_value_t* d1 = rocke_b_add(b, d0, rocke_b_const_i32(b, 1));
+        rocke_value_t* linear1 = rocke_b_add(b, row_base, d1);
         rocke_value_t* valid1 = NULL;
         rocke_value_t* voff1
             = rocke__paged_kv_offset(ctx, kv_tile_idx, linear1, ctx->kv_head_idx, &valid1);

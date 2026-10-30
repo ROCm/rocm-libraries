@@ -222,6 +222,18 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_k_single_buffer = true;
         s->kv_cache_policy = "all";
         break;
+    case 13:
+        /* Additive bias on gfx942; both engines reject it (BOTH_REJECTED). */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = true;
+        s->sliding_window = 2048;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        break;
     default:
         return -1;
     }

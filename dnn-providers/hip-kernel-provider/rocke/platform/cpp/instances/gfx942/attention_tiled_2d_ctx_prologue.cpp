@@ -228,6 +228,20 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
                  "ring schedule (not yet ported)");
         return false;
     }
+    /* This shared narrow/default-geometry driver has no additive-bias score
+     * site (that lives only in the gfx950-specific ctx-init/driver). Reject
+     * rather than silently build an ordinary kernel under a biased name --
+     * the real check this mirrors (`rocke_attention_tiled_2d_spec_validate`,
+     * gfx942/attention_tiled_2d.cpp) is unreachable from this build path. */
+    if(spec->use_additive_bias)
+    {
+        b->status = ROCKE_ERR_VALUE;
+        snprintf(b->err,
+                 ROCKE_ERR_MSG_CAP,
+                 "use_additive_bias: the narrow/default tiled-2D driver does not "
+                 "emit additive bias");
+        return false;
+    }
     ctx->K_SLICED_RING = K_SLICED_RING;
     ctx->K_SLICED_LDSSEQ = spec->use_k_sliced_ldsseq;
     ctx->USE_IGLP_OPT = spec->use_iglp_opt;

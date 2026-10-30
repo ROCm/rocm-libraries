@@ -95,6 +95,8 @@ EXPECTED_FEATURES = {
     },
     "attention_gfx950_d256": {"causal", "causal_bottom_right"},
     "attention_unified_2d": {
+        # Served by the tiled kernels; the tiled gate limits it to gfx950.
+        "attn_bias",
         "band",
         "causal",
         "causal_bottom_right",
@@ -104,6 +106,7 @@ EXPECTED_FEATURES = {
         "sliding_window",
     },
     "attention_unified_3d": {
+        "attn_bias",
         "band",
         "causal",
         "causal_bottom_right",
@@ -397,10 +400,16 @@ class TestAttentionDispatch(unittest.TestCase):
         tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
         self.assertTrue(tuning)
         for candidate in tuning:
-            # Only split-KV (u3d) geometries write the optional LSE output.
+            # Only split-KV (u3d) geometries write the optional LSE output, and
+            # every gfx950 geometry but the non-transposed 32x32 one takes an
+            # additive bias.
             expected = set(ATTENTION_FEATURES) | (
                 {"lse"} if "_u3d_" in candidate.name else set()
             )
+            if candidate.name.startswith("attention_gfx950_") and (
+                "_wide32_" not in candidate.name
+            ):
+                expected.add("attn_bias")
             with self.subTest(candidate=candidate.name):
                 self.assertEqual(set(candidate.capability.supports_features), expected)
 

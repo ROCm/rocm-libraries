@@ -17,7 +17,9 @@ decision is a PURE function of the problem
 ``UnifiedAttentionProblem.select_path``), so it can be mirrored byte-faithfully
 on the C++ side. Backend coverage is gated by
 :func:`attention_unified.supports_native_unified_attention` (head_size /
-block_size / dtype / feature gate -- also pure).
+block_size / dtype / feature gate -- also pure); for a bias problem,
+:func:`_unified_path_coverage` skips that scalar gate and judges the problem
+by the path's own tiled gate instead (the scalar backend never serves bias).
 
 The structural identity used for selection parity is therefore::
 
@@ -58,6 +60,9 @@ from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     gfx942_3d_kv_needs_i64_addr,
     kv_addr_width_for_builder,
+    supports_native_unified_attention,
+    supports_native_unified_attention_3d_tiled,
+    supports_native_unified_attention_tiled,
     # Re-exported, never redeclared. The kernel owns what it covers; dispatch's
     # job is to state that coverage as a Capability so it can be filtered and
     # queried without probing. Copying the numbers would drift in the one
@@ -194,7 +199,12 @@ class AttentionRequest(OperatorRequest):
     use_qq_bias: bool = False
     # Dense additive attention bias ``[B|1, H|1, Sq|1, Sk]`` (unit-stride keys)
     # added to the scaled scores; ``attn_bias_dtype`` is "f32" or "q" (the Q
-    # dtype). A candidate must declare the "attn_bias" feature.
+    # dtype) on the RDNA WMMA candidates. A candidate must declare the
+    # "attn_bias" feature. The gfx950 unified 2D/3D path also serves this: it
+    # takes an f32 bias only (q_dtype bias is refused there), needs a pinned
+    # tuning spec that declares attn_bias plus ``tensors["attn_bias"]`` to
+    # bind (every gfx950 geometry except the non-transposed wide32 path
+    # declares it; see gfx950_unified.py's _variant_features).
     use_attn_bias: bool = False
     attn_bias_dtype: str = "f32"
     kv_layout: str = "paged"  # "paged" | "strided" (non-paged decode)
@@ -795,6 +805,8 @@ def _problem_with_num_cus(
         dtype=req.dtype.lower(),
         sliding_window=int(req.sliding_window),
         use_sinks=bool(req.use_sinks),
+        # fp32 only; _unified_path_coverage refuses attn_bias_dtype="q".
+        use_additive_bias=bool(req.use_attn_bias),
         use_fp8=bool(req.use_fp8),
         fp8_fnuz=bool(req.fp8_fnuz),
         num_cus=int(num_cus),
@@ -803,6 +815,37 @@ def _problem_with_num_cus(
         right_bound=right_bound,
         emit_lse=bool(req.emit_lse),
     )
+
+
+def _unified_path_coverage(
+    req: AttentionRequest, problem: UnifiedAttentionProblem, path: str, arch: str
+) -> Tuple[bool, str]:
+    """Whether the unified ``path`` ("2d" / "3d") can run ``problem``.
+
+    The single owner of which gate judges a unified problem. The scalar gate
+    knows nothing about the tiled-only features (additive bias, the LSE
+    output), so a problem with either is judged by the path's own tiled gate:
+    instead of the scalar gate for bias (which the scalar gate refuses), after
+    it for LSE. The tiled gate limits each feature to the arches that
+    implement it; the split-KV gate owns LSE and the 2D gate refuses it. The
+    unified kernels take an fp32 bias only.
+    """
+    path_gate = (
+        supports_native_unified_attention_3d_tiled
+        if path == "3d"
+        else supports_native_unified_attention_tiled
+    )
+    if problem.use_additive_bias:
+        if str(req.attn_bias_dtype).strip().lower() != "f32":
+            return False, (
+                "unified attention takes an f32 additive bias only, got "
+                f"attn_bias_dtype={req.attn_bias_dtype!r}"
+            )
+        return path_gate(problem, arch=arch)
+    ok, why = supports_native_unified_attention(problem, arch=arch)
+    if ok and problem.emit_lse:
+        return path_gate(problem, arch=arch)
+    return ok, why
 
 
 def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
@@ -873,21 +916,26 @@ class AttentionSpec:
     # spec_hash either. LSE-off leaves both exactly as before the field existed
     # (see :meth:`identity`).
     emit_lse: bool = False
+    # Additive bias appends four kernel params, so it is a distinct kernel too;
+    # bias-off leaves kernel_name / spec_hash unchanged, like emit_lse.
+    use_additive_bias: bool = False
 
     def __post_init__(self) -> None:
-        # identity() and kernel_name() branch on emit_lse, so a truthy non-bool
-        # (1, "yes") would silently produce an LSE identity: refuse it instead.
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        # identity() and kernel_name() branch on these, so a truthy non-bool
+        # (1, "yes") would silently produce another identity: refuse it instead.
+        for name in ("emit_lse", "use_additive_bias"):
+            value = getattr(self, name)
+            if type(value) is not bool:
+                raise ValueError(f"{name} must be a bool, got {type(value).__name__}")
 
     def identity(self) -> dict:
-        """``spec_hash`` payload: every field, except ``emit_lse`` when it is off,
-        so an LSE-off spec keeps the hash that stored caches already hold."""
+        """``spec_hash`` payload: every field, except ``emit_lse`` and
+        ``use_additive_bias`` when they are off, so such a spec keeps the hash
+        that stored caches already hold."""
         payload = asdict(self)
-        if not self.emit_lse:
-            del payload["emit_lse"]
+        for name in ("emit_lse", "use_additive_bias"):
+            if not payload[name]:
+                del payload[name]
         return payload
 
     def kernel_name(self) -> str:
@@ -913,6 +961,8 @@ class AttentionSpec:
             parts.append(f"sw{self.sliding_window}")
         if self.emit_lse:
             parts.append("lse")
+        if self.use_additive_bias:
+            parts.append("addb")
         return kernel_name_join(*parts)
 
 

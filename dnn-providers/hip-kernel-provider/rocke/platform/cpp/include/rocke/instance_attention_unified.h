@@ -92,8 +92,8 @@ extern "C" {
  *
  * Returns whether the SCALAR 2D backend can run this problem (head_size in
  * {64,128,256}, block_size in {16,32,64}, dtype in {fp16,bf16}, no fp8/alibi/
- * qq_bias). On false, *out_reason (if non-NULL) points to a static string
- * mirroring the Python reason. */
+ * qq_bias/additive_bias). On false, *out_reason (if non-NULL) points to a
+ * static string mirroring the Python reason. */
 bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_problem_t* p,
                                              const char** out_reason);
 

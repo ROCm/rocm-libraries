@@ -650,6 +650,9 @@ def supports_native_unified_attention_tiled(
     )
     if rejected is not None:
         return rejected
+    rejected = _reject_fp8_format_arch_mismatch(problem, arch)
+    if rejected is not None:
+        return rejected
     if arch == "gfx1250" and problem.softcap > 0:
         return False, "gfx1250 tiled 2D does not support softcap yet"
     if problem.use_additive_bias and arch != "gfx950":

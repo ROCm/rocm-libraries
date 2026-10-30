@@ -13,7 +13,9 @@ single-batch), which selects the transposed 32x32 path, plus a multi-batch
 group past max_seqlen_q=512 that compiles through hipcc. Softcap and
 sliding-window groups run on 2D and 3D, and a d64 / block 32 GQA-8 bf16 group
 covers the transposed 32x32 combo stack. Every 2D group asserts its score path
-and compile backend so the coverage cannot silently drift.
+and compile backend so the coverage cannot silently drift. A dispatcher group
+launches an ``AttentionRequest(use_attn_bias=True)`` through the gfx950 tuning
+candidates' binding with ``tensors["attn_bias"]``.
 
 Bias addressing (element strides; Sk stride is always 1):
 ``bias[seq_idx*batch_stride + q_head*head_stride + q_local*sq_stride + k_abs]``.
@@ -81,7 +83,7 @@ _CASES = {
 # multi-batch prefill past max_seqlen_q=512, which compiles through hipcc
 # instead of LLVM-direct. The softcap and sliding-window groups pin the score
 # order and the masked bias load under a window, on 2D and 3D; the single-seq
-# fp16 window case lands on the transposed 32x32 path. The softcap is small
+# window case lands on the transposed 32x32 path (fp16 and bf16). The softcap is small
 # enough that ``softcap(QK*scale) + bias`` and ``softcap(QK*scale + bias)``
 # differ. Each group runs on two bias layouts (a padded full layout and a
 # broadcast one) to bound the lane's runtime; _CASES covers all seven layouts.
@@ -121,7 +123,10 @@ _ROUTES = {
     },
     "tiled_softcap": {"fp16": ("16x16", "llvm"), "bf16": ("16x16", "llvm")},
     "tiled_window": {"fp16": ("16x16", "llvm"), "bf16": ("16x16", "llvm")},
-    "tiled_window_1seq": {"fp16": ("transposed32", "llvm"), "bf16": ("16x16", "llvm")},
+    "tiled_window_1seq": {
+        "fp16": ("transposed32", "llvm"),
+        "bf16": ("transposed32", "llvm"),
+    },
     "tiled_combo": {"bf16": ("transposed32", "llvm")},
 }
 
@@ -195,16 +200,27 @@ def _reference(
     softcap=0.0,
     sliding_window=0,
     bias_inside_softcap=False,
+    top_left=False,
+    right_bound=0,
+    sinks=None,
+    return_lse=False,
 ):
-    """fp32 paged attention (bottom-right causal) in the kernels' order:
-    ``softcap(QK*scale) + bias``, then the causal and sliding-window masks.
+    """fp32 paged attention in the kernels' order: ``softcap(QK*scale) +
+    bias``, then the mask, then the softmax (with ``sinks`` [hq] appended as
+    extra logits).
+
+    The mask is the band around the diagonal ``d = q + context`` (``context =
+    kv_len - q_len`` bottom-right, 0 with ``top_left``): key ``k`` is kept iff
+    ``k <= d + right_bound`` (``-1``: no right bound) and, with a window,
+    ``d - k < sliding_window``. A row with no kept key outputs 0 (LSE -inf).
+    ``return_lse`` also returns the natural-log normalizer ``[total_q, hq, 1]``.
 
     ``bias_inside_softcap`` computes the other order, ``softcap(QK*scale +
     bias)``, only to show a softcap case can tell the two apart.
     """
     hq, hkv = q.shape[1], k.shape[2]
     block_size, head_size = k.shape[1], k.shape[3]
-    outs = []
+    outs, lses = [], []
     start = 0
     for i, (q_len, kv_len) in enumerate(seq_lens):
         n_blk = (kv_len + block_size - 1) // block_size
@@ -221,19 +237,29 @@ def _reference(
             s = softcap * torch.tanh(s / softcap)
         if bias_full is not None and not bias_inside_softcap:
             s = s + bias_full[i, :, :q_len, :kv_len]
-        mask = torch.triu(
-            torch.ones(q_len, kv_len, device=q.device), diagonal=kv_len - q_len + 1
-        ).bool()
+        context = 0 if top_left else kv_len - q_len
+        diag = torch.arange(q_len, device=q.device)[:, None] + context
+        k_pos = torch.arange(kv_len, device=q.device)[None, :]
+        mask = torch.zeros(q_len, kv_len, dtype=torch.bool, device=q.device)
+        if right_bound >= 0:
+            mask |= k_pos > diag + right_bound
         if sliding_window > 0:
-            # The kernels keep key k for query position q_abs iff q_abs - k < window.
-            q_abs = torch.arange(q_len, device=q.device)[:, None] + (kv_len - q_len)
-            k_pos = torch.arange(kv_len, device=q.device)[None, :]
-            mask |= (q_abs - k_pos) >= sliding_window
+            mask |= (diag - k_pos) >= sliding_window
         s = s.masked_fill(mask, float("-inf"))
-        p = torch.softmax(s, dim=-1)
+        empty = mask.all(dim=-1)
+        lses.append(torch.logsumexp(s, dim=-1).transpose(0, 1))
+        if sinks is not None:
+            sink = sinks.float()[:, None, None].expand(hq, q_len, 1)
+            p = torch.softmax(torch.cat((s, sink), dim=-1), dim=-1)[..., :-1]
+        else:
+            p = torch.softmax(s, dim=-1)
+        p = p.masked_fill(empty[None, :, None], 0.0)
         outs.append(torch.einsum("hqk,khd->qhd", p, vs))
         start += q_len
-    return torch.cat(outs, dim=0)
+    out = torch.cat(outs, dim=0)
+    if return_lse:
+        return out, torch.cat(lses, dim=0).unsqueeze(-1)
+    return out
 
 
 def _2d_route(problem):
@@ -383,6 +409,233 @@ def test_additive_bias_combo_cohort_matches_reference(heads, bias_mode):
         block_size=32,
         spec_knobs=_COMBO_KNOBS,
     )
+
+
+# Bias combined with the other features the routed candidates declare: the
+# top-left causal and no-mask alignments, attention sinks, an fp8 K/V cache and
+# (split-KV only) the LSE output. feature -> (problem fields, paths).
+_FEATURES = {
+    "top_left": ({"causal_top_left": True, "right_bound": 0}, ("2d", "3d")),
+    "no_mask": ({"right_bound": -1}, ("2d", "3d")),
+    "sinks": ({"use_sinks": True}, ("2d", "3d")),
+    "fp8_kv": ({"use_fp8": True}, ("2d", "3d")),
+    "lse": ({"emit_lse": True}, ("3d",)),
+}
+_FEATURE_PATHS = {
+    "2d": ("tiled", [(37, 101), (64, 64), (5, 130)]),
+    "3d": ("3d", [(4, 300), (16, 517), (1, 64)]),
+}
+_FEATURE_CASES = [
+    (feature, path) for feature, (_, paths) in _FEATURES.items() for path in paths
+]
+_FP8_K_SCALE, _FP8_V_SCALE = 0.5, 0.25
+
+
+def _check_feature_case(
+    feature,
+    path,
+    dtype,
+    bias_mode,
+    heads,
+    *,
+    seq_lens=None,
+    head_size=_HEAD_SIZE,
+    block_size=_BLOCK_SIZE,
+):
+    fields, _ = _FEATURES[feature]
+    backend, default_lens = _FEATURE_PATHS[path]
+    seq_lens = seq_lens or default_lens
+    hq, hkv = {**_HEADS, **_COMBO_HEADS}[heads]
+    q, k, v, block_table, cu_q, seqused_k = _make_inputs(
+        seq_lens, hq, hkv, dtype, head_size=head_size, block_size=block_size
+    )
+    k_scale = v_scale = 1.0
+    if fields.get("use_fp8"):
+        # Quantise the cache; the reference reads the same dequantised values.
+        k_scale, v_scale = _FP8_K_SCALE, _FP8_V_SCALE
+        k = (k.float() / k_scale).to(torch.float8_e4m3fn)
+        v = (v.float() / v_scale).to(torch.float8_e4m3fn)
+        k_ref, v_ref = k.float() * k_scale, v.float() * v_scale
+    else:
+        k_ref, v_ref = k, v
+    max_q = max(s[0] for s in seq_lens)
+    max_k = max(s[1] for s in seq_lens)
+    scale = head_size**-0.5
+    storage, b_stride, h_stride, sq_stride, bias_full = _make_bias(
+        bias_mode, len(seq_lens), hq, max_q, max_k
+    )
+    # The kernels read one sink logit per query head in the Q dtype.
+    sinks = (
+        torch.randn(hq, dtype=q.dtype, device="cuda") + 2.0
+        if fields.get("use_sinks")
+        else None
+    )
+    problem = UnifiedAttentionProblem(
+        total_q=q.shape[0],
+        num_seqs=len(seq_lens),
+        num_query_heads=hq,
+        num_kv_heads=hkv,
+        head_size=head_size,
+        block_size=block_size,
+        max_seqlen_q=max_q,
+        max_seqlen_k=max_k,
+        dtype=dtype,
+        use_additive_bias=True,
+        num_kv_blocks=int(k.shape[0]),
+        **fields,
+    )
+    lse = (
+        torch.full((q.shape[0], hq, 1), float("nan"), device="cuda")
+        if fields.get("emit_lse")
+        else None
+    )
+    out = torch.empty_like(q)
+    run_unified_attention_torch(
+        problem=problem,
+        q=q,
+        k=k,
+        v=v,
+        out=out,
+        cu_seqlens_q=cu_q,
+        seqused_k=seqused_k,
+        softmax_scale=scale,
+        block_table=block_table,
+        softcap=0.0,
+        sinks=sinks,
+        additive_bias=storage,
+        additive_bias_batch_stride=b_stride,
+        additive_bias_head_stride=h_stride,
+        additive_bias_sq_stride=sq_stride,
+        backend=backend,
+        k_scale=k_scale,
+        v_scale=v_scale,
+        lse=lse,
+    )
+    torch.cuda.synchronize()
+
+    mask_kw = {
+        "top_left": bool(fields.get("causal_top_left", False)),
+        "right_bound": int(fields.get("right_bound", 0)),
+        "sinks": sinks,
+    }
+    ref_args = (q, k_ref, v_ref, block_table, seq_lens, scale)
+    ref, ref_lse = _reference(*ref_args, bias_full, return_lse=True, **mask_kw)
+    ref_nobias = _reference(*ref_args, None, **mask_kw)
+    tol = _TOL[dtype]
+    label = f"{feature}/{path}/{dtype}/{bias_mode}/{heads}"
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, f"{label}: max_abs={max_abs:.3e} >= {tol}"
+    shift = (ref - ref_nobias).abs().max().item()
+    assert shift > 10 * tol, f"{label}: bias too weak to observe (shift={shift:.3e})"
+    if lse is not None:
+        assert torch.equal(torch.isneginf(lse), torch.isneginf(ref_lse)), label
+        finite = torch.isfinite(ref_lse)
+        lse_err = (lse[finite] - ref_lse[finite]).abs().max().item()
+        assert lse_err < tol, f"{label}: lse max_abs={lse_err:.3e} >= {tol}"
+
+
+@requires_gfx950_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("heads", sorted(_HEADS))
+@pytest.mark.parametrize("bias_mode", _EXTRA_BIAS_MODES)
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize(("feature", "path"), _FEATURE_CASES)
+def test_additive_bias_with_more_features_matches_reference(
+    feature, path, dtype, bias_mode, heads
+):
+    _check_feature_case(feature, path, dtype, bias_mode, heads)
+
+
+@requires_gfx950_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("head_size", [64, 128])
+def test_additive_bias_fp8_single_batch_combo_matches_reference(head_size):
+    # The fp8 K/V single-batch cohort (d64/d128, block 64, 64/8 heads) takes the
+    # transposed 32x32 combo; bias must turn its mask-once/mask-limit opts off.
+    _check_feature_case(
+        "fp8_kv",
+        "2d",
+        "bf16",
+        "full_padded_sq",
+        "gqa8_h64",
+        seq_lens=[(384, 640)],
+        head_size=head_size,
+        block_size=64,
+    )
+
+
+# Dispatcher lane: an AttentionRequest(use_attn_bias=True) pinned to a gfx950
+# tuning geometry, bound with tensors["attn_bias"] and launched through the
+# candidate's binding. One geometry per score path.
+_DISPATCH_GEOMETRIES = (
+    "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm",
+    "attention_gfx950_u2d_transposed32_nw2_mw32_t2xb_llvm",
+    "attention_gfx950_u3d_splitkv_seg8_t1xb",
+)
+
+
+@requires_gfx950_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("bias_shape", ["full", "key_padding"])
+@pytest.mark.parametrize("geometry", _DISPATCH_GEOMETRIES)
+def test_dispatched_attn_bias_matches_reference(geometry, bias_shape):
+    from dispatch.attention import AttentionRequest, attention_execution_candidates
+    from dispatch.attention.common import AttentionMaskType
+
+    batch, seqlen_q, seqlen_k, hq, hkv, dtype = 2, 96, 200, 8, 2, "bf16"
+    seq_lens = [(seqlen_q, seqlen_k)] * batch
+    q, k, v, block_table, cu_q, seqused_k = _make_inputs(seq_lens, hq, hkv, dtype)
+    shape = (batch, hq, seqlen_q, seqlen_k)
+    if bias_shape == "key_padding":
+        shape = (batch, 1, 1, seqlen_k)
+    bias = torch.randn(*shape, dtype=torch.float32, device="cuda")
+
+    candidate = next(
+        c for c in attention_execution_candidates() if c.name.startswith(geometry)
+    )
+    request = AttentionRequest(
+        batch=batch,
+        nhead_q=hq,
+        nhead_k=hkv,
+        seqlen_q=seqlen_q,
+        seqlen_k=seqlen_k,
+        hdim_q=_HEAD_SIZE,
+        hdim_v=_HEAD_SIZE,
+        kv_block_size=_BLOCK_SIZE,
+        arch="gfx950",
+        dtype=dtype,
+        mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+        use_attn_bias=True,
+        algorithm=candidate.algorithm,
+        spec_id=candidate.spec_id,
+    )
+    ok, why = candidate.admits(request)
+    assert ok, why
+    spec = candidate.select_spec(request)
+    assert spec.kernel_spec.use_additive_bias
+    out = torch.empty_like(q)
+    tensors = {
+        "q": q,
+        "k": k,
+        "v": v,
+        "out": out,
+        "cu_seqlens_q": cu_q,
+        "seqused_k": seqused_k,
+        "block_table": block_table,
+        "attn_bias": bias,
+    }
+    candidate.bound_torch(request, spec, tensors).launch()
+    torch.cuda.synchronize()
+
+    scale = _HEAD_SIZE**-0.5
+    bias_full = bias.expand(batch, hq, seqlen_q, seqlen_k)
+    ref_args = (q, k, v, block_table, seq_lens, scale)
+    ref = _reference(*ref_args, bias_full)
+    tol = _TOL[dtype]
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, f"{geometry}/{bias_shape}: max_abs={max_abs:.3e} >= {tol}"
+    shift = (ref - _reference(*ref_args, None)).abs().max().item()
+    assert shift > 10 * tol, f"bias too weak to be observable (shift={shift:.3e})"
 
 
 # Host-side argument validation. These raise before any compile or launch, so

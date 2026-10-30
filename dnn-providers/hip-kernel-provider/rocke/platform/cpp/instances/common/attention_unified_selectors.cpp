@@ -127,6 +127,13 @@ static int nqpk(const rocke_unified_attn_problem_t* p)
     return p->num_query_heads / p->num_kv_heads;
 }
 
+/* Python: _has_score_bias(problem). Fast paths that skip per-score bias
+ * handling exclude ALiBi, QQ bias and additive bias alike. */
+static bool has_score_bias(const rocke_unified_attn_problem_t* p)
+{
+    return p->use_alibi || p->use_qq_bias || p->use_additive_bias;
+}
+
 /* ----------------------------------------------------- gate predicates */
 /* These mirror the Python private predicates (_enable_*). They are static so
  * the selectors stay byte-faithful; not part of the public ABI. */
@@ -281,8 +288,8 @@ static bool enable_i64_kv_addr(const rocke_unified_attn_problem_t* p)
 static bool d256_gfx950_cohort(const rocke_unified_attn_problem_t* p)
 {
     return p->head_size == 256 && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8
-           && p->sliding_window == 0 && p->softcap == 0 && !p->use_sinks && !p->use_alibi
-           && !p->use_qq_bias && p->max_seqlen_q > 1;
+           && p->sliding_window == 0 && p->softcap == 0 && !p->use_sinks && !has_score_bias(p)
+           && p->max_seqlen_q > 1;
 }
 
 /* Python: _d256_gfx950_fast(problem). */
@@ -298,9 +305,8 @@ static bool d256_gfx942_fast(const rocke_unified_attn_problem_t* p)
     /* d192 rides the same lean 4-warp body as d256. */
     return arch_is("gfx942") && (p->head_size == 192 || p->head_size == 256)
            && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8 && p->sliding_window == 0
-           && p->softcap == 0 && !p->use_sinks && !p->use_alibi && !p->use_qq_bias
-           && p->max_seqlen_q > 1 && (p->block_size == 16 || p->block_size == 32)
-           && !enable_i64_kv_addr(p);
+           && p->softcap == 0 && !p->use_sinks && !has_score_bias(p) && p->max_seqlen_q > 1
+           && (p->block_size == 16 || p->block_size == 32) && !enable_i64_kv_addr(p);
 }
 
 /* Python: _enable_transposed_qk_32x32(problem). */
@@ -415,6 +421,12 @@ static bool enable_transposed_subflags(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
+    /* The VALU sub-flags do not support softcap or any score bias; the spec
+     * validator enforces this. */
+    if(p->softcap > 0 || has_score_bias(p))
+    {
+        return false;
+    }
     return enable_transposed_qk_32x32(p);
 }
 
@@ -424,7 +436,7 @@ static bool enable_gfx942_small_q_narrow(const rocke_unified_attn_problem_t* p)
     return arch_is("gfx942") && (strcmp(p->dtype, "fp16") == 0 || strcmp(p->dtype, "bf16") == 0)
            && !p->use_fp8 && (p->head_size == 64 || p->head_size == 128)
            && (p->max_seqlen_q > 1 && p->max_seqlen_q <= 768) && p->sliding_window == 0
-           && !p->use_sinks && p->softcap == 0 && !p->use_alibi && !p->use_qq_bias;
+           && !p->use_sinks && p->softcap == 0 && !has_score_bias(p);
 }
 
 /* Python: _enable_gfx942_fp16_flash(problem). */
@@ -432,7 +444,7 @@ static bool enable_gfx942_fp16_flash(const rocke_unified_attn_problem_t* p)
 {
     return arch_is("gfx942") && (p->head_size == 64 || p->head_size == 128)
            && strcmp(p->dtype, "fp16") == 0 && !p->use_fp8 && p->sliding_window == 0
-           && !p->use_sinks && p->softcap == 0 && !p->use_alibi && !p->use_qq_bias
+           && !p->use_sinks && p->softcap == 0 && !has_score_bias(p)
            && !enable_gfx942_small_q_narrow(p);
 }
 
@@ -454,7 +466,7 @@ static bool enable_gfx942_sink_prefill_tuned(const rocke_unified_attn_problem_t*
 {
     return arch_is("gfx942") && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8 && p->head_size == 64
            && p->block_size == 16 && p->num_seqs <= 1 && p->max_seqlen_q > 1 && p->use_sinks
-           && p->sliding_window == 0 && p->softcap == 0 && !p->use_alibi && !p->use_qq_bias;
+           && p->sliding_window == 0 && p->softcap == 0 && !has_score_bias(p);
 }
 
 /* Python: _enable_gfx950_sink_prefill_wpe3(problem). gfx950 full-causal bf16/fp16
@@ -464,7 +476,7 @@ static bool enable_gfx950_sink_prefill_wpe3(const rocke_unified_attn_problem_t* 
     return arch_is("gfx950") && (strcmp(p->dtype, "bf16") == 0 || strcmp(p->dtype, "fp16") == 0)
            && !p->use_fp8 && p->head_size == 64 && p->block_size == 16 && p->num_seqs <= 1
            && p->max_seqlen_q > 1 && p->use_sinks && p->sliding_window == 0 && p->softcap == 0
-           && !p->use_alibi && !p->use_qq_bias;
+           && !has_score_bias(p);
 }
 
 /* Python: _gfx942_flash_wide_setting(). The HIPDNN_GFX942_FLASH_WIDE env knob
@@ -802,8 +814,7 @@ int rocke_unified_attn_select_2d_block_m_per_warp(const rocke_unified_attn_probl
     /* Qwen3-30B-A3B prefill specialization. */
     if(p->head_size == 64 && p->block_size == 16 && p->num_seqs <= 1 && !p->use_fp8
        && strcmp(p->dtype, "bf16") == 0 && nqpk(p) >= 4 && p->max_seqlen_q > 768
-       && p->sliding_window == 0 && p->softcap == 0 && !p->use_sinks && !p->use_alibi
-       && !p->use_qq_bias)
+       && p->sliding_window == 0 && p->softcap == 0 && !p->use_sinks && !has_score_bias(p))
     {
         return 32;
     }
@@ -882,7 +893,7 @@ static bool enable_register_pv(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->use_qq_bias)
+    if(p->use_qq_bias || p->use_additive_bias)
     {
         return false;
     }
@@ -991,6 +1002,7 @@ rocke_attention_tiled_2d_spec_t
     s.has_softcap = (p->softcap > 0);
     s.use_alibi = p->use_alibi;
     s.use_qq_bias = p->use_qq_bias;
+    s.use_additive_bias = p->use_additive_bias; /* gfx950 only, like the Python tail */
     s.num_seqs = p->num_seqs;
 
     /* Selectors */
@@ -1026,7 +1038,7 @@ rocke_attention_tiled_2d_spec_t
      * only the scalar-state layout maps correctly, so sinks always take it. */
     bool scalar_state = combo || subflags || (p->use_sinks && enable_transposed_qk_32x32(p));
     bool skip_legacy_qreg = combo || subflags;
-    bool bias_active = (p->softcap > 0) || p->use_alibi || p->use_qq_bias;
+    bool bias_active = (p->softcap > 0) || has_score_bias(p);
     bool mask_opts = (combo_no_sw && !bias_active) || subflags;
     s.use_transposed_scalar_state = scalar_state;
     s.use_mfma32_skip_legacy_qreg = skip_legacy_qreg;
@@ -1430,12 +1442,10 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
         int i;
         for(i = 0; i < VEC; ++i)
         {
-            score
-                = rocke_b_fadd(b,
-                               score,
-                               rocke_b_fmul(b,
-                                            rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i)),
-                                            rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i))));
+            /* Bound in Python's left-to-right order. */
+            rocke_value_t* q_i = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i));
+            rocke_value_t* k_i = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i));
+            score = rocke_b_fadd(b, score, rocke_b_fmul(b, q_i, k_i));
         }
     }
     /* Tail scalar fold for head_size not a multiple of VEC (empty for the

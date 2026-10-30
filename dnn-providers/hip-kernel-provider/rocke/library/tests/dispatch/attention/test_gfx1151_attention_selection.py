@@ -390,7 +390,9 @@ class TestRdnaAttentionSelection(unittest.TestCase):
             {"use_softcap": True},
             {"use_alibi": True},
             {"use_qq_bias": True},
-            {"use_attn_bias": True},
+            # gfx950 serves an f32 additive bias (unified tiled kernels), but
+            # not a Q-dtype one.
+            {"use_attn_bias": True, "attn_bias_dtype": "q"},
         ):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 dispatch_attention(_request(arch="gfx950", **changes))

@@ -331,6 +331,39 @@ _CONFIGS = {
         use_decode_grid=True,
         kv_cache_policy="stream",
     ),
+    # idx20: QQ bias alone (no config here enabled it before). The gfx950
+    # twin's mask build order fix (bind cmp_ge/cmp_lt before land, since C's
+    # argument evaluation order is unspecified) was mirrored into this file's
+    # 3D compute without a parity config to pin it -- this is that config.
+    20: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_qq_bias=True,
+        kv_storage_dtype=None,
+    ),
+    # idx21: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
+    # The gfx942 Python spec has no use_additive_bias field (TypeError); the C
+    # twin rejects it in rocke_unified_attention_3d_tiled_spec_validate.
+    21: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        kv_storage_dtype=None,
+    ),
 }
 
 

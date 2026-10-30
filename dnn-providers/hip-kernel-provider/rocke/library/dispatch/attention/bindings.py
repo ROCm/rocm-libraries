@@ -88,6 +88,11 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
             f"request.emit_lse={bool(request.emit_lse)} disagrees with "
             f"problem.emit_lse={problem.emit_lse}"
         )
+    if bool(request.use_attn_bias) != problem.use_additive_bias:
+        raise ValueError(
+            f"request.use_attn_bias={bool(request.use_attn_bias)} disagrees with "
+            f"problem.use_additive_bias={problem.use_additive_bias}"
+        )
 
     kernel_spec = spec.kernel_spec
     for name, expected in (
@@ -103,6 +108,12 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
                 f"kernel_spec.{name}={getattr(kernel_spec, name)!r} disagrees "
                 f"with problem value {expected!r}"
             )
+    # The kernel declares the bias params iff its spec has the flag, and the
+    # launcher packs them iff the problem does; kernargs are positional.
+    if bool(getattr(kernel_spec, "use_additive_bias", False)) != (
+        problem.use_additive_bias
+    ):
+        raise ValueError("kernel spec additive bias disagrees with problem")
     expected_kv_dtype = "fp8e4m3" if problem.use_fp8 else None
     if kernel_spec.kv_storage_dtype != expected_kv_dtype:
         raise ValueError("kernel spec K/V storage dtype disagrees with problem")
@@ -344,6 +355,50 @@ def bind_dense_attention_torch(
     )
 
 
+_ATTN_BIAS_STRIDE_NAMES = ("bias_stride_b", "bias_stride_h", "bias_stride_q")
+
+
+def _attn_bias_strides(
+    request, attn_bias, element_bytes: int | None
+) -> tuple[int, ...]:
+    """Validate ``attn_bias`` as ``[B|1, H|1, Sq|1, Sk]`` with a unit key stride
+    and return its batch, head and query element strides (0 on a size-1,
+    broadcast dimension).
+
+    ``element_bytes`` bounds the tensor's byte extent to I32, for kernels that
+    address it in bytes; ``None`` skips that (the unified runner bounds its i32
+    element index and the storage itself)."""
+    bias_shape = _shape(attn_bias, "attn_bias")
+    if len(bias_shape) != 4:
+        raise ValueError(
+            f"attn_bias must be rank-4 [B|1, H|1, Sq|1, Sk], got {bias_shape}"
+        )
+    for axis, (extent, full, label) in enumerate(
+        (
+            (bias_shape[0], int(request.batch), "batch"),
+            (bias_shape[1], int(request.nhead_q), "head"),
+            (bias_shape[2], int(request.seqlen_q), "query"),
+        )
+    ):
+        if extent not in (1, full):
+            raise ValueError(
+                f"attn_bias dim {axis} ({label}) must be 1 or {full}, got {extent}"
+            )
+    if bias_shape[3] != int(request.seqlen_k):
+        raise ValueError(
+            f"attn_bias key dim must equal seqlen_k={int(request.seqlen_k)}, "
+            f"got {bias_shape[3]}"
+        )
+    if bias_shape[3] > 1 and int(attn_bias.stride(3)) != 1:
+        raise ValueError("attn_bias innermost (key) dimension must be contiguous")
+    if element_bytes is not None:
+        _check_byte_extent_i32(attn_bias, "attn_bias", element_bytes)
+    return tuple(
+        0 if bias_shape[axis] == 1 else _fits_i32(attn_bias.stride(axis), key)
+        for axis, key in enumerate(_ATTN_BIAS_STRIDE_NAMES)
+    )
+
+
 _ADDITIVE_BIAS_INPUTS = (
     "additive_bias",
     "additive_bias_batch_stride",
@@ -353,13 +408,41 @@ _ADDITIVE_BIAS_INPUTS = (
 
 
 def _reject_additive_bias_inputs(inputs: Mapping[str, Any], where: str) -> None:
+    # The binding derives these from tensors["attn_bias"]; refuse them raw so a
+    # caller cannot pass strides that disagree with the bound tensor.
     supplied = [name for name in _ADDITIVE_BIAS_INPUTS if name in inputs]
     if supplied:
         raise ValueError(
-            "explicit tuning bindings do not support additive bias; got "
+            "explicit tuning bindings take the bias as tensors['attn_bias']; got "
             + ", ".join(supplied)
             + f" in {where}"
         )
+
+
+def _tuning_additive_bias(request, problem, tensors: Mapping[str, Any]) -> dict:
+    """``run_unified_attention_torch`` bias kwargs for ``tensors["attn_bias"]``,
+    which must be given exactly when the problem has additive bias."""
+    attn_bias = tensors.get("attn_bias")
+    if not problem.use_additive_bias:
+        if attn_bias is not None:
+            raise ValueError(
+                "tensors['attn_bias'] was given but the problem has no additive bias"
+            )
+        return {}
+    if attn_bias is None:
+        raise ValueError("an additive bias requires tensors['attn_bias']")
+    bias_kind = _dtype_kind(attn_bias, "attn_bias")
+    if bias_kind != "fp32":
+        raise ValueError(
+            f"attn_bias dtype must be fp32 for the unified kernels, got {bias_kind}"
+        )
+    batch, head, query = _attn_bias_strides(request, attn_bias, None)
+    return {
+        "additive_bias": attn_bias,
+        "additive_bias_batch_stride": batch,
+        "additive_bias_head_stride": head,
+        "additive_bias_sq_stride": query,
+    }
 
 
 def bind_tuning_attention_torch(
@@ -372,6 +455,12 @@ def bind_tuning_attention_torch(
     invariants externally may pass
     ``unsafe_skip_paged_value_validation=True`` to skip the synchronized value
     check; structural ABI validation is never skipped.
+
+    When the problem has an additive bias, ``tensors["attn_bias"]`` is
+    required: an f32 tensor shaped ``[B|1, H|1, Sq|1, Sk]`` with a unit
+    stride on the key dimension; its strides are derived (0 on a size-1
+    dimension) and passed through. Omitting it, or passing one when the
+    problem has no bias, raises ``ValueError``.
     """
     from kernels.common.attention_unified import (
         UnifiedAttentionProblem,
@@ -398,12 +487,8 @@ def bind_tuning_attention_torch(
         raise ValueError("emit_lse=True requires tensors['lse']")
     if has_lse and not problem.emit_lse:
         raise ValueError("tensors['lse'] was given but emit_lse is off")
-    # Explicit specs are built without additive bias (the spec makers reject
-    # it), so refuse a bias-on problem or bias inputs here instead of launching
-    # a kernel that would silently ignore them.
-    if problem.use_additive_bias:
-        raise ValueError("explicit tuning bindings do not support additive bias")
     _reject_additive_bias_inputs(tensors, "tensors")
+    bias_kwargs = _tuning_additive_bias(request, problem, tensors)
     unsafe_skip = bool(kwargs.pop("unsafe_skip_paged_value_validation", False))
     num_blocks = validate_tuning_attention_tensors(
         problem,
@@ -446,6 +531,7 @@ def bind_tuning_attention_torch(
             v_scale=float(_kw.get("v_scale", v_scale)),
             tuning_spec=spec,
             lse=_kw.get("lse", tensors.get("lse")),
+            **bias_kwargs,
         )
 
     return TorchBinding(
@@ -1147,39 +1233,11 @@ def _rdna_validate_and_collect(
                 f"attn_bias dtype must be {want_kind} for this object's "
                 f"{view.bias!r} bias, got {bias_kind}"
             )
-        bias_shape = _shape(attn_bias, "attn_bias")
-        if len(bias_shape) != 4:
-            raise ValueError(
-                f"attn_bias must be rank-4 [B|1, H|1, Sq|1, Sk], got {bias_shape}"
-            )
-        for axis, (extent, full, label) in enumerate(
-            (
-                (bias_shape[0], int(request.batch), "batch"),
-                (bias_shape[1], int(request.nhead_q), "head"),
-                (bias_shape[2], int(request.seqlen_q), "query"),
-            )
-        ):
-            if extent not in (1, full):
-                raise ValueError(
-                    f"attn_bias dim {axis} ({label}) must be 1 or {full}, got {extent}"
-                )
-        if bias_shape[3] != int(request.seqlen_k):
-            raise ValueError(
-                f"attn_bias key dim must equal seqlen_k={int(request.seqlen_k)}, "
-                f"got {bias_shape[3]}"
-            )
-        if bias_shape[3] > 1 and int(attn_bias.stride(3)) != 1:
-            raise ValueError("attn_bias innermost (key) dimension must be contiguous")
-        _check_byte_extent_i32(attn_bias, "attn_bias", 4 if bias_kind == "fp32" else 2)
+        strides = _attn_bias_strides(
+            request, attn_bias, 4 if bias_kind == "fp32" else 2
+        )
         values["attn_bias_ptr"] = attn_bias
-        for key, axis in (
-            ("bias_stride_b", 0),
-            ("bias_stride_h", 1),
-            ("bias_stride_q", 2),
-        ):
-            values[key] = (
-                0 if bias_shape[axis] == 1 else _fits_i32(attn_bias.stride(axis), key)
-            )
+        values.update(zip(_ATTN_BIAS_STRIDE_NAMES, strides))
     return values
 
 

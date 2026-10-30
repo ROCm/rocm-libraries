@@ -81,6 +81,7 @@ static rocke_status_t rocke__fastkv_gfx950_base_name(const rocke_attention_tiled
             s->has_softcap ? "softcap" : "",
             s->use_alibi ? "alibi" : "",
             s->use_qq_bias ? "qqb" : "",
+            s->use_additive_bias ? "addb" : "",
             w_buf,
             mw_buf,
             s->use_mfma_32x32 ? "mfma32" : "",
@@ -303,6 +304,13 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_fastkv_register_p(
         {
             rocke__fastkv_regp_set_err(
                 b, ROCKE_ERR_VALUE, "fastKV register-P experiment does not support FP8 KV cache");
+            return NULL;
+        }
+        /* if spec.use_additive_bias: raise ValueError(...) */
+        if(spec->use_additive_bias)
+        {
+            rocke__fastkv_regp_set_err(
+                b, ROCKE_ERR_VALUE, "fastKV register-P experiment does not support additive bias");
             return NULL;
         }
 
