@@ -30,6 +30,7 @@ reached, its first decline reasons from ``<out>/declines/``.
 import argparse
 import collections
 import csv
+import hashlib
 import io
 import json
 import re
@@ -419,6 +420,27 @@ def inventory_summary(out, rows, reasons=3):
                 "    no applicable case and no decline reason logged"
             ]
     return "\n".join(lines)
+
+
+def claim_repro(root, engine, nodeid):
+    """Whether a repro for ``nodeid`` may be saved under ``root`` (``<out>/repro``): at most
+    ``REPRO_MAX_PER_KEY`` per (engine, test function) and ``REPRO_MAX_BYTES`` on disk. A slot is
+    claimed atomically, so concurrent workers never exceed the per-key cap."""
+    root = Path(root)
+    used = sum(f.stat().st_size for f in root.rglob("*") if f.is_file())
+    if used >= contract.REPRO_MAX_BYTES:
+        return False
+    function = re.sub(r"\[.*\]$", "", nodeid)
+    key = hashlib.sha1(f"{engine}\0{function}".encode()).hexdigest()[:12]
+    claims = root / ".claims"
+    claims.mkdir(parents=True, exist_ok=True)
+    for slot in range(contract.REPRO_MAX_PER_KEY):
+        try:
+            (claims / f"{key}-{slot}").mkdir()
+            return True
+        except FileExistsError:
+            continue
+    return False
 
 
 _PID = re.compile(r"\(pid (\d+)\)$")

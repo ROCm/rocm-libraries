@@ -18,12 +18,21 @@ Load it with ``-p hipdnn_aotriton_plugin`` (``aotriton/`` on PYTHONPATH). It
   hipDNN planned unpinned, empty otherwise;
 * allocates every SDPA tensor of the vendored suite in the layout ``HIPDNN_SDPA_CONFORMANCE_LAYOUT_MODE``
   names (see ``_install_layout_wrappers``);
+* fills ``fwd_kernel`` / ``bwd_kernel`` (the kernel id ``hipdnn_sdpa.last_call`` reports; kind
+  ``kernel`` entries, ignored by the fold), ``fail_side`` and ``stage`` of a ``fail`` row, and
+  ``repro`` once ``hipdnn_sdpa.save_repro`` wrote the case's repro directory (``--repro-dir``,
+  capped per engine and test function and per shard);
+* turns a worker death into a ``crash`` row naming the engine, direction and stage left in the
+  worker's in-flight marker (``conformance_contract``): ``fwd``/``bwd`` hold ``hipdnn:<engine>``
+  for the direction in flight and ``fail_side`` names it; the marker is deleted once read, and
+  removed by a case's teardown otherwise;
 * supports ``--shard i/N`` (1-based), ``--hipdnn-nodeids-file`` and ``--fake always-decline``.
 """
 
 import dataclasses
 import json
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -31,6 +40,7 @@ from pathlib import Path
 import pytest
 
 import aotriton_layout as layout
+import conformance_contract as contract
 import reconcile
 
 VENDOR_DIR = Path(__file__).resolve().parent / "vendor"
@@ -66,7 +76,7 @@ def record(direction, kind, detail=""):
     ``direction`` is ``'fwd'`` or ``'bwd'``; ``kind`` is ``'hipdnn'`` (``detail`` the engine),
     ``'ref'`` (the reference forward ran; ``detail`` the decline reason), ``'declined'`` or
     ``'engines'`` (``detail`` the ``;``-joined ranked engine names of the preceding ``'hipdnn'``
-    call). A ``'ref'`` entry replaces the ``'declined'`` entry of the call it falls back from.
+    call) or ``'kernel'`` (the kernel id of that call; ignored by the fold). A ``'ref'`` entry replaces the ``'declined'`` entry of the call it falls back from.
     """
     with _LOCK:
         entries = _RECORDS.setdefault(_CURRENT, [])
@@ -89,7 +99,7 @@ def _fold(entries):
         calls = [
             (kind, detail)
             for d, kind, detail in entries
-            if d == direction and kind != "engines"
+            if d == direction and kind not in ("engines", "kernel")
         ]
         if not calls:
             folded[direction] = None
@@ -112,6 +122,48 @@ def _engine_list(entries, folded, direction):
     return next(
         (e for d, k, e in entries if (d, k) == (direction, "engines") and e), ""
     )
+
+
+def _kernel_text(entries, direction):
+    """``+``-joined distinct kernel ids recorded for ``direction`` (kind ``kernel``)."""
+    return "+".join(
+        sorted({d for dr, k, d in entries if (dr, k) == (direction, "kernel") and d})
+    )
+
+
+def _names(value):
+    """A marker's engine list (a list, or already ``;``-joined) as ``;``-joined text."""
+    return value if isinstance(value, str) else ";".join(value or ())
+
+
+_FORWARD_COMPARISON = re.compile(r"\bForward pass\b")
+
+
+def _fail_side(nodeid, excinfo, folded):
+    """``fwd`` when the failing assertion is the vendored forward comparison, the case is a forward
+    case, or the backward never ran; else ``bwd``."""
+    if reconcile.direction_of(nodeid) == "fwd" or folded["bwd"] is None:
+        return "fwd"
+    text = excinfo.exconly() if excinfo else ""
+    return "fwd" if _FORWARD_COMPARISON.search(text) else "bwd"
+
+
+def _inflight_marker_path(worker):
+    """The worker's in-flight marker of the current pass; None unless a directory is configured."""
+    root = os.environ.get(contract.INFLIGHT_DIR_ENV)
+    if not root:
+        return None
+    slug = os.environ.get(contract.PASS_SLUG_ENV, reconcile.MAIN_PASS)
+    return Path(root) / slug / contract.marker_name(worker)
+
+
+def _read_marker(path, nodeid):
+    """The marker's fields when ``path`` holds one written for ``nodeid``, else None."""
+    try:
+        marker = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return None
+    return marker if marker.get("nodeid") == nodeid else None
 
 
 def _state_text(state):
@@ -180,6 +232,8 @@ def _make_row(item, call, report):
         "reason": "",
         "fwd_engines": _engine_list(entries, folded, "fwd"),
         "bwd_engines": _engine_list(entries, folded, "bwd"),
+        "fwd_kernel": _kernel_text(entries, "fwd"),
+        "bwd_kernel": _kernel_text(entries, "bwd"),
     }
 
     declined = []
@@ -236,7 +290,18 @@ def _make_row(item, call, report):
                 if call.excinfo
                 else _one_line(report.longrepr)
             )
+    if row["outcome"] == "fail":
+        _describe_failure(item, call, row, folded)
     return row
+
+
+def _describe_failure(item, call, row, folded):
+    """Fill ``fail_side``, ``stage`` and ``repro`` of a ``fail`` row."""
+    row["fail_side"] = _fail_side(item.nodeid, call.excinfo, folded)
+    path = _inflight_marker_path(os.environ.get("PYTEST_XDIST_WORKER"))
+    marker = _read_marker(path, item.nodeid) if path else None
+    row["stage"] = marker["stage"] if marker else ""
+    row["repro"] = _save_repro(item, row)
 
 
 # ---------------------------------------------------------------------------- hooks
@@ -254,6 +319,11 @@ def pytest_addoption(parser):
         "--hipdnn-nodeids-file",
         metavar="PATH",
         help="run only the collected items whose node id is listed in PATH (one per line)",
+    )
+    group.addoption(
+        "--repro-dir",
+        metavar="DIR",
+        help="save a repro of every failing case under DIR (the runner passes <out>/repro)",
     )
     group.addoption(
         "--fake",
@@ -339,6 +409,61 @@ def _bind_backend_first(prefix):
     return mapped[0]
 
 
+_CALLS = {}  # nodeid -> {"records": {direction: CallRecord}, "tensors": {role: tensor}}
+_POSITIONAL_ROLES = {"fwd": ("q", "k", "v"), "bwd": ("q", "k", "v", "o", "do", "stats")}
+
+
+def _remember_call(direction, call, args, kwargs):
+    """Keep what a repro of the running case needs: its calls' records and tensors by role."""
+    import torch
+
+    roles = dict(zip(_POSITIONAL_ROLES[direction], args))
+    roles.update(kwargs)
+    dropout, varlen = roles.pop("dropout", None), roles.pop("varlen", None)
+    for owner, names in (
+        (dropout, ("seed", "offset")),
+        (varlen, ("seq_len_q", "seq_len_kv", "pos_q", "pos_kv")),
+    ):
+        roles.update({n: getattr(owner, n, None) for n in names} if owner else {})
+    tensors = {r: t for r, t in roles.items() if isinstance(t, torch.Tensor)}
+    with _LOCK:
+        saved = _CALLS.setdefault(_CURRENT, {"records": {}, "tensors": {}})
+        if call:
+            saved["records"][direction] = call
+        saved["tensors"].update(tensors)
+
+
+def _repro_root(config):
+    option = config.getoption("repro_dir")
+    return Path(option) if option else None
+
+
+def _save_repro(item, row):
+    """Save the case's repro through ``hipdnn_sdpa.save_repro`` within the caps; its path relative
+    to the shard directory, or '' when nothing was saved."""
+    import sys
+
+    root = _repro_root(item.config)
+    module = sys.modules.get("hipdnn_sdpa")
+    with _LOCK:
+        saved = _CALLS.get(item.nodeid)
+    if (
+        root is None
+        or saved is None
+        or not saved["records"]
+        or not hasattr(module, "save_repro")
+    ):
+        return ""
+    engine = reconcile.served_engines(row[row["fail_side"]])
+    if not reconcile.claim_repro(root, "+".join(sorted(engine)), item.nodeid):
+        return ""
+    case = contract.repro_case(
+        item.nodeid, os.environ.get(contract.PASS_SLUG_ENV, reconcile.MAIN_PASS)
+    )
+    module.save_repro(root / case, dict(saved["records"]), dict(saved["tensors"]))
+    return f"{contract.REPRO_DIR}/{case}"
+
+
 def _install_wrappers(fake):
     """Wrap ``hipdnn_sdpa.sdpa_fwd`` / ``sdpa_bwd`` so every call lands in the mode record.
 
@@ -351,18 +476,20 @@ def _install_wrappers(fake):
         return
 
     declined_type = hipdnn_sdpa.EngineDeclined
-    from hipdnn_sdpa import _runtime
 
     def make(direction, inner):
         def wrapper(*args, **kwargs):
-            _runtime.take_engines()
             try:
                 engine = inner(*args, **kwargs)
             except declined_type as declined:
                 record(direction, "declined", declined.reason)
                 raise
             record(direction, "hipdnn", engine)
-            record(direction, "engines", ";".join(_runtime.take_engines()))
+            call = hipdnn_sdpa.last_call(direction)
+            record(direction, "engines", ";".join(call.ranked) if call else "")
+            if call and call.kernel:
+                record(direction, "kernel", call.kernel)
+            _remember_call(direction, call, args, kwargs)
             return engine
 
         wrapper._sdpa_conformance_inner = inner
@@ -520,6 +647,44 @@ def pytest_pycollect_makemodule(module_path, parent):
             parent.config._sdpa_layout_mode = mode
 
 
+def _crash_row(report):
+    """The row of a case whose worker died: the engine, direction and stage come from the marker
+    ``<in-flight dir>/<pass>/<gateway id>.json`` when it was written for this case; it is deleted
+    once read. xdist gives a replacement worker a new gateway id, so a marker is never reused.
+    """
+    row = {
+        "nodeid": report.nodeid,
+        "outcome": "crash",
+        "reason": _one_line(str(report.longrepr)),
+    }
+    gateway = getattr(getattr(report, "node", None), "gateway", None)
+    path = _inflight_marker_path(getattr(gateway, "id", None))
+    marker = _read_marker(path, report.nodeid) if path else None
+    if marker is None:
+        return row
+    path.unlink(missing_ok=True)
+    direction = marker.get("direction", "")
+    engine = marker.get("engine") or marker.get(f"pin_{direction}", "")
+    if engine == contract.REFERENCE_PIN:
+        engine = ""
+    stage = marker.get("stage", "")
+    row.update(
+        fail_side=direction,
+        stage=stage,
+        fwd_engines=_names(marker.get("fwd_engines")),
+        bwd_engines=_names(marker.get("bwd_engines")),
+        reason=_one_line(
+            f"worker died in the {direction} {stage} stage"
+            + (f" on {engine}" if engine else "")
+            + f" (pid {marker.get('pid', '?')})"
+        ),
+    )
+    if direction in ("fwd", "bwd"):
+        row[direction] = f"hipdnn:{engine}" if engine else ""
+        row[f"{direction}_kernel"] = marker.get("kernel", "")
+    return row
+
+
 class _CsvController:
     """Writes the CSV from reports the controller receives (rows and xdist crash reports)."""
 
@@ -537,11 +702,7 @@ class _CsvController:
         if rows:
             row = rows[0]
         elif report.when == "???":
-            row = {
-                "nodeid": report.nodeid,
-                "outcome": "crash",
-                "reason": _one_line(str(report.longrepr)),
-            }
+            row = _crash_row(report)
         else:
             return
         if row["nodeid"] in self.seen:
@@ -552,6 +713,15 @@ class _CsvController:
 
     def close(self):
         self.file.close()
+
+
+def _install_kernel_log():
+    """Register ``hipdnn_sdpa``'s kernel-id log callback in a process that runs cases."""
+    import sys
+
+    module = sys.modules.get("hipdnn_sdpa")
+    if hasattr(module, "install_kernel_log"):
+        module.install_kernel_log()
 
 
 def pytest_configure(config):
@@ -565,7 +735,13 @@ def pytest_configure(config):
         _parse_shard(config.getoption("shard"))
     config._sdpa_backend = _bind_backend_first(config.getoption("hipdnn_prefix"))
     layout_mode()
-    _install_wrappers(config.getoption("fake") == "always-decline")
+    fake = config.getoption("fake") == "always-decline"
+    _install_wrappers(fake)
+    runs_cases = (
+        hasattr(config, "workerinput") or config.getoption("dist", "no") == "no"
+    )
+    if runs_cases and not fake:
+        _install_kernel_log()
     results = config.getoption("results_dir")
     if results and not hasattr(config, "workerinput"):
         config._sdpa_csv = _CsvController(Path(results) / reconcile.CSV_NAME)
@@ -633,7 +809,11 @@ def pytest_runtest_makereport(item, call):
     if call.when == "teardown":
         with _LOCK:
             _RECORDS.pop(item.nodeid, None)
+            _CALLS.pop(item.nodeid, None)
             _CURRENT = None
+        marker = _inflight_marker_path(os.environ.get("PYTEST_XDIST_WORKER"))
+        if marker:
+            marker.unlink(missing_ok=True)
         return report
     if call.when == "setup" and report.passed:
         return report
