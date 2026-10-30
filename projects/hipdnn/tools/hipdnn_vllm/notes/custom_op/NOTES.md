@@ -27,6 +27,7 @@ plus `users/sareeder/megakernel-engine` merged in.
 |---|---|
 | gfx94X wheel without engine sources (flag on, engine not merged yet), commit e8d652163c3 | `build_gfx94X_noengine.log` |
 | gfx94X wheel with the engine, commit 9fdb4197af7, tree clean, WHEEL_OK | `build_gfx94X_engine.log` |
+| gfx94X wheel after the re-merge of `users/sareeder/megakernel-engine` 92ed944eeb0, commit 55181f60133, tree clean, WHEEL_OK | `build_gfx94X_engine_55181f60133.log` |
 | custom_op tests, local MI210 (gfx90a), no engine | `test_custom_op_gfx90a_local.log` |
 | custom_op tests incl. H6, local MI210 (gfx90a), engine wheel | `test_custom_op_gfx90a_engine.log` |
 
