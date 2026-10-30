@@ -1,15 +1,16 @@
-"""The gfx950 dense attention bundle cases and the shipped catalog name the same head
-configurations.
+"""The gfx950 dense attention bundle cases and the shipped catalog agree on head sizes,
+and the catalog keys on nothing finer than that.
 
-The shared SdpaFwd sweeps vary one axis at a time off a baseline cell, and the cases
-claimed for the engine are meant to reach every (head size, Hq, Hkv) the catalog
-compiles. Nothing at run time enforces that: a configuration added to the catalog simply
-has no end-to-end bundle, and the knob suite's own catalog check runs only on gfx950
-hardware. A claimed case whose configuration the catalog lacks is the opposite drift,
-and surfaces only as a broken support claim on a gfx950 runner. This compares the two
-host-side, from the shipped descriptor and the sweep JSON, so every runner that builds
-the packaging tests sees both. Only cases support.json claims for the engine on gfx950
-count: the sweeps are shared, and another engine's cases are not this catalog's to cover.
+The kernel reads num_query_heads / num_kv_heads as kernargs, so one catalog entry per
+(dtype, head size, mask, tile) serves every head configuration and the metadata carries
+no head counts. What the catalog still specializes on is the head size, so that is what
+the claimed bundle cases must line up with: a head size the catalog compiles but no case
+reaches has no end-to-end bundle, and a claimed case whose head size the catalog lacks
+surfaces only as a broken support claim on a gfx950 runner. Both are checked host-side
+here, from the shipped descriptor and the sweep JSON, so every runner that builds the
+packaging tests sees them -- the knob suite's equivalent needs gfx950 hardware. Only
+cases support.json claims for the engine on gfx950 count: the sweeps are shared, and
+another engine's cases are not this catalog's to cover.
 """
 
 import json
@@ -34,15 +35,19 @@ SWEEPS = [
     for tier in ("quick", "standard")
 ]
 
+# Metadata fields the collapse removed. A catalog carrying either is matched on it again,
+# so one entry per head configuration comes back and this file's head-size rule is too
+# weak to catch it.
+HEAD_COUNT_FIELDS = ("num_query_heads", "num_kv_heads")
 
-def catalog_head_configs(kdp_path):
-    """(head_size, Hq, Hkv) of every kernel the descriptor packs."""
-    kdp = json.loads(kdp_path.read_text(encoding="utf-8"))
-    configs = set()
-    for kernel in kdp["kernelDescriptors"]:
-        spec = kernel["kernel_source"]["spec"]
-        configs.add((spec["head_size"], spec["num_query_heads"], spec["num_kv_heads"]))
-    return configs
+
+def catalog_kernels(kdp_path):
+    return json.loads(kdp_path.read_text(encoding="utf-8"))["kernelDescriptors"]
+
+
+def catalog_head_sizes(kdp_path):
+    """Head sizes the descriptor packs, from the metadata the matcher compares."""
+    return {kernel["metadata"]["head_size"] for kernel in catalog_kernels(kdp_path)}
 
 
 def claimed_case_ids(sweep_dir):
@@ -73,26 +78,65 @@ def sweep_head_configs(sweep_dir):
     return configs
 
 
-def head_config_gaps(kdp_path, sweep_dirs):
-    """(catalog configurations no case reaches, case configurations the catalog lacks)."""
-    catalog = catalog_head_configs(kdp_path)
-    swept = set().union(*(sweep_head_configs(d) for d in sweep_dirs))
+def swept_head_configs(sweep_dirs):
+    return set().union(*(sweep_head_configs(d) for d in sweep_dirs))
+
+
+def head_size_gaps(kdp_path, sweep_dirs):
+    """(catalog head sizes no case reaches, case head sizes the catalog lacks)."""
+    catalog = catalog_head_sizes(kdp_path)
+    swept = {head_size for head_size, _, _ in swept_head_configs(sweep_dirs)}
     return catalog - swept, swept - catalog
 
 
-def test_the_sweeps_reach_exactly_the_catalogs_head_configurations():
+def _require_catalog():
     # The KDP is a DVC output (descriptors/README.md), so a checkout without a
     # `dvc pull` has no catalog to compare.
     if not CATALOG.exists():
         pytest.skip(
             f"gfx950 catalog not pulled; run: dvc pull -r ingestor {CATALOG.parent}.dvc"
         )
-    # An unreadable or emptied catalog would otherwise pass as "nothing missing".
-    assert catalog_head_configs(CATALOG), f"no kernels read from {CATALOG}"
-    unreached, unknown = head_config_gaps(CATALOG, SWEEPS)
-    assert (
-        not unreached
-    ), f"catalog head configurations with no bundle case: {sorted(unreached)}"
+
+
+def test_the_catalog_keys_on_head_size_not_head_counts():
+    _require_catalog()
+    kernels = catalog_kernels(CATALOG)
+    # An unreadable or emptied catalog would otherwise pass as "nothing carries them".
+    assert kernels, f"no kernels read from {CATALOG}"
+    carriers = {
+        field: sum(1 for kernel in kernels if field in kernel["metadata"])
+        for field in HEAD_COUNT_FIELDS
+    }
+    assert not any(carriers.values()), (
+        f"catalog metadata still carries head counts {carriers}; the kernel takes them "
+        "as kernargs, so one entry per (dtype, head size, mask, tile) serves them all"
+    )
+    assert catalog_head_sizes(CATALOG), "no kernel carries an integer head_size"
+
+
+def test_the_sweeps_reach_exactly_the_catalogs_head_sizes():
+    _require_catalog()
+    assert catalog_head_sizes(CATALOG), f"no kernels read from {CATALOG}"
+    unreached, unknown = head_size_gaps(CATALOG, SWEEPS)
+    assert not unreached, f"catalog head sizes with no bundle case: {sorted(unreached)}"
     assert (
         not unknown
-    ), f"bundle cases on head configurations the catalog lacks: {sorted(unknown)}"
+    ), f"bundle cases on head sizes the catalog lacks: {sorted(unknown)}"
+
+
+def test_the_sweeps_vary_the_head_counts_the_catalog_no_longer_enumerates():
+    """Anti-vacuity for the rule above: the claimed cases must still run several head
+    configurations per head size, including both GQA and MHA. Keying coverage on the head
+    size alone is only safe while something exercises the head counts end to end."""
+    _require_catalog()
+    by_head_size = {}
+    for head_size, query_heads, kv_heads in swept_head_configs(SWEEPS):
+        by_head_size.setdefault(head_size, set()).add((query_heads, kv_heads))
+    assert by_head_size, "no claimed case in any sweep"
+    for head_size, configs in sorted(by_head_size.items()):
+        assert len(configs) > 1, (
+            f"D{head_size} claims only {sorted(configs)}; one kernel serving every head "
+            "count is then never exercised end to end"
+        )
+        assert any(hq != kv for hq, kv in configs), f"D{head_size} claims no GQA case"
+        assert any(hq == kv for hq, kv in configs), f"D{head_size} claims no MHA case"
