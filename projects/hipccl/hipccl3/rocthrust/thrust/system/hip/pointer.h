@@ -134,16 +134,13 @@ using reference = thrust::tagged_reference<T, thrust::hip_rocprim::tag>;
  *  aliased in the top-level <tt>thrust::hip</tt> namespace for easy access.
  *
  */
-namespace system
-{
-namespace hip
+namespace system::hip
 {
 using thrust::hip_rocprim::pointer;
 using thrust::hip_rocprim::reference;
 using thrust::hip_rocprim::universal_host_pinned_pointer;
 using thrust::hip_rocprim::universal_pointer;
-} // namespace hip
-} // namespace system
+} // namespace system::hip
 /*! \}
  */
 

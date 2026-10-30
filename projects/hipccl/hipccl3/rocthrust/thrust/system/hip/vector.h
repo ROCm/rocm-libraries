@@ -89,15 +89,12 @@ template <typename T>
 using universal_host_pinned_vector = thrust::detail::vector_base<T, universal_host_pinned_allocator<T>>;
 } // namespace hip_rocprim
 
-namespace system
-{
-namespace hip
+namespace system::hip
 {
 using thrust::hip_rocprim::universal_host_pinned_vector;
 using thrust::hip_rocprim::universal_vector;
 using thrust::hip_rocprim::vector;
-} // namespace hip
-} // namespace system
+} // namespace system::hip
 
 namespace hip
 {

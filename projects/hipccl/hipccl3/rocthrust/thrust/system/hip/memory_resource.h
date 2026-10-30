@@ -40,11 +40,8 @@
 
 THRUST_NAMESPACE_BEGIN
 
-namespace system
+namespace system::hip
 {
-namespace hip
-{
-
 //! \cond
 namespace detail
 {
@@ -115,8 +112,7 @@ using universal_memory_resource = detail::managed_memory_resource;
  */
 using universal_host_pinned_memory_resource = detail::pinned_memory_resource;
 
-} // namespace hip
-} // namespace system
+} // namespace system::hip
 
 namespace hip
 {

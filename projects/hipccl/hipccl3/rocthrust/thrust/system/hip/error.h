@@ -37,10 +37,6 @@ THRUST_NAMESPACE_BEGIN
 
 namespace system
 {
-
-namespace hip_rocprim
-{
-
 // To construct an error_code after a HIP Runtime error:
 //
 //   error_code(::hipGetLastError(), hip_category())
@@ -48,9 +44,8 @@ namespace hip_rocprim
 // XXX N3000 prefers enum class errc { ... }
 /*! Namespace for HIP Runtime errors.
  */
-namespace errc
+namespace hip_rocprim::errc
 {
-
 /*! \p errc_t enumerates the kinds of HIP Runtime errors.
  */
 enum errc_t
@@ -114,10 +109,7 @@ enum errc_t
   attempted_operation_not_supported = hipErrorNotSupported,
   startup_failure                   = hipErrorTbd
 }; // end errc_t
-
-} // end namespace errc
-
-} // namespace hip_rocprim
+} // namespace hip_rocprim::errc
 
 /*! \return A reference to an object of a type derived from class \p thrust::error_category.
  *  \note The object's \p equivalent virtual functions shall behave as specified

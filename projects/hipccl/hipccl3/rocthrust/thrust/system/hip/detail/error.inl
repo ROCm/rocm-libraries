@@ -44,12 +44,8 @@ error_condition make_error_condition(hip_rocprim::errc::errc_t e)
   return error_condition(static_cast<int>(e), hip_category());
 } // end make_error_condition()
 
-namespace hip_rocprim
+namespace hip_rocprim::detail
 {
-
-namespace detail
-{
-
 class hip_error_category : public error_category
 {
 public:
@@ -81,10 +77,7 @@ public:
     return system_category().default_error_condition(ev);
   }
 }; // end hip_error_category
-
-} // namespace detail
-
-} // end namespace hip_rocprim
+} // end namespace hip_rocprim::detail
 
 const error_category& hip_category()
 {

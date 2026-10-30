@@ -93,17 +93,14 @@ using universal_host_pinned_allocator =
   thrust::mr::stateless_resource_allocator<T, thrust::system::hip::universal_host_pinned_memory_resource>;
 } // namespace hip_rocprim
 
-namespace system
-{
-namespace hip
+namespace system::hip
 {
 using thrust::hip_rocprim::allocator;
 using thrust::hip_rocprim::free;
 using thrust::hip_rocprim::malloc;
 using thrust::hip_rocprim::universal_allocator;
 using thrust::hip_rocprim::universal_host_pinned_allocator;
-} // namespace hip
-} // namespace system
+} // namespace system::hip
 
 /*! \namespace thrust::hip
  *  \brief \p thrust::hip is a top-level alias for \p thrust::system::hip.

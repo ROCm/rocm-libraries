@@ -28,10 +28,7 @@
 #endif // no system header
 
 THRUST_NAMESPACE_BEGIN
-namespace hip_rocprim
-{
-
-namespace detail
+namespace hip_rocprim::detail
 {
 
 template <typename Size>
@@ -57,6 +54,5 @@ struct make_unsigned_special<long long>
   using type = unsigned long long;
 };
 
-} // namespace detail
-} // namespace hip_rocprim
+} // namespace hip_rocprim::detail
 THRUST_NAMESPACE_END
