@@ -102,7 +102,7 @@ TensileRetuneLibrary = "tensilelite.TensileRetuneLibrary:main"
 dev = [
     "rocisa",
     "pytest>=5.4.1",
-    "pytest-xdist>=1.32.0",
+    "pytest-xdist>=3.2",
     "pytest-cov",
     "syrupy",
     "filelock",
