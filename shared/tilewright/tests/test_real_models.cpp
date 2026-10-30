@@ -514,6 +514,19 @@ TEST_CASE("shipped models served with the drift fallback rank as its rule says",
   const std::vector<tw::Config> synth_pool = synthetic_pool();
   const tw::Hardware hw{128, 65536, 4u << 20};
   const tw::ExecutionContext ctx;
+  // bf16 problems with A transposed and B not, and some with both transposed and with
+  // neither, whose K-contiguous operand an alignment veto a model ships with reads (K 1000
+  // leaves it short of whole lines).
+  std::vector<tw::Problem> problems;
+  for (std::size_t m : {1, 64, 777, 4096})
+    for (std::size_t n : {16, 640, 9000})
+      for (std::size_t k : {16, 1000, 16384})
+        for (std::size_t b : {1, 4})
+          problems.push_back(make_problem(m, n, k, b, tw::DataType::BFloat16));
+  for (const tw::Transpose t : {tw::Transpose::T, tw::Transpose::N})
+    for (std::size_t m : {64, 4096})
+      for (std::size_t k : {1000, 16384})
+        problems.push_back(make_problem(m, 640, k, 1, tw::DataType::BFloat16, t, t));
   std::size_t flagged = 0, degraded_rankings = 0, merged = 0, kept = 0;
   for (const fs::path& path : models) {
     INFO(path.string());
@@ -556,57 +569,48 @@ TEST_CASE("shipped models served with the drift fallback rank as its rule says",
         const std::vector<std::size_t> degraded = set.degraded_cells();
         CHECK(ready.degraded_cells() == degraded);
         CHECK(base.degraded_cells().empty());
-        for (std::size_t m : {1, 64, 777, 4096})
-          for (std::size_t n : {16, 640, 9000})
-            for (std::size_t k : {16, 1000, 16384})
-              for (std::size_t b : {1, 4}) {
-                const tw::Problem p = make_problem(m, n, k, b, tw::DataType::BFloat16);
-                const int cell      = tw::route(*drift, p);
-                if (cell < 0) continue;
-                const bool is_degraded = std::binary_search(
-                    degraded.begin(), degraded.end(), static_cast<std::size_t>(cell));
-                // The cell's whitelisted view keys the model lists as trained.
-                std::vector<std::uint64_t> listed;
-                for (const std::uint64_t h :
-                     plain->cells[static_cast<std::size_t>(cell)].view_key_hashes)
-                  if (!plain->trained_key_gate ||
-                      std::binary_search(plain->trained_keys.begin(), plain->trained_keys.end(), h))
-                    listed.push_back(h);
-                std::sort(listed.begin(), listed.end());
-                for (const std::size_t min_scored :
-                     {std::size_t{0}, std::size_t{1}, std::size_t{1000}}) {
-                  const std::vector<tw::Result> r = set.rank(p, hw, ctx, min_scored);
-                  REQUIRE(same_results(
-                      r, tw::rank_configs(*drift, p, hw, ctx, *pool, options, min_scored)));
-                  REQUIRE(same_results(ready.rank(p, hw, ctx, min_scored), r));
-                  if (!is_degraded) {
-                    REQUIRE(same_results(base.rank(p, hw, ctx, min_scored), r));
-                    ++kept;
-                    continue;
-                  }
-                  ++degraded_rankings;
-                  // Tier 2 is built behind a whitelist tier 1 and both rank as one tier.
-                  const std::vector<std::size_t> tier1 = scored_indices(base.rank(p, hw, ctx, 1));
-                  const bool whitelist =
-                      !tier1.empty() && std::all_of(tier1.begin(), tier1.end(), [&](std::size_t c) {
-                        return std::binary_search(
-                            listed.begin(), listed.end(), hash_of((*pool)[c]));
-                      });
-                  std::vector<tw::Result> want = base.rank(
-                      p, hw, ctx, whitelist ? std::max(min_scored, tier1.size() + 1) : min_scored);
-                  if (whitelist) {
-                    ++merged;
-                    const auto tail = std::stable_partition(
-                        want.begin(), want.end(), [](const tw::Result& x) { return x.scored; });
-                    std::stable_sort(
-                        want.begin(), tail, [](const tw::Result& a, const tw::Result& b) {
-                          return a.score > b.score ||
-                                 (a.score == b.score && a.config_index < b.config_index);
-                        });
-                  }
-                  REQUIRE(same_results(r, want));
-                }
-              }
+        for (const tw::Problem& p : problems) {
+          const int cell = tw::route(*drift, p);
+          if (cell < 0) continue;
+          const bool is_degraded =
+              std::binary_search(degraded.begin(), degraded.end(), static_cast<std::size_t>(cell));
+          // The cell's whitelisted view keys the model lists as trained.
+          std::vector<std::uint64_t> listed;
+          for (const std::uint64_t h : plain->cells[static_cast<std::size_t>(cell)].view_key_hashes)
+            if (!plain->trained_key_gate ||
+                std::binary_search(plain->trained_keys.begin(), plain->trained_keys.end(), h))
+              listed.push_back(h);
+          std::sort(listed.begin(), listed.end());
+          for (const std::size_t min_scored : {std::size_t{0}, std::size_t{1}, std::size_t{1000}}) {
+            const std::vector<tw::Result> r = set.rank(p, hw, ctx, min_scored);
+            REQUIRE(
+                same_results(r, tw::rank_configs(*drift, p, hw, ctx, *pool, options, min_scored)));
+            REQUIRE(same_results(ready.rank(p, hw, ctx, min_scored), r));
+            if (!is_degraded) {
+              REQUIRE(same_results(base.rank(p, hw, ctx, min_scored), r));
+              ++kept;
+              continue;
+            }
+            ++degraded_rankings;
+            // Tier 2 is built behind a whitelist tier 1 and both rank as one tier.
+            const std::vector<std::size_t> tier1 = scored_indices(base.rank(p, hw, ctx, 1));
+            const bool whitelist =
+                !tier1.empty() && std::all_of(tier1.begin(), tier1.end(), [&](std::size_t c) {
+                  return std::binary_search(listed.begin(), listed.end(), hash_of((*pool)[c]));
+                });
+            std::vector<tw::Result> want = base.rank(
+                p, hw, ctx, whitelist ? std::max(min_scored, tier1.size() + 1) : min_scored);
+            if (whitelist) {
+              ++merged;
+              const auto tail = std::stable_partition(
+                  want.begin(), want.end(), [](const tw::Result& x) { return x.scored; });
+              std::stable_sort(want.begin(), tail, [](const tw::Result& a, const tw::Result& b) {
+                return a.score > b.score || (a.score == b.score && a.config_index < b.config_index);
+              });
+            }
+            REQUIRE(same_results(r, want));
+          }
+        }
       }
     }
   }

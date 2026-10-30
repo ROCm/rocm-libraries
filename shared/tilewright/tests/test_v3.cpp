@@ -2776,9 +2776,42 @@ std::vector<tw::Result> rank_by_config(const tw::Model& model,
                                nullptr);
 }
 
-// What a degraded cell serves, from the model without the fallback: its ranking with tier 2
-// built behind a whitelist tier 1 (min_scored above tier 1), both tiers ordered best-first by
-// score, equal scores in input order; its ranking itself when tier 1 is not the whitelist.
+// What a degraded cell serves, from `rank(min_scored)`, the model without the fallback ranking
+// the same pool: with a whitelist tier 1 (the configs rank(1) scores, all of them of `listed`
+// keys), its ranking with tier 2 built behind it (min_scored above tier 1), both tiers ordered
+// best-first by score, equal scores by ascending `prior` (non-finite last) when there is one,
+// then in input order; its ranking itself when tier 1 is not the whitelist.
+template <class Rank>
+std::vector<tw::Result> merged_reference(const Rank& rank,
+                                         const std::vector<std::uint64_t>& listed,
+                                         const std::vector<tw::Config>& pool,
+                                         std::size_t min_scored,
+                                         const std::vector<double>* prior = nullptr,
+                                         bool* merged                     = nullptr) {
+  const std::vector<std::size_t> tier1 = scored_indices(rank(std::size_t{1}));
+  const bool whitelist =
+      !tier1.empty() && std::all_of(tier1.begin(), tier1.end(), [&](std::size_t c) {
+        return std::binary_search(listed.begin(), listed.end(), key_hash(pool[c], {}));
+      });
+  if (merged != nullptr) *merged = whitelist;
+  std::vector<tw::Result> r = rank(whitelist ? std::max(min_scored, tier1.size() + 1) : min_scored);
+  if (!whitelist) return r;
+  const auto unscored =
+      std::stable_partition(r.begin(), r.end(), [](const tw::Result& x) { return x.scored; });
+  std::stable_sort(r.begin(), unscored, [&](const tw::Result& a, const tw::Result& b) {
+    if (a.score != b.score) return a.score > b.score;
+    if (prior != nullptr) {
+      const double pa = (*prior)[a.config_index], pb = (*prior)[b.config_index];
+      if (std::isfinite(pa) != std::isfinite(pb)) return std::isfinite(pa);
+      if (std::isfinite(pa) && pa != pb) return pa < pb;
+    }
+    return a.config_index < b.config_index;
+  });
+  return r;
+}
+
+// What a degraded cell serves, from the model without the fallback (merged_reference) at the
+// exclusive context.
 std::vector<tw::Result> drift_reference(const tw::CandidateSet& plain,
                                         const std::vector<std::uint64_t>& listed,
                                         const std::vector<tw::Config>& pool,
@@ -2786,22 +2819,13 @@ std::vector<tw::Result> drift_reference(const tw::CandidateSet& plain,
                                         std::size_t min_scored,
                                         bool* merged = nullptr) {
   const tw::Hardware hw = test_hardware();
-  const tw::ExecutionContext ctx;
-  const std::vector<std::size_t> tier1 = scored_indices(plain.rank(p, hw, ctx, 1));
-  const bool whitelist =
-      !tier1.empty() && std::all_of(tier1.begin(), tier1.end(), [&](std::size_t c) {
-        return std::binary_search(listed.begin(), listed.end(), key_hash(pool[c], {}));
-      });
-  if (merged != nullptr) *merged = whitelist;
-  std::vector<tw::Result> r =
-      plain.rank(p, hw, ctx, whitelist ? std::max(min_scored, tier1.size() + 1) : min_scored);
-  if (!whitelist) return r;
-  const auto unscored =
-      std::stable_partition(r.begin(), r.end(), [](const tw::Result& x) { return x.scored; });
-  std::stable_sort(r.begin(), unscored, [](const tw::Result& a, const tw::Result& b) {
-    return a.score > b.score || (a.score == b.score && a.config_index < b.config_index);
-  });
-  return r;
+  return merged_reference(
+      [&](std::size_t k) { return plain.rank(p, hw, tw::ExecutionContext{}, k); },
+      listed,
+      pool,
+      min_scored,
+      nullptr,
+      merged);
 }
 
 }  // namespace
@@ -3022,6 +3046,256 @@ TEST_CASE("drift rankings agree through every entry point and cache state", "[v3
       ++at;
     }
   tw::set_cache_limit(saved);
+}
+
+namespace {
+
+// MLREC_v3 serving flag of the alignment veto.
+constexpr std::uint32_t kVeto = 0x200;
+
+// `spec` with the alignment veto of the gfx950 recipes: K above 512, 128-byte lines.
+ModelSpec with_veto(ModelSpec spec) {
+  spec.v3_serving_flags |= kVeto;
+  spec.veto_k_min      = 512;
+  spec.veto_align_bits = 1024;
+  return spec;
+}
+
+// Every tile of a grid with its hint-free kernel and its non-temporal siblings of A and of B,
+// every seventh of them with a second config of its view key (another occupancy), shuffled.
+std::vector<tw::Config> sibling_drift_pool(Random& rnd) {
+  std::vector<tw::Config> kinds;
+  for (const std::size_t m : {32, 64, 128, 256})
+    for (const std::size_t n : {32, 64, 128, 256})
+      for (const std::size_t k : {32, 64, 128})
+        for (const std::pair<int, int>& h :
+             {std::pair<int, int>{0, 0}, std::pair<int, int>{4, 0}, std::pair<int, int>{0, 4}})
+          kinds.push_back(make_config(m, n, k, 16, 16, 32, h.first, h.second));
+  std::vector<tw::Config> pool = kinds;
+  for (std::size_t i = 0; i < kinds.size(); i += 7) {
+    tw::Config c = kinds[i];
+    c.occupancy  = 2;
+    pool.push_back(c);
+  }
+  for (std::size_t i = pool.size(); i > 1; --i) std::swap(pool[i - 1], pool[rnd.below(i)]);
+  for (std::size_t i = 0; i < pool.size(); ++i) pool[i].index = i;
+  return pool;
+}
+
+// The configs of `pool` that `keep` accepts, in its order, indexed again.
+template <class Keep>
+std::vector<tw::Config> configs_where(const std::vector<tw::Config>& pool, Keep keep) {
+  std::vector<tw::Config> out;
+  for (const tw::Config& c : pool)
+    if (keep(c)) out.push_back(c);
+  for (std::size_t i = 0; i < out.size(); ++i) out[i].index = i;
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("a degraded cell ranks as the drift fallback says under the alignment veto",
+          "[v3][drift][veto]") {
+  Random rnd(83);
+  const tw::Hardware hw                = test_hardware();
+  const std::vector<tw::Config> pool   = sibling_drift_pool(rnd);
+  const std::vector<std::uint64_t> all = view_hashes(pool);
+  // Six keys without training data, which no cell lists; every cell lists eight hint-free
+  // trained keys and four non-temporal ones of A and of B.
+  std::vector<std::uint64_t> untrained;
+  while (untrained.size() < 6) {
+    const std::uint64_t h = all[rnd.below(all.size())];
+    if (std::find(untrained.begin(), untrained.end(), h) == untrained.end()) untrained.push_back(h);
+  }
+  std::sort(untrained.begin(), untrained.end());
+  std::vector<std::uint64_t> trained, by_hint[3];
+  for (const std::uint64_t h : all)
+    if (!std::binary_search(untrained.begin(), untrained.end(), h)) trained.push_back(h);
+  for (const tw::Config& c : pool) {
+    const std::uint64_t h = key_hash(c, {});
+    if (std::binary_search(trained.begin(), trained.end(), h))
+      by_hint[c.cache_hints_a == 4 ? 1 : c.cache_hints_b == 4 ? 2 : 0].push_back(h);
+  }
+  for (std::vector<std::uint64_t>& keys : by_hint) {
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+  }
+  ModelSpec spec        = v3_grid({});
+  spec.v3_serving_flags = kGate;
+  spec.trained_keys     = trained;
+  spec.v3_cascade_keys  = 4;
+  // CU budgets from a quarter of the device: a budget below them ranks at its scoring context.
+  spec.min_cu_fraction = 0.25;
+  std::vector<std::uint64_t> listed_anywhere;
+  for (CellSpec& cell : spec.cells) {
+    std::vector<std::uint64_t> keys;
+    for (std::size_t s = 0; s < 3; ++s) {
+      std::vector<std::uint64_t> from = by_hint[s];
+      for (std::size_t i = from.size(); i > 1; --i) std::swap(from[i - 1], from[rnd.below(i)]);
+      from.resize(s == 0 ? 8 : 4);
+      keys.insert(keys.end(), from.begin(), from.end());
+    }
+    std::sort(keys.begin(), keys.end());
+    cell.view_key_hashes = keys;
+    listed_anywhere.insert(listed_anywhere.end(), keys.begin(), keys.end());
+  }
+  std::sort(listed_anywhere.begin(), listed_anywhere.end());
+  listed_anywhere.erase(std::unique(listed_anywhere.begin(), listed_anywhere.end()),
+                        listed_anywhere.end());
+  const auto listed_key = [&](const tw::Config& c) {
+    return std::binary_search(listed_anywhere.begin(), listed_anywhere.end(), key_hash(c, {}));
+  };
+  std::vector<std::uint64_t> gone = listed_anywhere;
+  for (std::size_t i = gone.size(); i > 1; --i) std::swap(gone[i - 1], gone[rnd.below(i)]);
+  gone.resize(10);
+  // The pool; the pool without some listed keys; the pool whose listed keys are only those
+  // non-temporal on A (or B), where the veto of a TT (or NN) problem names every whitelisted
+  // survivor; and only the kernels non-temporal on A (or B), where it names every kernel and
+  // steps aside.
+  const std::vector<std::pair<std::string, std::vector<tw::Config>>> pools = {
+      {"whole", pool},
+      {"listed keys gone", without_keys(pool, gone)},
+      {"listed keys non-temporal on A",
+       configs_where(pool,
+                     [&](const tw::Config& c) { return !listed_key(c) || c.cache_hints_a == 4; })},
+      {"listed keys non-temporal on B",
+       configs_where(pool,
+                     [&](const tw::Config& c) { return !listed_key(c) || c.cache_hints_b == 4; })},
+      {"non-temporal on A",
+       configs_where(pool, [](const tw::Config& c) { return c.cache_hints_a == 4; })},
+      {"non-temporal on B",
+       configs_where(pool, [](const tw::Config& c) { return c.cache_hints_b == 4; })}};
+  // bf16 TT and NN problems, at K the veto names (600, 1000) and at K it does not.
+  std::vector<tw::Problem> problems;
+  for (const tw::Transpose t : {tw::Transpose::T, tw::Transpose::N})
+    for (const std::pair<std::size_t, std::size_t>& mn :
+         {std::pair<std::size_t, std::size_t>{64, 64},
+          std::pair<std::size_t, std::size_t>{500, 3000},
+          std::pair<std::size_t, std::size_t>{3000, 500},
+          std::pair<std::size_t, std::size_t>{8192, 8192},
+          std::pair<std::size_t, std::size_t>{24, 4096}})
+      for (const std::size_t k : {300, 600, 1000, 1024, 4096})
+        problems.push_back(make_problem(
+            mn.first, mn.second, k, mn.first == 24 ? 4 : 1, tw::DataType::BFloat16, t, t));
+  const tw::ExecutionContext contexts[] = {context(0, tw::Schedule::Default),
+                                           context(1, tw::Schedule::Default),
+                                           context(32, tw::Schedule::Default),
+                                           context(0, tw::Schedule::Dynamic)};
+  const tw::PoolOptions by_prior{tw::TieBreak::Prior};
+  std::size_t merged = 0, kept = 0, beside = 0, all_vetoed = 0, aside = 0, moved = 0;
+  std::size_t reordered = 0;
+  for (const std::uint32_t keep : {std::uint32_t{1000000}, std::uint32_t{900000}}) {
+    const ModelSpec veto = with_veto(spec), both = with_drift(veto, keep);
+    const tw::ModelPtr vm = load_spec(veto), bm = load_spec(both);
+    const tw::ModelPtr dm = load_spec(with_drift(spec, keep));
+    REQUIRE(tw::describe(*bm).alignment_veto.on);
+    REQUIRE(tw::describe(*bm).drift_keep_ppm == keep);
+    for (const std::pair<std::string, std::vector<tw::Config>>& named : pools) {
+      const std::vector<tw::Config>& variant = named.second;
+      const tw::CandidateSet vs(vm, variant), bs(bm, variant), ds(dm, variant), ready(bm, variant);
+      const tw::CandidateSet vp(vm, variant, by_prior), bp(bm, variant, by_prior);
+      ready.prepare();
+      // The veto never changes which cells are degraded.
+      const std::vector<std::size_t> degraded = bs.degraded_cells();
+      CHECK(degraded == ds.degraded_cells());
+      CHECK(degraded == degraded_oracle(both, variant, keep));
+      CHECK(vs.degraded_cells().empty());
+      // A prior with ties and non-finite values.
+      std::vector<double> prior(variant.size());
+      for (double& x : prior) x = rnd.pick<double>({0.0, 1.0, 2.0, -1.5, std::nan("")});
+      for (const tw::Problem& p : problems) {
+        const int cell = tw::route(*bm, p);
+        REQUIRE(cell >= 0);
+        const bool is_degraded =
+            std::binary_search(degraded.begin(), degraded.end(), static_cast<std::size_t>(cell));
+        const std::vector<std::uint64_t> listed =
+            trained_listed(both, static_cast<std::size_t>(cell));
+        const bool applies = veto_applies(p);
+        for (const tw::ExecutionContext& ctx : contexts) {
+          const std::optional<tw::ExecutionContext> at = tw::scoring_context(*bm, ctx, hw);
+          REQUIRE(at.has_value());
+          for (const std::size_t min_scored :
+               {std::size_t{0}, std::size_t{1}, std::size_t{8}, kAll}) {
+            INFO(named.first << ", keep_ppm " << keep << ", m " << p.size.m << " n " << p.size.n
+                             << " k " << p.size.k << " layout " << static_cast<int>(p.a_transpose)
+                             << " budget " << ctx.cu_budget << " schedule "
+                             << static_cast<int>(ctx.schedule) << " min_scored " << min_scored);
+            const auto by_veto              = [&](std::size_t k) { return vs.rank(p, hw, ctx, k); };
+            bool whitelist                  = false;
+            const std::vector<tw::Result> r = bs.rank(p, hw, ctx, min_scored);
+            CHECK(same_results(
+                r,
+                is_degraded
+                    ? merged_reference(by_veto, listed, variant, min_scored, nullptr, &whitelist)
+                    : by_veto(min_scored)));
+            CHECK(same_results(tw::rank_configs(*bm, p, hw, ctx, variant, min_scored), r));
+            CHECK(same_results(bs.rank_top(p, hw, ctx, min_scored), scored_prefix(r, min_scored)));
+            // A budget ranks as its scoring context; a prepared set twice in a row (the memo
+            // never answers a degraded ranking); where the veto applies to nothing, the model
+            // ranks as with the drift fallback alone.
+            CHECK(same_results(bs.rank(p, hw, *at, min_scored), r));
+            for (int twice = 0; twice < 2; ++twice)
+              CHECK(same_results(ready.rank(p, hw, ctx, min_scored), r));
+            if (!applies) CHECK(same_results(ds.rank(p, hw, ctx, min_scored), r));
+            if (ctx.cu_budget == 1 &&
+                !same_results(r, bs.rank(p, hw, tw::ExecutionContext{}, min_scored)))
+              ++moved;
+            if (min_scored == 1 || min_scored == kAll) {
+              const std::vector<tw::Result> rp = bp.rank(p, hw, ctx, min_scored, &prior);
+              const auto by_veto_prior         = [&](std::size_t k) {
+                return vp.rank(p, hw, ctx, k, &prior);
+              };
+              CHECK(same_results(
+                  rp,
+                  is_degraded ? merged_reference(by_veto_prior, listed, variant, min_scored, &prior)
+                              : by_veto_prior(min_scored)));
+              CHECK(same_results(
+                  tw::rank_configs(
+                      *bm, p, hw, ctx, variant, min_scored, tw::TieBreak::Prior, &prior),
+                  rp));
+              CHECK(same_results(bp.rank_top(p, hw, ctx, min_scored, &prior),
+                                 scored_prefix(rp, min_scored)));
+              if (is_degraded && whitelist && !same_results(rp, r)) ++reordered;
+            }
+            if (!is_degraded) {
+              ++kept;
+              continue;
+            }
+            merged += whitelist ? 1 : 0;
+            if (!applies) continue;
+            // What the veto did in this degraded cell: named whitelisted kernels beside others
+            // that rank merged; named every whitelisted survivor, so that the cell ranks without
+            // its whitelist; or named every kernel and stepped aside.
+            const std::vector<std::size_t> tier1 = scored_indices(by_veto(1));
+            const bool stepped_aside             = std::any_of(
+                tier1.begin(), tier1.end(), [&](std::size_t c) { return vetoed(p, variant[c]); });
+            bool survivor = false, any_named = false, every_named = true;
+            for (const tw::Config& c : variant) {
+              if (!std::binary_search(listed.begin(), listed.end(), key_hash(c, {})) ||
+                  !lds_fits(p, c))
+                continue;
+              survivor    = true;
+              any_named   = any_named || vetoed(p, c);
+              every_named = every_named && vetoed(p, c);
+            }
+            if (stepped_aside && whitelist)
+              ++aside;
+            else if (!stepped_aside && whitelist && any_named)
+              ++beside;
+            else if (!stepped_aside && !whitelist && survivor && every_named)
+              ++all_vetoed;
+          }
+        }
+      }
+    }
+  }
+  CHECK(merged > 0);
+  CHECK(kept > 0);
+  CHECK(beside > 0);
+  CHECK(all_vetoed > 0);
+  CHECK(aside > 0);
+  CHECK(moved > 0);
+  CHECK(reordered > 0);
 }
 
 namespace {
