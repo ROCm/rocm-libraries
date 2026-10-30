@@ -1,49 +1,53 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The MX GEMM gives the right answer across the whole E8M0 scale range.
+"""The MX GEMM keeps its numerical contract across the whole E8M0 scale range.
 
-The MX GEMM folds each scale group into its f32 accumulator with one update,
-``acc + dot * 2^(ea + eb)`` rounded once, where ``dot`` is the group's
-32-element mantissa dot product and ``ea``, ``eb`` are the unbiased exponents
-of the A and B scale codes (each -127..127). The combined exponent ``ea + eb``
-spans -254..254, far wider than one f32 can hold (2^-149..2^127), so the
-kernel must not form ``2^(ea + eb)`` as a single f32: large scales would
-overflow it to Inf (and 0 * Inf to NaN) and small scales would flush it to
-zero, even when the true output is an ordinary f32.
+Contract (``dsl_docs/instances/gemm.md``, MX GEMM): every output is within the
+GEMM tolerance of the exact result,
 
-The kernel splits ``2^(ea + eb)`` into two f32 factors and applies them with
-one fma; :func:`rocke.helpers.mx_scale.exact_mx_scale_split` derives the split
-from the element format the target's MFMA reads so that the update is exact,
-bit for bit, with IEEE special values and signed zeros, for every dot product
-a group of those elements can produce.
+    |C - exact| <= 1e-3 * sum_k |a_k b_k| 2^(ea + eb) + (K / 32) * 2^-126,
+
+with IEEE special values: a NaN scale code (255) or a NaN input element gives
+NaN. An output is finite while every scaled group term
+``T_g = 2^(ea + eb) * sum_{k in g} a_k b_k`` and every running sum
+``T_0 + ... + T_g`` (K order) stays within the f32 range -- the scaling never
+overflows on its own. Once one of them overflows, the output may be Inf or
+NaN, as in any GEMM that accumulates in f32.
 
 Checks:
 
-* On a gfx942 or gfx950 GPU, the kernel's outputs for chosen mantissas and
-  scale codes match that update, applied once per group, bit for bit,
-  including an infinite accumulator meeting a group that overflows the other
-  way and negative groups too small for f32 on a zero accumulator.
-* On the host, on the kernel's LLVM IR from both engines for gfx942 and
-  gfx950, fp8 and bf8: no float multiply takes two values made from scale
-  bytes alone; the update is ``fma(group * 2^pre, 2^fused, acc)`` with
-  ``fused`` the combined exponent clamped to every f32 power of two and
-  ``pre`` the rest, saturated at the derived largest ``pre``; and that update, evaluated over every pair of scale
-  codes for dot products the format can produce and for zero (of either
-  sign), infinite, subnormal and finite accumulators, is the exact update bit
-  for bit. This covers the full code range the GPU cases only sample.
+* On a gfx942 or gfx950 GPU: random mantissas with A scale codes that differ
+  from row to row and B scale codes that differ from column to column, for
+  shapes with whole and partial workgroup tiles, a K that is not a multiple of
+  64 and an N that is not a multiple of 32; one shape with chosen special
+  values (NaN codes, NaN and infinite inputs, products far beyond the f32 range
+  that cancel to an ordinary f32, outputs that overflow, a group term that
+  overflows and a later one that cancels it, running sums close to the f32
+  limit that never cross it, tiny scales, scaled products near the f32
+  subnormal range); and codes at the largest scale the scaled MFMA takes
+  directly with the largest mantissas.
+* On the host, the contract checker itself: an output whose running sum
+  overflows may be Inf or NaN, one whose terms and running sums all stay in
+  range must be finite and within the tolerance.
+* On the host, on the LLVM IR of both engines: every stored output gets each K
+  group once, with the A scale of its own row and the B scale of its own
+  column, for every lane, wave and workgroup; the gfx950 kernel uses the
+  scaled MFMA and the ldexp path, the gfx942 kernel the 32x32x16 MFMA and
+  ldexp, and neither multiplies floats; both engines refuse the same invalid
+  specs with the same text, including a shape whose padded edge leaves the
+  i32 offset range; the spec takes keyword arguments only.
 """
 
 from __future__ import annotations
 
+import math
 import re
-import struct
-from typing import NamedTuple
 
 import numpy as np
 import pytest
+from rocke.core.backend import lower_mx_gemm
 from rocke.helpers import compile_kernel
-from rocke.helpers.compile import lower_kernel_for_comgr
-from rocke.helpers.mx_scale import exact_mx_scale_split
+from rocke.helpers.mx_scale import largest_safe_mx_scale_code
 from rocke.instances.common.mx_gemm import (
     MxGemmSpec,
     build_mx_gemm,
@@ -51,126 +55,154 @@ from rocke.instances.common.mx_gemm import (
     mx_gemm_grid,
     mx_gemm_signature,
 )
-from rocke.tests.engines import all_engines_backend
+from rocke.tests.engines import (
+    all_engines_backend,
+    available_engines,
+    lower_spec_with_all_engines,
+)
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
 from rocke.tests.llvm_ir import KernelIR
 
 _NAN_CODE = 255
-_BIAS = 127
-
-
-def _round_once(product, addend):
-    """``product + addend`` rounded once to f32 (nearest even), elementwise.
-
-    ``product`` is a float64 holding an exact value (a product of two f32
-    values, or a short dot product times a power of two, is exact in
-    float64); ``addend`` is f32. float64 cannot always hold the sum, and
-    rounding it to float64 and then to f32 could round twice. So the sum is
-    taken to float64 with its exact error (two-sum), an inexact sum is moved
-    to its odd float64 neighbour on the side of the error, and only then is
-    it rounded to f32: rounding to odd with 53 bits and then to nearest with
-    24 rounds once. Infinities and NaN follow IEEE (``Inf - Inf`` is NaN),
-    and the conversion overflows to Inf and goes through the f32 subnormals
-    like the GPU.
-    """
-    product = np.asarray(product, dtype=np.float64)
-    addend = np.asarray(addend, dtype=np.float32).astype(np.float64)
-    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
-        total = product + addend
-        addend_part = total - product
-        error = (product - (total - addend_part)) + (addend - addend_part)
-        even = (total.view(np.uint64) & 1) == 0
-        inexact_even = np.isfinite(total) & (error != 0) & even
-        toward_error = np.nextafter(total, np.where(error > 0, np.inf, -np.inf))
-        return np.where(inexact_even, toward_error, total).astype(np.float32)
-
-
-def _exact_update(dot, exponent, acc):
-    """``acc + dot * 2^exponent`` rounded once to f32, elementwise
-    (:func:`_round_once`). ``dot`` is an f32 value held exactly in float64,
-    ``exponent`` the combined scale exponent ``ea + eb`` and ``acc`` the f32
-    accumulator; ``dot * 2^exponent`` is exact in float64."""
-    dot = np.asarray(dot, dtype=np.float64)
-    exponent = np.asarray(exponent, dtype=np.float64)
-    with np.errstate(over="ignore", invalid="ignore"):
-        return _round_once(dot * np.exp2(exponent), acc)
-
-
-def _bf8_byte(arch: str, value: float) -> int:
-    """The bf8 (E5M2) byte the arch's MFMA reads as ``value``: zero or
-    ``+-2^power`` in the normal range. gfx950 reads OCP E5M2 (bias 15,
-    exponent field 31 is Inf and NaN); gfx942 reads E5M2FNUZ (bias 16, every
-    exponent field is a number, and 0x80 is NaN, not -0)."""
-    if value == 0:
-        return 0
-    bias, largest_field = {"gfx950": (15, 30), "gfx942": (16, 31)}[arch]
-    power = int(np.log2(abs(value)))
-    if abs(value) != 2.0**power or not 1 <= power + bias <= largest_field:
-        raise ValueError(f"{value!r} is not a normal power of two in {arch} bf8")
-    return (0x80 if value < 0 else 0) | ((power + bias) << 2)
-
-
-# (case name, A mantissa power or None for zero, B mantissa power or None,
-#  A scale code, B scale code). Every A and B element and every scale byte
-# of a case holds the same value, so the result does not depend on which
-# lane reads which scale.
-_GPU_CASES = (
-    # Each scale is 2^65; their product 2^130 is not an f32, the output 2^107 is.
-    ("large scales, finite output", -14, -14, 192, 192),
-    # Zero mantissas with large scales: 0, not 0 * Inf = NaN.
-    ("large scales, zero mantissas", None, None, 192, 192),
-    # A true overflow still gives Inf.
-    ("largest scales, output overflows", 15, 15, 254, 254),
-    # Scales 2^-127 and 2^-27: their product 2^-154 flushes to zero in f32,
-    # the output 2^-119 is a normal f32.
-    ("small scales, normal output", 15, 15, 0, 100),
-    # Scale code 0 is 2^-127; the output 2^-146 is an f32 subnormal.
-    ("smallest scale, subnormal output", -12, -12, 0, _BIAS),
-    # 2^127 * 2^-127: the exponents cancel.
-    ("largest and smallest scale", 0, 0, 254, 0),
-    # A NaN scale code makes its block NaN.
-    ("NaN scale code", 0, 0, _NAN_CODE, _BIAS),
-    ("NaN scale code, zero mantissas", None, None, _BIAS, _NAN_CODE),
-)
-
-# (case name, groups), one group per 32 K elements: (A mantissa, B mantissa,
-# A scale code, B scale code). Every element and scale byte of a group holds
-# the same value, so each group's dot product is 32 * A * B.
-_GPU_GROUP_CASES = (
-    # The first group overflows the accumulator to +Inf; the second, finite
-    # and negative, is -2^6 * 2^254. +Inf plus a finite value is +Inf.
-    (
-        "infinite accumulator, opposite overflowing group",
-        ((2.0**15, 2.0**15, 254, 254), (-(2.0**-14), 2.0**15, 254, 254)),
-    ),
-    # The group is -2^-23 * 2^-254, far below the f32 subnormals: +0 plus a
-    # negative value too small for f32 rounds to -0.
-    ("negative group below f32, zero accumulator", ((-(2.0**-14), 2.0**-14, 0, 0),)),
-    (
-        "two negative groups below f32",
-        ((-(2.0**-14), 2.0**-14, 0, 0), (-(2.0**-14), 2.0**-14, 0, 0)),
-    ),
-    # The first group leaves the smallest subnormal 2^-149; the second adds
-    # 2^-23 * 2^-254, far less than half a step, so the output stays 2^-149.
-    (
-        "group below f32 onto the smallest subnormal",
-        ((2.0**-2, 2.0**-2, 0, 104), (2.0**-14, 2.0**-14, 0, 0)),
-    ),
-)
-
-
-def _expected_output(groups) -> np.float32:
-    """Each group's exact update of the accumulator (from +0), rounded once."""
-    acc = np.float32(0.0)
-    for a_value, b_value, a_code, b_code in groups:
-        if _NAN_CODE in (a_code, b_code):
-            return np.float32(np.nan)
-        dot = 32 * np.float64(a_value) * np.float64(b_value)
-        acc = _exact_update(dot, a_code + b_code - 2 * _BIAS, acc)
-    return acc
-
-
+_GROUP = 32
+# The tolerance of the contract, relative to sum_k |a_k b_k| 2^(ea + eb).
+_RTOL = 1e-3
+# The smallest magnitude that rounds to infinity in f32.
+_F32_OVERFLOW = 2.0**128 * (1 - 2.0**-25)
 _MX_GPU_ARCHS = ("gfx942", "gfx950")
+_WAVE = 64
+
+
+# ---------------------------------------------------------------------------
+# The element encodings and the exact reference.
+# ---------------------------------------------------------------------------
+
+
+def _decode_table(arch: str, mantissa: str) -> np.ndarray:
+    """Every byte's value in the fp8 / bf8 encoding the arch's MFMA reads:
+    E4M3 / E5M2 FNUZ on gfx942 (bias one higher, 0x80 is NaN, no infinity),
+    OCP on gfx950 (E4M3: only S.1111.111 is NaN; E5M2: exponent 31 is
+    infinity or NaN)."""
+    exp_bits, man_bits = (4, 3) if mantissa == "fp8e4m3" else (5, 2)
+    fnuz = arch == "gfx942"
+    bias = (1 << (exp_bits - 1)) - 1 + (1 if fnuz else 0)
+    table = np.empty(256)
+    for code in range(256):
+        sign = -1.0 if code >> 7 else 1.0
+        field = (code >> man_bits) & ((1 << exp_bits) - 1)
+        frac = code & ((1 << man_bits) - 1)
+        if (fnuz and code == 0x80) or (
+            not fnuz and mantissa == "fp8e4m3" and field == 15 and frac == 7
+        ):
+            table[code] = np.nan
+        elif not fnuz and mantissa == "bf8e5m2" and field == 31:
+            table[code] = sign * np.inf if frac == 0 else np.nan
+        elif field == 0:
+            table[code] = sign * frac / (1 << man_bits) * 2.0 ** (1 - bias)
+        else:
+            table[code] = sign * (1 + frac / (1 << man_bits)) * 2.0 ** (field - bias)
+    return table
+
+
+def _code_of(table: np.ndarray, value: float) -> int:
+    matches = np.flatnonzero(table == value)
+    assert matches.size, value
+    return int(matches[0])
+
+
+def _reference(table, a, a_codes, b, b_codes):
+    """The exact result in float64 (NaN where a code is 255),
+    ``sum_k |a_k b_k| 2^(ea + eb)``, and where an f32 accumulator may
+    overflow: some scaled group term ``T_g`` or running sum ``T_0 + ... + T_g``
+    (K order) reaches the f32 overflow threshold within its tolerance.
+    ``a`` is (M, K), ``a_codes`` (K/32, M), ``b`` (K, N), ``b_codes``
+    (K/32, N)."""
+    av, bv = table[a], table[b]
+    exact = np.zeros((a.shape[0], b.shape[1]))
+    magnitude = np.zeros_like(exact)
+    overflows = np.zeros(exact.shape, dtype=bool)
+    with np.errstate(all="ignore"):
+        for g in range(a_codes.shape[0]):
+            ks = slice(g * _GROUP, (g + 1) * _GROUP)
+            ea = a_codes[g].astype(np.int64)[:, None]
+            eb = b_codes[g].astype(np.int64)[None, :]
+            scale = np.exp2((ea + eb - 254).astype(np.float64))
+            nan = (ea == _NAN_CODE) | (eb == _NAN_CODE)
+            term = np.where(nan, np.nan, (av[:, ks] @ bv[ks]) * scale)
+            term_size = np.where(nan, 0.0, (np.abs(av[:, ks]) @ np.abs(bv[ks])) * scale)
+            exact = exact + term
+            magnitude = magnitude + term_size
+            for value, size in ((term, term_size), (exact, magnitude)):
+                overflows |= np.abs(value) + _RTOL * size >= _F32_OVERFLOW
+    return exact, magnitude, overflows
+
+
+def _contract_violations(got, exact, magnitude, overflows, groups) -> dict:
+    """The outputs that break the contract, by kind; empty when it holds.
+
+    ``overflows`` marks the outputs whose group terms or running sums leave
+    the f32 range: those may be Inf or NaN, or else must be within the
+    tolerance. Every other output must be finite and within the tolerance,
+    or NaN where the exact result is NaN.
+    """
+    got = got.astype(np.float64)
+    tol = _RTOL * magnitude + groups * 2.0**-126
+    with np.errstate(all="ignore"):
+        nan = np.isnan(exact)
+        close = np.isfinite(got) & (np.abs(got - exact) <= tol)
+        bad = {
+            "NaN expected": nan & ~np.isnan(got),
+            "finite within tolerance expected": ~nan & ~overflows & ~close,
+            "within tolerance, Inf or NaN expected": ~nan
+            & overflows
+            & ~(close | ~np.isfinite(got)),
+        }
+    return {
+        kind: [
+            (int(r), int(c), float(got[r, c]), float(exact[r, c]))
+            for r, c in np.argwhere(where)[:4]
+        ]
+        for kind, where in bad.items()
+        if where.any()
+    }
+
+
+def test_contract_allows_inf_or_nan_only_after_a_running_sum_overflows():
+    """The contract checker on chosen outputs, no GPU needed.
+
+    Row 0: group 0 adds ``+largest^2 * 32 * 2^127`` (beyond f32), group 1 the
+    same with the opposite sign, so the exact result is 0 but the running sum
+    of an f32 accumulator overflowed in between: Inf or NaN is allowed, as is
+    a value within the tolerance. Row 1: both groups scaled by ``2^105``, the
+    running sum about ``2^127``, every term and running sum inside the f32
+    range: only a finite value within the tolerance is allowed.
+    """
+    table = _decode_table("gfx942", "fp8e4m3")
+    largest = float(np.nanmax(np.abs(table[np.isfinite(table)])))
+    pos, neg = _code_of(table, largest), _code_of(table, -largest)
+    a = np.full((2, 2 * _GROUP), pos, dtype=np.uint8)
+    a[0, _GROUP:] = neg
+    b = np.full((2 * _GROUP, 1), pos, dtype=np.uint8)
+    a_codes = np.array([[254, 232], [254, 232]], dtype=np.uint8)
+    b_codes = np.array([[127], [127]], dtype=np.uint8)
+    exact, magnitude, overflows = _reference(table, a, a_codes, b, b_codes)
+    assert exact[0, 0] == 0.0 and overflows[0, 0]
+    assert np.isfinite(exact[1, 0]) and not overflows[1, 0]
+
+    def violations(row0, row1):
+        got = np.array([[row0], [row1]])
+        return _contract_violations(got, exact, magnitude, overflows, 2)
+
+    fine = exact[1, 0]
+    for allowed in (np.nan, np.inf, -np.inf, 0.0):
+        assert not violations(allowed, fine), allowed
+    for wrong in (np.nan, np.inf, -np.inf, 0.0):
+        assert violations(0.0, wrong), wrong
+
+
+# ---------------------------------------------------------------------------
+# GPU
+# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="module")
@@ -181,26 +213,18 @@ def mx_gpu_arch():
     return current_device_arch_in(_MX_GPU_ARCHS)
 
 
-def _run_on_gpu(arch, groups) -> np.ndarray:
-    """Run a 16x16 MX GEMM with one scale group per entry of ``groups``
-    (A mantissa, B mantissa, A scale code, B scale code) and return C."""
-    spec = MxGemmSpec(M=16, N=16, K=32 * len(groups), mantissa_dtype="bf8e5m2")
+def _run_on_gpu(arch, spec, a, a_codes, b, b_codes) -> np.ndarray:
+    """Run the MX GEMM for ``spec`` on the given bytes and return C (M, N)."""
     artifact = compile_kernel(
         build_mx_gemm(spec, arch=arch), arch=arch, backend=all_engines_backend()
     )
-    a_bytes = [_bf8_byte(arch, group[0]) for group in groups]
-    b_bytes = [_bf8_byte(arch, group[1]) for group in groups]
-    a_codes = [group[2] for group in groups]
-    b_codes = [group[3] for group in groups]
-    k_group = np.arange(spec.K) // spec.group_k
     host = {
-        # A is (M, K) and AScale (M, K / 32), both row-major; B is (K, N) and
-        # BScale (K / 32, N).
-        "A": np.tile(np.array(a_bytes, dtype=np.uint8)[k_group], spec.M),
-        "AScale": np.tile(np.array(a_codes, dtype=np.uint8), spec.M),
-        "B": np.repeat(np.array(b_bytes, dtype=np.uint8)[k_group], spec.N),
-        "BScale": np.repeat(np.array(b_codes, dtype=np.uint8), spec.N),
-        "C": np.zeros(spec.M * spec.N, dtype=np.float32),
+        "A": np.ascontiguousarray(a, dtype=np.uint8),
+        "AScale": np.ascontiguousarray(a_codes, dtype=np.uint8),
+        "B": np.ascontiguousarray(b, dtype=np.uint8),
+        "BScale": np.ascontiguousarray(b_codes, dtype=np.uint8),
+        # NaN bits, so an output the kernel does not write fails the check.
+        "C": np.full(spec.M * spec.N, 0xFFFFFFFF, dtype=np.uint32).view(np.float32),
     }
     launch_with_buffers(
         artifact,
@@ -210,128 +234,588 @@ def _run_on_gpu(arch, groups) -> np.ndarray:
         block=(spec.block_size, 1, 1),
         scalars={"M": spec.M, "N": spec.N, "K": spec.K},
     )
-    return host["C"]
+    return host["C"].reshape(spec.M, spec.N)
 
 
-def _check_gpu_output(arch, name, groups):
-    got = _run_on_gpu(arch, groups)
-    want = _expected_output(groups)
-    if np.isnan(want):
-        assert np.isnan(got).all(), got
-    else:
-        assert (got.view(np.uint32) == want.view(np.uint32)).all(), (
-            name,
-            np.unique(got.view(np.uint32)),
-            want.view(np.uint32),
-        )
+def _random_case(arch, mantissa, M, N, K, seed):
+    """Finite mantissas; A codes that differ from row to row and B codes that
+    differ from column to column, around 2^0."""
+    rng = np.random.default_rng(seed)
+    table = _decode_table(arch, mantissa)
+    finite = np.flatnonzero(np.isfinite(table)).astype(np.uint8)
+    G = K // _GROUP
+    a = rng.choice(finite, size=(M, K))
+    b = rng.choice(finite, size=(K, N))
+    a_codes = rng.integers(112, 143, size=(G, M)).astype(np.uint8)
+    b_codes = rng.integers(112, 143, size=(G, N)).astype(np.uint8)
+    return table, a, a_codes, b, b_codes
 
 
-@pytest.mark.parametrize("group_count", [1, 2], ids=["one-group", "two-groups"])
-@pytest.mark.parametrize(
-    "name, a_power, b_power, a_code, b_code", _GPU_CASES, ids=[c[0] for c in _GPU_CASES]
+# (M, N, K, block_tile_m, block_tile_n): whole tiles, partial workgroup tiles,
+# a K that leaves one group past the last multiple of 64 (added without the
+# scaled MFMA) and an N that is not a multiple of 32 (stores past N dropped).
+_RANDOM_SHAPES = (
+    (64, 256, 512, 32, 128),
+    (128, 256, 256, 64, 256),
+    (48, 64, 96, 32, 128),
+    (64, 48, 160, 64, 32),
 )
-def test_mx_gemm_output_on_gpu(
-    mx_gpu_arch, group_count, name, a_power, b_power, a_code, b_code
+
+
+@pytest.mark.parametrize("mantissa", ["fp8e4m3", "bf8e5m2"])
+@pytest.mark.parametrize(
+    "M, N, K, tile_m, tile_n",
+    _RANDOM_SHAPES,
+    ids=["x".join(map(str, shape)) for shape in _RANDOM_SHAPES],
+)
+def test_mx_gemm_scales_each_row_and_column_on_gpu(
+    mx_gpu_arch, mantissa, M, N, K, tile_m, tile_n
 ):
-    a_value = 0.0 if a_power is None else 2.0**a_power
-    b_value = 0.0 if b_power is None else 2.0**b_power
-    groups = ((a_value, b_value, a_code, b_code),) * group_count
-    _check_gpu_output(mx_gpu_arch, name, groups)
+    table, a, a_codes, b, b_codes = _random_case(
+        mx_gpu_arch, mantissa, M, N, K, M + N + K
+    )
+    spec = MxGemmSpec(
+        M=M, N=N, K=K, block_tile_m=tile_m, block_tile_n=tile_n, mantissa_dtype=mantissa
+    )
+    got = _run_on_gpu(mx_gpu_arch, spec, a, a_codes, b, b_codes)
+    exact, magnitude, overflows = _reference(table, a, a_codes, b, b_codes)
+    assert np.isfinite(got).all() and not overflows.any()
+    assert not _contract_violations(got, exact, magnitude, overflows, K // _GROUP)
+
+
+def _special_case(arch, mantissa):
+    """64 x 64 x 256 random data with chosen special values written in."""
+    table, a, a_codes, b, b_codes = _random_case(arch, mantissa, 64, 64, 256, 7)
+    largest = float(np.nanmax(np.abs(table[np.isfinite(table)])))
+    pos, neg = _code_of(table, largest), _code_of(table, -largest)
+    one, zero = _code_of(table, 1.0), _code_of(table, 0.0)
+    nan_byte = int(np.flatnonzero(np.isnan(table))[0])
+    a_codes[1, 3] = _NAN_CODE  # NaN A code: row 3 is NaN
+    b_codes[2, 5] = _NAN_CODE  # NaN B code: column 5 is NaN
+    a[7, 40] = nan_byte  # NaN input: row 7 is NaN
+    a[15, 64:96] = zero  # a NaN code on an all-zero block is still NaN
+    a_codes[2, 15] = _NAN_CODE
+    # Row 9 x columns 10 and 11, group 0: every product is 2^128 times the
+    # largest square, far beyond f32: +Inf and -Inf.
+    a[9, 0:32] = pos
+    b[0:32, 10] = pos
+    b[0:32, 11] = neg
+    a_codes[0, 9] = 254
+    b_codes[0, 10:12] = 128
+    # Row 23 x column 24, group 0: +-largest^2 products times 2^112 each
+    # overflow f32, but they cancel to largest * 2^112, an ordinary f32.
+    a[23, 0:32:2] = pos
+    a[23, 1:32:2] = neg
+    a[23, 30] = zero
+    a[23, 31] = one
+    b[0:32, 24] = pos
+    a_codes[0, 23] = 254
+    b_codes[0, 24] = 112
+    # The largest A scale with a small B scale: 2^(127 - 126), finite.
+    a_codes[3, 11] = 254
+    b_codes[3, 12] = 1
+    # Every group of row 13 x column 14 at 2^-127, of row 17 x column 18 at
+    # 2^73 * 2^-73, of row 19 x column 20 at 2^-254.
+    a_codes[:, 13] = 0
+    b_codes[:, 14] = 127
+    a_codes[:, 17] = 200
+    b_codes[:, 18] = 54
+    a_codes[:, 19] = 0
+    b_codes[:, 20] = 0
+    # Row 29 x column 30: every scaled product is near the f32 subnormal range
+    # (2^-135 times the mantissa products), so the contract's subnormal floor
+    # is what bounds the error, also where the scaled MFMA (gfx950) scales each
+    # product before summing.
+    a_codes[:, 29] = 60
+    b_codes[:, 30] = 59
+    if mantissa == "bf8e5m2" and arch == "gfx950":
+        a[21, 5] = _code_of(table, np.inf)  # an infinite input in row 21
+    # Row 25 x column 26: group 0 adds 32 * largest^2 * 2^128, beyond f32, and
+    # group 1 the same with the opposite sign. The exact result is ordinary,
+    # but an f32 running sum overflows in between, so Inf or NaN is allowed.
+    a[25, 0:32] = pos
+    a[25, 32:64] = neg
+    b[0:64, 26] = pos
+    a_codes[0:2, 25] = 254
+    b_codes[0:2, 26] = 128
+    # Row 27 x column 28: groups 0 and 1 each add 32 * largest^2 * 2^(ea + eb)
+    # with ea + eb chosen so that their sum stays just below 2^128: every
+    # running sum is inside the f32 range, so the output must be finite.
+    a[27, 0:64] = pos
+    b[0:64, 28] = pos
+    a_codes[0:2, 27] = 254
+    b_codes[0:2, 28] = 127 - math.ceil(math.log2(64 * largest**2))
+    return table, a, a_codes, b, b_codes
+
+
+@pytest.mark.parametrize("mantissa", ["fp8e4m3", "bf8e5m2"])
+def test_mx_gemm_special_values_on_gpu(mx_gpu_arch, mantissa):
+    table, a, a_codes, b, b_codes = _special_case(mx_gpu_arch, mantissa)
+    spec = MxGemmSpec(
+        M=64, N=64, K=256, block_tile_m=32, block_tile_n=128, mantissa_dtype=mantissa
+    )
+    got = _run_on_gpu(mx_gpu_arch, spec, a, a_codes, b, b_codes)
+    exact, magnitude, overflows = _reference(table, a, a_codes, b, b_codes)
+    assert not _contract_violations(got, exact, magnitude, overflows, 256 // _GROUP)
+    # Each written-in case gives what it is there for.
+    assert np.isnan(got[3]).all() and np.isnan(got[:, 5]).all()
+    assert np.isnan(got[7]).all() and np.isnan(got[15]).all()
+    assert got[9, 10] == np.inf and got[9, 11] == -np.inf
+    assert np.isfinite(got[23, 24]) and np.isfinite(got[17, 18])
+    assert np.isfinite(got[11, 12]) and np.isfinite(got[13, 14])
+    assert overflows[25, 26] and np.isfinite(exact[25, 26])
+    assert not overflows[27, 28] and np.isfinite(got[27, 28])
+
+
+@pytest.mark.parametrize("mantissa", ["fp8e4m3", "bf8e5m2"])
+def test_mx_gemm_codes_at_the_safe_bound_on_gpu(mx_gpu_arch, mantissa):
+    """Every A and B code at the largest code the scaled MFMA takes directly,
+    with the largest mantissas: the outputs are finite (the bound keeps every
+    sum of scaled products a binade below the f32 overflow threshold) and
+    within the tolerance."""
+    table = _decode_table(mx_gpu_arch, mantissa)
+    element = mx_gemm_element_format(mantissa, mx_gpu_arch)
+    code = largest_safe_mx_scale_code(element, element, 64)
+    largest = float(np.nanmax(np.abs(table[np.isfinite(table)])))
+    M = N = K = 64
+    a = np.full((M, K), _code_of(table, largest), dtype=np.uint8)
+    b = np.full((K, N), _code_of(table, largest), dtype=np.uint8)
+    a_codes = np.full((K // _GROUP, M), code, dtype=np.uint8)
+    b_codes = np.full((K // _GROUP, N), code, dtype=np.uint8)
+    spec = MxGemmSpec(
+        M=M, N=N, K=K, block_tile_m=32, block_tile_n=128, mantissa_dtype=mantissa
+    )
+    got = _run_on_gpu(mx_gpu_arch, spec, a, a_codes, b, b_codes)
+    exact, magnitude, overflows = _reference(table, a, a_codes, b, b_codes)
+    assert np.isfinite(got).all() and not overflows.any()
+    assert not _contract_violations(got, exact, magnitude, overflows, K // _GROUP)
+
+
+# ---------------------------------------------------------------------------
+# Host checks on both engines' LLVM IR.
+# ---------------------------------------------------------------------------
+
+
+def _both_engines_ir(spec, arch) -> str:
+    return lower_spec_with_all_engines(
+        spec, arch, build_kernel=build_mx_gemm, lower_spec=lower_mx_gemm
+    )
+
+
+@pytest.mark.parametrize("mantissa", ["fp8e4m3", "bf8e5m2"])
+def test_gfx950_kernel_uses_the_scaled_mfma_and_the_ldexp_path(mantissa):
+    # K = 96: one scaled MFMA step and one group added with ldexp.
+    spec = MxGemmSpec(
+        M=64, N=64, K=96, block_tile_m=32, block_tile_n=128, mantissa_dtype=mantissa
+    )
+    ir = _both_engines_ir(spec, "gfx950")
+    assert "@llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32(" in ir
+    assert "call float @llvm.ldexp.f32.i32(" in ir
+    assert "@llvm.amdgcn.ballot" in ir  # the wave's codes checked against the bound
+    assert not re.search(r"= fmul ", ir)
 
 
 @pytest.mark.parametrize(
-    "name, groups", _GPU_GROUP_CASES, ids=[c[0] for c in _GPU_GROUP_CASES]
+    "mantissa, operands", [("fp8e4m3", "fp8.fp8"), ("bf8e5m2", "bf8.bf8")]
 )
-def test_mx_gemm_accumulator_edges_on_gpu(mx_gpu_arch, name, groups):
-    """Groups that differ in sign and scale: an infinite accumulator meeting a
-    group that overflows the other way, and groups below the f32 range on a
-    zero or the smallest subnormal accumulator."""
-    _check_gpu_output(mx_gpu_arch, name, groups)
+def test_gfx942_kernel_uses_the_32x32x16_mfma_and_ldexp(mantissa, operands):
+    spec = MxGemmSpec(
+        M=64, N=64, K=96, block_tile_m=32, block_tile_n=128, mantissa_dtype=mantissa
+    )
+    ir = _both_engines_ir(spec, "gfx942")
+    assert f"@llvm.amdgcn.mfma.f32.32x32x16.{operands}(" in ir
+    assert "mfma.scale" not in ir
+    assert "call float @llvm.ldexp.f32.i32(" in ir
+    assert not re.search(r"= fmul ", ir)
 
 
-# ---------------------------------------------------------------------------
-# Host checks on the lowered kernel.
-#
-# These read the MX GEMM's LLVM IR, as both engines emit it, so they follow the
-# kernel: an edit to the kernel or to the scale helper changes what they check.
-# ---------------------------------------------------------------------------
+# Every output is scaled with its own row's A scale and its own column's B
+# scale. The check reads both engines' LLVM IR and evaluates, for every lane,
+# wave, workgroup and K group, the address of every scale byte an output's
+# terms read and the address the output is stored to, so it follows the kernel:
+# any change to which scale an output gets changes what it checks.
 
-_LOCAL_NAME = re.compile(r"%[\w.]+")
-_FLOAT_MULTIPLIES = ("fmul", "llvm.fmuladd", "llvm.fma")
+_SCALED_MFMA = "llvm.amdgcn.mfma.scale."
+_BUFFER_STORE = re.compile(
+    r"call void @llvm\.amdgcn\.raw\.ptr\.buffer\.store\.\w+\("
+    r"\w+ (%[\w.]+), ptr addrspace\(8\) (%[\w.]+), i32 (%?[\w.]+), i32 (%?[\w.]+),"
+)
 
 
-class _KernelIR(KernelIR):
-    """The MX GEMM's LLVM IR, with the queries these checks make of it."""
+class _MxKernelIR(KernelIR):
+    """The MX GEMM's LLVM IR, with the queries the scale check makes of it."""
 
-    def sources(self, name: str) -> set:
-        """The loads, phis and MFMA results that ``name`` is computed from."""
-        seen, stack, found = set(), [name], set()
+    def buffer_stores(self) -> list:
+        """Every buffer store, in IR order: (stored value, parameter, lane
+        byte offset, scalar byte offset)."""
+        return [
+            (value, self.buffer_param(resource), lane_offset, scalar_offset)
+            for value, resource, lane_offset, scalar_offset in (
+                m.groups() for m in map(_BUFFER_STORE.search, self.lines) if m
+            )
+        ]
+
+    def is_scaled_mfma(self, name: str) -> bool:
+        text = self.definitions.get(name, "")
+        return text.startswith("call ") and self.callee(text).startswith(_SCALED_MFMA)
+
+    def element(self, vector: str, index: int) -> tuple:
+        """Where element ``index`` of ``vector`` comes from: ``(scalar,
+        None)`` when an ``insertelement`` put a scalar there, else ``(source
+        vector, index)`` for a phi, an MFMA result or a load."""
+        vector = self.copied(vector)
+        while self.opcode(vector) == "insertelement":
+            inner, scalar, at = self.operands(vector)
+            if int(at) == index:
+                return self.copied(scalar), None
+            vector = self.copied(inner)
+        return vector, index
+
+    def scalar(self, name: str) -> tuple:
+        """:meth:`element` of the vector element an ``extractelement``
+        reads, or ``(name, None)`` for any other scalar."""
+        name = self.copied(name)
+        if self.opcode(name) != "extractelement":
+            return name, None
+        vector, index = self.operands(name)
+        return self.element(vector, int(index))
+
+    def loop_exit_line(self, phi: str) -> int:
+        """The line of the label the loop whose header defines ``phi`` exits
+        to."""
+        header = self.block_of[phi]
+        start = next(i for i, line in enumerate(self.lines) if line == f"{header}:")
+        branch = next(
+            line for line in self.lines[start:] if line.strip().startswith("br i1 ")
+        )
+        exit_label = branch.rsplit("%", 1)[1]
+        return next(i for i, line in enumerate(self.lines) if line == f"{exit_label}:")
+
+    def loads_under(self, name: str) -> list:
+        """The buffer loads ``name`` is assembled from, through bitcasts and
+        element moves: (parameter, lane byte offset, scalar byte offset)."""
+        found, stack, seen = [], [name], set()
         while stack:
             current = stack.pop()
-            if current in seen or current not in self.definitions:
+            if current in seen or not current.startswith("%"):
                 continue
             seen.add(current)
-            if self.opcode(current) in ("load", "phi", "mfma"):
-                found.add(current)
-                continue
-            stack.extend(v for v in self.operands(current) if v.startswith("%"))
+            op = self.opcode(current)
+            if self.is_buffer_load(current):
+                found.append(self.buffer_load_access(current))
+            elif op in ("bitcast", "insertelement", "extractelement", "zext"):
+                stack.extend(self.operands(current))
+            elif op != "phi" or self.definitions[current].startswith("phi i8 "):
+                raise AssertionError(f"not modelled: {self.definitions[current]}")
         return found
 
-    def scale_loads(self) -> tuple:
-        """The loads of the A and the B scale byte."""
+    def scale_term(self, term: str) -> tuple:
+        """The parts of one scaled group term ``select(nan, NaN, ldexp(dot,
+        ea + eb - 254))``: (the dot product vector the term takes an element
+        of, A code, B code)."""
+        assert self.opcode(term) == "select", self.definitions[term]
+        ldexp = self.copied(self.operands(term)[2])
+        assert self.callee(self.definitions[ldexp]) == "llvm.ldexp.f32.i32", ldexp
+        dot, exponent = self.operands(ldexp)
+        assert self.opcode(exponent) == "sub", self.definitions[exponent]
+        codes = {}
+        for code in self.operands(self.operands(exponent)[0]):
+            assert self.opcode(code) == "zext", self.definitions[code]
+            codes[self.code_param(self.operands(code)[0])] = self.operands(code)[0]
+        dot_vector, _ = self.scalar(dot)
+        return dot_vector, codes["%AScale"], codes["%BScale"]
 
-        def address_base(name):
-            return _LOCAL_NAME.findall(self.definitions[name])[0]
-
-        def load_from(param):
-            loads = [
-                n for n in self.find("load") if address_base(address_base(n)) == param
-            ]
-            assert len(loads) == 1, (param, loads)
-            return loads[0]
-
-        return load_from("%AScale"), load_from("%BScale")
-
-    def splatted(self, name: str) -> str:
-        """The scalar that the ``insertelement`` chain ``name`` puts in every lane."""
-        assert self.opcode(name) == "insertelement", self.definitions[name]
-        scalar = self.operands(name)[1]
-        base = name
-        while base.startswith("%"):
-            assert self.opcode(base) == "insertelement", self.definitions[base]
-            vector, lane_value, _ = self.operands(base)
-            assert lane_value == scalar, (name, self.definitions[base])
-            base = vector
-        assert base in ("undef", "poison"), self.definitions[name]
-        return scalar
+    def code_param(self, code: str) -> str:
+        """The scale tensor a carried scale code is loaded from."""
+        _, carried = self.incoming(self.copied(code))
+        ((param, _, _),) = self.loads_under(carried)
+        return param
 
 
-class _LoweredMxGemm(NamedTuple):
-    """One MX GEMM's LLVM IR and the element format its MFMA reads."""
+def _scale_reads_of_term(ir, spec, term, inputs_at):
+    """(A scale (group, row), B scale (group, column), K groups of the dot
+    product) that one ldexp-path term of a stored output reads, evaluated
+    with ``inputs_at(loop counter, iterations the term's operands are loaded
+    in)``.
 
-    arch: str
-    element_format: object
-    ir: _KernelIR
+    A group is added one iteration late: the term in iteration ``c`` adds
+    the dot product and codes loaded in iteration ``c - 1``, and the term
+    after the loop those of the last iteration. The term in the first
+    iteration adds the loop's initial dot product, which must be zero."""
+    dot_vector, a_code, b_code = ir.scale_term(term)
+    code_phi = ir.copied(a_code)
+    counter, first, end = ir.loop_counter(code_phi)
+    inside = ir.line_of(code_phi) < ir.line_of(term) < ir.loop_exit_line(code_phi)
+    loaded_in = np.arange(first, end - 1) if inside else np.arange(end - 1, end)
+    inputs = inputs_at(counter, loaded_in)
+
+    def location(code, size):
+        _, carried = ir.incoming(ir.copied(code))
+        ((_, lane_offset, scalar_offset),) = ir.loads_under(carried)
+        byte = ir.evaluate(lane_offset, inputs) + ir.evaluate(scalar_offset, inputs)
+        byte = byte + int(ir.operands(ir.copied(carried))[1])  # byte in the dword
+        return np.divmod(byte, size)
+
+    a_read = location(a_code, spec.M)
+    b_read = location(b_code, spec.N)
+    # The dot product the term scales: the loads of the MFMAs that make it.
+    initial_dot, carried_dot = ir.incoming(ir.copied(dot_vector))
+    assert "zeroinitializer" in ir.definitions[ir.copied(initial_dot)], initial_dot
+    dot_groups = []
+    mfma = ir.copied(carried_dot)
+    while ir.opcode(mfma) == "mfma":
+        a_operand, b_operand, mfma = ir.operands(mfma)[:3]
+        mfma = ir.copied(mfma)
+        for param, lane_offset, scalar_offset in ir.loads_under(
+            a_operand
+        ) + ir.loads_under(b_operand):
+            index = ir.evaluate(lane_offset, inputs) + ir.evaluate(
+                scalar_offset, inputs
+            )
+            k = index % spec.K if param == "%A" else index // spec.N
+            dot_groups.append(k // _GROUP)
+    assert dot_groups, f"no MFMA loads found for {term}"
+    return a_read, b_read, dot_groups
 
 
-_HOST_TARGETS = [
-    (arch, dtype) for arch in _MX_GPU_ARCHS for dtype in ("fp8e4m3", "bf8e5m2")
+def _accumulated_parts(ir, output: str) -> list:
+    """What a stored output is the sum of, walking back from it: ("term",
+    t) for each ldexp-path group term ``t`` it adds, through every loop it
+    is carried round, and ("scaled", phi) for the accumulator phi of the
+    scaled-MFMA loop it starts from; the walk ends at the zero vector."""
+    parts, visited = [], set()
+    node, index = ir.scalar(output)
+    while True:
+        if index is None:
+            node = ir.copied(node)
+            assert ir.opcode(node) == "fadd", ir.definitions[node]
+            accumulated, term = ir.operands(node)
+            parts.append(("term", term))
+            node, index = ir.scalar(accumulated)
+            continue
+        vector = ir.copied(node)
+        if ir.opcode(vector) == "select":
+            assert "zeroinitializer" in ir.definitions[vector], ir.definitions[vector]
+            return parts
+        initial, carried = ir.incoming(vector)
+        if ir.is_scaled_mfma(carried):
+            parts.append(("scaled", vector))
+            node, index = ir.element(initial, index)
+        elif vector in visited:
+            node, index = ir.element(initial, index)
+        else:
+            visited.add(vector)
+            node, index = ir.element(carried, index)
+
+
+def _check_scaled_mfma_steps(ir, spec, phi, inputs_at, row) -> list:
+    """Check that in every step of the scaled-MFMA loop whose accumulator is
+    ``phi``, each lane passes the A scale of the row it loads A from and the
+    B scale of the column it loads B from, for group ``2 * step + lane / 32``;
+    return the K groups the steps cover, two per step."""
+    counter, first, end = ir.loop_counter(phi)
+    _, scaled = ir.incoming(phi)
+    operands = ir.operands(scaled)
+    inputs = inputs_at(counter, np.arange(first, end))
+    step = inputs[counter]
+    lane = np.arange(spec.block_size)[:, None, None, None] % _WAVE
+    group = 2 * step + lane // (_WAVE // 2)
+    # (matrix operand, its scale operand, the tensor's row length, which
+    # coordinate of a load picks the row or column the scale belongs to)
+    for matrix, scale, row_length, coordinate in (
+        (operands[0], operands[6], spec.K, lambda index: index // spec.K),
+        (operands[1], operands[8], spec.N, lambda index: index % spec.N),
+    ):
+        ((param, scale_lane, scale_scalar),) = ir.loads_under(scale)
+        scale_group, scale_at = np.divmod(
+            ir.evaluate(scale_lane, inputs) + ir.evaluate(scale_scalar, inputs),
+            spec.M if param == "%AScale" else spec.N,
+        )
+        shape = np.broadcast(group, scale_group).shape
+        np.testing.assert_array_equal(
+            np.broadcast_to(scale_group, shape),
+            np.broadcast_to(group, shape),
+            f"K group of the {param} byte a lane passes",
+        )
+        for _, load_lane, load_scalar in ir.loads_under(matrix):
+            loaded = coordinate(
+                ir.evaluate(load_lane, inputs) + ir.evaluate(load_scalar, inputs)
+            )
+            shape = np.broadcast(loaded, scale_at).shape
+            np.testing.assert_array_equal(
+                np.broadcast_to(scale_at, shape),
+                np.broadcast_to(loaded, shape),
+                f"{param} byte a lane passes vs the row or column it loads",
+            )
+    shape = np.broadcast(step, row).shape
+    return [np.broadcast_to(2 * step, shape), np.broadcast_to(2 * step + 1, shape)]
+
+
+_PROVENANCE_TARGETS = [
+    (arch, m) for arch in _MX_GPU_ARCHS for m in ("fp8e4m3", "bf8e5m2")
 ]
 
 
-@pytest.fixture(
-    scope="module", params=_HOST_TARGETS, ids=[f"{a}-{d}" for a, d in _HOST_TARGETS]
+@pytest.mark.parametrize(
+    "arch, mantissa",
+    _PROVENANCE_TARGETS,
+    ids=[f"{a}-{m}" for a, m in _PROVENANCE_TARGETS],
 )
-def mx_gemm(request) -> _LoweredMxGemm:
-    """The MX GEMM's LLVM IR from both engines (Python only without the
-    binding), for each target and mantissa type the builder supports."""
-    arch, dtype = request.param
-    spec = MxGemmSpec(M=16, N=16, K=64, mantissa_dtype=dtype)
-    lowered = lower_kernel_for_comgr(
-        build_mx_gemm(spec, arch=arch), arch=arch, backend=all_engines_backend()
+def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa):
+    """Every stored output gets each K group exactly once, scaled with the A
+    scale of its own row and the B scale of its own column, for every lane,
+    wave and workgroup.
+
+    On the ldexp path (every group on gfx942; on gfx950 the group past the
+    last multiple of 64 and the whole recomputation for large codes), the
+    term of group ``g`` of the output a lane stores to ``C[row, col]`` reads
+    ``AScale[g, row]`` and ``BScale[g, col]``, and its dot product comes from
+    MFMAs whose A and B loads all lie in group ``g``. On gfx950's scaled-MFMA
+    path, each lane passes the A scale of the row it loads A from and the B
+    scale of the column it loads B from, for group ``2 * step + lane / 32``
+    (``rocke.core.arch.mfma_scale.matrix_layout``); the instruction applies
+    them to those rows and columns. K = 96 gives gfx950 one scaled-MFMA step
+    and one group added the ldexp way.
+    """
+    spec = MxGemmSpec(
+        M=64, N=64, K=96, block_tile_m=32, block_tile_n=64, mantissa_dtype=mantissa
     )
-    element_format = mx_gemm_element_format(dtype, arch)
-    return _LoweredMxGemm(arch, element_format, _KernelIR(lowered.llvm_text))
+    ir = _MxKernelIR(_both_engines_ir(spec, arch))
+    grid_x, grid_y, _ = mx_gemm_grid(spec)
+    work_items = {
+        ir.call_named("llvm.amdgcn.workitem.id.x"): np.arange(spec.block_size)[
+            :, None, None, None
+        ],
+        ir.call_named("llvm.amdgcn.workgroup.id.x"): np.arange(grid_x)[
+            None, :, None, None
+        ],
+        ir.call_named("llvm.amdgcn.workgroup.id.y"): np.arange(grid_y)[
+            None, None, :, None
+        ],
+    }
+
+    def inputs_at(counter, iterations):
+        return {**work_items, counter: iterations[None, None, None, :]}
+
+    stores = ir.buffer_stores()
+    assert len(stores) == (32 if arch == "gfx950" else 16), stores
+    for value, param, lane_offset, scalar_offset in stores:
+        assert param == "%C"
+        cell = (
+            ir.evaluate(lane_offset, work_items)
+            + ir.evaluate(scalar_offset, work_items)
+        ) // 4
+        row, col = np.divmod(cell, spec.N)
+        stored, _ = ir.element(value, 0)  # the one float of a <1 x float> store
+        groups_seen = []
+        for kind, part in _accumulated_parts(ir, stored):
+            if kind == "term":
+                (a_group, a_row), (b_group, b_col), dot_groups = _scale_reads_of_term(
+                    ir, spec, part, inputs_at
+                )
+                shape = np.broadcast(a_group, b_group, row).shape
+                for got, want, what in (
+                    (a_row, row, "row of the A scale"),
+                    (b_col, col, "column of the B scale"),
+                    (b_group, a_group, "K group of the B scale"),
+                    *((g, a_group, "K group of the dot product") for g in dot_groups),
+                ):
+                    np.testing.assert_array_equal(
+                        np.broadcast_to(got, shape), np.broadcast_to(want, shape), what
+                    )
+                groups_seen.append(np.broadcast_to(a_group, shape))
+            else:
+                groups_seen += _check_scaled_mfma_steps(ir, spec, part, inputs_at, row)
+        seen = np.concatenate(groups_seen, axis=-1)
+        np.testing.assert_array_equal(
+            np.sort(seen, axis=-1),
+            np.broadcast_to(np.arange(spec.K // _GROUP), seen.shape),
+            "every K group exactly once",
+        )
+
+
+@pytest.mark.parametrize(
+    "fields, message",
+    [
+        (
+            {"block_tile_n": 48},
+            "block_tile_n must be a positive multiple of 32, got 48",
+        ),
+        (
+            {"block_tile_m": 0},
+            "block_tile_m must be a positive multiple of 32, got 0",
+        ),
+        (
+            {"block_tile_m": 128, "block_tile_n": 288},
+            "block_size 2304 > 1024 (hardware cap) on gfx950",
+        ),
+        (
+            # 64 * (2^30 / 32) = 2^31 threads: one past the i32 range, so a
+            # size computed in i32 wraps negative and slips under the cap.
+            {"block_tile_m": 2**30, "block_tile_n": 32},
+            "block_size 2147483648 > 1024 (hardware cap) on gfx950",
+        ),
+        (
+            {"M": 50},
+            (
+                "M (50) must be a multiple of 4: a lane reads the A scale codes of 4 "
+                "consecutive rows as one dword"
+            ),
+        ),
+        ({"K": 48}, "K (48) must be divisible by group_k (32)"),
+        ({"M": 0}, "M, N and K must be positive, got 0, 64, 64"),
+        (
+            # C fits in i32 bytes (4 * M * N < 2^31), but the rows a wave
+            # computes past M, up to the next multiple of 32, do not.
+            {"M": 4, "N": 2**26 - 32, "K": 32},
+            (
+                "the largest byte offset into C is 8589930495, expected at most "
+                "2147483647: the kernel computes every buffer offset in i32"
+            ),
+        ),
+        (
+            {"M": 65536, "N": 64, "K": 65536},
+            (
+                "the largest byte offset into A is 4294967295, expected at most "
+                "2147483647: the kernel computes every buffer offset in i32"
+            ),
+        ),
+    ],
+    ids=[
+        "tile",
+        "unset tile",
+        "workgroup too large",
+        "workgroup size past i32",
+        "M",
+        "K",
+        "empty",
+        "C past i32 at the padded edge",
+        "A past i32",
+    ],
+)
+def test_both_engines_refuse_invalid_specs(fields, message):
+    base = {"M": 64, "N": 64, "K": 64, "block_tile_m": 32, "block_tile_n": 128}
+    spec = MxGemmSpec(**{**base, **fields})
+    with pytest.raises(ValueError, match=re.escape(message)):
+        build_mx_gemm(spec, arch="gfx950")
+    if "cpp" not in available_engines():
+        pytest.skip("needs the rocke_engine binding")
+    with pytest.raises(RuntimeError, match=re.escape(message)):
+        lower_mx_gemm(spec, arch="gfx950", backend="cpp")
+
+
+def test_the_workgroup_tile_has_no_default():
+    """The workgroup tile is a tuning knob the caller chooses: leaving it out
+    is an error, not a hidden default."""
+    with pytest.raises(TypeError, match="block_tile_m"):
+        MxGemmSpec(M=64, N=64, K=64)  # type: ignore[call-arg]
+
+
+def test_the_spec_takes_keyword_arguments_only():
+    """A positional argument cannot land in the workgroup tile (the fields
+    after K moved when the tile was added)."""
+    with pytest.raises(TypeError, match="positional"):
+        MxGemmSpec(64, 64, 64, 32, 128)  # type: ignore[misc]
 
 
 @pytest.mark.parametrize(
@@ -344,371 +828,16 @@ def mx_gemm(request) -> _LoweredMxGemm:
     ],
 )
 def test_mx_gemm_element_format(arch, dtype, name):
-    """The split comes from the encoding each target's MFMA reads: the FNUZ
-    encodings on gfx942, the OCP ones on gfx950. The C++ engine's test
-    (tests/core/test_mx_scale_decode.cpp) pins the same table."""
+    """The MX GEMM reads the FNUZ encodings on gfx942, the OCP ones on gfx950."""
     assert mx_gemm_element_format(dtype, arch).name == name
 
 
 def test_mx_gemm_element_format_refuses_other_targets():
-    """A target whose MFMA reads no fp8 / bf8 has no element format."""
-    message = (
-        "mx_gemm: no fp8e4m3 element format known for gfx90a; "
-        "the MX GEMM reads fp8e4m3 / bf8e5m2 on gfx942 and gfx950"
-    )
-    with pytest.raises(ValueError, match=re.escape(message)):
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            "mx_gemm: no fp8e4m3 element format known for gfx90a; the MX GEMM reads "
+            "fp8e4m3 / bf8e5m2 on gfx942 and gfx950"
+        ),
+    ):
         mx_gemm_element_format("fp8e4m3", "gfx90a")
-
-
-def _literal(text: str):
-    if text in ("undef", "poison"):
-        return None
-    if text.startswith("0x"):  # LLVM prints a float constant as its f64 bits
-        return np.float32(struct.unpack(">d", bytes.fromhex(text[2:]))[0])
-    return np.int64(text)
-
-
-def _evaluate(ir: _KernelIR, name: str, inputs: dict):
-    """Evaluate ``name`` with numpy, given values for the loads, phis and MFMA
-    results it reads. Lanes are not modelled: a splat is its scalar.
-
-    Integers are i32 values held in int64 (none of these overflow i32), floats
-    are f32 and every f32 operation rounds once, as on the GPU. ``exp2`` is exact for the integer
-    exponents it gets here (the decoder test checks this on the GPU), and
-    ``fmuladd`` is fused: the product of two f32 values is exact in float64,
-    and :func:`_round_once` adds the addend to it with one rounding. An
-    instruction this does not know fails the test.
-    """
-    if not name.startswith("%"):
-        return _literal(name)
-    if name in inputs:
-        return inputs[name]
-    op = ir.opcode(name)
-    args = [_evaluate(ir, v, inputs) for v in ir.operands(name)]
-    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
-        if op in ("zext", "trunc"):  # the codes here are 0..255 either way
-            return args[0]
-        if op == "bitcast":  # a copy to the same type (loop-carried values)
-            return args[0]
-        if op in ("add", "or"):
-            return args[0] + args[1] if op == "add" else args[0] | args[1]
-        if op == "sub":
-            return args[0] - args[1]
-        if op == "icmp" and ir.definitions[name].startswith("icmp eq "):
-            return args[0] == args[1]
-        if op == "llvm.smax":
-            return np.maximum(args[0], args[1])
-        if op == "llvm.smin":
-            return np.minimum(args[0], args[1])
-        if op == "sitofp":
-            return np.asarray(args[0]).astype(np.float32)
-        if op == "llvm.exp2":
-            return np.exp2(np.asarray(args[0], dtype=np.float64)).astype(np.float32)
-        if op == "select":
-            return np.where(args[0], args[1], args[2]).astype(np.float32)
-        if op == "insertelement":
-            return _evaluate(ir, ir.splatted(name), inputs)
-        if op == "fmul":
-            return np.float32(args[0]) * np.asarray(args[1], dtype=np.float32)
-        if op == "fsub":
-            return np.float32(args[0]) - np.asarray(args[1], dtype=np.float32)
-        if op == "llvm.fmuladd":
-            product = np.asarray(args[0], dtype=np.float64) * np.asarray(
-                args[1], dtype=np.float64
-            )
-            return _round_once(product, args[2])
-    raise AssertionError(f"the emulation does not model: {ir.definitions[name]}")
-
-
-def _scale_updates(ir: _KernelIR) -> tuple:
-    """The two fused multiply-adds that fold a group into the accumulator: the
-    one in the K loop, which folds the previous iteration's group, and the one
-    after the loop, which folds the last group."""
-    updates = ir.find("llvm.fmuladd")
-    assert len(updates) == 2, [ir.definitions[n] for n in updates]
-    in_loop, after_loop = sorted(updates, key=ir.line_of)
-    return in_loop, after_loop
-
-
-def _combined_exponent(ir: _KernelIR, update: str) -> str:
-    """The update's ``ea + eb``: from ``fma(group * 2^pre, ...)`` with
-    ``pre = smin(exponent - fused, pre_max)``, the ``exponent``."""
-    scaled_group = ir.operands(update)[0]
-    pre_scale = ir.splatted(ir.operands(scaled_group)[1])
-    (pre_float,) = ir.operands(pre_scale)
-    (pre,) = ir.operands(pre_float)
-    unsaturated_pre = ir.operands(pre)[0]
-    return ir.operands(unsaturated_pre)[0]
-
-
-def _update_inputs(ir: _KernelIR, update: str) -> tuple:
-    """The values an update reads, copies followed to their source: (group,
-    A scale code, B scale code, accumulator). The codes are the two operands
-    of the ``code_a + code_b`` in ``exponent = code_a + code_b - 254``."""
-    scaled_group, _, acc = ir.operands(update)
-    code_sum = ir.operands(_combined_exponent(ir, update))[0]
-    a_code, b_code = (ir.copied(ir.operands(z)[0]) for z in ir.operands(code_sum))
-    return ir.copied(ir.operands(scaled_group)[0]), a_code, b_code, ir.copied(acc)
-
-
-def test_mx_gemm_folds_each_group_one_iteration_late(mx_gemm):
-    """Iteration ``kg`` of the K loop issues its two scale-byte loads before
-    its A and B loads, folds group ``kg - 1`` while they are in flight, then
-    runs its own MFMA; the last group is folded after the loop.
-
-    In the IR: both updates read the loop-carried group, scale codes and
-    accumulator; the loop carries the MFMA result and the two scale loads
-    into the next iteration, and the in-loop update as the next accumulator;
-    these start as a zero group, scale code 127 (2^0) and a zero accumulator,
-    so the first fold leaves the accumulator +0; the after-loop update is what
-    the kernel stores; and a scheduling barrier keeps the loop's other global
-    loads after the two scale loads."""
-    ir = mx_gemm.ir
-    in_loop, after_loop = _scale_updates(ir)
-    inputs = _update_inputs(ir, in_loop)
-    assert _update_inputs(ir, after_loop) == inputs
-    group, a_code, b_code, acc = inputs
-    a_load, b_load = ir.scale_loads()
-
-    initial, carried = ir.incoming(group)
-    assert "zeroinitializer" in ir.definitions[initial], ir.definitions[initial]
-    assert ir.opcode(carried) == "mfma", ir.definitions[carried]
-    for code, load in ((a_code, a_load), (b_code, b_load)):
-        initial, carried = ir.incoming(code)
-        assert _evaluate(ir, initial, {}) == _BIAS, ir.definitions[initial]
-        assert carried == load, ir.definitions[code]
-    initial, carried = ir.incoming(acc)
-    assert "zeroinitializer" in ir.definitions[initial], ir.definitions[initial]
-    assert carried == in_loop, ir.definitions[acc]
-
-    stored = {ir.operands(n)[0] for n in ir.find("extractelement")}
-    assert stored == {after_loop}, stored
-
-    (barrier,) = [
-        i
-        for i, line in enumerate(ir.lines)
-        if line.strip().startswith("call void @llvm.amdgcn.sched.barrier(")
-    ]
-    last_scale_load = max(ir.line_of(a_load), ir.line_of(b_load))
-    other_loads = [
-        ir.line_of(n)
-        for n in ir.find("load")
-        if last_scale_load < ir.line_of(n) < ir.line_of(in_loop)
-    ]
-    assert other_loads and last_scale_load < barrier < min(other_loads)
-
-
-def test_mx_gemm_never_multiplies_two_decoded_scales(mx_gemm):
-    """No float multiply in the kernel takes two values made from scale bytes
-    alone; their product is ``2^(ea + eb)``, which an f32 cannot hold."""
-    ir = mx_gemm.ir
-    _, a_code, b_code, _ = _update_inputs(ir, _scale_updates(ir)[0])
-    scale_values = set(ir.scale_loads()) | {a_code, b_code}
-    for name in ir.definitions:
-        if ir.opcode(name) not in _FLOAT_MULTIPLIES:
-            continue
-        factors = [v for v in ir.operands(name)[:2] if v.startswith("%")]
-        factor_sources = [ir.sources(f) for f in factors]
-        from_scales_only = [s for s in factor_sources if s and s <= scale_values]
-        assert len(from_scales_only) < 2, ir.definitions[name]
-
-
-@pytest.mark.parametrize("position", [0, 1], ids=["in the loop", "after the loop"])
-def test_mx_gemm_scale_update_shape(mx_gemm, position):
-    """The update is ``fma(group * 2^pre, 2^fused, acc)``: ``fused`` is the
-    combined scale exponent clamped to every f32 power of two and ``pre`` is
-    the rest, saturated at the largest ``pre`` that
-    :func:`rocke.helpers.mx_scale.exact_mx_scale_split` derives from the
-    target's element format."""
-    ir = mx_gemm.ir
-    split = exact_mx_scale_split(mx_gemm.element_format, mx_gemm.element_format, 32)
-    update = _scale_updates(ir)[position]
-    group, a_code, b_code, acc = _update_inputs(ir, update)
-    scaled_group, fused_splat, _ = ir.operands(update)
-    assert ir.opcode(acc) == "phi", ir.definitions[acc]
-
-    # group * 2^pre, with the group the MFMA result the loop carries.
-    assert ir.opcode(scaled_group) == "fmul", ir.definitions[scaled_group]
-    _, pre_splat = ir.operands(scaled_group)
-    assert ir.opcode(group) == "phi", ir.definitions[group]
-    pre_scale = ir.splatted(pre_splat)
-    assert ir.opcode(pre_scale) == "llvm.exp2", ir.definitions[pre_scale]
-    (pre_float,) = ir.operands(pre_scale)
-    assert ir.opcode(pre_float) == "sitofp", ir.definitions[pre_float]
-    (pre,) = ir.operands(pre_float)
-
-    # pre = smin(exponent - fused, pre_max).
-    assert ir.opcode(pre) == "llvm.smin", ir.definitions[pre]
-    unsaturated_pre, pre_max = ir.operands(pre)
-    assert pre_max == str(split.pre_max), ir.definitions[pre]
-    assert ir.opcode(unsaturated_pre) == "sub", ir.definitions[unsaturated_pre]
-    exponent, fused = ir.operands(unsaturated_pre)
-
-    # 2^fused, or NaN for a NaN scale code.
-    fused_scale = ir.splatted(fused_splat)
-    assert ir.opcode(fused_scale) == "select", ir.definitions[fused_scale]
-    _, nan, fused_power = ir.operands(fused_scale)
-    assert np.isnan(_literal(nan)), ir.definitions[fused_scale]
-    assert ir.opcode(fused_power) == "llvm.exp2", ir.definitions[fused_power]
-    (fused_float,) = ir.operands(fused_power)
-    assert ir.opcode(fused_float) == "sitofp", ir.definitions[fused_float]
-    assert ir.operands(fused_float) == [fused]
-
-    # fused = smin(smax(exponent, -149), 127).
-    assert (split.fused_min, split.fused_max) == (-149, 127)
-    assert ir.opcode(fused) == "llvm.smin", ir.definitions[fused]
-    lower_clamp, upper = ir.operands(fused)
-    assert ir.opcode(lower_clamp) == "llvm.smax", ir.definitions[lower_clamp]
-    assert ir.operands(lower_clamp) == [exponent, "-149"]
-    assert upper == "127", ir.definitions[fused]
-
-    # exponent = code_a + code_b - 2 * 127, from the two scale codes.
-    assert ir.opcode(exponent) == "sub", ir.definitions[exponent]
-    assert ir.sources(exponent) == {a_code, b_code}
-    codes = np.arange(256, dtype=np.int64)
-    got = _evaluate(ir, exponent, {a_code: codes[:, None], b_code: codes[None, :]})
-    np.testing.assert_array_equal(got, codes[:, None] + codes[None, :] - 2 * _BIAS)
-
-
-def _producible_dots(element_format) -> dict:
-    """Group values in the domain the split is derived for: +-0, +-Inf and
-    finite f32 values that are multiples of ``2^low`` (``low`` twice the
-    format's smallest exponent: every product of two elements is such a
-    multiple, so their sum and its f32 rounding are too) and at most the
-    largest group, 32 times the square of the largest element. The split is
-    exact only on that domain: a value no group can produce, such as 2^-149,
-    can need ``pre`` outside the range the split keeps exact, so such values
-    are not tested."""
-    smallest = 2.0 ** (2 * element_format.smallest_exponent)
-    largest = float(np.float32(32 * element_format.largest_value**2))
-    below_largest = float(np.nextafter(np.float32(largest), np.float32(0)))
-    return {
-        "zero": 0.0,
-        "negative zero": -0.0,
-        "smallest": smallest,
-        "-smallest": -smallest,
-        "odd 24-bit multiple of the smallest": (2.0**24 - 1) * smallest,
-        "one": 1.0,
-        "-1.5": -1.5,
-        "largest": largest,
-        "-largest": -largest,
-        "largest, odd last bit": below_largest,
-        "+Inf": np.inf,
-        "-Inf": -np.inf,
-    }
-
-
-_DOT_NAMES = tuple(_producible_dots(mx_gemm_element_format("bf8e5m2", "gfx950")))
-_ACCUMULATORS = {
-    "+0": 0.0,
-    "-0": -0.0,
-    "+Inf": np.inf,
-    "-Inf": -np.inf,
-    "one": 1.0,
-    "-2^-149": -(2.0**-149),
-    "2^-149": 2.0**-149,
-    "-largest f32": -float(np.finfo(np.float32).max),
-}
-
-
-def _evaluate_update(ir: _KernelIR, dot, acc, a_codes, b_codes) -> np.ndarray:
-    """The kernel's own update for one group value and accumulator, over the
-    given scale codes (broadcast against each other). Both updates, the one
-    in the loop and the one after it, are evaluated and must agree bit for
-    bit."""
-    shape = np.broadcast(a_codes, b_codes).shape
-    results = []
-    for update in _scale_updates(ir):
-        group, a_code, b_code, acc_phi = _update_inputs(ir, update)
-        inputs = {
-            a_code: a_codes,
-            b_code: b_codes,
-            group: np.float32(dot),
-            acc_phi: np.float32(acc),
-        }
-        assert ir.sources(update) <= set(inputs), ir.sources(update)
-        results.append(np.broadcast_to(_evaluate(ir, update, inputs), shape))
-    in_loop, after_loop = results
-    assert (in_loop.view(np.uint32) == after_loop.view(np.uint32)).all()
-    return in_loop
-
-
-def _same_bits(got, want) -> np.ndarray:
-    """Equal bit for bit, with any NaN equal to any NaN."""
-    return (got.view(np.uint32) == want.view(np.uint32)) | (
-        np.isnan(got) & np.isnan(want)
-    )
-
-
-@pytest.mark.parametrize("acc", _ACCUMULATORS.values(), ids=_ACCUMULATORS.keys())
-@pytest.mark.parametrize("dot_name", _DOT_NAMES)
-def test_scale_update_for_every_code_pair(mx_gemm, dot_name, acc):
-    """The kernel's own update, evaluated over every pair of scale codes, gives
-    ``acc + dot * 2^(ea + eb)`` rounded once to f32, bit for bit: for
-    positive, negative, zero and infinite groups the format can produce, and
-    for zero (of either sign), infinite, subnormal and finite accumulators.
-    NaN for code 255."""
-    dot = _producible_dots(mx_gemm.element_format)[dot_name]
-    codes = np.arange(_NAN_CODE + 1, dtype=np.int64)
-    a_codes, b_codes = codes[:, None], codes[None, :]
-    got = _evaluate_update(mx_gemm.ir, dot, acc, a_codes, b_codes)
-
-    want = _exact_update(np.float32(dot), a_codes + b_codes - 2 * _BIAS, acc)
-    finite = (a_codes != _NAN_CODE) & (b_codes != _NAN_CODE)
-    mismatch = finite & ~_same_bits(got, want)
-    assert not mismatch.any(), [
-        (int(a), int(b), got[a, b], want[a, b]) for a, b in np.argwhere(mismatch)[:5]
-    ]
-    assert np.isnan(got[~finite]).all()
-
-
-# (case name, group as a function of the format's largest group and smallest
-#  product, accumulator, A code, B code, the exact update).
-_EDGES = (
-    # The largest negative group times 2^254 is far beyond f32; added to +Inf
-    # it leaves +Inf.
-    (
-        "infinite accumulator, opposite overflow",
-        lambda largest, smallest: -largest,
-        np.inf,
-        254,
-        254,
-        np.inf,
-    ),
-    # -1 * 2^-254 is too small for f32: +0 plus it rounds to -0.
-    (
-        "zero accumulator, negative group below f32",
-        lambda largest, smallest: -1.0,
-        0.0,
-        0,
-        0,
-        -0.0,
-    ),
-    # The smallest group times 2^254 still overflows: above the cap the
-    # saturated pre gives the same infinity.
-    (
-        "smallest group, largest scales",
-        lambda largest, smallest: smallest,
-        1.0,
-        254,
-        254,
-        np.inf,
-    ),
-)
-
-
-@pytest.mark.parametrize(
-    "name, group, acc, a_code, b_code, exact", _EDGES, ids=[c[0] for c in _EDGES]
-)
-def test_scale_update_is_exact_at_the_edges(
-    mx_gemm, name, group, acc, a_code, b_code, exact
-):
-    """An infinite accumulator meeting a group that overflows the other way,
-    a negative group too small for f32 on a +0 accumulator, and a group whose
-    pre is saturated: the kernel's update is the exact one."""
-    dots = _producible_dots(mx_gemm.element_format)
-    dot = group(dots["largest"], dots["smallest"])
-    got = _evaluate_update(mx_gemm.ir, dot, acc, np.array([a_code]), np.array([b_code]))
-    assert _same_bits(got, np.full(1, exact, dtype=np.float32)).all(), (name, got)
-    exponent = a_code + b_code - 2 * _BIAS
-    assert _same_bits(got, _exact_update(np.float32(dot), exponent, acc)).all()

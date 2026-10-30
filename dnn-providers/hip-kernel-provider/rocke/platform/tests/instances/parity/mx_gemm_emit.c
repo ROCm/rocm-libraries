@@ -20,54 +20,33 @@
 /* Fill `spec` for config index `idx`. Returns 0 on success, -1 if unknown. */
 static int make_spec(int idx, rocke_mx_gemm_spec_t* spec)
 {
+    /* (M, N, K, mantissa, block_tile_m, block_tile_n), as mx_gemm_emit.py. */
+    static const struct
+    {
+        int M, N, K;
+        const char* mantissa;
+        int tile_m, tile_n;
+    } configs[] = {
+        {16, 16, 64, "fp8e4m3", 32, 32},
+        {32, 32, 64, "fp8e4m3", 32, 256},
+        {16, 16, 32, "bf8e5m2", 32, 32},
+        {32, 32, 128, "fp8e4m3", 64, 64},
+        {48, 64, 96, "fp8e4m3", 32, 64},
+        {64, 48, 160, "bf8e5m2", 64, 32},
+    };
+    if(idx < 0 || idx >= (int)(sizeof(configs) / sizeof(configs[0])))
+    {
+        return -1;
+    }
     *spec = rocke_mx_gemm_spec_default();
     spec->name = "rocke_mx_gemm";
     spec->group_k = 32;
-    spec->block_tile_m = 16;
-    spec->block_tile_n = 16;
-    spec->per_input_row = true;
-
-    switch(idx)
-    {
-    case 0:
-        spec->M = 16;
-        spec->N = 16;
-        spec->K = 64;
-        spec->mantissa_dtype = "fp8e4m3";
-        break;
-    case 1:
-        spec->M = 32;
-        spec->N = 32;
-        spec->K = 64;
-        spec->mantissa_dtype = "fp8e4m3";
-        break;
-    case 2:
-        spec->M = 16;
-        spec->N = 16;
-        spec->K = 32;
-        spec->mantissa_dtype = "bf8e5m2";
-        break;
-    case 3:
-        spec->M = 32;
-        spec->N = 32;
-        spec->K = 128;
-        spec->mantissa_dtype = "fp8e4m3";
-        break;
-    case 4:
-        spec->M = 48;
-        spec->N = 64;
-        spec->K = 96;
-        spec->mantissa_dtype = "fp8e4m3";
-        break;
-    case 5:
-        spec->M = 64;
-        spec->N = 48;
-        spec->K = 160;
-        spec->mantissa_dtype = "bf8e5m2";
-        break;
-    default:
-        return -1;
-    }
+    spec->M = configs[idx].M;
+    spec->N = configs[idx].N;
+    spec->K = configs[idx].K;
+    spec->mantissa_dtype = configs[idx].mantissa;
+    spec->block_tile_m = configs[idx].tile_m;
+    spec->block_tile_n = configs[idx].tile_n;
     return 0;
 }
 
