@@ -3606,6 +3606,7 @@ Tests:
   transB: [ N    ]
   alpha: 1
   beta: 1
+  # batched counterpart: gemm_batched_PyTorch_offset_overflow
 
 - name: gemm_ILP64
   category: stress
@@ -3736,7 +3737,7 @@ Tests:
   arguments:
     - { transA: N, transB: N, M: 8454144, N: 3, K: 508, lda: 8454144, ldb: 508, ldc: 8454144, ldd: 8454144 }
   alpha: 1
-  beta: 0
+  beta: 1
   api: [ C_64 ]
   os_flags: LINUX
 

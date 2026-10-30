@@ -599,4 +599,19 @@ Tests:
   pointer_mode_host: false
   devices: 4
   repeatability_check: true
+
+# Match gemm_PyTorch_offset_overflow on the pointer-batched path.
+# lda=2^26, K=32, fp32: K * lda * sizeof overflows signed 32-bit.
+- name: gemm_batched_PyTorch_offset_overflow
+  category: nightly
+  function:
+    - gemm_batched: *single_precision
+  matrix_size:
+    - { M: 67108863, N: 1, K: 32, lda: 67108863, ldb: 32, ldc: 67108863 }
+    - { M: 67108864, N: 1, K: 32, lda: 67108864, ldb: 32, ldc: 67108864 }
+  transA: [ N ]
+  transB: [ N ]
+  alpha: 1
+  beta: 1
+  batch_count: [ 2 ]
 ...
