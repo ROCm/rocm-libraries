@@ -241,6 +241,12 @@ struct fmha_bwd_args
     float p_undrop;
     std::variant<std::pair<uint64_t, uint64_t>, std::pair<const void*, const void*>>
         drop_seed_offset;
+
+    // Two-stage d_sink buffers in the workspace, filled in by fmha_bwd_launcher. Leave them
+    // at the defaults, which select the atomicAdd onto d_sink_ptr.
+    void* sink_partial_ptr               = nullptr;
+    ck_tile::index_t sink_slots_per_head = 0;
+    void* sink_counter_ptr               = nullptr; // only for kernel sets without ConvertQGrad
 };
 
 template <typename FmhaBwdDQDKDVKernel>
@@ -395,7 +401,9 @@ auto fmha_bwd_dot_do_o_create_kargs_and_grids(fmha_bwd_args args)
                                                      args.stride_o,
                                                      args.nhead_stride_do,
                                                      args.nhead_stride_o,
-                                                     args.nhead_stride_lsed);
+                                                     args.nhead_stride_lsed,
+                                                     args.sink_partial_ptr,
+                                                     args.sink_counter_ptr);
         }
         else
         { // create batch mode kernel arguments
@@ -416,7 +424,9 @@ auto fmha_bwd_dot_do_o_create_kargs_and_grids(fmha_bwd_args args)
                                                      args.nhead_stride_lsed,
                                                      args.batch_stride_do,
                                                      args.batch_stride_o,
-                                                     args.batch_stride_lsed);
+                                                     args.batch_stride_lsed,
+                                                     args.sink_partial_ptr,
+                                                     args.sink_counter_ptr);
         }
     }();
 
@@ -443,7 +453,10 @@ auto fmha_bwd_convert_dq_create_kargs_and_grids(fmha_bwd_args args)
                                                         args.cu_seqlen_k_ptr,
                                                         args.hdim_q,
                                                         args.stride_dq,
-                                                        args.nhead_stride_dq);
+                                                        args.nhead_stride_dq,
+                                                        args.sink_partial_ptr,
+                                                        args.d_sink_ptr,
+                                                        args.sink_slots_per_head);
         }
         else
         { // create batch mode kernel arguments
@@ -456,7 +469,10 @@ auto fmha_bwd_convert_dq_create_kargs_and_grids(fmha_bwd_args args)
                                                         args.hdim_q,
                                                         args.stride_dq,
                                                         args.nhead_stride_dq,
-                                                        args.batch_stride_dq);
+                                                        args.batch_stride_dq,
+                                                        args.sink_partial_ptr,
+                                                        args.d_sink_ptr,
+                                                        args.sink_slots_per_head);
         }
     }();
 
@@ -548,6 +564,10 @@ void fmha_bwd_dot_do_o_oneshot_(const ck_tile::stream_config&, fmha_bwd_args);
 template <typename Traits_, typename Arch = void>
 std::string fmha_bwd_dot_do_o_get_name_();
 
+// Query rows per OGradDotO block; sizes the two-stage d_sink buffer (one slot per block).
+template <typename Traits_, typename Arch = void>
+ck_tile::index_t fmha_bwd_dot_do_o_m0_();
+
 template <ck_tile::index_t HDim_,
           typename DataType_,
           bool kIsGroupMode_,
@@ -587,6 +607,10 @@ struct fmha_bwd_traits
     bool has_dropout;
     bool is_store_randval;
     bool is_deterministic;
+    // Set when the runs will pass d_sink_ptr: the launcher then reserves workspace to reduce
+    // d_sink in two stages instead of with atomics, which is faster. Optional, d_sink is
+    // correct either way; deterministic runs always use the two-stage reduction.
+    bool has_sink_grad = false;
     // TODO: padding check is inside this api
 };
 
@@ -633,6 +657,8 @@ struct fmha_bwd_launcher
             return -1.0f;
         }};
     // Layout: [host_ws_size_ bytes (host-prepared metadata)][dq_acc region]
+    //         [d_sink partials, with has_sink_grad on a ConvertQGrad kernel set, or deterministic]
+    //         [d_sink arrival counters, deterministic kernel sets without ConvertQGrad only]
     size_t workspace_size = 0;
 
     fmha_bwd_launcher(const fmha_bwd_traits&);
@@ -657,11 +683,19 @@ struct fmha_bwd_launcher
     {
         hipStream_t stream = s.stream_id_;
 
+        // d_sink arrival counters start at zero and every run leaves them so. The d_sink
+        // partials are fully rewritten by every run and are not zeroed.
+        if(sink_counter_bytes_ > 0)
+            HIP_CHECK_ERROR(hipMemsetAsync(static_cast<char*>(device_ws_ptr) + sink_counter_offset_,
+                                           0,
+                                           sink_counter_bytes_,
+                                           stream));
+
         // Fast path: no metadata region; just zero dq_acc if needed.
         if(host_ws_size_ == 0)
         {
-            if(needs_zero_dq_acc_ && workspace_size > 0)
-                HIP_CHECK_ERROR(hipMemsetAsync(device_ws_ptr, 0, workspace_size, stream));
+            if(needs_zero_dq_acc_ && dq_ws_size_ > 0)
+                HIP_CHECK_ERROR(hipMemsetAsync(device_ws_ptr, 0, dq_ws_size_, stream));
             return;
         }
 
@@ -672,10 +706,10 @@ struct fmha_bwd_launcher
 
         // Zero only the dq_acc region that follows the metadata region; the metadata
         // region is fully overwritten by the prepare kernel below.
-        if(needs_zero_dq_acc_ && workspace_size > host_ws_size_)
+        if(needs_zero_dq_acc_ && dq_ws_size_ > host_ws_size_)
             HIP_CHECK_ERROR(hipMemsetAsync(static_cast<char*>(device_ws_ptr) + host_ws_size_,
                                            0,
-                                           workspace_size - host_ws_size_,
+                                           dq_ws_size_ - host_ws_size_,
                                            stream));
 
         prepare_ws_dev_func_(device_ws_ptr,
@@ -708,6 +742,9 @@ struct fmha_bwd_launcher
     fmha_bwd_traits traits_{};
     ck_tile::index_t selected_max_seqlen_q_ = 0;
     size_t host_ws_size_                    = 0;
+    size_t dq_ws_size_                      = 0; // metadata + dq_acc, i.e. before the partials
+    size_t sink_counter_offset_             = 0;
+    size_t sink_counter_bytes_              = 0; // 0 unless the last-block fold is in use
     bool needs_zero_dq_acc_                 = false;
 
     // Function pointer (points to code segment, survives launcher destruction)
@@ -731,10 +768,7 @@ struct fmha_bwd_launcher
     {
         traits_                = t;
         selected_max_seqlen_q_ = fmha_bwd_dq_dk_dv_maxq_<T1, Arch>();
-        run                    = [](fmha_bwd_args a, const ck_tile::stream_config& s) {
-            return fmha_bwd_<T0, T1, T2, Arch>(s, a);
-        };
-        host_ws_size_         = fmha_bwd_dq_dk_dv_dq_ws_host_size_<T1, Arch>(t.batch);
+        host_ws_size_          = fmha_bwd_dq_dk_dv_dq_ws_host_size_<T1, Arch>(t.batch);
         size_t device_ws_size = 0;
         if(host_ws_size_ > 0)
         {
@@ -756,8 +790,73 @@ struct fmha_bwd_launcher
             seqlen_k_ = t.seqlen_k;
             num_cus_  = ck_tile::get_num_cus();
         }
-        workspace_size     = host_ws_size_ + device_ws_size;
+        dq_ws_size_        = host_ws_size_ + device_ws_size;
+        workspace_size     = dq_ws_size_;
         needs_zero_dq_acc_ = fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<T1, Arch>();
+
+        // Two-stage d_sink: OGradDotO stores one partial per block instead of every warp
+        // atomically adding into d_sink, and the partials are folded afterwards: by
+        // ConvertQGrad when the kernel set has one, otherwise by the last OGradDotO block of
+        // each head. The latter is slower than the atomics, so those kernel sets only use it
+        // for deterministic runs, where the atomics' arrival-order dependence is not allowed.
+        constexpr bool kHasConvertDq = !std::is_same_v<T2, void>;
+        size_t sink_offset           = 0;
+        size_t sink_bytes            = 0;
+        size_t counter_offset        = 0;
+        size_t counter_bytes         = 0;
+        ck_tile::index_t dot_do_o_m0 = 0;
+        const bool two_stage         = t.is_deterministic || (kHasConvertDq && t.has_sink_grad);
+        if(two_stage && t.batch > 0 && t.max_seqlen_q > 0)
+        {
+            dot_do_o_m0 = fmha_bwd_dot_do_o_m0_<T0, Arch>();
+            sink_offset = ck_tile::integer_least_multiple(dq_ws_size_, size_t{256});
+            sink_bytes  = sizeof(float) * t.nhead_q * t.batch *
+                         ck_tile::integer_divide_ceil(t.max_seqlen_q, dot_do_o_m0);
+            workspace_size = sink_offset + sink_bytes;
+            if(!kHasConvertDq)
+            {
+                counter_offset = ck_tile::integer_least_multiple(workspace_size, size_t{256});
+                counter_bytes  = sizeof(int) * t.nhead_q *
+                                static_cast<size_t>(ck_tile::kFmhaBwdSinkCounterStride);
+                workspace_size = counter_offset + counter_bytes;
+            }
+        }
+        sink_counter_offset_ = counter_offset;
+        sink_counter_bytes_  = counter_bytes;
+
+        const bool deterministic = t.is_deterministic;
+
+        run = [sink_offset, sink_bytes, counter_offset, counter_bytes, dot_do_o_m0, deterministic](
+                  fmha_bwd_args a, const ck_tile::stream_config& s) {
+            if(sink_bytes > 0 && a.d_sink_ptr != nullptr && a.workspace_ptr != nullptr)
+            {
+                // Same block count as the OGradDotO grid: batch x ceil(max_seqlen_q / m0).
+                const ck_tile::index_t slots =
+                    a.batch * ck_tile::integer_divide_ceil(a.max_seqlen_q, dot_do_o_m0);
+                // A run larger than the traits the workspace was sized for does not fit.
+                const bool fits =
+                    sizeof(float) * a.nhead_q * slots <= sink_bytes &&
+                    (counter_bytes == 0 ||
+                     sizeof(int) * a.nhead_q * ck_tile::kFmhaBwdSinkCounterStride <= counter_bytes);
+                if(fits)
+                {
+                    a.sink_partial_ptr    = static_cast<char*>(a.workspace_ptr) + sink_offset;
+                    a.sink_slots_per_head = slots;
+                    if(counter_bytes > 0)
+                        a.sink_counter_ptr = static_cast<char*>(a.workspace_ptr) + counter_offset;
+                }
+            }
+            // Outside deterministic mode a run that does not fit keeps the atomic path.
+            // Inside it that would quietly give up the bit-identical d_sink, so refuse.
+            if(deterministic && a.d_sink_ptr != nullptr && a.sink_partial_ptr == nullptr)
+            {
+                std::cerr << "fmha_bwd: deterministic d_sink needs a workspace of this "
+                             "launcher's workspace_size, built from traits that cover the run "
+                             "(batch, nhead_q, max_seqlen_q); skipping run\n";
+                return -1.0f;
+            }
+            return fmha_bwd_<T0, T1, T2, Arch>(s, a);
+        };
     }
 
     public:

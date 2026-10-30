@@ -691,6 +691,13 @@ std::string fmha_bwd_dot_do_o_get_name_<dot_do_o_trait_{F_idx}, {F_arch.tag}>()
     return k_::GetName();
 }}
 
+template <>
+ck_tile::index_t fmha_bwd_dot_do_o_m0_<dot_do_o_trait_{F_idx}, {F_arch.tag}>()
+{{
+    using k_ = fmha_bwd_dot_do_o_kernel_{F_idx};
+    return k_::kM0;
+}}
+
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
 """
 
