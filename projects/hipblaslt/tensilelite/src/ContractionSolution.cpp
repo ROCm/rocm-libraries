@@ -2222,9 +2222,9 @@ namespace TensileLite
         if(pAMDGPU->fixedStaggerUStrideShift != std::numeric_limits<size_t>::max())
             defaultStaggerUStrideShift = pAMDGPU->fixedStaggerUStrideShift;
 
-        // Uniform summation order can keep mapping 1 only when the kernel can
-        // apply row-uniform staggering. Persistent kernels also require the
-        // per-tile iteration capability; otherwise disable staggering.
+        // Mapping 1 keeps the summation start independent of the output row.
+        // Dynamic streamk can visit several full tiles, so its kernel must preserve
+        // the packed stagger argument across tiles. Older device libraries do not.
         //
         // The placement of this clamp is load-bearing. It must sit AFTER the
         // TENSILE_FIXED_STAGGERU* overrides directly above, or an env override
@@ -2233,9 +2233,15 @@ namespace TensileLite
         // this mode's zeros for concurrent callers who did not request it.
         if(problem.getParams().uniformSummationOrder() != 0)
         {
+            const bool usesDynamicQueue = streamKUsesDynamicQueue(
+                sizeMapping,
+                sizeMapping.hasHybridAssignment() && streamK5EffectiveDynamic(problem, *hardware));
+            const bool persistentCapable
+                = !sizeMapping.isPersistent()
+                  || (usesDynamicQueue ? internalArgsSupport.persistentStaggerU
+                                       : internalArgsSupport.perTileExtraIters);
             const bool rowUniformStaggerCapable
-                = internalArgsSupport.staggerU
-                  && (!sizeMapping.isPersistent() || internalArgsSupport.perTileExtraIters);
+                = internalArgsSupport.staggerU && persistentCapable;
             if(!(rowUniformStaggerCapable && defaultStaggerUMapping == 1))
             {
                 defaultStaggerUMapping     = 0;

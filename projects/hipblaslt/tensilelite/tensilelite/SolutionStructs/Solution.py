@@ -474,6 +474,13 @@ def _supportStreamKPerTileExtraIters(state):
   return isStreamK(state) and not hasDynamicAssignment(state) and not isCustomKernelConfig(state)
 
 
+def _supportPersistentStaggerU(state):
+  """Whether newly emitted assembly preserves the packed runtime stagger."""
+  return (state["KernelLanguage"] == "Assembly"
+          and state["InternalSupportParams"]["SupportCustomStaggerU"]
+          and not isCustomKernelConfig(state))
+
+
 def _supportOccupancyProbe(state):
   """Whether this solution's asm takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args.
 
@@ -1037,6 +1044,11 @@ class Solution(collections.abc.Mapping):
       if savedCustomKernel:
         self._state["CustomKernel"] = savedCustomKernel
       self._name = None
+
+    # Derive after unsupported stagger paths are disabled and custom metadata is
+    # restored. Frozen custom assembly must not inherit a generated-kernel claim.
+    self._state["InternalSupportParams"]["SupportPersistentStaggerU"] = \
+        _supportPersistentStaggerU(self._state)
 
     # Only merge and report mismatches if there were no pre-existing mismatches
     # To avoid duplicates and noise from cascading issues.
