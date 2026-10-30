@@ -960,7 +960,8 @@ std::vector<LayoutOverride> onAllIoTensors(const std::vector<int64_t>& strides)
 
 // Layouts the kernels address correctly: BSHD, padded row strides, dO strides that
 // differ from O, odd strides on every axis whose offset the kernels do not put in a
-// 4-byte record index, any stride on a length-1 axis, zero batch or head strides on
+// 4-byte record index, odd or zero batch and head strides on a length-1 axis (outputs
+// included), an odd row stride of at least D with S=1, zero batch or head strides on
 // the inputs (broadcasts), and stats whose size-1 axes have any stride (buildPlan
 // derives the LSE/D strides from Q's dims). The B=2, H=2 non-packed cases of
 // IntegrationGpuSdpaBackward run BSHD Q, K, V and dO with O and dQ rows padded to
@@ -1021,7 +1022,9 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsAddressableLayouts)
         GraphTest{withLayouts(createSdpaBwdGraph(dims), onTensors({"o", "dq"}, oddRows)),
                   "row stride D+1 on O and dQ"},
         true);
-    // The stride of a size-1 axis only ever multiplies index 0.
+    // On a size-1 axis the stride only multiplies index 0, so an odd one is addressed
+    // correctly. With S=1 the row stride must still be at least D, because S * row
+    // stride bounds each buffer.
     applicabilityTests.emplace_back(GraphTest{withLayouts(createSdpaBwdGraph({2, 2, 1, 128}),
                                                           onAllIoTensors({260, 130, 129, 1})),
                                               "row stride D+1 with S=1 on all eight tensors"},
