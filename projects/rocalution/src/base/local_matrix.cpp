@@ -5793,7 +5793,7 @@ namespace rocalution
     {
         log_debug(this, "LocalMatrix::DiagonalMatrixMultR()", (const void*&)diag);
 
-        assert((diag.GetSize() == this->GetM()) || (diag.GetSize() == this->GetN()));
+        assert(diag.GetSize() == this->GetN());
 
         assert(((this->matrix_ == this->matrix_host_) && (diag.vector_ == diag.vector_host_))
                || ((this->matrix_ == this->matrix_accel_) && (diag.vector_ == diag.vector_accel_)));
@@ -5873,7 +5873,7 @@ namespace rocalution
     {
         log_debug(this, "LocalMatrix::DiagonalMatrixMultL()", (const void*&)diag);
 
-        assert((diag.GetSize() == this->GetM()) || (diag.GetSize() == this->GetN()));
+        assert(diag.GetSize() == this->GetM());
 
         assert(((this->matrix_ == this->matrix_host_) && (diag.vector_ == diag.vector_host_))
                || ((this->matrix_ == this->matrix_accel_) && (diag.vector_ == diag.vector_accel_)));
@@ -7007,8 +7007,7 @@ namespace rocalution
             prolong->MoveToHost();
 
             // Convert to CSR
-            unsigned int format   = mat_host.GetFormat();
-            int          blockdim = mat_host.GetBlockDimension();
+            unsigned int format = mat_host.GetFormat();
             mat_host.ConvertToCSR();
 
             if(mat_host.matrix_->AMGSmoothedAggregationProlongNnz(

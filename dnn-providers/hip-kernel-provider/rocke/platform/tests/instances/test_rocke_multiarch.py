@@ -116,12 +116,17 @@ class TestArchTarget(unittest.TestCase):
         self.assertTrue(t942.supports_dtype_combo("fp16", "fp16", "fp32"))
         # gfx942 (CDNA3) ships fp8/bf8 MFMA, so the fp8 dtype combo IS
         # supported on it. The fp4/MX MFMA family is the gfx950-only
-        # combo, so use it for the negative case.
+        # combo, so use it for the negative case. The catalog has no
+        # unscaled fp4 row. It lists fp4 in the scaled family only.
         self.assertTrue(t942.supports_dtype_combo("fp8", "fp8", "fp32"))
-        self.assertFalse(t942.supports_dtype_combo("fp4", "fp4", "fp32"))
-        self.assertTrue(
-            ArchTarget.from_gfx("gfx950").supports_dtype_combo("fp4", "fp4", "fp32")
+        self.assertFalse(
+            t942.supports_dtype_combo("fp4", "fp4", "fp32", family="mfma_scaled")
         )
+        t950 = ArchTarget.from_gfx("gfx950")
+        self.assertTrue(
+            t950.supports_dtype_combo("fp4", "fp4", "fp32", family="mfma_scaled")
+        )
+        self.assertFalse(t950.supports_dtype_combo("fp4", "fp4", "fp32"))
         self.assertEqual(t942.max_threads_per_block, 1024)
 
     def test_dtype_normalization(self):
@@ -757,6 +762,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
         from rocke.core.lower_llvm import (
             LLVM_FLAVOR_LLVM23,
             _datalayout_for_flavor,
+            _emission_profile,
             _flavor_for_llvm,
         )
         from rocke.helpers.compile import emit_device_llvm_ir_via_hipcc
@@ -783,13 +789,16 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
             self.skipTest("cannot determine reference hipcc's LLVM version")
         detected_flavor = _flavor_for_llvm(int(match[1]))
         rocke_dl = _datalayout_for_flavor(detected_flavor)
+        uses_llvm23_profile = _emission_profile(detected_flavor) is _emission_profile(
+            LLVM_FLAVOR_LLVM23
+        )
         # The address spaces LLVM gained in 5bf967cb132b. Bound unconditionally:
         # the per-arch loop below reads it on the llvm23 path too.
         expected_p10_p15 = (
             "-p10:32:32-p11:32:32-p12:32:32-p13:32:32-p14:32:32-p15:32:32"
         )
 
-        if detected_flavor == LLVM_FLAVOR_LLVM23:
+        if uses_llvm23_profile:
             # rocKE's llvm23 constant is the llvm22 one with TWO independent
             # additions -- the ELF symbol-mangling spec `m:e` after the leading
             # endianness field, and address spaces p10-p15 (upstream
@@ -832,7 +841,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
                     self.skipTest(f"hipcc cannot target {arch} on this toolchain: {e}")
                 toolchain_dl = self._extract_datalayout_from_ir(ir)
                 if (
-                    detected_flavor == LLVM_FLAVOR_LLVM23
+                    uses_llvm23_profile
                     and toolchain_dl != rocke_dl
                     and toolchain_dl.replace("-i64:64", expected_p10_p15 + "-i64:64", 1)
                     == rocke_dl
