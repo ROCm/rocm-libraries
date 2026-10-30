@@ -216,7 +216,9 @@ def tensileLibraryFile(outputPath: Union[str, Path], arch: str, library_format: 
 
 class KernelCodeGenResult(NamedTuple):
     err: int
-    src: Union[str, bytes]
+    # src and header are None in the results writeSolutionsAndKernelsTCL's
+    # workers return: each worker writes its own source to disk.
+    src: Optional[Union[str, bytes]]
     header: Optional[str]
     name: str
     targetObjFilename: str
