@@ -21,6 +21,18 @@ Kernel records
     ``record(direction, "kernel", kernel)``; the plugin's fold and ``reconcile.served_engines``
     ignore entries of kind ``kernel`` as they ignore ``engines``.
 
+Candidates
+    ``--exhaustive`` pins kernels inside an engine. ``HIPDNN_FWD_CANDIDATE`` / ``HIPDNN_BWD_CANDIDATE``
+    (``CANDIDATE_ENV``) hold a candidate index ``k`` and take effect only beside the same
+    direction's engine pin; ``hipdnn_sdpa`` builds the ``k``-th entry of ``hipdnn_bench enumerate``
+    for that engine and declines ``candidate_not_honored`` when the kernel the backend logged is
+    not the candidate's. ``HIPDNN_SDPA_EXHAUSTIVE`` makes an unpinned call count the candidates of
+    every engine it ranked, and ``HIPDNN_SDPA_PREFIX`` names the hipDNN prefix whose ``bin/``
+    holds ``hipdnn_bench``. ``fwd_candidate`` / ``bwd_candidate`` of a ``results.csv`` row hold the
+    pinned index in a candidate pass and, in pass 1, a JSON object ``{engine: count | message}``
+    (``count`` an integer, ``message`` why the engine cannot enumerate). Candidate passes live
+    under ``<out>/cand/``.
+
 Repro directories
     ``<out>/repro/<case>/`` with ``case = repro_case(nodeid, pass_slug)``, holding
     ``meta.json``, ``fwd.graph.json``, ``bwd.graph.json``, ``tensors.pt`` and, for a failure,
@@ -38,6 +50,16 @@ import hashlib
 
 # Value of HIPDNN_FWD_ENGINE that runs the reference forward without asking hipDNN.
 REFERENCE_PIN = "reference"
+
+# Candidate pins (see "Candidates" above).
+CANDIDATE_ENV = {"fwd": "HIPDNN_FWD_CANDIDATE", "bwd": "HIPDNN_BWD_CANDIDATE"}
+EXHAUSTIVE_ENV = "HIPDNN_SDPA_EXHAUSTIVE"
+PREFIX_ENV = "HIPDNN_SDPA_PREFIX"
+BENCH_RELATIVE = "bin/hipdnn_bench"
+BENCH_PLUGIN_DIR = "lib/hipdnn_plugins/engines"
+CANDIDATES_DIR = "cand"
+NOT_ENUMERABLE = "not-enumerable"  # outcome of a case whose engine lists no candidates
+CANDIDATE_NOT_HONORED = "candidate_not_honored"  # decline reason prefix
 
 INFLIGHT_DIR_ENV = "HIPDNN_SDPA_INFLIGHT_DIR"
 PASS_SLUG_ENV = "HIPDNN_SDPA_PASS_SLUG"
@@ -84,6 +106,8 @@ DECLINES_PER_ENGINE = 20
 # Columns appended to reconcile.FIELDS and reconcile.ENGINES_FIELDS; older CSVs read them empty.
 RESULTS_EXTRA_FIELDS = ("fwd_kernel", "bwd_kernel", "fail_side", "stage", "repro")
 ENGINES_EXTRA_FIELDS = ("pin_fwd", "pin_bwd", "kernel", "stage")
+# Columns appended after RESULTS_EXTRA_FIELDS (results.csv) and ENGINES_EXTRA_FIELDS (engines.csv).
+CANDIDATE_FIELDS = ("fwd_candidate", "bwd_candidate")
 FAIL_SIDES = ("fwd", "bwd", "")
 
 
