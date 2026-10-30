@@ -74,6 +74,29 @@ namespace rocwmma
         {
         };
 
+        // Concatenation of operation lists, e.g. a target that has another target's
+        // operations plus its own.
+        template <typename... OpLists>
+        struct wmma_op_list_concat
+        {
+            using type = wmma_op_list<>;
+        };
+
+        template <typename... Ops>
+        struct wmma_op_list_concat<wmma_op_list<Ops...>>
+        {
+            using type = wmma_op_list<Ops...>;
+        };
+
+        template <typename... LhsOps, typename... RhsOps, typename... OpLists>
+        struct wmma_op_list_concat<wmma_op_list<LhsOps...>, wmma_op_list<RhsOps...>, OpLists...>
+            : wmma_op_list_concat<wmma_op_list<LhsOps..., RhsOps...>, OpLists...>
+        {
+        };
+
+        template <typename... OpLists>
+        using wmma_op_list_concat_t = typename wmma_op_list_concat<OpLists...>::type;
+
         // Lets a static_assert in a template depend on a template parameter.
         template <typename T>
         constexpr bool wmma_dependent_false_v = false;
