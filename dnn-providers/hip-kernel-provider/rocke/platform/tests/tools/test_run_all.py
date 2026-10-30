@@ -251,6 +251,70 @@ def test_native_pytest_env_discards_ambient_arch_domain_completion(
     )
 
 
+def test_pytest_targets_accept_paths_and_node_ids_but_reject_escapes(
+    runner, tmp_path
+):
+    module = runner.TESTS / "tools" / "test_run_all.py"
+    selected = runner.pytest_targets(
+        [
+            "tools/test_run_all.py",
+            "tests/tools/test_run_all.py::test_ctest_discovery_failure_is_an_error",
+            str(module),
+        ]
+    )
+    assert selected == [
+        str(module),
+        f"{module}::test_ctest_discovery_failure_is_an_error",
+    ]
+    assert runner.pytest_targets([]) == [str(runner.TESTS)]
+
+    with pytest.raises(ValueError, match="escapes"):
+        runner.pytest_targets(["../run_all.py"])
+    with pytest.raises(ValueError, match="does not exist"):
+        runner.pytest_targets(["tools/not_a_test.py"])
+
+
+def test_focused_pytest_selection_changes_both_passes_and_labels_the_result(
+    runner, monkeypatch, tmp_path, capsys
+):
+    selected = "tools/test_run_all.py::test_ctest_discovery_failure_is_an_error"
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        # Make the extension probe succeed so both pytest passes execute.
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "configure_pytest_build", lambda *_args: None)
+    monkeypatch.setattr(runner, "native_pytest_env", lambda *_args: {})
+    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-gate",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--pytest-target",
+            selected,
+            "--build-root",
+            str(tmp_path),
+        ],
+    )
+
+    assert runner.main() == 0
+    expected = str(runner.TESTS / selected.split("::", 1)[0]) + "::" + selected.split(
+        "::", 1
+    )[1]
+    pytest_calls = [command for command in calls if command[1:3] == ["-m", "pytest"]]
+    assert len(pytest_calls) == 2
+    assert all(expected in command for command in pytest_calls)
+    assert "RESULT: FOCUSED GREEN" in capsys.readouterr().out
+
+
 def test_source_script_alone_does_not_claim_the_native_suite_is_ready(
     runner, monkeypatch, tmp_path, capsys
 ):
