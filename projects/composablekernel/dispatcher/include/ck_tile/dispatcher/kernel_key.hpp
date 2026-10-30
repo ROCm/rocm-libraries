@@ -51,10 +51,10 @@ enum class Pipeline : std::uint8_t
     PreShuffleV2, // Weight preshuffle pipeline v2 (optimized)
     Wavelet,      // Wavelet pipeline (specialized math + load waves)
     CompAsync,    // Async global->LDS compute pipeline (always double-buffered)
-    CompTDMV1,     // Tensor Data Mover compute pipeline v1 (gfx1250 only)
-    CompTDMV2,     // Tensor Data Mover compute pipeline v2 (gfx1250 only, 4 waves)
-    CompTDMPC,     // Tensor Data Mover producer/consumer pipeline (gfx1250 only)
-    PreShuffleTDM  // Weight preshuffle pipeline, Tensor Data Mover (gfx1250 only)
+    CompTDMV1,    // Tensor Data Mover compute pipeline v1 (gfx1250 only)
+    CompTDMV2,    // Tensor Data Mover compute pipeline v2 (gfx1250 only, 4 waves)
+    CompTDMPC,    // Tensor Data Mover producer/consumer pipeline (gfx1250 only)
+    PreShuffleTDM // Weight preshuffle pipeline, Tensor Data Mover (gfx1250 only)
 };
 
 /// Epilogue strategies for output processing
