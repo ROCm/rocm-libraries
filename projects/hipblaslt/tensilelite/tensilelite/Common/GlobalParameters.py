@@ -139,6 +139,9 @@ globalParameters["CpuThreads"] = (
 # ``tox.ini``), so gfx1250 kernels built during those tests are verified automatically.
 globalParameters["CheckASMCodeSize"] = False
 globalParameters["NumWarmups"] = 0
+# W4A16: the group size the client benchmarks a runtime-group problem type
+# (several ScaleBlockSizesA) with; 0 = the smallest. Must be one of the list.
+globalParameters["BenchmarkScaleBlockSizeA"] = 0
 globalParameters["TimingInstrumentation"] = False  # Enable detailed timing instrumentation output
 globalParameters["ParallelGpuExecution"] = 1  # Number of GPUs for parallel client execution (0=auto-detect, 1=serial, N=use N GPUs)
 

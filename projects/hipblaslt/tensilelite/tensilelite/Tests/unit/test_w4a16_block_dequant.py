@@ -492,7 +492,9 @@ def test_client_config_carries_block_scale(toolchain, tmp_path):
     import inspect
 
     src = inspect.getsource(CW)
-    assert "param('scale-a-block', problemType.scaleBlockSizesA[0])" in src
+    # The benchmarked group: BenchmarkScaleBlockSizeA, else the smallest of the list.
+    assert 'globalParameters["BenchmarkScaleBlockSizeA"] or problemType.scaleBlockSizesA[0]' in src
+    assert "param('scale-a-block', benchGroup)" in src
     assert "param('scale-a-type', problemType.bType.toName())" in src
 
 
