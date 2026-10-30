@@ -99,7 +99,7 @@ for this reason. This constraint shapes the choice of runtime compiler.
 | Variant space | The variants hipDNN may request for one operation input and target: an enumerated catalog, or a bounded generator that produces them. |
 | Best-of-autotune | The fastest variant found by autotuning over the variant space. |
 | Per-shape ratio | Run time of the JIT kernel divided by run time of the baseline, for one problem shape. The geomean summarizes the ratios over a set of shapes; the worst shape is the one with the largest ratio. |
-| Parity margin, worst-shape cap | The largest geomean, and the largest single per-shape ratio, above 1 that still count as parity. Set per operation family (D10). |
+| Parity margin, worst-shape cap | The largest geomean, and the largest single per-shape ratio, above 1 that still count as parity. |
 | Tuning budget | The bound on how many candidates, or how much compile time, autotuning spends on JIT variants for one graph. |
 | Heuristic | A model that ranks candidate engines or kernels without running them (RFC 0019). |
 
@@ -181,8 +181,8 @@ against the unfused execution.
 
 | ID | Level | Requirement | Checked by |
 |---|---|---|---|
-| E1 | Must (POC) | A specialized kernel performs within the parity margin of the best existing engine for the same problem. | The geomean of per-shape ratios is within the margin, and the worst shape within the cap (D10). |
-| E2 | Must (POC) | A fused kernel reaches parity with the unfused execution of the same graph, and is within the parity margin of any existing fused engine for the pattern. | Against the unfused execution, the geomean of per-shape ratios does not exceed parity and the worst shape is within the cap (D10). Against an existing fused engine, the E1 check. |
+| E1 | Must (POC) | A specialized kernel performs within the parity margin of the best existing engine for the same problem. | The geomean of per-shape ratios is within the margin, and the worst shape within the cap. |
+| E2 | Must (POC) | A fused kernel reaches parity with the unfused execution of the same graph, and is within the parity margin of any existing fused engine for the pattern. | Against the unfused execution, the geomean of per-shape ratios does not exceed parity and the worst shape is within the cap. Against an existing fused engine, the E1 check. |
 | E3 | Must (POC) | E1 and E2 are judged on the best-of-autotune kernel over the variant space (V1), and every variant compiled to find it meets the per-kernel bound of L1. | The harness records the compile time of every variant compiled during the search, and the compile and run time of the selected code object. |
 
 Performance is measured on real model shapes that the baseline serves, in fp16 and bf16, on
@@ -388,15 +388,13 @@ hipDNN fusion generator and a solution for generic targets.
 | D7 | Kernel performance is judged on the best-of-autotune kernel: against hipDNN's best existing engine (E1), and for fused kernels against the unfused execution and any existing fused engine (E2). | Decided |
 | D8 | The compiler works within a bounded variant space whose variants can be ranked before compiling (V1, V2). | Decided |
 | D9 | The selection mechanism, its latency budget, and the tuning budget. Tracked with RFC 0019 (§4.3, §9.4, Open Question 8) and RFC 0013. | Open |
-| D10 | The parity margin and the worst-shape cap for each operation family. hipDNN project leads set them before the performance study, and they are recorded in this RFC. | Open |
 
 ## Next steps
 
 1. Extend the compile-time measurements to the full reference set: fp16 and bf16, one RDNA
    architecture, and the fusion kernels.
-2. Define the variant space (V1) for each reference-set input, record the parity margins and
-   worst-shape caps (D10) in this RFC, then measure kernel performance as described in
-   [Kernel performance](#kernel-performance).
+2. Define the variant space (V1) for each reference-set input, then measure kernel performance
+   as described in [Kernel performance](#kernel-performance).
 3. Build the fusion proof of concept on the option the measurements support. It must meet
    F1–F3.
 4. Build that option inside TheRock and check P1–P6 and the compiler-side checks of T1–T4 on
