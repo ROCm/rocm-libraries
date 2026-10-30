@@ -33,8 +33,9 @@ DEFAULT_OPS = (
 )
 # Opt-in: conv is the only op that needs the MIOpen provider, whose handle
 # initialization is costly and paid once per process, so MIOpen is loaded only
-# when conv is enabled.
-ALL_OPS = DEFAULT_OPS + ("conv", "linear", "linear_all")
+# when conv is enabled. custom_op (torch.ops.hipdnn_vllm.custom_op_*, e.g. the
+# megakernel decode engine) declines DISABLED unless listed.
+ALL_OPS = DEFAULT_OPS + ("conv", "linear", "linear_all", "custom_op")
 
 # `auto` and `absolute` load the bundled providers absolutely (the bundled
 # backend never sees torch's stock providers); `additive` adds them to the

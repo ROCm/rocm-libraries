@@ -83,6 +83,8 @@ TORCH_LIBRARY(hipdnn_vllm, m)
     m.def("layer_norm(Tensor x, Tensor? weight, Tensor? bias, float eps, bool strict) -> Tensor");
     m.def("conv_fwd(Tensor x, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, "
           "int groups, bool strict) -> Tensor");
+    m.def("custom_op_prepare(str op_id, str payload, Tensor[] inputs) -> str");
+    m.def("custom_op_exec(str op_id, str payload, Tensor[] inputs, bool strict) -> ()");
 }
 
 TORCH_LIBRARY_IMPL(hipdnn_vllm, CUDA, m)
@@ -95,6 +97,8 @@ TORCH_LIBRARY_IMPL(hipdnn_vllm, CUDA, m)
     m.impl("encoder_attention", &hipdnn_vllm::encoderAttention);
     m.impl("layer_norm", &hipdnn_vllm::layerNorm);
     m.impl("conv_fwd", &hipdnn_vllm::convFwd);
+    m.impl("custom_op_prepare", &hipdnn_vllm::customOpPrepare);
+    m.impl("custom_op_exec", &hipdnn_vllm::customOpExec);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
@@ -158,6 +162,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
         [](int64_t n) { planCache().setCapacity(static_cast<size_t>(n < 1 ? 1 : n)); },
         py::arg("n"));
     m.def("plan_cache_clear", [] { planCache().clear(); });
+    m.def("custom_op_set_enabled", &customOpSetEnabled, py::arg("enabled"));
 
     m.def("stats_snapshot", &statsSnapshot);
     m.def("stats_reset", [] { Stats::instance().reset(); });

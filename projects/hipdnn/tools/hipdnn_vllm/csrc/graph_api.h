@@ -67,6 +67,13 @@ std::optional<Decline> runGraphOp(const char* op,
                                   const at::Tensor& anchor,
                                   const GraphBuilder& builder,
                                   std::initializer_list<const void*> slotPtrs);
+// Same, for a slot count known only at run time.
+std::optional<Decline> runGraphOp(const char* op,
+                                  const PlanKey& key,
+                                  const at::Tensor& anchor,
+                                  const GraphBuilder& builder,
+                                  const void* const* slotPtrs,
+                                  size_t numSlots);
 
 // Build-or-fetch only: whether hipDNN accepts this signature, without counting a
 // call. Used by supports_args-style probes. Under capture it never builds (a

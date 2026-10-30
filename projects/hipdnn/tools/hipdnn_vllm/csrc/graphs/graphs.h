@@ -181,4 +181,19 @@ std::string convFwdProbe(const at::Tensor& x,
                          at::IntArrayRef dilation,
                          int64_t groups);
 
+// torch.ops.hipdnn_vllm.custom_op_prepare / custom_op_exec: one CUSTOM_OP node
+// (op id, opaque payload, input tensors, no outputs). Prepare builds the plan
+// and returns the decline reason ("" when an engine took it), never raising on
+// a decline; exec runs it, raising on a decline only when `strict`.
+std::string customOpPrepare(const std::string& opId,
+                            const std::string& payload,
+                            const std::vector<at::Tensor>& inputs);
+void customOpExec(const std::string& opId,
+                  const std::string& payload,
+                  const std::vector<at::Tensor>& inputs,
+                  bool strict);
+// Off until the bootstrap sees `custom_op` in HIPDNN_VLLM_OPS; while off both
+// calls decline DISABLED without building a graph.
+void customOpSetEnabled(bool enabled);
+
 } // namespace hipdnn_vllm

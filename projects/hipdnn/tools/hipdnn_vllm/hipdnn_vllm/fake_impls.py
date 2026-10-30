@@ -87,3 +87,8 @@ def _conv_fwd_fake(
         k = weight.shape[i + 2]
         out.append((x.shape[i + 2] + 2 * p - d * (k - 1) - 1) // s + 1)
     return torch.empty(out, dtype=x.dtype, device=x.device)
+
+
+@torch.library.register_fake("hipdnn_vllm::custom_op_exec")
+def _custom_op_exec_fake(op_id: str, payload: str, inputs: list[torch.Tensor], strict: bool) -> None:
+    return None

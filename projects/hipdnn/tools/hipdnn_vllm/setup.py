@@ -133,6 +133,7 @@ def main() -> None:
             "csrc/graphs/encoder_attention.cpp",
             "csrc/graphs/layer_norm.cpp",
             "csrc/graphs/conv.cpp",
+            "csrc/graphs/custom_op.cpp",
         ],
         include_dirs=include_dirs,
         define_macros=[

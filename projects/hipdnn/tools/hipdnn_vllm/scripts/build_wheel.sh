@@ -50,7 +50,8 @@ fams = pins["families"]
 if sys.argv[2] not in fams:
     sys.exit(f"unknown family {sys.argv[2]!r}; known: {', '.join(fams)}")
 print(";".join(fams[sys.argv[2]]))
-print("\n".join(pins["provider"]["cmake_flags"]))
+prov = pins["provider"]
+print("\n".join(prov["cmake_flags"] + prov.get("family_cmake_flags", {}).get(sys.argv[2], [])))
 EOF
 )
 test "${#PINNED[@]}" -ge 2 || { echo "could not read $TOOL_DIR/BUILD_PINS.toml for $FAMILY" >&2; exit 1; }
@@ -215,7 +216,8 @@ info = {
     "plugin_commit": plugin_commit,
     "plugin_tree_dirty_files": int(plugin_dirty),
     "backend_version": backend_version,
-    "provider_cmake_flags": pins["provider"]["cmake_flags"],
+    "provider_cmake_flags": pins["provider"]["cmake_flags"]
+    + pins["provider"].get("family_cmake_flags", {}).get(family, []),
     "pins": pins["pins"],
     "built_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
 }

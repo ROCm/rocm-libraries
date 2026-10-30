@@ -30,6 +30,12 @@ cmake_flags = [
     "-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON",
 ]
 
+# Extra provider flags for one family only, appended after cmake_flags.
+# The megakernel engine ships gfx942 code objects only, so it is built into the
+# gfx94X wheel alone. Its ops are reached only through the opt-in `custom_op`.
+[provider.family_cmake_flags]
+gfx94X = ["-DENABLE_MEGAKERNEL_ENGINE=ON"]
+
 # TheRock family name -> gfx targets compiled into that family's wheel.
 [families]
 gfx94X = ["gfx942"]
