@@ -31,14 +31,18 @@ version = 1
 # worst |GPU - CPU| was 7.8e-3 for bf16 and 2.0e-3 for fp16, about one bf16 and two
 # fp16 ulps of the largest gradient (|dV| up to 2.1). Each entry leaves about 3x
 # that at the worst element, and an all-zero output fails every case.
-# Filters key on the SdpaBackward bundle case ids' dtype token; the leading "_"
-# in "_fp16_" keeps it from also matching "bfp16_".
+# Filters key on the dtype token of the full GTest name `<suite>.<case>`, and the token sits in
+# a different place by source: the quick bundles carry it in the case id
+# (`quick_SdpaBackward_Default.1_1_256_128_fp16_...`), the gauntlet fuzz driver in the suite,
+# because its case ids are `s<seed>` (`gauntlet_SdpaBackward_Default_fp16_cases.s7`). The
+# globs therefore do not anchor on the `.`. The leading "_" in "_fp16_" keeps it from also
+# matching "bfp16_".
 [[tolerance_overrides]]
-filters = ["*_SdpaBackward_*.*_fp16_*"]
+filters = ["*_SdpaBackward_*_fp16_*"]
 atol = 2.5e-3
 rtol = 2.5e-3
 
 [[tolerance_overrides]]
-filters = ["*_SdpaBackward_*.*_bfp16_*"]
+filters = ["*_SdpaBackward_*_bfp16_*"]
 atol = 1e-2
 rtol = 1e-2
