@@ -773,7 +773,7 @@ def parse_param(text: str, function: str, where: str) -> Param:
     ):
         raise AbiError(
             f"{where}: {function}: parameter {declared!r} has no name; name every"
-            " parameter in miopen.h"
+            " parameter"
         )
     return Param(
         type=squash(type_text),

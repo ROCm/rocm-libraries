@@ -116,7 +116,7 @@ repos:
 
   # MIOpen's generated wrapper sources are formatted with this release
   # (projects/miopen/script/generate_wrapper_sources.py). A bump must regenerate
-  # them in the same PR and update the pins in the miopen-wrapper-sources hooks
+  # them in the same PR and update the pin in the miopen-wrapper-sources hooks
   # below. The generator takes another release while its output matches, so a
   # bump that changes no wrapping needs no new MIOpen CI image. MIOpen's hooks
   # skip PRs that leave projects/miopen alone, so nothing else catches a missed
@@ -268,10 +268,10 @@ repos:
       # this catches a hand edit or a stale file. The generator prefers the
       # release pinned for the clang-format hook above, and takes another only
       # while its output matches the committed files (releases can wrap lines
-      # differently). That release is written three times in this file: the
-      # clang-format hook's rev and the additional_dependencies of the two hooks
-      # below. Bump all three together; a mismatch shows only when the output
-      # differs.
+      # differently). That release is written twice in this file: the
+      # clang-format hook's rev and the additional_dependencies list that the two
+      # hooks below share. Bump both together; a mismatch shows only when the
+      # output differs.
       - id: miopen-wrapper-sources
         name: MIOpen wrapper sources match miopen.h
         entry: >-
@@ -281,7 +281,7 @@ repos:
           present or print('SKIP - projects/miopen is not checked out');
           sys.exit(subprocess.call([sys.executable, script, '--check']) if present else 0)"
         language: python
-        additional_dependencies: ["clang-format==18.1.4"]
+        additional_dependencies: &miopen_clang_format ["clang-format==18.1.4"]
         files: ^(\.pre-commit-config\.yaml|projects/miopen/(\.clang-format|include/miopen/miopen\.h|include_wrapper/miopen/hipdnn_forwarding\.h|script/(generate_wrapper_sources|check_public_abi)\.py|src/private/(wrapper|wrapper_passthrough)\.cpp|src/private/(miopen_impl|miopen_private_rename)\.h)|dnn-providers/miopen-provider/(\.clang-format|MiopenApiPrivateRename\.hpp))$
         pass_filenames: false
 
@@ -292,7 +292,7 @@ repos:
         name: Regenerate MIOpen wrapper sources from miopen.h
         entry: python projects/miopen/script/generate_wrapper_sources.py
         language: python
-        additional_dependencies: ["clang-format==18.1.4"]
+        additional_dependencies: *miopen_clang_format
         stages: [manual]
         pass_filenames: false
 

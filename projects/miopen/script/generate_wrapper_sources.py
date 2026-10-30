@@ -65,13 +65,10 @@ from pathlib import Path
 from check_public_abi import (
     AbiError,
     EntryPoint,
-    Param,
-    parse_prototype,
     parse_public_header,
     parse_wrapper,
     read_tracked_source,
     render_signature,
-    squash,
     strip_comments,
     stub_signature,
 )
