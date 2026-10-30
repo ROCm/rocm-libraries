@@ -38,17 +38,24 @@
 #endif // no system header
 
 #if THRUST_HAS_HIP_COMPILER()
-#  include <thrust/distance.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/parallel_for.h>
+#  include <thrust/system/hip/detail/transform.h>
 #  include <thrust/system/hip/detail/util.h>
+#  include <thrust/type_traits/is_trivially_relocatable.h>
 
-#  include <iterator>
+#  include _THRUST_STD_INCLUDE(iterator)
+#  include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
 {
+// forward declare and not include thrust/system/hip/detail/copy.h to avoid a circular dependency
+template <class System, class InputIterator, class Size, class OutputIterator>
+OutputIterator THRUST_HOST_DEVICE
+copy_n(execution_policy<System>& system, InputIterator first, Size n, OutputIterator result);
+
 namespace __uninitialized_copy
 {
 template <class InputIt, class OutputIt>
@@ -76,7 +83,18 @@ template <class Derived, class InputIt, class Size, class OutputIt>
 OutputIt THRUST_HOST_DEVICE
 uninitialized_copy_n(execution_policy<Derived>& policy, InputIt first, Size count, OutputIt result)
 {
-  hip_rocprim::parallel_for(policy, __uninitialized_copy::functor<InputIt, OutputIt>{first, result}, count);
+  // if the output type is trivially constructible from the input, it has no side effect, and we can skip placement new
+  // and calling a constructor. So we can delegate to copy_n.
+  using ctor_arg_t = thrust::detail::raw_reference_t<_THRUST_STD::iter_reference_t<InputIt>>;
+  using output_t   = thrust::detail::it_value_t<OutputIt>;
+  if constexpr (_THRUST_STD::is_trivially_constructible_v<output_t, ctor_arg_t>)
+  {
+    hip_rocprim::copy_n(policy, first, count, result);
+  }
+  else
+  {
+    hip_rocprim::parallel_for(policy, __uninitialized_copy::functor<InputIt, OutputIt>{first, result}, count);
+  }
 
   return result + count;
 }
