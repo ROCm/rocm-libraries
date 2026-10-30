@@ -1,0 +1,5 @@
+outs:
+- md5: f03bf78f1fabd8901db543533d2df8b8
+  size: 260430
+  hash: md5
+  path: gfx950_conv_fwd_aot_bf16.instances.json
