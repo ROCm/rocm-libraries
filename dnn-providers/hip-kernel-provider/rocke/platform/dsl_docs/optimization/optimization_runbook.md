@@ -2017,6 +2017,8 @@ Per-arch facts belong in the arch references — see §21.
 | `blocks_per_cu` | `StreamKGemmSpec` | 1 | Persistent dispatch density |
 | `reduction` | `StreamKGemmSpec` | `Atomic` | `StreamKReductionStrategy.{Atomic, Reduction, AtomicWithFixup}` |
 | split-K | GEMM (not yet a spec field; available primitives) | — | `b.global_atomic_add_f32` for atomic split-K; `helpers/streamk.py` for the Stream-K macro tile decode |
+| `split_k` | `ImplicitGemmConvSpec` (fwd, gfx1250 WMMA) | 1 | `> 1` builds the one split-K forward binary (`splitk` tag); the degree is the `ks_count` kernarg. Slices store fp32 partial tiles into a `[ks_count][M][K]` workspace and `conv_fwd_split_k_reduce` (`degree` unrolls its fold) sums them deterministically. For small-M layers whose plain grid cannot fill the device; costs the workspace traffic and a second launch. `-1` resolves the degree (`select_split_k_fwd`; 1 where splitting does not pay); `--split-k 0 --split-k-degrees` sweeps others. Not with `async_dma`, `unroll_k`, `chiplet_swizzle`, `group_merge`, pointwise or 3-D |
+| `split_k_cluster` | `ImplicitGemmConvSpec` (fwd, gfx1250, llvm23) | 0 | `S` in 2..15 folds the S slices of a tile through a `(1, 1, S)` workgroup cluster and a cluster barrier instead of a Stage 2 launch (`skc<S>` tag, one binary per S). Needs `split_k > 1`, `mem`, `tile_n % 4 == 0`; launch with the same cluster shape |
 | Grouped GEMM persistent | `instances/grouped_gemm.py` | per-group launches | v2 persistent variant is a documented follow-up |
 | `streamk` | `WgradConvSpec` | `"off"` | `"dp_sk"` launches one CTA per data-parallel tile plus `streamk_ctas` stream-K CTAs; `"persistent"` launches only the pool and round-robins the data-parallel tiles. Both balance MAC iterations across CTAs instead of tiles, so a shape with few tiles and a long `wg_K` still fills the device. Mutually exclusive with `split_k` |
 | `streamk_reduction` | `WgradConvSpec` | `"linear"` | How CTAs sharing a tile combine partials. `"linear"`: the owner waits on each later contributor in turn and stores once. `"tree"`: pairwise fan-in, `ceil(log2)` rounds. Both are deterministic and need no dW pre-zeroing. `"atomic"`: f32 atomics into dW (fp32 only). `"workspace"`: f32 scratch atomics plus the Stage 2 reduce kernel |
@@ -2108,7 +2110,7 @@ them by hand only through an explicit tuning spec.
 |---|---|---|---|
 | `chiplet_swizzle` | GEMM / conv | False | Remap WGIDs so contiguous stripes land on the same XCD (L2 reuse). Rejected by `is_valid_dgrad_spec`: the dgrad builder does not implement it (dgrad has `xcd_tile_order`) |
 | `chiplet_wgm` | GEMM / conv | 8 | Super-tile WGM grouping |
-| `chiplet_num_xcds` | GEMM / conv | 8 | MI300X / MI325X / MI350X have 8 XCDs |
+| `chiplet_num_xcds` | GEMM / conv / dense attention | 8 | MI300X / MI325X / MI350X have 8 XCDs; dense attention's XCD-aware block orders read it |
 | `chiplet_chunk_size` | GEMM / conv | 64 | XCD round-robin chunk size |
 | `helpers/grid.py::chiplet_transform_chunked` | helper | — | Pure helper if you author your own kernel |
 | Constants `NUM_XCDS_MI300X / MI325X / MI350X` | `helpers/grid.py` | — | All 8 today |
@@ -2388,6 +2390,24 @@ sweep CSVs.
   display kernel symbol is the same across two compile-time-constant
   variants, the cache can serve the wrong HSACO. Salt the kernel
   symbol with a shape hash before compile (see §12.2).
+- **16-bit split-K degree outgrows the atomic's rounding.** A packed
+  bf16/fp16 atomic (`global_atomic_add_pk_*`) rounds the running sum in
+  dW on every add, so with same-sign partials the relative error grows
+  roughly linearly in the split degree, up to about
+  `degree * 2**-(fraction bits + 1)` (`2**-8` per add for bf16, which
+  has 7 fraction bits). A degree picked for CTA fill alone on a
+  small-channel, deep-reduction wgrad can pass on signed random
+  inputs and still miss the tolerance on all-positive ones. Cap the
+  16-bit degree from that bound, not from throughput, and test the cap
+  with all-positive inputs (`WgradSplitPolicy.max_degree_by_dtype` on
+  gfx1250 caps bf16 at 12).
+- **Validator rule scoped to the wrong epilogue.** A store-width rule
+  written for the MFMA cshuffle epilogue also gated the WMMA split-K
+  epilogue, which never reads that width. Hand-built specs left the width
+  unset and passed, while every AOT cache job pins it, so the cache built
+  no split-K binary at all. Scope each validator rule to the code path
+  that consumes it, and test reachability through the AOT grid, not a
+  hand-built spec.
 
 ### 14.2 Performance Failures
 
@@ -2523,6 +2543,19 @@ An optimization is done when:
 - If the HIP-debug backend disagrees with LLVM-direct on a kernel,
   one of the two is missing an op lowering — file the issue,
   don't ignore it.
+- If a higher 16-bit split-K degree is faster, check it against the
+  atomic-rounding bound before raising the cap (§14.1): the speed comes
+  from accepting more rounding error. Only a wider dW dtype raises the
+  bound itself.
+- Sweep every 16-bit split-K degree per dtype, and compare it with the best
+  `split_k=1` kernel, before you set a cap. Do not assume two packed atomics
+  with the same instruction pattern behave alike. In a gfx1250 wgrad sweep
+  (`benchmark_implicit_gemm_conv.py --direction wgrad --verify`, once per
+  `--split-k` degree), bf16 timings kept improving up to the accuracy cap,
+  while no fp16 degree beat the unsplit kernel on a mid-size dW. That is a
+  timing observation only; the cause was not classified with hardware
+  counters. When no cap avoids such a loss, turn the automatic split off for
+  that dtype and leave the explicit degree as an opt-in.
 
 ### 16.2 Anti-patterns (what to avoid)
 

@@ -659,8 +659,8 @@ def _verify_launch(
     if observations.get("compile_target") != compile_target:
         fail("effective_spec compile-target binding mismatch")
     producer = observations.get("producer", {})
-    for role in ("builder", "spec"):
-        identity = producer.get(role, {})
+    for part in ("builder", "spec"):
+        identity = producer.get(part, {})
         if set(identity) != {"module", "qualname", "sha256"} or not all(
             isinstance(v, str) and v for v in identity.values()
         ):

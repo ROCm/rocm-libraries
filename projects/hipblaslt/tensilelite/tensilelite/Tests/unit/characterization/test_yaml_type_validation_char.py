@@ -14,7 +14,10 @@ from tensilelite.Common.ValidParameters import (
     validParameters,
     validateInternalSupportParams,
 )
-from tensilelite.SolutionStructs.Problem import validateProblemTypeParameterTypes
+from tensilelite.SolutionStructs.Problem import (
+    normalizeMXBlockTile,
+    validateProblemTypeParameterTypes,
+)
 from tensilelite.SolutionStructs.Solution import validateParameterTypes
 
 pytestmark = pytest.mark.unit
@@ -65,11 +68,24 @@ def _is_problem_type_dict(node):
     }
 
 
+def _normalized_problem_type(node, yaml_path):
+    # ProblemType.__init__ splits the [free, k] MXBlock list form before the type gate.
+    state = dict(node)
+    for ab in ("A", "B"):
+        if "MXBlock" + ab in state:
+            normalizeMXBlockTile(state, ab, str(yaml_path))
+    return state
+
+
 def _validate_problem_type_dict(node, yaml_path, key_path, errors):
     if not _is_problem_type_dict(node):
         return
     try:
-        validateProblemTypeParameterTypes(node, srcFile=str(yaml_path), keyPathPrefix=key_path)
+        validateProblemTypeParameterTypes(
+            _normalized_problem_type(node, yaml_path),
+            srcFile=str(yaml_path),
+            keyPathPrefix=key_path,
+        )
     except ConfigTypeError as exc:
         errors.append(str(exc))
 
@@ -80,7 +96,7 @@ def _validate_nested_problem_type(node, yaml_path, key_path, errors):
         return
     try:
         validateProblemTypeParameterTypes(
-            problem_type,
+            _normalized_problem_type(problem_type, yaml_path),
             srcFile=str(yaml_path),
             keyPathPrefix=f"{key_path}.ProblemType",
         )
