@@ -23,19 +23,12 @@ the production route (``run_unified_attention_torch`` with no tuning spec).
 from __future__ import annotations
 
 from collections.abc import Mapping
-from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import TorchBinding
 
-from dispatch.attention import (
-    ATTENTION_ROUTE_REGISTRY,
-    UNIFIED_HEAD_SIZES,
-    AttentionMaskType,
-    AttentionRequest,
-)
+from dispatch.attention import ATTENTION_ROUTE_REGISTRY, UNIFIED_HEAD_SIZES
 from dispatch.attention.common import (
     Alignment,
     AttentionBand,
@@ -43,10 +36,21 @@ from dispatch.attention.common import (
     _problem,
 )
 
+from .bind_shared import (
+    TORCH_DTYPES,
+    Operand,
+    asked_band,
+    band_text,
+    host_ints,
+    keeps_asked_keys,
+    to_attention_request,
+    value_rejects,
+)
+
 if TYPE_CHECKING:
     from rocke.dispatch.core import KernelCandidate
 
-    from .common import SdpaRequest, SdpaTensor
+    from .common import SdpaRequest
 
 __all__ = [
     "SDPA_UNIFIED_FEATURES",
@@ -63,8 +67,6 @@ _UNIFIED_ALGORITHMS = frozenset(
 )
 # Only the split-KV (3D) path writes LSE.
 _LSE_ALGORITHMS = frozenset({"unified_3d", "d256_decode"})
-# ``SdpaRequest`` dispatch selectors; only ``"auto"`` is served.
-_DISPATCH_PINS = ("algorithm", "spec_id", "tuning_id")
 
 # The binding's ``supports_features``: what the unified launch path carries.
 # Layouts other than packed BSHD are carried by copying Q/O to and from a
@@ -114,63 +116,6 @@ _DECLINED = {
 }
 
 
-def _to_attention_request(req: SdpaRequest) -> AttentionRequest:
-    """The ``AttentionRequest`` the unified candidates admit for ``req``.
-
-    ``SdpaRequest.left_bound`` / ``right_bound`` / ``diagonal`` are in the
-    same cuDNN/hipDNN band vocabulary as ``AttentionRequest.right_bound`` /
-    ``diagonal_alignment``. The one adjustment is ``sliding_window``: it sees
-    W keys, while hipDNN ``left_bound = W`` keeps W + 1, so lower with
-    ``left_bound + 1``.
-    """
-    features = req.features()
-    if "causal_tl" in features:
-        mask_type = AttentionMaskType.TOP_LEFT_CAUSAL
-    elif "causal_br" in features:
-        mask_type = AttentionMaskType.BOTTOM_RIGHT_CAUSAL
-    elif "window" in features:
-        mask_type = AttentionMaskType.SLIDING_WINDOW
-    else:
-        mask_type = AttentionMaskType.NO_MASK
-
-    is_window = mask_type == AttentionMaskType.SLIDING_WINDOW
-    return AttentionRequest(
-        batch=req.batch,
-        nhead_q=req.h_q,
-        nhead_k=req.h_k,
-        seqlen_q=req.s_q,
-        seqlen_k=req.s_kv,
-        hdim_q=req.d_qk,
-        hdim_v=req.d_v,
-        arch=req.arch,
-        dtype=req.dtype,
-        mask_type=mask_type,
-        sliding_window=(req.left_bound + 1) if is_window and req.left_bound >= 0 else 0,
-        right_bound=req.right_bound if is_window else -1,
-        diagonal_alignment=(
-            (1 if req.diagonal == "bottom_right" else 0) if is_window else None
-        ),
-        use_sinks=req.sink_token is not None,
-        use_alibi=req.alibi,
-        emit_lse=req.stats is not None,
-    )
-
-
-def _kept_keys(s_q: int, s_kv: int, top_left: bool, left: int, right: int):
-    """Per query row, the first and last key a hipDNN band keeps (``-1``
-    unbounded, ``left = W`` keeps W + 1 keys). A row that keeps no key is
-    ``(0, -1)``, so two bands keep the same keys iff both arrays are equal.
-
-    A band keeps one contiguous run of keys per row, so this is O(s_q) where
-    the dense s_q x s_kv mask would be quadratic.
-    """
-    d = np.arange(s_q, dtype=np.int64) + (0 if top_left else s_kv - s_q)
-    first = np.maximum(d - left, 0) if left >= 0 else np.zeros_like(d)
-    last = np.minimum(d + right, s_kv - 1) if right >= 0 else np.full_like(d, s_kv - 1)
-    empty = first > last
-    return np.where(empty, 0, first), np.where(empty, -1, last)
-
-
 def _computed_band(req: SdpaRequest) -> AttentionBand:
     """The band the unified kernels compute for ``req``.
 
@@ -180,7 +125,7 @@ def _computed_band(req: SdpaRequest) -> AttentionBand:
     request names. ``normalize_band`` raises for a band the band arches cannot
     serve.
     """
-    attn = _to_attention_request(req)
+    attn = to_attention_request(req)
     top_left, right_bound = _attention_band(attn)
     return AttentionBand(
         left_bound=attn.sliding_window if attn.sliding_window > 0 else None,
@@ -190,67 +135,17 @@ def _computed_band(req: SdpaRequest) -> AttentionBand:
 
 
 def _band_reject(req: SdpaRequest) -> tuple[bool, str] | None:
-    """Decline when the unified kernels would compute a different band.
-
-    Bands that differ in form but keep the same keys are equal: full vs
-    bottom-right causal at ``s_q == 1`` always, and any other pair (e.g.
-    top-left vs bottom-right at ``s_q == s_kv``) only for fixed lengths, since
-    with per-sequence lengths the diagonal moves per batch.
-    """
+    """Decline when the unified kernels would compute a different band."""
     try:
         band = _computed_band(req)
     except ValueError as exc:
         return False, f"band: {exc}"
-
-    asked = AttentionBand(
-        left_bound=None if req.left_bound < 0 else req.left_bound + 1,
-        right_bound=None if req.right_bound < 0 else req.right_bound,
-        alignment=(
-            Alignment.TOP_LEFT if req.diagonal == "top_left" else Alignment.BOTTOM_RIGHT
-        ),
-    )
-    if (band.left_bound, band.right_bound) == (
-        asked.left_bound,
-        asked.right_bound,
-    ) and (band.alignment == asked.alignment or asked.is_full):
+    if keeps_asked_keys(req, band):
         return None
-    # One query row per sequence: bottom-right causal keeps every key of each
-    # sequence, whatever its length, so it is full attention.
-    if (
-        asked.is_full
-        and req.s_q == 1
-        and band.left_bound is None
-        and band.right_bound == 0
-        and band.alignment == Alignment.BOTTOM_RIGHT
-    ):
-        return None
-
-    features = req.features()
-    if "padded" not in features and "ragged" not in features:
-
-        def kept(b: AttentionBand):
-            return _kept_keys(
-                req.s_q,
-                req.s_kv,
-                b.alignment == Alignment.TOP_LEFT,
-                -1 if b.left_bound is None else b.left_bound - 1,
-                -1 if b.right_bound is None else b.right_bound,
-            )
-
-        (first_a, last_a), (first_b, last_b) = kept(band), kept(asked)
-        if np.array_equal(first_a, first_b) and np.array_equal(last_a, last_b):
-            return None
-
     return False, (
-        f"band: {req.arch} unified kernels compute {_band_text(band)} for "
-        f"requested {_band_text(asked)}"
+        f"band: {req.arch} unified kernels compute {band_text(band)} for "
+        f"requested {band_text(asked_band(req))}"
     )
-
-
-def _band_text(b: AttentionBand) -> str:
-    if b.is_full:
-        return "full attention"
-    return f"left={b.left_bound} right={b.right_bound} " f"{b.alignment.name.lower()}"
 
 
 def _sdpa_unified_rejects(req: SdpaRequest) -> tuple[bool, str] | None:
@@ -274,29 +169,9 @@ def _sdpa_unified_rejects(req: SdpaRequest) -> tuple[bool, str] | None:
         if feature in features:
             return False, reason
 
-    if req.mma_core_mode is not None and req.mma_core_mode != req.dtype:
-        return False, (
-            f"mma_core_mode: the unified kernels run MMA in {req.dtype}, "
-            f"not {req.mma_core_mode}"
-        )
-    if req.implementation == "composite":
-        return False, "implementation_hint: composite was requested"
-    # The unified launch routes on its own (no tuning spec), so a pin would be
-    # admitted and then ignored.
-    for pin in _DISPATCH_PINS:
-        if getattr(req, pin) != "auto":
-            return False, (
-                f"dispatch_pin: {pin}={getattr(req, pin)!r} is pinned; the "
-                f"unified launch takes only the automatic route"
-            )
-    if req.tuning_knobs:
-        return False, (
-            "dispatch_pin: tuning_knobs are set; the unified launch takes only "
-            "the automatic route"
-        )
-    if req.padding_mask and req.seq_len_q is None and req.seq_len_kv is None:
-        return False, "padded: padding_mask is set but no seq_len tensor is given"
-
+    rejected = value_rejects(req, "unified")
+    if rejected is not None:
+        return rejected
     return _band_reject(req)
 
 
@@ -304,7 +179,7 @@ def _unified_supported(req: SdpaRequest) -> tuple[KernelCandidate, ...]:
     """Unified route candidates that admit the translated request."""
     supported = tuple(
         c
-        for c in ATTENTION_ROUTE_REGISTRY.supported(_to_attention_request(req))
+        for c in ATTENTION_ROUTE_REGISTRY.supported(to_attention_request(req))
         if c.algorithm in _UNIFIED_ALGORITHMS
     )
     if req.stats is not None:
@@ -345,96 +220,12 @@ def sdpa_unified_candidates(req: SdpaRequest) -> tuple[str, ...]:
 
 # --- binding -------------------------------------------------------------------
 
-_TORCH_DTYPES = {"fp16": "float16", "bf16": "bfloat16"}
 
-
-def _host_ints(tensor) -> list[int]:
-    return [int(x) for x in tensor.detach().reshape(-1).cpu().tolist()]
-
-
-class _Operand:
-    """Per-batch ``(rows, heads, d)`` views of one operand.
-
-    A dense operand is its logical BHSD tensor, with the request's strides. A
-    ragged operand is its packed buffer plus ``B + 1`` offsets: batch ``b``
-    starts at element ``offsets[b] * ragged_offset_multiplier``, as hipDNN
-    reads it, and the batch stride is unused.
-    """
-
-    def __init__(self, name: str, desc: SdpaTensor, tensor, offsets=None) -> None:
-        batch, heads, extent, width = desc.dims
-        self.name, self.desc, self.tensor = name, desc, tensor
-        self.heads, self.extent, self.width = heads, extent, width
-        self.starts: list[int] | None = None
-        self.lengths: list[int] | None = None
-        if not desc.ragged:
-            if tuple(tensor.shape) != tuple(desc.dims):
-                raise ValueError(
-                    f"{name}: tensor shape {tuple(tensor.shape)} is not the "
-                    f"request's dims {desc.dims}"
-                )
-            for n, got, want in zip(desc.dims, tensor.stride(), desc.strides):
-                if n > 1 and got != want:
-                    raise ValueError(
-                        f"{name}: tensor strides {tuple(tensor.stride())} are not "
-                        f"the request's strides {desc.strides}"
-                    )
-            return
-        if offsets is None:
-            raise ValueError(f"ragged operand {name!r} needs its ragged offsets")
-        if not tensor.is_contiguous():
-            raise ValueError(f"{name}: a ragged buffer must be contiguous")
-        _, s_h, s_s, s_d = desc.strides
-        mult = int(desc.ragged_offset_multiplier)
-        self.flat = tensor.reshape(-1)
-        self.starts = [o * mult for o in _host_ints(offsets)]
-        self.row_strides = (s_s, s_h, s_d)
-        if len(self.starts) != batch + 1 or any(x % s_s for x in self.starts):
-            raise ValueError(
-                f"{name}: ragged offsets must be B + 1 = {batch + 1} whole sequence "
-                f"rows, got element starts {self.starts}"
-            )
-        self.lengths = [(e - s) // s_s for s, e in pairwise(self.starts)]
-        if any(n < 0 or n > extent for n in self.lengths):
-            raise ValueError(
-                f"{name}: ragged lengths {self.lengths} must be in [0, {extent}]"
-            )
-
-    def rows(self, b: int, n: int):
-        """Batch ``b``'s first ``n`` rows as ``(n, heads, d)``."""
-        if self.starts is None:
-            return self.tensor[b, :, :n, :].transpose(0, 1)
-        import torch
-
-        return torch.as_strided(
-            self.flat,
-            (n, self.heads, self.width),
-            self.row_strides,
-            self.flat.storage_offset() + self.starts[b],
-        )
-
-    def packed_view(self, cu: list[int]):
-        """A ``(total, heads, d)`` view when the rows already sit packed in
-        token order (packed BSHD at full length, or contiguous ragged), else
-        ``None``."""
-        total, h, d = cu[-1], self.heads, self.width
-        if self.starts is None:
-            if any(b - a != self.extent for a, b in pairwise(cu)):
-                return None
-            bshd = self.tensor.transpose(1, 2)
-            return bshd.reshape(total, h, d) if bshd.is_contiguous() else None
-        if self.row_strides != (h * d, d, 1) or any(
-            s != c * h * d for s, c in zip(self.starts, cu)
-        ):
-            return None
-        return self.flat[: total * h * d].view(total, h, d)
-
-
-def _lengths(req_tensor, tensors, key: str, operand: _Operand, batch: int, extent: int):
+def _lengths(req_tensor, tensors, key: str, operand: Operand, batch: int, extent: int):
     """Per-batch lengths: ``seq_len_*`` when set, else ragged, else the extent."""
     if req_tensor is None:
         return list(operand.lengths) if operand.lengths else [extent] * batch
-    values = _host_ints(tensors[key])
+    values = host_ints(tensors[key])
     if len(values) != batch or any(n < 0 or n > extent for n in values):
         raise ValueError(f"{key}: need {batch} lengths in [0, {extent}], got {values}")
     if operand.lengths and any(n > r for n, r in zip(values, operand.lengths)):
@@ -456,7 +247,7 @@ class _LaunchPlan:
 
         import torch
 
-        dtype = getattr(torch, _TORCH_DTYPES[req.dtype])
+        dtype = getattr(torch, TORCH_DTYPES[req.dtype])
         device = tensors["q"].device
         for name in ("q", "k", "v", "o"):
             t = tensors[name]
@@ -471,14 +262,14 @@ class _LaunchPlan:
                 return tensors[key]
             return tensors.get(f"ragged_offset_{fallback}") if fallback else None
 
-        self.q = _Operand("q", req.q, tensors["q"], offsets("q"))
-        self.k = _Operand("k", req.k, tensors["k"], offsets("k"))
-        self.v = _Operand("v", req.v, tensors["v"], offsets("v", "k"))
-        self.o = _Operand("o", req.o, tensors["o"], offsets("o", "q"))
+        self.q = Operand("q", req.q, tensors["q"], offsets("q"))
+        self.k = Operand("k", req.k, tensors["k"], offsets("k"))
+        self.v = Operand("v", req.v, tensors["v"], offsets("v", "k"))
+        self.o = Operand("o", req.o, tensors["o"], offsets("o", "q"))
         self.stats = (
             None
             if req.stats is None
-            else _Operand("stats", req.stats, tensors["stats"], offsets("stats", "q"))
+            else Operand("stats", req.stats, tensors["stats"], offsets("stats", "q"))
         )
         if self.k.lengths and self.v.lengths and self.k.lengths != self.v.lengths:
             raise ValueError(
@@ -497,7 +288,7 @@ class _LaunchPlan:
             cu.append(cu[-1] + n)
         self.cu = cu
 
-        attn = _to_attention_request(req)
+        attn = to_attention_request(req)
         self.block = int(attn.kv_block_size)
         self.pages = max(1, -(-req.s_kv // self.block))
         self.problem = dataclasses.replace(_problem(attn), total_q=cu[-1])

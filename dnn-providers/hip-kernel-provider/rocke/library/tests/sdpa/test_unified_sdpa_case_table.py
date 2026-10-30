@@ -13,9 +13,9 @@ from __future__ import annotations
 import pytest
 
 from dispatch.attention import ATTENTION_ROUTE_REGISTRY
+from dispatch.sdpa.bind_shared import to_attention_request
 from dispatch.sdpa.bind_unified import (
     SDPA_UNIFIED_FEATURES,
-    _to_attention_request,
     sdpa_unified_admits,
     sdpa_unified_candidates,
 )
@@ -38,7 +38,7 @@ def test_admitted_features_are_carried_and_declines_explained(case, arch):
         return
     assert req.features() <= SDPA_UNIFIED_FEATURES
     names = sdpa_unified_candidates(req)
-    attn = _to_attention_request(req)
+    attn = to_attention_request(req)
     assert any(_CANDIDATES[n].admits(attn)[0] for n in names)
 
 

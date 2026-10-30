@@ -16,10 +16,10 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
+from dispatch.sdpa.bind_shared import kept_keys
 from dispatch.sdpa.bind_unified import (
     _DECLINED,
     SDPA_UNIFIED_FEATURES,
-    _kept_keys,
     sdpa_unified_admits,
     sdpa_unified_candidates,
 )
@@ -321,7 +321,7 @@ def test_kept_keys_matches_the_dense_mask():
     for s_q, s_kv, top_left, left, right in itertools.product(
         (1, 3, 8), (1, 5, 8), (True, False), (-1, 0, 2, 9), (-1, 0, 1, 9)
     ):
-        first, last = _kept_keys(s_q, s_kv, top_left, left, right)
+        first, last = kept_keys(s_q, s_kv, top_left, left, right)
         keep = _dense_keep(s_q, s_kv, top_left, left, right)
         k = np.arange(s_kv)[None, :]
         assert np.array_equal(keep, (k >= first[:, None]) & (k <= last[:, None])), (
@@ -359,10 +359,10 @@ def test_d256_decode_reaches_the_dedicated_decode_candidate(arch):
 
 def _gfx942_d256_fast(req) -> bool:
     from dispatch.attention.common import _problem
-    from dispatch.sdpa.bind_unified import _to_attention_request
+    from dispatch.sdpa.bind_shared import to_attention_request
     from kernels.common.attention_unified import _d256_gfx942_fast
 
-    return _d256_gfx942_fast(_problem(_to_attention_request(req)), "gfx942")
+    return _d256_gfx942_fast(_problem(to_attention_request(req)), "gfx942")
 
 
 def test_gfx942_bf16_d256_prefill_lands_in_the_fast_cohort():

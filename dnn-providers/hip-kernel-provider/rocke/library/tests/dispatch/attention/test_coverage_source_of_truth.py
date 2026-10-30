@@ -164,10 +164,8 @@ class TestSdpaUnifiedBindingNeverOverclaimsCoverage(unittest.TestCase):
     """
 
     def test_every_sdpa_admit_is_an_attention_candidate_admit(self):
-        from dispatch.sdpa.bind_unified import (
-            _to_attention_request,
-            sdpa_unified_admits,
-        )
+        from dispatch.sdpa.bind_shared import to_attention_request
+        from dispatch.sdpa.bind_unified import sdpa_unified_admits
         from tests.sdpa.request_cases import CASES, make_request
 
         cases = dict(CASES)
@@ -190,7 +188,7 @@ class TestSdpaUnifiedBindingNeverOverclaimsCoverage(unittest.TestCase):
             if not ok:
                 continue
             with self.subTest(case=name):
-                attn_req = _to_attention_request(req)
+                attn_req = to_attention_request(req)
                 admitted = [
                     c.name
                     for c in ATTENTION_REGISTRY.candidates()
