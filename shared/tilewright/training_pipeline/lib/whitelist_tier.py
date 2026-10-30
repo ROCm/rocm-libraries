@@ -44,6 +44,13 @@ schedules) count as `train.whitelist_tier_contexts` says (`CONTEXT_MODES`):
 
 A cell whose GEMMs share one context gets the pooled tier in every mode.
 
+The tier names keys of the pool it was chosen over. A model deployed with
+the drift fallback (`deploy.drift_fallback`, lib/drift_fallback.py) serves a cell
+degraded on a pool that lacks too many of the cell's trained tier keys: the
+cell then ranks its tier keys and the cascade over its other keys as one
+tier, from the model's own pool. Rebuilding the tier for the new pool
+(scripts/build_whitelist_tier.py) serves it from its tier again.
+
 The greedy serves a cell's mean, so a key that only a few of its GEMMs
 need, such as the winners of a context its GEMMs rarely run in, can drop
 out while the model's pick from the rest takes more than twice the
@@ -147,7 +154,15 @@ def strip(bundle: Mapping[str, Any]) -> Dict[str, Any]:
     out["models"] = {
         label: _without_keys(e) for label, e in (bundle.get("models") or {}).items()
     }
-    out["serving"] = dict(bundle.get("serving") or {}, whitelist_tier=False)
+    out["serving"] = _without_drift(bundle.get("serving"), whitelist_tier=False)
+    return out
+
+
+def _without_drift(serving: Optional[Mapping[str, Any]], **kw: Any) -> Dict[str, Any]:
+    """`serving` with `kw`, without the drift fallback, which counts the keys
+    of a whitelist tier."""
+    out = dict(serving or {}, **kw)
+    out.pop("drift_keep_ppm", None)
     return out
 
 
@@ -158,8 +173,8 @@ def scoring_bundle(bundle: Mapping[str, Any]) -> Dict[str, Any]:
     out["models"] = {
         label: _without_keys(e) for label, e in (out.get("models") or {}).items()
     }
-    out["serving"] = dict(
-        out.get("serving") or {}, cascade_keys=0, whitelist_tier=False
+    out["serving"] = _without_drift(
+        out.get("serving"), cascade_keys=0, whitelist_tier=False
     )
     return out
 

@@ -411,6 +411,9 @@ class ModelRanker(Ranker):
 
         self.ev = ev
         self.tw = tw or ev.tilewright_module()
+        # The drift fallback serves deployed models only: a planning model
+        # ranks the catalog's pool as the model it was trained as.
+        data = mlrec.without_drift_fallback(data)
         header = mlrec.read_header(data)
         version = int(header["version"])
         if version == 3:

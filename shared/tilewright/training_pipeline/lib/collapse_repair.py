@@ -296,6 +296,7 @@ class AuditView:
             pools=ev.pools_for(gemms, self.prep.library),
             tw=self.tw,
             pick_measurement=self.spec.pick_measurement,
+            allow_drift=True,
         )
         return {
             k: Pick(

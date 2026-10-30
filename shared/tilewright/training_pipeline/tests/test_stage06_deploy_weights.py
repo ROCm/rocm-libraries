@@ -958,6 +958,190 @@ def test_deployed_serving_decides_the_bank_and_the_gate(capsys):
     assert s6.deployed_serving(v2, cfg, "b", quiet=True) == v2
 
 
+def test_deployed_serving_packs_the_drift_fallback():
+    models = {"A|B|C|D": {"view_key_hashes": [3, 5], "smart_k_signatures": []}}
+    v3 = {"catalog": "v3", "serving": {"cascade_keys": 8}, "trained_view_keys": [3, 5],
+          "models": models}  # fmt: skip
+    cfg = {"arch": "gfx950", "deploy": {"drift_fallback": {"keep": 0.9}}}
+    out = s6.deployed_serving(v3, cfg, "the bundle", quiet=True)
+    assert out["serving"]["drift_keep_ppm"] == 900000
+    assert v3["serving"] == {"cascade_keys": 8}
+    plain = s6.deployed_serving(v3, {"arch": "gfx950"}, "the bundle", quiet=True)
+    assert "drift_keep_ppm" not in plain["serving"]
+    # A bundle that carries one (a deployed file read back) deploys as the config says.
+    carried = dict(v3, serving={"cascade_keys": 8, "drift_keep_ppm": 1})
+    assert (
+        "drift_keep_ppm"
+        not in s6.deployed_serving(carried, {"arch": "gfx950"}, "b", quiet=True)[
+            "serving"
+        ]
+    )
+    for bundle, why in (
+        (dict(v3, serving={"whitelist_tier": False}), "no whitelist tier"),
+        (dict(v3, serving={"cascade_keys": 0}), "no cascade"),
+        (dict(v3, serving={"launch_keys": True}), "launch keys"),
+        (dict(v3, models={"A|B|C|D": {"smart_k_signatures": [[1] * 8]}}), "signatures"),
+        (dict(v3, models={"A|B|C|D": {"view_key_hashes": []}}), "no cell lists"),
+        ({"serving": {}}, "not an MLREC_v3 bundle"),
+    ):
+        with pytest.raises(s6.DeployError, match=why):
+            s6.deployed_serving(bundle, cfg, "b", quiet=True)
+    for keep in (0, 1.5, 0.1234567):
+        with pytest.raises(s6.DeployError, match="drift_fallback"):
+            s6.deployed_serving(v3, dict(cfg, deploy={"drift_fallback": {"keep": keep}}),
+                                "b", quiet=True)  # fmt: skip
+
+
+def write_drift_bundle(d, listed, trained):
+    """A gated v3 bundle with a whitelist tier and a cascade whose cells
+    (LABELS, in order) list the view keys `listed`."""
+    import torch
+
+    bundle = write_v3_bundle(
+        d, LABELS, serving={"cascade_keys": 4, "trained_key_gate": True},
+        trained_view_keys=sorted(trained), whitelist_tier={"k": 2, "n_keys": 2},
+    )  # fmt: skip
+    for label, keys in zip(LABELS, listed):
+        bundle["models"][label]["view_key_hashes"] = sorted(keys)
+    torch.save(bundle, d / "models.pt")
+    return bundle
+
+
+def library_keys(cfg_path, library_dir):
+    """The view-key hashes of the pool stage06 reads from `library_dir`."""
+    from lib import drift_fallback
+    from lib import evaluate as ev
+    from lib import features as fs
+
+    cfg = yaml.safe_load(cfg_path.read_text())
+    pool = ev.library_pool(library_dir, STEM, cfg)
+    return set(drift_fallback.pool_hashes(pool, fs.DEFAULT_ATTRIBUTE_SPEC))
+
+
+def test_a_library_that_would_serve_a_cell_degraded_is_refused(tmp_path, capsys):
+    """stage06 checks a model packed with the drift fallback against the
+    pool of the library it deploys into before it measures or stages
+    anything: one that pool would serve degraded is refused, naming the
+    cells; the deploy record keeps the trigger's counts, which count an
+    untrained listed key in neither number."""
+    pytest.importorskip("tilewright")
+    from test_kernel_identity import pool_library
+    from test_stage05_train import kernel_pool
+
+    pool = kernel_pool()
+    pool_library(tmp_path / "full", pool, stem=STEM)
+    pool_library(tmp_path / "lacking", pool[1:], stem=STEM)
+    cfg = gate_cfg(tmp_path / "cfg.yaml", drift_fallback={"keep": 1.0})
+    full = library_keys(cfg, tmp_path / "full")
+    held = sorted(library_keys(cfg, tmp_path / "lacking"))
+    (gone,) = sorted(full - set(held))
+    untrained = 999
+    assert untrained not in full
+    train = tmp_path / "round_1" / "stage05"
+    write_drift_bundle(train, [held[:2], held[2:4], [gone, held[4], untrained]], full)
+    capsys.readouterr()
+    out = tmp_path / "out"
+    assert deploy(train, cfg, out, library_dir=tmp_path / "full") == 0
+    rec = json.loads((out / "deploy_record.json").read_text())
+    data = Path(rec["staged_model"]).read_bytes()
+    assert mlrec.read_header(data)["serving"]["drift_keep_ppm"] == 1000000
+    assert rec["whitelist_tier"]["drift_fallback"] == {
+        "keep_ppm": 1000000,
+        "degraded": [],
+        "cells_with_whitelist": 3,
+        "missing": 0,
+    }
+    assert rec["drift_fallback"] == dict(
+        rec["whitelist_tier"]["drift_fallback"], library_dir=str(tmp_path / "full")
+    )
+    refused = tmp_path / "refused"
+    assert deploy(train, cfg, refused, library_dir=tmp_path / "lacking") == 1
+    err = capsys.readouterr().err
+    assert (
+        "lacks 1 trained whitelist tier keys of 1 cells (Tiny|Tiny|TinyK|Bnone)" in err
+    )
+    assert "scripts/build_whitelist_tier.py" in err
+    assert not (refused / "deploy_record.json").exists()
+    assert not (refused / "staged_for_deploy").exists()
+    assert deploy(train, cfg, tmp_path / "nowhere") == 1
+    assert "give --library-dir" in capsys.readouterr().err
+    # Served from a library that degrades a cell (one built after the
+    # preflight), the record names it and warns.
+    bundle, _ = s6.load_bundle(train)
+    served = s6.deployed_serving(
+        bundle, yaml.safe_load(cfg.read_text()), "the bundle", quiet=True
+    )
+    tier = s6.tier_record(
+        served, yaml.safe_load(cfg.read_text()), STEM, tmp_path / "lacking", 0, False
+    )
+    assert tier["drift_fallback"] == {
+        "keep_ppm": 1000000,
+        "degraded": ["Tiny|Tiny|TinyK|Bnone"],
+        "cells_with_whitelist": 3,
+        "missing": 1,
+    }
+    assert "which the drift fallback serves degraded" in capsys.readouterr().err
+
+
+def test_the_gate_of_a_model_with_the_drift_fallback_needs_the_library(
+    tmp_path, gate_dir
+):
+    tw = pytest.importorskip("tilewright")
+    from test_v3 import v3_bundle, write
+
+    bundle = v3_bundle(
+        labels=LABELS, serving={"cascade_keys": 4, "drift_keep_ppm": 1000000}
+    )
+    for entry in bundle["models"].values():
+        entry["view_key_hashes"] = [7, 11]
+    data = write(bundle)
+    cfg = yaml.safe_load(gate_cfg(tmp_path / "cfg.yaml").read_text())
+    with pytest.raises(s6.DeployError, match="give the gate a library directory"):
+        s6.measure_gate(
+            data,
+            sorted(bundle["models"]),
+            cfg=cfg,
+            arch="gfx950",
+            dtype="fp32",
+            stem=STEM,
+            gate=s6.Gate(csv_dirs=[gate_dir], bootstrap=0),
+            tw=tw,
+            quiet=True,
+        )
+
+
+def test_the_gate_measures_a_baseline_the_library_serves_degraded(tmp_path, gate_dir):
+    """The gate ranks over the library pool, so it measures the deployed
+    bytes as they rank there: a baseline whose tier names a key the library
+    lacks is measured degraded, and gate.json names its degraded cells."""
+    pytest.importorskip("tilewright")
+    from test_kernel_identity import pool_library
+    from test_stage05_train import kernel_pool
+
+    pool_library(tmp_path / "full", kernel_pool(), stem=STEM)
+    cfg = gate_cfg(tmp_path / "cfg.yaml", drift_fallback={"keep": 1.0})
+    keys = sorted(library_keys(cfg, tmp_path / "full"))
+    train = tmp_path / "round_2" / "stage05"
+    write_drift_bundle(train, [keys[:2], keys[2:4], keys[4:6]], keys)
+    base = tmp_path / "round_0" / "stage05"
+    write_drift_bundle(base, [keys[:2], keys[2:4], [keys[4], 12345]], keys + [12345])
+    gate = s6.Gate(
+        csv_dirs=[gate_dir],
+        library_dir=tmp_path / "full",
+        baseline_train_dir=base,
+        bootstrap=0,
+    )
+    out = tmp_path / "out"
+    assert deploy(train, cfg, out, gate=gate, library_dir=tmp_path / "full") == 0
+    measured = json.loads((out / "gate.json").read_text())
+    assert "drift_degraded" not in measured
+    assert measured["baseline"].get("error") is None
+    assert measured["baseline"]["n"] > 0
+    assert list(measured["baseline"]["drift_degraded"].values()) == [
+        ["Tiny|Tiny|TinyK|Bnone"]
+    ]
+
+
 def test_a_v3_bundle_ships_with_the_trained_key_gate(tmp_path):
     train = tmp_path / "v3" / "stage05"
     write_v3_bundle(train, LABELS, trained_view_keys=[11, 7])

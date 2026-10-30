@@ -685,3 +685,29 @@ def test_planned_lists_take_the_family_rule_members_past_max_list(monkeypatch):
     assert capped[0].n_family_over_limit == 1
     assert capped[0].n_truncated == before[FAMILY_SHAPE].n_truncated
     assert capped[0].to_json()["n_family_over_limit"] == 1
+
+
+def test_planning_models_rank_without_the_drift_fallback():
+    """A planning model ranks the catalog as the model it was trained as: a
+    deployed file with the drift fallback plans byte for byte alike."""
+    tw = pytest.importorskip("tilewright")
+    from lib import drift_fallback, mlrec
+    from lib.hardware import DeviceHardware
+    from test_v3 import LARGE, v3_bundle, write
+
+    cat, _ = make()
+    kernels = [
+        dict(k, attributes=k.get("attributes") or {}) for k in cat.kernels.values()
+    ]
+    hashes = sorted(set(drift_fallback.pool_hashes(kernels, ())))
+    bundle = v3_bundle(labels=[LARGE], serving={"cascade_keys": 4})
+    # The cell lists one key the catalog lacks, so its pool degrades it.
+    bundle["models"][LARGE]["view_key_hashes"] = hashes[:3] + [12345]
+    data = write(bundle)
+    flagged = mlrec.with_drift_fallback(data, 1000000)
+    hw = DeviceHardware(n_cu=256, lds_bytes=LDS, l2_bytes=4 << 20)
+    plain = pl.ModelRanker(data, cat, PTYPE, hw, tw=tw)
+    served = pl.ModelRanker(flagged, cat, PTYPE, hw, tw=tw)
+    assert served.cs.degraded_cells() == []
+    for shape in ((2048, 2048, 2048, 1), (64, 4096, 512, 1), (8, 8, 8, 1)):
+        assert served.rank(shape) == plain.rank(shape)

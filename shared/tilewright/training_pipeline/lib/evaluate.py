@@ -1015,6 +1015,9 @@ class Evaluation:
     # Per pool, the kernels whose view key the model's trained-key list
     # leaves out (empty without such a list).
     n_untrained_configs: Dict[str, int] = field(default_factory=dict)
+    # Per pool, the cells (labels) a model served with the drift fallback
+    # ranks degraded there (lib/drift_fallback.py; empty without such cells).
+    degraded_cells: Dict[str, List[str]] = field(default_factory=dict)
 
     def summary(
         self,
@@ -1072,13 +1075,20 @@ def evaluate_model(
     tw: Any = None,
     pick_measurement: str = DEFAULT_PICK_MEASUREMENT,
     off_list_sel_eff: Union[None, float, OffListCharge] = None,
+    allow_drift: bool = False,
 ) -> Evaluation:
     """Deployed picks of `gemms` (stage05 GEMM dicts with `candidates` and
     `winner_us`, optionally `listed`) under the model file `data`. A GEMM's
     measurement of a solution is its timed rows of that solution index,
     else its skip rows, merged by the median (`measurements`; the loader
     merged them by the run's rule already); `off_list_sel_eff` as in
-    `pick_cost`, or per GEMM context (`OffListCharge`)."""
+    `pick_cost`, or per GEMM context (`OffListCharge`). A model served with
+    the drift fallback (lib/drift_fallback.py) is refused (ValueError, naming
+    the cells) on a pool that serves a cell degraded, such as one built from
+    a GEMM's measured candidates rather than the library's pool, whose
+    rankings would not be the deployed ones; an evaluation over a library
+    pool passes `allow_drift` to measure the degraded rankings, and
+    `Evaluation.degraded_cells` names the cells."""
     if pick_measurement not in EVALUATION_PICK_MEASUREMENTS:
         raise ValueError(
             f"pick_measurement {pick_measurement!r} is not one of "
@@ -1094,6 +1104,23 @@ def evaluate_model(
     label_set = set(labels)
     pools = build_pools(gemms) if pools is None else pools
     poolset = PoolSet(tw, model, pools, hardware)
+    degraded: Dict[str, List[str]] = {}
+    if "drift_keep_ppm" in header["serving"]:
+        for key in poolset.pools:
+            cs = poolset.candidate_set(key)
+            cells = [] if cs is None else list(cs.degraded_cells())
+            if not cells:
+                continue
+            names = [str(tw.cell_label(model, int(c))) for c in cells]
+            if not allow_drift:
+                raise ValueError(
+                    f"the model is served with the drift fallback, and the pool "
+                    f"{'|'.join(key)} serves {len(names)} cells degraded "
+                    f"({', '.join(names[:4])}{', ...' if len(names) > 4 else ''}): "
+                    f"evaluate it over the library pool it is served from "
+                    f"(library_pool), or pass allow_drift=True"
+                )
+            degraded["|".join(key)] = names
     positions = {
         key: {int(k["sol_idx_global"]): i for i, k in enumerate(pool)}
         for key, pool in poolset.pools.items()
@@ -1178,6 +1205,7 @@ def evaluate_model(
         n_pool_configs={"|".join(k): len(v) for k, v in poolset.pools.items()},
         n_routing_mismatch=n_mismatch,
         pick_measurement=pick_measurement,
+        degraded_cells=degraded,
         n_untrained_configs={
             "|".join(k): m.count(False) for k, m in trained.items() if m is not None
         },

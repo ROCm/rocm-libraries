@@ -1588,6 +1588,9 @@ def _summaries(
 def _run_model(data: bytes, prep: _Prepared, spec: Spec, hardware: Any, tw: Any):
     from . import evaluate as ev
 
+    # The audit's pool is the library's (`evaluation_pool`): a model served
+    # with the drift fallback is measured as it ranks there, degraded cells
+    # included (the record's `drift_degraded`).
     out = ev.evaluate_model(
         data,
         prep.gemms,
@@ -1595,6 +1598,7 @@ def _run_model(data: bytes, prep: _Prepared, spec: Spec, hardware: Any, tw: Any)
         pools=ev.pools_for(prep.gemms, prep.library),
         tw=tw,
         pick_measurement=spec.pick_measurement,
+        allow_drift=True,
     )
     ev.require_consistent_routing(out, "audit")
     return out
@@ -1703,6 +1707,8 @@ def evaluate(
         "headline": headline_of(head) if head else None,
         "groups": groups,
     }
+    if "drift_keep_ppm" in (scorer.header.get("serving") or {}):
+        rec["drift_degraded"] = out.degraded_cells
     if spec.protocol == "both":
         rec["v2"], rec["sustained"] = _evaluate_repeated(spec, prep, out, scorer)
     return rec

@@ -301,6 +301,7 @@ def model_view(data: bytes, hardware: DeviceHardware, tw: Any) -> ModelView:
             ),
             ("the trained-key gate", serving.get("trained_key_gate")),
             ("the alignment veto", serving.get("alignment_veto")),
+            ("the drift fallback", serving.get("drift_keep_ppm") is not None),
         )
         if on
     ]

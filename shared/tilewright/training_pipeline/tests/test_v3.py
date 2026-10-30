@@ -1641,3 +1641,189 @@ def test_trained_key_gate_through_the_binding_and_evaluate():
     assert (
         ungated.results[0].pick_untrained is None and ungated.n_untrained_configs == {}
     )
+
+
+DRIFT_KEYS = [11, 22, 33]
+
+
+def _drift_bundle(**serving):
+    """A v3 bundle whose cells list view keys, gated, floored and with
+    provenance: every optional header field beside the drift fallback."""
+    bundle = v3_bundle(
+        labels=[LARGE, "Mid|Mid|MidK|Bnone"], contexts=FLOORED,
+        serving={"trained_key_gate": True, "cascade_keys": 8, **serving},
+        trained_view_keys=[22, 11, 33, 44],
+    )  # fmt: skip
+    for entry in bundle["models"].values():
+        entry["view_key_hashes"] = list(DRIFT_KEYS)
+    return bundle
+
+
+def test_drift_fallback_round_trip_and_rewrite():
+    data = write(_drift_bundle(drift_keep_ppm=900000), provenance=PROVENANCE)
+    parsed = mlrec.read_model(data)
+    assert parsed["serving"]["drift_keep_ppm"] == 900000
+    assert mlrec.read_header(data)["serving"]["drift_keep_ppm"] == 900000
+    assert write(mlrec.bundle_from_model(parsed), provenance=PROVENANCE) == data
+    h = mlrec._v3_header(data, len(data))
+    assert (
+        struct.unpack_from("<I", data, h["serving_offset"])[0] == 0x80 | 0x100 | 0x400
+    )
+    # The field follows the trained keys and the CU floor and precedes the
+    # provenance.
+    tail = mlrec._provenance_bytes(mlrec.check_provenance(PROVENANCE))
+    end = h["header_end"]
+    assert data[end - len(tail) - 4 - 4 - 32 : end - len(tail)] == struct.pack(
+        "<QQQQII", 11, 22, 33, 44, 64, 900000
+    )
+    # Without it the file is byte for byte what a writer without it wrote, and
+    # the fallback can be added, changed or removed without retraining.
+    old = write(_drift_bundle(), provenance=PROVENANCE)
+    assert "drift_keep_ppm" not in mlrec.read_model(old)["serving"]
+    assert len(old) == len(data) - 4
+    # The parser places the field where a rewrite writes it: after the field
+    # of every flag before it.
+    at = mlrec._v3_header(old, len(old))["drift_offset"]
+    assert at == h["drift_offset"] == end - len(tail) - 4
+    assert data[at : at + 4] == struct.pack("<I", 900000)
+    assert mlrec.with_drift_fallback(old, 900000) == data
+    assert mlrec.with_drift_fallback(data, None) == old
+    assert mlrec.without_drift_fallback(data) == old
+    assert mlrec.without_drift_fallback(old) == old
+    assert mlrec.with_drift_fallback(mlrec.with_drift_fallback(data, 1), 900000) == data
+    assert (
+        mlrec.read_model(data)["payload_crc32"]
+        == mlrec.read_model(old)["payload_crc32"]
+    )
+    # The other header editors keep it.
+    assert (
+        mlrec.read_header(mlrec.with_cu_floor(data, None))["serving"]["drift_keep_ppm"]
+        == 900000
+    )
+    assert mlrec.with_cu_floor(mlrec.with_cu_floor(data, None), 64) == data
+    ungated = mlrec.with_trained_keys(data, None)
+    assert mlrec.read_header(ungated)["serving"]["drift_keep_ppm"] == 900000
+    assert mlrec.with_bank(data, False) == data
+    with pytest.raises(mlrec.FormatError, match="MLREC_v3"):
+        mlrec.with_drift_fallback(b"MLREC_v2" + data[8:], 1)
+
+
+def test_drift_fallback_follows_the_alignment_veto():
+    """With the alignment veto the drift field follows the veto's two fields:
+    each rewrite places its fields where the writer does, either serving
+    option is added or removed without the other, and the engine reads
+    both."""
+    veto = {"k_min": 512, "align_bits": 1024}
+    both = write(
+        _drift_bundle(alignment_veto=veto, drift_keep_ppm=900000),
+        provenance=PROVENANCE,
+    )
+    parsed = mlrec.read_model(both)
+    assert parsed["serving"]["alignment_veto"] == veto
+    assert parsed["serving"]["drift_keep_ppm"] == 900000
+    assert write(mlrec.bundle_from_model(parsed), provenance=PROVENANCE) == both
+    h = mlrec._v3_header(both, len(both))
+    at = h["serving_offset"]
+    assert struct.unpack_from("<I", both, at)[0] == 0x80 | 0x100 | 0x200 | 0x400
+    # The trained keys, the CU floor, the veto's K and line, keep_ppm, then the
+    # provenance.
+    tail = mlrec._provenance_bytes(mlrec.check_provenance(PROVENANCE))
+    end = h["header_end"]
+    assert both[end - len(tail) - 48 : end - len(tail)] == struct.pack(
+        "<QQQQIIII", 11, 22, 33, 44, 64, 512, 1024, 900000
+    )
+    assert h["drift_offset"] == end - len(tail) - 4
+    veto_only = write(_drift_bundle(alignment_veto=veto), provenance=PROVENANCE)
+    drift_only = write(_drift_bundle(drift_keep_ppm=900000), provenance=PROVENANCE)
+    assert mlrec.with_drift_fallback(veto_only, 900000) == both
+    assert mlrec.without_drift_fallback(both) == veto_only
+    assert mlrec.with_alignment_veto(drift_only, 512, 1024) == both
+    assert mlrec.without_alignment_veto(both) == drift_only
+    assert mlrec.with_cu_floor(mlrec.with_cu_floor(both, None), 64) == both
+    # Either flag cleared leaves its fields as bytes the header does not expect.
+    for flags in (0x80 | 0x100 | 0x400, 0x80 | 0x100 | 0x200):
+        cleared = bytearray(both)
+        struct.pack_into("<I", cleared, at, flags)
+        with pytest.raises(mlrec.FormatError):
+            mlrec.read_model(bytes(cleared))
+    tw = pytest.importorskip("tilewright")
+    info = tw.describe(tw.load_model_from_memory(both))
+    assert info.drift_keep_ppm == 900000
+    assert (info.alignment_veto.on, info.alignment_veto.k_min) == (True, 512)
+    assert info.alignment_veto.align_bits == 1024
+
+
+@pytest.mark.parametrize("bad", [0, -1, 1000001, 2**32, True, 0.5, "900000"])
+def test_drift_fallback_values_are_checked(bad):
+    with pytest.raises(ValueError, match="keep_ppm"):
+        write(_drift_bundle(drift_keep_ppm=bad))
+    with pytest.raises(ValueError, match="keep_ppm"):
+        mlrec.with_drift_fallback(write(_drift_bundle()), bad)
+
+
+def test_drift_fallback_is_refused_where_the_engine_refuses_it():
+    for serving, why in (
+        ({"whitelist_tier": False}, "without the whitelist tier"),
+        ({"launch_keys": True}, "with launch keys"),
+    ):
+        with pytest.raises(ValueError, match=why):
+            write(_drift_bundle(drift_keep_ppm=1000000, **serving))
+        with pytest.raises(ValueError, match=why):
+            mlrec.with_drift_fallback(write(_drift_bundle(**serving)), 1000000)
+    signed = _drift_bundle(drift_keep_ppm=1000000)
+    signed["models"][LARGE]["smart_k_signatures"] = [[256, 256, 64, 16, 16, 32, 0, 0]]
+    with pytest.raises(ValueError, match="signatures"):
+        write(signed)
+    signed["serving"].pop("drift_keep_ppm")
+    with pytest.raises(ValueError, match="signatures"):
+        mlrec.with_drift_fallback(write(signed), 1000000)
+    data = write(_drift_bundle(drift_keep_ppm=1000000))
+    with pytest.raises(ValueError, match="whitelist tier"):
+        mlrec._with_flags(data, lambda f: f | mlrec.V3_NO_WHITELIST_TIER)
+    with pytest.raises(ValueError, match="with_drift_fallback"):
+        mlrec._with_flags(data, lambda f: f & ~mlrec.V3_DRIFT_FALLBACK)
+    with pytest.raises(ValueError, match="with_drift_fallback"):
+        mlrec._with_flags(write(_drift_bundle()), lambda f: f | mlrec.V3_DRIFT_FALLBACK)
+
+
+def test_drift_fallback_defects_are_rejected_by_reader_and_engine():
+    data = write(_drift_bundle(drift_keep_ppm=1000000))
+    h = mlrec._v3_header(data, len(data))
+    end, at = h["header_end"], h["serving_offset"]
+    assert struct.unpack_from("<I", data, end - 4) == (1000000,)
+    zero = data[: end - 4] + struct.pack("<I", 0) + data[end:]
+    over = data[: end - 4] + struct.pack("<I", 1000001) + data[end:]
+    for bad in (zero, over):
+        with pytest.raises(mlrec.FormatError, match="outside 1 to 1000000"):
+            mlrec.read_model(bad)
+    unflagged = bytearray(data)
+    struct.pack_into("<I", unflagged, at, 0x80 | 0x100)
+    with pytest.raises(mlrec.FormatError):
+        mlrec.read_model(bytes(unflagged))
+    tierless = bytearray(data)
+    struct.pack_into("<I", tierless, at, 0x80 | 0x100 | 0x400 | 0x08)
+    with pytest.raises(mlrec.FormatError, match="whitelist tier"):
+        mlrec.read_model(bytes(tierless))
+    unknown = bytearray(data)
+    struct.pack_into("<I", unknown, at, 0x80 | 0x100 | 0x400 | 0x800)
+    with pytest.raises(mlrec.FormatError, match="unknown serving flags"):
+        mlrec.read_model(bytes(unknown))
+    tw = pytest.importorskip("tilewright")
+    for bad, why in (
+        (zero, "outside 1 to 1000000"),
+        (over, "outside 1 to 1000000"),
+        (bytes(tierless), "whitelist tier"),
+        (bytes(unknown), "unknown serving flags"),
+    ):
+        with pytest.raises(ValueError, match=why):
+            tw.load_model_from_memory(bad)
+    with pytest.raises(ValueError):
+        tw.load_model_from_memory(bytes(unflagged))
+    model = tw.load_model_from_memory(data)
+    assert tw.describe(model).drift_keep_ppm == 1000000
+    assert (
+        tw.describe(
+            tw.load_model_from_memory(mlrec.without_drift_fallback(data))
+        ).drift_keep_ppm
+        == 0
+    )

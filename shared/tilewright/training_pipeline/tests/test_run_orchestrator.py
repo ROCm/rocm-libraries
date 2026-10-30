@@ -2916,6 +2916,7 @@ def test_the_offset_rereads_are_pinned_only_when_they_change_something(tmp_path)
         "correctness.custom_kernels",
         "audit.held_out",
         "contexts.granule",
+        "deploy.drift_fallback.keep",
     } | {f"bench.rebench.{k}" for k in NEUTRAL_REREADS} | set(NEED_BUDGET) | set(
         ALIGNMENT_VETO_KEYS
     )
@@ -2923,6 +2924,7 @@ def test_the_offset_rereads_are_pinned_only_when_they_change_something(tmp_path)
     assert all(ro.PINNED_UNLESS_NEUTRAL[k] is None for k in ALIGNMENT_VETO_KEYS)
     assert ro.PINNED_UNLESS_NEUTRAL["audit.held_out"] == []
     assert ro.PINNED_UNLESS_NEUTRAL["correctness.custom_kernels"] is None
+    assert ro.PINNED_UNLESS_NEUTRAL["deploy.drift_fallback.keep"] is None
     assert all(REREAD_DEFAULTS[k] == v for k, v in NEUTRAL_REREADS.items())
     assert all(PREDATING_REREADS[k] == v for k, v in NEUTRAL_REREADS.items())
     cfg = yaml.safe_load(make_config(tmp_path).read_text())

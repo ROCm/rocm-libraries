@@ -92,6 +92,7 @@ def test_parse_diag_and_pick_lines(tmp_path):
         "[TILEWRIGHT_DIAG FILE] path=/x/m.bin arch=gfx950 qhash=abc qdim=55 idim=12 "
         "xdim=37 n_cells=3 n_splits=1 weights=int8\n"
         "[TILEWRIGHT_DIAG FAIL] /x/bad.bin: CRC mismatch\n"
+        "[TILEWRIGHT_DIAG DRIFT] cells=3/40 keep_ppm=1000000 missing=4\n"
         "[TILEWRIGHT_PICK] m=1 n=2 k=3 b=4 tA=T tB=N leaf=Tiny|Tiny|TinyK|Bany "
         "top1_sig=(mt_m=64,mt_n=64,mt_k=64,mi_m=16,mi_n=16,mi_k=128,cha=0,chb=4) "
         "top1_score=nan top1_index=17 n_configs=243\n"
@@ -102,6 +103,7 @@ def test_parse_diag_and_pick_lines(tmp_path):
     p = s7.parse_bench_log(log)
     assert p.diag_files[0]["path"] == "/x/m.bin" and p.diag_files[0]["n_cells"] == "3"
     assert p.diag_fails == ["/x/bad.bin: CRC mismatch"]
+    assert p.diag_drifts == [{"cells": "3/40", "keep_ppm": "1000000", "missing": "4"}]
     (pick,) = p.picks
     assert pick["key"] == (1, 2, 3, 4, "T", "N")
     assert pick["top1_sig"] == (64, 64, 64, 16, 16, 128, 0, 4)
@@ -185,6 +187,14 @@ def test_check_diag(tmp_path):
         s7.BenchLog(diag_files=[dict(line, path="/elsewhere/m.bin")]), model, rec
     )
     assert not ok and "/elsewhere/m.bin" in problems[0]
+    # The runtime's pool lacks whitelist tier keys of the loaded model: its
+    # drift fallback serves cells degraded, which fails the check.
+    drift = {"cells": "3/40", "keep_ppm": "1000000", "missing": "4"}
+    ok, problems = s7.check_diag(
+        s7.BenchLog(diag_files=[line], diag_drifts=[drift]), model, rec
+    )
+    assert not ok and len(problems) == 1
+    assert "serves 3/40 cells" in problems[0] and "4 trained whitelist" in problems[0]
 
 
 def _cpp(m, sig, index, cell="c", n=10):

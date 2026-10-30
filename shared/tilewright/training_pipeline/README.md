@@ -1648,7 +1648,9 @@ shape, and a record from before the guard reads as None (stage05's
 A problem none of whose tier keys is in the pool or feasible is ranked as
 by the model without the tier: through the cascade (`train.cascade_k`) over
 every feasible key. Keys outside the tier rank behind it, through the
-cascade, only for a caller that asks for more kernels than the tier holds.
+cascade, only for a caller that asks for more kernels than the tier holds,
+unless the model is deployed with `deploy.drift_fallback` and its pool
+degrades the cell (see *Deployment (stage06)*).
 
 `models.pt` holds the tier as the cells' `view_key_hashes` with
 `serving.whitelist_tier` and the record `whitelist_tier` (K, how it counted
@@ -1683,7 +1685,10 @@ When the kernel pool changes (another hipBLASLt build, another bank or
 blocklist), a model keeps serving: the engine skips the tier keys the pool
 lacks, a cell whose tier keys are all missing or infeasible is served
 through the cascade over the new pool, and a kernel the pool adds ranks
-only where the cascade serves. To build the tier again without training:
+only where the cascade serves. A model deployed with
+`deploy.drift_fallback` serves a cell whose pool lacks too many of its
+trained tier keys from its whole trained pool instead (see *Deployment
+(stage06)*). To build the tier again without training:
 
     python scripts/build_whitelist_tier.py --train-dir <run>/<round>/stage05 \
         --out-dir <dir> [--library-dir <dir> --library-stem <stem>] \
@@ -3467,6 +3472,45 @@ or for an older bundle whether the config's pool has a bank) and, with
 the bundle records; a bundle trained before that record ships without the
 gate, with a warning.
 
+`deploy.drift_fallback` (`{keep: <share in (0, 1]>}`; absent: none) packs
+the engine's drift fallback into every MLREC_v3 model stage06 deploys, and
+only there: no round's bundle, stage04b evaluation, planner or stage05
+training reads it, so what a run benches and trains is as without it. The
+deployed model then serves a cell whose pool holds fewer than `keep` of the
+cell's trained whitelisted view keys degraded, ranking its whitelist and the
+cascade over its other keys as one tier, so that a library that drops
+kernels the whitelist tier names is served from the model's whole pool until
+the tier is built again for it; a degraded cell's rankings cost more than
+its tier's alone. `lib/drift_fallback.py` mirrors the engine's rule
+(`degraded_cells`, `missing_keys`, `drift_summary`), and `lib/mlrec.py`'s
+`with_drift_fallback(data, keep_ppm)` and `without_drift_fallback(data)` add
+or remove it without retraining (an engine that predates it refuses such a
+file). The config check refuses the key without a view-key whitelist
+(`train.whitelist_tier_k`, or `train.whitelist: view-key`), with
+`train.cascade_k` 0, with a signature whitelist or launch keys, for a
+catalog other than v3, and for a share the file cannot hold in whole
+millionths; a final-retrain recipe cannot set it. A model is never deployed
+degraded: before it measures or stages anything, stage06 refuses a model
+that the pool of the library it deploys into (`--library-dir`, else the
+config's bench library, less the kernels the config's blocklist names) would
+serve with a degraded cell, and names the cells; build the tier for that
+library first (`scripts/build_whitelist_tier.py`). `lib/evaluate.py`'s
+`evaluate_model` refuses a model with the fallback on a pool that serves a
+cell degraded, such as one built from a GEMM's measured candidates, unless
+`allow_drift=True`. The deploy gate, the audit, the per-cell gate and
+collapse repair pass it, as they rank over the library pool: they measure
+the degraded rankings, such as a gate baseline's or those of an audit pool
+that leaves out more kernels, and name the cells
+(`Evaluation.degraded_cells`; `drift_degraded` in `gate.json` and the audit
+record). The gate of such a model needs `--library-dir`. Stage 8 evaluates
+the bundle as stage05 wrote it, without the fallback. The planner ranks any
+planning model without it, the subset simulation (lib/shipped_subset.py)
+refuses it, the deploy record keeps the preflight's counts
+(`drift_fallback`) and, with a whitelist tier, those over the pool the model
+is served from (`whitelist_tier.drift_fallback`), and stage 7 fails a run
+whose runtime prints a `[TILEWRIGHT_DIAG DRIFT]` line: the pool hipBLASLt
+serves lacks trained tier keys of the deployed model.
+
 The deploy gate measures the bundle that ships: stage06 evaluates the packed
 model file, the bytes it would install, on the round's gate GEMMs, which no
 bundle trained on, and writes `gate.json` (overall and per cell). An active
@@ -4397,8 +4441,9 @@ are all complete retrains every cell once more, in `final_retrain/`:
   is neither a train key nor an option of this stage05, or is one the
   orchestrator sets (the run's data, rounds, library and device, the cells,
   the catalog and attribute spec), or sets the trained-key gate
-  (`trained_key_gate`, `no_trained_key_gate`) or the alignment veto
-  (`alignment_veto`): stage06 deploys every bundle with the run's, and the
+  (`trained_key_gate`, `no_trained_key_gate`), the alignment veto
+  (`alignment_veto`) or the drift fallback (`drift_fallback`): stage06
+  deploys every bundle with the run's, and the
   gate must score the bytes stage06 deploys. The
   train section with the overrides goes through the train section's own
   checks (pseudo-negatives against their sample count and the catalog,
@@ -4670,7 +4715,9 @@ It times hipBLASLt's `Solution selection time` with the model on and off
 alternating repetitions over the identical problem list; pick logging off),
 pairs the two runs problem by problem, and reports the per-problem deltas.
 In a separate run with `TILEWRIGHT_DIAG` and `TILEWRIGHT_PICK_LOG` it checks
-that the runtime loaded exactly the deployed file and compares every
+that the runtime loaded exactly the deployed file, that the model's drift
+fallback serves no cell degraded on the runtime's pool (no `[TILEWRIGHT_DIAG
+DRIFT]` line; see *Deployment (stage06)*), and compares every
 problem's pick (its position in the library's kernel pool) and serving cell
 with the engine ranking the same model, library and hardware in Python. Both
 sides run the same engine, so a mismatch points at how hipBLASLt maps its
@@ -5476,7 +5523,10 @@ bundle's provenance as stage05 wrote it), `alignment_veto` (null: none;
 stages carries, for models served without the non-temporal rule, which
 the final retrain's decision scores and no decision of the rounds does;
 refused with another catalog, the non-temporal rule or a K-contiguous
-operand of a data type it does not count; see *Deployment*).
+operand of a data type it does not count; see *Deployment*),
+`drift_fallback` (null: none; `{keep: <share in (0, 1]>}` in whole
+millionths; MLREC_v3 with a view-key whitelist and a cascade only; see
+*Deployment (stage06)*).
 
 **`stage07`**: `build_dir` (null: the deploy build; a hipBLASLt build
 whose TensileLite serves the trained format, see *Validation*), `cpus` (null;

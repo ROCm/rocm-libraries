@@ -68,7 +68,26 @@ staged, veto included, as the audit set's evaluations do (lib/audit.py
 `model_bytes`). The deploy record names the veto the staged file carries
 (`alignment_veto`), its sha256 without the veto (`veto_free_sha256`, by which
 a later repair finds the bundle) and whether the gates scored it without
-(`scored_without_alignment_veto`).
+(`scored_without_alignment_veto`). With `deploy.drift_fallback`
+({keep: <share in (0, 1]>}; absent: none) it is packed with the engine's
+drift fallback as well (lib/drift_fallback.py): a cell whose pool holds
+fewer than that share of its trained whitelisted view keys ranks its
+whitelist and the cascade over its other keys as one tier. Only the
+deployed bytes carry it, never a round's bundle, so what a run benches and
+trains is as without it. The deploy refuses it for a bundle without a
+view-key whitelist tier, without a cascade, with launch keys or with a cell
+that lists signatures, and, before it measures or stages anything
+(`drift_preflight`), for a model the pool of the library it deploys into
+(--library-dir, else the config's bench library) would already serve
+degraded: that library lacks trained whitelist tier keys of the model,
+whose tier is built for it again first (scripts/build_whitelist_tier.py).
+The gate, the audit and the per-cell gate measure the deployed bytes as
+they rank over the library pool (lib/evaluate.py, `allow_drift`) and name
+the cells they find degraded, a baseline's or those of an audit pool that
+leaves out more kernels (gate.json `drift_degraded`); the deploy record
+keeps the preflight's counts (`drift_fallback`) and, for a bundle with a
+whitelist tier, those over the pool the model is served from
+(`whitelist_tier.drift_fallback`).
 
 Deploy gate (--gate-csv-dir): the model file, exactly the bytes that would be
 installed (less the alignment veto with --score-without-alignment-veto), is
@@ -184,6 +203,7 @@ from lib import audit as auditlib  # noqa: E402
 from lib import bank_pool  # noqa: E402
 from lib import cell_merge as cm  # noqa: E402
 from lib import correctness as cx  # noqa: E402
+from lib import drift_fallback  # noqa: E402
 from lib import evaluate as ev  # noqa: E402
 from lib import feasibility as feas  # noqa: E402
 from lib import features as fs  # noqa: E402
@@ -596,13 +616,30 @@ def deployed_serving(
 ) -> Dict[str, Any]:
     """`bundle` with the serving options an MLREC_v3 model deploys with: the
     bank flag (as stage05 recorded it, else whether the config's planner has
-    a bank), the trained-key gate (`train.trained_key_gate`, when the bundle
-    records trained view keys) and the alignment veto
+    a bank), the trained-key gate (`train.trained_key_gate`, when the
+    bundle records trained view keys), the alignment veto
     (`deploy.alignment_veto`; DeployError for a bundle served with the
-    non-temporal rule). Other bundles are returned as they are."""
+    non-temporal rule) and the drift fallback (`deploy.drift_fallback`;
+    DeployError for a bundle that cannot take it).
+    Other bundles are returned as they are, and DeployError when the config
+    asks for the drift fallback."""
+    keep = drift_keep_ppm(cfg)
     if str(bundle.get("catalog") or "v2") != "v3":
+        if keep is not None:
+            raise DeployError(
+                f"deploy.drift_fallback: {what} is not an MLREC_v3 bundle; the drift "
+                f"fallback is an MLREC_v3 serving option"
+            )
         return dict(bundle)
     serving = dict(bundle.get("serving") or {})
+    serving.pop("drift_keep_ppm", None)
+    if keep is not None:
+        why = _drift_refusal(serving, list((bundle.get("models") or {}).values()))
+        if why is not None:
+            raise DeployError(
+                f"deploy.drift_fallback: {what} cannot take the drift fallback: {why}"
+            )
+        serving["drift_keep_ppm"] = keep
     if "bank" not in serving:
         serving["bank"] = bank_pool.bank_source(cfg).enabled
     gate = bool(cfg_get(cfg, "train.trained_key_gate"))
@@ -627,6 +664,100 @@ def deployed_serving(
             )
         serving["alignment_veto"] = veto
     return dict(bundle, serving=serving)
+
+
+def _drift_refusal(serving: Mapping[str, Any], models: List[Any]) -> Optional[str]:
+    """Why a v3 bundle with `serving` and the cell entries `models` cannot
+    take the drift fallback, or None: the engine counts the view keys of a
+    whitelist tier."""
+    if not serving.get("whitelist_tier", True):
+        return "it has no whitelist tier"
+    if not int(serving.get("cascade_keys", 32) or 0):
+        return (
+            "it has no cascade (cascade_keys 0), so a degraded cell would fully score "
+            "every feasible key"
+        )
+    if serving.get("launch_keys"):
+        return "it serves launch keys"
+    if any(m.get("smart_k_signatures") for m in models):
+        return "a cell lists signatures"
+    if not any(m.get("view_key_hashes") for m in models):
+        return "no cell lists a view key"
+    return None
+
+
+def drift_keep_ppm(cfg: Mapping[str, Any]) -> Optional[int]:
+    """The keep_ppm of `deploy.drift_fallback`, or None when it is absent;
+    DeployError for a share the engine cannot hold exactly."""
+    section = cfg_get(cfg, "deploy.drift_fallback")
+    if section is None:
+        return None
+    try:
+        return drift_fallback.keep_ppm((section or {}).get("keep"))
+    except ValueError as e:
+        raise DeployError(f"deploy.drift_fallback: {e}") from None
+
+
+def drift_record(
+    bundle: Mapping[str, Any], kernels: Sequence[Mapping[str, Any]]
+) -> Dict[str, Any]:
+    """The drift fallback's trigger for a bundle packed with it
+    (`deployed_serving`) over a pool's `kernels`: `lib.drift_fallback.
+    drift_summary`, with the degraded cells by label."""
+    models = bundle.get("models") or {}
+    labels = sorted(models)
+    spec = fs.parse_attribute_spec(bundle.get("attribute_spec") or [])
+    summary = drift_fallback.drift_summary(
+        {
+            "serving": bundle.get("serving"),
+            "trained_view_keys": bundle.get("trained_view_keys"),
+            "cells": [models[label] for label in labels],
+        },
+        drift_fallback.pool_hashes(ev.pool_from_kernels(kernels), spec),
+    )
+    return {**summary, "degraded": [labels[i] for i in summary["degraded"]]}
+
+
+def drift_preflight(
+    bundle: Mapping[str, Any],
+    cfg: Mapping[str, Any],
+    stem: str,
+    library_dir: Optional[Path],
+    device: int,
+) -> Optional[Dict[str, Any]]:
+    """For a bundle packed with the drift fallback: `drift_record` over the
+    pool of the library it deploys into (`lib.bank_pool.config_pool`, the
+    pool the runtime serves: the table and the bank the config serves,
+    without the kernels the config's blocklist names), with `library_dir`.
+    DeployError when that pool degrades a cell, naming the cells: the model
+    would be served degraded from the start, and its tier is to be built for
+    that library first. None without the fallback."""
+    keep = (bundle.get("serving") or {}).get("drift_keep_ppm")
+    if keep is None:
+        return None
+    if library_dir is None:
+        raise DeployError(
+            "deploy.drift_fallback: a model served with the drift fallback is checked "
+            "against the library it deploys into; give --library-dir"
+        )
+    try:
+        pool = bank_pool.config_pool(cfg, library_dir, stem, device)
+    except (OSError, ValueError, RuntimeError) as e:
+        raise DeployError(
+            f"deploy.drift_fallback: cannot read the pool of {library_dir}: {e}"
+        ) from None
+    rec = drift_record(bundle, pool.kernels)
+    cells = rec["degraded"]
+    if cells:
+        raise DeployError(
+            f"deploy.drift_fallback: the pool of {library_dir} lacks {rec['missing']} "
+            f"trained whitelist tier keys of {len(cells)} cells "
+            f"({', '.join(cells[:4])}{', ...' if len(cells) > 4 else ''}), which the "
+            f"model would serve degraded from the start (keep_ppm {keep}): build the "
+            f"tier for this pool with scripts/build_whitelist_tier.py, or deploy "
+            f"without deploy.drift_fallback"
+        )
+    return {**rec, "library_dir": str(library_dir)}
 
 
 def engine_check(data: bytes, n_cells: int, n_splits: int, tw: Any) -> None:
@@ -1112,6 +1243,11 @@ def measure_gate(
         if gate.library_dir is not None
         else None
     )
+    if library is None and "drift_keep_ppm" in mlrec.read_header(data)["serving"]:
+        raise DeployError(
+            "deploy gate: a model served with the drift fallback is gated over the "
+            "library pool it serves; give the gate a library directory (--library-dir)"
+        )
     pools = ev.pools_for(gemms, library)
 
     def run(model: bytes, model_labels: List[str], what: str) -> mr.Measured:
@@ -1124,6 +1260,7 @@ def measure_gate(
                 labels=model_labels,
                 tw=tw,
                 pick_measurement=rule,
+                allow_drift=library is not None,
             )
             return ev.require_consistent_routing(out, what)
 
@@ -1152,6 +1289,8 @@ def measure_gate(
         "per_cell": _cell_rows(results),
         "baseline": None,
     }
+    if measured is not None and measured.evaluation.degraded_cells:
+        m["drift_degraded"] = measured.evaluation.degraded_cells
     if gate.rebench is not None:
         m.update(_rebench_numbers(measured, gate.pick_measurement, identity))
     if gate.baseline_train_dir is not None:
@@ -1185,6 +1324,8 @@ def measure_gate(
                     bundle_sel_eff=_num(ev.geomean(a.sel_eff for a, _ in both)),
                     sha256=sha256_bytes(base_data),
                 )
+                if other.degraded_cells:
+                    base["drift_degraded"] = other.degraded_cells
         m["baseline"] = base
     return m
 
@@ -1606,6 +1747,19 @@ def tier_record(
         return out
     served = wt.pool_check(bundle, ev.pool_from_kernels(pool.kernels))
     out["served_pool"] = served
+    keep = (bundle.get("serving") or {}).get("drift_keep_ppm")
+    if keep is not None:
+        rec = drift_record(bundle, pool.kernels)
+        out["drift_fallback"] = rec
+        degraded = rec["degraded"]
+        if degraded and not quiet:
+            ui.warn(
+                "drift_fallback",
+                f"the pool of {library_dir} lacks trained whitelist tier keys of "
+                f"{len(degraded)} cells, which the drift fallback serves degraded "
+                f"(keep_ppm {keep}): build the tier for this pool with "
+                f"scripts/build_whitelist_tier.py",
+            )
     built = (record.get("pool") or {}).get("keys_digest")
     if served and served["tier_keys_missing"] and not quiet:
         bare = served["cells_without_tier_keys"]
@@ -1764,6 +1918,13 @@ def _deploy(
     bundle, cells_json = load_bundle(train_dir)
     check_catalog(bundle, cells_json, tw)
     bundle = deployed_serving(bundle, cfg, "the bundle", quiet)
+    preflight = drift_preflight(
+        bundle,
+        cfg,
+        stem,
+        library_dir or _config_library_dir(cfg, stem),
+        hardware_device,
+    )
     labels = sorted(bundle["models"])
     provenance_mode = str(cfg_get(cfg, "deploy.provenance"))
     provenance = prov.deployed_provenance(bundle.get("provenance"), cfg)
@@ -2062,6 +2223,7 @@ def _deploy(
         "member_order": members,
         "identity_rule": bundle.get("identity_rule"),
         "whitelist_tier": tier,
+        "drift_fallback": preflight,
         "launch": launch_record(bundle, build_dir, quiet),
         "blocklist": {
             "kernels": len(blocked),

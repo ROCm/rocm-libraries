@@ -1102,6 +1102,7 @@ def test_models_the_simulation_cannot_follow_are_refused(tw):
         {"non_temporal_rule": True, "non_temporal_family_rule": True},
         {"trained_key_gate": True},
         {"alignment_veto": {"k_min": 512, "align_bits": 1024}},
+        {"drift_keep_ppm": 1000000},
     ):
         bundle = v3_bundle(labels=LABELS, spec=SPEC, serving=serving,
                            trained_view_keys=[1])  # fmt: skip

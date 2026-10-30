@@ -57,7 +57,10 @@ Pick parity (one run per yaml, `requested_solution_num: 1`, with
   * every `[TILEWRIGHT_DIAG FILE]` line of the deployed library must name the
     co-located copy of the deployed file, with the recorded cell and split
     counts, feature hash and weight type, and that file must hash to the
-    recorded sha256;
+    recorded sha256; a `[TILEWRIGHT_DIAG DRIFT]` line, a candidate set whose
+    pool lacks trained whitelist tier keys of the model, which its drift
+    fallback then serves degraded, fails the check (as in every run that
+    checks the loaded model);
   * the engine's top-1 pick (its position in the library's kernel pool, the
     pick log's `top1_index`) and serving cell of every problem are compared
     with `lib.evaluate.top1_picks` on the same model bytes, the library's
@@ -237,6 +240,7 @@ _RE_SUPPORTED = re.compile(r"^Is supported\s+(\d+)\s*/\s*Total solutions:\s*(\d+
 _RE_HEADER = re.compile(r"^\[(\d+)\]:(.*)$")
 _RE_DIAG_FILE = re.compile(r"\[TILEWRIGHT_DIAG FILE\]\s*(.*)$")
 _RE_DIAG_FAIL = re.compile(r"\[TILEWRIGHT_DIAG FAIL\]\s*(.*)$")
+_RE_DIAG_DRIFT = re.compile(r"\[TILEWRIGHT_DIAG DRIFT\]\s*(.*)$")
 _PICK_TAG = "[TILEWRIGHT_PICK]"
 _RE_PICK = re.compile(
     r"\[TILEWRIGHT_PICK\]\s+m=(\d+)\s+n=(\d+)\s+k=(\d+)\s+b=(\d+)\s+"
@@ -440,6 +444,9 @@ class BenchLog:
     calls: List[Call] = field(default_factory=list)
     diag_files: List[Dict[str, str]] = field(default_factory=list)
     diag_fails: List[str] = field(default_factory=list)
+    # `[TILEWRIGHT_DIAG DRIFT]` lines: candidate sets whose model's drift
+    # fallback serves cells degraded on the runtime's pool.
+    diag_drifts: List[Dict[str, str]] = field(default_factory=list)
     picks: List[Dict[str, Any]] = field(default_factory=list)
     unparsed_picks: List[str] = field(default_factory=list)
     unattributed_sel_lines: int = 0
@@ -564,6 +571,10 @@ def parse_bench_log(path: Path) -> BenchLog:
             m = _RE_DIAG_FAIL.search(line)
             if m:
                 out.diag_fails.append(m.group(1))
+                continue
+            m = _RE_DIAG_DRIFT.search(line)
+            if m:
+                out.diag_drifts.append(_kv(m.group(1)))
     out.unattributed_sel_lines += len(pending)
     return out
 
@@ -595,11 +606,20 @@ def check_diag(
     log: BenchLog, expected_path: Path, record: Mapping[str, Any]
 ) -> Tuple[bool, List[str]]:
     """(ok, problems): the deployed model loaded from `expected_path` with
-    the recorded contents."""
+    the recorded contents, and no candidate set it ranks is served degraded
+    by its drift fallback (a `[TILEWRIGHT_DIAG DRIFT]` line: the runtime's
+    pool lacks trained whitelist tier keys of the model)."""
     problems: List[str] = []
     mine = _loaded_from(log, expected_path)
     for msg in log.diag_fails:
         problems.append(f"engine load failure: {msg}")
+    for d in log.diag_drifts:
+        problems.append(
+            f"the runtime serves {d.get('cells', '?')} cells (degraded/with a whitelist) "
+            f"degraded through the drift fallback (keep_ppm {d.get('keep_ppm', '?')}, "
+            f"{d.get('missing', '?')} trained whitelist tier keys missing from its pool): "
+            f"build the tier for this library (scripts/build_whitelist_tier.py)"
+        )
     if not mine:
         seen = sorted({d.get("path", "?") for d in log.diag_files})
         problems.append(

@@ -41,7 +41,9 @@ replaces the header tail with:
                                    bit 2; lib/feasibility.py), bit 6 trained
                                    on the table plus the bank, bit 7
                                    trained-key gate, bit 8 CU floor, bit 9
-                                   alignment veto (never with bit 2)
+                                   alignment veto (never with bit 2), bit 10
+                                   drift fallback (needs the whitelist tier
+                                   and no launch keys)
     u32      cascade_keys
     f64      min_cu_fraction, max_cu_fraction
                                    usable CUs / device CUs the model supports,
@@ -59,6 +61,10 @@ replaces the header tail with:
     with bit 9 only: u32 veto_k_min (>= 1), u32 veto_align_bits (a power of
              two, >= 8): the alignment veto (lib/feasibility.py
              `alignment_vetoed`), a serving rule stage06 adds at deploy
+    with bit 10 only: u32 keep_ppm (1..1000000): the drift fallback's share,
+             in millionths, of a cell's whitelisted view keys the model lists
+             as trained that a pool must hold for the cell to be served from
+             its whitelist alone (lib/drift_fallback.py); no cell lists signatures
     optional provenance, present when header bytes remain:
     u16      n_provenance (1..5), then per entry u16+str key | u16+str value,
              each key of PROVENANCE_KEYS at most once
@@ -159,7 +165,9 @@ V3_BANK = 0x40
 V3_TRAINED_KEY_GATE = 0x80
 V3_CU_FLOOR = 0x100
 V3_ALIGNMENT_VETO = 0x200
-_V3_SERVING_FLAGS_KNOWN = 0x3FF
+V3_DRIFT_FALLBACK = 0x400
+_V3_SERVING_FLAGS_KNOWN = 0x7FF
+DRIFT_KEEP_MAX = 1000000
 SCHEDULE_BITS: Dict[str, int] = {"default": 1, "dynamic": 2, "auto": 4}
 BOUND_KEYS: Tuple[str, ...] = ("q_lo", "q_hi", "i_lo", "i_hi", "x_lo", "x_hi")
 # Where an MLREC_v3 model came from: the training config's id, a hash of the
@@ -659,6 +667,34 @@ def alignment_veto_bytes(veto: Mapping[str, Any]) -> bytes:
     return struct.pack("<II", int(k_min), bits)
 
 
+def drift_keep_bytes(keep_ppm: Any) -> bytes:
+    """The drift-fallback section of a model that serves a cell from its
+    whitelist alone while the pool holds at least `keep_ppm` millionths of
+    the cell's trained whitelisted view keys. ValueError unless `keep_ppm`
+    is a whole number from 1 to DRIFT_KEEP_MAX."""
+    if (
+        isinstance(keep_ppm, bool)
+        or not isinstance(keep_ppm, (int, np.integer))
+        or not 1 <= int(keep_ppm) <= DRIFT_KEEP_MAX
+    ):
+        raise ValueError(
+            f"the drift fallback's keep_ppm must be a whole number from 1 to "
+            f"{DRIFT_KEEP_MAX}, got {keep_ppm!r}"
+        )
+    return struct.pack("<I", int(keep_ppm))
+
+
+def _check_drift_flags(flags: int, error: Any) -> None:
+    if flags & V3_DRIFT_FALLBACK and flags & V3_NO_WHITELIST_TIER:
+        raise error(
+            f"serving flags {flags} ask for the drift fallback without the whitelist tier"
+        )
+    if flags & V3_DRIFT_FALLBACK and flags & V3_LAUNCH_KEYS:
+        raise error(
+            f"serving flags {flags} ask for the drift fallback with launch keys"
+        )
+
+
 def schedule_mask(schedules: Iterable[str]) -> int:
     mask = 0
     for name in schedules:
@@ -823,7 +859,11 @@ def _v3_tail(
     if not 0 <= cascade < 2**32:
         raise ValueError(f"cascade_keys {cascade} out of range")
     floor = contexts.get("min_effective_cus")
+    keep = serving.get("drift_keep_ppm")
     flags = v3_serving_flags(serving) | (V3_CU_FLOOR if floor is not None else 0)
+    if keep is not None:
+        flags |= V3_DRIFT_FALLBACK
+        _check_drift_flags(flags, ValueError)
     fhash = fs.v3_catalog_hash()
     tail = [
         _lenstr(fhash),
@@ -853,6 +893,8 @@ def _v3_tail(
         tail.append(cu_floor_bytes(floor))
     if serving.get("alignment_veto"):
         tail.append(alignment_veto_bytes(serving["alignment_veto"]))
+    if keep is not None:
+        tail.append(drift_keep_bytes(keep))
     tail.append(_provenance_bytes(check_provenance(provenance)))
     return b"".join(tail)
 
@@ -874,9 +916,10 @@ def write_model_v3(
     holds small_batched_rule / dot2_rule / non_temporal_rule /
     non_temporal_family_rule, launch_keys, bank and trained_key_gate
     (default off), whitelist_tier (default on), cascade_keys (default
-    32) and alignment_veto ({k_min, align_bits}, or absent or None for
-    none); with trained_key_gate, `trained_view_keys` lists the view-key
-    hashes of the keys with training data. The arch's
+    32), alignment_veto ({k_min, align_bits}, or absent or None for
+    none) and, for the drift fallback (serving flag bit 10), drift_keep_ppm
+    (absent: none); with trained_key_gate, `trained_view_keys` lists the
+    view-key hashes of the keys with training data. The arch's
     bandwidth coefficients are not written. `provenance` (else the bundle's
     `provenance`) is recorded as `check_provenance` describes."""
     wdt = weight_dtype_code(weight_dtype)
@@ -898,6 +941,15 @@ def write_model_v3(
         )
     dims = (len(expected[0]), len(expected[1]), len(expected[2]))
     models: Mapping[str, Any] = bundle["models"]
+    if (bundle.get("serving") or {}).get("drift_keep_ppm") is not None:
+        listed = sorted(
+            label for label, m in models.items() if m.get("smart_k_signatures")
+        )
+        if listed:
+            raise ValueError(
+                f"the drift fallback counts view keys only; cells {listed[:3]} "
+                f"list signatures"
+            )
     rules = _split_rules(models, splits)
     clip = bool(bundle.get("clip", False))
     payload = b"".join(_split_bytes(r) for r in rules) + b"".join(
@@ -1213,6 +1265,7 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
             f"serving flags {flags} ask for the alignment veto with the "
             f"non-temporal rule"
         )
+    _check_drift_flags(flags, FormatError)
     if not 0.0 < lo <= hi <= 1.0:
         raise FormatError("CU fraction range must satisfy 0 < min <= max <= 1")
     if schedules == 0 or schedules & ~0x07:
@@ -1264,6 +1317,16 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
                 f"of two of at least 8 bits"
             )
         veto = {"k_min": veto_k_min, "align_bits": veto_bits}
+    # Where the drift field is, or goes: after the field of every flag before
+    # it (with_drift_fallback writes it there).
+    drift_offset = cur.pos
+    keep: Optional[int] = None
+    if flags & V3_DRIFT_FALLBACK:
+        (keep,) = cur.unpack("<I", "drift keep_ppm")
+        if not 1 <= keep <= DRIFT_KEEP_MAX:
+            raise FormatError(
+                f"the drift fallback's keep_ppm {keep} is outside 1 to {DRIFT_KEEP_MAX}"
+            )
     provenance: Dict[str, str] = {}
     if cur.pos < cur.end:
         (n_prov,) = cur.unpack("<H", "n_provenance")
@@ -1317,9 +1380,12 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
     }
     if veto is not None:
         serving["alignment_veto"] = veto
+    if keep is not None:
+        serving["drift_keep_ppm"] = keep
     return {
         "header_end": cur.pos,
         "serving_offset": serving_offset,
+        "drift_offset": drift_offset,
         "header_size": header_size,
         "payload_size": payload_size,
         "crc": crc,
@@ -1369,6 +1435,13 @@ def _read_v3(data: bytes) -> Dict[str, Any]:
         version=3,
         clip=h["clip"],
     )
+    if "drift_keep_ppm" in h["serving"]:
+        for c in cells:
+            if c["smart_k_signatures"]:
+                raise FormatError(
+                    f"cell {c['label']!r} lists signatures, and the drift fallback "
+                    f"counts view keys only"
+                )
     return {
         "format": MAGIC_V3.decode(),
         "version": 3,
@@ -1460,8 +1533,8 @@ def _with_flags(data: bytes, edit: Any) -> bytes:
     out = bytearray(data)
     h = _v3_header(bytes(out), len(out))
     at = h["serving_offset"]
-    (flags,) = struct.unpack_from("<I", out, at)
-    flags = edit(flags)
+    (old,) = struct.unpack_from("<I", out, at)
+    flags = edit(old)
     if flags & V3_NON_TEMPORAL_FAMILY_RULE and not flags & V3_NON_TEMPORAL_RULE:
         raise ValueError(
             "the family-wise non-temporal rule refines the non-temporal rule; "
@@ -1472,6 +1545,11 @@ def _with_flags(data: bytes, edit: Any) -> bytes:
             "the alignment veto is a rule of models served without the "
             "non-temporal rule"
         )
+    if (flags ^ old) & V3_DRIFT_FALLBACK:
+        raise ValueError(
+            "the drift fallback has a header field: use with_drift_fallback"
+        )
+    _check_drift_flags(flags, ValueError)
     struct.pack_into("<I", out, at, flags)
     return bytes(out)
 
@@ -1594,7 +1672,7 @@ def _with_alignment_veto_section(data: bytes, section: Optional[bytes]) -> bytes
             "non-temporal rule"
         )
     # The section follows the trained keys and the CU floor and precedes the
-    # provenance.
+    # drift fallback's field and the provenance.
     at = _attribute_spec_end(
         _Cursor(data, _V2_FIXED.size, header_size), h["serving_offset"]
     )
@@ -1611,6 +1689,58 @@ def _with_alignment_veto_section(data: bytes, section: Optional[bytes]) -> bytes
     struct.pack_into("<I", head, h["serving_offset"], flags)
     struct.pack_into("<I", head, 12, len(head))
     return bytes(head) + data[header_size:]
+
+
+def with_drift_fallback(data: bytes, keep_ppm: Optional[int]) -> bytes:
+    """An MLREC_v3 model file served with the drift fallback at `keep_ppm`
+    millionths (serving flag bit 10; without it when None) and otherwise
+    `data`: the header changes size, the payload and its CRC do not.
+    ValueError for a model the engine would refuse with the fallback: one
+    without the whitelist tier, with launch keys, or with a cell that lists
+    signatures. An engine that predates the fallback refuses a file that has
+    it."""
+    data = bytes(data)
+    if data[:8] != MAGIC_V3:
+        raise FormatError("the drift fallback is an MLREC_v3 serving option")
+    h = _v3_header(data, len(data))
+    header_size = h["header_size"]
+    flags = struct.unpack_from("<I", data, h["serving_offset"])[0]
+    if keep_ppm is not None:
+        _check_drift_flags(flags | V3_DRIFT_FALLBACK, ValueError)
+        section = drift_keep_bytes(keep_ppm)
+        listed = [
+            c["label"] for c in read_model(data)["cells"] if c["smart_k_signatures"]
+        ]
+        if listed:
+            raise ValueError(
+                f"the drift fallback counts view keys only; cells {listed[:3]} list "
+                f"signatures"
+            )
+    else:
+        section = b""
+    at = h["drift_offset"]
+    end = at + 4 if flags & V3_DRIFT_FALLBACK else at
+    head = bytearray(data[:at] + section + data[end:header_size])
+    flags = (
+        flags | V3_DRIFT_FALLBACK
+        if keep_ppm is not None
+        else flags & ~V3_DRIFT_FALLBACK
+    )
+    struct.pack_into("<I", head, h["serving_offset"], flags)
+    struct.pack_into("<I", head, 12, len(head))
+    return bytes(head) + data[header_size:]
+
+
+def without_drift_fallback(data: bytes) -> bytes:
+    """`data` without the drift fallback (with_drift_fallback(data, None));
+    a v2 file or a v3 file without it comes back unchanged."""
+    data = bytes(data)
+    if data[:8] != MAGIC_V3:
+        return data
+    h = _v3_header(data, len(data))
+    if "drift_keep_ppm" not in h["serving"]:
+        return data
+    return with_drift_fallback(data, None)
 
 
 def _attribute_spec_end(cur: _Cursor, serving_offset: int) -> int:
@@ -1815,6 +1945,7 @@ __all__: Sequence[str] = (
     "convert_v1_to_v2",
     "cu_floor_bytes",
     "decode_weight",
+    "drift_keep_bytes",
     "encode_weight",
     "feature_spec_hash",
     "read_model",
@@ -1822,8 +1953,10 @@ __all__: Sequence[str] = (
     "weight_dtype_code",
     "with_bank",
     "with_cu_floor",
+    "with_drift_fallback",
     "with_soft_rules",
     "with_trained_keys",
+    "without_drift_fallback",
     "write_model",
     "write_model_v3",
 )

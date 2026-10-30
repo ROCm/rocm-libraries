@@ -184,6 +184,7 @@ from lib import contexts as ctxlib  # noqa: E402
 from lib import correctness as cxlib  # noqa: E402
 from lib import correctness_gate as cgate  # noqa: E402
 from lib import device_values as dvlib  # noqa: E402
+from lib import drift_fallback  # noqa: E402
 from lib import external_sets as xslib  # noqa: E402
 from lib import feasibility as feaslib  # noqa: E402
 from lib import fingerprint  # noqa: E402
@@ -914,6 +915,17 @@ SCHEMA = _section(
                     {
                         "k_min": _int(required=True, minimum=1, maximum=2**32 - 1),
                         "align_bytes": _int(required=True, minimum=1, maximum=2**28),
+                    },
+                    nullable=True,
+                ),
+                "drift_fallback": _section(
+                    {
+                        "keep": _num(
+                            required=True,
+                            minimum=0,
+                            maximum=1,
+                            exclusive_minimum=True,
+                        ),
                     },
                     nullable=True,
                 ),
@@ -1741,6 +1753,7 @@ def validate_config(
     _audit_config_checks(cfg, errors)
     _final_retrain_config_checks(cfg, errors, warnings)
     _train_config_checks(cfg, errors, warnings)
+    _drift_fallback_config_checks(cfg, errors)
 
     _alignment_veto_config_checks(cfg, errors, warnings)
 
@@ -1894,6 +1907,50 @@ def _block_scale_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> Non
                 f"scale{operand} to the library's block format (3: Block_32_UE8M0), "
                 f"not {'nothing' if mode is None else mode}"
             )
+
+
+def _drift_fallback_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> None:
+    """deploy.drift_fallback: a share the engine holds exactly, and models it
+    can serve: MLREC_v3 bundles with a view-key whitelist (the tier, or the
+    view-key smart_K whitelist) and a cascade, no signature whitelist and no
+    launch keys."""
+    section = cfg_get(cfg, "deploy.drift_fallback")
+    if section is None:
+        return
+    if isinstance(section, dict) and "keep" in section:
+        try:
+            drift_fallback.keep_ppm(section["keep"])
+        except ValueError as e:
+            errors.append(f"deploy.drift_fallback.keep: {e}")
+    whitelist = cfg_get(cfg, "train.whitelist")
+    for wrong, why in (
+        (
+            cfg_get(cfg, "train.catalog") != "v3",
+            "the drift fallback is an MLREC_v3 serving option; set train.catalog v3",
+        ),
+        (
+            not cfg_get(cfg, "train.whitelist_tier_k") and whitelist != "view-key",
+            "the drift fallback serves a cell from its view-key whitelist, and the "
+            "bundles get none (train.whitelist_tier_k is 0)",
+        ),
+        (
+            whitelist == "signature",
+            "the drift fallback counts view keys, and train.whitelist signature lists "
+            "signatures",
+        ),
+        (
+            bool(cfg_get(cfg, "train.launch_keys")),
+            "the drift fallback counts view keys, and train.launch_keys scores each "
+            "launch class of a view key on its own",
+        ),
+        (
+            cfg_get(cfg, "train.cascade_k") == 0,
+            "a degraded cell ranks its other keys through the cascade, and "
+            "train.cascade_k 0 would fully score every feasible key instead",
+        ),
+    ):
+        if wrong:
+            errors.append(f"deploy.drift_fallback: {why}")
 
 
 def _whitelist_tier_config_checks(
@@ -2383,6 +2440,7 @@ PINNED_UNLESS_NEUTRAL: Dict[str, Any] = {
     "audit.canary_tolerance_us": 0.0,
     "correctness.custom_kernels": None,
     "audit.held_out": [],
+    "deploy.drift_fallback.keep": None,
     "contexts.granule": ctxlib.PREDATING_GRANULE,
     "seed.weak_cell_factor": 1.0,
     "seed.strong_cell_factor": 1.0,
@@ -2806,6 +2864,7 @@ RECIPE_DEPLOYED_KEYS = {
     "trained_key_gate": "train.trained_key_gate",
     "no_trained_key_gate": "train.trained_key_gate",
     "alignment_veto": "deploy.alignment_veto",
+    "drift_fallback": "deploy.drift_fallback",
 }
 # stage05 options the orchestrator derives from the run (its rounds, library
 # and device) and from the final retrain itself (every cell).

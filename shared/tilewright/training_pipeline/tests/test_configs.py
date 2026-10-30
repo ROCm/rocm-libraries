@@ -1296,3 +1296,35 @@ def test_cfg_get_defaults(base_cfg):
     assert ro.cfg_get(cfg, "stage07.timing_request_sizes") == [1]
     assert ro.cfg_get(cfg, "stage07.parity_min_match_rate") == 1.0
     assert ro.cfg_get(cfg, "deploy.weight_dtype") == "int8"
+
+
+def test_drift_fallback_settings(config_env):
+    cfg = _load(Path(CONFIGS[0]).parent / "gfx950_bbs_tn_origami_v3.yaml")
+    cfg["deploy"].pop("drift_fallback", None)
+    assert ro.cfg_get(cfg, "deploy.drift_fallback") is None
+    assert "deploy.drift_fallback.keep" not in ro.pinned_config(cfg)
+    cfg["deploy"]["drift_fallback"] = {"keep": 0.9}
+    assert _errors(cfg) == []
+    assert ro.pinned_config(cfg)["deploy.drift_fallback.keep"] == 0.9
+    for keep, fragment in (
+        (0, "deploy.drift_fallback.keep"),
+        (1.5, "deploy.drift_fallback.keep"),
+        (0.1234567, "whole millionths"),
+        ("all", "deploy.drift_fallback.keep"),
+    ):
+        cfg["deploy"]["drift_fallback"] = {"keep": keep}
+        assert any(fragment in e for e in _errors(cfg)), keep
+    cfg["deploy"]["drift_fallback"] = {}
+    assert "deploy.drift_fallback.keep: required key is missing" in _errors(cfg)
+    cfg["deploy"]["drift_fallback"] = {"keep": 1.0}
+    for path, value, fragment in (
+        ("train.whitelist_tier_k", 0, "the bundles get none"),
+        ("train.launch_keys", True, "train.launch_keys"),
+        ("train.catalog", "v2", "MLREC_v3 serving option"),
+        ("train.cascade_k", 0, "train.cascade_k 0"),
+    ):
+        bad = copy.deepcopy(cfg)
+        section, key = path.split(".")
+        bad[section][key] = value
+        assert any(e.startswith("deploy.drift_fallback") and fragment in e
+                   for e in _errors(bad)), path  # fmt: skip
