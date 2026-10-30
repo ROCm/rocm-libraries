@@ -736,7 +736,7 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
 
     stop = EarlyStop.for_case(args, p, dtype, direction)
     measured: list[_Measured] = []
-    n_missing = n_failed = 0
+    n_missing = n_failed = n_skipped = 0
     n = len(sel.results)
     rc = 0
     try:
@@ -784,9 +784,11 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
                 if max(sizes.values()) <= 2**31 - 1:
                     raise
                 print(f"  [skip] {spec.name}: tensor over 2 GiB ({e})", flush=True)
+                n_skipped += 1
                 continue
             except (HipError, KeyError) as e:
                 print(f"  [skip] {spec.name}: {e}", flush=True)
+                n_skipped += 1
                 continue
 
             def run(bound=bound):
@@ -816,6 +818,7 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
                 )
             except (HipError, RuntimeError) as e:
                 print(f"  [skip] {spec.name}: {e}", flush=True)
+                n_skipped += 1
                 continue
             if ms is None:
                 stop.report(spec.name)
@@ -841,6 +844,12 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
             f"(build them with --compile-all, or run without --run-from-cache)",
             flush=True,
         )
+    if n_skipped:
+        print(f"  {n_skipped} instance(s) skipped (see [skip] lines above)", flush=True)
+        if args.verify:
+            # A skip is neither a pass nor a fail: --verify must not report rc=0
+            # for a run that never actually verified every admitted instance.
+            rc = 1
     if ref_out is not None:
         print(f"  verify: {n_failed} of the launched instances failed", flush=True)
     if not measured:

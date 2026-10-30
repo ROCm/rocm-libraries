@@ -91,6 +91,12 @@ static int dw_win_cdiv(int a, int b)
     return (a + b - 1) / b;
 }
 
+/* 8-channel input chunks a wave contracts (1 for depthwise). */
+static int dw_win_cin_chunks(const rocke_direct_conv_problem_t* p)
+{
+    return p->cpg > 1 ? p->cpg / ROCKE_DW_DGRAD_MFMA_CH : 1;
+}
+
 long long rocke_direct_depthwise_dgrad_win_unrolled_fmas(
     const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
@@ -102,7 +108,7 @@ long long rocke_direct_depthwise_dgrad_win_unrolled_mfmas(
     const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    return (long long)spec->block_h * p->KH * dw_win_passes(p->KW);
+    return (long long)spec->block_h * p->KH * dw_win_passes(p->KW) * dw_win_cin_chunks(p);
 }
 
 static int dw_win_mfma_in_passes(const rocke_direct_depthwise_dgrad_win_spec_t* spec)
@@ -118,8 +124,7 @@ int rocke_direct_depthwise_dgrad_win_mfma_frag_vgprs(
     const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    const int chunks = p->cpg > 1 ? p->cpg / ROCKE_DW_DGRAD_MFMA_CH : 1;
-    const int kwp = dw_win_passes(p->KW) * chunks;
+    const int kwp = dw_win_passes(p->KW) * dw_win_cin_chunks(p);
     const int rows = spec->prefetch_rows * dw_win_mfma_in_passes(spec);
     return 4 * (p->KH * kwp + p->KH + kwp + rows);
 }
@@ -246,6 +251,9 @@ static bool
         DW_WIN_FAIL("prefetch_rows must be >= 1 (got %d)", spec->prefetch_rows);
     if(spec->fwd && !spec->mfma)
         DW_WIN_FAIL("fwd requires mfma");
+    if(spec->fwd && p->KH != p->KW)
+        /* One PAD serves both axes; only a square filter keeps it one value. */
+        DW_WIN_FAIL("fwd requires a square filter (got %dx%d)", p->KH, p->KW);
     if((spec->out_stride != 1 && spec->out_stride != 2) || (spec->out_stride != 1 && !spec->fwd))
         DW_WIN_FAIL("out_stride must be 1, or 2 with fwd (got %d)", spec->out_stride);
     if(spec->block_h % spec->out_stride != 0)
