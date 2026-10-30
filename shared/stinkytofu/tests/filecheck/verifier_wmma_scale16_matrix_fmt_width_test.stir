@@ -1,0 +1,35 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyIRVerifierPass --print-output 2>&1
+#
+# F8F6F4-family WMMA source widths depend on mod.matrix_fmt, not just the
+# static instruction descriptor: FP8 is 512 bits (16 VGPRs), FP6 is 384 bits
+# (12 VGPRs), and FP4 is 256 bits (8 VGPRs).
+#
+# CHECK: [StinkyIRVerifier] Register width validation failed:
+# CHECK: v_wmma_scale16_f32_16x16x128_f8f6f4
+# CHECK-SAME: fmtA = "MATRIX_FMT_FP8"
+# CHECK: operand src[0] has register width 12, expected 16
+#
+# CHECK: [StinkyIRVerifier] Register width validation failed:
+# CHECK: v_wmma_scale16_f32_16x16x128_f8f6f4
+# CHECK-SAME: fmtA = "MATRIX_FMT_FP6"
+# CHECK: operand src[0] has register width 16, expected 12
+#
+# CHECK: [StinkyIRVerifier] Register width validation failed:
+# CHECK: v_wmma_scale16_f32_16x16x128_f8f6f4
+# CHECK-SAME: fmtA = "MATRIX_FMT_FP4"
+# CHECK: operand src[0] has register width 16, expected 8
+
+st.func @wmma_scale16_fp8_rejects_fp6_width_src() {
+^entry:
+  v[18:25] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[154:165], v[220:235], v[18:25], v[0:1], v[10:11]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8, scaleFmtA = MATRIX_SCALE_FMT_E5M3, scaleFmtB = MATRIX_SCALE_FMT_E5M3 }, mod.mfma = { reuseA = false, reuseB = false } }
+}
+
+st.func @wmma_scale16_fp6_rejects_max_width_src() {
+^entry:
+  v[18:25] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[154:169], v[220:231], v[18:25], v[0:1], v[10:11]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP6, fmtB = MATRIX_FMT_FP6, scaleFmtA = MATRIX_SCALE_FMT_E5M3, scaleFmtB = MATRIX_SCALE_FMT_E5M3 }, mod.mfma = { reuseA = false, reuseB = false } }
+}
+
+st.func @wmma_scale16_fp4_rejects_max_width_src() {
+^entry:
+  v[18:25] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[154:169], v[220:227], v[18:25], v[0:1], v[10:11]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP4, fmtB = MATRIX_FMT_FP4, scaleFmtA = MATRIX_SCALE_FMT_E5M3, scaleFmtB = MATRIX_SCALE_FMT_E5M3 }, mod.mfma = { reuseA = false, reuseB = false } }
+}

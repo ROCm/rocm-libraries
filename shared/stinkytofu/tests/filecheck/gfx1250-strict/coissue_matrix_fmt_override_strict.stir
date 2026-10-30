@@ -21,6 +21,6 @@
 
 st.func @override() {
 ^entry:
-  v[0:7] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[20:35], v[30:45], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP4, fmtB = MATRIX_FMT_FP4 } }
+  v[0:7] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[20:27], v[30:37], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP4, fmtB = MATRIX_FMT_FP4 } }
   v[8:15] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[20:35], v[30:45], v[8:15]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
 }

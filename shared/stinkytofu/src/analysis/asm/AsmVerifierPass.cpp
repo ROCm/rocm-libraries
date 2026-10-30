@@ -110,20 +110,41 @@ static bool canUseLessOperand(const StinkyInstruction* inst) {
     return false;
 }
 
-// Workaround: v_wmma_f32_16x16x128_f8f6f4 and v_wmma_scale_f32_16x16x128_f8f6f4 have
-// matrix-format-dependent packed source widths. For src0/src1, accept dynamic widths
-// (256/384/512 bits) even though the static format metadata uses a fixed maximum width.
-static bool allowDynamicWmmaScaleSrcWidth(const HwInstDesc* hwDesc, bool isDest,
-                                          unsigned operandIndex, unsigned expectedWidth,
-                                          unsigned actualWidth) {
-    if (!hwDesc || !hwDesc->mnemonic || isDest) return false;
-    if (operandIndex > 1) return false;  // only src0/src1 are dynamic
-    if (expectedWidth != 16) return false;
+static unsigned matrixFmtWidthInRegs(MatrixFmt fmt) {
+    switch (fmt) {
+        case MatrixFmt::FP8:
+        case MatrixFmt::BF8:
+            return 16;
+        case MatrixFmt::FP6:
+        case MatrixFmt::BF6:
+            return 12;
+        case MatrixFmt::FP4:
+            return 8;
+        default:
+            return 0;
+    }
+}
+
+// F8F6F4-family WMMA source operands are packed according to mod.matrix_fmt:
+// FP8/BF8 => 512 bits, FP6/BF6 => 384 bits, FP4 => 256 bits.
+static unsigned getDynamicWmmaSrcExpectedWidth(const StinkyInstruction* inst, bool isDest,
+                                               unsigned operandIndex,
+                                               unsigned staticExpectedWidth) {
+    const HwInstDesc* hwDesc = inst->getHwInstDesc();
+    if (!hwDesc || !hwDesc->mnemonic || isDest) return 0;
+    if (operandIndex > 1) return 0;  // only src0/src1 are dynamic
+    if (staticExpectedWidth != 16) return 0;
     std::string_view mnemonic(hwDesc->mnemonic);
     if (mnemonic != "v_wmma_f32_16x16x128_f8f6f4" &&
-        mnemonic != "v_wmma_scale_f32_16x16x128_f8f6f4")
-        return false;
-    return actualWidth == 8 || actualWidth == 12 || actualWidth == 16;
+        mnemonic != "v_wmma_scale_f32_16x16x128_f8f6f4" &&
+        mnemonic != "v_wmma_scale16_f32_16x16x128_f8f6f4")
+        return 0;
+
+    const auto* matrixFmt = inst->getModifier<MatrixFmtModifiers>();
+    if (!matrixFmt) return 0;
+
+    MatrixFmt fmt = operandIndex == 0 ? matrixFmt->fmtA : matrixFmt->fmtB;
+    return matrixFmtWidthInRegs(fmt);
 }
 
 static std::string checkRegisterWidths(const StinkyInstruction* inst,
@@ -163,13 +184,16 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
 
         // Width check: only meaningful for operands wider than one DWORD.
         if (expectedWidth > 1) {
+            if (unsigned dynamicExpectedWidth =
+                    getDynamicWmmaSrcExpectedWidth(inst, isDest, operandIndex, expectedWidth)) {
+                expectedWidth = dynamicExpectedWidth;
+            }
+
             // M64 operands are 64-bit lane masks that may be truncated to
             // 32 bits in wave32 mode, so width 1 is valid when expected is 2.
             bool m64Truncated = field.isM64 && expectedWidth == 2 && reg.reg.num == 1;
-            bool dynamicWmmaWidth = allowDynamicWmmaScaleSrcWidth(hwDesc, isDest, operandIndex,
-                                                                  expectedWidth, reg.reg.num);
 
-            if (reg.reg.num != expectedWidth && !m64Truncated && !dynamicWmmaWidth) {
+            if (reg.reg.num != expectedWidth && !m64Truncated) {
                 errors << "Instruction '";
                 inst->dump(errors);
                 errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "
