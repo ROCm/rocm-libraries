@@ -247,9 +247,14 @@ namespace
     // bestEffortEvents is the caller saying it would rather lose the
     // measurement. The two cases below are the same launch with that answer
     // given both ways.
+    //
+    // Building an unrecordable event takes two devices, so the suite carries
+    // the multi_gpu token and no smoke_ prefix: CI runs it in its multi_gpu
+    // tier rather than selecting it in every single-GPU tier, where it could
+    // only skip. See clients/tests/test_categories.yaml.
     // ----------------------------------------------------------------------
 
-    class HipSolutionAdapterEventTest : public ::testing::Test
+    class HipSolutionAdapterEventTest_multi_gpu : public ::testing::Test
     {
     protected:
         void SetUp() override
@@ -319,7 +324,7 @@ namespace
         std::optional<std::string> m_savedDb2;
     };
 
-    TEST_F(HipSolutionAdapterEventTest, smoke_AnUnrecordableEventFailsTheLaunchByDefault)
+    TEST_F(HipSolutionAdapterEventTest_multi_gpu, AnUnrecordableEventFailsTheLaunchByDefault)
     {
         TensileLite::hip::SolutionAdapter adapter;
 
@@ -330,7 +335,7 @@ namespace
         static_cast<void>(hipGetLastError());
     }
 
-    TEST_F(HipSolutionAdapterEventTest, smoke_BestEffortEventsCostTheMeasurementNotTheLaunch)
+    TEST_F(HipSolutionAdapterEventTest_multi_gpu, BestEffortEventsCostTheMeasurementNotTheLaunch)
     {
         TensileLite::hip::SolutionAdapter adapter;
 
@@ -359,7 +364,7 @@ namespace
     // pair reads as never recorded. Asserted for one kernel, where both records
     // are in one launchKernel, and for a solution of several, where the start
     // goes with the first kernel and the stop with the last.
-    TEST_F(HipSolutionAdapterEventTest, smoke_ASwallowedStartRecordLeavesTheStopUnrecorded)
+    TEST_F(HipSolutionAdapterEventTest_multi_gpu, ASwallowedStartRecordLeavesTheStopUnrecorded)
     {
         TensileLite::hip::SolutionAdapter adapter;
 

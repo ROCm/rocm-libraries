@@ -54,7 +54,10 @@
 #   second, so every tier runs it. Most cases are host-only; the ones that
 #   acquire HIP event pairs need one device and skip without it. The single
 #   case that needs two devices is in the OnlineTuner_multi_gpu suite, which
-#   "*OnlineTuner.*" does not match and the multi_gpu tier selects.
+#   "*OnlineTuner.*" does not match and the multi_gpu tier selects. The
+#   launch-event cases that need two devices are likewise in
+#   HipSolutionAdapterEventTest_multi_gpu, with no smoke_ prefix, so no
+#   single-GPU tier selects them only to skip them.
 #
 # These tiers are TheRock ctest presets; they are NOT a port of hipBLASLt's
 # rocJenkins job filters (those are wired differently).
