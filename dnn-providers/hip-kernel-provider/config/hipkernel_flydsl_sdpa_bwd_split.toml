@@ -14,17 +14,18 @@ version = 1
 # The common suite's ToleranceResolver maps both SdpaAttributes and
 # SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
 # forward), so SDPA backward gradients (dQ/dK/dV) get their own entries here.
-# Calibrated on gfx1100: bf16 backward outputs differ from the reference by 1-2
-# bf16 ulp from fp32 accumulation order. To be re-checked against the post-#14312
-# bundles, which derive O and the LSE from the forward.
+# Calibrated on gfx1100 and gfx950 against the bundles that derive O and the LSE from the
+# forward, with device and host input fill and both references: every case passes
+# at fp16 2.5e-3 and bf16 5e-3 (bf16 dV differs by up to 2 ulp from fp32
+# accumulation order); each value below is one grid step above that.
 # Filters key on the SdpaBackward bundle case ids' dtype token; the leading "_"
 # in "_fp16_" keeps it from also matching "bfp16_".
 [[tolerance_overrides]]
 filters = ["*_SdpaBackward_*.*_fp16_*"]
-atol = 1e-2
-rtol = 1e-2
+atol = 5e-3
+rtol = 5e-3
 
 [[tolerance_overrides]]
 filters = ["*_SdpaBackward_*.*_bfp16_*"]
-atol = 2e-2
-rtol = 2e-2
+atol = 1e-2
+rtol = 1e-2
