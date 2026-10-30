@@ -109,26 +109,49 @@ st.func @smem_multi_op_self_overlap() {
 # own source. That is not repairable with a drain and the pass aborts on it;
 # see the death test in unit/asm/Gfx1250HazardPassTest.cpp.
 
-# prefetch needs XCnt drain when a memory group is still outstanding.
+# A scalar prefetch joins the SMEM group, so it needs an XCnt drain only when an
+# SMEM group is still outstanding (BUG #20).
 # CHECK-LABEL: @existing_scalar_prefetch
-# CHECK: buffer_load_b32
+# CHECK: s_load_b32
 # CHECK-NEXT: s_wait_xcnt"(0)
 # CHECK-NEXT: s_prefetch_inst_pc_rel
 st.func @existing_scalar_prefetch() {
+^entry:
+  s8 = "st.s_load_b32"(s[10:11])
+  "st.s_prefetch_inst_pc_rel"(0, s0, 0)
+}
+
+# VMEM -> SMEM is a group switch, which hardware drains before the prefetch.
+# CHECK-LABEL: @scalar_prefetch_after_vmem
+# CHECK: buffer_load_b32
+# CHECK-NOT: s_wait_xcnt
+# CHECK: s_prefetch_inst_pc_rel
+st.func @scalar_prefetch_after_vmem() {
 ^entry:
   v9 = "st.buffer_load_b32"(v0)
   "st.s_prefetch_inst_pc_rel"(0, s0, 0)
 }
 
+# The absolute form is a scalar prefetch too.
+# CHECK-LABEL: @existing_scalar_prefetch_abs
+# CHECK: s_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_prefetch_inst
+st.func @existing_scalar_prefetch_abs() {
+^entry:
+  s8 = "st.s_load_b32"(s[10:11])
+  "st.s_prefetch_inst"(s[0:1], 0, s0, 0)
+}
+
 # A single drain covers a consecutive prefetch sequence.
 # CHECK-LABEL: @consecutive_scalar_prefetches
-# CHECK: buffer_load_b32
+# CHECK: s_load_b32
 # CHECK-NEXT: s_wait_xcnt"(0)
 # CHECK-NEXT: s_prefetch_inst_pc_rel
 # CHECK-NEXT: s_prefetch_inst_pc_rel
 st.func @consecutive_scalar_prefetches() {
 ^entry:
-  v9 = "st.buffer_load_b32"(v0)
+  s8 = "st.s_load_b32"(s[10:11])
   "st.s_prefetch_inst_pc_rel"(0, s0, 0)
   "st.s_prefetch_inst_pc_rel"(4, s0, 0)
 }

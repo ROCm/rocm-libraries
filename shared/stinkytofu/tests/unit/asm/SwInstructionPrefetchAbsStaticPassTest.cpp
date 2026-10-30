@@ -376,6 +376,33 @@ TEST_F(SwInstructionPrefetchAbsStaticPassTest, AboveP0_SiteBeforeGetpcBeforePref
     EXPECT_EQ(s, State::Done) << "burst instruction sequence not found in entry BB";
 }
 
+// The scalar getpc/add setup ends any replay group, so the burst needs no s_wait_xcnt and its
+// first prefetch directly follows s_addc_u32.
+TEST_F(SwInstructionPrefetchAbsStaticPassTest, AboveP0_BurstHasNoXcntWait) {
+    buildAboveP0Kernel(bb, arch);
+
+    auto pm = makePm(64);
+    pm.run(*func);
+
+    ASSERT_GT(countSPrefetchInst(*func), 0);
+    EXPECT_EQ(countInstructions(*bb, "s_wait_xcnt"), 0);
+
+    const char* previous = nullptr;
+    for (auto it = bb->begin(); it != bb->end(); ++it) {
+        const IRBase* n = it.getNodePtr();
+        if (n->getType() != IRBase::IRType::StinkyTofu) continue;
+        const StinkyInstruction& inst = *cast<StinkyInstruction>(n);
+        if (isPseudoInst(&inst)) continue;
+        const char* m = inst.getHwInstDesc() ? inst.getHwInstDesc()->mnemonic : nullptr;
+        if (m && std::strcmp(m, "s_prefetch_inst") == 0) {
+            ASSERT_NE(previous, nullptr);
+            EXPECT_STREQ(previous, "s_addc_u32");
+            break;
+        }
+        previous = m;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // gfx1250 hardware-entrypoint prologue
 // ---------------------------------------------------------------------------

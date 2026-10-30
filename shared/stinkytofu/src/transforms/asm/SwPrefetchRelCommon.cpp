@@ -22,6 +22,7 @@
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250ReplayGroup.hpp"
 #include "stinkytofu/transforms/asm/InstructionSizeCosting.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
@@ -31,116 +32,13 @@ using namespace stinkytofu;
 /// Grid constants `kSwPrefetchFirstGlobalByte` / `kSwPrefetchSpacingBytes` live in
 /// SwPrefetchRelCommon.hpp (128*255, then every 32*128).
 
-enum class SwReplayGroupKind {
-    None,
-    SMEM,
-    VMEM,
-    Other,
-};
-
-struct SwReplayState {
-    SwReplayGroupKind kind = SwReplayGroupKind::None;
-    bool hasMemory = false;
-
-    void clear() {
-        kind = SwReplayGroupKind::None;
-        hasMemory = false;
-    }
-};
-
-SwReplayGroupKind getSwReplayGroupKind(const StinkyInstruction& inst) {
-    if (isSMemLoad(inst) || isSMemStore(inst) || inst.is(InstFlag::IF_SMemAtomic))
-        return SwReplayGroupKind::SMEM;
-    if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isFLATLoad(inst) ||
-        isFLATStore(inst) || isFLATAtomic(inst) || isGLOBALLoad(inst) || isGLOBALStore(inst) ||
-        isGLOBALAtomic(inst))
-        return SwReplayGroupKind::VMEM;
-    if (isTensorLoad(inst)) return SwReplayGroupKind::Other;
-    return SwReplayGroupKind::None;
-}
-
-bool hasZeroWaitImmediate(const StinkyInstruction& inst) {
-    const auto& srcs = inst.getSrcRegs();
-    return srcs.size() == 1 && srcs.front().dataType == StinkyRegister::Type::LiteralInt &&
-           srcs.front().getLiteralInt() == 0;
-}
-
-bool isFullTranslationDrain(const StinkyInstruction& inst) {
-    switch (inst.getUnifiedOpcode()) {
-        case GFX::s_wait_xcnt:
-        case GFX::s_wait_loadcnt:
-        case GFX::s_wait_kmcnt:
-        case GFX::s_wait_dscnt:
-        case GFX::s_wait_loadcnt_dscnt:
-        case GFX::s_wait_tensorcnt:
-        case GFX::s_wait_storecnt:
-        case GFX::s_wait_storecnt_dscnt:
-        case GFX::s_wait_asynccnt:
-            return hasZeroWaitImmediate(inst);
-        default:
-            return false;
-    }
-}
-
-void updateSwReplayState(SwReplayState& state, const StinkyInstruction& inst) {
-    if (isPseudoInst(&inst)) return;
-
-    if (isFullTranslationDrain(inst)) {
-        state.clear();
-        return;
-    }
-
-    const SwReplayGroupKind kind = getSwReplayGroupKind(inst);
-    if (kind == SwReplayGroupKind::None) {
-        state.clear();
-        return;
-    }
-
-    if (state.hasMemory && state.kind != kind) state.clear();
-
-    if (kind == SwReplayGroupKind::Other) {
-        state.clear();
-        return;
-    }
-
-    state.kind = kind;
-    state.hasMemory = true;
-}
-
-SwReplayState replayStateBefore(BasicBlock& bb, IRList::iterator insertBefore) {
-    SwReplayState state;
-    for (IRList::iterator it = bb.begin(); it != insertBefore; ++it) {
-        IRBase* node = it.getNodePtr();
-        if (node->getType() != IRBase::IRType::StinkyTofu) continue;
-        updateSwReplayState(state, getStinkyInst(it));
-    }
-    return state;
-}
-
-std::optional<SwReplayGroupKind> firstRealGroupAtOrAfter(BasicBlock& bb,
-                                                         IRList::iterator insertBefore) {
-    for (IRList::iterator it = insertBefore; it != bb.end(); ++it) {
-        IRBase* node = it.getNodePtr();
-        if (node->getType() != IRBase::IRType::StinkyTofu) continue;
-        const StinkyInstruction& inst = getStinkyInst(it);
-        if (isPseudoInst(&inst)) continue;
-        return getSwReplayGroupKind(inst);
-    }
-    return std::nullopt;
-}
-
+/// BUG #20 (MI400-SPG §4.5.6.1): in xnack-replay mode XCNT must be 0 when an `s_prefetch_*`
+/// issues. A prefetch belongs to the SMEM group, so single-group hardware already drains XCNT when
+/// it follows any other group or a non-memory instruction; only an open SMEM group needs a wait.
+/// Gfx1250HazardPass rejects kernels that may enable multi-group replay.
 bool needsSwPrefetchXcntWait(BasicBlock& bb, IRList::iterator insertBefore) {
     if (!kSwPrefetchEmitXnackWait) return false;
-
-    const SwReplayState state = replayStateBefore(bb, insertBefore);
-    if (!state.hasMemory) return false;
-
-    const std::optional<SwReplayGroupKind> nextKind = firstRealGroupAtOrAfter(bb, insertBefore);
-    if (nextKind.has_value() && *nextKind != state.kind) {
-        return false;
-    }
-
-    return true;
+    return gfx1250::smemReplayGroupOpenBefore(bb, insertBefore);
 }
 
 /// **PC-rel chain after `s_getpc_b64`.**  The instruction records the address
@@ -217,7 +115,7 @@ int64_t insertSwPrefetchInstPcRelBefore(
     const HwInstDesc* pfMc = getMCIDByUOp(GFX::s_prefetch_inst_pc_rel, archId);
     if (pfMc == nullptr) return 0;
 
-    // XNACK safety: emit a wait only when the insertion site has an open same-kind replay group.
+    // XNACK safety: emit a wait only when an SMEM replay group reaches the insertion site.
     // Its bytes must join the walk so downstream placement and PC-relative offsets stay aligned.
     StinkyInstruction* xcntInst = nullptr;
     int xcntB = 0;

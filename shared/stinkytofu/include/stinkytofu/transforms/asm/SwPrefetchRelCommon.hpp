@@ -27,8 +27,9 @@ inline constexpr int32_t kSwPrefetchPcRelKlengthImm = 31;
 
 /// Debug/perf-only toggle: allow SW instruction prefetch to emit `s_wait_xcnt 0`
 /// for gfx1250 XNACK safety. Relative prefetch uses the hazard pass's single-group model and emits
-/// a wait only when the insertion site still has an open replay group. Absolute prefetch emits a
-/// scalar address setup before each burst, which is already a non-memory boundary.
+/// a wait only when an SMEM replay group reaches the insertion site, including across a
+/// fall-through block boundary. Absolute prefetch emits a scalar address setup before each burst,
+/// which is already a non-memory boundary.
 ///
 /// Intentionally NOT a ModuleOption / TensileLite parameter — purely a stinkytofu-internal knob
 /// for debugging and performance A/B testing. Flip to false to measure without the wait; when
