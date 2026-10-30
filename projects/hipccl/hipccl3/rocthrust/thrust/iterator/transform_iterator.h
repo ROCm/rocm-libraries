@@ -49,11 +49,11 @@
 #include <thrust/iterator/iterator_traits.h>
 
 #include _THRUST_STD_INCLUDE(__functional/identity.h)
+#include _THRUST_STD_INCLUDE(__functional/invoke.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_copy_assignable.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_copy_constructible.h)
 #include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
 #include _THRUST_STD_INCLUDE(__type_traits/remove_reference.h)
-#include _THRUST_STD_INCLUDE(__utility/declval.h)
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <iterator>
@@ -71,7 +71,7 @@ template <class UnaryFunc, class Iterator>
 struct transform_iterator_reference
 {
   // by default, dereferencing the iterator yields the same as the function.
-  using type = decltype(_THRUST_STD::declval<UnaryFunc>()(_THRUST_STD::declval<it_value_t<Iterator>>()));
+  using type = _THRUST_STD::invoke_result_t<UnaryFunc&, it_value_t<Iterator>>;
 };
 
 // for certain function objects, we need to tweak the reference type. Notably, identity functions must decay to values.
@@ -84,8 +84,8 @@ struct transform_iterator_reference<_THRUST_STD::identity, Iterator>
 template <typename Eval, class Iterator>
 struct transform_iterator_reference<functional::actor<Eval>, Iterator>
 {
-  using type = _THRUST_STD::remove_reference_t<decltype(_THRUST_STD::declval<functional::actor<Eval>>()(
-    _THRUST_STD::declval<it_value_t<Iterator>>()))>;
+  using type =
+    _THRUST_STD::remove_reference_t<_THRUST_STD::invoke_result_t<functional::actor<Eval>&, it_value_t<Iterator>>>;
 };
 
 // Type function to compute the iterator_adaptor instantiation to be used for transform_iterator
