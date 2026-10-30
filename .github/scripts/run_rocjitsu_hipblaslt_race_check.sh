@@ -345,7 +345,10 @@ validate_race_check_output() {
   local logging_log="$5"
   local failed=0
 
-  if [[ "${command_status}" -ne 0 ]]; then
+  if [[ "${command_status}" -eq 124 ]]; then
+    echo "${label} timed out (timeout(1) exit status 124)" >&2
+    failed=1
+  elif [[ "${command_status}" -ne 0 ]]; then
     echo "${label} command failed with status ${command_status}" >&2
     failed=1
   fi
