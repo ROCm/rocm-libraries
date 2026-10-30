@@ -373,10 +373,13 @@ namespace TensileLite
                             if(ranked[i] < solution_list.size())
                                 offered[ranked[i]] = true;
                         }
-                        if(ranker->blocksAny())
+                        // Neither a blocked kernel nor one whose guards deny
+                        // the problem fills a slot.
+                        if(ranker->blocksAny() || ranker->guardsAny())
                         {
                             for(size_t i = 0; i < solution_list.size(); i++)
-                                offered[i] = offered[i] || ranker->blocked(i);
+                                offered[i] = offered[i] || ranker->blocked(i)
+                                             || ranker->guardDenies(i, m, n);
                         }
                     }
 #endif
@@ -610,7 +613,8 @@ namespace TensileLite
                     tilewright_ranker->arch(),
                     true,
                     tilewright_ranker->blocklist(),
-                    tilewright_ranker->library());
+                    tilewright_ranker->library(),
+                    tilewright_ranker->guards());
                 pool.ranker->warnUnresolvedBlocklistNames();
             }
             catch(std::exception const& e)

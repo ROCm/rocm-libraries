@@ -21,6 +21,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -868,6 +869,18 @@ namespace TensileLite
      * whose name has its blocklistKey(): builds of TensileLite can spell the
      * name of one kernel differently, and a blocklist written from one build
      * still names the kernel in another.
+     *
+     * A model trained with kernel guards (tilewright::ModelInfo::kernel_guards)
+     * ships with `<stem>.tilewright.guards` next to its blocklist: per line a
+     * kernel name, a free size (M, the free size of A, or N, that of B) and a
+     * minimum. For such a model the ranker keeps a guarded kernel in its pool,
+     * also when the blocklist names it, but offers it only for problems whose
+     * free sizes reach every minimum of its guards; for any other problem it
+     * stands out of the ranking and of the analytical ranking that fills the
+     * remaining slots, as a blocked kernel does, so a candidate is served by
+     * its next member. A model without the flag never reads the guards: the
+     * blocklist leaves its kernels out whole. A flagged model whose guards file
+     * is missing or malformed is unusable.
      */
     class TilewrightRanker
     {
@@ -875,11 +888,27 @@ namespace TensileLite
         // The kernel names a blocklist holds; null for a library without one.
         using Blocklist = std::shared_ptr<const std::unordered_set<std::string>>;
 
+        // A kernel a guards file offers only for problems whose free size
+        // `free` (0: M, the free size of A; 1: N, that of B) is at least
+        // `minimum`.
+        struct Guard
+        {
+            std::string name;
+            int         free    = 0;
+            size_t      minimum = 0;
+        };
+        // The guards a guards file holds, in file order; null for a library
+        // without one.
+        using Guards = std::shared_ptr<const std::vector<Guard>>;
+        // Per pool position, the least M and N its guards admit (0: no guard).
+        using GuardBounds = std::array<size_t, 2>;
+
         // Throws std::invalid_argument for a null model, an invalid attribute
         // name, or a launch model other than the one the model was trained with.
         // `blocked` flags the pool positions `blocklist` left out of `configs`,
-        // `unresolved` lists its names that match no kernel of the pool, and
-        // `library` names the library for warnings.
+        // `unresolved` lists its names that match no kernel of the pool,
+        // `library` names the library for warnings, and `guarded` holds per
+        // pool position the least free sizes `guards` admit (empty: none).
         TilewrightRanker(tilewright::ModelPtr                           model,
                          std::vector<tilewright::Config>                configs,
                          std::shared_ptr<const tilewright::LaunchModel> launch     = nullptr,
@@ -887,7 +916,9 @@ namespace TensileLite
                          Blocklist                                      blocklist  = nullptr,
                          std::vector<bool>                              blocked    = {},
                          std::vector<std::string>                       unresolved = {},
-                         std::string                                    library    = {})
+                         std::string                                    library    = {},
+                         Guards                                         guards     = nullptr,
+                         std::vector<GuardBounds>                       guarded    = {})
             : m_candidates(std::move(model),
                            std::move(configs),
                            tilewright::PoolOptions{.tie_break = tilewright::TieBreak::PoolOrder,
@@ -898,7 +929,14 @@ namespace TensileLite
             , m_unresolved(std::move(unresolved))
             , m_library(std::move(library))
             , m_launchModel(launch ? launch->id() : std::string())
+            , m_guards(std::move(guards))
+            , m_guarded(std::move(guarded))
         {
+            for(size_t i = 0; i < m_guarded.size(); i++)
+            {
+                if(m_guarded[i][0] != 0 || m_guarded[i][1] != 0)
+                    m_guardedPositions.push_back(i);
+            }
         }
 
         // Looks up the stem of `logicFile` in the tilewright_index of its
@@ -987,11 +1025,64 @@ namespace TensileLite
             return names;
         }
 
+        // The guards file of the stem of `logicFile` in the directory of its
+        // tilewright_index: every line but blank ones and those that start with
+        // '#' holds a kernel name, a free size (M or N) and a minimum of at
+        // least 2, separated by blanks; a name and free size appear once. Null
+        // when there is no such file; throws std::runtime_error when it cannot
+        // be read or a line is malformed.
+        static Guards loadGuards(std::string const& logicFile)
+        {
+            std::string           dir  = ".";
+            std::string const     stem = logicStem(logicFile, &dir);
+            std::filesystem::path path = std::filesystem::path(dir) / (stem + GuardsSuffix);
+            std::error_code       ec;
+            if(!std::filesystem::exists(path, ec))
+                return nullptr;
+            std::ifstream in(path);
+            if(!std::filesystem::is_regular_file(path, ec) || !in)
+                throw std::runtime_error("cannot read the guards " + path.string());
+            auto                                  guards = std::make_shared<std::vector<Guard>>();
+            std::set<std::pair<std::string, int>> seen;
+            std::string                           line;
+            for(size_t number = 1; std::getline(in, line); number++)
+            {
+                size_t const first = line.find_first_not_of(" \t\r");
+                if(first == std::string::npos || line[first] == '#')
+                    continue;
+                std::istringstream fields(line);
+                std::string        name, free, minimum, extra;
+                fields >> name >> free >> minimum;
+                Guard guard{name, free == "N" ? 1 : 0, 0};
+                bool  valid = !minimum.empty() && minimum.size() <= 9 && !(fields >> extra)
+                             && (free == "M" || free == "N");
+                for(char const c : minimum)
+                    valid = valid && c >= '0' && c <= '9';
+                if(valid)
+                    guard.minimum = std::stoul(minimum);
+                if(!valid || guard.minimum < 2)
+                    throw std::runtime_error("the guards " + path.string() + " line "
+                                             + std::to_string(number)
+                                             + " is not `<kernel name> <M or N> <minimum of at "
+                                               "least 2>`");
+                if(!seen.emplace(blocklistKey(guard.name), guard.free).second)
+                    throw std::runtime_error("the guards " + path.string() + " line "
+                                             + std::to_string(number) + " guards the " + free
+                                             + " of " + guard.name + " again");
+                guards->push_back(std::move(guard));
+            }
+            if(in.bad())
+                throw std::runtime_error("cannot read the guards " + path.string());
+            return guards;
+        }
+
         // A ranker over `poolSize` kernels of `arch` whose kernel i is
-        // solutionAt(i), without the kernels `blocklist` names (blocklistKey()),
-        // with its per-cell data built now when `prepare` is set and
-        // TENSILE_TILEWRIGHT_PREPARE does not turn that off. `library` names the
-        // library in warnings. Throws what the CandidateSet throws.
+        // solutionAt(i), without the kernels `blocklist` names (blocklistKey())
+        // unless `guards` names them too, and with the kernels `guards` names
+        // offered only for problems at or above their guards, with its per-cell
+        // data built now when `prepare` is set and TENSILE_TILEWRIGHT_PREPARE
+        // does not turn that off. `library` names the library in warnings.
+        // Throws what the CandidateSet throws.
         template <typename SolutionAt>
         static std::shared_ptr<const TilewrightRanker> make(tilewright::ModelPtr model,
                                                             size_t               poolSize,
@@ -999,13 +1090,15 @@ namespace TensileLite
                                                             std::string const&   arch,
                                                             bool                 prepare = true,
                                                             Blocklist          blocklist = nullptr,
-                                                            std::string const& library   = {})
+                                                            std::string const& library   = {},
+                                                            Guards             guards    = nullptr)
         {
             using MySolution = typename std::decay_t<decltype(*solutionAt(0))>;
 
             auto const                      names = tilewright::attribute_names(*model);
             std::vector<tilewright::Config> configs;
             std::vector<bool>               blocked;
+            std::vector<GuardBounds>        guarded;
             // The keys of the blocklist's names, each with whether it matched a
             // kernel of the pool.
             std::unordered_map<std::string, bool> keys;
@@ -1014,15 +1107,34 @@ namespace TensileLite
                 for(auto const& name : *blocklist)
                     keys.emplace(blocklistKey(name), false);
             }
+            // The keys of the guards' names, each with the least M and N they
+            // admit.
+            std::unordered_map<std::string, GuardBounds> guardKeys;
+            if(guards)
+            {
+                for(auto const& guard : *guards)
+                {
+                    size_t& bound = guardKeys[blocklistKey(guard.name)][guard.free];
+                    bound         = std::max(bound, guard.minimum);
+                }
+            }
             configs.reserve(poolSize);
             for(size_t i = 0; i < poolSize; i++)
             {
-                if(!keys.empty())
+                if(!keys.empty() || !guardKeys.empty())
                 {
-                    auto const key = keys.find(blocklistKey(solutionAt(i)->name()));
+                    std::string const name  = blocklistKey(solutionAt(i)->name());
+                    auto const        guard = guardKeys.find(name);
+                    auto const        key   = keys.find(name);
                     if(key != keys.end())
-                    {
                         key->second = true;
+                    if(guard != guardKeys.end())
+                    {
+                        guarded.resize(poolSize);
+                        guarded[i] = guard->second;
+                    }
+                    else if(key != keys.end())
+                    {
                         blocked.resize(poolSize);
                         blocked[i] = true;
                         continue;
@@ -1067,7 +1179,9 @@ namespace TensileLite
                                                                    std::move(blocklist),
                                                                    std::move(blocked),
                                                                    std::move(unresolved),
-                                                                   library);
+                                                                   library,
+                                                                   std::move(guards),
+                                                                   std::move(guarded));
             if(prepare && Debug::Instance().tilewrightPrepare())
             {
                 auto const start = std::chrono::steady_clock::now();
@@ -1084,9 +1198,10 @@ namespace TensileLite
 
         // Looks up the stem of `logicFile` in the tilewright_index of its
         // directory; pool position i is solutions[i], unless the stem's
-        // blocklist names it. Returns nullptr when no model is listed for the
-        // stem, or, with a warning, when the listed model or the blocklist
-        // cannot be used.
+        // blocklist names it, and a model trained with kernel guards is served
+        // with the stem's guards. Returns nullptr when no model is listed for
+        // the stem, or, with a warning, when the listed model, the blocklist or
+        // the guards a flagged model needs cannot be used.
         template <typename MySolution>
         static std::shared_ptr<const TilewrightRanker>
             load(std::string const&                                              logicFile,
@@ -1110,6 +1225,15 @@ namespace TensileLite
             std::string error;
             try
             {
+                Guards guards;
+                if(tilewright::describe(*model).kernel_guards)
+                {
+                    guards = loadGuards(logicFile);
+                    if(!guards)
+                        throw std::runtime_error(
+                            "it was trained with kernel guards and there is no "
+                            + logicStem(logicFile) + GuardsSuffix);
+                }
                 return make(
                     std::move(model),
                     solutions.size(),
@@ -1119,7 +1243,8 @@ namespace TensileLite
                     logicArch(logicFile),
                     prepare,
                     loadBlocklist(logicFile),
-                    logicStem(logicFile));
+                    logicStem(logicFile),
+                    std::move(guards));
             }
             catch(std::exception const& e)
             {
@@ -1279,9 +1404,14 @@ namespace TensileLite
                 .lds_capacity = hardware.lds_capacity,
                 .L2_capacity  = hardware.L2_capacity,
             };
-            size_t const depth   = numSolutions < 0 ? std::numeric_limits<size_t>::max()
-                                                    : static_cast<size_t>(numSolutions);
-            auto const   context = executionContext(problem);
+            // The configs whose guards deny the problem stand out of the
+            // ranking: ask for as many more.
+            size_t const denied = guardDenied(m, n);
+            size_t       depth  = numSolutions < 0 ? std::numeric_limits<size_t>::max()
+                                                   : static_cast<size_t>(numSolutions);
+            if(denied != 0 && depth != std::numeric_limits<size_t>::max())
+                depth += denied;
+            auto const context = executionContext(problem);
 
             static thread_local std::vector<tilewright::Result> ranked;
             std::vector<size_t>                                 positions;
@@ -1300,8 +1430,14 @@ namespace TensileLite
                 {
                     if(!r.scored)
                         break;
-                    positions.push_back(configs[r.config_index].index);
+                    size_t const position = configs[r.config_index].index;
+                    if(denied != 0 && guardDenies(position, m, n))
+                        continue;
+                    positions.push_back(position);
                 }
+                if(denied != 0 && !everyScored && numSolutions >= 0
+                   && positions.size() > static_cast<size_t>(numSolutions))
+                    positions.resize(static_cast<size_t>(numSolutions));
             }
             catch(std::exception const& e)
             {
@@ -1405,6 +1541,38 @@ namespace TensileLite
             return !m_blocked.empty();
         }
 
+        // The guards the ranker's pool was built with; null without them (a
+        // model trained without kernel guards).
+        Guards const& guards() const noexcept
+        {
+            return m_guards;
+        }
+
+        // Whether the guards of pool position `position` deny a problem whose
+        // free sizes are `m` (of A) and `n` (of B).
+        bool guardDenies(size_t position, size_t m, size_t n) const noexcept
+        {
+            if(position >= m_guarded.size())
+                return false;
+            auto const& bounds = m_guarded[position];
+            return m < bounds[0] || n < bounds[1];
+        }
+
+        // How many of the pool's kernels their guards deny for free sizes `m`
+        // and `n`.
+        size_t guardDenied(size_t m, size_t n) const noexcept
+        {
+            size_t denied = 0;
+            for(size_t const position : m_guardedPositions)
+                denied += guardDenies(position, m, n) ? 1 : 0;
+            return denied;
+        }
+
+        bool guardsAny() const noexcept
+        {
+            return !m_guardedPositions.empty();
+        }
+
         // The blocklist names that match no kernel of the pool, sorted.
         std::vector<std::string> const& unresolvedBlocklistNames() const noexcept
         {
@@ -1438,6 +1606,7 @@ namespace TensileLite
         }
 
         static constexpr char const* BlocklistSuffix = ".tilewright.blocklist";
+        static constexpr char const* GuardsSuffix    = ".tilewright.guards";
 
         // The name tokens, an abbreviated parameter and its value, that builds
         // of TensileLite spell differently for one kernel: IA (InterleaveAlpha),
@@ -1660,6 +1829,9 @@ namespace TensileLite
         std::vector<std::string>                 m_unresolved;
         std::string                              m_library;
         std::string                              m_launchModel;
+        Guards                                   m_guards;
+        std::vector<GuardBounds>                 m_guarded;
+        std::vector<size_t>                      m_guardedPositions;
         mutable std::mutex                       m_reportedMutex;
         mutable std::set<std::pair<size_t, int>> m_reported;
     };

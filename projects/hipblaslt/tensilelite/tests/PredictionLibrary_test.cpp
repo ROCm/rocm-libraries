@@ -2359,6 +2359,303 @@ TEST(PredictionLibraryTest, TilewrightWarnsAboutBlocklistNamesTheBankPoolLacks)
     EXPECT_EQ(pool.ranker->unresolvedBlocklistNames(), (std::vector<std::string>{"probe_gone"}));
     EXPECT_EQ(configPositions(*pool.ranker), (std::vector<size_t>{1, 2, 4}));
 }
+
+namespace
+{
+    // MLREC_v3 serving flag of a model trained with kernel guards.
+    constexpr std::uint32_t TrainedWithGuards = 0x800;
+
+    // An M x N x 64 GEMM of the probe kernels' types, neither operand
+    // transposed.
+    ContractionProblemGemm gemmOf(size_t m, size_t n)
+    {
+        auto problem
+            = ContractionProblemGemm::GEMM(false, false, m, n, 64, m, 64, m, 1.0, false, 1);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        return problem;
+    }
+
+    // `text` as the guards of TensileLibrary_Probe_gfx950 in `dir`.
+    void writeGuards(ScratchDir const& dir, std::string const& text)
+    {
+        std::ofstream(dir.path() / "TensileLibrary_Probe_gfx950.tilewright.guards") << text;
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightGuardsAreReadNextToTheIndex)
+{
+    ScratchDir        dir("tensilelite_tilewright_guards");
+    std::string const logic = (dir.path() / "TensileLibrary_Probe_gfx950.dat").string();
+    EXPECT_EQ(TilewrightRanker::loadGuards(logic), nullptr);
+
+    writeGuards(dir,
+                "# kernels offered only from a free size on\n\n   \nCijk_A M 4\n"
+                "  Cijk_B\tN\t16 \r\nCijk_A N 2\n#Cijk_C M 4\n");
+    auto const guards = TilewrightRanker::loadGuards(logic);
+    ASSERT_NE(guards, nullptr);
+    ASSERT_EQ(guards->size(), 3u);
+    EXPECT_EQ((*guards)[0].name, "Cijk_A");
+    EXPECT_EQ((*guards)[0].free, 0);
+    EXPECT_EQ((*guards)[0].minimum, 4u);
+    EXPECT_EQ((*guards)[1].name, "Cijk_B");
+    EXPECT_EQ((*guards)[1].free, 1);
+    EXPECT_EQ((*guards)[1].minimum, 16u);
+    EXPECT_EQ((*guards)[2].name, "Cijk_A");
+    EXPECT_EQ((*guards)[2].free, 1);
+    EXPECT_EQ((*guards)[2].minimum, 2u);
+    EXPECT_EQ(
+        TilewrightRanker::loadGuards((dir.path() / "TensileLibrary_Other_gfx950.dat").string()),
+        nullptr);
+
+    for(std::string const malformed : {"Cijk_A M\n",
+                                       "Cijk_A\n",
+                                       "Cijk_A K 4\n",
+                                       "Cijk_A m 4\n",
+                                       "Cijk_A M 1\n",
+                                       "Cijk_A M 0\n",
+                                       "Cijk_A M -4\n",
+                                       "Cijk_A M 4x\n",
+                                       "Cijk_A M four\n",
+                                       "Cijk_A M 1234567890\n",
+                                       "Cijk_A M 4 8\n",
+                                       "Cijk_A M 4\nCijk_A M 8\n",
+                                       "Cijk_A_PKA1 N 4\nCijk_A_PKA0 N 8\n"})
+    {
+        writeGuards(dir, malformed);
+        EXPECT_THROW(TilewrightRanker::loadGuards(logic), std::runtime_error) << malformed;
+    }
+
+    std::filesystem::create_directory(dir.path() / "TensileLibrary_Dir_gfx950.tilewright.guards");
+    EXPECT_THROW(
+        TilewrightRanker::loadGuards((dir.path() / "TensileLibrary_Dir_gfx950.dat").string()),
+        std::runtime_error);
+}
+
+TEST(PredictionLibraryTest, TilewrightOffersAGuardedKernelOnlyAtOrAboveItsGuard)
+{
+    auto const device = makeGfx950Device();
+    for(auto const& [free, guards] :
+        std::vector<std::pair<int, std::string>>{{0, "probe_33 M 4\n"}, {1, "probe_33 N 4\n"}})
+    {
+        SCOPED_TRACE(guards);
+        // The blocklist names 33, as the sidecar of a model trained with the
+        // guard does: a model with the flag narrows it to the guard.
+        SolutionMap<ContractionSolution>    solutions;
+        ScratchDir                          dir("tensilelite_tilewright_guarded");
+        ContractionProblemPredictionLibrary lib;
+        writeGuards(dir, guards);
+        loadBlocked(dir, {"probe_33"}, solutions, lib, TrainedWithGuards);
+        ASSERT_NE(lib.tilewright_ranker, nullptr);
+        auto const& ranker = *lib.tilewright_ranker;
+        EXPECT_EQ(configPositions(ranker), (std::vector<size_t>{0, 1, 2}));
+        EXPECT_FALSE(ranker.blocked(2));
+        EXPECT_TRUE(ranker.guardsAny());
+        EXPECT_TRUE(ranker.unresolvedBlocklistNames().empty());
+
+        // A model without the flag never reads the guards: the blocklist
+        // leaves 33 out whole.
+        SolutionMap<ContractionSolution>    plainSolutions;
+        ScratchDir                          plainDir("tensilelite_tilewright_guards_unflagged");
+        ContractionProblemPredictionLibrary plain;
+        writeGuards(plainDir, guards);
+        loadBlocked(plainDir, {"probe_33"}, plainSolutions, plain);
+        ASSERT_NE(plain.tilewright_ranker, nullptr);
+        EXPECT_EQ(configPositions(*plain.tilewright_ranker), (std::vector<size_t>{0, 1}));
+        EXPECT_TRUE(plain.tilewright_ranker->blocked(2));
+        EXPECT_FALSE(plain.tilewright_ranker->guardsAny());
+        EXPECT_EQ(plain.tilewright_ranker->guards(), nullptr);
+
+        for(size_t m = 1; m <= 8; m++)
+        {
+            for(size_t n = 1; n <= 8; n++)
+            {
+                SCOPED_TRACE(std::to_string(m) + " x " + std::to_string(n));
+                auto const problem  = gemmOf(m, n);
+                bool const admitted = (free == 0 ? m : n) >= 4;
+                EXPECT_EQ(ranker.guardDenies(2, m, n), !admitted);
+                EXPECT_EQ(ranker.guardDenied(m, n), admitted ? 0u : 1u);
+                auto const ranked = ranker.rank(problem, device, -1);
+                EXPECT_EQ(ranked.size(), admitted ? 3u : 2u);
+                EXPECT_EQ(std::count(ranked.begin(), ranked.end(), size_t{2}), admitted ? 1 : 0);
+                for(int k = 1; k <= 3; k++)
+                {
+                    auto top = ranker.rank(problem, device, k);
+                    EXPECT_EQ(top.size(), std::min<size_t>(k, ranked.size())) << k;
+                    EXPECT_TRUE(std::equal(top.begin(), top.end(), ranked.begin())) << k;
+                }
+                // Below the guard the analytical ranking that fills the
+                // remaining slots does not offer 33 either.
+                auto const served = solutionIndices(lib.findTopSolutions(problem, device, 3));
+                EXPECT_EQ(served.size(), admitted ? 3u : 2u);
+                EXPECT_EQ(std::count(served.begin(), served.end(), 33), admitted ? 1 : 0);
+                auto const whole = solutionIndices(plain.findTopSolutions(problem, device, 3));
+                EXPECT_EQ(whole.size(), 2u);
+                EXPECT_EQ(std::count(whole.begin(), whole.end(), 33), 0);
+            }
+        }
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightServesTheNextMemberOfACandidateWhoseGuardDeniesItsFirst)
+{
+    // 31 and 32 are one candidate (keyTable); a guard of 31 hands the
+    // candidate to 32 below it.
+    auto const                          device = makeGfx950Device();
+    SolutionMap<ContractionSolution>    plainSolutions;
+    ScratchDir                          plainDir("tensilelite_tilewright_guard_unblocked");
+    ContractionProblemPredictionLibrary plain;
+    loadBlocked(plainDir, {}, plainSolutions, plain);
+    ASSERT_NE(plain.tilewright_ranker, nullptr);
+    EXPECT_FALSE(plain.tilewright_ranker->guardsAny());
+
+    SolutionMap<ContractionSolution>    solutions;
+    ScratchDir                          dir("tensilelite_tilewright_guarded_member");
+    ContractionProblemPredictionLibrary lib;
+    writeGuards(dir, "probe_31 M 4\n");
+    loadBlocked(dir, {"probe_31"}, solutions, lib, TrainedWithGuards);
+    ASSERT_NE(lib.tilewright_ranker, nullptr);
+
+    for(size_t m = 1; m <= 8; m++)
+    {
+        SCOPED_TRACE(m);
+        auto const problem = gemmOf(m, 256);
+        auto const all     = plain.tilewright_ranker->rank(problem, device, -1);
+        ASSERT_EQ(all.size(), 3u);
+        auto const at31 = std::find(all.begin(), all.end(), size_t{0});
+        ASSERT_NE(at31, all.end());
+        EXPECT_EQ(*(at31 + 1), size_t{1}) << "32 follows 31, its candidate's first member";
+        std::vector<size_t> expected;
+        for(size_t position : all)
+            if(m >= 4 || position != 0)
+                expected.push_back(position);
+        EXPECT_EQ(lib.tilewright_ranker->rank(problem, device, -1), expected);
+        auto const top = solutionIndices(lib.findTopSolutions(problem, device, 1));
+        ASSERT_EQ(top.size(), 1u);
+        EXPECT_EQ(top[0], lib.solution_list[expected[0]].first);
+        if(*all.begin() == 0)
+            EXPECT_EQ(top[0], m >= 4 ? 31 : 32);
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightAsksForAsManyMoreKernelsAsTheGuardsDeny)
+{
+    // Whichever kernel ranks first at M = 2, guarded on M: a request for k
+    // kernels still gets the next k below the guard.
+    auto const                          device = makeGfx950Device();
+    SolutionMap<ContractionSolution>    plainSolutions;
+    ScratchDir                          plainDir("tensilelite_tilewright_guard_depth_plain");
+    ContractionProblemPredictionLibrary plain;
+    loadBlocked(plainDir, {}, plainSolutions, plain);
+    ASSERT_NE(plain.tilewright_ranker, nullptr);
+    auto const first = plain.tilewright_ranker->rank(gemmOf(2, 256), device, 1);
+    ASSERT_EQ(first.size(), 1u);
+    std::string const top = "probe_" + std::to_string(plain.solution_list[first[0]].first);
+
+    SolutionMap<ContractionSolution>    solutions;
+    ScratchDir                          dir("tensilelite_tilewright_guard_depth");
+    ContractionProblemPredictionLibrary lib;
+    writeGuards(dir, top + " M 4\n");
+    loadBlocked(dir, {top}, solutions, lib, TrainedWithGuards);
+    ASSERT_NE(lib.tilewright_ranker, nullptr);
+    for(size_t m : {1, 2, 3, 4, 8})
+    {
+        SCOPED_TRACE(m);
+        auto const          problem = gemmOf(m, 256);
+        auto const          all     = plain.tilewright_ranker->rank(problem, device, -1);
+        std::vector<size_t> expected;
+        for(size_t position : all)
+            if(m >= 4 || position != first[0])
+                expected.push_back(position);
+        for(int k = 1; k <= 3; k++)
+        {
+            std::vector<size_t> const want(expected.begin(),
+                                           expected.begin() + std::min<size_t>(k, expected.size()));
+            EXPECT_EQ(lib.tilewright_ranker->rank(problem, device, k), want) << k;
+        }
+        auto const served = solutionIndices(lib.findTopSolutions(problem, device, 1));
+        ASSERT_EQ(served.size(), 1u);
+        EXPECT_EQ(served[0], lib.solution_list[expected[0]].first);
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightRefusesAGuardedModelWithoutUsableGuards)
+{
+    // Missing, malformed and unreadable guards make a flagged model
+    // unusable; a model without the flag never reads them, and its
+    // blocklist leaves 33 out whole.
+    for(std::string const guards : {std::string(), std::string("probe_33 M 4\nprobe_33 M 1\n")})
+    {
+        for(std::uint32_t const flags : {TrainedWithGuards, 0u})
+        {
+            SCOPED_TRACE(guards + " flags " + std::to_string(flags));
+            SolutionMap<ContractionSolution>    solutions;
+            ScratchDir                          dir("tensilelite_tilewright_bad_guards");
+            ContractionProblemPredictionLibrary lib;
+            if(!guards.empty())
+                writeGuards(dir, guards);
+            ::testing::internal::CaptureStderr();
+            loadBlocked(dir, {"probe_33"}, solutions, lib, flags);
+            std::string const warning = ::testing::internal::GetCapturedStderr();
+            if(flags == 0)
+            {
+                ASSERT_NE(lib.tilewright_ranker, nullptr);
+                EXPECT_EQ(warning, "");
+                EXPECT_TRUE(lib.tilewright_ranker->blocked(2));
+                EXPECT_FALSE(lib.tilewright_ranker->guardsAny());
+                continue;
+            }
+            EXPECT_EQ(lib.tilewright_ranker, nullptr);
+            EXPECT_NE(warning.find("ranking with origami"), std::string::npos) << warning;
+            EXPECT_NE(warning.find(guards.empty()
+                                       ? "trained with kernel guards and there is no "
+                                         "TensileLibrary_Probe_gfx950.tilewright.guards"
+                                       : "line 2 is not `<kernel name> <M or N> <minimum"),
+                      std::string::npos)
+                << warning;
+        }
+    }
+
+    SolutionMap<ContractionSolution> solutions;
+    ScratchDir                       dir("tensilelite_tilewright_guards_directory");
+    std::filesystem::create_directory(dir.path() / "TensileLibrary_Probe_gfx950.tilewright.guards");
+    ContractionProblemPredictionLibrary lib;
+    ::testing::internal::CaptureStderr();
+    loadBlocked(dir, {"probe_33"}, solutions, lib, TrainedWithGuards);
+    std::string const warning = ::testing::internal::GetCapturedStderr();
+    EXPECT_EQ(lib.tilewright_ranker, nullptr);
+    EXPECT_NE(warning.find("cannot read the guards"), std::string::npos) << warning;
+}
+
+TEST(PredictionLibraryTest, TilewrightGuardsTheBankPoolToo)
+{
+    ScopedTilewrightBank                unset(nullptr);
+    SolutionMap<ContractionSolution>    solutions;
+    ScratchDir                          dir("tensilelite_tilewright_guarded_bank");
+    ContractionProblemPredictionLibrary lib;
+    writeGuards(dir, "probe_22 M 4\n");
+    loadBlocked(dir, {"probe_22"}, solutions, lib, TrainedOnBank | TrainedWithGuards);
+    ASSERT_NE(lib.tilewright_bank, nullptr);
+    setBankSources(lib, {named(withTile(21, 128, 64)), named(withTile(22, 256, 64))});
+
+    auto const device = makeGfx950Device();
+    for(size_t m : {1, 2, 3, 4, 8})
+    {
+        SCOPED_TRACE(m);
+        auto top = solutionIndices(lib.findTopSolutions(gemmOf(m, 256), device, 5));
+        std::sort(top.begin(), top.end());
+        EXPECT_EQ(top,
+                  m >= 4 ? (std::vector<int>{21, 22, 31, 32, 33})
+                         : (std::vector<int>{21, 31, 32, 33}));
+    }
+    auto const& pool = builtPool(lib, device);
+    ASSERT_NE(pool.ranker, nullptr);
+    EXPECT_EQ(pool.ranker->guards(), lib.tilewright_ranker->guards());
+    EXPECT_EQ(configPositions(*pool.ranker), (std::vector<size_t>{0, 1, 2, 3, 4}));
+    EXPECT_FALSE(pool.ranker->blocked(4));
+    EXPECT_TRUE(pool.ranker->guardDenies(4, 3, 256));
+    EXPECT_FALSE(pool.ranker->guardDenies(4, 4, 256));
+}
 #endif
 
 #if defined(TILEWRIGHT_TEST_MODEL_WRITER)

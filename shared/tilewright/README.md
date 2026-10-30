@@ -66,6 +66,22 @@ listed is no candidate, and `top1_index` counts the kernels that remain, as
 the training pipeline's pools do. A blocklist that cannot be read makes the
 model unusable for the library.
 
+A model trained with kernel guards (`kernel_guards` in `describe`, MLREC_v3
+serving flag bit 11) ships with `<stem>.tilewright.guards` next to its
+blocklist: per line a kernel name, a free size (`M`, the free size of A, or
+`N`, that of B) and a minimum of at least 2, separated by blanks, after
+comment lines that start with `#`; a kernel and free size appear once, and
+names match as in the blocklist. For such a model TensileLite keeps a guarded
+kernel in its pools, also when the blocklist names it, and offers it only for
+problems whose free sizes reach every minimum of its guards; for any other
+problem it is left out of the ranking and of the analytical ranking that fills
+the remaining slots, as a listed kernel is, and a view key whose first member
+it is is served by its next member. A model without the flag never reads the
+guards, so the blocklist leaves those kernels out whole, and an engine that
+predates the flag refuses a flagged model. A flagged model whose guards file
+is missing, cannot be read or has a malformed line is unusable for the
+library: hipBLASLt ranks with Origami and warns.
+
 ## Layout
 
 | Path | Contents |
@@ -683,8 +699,9 @@ so their models are rows of the subtree's index. A directory holds one
 `.tilewright.bin` per trained library, named after the logic file it was
 trained on (so a model shared by several trees keeps the name of the tree it
 was trained for), the libraries' blocklists (`<stem>.tilewright.blocklist`,
-see above) and a `tilewright_index` that maps Tensile library stems to model
-files:
+see above), the guards of the models trained with them
+(`<stem>.tilewright.guards`) and a `tilewright_index` that maps Tensile library
+stems to model files:
 
 ```
 # comment

@@ -33,7 +33,7 @@ ctest --test-dir build --output-on-failure
 ```
 
 - Tests are on by default for a standalone build. Catch2 3 comes from `find_package` or, with `TILEWRIGHT_ENABLE_FETCH=ON` (default), from FetchContent.
-- The suite writes its own synthetic models. Real-model tests load every shipped model: hipBLASLt keeps them, with their `tilewright_index` and blocklists, in `projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/<arch>/<subtree>/Tilewright/` (`TILEWRIGHT_TEST_WEIGHTS_DIR` names another root).
+- The suite writes its own synthetic models. Real-model tests load every shipped model: hipBLASLt keeps them, with their `tilewright_index`, blocklists and guards, in `projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/<arch>/<subtree>/Tilewright/` (`TILEWRIGHT_TEST_WEIGHTS_DIR` names another root).
 - Run the suite under sanitizers after touching the loader, caches or threading: configure with `-DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"` (and separately `-fsanitize=thread`).
 - Python bindings: `pip install shared/tilewright/python`, or build with `-DTILEWRIGHT_ENABLE_PYTHON=ON` and run the `tilewright-python` ctest entry.
 - The selection-time options `TILEWRIGHT_LEVER_PREFETCH` and `TILEWRIGHT_LEVER_MEMO` are on by default and never change a pick; configure with `-DTILEWRIGHT_LEVER_PREFETCH=OFF` or `-DTILEWRIGHT_LEVER_MEMO=OFF` to build without one (Invariants, Selection-time options).
