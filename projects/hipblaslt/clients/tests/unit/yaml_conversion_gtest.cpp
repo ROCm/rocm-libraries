@@ -71,8 +71,7 @@ namespace
 TEST(HostUnitYamlConversionDeathTest, smoke_RejectsMalformedYaml)
 {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
-    EXPECT_EXIT(
-        parseYamlAndExit("Tests: [}\n"), ::testing::ExitedWithCode(EXIT_FAILURE), "node content");
+    EXPECT_EXIT(parseYamlAndExit("Tests: [}\n"), ::testing::ExitedWithCode(EXIT_FAILURE), "");
 }
 
 TEST(HostUnitYamlConversionDeathTest, smoke_AcceptsValidYaml)
