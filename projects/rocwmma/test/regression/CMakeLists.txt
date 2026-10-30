@@ -114,6 +114,8 @@ if(REGRESSION_TEST_SOURCES)
   file(APPEND "${INSTALL_REGRESSION_TEST_FILE}" "add_test(\"regression_tests\" \"../../${EXE_NAME}\")\n")
   file(APPEND "${INSTALL_REGRESSION_TEST_FILE}" "set_tests_properties(\"regression_tests\" PROPERTIES SKIP_REGULAR_EXPRESSION \"no ROCm-capable device;unsupported host device\")\n")
 
+    add_subdirectory(compile_fail)
+
     message(STATUS "Regression tests: Enabled (${TEST_TARGET})")
 else()
     message(STATUS "Regression tests: No test files found in ${CMAKE_CURRENT_SOURCE_DIR}")
