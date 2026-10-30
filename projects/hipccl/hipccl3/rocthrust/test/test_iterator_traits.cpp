@@ -4,6 +4,7 @@
 
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
+#include <thrust/host_vector.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/transform_iterator.h>
@@ -24,6 +25,19 @@ TEST(IteratorTraitsTests, IteratorSystemPropagationAnySystem)
 
   [[maybe_unused]] auto zip_it = thrust::make_zip_iterator(counting_it, transform_it);
   static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(zip_it)>, thrust::any_system_tag>);
+}
+
+TEST(IteratorTraitsTests, IteratorSystemPropagationHostSystem)
+{
+  [[maybe_unused]] auto h_vec    = thrust::host_vector<int>{};
+  [[maybe_unused]] auto h_vec_it = h_vec.begin();
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(h_vec_it)>, thrust::host_system_tag>);
+
+  [[maybe_unused]] auto transform_it = thrust::make_transform_iterator(h_vec_it, thrust::square<>{});
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(transform_it)>, thrust::host_system_tag>);
+
+  [[maybe_unused]] auto zip_it = thrust::make_zip_iterator(h_vec_it, transform_it);
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(zip_it)>, thrust::host_system_tag>);
 }
 
 TEST(IteratorTraitsTests, IteratorSystemPropagationDeviceSystem)
