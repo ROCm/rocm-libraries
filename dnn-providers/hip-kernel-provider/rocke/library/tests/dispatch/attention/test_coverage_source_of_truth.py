@@ -202,5 +202,57 @@ class TestSdpaUnifiedBindingNeverOverclaimsCoverage(unittest.TestCase):
                 )
 
 
+class TestSdpaDenseBindingNeverOverclaimsCoverage(unittest.TestCase):
+    """The dense twin of the test above: every request
+    ``dispatch.sdpa.bind_dense.sdpa_dense_admits`` accepts is accepted by a
+    dense candidate's own ``admits()`` on the translated request, pinned to
+    that candidate (the dense candidates are opt-in)."""
+
+    def test_every_sdpa_admit_is_a_dense_candidate_admit(self):
+        from rocke.dispatch.core import opt_in_probe
+
+        from dispatch.sdpa.bind_dense import sdpa_dense_admits
+        from dispatch.sdpa.bind_shared import to_attention_request
+        from tests.sdpa.request_cases import CASES, make_request
+
+        cases = dict(CASES)
+        # CASES uses d=16, below every dense head size -- add dense-sized,
+        # tile-multiple shapes so the candidates' admits() is exercised.
+        for arch in ("gfx942", "gfx950"):
+            for d in (64, 128):
+                for dtype in ("fp16", "bf16"):
+                    for name, kw in (
+                        ("full", {}),
+                        ("causal", {"right_bound": 0}),
+                        ("window", {"left_bound": 63, "right_bound": 0}),
+                    ):
+                        cases[f"dense_{arch}_d{d}_{dtype}_{name}"] = make_request(
+                            arch=arch, d=d, dtype=dtype, s_q=256, s_kv=256, **kw
+                        )
+
+        dense = [
+            c
+            for c in ATTENTION_REGISTRY.candidates()
+            if c.algorithm.startswith("attention_dense")
+        ]
+        admitted_any = False
+        for name, req in cases.items():
+            ok, reason = sdpa_dense_admits(req)
+            if not ok:
+                continue
+            admitted_any = True
+            with self.subTest(case=name):
+                attn_req = to_attention_request(req)
+                admitted = [
+                    c.name for c in dense if c.admits(opt_in_probe(attn_req, c))[0]
+                ]
+                self.assertTrue(
+                    admitted,
+                    f"sdpa_dense_admits accepted {name!r} ({reason}) but no dense "
+                    "candidate's own admits() accepts the translated request",
+                )
+        self.assertTrue(admitted_any)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -757,6 +757,7 @@ if(ROCKE_INSTALL_TESTS)
            "add_test(rocke_library_sdpa_pytest python -m pytest"
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa\""
            " --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa/test_unified_sdpa_numeric.py\""
+           " --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library/tests/sdpa/test_dense_sdpa_numeric.py\""
            " -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_sdpa_pytest PROPERTIES\n"
@@ -887,6 +888,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_scalar_block_table_numeric.py"
         "tests/library/tests/test_attention_unified_lse_numeric.py"
         "tests/library/tests/sdpa/test_unified_sdpa_numeric.py"
+        "tests/library/tests/sdpa/test_dense_sdpa_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"
         "tests/library/tests/test_gdn_decode_gfx950_numeric.py"
