@@ -5,6 +5,12 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.42
 
+### Resolved issues
+
+* Fixed multi-device plans whose per-device sub-transforms have lengths involving large prime
+  factors silently falling back to running the transform on a single device.  Such plans may now
+  perform better.
+
 ## rocFFT 1.0.41 for ROCm 10.2
 
 ### Added
@@ -35,8 +41,6 @@ Documentation for rocFFT is available at
   factors when the output data layout uses a batch distance larger than the transform length.
 * Fixed `rocfft_plan_create` failures and GPU memory access faults for 1D complex transforms of
   lengths involving large prime factors when batches are interleaved (unit batch distance).
-* Fixed multi-device plans whose per-device sub-transforms have lengths involving large prime
-  factors.
 
 ### Optimized
 
