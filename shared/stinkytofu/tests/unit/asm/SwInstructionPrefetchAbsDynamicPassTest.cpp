@@ -252,8 +252,10 @@ class SwInstructionPrefetchAbsDynamicPassTest : public ::testing::Test {
         gemmConfig.NumGRM = 1;
     }
 
+    // xnackReplay defaults to the shipping mode; see the note in
+    // SwInstructionPrefetchAbsStaticPassTest.cpp.
     PassManager makePm(int baseSgpr = 64, bool cpCover = false, bool afterSgprCompact = false,
-                       bool xnackReplay = false) {
+                       bool xnackReplay = true) {
         PassManager pm;
         registerAllAnalyses(pm.getAnalysisManager());
         pm.setGemmTileConfig(gemmConfig);
