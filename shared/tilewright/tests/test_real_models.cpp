@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -302,14 +303,17 @@ TEST_CASE("shipped models rank repeated kernels like kernels scored one by one",
                                    scored_prefix(expect, min_scored)));
               for (const tw::Result& x : expect) scored += x.scored ? 1 : 0;
               // A budget the model was not trained for ranks as the nearest
-              // one it was, bit for bit.
+              // one it was, bit for bit, prepared or not.
               for (std::size_t budget : {std::size_t{1}, hw.N_CU / 8, hw.N_CU / 2}) {
                 const tw::ExecutionContext small{budget, tw::Schedule::Default};
                 const std::optional<tw::ExecutionContext> at =
                     tw::scoring_context(*model, small, hw);
                 REQUIRE(at.has_value());
-                REQUIRE(same_results(set.rank(p, hw, small, min_scored),
-                                     set.rank(p, hw, *at, min_scored)));
+                const std::vector<tw::Result> ranked = set.rank(p, hw, *at, min_scored);
+                REQUIRE(same_results(set.rank(p, hw, small, min_scored), ranked));
+                REQUIRE(same_results(prepared.rank(p, hw, small, min_scored), ranked));
+                REQUIRE(same_results(prepared.rank_top(p, hw, small, min_scored),
+                                     scored_prefix(ranked, min_scored)));
               }
               if (!has_unsupported) continue;
               const std::vector<tw::Result> none = set.rank(p, hw, unsupported, min_scored);

@@ -1576,7 +1576,9 @@ TEST_CASE("a CU budget outside a model's range ranks as the nearest budget it co
   const tw::ModelPtr m               = load_spec(spec);
   const std::vector<tw::Config> pool = variant_pool();
   const tw::Problem p                = make_problem(4096, 2048, 512);
-  for (std::size_t n_cu : {256u, 128u, 64u, 32u, 8u, 3u}) {
+  // A quarter of 255, 38 or 6 CUs is not a whole number of CUs: the fewest
+  // usable CUs at fraction 0.25 is the next one above it there.
+  for (std::size_t n_cu : {256u, 255u, 128u, 64u, 38u, 32u, 8u, 6u, 3u}) {
     const tw::Hardware hw{n_cu, 65536, 4u << 20};
     const std::size_t lo = (n_cu + 3) / 4;  // the fewest usable CUs at fraction 0.25
     const auto launch    = std::make_shared<BudgetLaunch>();

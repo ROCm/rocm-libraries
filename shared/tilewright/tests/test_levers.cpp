@@ -67,12 +67,15 @@ std::vector<tw::Config> variant_pool() {
   return pool;
 }
 
-// An MLREC_v3 grid model for every schedule and CU budget whose cells all
-// whitelist the view keys of `whitelisted`.
-tw::ModelPtr whitelist_model(const std::vector<tw::Config>& whitelisted, bool launch_keys = false) {
+// An MLREC_v3 grid model for every schedule and the CU budgets from
+// `min_cu_fraction` of the device up whose cells all whitelist the view keys
+// of `whitelisted`.
+tw::ModelPtr whitelist_model(const std::vector<tw::Config>& whitelisted,
+                             bool launch_keys       = false,
+                             double min_cu_fraction = 1.0 / 64.0) {
   ModelSpec spec       = as_v3(grid_model());
   spec.schedules       = 0x7;
-  spec.min_cu_fraction = 1.0 / 64.0;
+  spec.min_cu_fraction = min_cu_fraction;
   if (launch_keys) spec.v3_serving_flags |= 0x10;
   for (CellSpec& cell : spec.cells)
     for (const tw::Config& c : whitelisted) cell.view_key_hashes.push_back(key_hash(c));
@@ -103,6 +106,18 @@ struct ShiftLaunch final : tw::LaunchModel {
   }
   std::uint64_t launch_key(const tw::Config& c) const override {
     return static_cast<std::uint64_t>(c.occupancy);
+  }
+};
+
+// Plans as ShiftLaunch does, shifted by the CU budget they are asked for.
+struct BudgetShiftLaunch final : tw::LaunchModel {
+  tw::LaunchPlan plan(const tw::Config& c,
+                      const tw::Problem&,
+                      const tw::ExecutionContext& context) const override {
+    const bool tree = c.index % 3 == 0;
+    return {c.index % 2 == 0,
+            7 + 31 * c.index + context.cu_budget,
+            tree ? tw::PartialReduction::Tree : tw::PartialReduction::None};
   }
 };
 
@@ -374,6 +389,42 @@ TEST_CASE("the memo leaves a ranking that differs in one input to a fresh one", 
     CHECK(same_results(set.rank(b.p, b.h, b.c, 1), fresh_b));
     CHECK(replays() == n);
   }
+}
+
+TEST_CASE("the memo answers a ranking at another CU budget scored at the same context",
+          "[levers][memo]") {
+  const tw::Hardware hw              = test_hardware();
+  const std::vector<tw::Config> pool = variant_pool();
+  const std::vector<tw::Config> listed(pool.begin(), pool.begin() + 4);
+  // The model's budgets start at a quarter of the 64 CUs: 4 and 8 CUs are
+  // scored as 16, with launches planned for 16, and 32 as itself.
+  const tw::ModelPtr m = whitelist_model(listed, false, 0.25);
+  const tw::PoolOptions options{tw::TieBreak::PoolOrder, std::make_shared<BudgetShiftLaunch>()};
+  const tw::CandidateSet set(m, pool, options);
+  const tw::Problem p              = make_problem(1000, 2000, 512);
+  const tw::ExecutionContext four  = context(4, tw::Schedule::Default);
+  const tw::ExecutionContext eight = context(8, tw::Schedule::Default);
+  const tw::ExecutionContext half  = context(32, tw::Schedule::Default);
+  REQUIRE(tw::scoring_context(*m, four, hw)->cu_budget == 16);
+  REQUIRE(tw::scoring_context(*m, eight, hw)->cu_budget == 16);
+  const std::vector<tw::Result> at_eight = tw::rank_configs(*m, p, hw, eight, pool, options, 1);
+  const std::vector<tw::Result> at_half  = tw::rank_configs(*m, p, hw, half, pool, options, 1);
+  REQUIRE(same_results(
+      at_eight, tw::rank_configs(*m, p, hw, context(16, tw::Schedule::Default), pool, options, 1)));
+  REQUIRE_FALSE(same_results(at_eight, at_half));
+  std::vector<tw::Result> top;
+
+  // Remembered at 4 CUs, answered at 8 with the scores of 16.
+  set.rank_top(p, hw, four, 1, top);
+  std::uint64_t n = replays();
+  CHECK(same_results(set.rank(p, hw, eight, 1), at_eight));
+  CHECK(replays() == n + 1);
+
+  // A budget in the range is scored at itself: ranked afresh.
+  set.rank_top(p, hw, four, 1, top);
+  n = replays();
+  CHECK(same_results(set.rank(p, hw, half, 1), at_half));
+  CHECK(replays() == n);
 }
 
 TEST_CASE("prefetching and the memo leave whitelist-tier rankings bit-identical", "[levers]") {
