@@ -606,6 +606,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_fwd_small_wmma.py"
         "tests/library/tests/test_direct_dgrad_wmma.py"
         "tests/library/tests/test_direct_fwd_wmma.py"
+        "tests/library/tests/test_conv_fwd_split_k.py"
         "tests/library/tests/test_conv_winograd_fwd_cpu.py"
         "tests/library/tests/test_conv_winograd_gemm_wmma.py"
         "tests/library/tests/test_conv_winograd_gen_cpu.py"
@@ -615,7 +616,12 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_direct_depthwise_fwd_cpl.py"
         "tests/library/tests/test_conv_gradient_contract.py"
         "tests/library/tests/test_builder_signature_contract.py"
-        "tests/library/tests/test_library_layering.py")
+        "tests/library/tests/test_library_layering.py"
+        "tests/library/tests/test_aot_launch_zeroing.py"
+        "tests/library/tests/test_batched_timing.py"
+        "tests/library/tests/test_capability_keys.py"
+        "tests/library/tests/test_module_cache.py"
+        "tests/library/tests/test_run_conv_shards.py")
     set(_ROCKE_LIBRARY_CONV_TESTS "")
     foreach(_rocke_conv_test ${_ROCKE_LIBRARY_CONV_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_CONV_TESTS
