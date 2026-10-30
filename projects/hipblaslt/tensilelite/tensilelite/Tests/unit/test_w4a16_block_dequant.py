@@ -516,8 +516,24 @@ def test_client_config_carries_block_scale(toolchain, tmp_path):
     import inspect
 
     src = inspect.getsource(CW)
-    assert "param('scale-a-block', problemType.scaleBlockSizesA[0])" in src
+    assert "param('scale-a-block', benchmarkScaleBlockSizeA(problemType.scaleBlockSizesA))" in src
     assert "param('scale-a-type', problemType.bType.toName())" in src
+
+
+@pytest.mark.parametrize("setting,want", [(0, 32), (32, 32), (128, 128)])
+def test_benchmark_scale_block_size_selects_the_timed_group(setting, want, monkeypatch):
+    """A runtime-group type is benchmarked with BenchmarkScaleBlockSizeA, or with
+    the smallest group when it is 0."""
+    import Tensile.ClientWriter as CW
+    monkeypatch.setitem(CW.globalParameters, "BenchmarkScaleBlockSizeA", setting)
+    assert CW.benchmarkScaleBlockSizeA([32, 64, 128]) == want
+
+
+def test_benchmark_scale_block_size_must_be_in_the_list(monkeypatch):
+    import Tensile.ClientWriter as CW
+    monkeypatch.setitem(CW.globalParameters, "BenchmarkScaleBlockSizeA", 256)
+    with pytest.raises(ValueError, match="not one of ScaleBlockSizesA"):
+        CW.benchmarkScaleBlockSizeA([32, 64, 128])
 
 
 def test_bf16_dequant_keeps_scale_increment_register(toolchain):

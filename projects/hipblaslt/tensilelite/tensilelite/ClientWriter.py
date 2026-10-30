@@ -624,6 +624,17 @@ def pruneModeName(mode):
     if mode == 5: return 'Prune0X0X'
     if mode == 6: return 'Prune00XX'
 
+def benchmarkScaleBlockSizeA(scaleBlockSizesA):
+    """W4A16: the group size the client benchmarks a problem type with. A
+    runtime-group type (several ScaleBlockSizesA) builds one kernel for all of
+    them; BenchmarkScaleBlockSizeA picks the one to time, 0 the smallest."""
+    group = globalParameters["BenchmarkScaleBlockSizeA"] or scaleBlockSizesA[0]
+    if group not in scaleBlockSizesA:
+        raise ValueError(f"BenchmarkScaleBlockSizeA {group} is not one of ScaleBlockSizesA "
+                         f"{list(scaleBlockSizesA)}")
+    return group
+
+
 def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile, gateTypeArgs="", probSolMap={}):
 
     assert os.path.exists(sourceDir), f"sourceDir={sourceDir} does not exist"
@@ -672,7 +683,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('swizzle-tensor-b', problemType.swizzleTensorB)
         param('fused-gemm-a2a', problemType.fusedGemmA2A)
         if problemType.scaleBlockSizesA:
-            param('scale-a-block', problemType.scaleBlockSizesA[0])
+            param('scale-a-block', benchmarkScaleBlockSizeA(problemType.scaleBlockSizesA))
             # The group scale shares B's type; it has no parameter of its own.
             param('scale-a-type', problemType.bType.toName())
             param('scale-a-zero-point', problemType.scaleZeroPointA)
