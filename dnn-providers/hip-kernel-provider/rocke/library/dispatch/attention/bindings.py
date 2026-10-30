@@ -420,7 +420,12 @@ def bind_tuning_attention_torch(
     if problem.use_additive_bias:
         raise ValueError("explicit tuning bindings do not support additive bias")
     _reject_additive_bias_inputs(tensors, "tensors")
-    unsafe_skip = bool(kwargs.pop("unsafe_skip_paged_value_validation", False))
+    unsafe_skip = kwargs.pop("unsafe_skip_paged_value_validation", False)
+    if type(unsafe_skip) is not bool:
+        raise ValueError(
+            "unsafe_skip_paged_value_validation must be a bool, got "
+            f"{type(unsafe_skip).__name__}"
+        )
     num_blocks = validate_tuning_attention_tensors(
         problem,
         tensors,
