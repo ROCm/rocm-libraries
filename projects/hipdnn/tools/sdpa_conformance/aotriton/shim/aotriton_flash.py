@@ -14,7 +14,9 @@ The vendored suite reaches the GPU only through this module's ``attn_fwd``, ``at
 * The plugin wraps ``sdpa_fwd`` / ``sdpa_bwd`` to record hipDNN calls and declines; the shim records
   only ``ref:`` entries (``hipdnn_aotriton_plugin.record``) for the reference fallback.
 
-Engine pinning comes from ``HIPDNN_FWD_ENGINE`` / ``HIPDNN_BWD_ENGINE``.
+Engine pinning comes from ``HIPDNN_FWD_ENGINE`` / ``HIPDNN_BWD_ENGINE``. With
+``HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS`` set, the forward asks hipDNN for no Stats (the M buffer
+stays unwritten; ``test_forward.py`` compares only O); the reference fallback still fills it.
 """
 
 import os
@@ -59,6 +61,10 @@ def _record(direction, kind, detail):
     plugin = sys.modules.get("hipdnn_aotriton_plugin")
     if plugin is not None:
         plugin.record(direction, kind, detail)
+
+
+def _fwd_no_stats():
+    return bool(os.environ.get("HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS"))
 
 
 def _engine(direction):
@@ -274,7 +280,7 @@ def _forward(
             k,
             v,
             o=o,
-            stats=stats,
+            stats=None if _fwd_no_stats() else stats,
             scale=scale,
             bias=bias,
             mask=mask,
