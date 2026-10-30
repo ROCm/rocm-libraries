@@ -16,6 +16,7 @@
  * rocke_h_smem_set_storage/_storage, rocke_h_fail, rocke_h_live) are NOT defined here.
  */
 #include "rocke/dtypes.h"
+#include "rocke/ir_internal.h"
 #include "rocke/lower_hip_internal.h"
 #include "rocke/lower_llvm_internal.h" /* rocke_ll_backend_for: the target's buffer word3 */
 
@@ -1013,6 +1014,50 @@ static rocke_status_t _op_tile_global_ptr_add(rocke_h_lowerer_t* lw, const rocke
     return lw->status;
 }
 
+/* Python _op_tile_global_ptr_offset: integer arithmetic, so the sum is not an
+ * inbounds pointer step; the result keeps the pointer's element type. */
+static rocke_status_t _op_tile_global_ptr_offset(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    char err[256];
+    const char* hip_type;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(const char* error = rocke_i_global_ptr_offset_op_error(op, err, sizeof err))
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+    }
+    hip_type = rocke_h_type_to_hip(lw, op->results[0]->type);
+    rocke_h_emitf(lw,
+                  "%s %s = (%s)((uintptr_t)%s + (uint64_t)%s);",
+                  hip_type,
+                  rocke_h_name(lw, op->results[0]),
+                  hip_type,
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]));
+    return lw->status;
+}
+
+/* Python _op_tile_global_ptr_to_i64 */
+static rocke_status_t _op_tile_global_ptr_to_i64(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    char err[256];
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(const char* error = rocke_i_global_ptr_to_i64_op_error(op, err, sizeof err))
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+    }
+    rocke_h_emitf(lw,
+                  "int64_t %s = (int64_t)(uintptr_t)%s;",
+                  rocke_h_name(lw, op->results[0]),
+                  rocke_h_name(lw, op->operands[0]));
+    return lw->status;
+}
+
 /* ======================= buffer resource descriptor ===================== */
 
 /* Python _op_tile_buffer_rsrc */
@@ -1157,73 +1202,145 @@ static rocke_status_t _op_tile_buffer_load_vN_f16(rocke_h_lowerer_t* lw, const r
     return lw->status;
 }
 
-/* Python _op_tile_buffer_load_vN (dtype-generic): raw buffer load + memcpy into
- * the <n x elem> result. f16/bf16 (2-byte): n = dwords*2; f32/i32: n = dwords. */
+/* Python _HIP_BUFFER_ACCESS: one buffer access per width in bytes, the raw
+ * buffer builtin's suffix and the integer type it loads or stores. */
+typedef struct
+{
+    int bytes;
+    const char* suffix;
+    const char* raw_type;
+} hip_buffer_access_t;
+
+static const hip_buffer_access_t hip_buffer_accesses[] = {
+    {1, "_b8", "unsigned char"},
+    {2, "_b16", "unsigned short"},
+    {4, "_b32", "int"},
+    {8, "_b64", "i32x2"},
+    {16, "_b128", "i32x4"},
+};
+
+/* The access of the buffer load or store `op` (Python _buffer_op_bytes, then
+ * _HIP_BUFFER_ACCESS); NULL after failing the lowering with the Python engine's
+ * text. */
+static const hip_buffer_access_t*
+    hip_buffer_access(rocke_h_lowerer_t* lw, const rocke_op_t* op, int* nbytes)
+{
+    char err[ROCKE_ERR_MSG_CAP];
+    *nbytes = rocke_i_buffer_op_bytes(op, err, sizeof(err));
+    if(*nbytes == 0)
+    {
+        rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", err);
+        return NULL;
+    }
+    for(const hip_buffer_access_t& access : hip_buffer_accesses)
+    {
+        if(access.bytes == *nbytes)
+            return &access;
+    }
+    rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s: no buffer access form for %d bytes", op->name, *nbytes);
+    return NULL;
+}
+
+/* Python _op_tile_buffer_load_vN (dtype-generic): one raw buffer load of the
+ * result's width, copied into the result vector. */
 static rocke_status_t _op_tile_buffer_load_vN(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    const hip_buffer_access_t* access;
+    const char *res, *tmp, *result_t;
+    int nbytes;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    access = hip_buffer_access(lw, op, &nbytes);
+    if(access == NULL)
+        return lw->status;
+    result_t = rocke_h_type_to_hip(lw, op->results[0]->type);
+    if(!rocke_h_live(lw))
+        return lw->status;
+    res = rocke_h_name(lw, op->results[0]);
+    tmp = rocke_arena_printf(&lw->b->arena, "_blraw_%s", res);
+    rocke_h_emitf(lw,
+                  "%s %s = __builtin_amdgcn_raw_buffer_load%s(%s, %s, %s, 0);",
+                  access->raw_type,
+                  tmp,
+                  access->suffix,
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]),
+                  rocke_h_name(lw, op->operands[2]));
+    rocke_h_emitf(lw, "%s %s; __builtin_memcpy(&%s, &%s, %d);", result_t, res, res, tmp, nbytes);
+    return lw->status;
+}
+
+/* Python _op_tile_buffer_store_vN (dtype-generic): the value copied into one
+ * integer of its width and stored; the braces scope the temporary. */
+static rocke_status_t _op_tile_buffer_store_vN(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const hip_buffer_access_t* access;
+    int nbytes;
+    if(!rocke_h_live(lw))
+        return lw->status;
+    access = hip_buffer_access(lw, op, &nbytes);
+    if(access == NULL)
+        return lw->status;
+    rocke_h_emitf(lw,
+                  "{ %s _bs; __builtin_memcpy(&_bs, &%s, %d); "
+                  "__builtin_amdgcn_raw_buffer_store%s(_bs, %s, %s, %s, 0); }",
+                  access->raw_type,
+                  rocke_h_name(lw, op->operands[3]),
+                  nbytes,
+                  access->suffix,
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]),
+                  rocke_h_name(lw, op->operands[2]));
+    return lw->status;
+}
+
+/* Python _op_tile_buffer_load (dtype-generic scalar): 2-byte elements (f16,
+ * bf16) through the b16 builtin, 4-byte ones (f32, i32) through the b32 one,
+ * memcpy into the scalar result. */
+static rocke_status_t _op_tile_buffer_load(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
     rocke_value_t *rsrc, *voffset, *soffset;
-    const char *res, *b_suffix, *raw_t, *tmp, *elem, *prefix;
-    int64_t dwords, n;
+    const char *res, *tmp, *elem, *hip_t;
+    bool narrow;
     if(!rocke_h_live(lw))
     {
         return lw->status;
     }
     if(op->num_operands < 3 || op->num_results < 1)
     {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_load_vN: bad operand/result count");
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_load: bad operand/result count");
     }
     rsrc = op->operands[0];
     voffset = op->operands[1];
     soffset = op->operands[2];
-    dwords = mem_attr_int(op, "dwords", 0);
-    elem = mem_attr_str(op, "elem_type", "f16");
-    /* Python _op_tile_buffer_load_vN indexes a 4-entry map ({f16,bf16,f32,i32})
-     * and raises KeyError otherwise, so f32/i32 must not resolve to "f16x". */
+    elem = mem_attr_str(op, "elem_type", "");
     if(strcmp(elem, "f16") != 0 && strcmp(elem, "bf16") != 0 && strcmp(elem, "f32") != 0
        && strcmp(elem, "i32") != 0)
     {
         return rocke_h_fail(
-            lw, ROCKE_ERR_KEY, "tile.buffer_load_vN: unsupported element type '%s'", elem);
+            lw, ROCKE_ERR_VALUE, "tile.buffer_load: unsupported elem_type '%s'", elem);
     }
-    prefix = rocke_h_vec_prefix(elem, /*full_map=*/true);
-    n = (strcmp(elem, "f16") == 0 || strcmp(elem, "bf16") == 0) ? dwords * 2 : dwords;
-    if(dwords == 1)
+    hip_t = rocke_h_require_hip_scalar(lw, elem);
+    if(!hip_t)
     {
-        b_suffix = "_b32";
+        return lw->status;
     }
-    else if(dwords == 2)
-    {
-        b_suffix = "_b64";
-    }
-    else if(dwords == 4)
-    {
-        b_suffix = "_b128";
-    }
-    else
-    {
-        return rocke_h_fail(
-            lw, ROCKE_ERR_KEY, "tile.buffer_load_vN: unsupported dwords=%lld", (long long)dwords);
-    }
-    raw_t
-        = (dwords == 1) ? "int" : rocke_arena_printf(&lw->b->arena, "i32x%lld", (long long)dwords);
+    narrow = strcmp(elem, "f16") == 0 || strcmp(elem, "bf16") == 0;
     res = rocke_h_name(lw, op->results[0]);
-    tmp = rocke_arena_printf(&lw->b->arena, "_blraw_%s", res);
+    tmp = rocke_arena_printf(&lw->b->arena, "_bl_%s", res);
     rocke_h_emitf(lw,
-                  "%s %s = __builtin_amdgcn_raw_buffer_load%s(%s, %s, %s, 0);",
-                  raw_t,
+                  "%s %s = (%s)__builtin_amdgcn_raw_buffer_load_%s(%s, %s, %s, 0);",
+                  narrow ? "unsigned short" : "unsigned int",
                   tmp,
-                  b_suffix,
+                  narrow ? "unsigned short" : "unsigned int",
+                  narrow ? "b16" : "b32",
                   rocke_h_name(lw, rsrc),
                   rocke_h_name(lw, voffset),
                   rocke_h_name(lw, soffset));
-    rocke_h_emitf(lw,
-                  "%s%lld %s; __builtin_memcpy(&%s, &%s, %lld);",
-                  prefix,
-                  (long long)n,
-                  res,
-                  res,
-                  tmp,
-                  (long long)dwords * 4);
+    rocke_h_emitf(
+        lw, "%s %s; __builtin_memcpy(&%s, &%s, %d);", hip_t, res, res, tmp, narrow ? 2 : 4);
     return lw->status;
 }
 
@@ -1715,11 +1832,14 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_MEMREF_COOPERATIVE_GLOBAL_STORE, _op_memref_cooperative_global_store},
            /* global pointer arithmetic + buffer rsrc */
            {ROCKE_OP_TILE_GLOBAL_PTR_ADD, _op_tile_global_ptr_add},
+           {ROCKE_OP_TILE_GLOBAL_PTR_OFFSET, _op_tile_global_ptr_offset},
+           {ROCKE_OP_TILE_GLOBAL_PTR_TO_I64, _op_tile_global_ptr_to_i64},
            {ROCKE_OP_TILE_BUFFER_RSRC, _op_tile_buffer_rsrc},
            /* buffer load/store */
            {ROCKE_OP_TILE_BUFFER_LOAD_F16, _op_tile_buffer_load_f16},
            {ROCKE_OP_TILE_BUFFER_LOAD_VN_F16, _op_tile_buffer_load_vN_f16},
            {ROCKE_OP_TILE_BUFFER_LOAD_VN, _op_tile_buffer_load_vN},
+           {ROCKE_OP_TILE_BUFFER_LOAD, _op_tile_buffer_load},
            {ROCKE_OP_TILE_BUFFER_STORE_F16, _op_tile_buffer_store_f16},
            {ROCKE_OP_TILE_BUFFER_STORE_VN_F16, _op_tile_buffer_store_vN_f16},
            {ROCKE_OP_TILE_BUFFER_LOAD_BF16, _op_tile_buffer_load_bf16},
@@ -1728,6 +1848,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_TILE_BUFFER_STORE_VN_BF16, _op_tile_buffer_store_vN_bf16},
            {ROCKE_OP_TILE_BUFFER_STORE_F32, _op_tile_buffer_store_f32},
            {ROCKE_OP_TILE_BUFFER_STORE_VN_F32, _op_tile_buffer_store_vN_f32},
+           {ROCKE_OP_TILE_BUFFER_STORE_VN, _op_tile_buffer_store_vN},
            /* async DRAM->LDS */
            {ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS_ADDR, _op_tile_async_buffer_load_lds_addr},
            {ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS, _op_tile_async_buffer_load_lds},
