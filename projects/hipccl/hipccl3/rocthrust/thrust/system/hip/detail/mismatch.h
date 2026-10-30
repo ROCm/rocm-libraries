@@ -40,22 +40,22 @@
 #if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/pair.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
 
 #  include _THRUST_LIBCXX_INCLUDE(__iterator/zip_function.h)
 #  include _THRUST_LIBCXX_INCLUDE(__iterator/zip_iterator.h)
 #  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#  include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 template <class Derived, class InputIt1, class InputIt2, class BinaryPred>
-pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
+_THRUST_STD::pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
 mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2, BinaryPred binary_pred);
 
 template <class Derived, class InputIt1, class InputIt2>
-pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
+_THRUST_STD::pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
 mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2);
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
@@ -66,7 +66,7 @@ THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 template <class Derived, class InputIt1, class InputIt2, class BinaryPred>
-pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
+_THRUST_STD::pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
 mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2, BinaryPred binary_pred)
 {
   const auto n            = _THRUST_STD::distance(first1, last1);
@@ -74,11 +74,11 @@ mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, Inp
   const auto last         = _THRUST_LIBCXX::make_zip_iterator(last1, first2 + n);
   const auto mismatch_pos = hip_rocprim::find_if_not(policy, first, last, _THRUST_LIBCXX::zip_function(binary_pred));
   const auto dist         = _THRUST_STD::distance(first, mismatch_pos);
-  return thrust::make_pair(first1 + dist, first2 + dist);
+  return _THRUST_STD::make_pair(first1 + dist, first2 + dist);
 }
 
 template <class Derived, class InputIt1, class InputIt2>
-pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
+_THRUST_STD::pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
 mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2)
 {
   using InputType1 = thrust::detail::it_value_t<InputIt1>;

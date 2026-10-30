@@ -18,12 +18,12 @@
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/iterator_traits.h>
-#  include <thrust/pair.h>
 #  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/util.h>
 
 #  include _THRUST_STD_INCLUDE(cstdint)
+#  include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 // rocPRIM includes
 #  include <rocprim/rocprim.hpp>
@@ -112,7 +112,7 @@ template <typename Derived,
           typename KeysOutputIt,
           typename ItemsOutputIt,
           typename CompareOp>
-THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ItemsOutputIt> merge(
+THRUST_HIP_RUNTIME_FUNCTION _THRUST_STD::pair<KeysOutputIt, ItemsOutputIt> merge(
   execution_policy<Derived>& policy,
   KeysIt1 keys1_begin,
   KeysIt1 keys1_end,
@@ -136,7 +136,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ItemsOutputIt> merge(
 
   if (input1_size == 0 && input2_size == 0)
   {
-    return thrust::make_pair(keys_out_begin, items_out_begin);
+    return _THRUST_STD::make_pair(keys_out_begin, items_out_begin);
   };
 
   size_t storage_size = 0;
@@ -178,7 +178,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ItemsOutputIt> merge(
   hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy), "merge: failed to synchronize");
 
   size_t count = input1_size + input2_size;
-  return thrust::make_pair(keys_out_begin + count, items_out_begin + count);
+  return _THRUST_STD::make_pair(keys_out_begin + count, items_out_begin + count);
 }
 
 } // namespace __merge
@@ -242,7 +242,7 @@ template <class Derived,
           class KeysOutputIt,
           class ItemsOutputIt,
           class CompareOp = ::cuda::std::less<>>
-pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE merge_by_key(
+_THRUST_STD::pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE merge_by_key(
   execution_policy<Derived>& policy,
   KeysIt1 keys1_begin,
   KeysIt1 keys1_end,
@@ -257,7 +257,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE merge_by_key(
   // struct workaround is required for HIP-clang
   struct workaround
   {
-    THRUST_HOST static pair<KeysOutputIt, ItemsOutputIt> par(
+    THRUST_HOST static _THRUST_STD::pair<KeysOutputIt, ItemsOutputIt> par(
       execution_policy<Derived>& policy,
       KeysIt1 keys1_begin,
       KeysIt1 keys1_end,
@@ -282,7 +282,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE merge_by_key(
         compare_op);
     }
 #  if defined(__HIP_DEVICE_COMPILE__)
-    THRUST_DEVICE static pair<KeysOutputIt, ItemsOutputIt> seq(
+    THRUST_DEVICE static _THRUST_STD::pair<KeysOutputIt, ItemsOutputIt> seq(
       execution_policy<Derived>& policy,
       KeysIt1 keys1_begin,
       KeysIt1 keys1_end,

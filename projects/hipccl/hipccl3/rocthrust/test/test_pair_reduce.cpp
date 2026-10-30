@@ -15,9 +15,10 @@
  *  limitations under the License.
  */
 
-#include <thrust/pair.h>
 #include <thrust/reduce.h>
 #include <thrust/transform.h>
+
+#include _THRUST_STD_INCLUDE(utility)
 
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
@@ -27,9 +28,9 @@ TESTS_DEFINE(PairReduceTests, NumericalTestsParams);
 struct make_pair_functor
 {
   template <typename T1, typename T2>
-  __host__ __device__ thrust::pair<T1, T2> operator()(const T1& x, const T2& y)
+  __host__ __device__ _THRUST_STD::pair<T1, T2> operator()(const T1& x, const T2& y)
   {
-    return thrust::make_pair(x, y);
+    return _THRUST_STD::make_pair(x, y);
   } // end operator()()
 }; // end make_pair_functor
 
@@ -38,14 +39,14 @@ struct add_pairs
   template <typename Pair1, typename Pair2>
   __host__ __device__ Pair1 operator()(const Pair1& x, const Pair2& y)
   {
-    return thrust::make_pair(x.first + y.first, x.second + y.second);
+    return _THRUST_STD::make_pair(x.first + y.first, x.second + y.second);
   } // end operator()
 }; // end add_pairs
 
 TYPED_TEST(PairReduceTests, TestPairReduce)
 {
   using T = typename TestFixture::input_type;
-  using P = thrust::pair<T, T>;
+  using P = _THRUST_STD::pair<T, T>;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -72,7 +73,7 @@ TYPED_TEST(PairReduceTests, TestPairReduce)
       thrust::device_vector<T> d_p2    = h_p2;
       thrust::device_vector<P> d_pairs = h_pairs;
 
-      P init = thrust::make_pair(13, 13);
+      P init = _THRUST_STD::make_pair(13, 13);
 
       // reduce on the host
       P h_result = thrust::reduce(h_pairs.begin(), h_pairs.end(), init, add_pairs());

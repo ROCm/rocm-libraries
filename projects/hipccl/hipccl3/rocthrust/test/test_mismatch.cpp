@@ -47,11 +47,11 @@ TYPED_TEST(MismatchTests, TestMismatchSimple)
 }
 
 template <typename InputIterator1, typename InputIterator2>
-thrust::pair<InputIterator1, InputIterator2>
+_THRUST_STD::pair<InputIterator1, InputIterator2>
 mismatch(my_system& system, InputIterator1 first, InputIterator1, InputIterator2)
 {
   system.validate_dispatch();
-  return thrust::make_pair(first, first);
+  return _THRUST_STD::make_pair(first, first);
 }
 
 TEST(MismatchTests, TestMismatchDispatchExplicit)
@@ -67,10 +67,10 @@ TEST(MismatchTests, TestMismatchDispatchExplicit)
 }
 
 template <typename InputIterator1, typename InputIterator2>
-thrust::pair<InputIterator1, InputIterator2> mismatch(my_tag, InputIterator1 first, InputIterator1, InputIterator2)
+_THRUST_STD::pair<InputIterator1, InputIterator2> mismatch(my_tag, InputIterator1 first, InputIterator1, InputIterator2)
 {
   *first = 13;
-  return thrust::make_pair(first, first);
+  return _THRUST_STD::make_pair(first, first);
 }
 
 TEST(MismatchTests, TestMismatchDispatchImplicit)

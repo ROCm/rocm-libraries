@@ -33,7 +33,7 @@ template <typename InputIterator1,
           typename InputIterator4,
           typename OutputIterator1,
           typename OutputIterator2>
-thrust::pair<OutputIterator1, OutputIterator2> set_difference_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> set_difference_by_key(
   my_system& system,
   InputIterator1,
   InputIterator1,
@@ -45,7 +45,7 @@ thrust::pair<OutputIterator1, OutputIterator2> set_difference_by_key(
   OutputIterator2 values_result)
 {
   system.validate_dispatch();
-  return thrust::make_pair(keys_result, values_result);
+  return _THRUST_STD::make_pair(keys_result, values_result);
 }
 
 TEST(setDifferenceByKeyTests, TestSetDifferenceByKeyDispatchExplicit)
@@ -67,7 +67,7 @@ template <typename InputIterator1,
           typename InputIterator4,
           typename OutputIterator1,
           typename OutputIterator2>
-thrust::pair<OutputIterator1, OutputIterator2> set_difference_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> set_difference_by_key(
   my_tag,
   InputIterator1,
   InputIterator1,
@@ -79,7 +79,7 @@ thrust::pair<OutputIterator1, OutputIterator2> set_difference_by_key(
   OutputIterator2 values_result)
 {
   *keys_result = 13;
-  return thrust::make_pair(keys_result, values_result);
+  return _THRUST_STD::make_pair(keys_result, values_result);
 }
 
 TEST(setDifferenceByKeyTests, TestSetDifferenceByKeyDispatchImplicit)
@@ -119,7 +119,7 @@ TYPED_TEST(setDifferenceByKeyTests, TestSetDifferenceByKeySimple)
 
   Vector result_key(2), result_val(2);
 
-  thrust::pair<Iterator, Iterator> end = thrust::set_difference_by_key(
+  _THRUST_STD::pair<Iterator, Iterator> end = thrust::set_difference_by_key(
     a_key.begin(),
     a_key.end(),
     b_key.begin(),
@@ -182,9 +182,10 @@ TYPED_TEST(SetDifferenceByKeyPrimitiveTests, TestSetDifferenceByKey)
         thrust::device_vector<T> d_result_keys(size);
         thrust::device_vector<T> d_result_vals(size);
 
-        thrust::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
+        _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
 
-        thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
+        _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator>
+          d_end;
 
         h_end = thrust::set_difference_by_key(
           h_a_keys.begin(),
@@ -252,9 +253,9 @@ TYPED_TEST(SetDifferenceByKeyPrimitiveTests, TestSetDifferenceByKeyEquivalentRan
       thrust::host_vector<T> h_result_key(size), h_result_val(size);
       thrust::device_vector<T> d_result_key(size), d_result_val(size);
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
 
       h_end = thrust::set_difference_by_key(
         h_a_key.begin(),
@@ -331,9 +332,9 @@ TYPED_TEST(SetDifferenceByKeyPrimitiveTests, TestSetDifferenceByKeyMultiset)
       thrust::host_vector<T> h_result_key(size), h_result_val(size);
       thrust::device_vector<T> d_result_key(size), d_result_val(size);
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
 
       h_end = thrust::set_difference_by_key(
         h_a_key.begin(),

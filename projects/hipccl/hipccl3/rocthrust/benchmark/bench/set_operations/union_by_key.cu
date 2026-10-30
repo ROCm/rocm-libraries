@@ -36,7 +36,7 @@ struct op_t
             class InputIterator4,
             class OutputIterator1,
             class OutputIterator2>
-  __host__ thrust::pair<OutputIterator1, OutputIterator2> operator()(
+  __host__ _THRUST_STD::pair<OutputIterator1, OutputIterator2> operator()(
     const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
     InputIterator1 keys_first1,
     InputIterator1 keys_last1,

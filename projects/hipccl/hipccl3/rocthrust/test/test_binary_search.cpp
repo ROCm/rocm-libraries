@@ -894,11 +894,11 @@ TYPED_TEST(BinarySearchVectorTests, TestScalarEqualRangeSimple)
 }
 
 template <typename ForwardIterator, typename LessThanComparable>
-thrust::pair<ForwardIterator, ForwardIterator>
+_THRUST_STD::pair<ForwardIterator, ForwardIterator>
 equal_range(my_system& system, ForwardIterator first, ForwardIterator /*last*/, const LessThanComparable& /*value*/)
 {
   system.validate_dispatch();
-  return thrust::make_pair(first, first);
+  return _THRUST_STD::make_pair(first, first);
 }
 
 TEST(BinarySearchTests, TestScalarEqualRangeDispatchExplicit)
@@ -914,11 +914,11 @@ TEST(BinarySearchTests, TestScalarEqualRangeDispatchExplicit)
 }
 
 template <typename ForwardIterator, typename LessThanComparable>
-thrust::pair<ForwardIterator, ForwardIterator>
+_THRUST_STD::pair<ForwardIterator, ForwardIterator>
 equal_range(my_tag, ForwardIterator first, ForwardIterator /*last*/, const LessThanComparable& /*value*/)
 {
   *first = 13;
-  return thrust::make_pair(first, first);
+  return _THRUST_STD::make_pair(first, first);
 }
 
 TEST(BinarySearchTests, TestScalarEqualRangeDispatchImplicit)
@@ -944,12 +944,13 @@ TEST(BinarySearchTests, TestEqualRangeExecutionPolicy)
   constexpr int key     = 4;
   thrust::device_vector<int> d_data(data, data + size);
 
-  thrust::pair<thrust::device_vector<int>::iterator, thrust::device_vector<int>::iterator> range = thrust::equal_range(
-    thrust_exec_policy_t(thrust::hip_rocprim::execute_on_stream_base<thrust_exec_policy_t>(hipStreamPerThread),
-                         thrust::device_allocator<char>()),
-    d_data.begin(),
-    d_data.end(),
-    key);
+  _THRUST_STD::pair<thrust::device_vector<int>::iterator, thrust::device_vector<int>::iterator> range =
+    thrust::equal_range(
+      thrust_exec_policy_t(thrust::hip_rocprim::execute_on_stream_base<thrust_exec_policy_t>(hipStreamPerThread),
+                           thrust::device_allocator<char>()),
+      d_data.begin(),
+      d_data.end(),
+      key);
 
   ASSERT_EQ(*range.first, 4);
   ASSERT_EQ(*range.second, 5);

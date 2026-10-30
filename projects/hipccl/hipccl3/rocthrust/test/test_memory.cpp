@@ -18,10 +18,11 @@
 #include <thrust/fill.h>
 #include <thrust/logical.h>
 #include <thrust/memory.h>
-#include <thrust/pair.h>
 #include <thrust/reverse.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
+
+#include _THRUST_STD_INCLUDE(utility)
 
 #include <iostream>
 
@@ -82,12 +83,12 @@ struct my_old_temporary_allocation_system : public thrust::device_execution_poli
 {};
 
 template <typename T>
-thrust::pair<thrust::pointer<T, my_old_temporary_allocation_system>, std::ptrdiff_t>
+_THRUST_STD::pair<thrust::pointer<T, my_old_temporary_allocation_system>, std::ptrdiff_t>
 get_temporary_buffer(my_old_temporary_allocation_system, std::ptrdiff_t)
 {
   thrust::pointer<T, my_old_temporary_allocation_system> const result(reinterpret_cast<T*>(4217));
 
-  return thrust::make_pair(result, 314);
+  return _THRUST_STD::make_pair(result, 314);
 }
 
 template <typename Pointer>
@@ -106,12 +107,12 @@ struct my_new_temporary_allocation_system : public thrust::device_execution_poli
 {};
 
 template <typename T>
-thrust::pair<thrust::pointer<T, my_new_temporary_allocation_system>, std::ptrdiff_t>
+_THRUST_STD::pair<thrust::pointer<T, my_new_temporary_allocation_system>, std::ptrdiff_t>
 get_temporary_buffer(my_new_temporary_allocation_system, std::ptrdiff_t)
 {
   thrust::pointer<T, my_new_temporary_allocation_system> const result(reinterpret_cast<T*>(1742));
 
-  return thrust::make_pair(result, 413);
+  return _THRUST_STD::make_pair(result, 413);
 }
 
 template <typename Pointer>
@@ -193,7 +194,7 @@ TEST(MemoryTests, TestGetTemporaryBuffer)
 
   thrust::device_system_tag dev_tag;
   using pointer                                    = thrust::pointer<int, thrust::device_system_tag>;
-  thrust::pair<pointer, std::ptrdiff_t> ptr_and_sz = thrust::get_temporary_buffer<int>(dev_tag, n);
+  _THRUST_STD::pair<pointer, std::ptrdiff_t> ptr_and_sz = thrust::get_temporary_buffer<int>(dev_tag, n);
 
   ASSERT_EQ(ptr_and_sz.second, n);
 
@@ -265,15 +266,15 @@ TEST(MemoryTests, TestFreeDispatchExplicit)
 }
 
 template <typename T>
-thrust::pair<thrust::pointer<T, my_memory_system>, std::ptrdiff_t>
+_THRUST_STD::pair<thrust::pointer<T, my_memory_system>, std::ptrdiff_t>
 get_temporary_buffer(my_memory_system& system, std::ptrdiff_t n)
 {
   system.validate_dispatch();
 
   thrust::device_system_tag device_sys;
-  thrust::pair<thrust::pointer<T, thrust::device_system_tag>, std::ptrdiff_t> result =
+  _THRUST_STD::pair<thrust::pointer<T, thrust::device_system_tag>, std::ptrdiff_t> result =
     thrust::get_temporary_buffer<T>(device_sys, n);
-  return thrust::make_pair(thrust::pointer<T, my_memory_system>(result.first.get()), result.second);
+  return _THRUST_STD::make_pair(thrust::pointer<T, my_memory_system>(result.first.get()), result.second);
 }
 
 // [NON-CCCL PARITY BEGIN]
@@ -297,7 +298,7 @@ TEST(MemoryTests, TestGetTemporaryBufferDispatchExplicit)
 
   my_memory_system sys(0);
   using pointer                                    = thrust::pointer<int, thrust::device_system_tag>;
-  thrust::pair<pointer, std::ptrdiff_t> ptr_and_sz = thrust::get_temporary_buffer<int>(sys, n);
+  _THRUST_STD::pair<pointer, std::ptrdiff_t> ptr_and_sz = thrust::get_temporary_buffer<int>(sys, n);
 
   ASSERT_EQ(ptr_and_sz.second, n);
   ASSERT_EQ(true, sys.is_valid());
@@ -348,7 +349,7 @@ TEST(MemoryTests, TestTemporaryBufferOldCustomization)
 
   using system           = my_old_namespace::my_old_temporary_allocation_system;
   using pointer          = thrust::pointer<int, system>;
-  using pointer_and_size = thrust::pair<pointer, std::ptrdiff_t>;
+  using pointer_and_size = _THRUST_STD::pair<pointer, std::ptrdiff_t>;
 
   system sys;
 
@@ -367,7 +368,7 @@ TEST(MemoryTests, TestTemporaryBufferNewCustomization)
 {
   using system           = my_new_namespace::my_new_temporary_allocation_system;
   using pointer          = thrust::pointer<int, system>;
-  using pointer_and_size = thrust::pair<pointer, std::ptrdiff_t>;
+  using pointer_and_size = _THRUST_STD::pair<pointer, std::ptrdiff_t>;
 
   system sys;
 

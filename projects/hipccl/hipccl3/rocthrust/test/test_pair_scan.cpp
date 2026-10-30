@@ -15,9 +15,10 @@
  *  limitations under the License.
  */
 
-#include <thrust/pair.h>
 #include <thrust/scan.h>
 #include <thrust/transform.h>
+
+#include _THRUST_STD_INCLUDE(utility)
 
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
@@ -27,9 +28,9 @@ TESTS_DEFINE(PairScanVariablesTests, NumericalTestsParams);
 struct make_pair_functor
 {
   template <typename T1, typename T2>
-  THRUST_HOST_DEVICE thrust::pair<T1, T2> operator()(const T1& x, const T2& y)
+  THRUST_HOST_DEVICE _THRUST_STD::pair<T1, T2> operator()(const T1& x, const T2& y)
   {
-    return thrust::make_pair(x, y);
+    return _THRUST_STD::make_pair(x, y);
   } // end operator()()
 }; // end make_pair_functor
 
@@ -38,14 +39,14 @@ struct add_pairs
   template <typename Pair1, typename Pair2>
   THRUST_HOST_DEVICE Pair1 operator()(const Pair1& x, const Pair2& y)
   {
-    return thrust::make_pair(x.first + y.first, x.second + y.second);
+    return _THRUST_STD::make_pair(x.first + y.first, x.second + y.second);
   } // end operator()
 }; // end add_pairs
 
 TYPED_TEST(PairScanVariablesTests, TestPairScan)
 {
   using T = typename TestFixture::input_type;
-  using P = thrust::pair<T, T>;
+  using P = _THRUST_STD::pair<T, T>;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -72,7 +73,7 @@ TYPED_TEST(PairScanVariablesTests, TestPairScan)
       thrust::device_vector<P> d_pairs = h_pairs;
       thrust::device_vector<P> d_output(size);
 
-      P init = thrust::make_pair(13, 13);
+      P init = _THRUST_STD::make_pair(13, 13);
 
       // scan with plus
       thrust::inclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), add_pairs());

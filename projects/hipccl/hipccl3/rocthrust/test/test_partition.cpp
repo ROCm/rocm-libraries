@@ -104,7 +104,7 @@ TYPED_TEST(PartitionVectorTests, TestPartitionCopySimple)
   Vector true_results(2);
   Vector false_results(3);
 
-  thrust::pair<typename Vector::iterator, typename Vector::iterator> ends =
+  _THRUST_STD::pair<typename Vector::iterator, typename Vector::iterator> ends =
     thrust::partition_copy(data.begin(), data.end(), true_results.begin(), false_results.begin(), is_even<T>());
 
   Vector true_ref(2, 2);
@@ -131,7 +131,7 @@ TYPED_TEST(PartitionVectorTests, TestPartitionCopyStencilSimple)
   Vector true_results(2);
   Vector false_results(3);
 
-  thrust::pair<typename Vector::iterator, typename Vector::iterator> ends = thrust::partition_copy(
+  _THRUST_STD::pair<typename Vector::iterator, typename Vector::iterator> ends = thrust::partition_copy(
     data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), is_even<T>());
 
   Vector true_ref(2, 1);
@@ -193,7 +193,7 @@ TYPED_TEST(PartitionVectorTests, TestStablePartitionCopySimple)
   Vector true_results(2);
   Vector false_results(3);
 
-  thrust::pair<typename Vector::iterator, typename Vector::iterator> ends =
+  _THRUST_STD::pair<typename Vector::iterator, typename Vector::iterator> ends =
     thrust::stable_partition_copy(data.begin(), data.end(), true_results.begin(), false_results.begin(), is_even<T>());
 
   Vector true_ref(2, 2);
@@ -218,7 +218,7 @@ TYPED_TEST(PartitionVectorTests, TestStablePartitionCopyStencilSimple)
   Vector true_results(2);
   Vector false_results(3);
 
-  thrust::pair<typename Vector::iterator, typename Vector::iterator> ends = thrust::stable_partition_copy(
+  _THRUST_STD::pair<typename Vector::iterator, typename Vector::iterator> ends = thrust::stable_partition_copy(
     data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), _THRUST_STD::identity{});
 
   Vector true_ref(2, 2);
@@ -342,12 +342,12 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopy)
       thrust::device_vector<T> d_true_results(n_true, 0);
       thrust::device_vector<T> d_false_results(n_false, 0);
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_ends =
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_ends =
         thrust::partition_copy(
           h_data.begin(), h_data.end(), h_true_results.begin(), h_false_results.begin(), is_even<T>());
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_ends =
-        thrust::partition_copy(
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator>
+        d_ends = thrust::partition_copy(
           d_data.begin(), d_data.end(), d_true_results.begin(), d_false_results.begin(), is_even<T>());
 
       // check true output
@@ -398,7 +398,7 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencil)
       thrust::device_vector<T> d_true_results(n_true, 0);
       thrust::device_vector<T> d_false_results(n_false, 0);
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_ends =
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_ends =
         thrust::partition_copy(
           h_data.begin(),
           h_data.end(),
@@ -407,8 +407,8 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencil)
           h_false_results.begin(),
           is_even<T>());
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_ends =
-        thrust::partition_copy(
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator>
+        d_ends = thrust::partition_copy(
           d_data.begin(),
           d_data.end(),
           d_stencil.begin(),
@@ -464,7 +464,7 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencil)
       thrust::device_vector<T> d_true_results(n_true, 0);
       thrust::device_vector<T> d_false_results(n_false, 0);
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_ends =
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_ends =
         thrust::stable_partition_copy(
           h_data.begin(),
           h_data.end(),
@@ -473,8 +473,8 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencil)
           h_false_results.begin(),
           is_even<T>());
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_ends =
-        thrust::stable_partition_copy(
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator>
+        d_ends = thrust::stable_partition_copy(
           d_data.begin(),
           d_data.end(),
           d_stencil.begin(),
@@ -522,14 +522,14 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyToDiscardIterator)
       std::ptrdiff_t n_false = size - n_true;
 
       // mask both ranges
-      thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> h_result1 = thrust::partition_copy(
+      _THRUST_STD::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> h_result1 = thrust::partition_copy(
         h_data.begin(), h_data.end(), thrust::make_discard_iterator(), thrust::make_discard_iterator(), is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> d_result1 = thrust::partition_copy(
+      _THRUST_STD::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> d_result1 = thrust::partition_copy(
         d_data.begin(), d_data.end(), thrust::make_discard_iterator(), thrust::make_discard_iterator(), is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> reference1 =
-        thrust::make_pair(thrust::make_discard_iterator(n_true), thrust::make_discard_iterator(n_false));
+      _THRUST_STD::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> reference1 =
+        _THRUST_STD::make_pair(thrust::make_discard_iterator(n_true), thrust::make_discard_iterator(n_false));
 
       ASSERT_EQ_QUIET(reference1, h_result1);
       ASSERT_EQ_QUIET(reference1, d_result1);
@@ -538,19 +538,19 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyToDiscardIterator)
       thrust::host_vector<T> h_trues(n_true);
       thrust::device_vector<T> d_trues(n_true);
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_result2 =
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_result2 =
         thrust::partition_copy(
           h_data.begin(), h_data.end(), h_trues.begin(), thrust::make_discard_iterator(), is_even<T>());
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_result2 =
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_result2 =
         thrust::partition_copy(
           d_data.begin(), d_data.end(), d_trues.begin(), thrust::make_discard_iterator(), is_even<T>());
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_reference2 =
-        thrust::make_pair(h_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_reference2 =
+        _THRUST_STD::make_pair(h_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_reference2 =
-        thrust::make_pair(d_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_reference2 =
+        _THRUST_STD::make_pair(d_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
 
       ASSERT_EQ(h_trues, d_trues);
       ASSERT_EQ_QUIET(h_reference2, h_result2);
@@ -560,19 +560,19 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyToDiscardIterator)
       thrust::host_vector<T> h_falses(n_false);
       thrust::device_vector<T> d_falses(n_false);
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_result3 =
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_result3 =
         thrust::partition_copy(
           h_data.begin(), h_data.end(), thrust::make_discard_iterator(), h_falses.begin(), is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_result3 =
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_result3 =
         thrust::partition_copy(
           d_data.begin(), d_data.end(), thrust::make_discard_iterator(), d_falses.begin(), is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_reference3 =
-        thrust::make_pair(thrust::make_discard_iterator(n_true), h_falses.begin() + n_false);
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_reference3 =
+        _THRUST_STD::make_pair(thrust::make_discard_iterator(n_true), h_falses.begin() + n_false);
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_reference3 =
-        thrust::make_pair(thrust::make_discard_iterator(n_true), d_falses.begin() + n_false);
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_reference3 =
+        _THRUST_STD::make_pair(thrust::make_discard_iterator(n_true), d_falses.begin() + n_false);
 
       ASSERT_EQ(h_falses, d_falses);
       ASSERT_EQ_QUIET(h_reference3, h_result3);
@@ -607,7 +607,7 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencilToDiscardIterator)
       std::ptrdiff_t n_false = size - n_true;
 
       // mask both ranges
-      thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> h_result1 = thrust::partition_copy(
+      _THRUST_STD::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> h_result1 = thrust::partition_copy(
         h_data.begin(),
         h_data.end(),
         h_stencil.begin(),
@@ -615,7 +615,7 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencilToDiscardIterator)
         thrust::make_discard_iterator(),
         is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> d_result1 = thrust::partition_copy(
+      _THRUST_STD::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> d_result1 = thrust::partition_copy(
         d_data.begin(),
         d_data.end(),
         d_stencil.begin(),
@@ -623,8 +623,8 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencilToDiscardIterator)
         thrust::make_discard_iterator(),
         is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> reference1 =
-        thrust::make_pair(thrust::make_discard_iterator(n_true), thrust::make_discard_iterator(n_false));
+      _THRUST_STD::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> reference1 =
+        _THRUST_STD::make_pair(thrust::make_discard_iterator(n_true), thrust::make_discard_iterator(n_false));
 
       ASSERT_EQ_QUIET(reference1, h_result1);
       ASSERT_EQ_QUIET(reference1, d_result1);
@@ -633,7 +633,7 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencilToDiscardIterator)
       thrust::host_vector<T> h_trues(n_true);
       thrust::device_vector<T> d_trues(n_true);
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_result2 =
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_result2 =
         thrust::partition_copy(
           h_data.begin(),
           h_data.end(),
@@ -642,7 +642,7 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencilToDiscardIterator)
           thrust::make_discard_iterator(),
           is_even<T>());
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_result2 =
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_result2 =
         thrust::partition_copy(
           d_data.begin(),
           d_data.end(),
@@ -651,11 +651,11 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencilToDiscardIterator)
           thrust::make_discard_iterator(),
           is_even<T>());
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_reference2 =
-        thrust::make_pair(h_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_reference2 =
+        _THRUST_STD::make_pair(h_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_reference2 =
-        thrust::make_pair(d_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_reference2 =
+        _THRUST_STD::make_pair(d_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
 
       ASSERT_EQ(h_trues, d_trues);
       ASSERT_EQ_QUIET(h_reference2, h_result2);
@@ -665,7 +665,7 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencilToDiscardIterator)
       thrust::host_vector<T> h_falses(n_false);
       thrust::device_vector<T> d_falses(n_false);
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_result3 =
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_result3 =
         thrust::partition_copy(
           h_data.begin(),
           h_data.end(),
@@ -674,7 +674,7 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencilToDiscardIterator)
           h_falses.begin(),
           is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_result3 =
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_result3 =
         thrust::partition_copy(
           d_data.begin(),
           d_data.end(),
@@ -683,11 +683,11 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencilToDiscardIterator)
           d_falses.begin(),
           is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_reference3 =
-        thrust::make_pair(thrust::make_discard_iterator(n_true), h_falses.begin() + n_false);
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_reference3 =
+        _THRUST_STD::make_pair(thrust::make_discard_iterator(n_true), h_falses.begin() + n_false);
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_reference3 =
-        thrust::make_pair(thrust::make_discard_iterator(n_true), d_falses.begin() + n_false);
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_reference3 =
+        _THRUST_STD::make_pair(thrust::make_discard_iterator(n_true), d_falses.begin() + n_false);
 
       ASSERT_EQ(h_falses, d_falses);
       ASSERT_EQ_QUIET(h_reference3, h_result3);
@@ -797,12 +797,12 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopy)
       thrust::device_vector<T> d_true_results(n_true, 0);
       thrust::device_vector<T> d_false_results(n_false, 0);
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_ends =
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_ends =
         thrust::stable_partition_copy(
           h_data.begin(), h_data.end(), h_true_results.begin(), h_false_results.begin(), is_even<T>());
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_ends =
-        thrust::stable_partition_copy(
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator>
+        d_ends = thrust::stable_partition_copy(
           d_data.begin(), d_data.end(), d_true_results.begin(), d_false_results.begin(), is_even<T>());
 
       // check true output
@@ -841,14 +841,16 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyToDiscardIterator)
       std::ptrdiff_t n_false = size - n_true;
 
       // mask both ranges
-      thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> h_result1 = thrust::stable_partition_copy(
-        h_data.begin(), h_data.end(), thrust::make_discard_iterator(), thrust::make_discard_iterator(), is_even<T>());
+      _THRUST_STD::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> h_result1 =
+        thrust::stable_partition_copy(
+          h_data.begin(), h_data.end(), thrust::make_discard_iterator(), thrust::make_discard_iterator(), is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> d_result1 = thrust::stable_partition_copy(
-        d_data.begin(), d_data.end(), thrust::make_discard_iterator(), thrust::make_discard_iterator(), is_even<T>());
+      _THRUST_STD::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> d_result1 =
+        thrust::stable_partition_copy(
+          d_data.begin(), d_data.end(), thrust::make_discard_iterator(), thrust::make_discard_iterator(), is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> reference1 =
-        thrust::make_pair(thrust::make_discard_iterator(n_true), thrust::make_discard_iterator(n_false));
+      _THRUST_STD::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> reference1 =
+        _THRUST_STD::make_pair(thrust::make_discard_iterator(n_true), thrust::make_discard_iterator(n_false));
 
       ASSERT_EQ_QUIET(reference1, h_result1);
       ASSERT_EQ_QUIET(reference1, d_result1);
@@ -857,19 +859,19 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyToDiscardIterator)
       thrust::host_vector<T> h_trues(n_true);
       thrust::device_vector<T> d_trues(n_true);
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_result2 =
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_result2 =
         thrust::stable_partition_copy(
           h_data.begin(), h_data.end(), h_trues.begin(), thrust::make_discard_iterator(), is_even<T>());
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_result2 =
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_result2 =
         thrust::stable_partition_copy(
           d_data.begin(), d_data.end(), d_trues.begin(), thrust::make_discard_iterator(), is_even<T>());
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_reference2 =
-        thrust::make_pair(h_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_reference2 =
+        _THRUST_STD::make_pair(h_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_reference2 =
-        thrust::make_pair(d_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_reference2 =
+        _THRUST_STD::make_pair(d_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
 
       ASSERT_EQ(h_trues, d_trues);
       ASSERT_EQ_QUIET(h_reference2, h_result2);
@@ -879,19 +881,19 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyToDiscardIterator)
       thrust::host_vector<T> h_falses(n_false);
       thrust::device_vector<T> d_falses(n_false);
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_result3 =
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_result3 =
         thrust::stable_partition_copy(
           h_data.begin(), h_data.end(), thrust::make_discard_iterator(), h_falses.begin(), is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_result3 =
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_result3 =
         thrust::stable_partition_copy(
           d_data.begin(), d_data.end(), thrust::make_discard_iterator(), d_falses.begin(), is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_reference3 =
-        thrust::make_pair(thrust::make_discard_iterator(n_true), h_falses.begin() + n_false);
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_reference3 =
+        _THRUST_STD::make_pair(thrust::make_discard_iterator(n_true), h_falses.begin() + n_false);
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_reference3 =
-        thrust::make_pair(thrust::make_discard_iterator(n_true), d_falses.begin() + n_false);
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_reference3 =
+        _THRUST_STD::make_pair(thrust::make_discard_iterator(n_true), d_falses.begin() + n_false);
 
       ASSERT_EQ(h_falses, d_falses);
       ASSERT_EQ_QUIET(h_reference3, h_result3);
@@ -926,24 +928,26 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencilToDiscardIterato
       std::ptrdiff_t n_false = size - n_true;
 
       // mask both ranges
-      thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> h_result1 = thrust::stable_partition_copy(
-        h_data.begin(),
-        h_data.end(),
-        h_stencil.begin(),
-        thrust::make_discard_iterator(),
-        thrust::make_discard_iterator(),
-        is_even<T>());
+      _THRUST_STD::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> h_result1 =
+        thrust::stable_partition_copy(
+          h_data.begin(),
+          h_data.end(),
+          h_stencil.begin(),
+          thrust::make_discard_iterator(),
+          thrust::make_discard_iterator(),
+          is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> d_result1 = thrust::stable_partition_copy(
-        d_data.begin(),
-        d_data.end(),
-        d_stencil.begin(),
-        thrust::make_discard_iterator(),
-        thrust::make_discard_iterator(),
-        is_even<T>());
+      _THRUST_STD::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> d_result1 =
+        thrust::stable_partition_copy(
+          d_data.begin(),
+          d_data.end(),
+          d_stencil.begin(),
+          thrust::make_discard_iterator(),
+          thrust::make_discard_iterator(),
+          is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> reference1 =
-        thrust::make_pair(thrust::make_discard_iterator(n_true), thrust::make_discard_iterator(n_false));
+      _THRUST_STD::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> reference1 =
+        _THRUST_STD::make_pair(thrust::make_discard_iterator(n_true), thrust::make_discard_iterator(n_false));
 
       ASSERT_EQ_QUIET(reference1, h_result1);
       ASSERT_EQ_QUIET(reference1, d_result1);
@@ -952,7 +956,7 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencilToDiscardIterato
       thrust::host_vector<T> h_trues(n_true);
       thrust::device_vector<T> d_trues(n_true);
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_result2 =
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_result2 =
         thrust::stable_partition_copy(
           h_data.begin(),
           h_data.end(),
@@ -961,7 +965,7 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencilToDiscardIterato
           thrust::make_discard_iterator(),
           is_even<T>());
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_result2 =
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_result2 =
         thrust::stable_partition_copy(
           d_data.begin(),
           d_data.end(),
@@ -970,11 +974,11 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencilToDiscardIterato
           thrust::make_discard_iterator(),
           is_even<T>());
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_reference2 =
-        thrust::make_pair(h_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<>> h_reference2 =
+        _THRUST_STD::make_pair(h_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_reference2 =
-        thrust::make_pair(d_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<>> d_reference2 =
+        _THRUST_STD::make_pair(d_trues.begin() + n_true, thrust::make_discard_iterator(n_false));
 
       ASSERT_EQ(h_trues, d_trues);
       ASSERT_EQ_QUIET(h_reference2, h_result2);
@@ -984,7 +988,7 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencilToDiscardIterato
       thrust::host_vector<T> h_falses(n_false);
       thrust::device_vector<T> d_falses(n_false);
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_result3 =
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_result3 =
         thrust::stable_partition_copy(
           h_data.begin(),
           h_data.end(),
@@ -993,7 +997,7 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencilToDiscardIterato
           h_falses.begin(),
           is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_result3 =
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_result3 =
         thrust::stable_partition_copy(
           d_data.begin(),
           d_data.end(),
@@ -1002,11 +1006,11 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencilToDiscardIterato
           d_falses.begin(),
           is_even<T>());
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_reference3 =
-        thrust::make_pair(thrust::make_discard_iterator(n_true), h_falses.begin() + n_false);
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::host_vector<T>::iterator> h_reference3 =
+        _THRUST_STD::make_pair(thrust::make_discard_iterator(n_true), h_falses.begin() + n_false);
 
-      thrust::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_reference3 =
-        thrust::make_pair(thrust::make_discard_iterator(n_true), d_falses.begin() + n_false);
+      _THRUST_STD::pair<thrust::discard_iterator<>, typename thrust::device_vector<T>::iterator> d_reference3 =
+        _THRUST_STD::make_pair(thrust::make_discard_iterator(n_true), d_falses.begin() + n_false);
 
       ASSERT_EQ(h_falses, d_falses);
       ASSERT_EQ_QUIET(h_reference3, h_result3);
@@ -1202,11 +1206,11 @@ TYPED_TEST(PartitionTests, TestPartitionStencilDispatchImplicit)
 }
 
 template <typename InputIterator, typename OutputIterator1, typename OutputIterator2, typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
   my_system& system, InputIterator, InputIterator, OutputIterator1 out_true, OutputIterator2 out_false, Predicate)
 {
   system.validate_dispatch();
-  return thrust::make_pair(out_true, out_false);
+  return _THRUST_STD::make_pair(out_true, out_false);
 }
 
 TEST(PartitionTests, TestPartitionCopyDispatchExplicit)
@@ -1226,7 +1230,7 @@ template <typename InputIterator1,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
   my_system& system,
   InputIterator1,
   InputIterator1,
@@ -1236,7 +1240,7 @@ thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
   Predicate)
 {
   system.validate_dispatch();
-  return thrust::make_pair(out_true, out_false);
+  return _THRUST_STD::make_pair(out_true, out_false);
 }
 
 TEST(PartitionTests, TestPartitionCopyStencilDispatchExplicit)
@@ -1252,11 +1256,11 @@ TEST(PartitionTests, TestPartitionCopyStencilDispatchExplicit)
 }
 
 template <typename InputIterator, typename OutputIterator1, typename OutputIterator2, typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
   my_tag, InputIterator first, InputIterator, OutputIterator1 out_true, OutputIterator2 out_false, Predicate)
 {
   *first = 13;
-  return thrust::make_pair(out_true, out_false);
+  return _THRUST_STD::make_pair(out_true, out_false);
 }
 
 TEST(PartitionTests, TestPartitionCopyDispatchImplicit)
@@ -1280,7 +1284,7 @@ template <typename InputIterator1,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> partition_copy(
   my_tag,
   InputIterator1 first,
   InputIterator1,
@@ -1290,7 +1294,7 @@ thrust::pair<OutputIterator1, OutputIterator2> partition_copy(
   Predicate)
 {
   *first = 13;
-  return thrust::make_pair(out_true, out_false);
+  return _THRUST_STD::make_pair(out_true, out_false);
 }
 
 TEST(PartitionTests, TestPartitionCopyStencilDispatchImplicit)
@@ -1386,11 +1390,11 @@ TEST(PartitionTests, TestStablePartitionStencilDispatchImplicit)
 }
 
 template <typename InputIterator, typename OutputIterator1, typename OutputIterator2, typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   my_system& system, InputIterator, InputIterator, OutputIterator1 out_true, OutputIterator2 out_false, Predicate)
 {
   system.validate_dispatch();
-  return thrust::make_pair(out_true, out_false);
+  return _THRUST_STD::make_pair(out_true, out_false);
 }
 
 TEST(PartitionTests, TestStablePartitionCopyDispatchExplicit)
@@ -1410,7 +1414,7 @@ template <typename InputIterator1,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   my_system& system,
   InputIterator1,
   InputIterator1,
@@ -1420,7 +1424,7 @@ thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   Predicate)
 {
   system.validate_dispatch();
-  return thrust::make_pair(out_true, out_false);
+  return _THRUST_STD::make_pair(out_true, out_false);
 }
 
 TEST(PartitionTests, TestStablePartitionCopyStencilDispatchExplicit)
@@ -1436,11 +1440,11 @@ TEST(PartitionTests, TestStablePartitionCopyStencilDispatchExplicit)
 }
 
 template <typename InputIterator, typename OutputIterator1, typename OutputIterator2, typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   my_tag, InputIterator first, InputIterator, OutputIterator1 out_true, OutputIterator2 out_false, Predicate)
 {
   *first = 13;
-  return thrust::make_pair(out_true, out_false);
+  return _THRUST_STD::make_pair(out_true, out_false);
 }
 
 TEST(PartitionTests, TestStablePartitionCopyDispatchImplicit)
@@ -1464,7 +1468,7 @@ template <typename InputIterator1,
           typename OutputIterator1,
           typename OutputIterator2,
           typename Predicate>
-thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   my_tag,
   InputIterator1 first,
   InputIterator1,
@@ -1474,7 +1478,7 @@ thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
   Predicate)
 {
   *first = 13;
-  return thrust::make_pair(out_true, out_false);
+  return _THRUST_STD::make_pair(out_true, out_false);
 }
 
 TEST(PartitionTests, TestStablePartitionCopyStencilDispatchImplicit)
@@ -1542,7 +1546,7 @@ PartitionCopyKernel(int const N, int* array, int* true_arr, int* false_arr, int*
     thrust::device_ptr<int> false_begin(false_arr);
     using iter = thrust::device_vector<int>::iterator;
 
-    thrust::pair<iter, iter> end_pair =
+    _THRUST_STD::pair<iter, iter> end_pair =
       thrust::partition_copy(thrust::hip::par, begin, end, true_begin, false_begin, is_even<int>());
     size_array[0] = end_pair.first - iter(true_begin);
     size_array[1] = end_pair.second - iter(false_begin);

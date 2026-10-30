@@ -40,7 +40,7 @@ TYPED_TEST(SetIntersectionByKeyDescendingTests, TestSetIntersectionByKeyDescendi
   Vector ref_key{4, 0}, ref_val{0, 0};
   Vector result_key(2), result_val(2);
 
-  thrust::pair<Iterator, Iterator> end = thrust::set_intersection_by_key(
+  _THRUST_STD::pair<Iterator, Iterator> end = thrust::set_intersection_by_key(
     a_key.begin(),
     a_key.end(),
     b_key.begin(),
@@ -89,9 +89,9 @@ TYPED_TEST(SetIntersectionByKeyDescendingPrimitiveTests, TestSetIntersectionByKe
       thrust::host_vector<T> h_result_key(size), h_result_val(size);
       thrust::device_vector<T> d_result_key(size), d_result_val(size);
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
 
       h_end = thrust::set_intersection_by_key(
         h_a_key.begin(),

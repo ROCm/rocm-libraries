@@ -15,8 +15,9 @@
  *  limitations under the License.
  */
 
-#include <thrust/pair.h>
 #include <thrust/sort.h>
+
+#include _THRUST_STD_INCLUDE(utility)
 
 #include <cstdint>
 
@@ -31,9 +32,9 @@ TESTS_DEFINE(PairSortByKeyTests, PairSortByKeyTestParams);
 struct make_pair_functor
 {
   template <typename T1, typename T2>
-  THRUST_HOST_DEVICE thrust::pair<T1, T2> operator()(const T1& x, const T2& y)
+  THRUST_HOST_DEVICE _THRUST_STD::pair<T1, T2> operator()(const T1& x, const T2& y)
   {
-    return thrust::make_pair(x, y);
+    return _THRUST_STD::make_pair(x, y);
   } // end operator()()
 }; // end make_pair_functor
 
@@ -42,7 +43,7 @@ TYPED_TEST(PairSortByKeyTests, TestPairStableSort)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   using T = typename TestFixture::input_type;
-  using P = thrust::pair<T, T>;
+  using P = _THRUST_STD::pair<T, T>;
 
   for (auto size : get_sizes())
   {

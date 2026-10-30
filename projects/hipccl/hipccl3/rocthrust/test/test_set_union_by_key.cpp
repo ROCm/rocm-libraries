@@ -33,7 +33,7 @@ template <typename InputIterator1,
           typename InputIterator4,
           typename OutputIterator1,
           typename OutputIterator2>
-thrust::pair<OutputIterator1, OutputIterator2> set_union_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> set_union_by_key(
   my_system& system,
   InputIterator1,
   InputIterator1,
@@ -45,7 +45,7 @@ thrust::pair<OutputIterator1, OutputIterator2> set_union_by_key(
   OutputIterator2 values_result)
 {
   system.validate_dispatch();
-  return thrust::make_pair(keys_result, values_result);
+  return _THRUST_STD::make_pair(keys_result, values_result);
 }
 
 TEST(SetUnionByKeyTests, TestSetUnionByKeyDispatchExplicit)
@@ -67,7 +67,7 @@ template <typename InputIterator1,
           typename InputIterator4,
           typename OutputIterator1,
           typename OutputIterator2>
-thrust::pair<OutputIterator1, OutputIterator2> set_union_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> set_union_by_key(
   my_tag,
   InputIterator1,
   InputIterator1,
@@ -79,7 +79,7 @@ thrust::pair<OutputIterator1, OutputIterator2> set_union_by_key(
   OutputIterator2 values_result)
 {
   *keys_result = 13;
-  return thrust::make_pair(keys_result, values_result);
+  return _THRUST_STD::make_pair(keys_result, values_result);
 }
 
 TEST(SetUnionByKeyTests, TestSetUnionByKeyDispatchImplicit)
@@ -114,7 +114,7 @@ TYPED_TEST(SetUnionByKeyTests, TestSetUnionByKeySimple)
   Vector ref_key{0, 2, 3, 3, 4}, ref_val{0, 0, 1, 1, 0};
   Vector result_key(5), result_val(5);
 
-  thrust::pair<Iterator, Iterator> end = thrust::set_union_by_key(
+  _THRUST_STD::pair<Iterator, Iterator> end = thrust::set_union_by_key(
     a_key.begin(),
     a_key.end(),
     b_key.begin(),
@@ -173,9 +173,9 @@ TYPED_TEST(SetUnionByKeyPrimitiveTests, TestSetUnionByKey)
       thrust::device_vector<T> d_result_keys(max_size);
       thrust::device_vector<T> d_result_vals(max_size);
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
 
       h_end = thrust::set_union_by_key(
         h_a_keys.begin(),
@@ -244,9 +244,9 @@ TYPED_TEST(SetUnionByKeyPrimitiveTests, TestSetUnionByKeyEquivalentRanges)
       thrust::host_vector<T> h_result_key(max_size), h_result_val(max_size);
       thrust::device_vector<T> d_result_key(max_size), d_result_val(max_size);
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
 
       h_end = thrust::set_union_by_key(
         h_a_key.begin(),
@@ -324,9 +324,9 @@ TYPED_TEST(SetUnionByKeyPrimitiveTests, TestSetUnionByKeyMultiset)
       thrust::host_vector<T> h_result_key(max_size), h_result_val(max_size);
       thrust::device_vector<T> d_result_key(max_size), d_result_val(max_size);
 
-      thrust::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
+      _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
 
-      thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
+      _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
 
       h_end = thrust::set_union_by_key(
         h_a_key.begin(),
