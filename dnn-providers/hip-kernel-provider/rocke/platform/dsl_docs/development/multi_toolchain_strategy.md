@@ -352,8 +352,11 @@ target that lacks the instruction and write it into the object, and only the
 text assembler checks each instruction against the target (`arch_absent`
 otherwise). Every decl key × every wired arch — the committed columns are the count of
 record, not this sentence — ~15 s wall across cores on `llvm22`. Managed like
-golden — a generator tool, a committed artifact, a test asserting regeneration is
-a no-op. Depends only on `clang`, never on install layout (§2.4).
+golden — a generator tool, a committed artifact, and a test asserting
+regeneration is a no-op when run with the exact compiler build recorded in the
+artifact. A different build is explicitly unvalidated because development builds
+within one LLVM major can disagree. Depends only on `clang`, never on install
+layout (§2.4).
 
 Per-cell provenance landed as **one file per flavor, named after it**, rather
 than a `verified`/`unvalidated` marker inside a shared file as §3.2 suggested. A

@@ -992,22 +992,15 @@ def _decl_table(flavor: str) -> dict[str, str]:
 def _drift(committed: str, fresh: str) -> str | None:
     """Describe how a committed column differs from a fresh run, or None.
 
-    None means "differs only in which compiler build answered" -- every cell
-    agrees, and so does every field describing how the probe was posed. That is
-    not staleness and must not fail: `toolchain.clang` records the exact ROCm
-    build, so a byte comparison reds on any host whose patch level differs from
-    the one that blessed the column, which is most of them. This check exists to
-    catch a *wrong measurement*, and a column this host reproduces cell for cell
-    is not one.
-
-    Everything else is drift, including the rest of `toolchain`. Those fields
-    are our own settings rather than properties of the host: `generator`,
-    `probe_cflags` and `probe_timeout_s` say how the question was asked, and a
-    change to any of them means the committed answers were obtained by a method
-    we no longer use. `probe_cflags` is the concrete example -- the same clang
-    reports `ok` or hangs for the same key depending on whether it carries
-    `-O0` -- so forgiving a difference there would forgive precisely the defect
-    that field was added to make visible.
+    Exact reproduction is meaningful only with the compiler build recorded in
+    ``toolchain.clang``. The caller checks that provenance before probing, so a
+    different compiler build is unvalidated rather than drift. Once applicable,
+    every toolchain field remains part of the artifact: ``generator``,
+    ``probe_cflags`` and ``probe_timeout_s`` say how the question was asked, and
+    changing any of them means the committed answers were obtained by a method
+    we no longer use. ``probe_cflags`` is the concrete example -- the same clang
+    reports ``ok`` or hangs for the same key depending on whether it carries
+    ``-O0``.
     """
     try:
         a, b = json.loads(committed), json.loads(fresh)
@@ -1026,8 +1019,6 @@ def _drift(committed: str, fresh: str) -> str | None:
         more = f" (+{len(changed) - 5} more)" if len(changed) > 5 else ""
         return f"measurements changed -- {head}{more}"
 
-    for doc in (a, b):
-        doc.get("toolchain", {}).pop("clang", None)
     if a != b:
         fields = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
         return f"differs in {', '.join(fields)}, not in the measurements"
@@ -1447,6 +1438,28 @@ def main() -> int:
         )
         return 1
 
+    # A measured column is an artifact of one exact compiler build, not every
+    # compiler that reports the same LLVM major. Development snapshots within a
+    # flavor can change intrinsic availability and even ABI. Re-probing with a
+    # different build would compare two different questions and make ordinary
+    # CI depend on whichever compiler-runtime artifact it happened to receive.
+    # Report that honestly as unvalidated before starting the expensive sweep.
+    if args.check and out.is_file():
+        try:
+            committed_doc = json.loads(out.read_text())
+        except json.JSONDecodeError:
+            # The final drift check owns the actionable malformed-JSON error.
+            committed_doc = {}
+        blessed_identity = committed_doc.get("toolchain", {}).get("clang")
+        if blessed_identity and blessed_identity != identity:
+            print(
+                f"\nUNVALIDATED: {out.name} was measured with a different "
+                "compiler build; exact artifact reproduction is not applicable.\n"
+                f"      blessed by: {blessed_identity}\n"
+                f"      this host : {identity}"
+            )
+            return _unvalidated_exit(args.unvalidated_exit_code, 0)
+
     arches = sorted(args.arch) if args.arch else sorted(wired_arches())
     decls = _decl_table(flavor)
     keys = sorted(k for k in decls if not args.only or args.only in k)
@@ -1805,16 +1818,7 @@ def main() -> int:
             return 0
         why = _drift(committed, text)
         if why is None:
-            # Reproduced cell for cell by a different build of the same
-            # flavor -- a stronger pass than a byte match, since two
-            # independent builds agreeing shows the column describes the
-            # flavor rather than one machine. See `_drift`.
-            print(
-                f"\nOK: {out.name} is up to date -- every cell reproduces "
-                "here; only the compiler build differs.\n"
-                f"      blessed by: {json.loads(committed)['toolchain']['clang']}\n"
-                f"      this host : {identity}"
-            )
+            print(f"\nOK: {out.name} is semantically unchanged.")
             return 0
         print(
             f"\nFAIL: {out} is stale -- regenerating changed it.\n"

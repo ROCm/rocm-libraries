@@ -17,10 +17,11 @@ Two gates fail for different reasons and run under different schedulers:
   removed while the artifact still looks authoritative.
 
 * **Regeneration** is the dedicated ``rocke_arch_domain_reproducibility`` CTest.
-  It re-probes the toolchain and asserts the committed measurements for *this
-  host's* flavor reproduce cell-for-cell; compiler-build provenance may differ.
-  It is the only check that can catch a wrong measurement rather than a missing
-  one. Its external compiler processes,
+  When the host has the exact compiler build recorded in the column, it
+  re-probes the toolchain and asserts the committed measurements reproduce
+  cell-for-cell. A different compiler build is explicitly unvalidated: an LLVM
+  major is not a stable intrinsic-availability contract. It is the only check
+  that can catch a wrong measurement rather than a missing one. Its external compiler processes,
   timeout, resource policy, and skip result do not belong in the unit-test pool.
 
 A host can only ever measure its own LLVM, so a flavor with no matching
@@ -39,6 +40,7 @@ registrations and the packaged helper list in step if either path is renamed.
 from __future__ import annotations
 
 import ast
+import io
 import json
 import os
 import re
@@ -319,12 +321,10 @@ class AvailableCpusTest(unittest.TestCase):
 
 
 class DriftTest(unittest.TestCase):
-    """What `--check` forgives, and what it must not.
+    """What an applicable ``--check`` treats as drift.
 
-    The column embeds the exact ROCm build that measured it, so a byte
-    comparison fails on any host at a different patch level -- not something
-    anyone can act on. But the fields saying *how* the probe was posed are
-    ours, not the host's, and forgiving those forgives real defects.
+    The caller rejects a compiler-provenance mismatch before probing. Once the
+    exact recorded compiler is present, every artifact field is load-bearing.
     """
 
     def _doc(self, **toolchain) -> str:
@@ -346,9 +346,11 @@ class DriftTest(unittest.TestCase):
             }
         )
 
-    def test_a_different_compiler_build_is_not_drift(self):
+    def test_a_different_compiler_build_is_drift_when_compared(self):
         other = "AMD clang version 22.0.0git (... roc-7.2.0 26014 def)"
-        self.assertIsNone(G._drift(self._doc(), self._doc(clang=other)))
+        why = G._drift(self._doc(), self._doc(clang=other))
+        self.assertIsNotNone(why)
+        self.assertIn("toolchain", why)
 
     def test_a_changed_measurement_is_drift_and_says_which(self):
         fresh = json.loads(self._doc())
@@ -1290,6 +1292,35 @@ for line in open(src):
             )
         self.assertEqual(rc, 77)
         self.assertFalse(out.exists())
+
+    def test_ctest_skips_a_column_from_a_different_compiler_build(self):
+        """One LLVM major does not make development builds interchangeable."""
+        out = Path(tempfile.mkdtemp()) / "column.json"
+        self.addCleanup(shutil.rmtree, out.parent, True)
+        blessed = "AMD clang version 22.0.0git (blessed-build)"
+        host = "AMD clang version 22.0.0git"
+        out.write_text(json.dumps({"toolchain": {"clang": blessed}}))
+        tools = {
+            "clang": self._clang_with_accepting_assembler(self._CLANG_ACCEPTS),
+            "opt": self._stub("opt", self._OPT_RESOLVES_AND_IDENTIFIES),
+        }
+        stdout = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+            mock.patch("sys.stdout", stdout),
+        ):
+            rc = self._run(
+                tools,
+                out,
+                "--check",
+                "--unvalidated-exit-code",
+                "77",
+            )
+
+        self.assertEqual(rc, 77)
+        self.assertIn("UNVALIDATED", stdout.getvalue())
+        self.assertIn(blessed, stdout.getvalue())
+        self.assertIn(host, stdout.getvalue())
 
     def test_ctest_can_translate_a_missing_column_to_a_skip(self):
         """A measured flavor with no baseline is unvalidated, not green."""
