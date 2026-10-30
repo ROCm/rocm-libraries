@@ -85,20 +85,42 @@ BenchmarkProblems:
         - DepthU: [ 16 ]
         - 1LDSBuffer: [0]
         - ExpandPointerSwap: [False]
-        - GlobalReadVectorWidthA: [1, 2, 4]
-        - GlobalReadVectorWidthB: [1, 2, 4]
+        # Pairwise cover of the full parameter grid, written by scripts/sparsify_fork_grid.py.
+        # Every pair of values that is valid together appears in at least one row.
+        - Groups:
+          -
+            - {GlobalReadVectorWidthA: 1, GlobalReadVectorWidthB: 1, ScheduleIterAlg: 0, VectorWidthA: 1, VectorWidthB: 1, WorkGroupMapping: 0}
+            - {GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 0, VectorWidthA: 4, VectorWidthB: 4, WorkGroupMapping: 0}
+            - {GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 4, VectorWidthA: 2, VectorWidthB: 2, WorkGroupMapping: 0}
+            - {GlobalReadVectorWidthA: 1, GlobalReadVectorWidthB: 1, ScheduleIterAlg: 0, VectorWidthA: 2, VectorWidthB: 1, WorkGroupMapping: 1}
+            - {GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 0, VectorWidthA: 4, VectorWidthB: 4, WorkGroupMapping: 1}
+            - {GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 4, VectorWidthA: 1, VectorWidthB: 2, WorkGroupMapping: 1}
+            - {GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 1, ScheduleIterAlg: 0, VectorWidthA: 2, VectorWidthB: 4, WorkGroupMapping: 2}
+            - {GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 0, VectorWidthA: 1, VectorWidthB: 2, WorkGroupMapping: 2}
+            - {GlobalReadVectorWidthA: 1, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 4, VectorWidthA: 4, VectorWidthB: 1, WorkGroupMapping: 2}
+            - {GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 1, ScheduleIterAlg: 0, VectorWidthA: 4, VectorWidthB: 2, WorkGroupMapping: 4}
+            - {GlobalReadVectorWidthA: 1, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 0, VectorWidthA: 2, VectorWidthB: 4, WorkGroupMapping: 4}
+            - {GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 4, VectorWidthA: 1, VectorWidthB: 1, WorkGroupMapping: 4}
+            - {GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 0, VectorWidthA: 1, VectorWidthB: 4, WorkGroupMapping: 8}
+            - {GlobalReadVectorWidthA: 1, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 0, VectorWidthA: 2, VectorWidthB: 2, WorkGroupMapping: 8}
+            - {GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 1, ScheduleIterAlg: 4, VectorWidthA: 4, VectorWidthB: 1, WorkGroupMapping: 8}
+            - {GlobalReadVectorWidthA: 1, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 0, VectorWidthA: 1, VectorWidthB: 4, WorkGroupMapping: 16}
+            - {GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 0, VectorWidthA: 4, VectorWidthB: 2, WorkGroupMapping: 16}
+            - {GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 1, ScheduleIterAlg: 4, VectorWidthA: 2, VectorWidthB: 1, WorkGroupMapping: 16}
+            - {GlobalReadVectorWidthA: 1, GlobalReadVectorWidthB: 1, ScheduleIterAlg: 0, VectorWidthA: 1, VectorWidthB: 1, WorkGroupMapping: 32}
+            - {GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 0, VectorWidthA: 4, VectorWidthB: 4, WorkGroupMapping: 32}
+            - {GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 4, VectorWidthA: 2, VectorWidthB: 2, WorkGroupMapping: 32}
+            - {GlobalReadVectorWidthA: 1, GlobalReadVectorWidthB: 1, ScheduleIterAlg: 0, VectorWidthA: 2, VectorWidthB: 1, WorkGroupMapping: 64}
+            - {GlobalReadVectorWidthA: 2, GlobalReadVectorWidthB: 2, ScheduleIterAlg: 0, VectorWidthA: 4, VectorWidthB: 2, WorkGroupMapping: 64}
+            - {GlobalReadVectorWidthA: 4, GlobalReadVectorWidthB: 4, ScheduleIterAlg: 4, VectorWidthA: 1, VectorWidthB: 4, WorkGroupMapping: 64}
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 4,4, 1,2]
         - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [0, 4]
         - SourceSwap: [True]
         - StoreRemapVectorWidth: [0]
         - TransposeLDS: [0]
-        - VectorWidthA: [1, 2, 4]
-        - VectorWidthB: [1, 2, 4]
-        - WorkGroupMapping: [0, 1, 2, 4, 8, 16, 32, 64]
 
       BenchmarkForkParameters:
       JoinParameters:
