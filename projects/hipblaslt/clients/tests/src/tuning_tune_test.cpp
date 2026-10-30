@@ -30,6 +30,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -3872,6 +3873,91 @@ namespace
                                                                : 3);
             },
             ::testing::ExitedWithCode(0),
+            "");
+    }
+
+    // A shape dispatched once keeps the only pair a cap of one allows, and its
+    // launch is long finished. The next shape keeps coming back and must still
+    // be explored and recorded: at the cap the finished launch is read back and
+    // its pair reused, rather than every later shape on the device running
+    // untimed for the rest of the process.
+    //
+    // In a fresh process, so no pair an earlier case pooled can stand in for
+    // the one the cap allows.
+    TEST_F(TuningOnline_pre_checkin, AShapeDispatchedOnceDoesNotStopTheNextOneBeingTuned)
+    {
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        EXPECT_EXIT(
+            {
+                OnlineProblem once(/*pointerArray=*/false, kOnlineM + 192);
+                OnlineProblem repeated(/*pointerArray=*/false, kOnlineM + 256);
+                if(!once.create() || !repeated.create() || once.distinctCandidates(kOnlineTopK) < 2
+                   || repeated.distinctCandidates(kOnlineTopK) < 2)
+                    std::exit(2);
+
+                setenv("HIPBLASLT_TUNING_MAX_EVENT_PAIRS", "1", 1);
+                enterOnline(m_path);
+
+                int launched = -1;
+                if(!once.dispatch(&launched))
+                    std::exit(2);
+
+                // One kernel throughout is the shape never having been probed,
+                // and no row is it never having been recorded.
+                if(runToResolution(repeated) < 2)
+                    std::exit(3);
+                std::exit(valueRowCount(m_path) == 1 ? 0 : 4);
+            },
+            ::testing::ExitedWithCode(0),
+            "");
+    }
+
+    // More shapes in rotation than a cap of one has pairs for, and more than
+    // the waves the cap used to let through could reach. Every one of them
+    // must be explored and recorded. Without reclaiming the pairs of finished
+    // launches, shapes went through one wave per pair, each waiting shape
+    // spending its visit budget on declined launches, and the shapes past the
+    // last wave the budget allows were never recorded.
+    //
+    // The child exits with 100 plus the number of rows written, so a failure
+    // says how many shapes were recorded. Fresh process, as above.
+    TEST_F(TuningOnline_pre_checkin, ShapesInRotationPastTheCapAreAllTuned)
+    {
+        // The last wave the visit budget lets a cap of one through, plus two.
+        constexpr int kShapes = 10;
+
+        // Long enough for every wave to have run out, so a shape the waves
+        // never reached has also resolved, with no row, by the time rows are
+        // counted.
+        constexpr int kRounds = kOnlineTopK * kOnlineRepeats * 8 + 5;
+
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        EXPECT_EXIT(
+            {
+                std::vector<std::unique_ptr<OnlineProblem>> shapes;
+                for(int i = 0; i < kShapes; i++)
+                {
+                    shapes.push_back(
+                        std::make_unique<OnlineProblem>(/*pointerArray=*/false, kOnlineM + 64 * i));
+                    if(!shapes.back()->create()
+                       || shapes.back()->distinctCandidates(kOnlineTopK) < 2)
+                        std::exit(2);
+                }
+
+                setenv("HIPBLASLT_TUNING_MAX_EVENT_PAIRS", "1", 1);
+                enterOnline(m_path);
+
+                for(int round = 0; round < kRounds; round++)
+                    for(auto& shape : shapes)
+                    {
+                        int launched = -1;
+                        if(!shape->dispatch(&launched))
+                            std::exit(2);
+                    }
+
+                std::exit(100 + static_cast<int>(valueRowCount(m_path)));
+            },
+            ::testing::ExitedWithCode(100 + kShapes),
             "");
     }
 } // namespace

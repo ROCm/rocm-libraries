@@ -186,7 +186,8 @@ closing summary. Replaying a cache adds no output per call. Where the notices go
 
     * - | ``HIPBLASLT_TUNING_MAX_EVENT_PAIRS``
         | Caps the HIP event pairs ``online`` mode keeps alive on each device to time its
-          candidates. A device at the cap with no pair free runs the call untimed.
+          candidates. At the cap, the pairs of other shapes' finished launches are read back
+          and reused; a call that finds every pair still in flight runs untimed.
         | Read only in ``online`` mode.
       - | Positive integer (default: 4096); a value below 1 counts as 1
         | A pair holds a little host memory and no device memory

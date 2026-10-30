@@ -394,29 +394,17 @@ namespace rocblaslt
             //
             // Records the GPU has not finished are compacted to the front, which
             // keeps the launch order the rest of this loop reports in.
-            if(hipEventQuery(pending.m_stop) != hipSuccess)
+            float             milliseconds = 0.0f;
+            const PairReading reading      = readPair(pending, milliseconds);
+            if(reading == PairReading::Outstanding)
             {
                 state.m_pending[outstanding++] = pending;
                 continue;
             }
 
-            // A pair the caller never recorded still queries as complete, so
-            // the elapsed time is the only evidence that the launch happened.
-            // Every way of missing one reads as non-positive, which is why the
-            // sign test is load-bearing and not defensive: a fresh pair fails
-            // with hipErrorInvalidHandle, a pooled pair is inverted so it reads
-            // the negative of its last duration, and a launch that recorded
-            // start and then failed reads an older stop against a newer start.
-            // A launch whose start record failed records no stop either --
-            // SolutionAdapter::launchKernel skips it -- so that case is one of
-            // the first two and never a fresh stop against a stale start.
-            float      milliseconds = 0.0f;
-            const bool timed
-                = hipEventElapsedTime(&milliseconds, pending.m_start, pending.m_stop) == hipSuccess
-                  && std::isfinite(milliseconds) && milliseconds > 0.0f;
-
             // Only a pair that produced a sample is known to have been
             // recorded, so only that pair is safe to hand out again.
+            const bool timed = reading == PairReading::Sample;
             if(timed)
             {
                 recycleEvents(pending.m_start, pending.m_stop, pending.m_device);
@@ -442,6 +430,115 @@ namespace rocblaslt
         if(!state.m_resolved && state.m_pending.empty()
            && (state.m_gaveUp || nextCandidate(state) < 0))
             resolve(problemKey, state);
+    }
+
+    // What a pending pair says now, read the same way by a problem's own
+    // harvest and by reclaimFinishedPairs().
+    //
+    // A pair the caller never recorded still queries as complete, so the
+    // elapsed time is the only evidence that the launch happened. Every way of
+    // missing one reads as non-positive, which is why the sign test is
+    // load-bearing and not defensive: a fresh pair fails with
+    // hipErrorInvalidHandle, a pooled pair is inverted so it reads the
+    // negative of its last duration, and a launch that recorded start and then
+    // failed reads an older stop against a newer start. A launch whose start
+    // record failed records no stop either -- SolutionAdapter::launchKernel
+    // skips it -- so that case is one of the first two and never a fresh stop
+    // against a stale start.
+    OnlineTuner::PairReading OnlineTuner::readPair(const PendingMeasurement& pending,
+                                                   float&                    milliseconds) const
+    {
+        if(hipEventQuery(pending.m_stop) != hipSuccess)
+            return PairReading::Outstanding;
+
+        milliseconds = 0.0f;
+        const bool timed
+            = hipEventElapsedTime(&milliseconds, pending.m_start, pending.m_stop) == hipSuccess
+              && std::isfinite(milliseconds) && milliseconds > 0.0f;
+
+        return timed ? PairReading::Sample : PairReading::Rejected;
+    }
+
+    /**
+     * @brief Read back the finished launches other problems hold pairs for on
+     * device, and pool those pairs.
+     *
+     * A problem's pairs otherwise only come back through a harvest of its own
+     * key, which needs that key to be dispatched again. A shape dispatched
+     * fewer times than an exploration takes never is, so without this its pair
+     * stays taken for the life of the process, and once such shapes hold the
+     * whole of livePairCap() nothing new is ever measured on the device again.
+     * Rotating through more shapes than the cap allows starves the same way,
+     * only slower: a shape waiting for a pair spends its visit budget on
+     * declined launches and resolves with no winner.
+     *
+     * Called only from acquireEvents(), and only when the device is at the cap
+     * with nothing pooled, so below the cap it costs nothing. A pass walks
+     * every problem the tuner holds, resolved ones included, and its cost is
+     * spread over the pairs it hands back: a pass that pools many pairs is
+     * followed by as many acquisitions that need no pass. It repeats on every
+     * acquisition only while all of the device's pairs are in flight, which
+     * takes a host running a long way ahead of its GPU.
+     *
+     * Each sample a pass reads back is credited to the problem that took it,
+     * exactly as that problem's own harvest would have done: the sample is
+     * kept, and the problem still resolves on its own visits if it comes back.
+     * Nothing is resolved here; that stays with the visits that own the
+     * exploration. requester is skipped because its own harvest has just run.
+     *
+     * Only a pair that reads as a sample is taken, which is what keeps this
+     * away from launches that are not finished. A stop the GPU has not reached
+     * queries as outstanding. A pair handed out by beginMeasurement() whose
+     * launch has not recorded it yet -- another thread can be between the two
+     * right now, outside the lock -- reads non-positive, by the same
+     * invariant the sign test relies on: a pooled pair is inverted and a fresh
+     * one has no timestamps. So does a pair whose launch failed to record it,
+     * which is indistinguishable from that and is left for its own problem's
+     * harvest to retire. Nothing here retires or destroys a pair, so a launch
+     * about to record one can never be handed a destroyed handle.
+     *
+     * Under the write lock, like the harvest, for the same reason: the events
+     * are queried and the pending lists rewritten together, and nothing else
+     * can take or pool a pair in between. The HIP calls are the harvest's
+     * own two, so no lock is held across anything the harvest did not
+     * already hold it across.
+     */
+    void OnlineTuner::reclaimFinishedPairs(int device, size_t requester)
+    {
+        for(auto& [key, state] : m_problems)
+        {
+            if(key == requester || state.m_pending.empty())
+                continue;
+
+            size_t kept = 0;
+
+            for(size_t i = 0; i < state.m_pending.size(); ++i)
+            {
+                const PendingMeasurement pending = state.m_pending[i];
+
+                float milliseconds = 0.0f;
+                if(pending.m_device != device
+                   || readPair(pending, milliseconds) != PairReading::Sample)
+                {
+                    state.m_pending[kept++] = pending;
+                    continue;
+                }
+
+                recycleEvents(pending.m_start, pending.m_stop, pending.m_device);
+                state.m_samples[pending.m_candidate].push_back(milliseconds * 1000.0f);
+
+                if(m_verbose)
+                {
+                    std::ostringstream msg = traceLine("reclaim", key);
+                    msg << " cand=" << pending.m_candidate
+                        << " sol=" << state.m_candidates[pending.m_candidate]
+                        << " us=" << milliseconds * 1000.0f << " device=" << device << "\n";
+                    std::cerr << msg.str();
+                }
+            }
+
+            state.m_pending.resize(kept);
+        }
     }
 
     bool OnlineTuner::beginMeasurementImpl(size_t      problemKey,
@@ -495,12 +592,13 @@ namespace rocblaslt
             return false;
         }
 
-        // Declined the same way when the device is at livePairCap(), which is
-        // the cap doing its job, or when HIP will not create an event. Either
-        // way the launch goes ahead untimed, and the offer is left for the
-        // next launch this thread's visit makes.
+        // Declined the same way when the device is at livePairCap() and every
+        // pair it holds is still in flight, which is the cap doing its job, or
+        // when HIP will not create an event. Either way the launch goes ahead
+        // untimed, and the offer is left for the next launch this thread's
+        // visit makes.
         int device = 0;
-        if(!acquireEvents(start, stop, device))
+        if(!acquireEvents(start, stop, device, problemKey))
         {
             ++state.m_declined;
             return false;
@@ -835,13 +933,21 @@ namespace rocblaslt
     //
     // A new pair is only created while the device holds fewer than
     // livePairCap() live ones. Past that, a measurement can still start on a
-    // pair some harvest handed back, and otherwise it does not start.
-    bool OnlineTuner::acquireEvents(hipEvent_t& start, hipEvent_t& stop, int& device)
+    // pair some harvest handed back, or one reclaimFinishedPairs() reads back
+    // from another problem's finished launch, and otherwise it does not start.
+    bool OnlineTuner::acquireEvents(hipEvent_t& start,
+                                    hipEvent_t& stop,
+                                    int&        device,
+                                    size_t      requester)
     {
         if(hipGetDevice(&device) != hipSuccess)
             return false;
 
         std::vector<EventPair>& pool = m_pairs[device];
+        int&                    live = m_livePairs[device];
+
+        if(pool.empty() && live >= livePairCap())
+            reclaimFinishedPairs(device, requester);
 
         if(!pool.empty())
         {
@@ -854,7 +960,6 @@ namespace rocblaslt
             return true;
         }
 
-        int& live = m_livePairs[device];
         if(live >= livePairCap())
             return false;
 

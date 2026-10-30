@@ -378,13 +378,17 @@ namespace rocblaslt
          * @brief The most event pairs the tuner keeps alive on one device,
          * pooled and outstanding together.
          *
-         * A pair is only handed back by a later harvest of the problem that
-         * took it, so a shape dispatched once and never again keeps its pair
-         * for the life of the process; with no cold visits that is the
+         * A problem's own harvest hands a pair back on the problem's next
+         * visit, so a shape dispatched once and never again would keep its
+         * pair for the life of the process; with no cold visits that is the
          * ordinary life of a one-shot shape. The cap is what bounds that.
-         * Once a device holds this many and none is pooled, no new
-         * measurement starts there: beginMeasurement() declines, and the
-         * launch runs exactly as an untuned one would.
+         * Once a device holds this many and none is pooled, the finished
+         * launches other problems still hold pairs for are read back and
+         * their pairs pooled; see reclaimFinishedPairs(). Only when every
+         * pair on the device is still in flight does no new measurement
+         * start there: beginMeasurement() declines, and the launch runs
+         * exactly as an untuned one would. So the cap bounds launches
+         * measured and not yet read back, not shapes.
          *
          * Configured, as OnlineTunerConfig::livePairCap, and a fixed number of
          * pairs rather than a multiple of topK() * repeats(): see
@@ -766,6 +770,18 @@ namespace rocblaslt
                               size_t                  problem,
                               ProblemState&           state,
                               const std::vector<int>& rankedSolutionIndices);
+        // What readPair() finds: the GPU has not reached the stop yet, the
+        // pair holds an accepted sample, or it holds nothing a launch is known
+        // to have recorded.
+        enum class PairReading
+        {
+            Outstanding,
+            Sample,
+            Rejected,
+        };
+
+        PairReading readPair(const PendingMeasurement& pending, float& milliseconds) const;
+        void        reclaimFinishedPairs(int device, size_t requester);
         int   nextCandidate(const ProblemState& state) const;
         int   measurableCandidate(const ProblemState& state,
                                   size_t              problemKey,
@@ -777,7 +793,7 @@ namespace rocblaslt
         void  resolve(size_t problemKey, ProblemState& state);
         void  releaseExploration(ProblemState& state);
         void  publishResolution(size_t problemKey, const ProblemState& state);
-        bool  acquireEvents(hipEvent_t& start, hipEvent_t& stop, int& device);
+        bool  acquireEvents(hipEvent_t& start, hipEvent_t& stop, int& device, size_t requester);
         void  recycleEvents(hipEvent_t start, hipEvent_t stop, int device);
         void  retireEvents(hipEvent_t start, hipEvent_t stop, int device);
 

@@ -984,6 +984,89 @@ namespace
         return position;
     }
 
+    // One dispatch the way the library makes it: harvest this key's finished
+    // launches first, then select, then time the launch selection asked for.
+    // Unlike sampleOneVisit() the pair is left outstanding until the key's
+    // next dispatch, which is what holds pairs between visits and what a shape
+    // dispatched once never gives back. Returns whether the launch was timed.
+    bool dispatchOnce(size_t                  key,
+                      size_t                  problem,
+                      const std::vector<int>& ranked,
+                      const Device&           device)
+    {
+        tuner().harvestPending(key);
+
+        const int position = tuner().selectCandidate(key, problem, ranked);
+        if(position < 0)
+            return false;
+
+        hipEvent_t start = nullptr;
+        hipEvent_t stop  = nullptr;
+        if(!tuner().beginMeasurement(key, ranked[position], start, stop))
+            return false;
+
+        device.bracket(start, stop);
+        return true;
+    }
+
+    // A stream the GPU stops on until the host says go, so what is recorded on
+    // it stays in flight for as long as a case needs: the stream waits on a
+    // host-visible value that release() writes.
+    class HeldStream
+    {
+    public:
+        static bool supported(int id)
+        {
+            int canWait = 0;
+            return hipDeviceGetAttribute(&canWait, hipDeviceAttributeCanUseStreamWaitValue, id)
+                       == hipSuccess
+                   && canWait != 0;
+        }
+
+        explicit HeldStream(int id)
+        {
+            EXPECT_EQ(hipSetDevice(id), hipSuccess);
+            EXPECT_EQ(hipStreamCreate(&m_stream), hipSuccess);
+            EXPECT_EQ(hipHostMalloc(reinterpret_cast<void**>(&m_go), sizeof(*m_go), 0), hipSuccess);
+            if(m_go)
+            {
+                *m_go = 0;
+                EXPECT_EQ(hipStreamWaitValue32(m_stream, m_go, 1, hipStreamWaitValueEq),
+                          hipSuccess);
+            }
+        }
+
+        ~HeldStream()
+        {
+            release();
+            static_cast<void>(hipStreamDestroy(m_stream));
+            static_cast<void>(hipHostFree(m_go));
+        }
+
+        HeldStream(const HeldStream&)            = delete;
+        HeldStream& operator=(const HeldStream&) = delete;
+
+        // A launch's two records, behind the wait.
+        void bracket(hipEvent_t start, hipEvent_t stop) const
+        {
+            EXPECT_EQ(hipEventRecord(start, m_stream), hipSuccess);
+            EXPECT_EQ(hipEventRecord(stop, m_stream), hipSuccess);
+        }
+
+        void release()
+        {
+            if(m_go && !m_released)
+                __atomic_store_n(m_go, 1u, __ATOMIC_SEQ_CST);
+            m_released = true;
+            EXPECT_EQ(hipStreamSynchronize(m_stream), hipSuccess);
+        }
+
+    private:
+        hipStream_t m_stream   = nullptr;
+        uint32_t*   m_go       = nullptr;
+        bool        m_released = false;
+    };
+
     // The case the capture test above cannot reach, and the only damaging one:
     // exploration has advanced past its first candidate, and a capture lands
     // on one the caller's own ranking does not put first. Freezing that into a
@@ -1445,19 +1528,22 @@ namespace
         tuner().reloadForTest();
     }
 
-    // A shape dispatched once and never again keeps the event pair its one
-    // measurement took: pairs are only handed back by a later harvest of the
-    // same key, and that harvest never comes. With no cold visits that is the
-    // ordinary life of a one-shot shape, and a long tail of them is the
-    // workload online tuning exists for, so live pairs per device are capped.
-    // Past the cap no new measurement starts; the launch runs unmeasured and
-    // nothing about it changes.
+    // The bound the cap exists for: however many shapes are measured, a device
+    // holds no more than livePairCap() pairs. A pair can only come back once
+    // the launch it timed is finished, so the way to hold a device at the cap
+    // is launches the GPU has not reached. Past it no new measurement starts;
+    // the launch runs unmeasured and nothing about it changes. And nothing
+    // still in flight is read back early: each launch's own harvest finds its
+    // sample once the GPU gets there.
     TEST(OnlineTuner, LiveEventPairsOnADeviceAreCapped)
     {
         if(deviceCount() < 1)
             GTEST_SKIP() << "no HIP device";
+        if(!HeldStream::supported(0))
+            GTEST_SKIP() << "the device cannot hold a stream on a host value";
 
         const Device device(0);
+        const int    id = device.id();
 
         // Hands back what earlier cases left outstanding, so what is live now
         // is only what the pool holds, and every pooled pair is one a new
@@ -1469,6 +1555,8 @@ namespace
 
         constexpr size_t       base = 0x70000;
         const std::vector<int> ranked{281, 282, 283};
+
+        HeldStream held(id);
 
         int measured = 0;
         for(int shape = 0; shape < cap + 8; ++shape)
@@ -1486,15 +1574,23 @@ namespace
             }
 
             ++measured;
-            device.bracket(start, stop);
+            held.bracket(start, stop);
         }
 
-        EXPECT_EQ(measured, cap) << "one-shot shapes held more live event pairs than the cap";
+        EXPECT_EQ(measured, cap) << "launches in flight held more live event pairs than the cap";
+        EXPECT_EQ(OnlineTunerTestAccess::livePairs(tuner(), id), cap);
 
-        // The cap does not stop reclamation: harvesting one of those shapes
-        // pools its pair, and a new shape can be measured again.
-        tuner().harvestPending(base);
+        held.release();
 
+        for(int shape = 0; shape < cap; ++shape)
+        {
+            const size_t key = base + static_cast<size_t>(shape);
+            tuner().harvestPending(key);
+            EXPECT_EQ(OnlineTunerTestAccess::samples(tuner(), key), 1u)
+                << "shape " << shape << ": a launch still in flight was read back early";
+        }
+
+        // Those harvests pooled the pairs, so a new shape is measured again.
         const size_t late = base + static_cast<size_t>(cap) + 8;
         ASSERT_EQ(tuner().selectCandidate(late, identityOf(late), ranked), 0);
 
@@ -1505,6 +1601,198 @@ namespace
         device.bracket(start, stop);
 
         // Leave nothing outstanding for the cases after this one.
+        tuner().reloadForTest();
+    }
+
+    // Shapes dispatched once and never again hold the whole cap, with every
+    // launch they timed long finished. A shape that keeps coming back must
+    // still be explored to a winner: at the cap the finished launches are read
+    // back and their pairs reused, rather than the cap ending tuning on the
+    // device for the rest of the process. Each one-shot shape keeps the sample
+    // its one launch bought.
+    TEST(OnlineTuner, AtTheCapTheFinishedPairsOfOneShotShapesAreReclaimed)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        const Device device(0);
+        const int    id = device.id();
+
+        tuner().reloadForTest();
+
+        const int cap = tuner().livePairCap();
+
+        constexpr size_t       base = 0x71000;
+        const std::vector<int> ranked{271, 272, 273};
+
+        for(int shape = 0; shape < cap; ++shape)
+        {
+            const size_t key = base + static_cast<size_t>(shape);
+            ASSERT_TRUE(dispatchOnce(key, identityOf(key), ranked, device)) << shape;
+        }
+
+        ASSERT_EQ(OnlineTunerTestAccess::livePairs(tuner(), id), cap);
+        ASSERT_TRUE(OnlineTunerTestAccess::pooledPairs(tuner(), id).empty());
+
+        constexpr size_t repeated = 0x72000;
+
+        int visits = 0;
+        while(!tuner().resolution(repeated) && visits < kCallCeiling)
+        {
+            EXPECT_TRUE(dispatchOnce(repeated, identityOf(repeated), ranked, device) || visits > 0)
+                << "the first launch of a new shape at the cap was not measured";
+            ++visits;
+        }
+
+        const OnlineTuner::Resolution* resolved = tuner().resolution(repeated);
+        ASSERT_NE(resolved, nullptr);
+        EXPECT_GE(resolved->winner(), 0) << "a shape that kept coming back was never measured";
+        EXPECT_EQ(visits, kTopK * kRepeats + 1) << "exploration took longer than an uncapped one";
+
+        for(int shape = 0; shape < cap; ++shape)
+            EXPECT_EQ(OnlineTunerTestAccess::samples(tuner(), base + static_cast<size_t>(shape)),
+                      1u)
+                << "shape " << shape << ": the sample its launch bought was not kept";
+
+        EXPECT_LE(OnlineTunerTestAccess::livePairs(tuner(), id), cap);
+
+        tuner().reloadForTest();
+    }
+
+    // More shapes in rotation than the cap has pairs for. Each holds its pair
+    // only between its own visits, and at the cap the pairs of the others'
+    // finished launches are reused, so every shape is explored at once and
+    // resolves with a winner. Without that the shapes went through in waves
+    // of the cap's size, each waiting shape spending its visit budget on
+    // declined launches, and every shape past the waves that budget allows
+    // resolved with no winner at all.
+    TEST(OnlineTuner, MoreShapesInRotationThanTheCapAllResolveWithWinners)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        const Device device(0);
+        const int    id = device.id();
+
+        tuner().reloadForTest();
+
+        const int cap = tuner().livePairCap();
+
+        // Past the last shape the waves could reach.
+        const int shapes = cap * OnlineTuner::c_visitBudgetFactor + cap;
+
+        constexpr size_t       base = 0x73000;
+        const std::vector<int> ranked{261, 262, 263};
+
+        int rounds = 0;
+        for(int unresolved = shapes; unresolved > 0 && rounds < kCallCeiling; ++rounds)
+        {
+            unresolved = 0;
+            for(int shape = 0; shape < shapes; ++shape)
+            {
+                const size_t key = base + static_cast<size_t>(shape);
+                if(tuner().resolution(key))
+                    continue;
+
+                dispatchOnce(key, identityOf(key), ranked, device);
+                if(!tuner().resolution(key))
+                    ++unresolved;
+            }
+        }
+
+        int starved = 0;
+        for(int shape = 0; shape < shapes; ++shape)
+        {
+            const OnlineTuner::Resolution* resolved
+                = tuner().resolution(base + static_cast<size_t>(shape));
+            ASSERT_NE(resolved, nullptr) << shape;
+            if(resolved->winner() < 0)
+                ++starved;
+        }
+
+        EXPECT_EQ(starved, 0) << "of " << shapes << " shapes in rotation, " << starved
+                              << " resolved with no winner";
+        EXPECT_EQ(rounds, kTopK * kRepeats + 1) << "the shapes did not all explore at once";
+        EXPECT_LE(OnlineTunerTestAccess::livePairs(tuner(), id), cap);
+
+        tuner().reloadForTest();
+    }
+
+    // The window a reclaim must never reach into. beginMeasurement() hands a
+    // pair out under the lock and the launch records it after the lock is
+    // released, so on another thread a pair can be outstanding and not yet
+    // recorded at the moment a dispatch at the cap looks for pairs to take
+    // back. Such a pair must be left exactly where it is: taking it would hand
+    // one pair to two launches, and retiring it would destroy a handle a launch
+    // is about to record.
+    TEST(OnlineTuner, APairHandedOutAndNotYetRecordedIsNeverReclaimed)
+    {
+        if(deviceCount() < 1)
+            GTEST_SKIP() << "no HIP device";
+
+        const Device device(0);
+        const int    id = device.id();
+
+        tuner().reloadForTest();
+
+        const int cap = tuner().livePairCap();
+
+        const std::vector<int> ranked{251, 252, 253};
+
+        // Bring the device to the cap and pool every pair, so what is handed
+        // out below is what a busy device hands out: a pooled pair, inverted.
+        std::vector<size_t> filled;
+        for(size_t key = 0x74000; !OnlineTunerTestAccess::pooledPairs(tuner(), id).empty()
+                                  || OnlineTunerTestAccess::livePairs(tuner(), id) < cap;
+            ++key)
+        {
+            ASSERT_TRUE(dispatchOnce(key, identityOf(key), ranked, device));
+            filled.push_back(key);
+        }
+        for(size_t key : filled)
+            tuner().harvestPending(key);
+        ASSERT_EQ(OnlineTunerTestAccess::pooledPairs(tuner(), id).size(), static_cast<size_t>(cap));
+
+        // Every one of them handed out for a launch that has not recorded yet.
+        struct Taken
+        {
+            size_t     key;
+            hipEvent_t start;
+            hipEvent_t stop;
+        };
+        std::vector<Taken> taken;
+        for(int shape = 0; shape < cap; ++shape)
+        {
+            const size_t key = 0x75000 + static_cast<size_t>(shape);
+            ASSERT_EQ(tuner().selectCandidate(key, identityOf(key), ranked), 0);
+
+            Taken pair{key, nullptr, nullptr};
+            ASSERT_TRUE(tuner().beginMeasurement(key, ranked[0], pair.start, pair.stop));
+            taken.push_back(pair);
+        }
+
+        // A new shape at the cap with nothing pooled, so the reclaim runs, and
+        // it must find nothing it may take.
+        constexpr size_t late = 0x76000;
+        ASSERT_EQ(tuner().selectCandidate(late, identityOf(late), ranked), 0);
+
+        hipEvent_t start = nullptr;
+        hipEvent_t stop  = nullptr;
+        EXPECT_FALSE(tuner().beginMeasurement(late, ranked[0], start, stop))
+            << "a pair handed out for a launch not yet recorded was taken back";
+        EXPECT_EQ(OnlineTunerTestAccess::livePairs(tuner(), id), cap)
+            << "a pair handed out for a launch not yet recorded was retired";
+
+        // Each launch now records its pair, and its own harvest finds the
+        // sample: nothing was taken, pooled or destroyed underneath it.
+        for(const Taken& pair : taken)
+        {
+            device.bracket(pair.start, pair.stop);
+            tuner().harvestPending(pair.key);
+            EXPECT_EQ(OnlineTunerTestAccess::samples(tuner(), pair.key), 1u)
+                << "key " << pair.key << " lost the launch it had a pair for";
+        }
+
         tuner().reloadForTest();
     }
 
