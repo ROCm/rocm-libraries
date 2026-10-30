@@ -2011,6 +2011,47 @@ namespace
         EXPECT_EQ(launched, finished.first) << "a later process chose differently";
     }
 
+    // A row the tuner adds for a shape that replay has already served is
+    // launched from then on. Replay remembers which entry the shape's last call
+    // could run, and that has to go when the shape's entries change.
+    TEST_F(TuningTune_pre_checkin, NullAlgoLaunchesARowAddedAfterItsShapeWasReplayed)
+    {
+        // The fixture searches the top sixteen, so the recorded row names a
+        // solution well past them, which the search is unlikely to pick.
+        const auto identities = candidateIdentities(1024, 512, 1024, 64);
+        if(identities.size() <= 16)
+            GTEST_SKIP() << "this device offers no solution past the searched prefix";
+        const auto& recorded = identities.back();
+
+        // A real row first, so every key column is what the writer emits, made
+        // into a finished search of one candidate that names another solution.
+        enterMode("tune", m_path);
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
+        ASSERT_TRUE(rewriteColumn(m_path, "solution_index", std::to_string(recorded.first)));
+        ASSERT_TRUE(rewriteColumn(m_path, "kernel_name", recorded.second));
+        ASSERT_TRUE(rewriteColumn(m_path, "search_max_candidates", "1"));
+
+        // Replay serves the shape from that row, then the wider search this run
+        // makes adds a row for it, all in the first call.
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched, true));
+        const auto indexes = columnValues(m_path, "solution_index");
+        ASSERT_EQ(indexes.size(), 2u) << "the narrower finished search was not widened";
+        const int added = std::stoi(indexes.back());
+        if(added == recorded.first)
+            GTEST_SKIP() << "the wider search chose the recorded solution again";
+        EXPECT_EQ(launched, added);
+
+        for(int call = 0; call < 2; call++)
+        {
+            SCOPED_TRACE(call);
+            ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Null, -1, &launched, true));
+            EXPECT_EQ(launched, added) << "replay went back to the row it served before";
+        }
+    }
+
     // A search the budget stops keeps its best candidate only once the kernel
     // the call would otherwise run has been measured, and that kernel goes
     // first. The caller here passes a non-default algo and the search stops

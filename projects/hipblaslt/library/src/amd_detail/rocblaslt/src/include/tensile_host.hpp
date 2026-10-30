@@ -299,6 +299,11 @@ int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
  * within the problem's workspace, filling *algo to launch the entry it finds.
  * Counts the lookup, except a miss when countMiss is false: a call that can go
  * on to tune is counted by what it finds once it can.
+ *
+ * A call that makes the same Tensile problem as the last call an entry was
+ * found to support launches that entry without checking support again. Either
+ * way, an entry found leaves gemmData's problem as updateTensileProblem makes
+ * it from problem.
  */
 int tuning_cache_replay(rocblaslt_handle                    handle,
                         const TensileLite::ProblemOverride& key,
@@ -306,6 +311,33 @@ int tuning_cache_replay(rocblaslt_handle                    handle,
                         std::shared_ptr<void>               gemmData,
                         rocblaslt_matmul_algo*              algo,
                         bool                                countMiss);
+
+/**
+ * That a support check accepted an index for one exact Tensile problem, so that
+ * cache replay need not check it again while calls keep making that problem.
+ */
+struct ReplaySupportMemo;
+
+/**
+ * The memo for an index whose support check problem has just passed, with
+ * gemmData's problem as updateTensileProblem makes it from problem; null for a
+ * problem whose support is not decided on gemmData's problem alone.
+ */
+std::shared_ptr<const ReplaySupportMemo>
+    captureReplaySupport(rocblaslt_handle                   handle,
+                         const RocblasltContractionProblem& problem,
+                         std::shared_ptr<void>              gemmData,
+                         int                                index);
+
+/**
+ * The memo's index if problem makes the Tensile problem the memo was taken for,
+ * on the same device, or -1. May leave gemmData's problem as
+ * updateTensileProblem makes it from problem, whether or not it matches.
+ */
+int matchReplaySupport(const ReplaySupportMemo&           memo,
+                       rocblaslt_handle                   handle,
+                       const RocblasltContractionProblem& problem,
+                       std::shared_ptr<void>              gemmData);
 
 /**
  * The solution index this thread last launched through runContractionProblem,

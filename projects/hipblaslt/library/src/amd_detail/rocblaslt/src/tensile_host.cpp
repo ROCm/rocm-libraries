@@ -70,6 +70,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <complex>
 #include <cstdint>
@@ -84,6 +85,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
@@ -5668,6 +5670,112 @@ namespace
     }
 } // namespace
 
+struct ReplaySupportMemo
+{
+    int                                 device;
+    int                                 index;
+    TensileLite::ContractionProblemGemm problem;
+};
+
+namespace
+{
+    /**
+     * Whether two Tensile problems agree on everything a support check reads
+     * from them. Comparison<ContractionProblemGemm> covers most of it, since
+     * default selection's caches need the same; the rest is compared here.
+     * That includes fields only a grouped problem reads and fields hipBLASLt
+     * leaves at their defaults, so that the memo does not rely on either.
+     */
+    bool sameSupportInputs(const TensileLite::ContractionProblemGemm& a,
+                           const TensileLite::ContractionProblemGemm& b)
+    {
+        // Predicates test beta against zero, which the comparison covers, and
+        // against one.
+        return TensileLite::Comparison<TensileLite::ContractionProblemGemm>::compare(a, b) == 0
+               && a.cEqualsD() == b.cEqualsD() && a.alphaRestriction() == b.alphaRestriction()
+               && a.betaRestriction() == b.betaRestriction()
+               && (a.beta() == 1.0) == (b.beta() == 1.0) && a.batchMode() == b.batchMode()
+               && a.getUseDeviceUserArguments() == b.getUseDeviceUserArguments()
+               && a.groupedGemmCount() == b.groupedGemmCount() && a.sparse() == b.sparse()
+               && a.getPersistentKernelEligibility() == b.getPersistentKernelEligibility()
+               && a.gateResidual().dataType() == b.gateResidual().dataType()
+               && a.bias().sizes() == b.bias().sizes()
+               && a.getParams().biasEnum() == b.getParams().biasEnum()
+               && a.getParams().factorDim() == b.getParams().factorDim();
+    }
+
+    /** Whether replay decides prob's support on gemmData's Tensile problem alone. */
+    bool supportFollowsTensileProblem([[maybe_unused]] rocblaslt_handle  handle,
+                                      const RocblasltContractionProblem& prob)
+    {
+#ifdef HIPBLASLT_USE_ROCROLLER
+        if(useRocRoller(handle, prob))
+            return false;
+#endif
+        // An XF32 problem that fails is checked again as FP32, on a copy.
+        return prob.compute_type != rocblaslt_compute_f32_fast_xf32;
+    }
+
+#ifndef NDEBUG
+    /** Whether problem is already what updateTensileProblem makes of it from prob. */
+    bool isUpdatedFrom(const RocblasltContractionProblem&         prob,
+                       const TensileLite::ContractionProblemGemm& problem)
+    {
+        auto updated = problem;
+        updateTensileProblem(prob, updated);
+
+        auto params = [](const TensileLite::ContractionProblemParameters& p) {
+            return std::make_tuple(p.gsu(),
+                                   p.gsuc(),
+                                   p.gsuwgmrr(),
+                                   p.wgm(),
+                                   p.wgmxcc(),
+                                   p.wgmxccg(),
+                                   p.biasEnum(),
+                                   p.factorDim(),
+                                   p.activationEnum(),
+                                   p.fallbackStatus(),
+                                   p.streamKTileSchedulingMode(),
+                                   p.uniformSummationOrder(),
+                                   p.smCountTarget(),
+                                   p.occupancyProbeAddr(),
+                                   p.occupancyProbeEpoch(),
+                                   p.occupancyProbeMinGrid());
+        };
+        return sameSupportInputs(updated, problem) && updated.tensors() == problem.tensors()
+               && updated.beta() == problem.beta() && updated.alphaType() == problem.alphaType()
+               && updated.betaType() == problem.betaType()
+               && params(updated.getParams()) == params(problem.getParams());
+    }
+#endif
+} // namespace
+
+std::shared_ptr<const ReplaySupportMemo>
+    captureReplaySupport(rocblaslt_handle                   handle,
+                         const RocblasltContractionProblem& prob,
+                         std::shared_ptr<void>              gemmData,
+                         int                                index)
+{
+    if(!supportFollowsTensileProblem(handle, prob))
+        return nullptr;
+    const auto& problem = std::static_pointer_cast<TensileDataGemm>(gemmData)->problem;
+    return std::make_shared<const ReplaySupportMemo>(
+        ReplaySupportMemo{handle->device, index, problem});
+}
+
+int matchReplaySupport(const ReplaySupportMemo&           memo,
+                       rocblaslt_handle                   handle,
+                       const RocblasltContractionProblem& prob,
+                       std::shared_ptr<void>              gemmData)
+{
+    // The hardware a check reads is the device's.
+    if(memo.device != handle->device || !supportFollowsTensileProblem(handle, prob))
+        return -1;
+    auto& problem = std::static_pointer_cast<TensileDataGemm>(gemmData)->problem;
+    updateTensileProblem(prob, problem);
+    return sameSupportInputs(memo.problem, problem) ? memo.index : -1;
+}
+
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasltContractionProblem *
@@ -5762,7 +5870,12 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 return rocblaslt_status_not_implemented;
             algo = &heuristicResult.algo;
         }
-        updateTensileProblem(prob, data->problem);
+        // Replay's support check, or the memo standing in for it, has already
+        // made data->problem what this would.
+        if(replayed)
+            assert(isUpdatedFrom(prob, data->problem));
+        else
+            updateTensileProblem(prob, data->problem);
 
         // A re-selected solution runs through a copy of the caller's algo with
         // its index replaced; the caller's algo stays as queried.

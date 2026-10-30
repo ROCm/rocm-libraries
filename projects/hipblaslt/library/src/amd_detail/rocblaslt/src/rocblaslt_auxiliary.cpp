@@ -599,9 +599,9 @@ namespace
      * A key's entries that still name the kernel their index resolves to, in
      * the order lookups try them. Neither resolving an index nor comparing
      * names depends on the call, so replay does both once per key, again only
-     * after the loaded entries change. Support is still checked on every call:
-     * it also depends on values the key leaves out, such as beta and C/D
-     * aliasing.
+     * after the loaded entries change. Support also depends on values the key
+     * leaves out, such as beta and C/D aliasing, so it is remembered only for
+     * the exact problem of the last call a candidate was found to support.
      */
     struct ReplayCandidates
     {
@@ -612,6 +612,11 @@ namespace
         // that it fell back, 2 that it matched. Replay asks on every call; the
         // tally only needs to hear when the answer improves.
         std::atomic<int> tallied{0};
+
+        // The last call a candidate was found to support, read and written with
+        // std::atomic_load and std::atomic_store. It lives no longer than this
+        // object, so it never outlasts the entries it was checked against.
+        std::shared_ptr<const ReplaySupportMemo> supported;
     };
 
     class ReplayCandidatesByKey
@@ -669,6 +674,14 @@ namespace
         std::unordered_map<TensileLite::ProblemOverride, std::shared_ptr<ReplayCandidates>> m_byKey;
     };
 
+    /** Fills *algo as getSolutionsFromIndex returns an index. */
+    void algo_for_index(int index, size_t max_workspace_bytes, rocblaslt_matmul_algo* algo)
+    {
+        *algo                               = rocblaslt_matmul_algo{};
+        *reinterpret_cast<int*>(algo->data) = index;
+        algo->max_workspace_bytes           = max_workspace_bytes;
+    }
+
     /** Whether an index supports this call within the workspace, filling *algo to launch it. */
     bool index_supports_call(rocblaslt_handle                   handle,
                              int                                index,
@@ -677,10 +690,7 @@ namespace
                              size_t                             max_workspace_bytes,
                              rocblaslt_matmul_algo*             algo)
     {
-        // What getSolutionsFromIndex returns for this index.
-        *algo                               = rocblaslt_matmul_algo{};
-        *reinterpret_cast<int*>(algo->data) = index;
-        algo->max_workspace_bytes           = max_workspace_bytes;
+        algo_for_index(index, max_workspace_bytes, algo);
 
         size_t required = 0;
         if(rocblaslt_status_success
@@ -762,8 +772,21 @@ int tuning_cache_replay(rocblaslt_handle                    handle,
                         bool                                countMiss)
 {
     const auto candidates = ReplayCandidatesByKey::instance().find(handle, key);
-    const int  index      = first_supported_candidate(
-        handle, *candidates, problem, gemmData, problem.workspaceSize, algo);
+
+    int index = -1;
+    if(const auto memo = std::atomic_load(&candidates->supported))
+        index = matchReplaySupport(*memo, handle, problem, gemmData);
+    if(index >= 0)
+        algo_for_index(index, problem.workspaceSize, algo);
+    else
+    {
+        TensileLite::TuningCounters::instance().replayChecks++;
+        index = first_supported_candidate(
+            handle, *candidates, problem, gemmData, problem.workspaceSize, algo);
+        if(index >= 0)
+            if(auto memo = captureReplaySupport(handle, problem, gemmData, index))
+                std::atomic_store(&candidates->supported, std::move(memo));
+    }
     if(index < 0 && !countMiss)
         return index;
 
@@ -3738,6 +3761,7 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     counters.tuned         = 0;
     counters.skipped       = 0;
     counters.attempts      = 0;
+    counters.replayChecks  = 0;
 
     tuningInjectFailureForTest(0);
     static_cast<void>(tuningLastLaunchedIndexForTest());
@@ -3873,6 +3897,9 @@ extern "C" HIPBLASLT_EXPORT int hipblaslt_tuning_last_launch_for_test()
 //       lines are bounded per shape, so they cannot show a retry.
 //   10 tuned shapes
 //       Distinct shapes this process tuned, as the summary line counts them.
+//   11 replay checks
+//       Calls cache replay answered by checking support rather than from what
+//       it remembers of the last call it found supported.
 //
 // Fills up to count values in that order and returns how many there are, so a
 // test expecting a different list notices instead of misreading it. New values
@@ -3893,7 +3920,8 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_stats_for_test(uint64_t* val
                             c.tuned.load(),
                             c.skipped.load(),
                             c.attempts.load(),
-                            tunedShapes};
+                            tunedShapes,
+                            c.replayChecks.load()};
 
     constexpr size_t known = sizeof(all) / sizeof(all[0]);
     for(size_t i = 0; values && i < count && i < known; i++)

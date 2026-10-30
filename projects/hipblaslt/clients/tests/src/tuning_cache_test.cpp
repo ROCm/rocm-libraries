@@ -431,13 +431,14 @@ namespace
     {
         uint64_t loaded = 0, hits = 0, misses = 0, invalidated = 0;
         uint64_t shapes = 0, matched = 0, fellback = 0;
+        uint64_t checks = 0;
     };
 
     Counters counters()
     {
-        uint64_t     v[7]  = {};
-        const size_t known = hipblaslt_tuning_stats_for_test(v, 7);
-        EXPECT_GE(known, 7u) << "the library reports fewer tallies than this reads";
+        uint64_t     v[12] = {};
+        const size_t known = hipblaslt_tuning_stats_for_test(v, 12);
+        EXPECT_GE(known, 12u) << "the library reports fewer tallies than this reads";
 
         Counters c;
         c.loaded      = v[0];
@@ -447,6 +448,7 @@ namespace
         c.shapes      = v[4];
         c.matched     = v[5];
         c.fellback    = v[6];
+        c.checks      = v[11];
         return c;
     }
 
@@ -466,14 +468,26 @@ namespace
         Null, // no algo, which leaves the choice to the library
     };
 
+    /** What a launchGemm call changes that the tuning key leaves out. */
+    struct Variant
+    {
+        float    beta      = 0.0f;
+        bool     inPlace   = false; // D is C
+        uint64_t workspace = kWorkspaceBytes;
+    };
+
     /**
-     * One matmul of the problem with separate C and D, reporting the solution
-     * the library actually launched.
+     * One matmul of the problem, with separate C and D unless the variant
+     * says otherwise, reporting the solution the library actually launched.
      *
-     * verifyProduct fills A and B with ones and checks every element of D is k,
-     * which proves the launched kernel ran on the caller's buffers.
+     * verifyProduct fills A, B and C with ones and checks every element of D is
+     * k + beta, which proves the launched kernel ran on the caller's buffers.
      */
-    bool launchGemm(AlgoFrom from, int index, int* launched, bool verifyProduct = false)
+    bool launchGemm(AlgoFrom       from,
+                    int            index,
+                    int*           launched,
+                    bool           verifyProduct = false,
+                    const Variant& variant       = {})
     {
         *launched = -1;
 
@@ -498,20 +512,24 @@ namespace
             const uint16_t              fill = verifyProduct ? halfBits(1.0f) : 0;
             const std::vector<uint16_t> a(static_cast<size_t>(kM * kK), fill);
             const std::vector<uint16_t> b(static_cast<size_t>(kK * kN), fill);
+            const std::vector<uint16_t> c(static_cast<size_t>(kM * kN), fill);
             ok = hipMemcpy(dA, a.data(), a.size() * sizeof(uint16_t), hipMemcpyHostToDevice)
                      == hipSuccess
                  && hipMemcpy(dB, b.data(), b.size() * sizeof(uint16_t), hipMemcpyHostToDevice)
                         == hipSuccess
-                 && hipMemset(dC, 0, kM * kN * sizeof(uint16_t)) == hipSuccess
+                 && hipMemcpy(dC, c.data(), c.size() * sizeof(uint16_t), hipMemcpyHostToDevice)
+                        == hipSuccess
                  && hipMemset(dD, 0, kM * kN * sizeof(uint16_t)) == hipSuccess;
         }
+
+        void* const dOut = variant.inPlace ? dC : dD;
 
         {
             Problem problem;
             ok = ok && problem.create();
 
             const float                  alpha   = 1.0f;
-            const float                  beta    = 0.0f;
+            const float                  beta    = variant.beta;
             hipblasLtMatmulAlgo_t        algo    = {};
             const hipblasLtMatmulAlgo_t* algoPtr = nullptr;
 
@@ -560,11 +578,11 @@ namespace
                                      &beta,
                                      dC,
                                      problem.layoutC,
-                                     dD,
+                                     dOut,
                                      problem.layoutC,
                                      algoPtr,
                                      dWs,
-                                     kWorkspaceBytes,
+                                     variant.workspace,
                                      nullptr)
                          == HIPBLAS_STATUS_SUCCESS
                      && hipDeviceSynchronize() == hipSuccess;
@@ -575,10 +593,10 @@ namespace
         if(ok && verifyProduct)
         {
             std::vector<uint16_t> out(static_cast<size_t>(kM * kN), 0);
-            ok = hipMemcpy(out.data(), dD, out.size() * sizeof(uint16_t), hipMemcpyDeviceToHost)
+            ok = hipMemcpy(out.data(), dOut, out.size() * sizeof(uint16_t), hipMemcpyDeviceToHost)
                  == hipSuccess;
 
-            const uint16_t expected = halfBits(static_cast<float>(kK));
+            const uint16_t expected = halfBits(static_cast<float>(kK) + variant.beta);
             for(size_t i = 0; ok && i < out.size(); i++)
                 ok = out[i] == expected;
         }
@@ -1274,6 +1292,78 @@ namespace
 
         ASSERT_TRUE(launchGemm(AlgoFrom::Null, -1, &launched, true));
         EXPECT_EQ(launched, recorded.index);
+    }
+
+    // Calls that differ only in what the tuning key leaves out, such as beta,
+    // C/D aliasing and the workspace, share an entry. Replay remembers the
+    // problem it last found the entry supports, so calls that take turns must
+    // each have support checked again, and still launch what they launch on
+    // their own and compute their own result. Only a repeat of the last call
+    // is answered from memory.
+    TEST_F(TuningCache_pre_checkin, NullAlgoCallsSharingAnEntryAreEachCheckedForSupport)
+    {
+        if(!haveSolutions(2))
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        const auto& cached = m_identities[1];
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{cached.index, cached.kernelName}}));
+
+        const std::vector<Variant> variants{{0.0f, false, kWorkspaceBytes},
+                                            {1.0f, false, kWorkspaceBytes},
+                                            {0.0f, true, kWorkspaceBytes},
+                                            {1.0f, true, kWorkspaceBytes},
+                                            {0.0f, false, 0}};
+
+        // What each call launches with no other call made before it.
+        std::vector<int> alone;
+        for(const auto& variant : variants)
+        {
+            useCache(m_path);
+            int launched = -1;
+            ASSERT_TRUE(launchGemm(AlgoFrom::Null, -1, &launched, true, variant));
+            alone.push_back(launched);
+        }
+        EXPECT_EQ(alone[0], cached.index) << "the entry was not replayed at all";
+
+        // Each call twice in a row, so the second can be served from memory.
+        useCache(m_path);
+        for(int round = 0; round < 2; round++)
+            for(size_t i = 0; i < variants.size(); i++)
+                for(int repeat = 0; repeat < 2; repeat++)
+                {
+                    SCOPED_TRACE(::testing::Message()
+                                 << "round " << round << ", call " << i << ", repeat " << repeat);
+                    int launched = -1;
+                    ASSERT_TRUE(launchGemm(AlgoFrom::Null, -1, &launched, true, variants[i]));
+                    EXPECT_EQ(launched, alone[i]);
+                }
+        EXPECT_EQ(counters().checks, 2 * variants.size())
+            << "a call that changed the problem was not checked, or a repeat was";
+    }
+
+    // What replay remembers about an entry goes with the entries it was
+    // learned from, so a file read again serves its own entry.
+    TEST_F(TuningCache_pre_checkin, NullAlgoReplaysTheEntryOfAFileReadAgain)
+    {
+        if(!haveSolutions(3))
+            GTEST_SKIP() << "the heuristic offers fewer than three solutions for this problem";
+
+        const auto& before = m_identities[1];
+        const auto& after  = m_identities[2];
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{before.index, before.kernelName}}));
+        useCache(m_path);
+
+        int launched = -1;
+        for(int call = 0; call < 2; call++)
+        {
+            ASSERT_TRUE(launchGemm(AlgoFrom::Null, -1, &launched, true));
+            ASSERT_EQ(launched, before.index);
+        }
+
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{after.index, after.kernelName}}));
+        useCache(m_path);
+        ASSERT_TRUE(launchGemm(AlgoFrom::Null, -1, &launched, true));
+        EXPECT_EQ(launched, after.index);
     }
 
     // Replay looks for a missing file at most once a second rather than on
