@@ -794,14 +794,25 @@ def normalizeMXBlockTile(state, ab: str, srcFile: str = ""):
   from ..Common.TypeValidationErrors import ConfigTypeError
 
   key = "MXBlock" + ab
+  freeKey = "MXBlockFree" + ab
   tile = state[key]
-  if not isinstance(tile, (list, tuple)):
-    return
-  if len(tile) not in (1, 2):
+  if isinstance(tile, (list, tuple)):
+    if len(tile) not in (1, 2):
+      raise ConfigTypeError(
+          f"{srcFile}: ProblemType.{key} = {list(tile)}: expected [k] or [free, k]")
+    free = tile[0] if len(tile) == 2 else 1
+    # An explicit MXBlockFree<ab> other than the default must agree with the list.
+    if state.get(freeKey, 1) not in (1, free):
+      raise ConfigTypeError(
+          f"{srcFile}: ProblemType.{key} = {list(tile)} conflicts with "
+          f"{freeKey} = {state[freeKey]}")
+    state[key] = tile[-1]
+    state[freeKey] = free
+  # k == 0 turns MX off for this side, so a free extent there would only raise
+  # AssertFree*ElementMultiple.
+  if state[key] == 0 and state.get(freeKey, 1) != 1:
     raise ConfigTypeError(
-        f"{srcFile}: ProblemType.{key} = {list(tile)}: expected [k] or [free, k]")
-  state[key] = tile[-1]
-  state["MXBlockFree" + ab] = tile[0] if len(tile) == 2 else 1
+        f"{srcFile}: ProblemType.{freeKey} = {state[freeKey]} needs {key} > 0")
 
 
 def validateProblemTypeParameterTypes(state, srcFile="", *, raiseOnMismatch: bool = True,
