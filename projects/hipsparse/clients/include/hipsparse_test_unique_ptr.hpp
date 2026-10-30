@@ -40,7 +40,7 @@ namespace hipsparse_test
     // device_malloc wraps hipMalloc. A failed allocation throws so the caller does
     // not continue with an invalid pointer. A successful hipMalloc(0) can still
     // return nullptr.
-    static void* device_malloc(size_t byte_size)
+    inline void* device_malloc(size_t byte_size)
     {
         void*      pointer = nullptr;
         hipError_t status  = hipMalloc(&pointer, byte_size);
@@ -84,7 +84,7 @@ namespace hipsparse_test
     }
 
     // device_free wraps hipFree and provides same API as free
-    static void device_free(void* ptr)
+    inline void device_free(void* ptr)
     {
         const hipError_t status = hipFree(ptr);
         if(status != hipSuccess)
