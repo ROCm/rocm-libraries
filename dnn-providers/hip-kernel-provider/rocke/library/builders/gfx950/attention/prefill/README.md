@@ -339,7 +339,7 @@ Known gap: the C++ engine (`platform/cpp/instances/`, the tiled 2D / 3D and unif
 bodies, with the `library/tests/parity/*_emit` pairs) does not yet mirror the
 `causal_top_left` / `right_bound` bodies. The default mask is unchanged, so the
 Python/C++ byte-identity gate still holds, and the new variants' lowered IR is pinned
-by representative cases in `platform/tests/golden/rocke_representative_ir_sha256.json`
+by representative cases in `platform/tests/golden/rocke_representative_ir_sha256/`
 (Python only). Mirroring them in C++ and adding emit pairs is tracked as a follow-up.
 
 Every alias above (causal kinds fix the right bound at 0, full attention ignores the
