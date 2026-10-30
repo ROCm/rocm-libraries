@@ -13,7 +13,10 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: pinned to ROCm/TheRock commit 7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a.
+# TheRock ref: TEMPORARILY pointed at the branch
+# users/geomin12/external-ci-config-test-fix, to test ROCm/TheRock's move of
+# test depth out of configure_external_repo_ci.py. Restore a pinned SHA before
+# merging.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
@@ -32,7 +35,7 @@ on:
     inputs:
       linux_amdgpu_families:
         type: string
-        description: "Comma-separated Linux GPU families to build and test, ex: gfx94X,gfx120X. Use 'none' to skip Linux or 'all' for every family."
+        description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X (empty = skip linux)"
         default: ""
       windows_amdgpu_families:
         type: string
@@ -40,7 +43,7 @@ on:
         default: ""
       pr_labels:
         type: string
-        description: "Comma-separated PR labels (e.g. ci:skip-pytorch,test:rocprim,test_filter:quick). On pull_request events the labels come from the event payload instead."
+        description: "Comma-separated labels, as a PR would carry. ex: test:rocprim,test_filter:quick"
         default: ""
       prebuilt_stages:
         type: string
@@ -107,16 +110,17 @@ jobs:
     name: Configure Changed Projects
     runs-on: ubuntu-24.04
     outputs:
-      changed_projects: ${{ steps.configure.outputs.changed_projects }}
+      # The only output of configure_external_repo_ci.py. An empty value means
+      # the run could not be narrowed and downstream tests everything, which is
+      # what the retired run_all_tests output used to say explicitly.
+      #
       # TheRock's determine_rocm_test_dependencies.py natively resolves
       # shared/* monorepo subtrees (shared/stinkytofu, shared/tensile,
       # shared/origami, shared/mxdatagenerator, shared/rocroller) into the
-      # right consumer set, so changed_projects is passed straight through
-      # as test_projects without a rocm-libraries-side translation step.
+      # right consumer set, so this is passed straight through to the build
+      # workflows without a rocm-libraries-side translation step.
       # See ROCm/rocm-libraries#11784 for the retired stopgap this replaces.
-      test_projects: ${{ steps.configure.outputs.changed_projects }}
-      run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
-      test_type: ${{ steps.configure.outputs.test_type }}
+      changed_projects: ${{ steps.configure.outputs.changed_projects }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -129,7 +133,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: 7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+          ref: users/geomin12/external-ci-config-test-fix
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -148,7 +152,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/geomin12/external-ci-config-test-fix
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
@@ -191,7 +195,7 @@ jobs:
           'off'
         }}
       repository: ROCm/TheRock
-      ref: 7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+      ref: users/geomin12/external-ci-config-test-fix
       # Pass external repo info for stage-impact analysis.
       # extra_cmake_options is appended to the cmake configure line of every
       # build stage, scoped to this repository's CI runs. TheRock keeps
@@ -221,7 +225,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/geomin12/external-ci-config-test-fix
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -229,13 +233,14 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      # Test depth now comes from setup, which derives it from this repo's diff.
+      test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
+      # Empty string triggers a full test run in the downstream workflow.
+      changed_projects: ${{ needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+      ref: users/geomin12/external-ci-config-test-fix
     permissions:
       contents: read
       id-token: write
@@ -248,19 +253,20 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@users/geomin12/external-ci-config-test-fix
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      # Test depth now comes from setup, which derives it from this repo's diff.
+      test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
+      # Empty string triggers a full test run in the downstream workflow.
+      changed_projects: ${{ needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+      ref: users/geomin12/external-ci-config-test-fix
     permissions:
       contents: read
       id-token: write
@@ -360,7 +366,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: 7bab0a89ed8bb5a9ad3b0421a3586ffe9ff1439a # 2026-10-26
+          ref: users/geomin12/external-ci-config-test-fix
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
