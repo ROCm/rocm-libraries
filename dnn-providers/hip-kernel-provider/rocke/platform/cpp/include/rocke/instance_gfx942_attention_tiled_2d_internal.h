@@ -211,10 +211,9 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     const rocke_type_t* K_LDS_DTYPE;
     const rocke_type_t* V_LDS_DTYPE;
     const rocke_type_t* P_LDS_DTYPE;
-    int Q_BYTES;
     int K_SLICE_HD, K_SLICE_SLOTS;
     bool K_SLICED_ACTIVE;
-    int K_LDS_ELEM_BYTES, K_BUF_BYTES, K_BUFS, K_TOTAL_BYTES;
+    int K_BUF_BYTES;
     bool Q_DIRECT_GLOBAL, Q_ALIAS_K, Q_USES_DUAL_SLOT;
     int V_BUFS;
     /* V_lds bank-deconflict swizzle */
