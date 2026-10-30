@@ -47,6 +47,7 @@ inline const PointwiseModeBitset& getImplementedUnaryModesBitset()
         bitset.set(toBitPosition(data_objects::PointwiseMode::FLOOR));
         bitset.set(toBitPosition(data_objects::PointwiseMode::ELU_FWD));
         bitset.set(toBitPosition(data_objects::PointwiseMode::SOFTPLUS_FWD));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::LOGICAL_NOT));
         return bitset;
     }();
     return s_implementedUnaryModes;
@@ -62,6 +63,15 @@ inline const PointwiseModeBitset& getImplementedBinaryModesBitset()
         bitset.set(toBitPosition(data_objects::PointwiseMode::SUB));
         bitset.set(toBitPosition(data_objects::PointwiseMode::MUL));
         bitset.set(toBitPosition(data_objects::PointwiseMode::CMP_GT));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::CMP_EQ));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::CMP_NEQ));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::CMP_GE));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::CMP_LT));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::CMP_LE));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::DIV));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::ADD_SQUARE));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::LOGICAL_AND));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::LOGICAL_OR));
         bitset.set(toBitPosition(data_objects::PointwiseMode::RELU_BWD));
         bitset.set(toBitPosition(data_objects::PointwiseMode::SIGMOID_BWD));
         bitset.set(toBitPosition(data_objects::PointwiseMode::TANH_BWD));
