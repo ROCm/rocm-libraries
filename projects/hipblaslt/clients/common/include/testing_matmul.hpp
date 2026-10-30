@@ -49,6 +49,7 @@
 #include "near.hpp"
 #include "norm.hpp"
 #include "relaunch_compare.hpp"
+#include "row_uniform.hpp"
 #include "testing_matmul_grouped_c.hpp"
 #include "ulp.hpp"
 #include "unit.hpp"
@@ -2485,6 +2486,61 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
     }
 
+    // row_uniform_check: ruSkip says why the inputs cannot be made uniform along M; then the
+    // inputs are left as generated and every solution reports skip.
+    std::string ruSkip;
+    if(arg.row_uniform_check)
+    {
+        const int  tiA      = static_cast<int>(TiA);
+        auto       fp4OrFp6 = [](hipDataType t) {
+            const int v = static_cast<int>(t);
+            return v == HIP_R_4F_E2M1 || v == HIP_R_6F_E2M3 || v == HIP_R_6F_E3M2;
+        };
+        auto       integer  = [](hipDataType t) {
+            return t == HIP_R_8I || t == HIP_R_8U || t == HIP_R_32I || t == HIP_R_4I
+                   || t == HIP_R_4U;
+        };
+        const auto init = arg.initialization;
+        // These inputs sum exactly in any order (or are constant), so every row agrees whatever
+        // the summation order and a pass would prove nothing.
+        if(init == hipblaslt_initialization::rand_int
+           || init == hipblaslt_initialization::integer_exact
+           || init == hipblaslt_initialization::zero || init == hipblaslt_initialization::special
+           || init == hipblaslt_initialization::fp16_accumulator_probe
+           || init == hipblaslt_initialization::inf || init == hipblaslt_initialization::neg_inf
+           || init == hipblaslt_initialization::nan
+           || init == hipblaslt_initialization::neg_zero)
+            ruSkip = std::string("initialization ") + hipblaslt_initialization2string(init)
+                     + " sums exactly in any order; use hpl, trig_float or norm_dist";
+        // fp4/fp6 products are short multiples of their block scales, whose fp32 sums stay
+        // exact unless the scales spread widely.
+        else if(fp4OrFp6(TiA) && fp4OrFp6(TiB))
+            ruSkip = "fp4/fp6 by fp4/fp6 products sum exactly in any order";
+        else if(integer(TiA) || integer(TiB))
+            ruSkip = "integer inputs sum exactly in any order";
+        else if(arg.c_equal_d && (arg.beta != 0 || arg.betai != 0))
+            ruSkip = "c_equal_d with a nonzero beta: each launch reads the D the previous "
+                     "launch wrote";
+        else if(isW4A16Scaling(arg.scaleA))
+            ruSkip = "w4a16 group scales";
+        else if(isBlockScaling(arg.scaleA))
+        {
+            if(transA != HIPBLAS_OP_T)
+                ruSkip = "MX A requires transA=T";
+            else if(mx_use_rocroller || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+                ruSkip = "MX A with padded or preswizzled scales";
+            for(int i = 0; i < gemm_count && ruSkip.empty(); i++)
+                if(lda[i] != A_row[i] || K[i] % 128 != 0)
+                    ruSkip = "MX A requires lda equal to K and K a multiple of 128";
+        }
+        else if(tiA == HIP_R_4F_E2M1 || tiA == HIP_R_6F_E2M3 || tiA == HIP_R_6F_E3M2
+                || TiA == HIP_R_4I || TiA == HIP_R_4U)
+            ruSkip = "sub-byte A without MX scales";
+        if(!ruSkip.empty())
+            hipblaslt_cerr << "row_uniform_check skipped: " << ruSkip << std::endl;
+    }
+    bool ruInputs = arg.row_uniform_check && ruSkip.empty();
+
     IntegerExactPattern      iePattern = IntegerExactPattern::standard;
     IntegerExactPatternScope iePatternScope;
     if(arg.integer_exact_pattern[0])
@@ -3299,6 +3355,36 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       /*max_val=*/1.0f);
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
+            if(ruInputs && scaleLayoutA != MXScaleLayout::None)
+            {
+                ruSkip   = "MX A with swizzled scales";
+                ruInputs = false;
+                hipblaslt_cerr << "row_uniform_check skipped: " << ruSkip << std::endl;
+            }
+            if(ruInputs)
+            {
+                // Logical row m of op(A) is stored column m: K packed elements and K / blockSize
+                // natural-order scales, both contiguous since lda == K.
+                const int    tiA       = static_cast<int>(TiA);
+                const size_t bits      = tiA == HIP_R_4F_E2M1                             ? 4
+                                         : tiA == HIP_R_6F_E2M3 || tiA == HIP_R_6F_E3M2 ? 6
+                                                                                        : 8;
+                const size_t colBytes  = size_t(K[i]) * bits / 8;
+                const size_t kBlocks   = size_t(K[i]) / blockSize(arg.scaleA);
+                for(int64_t b = 0; b < num_batches[i]; b++)
+                {
+                    auto* dataPtrA = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
+                    auto* scalePtrA
+                        = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
+                    float* refPtrA = refAAll.data() + size_t(b) * K[i] * M[i];
+                    for(int64_t m = 1; m < M[i]; m++)
+                    {
+                        std::memcpy(dataPtrA + m * colBytes, dataPtrA, colBytes);
+                        std::memcpy(scalePtrA + m * kBlocks, scalePtrA, kBlocks);
+                        std::memcpy(refPtrA + m * K[i], refPtrA, K[i] * sizeof(float));
+                    }
+                }
+            }
             refA.emplace_back(std::move(refAAll));
             CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
@@ -3473,6 +3559,36 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   stride_c[i],
                                   num_batches[i]);
 
+            // row_uniform_check: every logical row of op(A) and every row of C equal row 0. On
+            // the null stream, after the device initialization and before the copies below.
+            if(ruInputs)
+            {
+                if(!isBlockScaling(arg.scaleA))
+                {
+                    const int64_t ldA = do_swizzle_a ? A_row[i] : lda[i];
+                    const int64_t sA  = (do_swizzle_a && stride_a[i] != 0) ? A_row[i] * A_col[i]
+                                                                           : stride_a[i];
+                    auto fillA = transA == HIPBLAS_OP_N ? row_uniform_fill_rows_device
+                                                        : row_uniform_fill_cols_device;
+                    CHECK_HIP_ERROR(fillA(dA[i].buf(),
+                                          realDataTypeSize(TiA),
+                                          A_row[i],
+                                          A_col[i],
+                                          ldA,
+                                          sA,
+                                          num_batches[i],
+                                          hipStreamDefault));
+                }
+                CHECK_HIP_ERROR(row_uniform_fill_rows_device(dC[i].buf(),
+                                                             realDataTypeSize(To),
+                                                             M[i],
+                                                             N[i],
+                                                             ldc[i],
+                                                             stride_c[i],
+                                                             num_batches[i],
+                                                             hipStreamDefault));
+            }
+
         // generateMXInput already produced the reference floats and the
         // kernel-ready scale layout for both A and B; nothing to do here.
             if(arg.fast_check)
@@ -3614,6 +3730,14 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.gradient && arg.use_e)
             {
                 hipblaslt_init(hE[i].buf(), M[i], N[i], lde[i], Taux, stride_e[i], num_batches[i]);
+                if(ruInputs)
+                    row_uniform_fill_rows_host(hE[i].buf(),
+                                               realDataTypeSize(Taux),
+                                               M[i],
+                                               N[i],
+                                               lde[i],
+                                               stride_e[i],
+                                               num_batches[i]);
             }
 
             if(arg.bias_vector)
@@ -3623,6 +3747,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                     hipblaslt_init(hBias[i].buf(), arg.bias_stride, 1, arg.bias_stride, Tbias, arg.bias_stride, num_batches[i]);
                 else
                     hipblaslt_init(hBias[i].buf(), size_bias[i], 1, size_bias[i], Tbias);
+                // A bias along M is an input unless it is a gradient output.
+                if(ruInputs && !arg.gradient && arg.bias_source != hipblaslt_bias_source::b)
+                    row_uniform_fill_constant_host(
+                        hBias[i].buf(), realDataTypeSize(Tbias), size_bias[i]);
             }
 
             if(arg.scaleA == hipblaslt_scaling_format::Scalar
@@ -3634,6 +3762,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                 else
                     hipblaslt_init(
                         hScaleA[i].buf(), size_scaleAVec[i], 1, size_scaleAVec[i], Talpha);
+                if(ruInputs)
+                    row_uniform_fill_constant_host(
+                        hScaleA[i].buf(), realDataTypeSize(Talpha), size_scaleAVec[i]);
             }
 
             if(arg.scaleB == hipblaslt_scaling_format::Scalar
@@ -3678,7 +3809,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hipblaslt_init(hScaleE[i].buf(), 1, 1, 1, Talpha);
 
             if(arg.scaleAlpha_vector)
+            {
                 hipblaslt_init(hScaleAlphaVec[i].buf(), M[i], 1, M[i], Talpha);
+                if(ruInputs)
+                    row_uniform_fill_constant_host(
+                        hScaleAlphaVec[i].buf(), realDataTypeSize(Talpha), M[i]);
+            }
 
             if(arg.gradient && arg.use_e)
             {
@@ -4029,6 +4165,27 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       To,
                                       stride_c[i],
                                       1);
+                if(ruInputs)
+                {
+                    auto fillA = transA == HIPBLAS_OP_N ? row_uniform_fill_rows_device
+                                                        : row_uniform_fill_cols_device;
+                    CHECK_HIP_ERROR(fillA(dA[batchCount].buf(),
+                                          realDataTypeSize(TiA),
+                                          A_row[i],
+                                          A_col[i],
+                                          do_swizzle_a ? A_row[i] : lda[i],
+                                          0,
+                                          1,
+                                          hipStreamDefault));
+                    CHECK_HIP_ERROR(row_uniform_fill_rows_device(dC[batchCount].buf(),
+                                                                 realDataTypeSize(To),
+                                                                 M[i],
+                                                                 N[i],
+                                                                 ldc[i],
+                                                                 0,
+                                                                 1,
+                                                                 hipStreamDefault));
+                }
                 // broadcast first block
                 CHECK_HIP_ERROR(broadcast(dA[batchCount], block_count));
                 CHECK_HIP_ERROR(broadcast(dB[batchCount], block_count));
@@ -5907,6 +6064,65 @@ void testing_matmul_with_bias(const Arguments& arg,
             CHECK_HIP_ERROR(err);
         }
     };
+    // row_uniform_check: checks on the device that every row of the D of rotation block 0 is
+    // bitwise equal to its row 0, and reports a failure on stderr without stopping the run.
+    std::unique_ptr<HipDeviceBuffer> dRowUniform;
+    if(ruInputs)
+    {
+        dRowUniform = std::make_unique<HipDeviceBuffer>(HIP_R_8I, sizeof(RowUniformDeviceResult));
+        CHECK_HIP_ERROR(dRowUniform->memcheck());
+    }
+    // void, since CHECK_HIP_ERROR returns from it under gtest.
+    auto checkRowUniform = [&](size_t sol, RowUniformResult& result) {
+        if(!arg.row_uniform_check)
+            return;
+        if(!ruInputs)
+        {
+            result.status = RowUniformResult::Status::skip;
+            return;
+        }
+        auto*        dResult = dRowUniform->as<RowUniformDeviceResult>();
+        const size_t elem    = realDataTypeSize(To);
+        CHECK_HIP_ERROR(row_uniform_reset_device(dResult, stream));
+        if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            for(int b = 0; b < arg.batch_count; b++)
+                CHECK_HIP_ERROR(row_uniform_check_device(
+                    (*dDp)[b].buf(), elem, M[0], N[0], ldd[0], 0, 1, dResult, stream));
+        else
+            for(int i = 0; i < gemm_count; i++)
+                CHECK_HIP_ERROR(row_uniform_check_device((*dDp)[i].buf(),
+                                                         elem,
+                                                         M[i],
+                                                         N[i],
+                                                         ldd[i],
+                                                         stride_d[i],
+                                                         num_batches[i],
+                                                         dResult,
+                                                         stream));
+        RowUniformDeviceResult h{};
+        CHECK_HIP_ERROR(
+            hipMemcpyAsync(&h, dResult, sizeof(h), hipMemcpyDeviceToHost, stream));
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+        result.bad_cols  = int64_t(h.bad_cols);
+        result.first_row = h.first_row();
+        result.status
+            = h.bad_cols ? RowUniformResult::Status::fail : RowUniformResult::Status::pass;
+        if(h.bad_cols)
+        {
+            std::ostringstream msg;
+            msg << "row_uniform_check FAIL for "
+                << solution_description(
+                       handle, heuristicResult[sol].algo, sol, heuristicResult.size(), true)
+                << ": " << h.bad_cols << " columns of D have a row that differs from row 0;"
+                << " the first difference is at row " << h.first_row() << ", column "
+                << h.first_col();
+#ifdef GOOGLE_TEST
+            ADD_FAILURE() << msg.str();
+#else
+            hipblaslt_cerr << msg.str() << std::endl;
+#endif
+        }
+    };
     if(!arg.timing)
     {
         // fast_check launches and checks each solution fast_check_repeat times, solution by
@@ -6242,6 +6458,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                                        sol,
                                        heuristicResult.size());
             }
+            if(iter == 0)
+            {
+                RowUniformResult rowUniform;
+                checkRowUniform(sol, rowUniform);
+            }
             if(arg.fast_check)
             {
                 CHECK_HIP_ERROR(hipStreamSynchronize(stream));
@@ -6484,6 +6705,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             double      rtol    = 0.0;
             double      max_ulp = 0.0;
             double      avg_ulp = 0.0;
+
+            RowUniformResult row_uniform;
         };
         std::vector<CandidateReport> reports(heuristicResult.size());
         int number_cold_calls
@@ -6863,6 +7086,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 first_launch_failed
                     = hipblaslt_bench_options::verification_failures() > failures_before;
             }
+            RowUniformResult rowUniform;
+            checkRowUniform(sol, rowUniform);
             if(post_iters > 0 && relaunch)
                 verifyRelaunches(sol, first_launch_failed);
             else if(post_iters > 0)
@@ -6953,7 +7178,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                     hipblaslt_rtol,
                     hipblaslt_max_ulp,
                     hipblaslt_avg_ulp,
-                    timing);
+                    timing,
+                    rowUniform);
             }
 
             reports[sol] = {flops,
@@ -6963,7 +7189,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                             hipblaslt_atol,
                             hipblaslt_rtol,
                             hipblaslt_max_ulp,
-                            hipblaslt_avg_ulp};
+                            hipblaslt_avg_ulp,
+                            rowUniform};
         };
 
         // Every path reports its candidates through these.
@@ -7307,7 +7534,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 best.rtol,
                 best.max_ulp,
                 best.avg_ulp,
-                search.best_timing);
+                search.best_timing,
+                best.row_uniform);
         }
     }
 

@@ -26,7 +26,11 @@
 
 #include <Tensile/Debug.hpp>
 
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
 #include <mutex>
+#include <string>
 
 #ifndef DEBUG_SM
 #define DEBUG_SM 0
@@ -128,6 +132,11 @@ namespace TensileLite
     bool Debug::printNoSolutionUniformSummationOrder() const
     {
         return m_value & 0x400000;
+    }
+
+    bool Debug::forceUniformSummationOrderOn() const
+    {
+        return m_forceUSOOn;
     }
 
     bool Debug::naivePropertySearch() const
@@ -289,6 +298,20 @@ namespace TensileLite
         const char* tensile_disable_staggerU = std::getenv("TENSILE_DISABLE_STAGGERU");
         if(tensile_disable_staggerU)
             m_disableStaggerU = strtol(tensile_disable_staggerU, nullptr, 0) != 0;
+
+        if(const char* forceUSO = std::getenv("HIPBLASLT_FORCE_USO_ON"))
+        {
+            std::string v(forceUSO);
+            std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            m_forceUSOOn = v == "1" || v == "on" || v == "true";
+            if(m_forceUSOOn)
+                std::fprintf(stderr,
+                             "hipBLASLt warning: HIPBLASLT_FORCE_USO_ON is set: with uniform "
+                             "summation order on, kernels it would refuse are selected and "
+                             "launched anyway, and the guarantee no longer holds\n");
+        }
     }
 
     void Debug::reloadDebugBitsForTest()

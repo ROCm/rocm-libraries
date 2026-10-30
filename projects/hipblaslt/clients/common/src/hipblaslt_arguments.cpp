@@ -171,6 +171,7 @@ void Arguments::init()
     use_gpu_timer            = false;
     skip_slow_solution_ratio = 0.0;
     uniform_summation_order  = -1;
+    row_uniform_check        = 0;
 
     // tuning
     gsu_vector[0] = 0;

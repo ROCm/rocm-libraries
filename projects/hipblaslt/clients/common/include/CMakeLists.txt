@@ -30,6 +30,7 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/near.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/norm.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/relaunch_compare.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/row_uniform.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/singletons.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDataManipulation.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/test_cleanup.hpp"

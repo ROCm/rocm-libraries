@@ -91,6 +91,7 @@ cd hipBLASLt; cd build/release
 --hybrid_assignment_policy <value>  Select the assignment policy for a Hybrid kernel: Default, DynamicWorkQueue, or Auto (case-sensitive). (Default value is: unset)
 --streamk_tile_scheduling <value>  Legacy alias for hybrid_assignment_policy: off|0, on|1, or auto|2 (case-insensitive). (Default value is: unset)
 --uniform_summation_order <value>  off|0 or on|1. Omit to leave unset.
+--row_uniform_check <value>        Nonzero makes every row of op(A), C, E and the bias, scaleA and scaleAlpha vectors along M equal row 0, and checks after timing that every row of D is bitwise equal to row 0. Adds the row_uniform (pass, FAIL or skip), row_uniform_bad_cols and row_uniform_first_row columns; a FAIL is also reported on stderr, does not stop the run and does not change the exit status. Inputs that sum exactly in any order (rand_int, integer_exact, integer types, ...) report skip. Also a YAML key. (Default value is: 0)
 --help |-h                 produces this help message
 --version <value>          Prints the version number
 ```

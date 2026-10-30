@@ -54,6 +54,8 @@
 #include <mutex>
 #include <numeric>
 #include <random>
+#include <set>
+#include <tuple>
 #include <unordered_map>
 
 #include <sstream>
@@ -6923,6 +6925,32 @@ namespace TensileLite
             ++tally.distinct;
         }
 
+        // HIPBLASLT_FORCE_USO_ON: names, once per kernel and clause, each refusal it bypasses.
+        // A thread-local set of (solution, clause, site) keeps repeat launches off the lock.
+        void reportForcedUniformSummationOrder(void const*        solution,
+                                               std::string const& kernel,
+                                               char const*        token,
+                                               char const*        where)
+        {
+            if(token == nullptr)
+                token = "Untagged";
+            using Key = std::tuple<void const*, char const*, char const*>;
+            thread_local std::set<Key> seen;
+            const Key                  key{solution, token, where};
+            if(seen.find(key) != seen.end())
+                return;
+            seen.insert(key);
+
+            static std::mutex            mutex;
+            static std::set<std::string> reported;
+            std::lock_guard<std::mutex>  lock(mutex);
+            if(!reported.insert(std::string(where) + '|' + token + '|' + kernel).second)
+                return;
+            std::cerr << "hipBLASLt warning: HIPBLASLT_FORCE_USO_ON bypassed the uniform "
+                         "summation order "
+                      << where << " refusal " << token << " for kernel " << kernel << std::endl;
+        }
+
         // Statically-knowable reasons a StreamK launch cannot be shown
         // row-uniform: no resolved grid, reduction strategy or Synchronizer
         // pointer is consulted, so the launch-obstacle helper (used by both
@@ -7093,11 +7121,19 @@ namespace TensileLite
         const std::string obstacle      = uniformSummationOrderLaunchObstacle(
             problem, hardware, launch, resolvedGA, gsu, nullptr, false, &obstacleToken);
 
+        // A refusal HIPBLASLT_FORCE_USO_ON bypasses is tallied as admitted.
+        const bool forced = !obstacle.empty() && Debug::Instance().forceUniformSummationOrderOn();
         if(Debug::Instance().printNoSolutionUniformSummationOrder())
         {
             ++uniformSummationOrderTally().examined;
-            if(!obstacle.empty())
+            if(!obstacle.empty() && !forced)
                 uniformSummationOrderTallyRecord(obstacleToken);
+        }
+
+        if(forced)
+        {
+            reportForcedUniformSummationOrder(this, kernelName, obstacleToken, "selection");
+            return true;
         }
 
         return obstacle.empty();
@@ -7356,8 +7392,20 @@ namespace TensileLite
         if(launch.effectiveWorkAssignment == WorkAssignment::DynamicWorkQueue)
             return;
 
-        const std::string reason = uniformSummationOrderLaunchObstacle(
-            problem, hardware, launch, resolvedGlobalAccumulation, gsu, synchronizer, true);
+        char const*       obstacleToken = nullptr;
+        const std::string reason        = uniformSummationOrderLaunchObstacle(problem,
+                                                                       hardware,
+                                                                       launch,
+                                                                       resolvedGlobalAccumulation,
+                                                                       gsu,
+                                                                       synchronizer,
+                                                                       true,
+                                                                       &obstacleToken);
+        if(!reason.empty() && Debug::Instance().forceUniformSummationOrderOn())
+        {
+            reportForcedUniformSummationOrder(this, kernelName, obstacleToken, "launch");
+            return;
+        }
         if(!reason.empty())
         {
             throw UniformSummationOrderError(
