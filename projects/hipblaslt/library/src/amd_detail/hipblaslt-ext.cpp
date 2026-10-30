@@ -1152,10 +1152,25 @@ namespace hipblaslt_ext
                       inputs.getScaleAux());
             return HIPBLAS_STATUS_NOT_SUPPORTED;
         }
-        if(auto status
-           = refuse_row_order(__func__, problemtype.getOrderA(), problemtype.getOrderB());
-           status != HIPBLAS_STATUS_SUCCESS)
-            return status;
+        // A null scalar or data pointer keeps the invalid-pointer status rocblaslt reports for it.
+        if(!gemm_pointers_missing(m,
+                                  n,
+                                  k,
+                                  batch_count,
+                                  (rocblaslt_compute_type)problemtype.getTypeCompute(),
+                                  HIPBLASLT_DATATYPE_INVALID,
+                                  problemtype.getTypeA(),
+                                  rocblaslt_pointer_mode_host,
+                                  inputs.getAlpha(),
+                                  inputs.getBeta(),
+                                  inputs.getA(),
+                                  inputs.getB(),
+                                  inputs.getC(),
+                                  inputs.getD()))
+            if(auto status
+               = refuse_row_order(__func__, problemtype.getOrderA(), problemtype.getOrderB());
+               status != HIPBLAS_STATUS_SUCCESS)
+                return status;
         rocblaslt::Debug::Instance().markerStart("hipblasLtGemmSetProblemFullV2Cpp");
         auto rocepilogue = reinterpret_cast<rocblaslt::RocGemmEpilogueV2*>(epilogue.pimpl.get());
         auto rocepinputs = reinterpret_cast<rocblaslt::RocGemmInputsV2*>(inputs.pimpl.get());
@@ -1200,8 +1215,19 @@ namespace hipblaslt_ext
                                      void*                   D,
                                      hipblasLtMatrixLayout_t matD)
     {
-        // A null descriptor keeps the invalid-handle status rocblaslt reports for it.
-        if(matmul_descr)
+        // A null descriptor, layout, scalar, or data pointer keeps the status rocblaslt reports
+        // for it.
+        if(!gemm_pointers_missing((rocblaslt_matmul_desc)matmul_descr,
+                                  (rocblaslt_matrix_layout)matA,
+                                  (rocblaslt_matrix_layout)matB,
+                                  (rocblaslt_matrix_layout)matC,
+                                  (rocblaslt_matrix_layout)matD,
+                                  alpha,
+                                  beta,
+                                  A,
+                                  B,
+                                  C,
+                                  D))
             if(auto status = refuse_row_order(__func__,
                                               (rocblaslt_matrix_layout)matA,
                                               (rocblaslt_matrix_layout)matB,
@@ -1379,10 +1405,31 @@ namespace hipblaslt_ext
                 return HIPBLAS_STATUS_NOT_SUPPORTED;
             }
         }
-        if(auto status
-           = refuse_row_order(__func__, problemtype.getOrderA(), problemtype.getOrderB());
-           status != HIPBLAS_STATUS_SUCCESS)
-            return status;
+        // A null scalar or data pointer in any GEMM keeps the invalid-pointer status rocblaslt
+        // reports for it.
+        bool pointersPresent = inputs.size() >= m.size();
+        for(size_t i = 0; pointersPresent && i < m.size(); i++)
+            pointersPresent
+                = i < n.size() && i < k.size() && i < batch_count.size()
+                  && !gemm_pointers_missing(m[i],
+                                            n[i],
+                                            k[i],
+                                            batch_count[i],
+                                            (rocblaslt_compute_type)problemtype.getTypeCompute(),
+                                            HIPBLASLT_DATATYPE_INVALID,
+                                            problemtype.getTypeA(),
+                                            rocblaslt_pointer_mode_host,
+                                            inputs[i].getAlpha(),
+                                            inputs[i].getBeta(),
+                                            inputs[i].getA(),
+                                            inputs[i].getB(),
+                                            inputs[i].getC(),
+                                            inputs[i].getD());
+        if(pointersPresent)
+            if(auto status
+               = refuse_row_order(__func__, problemtype.getOrderA(), problemtype.getOrderB());
+               status != HIPBLAS_STATUS_SUCCESS)
+                return status;
         rocblaslt::Debug::Instance().markerStart("hipblasLtGroupedGemmSetProblemFullV2Cpp");
         std::vector<rocblaslt::RocGemmEpilogueV2> rocepilogue;
         for(auto& e : epilogue)
@@ -1440,12 +1487,25 @@ namespace hipblaslt_ext
         auto layoutAt = [](const std::vector<hipblasLtMatrixLayout_t>& mats, size_t i) {
             return i < mats.size() ? (rocblaslt_matrix_layout)mats[i] : nullptr;
         };
-        // A null descriptor or layout in any GEMM keeps the invalid-handle status rocblaslt
-        // reports for it, so the order is checked only once every GEMM's arguments are present.
+        // A null descriptor, layout, scalar, or data pointer in any GEMM keeps the status
+        // rocblaslt reports for it, so the order is checked only once every GEMM's arguments are
+        // present.
+        auto pointerAt = [](const auto& ptrs, size_t i) -> const void* {
+            return i < ptrs.size() ? ptrs[i] : nullptr;
+        };
         bool present = true;
-        for(size_t i = 0; i < matmul_descr.size(); i++)
-            present = present && matmul_descr[i] && layoutAt(matA, i) && layoutAt(matB, i)
-                      && layoutAt(matC, i) && layoutAt(matD, i);
+        for(size_t i = 0; present && i < matmul_descr.size(); i++)
+            present = !gemm_pointers_missing((rocblaslt_matmul_desc)matmul_descr[i],
+                                             layoutAt(matA, i),
+                                             layoutAt(matB, i),
+                                             layoutAt(matC, i),
+                                             layoutAt(matD, i),
+                                             pointerAt(alpha, i),
+                                             pointerAt(beta, i),
+                                             pointerAt(A, i),
+                                             pointerAt(B, i),
+                                             pointerAt(C, i),
+                                             pointerAt(D, i));
         const size_t count = present ? matmul_descr.size() : 0;
         for(size_t i = 0; i < count; i++)
         {

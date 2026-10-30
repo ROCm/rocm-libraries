@@ -117,6 +117,61 @@ hipblasStatus_t refuse_row_order(const char*             caller,
     return refuse_row_order(caller, matA->order, matB->order, matC->order, matD->order);
 }
 
+bool gemm_pointers_missing(int64_t                m,
+                           int64_t                n,
+                           int64_t                k,
+                           int64_t                batchCount,
+                           rocblaslt_compute_type computeType,
+                           hipDataType            scaleType,
+                           hipDataType            typeA,
+                           rocblaslt_pointer_mode pointerMode,
+                           const void*            alpha,
+                           const void*            beta,
+                           const void*            A,
+                           const void*            B,
+                           const void*            C,
+                           const void*            D)
+{
+    // validateMatmulArgs returns early for an empty problem, before it checks pointers.
+    if(!m || !batchCount)
+        return false;
+    if(!beta)
+        return true;
+    const bool alphaForbidsNull = alphaForbidsNullAB(
+        alphaBetaScalarType(scaleType, computeType, typeA), pointerMode, alpha, A, B);
+    return n && ((k && alphaForbidsNull) || !C || !D);
+}
+
+bool gemm_pointers_missing(rocblaslt_matmul_desc   desc,
+                           rocblaslt_matrix_layout matA,
+                           rocblaslt_matrix_layout matB,
+                           rocblaslt_matrix_layout matC,
+                           rocblaslt_matrix_layout matD,
+                           const void*             alpha,
+                           const void*             beta,
+                           const void*             A,
+                           const void*             B,
+                           const void*             C,
+                           const void*             D)
+{
+    if(!desc || !matA || !matB || !matC || !matD)
+        return true;
+    return gemm_pointers_missing(matD->m,
+                                 matD->n,
+                                 desc->op_A == HIPBLAS_OP_N ? matA->n : matA->m,
+                                 matA->batch_count,
+                                 desc->compute_type,
+                                 desc->scale_type,
+                                 matA->type,
+                                 desc->pointermode,
+                                 alpha,
+                                 beta,
+                                 A,
+                                 B,
+                                 C,
+                                 D);
+}
+
 namespace
 {
     // The arguments rocblaslt_matmul checks before anything else. A missing one keeps its

@@ -51,3 +51,34 @@ hipblasStatus_t refuse_row_order(const char*             caller,
                                  rocblaslt_matrix_layout matB,
                                  rocblaslt_matrix_layout matC,
                                  rocblaslt_matrix_layout matD);
+
+// True when validateMatmulArgs would report a null scalar or data pointer for this GEMM. The
+// extension API checks it before refusing a row-major layout, so those calls keep their
+// invalid-pointer status.
+bool gemm_pointers_missing(int64_t                m,
+                           int64_t                n,
+                           int64_t                k,
+                           int64_t                batchCount,
+                           rocblaslt_compute_type computeType,
+                           hipDataType            scaleType,
+                           hipDataType            typeA,
+                           rocblaslt_pointer_mode pointerMode,
+                           const void*            alpha,
+                           const void*            beta,
+                           const void*            A,
+                           const void*            B,
+                           const void*            C,
+                           const void*            D);
+// The same check with the sizes and modes read from a descriptor and its layouts. Also true when
+// the descriptor or a layout is null.
+bool gemm_pointers_missing(rocblaslt_matmul_desc   desc,
+                           rocblaslt_matrix_layout matA,
+                           rocblaslt_matrix_layout matB,
+                           rocblaslt_matrix_layout matC,
+                           rocblaslt_matrix_layout matD,
+                           const void*             alpha,
+                           const void*             beta,
+                           const void*             A,
+                           const void*             B,
+                           const void*             C,
+                           const void*             D);
