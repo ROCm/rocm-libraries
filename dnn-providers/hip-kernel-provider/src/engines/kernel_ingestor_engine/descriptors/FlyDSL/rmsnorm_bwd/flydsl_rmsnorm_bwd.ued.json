@@ -10,6 +10,7 @@
   },
   "predict_engine": {
     "default": "65a6026c-17b9-57a0-bea5-162bd66698b0",
+    "gfx1201": "7f254fed-6f1e-40f0-9b93-088da7734954",
     "gfx90a": "f6e5703f-cb50-49d7-9776-f670ee93383a",
     "gfx942": "aa024e3f-ab24-41ce-9753-fab2239d00dc",
     "gfx950": "f4f4b68c-a35d-4a78-aa05-65585b0cf5db"
