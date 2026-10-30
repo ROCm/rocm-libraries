@@ -209,6 +209,47 @@ namespace rocwmma
             }
         };
 
+        // Signed 8-bit inputs. Shares its builtin with the uint8 operation.
+        struct wmma_i32_16x16x16_i8_gfx12
+        {
+            using Key       = wmma_key<int8_t, int8_t, int32_t, 16u, 16u, 16u>;
+            using PaddableK = wmma_k_list<8u>;
+
+            using ARegsT = VRegI32x2;
+            using BRegsT = VRegI32x2;
+            using CRegsT = AccRegI32x8;
+            using DRegsT = AccRegI32x8;
+
+            constexpr static WmmaInputSign InputSign = WmmaInputSign::Signed;
+            // Wrap on int32 overflow (no saturation), as on every other target
+            constexpr static bool Clamp = false;
+
+            template <typename Dummy = void>
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+#if ROCWMMA_HAS_AMDGCN_BUILTIN(wmma_i32_16x16x16_iu8_w32_gfx12)
+                using I32x2 = wmma_native_vec_t<int32_t, 2>;
+                using I32x8 = wmma_native_vec_t<int32_t, 8>;
+
+                DRegsT result;
+                wmma_abi::as<I32x8>(result)
+                    = __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12((bool)InputSign,
+                                                                       wmma_abi::as<I32x2>(regsA),
+                                                                       (bool)InputSign,
+                                                                       wmma_abi::as<I32x2>(regsB),
+                                                                       wmma_abi::as<I32x8>(regsC),
+                                                                       Clamp);
+                return result;
+#else
+                static_assert(!ROCWMMA_DEVICE_COMPILE || wmma_dependent_false_v<Dummy>,
+                              "rocWMMA: the compiler does not provide "
+                              "__builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12 for this target");
+                return DRegsT{};
+#endif
+            }
+        };
+
     } // namespace detail
 
 } // namespace rocwmma

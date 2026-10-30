@@ -211,6 +211,140 @@ namespace rocwmma
             }
         };
 
+        // Signed 8-bit inputs
+        struct wmma_i32_16x16x64_i8_gfx1250
+        {
+            using Key       = wmma_key<int8_t, int8_t, int32_t, 16u, 16u, 64u>;
+            using PaddableK = wmma_k_list<8u, 16u, 32u>;
+
+            using ARegsT = VRegI32x8;
+            using BRegsT = VRegI32x8;
+            using CRegsT = AccRegI32x8;
+            using DRegsT = AccRegI32x8;
+
+            constexpr static WmmaInputSign InputSign = WmmaInputSign::Signed;
+            constexpr static WmmaReuse     ReuseA    = WmmaReuse::None;
+            constexpr static WmmaReuse     ReuseB    = WmmaReuse::None;
+            // Wrap on int32 overflow (no saturation), as on every other target.
+            // The builtin's clamp operand defaults to false and is not passed, as
+            // not every supported compiler accepts it.
+            constexpr static bool Clamp = false;
+
+            template <typename Dummy = void>
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+#if ROCWMMA_HAS_AMDGCN_BUILTIN(wmma_i32_16x16x64_iu8)
+                using I32x8 = wmma_native_vec_t<int32_t, 8>;
+
+                DRegsT result;
+                wmma_abi::as<I32x8>(result)
+                    = __builtin_amdgcn_wmma_i32_16x16x64_iu8((bool)InputSign,
+                                                             wmma_abi::as<I32x8>(regsA),
+                                                             (bool)InputSign,
+                                                             wmma_abi::as<I32x8>(regsB),
+                                                             wmma_abi::as<I32x8>(regsC),
+                                                             (bool)ReuseA,
+                                                             (bool)ReuseB);
+                return result;
+#else
+                static_assert(!ROCWMMA_DEVICE_COMPILE || wmma_dependent_false_v<Dummy>,
+                              "rocWMMA: the compiler does not provide "
+                              "__builtin_amdgcn_wmma_i32_16x16x64_iu8 for this target");
+                return DRegsT{};
+#endif
+            }
+        };
+
+        // Unsigned 8-bit inputs
+        struct wmma_i32_16x16x64_u8_gfx1250
+        {
+            using Key       = wmma_key<uint8_t, uint8_t, int32_t, 16u, 16u, 64u>;
+            using PaddableK = wmma_k_list<8u, 16u, 32u>;
+
+            using ARegsT = VRegUI32x8;
+            using BRegsT = VRegUI32x8;
+            using CRegsT = AccRegI32x8;
+            using DRegsT = AccRegI32x8;
+
+            constexpr static WmmaInputSign InputSign = WmmaInputSign::Unsigned;
+            constexpr static WmmaReuse     ReuseA    = WmmaReuse::None;
+            constexpr static WmmaReuse     ReuseB    = WmmaReuse::None;
+            // Wrap on int32 overflow (no saturation), as on every other target.
+            // The builtin's clamp operand defaults to false and is not passed, as
+            // not every supported compiler accepts it.
+            constexpr static bool Clamp = false;
+
+            template <typename Dummy = void>
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+#if ROCWMMA_HAS_AMDGCN_BUILTIN(wmma_i32_16x16x64_iu8)
+                using I32x8 = wmma_native_vec_t<int32_t, 8>;
+
+                DRegsT result;
+                wmma_abi::as<I32x8>(result)
+                    = __builtin_amdgcn_wmma_i32_16x16x64_iu8((bool)InputSign,
+                                                             wmma_abi::as<I32x8>(regsA),
+                                                             (bool)InputSign,
+                                                             wmma_abi::as<I32x8>(regsB),
+                                                             wmma_abi::as<I32x8>(regsC),
+                                                             (bool)ReuseA,
+                                                             (bool)ReuseB);
+                return result;
+#else
+                static_assert(!ROCWMMA_DEVICE_COMPILE || wmma_dependent_false_v<Dummy>,
+                              "rocWMMA: the compiler does not provide "
+                              "__builtin_amdgcn_wmma_i32_16x16x64_iu8 for this target");
+                return DRegsT{};
+#endif
+            }
+        };
+
+        struct wmma_f32_16x16x4_f32_gfx1250
+        {
+            using Key       = wmma_key<float32_t, float32_t, float32_t, 16u, 16u, 4u>;
+            using PaddableK = wmma_k_list<2u>;
+
+            using ARegsT = VRegF32x2;
+            using BRegsT = VRegF32x2;
+            using CRegsT = AccRegF32x8;
+            using DRegsT = AccRegF32x8;
+
+            constexpr static WmmaInputNeg NegA   = WmmaInputNeg::None;
+            constexpr static WmmaInputNeg NegB   = WmmaInputNeg::None;
+            constexpr static WmmaCMod     CMod   = WmmaCMod::None;
+            constexpr static WmmaReuse    ReuseA = WmmaReuse::None;
+            constexpr static WmmaReuse    ReuseB = WmmaReuse::None;
+
+            template <typename Dummy = void>
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+#if ROCWMMA_HAS_AMDGCN_BUILTIN(wmma_f32_16x16x4_f32)
+                using F32x2 = wmma_native_vec_t<float32_t, 2>;
+                using F32x8 = wmma_native_vec_t<float32_t, 8>;
+
+                DRegsT result;
+                wmma_abi::as<F32x8>(result)
+                    = __builtin_amdgcn_wmma_f32_16x16x4_f32((bool)NegA,
+                                                            wmma_abi::as<F32x2>(regsA),
+                                                            (bool)NegB,
+                                                            wmma_abi::as<F32x2>(regsB),
+                                                            (int16_t)CMod,
+                                                            wmma_abi::as<F32x8>(regsC),
+                                                            (bool)ReuseA,
+                                                            (bool)ReuseB);
+                return result;
+#else
+                static_assert(!ROCWMMA_DEVICE_COMPILE || wmma_dependent_false_v<Dummy>,
+                              "rocWMMA: the compiler does not provide "
+                              "__builtin_amdgcn_wmma_f32_16x16x4_f32 for this target");
+                return DRegsT{};
+#endif
+            }
+        };
+
     } // namespace detail
 
 } // namespace rocwmma
