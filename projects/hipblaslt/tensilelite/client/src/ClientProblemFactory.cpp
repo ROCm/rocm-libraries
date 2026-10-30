@@ -125,6 +125,13 @@ namespace TensileLite
             if(pointerArrayBatch && m_sparse)
                 throw std::invalid_argument("batch-mode=1 does not support sparse GEMM");
 
+            // Solutions only exist for 1 (1D) and 128 (2D tile, see _validateMX2DFreeTile).
+            // Non-MX sides never read the free block, so only check the scaled ones.
+            if(m_mxBlockA && m_mxBlockFreeA != 1 && m_mxBlockFreeA != 128)
+                throw std::invalid_argument("mx-a-free-block must be 1 or 128");
+            if(m_mxBlockB && m_mxBlockFreeB != 1 && m_mxBlockFreeB != 128)
+                throw std::invalid_argument("mx-b-free-block must be 1 or 128");
+
             if(m_mxBlockA || m_mxBlockB)
             {
                 hipDeviceProp_t prop;

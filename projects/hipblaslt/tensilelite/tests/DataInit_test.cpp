@@ -824,3 +824,65 @@ TEST(CopyTensorVoid, CopiesSource)
 
     EXPECT_EQ(dst, src);
 }
+
+// =============================================================================
+//   Section 7 - ClientProblemFactory mx-{a,b}-free-block validation
+//
+//   Only 1 and 128 have solutions. The check runs before any HIP call, so these
+//   need no GPU.
+// =============================================================================
+namespace
+{
+    TensileLite::Client::po::variables_map
+        makeMXFreeBlockArgs(int mxBlockA, int mxBlockB, int freeA, int freeB)
+    {
+        TensileLite::Client::po::variables_map args;
+        setOption(args, "problem-size", std::vector<std::vector<size_t>>{{128, 128, 1, 512}});
+        setOption(args, "strided-batched", true);
+        setOption(args, "batch-mode", 0);
+        setOption(args, "grouped-gemm", false);
+        setOption(args, "sparse", 0);
+        setOption(args, "high-precision-accumulate", false);
+        setOption(args, "kernel-language", KernelLanguage::Any);
+        setOption(args, "performance-metric", PerformanceMetric::DeviceEfficiency);
+        setOption(args, "deterministic-mode", false);
+        setOption(args, "c-equal-d", false);
+        setOption(args, "uniform-summation-order", 0);
+        setOption(args, "mx-a-block", mxBlockA);
+        setOption(args, "mx-b-block", mxBlockB);
+        setOption(args, "mx-a-free-block", freeA);
+        setOption(args, "mx-b-free-block", freeB);
+        setOption(args, "fused-gemm-a2a", false);
+        setOption(args, "metadata-layout", 0);
+        setOption(args, "a-ops", TensileLite::TensorOps{});
+        setOption(args, "b-ops", TensileLite::TensorOps{});
+        setOption(args, "c-ops", TensileLite::TensorOps{});
+        setOption(args, "d-ops", TensileLite::TensorOps{});
+        return args;
+    }
+
+    void expectFreeBlockRejected(TensileLite::Client::po::variables_map const& args,
+                                 std::string const&                            expected)
+    {
+        try
+        {
+            TensileLite::Client::ClientProblemFactory factory(args);
+            FAIL() << "expected std::invalid_argument: " << expected;
+        }
+        catch(std::invalid_argument const& e)
+        {
+            EXPECT_EQ(std::string(e.what()), expected);
+        }
+    }
+} // namespace
+
+TEST(ClientProblemFactoryMXFreeBlock, RejectsUnsupportedFreeBlockOnA)
+{
+    expectFreeBlockRejected(makeMXFreeBlockArgs(32, 0, 64, 1), "mx-a-free-block must be 1 or 128");
+}
+
+TEST(ClientProblemFactoryMXFreeBlock, RejectsUnsupportedFreeBlockOnB)
+{
+    // A is not MX, so its bogus free block is ignored and only B is reported.
+    expectFreeBlockRejected(makeMXFreeBlockArgs(0, 32, 64, 2), "mx-b-free-block must be 1 or 128");
+}
