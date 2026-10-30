@@ -3,6 +3,8 @@
 
 """reconcile.py: union over shards, truncated trailing rows, not-run rows."""
 
+import csv
+
 import pytest
 
 import reconcile
@@ -106,3 +108,56 @@ def test_summary_and_cli_output(tmp_path, capsys):
     assert "2 declined: bwd none" in " ".join(text.split())
     assert "fail a::t2  Forward pass is_allclose=False" in text
     assert len(read_rows(out)) == 7
+
+
+def test_csv_without_the_engine_columns_still_reads(tmp_path):
+    (tmp_path / "results.csv").write_text(
+        ",".join(reconcile.LEGACY_FIELDS) + "\na::t1,pass,hipdnn,hipdnn:e,,\n"
+    )
+    (only,) = read_rows(tmp_path / "results.csv")
+    assert (only["outcome"], only["fwd_engines"], only["bwd_engines"]) == (
+        "pass",
+        "",
+        "",
+    )
+
+
+def sweep(out, direction, engine, rows):
+    d = out / "all-engines" / direction / engine.lower()
+    d.mkdir(parents=True)
+    (d / "engine.txt").write_text(engine + "\n")
+    (d / "results.csv").write_text(
+        ",".join(FIELDS) + "\n" + "".join(format_row(r) for r in rows)
+    )
+
+
+def test_engines_csv_lists_heuristic_and_pinned_rows_and_never_counts_a_mismatch_as_a_pass(
+    tmp_path,
+):
+    fwd, bwd = "v/test_forward.py::f1", "v/test_backward.py::b1"
+    (tmp_path / "results.csv").write_text(
+        ",".join(FIELDS)
+        + "\n"
+        + format_row(row(fwd, fwd="hipdnn:A", fwd_engines="A;B"))
+        + format_row(row(bwd, fwd="ref:why", bwd="hipdnn:A", bwd_engines="A;B"))
+    )
+    sweep(tmp_path, "fwd", "B", [row(fwd, fwd="hipdnn:B")])
+    sweep(tmp_path, "bwd", "B", [row(bwd, bwd="hipdnn:A")])  # served A despite the pin
+    counts = reconcile.write_engines(tmp_path)
+    with open(tmp_path / "engines.csv", newline="") as f:
+        table = list(csv.reader(f))
+    assert table[0] == list(reconcile.ENGINES_FIELDS)
+    assert sorted(table[1:]) == sorted(
+        [
+            [fwd, "fwd", "A", "heuristic", "pass", ""],
+            [bwd, "bwd", "A", "heuristic", "pass", ""],
+            [fwd, "fwd", "B", "pinned", "pass", ""],
+            [bwd, "bwd", "B", "pinned", "declined", "served A, not the pinned B"],
+        ]
+    )
+    assert counts.splitlines() == [
+        "bwd A: pass=1 fail=0 declined=0",
+        "bwd B: pass=0 fail=0 declined=1",
+        "fwd A: pass=1 fail=0 declined=0",
+        "fwd B: pass=1 fail=0 declined=0",
+    ]

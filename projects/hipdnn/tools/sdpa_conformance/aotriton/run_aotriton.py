@@ -5,7 +5,7 @@
 """Run AOTriton's SDPA suite against hipDNN and record one CSV row per case.
 
     run_aotriton.py [--suite default|forward] [--release N] [--shard I/N] [--fake always-decline]
-                    [--fwd-no-stats] [--packed-gpu] [--out DIR | --arch ARCH --run NAME] [--workers N]
+                    [--fwd-no-stats] [--all-engines] [--packed-gpu] [--out DIR | --arch ARCH --run NAME] [--workers N]
                     [--hipdnn-prefix DIR] [-- PYTEST...]
 
 Per pass the runner (1) collects with the same options and writes the node ids to
@@ -24,13 +24,26 @@ the pytest workers), for engines that decline when Stats are requested. The back
 consume the forward's Stats, so the runner refuses the flag unless every collected case is in
 ``test_forward.py``.
 
+``--all-engines`` adds a second stage after the normal run (which still decides ``<out>/results.csv``).
+Pass 1 records, per case, the applicable engines in heuristic rank order (``fwd_engines`` /
+``bwd_engines``). For every engine that is applicable to a case but did not serve it, the runner
+pins that engine and re-runs exactly those cases (``--hipdnn-nodeids-file``): ``test_forward.py``
+cases with ``HIPDNN_FWD_ENGINE``, every other case with ``HIPDNN_BWD_ENGINE`` (forward left to the
+heuristic). Results go to ``<out>/all-engines/<fwd|bwd>/<engine-slug>/`` in the same CSV format,
+with ``engine.txt`` naming the engine; ``reconcile.py --engines <out>`` folds them into
+``engines.csv``. It composes with ``--suite``, ``--shard``, ``--release``, ``--workers`` and
+``--fwd-no-stats`` (forward sweep only); it refuses ``--fake`` and pre-set
+``HIPDNN_FWD_ENGINE`` / ``HIPDNN_BWD_ENGINE``.
+
 Every pytest process checks that the ``libhipdnn_backend`` mapped into it is the one under
 ``--hipdnn-prefix`` (default ``$ROCM_PATH``, which dnn-benchmarking's ``setup_env.py``
 activation sets); the runner refuses to start without a prefix.
 """
 
 import argparse
+import copy
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -41,6 +54,7 @@ import reconcile
 DEFAULT_RESULTS = Path.cwd() / "sdpa_conformance_results"
 FWD_NO_STATS_ENV = "HIPDNN_SDPA_CONFORMANCE_FWD_NO_STATS"
 FWD_NO_STATS_TESTS = "test_forward.py"
+ENGINE_ENV = {"fwd": "HIPDNN_FWD_ENGINE", "bwd": "HIPDNN_BWD_ENGINE"}
 
 
 def parse_args(argv):
@@ -56,6 +70,11 @@ def parse_args(argv):
         "--fwd-no-stats",
         action="store_true",
         help=f"run the forward without Stats; only valid for {FWD_NO_STATS_TESTS}",
+    )
+    parser.add_argument(
+        "--all-engines",
+        action="store_true",
+        help="after the normal run, re-run every case with each other applicable engine pinned",
     )
     parser.add_argument("--out", type=Path)
     parser.add_argument(
@@ -108,7 +127,29 @@ def passes(args):
     return result
 
 
-def pytest_cmd(args, selection, out=None):
+def engine_slug(name):
+    """A directory name for an engine name."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", name)
+
+
+def engine_work(rows):
+    """Pass-2 work from pass-1 rows: ``{(direction, engine): [nodeid, ...]}``.
+
+    A ``test_forward.py`` case is a forward case and reads ``fwd_engines`` / ``fwd``; any other
+    case is a backward case and reads ``bwd_engines`` / ``bwd``. Per case, every listed engine
+    except the one(s) that served it.
+    """
+    work = {}
+    for row in rows:
+        direction = reconcile.direction_of(row["nodeid"])
+        winners = reconcile.served_engines(row[direction])
+        for engine in row[f"{direction}_engines"].split(";"):
+            if engine and engine not in winners:
+                work.setdefault((direction, engine), []).append(row["nodeid"])
+    return work
+
+
+def pytest_cmd(args, selection, out=None, nodeids=None):
     """The pytest command; ``out`` (the results directory) is omitted for the collection pass."""
     cmd = [
         sys.executable,
@@ -128,12 +169,53 @@ def pytest_cmd(args, selection, out=None):
         cmd.append(f"--shard={args.shard}")
     if args.fake:
         cmd.append(f"--fake={args.fake}")
+    if nodeids:
+        cmd.append(f"--hipdnn-nodeids-file={nodeids}")
     cmd.append(f"--hipdnn-prefix={args.hipdnn_prefix}")
     return cmd + args.pytest_args + selection
 
 
+def sweep_engines(args, env, out, pass_ids, workers):
+    """Pass 2: one pytest run per (direction, engine) over the cases that engine did not win."""
+    status = 0
+    args = copy.copy(args)
+    args.shard = None  # the listed node ids are already this shard's cases
+    work = engine_work(reconcile.read_rows(out / reconcile.CSV_NAME))
+    for (direction, engine), nodeids in sorted(work.items()):
+        sweep = out / reconcile.ENGINES_DIR / direction / engine_slug(engine)
+        sweep.mkdir(parents=True, exist_ok=True)
+        (sweep / reconcile.ENGINE_NAME_FILE).write_text(engine + "\n")
+        listing = (sweep / "nodeids.txt").resolve()
+        listing.write_text("".join(f"{n}\n" for n in nodeids))
+        sweep_env = {k: v for k, v in env.items() if k not in ENGINE_ENV.values()}
+        sweep_env[ENGINE_ENV[direction]] = engine
+        wanted = set(nodeids)
+        for label, selection in passes(args):
+            count = len(wanted & pass_ids[label])
+            if not count:
+                continue
+            print(
+                f"all-engines {direction} {engine} (pass '{label}'): {count} cases",
+                flush=True,
+            )
+            run = subprocess.run(
+                pytest_cmd(args, selection, sweep, listing)
+                + ["-n", str(workers), f"--max-worker-restart={count}"],
+                env=sweep_env,
+            )
+            status = status or run.returncode
+    return status
+
+
 def main(argv=None):
     args = parse_args(argv)
+    if args.all_engines:
+        pinned = [k for k in ENGINE_ENV.values() if os.environ.get(k)]
+        if args.fake or pinned:
+            raise SystemExit(
+                "--all-engines needs the real heuristic run: refused with "
+                + ("--fake" if args.fake else ", ".join(pinned))
+            )
     if not args.hipdnn_prefix:
         raise SystemExit(
             "no hipDNN prefix: activate the setup_env.py venv (it sets ROCM_PATH) or pass "
@@ -165,6 +247,7 @@ def main(argv=None):
     collected_path = out / reconcile.COLLECTED_NAME
     collected_path.write_text("")
     status = 0
+    pass_ids = {}
     for label, selection in passes(args):
         collect = subprocess.run(
             pytest_cmd(args, selection) + ["--collect-only", "-q"],
@@ -193,6 +276,7 @@ def main(argv=None):
                 f"also collected: {', '.join(foreign)}"
             )
             return 2
+        pass_ids[label] = set(ids)
         with open(collected_path, "a") as f:
             f.write("".join(f"{nodeid}\n" for nodeid in ids))
         print(
@@ -207,6 +291,9 @@ def main(argv=None):
             env=env,
         )
         status = status or run.returncode
+    if args.all_engines:
+        sweep_status = sweep_engines(args, env, out, pass_ids, workers)
+        status = status or sweep_status
     return status
 
 
