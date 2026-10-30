@@ -327,7 +327,7 @@ void sysv_getError(const rocblas_handle handle,
     {
         // factorization (A is factorized even if nrhs = 0 or D is singular)
         err = norm_error('F', n, n, lda, hA[b], hARes[b]);
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
 
         // also check pivoting (count the number of incorrect pivots)
         err = 0;
@@ -337,7 +337,7 @@ void sysv_getError(const rocblas_handle handle,
             if(hIpiv[b][i] != hIpivRes[b][i])
                 err++;
         }
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
 
         if(nrhs > 0)
         {
@@ -347,7 +347,7 @@ void sysv_getError(const rocblas_handle handle,
             {
                 // solution
                 err = norm_error('I', n, nrhs, ldb, hB[b], hBRes[b]);
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
             }
 
             // count the elements of B that were modified but must be bitwise unchanged:
