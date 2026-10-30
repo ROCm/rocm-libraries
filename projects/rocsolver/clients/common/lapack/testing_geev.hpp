@@ -1046,7 +1046,7 @@ void testing_geev(Arguments& argus)
     // output results for rocsolver-bench
     if(argus.timing)
     {
-        max_error = std::max(max_error, max_error_eig);
+        max_error = rocblas_max_nan(max_error, max_error_eig);
         if(!argus.perf)
         {
             rocsolver_bench_header("Arguments:");

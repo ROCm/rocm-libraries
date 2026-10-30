@@ -239,7 +239,7 @@ void gebak_getError(const rocblas_handle handle,
     for(rocblas_int b = 0; b < bc; ++b)
     {
         err = norm_error('F', n, m, ldv, hV[b], hVRes[b]);
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
     }
 }
 

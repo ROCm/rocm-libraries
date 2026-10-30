@@ -800,7 +800,7 @@ void hseqr_getError(const rocblas_handle handle,
             const double hnorm = snorm('F', n, n, hH0[b], ldh);
             const double err
                 = std::abs(sumw - trace) / std::max(std::sqrt(double(n)) * hnorm, 1e-300);
-            *max_err_eig = std::max(*max_err_eig, err);
+            *max_err_eig = rocblas_max_nan(err, *max_err_eig);
         }
 
         if(wantt && wantz)
@@ -836,7 +836,7 @@ void hseqr_getError(const rocblas_handle handle,
                      ZT.data(), n, Z.data(), n, T(1), R.data(), n);
             double err = snorm('F', n, n, R.data(), n)
                 / std::max(double(snorm('F', n, n, M.data(), n)), 1e-300);
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
 
             // orthogonality ||Z^H * Z - I||
             for(rocblas_int j = 0; j < n; j++)
@@ -845,7 +845,7 @@ void hseqr_getError(const rocblas_handle handle,
             cpu_gemm(rocblas_operation_conjugate_transpose, rocblas_operation_none, n, n, n, T(-1),
                      Z.data(), n, Z.data(), n, T(1), R.data(), n);
             err = snorm('F', n, n, R.data(), n) / std::sqrt(double(n));
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
         else if(wantz)
         {
@@ -861,7 +861,7 @@ void hseqr_getError(const rocblas_handle handle,
             cpu_gemm(rocblas_operation_conjugate_transpose, rocblas_operation_none, n, n, n, T(-1),
                      Z.data(), n, Z.data(), n, T(1), R.data(), n);
             const double err = snorm('F', n, n, R.data(), n) / std::sqrt(double(n));
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
 
         if(compare_eigenvalues)
@@ -1239,7 +1239,7 @@ void testing_hseqr(Arguments& argus)
     // output results for rocsolver-bench
     if(argus.timing)
     {
-        max_error = std::max(max_error, max_error_eig);
+        max_error = rocblas_max_nan(max_error, max_error_eig);
         if(!argus.perf)
         {
             rocsolver_bench_header("Arguments:");

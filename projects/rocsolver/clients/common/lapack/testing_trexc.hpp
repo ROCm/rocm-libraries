@@ -234,11 +234,11 @@ void trexc_getError(const rocblas_handle handle,
     for(rocblas_int b = 0; b < bc; ++b)
     {
         err = norm_error('F', n, n, ldt, hT[b], hTRes[b]);
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
         if(wantq)
         {
             err = norm_error('F', n, n, ldq, hQ[b], hQRes[b]);
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
     }
 }

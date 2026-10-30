@@ -303,13 +303,13 @@ void gebal_getError(const rocblas_handle handle,
     for(rocblas_int b = 0; b < bc; ++b)
     {
         err = norm_error('F', n, n, lda, hA[b], hARes[b]);
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
 
         for(rocblas_int i = 0; i < n; i++)
         {
             const double s = hScale[b][i];
             err = std::abs(double(hScaleRes[b][i]) - s) / (s != 0 ? std::abs(s) : 1.0);
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
 
         EXPECT_EQ(hIlo[b][0], hIloRes[b][0]) << "where b = " << b;

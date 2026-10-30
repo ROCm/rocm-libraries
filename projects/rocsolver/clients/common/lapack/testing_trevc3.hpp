@@ -705,7 +705,7 @@ void trevc3_getError(const rocblas_handle handle,
                     continue;
                 err = left ? trevc3_cleanError(true, over, n, Tu, Q, hVLRes[b], ldvl, nclean)
                            : trevc3_cleanError(false, over, n, Tu, Q, hVRRes[b], ldvr, nclean);
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
                 // (some vectors must be checked)
                 EXPECT_GT(nclean, 0) << "where b = " << b;
                 if(n > 3 && nclean == 0)
@@ -716,12 +716,12 @@ void trevc3_getError(const rocblas_handle handle,
         if(rightv)
         {
             err = trevc3_vectorError(false, over, n, Tu, normT, Q, hVRRes[b], ldvr);
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
         if(leftv)
         {
             err = trevc3_vectorError(true, over, n, Tu, normT, Q, hVLRes[b], ldvl);
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
     }
 }
