@@ -1705,9 +1705,10 @@ WrwConfigCounts RunEveryWrwConfig(const TestCase& test_case, bool deterministic)
 // Wgrad layers covering each kernel family but patch_embed, which GetConvPatchEmbedTestCases()
 // covers.
 //
-// gfx950: direct_wgrad (16-bit dw, with and without splitting the N × P × Q reduction),
-// depthwise_wgrad_hankel and grouped_wgrad (fp32 dw and a cast). gfx1250: direct_wgrad,
-// depthwise_wgrad_hankel and grouped_wgrad.
+// gfx950: direct_wgrad (with and without splitting the N × P × Q reduction),
+// depthwise_wgrad_hankel and grouped_wgrad, all writing 16-bit dw; grouped_wgrad accumulates
+// partial sums in fp32 workspace. gfx1250: direct_wgrad, depthwise_wgrad_hankel and
+// grouped_wgrad.
 auto GetWrwFamilyTestCases(miopenDataType_t datatype)
 {
     constexpr auto layout = miopenTensorNHWC;
@@ -1858,6 +1859,34 @@ TEST(GPU_ConvHipConvWrwConfigs_BFP16, Workspace)
         }
     }
     EXPECT_GT(with_ws, 0);
+}
+
+// Grouped 3×3 and 3×3×3 layers of every channels-per-group width.
+//
+// On gfx950 their grouped_wgrad configs accumulate partial sums in fp32 workspace before writing
+// a 16-bit dw.
+template <typename T>
+void RunGroupedWrwWorkspace(miopenDataType_t datatype)
+{
+    auto cases         = GetConvGroupedTestCases(datatype);
+    const auto cases3d = GetConv3dGroupedTestCases(datatype);
+    cases.insert(cases.end(), cases3d.begin(), cases3d.end());
+    for(const auto& test_case : cases)
+        EXPECT_GT(RunEveryWrwConfig<T>(test_case, false).with_ws, 0) << test_case;
+}
+
+TEST(GPU_ConvHipConvWrwConfigs_FP16, GroupedWorkspace)
+{
+    if(!IsTestSupportedByDevice(Gpu::gfx950))
+        GTEST_SKIP();
+    RunGroupedWrwWorkspace<half_float::half>(miopenHalf);
+}
+
+TEST(GPU_ConvHipConvWrwConfigs_BFP16, GroupedWorkspace)
+{
+    if(!IsTestSupportedByDevice(Gpu::gfx950))
+        GTEST_SKIP();
+    RunGroupedWrwWorkspace<bfloat16>(miopenBFloat16);
 }
 
 TEST(GPU_ConvHipConvWrwConfigs_TF32, Workspace)
