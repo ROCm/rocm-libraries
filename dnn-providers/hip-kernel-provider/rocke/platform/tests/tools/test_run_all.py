@@ -251,9 +251,7 @@ def test_native_pytest_env_discards_ambient_arch_domain_completion(
     )
 
 
-def test_pytest_targets_accept_paths_and_node_ids_but_reject_escapes(
-    runner, tmp_path
-):
+def test_pytest_targets_accept_paths_and_node_ids_but_reject_escapes(runner, tmp_path):
     module = runner.TESTS / "tools" / "test_run_all.py"
     selected = runner.pytest_targets(
         [
@@ -306,9 +304,11 @@ def test_focused_pytest_selection_changes_both_passes_and_labels_the_result(
     )
 
     assert runner.main() == 0
-    expected = str(runner.TESTS / selected.split("::", 1)[0]) + "::" + selected.split(
-        "::", 1
-    )[1]
+    expected = (
+        str(runner.TESTS / selected.split("::", 1)[0])
+        + "::"
+        + selected.split("::", 1)[1]
+    )
     pytest_calls = [command for command in calls if command[1:3] == ["-m", "pytest"]]
     assert len(pytest_calls) == 2
     assert all(expected in command for command in pytest_calls)
