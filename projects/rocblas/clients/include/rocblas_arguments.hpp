@@ -156,6 +156,8 @@ struct Arguments
     uint64_t flush_batch_count;
     uint64_t flush_memory_size;
 
+    int use_hipblaslt;
+
     // 16 bit
     uint16_t threads;
     uint16_t streams;
@@ -177,14 +179,11 @@ struct Arguments
     bool pointer_mode_host;
     bool pointer_mode_device;
     bool stochastic_rounding;
-    bool c_noalias_d;
     bool outofplace;
     bool HMM; // xnack+
     bool graph_test;
     bool repeatability_check;
     bool alpha_beta_stride;
-
-    int use_hipblaslt;
 
     bool cleanup;
     bool size_query;
@@ -269,7 +268,6 @@ struct Arguments
     OPER(pointer_mode_host) SEP      \
     OPER(pointer_mode_device) SEP    \
     OPER(stochastic_rounding) SEP    \
-    OPER(c_noalias_d) SEP            \
     OPER(outofplace) SEP             \
     OPER(HMM) SEP                    \
     OPER(graph_test) SEP             \

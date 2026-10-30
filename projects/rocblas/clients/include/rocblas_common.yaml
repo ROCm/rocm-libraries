@@ -581,7 +581,6 @@ Arguments:
   - pointer_mode_host: c_bool
   - pointer_mode_device: c_bool
   - stochastic_rounding: c_bool
-  - c_noalias_d: c_bool
   - outofplace: c_bool
   - HMM: c_bool
   - graph_test: c_bool
@@ -680,7 +679,6 @@ Defaults:
   pointer_mode_host: true
   pointer_mode_device: true
   stochastic_rounding: false
-  c_noalias_d: false
   outofplace: false
   user_allocated_workspace: 0
   compute_type: -1

@@ -3673,7 +3673,7 @@ Tests:
   devices: 4
   repeatability_check: true
 
-- name: hipblaslt_f16
+- name: hipblaslt_force_on_f16
   category: pre_checkin
   function: gemm_ex
   precision: *hpa_half_precision
@@ -3682,8 +3682,9 @@ Tests:
   matrix_size: *medium_matrix_size_range
   use_hipblaslt: 1
   os_flags: LINUX
+  gpu_arch: ['90?'] # non default gfx test for forced hipblaslt
 
-- name: non_hipblaslt_f16
+- name: hipblaslt_force_off_f16
   category: pre_checkin
   function: gemm_ex
   precision: *hpa_half_precision
@@ -3692,7 +3693,8 @@ Tests:
   matrix_size: *medium_matrix_size_range
   use_hipblaslt: 0
   os_flags: LINUX
-
+  gpu_arch: ['90?'] # non default gfx test for forced hipblaslt
+ 
 - name: gemm_ex_h2f #SWDEV-560127
   category: pre_checkin
   function: gemm_ex
