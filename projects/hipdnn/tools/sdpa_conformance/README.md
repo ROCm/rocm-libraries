@@ -44,18 +44,25 @@ python aotriton/run_aotriton.py --out <dir> --fake always-decline          # har
 ```
 
 Other options: `--packed-gpu` (adds `tests/`' `gpu` cases), `--workers N` (default one per GPU),
-`-- <pytest args>`. Pin engines with `HIPDNN_FWD_ENGINE` / `HIPDNN_BWD_ENGINE`.
+`-- <pytest args>`, `--hipdnn-nodeids-file PATH` (plugin option: run only the listed node ids). Pin engines with `HIPDNN_FWD_ENGINE` / `HIPDNN_BWD_ENGINE`.
 `--fwd-no-stats` (with `--suite forward`) runs the forward without Stats, so engines that decline
 when Stats are requested can be exercised; AOTriton's M buffer is filled with zeros (its wrapper rejects NaN in M) and
 `test_forward.py` compares only O. The runner refuses it for any collection that includes
 backward or varlen cases, whose backward consumes the forward's Stats.
+`--all-engines` tests every applicable engine, not only the heuristic winner: after the normal
+run it pins each other engine that is applicable to a case (`fwd_engines` / `bwd_engines` in
+`results.csv`) and re-runs exactly those cases, `test_forward.py` with `HIPDNN_FWD_ENGINE`, every
+other case with `HIPDNN_BWD_ENGINE`. It composes with `--suite`, `--shard`, `--release`,
+`--workers` and (forward sweep) `--fwd-no-stats`; it refuses `--fake` and pre-set engine pins.
 AOTriton's calibration and backend knobs (`USE_ADIFFS_TXT`, `RECORD_ADIFFS_TO`, `SKIP_BWD`,
 `FWD_IMPL`, `BWD_IMPL`, ...) are refused; `FOR_RELEASE`, `SMALL_VRAM` and
 `AOTRITON_REF_DEVICE_OPTION` pass through.
 
 Outputs, in `<out>/` (default `./sdpa_conformance_results/<arch>/<run>/shard-<I>of<N>/`):
 `collected.txt` (every collected node id) and `results.csv` (`nodeid,outcome,mode,fwd,bwd,reason`,
-flushed per row). After a run, or a killed one:
+flushed per row; `fwd_engines` / `bwd_engines` list the applicable engines in heuristic rank
+order, `;`-joined, for a direction hipDNN planned unpinned). With `--all-engines`, each sweep
+writes the same files under `all-engines/<fwd|bwd>/<engine-slug>/`. After a run, or a killed one:
 
 ```
 python aotriton/reconcile.py <arch>/<run> --out <arch>/<run>/reconciled.csv
@@ -63,3 +70,9 @@ python aotriton/reconcile.py <arch>/<run> --out <arch>/<run>/reconciled.csv
 
 `mode` is `hipdnn` or `ref-fwd` (hipDNN forward declined; a reference forward fed the hipDNN
 backward). A `ref-fwd` pass proves the backward only.
+
+For an `--all-engines` run, `reconcile.py <arch>/<run> --engines <out>` writes `<out>/engines.csv`
+(`nodeid,direction,engine,source,outcome,reason`; `source` is `heuristic` for the engine that
+served the case in the normal run, `pinned` for a sweep) and prints pass/fail/declined counts per
+direction and engine. A pinned case served by another engine is recorded as `declined`, never as
+that engine's pass.

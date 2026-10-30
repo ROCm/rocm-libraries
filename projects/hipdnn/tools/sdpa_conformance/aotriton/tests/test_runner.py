@@ -186,3 +186,80 @@ def test_fwd_no_stats_exports_the_env_var_only_when_asked(
     assert all(run_aotriton.FWD_NO_STATS_ENV not in env for _, env in plain)
     assert len(flagged) == 2
     assert all(env[run_aotriton.FWD_NO_STATS_ENV] == "1" for _, env in flagged)
+
+
+FWD = "vendor/test_forward.py"
+BWD = "vendor/test_backward.py"
+
+
+def pass1_row(nodeid, fwd_state="", bwd_state="", fwd_engines="", bwd_engines=""):
+    return {
+        "nodeid": nodeid,
+        "outcome": "pass",
+        "fwd": fwd_state,
+        "bwd": bwd_state,
+        "fwd_engines": fwd_engines,
+        "bwd_engines": bwd_engines,
+    }
+
+
+def test_all_engines_sweeps_each_non_winning_engine_over_its_cases_only(
+    monkeypatch, tmp_path
+):
+    pass1 = [
+        # forward cases: winner excluded per case; a case a lone engine served adds no work
+        pass1_row(f"{FWD}::f1", "hipdnn:A", fwd_engines="A;B;C"),
+        pass1_row(f"{FWD}::f2", "hipdnn:B", fwd_engines="A;B"),
+        pass1_row(f"{FWD}::f3", "hipdnn:A", fwd_engines="A"),
+        # backward cases read bwd; their forward list is not swept
+        pass1_row(f"{BWD}::b1", "hipdnn:X", "hipdnn:A", "X;Y", "A;B"),
+        pass1_row(f"{BWD}::b2", "ref:why", "hipdnn:B", "", "A;B"),
+        pass1_row(f"{BWD}::b3", "hipdnn:X", "declined:no", "X", ""),
+    ]
+    fake = FakePytest([[r["nodeid"] for r in pass1]])
+    fake_call = fake.__call__
+
+    def call(cmd, env=None, **kw):
+        if "--collect-only" not in cmd and f"--results-dir={tmp_path}" in cmd:
+            (tmp_path / "results.csv").write_text(
+                ",".join(run_aotriton.reconcile.FIELDS)
+                + "\n"
+                + "".join(run_aotriton.reconcile.format_row(r) for r in pass1)
+            )
+        return fake_call(cmd, env=env, **kw)
+
+    monkeypatch.setattr(run_aotriton.subprocess, "run", call)
+    monkeypatch.setenv("ROCM_PATH", "/opt/fake-rocm")
+    status = run_aotriton.main(
+        ["--workers", "2", "--out", str(tmp_path), "--all-engines", "--shard", "1/2"]
+    )
+    assert status == 0
+    sweeps = {}
+    for cmd, env in fake.commands[2:]:
+        (pin,) = [k for k in env if k in run_aotriton.ENGINE_ENV.values() and env[k]]
+        listing = next(a for a in cmd if a.startswith("--hipdnn-nodeids-file=")).split(
+            "="
+        )[1]
+        sweeps[(pin, env[pin])] = [
+            line.split("::")[-1] for line in open(listing).read().splitlines()
+        ]
+        assert not any(a.startswith("--shard") for a in cmd)  # the ids are the shard
+        assert f"--results-dir={tmp_path}" not in cmd
+    assert sweeps == {
+        ("HIPDNN_FWD_ENGINE", "A"): ["f2"],
+        ("HIPDNN_FWD_ENGINE", "B"): ["f1"],
+        ("HIPDNN_FWD_ENGINE", "C"): ["f1"],
+        ("HIPDNN_BWD_ENGINE", "A"): ["b2"],
+        ("HIPDNN_BWD_ENGINE", "B"): ["b1"],
+    }
+    assert (tmp_path / "all-engines" / "fwd" / "C" / "engine.txt").read_text() == "C\n"
+
+
+def test_all_engines_is_refused_with_fake_or_a_preset_pin(
+    runner, tmp_path, monkeypatch
+):
+    with pytest.raises(SystemExit, match="--fake"):
+        runner([], "--workers", "1", "--out", str(tmp_path), "--all-engines", "--fake", "always-decline")  # fmt: skip
+    monkeypatch.setenv("HIPDNN_BWD_ENGINE", "X")
+    with pytest.raises(SystemExit, match="HIPDNN_BWD_ENGINE"):
+        runner([], "--workers", "1", "--out", str(tmp_path), "--all-engines")
