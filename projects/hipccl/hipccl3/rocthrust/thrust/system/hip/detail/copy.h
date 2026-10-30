@@ -224,7 +224,8 @@ device_to_device(execution_policy<Derived>& policy, InputIt first, InputIt last,
   }
   else
   {
-    return hip_rocprim::transform(policy, first, last, result, _THRUST_STD::identity{});
+    return hip_rocprim::transform(
+      policy, first, last, result, _THRUST_LIBCXX::proclaim_copyable_arguments(_THRUST_STD::identity{}));
   }
 }
 #endif // THRUST_HAS_HIP_COMPILER()
