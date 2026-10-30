@@ -28,6 +28,7 @@
 #include _THRUST_STD_INCLUDE(utility)
 
 #include <cstdint>
+#include <new>
 
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
@@ -511,9 +512,17 @@ TEST(UniqueTests, TestUniqueWithLargeNumberOfItems)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  for (int mag : {30, 31, 32, 33})
+  try
   {
-    TestUniqueWithMagnitude(mag);
+    for (int mag : {30, 31, 32, 33})
+    {
+      TestUniqueWithMagnitude(mag);
+    }
+  }
+  catch (std::bad_alloc&)
+  {
+    // if we run out of memory, just skip the test
+    GTEST_SKIP() << "Out of device memory";
   }
 }
 
