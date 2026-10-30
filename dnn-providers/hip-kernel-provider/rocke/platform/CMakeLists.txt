@@ -642,7 +642,8 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
             "  TIMEOUT 180)\n")
 
-    # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
+    # Library attention CPU tests (no GPU required): gfx942 Q staging when K is
+    # read from HBM on the emitted IR, gfx950 LDS budget model,
     # dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
     # and K/V cache policy, the scalar fallback's cache key and block-table
     # stride kernarg, the unified attention running-max carry and keyless
@@ -650,6 +651,7 @@ if(ROCKE_INSTALL_TESTS)
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
+        "tests/library/tests/test_gfx942_k_hbm_direct_q_staging.py"
         "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
         "tests/library/tests/test_attention_scalar_cache_key.py"
