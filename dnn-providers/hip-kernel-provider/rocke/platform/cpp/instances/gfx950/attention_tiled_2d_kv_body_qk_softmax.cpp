@@ -243,7 +243,7 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         rocke_value_t* qh_mod = rocke_b_mod(b, row, rocke_b_const_i32(b, ctx->NQK));
         rocke_value_t* qh_r = rocke_b_add(b, qh_mul, qh_mod);
         rocke_value_t* row_ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
-        rocke_value_t* row_ok_qh = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
+        rocke_value_t* row_ok_qh = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
         rocke_value_t* row_ok_inner = rocke_b_land(b, row_ok_pos, row_ok_qh);
         rocke_value_t* row_ok;
         if(ctx->VALID_ROWS < ctx->BLOCK_M)
@@ -271,7 +271,7 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         for(reg = 0; reg < ctx->REGS_PER_LANE; ++reg)
         {
             rocke_value_t* qh_r = ctx->hoist_q_head[reg];
-            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
+            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
             rocke_value_t* slope = rocke_b_masked_global_load(
                 b, ctx->alibi_slopes_ptr, qh_r, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
             ctx->hoist_q_head[reg] = slope;
@@ -294,7 +294,7 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         rocke_value_t* st_qh_mod = rocke_b_mod(b, st_q_row, rocke_b_const_i32(b, ctx->NQK));
         rocke_value_t* st_qh = rocke_b_add(b, st_qh_mul, st_qh_mod);
         rocke_value_t* st_ok_qp = rocke_b_cmp_lt(b, st_qp, ctx->cur_batch_q_len);
-        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh, rocke_b_const_i32(b, ctx->NUM_QH));
+        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh, ctx->num_qh_p);
         rocke_value_t* st_ok_inner = rocke_b_land(b, st_ok_qp, st_ok_qh);
         ctx->st_qp_hoist = st_qp;
         ctx->st_qh_hoist = st_qh;
@@ -311,7 +311,7 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         ctx->st_causal_lim_hoist = rocke_b_add(b, ctx->context_len, st_qp);
         if(ctx->USE_ALIBI)
         {
-            rocke_value_t* st_qh_ok = rocke_b_cmp_lt(b, st_qh, rocke_b_const_i32(b, ctx->NUM_QH));
+            rocke_value_t* st_qh_ok = rocke_b_cmp_lt(b, st_qh, ctx->num_qh_p);
             ctx->st_alibi_slope_hoist = rocke_b_masked_global_load(b,
                                                                    ctx->alibi_slopes_ptr,
                                                                    st_qh,
@@ -528,7 +528,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         rocke_value_t* st_qh_mod = rocke_b_mod(b, st_q_row_iter, rocke_b_const_i32(b, ctx->NQK));
         rocke_value_t* st_qh_iter = rocke_b_add(b, st_qh_mul, st_qh_mod);
         rocke_value_t* st_ok_qp = rocke_b_cmp_lt(b, st_qp_iter, ctx->cur_batch_q_len);
-        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh_iter, rocke_b_const_i32(b, ctx->NUM_QH));
+        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh_iter, ctx->num_qh_p);
         rocke_value_t* st_ok_inner = rocke_b_land(b, st_ok_qp, st_ok_qh);
         if(ctx->VALID_ROWS < ctx->BLOCK_M)
         {
@@ -543,8 +543,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         st_causal_lim_iter = rocke_b_add(b, ctx->context_len, st_qp_iter);
         if(ctx->USE_ALIBI)
         {
-            rocke_value_t* st_qh_iter_ok
-                = rocke_b_cmp_lt(b, st_qh_iter, rocke_b_const_i32(b, ctx->NUM_QH));
+            rocke_value_t* st_qh_iter_ok = rocke_b_cmp_lt(b, st_qh_iter, ctx->num_qh_p);
             st_alibi_slope_iter = rocke_b_masked_global_load(b,
                                                              ctx->alibi_slopes_ptr,
                                                              st_qh_iter,
@@ -561,6 +560,8 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
     rocke_value_t* in_range_next = rocke_b_cmp_lt(b, next_tile_iv_raw, ctx->tile_end);
     rocke_value_t* safe_next_tile
         = rocke_b_select(b, in_range_next, next_tile_iv_raw, ctx->kv_tile_iv);
+    if(rocke_gfx950_attn2d_page_prefetch(ctx))
+        ctx->page_next_tile = safe_next_tile;
 
     /* softmax-derived state forwarded to the PV bucket. */
     rocke_value_t* alpha_regs[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
@@ -594,6 +595,19 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
     if(ctx->USE_SOFTMAX_INTERLEAVE
        && (ctx->SOFTMAX_INTERLEAVE_MODE == 0 || ctx->SOFTMAX_INTERLEAVE_MODE == 1))
         rocke_b_iglp_opt(b, ctx->SOFTMAX_INTERLEAVE_MODE);
+
+    /* Read the page ids of the tile after next now, right after the iter-start
+     * drain, so they arrive long before next iteration's copies need them. That
+     * tile is next iteration's safe_next_tile. */
+    if(rocke_gfx950_attn2d_page_prefetch(ctx))
+    {
+        rocke_value_t* c_two = rocke_b_const_i32(b, 2);
+        rocke_value_t* after_next_raw = rocke_b_add(b, ctx->kv_tile_iv, c_two);
+        rocke_value_t* in_range_after = rocke_b_cmp_lt(b, after_next_raw, ctx->tile_end);
+        rocke_value_t* after_next
+            = rocke_b_select(b, in_range_after, after_next_raw, next_tile_iv_raw);
+        rocke_gfx950_attn2d_tile_page_ids(ctx, after_next, ctx->page_after_next);
+    }
 
     /* Early-V schedule: V_lds is single-buffered and the iter-start full drain
      * guarantees the previous PV's V reads retired, so the current V copy can be
@@ -760,7 +774,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                             qh_mod = rocke_b_mod(b, q_row_t, rocke_b_const_i32(b, ctx->NQK));
                             qh_r = rocke_b_add(b, qh_mul, qh_mod);
                             row_ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
-                            row_ok_qh = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
+                            row_ok_qh = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
                             rocke_value_t* row_ok_inner = rocke_b_land(b, row_ok_pos, row_ok_qh);
                             if(ctx->VALID_ROWS < ctx->BLOCK_M)
                             {

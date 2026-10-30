@@ -117,7 +117,7 @@ typedef struct rocke_gfx950_attn2d_build_ctx
 
     /* ---- ALL-CAPS geometry constants (lines 754-847) ---- */
     int HD, T, BS, N_BLOCKS_PER_TILE;
-    int BLOCK_M, BLOCK_Q, NQK, NUM_KV, NUM_QH;
+    int BLOCK_M, BLOCK_Q, NQK, NUM_KV; /* NUM_KV only for the fast-desc 64/8 pin */
     int VALID_ROWS; /* BLOCK_Q * NQK -- rows that map to complete GQA groups */
     int SLIDING_WINDOW;
     bool USE_SOFTCAP, USE_SINKS, USE_ALIBI, USE_QQ_BIAS;
@@ -175,6 +175,10 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* num_seqs_p;
     rocke_value_t* bt_stride_p;
     rocke_value_t* qq_bias_stride0_p;
+    /* RUNTIME_KERNARG_FIELDS params, in declaration order. */
+    rocke_value_t* num_qh_p;
+    rocke_value_t* num_kv_p;
+    rocke_value_t* sliding_window_p;
 
     /* ---- grid ids + wave decomposition ---- */
     rocke_value_t* q_block_global_idx;
@@ -246,21 +250,40 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* lane_rg_is2_v;
 
     /* ---- SSA constants ---- */
-    rocke_value_t* c0;
     rocke_value_t* zero_f;
     rocke_value_t* neg_inf_v; /* b.const_f32(-inf)               */
     rocke_value_t* one_f_v; /* b.const_f32(1.0)                */
     rocke_value_t* rcp_ln2_v; /* b.const_f32(1.4426950408889634) */
     rocke_value_t* qk_scale_v; /* derived from scale_p            */
     rocke_value_t* pv_fp8_scale_v; /* fdiv(v_scale, 240) when FP8_MFMA_PV (line 1149) */
-    rocke_value_t* sw_const_v; /* b.const_i32(SLIDING_WINDOW)     */
+    rocke_value_t* sw_const_v; /* the sliding_window kernarg      */
 
     /* ---- paged-KV byte descriptor (full transform DAG, lines 1163-1630) ---- */
     rocke_tensor_descriptor_t* q_desc; /* output/query [token,head,dim]   */
     rocke_tensor_descriptor_t* kv_desc; /* paged K/V byte descriptor       */
     rocke_value_t* seq_base; /* to_sgpr_u32(seq_idx*bt_stride)  */
     rocke_value_t* block_table_max_idx; /* to_sgpr_u32(num_seqs*bt_stride) */
-    rocke_value_t* kv_block_bytes_c_v; /* const BS*NUM_KV*HD*KV_BYTES     */
+    rocke_value_t* kv_stride_tok_b_v; /* num_kv_p*HD*KV_BYTES            */
+    rocke_value_t* kv_stride_blk_b_v; /* kv_stride_tok_b_v*BS            */
+    rocke_value_t* kv_block_bytes_c_v; /* kv_stride_blk_b_v (one block)   */
+    /* bf16/fp16 loaders (!KV_FP8, !FAST_PAGED_KV_DESC): the lane's in-page byte
+     * offset, each copy's first-token offset in its page (indexed by that
+     * token; [0] stays NULL), and the i64 page stride (I64_KV_ADDR). */
+    rocke_value_t* lane_within_b_v;
+    rocke_value_t* copy_tok_b[64];
+    rocke_value_t* kv_stride_blk_i64_v;
+    /* Page ids the KV loop carries when page copies prefetch them (one per page
+     * of a tile), with the tile index value each set belongs to: the first tile
+     * and the one after it (prologue), the current and next tile, and the tile
+     * after next read one iteration ahead. */
+    rocke_value_t* page_start_tile;
+    rocke_value_t* page_start[16];
+    rocke_value_t* page_start_next[16];
+    rocke_value_t* page_cur_tile;
+    rocke_value_t* page_cur[16];
+    rocke_value_t* page_next_tile;
+    rocke_value_t* page_next[16];
+    rocke_value_t* page_after_next[16];
     rocke_value_t* lane_half_base_v; /* tid * KV_HALVES_PER_LANE        */
     rocke_value_t* zero_soff_v; /* const_i32(0) soffset            */
     rocke_value_t* wave_lds_off_i64_v; /* wave_lds_offset_i64             */
@@ -434,6 +457,13 @@ void rocke_gfx950_attn2d_issue_k_load_runtime(rocke_gfx950_attn2d_build_ctx_t* c
 void rocke_gfx950_attn2d_issue_v_load_runtime(rocke_gfx950_attn2d_build_ctx_t* ctx,
                                               rocke_value_t* kv_tile_idx,
                                               rocke_value_t* buf_idx);
+/* True when the bf16/fp16 loaders use per-page copy offsets and the KV loop
+ * carries the page ids, reading each tile's ids one iteration ahead. */
+bool rocke_gfx950_attn2d_page_prefetch(const rocke_gfx950_attn2d_build_ctx_t* ctx);
+/* The page ids of every page of a tile: one guarded block-table read each. */
+void rocke_gfx950_attn2d_tile_page_ids(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                       rocke_value_t* kv_tile_idx,
+                                       rocke_value_t** out);
 void rocke_gfx950_attn2d_issue_k(rocke_gfx950_attn2d_build_ctx_t* ctx,
                                  rocke_value_t* tile_idx,
                                  rocke_value_t* buf_idx);

@@ -436,7 +436,7 @@ class CkVariantBench:
             supports_tiled_2d,
         )
         from kernels.common.attention_unified import (
-            _attn_signature,
+            _tiled_2d_signature,
             _enable_i64_kv_addr,
             _select_2d_compile_backend,
         )
@@ -521,9 +521,7 @@ class CkVariantBench:
                 KernelLauncher(
                     hsaco=artifact.hsaco,
                     kernel_name=artifact.kernel_name,
-                    signature=_attn_signature(
-                        dtype, include_bt_stride=True, include_qq_bias_stride=True
-                    ),
+                    signature=_tiled_2d_signature("gfx950", dtype),
                     cache_key=("prefill2d_live", key),
                 ),
                 spec,

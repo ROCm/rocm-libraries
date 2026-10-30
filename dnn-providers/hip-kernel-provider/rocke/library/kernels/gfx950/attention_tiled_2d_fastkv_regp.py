@@ -141,6 +141,47 @@ def supports_fastkv_register_p_2d(
     return True, "supported"
 
 
+def _fastkv_register_p_spec_error(spec: UnifiedAttention2DTiledSpec) -> str | None:
+    """Why the fastKV register-P builder refuses ``spec``, or None if it builds."""
+    if not spec.use_fast_paged_kv_desc:
+        return "fastKV register-P experiment requires use_fast_paged_kv_desc"
+    if not (spec.use_mfma_32x32 and spec.use_transposed_qk_32x32):
+        return "fastKV register-P experiment requires transposed R4"
+    if spec.kv_storage_dtype is not None:
+        return "fastKV register-P experiment does not support FP8 KV cache"
+    return None
+
+
+def supports_fastkv_register_p_2d_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str = "gfx950"
+) -> tuple[bool, str]:
+    """Spec-shaped wrapper for ``supports_fastkv_register_p_2d``.
+
+    ``supports_fastkv_register_p_2d`` takes its parameters as keyword-only
+    arguments, so ``hkp_pack``'s ``_check_support_predicate`` cannot call it with a
+    spec instance. This wrapper reads them off the spec and delegates, after
+    refusing what :func:`build_unified_attention_2d_fastkv_register_p` raises on,
+    so the builder is validatable at pack time.
+    """
+    error = _fastkv_register_p_spec_error(spec)
+    if error is not None:
+        return False, error
+    return supports_fastkv_register_p_2d(
+        head_size=spec.head_size,
+        block_size=spec.block_size,
+        dtype=spec.dtype,
+        num_queries_per_kv=spec.num_queries_per_kv,
+        use_alibi=spec.use_alibi,
+        use_qq_bias=spec.use_qq_bias,
+        use_fp8=False,
+        q_dtype=spec.dtype,
+        num_query_heads=spec.num_query_heads,
+        num_kv_heads=spec.num_kv_heads,
+        tile_size=spec.tile_size,
+        arch=arch,
+    )
+
+
 def build_unified_attention_2d_fastkv_register_p(
     spec: UnifiedAttention2DTiledSpec,
     *,
@@ -153,10 +194,7 @@ def build_unified_attention_2d_fastkv_register_p(
     a gfx942 request fails with the same clean structured error.
     """
 
-    if not spec.use_fast_paged_kv_desc:
-        raise ValueError("fastKV register-P experiment requires use_fast_paged_kv_desc")
-    if not (spec.use_mfma_32x32 and spec.use_transposed_qk_32x32):
-        raise ValueError("fastKV register-P experiment requires transposed R4")
-    if spec.kv_storage_dtype is not None:
-        raise ValueError("fastKV register-P experiment does not support FP8 KV cache")
+    error = _fastkv_register_p_spec_error(spec)
+    if error is not None:
+        raise ValueError(error)
     return build_unified_attention_2d_tiled(_FastKvRegisterPProxy(spec), arch=arch)

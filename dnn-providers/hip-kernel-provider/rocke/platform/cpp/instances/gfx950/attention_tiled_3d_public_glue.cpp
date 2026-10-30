@@ -9,7 +9,7 @@
  * SCOPE (this TU only):
  *   - The shared spec PODs' _default() / _validate() (__post_init__) and every
  *     @property accessor (num_queries_per_kv, block_m=16, block_q, tile_size,
- *     dtype_ir, binary_search_iters, kernel_name via kernel_name_join). These
+ *     dtype_ir, kernel_name via kernel_name_join). These
  *     spec struct/default definitions are GUARDED against the gfx942 3D header's
  *     duplicate definitions (the two arch ports share the identical frozen
  *     dataclass shape -- see the SHARED SPEC POD note in
@@ -357,25 +357,6 @@ const rocke_type_t* rocke_gfx950_unified_attention_3d_tiled_spec_dtype_ir(
     return rocke_bf16();
 }
 
-int rocke_gfx950_unified_attention_3d_tiled_spec_binary_search_iters(
-    const rocke_unified_attention_3d_tiled_spec_t* s)
-{
-    double v;
-    int r;
-    if(s == NULL)
-    {
-        return -1;
-    }
-    if(s->num_seqs <= 0)
-    {
-        return 32;
-    }
-    /* max(1, ceil(log2(num_seqs + 1))) */
-    v = ceil(log2((double)(s->num_seqs + 1)));
-    r = (int)v;
-    return r < 1 ? 1 : r;
-}
-
 int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     const rocke_unified_attention_3d_tiled_spec_t* s, char* buf, size_t cap)
 {
@@ -412,7 +393,8 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
 
     snprintf(d_part, sizeof(d_part), "d%d", s->head_size);
     snprintf(b_part, sizeof(b_part), "b%d", s->block_size);
-    snprintf(h_part, sizeof(h_part), "h%dkv%d", s->num_query_heads, s->num_kv_heads);
+    /* Head counts are kernargs; only the GQA ratio is baked. */
+    snprintf(h_part, sizeof(h_part), "g%d", s->num_query_heads / s->num_kv_heads);
     snprintf(seg_part, sizeof(seg_part), "seg%d", s->num_segments);
 
     parts[np++] = "rocke_uattn3d_tiled";
@@ -442,9 +424,10 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     {
         parts[np++] = "sinks";
     }
+    /* The window size is a kernarg; only whether the body masks one is baked. */
     if(s->sliding_window > 0)
     {
-        snprintf(sw_part, sizeof(sw_part), "sw%d", s->sliding_window);
+        snprintf(sw_part, sizeof(sw_part), "sw");
         parts[np++] = sw_part;
     }
     if(s->has_softcap)
@@ -502,10 +485,9 @@ const rocke_type_t* rocke_gfx950_unified_attention_reduce_tiled_spec_dtype_ir(
 int rocke_gfx950_unified_attention_reduce_tiled_spec_kernel_name(
     const rocke_unified_attention_reduce_tiled_spec_t* s, char* buf, size_t cap)
 {
-    /* kernel_name_join("rocke_uattn_reduce_tiled", d<HD>, h<NUM_QH>,
-     *   seg<NUM_SEG>, dtype) */
+    /* kernel_name_join("rocke_uattn_reduce_tiled", d<HD>, seg<NUM_SEG>, dtype);
+     * the head count is a kernarg. */
     char d_part[32];
-    char h_part[32];
     char seg_part[32];
     const char* parts[8];
     size_t np = 0;
@@ -518,12 +500,10 @@ int rocke_gfx950_unified_attention_reduce_tiled_spec_kernel_name(
     }
 
     snprintf(d_part, sizeof(d_part), "d%d", s->head_size);
-    snprintf(h_part, sizeof(h_part), "h%d", s->num_query_heads);
     snprintf(seg_part, sizeof(seg_part), "seg%d", s->num_segments);
 
     parts[np++] = "rocke_uattn_reduce_tiled";
     parts[np++] = d_part;
-    parts[np++] = h_part;
     parts[np++] = seg_part;
     parts[np++] = (s->dtype != NULL) ? s->dtype : "";
 
@@ -707,8 +687,6 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
     out->BLOCK_M = rocke_gfx950_unified_attention_3d_tiled_spec_block_m(spec);
     out->BLOCK_Q = rocke_gfx950_unified_attention_3d_tiled_spec_block_q(spec);
     out->NQK = rocke_gfx950_unified_attention_3d_tiled_spec_num_queries_per_kv(spec);
-    out->NUM_KV = spec->num_kv_heads;
-    out->NUM_QH = spec->num_query_heads;
     out->NUM_SEG = spec->num_segments;
     out->SLIDING_WINDOW = spec->sliding_window;
     out->USE_SOFTCAP = spec->has_softcap;
@@ -742,8 +720,6 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
     out->PV_N_TILES = out->HD / ROCKE_ATTN3D950_MFMA_N;
 
     out->THREADS = ROCKE_ATTN3D950_SEGMENT_THREADS;
-    out->binary_search_iters
-        = rocke_gfx950_unified_attention_3d_tiled_spec_binary_search_iters(spec);
 
     if(out->PV_N_TILES < 0 || out->PV_N_TILES > 16)
     {
@@ -770,8 +746,6 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
     }
     out->kv_calls_per_tile = (out->T * out->HD) / out->KV_HALVES_PER_CALL;
     out->bytes_per_call = out->KV_HALVES_PER_CALL * 2;
-    out->kv_stride_blk_b = out->BS * out->NUM_KV * out->HD * out->KV_BYTES;
-    out->kv_stride_tok_b = out->NUM_KV * out->HD * out->KV_BYTES;
     out->kv_stride_h_b = out->HD * out->KV_BYTES;
     out->bytes_per_buf = out->T * out->HD * 2;
     out->N_BLOCKS_PER_TILE = out->BS > 0 ? out->T / out->BS : 0;
@@ -856,8 +830,6 @@ bool rocke_gfx950_attn_tiled_3d_reduce_config_from_spec(
 
     out->HD = spec->head_size;
     out->NUM_SEG = spec->num_segments;
-    out->NUM_QH = spec->num_query_heads;
-    out->NUM_KV = spec->num_kv_heads;
     out->dtype = rocke_gfx950_unified_attention_reduce_tiled_spec_dtype_ir(spec);
     out->THREADS = 64;
 

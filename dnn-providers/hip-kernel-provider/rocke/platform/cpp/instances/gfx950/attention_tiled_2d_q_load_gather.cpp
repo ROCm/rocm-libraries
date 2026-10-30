@@ -110,16 +110,17 @@ void rocke_gfx950_attn2d_emit_q_load(rocke_gfx950_attn2d_build_ctx_t* ctx)
     Q_VECS_PER_ROW = ctx->HD / 8;
     Q_VECS_PER_THREAD = (ctx->BLOCK_M * Q_VECS_PER_ROW) / ctx->THREADS;
 
-    /* q_desc = TensorDescriptor.naive("Q", lengths=[1<<30, NUM_QH, HD],
-     *          coord_names=("token","head","dim")). Stored on ctx for the
-     *          downstream Q gather + the epilogue output store. */
+    /* q_desc over (token, head, dim), stored on ctx for the downstream Q gather
+     * + the epilogue output store. The head count is a kernarg, so the token
+     * stride is too. */
     {
-        int lengths[3];
         static const char* const coord_names[3] = {"token", "head", "dim"};
-        lengths[0] = 1 << 30;
-        lengths[1] = ctx->NUM_QH;
-        lengths[2] = ctx->HD;
-        ctx->q_desc = rocke_tensor_descriptor_naive(b, "Q", lengths, 3, NULL, coord_names, 3);
+        rocke_value_t* strides[3]
+            = {rocke_b_mul(b, ctx->num_qh_p, rocke_b_const_i32(b, ctx->HD)), NULL, NULL};
+        const int static_strides[3] = {1, ctx->HD, 1};
+        ctx->q_desc = &rocke_tensor_descriptor_naive_dynamic_mixed(
+                           b, "Q", coord_names, 3, strides, static_strides)
+                           ->base;
     }
 
     for(li = 0; li < Q_VECS_PER_THREAD; ++li)
@@ -164,12 +165,11 @@ void rocke_gfx950_attn2d_emit_q_load(rocke_gfx950_attn2d_build_ctx_t* ctx)
             rocke_value_t* qh_mod = rocke_b_mod(b, Q_row, rocke_b_const_i32(b, (int64_t)ctx->NQK));
             qh_t = rocke_b_add(b, qh_mul, qh_mod);
         }
-        /* qmask_t = (q_pos_t < cur_batch_q_len) && (qh_t < NUM_QH) [&& (Q_row < VALID_ROWS)].
+        /* qmask_t = (q_pos_t < cur_batch_q_len) && (qh_t < num_query_heads) [&& (Q_row < VALID_ROWS)].
          * Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
         {
             rocke_value_t* lt_pos = rocke_b_cmp_lt(b, q_pos_t, ctx->cur_batch_q_len);
-            rocke_value_t* lt_qh
-                = rocke_b_cmp_lt(b, qh_t, rocke_b_const_i32(b, (int64_t)ctx->NUM_QH));
+            rocke_value_t* lt_qh = rocke_b_cmp_lt(b, qh_t, ctx->num_qh_p);
             rocke_value_t* and_pos_qh = rocke_b_land(b, lt_pos, lt_qh);
             if(ctx->VALID_ROWS < ctx->BLOCK_M)
             {
@@ -248,7 +248,6 @@ void rocke_gfx950_attn2d_emit_loop_bounds_and_inits(rocke_gfx950_attn2d_build_ct
     const int BLOCK_M = ctx->BLOCK_M;
     const int NQK = ctx->NQK;
     const int SLIDING_WINDOW = ctx->SLIDING_WINDOW;
-    const int NUM_QH = ctx->NUM_QH;
     const int SOFTMAX_STATE_SLOTS = ctx->SOFTMAX_STATE_SLOTS;
 
     /* ---- max_seq_prefix_len (1221-1223) ---- */
@@ -334,7 +333,7 @@ void rocke_gfx950_attn2d_emit_loop_bounds_and_inits(rocke_gfx950_attn2d_build_ct
             rocke_value_t* qh_mul = rocke_b_mul(B, ctx->kv_head_idx, rocke_b_const_i32(B, NQK));
             rocke_value_t* qh_mod = rocke_b_mod(B, row, rocke_b_const_i32(B, NQK));
             rocke_value_t* qh = rocke_b_add(B, qh_mul, qh_mod);
-            rocke_value_t* qh_in = rocke_b_cmp_lt(B, qh, rocke_b_const_i32(B, NUM_QH));
+            rocke_value_t* qh_in = rocke_b_cmp_lt(B, qh, ctx->num_qh_p);
             rocke_value_t* sink_h = rocke_b_global_load(B, ctx->sinks, qh, ctx->dtype, 2);
             rocke_value_t* sink_f = rocke_b_fmul(B, rocke_b_cast_to_f32(B, sink_h), rcp_ln2);
             m_inits[0] = rocke_b_select(B, qh_in, sink_f, neg_inf);
@@ -349,7 +348,7 @@ void rocke_gfx950_attn2d_emit_loop_bounds_and_inits(rocke_gfx950_attn2d_build_ct
                 rocke_value_t* qh_mul = rocke_b_mul(B, ctx->kv_head_idx, rocke_b_const_i32(B, NQK));
                 rocke_value_t* qh_mod = rocke_b_mod(B, row, rocke_b_const_i32(B, NQK));
                 rocke_value_t* qh = rocke_b_add(B, qh_mul, qh_mod);
-                rocke_value_t* qh_in = rocke_b_cmp_lt(B, qh, rocke_b_const_i32(B, NUM_QH));
+                rocke_value_t* qh_in = rocke_b_cmp_lt(B, qh, ctx->num_qh_p);
                 rocke_value_t* sink_h = rocke_b_global_load(B, ctx->sinks, qh, ctx->dtype, 2);
                 rocke_value_t* sink_f = rocke_b_fmul(B, rocke_b_cast_to_f32(B, sink_h), rcp_ln2);
                 m_inits[r] = rocke_b_select(B, qh_in, sink_f, neg_inf);
@@ -626,6 +625,20 @@ void rocke_gfx950_attn2d_emit_preloop_prefetch(rocke_gfx950_attn2d_build_ctx_t* 
     if(ctx == NULL)
         return;
 
+    /* Page ids of the first tile and of the one after it, carried into the
+     * loop; iteration i then reads the ids of tile i + 2. */
+    const bool page_prefetch = rocke_gfx950_attn2d_page_prefetch(ctx);
+    if(page_prefetch)
+    {
+        rocke_value_t* c_one = rocke_b_const_i32(B, 1);
+        rocke_value_t* start_next_raw = rocke_b_add(B, ctx->tile_start, c_one);
+        rocke_value_t* in_range = rocke_b_cmp_lt(B, start_next_raw, ctx->tile_end);
+        rocke_value_t* start_next = rocke_b_select(B, in_range, start_next_raw, ctx->tile_start);
+        rocke_gfx950_attn2d_tile_page_ids(ctx, ctx->tile_start, ctx->page_start);
+        rocke_gfx950_attn2d_tile_page_ids(ctx, start_next, ctx->page_start_next);
+        ctx->page_start_tile = ctx->tile_start;
+    }
+
     /* Prefetch tile_start's K into buffer 0 BEFORE the loop (2384). */
     rocke_gfx950_attn2d_issue_k(ctx, ctx->tile_start, rocke_b_const_i32(B, 0));
 
@@ -636,6 +649,25 @@ void rocke_gfx950_attn2d_emit_preloop_prefetch(rocke_gfx950_attn2d_build_ctx_t* 
     ctx->iter_args_names[idx] = ctx->iter_args_name_buf[idx];
     ctx->iter_args[idx] = rocke_b_const_i32(B, 0);
     ctx->iter_args_count = idx + 1;
+    if(page_prefetch)
+    {
+        for(int j = 0; j < ctx->N_BLOCKS_PER_TILE; ++j)
+        {
+            idx = ctx->iter_args_count++;
+            snprintf(
+                ctx->iter_args_name_buf[idx], sizeof(ctx->iter_args_name_buf[0]), "page_cur%d", j);
+            ctx->iter_args_names[idx] = ctx->iter_args_name_buf[idx];
+            ctx->iter_args[idx] = ctx->page_start[j];
+        }
+        for(int j = 0; j < ctx->N_BLOCKS_PER_TILE; ++j)
+        {
+            idx = ctx->iter_args_count++;
+            snprintf(
+                ctx->iter_args_name_buf[idx], sizeof(ctx->iter_args_name_buf[0]), "page_next%d", j);
+            ctx->iter_args_names[idx] = ctx->iter_args_name_buf[idx];
+            ctx->iter_args[idx] = ctx->page_start_next[j];
+        }
+    }
 
     /* kv_step (2482) is emitted by the caller AFTER emit_licm_hoist to keep the
      * const in Python emission order; see rocke_gfx950_attn2d_emit_kv_step. */

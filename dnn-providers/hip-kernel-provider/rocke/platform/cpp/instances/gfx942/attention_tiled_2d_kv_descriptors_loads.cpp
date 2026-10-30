@@ -106,8 +106,12 @@ static rocke_value_t* rocke__kv_block_bytes_c(rocke_gfx942_attn2d_build_ctx_t* c
 {
     if(ctx->kv_block_bytes_c_v == NULL)
     {
-        int kv_stride_blk_b = ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
-        ctx->kv_block_bytes_c_v = rocke_b_const_i32(ctx->b, kv_stride_blk_b);
+        /* The token and block strides scale with the runtime kv head count. */
+        ctx->kv_stride_tok_b_v = rocke_b_mul(
+            ctx->b, ctx->num_kv_p, rocke_b_const_i32(ctx->b, ctx->HD * ctx->KV_BYTES));
+        ctx->kv_stride_blk_b_v
+            = rocke_b_mul(ctx->b, ctx->kv_stride_tok_b_v, rocke_b_const_i32(ctx->b, ctx->BS));
+        ctx->kv_block_bytes_c_v = ctx->kv_stride_blk_b_v;
     }
     return ctx->kv_block_bytes_c_v;
 }
@@ -388,14 +392,12 @@ void rocke_gfx942_attn2d_emit_preloop(rocke_gfx942_attn2d_build_ctx_t* ctx)
      *     lengths=[1<<24, BS, NUM_KV, HD],
      *     strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
      *     coord_names=("physical_block","token","kv_head","dim")). */
-    int blk_b = ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
-    int tok_b = ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
-    int h_b = ctx->HD * ctx->KV_BYTES;
-    int kv_lengths[4] = {1 << 24, ctx->BS, ctx->NUM_KV, ctx->HD};
-    int kv_strides[4] = {blk_b, tok_b, h_b, ctx->KV_BYTES};
+    int kv_strides[4] = {1, 1, ctx->HD * ctx->KV_BYTES, ctx->KV_BYTES};
     static const char* const kv_coords[4] = {"physical_block", "token", "kv_head", "dim"};
-    rocke_tensor_descriptor_t* kv_base = rocke_tensor_descriptor_naive(
-        b, "paged_kv_bytes", kv_lengths, 4, kv_strides, kv_coords, 4);
+    rocke_value_t* dyn[4] = {ctx->kv_stride_blk_b_v, ctx->kv_stride_tok_b_v, NULL, NULL};
+    rocke_tensor_descriptor_t* kv_base = &rocke_tensor_descriptor_naive_dynamic_mixed(
+                                              b, "paged_kv_bytes", kv_coords, 4, dyn, kv_strides)
+                                              ->base;
 
     /* Single-block tile (N_BLOCKS_PER_TILE == 1, T == BS):
      *   indirect(tile_idx -> physical_block) ; unmerge(linear_half -> token,dim).
@@ -603,7 +605,6 @@ static bool rocke__tile_pages(rocke_gfx942_attn2d_build_ctx_t* ctx,
         snprintf(b->err, ROCKE_ERR_MSG_CAP, "out of memory for %d tile pages", n_pages);
         return false;
     }
-    int64_t kv_stride_blk_b = (int64_t)ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
     rocke_value_t* seq_base = rocke__seq_base(ctx);
     rocke_value_t* max_idx = rocke__block_table_max_idx(ctx);
     rocke_value_t* tile_page0 = rocke_b_mul(b, kv_tile_idx, rocke_b_const_i32(b, n_pages));
@@ -616,7 +617,8 @@ static bool rocke__tile_pages(rocke_gfx942_attn2d_build_ctx_t* ctx,
         rocke_value_t* physical
             = rocke_b_masked_global_load(b, ctx->block_tables, idx, mask, def, rocke_i32(), 4);
         rocke_value_t* page_i64 = rocke_b_zext(b, rocke_b_to_sgpr_u32(b, physical), rocke_i64());
-        rocke_value_t* base = rocke_b_mul(b, page_i64, rocke_b_const_i64(b, kv_stride_blk_b));
+        rocke_value_t* stride64 = rocke_b_zext(b, ctx->kv_stride_blk_b_v, rocke_i64());
+        rocke_value_t* base = rocke_b_mul(b, page_i64, stride64);
         ptrs[page] = rocke_b_global_ptr_add(b, src, base);
     }
     rocke_value_t* kv_block_bytes_c = rocke__kv_block_bytes_c(ctx);
@@ -639,8 +641,7 @@ static rocke_value_t*
     rocke_value_t* half = rocke_b_add(b, call_half, rocke__lane_half_base(ctx));
     rocke_value_t* token = rocke_b_div(b, half, rocke_b_const_i32(b, ctx->HD));
     rocke_value_t* dim = rocke_b_mod(b, half, rocke_b_const_i32(b, ctx->HD));
-    rocke_value_t* token_b
-        = rocke_b_mul(b, token, rocke_b_const_i32(b, ctx->NUM_KV * ctx->HD * ctx->KV_BYTES));
+    rocke_value_t* token_b = rocke_b_mul(b, token, ctx->kv_stride_tok_b_v);
     rocke_value_t* token_head_b = rocke_b_add(b, token_b, kv_head_b);
     rocke_value_t* dim_b = rocke_b_mul(b, dim, rocke_b_const_i32(b, ctx->KV_BYTES));
     return rocke_b_add(b, token_head_b, dim_b);

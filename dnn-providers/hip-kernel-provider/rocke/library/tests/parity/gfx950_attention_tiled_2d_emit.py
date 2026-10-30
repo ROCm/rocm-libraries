@@ -898,6 +898,31 @@ _CONFIGS = {
         block_m_per_warp=32,
         tile_size=64,
     ),
+    # bf16 D64/b16 GQA-4 multi-batch: the shipping spec, whose one K/V copy per
+    # tile (32 tokens) spans two pages, so the bf16 loaders keep the paged-KV
+    # descriptor. Every other bf16/fp16 case takes the per-page copy offsets.
+    56: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=2,
+        num_warps=4,
+        waves_per_eu=2,
+        tile_size=32,
+        block_m_per_warp=32,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+        use_transposed_half_local_pv=True,
+        use_mfma32_skip_legacy_qreg=True,
+        use_transposed_mask_limit=True,
+    ),
 }
 
 
