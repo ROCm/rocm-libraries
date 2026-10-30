@@ -67,6 +67,10 @@ Log: `logs/run-off-on.log` (job 68218157, head a90fe00804e).
   repo): push 6 files, delete artifacts and cache, pull, `hkp_megakernel_lock.py verify` OK;
   the pointer is byte-identical after regenerating the KDP. Nothing was pushed to `ingestor`.
 
+With the exporter's 16-object rt0 lock (head af5a3559c2e, job 68219792,
+`logs/run-on-rt0-set.log`): ON build rc 0, lock verify passes in the pack step, product KDP
+packed for gfx942, 1119 passed / 68 skipped / 0 failed, clang-tidy rc 0, lock pytest 11 passed.
+
 ## Not done
 
 - GPU integration test (`IntegrationGpuMegakernel.*`) not run yet: gfx942 nodes are held
