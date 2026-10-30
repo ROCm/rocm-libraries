@@ -141,9 +141,11 @@ class KernelIdentity:
     # wgrad only (WgradConvSpec.lds_kpack): K steps packed per LDS store on
     # the M-outer transpose-on-store. Left out of the hash at 1.
     lds_kpack: int = 1
-    # wgrad (WgradConvSpec.xcd_remap: whole-grid remap) and fwd
-    # (ImplicitGemmConvSpec.xcd_remap: XCD-contiguous tile order): the XCD
-    # count, 0 = launch order. Left out of the hash at 0.
+    # wgrad (WgradConvSpec.xcd_remap: whole-grid remap), fwd
+    # (ImplicitGemmConvSpec.xcd_remap: XCD-contiguous tile order) and dgrad
+    # (DgradConvSpec.xcd_remap: the XCD tile order for ungrouped launches
+    # too): the XCD count, 0 = launch order / the target default. Left out
+    # of the hash at 0.
     xcd_remap: int = 0
     # wgrad only (WgradConvSpec.sep_addr): separable (1) / carried (2)
     # operand addressing. Left out of the hash at 0.
@@ -155,8 +157,9 @@ class KernelIdentity:
     # fwd only (ImplicitGemmConvSpec.reg_prefetch): the register-prefetch
     # K loop, 1 = one LDS buffer, 2 = two. Left out of the hash at 0.
     reg_prefetch: int = 0
-    # fwd only (ImplicitGemmConvSpec.lds_xor): XOR-swizzled, unpadded A/B LDS
-    # tiles. Left out of the hash while False.
+    # fwd (ImplicitGemmConvSpec.lds_xor) and dgrad x-halo
+    # (DgradConvSpec.lds_xor): XOR-swizzled, unpadded A/B LDS tiles. Left out
+    # of the hash while False.
     lds_xor: bool = False
     # fwd only (ImplicitGemmConvSpec.a_direct). Left out of the hash while False.
     a_direct: bool = False
@@ -181,6 +184,23 @@ class KernelIdentity:
     # dgrad only (DgradConvSpec.b_kpack): k values per B LDS write. Left out
     # of the hash at 0.
     b_kpack: int = 0
+    # dgrad only (DgradConvSpec.tapk_ilv / xhalo_exact / cshuffle_m_chunks):
+    # x-halo loop load interleave, exact halo rows, and the C staging slabs
+    # of the cshuffle epilogue. Left out of the hash at 0 / False / 1.
+    tapk_ilv: int = 0
+    xhalo_exact: bool = False
+    cshuffle_m_chunks: int = 1
+    # dgrad only (DgradConvSpec.tapk_lds_ahead): LDS fragment reads that many
+    # MFMA steps ahead in the x-halo loop. Left out of the hash at 0.
+    tapk_lds_ahead: int = 0
+    # dgrad only (DgradConvSpec.tapk_lds_barrier). Left out of the hash at False.
+    tapk_lds_barrier: bool = False
+    # dgrad only (DgradConvSpec.tapk_setprio). Left out of the hash at 0.
+    tapk_setprio: int = 0
+    # dgrad only (DgradConvSpec.xh_b_wide). Left out of the hash at False.
+    xh_b_wide: bool = False
+    # dgrad only (DgradConvSpec.xh_b_kpad). Left out of the hash at 0.
+    xh_b_kpad: int = 0
     # fwd only (ImplicitGemmConvSpec.split_addr_k_decode): the per-tile
     # reduction decode of the 3-D split-addressing path. Serves only problems
     # whose cpg is a multiple of tile_k (see identity_supports_problem). Left
@@ -326,6 +346,22 @@ class KernelIdentity:
             del fields["tapk_xhalo"]
         if not fields["b_kpack"]:
             del fields["b_kpack"]
+        if not fields["tapk_ilv"]:
+            del fields["tapk_ilv"]
+        if not fields["xhalo_exact"]:
+            del fields["xhalo_exact"]
+        if fields["cshuffle_m_chunks"] == 1:
+            del fields["cshuffle_m_chunks"]
+        if not fields["tapk_lds_ahead"]:
+            del fields["tapk_lds_ahead"]
+        if not fields["tapk_lds_barrier"]:
+            del fields["tapk_lds_barrier"]
+        if not fields["tapk_setprio"]:
+            del fields["tapk_setprio"]
+        if not fields["xh_b_wide"]:
+            del fields["xh_b_wide"]
+        if not fields["xh_b_kpad"]:
+            del fields["xh_b_kpad"]
         if not fields["split_addr_k_decode"]:
             del fields["split_addr_k_decode"]
         for name in (
@@ -765,6 +801,14 @@ def identity_supports_problem(
         # filter width it unrolls is baked (filter_w, matched above).
         if identity.tapk_xhalo and int(getattr(problem, "pW", 0)) != 0:
             return False, "tapk_xhalo serves pW == 0 only"
+        # x-halo split-K accumulates through a packed-atomic store that
+        # treats dX as one dense (M, C) matrix: ungrouped problems only.
+        if (
+            identity.tapk_xhalo
+            and identity.split_k > 1
+            and int(getattr(problem, "groups", 1)) != 1
+        ):
+            return False, "x-halo split-K serves groups == 1 only"
         # The dY halo loop shifts the linear pixel index by whole output
         # rows, so the output must be the input's size, and its LDS tile
         # is sized for halo_max_wo. The filter (filter_h/w, baked) is

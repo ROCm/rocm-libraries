@@ -247,6 +247,7 @@ CACHE_GROUPED: Tuple[bool, ...] = (True,)
 # The 3-D kernels decode a depth axis, so they are distinct binaries. Only 2-D
 # is built by default; ROCKE_AOT_SPATIAL=3d (or 2d,3d) adds the 3-D grid.
 import os as _os
+import re as _re
 CACHE_SPATIAL_3D: Tuple[bool, ...] = tuple(
     {"2d": False, "3d": True}[v.strip()]
     for v in _os.environ.get("ROCKE_AOT_SPATIAL", "2d").split(",")
@@ -274,6 +275,98 @@ CACHE_DGRAD_XHALO_TPF: Tuple[int, ...] = tuple(
 CACHE_DGRAD_B_KPACK: Tuple[int, ...] = tuple(
     int(v) for v in _os.environ.get("ROCKE_AOT_DGRAD_BKP", "0").split(",") if v.strip()
 )
+# Knob sets of the x-halo dgrad binaries (tapk_xhalo), each built per x-halo
+# variant it applies to: ROCKE_AOT_DGRAD_XHK is a ";"-separated list of
+# ","-separated key=value sets over ilv (DgradConvSpec.tapk_ilv), lda
+# (tapk_lds_ahead), lsb (tapk_lds_barrier), sp (tapk_setprio) -- those four
+# on tpf 1/3 only --, xhx (xhalo_exact), xcd (xcd_remap), kpad (lds_k_pad),
+# lxor (lds_xor, with lds_k_pad 0), mch (cshuffle_m_chunks; cshuffle only),
+# wpe (waves_per_eu) and sk (split_k; cshuffle tpf 1/3 only, serves
+# groups == 1), e.g. "ilv=4,xhx=1,xcd=6;ilv=8,xhx=1,xcd=6". An item
+# "@<regex>" gives its set its own scope (see ROCKE_AOT_DGRAD_XHK_SCOPE). An
+# empty set is the plain binary; unset = that alone.
+def _parse_dgrad_xh_knobs(text: str) -> Tuple[Tuple[Tuple[str, int], ...], ...]:
+    keys = {"ilv", "xhx", "xcd", "kpad", "mch", "sk", "lda", "wpe", "lsb", "sp", "lxor", "bw", "bpad"}
+    out = []
+    for part in text.split(";"):
+        kv = []
+        for item in part.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            if item.startswith("@"):
+                # This set's own scope (overrides ROCKE_AOT_DGRAD_XHK_SCOPE).
+                kv.append(("@", item[1:]))
+                continue
+            k, _, v = item.partition("=")
+            if k not in keys:
+                raise ValueError(f"ROCKE_AOT_DGRAD_XHK: unknown knob {k!r}")
+            kv.append((k, int(v)))
+        out.append(tuple(sorted(kv)))
+    # The plain binary is always built; the sets add to it.
+    return tuple(dict.fromkeys([(), *out]))
+
+
+CACHE_DGRAD_XHALO_KNOBS = _parse_dgrad_xh_knobs(
+    _os.environ.get("ROCKE_AOT_DGRAD_XHK", "")
+)
+# The x-halo binaries the non-empty knob sets apply to: a regular expression
+# searched in the plain binary's label (ROCKE_AOT_DGRAD_XHK_SCOPE; unset =
+# every x-halo binary), so a cache can carry the knobs where they pay only.
+CACHE_DGRAD_XHALO_KNOB_SCOPE = _os.environ.get("ROCKE_AOT_DGRAD_XHK_SCOPE", "")
+
+
+def _dgrad_xh_knob_cfg(knobs, *, tpf: int, grouped: bool, epilogue: str):
+    """The spec kwargs of one CACHE_DGRAD_XHALO_KNOBS set on an x-halo
+    variant, or None where the set does not apply."""
+    d = dict(knobs)
+    d.pop("@", None)
+    cfg = {}
+    if d.get("ilv"):
+        if tpf not in (1, 3):
+            return None
+        cfg["tapk_ilv"] = d["ilv"]
+    if d.get("lda"):
+        if tpf not in (1, 3):
+            return None
+        cfg["tapk_lds_ahead"] = d["lda"]
+    if d.get("lsb"):
+        if tpf not in (1, 3):
+            return None
+        cfg["tapk_lds_barrier"] = True
+    if d.get("bpad"):
+        cfg["xh_b_kpad"] = d["bpad"]
+    if d.get("bw"):
+        if tpf not in (1, 3):
+            return None
+        cfg["xh_b_wide"] = True
+    if d.get("lxor"):
+        # Swizzled instead of padded rows.
+        cfg["lds_xor"] = True
+        cfg["lds_k_pad"] = 0
+    if d.get("sp"):
+        if tpf not in (1, 3):
+            return None
+        cfg["tapk_setprio"] = d["sp"]
+    if d.get("xhx"):
+        cfg["xhalo_exact"] = True
+    if d.get("xcd"):
+        cfg["xcd_remap"] = d["xcd"]
+    if d.get("kpad"):
+        cfg["lds_k_pad"] = d["kpad"]
+    if d.get("wpe"):
+        cfg["waves_per_eu"] = d["wpe"]
+    if d.get("mch", 1) > 1:
+        if epilogue != "cshuffle":
+            return None
+        cfg["cshuffle_m_chunks"] = d["mch"]
+    if d.get("sk", 1) > 1:
+        if epilogue != "cshuffle" or tpf not in (1, 3):
+            return None
+        cfg["split_k"] = d["sk"]
+    return cfg
+
+
 # Whether the stride-1 dgrad binaries are built next to the tilde ones.
 CACHE_DGRAD_STRIDE1: tuple[bool, ...] = (False, True)
 # dY halo binaries (DgradConvSpec.dy_halo): a capped sub-grid, not the
@@ -1733,8 +1826,24 @@ def _dgrad_jobs(
                         cfg["b_kpack"] = bkp
                     else:
                         cfg.pop("b_kpack", None)
-                yield BuildJob(
-                    identity=KernelIdentity(
+                knob_sets = (((),) if not (tapk and isinstance(tpf, tuple)) else CACHE_DGRAD_XHALO_KNOBS)
+                knob_cfgs = [
+                    (kc, dict(k).get("@", CACHE_DGRAD_XHALO_KNOB_SCOPE))
+                    for kc, k in (
+                        (
+                            _dgrad_xh_knob_cfg(
+                                k, tpf=tpf[1] if isinstance(tpf, tuple) else tpf,
+                                grouped=grouped, epilogue=epilogue,
+                            ),
+                            k,
+                        )
+                        for k in knob_sets
+                    )
+                    if kc is not None
+                ]
+                for kcfg, kscope in knob_cfgs:
+                    jcfg = {**cfg, **kcfg}
+                    ident = KernelIdentity(
                         arch=arch,
                         direction="dgrad",
                         algorithm="implicit_gemm",
@@ -1749,12 +1858,26 @@ def _dgrad_jobs(
                         dilation_h=caps.get("dilation", 0),
                         dilation_w=caps.get("dilation", 0),
                         **filt,
-                        **cfg,
-                    ),
-                    direction="dgrad",
-                    spec_kwargs=cfg,
-                    caps=job_caps,
-                )
+                        **jcfg,
+                    )
+                    if kcfg and kscope:
+                        base_label = KernelIdentity(
+                            **{
+                                **ident.to_dict(),
+                                **{
+                                    k: KernelIdentity.__dataclass_fields__[k].default
+                                    for k in kcfg
+                                },
+                            }
+                        ).label()
+                        if not _re.search(kscope, base_label):
+                            continue
+                    yield BuildJob(
+                        identity=ident,
+                        direction="dgrad",
+                        spec_kwargs=jcfg,
+                        caps=job_caps,
+                    )
 
         # The dY halo mode of the tap-outer loop (stride 1 / dilation 1, the
         # filter and the widest Wo baked), on the halo tiles only.
@@ -2111,7 +2234,10 @@ def count_jobs(
                 )
             elif direction == "dgrad":
                 total += vecs * sum(
-                    (len(CACHE_DGRAD_TAPK_PREFETCH) + len(CACHE_DGRAD_XHALO_TPF))
+                    (
+                        len(CACHE_DGRAD_TAPK_PREFETCH)
+                        + len(CACHE_DGRAD_XHALO_TPF) * len(CACHE_DGRAD_XHALO_KNOBS)
+                    )
                     * len(CACHE_DGRAD_B_KPACK)
                     if t
                     else 1

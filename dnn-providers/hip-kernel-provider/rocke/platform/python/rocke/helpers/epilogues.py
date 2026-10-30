@@ -378,6 +378,10 @@ class CShuffleEpilogue:
     #   barrier 0: MFMAs done; load waves may exit.
     #   barrier 1: load waves exited; safe to overwrite A/B LDS with C writes.
     war_barriers: int = 1
+    # PROTOTYPE (scaffold/dgi): stage the C tile through LDS in ``m_chunks``
+    # row slabs (each warp's mfmas_m split into m_chunks groups) so the
+    # staging buffer is tile_m/m_chunks rows -> less LDS, more occupancy.
+    m_chunks: int = 1
     # MFMA path: set by from_grid(); drives lane_to_output in store().
     atom: Optional[MfmaAtom] = None
     # WMMA path: set by from_grid_op(); uses c_frag_len / c_layout().coord() instead.
@@ -512,6 +516,12 @@ class CShuffleEpilogue:
         _fp32_out = self.out_dtype == "fp32"
         _bf16_out = self.out_dtype == "bf16"
         _lds_dtype = F32 if _fp32_out else (BF16 if _bf16_out else F16)
+        if self.m_chunks > 1:
+            return self._store_m_chunked(
+                b, accs=accs, addr_fn=addr_fn, d_rsrc=d_rsrc, bounds=bounds,
+                lds_dtype=_lds_dtype, bf16_out=_bf16_out, fp32_out=_fp32_out,
+                warp_n_off=warp_n_off,
+            )
 
         # ---- step 1: publish accs to LDS at the MMA output layout. ----
         #
@@ -693,6 +703,90 @@ class CShuffleEpilogue:
                         v = b.smem_load_vN_f16(c_smem, row, col, n=sv)
                     dwords = sv // 2
                     b.buffer_store_vN_f16(d_rsrc, safe, b.const_i32(0), v, dwords)
+
+    def _store_m_chunked(
+        self, b, *, accs, addr_fn, d_rsrc, bounds, lds_dtype, bf16_out, fp32_out, warp_n_off
+    ) -> None:
+        """PROTOTYPE: :meth:`store` through a tile_m/m_chunks-row LDS slab."""
+        atom = self.atom
+        grid = self.grid
+        if atom is None or fp32_out or not bf16_out:
+            raise ValueError("m_chunks > 1: MFMA bf16 output only (prototype)")
+        mc = self.m_chunks
+        mfmas_m = grid.mfmas_per_warp_m
+        mfmas_n = grid.mfmas_per_warp_n
+        if mfmas_m % mc:
+            raise ValueError(f"m_chunks {mc} does not divide mfmas_per_warp_m {mfmas_m}")
+        cm = mfmas_m // mc
+        am = atom.m
+        rows_c = grid.tile_m // mc
+        threads = grid.block_size
+        sv = self.store_vec
+        if (rows_c * grid.tile_n // sv) % threads or rows_c * grid.tile_n // sv < threads:
+            raise ValueError("m_chunks: slab does not distribute over the block")
+        lds_layout = LdsLayout.cshuffle(tile_m=rows_c, tile_n=grid.tile_n)
+        c_view = make_lds_view(
+            b, dtype=lds_dtype, shape=lds_layout.storage_shape(rows_c),
+            name_hint=self.smem_name_hint, exclusive=self.no_alias,
+        )
+        c_smem = c_view.base
+        c_window = c_view.tile(
+            list(lds_layout.storage_shape(rows_c)), [b.const_i32(0), b.const_i32(0)]
+        )
+        dist = _cshuffle_acc_distribution(atom.c_per_lane)
+        traits = LoadStoreTraits(distribution=dist, vector_dim_y=1, scalar_per_vector=1)
+        warp_m_off_c = b.mul(grid.warp_m_idx, b.const_i32(cm * am))
+        c_threads = b.const_i32(threads)
+        c_tile_n_div_vec = b.const_i32(grid.tile_n // sv)
+        c_elem_bytes = b.const_i32(2)
+        oob_sentinel = b.const_i32((1 << 31) - 1)
+        c_slab = b.const_i32(cm * am)
+        c_wrows = b.const_i32(mfmas_m * am)
+        vecs_per_thread = (rows_c * grid.tile_n // sv) // threads
+        for c in range(mc):
+            if c > 0 or not self.no_alias:
+                for _ in range(self.war_barriers if c == 0 else 1):
+                    b.sync()
+            for mi_l in range(cm):
+                mi = c * cm + mi_l
+                for ni in range(mfmas_n):
+                    acc = accs[mi * mfmas_n + ni]
+                    acc_staged = b.vec_trunc_f32_to_bf16(acc)
+                    dt = make_static_distributed_tensor(dist, dtype=BF16)
+                    for i in range(atom.c_per_lane):
+                        dt.set([i, 0], b.vec_extract(acc_staged, i))
+                    tile_m_base = b.add(warp_m_off_c, b.const_i32(mi_l * am))
+                    tile_n_base = b.add(warp_n_off, b.const_i32(ni * atom.n))
+
+                    def coord_fn(b_, y_base, k, *, _mb=tile_m_base, _nb=tile_n_base,
+                                 _atom=atom, _lane=grid.lane):
+                        i = int(y_base[0])
+                        r, cc = _atom.lane_to_output(b_, _lane, i)
+                        return [b_.add(_mb, r), b_.add(_nb, cc)]
+
+                    store_tile_cshuffle(b, c_window, dt, traits=traits, coord_fn=coord_fn)
+            b.sync()
+            for e in range(vecs_per_thread):
+                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), grid.tid)
+                row = b.div(vec_idx, c_tile_n_div_vec)
+                col_v = b.mod(vec_idx, c_tile_n_div_vec)
+                col = b.mul(col_v, b.const_i32(sv)) if sv > 1 else col_v
+                w = b.div(row, c_slab)
+                r_in = b.sub(row, b.mul(w, c_slab))
+                g_row = b.add(b.add(b.mul(w, c_wrows), b.const_i32(c * cm * am)), r_in)
+                m_val = b.add(grid.block_m_off, g_row)
+                n_val = b.add(grid.block_n_off, col)
+                ok = DirectEpilogue._bounds_check(b, m_val, n_val, bounds, vec_n=sv)
+                off_elems, valid = addr_fn(b, m_val, n_val)
+                ok = (
+                    b.land(ok, valid)
+                    if (ok is not None and valid is not None)
+                    else (ok if ok is not None else valid)
+                )
+                off_bytes = b.mul(off_elems, c_elem_bytes)
+                safe = b.select(ok, off_bytes, oob_sentinel) if ok is not None else off_bytes
+                vbf = b.smem_load_vN(c_smem, row, col, dtype=BF16, n=sv)
+                b.buffer_store_vN_bf16(d_rsrc, safe, b.const_i32(0), vbf, sv // 2)
 
     def atomic_store(
         self,

@@ -6297,6 +6297,16 @@ def _cached_bind(
                 rt.memset_async(d_ptr, 0, d_bytes, stream)
             _launch()
 
+    elif direction == "dgrad" and ident.split_k > 1:
+        # Split-K dgrad (the x-halo loop's whole-tile slices) atomically
+        # accumulates into dX, so every launch zeroes it first -- part of
+        # the algorithm's cost.
+        _launch = run
+
+        def run(_launch=_launch, dx_ptr=ptrs[2], dx_bytes=sizes[2], stream=stream):
+            rt.memset_async(dx_ptr, 0, dx_bytes, stream)
+            _launch()
+
     elif direction == "wgrad" and ident.two_stage:
         # Two-stage is three steps and all of them are the algorithm's cost:
         # zero the scratch (Stage 1 accumulates), Stage 1, then the fold/cast
