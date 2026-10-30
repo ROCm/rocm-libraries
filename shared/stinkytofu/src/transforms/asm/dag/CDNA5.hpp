@@ -3152,10 +3152,48 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             return result;
         };
 
+        auto pseudoTokens = [](const StinkyInstruction& inst) {
+            std::unordered_set<uint32_t> tokens;
+            for (const auto* regs : {&inst.getSrcRegs(), &inst.getDestRegs()}) {
+                for (const StinkyRegister& reg : *regs)
+                    if (isPseudoReg(reg)) tokens.insert(reg.reg.idx);
+            }
+            return tokens;
+        };
         // Computed once per group (not once per after x before pair).
+        // Register descendants miss the real shape: a tensor_load is the next
+        // LDS producer, so it defines the token instead of using the barrier's
+        // definition. Take the same-token tensor_loads that follow the after
+        // group until the next barrier.
         for (auto& afterGroup : exclusiveAfterGroups) {
             afterGroup.descendantLoads = collectDescendants(
                 afterGroup.barriers, [](StinkyInstruction& inst) { return isTensorLoad(inst); });
+            std::unordered_set<uint32_t> tokens;
+            std::unordered_set<StinkyInstruction*> groupBarriers(afterGroup.barriers.begin(),
+                                                                 afterGroup.barriers.end());
+            for (StinkyInstruction* barrier : afterGroup.barriers) {
+                auto barrierTokens = pseudoTokens(*barrier);
+                tokens.insert(barrierTokens.begin(), barrierTokens.end());
+            }
+            std::unordered_set<StinkyInstruction*> seen(afterGroup.descendantLoads.begin(),
+                                                        afterGroup.descendantLoads.end());
+            bool passedGroup = false;
+            for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst == nullptr) continue;
+                if (groupBarriers.count(inst) != 0) {
+                    passedGroup = true;
+                    continue;
+                }
+                if (!passedGroup) continue;
+                if (isBarrier(*inst)) break;
+                if (!isTensorLoad(*inst)) continue;
+                auto loadTokens = pseudoTokens(*inst);
+                if (std::none_of(loadTokens.begin(), loadTokens.end(),
+                                 [&](uint32_t token) { return tokens.count(token) != 0; }))
+                    continue;
+                if (seen.insert(inst).second) afterGroup.descendantLoads.push_back(inst);
+            }
         }
         for (auto& beforeGroup : exclusiveBeforeGroups) {
             beforeGroup.descendantLoads = collectDescendants(
@@ -3197,8 +3235,38 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 const int baseBeforeEnd = baseBeforeBegin + beforeGroup.claimWindow;
                 const bool overlap = (baseAfterBegin < baseBeforeEnd) &&
                                      (baseBeforeBegin < baseAfterEnd + separationSlack);
+                // Even when the two claimed windows do not overlap, an after
+                // group whose threshold is earlier than the before group has
+                // room for its tensor load. Keep that load in the gap instead
+                // of allowing the later barrier to overtake it.
+                const bool tensorLoadFitsBetween = afterGroup.threshold < beforeGroup.threshold;
                 int proportionalSplit = -1;
                 const char* placement = "none";
+                if (overlap || tensorLoadFitsBetween) {
+                    auto requireOrdering = [&](StinkyInstruction* predecessor,
+                                               StinkyInstruction* successor) {
+                        deps.requestedConstraints.emplace_back(predecessor, successor);
+                    };
+
+                    // barrierAfter -> tensor_load -> barrierBefore. The
+                    // tensor_load is the next producer of the after token, so
+                    // def-use does not put it after the barrier; request that
+                    // edge explicitly.
+                    for (StinkyInstruction* barrierAfter : afterGroup.barriers) {
+                        for (StinkyInstruction* barrierBefore : beforeGroup.barriers)
+                            requireOrdering(barrierAfter, barrierBefore);
+                        for (StinkyInstruction* tensorLoad : afterGroup.descendantLoads)
+                            requireOrdering(barrierAfter, tensorLoad);
+                    }
+                    for (StinkyInstruction* tensorLoad : afterGroup.descendantLoads) {
+                        for (StinkyInstruction* barrierBefore : beforeGroup.barriers) {
+                            requireOrdering(tensorLoad, barrierBefore);
+                        }
+                        for (StinkyInstruction* dsLoad : beforeGroup.descendantLoads) {
+                            requireOrdering(tensorLoad, dsLoad);
+                        }
+                    }
+                }
                 if (overlap) {
                     // afterNeeded is issue-only (no drain); beforeNeeded is the
                     // before claim window.
@@ -3217,32 +3285,25 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                     // every requested ordering against final instruction order first.
                     Layer2BarrierOverlapCandidate overlapCandidate{
                         afterGroup.barriers, beforeGroup.barriers, {}};
-                    auto requireOrdering = [&](StinkyInstruction* predecessor,
-                                               StinkyInstruction* successor) {
-                        deps.requestedConstraints.emplace_back(predecessor, successor);
+                    auto requireOverlapOrdering = [&](StinkyInstruction* predecessor,
+                                                      StinkyInstruction* successor) {
                         overlapCandidate.requiredConstraints.emplace_back(predecessor, successor);
                     };
 
-                    // Every overlapping pair needs structural ordering, independent of
-                    // which threshold-adjustment branch above was taken.
+                    // The same hard orderings were requested above. Record
+                    // their provenance only for overlap candidates, which are
+                    // the only pairs eligible for barrier merging.
                     for (StinkyInstruction* barrierAfter : afterGroup.barriers) {
-                        for (StinkyInstruction* barrierBefore : beforeGroup.barriers) {
-                            requireOrdering(barrierAfter, barrierBefore);
-                        }
+                        for (StinkyInstruction* barrierBefore : beforeGroup.barriers)
+                            requireOverlapOrdering(barrierAfter, barrierBefore);
+                        for (StinkyInstruction* tensorLoad : afterGroup.descendantLoads)
+                            requireOverlapOrdering(barrierAfter, tensorLoad);
                     }
-
-                    // Also keep tensor_load descendants of barrierAfter ahead of the
-                    // barrierBefore group, and prevent them from interleaving with
-                    // ds_load descendants of barrierBefore: all matching tensor_loads
-                    // must issue first. Both descendant sets were precomputed once per
-                    // group above.
                     for (StinkyInstruction* tensorLoad : afterGroup.descendantLoads) {
-                        for (StinkyInstruction* barrierBefore : beforeGroup.barriers) {
-                            requireOrdering(tensorLoad, barrierBefore);
-                        }
-                        for (StinkyInstruction* dsLoad : beforeGroup.descendantLoads) {
-                            requireOrdering(tensorLoad, dsLoad);
-                        }
+                        for (StinkyInstruction* barrierBefore : beforeGroup.barriers)
+                            requireOverlapOrdering(tensorLoad, barrierBefore);
+                        for (StinkyInstruction* dsLoad : beforeGroup.descendantLoads)
+                            requireOverlapOrdering(tensorLoad, dsLoad);
                     }
                     layer2BarrierOverlapCandidates_.push_back(std::move(overlapCandidate));
 

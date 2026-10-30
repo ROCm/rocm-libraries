@@ -783,17 +783,22 @@ TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindo
     EXPECT_EQ(waits, 2);
 }
 
-// A non-overlapping pair stays on one threshold and issues together.
-TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairStaysTogether) {
+// Non-overlapping after/before groups still keep the after token's next
+// tensor_load between them when the after threshold is earlier. The load
+// defines that token, so it is not a register user of the barrier. The before
+// barrier starts ahead of the load, so only the new hard edges can move it
+// behind the load.
+TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairKeepsTensorLoadBetweenGroups) {
     bb->addSuccessor(bb);
 
     createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
     createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
     for (int i = 0; i < 22; ++i)
         createWmmaF32_16x16x16_bf16(/*destStart=*/400 + i * 16, /*src0Start=*/64 + i * 16);
-    auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
-    createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/0);
     auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    StinkyInstruction* tensorLoad =
+        createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/0);
     createMovableDsLoad(/*destReg=*/500, /*addrReg=*/204, /*ldsToken=*/1);
     createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
 
@@ -816,6 +821,12 @@ TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairStaysTogether) {
     EXPECT_EQ(wmmasBetween(afterSignal, afterWait), 0) << scheduleOrder(*bb);
     EXPECT_EQ(positionOf(*bb, beforeWait), positionOf(*bb, beforeSignal) + 1) << scheduleOrder(*bb);
     EXPECT_EQ(wmmasBetween(beforeSignal, beforeWait), 0) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, afterWait), positionOf(*bb, tensorLoad)) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, tensorLoad), positionOf(*bb, beforeSignal)) << scheduleOrder(*bb);
+
+    const auto* overlaps = am.getCachedResult<Layer2BarrierOverlapAnalysis>();
+    ASSERT_NE(overlaps, nullptr);
+    EXPECT_FALSE(overlaps->contains(afterSignal, beforeSignal));
 }
 
 // The latest matching ds_load does not overlap any WMMA, so lastOverlap is 0.
