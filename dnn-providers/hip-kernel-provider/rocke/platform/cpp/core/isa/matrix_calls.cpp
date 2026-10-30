@@ -143,6 +143,31 @@ static constexpr rocke_matrix_call_t gfx11_16bit_out_wmma(const char* intrinsic,
         NULL};
 }
 
+/* gfx1250 bf16 x bf16 with an fp32 accumulator and a bf16 result (Python
+ * _GFX1250_BF16F32): (neg A, A, neg B, B, C modifier, C, reuse A, reuse B),
+ * every modifier 0. The result type differs from the accumulator's, so the
+ * call returns <8 x bfloat> while C passes as <8 x float>. */
+static const rocke_matrix_arg_t k_gfx1250_bf16f32_args[] = {
+    {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
+    {ROCKE_MATRIX_ARG_A, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
+    {ROCKE_MATRIX_ARG_B, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_IMM, "i16", 0, true},
+    {ROCKE_MATRIX_ARG_C, NULL, 0, false},
+    {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
+    {ROCKE_MATRIX_ARG_IMM, "i1", 0, true},
+};
+
+static constexpr rocke_matrix_call_t k_gfx1250_bf16f32
+    = {"llvm.amdgcn.wmma.bf16f32.16x16x32.bf16.v8bf16.v16bf16.v8f32",
+       k_gfx1250_bf16f32_args,
+       (int)(sizeof(k_gfx1250_bf16f32_args) / sizeof(k_gfx1250_bf16f32_args[0])),
+       as_is(reg("bf16", 16)),
+       as_is(reg("bf16", 16)),
+       as_is(reg("f32", 8)),
+       as_is(reg("bf16", 8)),
+       NULL};
+
 /* Eight fp8 / bf8 values: two words at LLVM 20, one i64 from LLVM 22 on (the
  * same register types the hand-written fp8 x fp8 and bf8 x bf8 MFMAs use). */
 static const rocke_matrix_flavor_override_t k_i64_from_llvm22[] = {{"llvm22", {"i64", 0}}};
@@ -256,6 +281,9 @@ static const rocke_matrix_call_entry_t k_matrix_calls[] = {
           k_gfx12_16bit_out_args,
           reg("i16", 8),
           reg("i16", 8))},
+    /* gfx1250 bf16 -> bf16 through an fp32 accumulator: sixteen bf16 of A and
+     * of B per lane, eight fp32 accumulator values, eight bf16 results. */
+    {"wmma_gfx1250_bf16f32_16x16x32_bf16", k_gfx1250_bf16f32},
 };
 
 #undef ROCKE_INTEGER_WMMA

@@ -27,6 +27,7 @@ from types import MappingProxyType
 from ..arch.target import integer_mma_op_ids
 from ..dtypes import DTypeCategory, dtype_info, dtype_names
 from ..ir import (
+    BF16,
     F16,
     F32,
     I1,
@@ -309,6 +310,28 @@ def _gfx11_16bit_out_wmma(intrinsic: str, register: VectorType) -> MatrixCall:
     )
 
 
+# gfx1250 bf16 x bf16 with an fp32 accumulator and a bf16 result:
+# (neg A, A, neg B, B, C modifier, C, reuse A, reuse B), every modifier 0. The
+# result type differs from the accumulator's, so the call returns <8 x bfloat>
+# while C passes as <8 x float>.
+_GFX1250_BF16F32 = MatrixCall(
+    intrinsic="llvm.amdgcn.wmma.bf16f32.16x16x32.bf16.v8bf16.v16bf16.v8f32",
+    args=(
+        Imm(I1, 0),
+        MatrixOperand.A,
+        Imm(I1, 0),
+        MatrixOperand.B,
+        Imm(I16, 0),
+        MatrixOperand.C,
+        Imm(I1, 0),
+        Imm(I1, 0),
+    ),
+    a=AsIs(VectorType(BF16, 16)),
+    b=AsIs(VectorType(BF16, 16)),
+    c=AsIs(VectorType(F32, 8)),
+    result=AsIs(VectorType(BF16, 8)),
+)
+
 # Eight fp8 / bf8 values: two words at LLVM 20, one i64 from LLVM 22 on (the
 # same register types the hand-written fp8 x fp8 and bf8 x bf8 MFMAs use).
 _FP8_X8 = FlavorType(VectorType(I32, 2), ((LLVM_FLAVOR_LLVM22, I64),))
@@ -436,5 +459,8 @@ MATRIX_CALLS: Mapping[str, MatrixCall] = MappingProxyType(
             VectorType(I16, 8),
             _GFX12_16BIT_OUT_ARGS,
         ),
+        # gfx1250 bf16 -> bf16 through an fp32 accumulator: sixteen bf16 of A
+        # and of B per lane, eight fp32 accumulator values, eight bf16 results.
+        "wmma_gfx1250_bf16f32_16x16x32_bf16": _GFX1250_BF16F32,
     }
 )

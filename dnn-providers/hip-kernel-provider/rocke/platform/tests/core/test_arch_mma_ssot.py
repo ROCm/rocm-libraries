@@ -1,12 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""SSOT guards for the bare-op_id MMA accumulator-dtype lookup.
+"""SSOT guards for the bare-op_id MMA accumulator- and result-dtype lookups.
 
-``IRBuilder.mma`` uses ``target._op_id_c_dtype()`` to size a ``tile.mma`` result
-vector's accumulator element without an ``ArchTarget`` in hand. These tests pin
-the first-wins / raise-on-drift contract of that lookup so it stays deterministic
-across the arches that list a given op_id.
+``IRBuilder.mma`` uses ``target._op_id_dst_dtype()`` to size a ``tile.mma``
+result vector's element without an ``ArchTarget`` in hand;
+``target._op_id_c_dtype()`` answers the accumulator dtype the same way. These
+tests pin the first-wins / raise-on-drift contract of both lookups so they stay
+deterministic across the arches that list a given op_id.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from rocke.core.arch.target import (
     _mma_op_by_id,
     _GFX1250_SCALED_FAMILY,
     _op_id_c_dtype,
+    _op_id_dst_dtype,
     _op_id_family,
     normalize_dtype,
 )
@@ -43,12 +45,13 @@ from rocke.core.arch.target import (
 
 def test_filtered_catalog_preserves_supported_order_and_fields():
     # Independent snapshot of the supported rows at 72c28a69, filtered with
-    # the LLVM legality table. Preserve all remaining fields and relative order.
+    # the LLVM legality table, plus the bf16-result row. Preserve all
+    # remaining fields and relative order.
     rows = _load_specs()["gfx1250"]["mma"]
-    assert len(rows) == 93
+    assert len(rows) == 94
     encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
     assert hashlib.sha256(encoded).hexdigest() == (
-        "d31fe60f6172c7c2172a420cc4558591fa1389d41cc2829eafc99bceb66e858a"
+        "65efeb2d45fe3f6b21007260fcf0bc16dfea3c9ddb964f71776edba1fdee52d0"
     )
 
 
@@ -160,6 +163,16 @@ class TestOpIdCDtype(unittest.TestCase):
                     _op_id_c_dtype()
         finally:
             _op_id_c_dtype.cache_clear()
+
+
+class TestOpIdDstDtype(unittest.TestCase):
+    def test_matches_catalog_first_hit(self):
+        # A row's result dtype is its dst, or its accumulator c when it has none.
+        expected: dict = {}
+        for row in _load_specs().values():
+            for o in row["mma"]:
+                expected.setdefault(o["op_id"], normalize_dtype(o.get("dst", o["c"])))
+        self.assertEqual(_op_id_dst_dtype(), expected)
 
 
 def _contracts():
@@ -536,8 +549,9 @@ def test_every_target_names_each_mma_contract_once(gfx):
     # Selection answers one question per operand contract: op_for_shape and
     # select_largest_k raise "ambiguous MMA query" when two ops of one target
     # share a full contract, and the backend keys its lowering on op_id. So on
-    # every target both the op_id and the full contract (family, operand and
-    # accumulator dtypes, shape, scale contract) must name exactly one op.
+    # every target both the op_id and the full contract (family, operand,
+    # accumulator and result dtypes, shape, scale contract) must name exactly
+    # one op.
     ops = ArchTarget.from_gfx(gfx).mma.ops
     op_ids = [op.op_id for op in ops]
     contracts = [
@@ -546,6 +560,7 @@ def test_every_target_names_each_mma_contract_once(gfx):
             op.a_dtype,
             op.b_dtype,
             op.c_dtype,
+            op.dst_dtype,
             op.m,
             op.n,
             op.k,
