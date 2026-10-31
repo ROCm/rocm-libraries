@@ -5,8 +5,10 @@
 
 #include <array>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <optional>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -106,12 +108,47 @@ TEST(TestGfx942AttentionUnified3dGeometry, KvCachePolicyFollowsTheLastLevelCache
     EXPECT_EQ(gfx942KvCachePolicy(32, 8, 128, 8192), Gfx942KvCachePolicy::STREAM);
     EXPECT_EQ(gfx942KvCachePolicy(4, 8, 128, 512), Gfx942KvCachePolicy::ALL);
     EXPECT_EQ(gfx942KvCachePolicy(1, 1, 64, 0), Gfx942KvCachePolicy::ALL);
+    // Zero keys are zero bytes even at a batch whose byte count would overflow int64.
+    EXPECT_EQ(gfx942KvCachePolicy(std::numeric_limits<int64_t>::max(), 1, 64, 0),
+              Gfx942KvCachePolicy::ALL);
     // A byte count past int64 is far past the cache.
     EXPECT_EQ(gfx942KvCachePolicy(std::numeric_limits<int64_t>::max(), 8, 128, 8192),
               Gfx942KvCachePolicy::STREAM);
     EXPECT_EQ(gfx942KvCachePolicyName(Gfx942KvCachePolicy::STREAM), "stream");
     EXPECT_EQ(gfx942KvCachePolicyName(Gfx942KvCachePolicy::ALL), "all");
     EXPECT_THROW(gfx942KvCachePolicy(0, 8, 128, 8192), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+namespace
+{
+
+struct KvCachePolicyRow
+{
+    int64_t batch;
+    int64_t hkv;
+    int64_t headSize;
+    int64_t seqlenK;
+    int64_t stream;
+};
+
+const std::vector<KvCachePolicyRow> KV_CACHE_POLICY_TABLE = {
+#include "Gfx942AttentionUnified3dKvCachePolicyTable.inc"
+};
+
+} // namespace
+
+// gen_gfx942_attention_unified_3d_kv_cache_policy.py asks rocKE's _kv_cache_policy_3d on a
+// grid that straddles 256 MiB; test_gfx942_kv_cache_policy_table_current.py keeps it current.
+TEST(TestGfx942AttentionUnified3dGeometry, KvCachePolicyMatchesRockeOnEveryGeneratedRow)
+{
+    // 8 batches x 2 KV heads x 3 D x 6 seqlen_k.
+    ASSERT_EQ(std::size(KV_CACHE_POLICY_TABLE), 288U);
+    for(const auto& r : KV_CACHE_POLICY_TABLE)
+    {
+        const auto want = r.stream != 0 ? Gfx942KvCachePolicy::STREAM : Gfx942KvCachePolicy::ALL;
+        EXPECT_EQ(gfx942KvCachePolicy(r.batch, r.hkv, r.headSize, r.seqlenK), want)
+            << "B=" << r.batch << " Hkv=" << r.hkv << " D=" << r.headSize << " Skv=" << r.seqlenK;
+    }
 }
 
 // _gfx942_3d_tile_size_override: block_size // 2 iff head_size >= 128 and

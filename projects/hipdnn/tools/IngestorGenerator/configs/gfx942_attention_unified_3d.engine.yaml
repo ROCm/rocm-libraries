@@ -350,12 +350,13 @@ launch_surface:
     kmd_fields: [kv_cache_policy]
     guard: >
       Perf only: gfx942KvCachePolicy() restates the 256 MiB K/V rule ("stream"
-      above, "all" at or below; an int64 overflow counts as above), and
-      scoreKernel() uses it only to break a tie between kernels equal in
-      block_size and num_segments, so it never removes a candidate. A record
-      whose kv_cache_policy is missing or neither "stream" nor "all" is
+      above, "all" at or below; zero keys are "all"; an int64 overflow counts as
+      above), and scoreKernel() uses it only to break a tie between kernels
+      equal in block_size and num_segments, so it never removes a candidate. A
+      record whose kv_cache_policy is missing or neither "stream" nor "all" is
       declined in kernelMatches(). The restatement holds for fp16/bf16 K/V,
-      the only dtypes graph_match admits.
+      the only dtypes graph_match admits. A rocKE-generated table straddling
+      256 MiB pins it, kept current by a quick pytest drift guard.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dGeometry.cpp
 
   - name: admission

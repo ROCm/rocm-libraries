@@ -118,6 +118,12 @@ inline Gfx942KvCachePolicy
             "gfx942 unified 3d: cache policy needs positive batch, KV heads and head size, "
             "and non-negative seqlen_k");
     }
+    if(seqlenK == 0)
+    {
+        // No K/V bytes at all, whatever the other factors: Python's product is 0. Checked
+        // first, so a huge batch cannot overflow before the zero is reached.
+        return Gfx942KvCachePolicy::ALL;
+    }
     constexpr int64_t KV_TENSORS = 2; // K and V
     constexpr int64_t ELEMENT_BYTES = 2; // fp16/bf16
     int64_t bytes = KV_TENSORS * ELEMENT_BYTES;
