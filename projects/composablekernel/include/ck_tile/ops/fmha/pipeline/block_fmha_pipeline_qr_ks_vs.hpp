@@ -75,20 +75,36 @@ struct BlockFmhaPipelineQRKSVS
     static constexpr bool kPaddedVecLoadStore = PaddedVecLoadStore_;
     static constexpr bool kUseHdimTailArgs    = kPadHeadDimQ || kPadHeadDimV;
 
-    // Separate K from the LDS reused by V and dropout to remove barriers
-    // needed for K/V aliasing.
+    // Separate K from V/dropout LDS to remove K/V aliasing barriers.
 #if defined(__gfx11__) || defined(__gfx120__)
     static constexpr bool kUseSeparateKVLds =
 #if defined(__gfx115__)
-        !(kQKHeaddim == 64 && kN1 == 64) &&
-#endif
-#if defined(__gfx11__)
+        // gfx115 separates LDS only for D128, except QK32/PV32.
+        (kQKHeaddim == 128 && kN1 == 128 && !(kK0 == 32 && kK1 == 32)) &&
+#elif defined(__gfx11__)
+        // M64/M128 D64 QK32/PV32 tiles keep shared LDS.
+        !(kQKHeaddim == 64 && kN1 == 64 && kM0 <= 128 && kN0 == 64 && kK0 == 32 && kK1 == 32) &&
+        // D128 shares LDS for QK32/PV32 or elementwise bias with dropout.
+        !(kQKHeaddim == 128 && kN1 == 128 &&
+          ((kK0 == 32 && kK1 == 32) ||
+           (kHasDropout && BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS))) &&
+        // D256 keeps shared LDS to preserve long-sequence throughput.
         !(kQKHeaddim == 256 && kN1 == 256) &&
+#elif defined(__gfx120__)
+        // D64 masked dropout+sink shares LDS for bias and unpadded ALiBi.
+        !(kQKHeaddim == 64 && FmhaMask::IsMasking && kHasDropout && kHasSink &&
+          (BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+           (BiasEnum == BlockAttentionBiasEnum::ALIBI && !kUseHdimTailArgs))) &&
+        // Small no-bias tiles share LDS, except D32 dropout.
+        (kM0 > 64 || BiasEnum != BlockAttentionBiasEnum::NO_BIAS ||
+         (kHasDropout && kQKHeaddim == 32)) &&
 #endif
+        // Separate LDS supports matching FP16/BF16 Q/K/V types and row-major V.
         (std::is_same_v<QDataType, bf16_t> || std::is_same_v<QDataType, half_t>) &&
         std::is_same_v<KDataType, QDataType> && std::is_same_v<VDataType, QDataType> &&
         std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>;
 #else
+    // Other architectures, including gfx9, retain shared LDS.
     static constexpr bool kUseSeparateKVLds = false;
 #endif
 
@@ -673,21 +689,49 @@ struct BlockFmhaPipelineQRKSVS
                 AfterSoftmax
             };
 
+            // Early V loads overlap QK work; later loads shorten V's register live range.
+            // The balance depends on the architecture, tile and shared/separate LDS.
+            constexpr auto kVPrefetch = []() {
 #if defined(__gfx11__) || defined(__gfx12__) || defined(__gfx117__)
 #if defined(__gfx115__)
-            constexpr auto kSepLdsVPrefetch = kQKHeaddim == 128 && kN1 == 128
-                                                  ? VPrefetchPoint::AfterGemm0Tail
-                                                  : VPrefetchPoint::BeforeGemm0Tail;
-#else
-            constexpr auto kSepLdsVPrefetch = VPrefetchPoint::BeforeGemm0Tail;
+                // Separate LDS only serves D128; defer V past no-bias dropout.
+                if constexpr(kUseSeparateKVLds)
+                    return kHasDropout && BiasEnum == BlockAttentionBiasEnum::NO_BIAS
+                               ? VPrefetchPoint::AfterSoftmax
+                               : VPrefetchPoint::AfterGemm0Tail;
+                // Shared bias overlaps QK; D64 sink without LSE keeps V's live range shorter.
+                if constexpr(!kHasDropout && BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS &&
+                             (kQKHeaddim == 64 || kK0 == 128))
+                    return (kK0 == 128 || kStoreLSE || !kHasSink) ? VPrefetchPoint::BeforeGemm0Tail
+                                                                  : VPrefetchPoint::AfterGemm0Tail;
+#elif defined(__gfx11__)
+                // D128 no-bias dropout waits for softmax; other separate tiles overlap QK.
+                if constexpr(kUseSeparateKVLds)
+                    return kQKHeaddim == 128 && kN1 == 128 && kHasDropout &&
+                                   BiasEnum == BlockAttentionBiasEnum::NO_BIAS
+                               ? VPrefetchPoint::AfterSoftmax
+                               : VPrefetchPoint::BeforeGemm0Tail;
+#elif defined(__gfx120__)
+                if constexpr(kUseSeparateKVLds)
+                {
+                    // D64/D128 dropout trades V's live range against overlap with softmax.
+                    if constexpr(!kHasDropout || (kQKHeaddim != 64 && kQKHeaddim != 128))
+                        return VPrefetchPoint::BeforeGemm0Tail;
+                    constexpr auto kAfterQKBias = kQKHeaddim == 64
+                                                      ? BlockAttentionBiasEnum::ALIBI
+                                                      : BlockAttentionBiasEnum::ELEMENTWISE_BIAS;
+                    return FmhaMask::IsMasking && kHasSink && BiasEnum == kAfterQKBias
+                               ? VPrefetchPoint::AfterGemm0Tail
+                               : VPrefetchPoint::AfterSoftmax;
+                }
 #endif
-            constexpr auto kVPrefetch = kUseSeparateKVLds
-                                            ? kSepLdsVPrefetch
-                                            : (kPadHeadDimV ? VPrefetchPoint::AfterSoftmax
-                                                            : VPrefetchPoint::AfterGemm0Tail);
+                // Shared LDS waits for softmax with V head padding, otherwise QK.
+                return kPadHeadDimV ? VPrefetchPoint::AfterSoftmax : VPrefetchPoint::AfterGemm0Tail;
 #else
-            constexpr auto kVPrefetch = VPrefetchPoint::BeforeGemm0Tail;
+                // Other targets overlap V with the QK tail.
+                return VPrefetchPoint::BeforeGemm0Tail;
 #endif
+            }();
             if constexpr(kVPrefetch == VPrefetchPoint::BeforeGemm0Tail)
             {
                 load_tile(v_prefetch, v_dram_window); // prefetch load v tile
