@@ -11,6 +11,7 @@ from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, 
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
 from ..Common.MxScaleLayout import mxFreeTile, mulScaleRows, mxTdmMSplitStride, mxTdmTileM
+from ..SolutionStructs.segment_interleave import mn_major_b
 # from ..KernelWriterAssembly import KernelWriterAssembly
 
 
@@ -262,6 +263,8 @@ class TensorDataMoverLoad(TensorDataMover):
                     # (extra comps are 0-wide via dim0).
                     mSplit = mxTdmMSplitStride(mt, mxTile, numComp)
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mSplit * mxUnit * bpe), f"woffset = wCompId * mSplit({mSplit}) * mxUnit({mxUnit}) * bpe({bpe})"))
+            elif tc == "B" and mn_major_b(kernel):
+                mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * bpe), f"woffset = wCompId * MT({mt}) // numComp({numComp}) * bpe({bpe}): one N half per component"))
             else:
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(tile1Size // numComp * bpe // tdmSplit), f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe}) // tdmSplit({tdmSplit})"))
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= tdmSeparateStride"))

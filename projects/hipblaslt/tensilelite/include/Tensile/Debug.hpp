@@ -109,6 +109,14 @@ namespace TensileLite
         // Sourced from the TENSILE_STREAMK5_FORCE_MODE environment variable.
         int streamK5ForceMode() const;
 
+        // StreamK reduction debug override, for tests that compare the two paths.
+        // Return value semantics:
+        //   -1 -> the grid policy chooses
+        //    0 -> force the in-kernel fixup
+        //    1 -> force the parallel reduction where the launch can express it
+        // Sourced from the TENSILE_PERSISTENT_REDUCTION_FORCE_MODE environment variable.
+        int streamKReductionForceMode() const;
+
         int useExperimentalSelection() const;
 
         std::string getMetric() const;
@@ -182,6 +190,8 @@ namespace TensileLite
         bool        m_disableStaggerU     = false;
         // -1 = unset (use API attribute); 0 = force static SK3; 1 = force dynamic SK4
         int         m_streamK5ForceMode   = -1;
+        // -1 = unset (grid policy); 0 = force the in-kernel fixup; 1 = force parallel reduction
+        int         m_streamKReductionForceMode = -1;
         StringSet   m_excludedFromGetAll;
 
         Debug();

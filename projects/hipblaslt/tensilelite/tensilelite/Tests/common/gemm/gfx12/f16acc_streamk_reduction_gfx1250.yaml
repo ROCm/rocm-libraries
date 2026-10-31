@@ -1,0 +1,71 @@
+# f16 accumulation with StreamK, alpha 2 and beta -1: the parallel reduction and the linear in-kernel fixup both add the
+# f16 partials of a tile in f32 in K order and round once, so they give the same bits.
+# test_f16acc_streamk_reduction.py runs this config with each path forced (TENSILE_PERSISTENT_REDUCTION_FORCE_MODE) on
+# 6 tiles of 6 iterations split three ways (TENSILE_PERSISTENT_FIXED_GRID 18) and compares D.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  BoundsCheck: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  PrintTensorD: 1
+  DataInitTypeA: 23
+  DataInitTypeB: 26
+  DataInitTypeC: 13
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 17
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  ########################################
+  # D h
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: h
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup: StaticGrid with the linear fixup, one wave
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 128, 1, 1, 2, 2, 1, 1]]
+        - AssertFree0ElementMultiple: [1]
+        - AssertSummationElementMultiple: [128]
+        - DepthU: [128]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - SourceSwap: [False]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
+        - StreamKFixupTreeReduction: [0]
+        - WorkGroupMapping: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [0]
+        - TransposeLDS: [1]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [65, 33, 1, 768]

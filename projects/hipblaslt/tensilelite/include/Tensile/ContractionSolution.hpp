@@ -450,6 +450,9 @@ namespace TensileLite
                 throw std::runtime_error(std::string(toString(tileProcessingStrategy)) + " supports WorkAssignment=StaticGrid only");
         }
         int    streamKAtomic              = 0;
+        int    streamKFixupTreeReduction  = 0;
+        //! SpaceFillingAlgo levels, 4 bits each, with the level count in bits 28-31
+        int    spaceFillingAlgo           = 0;
         int    prefetchAcrossPersistent   = 0;
         int    persistentKernel           = 0;
         bool   persistentKernelAlongBatch = false;
@@ -1502,6 +1505,45 @@ namespace TensileLite
                                                                   uint32_t        skgrid,
                                                                   int32_t         autoWGM) const;
         uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
+
+        //! The GSU and StaggerU fields of the internalArgs word a launch of this solution passes for the problem, and
+        //! the arguments that decide how a persistent launch splits the unroll iterations of each tile.
+        struct LaunchSummationOrder
+        {
+            enum class Persistent : uint32_t
+            {
+                None,
+                DataParallel,
+                StreamK, //!< two-tile StreamK with the fixup in the kernel
+                StreamKParallel, //!< two-tile StreamK reduced by the reduction kernel
+                StreamKDynamic //!< the work-queue path of StreamK=4 and StreamK=5
+            };
+
+            uint32_t gsu                 = 1;
+            bool     gsuCoalesced        = false;
+            uint32_t staggerU            = 0;
+            uint32_t staggerUStrideShift = 0;
+            uint32_t staggerUMapping     = 0;
+
+            Persistent persistent        = Persistent::None;
+            bool       fixupTree         = false; //!< StreamKFixupTreeReduction
+            bool       perTileExtraIters = false; //!< the uniform-summation-order bit the kernel acts on
+            size_t     tiles             = 0;
+            size_t     itersPerTile      = 1;
+            size_t     grid              = 0;
+            size_t     skTiles           = 0; //!< StreamK: split tiles; dynamic: SKTiles
+            size_t     skItersPerWG      = 0;
+            size_t     extraIters        = 0;
+            size_t     skSplit           = 0; //!< parallel: workgroups per tile; dynamic: SKSplit
+            size_t     skItersPerWI      = 0;
+            size_t     tiles0            = 0; //!< workgroups along M and N, which tileIndexToWorkGroup walks
+            size_t     tiles1            = 0;
+            int32_t    wgm               = 1; //!< the WGM field DefaultWGM reads
+            bool       spaceFilling      = false; //!< the SpaceFillingAlgo walk replaces DefaultWGM
+            uint32_t   spaceFillingAlgo  = 0; //!< SizeMapping::spaceFillingAlgo
+            uint32_t   wgmWord           = 0; //!< the WGM word the SpaceFillingAlgo walk reads
+        };
+        LaunchSummationOrder launchSummationOrder(Problem const& problem, Hardware const& hardware) const;
 
         double calculateDimensionM(Problem const&  problem) const;
         double calculateDimensionN(Problem const&  problem) const;

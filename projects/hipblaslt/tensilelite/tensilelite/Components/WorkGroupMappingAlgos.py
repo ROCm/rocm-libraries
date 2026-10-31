@@ -847,8 +847,10 @@ def TransformNLevels(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN, sg
     if numLevels > 1:
         sgprCumulativeX = writer.sgprPool.checkOut(1, tag="TransformNLevels_sgprCumulativeX")
         sgprCumulativeY = writer.sgprPool.checkOut(1, tag="TransformNLevels_sgprCumulativeY")
-        sgprBlockM       = writer.sgprPool.checkOut(1, tag="TransformNLevels_sgprBlockM")
-        sgprBlockN       = writer.sgprPool.checkOut(1, tag="TransformNLevels_sgprBlockN")
+        # SpaceFillCurveSimpleImpl moves M and N as one 64-bit pair.
+        sgprBlockMN      = writer.sgprPool.checkOutAligned(2,2, tag="TransformNLevels_sgprBlockMN")
+        sgprBlockM       = sgprBlockMN
+        sgprBlockN       = sgprBlockMN + 1
 
     sgprLocalXY      = writer.sgprPool.checkOutAligned(2,2, tag="TransformNLevels_sgprLocalXY")
     sgprLocalY       = sgprLocalXY
@@ -942,8 +944,7 @@ def TransformNLevels(writer, kernel, sgprIndex, sgprNumTilesM, sgprNumTilesN, sg
     if numLevels > 1:
         writer.sgprPool.checkIn(sgprCumulativeX)
         writer.sgprPool.checkIn(sgprCumulativeY)
-        writer.sgprPool.checkIn(sgprBlockM)
-        writer.sgprPool.checkIn(sgprBlockN)
+        writer.sgprPool.checkIn(sgprBlockMN)
     writer.sgprPool.checkIn(sgprLocalXY)
     writer.sgprPool.checkIn(sgprTemp)
 

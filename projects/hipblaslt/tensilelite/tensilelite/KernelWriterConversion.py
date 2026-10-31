@@ -30,6 +30,7 @@ from .KernelWriterBase import KernelWriterBase
 from .Common.Architectures import archMacroNames
 from .Common import INDEX_CHARS, IsaInfo
 from .Common.DataType import DataType
+from .SolutionStructs.Problem import isF16Accumulation
 
 class KernelWriterConversion(KernelWriterBase):
 
@@ -150,9 +151,10 @@ class KernelWriterConversion(KernelWriterBase):
       gatePtrStr = self.state["ProblemType"]["GateResidualDataTypeList"][0].toDevice(self.language)
       kStr += "  " + gatePtrStr + " * " + "Gate;" + self.endLine
 
-    # alpha & beta
-    kStr += "  %s alpha;%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
-    kStr += "  %s beta;%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
+    # alpha & beta; f16 accumulation takes them as float, the type the host appends for a Half alpha/beta.
+    alphaTypeStr = "float" if isF16Accumulation(self.state["ProblemType"]) else self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
+    kStr += "  %s alpha;%s" % (alphaTypeStr, self.endLine)
+    kStr += "  %s beta;%s" % (alphaTypeStr, self.endLine)
 
     # activation
     activationCDataType = self.state["ProblemType"]["ActivationComputeDataType"]
@@ -406,6 +408,8 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  }" + self.endLine
 
     kStr += self.endLine
+    if isF16Accumulation(problemType):
+      kStr += "  uint64_t idW = id * NUM_ELEMENT_LOAD;" + self.endLine
     kStr += "  uint64_t id0"
     for i in range(1, problemType["NumIndicesC"]):
       kStr += ", id%d" % i
@@ -528,6 +532,8 @@ class KernelWriterConversion(KernelWriterBase):
       else:
         kStr += "  %s idxBias = %s;%s" % (self.uint64Str, id_str, self.endLine)
 
+    if isF16Accumulation(problemType):
+      return kStr + self.f16AccumulationBody(problemType) + self.kernelBodyEnd(firstStride, lastStrideC)
 
     ########################################
     # multi buffers GSU: Accumulate all GSU buffer
@@ -889,9 +895,12 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  }" + self.endLine
     else:
       kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, arg.D, byteOffsetD, 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, self.endLine)
-    ########################################
-    # end
-    kStr += "}%s" % self.endLine
+    kStr += self.kernelBodyEnd(firstStride, lastStrideC)
+    return kStr
+
+
+  def kernelBodyEnd(self, firstStride, lastStrideC):
+    kStr = "}%s" % self.endLine
     kStr += "#undef NUM_GSU" + self.endLine
     kStr += "#undef NUM_ELEMENT_LOAD" + self.endLine
     for i in range(firstStride, lastStrideC):
@@ -915,6 +924,146 @@ class KernelWriterConversion(KernelWriterBase):
 
     return kStr
 
+  def f16AccumulationBody(self, problemType):
+    """
+    f16 accumulation: the GSU slices hold f16 partials. They are added in f32 in slice order and the sum is
+    rounded once to f16; alpha and beta then apply as in the GEMM kernel's epilogue (f16 for Half and Float8
+    outputs, f32 for BFloat16), and alpha == 0 skips the partials as the GEMM kernel skips the summation.
+    A thread loads its NUM_ELEMENT_LOAD halves of a slice in one access and keeps NUM_GSU slices in flight.
+    Slices after the first are added with v_fma_mix_f32 (x * 1.0 + sum, one rounding): finite sums are those of
+    an f32 add, and when several slices are NaN this instruction decides which NaN propagates.
+    """
+    dest = problemType["DestDataType"]
+    destTypeStr = dest.toDevice(self.language)
+    vw = self.num_elements_load
+    endl = self.endLine
+    indexChar = self.indexChars[0]
+    wordType = {1: "uint16_t", 2: "uint32_t", 4: "f16acc_u32x2", 8: "f16acc_u32x4"}[vw]
+    word = {1: "(uint32_t)v[u]", 2: "v[u]", 4: "v[u][e >> 1]", 8: "v[u][e >> 1]"}[vw]
+    kStr = ""
+    if vw >= 4:
+      kStr += "  typedef uint32_t f16acc_u32x2 __attribute__((ext_vector_type(2)));" + endl
+    if vw == 8:
+      kStr += "  typedef uint32_t f16acc_u32x4 __attribute__((ext_vector_type(4)));" + endl
+    kStr += "  %s strideW = 1 + (arg.size%s - 1) * strideW%s" % (self.uint64Str, indexChar, indexChar)
+    for i in range(1, problemType["NumIndicesC"]):
+      kStr += " + (arg.size%s - 1) * arg.strideW%s" % (self.indexChars[i], self.indexChars[i])
+    kStr += ";" + endl
+    kStr += "  tensile_half alpha = (tensile_half)arg.alpha;" + endl
+    kStr += "  tensile_half beta = (tensile_half)arg.beta;" + endl
+    kStr += "  %s* dstD = arg.D;%s" % (destTypeStr, endl)
+    kStr += "  %s const* srcC = arg.C;%s" % (destTypeStr, endl)
+    if not problemType["GroupedGemm"]:
+      kStr += "  if(batch_mode != 0)" + endl
+      kStr += "  {" + endl
+      kStr += "    dstD = *(reinterpret_cast<%s **>(((char *)arg.D) + (8*batchIdx))) + batchOffsetD/sizeof(%s);%s" % (destTypeStr, destTypeStr, endl)
+      kStr += "    if(beta != (tensile_half)0)" + endl
+      kStr += "      srcC = *(reinterpret_cast<%s **>(((char *)arg.C) + (8*batchIdx))) + batchOffsetC/sizeof(%s);%s" % (destTypeStr, destTypeStr, endl)
+      kStr += "  }" + endl
+    kStr += "  float sum[NUM_ELEMENT_LOAD];" + endl
+    kStr += "#pragma unroll" + endl
+    kStr += "  for(int e = 0; e < NUM_ELEMENT_LOAD; e++)" + endl
+    kStr += "    sum[e] = 0.0f;" + endl
+    kStr += "  if(alpha != (tensile_half)0)" + endl
+    kStr += "  {" + endl
+    kStr += "    for(uint32_t g0 = 0; g0 < arg.gsu; g0 += NUM_GSU)" + endl
+    kStr += "    {" + endl
+    kStr += "      %s v[NUM_GSU];%s" % (wordType, endl)
+    kStr += "#pragma unroll" + endl
+    kStr += "      for(uint32_t u = 0; u < NUM_GSU; u++)" + endl
+    kStr += "        if(g0 + u < arg.gsu)" + endl
+    kStr += "          v[u] = *(%s const*)(arg.W + idW + (g0 + u) * strideW);%s" % (wordType, endl)
+    kStr += "#pragma unroll" + endl
+    kStr += "      for(uint32_t u = 0; u < NUM_GSU; u++)" + endl
+    kStr += "        if(g0 + u < arg.gsu)" + endl
+    kStr += "        {" + endl
+    kStr += "#pragma unroll" + endl
+    kStr += "          for(int e = 0; e < NUM_ELEMENT_LOAD; e++)" + endl
+    kStr += "          {" + endl
+    kStr += "            uint32_t w = %s;%s" % (word, endl)
+    kStr += "            if(g0 + u == 0)" + endl
+    kStr += "              sum[e] = (float)__builtin_bit_cast(tensile_half, (uint16_t)((e & 1) ? (w >> 16) : w));" + endl
+    kStr += "            else if(e & 1)" + endl
+    kStr += "              asm(\"v_fma_mix_f32 %0, %1, 1.0, %2 op_sel:[1,0,0] op_sel_hi:[1,1,0]\" : \"=v\"(sum[e]) : \"v\"(w), \"v\"(sum[e]));" + endl
+    kStr += "            else" + endl
+    kStr += "              asm(\"v_fma_mix_f32 %0, %1, 1.0, %2 op_sel_hi:[1,1,0]\" : \"=v\"(sum[e]) : \"v\"(w), \"v\"(sum[e]));" + endl
+    kStr += "          }" + endl
+    kStr += "        }" + endl
+    kStr += "    }" + endl
+    kStr += "  }" + endl
+    if dest.isAnyFloat8():
+      kStr += "  float res[NUM_ELEMENT_LOAD];" + endl
+    else:
+      kStr += "  uint16_t res[NUM_ELEMENT_LOAD];" + endl
+    kStr += "#pragma unroll" + endl
+    kStr += "  for(int e = 0; e < NUM_ELEMENT_LOAD; e++)" + endl
+    kStr += "  {" + endl
+    kStr += "    tensile_half acc = (tensile_half)sum[e];" + endl
+    if dest.isBFloat16():
+      kStr += "    float r = (float)alpha * (float)acc;" + endl
+      kStr += "    if(beta != (tensile_half)0)" + endl
+      kStr += "      r = __builtin_fmaf((float)beta, (float)srcC[idxC + e], r);" + endl
+      kStr += "    uint32_t u = __builtin_bit_cast(uint32_t, r);" + endl
+      kStr += "    res[e] = __builtin_isnan(r) ? 0x7fff : (uint16_t)((u + 0x7fff + ((u >> 16) & 1)) >> 16);" + endl
+    else:
+      kStr += "    tensile_half r = alpha * acc;" + endl
+      kStr += "    if(beta != (tensile_half)0)" + endl
+      kStr += "      r = __builtin_fmaf16((tensile_half)(float)srcC[idxC + e], beta, r);" + endl
+      if dest.isHalf():
+        kStr += "    res[e] = __builtin_bit_cast(uint16_t, r);" + endl
+      else:
+        kStr += "    float f = (float)r;" + endl
+        kStr += "    if(!__builtin_isnan(f))" + endl
+        kStr += "      f = __builtin_amdgcn_fmed3f(f, -448.0f, 448.0f);" + endl
+        kStr += "    res[e] = f;" + endl
+    kStr += "  }" + endl
+    # D may be unaligned (ldd, batch pointers): one store of NUM_ELEMENT_LOAD outputs only on an aligned address
+    if dest.isAnyFloat8():
+      scalarStore = "((uint8_t*)dstD)[idxD + e] = (uint8_t)__builtin_amdgcn_cvt_pk_fp8_f32(res[e], res[e], 0, false);"
+      if vw == 8:
+        vecStore = ["f16acc_u32x2 p;",
+                    "p.x = (uint32_t)__builtin_amdgcn_cvt_pk_fp8_f32(res[0], res[1], 0, false);",
+                    "p.x = (uint32_t)__builtin_amdgcn_cvt_pk_fp8_f32(res[2], res[3], (int)p.x, true);",
+                    "p.y = (uint32_t)__builtin_amdgcn_cvt_pk_fp8_f32(res[4], res[5], 0, false);",
+                    "p.y = (uint32_t)__builtin_amdgcn_cvt_pk_fp8_f32(res[6], res[7], (int)p.y, true);",
+                    "*(f16acc_u32x2*)((uint8_t*)dstD + idxD) = p;"]
+      elif vw == 4:
+        vecStore = ["uint32_t p = (uint32_t)__builtin_amdgcn_cvt_pk_fp8_f32(res[0], res[1], 0, false);",
+                    "p = (uint32_t)__builtin_amdgcn_cvt_pk_fp8_f32(res[2], res[3], (int)p, true);",
+                    "*(uint32_t*)((uint8_t*)dstD + idxD) = p;"]
+      elif vw == 2:
+        vecStore = ["*(uint16_t*)((uint8_t*)dstD + idxD) = (uint16_t)__builtin_amdgcn_cvt_pk_fp8_f32(res[0], res[1], 0, false);"]
+      else:
+        vecStore = []
+      elemBytes = 1
+    else:
+      scalarStore = "((uint16_t*)dstD)[idxD + e] = res[e];"
+      if vw == 8:
+        vecStore = ["f16acc_u32x4 p;", "p.x = res[0] | ((uint32_t)res[1] << 16);", "p.y = res[2] | ((uint32_t)res[3] << 16);",
+                    "p.z = res[4] | ((uint32_t)res[5] << 16);", "p.w = res[6] | ((uint32_t)res[7] << 16);",
+                    "*(f16acc_u32x4*)((uint16_t*)dstD + idxD) = p;"]
+      elif vw == 4:
+        vecStore = ["f16acc_u32x2 p;", "p.x = res[0] | ((uint32_t)res[1] << 16);", "p.y = res[2] | ((uint32_t)res[3] << 16);",
+                    "*(f16acc_u32x2*)((uint16_t*)dstD + idxD) = p;"]
+      elif vw == 2:
+        vecStore = ["*(uint32_t*)((uint16_t*)dstD + idxD) = res[0] | ((uint32_t)res[1] << 16);"]
+      else:
+        vecStore = []
+      elemBytes = 2
+    if vecStore:
+      kStr += "  if((((uintptr_t)dstD + idxD * %d) & %d) == 0)%s" % (elemBytes, vw * elemBytes - 1, endl)
+      kStr += "  {" + endl
+      for l in vecStore:
+        kStr += "    " + l + endl
+      kStr += "  }" + endl
+      kStr += "  else" + endl
+    kStr += "  {" + endl
+    kStr += "#pragma unroll" + endl
+    kStr += "    for(int e = 0; e < NUM_ELEMENT_LOAD; e++)" + endl
+    kStr += "      " + scalarStore + endl
+    kStr += "  }" + endl
+    return kStr
+
 
   @staticmethod
   def kernelName(solution, num_elements_load, btype=None, gateType=None):
@@ -929,6 +1078,8 @@ class KernelWriterConversion(KernelWriterBase):
     # add input datatype into kernel name (the datatype of workspace)
     inputTypeStr = DataType("I").toChar() if state["ProblemType"]["DataType"].isInt8() or state["ProblemType"]["DataType"].isInt32() else \
                                   (DataType("D").toChar() if state["ProblemType"]["DataType"].isDouble() else DataType("S").toChar())
+    if isF16Accumulation(state["ProblemType"]):
+      inputTypeStr = DataType("H").toChar()
 
     name += (inputTypeStr + state["ProblemType"]["DestDataType"].toChar())
 
