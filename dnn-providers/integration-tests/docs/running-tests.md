@@ -494,7 +494,8 @@ crash.
 The binary, `--test-article`, `--test-engine` and `--test-config` are flags of the
 driver and are passed through; `--binary-arg` adds any other binary flag. Other flags:
 `--work-dir`, `--batch-size` (samples per binary invocation), `--spaces-dir` and
-`--summary`.
+`--summary`; `--pairwise`, `--pairwise-repair` and `--generate-only` are described under
+[Pairwise runs](#pairwise-runs---pairwise).
 
 **Continuous mode.** With `--time-budget` and no `--samples`, or with `--samples 0`,
 nothing is pre-built: each batch draws fresh random samples (new seeds, round-robin
@@ -583,8 +584,9 @@ simpler value kept the outcome, `shrunk/` holds the original sample and `axes_ch
 **Outputs** under `--work-dir`: `bundles/` (what the binary was given), `outcomes.jsonl`,
 `samples.jsonl`, `summary.json` (counts per outcome for each engine and space, decline
 and unexercised reasons, findings), `reports/` and `logs/` (one per binary invocation),
-`failures/<case>/` for each `WRONG` and `CRASH` (with `shrunk/` under `--shrink`) and
-`shrink/<case>/` (the candidate runs of a shrink). The exit status is non-zero if any
+`failures/<case>/` for each `WRONG` and `CRASH` (with `shrunk/` under `--shrink`),
+`shrink/<case>/` (the candidate runs of a shrink) and, for a [pairwise run](#pairwise-runs---pairwise),
+`pairwise/<Op>_<Space>.json`. The exit status is non-zero if any
 sample is `WRONG` or `CRASH`; `UNEXERCISED` samples are listed with their reasons and
 never count as green. A run whose samples are all `DECLINED` or `UNEXERCISED` has not
 tested the engine.
@@ -631,6 +633,135 @@ An engine that does not log a kernel (HIP_MLOPS) shows all its executed cases as
 `hipkernel:Gfx*Attention*` engine means the engine's `kernel:` line is missing. The record of
 each case in `outcomes.jsonl` carries its `kernels`, so a feature value's PASS count (see
 `axis_outcomes`) can be read against the kernel that ran.
+
+### Pairwise runs (`--pairwise`)
+
+A random run meets some pairs of axis values and misses others, and says nothing about which. A
+**pairwise** run runs, per space, a small covering set in which **every value of every axis meets
+every value of every other axis** in at least one legal row (RFC 0023 section 6). A **pair**, or
+tuple, is one value of one axis together with one value of another.
+
+```bash
+# run the covering sets of two SDPA forward spaces (the seed is the generator's; printed if random)
+python3 dnn-providers/integration-tests/gauntlet/run_gauntlet_fuzz.py \
+    --binary build/bin/hipdnn_integration_tests --test-article <plugin> \
+    --test-engine ASM_SDPA_ENGINE --test-config <its TOML> \
+    --pairwise --seed 7 --filter '^SdpaFwd/Default$' --work-dir gauntlet-runs/pw_fwd
+# write the same rows as sweeps and reports, running nothing (no binary needed)
+python3 .../run_gauntlet_fuzz.py --pairwise --generate-only --seed 7 \
+    --filter '^SdpaFwd/' --work-dir gauntlet-runs/pw_sweeps
+# the pair coverage of an earlier random run, by the same levels
+python3 .../run_gauntlet_fuzz.py --coverage-of gauntlet-runs/random \
+    --levels-from gauntlet-runs/pw_fwd/pairwise --first 190
+```
+
+| Flag | Meaning |
+|---|---|
+| `--pairwise` | Run every row of each selected space's covering set instead of drawing samples. `--seed` is the generator's seed (random and printed if absent; the same seed gives the same rows); `--data-seed` fixes the data seed of every row. `--samples` and `--row` are usage errors with it (`HIPDNN_FUZZ_SAMPLES` is ignored), and `--time-budget` still ends the run. |
+| `--pairwise-repair N` | After the rows, up to `N` rounds of repair rows (default 2; `0` is off), see below. |
+| `--generate-only` | With `--pairwise`: write each space's full row set and its report, run no binary. `--binary` and the engine flags are not needed. |
+| `--coverage-of DIR` `--levels-from PATH` `--first N` | Offline coverage of a finished run, see below. |
+
+**Levels.** The driver cannot meet every integer of a `range` axis. A `values` axis has its values
+(duplicates, such as the three `none` entries of a weighted list, count once). A `range` axis has
+its declared `boundaries` inside the range plus **one interior value**, drawn from the seed
+strictly between the lowest and the highest boundary and equal to none of them. The ends of the
+range are levels only if they are declared boundaries; a range with no room has no interior level.
+Other interior values stay with random runs. `late` axes are levels like any other.
+
+**Live values.** A value that changes nothing is not met: `wl` while `window` is `none`,
+`heads_d128` while `d` is 64, `under` placement at alignment 1 (it renders as `exact`) and the like.
+A value is **live** in a row when some other level of its axis gives a legal row whose rendered
+case differs (the graph values, tensor patches, added tensors, node patches, input recipes,
+validator and placement; the id, notes and seeds do not count). A pair counts as covered by a row
+only if both values are live in it.
+
+**Pairs no row covers are proven, not dropped.** Each one is reported as
+
+| Kind | Meaning |
+|---|---|
+| `illegal` | no legal row holds both values (a constraint forbids the pair) |
+| `dead` | legal rows hold both, but in each of them at least one of the two is inert (the pair can never be met live) |
+| `unproven` | the exhaustive search for a covering row passed its cap before it decided; the pair is never counted as covered |
+
+with the reason in the report. `unproven` is empty for the four SDPA forward spaces
+(`SdpaFwd/Default`, `SdpaFwd/Flash2Region`, `SdpaFwd/Gfx950Dense`, `SdpaFwd/Flash2`), where the
+generator's tests prove every `illegal` and `dead` pair by an independent search and show that
+every other pair is covered. The generator runs on every space, but the other spaces are not
+tested for completeness: a space with many axes tied together by constraints (the two Gfx1151
+spaces, which are not run on a device either) may report `unproven` pairs.
+
+**Rows.** A row is an explicit row: id `pw<k>` (`k` counts from 0 over the main rows and the repair
+rows of the space), `metadata.generator` `gauntlet-pairwise`, the pairwise seed in `notes`
+([`file-formats.md`](file-formats.md), metadata sidecar), data seed derived from (space, seed,
+`k`) unless `--data-seed` is given. Batches, crash isolation, the failure folders, `--shrink` and
+the summary work as for any run. A failure folder has `row.json` and a `replay.sh` that calls
+`--row`, which runs the row under the same GTest name; `repro.json` carries the row and no shape
+seed.
+
+**Repair (`--pairwise-repair N`).** An engine declines many rows of a space (an unsupported
+window, head size or alignment), and a pair that only declining rows drew has tested nothing.
+After the main rows, each round takes the **targets**: the pairs every row that drew them ended
+`DECLINED` or `UNEXERCISED`. It builds new rows for them, from the construction and liveness of
+the generator, using **only the levels that passed**: per axis, the values held by some `PASS` or
+`UNCLAIMED_PASS` row of the run. A target with a value outside them is not retried (the report
+lists it as `never_passed`); a target no row of those levels can cover live is `unreachable` (listed
+with the reason, not tried again). A target an earlier round retried that still did not pass is
+given a row of its own, and the other rows avoid holding it, so a pair that always declines does
+not drag the others down with it. Repair runs up to `N` rounds, and stops when a round builds no
+row. The repair rows are `pw<k>` after the main rows and run through the same batches.
+
+**Report.** `<work-dir>/pairwise/<Op>_<Space>.json`: `levels` (axis to level values),
+`tuples_total`, `rows` (the number of main rows), `lower_bound` (the largest product of two axes'
+level counts: no covering set is smaller), `illegal`, `dead` and `unproven` (each a list of
+`{"pair": [[axisA, valueA], [axisB, valueB]], "detail"}`), `repair` (`max_rounds`, `rows`, one entry
+per round with `targets`, `retried`, `never_passed`, `unreachable`, `rows`, `first_row`, and the
+`never_passed` pairs of the last round) and `timings` of the generator (`total_s`,
+`exhaustive_s`, `exhaustive_searches`, `renders`). It is written when the rows are built and
+again at the end.
+
+**`summary.json`.** A pairwise run has `"mode": "pairwise"` (`"random"` and `"row"` otherwise),
+`seed` (the generator seed), no `samples_per_space`, `"continuous": false`, and
+`stopped_because` `pairwise-complete` when every row and repair round ran (or `time-budget`,
+`interrupted`). `pair_coverage[<space id>]` has:
+
+| Field | Meaning |
+|---|---|
+| `tuples` | every pair of levels |
+| `illegal`, `dead`, `unproven` | the counts above |
+| `drawn` | pairs some sample drew: both values are levels and live in its row (a `range` axis holding a value that is no level draws none) |
+| `passed` | drawn by a `PASS` or `UNCLAIMED_PASS` sample |
+| `declined_only` | drawn, and every sample that drew it was `DECLINED` |
+| `never_passed` | drawn and not passed (`declined_only`, and pairs a `WRONG`, `CRASH` or `UNEXERCISED` sample drew) |
+| `not_passed_total`, `not_passed` | the pairs that could still be passed (everything not passed except the `illegal`, `dead` and `unproven` ones), and the first 50 of them as `[[axisA, valueA], [axisB, valueB]]` |
+| `rows`, `repair_rows` | main rows and repair rows run |
+| `complete` | `false` when the run stopped before every row and repair round ran; the counts are then partial |
+
+For a complete run, `drawn == tuples - illegal - dead - unproven`; `passed / tuples` is the number
+to read, with `not_passed` saying what is missing. It is counted from every axis value of every
+row (`range` axes included) and never from a shrink candidate. The console report prints one line
+per space.
+
+**`--generate-only`.** Writes `<work-dir>/bundles/gauntlet/<Op>/<Space>/<tag>_cases/sweep.json`
+(one per dtype tag, as a run writes them, with `graph.template.json`) holding **all** rows of
+each space, however many there are, and the pairwise reports; nothing is run and no repair rows
+exist. Only the selected spaces' own earlier sweeps are replaced. The sweeps are for reading or for
+running with `--golden-data-dir`; they are not part of any CI tier (that needs claims and a tier
+placement, a separate decision).
+
+**Offline coverage of an earlier run.** `--coverage-of WORK_DIR --levels-from PATH [--first N]`
+prints, as JSON, the pair coverage of the `samples.jsonl` and `outcomes.jsonl` of `WORK_DIR`
+(typically a random run) against the levels, and the `illegal`/`dead`/`unproven` pairs, of
+`PATH`: a pairwise report or a directory of them (`<work-dir>/pairwise`). Per space of a report it
+gives the `pair_coverage` fields above (without `rows`, `repair_rows` and `complete`) and
+`samples` and `with_outcome` (the samples counted and those with an outcome record). `--first N`
+counts only the first `N` samples of each space, so a random run of the same size as a pairwise run
+can be compared with it. The same is `run_gauntlet_fuzz.coverage_of(work_dir, levels_from,
+first=None, spaces_dir=None)`. Random runs have no `pair_coverage` of their own.
+
+**What is tested.** The generator, the driver's pairwise path and the coverage are tested
+(`test_gauntlet.py`, stub binary, no GPU). That every pair is covered or proven impossible is
+tested for the SDPA forward spaces only; the other spaces get a generator run and nothing more.
 
 ### Reading an alignment or placement probe
 

@@ -325,6 +325,15 @@ A bundle without its metadata is an error. These fields are required:
   requires them. They show a reviewer where the graph and its expected values
   came from.
 
+A case the gauntlet driver writes names its generator and where its axis values came from in the
+provenance fields: `generator` is `gauntlet-fuzz` for a drawn sample or a
+[`--row`](running-tests.md#gauntlet-fuzz-runs) one, and **`gauntlet-pairwise`** for a row of a
+[pairwise run](running-tests.md#pairwise-runs---pairwise) (`--pairwise`, `--generate-only`). The
+`notes` of a pairwise case read `gauntlet-pairwise sample: space <Op>/<Space>, pairwise seed
+<seed>, row <k>, axes {…}` (a repair row says `repair round <r>, row <k>`), so the sweep itself
+records the generator seed that produced it, and the case `id` is `pw<k>`. `seed` is the data
+seed, derived from the space, the pairwise seed and `k`, or the one `--data-seed` gave.
+
 Generators can write extra keys (`config`, `input_range`, …). The harness ignores
 keys that it does not know.
 
