@@ -91,9 +91,9 @@ constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx942_attention_unified3d.
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx942_attention_unified3d.dispatch";
 
 // KMD fields (gfx942_attention_unified3d.kmd.json). The first five are the kernel's
-// feature cell and must equal the graph's; the last three are performance knobs the
-// scorer ranks on (block_size, num_segments) or the build resolved from them
-// (tile_size_override).
+// feature cell and must equal the graph's; the last four are performance knobs the
+// scorer ranks on (block_size, num_segments, kv_cache_policy) or the build resolved from
+// them (tile_size_override).
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
 constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
@@ -102,6 +102,7 @@ constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view TILE_SIZE_OVERRIDE_FIELD = "tile_size_override";
 constexpr std::string_view NUM_SEGMENTS_FIELD = "num_segments";
+constexpr std::string_view KV_CACHE_POLICY_FIELD = "kv_cache_policy";
 
 constexpr std::string_view Q_TOKEN = "gfx942_attention_unified3d.q.uid";
 constexpr std::string_view K_TOKEN = "gfx942_attention_unified3d.k.uid";
@@ -829,6 +830,7 @@ struct Unified3dTraits
     int64_t blockSize = 0;
     int64_t tileSize = 0;
     int64_t numSegments = 0;
+    Gfx942KvCachePolicy kvCachePolicy = Gfx942KvCachePolicy::STREAM;
 };
 
 /**
@@ -839,7 +841,8 @@ struct Unified3dTraits
  * `kv_block_size` values {16, 32, 64}; num_segments is positive (the grid's z extent and the
  * workspace's segment axis); tile_size_override is the tile rocKE resolves from
  * (head_size, block_size) on gfx942 (gfx942ResolvedTileSize), so a record whose recorded
- * tile disagrees -- a binary built for another tile than its fields say -- is declined.
+ * tile disagrees -- a binary built for another tile than its fields say -- is declined;
+ * kv_cache_policy is "stream" or "all".
  */
 std::optional<Unified3dTraits> candidateTraits(const KernelDefinition& kernel)
 {
@@ -852,14 +855,27 @@ std::optional<Unified3dTraits> candidateTraits(const KernelDefinition& kernel)
     const auto blockSize = integerMetadata(kernel, BLOCK_SIZE_FIELD);
     const auto tileSize = integerMetadata(kernel, TILE_SIZE_OVERRIDE_FIELD);
     const auto numSegments = integerMetadata(kernel, NUM_SEGMENTS_FIELD);
+    const auto kvCachePolicy = stringMetadata(kernel, KV_CACHE_POLICY_FIELD);
     if(!dtype || !headSize || !numQueryHeads || !numKvHeads || !slidingWindow || !blockSize
-       || !tileSize || !numSegments)
+       || !tileSize || !numSegments || !kvCachePolicy)
     {
         return std::nullopt;
     }
     if(*headSize <= 0 || *numQueryHeads <= 0 || *numKvHeads <= 0 || *numSegments <= 0
        || (*blockSize != 16 && *blockSize != 32 && *blockSize != 64)
        || *tileSize != gfx942ResolvedTileSize(*headSize, *blockSize))
+    {
+        return std::nullopt;
+    }
+    if(*kvCachePolicy == gfx942KvCachePolicyName(Gfx942KvCachePolicy::STREAM))
+    {
+        traits.kvCachePolicy = Gfx942KvCachePolicy::STREAM;
+    }
+    else if(*kvCachePolicy == gfx942KvCachePolicyName(Gfx942KvCachePolicy::ALL))
+    {
+        traits.kvCachePolicy = Gfx942KvCachePolicy::ALL;
+    }
+    else
     {
         return std::nullopt;
     }
@@ -945,10 +961,14 @@ constexpr double UNSUPPORTED_SCORE = 0.0;
  *  2. then num_segments nearest the count rocKE's split rule would pick for this graph at
  *     block 16 (gfx942SplitRuleSegments, with the live CU count, or rocKE's off-box 120
  *     when the device reports none);
- *  3. ties to the smaller num_segments, then the smaller block_size.
+ *  3. then the kv_cache_policy rocKE would pick for the graph's K/V size
+ *     (gfx942KvCachePolicy): it only breaks a tie between equal block sizes and segment
+ *     counts, whose effect is measured, never overrides them;
+ *  4. ties to the smaller num_segments, then the smaller block_size.
  *
- * Every (block_size, num_segments) pair gets a distinct score. rocKE's split rule is often
- * not the fastest choice; a tuned selection, not this scorer, is the place for that.
+ * Every (block_size, num_segments, kv_cache_policy) triple gets a distinct score. rocKE's
+ * split rule is often not the fastest choice; a tuned selection, not this scorer, is the
+ * place for that.
  */
 double scoreKernel(const MatchContext& context,
                    const BoundTokens& /*bound*/,
@@ -975,6 +995,12 @@ double scoreKernel(const MatchContext& context,
     constexpr int64_t SEGMENT_CAP = 255;
     const int64_t segments = std::min(traits->numSegments, SEGMENT_CAP);
     const int64_t distance = std::min<int64_t>(std::abs(segments - target), SEGMENT_CAP);
+    const int64_t policyMismatch
+        = traits->kvCachePolicy
+                  == gfx942KvCachePolicy(
+                      problem->batch, problem->numKvHeads, problem->headSize, problem->seqLenKv)
+              ? 0
+              : 1;
     int64_t blockRank = 2;
     if(traits->blockSize == 32)
     {
@@ -984,8 +1010,9 @@ double scoreKernel(const MatchContext& context,
     {
         blockRank = 1;
     }
-    // Lexicographic (distance, segments, blockRank); smaller is better.
-    const int64_t key = (distance * 256 + segments) * 4 + blockRank;
+    // Lexicographic (distance, policyMismatch, segments, blockRank); smaller is better.
+    // The largest key, ((255 * 2 + 1) * 256 + 255) * 4 + 3 = 524,287, is below KEY_SPAN.
+    const int64_t key = ((distance * 2 + policyMismatch) * 256 + segments) * 4 + blockRank;
     const double base = traits->blockSize == PREFERRED_BLOCK_SIZE ? BLOCK_16_FLOOR : 0.0;
     return base + (KEY_SPAN - static_cast<double>(key));
 }

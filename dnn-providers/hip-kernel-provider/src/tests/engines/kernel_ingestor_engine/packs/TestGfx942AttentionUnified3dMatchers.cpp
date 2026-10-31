@@ -458,13 +458,23 @@ TEST(TestGfx942AttentionUnified3dMatchers, KernelMatchDeclinesMalformedRecords)
     kernel = KernelSpec{};
     kernel.numSegments = 0;
     EXPECT_FALSE(kernelMatchesGraph(base(), kernel)) << "num_segments 0";
+    kernel = KernelSpec{};
+    kernel.kvCachePolicy = "nt";
+    EXPECT_FALSE(kernelMatchesGraph(base(), kernel)) << "kv_cache_policy neither stream nor all";
+    kernel = KernelSpec{};
+    kernel.kvCachePolicy = "all";
+    EXPECT_TRUE(kernelMatchesGraph(base(), kernel)) << "kv_cache_policy all";
 
-    auto definition = makeKernel(KernelSpec{});
-    definition.metadata.erase("num_segments");
     const auto graph = fixture(base());
     const auto bound = matchesGraph(PACK, graph.context());
     ASSERT_TRUE(bound.has_value());
-    EXPECT_FALSE(matchesKernel(PACK, graph.context(), definition, *bound)) << "missing field";
+    for(const char* field : {"num_segments", "kv_cache_policy"})
+    {
+        auto definition = makeKernel(KernelSpec{});
+        definition.metadata.erase(field);
+        EXPECT_FALSE(matchesKernel(PACK, graph.context(), definition, *bound))
+            << "missing " << field;
+    }
 }
 
 // The base cell (Hq 32, D128) puts 32 * 16 * 128 = 2^16 segm_output elements in each batch

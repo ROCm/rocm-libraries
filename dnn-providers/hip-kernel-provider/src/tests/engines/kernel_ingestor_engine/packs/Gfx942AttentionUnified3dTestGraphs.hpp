@@ -259,6 +259,7 @@ struct KernelSpec
     int64_t blockSize = 16;
     std::optional<int64_t> tileSizeOverride;
     int64_t numSegments = 16;
+    std::string kvCachePolicy = "stream";
     unsigned idByte = 0xa1;
 };
 
@@ -295,6 +296,7 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec
         {std::string("tile_size_override"),
          spec.tileSizeOverride.value_or(resolvedTile(spec.headSize, spec.blockSize))},
         {std::string("num_segments"), spec.numSegments},
+        {std::string("kv_cache_policy"), spec.kvCachePolicy},
     };
     return kernel;
 }

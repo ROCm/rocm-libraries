@@ -158,7 +158,7 @@ TEST(TestGfx942AttentionUnified3dScorer, NeverRemovesAnAdmittedKernel)
     }
 }
 
-TEST(TestGfx942AttentionUnified3dScorer, GivesEveryKnobPairADistinctScore)
+TEST(TestGfx942AttentionUnified3dScorer, GivesEveryKnobTripleADistinctScore)
 {
     const auto graph = GraphSpec{};
     std::vector<double> scores;
@@ -166,11 +166,51 @@ TEST(TestGfx942AttentionUnified3dScorer, GivesEveryKnobPairADistinctScore)
     {
         for(const int64_t segments : SHIPPED_SEGMENTS)
         {
-            scores.push_back(score(graph, kernelWith(block, segments)));
+            for(const char* policy : {"stream", "all"})
+            {
+                auto kernel = kernelWith(block, segments);
+                kernel.kvCachePolicy = policy;
+                scores.push_back(score(graph, kernel));
+            }
         }
     }
     std::sort(scores.begin(), scores.end());
     EXPECT_EQ(std::adjacent_find(scores.begin(), scores.end()), scores.end());
+}
+
+KernelSpec withPolicy(int64_t segments, const char* policy)
+{
+    auto kernel = kernelWith(16, segments);
+    kernel.kvCachePolicy = policy;
+    return kernel;
+}
+
+// rocKE's K/V-size rule breaks the tie between two kernels equal in block and segments:
+// the default graph's K/V is 2 * 4 * 512 * 8 * 128 * 2 B = 8 MiB (fits, "all"); at batch 64
+// and Skv 32768 it is 8 GiB (past the 256 MiB last-level cache, "stream").
+TEST(TestGfx942AttentionUnified3dScorer, BreaksAKnobTieWithRocKesCachePolicy)
+{
+    const auto small = GraphSpec{};
+    const int64_t smallTarget = splitRule(small, 304);
+    EXPECT_GT(score(small, withPolicy(smallTarget, "all")),
+              score(small, withPolicy(smallTarget, "stream")));
+
+    GraphSpec large;
+    large.batch = 64;
+    large.seqLenKv = 32768;
+    const int64_t largeTarget = splitRule(large, 304);
+    EXPECT_GT(score(large, withPolicy(largeTarget, "stream")),
+              score(large, withPolicy(largeTarget, "all")));
+}
+
+// The policy only breaks ties: the segment count nearest the split rule wins whatever its
+// policy. The default graph takes the decode rule, 4 * 304 // (4 * 8) = 38.
+TEST(TestGfx942AttentionUnified3dScorer, CachePolicyNeverOverridesTheSegmentCount)
+{
+    const auto graph = GraphSpec{};
+    ASSERT_EQ(splitRule(graph, 304), 38);
+    EXPECT_GT(score(graph, withPolicy(38, "stream")), score(graph, withPolicy(57, "all")));
+    EXPECT_GT(score(graph, withPolicy(38, "stream")), score(graph, withPolicy(32, "all")));
 }
 
 } // namespace

@@ -94,6 +94,26 @@ TEST(TestGfx942AttentionUnified3dGeometry, WorkspaceCountsTheCuSeqlensTail)
     EXPECT_EQ(w.totalBytes, 34560);
 }
 
+// _kv_cache_policy_3d: "stream" iff 2 * B * Skv * Hkv * D * 2 bytes > 256 MiB.
+//   B=8,  Skv=8192, Hkv=8, D=128: 268,435,456 B = 256 MiB exactly, not above: "all".
+//   B=9:                          301,989,888 B:                         "stream".
+//   B=32:                         1 GiB:                                 "stream".
+//   B=4,  Skv=512:                8 MiB:                                 "all".
+TEST(TestGfx942AttentionUnified3dGeometry, KvCachePolicyFollowsTheLastLevelCacheSize)
+{
+    EXPECT_EQ(gfx942KvCachePolicy(8, 8, 128, 8192), Gfx942KvCachePolicy::ALL);
+    EXPECT_EQ(gfx942KvCachePolicy(9, 8, 128, 8192), Gfx942KvCachePolicy::STREAM);
+    EXPECT_EQ(gfx942KvCachePolicy(32, 8, 128, 8192), Gfx942KvCachePolicy::STREAM);
+    EXPECT_EQ(gfx942KvCachePolicy(4, 8, 128, 512), Gfx942KvCachePolicy::ALL);
+    EXPECT_EQ(gfx942KvCachePolicy(1, 1, 64, 0), Gfx942KvCachePolicy::ALL);
+    // A byte count past int64 is far past the cache.
+    EXPECT_EQ(gfx942KvCachePolicy(std::numeric_limits<int64_t>::max(), 8, 128, 8192),
+              Gfx942KvCachePolicy::STREAM);
+    EXPECT_EQ(gfx942KvCachePolicyName(Gfx942KvCachePolicy::STREAM), "stream");
+    EXPECT_EQ(gfx942KvCachePolicyName(Gfx942KvCachePolicy::ALL), "all");
+    EXPECT_THROW(gfx942KvCachePolicy(0, 8, 128, 8192), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
 // _gfx942_3d_tile_size_override: block_size // 2 iff head_size >= 128 and
 // block_size >= 32, else None (one block per tile).
 TEST(TestGfx942AttentionUnified3dGeometry, TileOverrideTable)
