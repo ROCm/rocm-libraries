@@ -585,7 +585,9 @@ class _Builder:
 
     def fill(self, fixed, rng):
         """A row with the axes of ``fixed`` (position -> level) set and every other axis put, in
-        a random order, at the level that covers most uncovered tuples with the axes set so far.
+        a random order, at the level that covers most uncovered tuples with the axes set so far
+        (fewest tuples to avoid first: when every allowed level of an axis holds one, the gain of
+        the best is negative, and it is still the level taken). Every axis needs an allowed level.
         """
         row = [-1] * self.n
         for p, level in fixed.items():
@@ -596,7 +598,7 @@ class _Builder:
         unc = self.uncovered
         avoid = self.avoid if self.has_avoid else None
         for x in order:
-            best, ties = -1, []
+            best, ties = None, []
             slots = [(self.slot[x][y], row[y]) for y in placed]
             for level in self.allowed[x]:
                 gain = 0
@@ -607,7 +609,7 @@ class _Builder:
                     for (start, step_x, step_y), ly in slots:
                         at = start + level * step_x + ly * step_y
                         gain += unc[at] - (self.n + 1) * avoid[at]
-                if gain > best:
+                if best is None or gain > best:
                     best, ties = gain, [level]
                 elif gain == best:
                     ties.append(level)
@@ -1193,7 +1195,7 @@ class Repair:
     """The result of ``repair``: ``rows`` (axis-value dicts), ``retried`` (the targets a row was
     built for), ``never_passed`` (targets not retried because a value of theirs is no level in
     ``allowed``), the ``unreachable`` findings (retried targets no row of the allowed levels
-    covers) and ``timings``."""
+    covers, all of them when ``allowed`` has no level for some axis) and ``timings``."""
 
     def __init__(self, space, seed, round_number):
         self.space_id = space.space_id
@@ -1249,11 +1251,6 @@ def repair(
     result.retried = retry
     if not retry:
         return result
-    if any(not allowed.get(name) for name in space.axes):
-        result.unreachable = [
-            Finding(pair, "an axis has no level that passed") for pair in retry
-        ]
-        return result
     stubborn_keys = {_pair_key(p) for p in stubborn}
     fresh = [p for p in retry if _pair_key(p) not in stubborn_keys]
     isolated = [p for p in retry if _pair_key(p) in stubborn_keys]
@@ -1269,6 +1266,13 @@ def repair(
         seed_prefix=f"gauntlet-pairwise-repair:{space.space_id}:{seed}:{round_number}",
         witness=witness,
     )
+    barred = [name for p, name in enumerate(b.names) if not b.allowed[p]]
+    if (
+        barred
+    ):  # a row has a value on every axis: with no level to give one, no row exists
+        detail = "no level of " + ", ".join(f"'{name}'" for name in barred) + " passed"
+        result.unreachable = [Finding(pair, detail) for pair in retry]
+        return result
 
     def cover(cursor):
         x, y, lx, ly = b.decode(cursor)

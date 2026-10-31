@@ -6171,3 +6171,93 @@ def test_a_target_only_the_declined_level_can_cover_is_unreachable_not_retried(
     assert "a != 2 or b == 'x' or c == 'q'" in unreachable[target]
     assert result.rows == [] and result.never_passed  # the c = q tuples are not retried
     assert all(("c", "q") in pair for pair in result.never_passed)
+
+
+def test_a_repair_round_that_must_hold_a_tuple_it_avoids_still_builds_its_rows(
+    run, tmp_path
+):
+    # bug caught: round 2 avoids the tuples round 1 retried without success; a row whose every
+    # allowed level of some axis holds one of them scored below the -1 the level search started
+    # from, chose no level and the whole run died with "Cannot choose from an empty sequence"
+    spaces = _pw_spaces(tmp_path)
+    run.control(
+        match=[
+            _when("declined", ("values.a", "==", 1), ("values.dtype", "==", "half")),
+            _when(
+                "declined",
+                ("values.mode", "==", "p"),
+                ("values.a", "==", 3),
+                ("values.dtype", "==", "half"),
+            ),
+        ]
+    )
+    assert _pw_run(run, spaces, "--pairwise-repair", "2", seed=2) == 0
+    assert run.summary["stopped_because"] == "pairwise-complete"
+    cov = run.summary["pair_coverage"]["Toy/Default"]
+    assert cov["complete"] is True
+    report = _pw_report(run.work)
+    samples = _pw_samples(run)
+    rounds = report["repair"]["rounds"]
+    assert [r["round"] for r in rounds] == [1, 2] and rounds[1]["retried"] > 0
+    for r in rounds:
+        # every target is retried or never passed; an unreachable one was retried
+        assert r["targets"] == r["retried"] + r["never_passed"]
+        assert r["unreachable"] <= r["retried"] and r["rows"] > 0
+    assert rounds[0]["first_row"] == report["rows"]
+    assert rounds[1]["first_row"] == report["rows"] + rounds[0]["rows"]
+    assert report["repair"]["rows"] == sum(r["rows"] for r in rounds)
+    assert len(samples) == report["rows"] + report["repair"]["rows"]
+    assert cov["repair_rows"] == report["repair"]["rows"]
+    assert len(run.outcome_list) == len(samples)
+
+
+def test_repair_rows_of_a_level_every_other_level_avoids_are_built_not_lost(tmp_path):
+    # bug caught: the same crash as above, found by calling repair directly: `a` may only be 3
+    # (the one level that passed) and the stubborn tuple (dtype half, a 3) is held by every row
+    # of it, so a row for (dtype half, mode p) cannot avoid it
+    sp = space_lib.load_space(write_space(tmp_path, **PW_TOY))
+    built = pairwise.build(sp, 3)
+    allowed = {name: list(levels) for name, levels in built.levels.items()}
+    allowed["a"] = [3]
+    target = (("dtype", "half"), ("mode", "p"))
+    stubborn = (("dtype", "half"), ("a", 3))
+    result = pairwise.repair(
+        sp, 3, [target, stubborn], allowed, round_number=2,
+        stubborn=[stubborn], liveness=built.liveness,
+    )  # fmt: skip
+    assert result.unreachable == [] and result.never_passed == []
+    assert result.rows and all(row["a"] == 3 for row in result.rows)
+    covered = _covered(sp, built.levels, result.rows)
+    assert _tuple_key("dtype", "half", "mode", "p") in covered
+    assert _tuple_key("dtype", "half", "a", 3) in covered  # its own row
+
+
+def test_repair_with_no_allowed_level_for_an_axis_retries_nothing_and_says_why(
+    tmp_path,
+):
+    # bug caught: an axis whose allowed set is empty (no level of it ever passed) with targets
+    # that do not mention it, which asked the level search for a level of that axis
+    sp = space_lib.load_space(write_space(tmp_path, **PW_TOY))
+    built = pairwise.build(sp, 3)
+    allowed = {name: list(levels) for name, levels in built.levels.items()}
+    allowed["mode"] = []
+    with_mode = (("a", 1), ("mode", "p"))
+    without_mode = (("dtype", "half"), ("a", 2))
+    result = pairwise.repair(
+        sp, 3, [with_mode, without_mode], allowed, round_number=1,
+        liveness=built.liveness,
+    )  # fmt: skip
+    assert result.rows == []
+    assert result.never_passed == [with_mode]  # needs a level of mode: never passed
+    assert result.retried == [without_mode]
+    assert [(f.pair, "'mode'" in f.detail) for f in result.unreachable] == [
+        (without_mode, True)
+    ]
+    # an axis left out of the map has no allowed level either
+    del allowed["mode"]
+    again = pairwise.repair(
+        sp, 3, [with_mode, without_mode], allowed, round_number=1,
+        liveness=built.liveness,
+    )  # fmt: skip
+    assert again.rows == [] and again.never_passed == [with_mode]
+    assert [f.pair for f in again.unreachable] == [without_mode]
