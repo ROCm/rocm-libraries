@@ -16,9 +16,9 @@ overflow is reported through the rejection path instead:
                                raises, unless ForceGenerateKernel=1
       -> checkResources        at the end of codegen, sets overflowedResources = 1
                                for VGPRs allocated during generation (and for a
-                               static overflow kept by ForceGenerateKernel=1);
-                               _getKernelSource then raises, unless
-                               ForceGenerateKernel=1
+                               static overflow kept by ForceGenerateKernel=1) and
+                               raises, unless ForceGenerateKernel=1, in which case
+                               _getKernelSource saves the source with a warning
 
 so an oversized kernel is still rejected by default and is only allowed
 through when the user explicitly asked for it.
@@ -218,13 +218,15 @@ class TestForceGenerateKernel:
         # SimpleNamespace standing in for a real writer must carry what that path
         # reads: the arg-registration hook, the kernel name and the collected arg
         # definitions. A real KernelWriter always has all three.
-        # It also runs the static VGPR check right after _initKernel (the real method,
-        # bound below); the static allocation here fits, so the overflow is only found
-        # by the end-of-codegen check, as for a kernel that overflows during generation.
+        # It also runs the static VGPR check and the overflowedResources stop right after
+        # _initKernel (the real methods, bound below); the static allocation here fits and
+        # no code is set, so the overflow is only found by the end-of-codegen check, as for
+        # a kernel that overflows during generation.
         writer = SimpleNamespace(
             _initKernel=lambda kernel, tPA, tPB: None,
             _registerKernelArgs=lambda kernel: None,
-            states=SimpleNamespace(kernelName="test_kernel", regCaps={"MaxVgpr": 256}),
+            states=SimpleNamespace(kernelName="test_kernel", regCaps={"MaxVgpr": 256},
+                                   overflowedResources=0),
             vgprPool=SimpleNamespace(size=lambda: 128),
             kernelArgDefs=[],
             stringIdx=0,
@@ -233,6 +235,8 @@ class TestForceGenerateKernel:
             debugConfig=SimpleNamespace(forceGenerateKernel=forceGenerateKernel),
         )
         writer._rejectStaticVgprOverflow = lambda kernel: KernelWriter._rejectStaticVgprOverflow(
+            writer, kernel)
+        writer.stopOnOverflowedResources = lambda kernel: KernelWriter.stopOnOverflowedResources(
             writer, kernel)
         return writer
 

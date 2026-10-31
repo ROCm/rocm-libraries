@@ -411,7 +411,7 @@ class KernelWriterAssembly(KernelWriter):
       "largest store-neutral K is %u but this kernel needs %u"
       % (withheld, batches, batchesWithout, neutralKTiles * kernel["DepthU"],
          self.rapResidentKTiles(kernel) * kernel["DepthU"]))
-    self.states.overflowedResources = 9
+    self.setOverflowedResources(kernel, 9)
 
   def rapNullTdmDescriptorForEvenWaves(self, kernel, groupSgprName) -> Module:
     """Stop this wave's next tensor_load_to_lds if it is the one carrying A.
@@ -789,6 +789,7 @@ class KernelWriterAssembly(KernelWriter):
       self.states.overflowedResources = 2
       if self.db["AssertOnSgprOverflow"]:
         raise e
+      self.stopOnOverflowedResources(self.states.kernel)
 
     tmpSgpr = allocTmpGpr(self.sgprPool, num, self.states.regCaps["MaxSgpr"], alignment, tag, overflowListener)
     return tmpSgpr
@@ -798,6 +799,7 @@ class KernelWriterAssembly(KernelWriter):
       self.states.overflowedResources = 2
       if self.db["AssertOnSgprOverflow"]:
         raise e
+      self.stopOnOverflowedResources(self.states.kernel)
 
     tmpSgpr = allocTmpGprList(self.sgprPool, nums, self.states.regCaps["MaxSgpr"], alignments, tag, overflowListener)
     return tmpSgpr
@@ -2366,6 +2368,7 @@ class KernelWriterAssembly(KernelWriter):
     self.vgprPool.checkFinalState()
 
     if self.states.overflowedResources:
+      self.stopOnOverflowedResources(kernel)
       mkb.body.add(ValueEndif("overflowed resources"))
       self.printRejectionReason(kernel)
       mkb.body.add(SEndpgm(comment="overflowed resources"), 0)
@@ -17147,7 +17150,7 @@ class KernelWriterAssembly(KernelWriter):
         # It might be possible to fix globalWriteBatch to handle this case but these
         # are likely to be low-performing so likely not worth optimizing.
         print2("WARNING: half requires at least two elements per batch")
-        self.states.overflowedResources = 3
+        self.setOverflowedResources(kernel, 3)
 
     assert numElementsPerBatch > 0, "numElementsPerBatch=0 for %s"%self.states.kernelName
 
@@ -21292,7 +21295,7 @@ class KernelWriterAssembly(KernelWriter):
     # common multiple of either, so normalizing everything by LdsOffsetA_Blk would
     # land the second group inside the first group's allocation. Refuse instead.
     if self._dcpDivergent(kernel):
-      self.states.overflowedResources = 12
+      self.setOverflowedResources(kernel, 12)
       return mod
     for blk in range(self.states.numLDSBlk - 1, 0, -1):
       inBuffer0 = Label(self.labels.getNameInc("TdmTailDescriptorInBuffer0"), "")

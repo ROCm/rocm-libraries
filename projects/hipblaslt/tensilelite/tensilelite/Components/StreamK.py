@@ -1695,7 +1695,7 @@ class StreamK(TileProcessingStrategy):
                 # are likely to be low-performing so likely not worth optimizing.
                 if shrinkDb:
                     print("WARNING: half requires at least two elements per batch")
-                writer.states.overflowedResources = 3
+                writer.setOverflowedResources(kernel, 3)
         #elif kernel["ProblemType"]["DataType"].is8bitFloat():
         #    if numElementsPerBatch > 1:
         #        numElementsPerBatch = int(numElementsPerBatch/4)*4
@@ -2342,7 +2342,7 @@ class StreamK(TileProcessingStrategy):
                     # are likely to be low-performing so likely not worth optimizing.
                     if shrinkDb:
                         print("WARNING: half requires at least two elements per batch")
-                    writer.states.overflowedResources = 3
+                    writer.setOverflowedResources(kernel, 3)
             #elif kernel["ProblemType"]["DataType"].is8bitFloat():
             #    if numElementsPerBatch > 1:
             #        numElementsPerBatch = int(numElementsPerBatch/4)*4
@@ -4236,7 +4236,7 @@ class StreamKKernelState:
     if self.isPersistentConstantsToVgprEnabled(kernel):
       idx = self.sgprPool.checkOut(1, name, preventOverflow=False)
       if idx + 1 > self.states.regCaps["MaxSgpr"]:
-        self.states.overflowedResources = 2
+        self.setOverflowedResources(kernel, 2)
       return idx
     return name
 

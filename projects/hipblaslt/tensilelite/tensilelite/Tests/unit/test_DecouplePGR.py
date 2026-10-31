@@ -951,6 +951,11 @@ class _ThickWaitWriter:
     def __init__(self):
         self.states = types.SimpleNamespace(overflowedResources=0)
 
+    def setOverflowedResources(self, kernel, code):
+        # Record the code only; stopping on it is KernelWriter.stopOnOverflowedResources'
+        # job (test_overflowed_resources_fail_fast.py).
+        self.states.overflowedResources = code
+
 
 def _applyThickWait(kernel, asm):
     from Tensile.KernelWriter import KernelWriter

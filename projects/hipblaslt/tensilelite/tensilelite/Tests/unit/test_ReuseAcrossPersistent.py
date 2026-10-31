@@ -576,8 +576,11 @@ _STORE_GUARD_WITHHELD = 204  # 3 k-tiles x (64 ValuA + 4 MXSA)
 
 
 def _runStoreGuard(numVgprAvailable, beta=True, edge=False, withheld=_STORE_GUARD_WITHHELD):
+    states = SimpleNamespace(overflowedResources=0, rapStoreNeutralityMsg="")
     writer = SimpleNamespace(
-        states=SimpleNamespace(overflowedResources=0, rapStoreNeutralityMsg=""),
+        states=states,
+        # Record the code only; stopping on it is tested in test_overflowed_resources_fail_fast.
+        setOverflowedResources=lambda kernel, code: setattr(states, "overflowedResources", code),
         rapStoreWithheldVgprs=lambda kernel: withheld,
         rapResidentKTiles=lambda kernel: 3,
     )
