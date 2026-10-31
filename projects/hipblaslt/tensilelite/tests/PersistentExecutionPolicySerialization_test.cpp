@@ -16,10 +16,12 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifdef TENSILE_YAML
@@ -419,6 +421,36 @@ namespace
             custom = output(kernel);
         }
 
+        void configureSpatialCustomDescriptor()
+        {
+            canonical(policies[2]);
+            size["clusterDim"] = object(std::vector<size_t>{2, 1, 1});
+            size["workGroup"] = object(std::vector<size_t>{32, 4, 1});
+            size["macroTile"] = object(std::vector<size_t>{128, 128, 1});
+            size["depthU"] = object(64);
+            size["workspaceSizePerElemC"] = object(4);
+            internalArgs["version"] = object(3);
+            internalArgs["persistentLoopArgsVersion"] = object(2);
+            CustomKernel descriptor;
+            descriptor.name = "streamk_v2";
+            descriptor.macrotile = {128, 128, 64};
+            descriptor.threads = {128, 1, 1};
+            descriptor.workspaceType = CustomWorkspaceType::StreamKWithReduction;
+            descriptor.workspaceSizePerElemC = 4;
+            descriptor.grid = {CustomGridSize::PersistentGrid, CustomGridSize::One,
+                               CustomGridSize::One};
+            descriptor.args = {
+                {CustomArgType::address, CustomArgSemantic::AddressFlags},
+                {CustomArgType::uint32, CustomArgSemantic::ItersPerTile},
+                {CustomArgType::uint32, CustomArgSemantic::MagicNumberItersPerTile},
+                {CustomArgType::uint32, CustomArgSemantic::MagicShiftItersPerTile},
+                {CustomArgType::uint32, CustomArgSemantic::SKItersPerWG},
+                {CustomArgType::uint32, CustomArgSemantic::SKGrid},
+                {CustomArgType::uint32, CustomArgSemantic::SKTilesAndSplit},
+                {CustomArgType::address, CustomArgSemantic::AddressWorkspace}};
+            custom = output(descriptor);
+        }
+
         void TearDown() override
         {
             if(!temporaryDirectory.empty())
@@ -816,6 +848,91 @@ namespace
         auto grid              = emittedDescriptor.at("grid").as<std::vector<std::string>>();
         EXPECT_EQ(grid, (std::vector<std::string>{"StreamKWithBatch", "One", "One"}));
     }
+    TEST_F(PersistentExecutionPolicySerializationTest, SpatialCustomDescriptorLogicalWorkGroupRoundTrips)
+    {
+        configureSpatialCustomDescriptor();
+        // WorkGroup is logical geometry; custom metadata describes the physical
+        // launch [NumThreads, 1, 1]. Exercise every logical axis when flattening.
+        for(const auto& shape : std::vector<std::vector<size_t>>{
+                {32, 4, 1}, {16, 4, 2}, {128, 1, 1}})
+        {
+            SCOPED_TRACE(::testing::PrintToString(shape));
+            size["workGroup"] = object(shape);
+            for(int roundTrip = 0; roundTrip < 2; ++roundTrip)
+            {
+                auto loaded = readSolution();
+                EXPECT_TRUE(loaded->usesStreamKSpatialCluster());
+                EXPECT_FALSE(loaded->customKernel.generated);
+                EXPECT_EQ(loaded->sizeMapping.workGroupSize.x, shape[0]);
+                EXPECT_EQ(loaded->sizeMapping.workGroupSize.y, shape[1]);
+                EXPECT_EQ(loaded->sizeMapping.workGroupSize.z, shape[2]);
+                EXPECT_EQ(loaded->customKernel.threads.x, 128u);
+                EXPECT_EQ(loaded->customKernel.threads.y, 1u);
+                EXPECT_EQ(loaded->customKernel.threads.z, 1u);
+                size = output(loaded->sizeMapping);
+                custom = output(loaded->customKernel);
+                internalArgs = output(loaded->internalArgsSupport);
+            }
+        }
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, SpatialCustomDescriptorRejectsInvalidGeometry)
+    {
+        // Either unchecked logical multiplication would wrap to 128 threads.
+        const size_t overflowing = std::numeric_limits<size_t>::max() / 2 + 65;
+        for(const auto& [field, shape] : std::vector<std::pair<std::string, std::vector<size_t>>>{
+                {"threads", {64, 1, 1}}, {"threads", {256, 1, 1}}, {"threads", {0, 1, 1}},
+                {"threads", {128, 0, 1}}, {"threads", {128, 1, 0}},
+                {"threads", {32, 4, 1}}, {"threads", {64, 1, 2}},
+                {"workGroup", {0, 4, 1}}, {"workGroup", {32, 0, 1}},
+                {"workGroup", {32, 4, 0}}, {"workGroup", {0, 1, 1}},
+                {"workGroup", {overflowing, 2, 1}}, {"workGroup", {overflowing, 1, 2}}})
+        {
+            SCOPED_TRACE(::testing::Message() << field << ::testing::PrintToString(shape));
+            configureSpatialCustomDescriptor();
+            if(field == "workGroup" && (shape[0] == 0 || shape[1] == 0 || shape[2] == 0))
+                custom["threads"] = object(std::vector<size_t>{0, 1, 1});
+            (field == "threads" ? custom : size)[field] = object(shape);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, SpatialCustomDescriptorRejectsMalformedAbi)
+    {
+        configureSpatialCustomDescriptor();
+        const auto descriptor = readSolution()->customKernel;
+        using Mutation = std::pair<const char*, void (*)(CustomKernel&)>;
+        for(const auto& [name, mutate] : std::vector<Mutation>{
+                {"missing word", [](auto& d) { d.args.erase(d.args.begin() + 1); }},
+                {"duplicate word", [](auto& d) { d.args.push_back(d.args[1]); }},
+                {"word order", [](auto& d) { std::swap(d.args[1], d.args[2]); }},
+                {"word gap", [](auto& d) { d.args.insert(d.args.begin() + 2,
+                    {CustomArgType::address, CustomArgSemantic::AddressBias}); }},
+                {"word type", [](auto& d) { d.args[1].type = CustomArgType::uint64; }},
+                {"word padding", [](auto& d) { d.args[1].padding = 4; }},
+                {"missing flags", [](auto& d) { d.args.erase(d.args.begin()); }},
+                {"duplicate flags", [](auto& d) { d.args.push_back(d.args.front()); }},
+                {"missing workspace", [](auto& d) { d.args.pop_back(); }},
+                {"duplicate workspace", [](auto& d) { d.args.push_back(d.args.back()); }},
+                {"pointer type", [](auto& d) { d.args.front().type = CustomArgType::uint64; }},
+                {"pointer padding", [](auto& d) { d.args.back().padding = 8; }},
+                {"legacy scheduler", [](auto& d) { d.args.push_back(
+                    {CustomArgType::uint32, CustomArgSemantic::PersistentGrid}); }},
+                {"workspace kind", [](auto& d) { d.workspaceType = CustomWorkspaceType::None; }},
+                {"empty element", [](auto& d) { d.workspaceSizePerElemC = 0; }},
+                {"element mismatch", [](auto& d) { d.workspaceSizePerElemC = 8; }},
+                {"macro tile M", [](auto& d) { d.macrotile.x = 64; }},
+                {"macro tile N", [](auto& d) { d.macrotile.y = 64; }},
+                {"depth U", [](auto& d) { d.macrotile.z = 32; }}})
+        {
+            SCOPED_TRACE(name);
+            auto invalid = descriptor;
+            mutate(invalid);
+            custom = output(invalid);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+    }
+
     TEST_F(PersistentExecutionPolicySerializationTest, SpatialClusterVersionTwoRoundTrips)
     {
         canonical(policies[2]);
