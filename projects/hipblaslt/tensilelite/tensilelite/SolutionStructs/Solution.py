@@ -7189,6 +7189,20 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetBiasNonGSU"] = ldsNumBytesRemapCNonGSU
       state["LdsOffsetBiasGSU"] = ldsNumBytesRemapCGSU
       state["LdsOffsetBias"] = ldsNumBytesRemapC
+    # A DTL PAP prefetch keeps the next tile's first PGR group in one of the A/B
+    # LDS banks through the whole epilogue.
+    if state.get("PrefetchAcrossPersistent", 0) and \
+        (state["DirectToLdsA"] or state["DirectToLdsB"]):
+      if state["LocalSplitU"] > 1:
+        reject(state, printRejectionReason, "PrefetchAcrossPersistent with DirectToLds not supported with LocalSplitU > 1 (reduction reuses the A/B LDS banks)")
+        return
+      if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
+        reject(state, printRejectionReason, "PrefetchAcrossPersistent with DirectToLds not supported with bias reduction (stores from LDS offset 0)")
+        return
+      ldsOffsetEpilogue = roundUpToNearestMultiple(ldsNumBytesAB, 16)
+      state["LdsOffsetBiasNonGSU"] = ldsOffsetEpilogue
+      state["LdsOffsetBiasGSU"] = ldsOffsetEpilogue
+      state["LdsOffsetBias"] = ldsOffsetEpilogue
 
     # Calcualte the correct LDS usages
     def calcEpilogueTurns(factorDims: List) -> int:
