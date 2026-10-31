@@ -30,6 +30,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <optional>
 
 #include "ProgramOptions.hpp"
 
@@ -95,6 +96,9 @@ namespace TensileLite
             }
 
         private:
+            ContractionSolution::ProjectedPerformance const& projectedPerformance();
+            void reportProjectedPerformance(ResultReporter& reporter);
+
             const int    m_numWarmups;
             const int    m_numBenchmarks;
             const int    m_numEnqueuesPerSync;
@@ -106,12 +110,16 @@ namespace TensileLite
             const bool m_useGPUTimer;
             const bool m_syncAfterWarmups = true;
             const int  m_sleepPercent;
+            const bool m_csvExportExtraCols;
 
             int m_numBenchmarksRun = 0;
 
             Hardware const&      m_hardware;
             ContractionProblem*  m_problem;
             ContractionSolution* m_solution;
+
+            // The current solution's projected performance, computed on first use.
+            std::optional<ContractionSolution::ProjectedPerformance> m_projectedPerformance;
 
             int m_numEnqueuesInSolution = 0;
             int m_numSyncsInBenchmark   = 0;

@@ -135,6 +135,7 @@ namespace TensileLite
             , m_numEnqueuesPerSolution(m_numEnqueuesPerSync * m_numSyncsPerBenchmark)
             , m_useGPUTimer(args["use-gpu-timer"].as<bool>())
             , m_sleepPercent(args["sleep-percent"].as<int>())
+            , m_csvExportExtraCols(args["csv-export-extra-cols"].as<bool>())
             , m_timeInSolution(0)
             , m_totalGPUTime(0)
             , m_currentBestWarmUpTime(std::numeric_limits<double>::max())
@@ -207,34 +208,57 @@ namespace TensileLite
             if((m_probOnlyRunSolIdx != -1) && (m_probOnlyRunSolIdx != m_currSolutionIdx))
                 m_skiprun_from_map = true;
 
-            ContractionSolution::ProjectedPerformance pp;
+            m_solution = solution;
+            m_projectedPerformance.reset();
+
+            // The results file's extra columns read TilesPerCu and TotalGranularity when TimeUS
+            // is reported, so they are reported now. Otherwise only the log rows show these
+            // values, and whether a row is printed depends on the verdict, which is reported
+            // later (rejection after preSolution, FAILED and INVALID during or after the runs):
+            // the reporters that print the row ask for them then.
+            if(m_csvExportExtraCols)
+                reportProjectedPerformance(*m_reporter);
+            else
+                m_reporter->setRowValueProvider(
+                    [this](ResultReporter& reporter) { reportProjectedPerformance(reporter); });
+        }
+
+        ContractionSolution::ProjectedPerformance const& BenchmarkTimer::projectedPerformance()
+        {
+            if(m_projectedPerformance)
+                return *m_projectedPerformance;
 
             if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
             {
-                pp = solution->projectedPerformance(problem->gemms[0], m_hardware);
+                m_projectedPerformance
+                    = m_solution->projectedPerformance(problem->gemms[0], m_hardware);
             }
             else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
-                pp = solution->projectedPerformance(*problem, m_hardware);
+                m_projectedPerformance = m_solution->projectedPerformance(*problem, m_hardware);
             }
             else
             {
                 throw std::runtime_error(
                     "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
             }
+            return *m_projectedPerformance;
+        }
 
-            m_solution = solution;
+        void BenchmarkTimer::reportProjectedPerformance(ResultReporter& reporter)
+        {
+            auto const& pp = projectedPerformance();
 
-            m_reporter->report(ResultKey::Tile0Granularity, pp.granularities.tile0Granularity);
-            m_reporter->report(ResultKey::Tile1Granularity, pp.granularities.tile1Granularity);
-            m_reporter->report(ResultKey::CuGranularity, pp.granularities.cuGranularity);
-            m_reporter->report(ResultKey::WaveGranularity, pp.granularities.waveGranularity);
-            m_reporter->report(ResultKey::TotalGranularity, pp.granularities.totalGranularity);
+            reporter.report(ResultKey::Tile0Granularity, pp.granularities.tile0Granularity);
+            reporter.report(ResultKey::Tile1Granularity, pp.granularities.tile1Granularity);
+            reporter.report(ResultKey::CuGranularity, pp.granularities.cuGranularity);
+            reporter.report(ResultKey::WaveGranularity, pp.granularities.waveGranularity);
+            reporter.report(ResultKey::TotalGranularity, pp.granularities.totalGranularity);
 
-            m_reporter->report(ResultKey::NumCus, perf.CUs);
-            m_reporter->report(ResultKey::TilesPerCu, pp.granularities.tilesPerCu);
-            m_reporter->report(ResultKey::MemReadBytes, pp.staticModel.memReadBytes);
-            m_reporter->report(ResultKey::MemWriteBytes, pp.staticModel.memWriteBytesD);
+            reporter.report(ResultKey::NumCus, perf.CUs);
+            reporter.report(ResultKey::TilesPerCu, pp.granularities.tilesPerCu);
+            reporter.report(ResultKey::MemReadBytes, pp.staticModel.memReadBytes);
+            reporter.report(ResultKey::MemWriteBytes, pp.staticModel.memWriteBytesD);
         }
 
         void BenchmarkTimer::postSolution()
