@@ -11,12 +11,33 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdlib>
 #include <sstream>
 
 namespace TensileLite
 {
     namespace Client
     {
+        namespace
+        {
+            constexpr unsigned orReduceBlockSize = 256;
+            // Enough blocks to stream the client's 1.6 MB buffer at full
+            // bandwidth; larger buffers loop in the grid stride.
+            constexpr size_t orReduceMaxBlocks = 1024;
+
+            // ORs every 32-bit word of the buffer into *any. Only threads that
+            // saw residue touch *any, so a clean buffer costs no atomics.
+            __global__ void orReduceSynchronizer(uint32_t const* buffer, size_t ints, uint32_t* any)
+            {
+                uint32_t     v      = 0;
+                size_t const stride = size_t(gridDim.x) * blockDim.x;
+                for(size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x; i < ints; i += stride)
+                    v |= buffer[i];
+                if(v != 0)
+                    atomicOr(any, v);
+            }
+        }
+
         bool scanSynchronizerResidue(uint8_t const* host, size_t bytes, SynchronizerResidue& out)
         {
             // The buffer is declared with the alpha type but every consumer
@@ -56,9 +77,15 @@ namespace TensileLite
             return true;
         }
 
-        SynchronizerValidator::SynchronizerValidator(po::variables_map const& args)
+        SynchronizerValidator::SynchronizerValidator(po::variables_map const& args,
+                                                     hipStream_t              stream)
             : m_enabled(args["check-synchronizer"].as<bool>())
+            , m_stream(stream)
         {
+            // Under the FFM emulator the reduction kernel's cost is unknown;
+            // keep the host reduction there.
+            char const* memfile = std::getenv("HSA_MODEL_MEMFILE");
+            m_hostReduction     = memfile != nullptr && memfile[0] != '\0';
         }
 
         void SynchronizerValidator::preProblem(ContractionProblem* const problem)
@@ -223,6 +250,10 @@ namespace TensileLite
         {
             if(m_staging != nullptr)
                 static_cast<void>(hipHostFree(m_staging));
+            if(m_hostAny != nullptr)
+                static_cast<void>(hipHostFree(m_hostAny));
+            if(m_deviceAny != nullptr)
+                static_cast<void>(hipFree(m_deviceAny));
         }
 
         uint8_t* SynchronizerValidator::stagingBuffer(size_t bytes)
@@ -244,13 +275,60 @@ namespace TensileLite
         uint8_t* SynchronizerValidator::readBuffer(void* device, size_t bytes)
         {
             auto host = stagingBuffer(bytes);
-            HIP_CHECK_EXC(hipMemcpy(host, device, bytes, hipMemcpyDeviceToHost));
+            HIP_CHECK_EXC(hipMemcpyAsync(host, device, bytes, hipMemcpyDeviceToHost, m_stream));
+            HIP_CHECK_EXC(hipStreamSynchronize(m_stream));
             return host;
         }
 
         void SynchronizerValidator::clearBuffer(void* device, size_t bytes)
         {
-            HIP_CHECK_EXC(hipMemset(device, 0, bytes));
+            HIP_CHECK_EXC(hipMemsetAsync(device, 0, bytes, m_stream));
+            HIP_CHECK_EXC(hipStreamSynchronize(m_stream));
+        }
+
+        bool SynchronizerValidator::reduceBuffer(void const* device, size_t bytes, uint32_t& any)
+        {
+            if(m_hostAny == nullptr)
+            {
+                // Ask before the first launch: launching a kernel that has no
+                // code object for the device crashes inside HIP (ROCm 7.2.1)
+                // instead of returning an error.
+                hipFunction_t    function;
+                hipError_t const err = hipGetFuncBySymbol(
+                    &function, reinterpret_cast<void const*>(&orReduceSynchronizer));
+                if(err == hipErrorInvalidDeviceFunction || err == hipErrorNoBinaryForGpu)
+                {
+                    // Clear the expected probe failure: it is not an error of the run.
+                    static_cast<void>(hipGetLastError());
+                    return false;
+                }
+                HIP_CHECK_EXC(err);
+
+                if(m_deviceAny == nullptr)
+                    HIP_CHECK_EXC(hipMalloc(&m_deviceAny, sizeof(uint32_t)));
+                HIP_CHECK_EXC(hipHostMalloc(&m_hostAny, sizeof(uint32_t)));
+            }
+
+            assert(bytes % sizeof(uint32_t) == 0);
+            auto   buffer = static_cast<uint32_t const*>(device);
+            size_t ints   = bytes / sizeof(uint32_t);
+            auto   blocks
+                = std::min((ints + orReduceBlockSize - 1) / orReduceBlockSize, orReduceMaxBlocks);
+            void* args[] = {&buffer, &ints, &m_deviceAny};
+
+            HIP_CHECK_EXC(hipMemsetAsync(m_deviceAny, 0, sizeof(uint32_t), m_stream));
+            HIP_CHECK_EXC(hipLaunchKernel(reinterpret_cast<void const*>(&orReduceSynchronizer),
+                                          ::dim3(blocks),
+                                          ::dim3(orReduceBlockSize),
+                                          args,
+                                          0,
+                                          m_stream));
+
+            HIP_CHECK_EXC(hipMemcpyAsync(
+                m_hostAny, m_deviceAny, sizeof(uint32_t), hipMemcpyDeviceToHost, m_stream));
+            HIP_CHECK_EXC(hipStreamSynchronize(m_stream));
+            any = *m_hostAny;
+            return true;
         }
 
         bool SynchronizerValidator::checkBuffer(ContractionProblemGemm const& problem,
@@ -289,8 +367,31 @@ namespace TensileLite
                 return true;
             }
 
-            // Once per run iteration, so the copy is hot: pinned staging avoids
-            // the pageable bounce buffer.
+            if(!m_hostReduction)
+            {
+                uint32_t any = 0;
+                bool     reduced;
+                {
+                    ScopedTimer timer("synchronizer_reduce");
+                    reduced = reduceBuffer(deviceSynchronizer, bytes, any);
+                }
+                if(reduced)
+                {
+                    if(any == 0)
+                        return true;
+                }
+                else
+                {
+                    // No code object for this device: reduce on the host from now on.
+                    m_hostReduction = true;
+                    m_reporter->log(LogLevel::Verbose,
+                                    "Synchronizer check: the reduction kernel cannot launch on "
+                                    "this device; reducing on the host.\n");
+                }
+            }
+
+            // The host reduction, or the diagnostic for residue the GPU found.
+            // Pinned staging avoids the pageable bounce buffer.
             uint8_t* host;
             {
                 ScopedTimer timer("synchronizer_readback");

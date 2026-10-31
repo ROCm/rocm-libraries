@@ -1004,7 +1004,7 @@ int main(int argc, const char* argv[])
             // Before ReferenceValidator: postSolution runs listeners in
             // reverse, so the dirty-buffer verdict lands after the reference
             // one rather than being overwritten by it.
-            synchronizerValidator = std::make_shared<SynchronizerValidator>(args);
+            synchronizerValidator = std::make_shared<SynchronizerValidator>(args, stream);
             listeners.addListener(synchronizerValidator);
             listeners.addListener(std::make_shared<ReferenceValidator>(args, dataInit));
             benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);

@@ -10,7 +10,9 @@
 #include <Tensile/ContractionSolution.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -358,12 +360,18 @@ namespace
 {
     enum class TransferFailure { None, Readback, Clear };
 
+    // The Synchronizer lives in host memory. By default the reduction kernel
+    // "cannot launch" (as on a device without its code object), so the checks
+    // read the whole buffer back; with `deviceReduction` the reduction is
+    // simulated on the host and only dirty buffers are read back.
     class HostBufferValidator : public SynchronizerValidator
     {
     public:
         HostBufferValidator() : SynchronizerValidator(enabledArgs()) {}
-        TransferFailure failure = TransferFailure::None;
-        int             reads   = 0;
+        TransferFailure failure         = TransferFailure::None;
+        bool            deviceReduction = false;
+        int             reads           = 0;
+        int             reductions      = 0;
 
     protected:
         uint8_t* readBuffer(void* device, size_t) override
@@ -378,6 +386,17 @@ namespace
             if(failure == TransferFailure::Clear)
                 throw std::runtime_error("clear failed");
             std::fill_n(static_cast<uint8_t*>(device), bytes, uint8_t{0});
+        }
+        bool reduceBuffer(void const* device, size_t bytes, uint32_t& any) override
+        {
+            reductions++;
+            if(!deviceReduction)
+                return false;
+            auto words = static_cast<uint32_t const*>(device);
+            any        = 0;
+            for(size_t i = 0; i < bytes / sizeof(uint32_t); i++)
+                any |= words[i];
+            return true;
         }
     };
 
@@ -731,4 +750,266 @@ TEST(SynchronizerValidatorSolutionLoop, EachDistinctBufferIsReadOnce)
     EXPECT_EQ(loop.validator->reads, 3);
     EXPECT_EQ(loop.lastVerdict(), "FAILED");
     EXPECT_EQ(loop.buffer[3], 0u);
+}
+
+// GPU reduction path (simulated): a clean buffer is never read back; a dirty
+// one is read back once for the diagnostic, which is the host path's.
+TEST(SynchronizerValidatorSolutionLoop, ReductionReadsBackOnlyDirtyBuffers)
+{
+    SolutionLoop loop;
+    loop.validator->deviceReduction = true;
+
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.warmup();
+    loop.endIteration();
+    loop.listeners.postSolution();
+    EXPECT_EQ(loop.validator->reductions, 1);
+    EXPECT_EQ(loop.validator->reads, 0);
+    EXPECT_EQ(loop.lastVerdict(), "PASSED");
+
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.warmup();
+    loop.buffer[2] = 7;
+    loop.endIteration();
+    loop.listeners.postSolution();
+    EXPECT_EQ(loop.validator->reductions, 2);
+    EXPECT_EQ(loop.validator->reads, 1);
+    EXPECT_EQ(loop.lastVerdict(), "FAILED");
+    EXPECT_EQ(loop.listeners.error(), 1);
+    EXPECT_EQ(loop.buffer[2], 0u);
+    EXPECT_EQ(loop.reporter->logged,
+              "Synchronizer left dirty after run iteration (gemm 0): 1/4 ints nonzero, first at "
+              "int offset 2 -- the kernel did not reset the shared Synchronizer buffer on exit.\n");
+}
+
+// Without a code object for the device the check falls back to the host
+// reduction once, says so at verbose level, and does not retry the kernel.
+TEST(SynchronizerValidatorSolutionLoop, FallsBackToTheHostWhenTheKernelCannotLaunch)
+{
+    SolutionLoop loop;
+    for(int solution = 0; solution < 2; solution++)
+    {
+        loop.listeners.preSolution(nullptr);
+        loop.beginIteration();
+        loop.warmup();
+        loop.buffer[1] = 1;
+        loop.endIteration();
+        loop.listeners.postSolution();
+    }
+
+    EXPECT_EQ(loop.validator->reductions, 1);
+    EXPECT_EQ(loop.validator->reads, 2);
+    EXPECT_EQ(loop.failedVerdicts(), 2);
+    EXPECT_EQ(loop.listeners.error(), 2);
+    EXPECT_EQ(loop.buffer[1], 0u);
+    std::string const fallback = "the reduction kernel cannot launch on this device";
+    auto const        at       = loop.reporter->logged.find(fallback);
+    ASSERT_NE(at, std::string::npos);
+    EXPECT_EQ(loop.reporter->logged.find(fallback, at + 1), std::string::npos);
+}
+
+namespace
+{
+    // Sets an environment variable for one scope, restoring the old value.
+    class ScopedEnv
+    {
+    public:
+        ScopedEnv(char const* name, char const* value)
+            : m_name(name)
+        {
+            if(char const* old = std::getenv(name))
+                m_old = old;
+            setenv(name, value, 1);
+        }
+        ~ScopedEnv()
+        {
+            if(m_old)
+                setenv(m_name, m_old->c_str(), 1);
+            else
+                unsetenv(m_name);
+        }
+
+    private:
+        char const*                m_name;
+        std::optional<std::string> m_old;
+    };
+}
+
+// Under the FFM emulator the check never launches the reduction kernel.
+TEST(SynchronizerValidatorSolutionLoop, FfmEmulatorReducesOnTheHost)
+{
+    ScopedEnv    ffm("HSA_MODEL_MEMFILE", "/tmp/ffm_memfile");
+    SolutionLoop loop;
+    loop.validator->deviceReduction = true;
+
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.warmup();
+    loop.endIteration();
+    loop.listeners.postSolution();
+    EXPECT_EQ(loop.validator->reductions, 0);
+    EXPECT_EQ(loop.validator->reads, 1);
+    EXPECT_EQ(loop.lastVerdict(), "PASSED");
+    EXPECT_EQ(loop.reporter->logged, "");
+}
+
+namespace
+{
+    bool haveDevice()
+    {
+        int count = 0;
+        return hipGetDeviceCount(&count) == hipSuccess && count > 0;
+    }
+
+    // The client's validator with its real device transfers and reduction.
+    class DeviceValidator : public SynchronizerValidator
+    {
+    public:
+        using SynchronizerValidator::reduceBuffer;
+        using SynchronizerValidator::SynchronizerValidator;
+    };
+
+    // A device buffer of `ints` 32-bit words.
+    struct DeviceWords
+    {
+        uint32_t* ptr = nullptr;
+        size_t    ints;
+
+        explicit DeviceWords(size_t n)
+            : ints(n)
+        {
+            EXPECT_EQ(hipMalloc(&ptr, n * sizeof(uint32_t)), hipSuccess);
+        }
+        ~DeviceWords()
+        {
+            static_cast<void>(hipFree(ptr));
+        }
+        void fill(std::vector<uint32_t> const& host)
+        {
+            ASSERT_EQ(host.size(), ints);
+            ASSERT_EQ(hipMemcpy(ptr, host.data(), ints * sizeof(uint32_t), hipMemcpyHostToDevice),
+                      hipSuccess);
+        }
+        std::vector<uint32_t> read() const
+        {
+            std::vector<uint32_t> host(ints);
+            EXPECT_EQ(hipMemcpy(host.data(), ptr, ints * sizeof(uint32_t), hipMemcpyDeviceToHost),
+                      hipSuccess);
+            return host;
+        }
+    };
+}
+
+// The kernel's OR over sizes around its block and grid-stride boundaries,
+// with residue in any word and in any bit.
+TEST(SynchronizerValidatorDevice, ReductionFindsResidueAnywhere)
+{
+    if(!haveDevice())
+        GTEST_SKIP() << "No HIP device";
+
+    DeviceValidator validator(enabledArgs());
+    auto            reduce = [&](DeviceWords const& words) {
+        uint32_t any = 0xdeadbeef;
+        EXPECT_TRUE(validator.reduceBuffer(words.ptr, words.ints * sizeof(uint32_t), any));
+        return any;
+    };
+
+    for(size_t ints = 1; ints <= 67; ints++)
+    {
+        DeviceWords           words(ints);
+        std::vector<uint32_t> host(ints, 0);
+        words.fill(host);
+        EXPECT_EQ(reduce(words), 0u) << ints;
+        for(size_t i = 0; i < ints; i++)
+        {
+            host.assign(ints, 0);
+            host[i] = 1u << (i % 32);
+            words.fill(host);
+            EXPECT_EQ(reduce(words), 1u << (i % 32)) << ints << " ints, residue at " << i;
+        }
+    }
+
+    // The client's buffer, and one larger than a single pass of the grid
+    // (1024 blocks of 256 threads), so the grid stride loops.
+    for(size_t ints : {size_t(409600), size_t(1024 * 256 * 2 + 5)})
+    {
+        DeviceWords           words(ints);
+        std::vector<uint32_t> host(ints, 0);
+        words.fill(host);
+        EXPECT_EQ(reduce(words), 0u) << ints;
+        for(size_t i : {size_t(0), ints / 2 + 1, ints - 1})
+        {
+            host.assign(ints, 0);
+            host[i] = 0x80000000u;
+            words.fill(host);
+            EXPECT_EQ(reduce(words), 0x80000000u) << ints << " ints, residue at " << i;
+        }
+    }
+}
+
+// End to end on a device buffer of the client's size: the GPU check reports
+// residue with the host check's diagnostic, clears the buffer, and passes it
+// clean afterwards.
+TEST(SynchronizerValidatorDevice, GpuAndHostChecksGiveTheSameDiagnostic)
+{
+    if(!haveDevice())
+        GTEST_SKIP() << "No HIP device";
+
+    size_t const                        ints = 409600;
+    TensileLite::ContractionProblemGemm problem;
+    problem.setSynchronizer(rocisa::DataType::Int32, ints);
+    DeviceWords words(ints);
+    auto        inputs   = std::make_shared<TensileLite::ContractionInputs>();
+    inputs->Synchronizer = words.ptr;
+    hipStream_t stream   = nullptr;
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+
+    // One solution with one launched run iteration; returns what was logged.
+    auto runSolution = [&](SynchronizerValidator& validator, FakeResultReporter& reporter) {
+        validator.preSolution(nullptr);
+        validator.beginRunIteration({inputs});
+        validator.preWarmup();
+        validator.checkRunIteration();
+        validator.postSolution();
+        return reporter.logged;
+    };
+    auto dirtyBuffer = [&]() {
+        std::vector<uint32_t> host(ints, 0);
+        host[300001]   = 0x80000000u;
+        host[ints - 1] = 1;
+        words.fill(host);
+    };
+
+    std::string logs[2];
+    for(bool ffm : {false, true})
+    {
+        std::optional<ScopedEnv> env;
+        if(ffm)
+            env.emplace("HSA_MODEL_MEMFILE", "/tmp/ffm_memfile");
+        DeviceValidator validator(enabledArgs(), stream);
+        auto            reporter = std::make_shared<FakeResultReporter>();
+        validator.setReporter(reporter);
+        validator.preProblem(&problem);
+
+        dirtyBuffer();
+        logs[ffm] = runSolution(validator, *reporter);
+        EXPECT_EQ(validator.error(), 1) << "ffm " << ffm;
+        ASSERT_EQ(reporter->stringReports.size(), 1u);
+        EXPECT_EQ(reporter->stringReports[0].second, "FAILED");
+        EXPECT_EQ(words.read(), std::vector<uint32_t>(ints, 0));
+
+        reporter->logged.clear();
+        EXPECT_EQ(runSolution(validator, *reporter), "");
+        EXPECT_EQ(validator.error(), 1);
+        EXPECT_EQ(reporter->stringReports.size(), 1u);
+    }
+
+    EXPECT_EQ(logs[0],
+              "Synchronizer left dirty after run iteration (gemm 0): 2/409600 ints nonzero, first "
+              "at int offset 300001 -- the kernel did not reset the shared Synchronizer buffer on "
+              "exit.\n");
+    EXPECT_EQ(logs[0], logs[1]);
+    EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
 }

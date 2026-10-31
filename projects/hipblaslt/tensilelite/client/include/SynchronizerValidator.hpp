@@ -9,9 +9,15 @@
  * flags; GSU MultipleBufferSingleKernel and output-amax use it for
  * synchronization. Each consumer must leave the buffer at zero on exit.
  * Residue is silent -- it corrupts a later launch, not the one that left it --
- * so this listener reads the buffer back, fails the run on any nonzero int,
- * and clears it so it is reported once. Buffers declared too narrow to scan
- * in full produce a warning and are skipped.
+ * so this listener checks the buffer, fails the run on any nonzero int, and
+ * clears it so it is reported once. Buffers declared too narrow to scan in
+ * full produce a warning and are skipped.
+ *
+ * The check OR-reduces the buffer on the GPU, on the client's stream, and
+ * reads back the 4-byte result; only a nonzero result reads the whole buffer
+ * back to build the diagnostic. Under the FFM emulator (HSA_MODEL_MEMFILE),
+ * and when the reduction kernel has no code object for the device, the whole
+ * buffer is read back and reduced on the host instead.
  *
  * The check covers every launch of a solution: main hands each run
  * iteration's inputs to beginRunIteration() before its launches and calls
@@ -57,7 +63,8 @@ namespace TensileLite
         class SynchronizerValidator : public RunListener
         {
         public:
-            SynchronizerValidator(po::variables_map const& args);
+            /// Device work and readbacks are enqueued on *stream* (main's).
+            SynchronizerValidator(po::variables_map const& args, hipStream_t stream = nullptr);
             virtual ~SynchronizerValidator();
 
             virtual bool needMoreBenchmarkRuns() const override
@@ -184,11 +191,18 @@ namespace TensileLite
             uint8_t* stagingBuffer(size_t bytes);
 
             bool                m_enabled      = false;
+            hipStream_t         m_stream       = nullptr;
+            // Reduce on the host: under the FFM emulator, or once the reduction
+            // kernel turned out to have no code object for this device.
+            bool                m_hostReduction = false;
             // One narrow-alpha warning per run, not one per solution.
             bool                m_narrowAlphaWarned = false;
             ContractionProblem* m_problem      = nullptr;
             uint8_t*            m_staging      = nullptr;
             size_t              m_stagingBytes = 0;
+            // The GPU reduction's result word and its pinned readback target.
+            uint32_t*           m_deviceAny    = nullptr;
+            uint32_t*           m_hostAny      = nullptr;
             // The current run iteration's inputs: its buffer addresses depend on
             // the iteration (GuardPageFront / GuardPageBack).
             std::vector<std::shared_ptr<ProblemInputs>> m_iterationInputs;
@@ -199,6 +213,11 @@ namespace TensileLite
             // Keep device transfers overridable for host-only lifecycle tests.
             virtual uint8_t* readBuffer(void* device, size_t bytes);
             virtual void clearBuffer(void* device, size_t bytes);
+            /// ORs the buffer's 32-bit words into *any* on the device and reads
+            /// the result back. Returns false, leaving *any* untouched and
+            /// launching nothing, when the kernel has no code object for the
+            /// device; throws on any HIP error.
+            virtual bool reduceBuffer(void const* device, size_t bytes, uint32_t& any);
 
             /// Whether the check should do anything right now: switched on, and
             /// the solution in hand may use the Synchronizer.
