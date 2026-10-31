@@ -820,7 +820,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int getMaxSrcDataWait(DAGNode* node) const;
     bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
     bool pipeOpGateBlocks(DAGNode* node) const;
-    bool warGateRelieved() const;
+    bool warGateRelieved(DAGNode* ds) const;
     bool dsWarClear(DAGNode* ds) const;
     // dagFeatures.prefetchLeadWmmas for this basic block (StageWmmaCounter, set in onInit).
     int blockPrefetchLead_ = 0;
@@ -1367,16 +1367,10 @@ bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
     return false;
 }
 
-// mode2 WAR gate relief: the region is behind the ds issue rate its totals imply. Cumulative, so a
-// ratio of 1.19 paces differently from 2.0 -- a per-window integer share truncates both to 1.
-// Counts, not readiness: once the region's last WMMA issues, expectedDs reaches the region total
-// and the relief lifts the gate.
-bool CDNA5ReadyQueue::warGateRelieved() const {
-    const int expectedDs =
-        wmmaTotalThisRegion_ > 0
-            ? dsTotalThisRegion_ * wmmaIssuedCountThisRegion_ / wmmaTotalThisRegion_
-            : 0;
-    return dsIssuedThisRegion_ < expectedDs;
+// mode2 WAR gate relief: the ds_load's stage is behind its even line (DsSpreadPacer), so a gated
+// load may issue before its pipe-op distance closes. Without a pacer plan there is no relief.
+bool CDNA5ReadyQueue::warGateRelieved(DAGNode* ds) const {
+    return dsSpreadOn() && dsSpread_.behind(ds->id, wmmaIssuedCountThisRegion_) > 0;
 }
 
 // May \p ds issue without overwriting a register a queued WMMA still reads? Two checks, one answer:
@@ -1384,7 +1378,7 @@ bool CDNA5ReadyQueue::warGateRelieved() const {
 // s_wait_alu, lifted when the region is behind its ds rate), and the overlap check against the
 // queued WMMAs' sources (what the hardware does).
 bool CDNA5ReadyQueue::dsWarClear(DAGNode* ds) const {
-    if (!warGateRelieved() && pipeOpGateBlocks(ds)) return false;
+    if (!warGateRelieved(ds) && pipeOpGateBlocks(ds)) return false;
     return !destOverlapsActiveWmmaSrc(ds);
 }
 
