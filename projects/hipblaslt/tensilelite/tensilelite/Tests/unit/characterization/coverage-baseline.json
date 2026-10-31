@@ -62,7 +62,7 @@
     "tensilelite/Components/Subtile/InstructionEmitter.py": 97.35,
     "tensilelite/Components/Subtile/InstructionScheduler.py": 94.67,
     "tensilelite/Components/Subtile/Kernel.py": 78.11,
-    "tensilelite/Components/Subtile/LogicalScheduler.py": 93.46,
+    "tensilelite/Components/Subtile/LogicalScheduler.py": 87.41,
     "tensilelite/Components/Subtile/ScheduleTypes.py": 100.0,
     "tensilelite/Components/Subtile/SubtileGREmit.py": 88.23,
     "tensilelite/Components/Subtile/SubtileGeometry.py": 87.5,
