@@ -131,7 +131,14 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(66u,    2u, 256u,  8u,  96u,  32u),
         // Mixed odd M, even non-mult-of-16 N
         std::make_tuple(7u,    26u, 256u,  8u,  32u,  32u),
-        std::make_tuple(99u,   50u, 256u,  8u, 128u,  64u)
+        std::make_tuple(99u,   50u, 256u,  8u, 128u,  64u),
+        // Skinny extents (1..4) with large K, as used by the skinny MXFP8 GEMM kernels.
+        std::make_tuple(1u,     1u, 256u,    8u,  32u, 32u),
+        std::make_tuple(4096u,  2u, 8192u, 256u, 4096u, 32u),
+        std::make_tuple(3u,  5120u, 16384u, 512u,  32u, 5120u),
+        std::make_tuple(4u,     4u, 32768u, 1024u, 32u, 32u),
+        std::make_tuple(10240u, 4u, 4100u, 136u, 10240u, 32u),
+        std::make_tuple(2u,  2049u, 14336u, 448u,  32u, 2080u)
     )
 );
 

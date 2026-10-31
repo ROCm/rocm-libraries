@@ -1,4 +1,22 @@
 # serializer version: 1
+# name: test_assert_multiple_map_invalid_raises[negative]
+  '''
+  Invalid parameter value: AssertStrideAMultiple = {1: -2}
+  Multiple must be > 0 (or -1 to skip), got -2
+  '''
+# ---
+# name: test_assert_multiple_map_invalid_raises[zero]
+  '''
+  Invalid parameter value: AssertStrideAMultiple = {1: 0}
+  Multiple must be > 0 (or -1 to skip), got 0
+  '''
+# ---
+# name: test_assert_multiple_map_invalid_raises[zero_after_skip]
+  '''
+  Invalid parameter value: AssertStrideAMultiple = {0: -1, 1: 0}
+  Multiple must be > 0 (or -1 to skip), got 0
+  '''
+# ---
 # name: test_assert_size_map_invalid_raises[bool_key]
   '''
   Invalid parameter value: AssertSizeEqual = {True: 1}

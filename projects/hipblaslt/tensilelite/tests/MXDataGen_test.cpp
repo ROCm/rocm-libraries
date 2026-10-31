@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <mxDataGen.hpp>
+#include <mxDataGenerator/PreSwizzle.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -11,6 +12,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 /**
@@ -394,6 +396,74 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(4096u, 16384u, 32, true, true)    // benchmark-scale problem
     )
 );
+
+// ============================================================================
+// Padded gfx950 scale swizzle for skinny extents
+//
+// The skinny MX kernels read scales whose MN extent is 1..4 and whose K block
+// count is not always a multiple of 8, so the swizzle must pad both to the
+// 32 x 8 tile and place every scale at its AITER e8m0_shuffle index.
+// ============================================================================
+
+// Params: {mn, k}
+class MXPreSwizzlePaddedTest : public ::testing::TestWithParam<std::tuple<size_t, size_t>>
+{
+};
+
+/** @brief Destination index of scale (row, col) in the AITER e8m0_shuffle layout. */
+static size_t aiterIndex(size_t row, size_t col, size_t paddedCols)
+{
+    const size_t d0 = row / 32;
+    const size_t d1 = (row / 16) % 2;
+    const size_t d2 = row % 16;
+    const size_t d3 = col / 8;
+    const size_t d4 = (col / 4) % 2;
+    const size_t d5 = col % 4;
+    return d1 + 2 * d4 + 4 * d2 + 64 * d5 + 256 * d3 + 32 * paddedCols * d0;
+}
+
+TEST_P(MXPreSwizzlePaddedTest, ScalesLandAtAiterIndexAndPaddingIsZero)
+{
+    auto [mn, k] = GetParam();
+
+    const size_t kBlocks = (k + 31) / 32;
+    const size_t padded  = DGen::preSwizzleScalesGFX950PaddedSize(mn, kBlocks);
+    ASSERT_EQ(padded, (size_t)32 * ((kBlocks + 7) / 8 * 8));
+
+    // Non-zero scales, so that any non-zero byte outside the expected indices is a bug.
+    std::vector<uint8_t> natural(mn * kBlocks);
+    for(size_t i = 0; i < natural.size(); ++i)
+        natural[i] = static_cast<uint8_t>(i % 251 + 1);
+
+    const std::vector<uint8_t> swizzled = DGen::preSwizzleScalesGFX950(natural, {mn, kBlocks});
+    ASSERT_EQ(swizzled.size(), padded);
+
+    const size_t paddedCols = (kBlocks + 7) / 8 * 8;
+    std::vector<bool> expectedSlot(padded, false);
+    for(size_t row = 0; row < mn; ++row)
+    {
+        for(size_t col = 0; col < kBlocks; ++col)
+        {
+            const size_t idx = aiterIndex(row, col, paddedCols);
+            ASSERT_LT(idx, padded);
+            EXPECT_EQ(swizzled[idx], natural[row * kBlocks + col])
+                << "mn=" << mn << " k=" << k << " row=" << row << " col=" << col;
+            expectedSlot[idx] = true;
+        }
+    }
+
+    for(size_t i = 0; i < padded; ++i)
+    {
+        if(!expectedSlot[i])
+            EXPECT_EQ(swizzled[i], 0) << "padding is not zero at " << i;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(SkinnyExtents,
+                         MXPreSwizzlePaddedTest,
+                         ::testing::Combine(::testing::Values<size_t>(1, 2, 3, 4),
+                                            // 288 and 4100 give 9 and 129 K blocks (not multiples of 8).
+                                            ::testing::Values<size_t>(256, 288, 512, 4096, 4100, 8192)));
 
 // ============================================================================
 // Init-mode coverage

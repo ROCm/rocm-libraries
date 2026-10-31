@@ -1373,7 +1373,9 @@
     'AssertSizeGreaterThan',
     'AssertSizeLessThan',
     'AssertStrideAEqual',
+    'AssertStrideAMultiple',
     'AssertStrideBEqual',
+    'AssertStrideBMultiple',
     'AssertStrideCEqual',
     'AssertStrideDEqual',
     'AssertSummationElementMultiple',
@@ -1651,7 +1653,15 @@
       'type': 'int',
       'value': -1,
     }),
+    'AssertStrideAMultiple': dict({
+      'type': 'int',
+      'value': -1,
+    }),
     'AssertStrideBEqual': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertStrideBMultiple': dict({
       'type': 'int',
       'value': -1,
     }),

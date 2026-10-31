@@ -142,6 +142,318 @@ Tests:
   batch_mode: [0, 1]
   batch_count: 1
 
+# Skinny MXFP8 TN GEMMs (f8 E4M3 A/B, E8M0 32-block pre-swizzled scales, bf16 D, f32 compute,
+# gfx950, skinny extent 1..4 on n or on m, any alpha and beta, natural leading dimensions, batch 1)
+# that library logic routes to the vendored skinny MXFP8 kernels. The cases rely on that routing
+# through the default heuristic pick (requested_solution_num 1); gtest cannot assert which kernel
+# ran. The kernels truncate f32 to bf16, hence norm_check (threshold 0.125 for f8 inputs) and no
+# unit_check. Sizes are (m, n, k); the skinny extent is n for the first group and m for the second.
+# K is a multiple of 256 and the wide extent H lies inside the box of the kernel each group targets.
+# K_LARGE_H kernel: skinny m has H 16385..262143 with K 2048..7936 or H 16385..106496 with K 8192..32768;
+# skinny n has H 29584..262143 with K 2048..7936 (skinny 1..4), H 16385..29583 with K 2048..8192 (skinny
+# 1..3), H 29584..106496 with K 8192 (skinny 1..4) or H 32769..106496 with K 8448..32768 (skinny 1..3).
+# The wide operand stays below 2^32 bytes (32-bit buffer addressing).
+# K_LARGE_K kernel: H in 2048..10240, K 8193..16384, skinny 1..3 only.
+# K_MEDIUM kernel: skinny n has H 2048..10240 (skinny 1..4) or up to 16384 (skinny 1..2) with K
+# 2048..8192; skinny m has H 2048..8192 with K 2048..8192 or H up to 10240 with K 2048..7168.
+- name: matmul_skinny_mxfp8_tn
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    # K_LARGE_H, skinny n: vLLM Qwen3-32B gate_up and lm_head.
+    - { M: 51200,  N: 1, K: 5120  }
+    - { M: 51200,  N: 4, K: 5120  }
+    - { M: 151936, N: 2, K: 5120  }
+    - { M: 151936, N: 3, K: 5120  }
+    - { M: 40960,  N: 2, K: 16384 }
+    - { M: 40960,  N: 3, K: 16384 }
+    # K_LARGE_H, skinny n: tails of the BN 32 tile and K tails that are not multiples of 1024.
+    - { M: 29584,  N: 4, K: 8192  }
+    - { M: 16385,  N: 3, K: 8192  }
+    - { M: 16401,  N: 2, K: 2304  }
+    - { M: 40001,  N: 1, K: 32768 }
+    - { M: 20001,  N: 3, K: 5376  }
+    - { M: 51203,  N: 4, K: 4096  }
+    # K_LARGE_H, skinny n: the largest wide extents of the boxes (wide operand below 2^32 bytes).
+    - { M: 262143, N: 3, K: 7936  }
+    - { M: 262143, N: 4, K: 7936  }
+    - { M: 106496, N: 3, K: 32768 }
+    - { M: 106496, N: 1, K: 32768 }
+    # K_LARGE_H, skinny m.
+    - { M: 1, N: 51200,  K: 5120  }
+    - { M: 4, N: 51200,  K: 5120  }
+    - { M: 2, N: 151936, K: 5120  }
+    - { M: 1, N: 18432,  K: 16384 }
+    - { M: 3, N: 18432,  K: 16384 }
+    - { M: 2, N: 16385,  K: 2304  }
+    - { M: 3, N: 20001,  K: 5376  }
+    - { M: 1, N: 40001,  K: 32768 }
+    - { M: 4, N: 51203,  K: 4096  }
+    # K_LARGE_H, skinny m: the largest wide extents of the boxes (wide operand below 2^32 bytes).
+    - { M: 4, N: 262143, K: 7936  }
+    - { M: 1, N: 262143, K: 7936  }
+    - { M: 4, N: 106496, K: 32768 }
+    - { M: 2, N: 106496, K: 32768 }
+    # K_LARGE_K, skinny n: vLLM Llama-8B down, plus tails of the BN 5 tile.
+    - { M: 4096,  N: 1, K: 14336 }
+    - { M: 4096,  N: 2, K: 14336 }
+    - { M: 4096,  N: 3, K: 14336 }
+    - { M: 5000,  N: 3, K: 8448  }
+    - { M: 3001,  N: 1, K: 12288 }
+    - { M: 10001, N: 2, K: 16384 }
+    - { M: 2049,  N: 3, K: 16384 }
+    - { M: 10240, N: 1, K: 8448  }
+    # K_LARGE_K, skinny m.
+    - { M: 1, N: 4096,  K: 14336 }
+    - { M: 2, N: 4096,  K: 14336 }
+    - { M: 3, N: 4096,  K: 14336 }
+    - { M: 3, N: 5000,  K: 8448  }
+    - { M: 1, N: 3001,  K: 12288 }
+    - { M: 2, N: 10001, K: 16384 }
+    - { M: 3, N: 2049,  K: 16384 }
+    # K_MEDIUM, skinny n: vLLM Qwen3-32B qkv and o_proj, Llama-8B qkv, plus tails of the BN 16 tile.
+    - { M: 10240, N: 1, K: 5120 }
+    - { M: 10240, N: 4, K: 5120 }
+    - { M: 5120,  N: 2, K: 8192 }
+    - { M: 5120,  N: 4, K: 8192 }
+    - { M: 6144,  N: 1, K: 4096 }
+    - { M: 6144,  N: 3, K: 4096 }
+    - { M: 6144,  N: 4, K: 4096 }
+    - { M: 3001,  N: 2, K: 2304 }
+    - { M: 5000,  N: 4, K: 5376 }
+    - { M: 2049,  N: 3, K: 2048 }
+    - { M: 10001, N: 1, K: 8192 }
+    - { M: 16384, N: 2, K: 5120 }
+    # K_MEDIUM, skinny m.
+    - { M: 1, N: 10240, K: 5120 }
+    - { M: 4, N: 10240, K: 5120 }
+    - { M: 2, N: 5120,  K: 8192 }
+    - { M: 4, N: 5120,  K: 8192 }
+    - { M: 1, N: 6144,  K: 4096 }
+    - { M: 3, N: 6144,  K: 4096 }
+    - { M: 4, N: 6144,  K: 4096 }
+    - { M: 2, N: 3001,  K: 2304 }
+    - { M: 4, N: 5000,  K: 5376 }
+    - { M: 3, N: 2049,  K: 2048 }
+    - { M: 1, N: 10001, K: 7168 }
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# The vendored kernels compute D = bf16(alpha * A^T B + beta * C) for any alpha and beta, so these
+# are routed exactly like matmul_skinny_mxfp8_tn. C and D are distinct buffers (c_equal_d is off),
+# and the leading dimensions stay natural. One shape per kernel and orientation.
+- name: matmul_skinny_mxfp8_tn_alpha_beta
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    # K_LARGE_H, skinny n.
+    - { M: 51200, N: 1, K: 5120  }
+    - { M: 29584, N: 4, K: 8192  }
+    # K_LARGE_H, skinny m.
+    - { M: 1, N: 51200, K: 5120 }
+    - { M: 4, N: 16385, K: 2304 }
+    # K_LARGE_K, skinny n.
+    - { M: 4096,  N: 1, K: 14336 }
+    - { M: 10240, N: 3, K: 9216  }
+    # K_LARGE_K, skinny m.
+    - { M: 3, N: 4096,  K: 14336 }
+    - { M: 1, N: 10240, K: 9216  }
+    # K_MEDIUM, skinny n.
+    - { M: 10240, N: 4, K: 5120 }
+    - { M: 16384, N: 2, K: 5120 }
+    # K_MEDIUM, skinny m.
+    - { M: 4, N: 10240, K: 5120 }
+    - { M: 2, N: 5120,  K: 8192 }
+  alpha: 1.5
+  beta: 0.5
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# A negative alpha and a beta above one, on a second shape per kernel and orientation.
+- name: matmul_skinny_mxfp8_tn_alpha_beta_negative
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    # K_LARGE_H, skinny n.
+    - { M: 51203, N: 4, K: 4096 }
+    # K_LARGE_H, skinny m.
+    - { M: 3, N: 20001, K: 5376 }
+    # K_LARGE_K, skinny n.
+    - { M: 3001, N: 3, K: 12288 }
+    # K_LARGE_K, skinny m.
+    - { M: 2, N: 10001, K: 16384 }
+    # K_MEDIUM, skinny n.
+    - { M: 5120, N: 2, K: 8192 }
+    # K_MEDIUM, skinny m.
+    - { M: 3, N: 2049, K: 2048 }
+  alpha: -1
+  beta: 2
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# A padded ldc with beta != 0: the kernels only require C to be contiguous along the leading
+# dimension (AssertStrideCEqual {0: 1}), not ldc == m, so these are routed too.
+- name: matmul_skinny_mxfp8_tn_alpha_beta_padded_ldc
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    # K_MEDIUM, skinny n.
+    - { M: 5120, N: 2, K: 8192, lda: 8192, ldb: 8192, ldc: 5248, ldd: 5120 }
+    # K_MEDIUM, skinny m.
+    - { M: 4, N: 10240, K: 5120, lda: 5120, ldb: 5120, ldc: 8, ldd: 4 }
+  alpha: 1.5
+  beta: 0.5
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Same configuration as matmul_skinny_mxfp8_tn, but every size is outside the vendored kernels'
+# boxes or predicates, so these are expected to NOT use them and to run on the existing kernels.
+# Skinny 5, K not a multiple of 256 (but of 32), K or H outside the boxes, and shapes where the
+# kernels would lose: skinny 4 is not in the K_LARGE_K box and K 25600 is above its bound, and the
+# K_LARGE_H boxes exclude very wide H with K >= 8192 and, for skinny n, narrow H with K > 8192.
+- name: matmul_skinny_mxfp8_tn_fallback
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    # Skinny 5 on n and on m.
+    - { M: 5120,  N: 5, K: 5120 }
+    - { M: 51200, N: 5, K: 5120 }
+    - { M: 5,  N: 5120,  K: 5120 }
+    - { M: 5,  N: 51200, K: 5120 }
+    # K a multiple of 32 but not of 256.
+    - { M: 5120, N: 2, K: 5152 }
+    - { M: 5120, N: 4, K: 4128 }
+    - { M: 5120, N: 1, K: 2080 }
+    - { M: 2, N: 5120, K: 4128 }
+    - { M: 4, N: 5120, K: 5152 }
+    # K below 2048 and above 32768.
+    - { M: 5120, N: 2, K: 1024  }
+    - { M: 5120, N: 4, K: 1536  }
+    - { M: 5120, N: 2, K: 40960 }
+    - { M: 2, N: 5120, K: 1024  }
+    - { M: 4, N: 5120, K: 40960 }
+    # H below 2048 and above the K_LARGE_K bound.
+    - { M: 1024,  N: 2, K: 5120  }
+    - { M: 2, N: 1024,  K: 5120  }
+    - { M: 12288, N: 2, K: 12288 }
+    - { M: 2, N: 12288, K: 12288 }
+    # K_LARGE_K excludes skinny 4 and K above 16384: the kernels would lose here.
+    - { M: 5120, N: 4, K: 25600 }
+    - { M: 4, N: 5120, K: 25600 }
+    # Wide operand of 2^32 bytes or more: the K_LARGE_H kernels address it with 32 bits and are not routed.
+    - { M: 1048576, N: 4, K: 4096  }
+    - { M: 4, N: 1048576, K: 4096  }
+    - { M: 262144,  N: 3, K: 16384 }
+    - { M: 4, N: 262144,  K: 16384 }
+    - { M: 131072,  N: 3, K: 32768 }
+    - { M: 4, N: 131072,  K: 32768 }
+    # K_LARGE_H trimmed region, skinny n: lm_head and qkv shapes that stay on the existing kernels
+    # (Llama-70B and Llama-405B lm_head, Llama-405B qkv, narrow H at K above 8192).
+    - { M: 128256, N: 1, K: 8192  }
+    - { M: 128256, N: 4, K: 8192  }
+    - { M: 128256, N: 2, K: 16384 }
+    - { M: 18432,  N: 1, K: 16384 }
+    - { M: 18432,  N: 3, K: 16384 }
+    - { M: 16416,  N: 2, K: 16640 }
+    - { M: 20001,  N: 1, K: 32768 }
+    - { M: 262143, N: 3, K: 16384 }
+    - { M: 262143, N: 4, K: 8192  }
+    - { M: 131071, N: 3, K: 32768 }
+    - { M: 131071, N: 1, K: 32768 }
+    # K_LARGE_H trimmed region, skinny m: very wide H at K of 8192 or more.
+    - { M: 3, N: 128256, K: 8192  }
+    - { M: 4, N: 128256, K: 8192  }
+    - { M: 2, N: 128256, K: 16384 }
+    - { M: 4, N: 262143, K: 16384 }
+    - { M: 1, N: 262143, K: 16384 }
+    - { M: 4, N: 131071, K: 32768 }
+    - { M: 2, N: 131071, K: 32768 }
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Strided-batched problems have no batch strides in the vendored kernels, so they fall back to
+# the existing kernels even for sizes inside the boxes.
+- name: matmul_skinny_mxfp8_tn_fallback_batched
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 5120, N: 2, K: 5120 }
+    - { M: 4, N: 5120, K: 5120 }
+    - { M: 51200, N: 3, K: 5120 }
+  alpha: 1
+  beta: 0
+  batch_count: 2
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Bias problems use a different problem type than the vendored kernels, so they fall back to the
+# existing kernels even for sizes inside the boxes.
+- name: matmul_skinny_mxfp8_tn_fallback_bias
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  transA: T
+  transB: N
+  matrix_size:
+    - { M: 5120, N: 2, K: 5120 }
+    - { M: 4, N: 5120, K: 5120 }
+    - { M: 51200, N: 3, K: 5120 }
+  alpha: 1
+  beta: 0
+  batch_count: 1
+  bias_vector: 1
+  bias_type: bf16_r
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
 # Tests confirm no NaN propagation when alpha = 0, 2 and beta = 0. Value .NaN is converted into zero
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }

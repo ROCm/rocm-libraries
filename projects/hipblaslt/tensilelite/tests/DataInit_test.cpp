@@ -604,7 +604,6 @@ TEST(DecodeMXElement, UnsupportedDataTypeReturnsNaN)
                                                scale, data, 0, 0)));
 }
 
-
 // =============================================================================
 //   Section 5 - downsampleMXScaleFreeDim
 //
@@ -783,6 +782,44 @@ TEST(VaryMXScaleFreeTiles, KeepsZeroNaNAndClampsToFiniteRange)
     EXPECT_EQ(s[1], 0xFF);
     EXPECT_EQ(s[2], 0x01); // 0x01 + 0
     EXPECT_EQ(s[3], 0xFE); // 0xFE + 1 clamps to 0xFE
+}
+
+// Truth table of the host scale layout: arch layout x CLI format x solution format x mxBlock.
+TEST(MXScaleLayoutForSolution, Gfx950FollowsSolutionHostPreSwizzle)
+{
+    constexpr size_t mxBlock = 32;
+    // Solution format -1 means no solution has been picked yet.
+    EXPECT_EQ(dt::mxScaleLayoutForSolution(MXScaleLayout::GFX950, 1, 1, mxBlock),
+              MXScaleLayout::GFX950);
+    EXPECT_EQ(dt::mxScaleLayoutForSolution(MXScaleLayout::GFX950, 1, 0, mxBlock),
+              MXScaleLayout::None);
+    EXPECT_EQ(dt::mxScaleLayoutForSolution(MXScaleLayout::GFX950, 1, 2, mxBlock),
+              MXScaleLayout::None);
+    EXPECT_EQ(dt::mxScaleLayoutForSolution(MXScaleLayout::GFX950, 1, -1, mxBlock),
+              MXScaleLayout::None);
+}
+
+TEST(MXScaleLayoutForSolution, RequiresCliFormatAndMXOperand)
+{
+    for(MXScaleLayout arch : {MXScaleLayout::GFX950, MXScaleLayout::GFX1250})
+    {
+        EXPECT_EQ(dt::mxScaleLayoutForSolution(arch, 0, 1, 32), MXScaleLayout::None);
+        EXPECT_EQ(dt::mxScaleLayoutForSolution(arch, 1, 1, 0), MXScaleLayout::None);
+    }
+}
+
+TEST(MXScaleLayoutForSolution, Gfx1250IgnoresSolutionFormat)
+{
+    for(int32_t solutionFormat : {-1, 0, 1, 2})
+        EXPECT_EQ(dt::mxScaleLayoutForSolution(MXScaleLayout::GFX1250, 1, solutionFormat, 32),
+                  MXScaleLayout::GFX1250);
+}
+
+TEST(MXScaleLayoutForSolution, UnsupportedArchStaysNone)
+{
+    for(int32_t solutionFormat : {-1, 0, 1, 2})
+        EXPECT_EQ(dt::mxScaleLayoutForSolution(MXScaleLayout::None, 1, solutionFormat, 32),
+                  MXScaleLayout::None);
 }
 
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
