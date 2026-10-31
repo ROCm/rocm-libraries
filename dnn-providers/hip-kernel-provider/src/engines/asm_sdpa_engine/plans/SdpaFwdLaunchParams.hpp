@@ -65,6 +65,12 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
         tgDiv = 1U;
     }
 
+    // Group mode: hipDNN's S_q is the maximum per-batch Q length, so every batch gets
+    // ceil(S_q / tileSizeQo) tiles and the kernel reads each batch's real length from the
+    // ptr_qseq offsets. Precondition, not checked: S_q >= max_b(offset[b+1] - offset[b]).
+    // An understated S_q launches too few tiles and silently leaves the tail rows of the
+    // longer batches unwritten. Checking it would need a device-to-host copy of the offset
+    // tensor and a stream sync before every launch, so it stays a caller contract.
     const unsigned int qTiles = (params.seqLenQ + params.tileSizeQo - 1U) / params.tileSizeQo;
 
     unsigned int gdx = (qTiles + tgDiv - 1U) / tgDiv;

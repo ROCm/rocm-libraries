@@ -42,7 +42,10 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
     const unsigned int inBpe = params.inBytesPerElement;
     constexpr unsigned int K_BF16_SIZE = 2;
 
-    // Q dimensions and strides (element strides converted to byte strides)
+    // Q dimensions and strides (element strides converted to byte strides).
+    // Group mode passes hipDNN's S_q (the maximum per-batch Q length), not AITER's packed
+    // total_q; the kernel only needs an upper bound on each batch's length. Precondition,
+    // not checked: S_q >= every per-batch Q length (see computeFwdLaunchParams).
     args.s_seq_len = params.seqLenQ;
     args.s_Seqs = params.qStrideSeq * inBpe;
     args.s_Ts = params.tileSizeQo * params.qStrideRow * inBpe;
@@ -62,7 +65,9 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
     args.s_opt = launchParams.tuneOpt;
     args.s_lse = params.lseUid ? 1 : 0;
 
-    // KV dimensions
+    // KV dimensions. Group mode passes hipDNN's S_kv (the maximum per-batch KV length),
+    // not a packed total. Precondition, not checked: S_kv >= every per-batch KV length,
+    // i.e. max_b(kvOffset[b+1] - kvOffset[b]).
     args.s_kv_seq_len = params.seqLenKv;
     args.s_qk_head_dim = params.headDimQk;
     args.s_v_head_dim = params.headDimV;

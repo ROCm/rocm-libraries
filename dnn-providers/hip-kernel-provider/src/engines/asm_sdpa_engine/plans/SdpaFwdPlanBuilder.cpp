@@ -156,6 +156,9 @@ static bool isTokenSeqstartTensor(
     }
     const auto* dims = tensor->dims();
     const auto* strides = tensor->strides();
+    // Only the batch-axis stride is checked: dims 1-3 are size 1, so their index is always 0
+    // and their strides never contribute to an element address. stride[0] == 1 makes the
+    // B+1 INT32 entries contiguous, which is how AITER reads seqstart[b].
     return dims != nullptr && strides != nullptr && dims->size() == 4 && strides->size() == 4
            && dims->Get(0) == batch + 1 && dims->Get(1) == 1 && dims->Get(2) == 1
            && dims->Get(3) == 1 && strides->Get(0) == 1;
@@ -632,10 +635,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
 
     HIP_KERNEL_RETURN_FALSE_IF(
         key.empty(),
-        "Could not find matching kernel for parameter combination. "
-        " dataType = "
-            + dataTypeId + " qDim = " + std::to_string(qTensor->dims()->Get(3))
-            + " vDim  = " + std::to_string(vTensor->dims()->Get(3))
+        "Could not find matching kernel for parameter combination. dataType = " + dataTypeId
+            + " qDim = " + std::to_string(qTensor->dims()->Get(3))
+            + " vDim = " + std::to_string(vTensor->dims()->Get(3))
             + " mask = " + std::to_string(static_cast<int>(maskType)) + " rounding = "
             + std::to_string(static_cast<int>(getBf16ConvertMode(attrs, dataTypeId)))
             + " batch = " + std::to_string(static_cast<int>(batchMode)));
