@@ -26,7 +26,6 @@ add_executable( rocfft-internal-test
   internal_test_main.cpp
   rtc_test.cpp
   solution_map_test.cpp
-  ../data_layout.cpp
   ../enum_printer.cpp
   ../rocfft_stub.cpp
 )
@@ -58,6 +57,7 @@ target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-rtc-common
   rocfft-rtc-compile
   rocfft-rtc-gen
+  rocfft-data-layout
   rocfft-rtc-launch
   rocfft-rtc-subprocess
   rocfft-solution-map
