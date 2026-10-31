@@ -1006,10 +1006,28 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     ),
 }
 
-# LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides. No intrinsic needs a
-# further override today.
+# LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides.
 _INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
     **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
+}
+
+# LLVM 24 changes the named-barrier pointer ABI from LDS addrspace(3) to
+# addrspace(15). Lowering inserts the matching addrspacecast at each call.
+_INTRINSIC_DECLS_LLVM24_OVERRIDES: Dict[str, str] = {
+    **_INTRINSIC_DECLS_LLVM23_OVERRIDES,
+    "s.barrier.init": (
+        "declare void @llvm.amdgcn.s.barrier.init(ptr addrspace(15) nocapture, i32)"
+    ),
+    "s.barrier.signal.var": (
+        "declare void @llvm.amdgcn.s.barrier.signal.var("
+        "ptr addrspace(15) nocapture, i32)"
+    ),
+    "s.barrier.join": (
+        "declare void @llvm.amdgcn.s.barrier.join(ptr addrspace(15) nocapture)"
+    ),
+    "s.wakeup.barrier": (
+        "declare void @llvm.amdgcn.s.wakeup.barrier(ptr addrspace(15) nocapture)"
+    ),
 }
 
 
@@ -1029,6 +1047,8 @@ def _decls_for_flavor(flavor: str) -> Dict[str, str]:
         decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
     elif abi is _LlvmDeclarationAbi.LLVM23:
         decls.update(_INTRINSIC_DECLS_LLVM23_OVERRIDES)
+    elif abi is _LlvmDeclarationAbi.LLVM24:
+        decls.update(_INTRINSIC_DECLS_LLVM24_OVERRIDES)
     return decls
 
 
@@ -5528,11 +5548,23 @@ class _Lowerer:
         if member_count.type != I32:
             raise TypeError(f"{short_name} member_count must be i32")
         local = self._lds_ptr_operand(short_name, barrier)
+        addrspace, local = self._named_barrier_pointer(local)
         self._need(intrinsic)
         self._current().emit(
             f"  call void @llvm.amdgcn.{intrinsic}("
-            f"ptr addrspace(3) {local}, i32 {self._operand(member_count)})"
+            f"ptr addrspace({addrspace}) {local}, i32 {self._operand(member_count)})"
         )
+
+    def _named_barrier_pointer(self, local: str) -> tuple[int, str]:
+        if not _emission_profile(self._flavor).has(
+            _LlvmEmissionCapability.NAMED_BARRIER_AS15
+        ):
+            return 3, local
+        cast = self._fresh("barrier.as15")
+        self._current().emit(
+            f"  {cast} = addrspacecast ptr addrspace(3) {local} " "to ptr addrspace(15)"
+        )
+        return 15, cast
 
     def _op_tile_s_barrier_join(self, op: Op) -> None:
         self._lower_named_barrier_one(op, "s.barrier.join")
@@ -5546,9 +5578,11 @@ class _Lowerer:
         if len(op.operands) != 1:
             raise ValueError(f"{short_name} expects one barrier pointer")
         local = self._lds_ptr_operand(short_name, op.operands[0])
+        addrspace, local = self._named_barrier_pointer(local)
         self._need(intrinsic)
         self._current().emit(
-            f"  call void @llvm.amdgcn.{intrinsic}(ptr addrspace(3) {local})"
+            f"  call void @llvm.amdgcn.{intrinsic}("
+            f"ptr addrspace({addrspace}) {local})"
         )
 
     def _op_tile_s_barrier_leave(self, op: Op) -> None:
