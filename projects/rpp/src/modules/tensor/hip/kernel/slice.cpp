@@ -84,12 +84,27 @@ __global__ void slice_ncdhw_hip_tensor(T* srcPtr, uint3 srcStridesCDH, T* dstPtr
     uint srcIdx = (id_z * srcStridesCDH.y) + (id_y * srcStridesCDH.z) + id_x;
     uint dstIdx = (id_z * dstStridesCDH.y) + (id_y * dstStridesCDH.z) + id_x;
 
-    d_float8 val_f8;
-    for (int c = 0; c < channels; c++) {
-        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &val_f8);
-        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &val_f8);
-        srcIdx += srcStridesCDH.x;
-        dstIdx += dstStridesCDH.x;
+    // Number of lanes of this thread's 8-wide vector that are actually inside the valid width.
+    // In [1, 8]; only < 8 for the tail vector of a row whose valid width is not a multiple of 8.
+    int validLanes = (int)validShapeDHW.z - id_x;
+
+    if (validLanes >= 8) {
+        d_float8 val_f8;
+        for (int c = 0; c < channels; c++) {
+            rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &val_f8);
+            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &val_f8);
+            srcIdx += srcStridesCDH.x;
+            dstIdx += dstStridesCDH.x;
+        }
+    } else {
+        // Tail vector: copy only the in-bounds lanes so elements beyond the valid width are left
+        // untouched (they must retain whatever fill_value_ncdhw_hip_tensor already wrote there),
+        // and so no source elements outside the ROI are read.
+        for (int c = 0; c < channels; c++) {
+            for (int i = 0; i < validLanes; i++) dstPtr[dstIdx + i] = srcPtr[srcIdx + i];
+            srcIdx += srcStridesCDH.x;
+            dstIdx += dstStridesCDH.x;
+        }
     }
 }
 
@@ -108,9 +123,24 @@ __global__ void slice_ndhwc_hip_tensor(T* srcPtr, uint2 srcStridesDH, T* dstPtr,
     uint srcIdx = (id_z * srcStridesDH.x) + (id_y * srcStridesDH.y) + (id_x * 3);
     uint dstIdx = (id_z * dstStridesDH.x) + (id_y * dstStridesDH.y) + (id_x * 3);
 
-    d_float24 val_f24;
-    rpp_hip_load24_pkd3_and_unpack_to_float24_pln3(srcPtr + srcIdx, &val_f24);
-    rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &val_f24);
+    // Number of pixels of this thread's 8-pixel vector that are actually inside the valid width.
+    // In [1, 8]; only < 8 for the tail vector of a row whose valid width is not a multiple of 8.
+    int validLanes = (int)validShapeDHW.z - id_x;
+
+    if (validLanes >= 8) {
+        d_float24 val_f24;
+        rpp_hip_load24_pkd3_and_unpack_to_float24_pln3(srcPtr + srcIdx, &val_f24);
+        rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &val_f24);
+    } else {
+        // Tail vector: copy only the in-bounds pixels so elements beyond the valid width are left
+        // untouched (they must retain whatever fill_value_ndhwc_hip_tensor already wrote there),
+        // and so no source pixels outside the ROI are read.
+        for (int i = 0; i < validLanes; i++) {
+            dstPtr[dstIdx + i * 3 + 0] = srcPtr[srcIdx + i * 3 + 0];
+            dstPtr[dstIdx + i * 3 + 1] = srcPtr[srcIdx + i * 3 + 1];
+            dstPtr[dstIdx + i * 3 + 2] = srcPtr[srcIdx + i * 3 + 2];
+        }
+    }
 }
 
 template <typename T>
