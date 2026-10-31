@@ -17,10 +17,14 @@ struct GpuResampleFwdSignatureKey
 {
     const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType
         = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes;
-    hipdnn_flatbuffers_sdk::data_objects::DataType xDataType;
-    hipdnn_flatbuffers_sdk::data_objects::DataType yDataType;
-    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType;
-    hipdnn_flatbuffers_sdk::data_objects::DataType indexDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType xDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType yDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType indexDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
 
     GpuResampleFwdSignatureKey() = default;
     constexpr GpuResampleFwdSignatureKey(hipdnn_flatbuffers_sdk::data_objects::DataType x,
@@ -159,10 +163,14 @@ struct GpuResampleBwdSignatureKey
 {
     const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType
         = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleBwdAttributes;
-    hipdnn_flatbuffers_sdk::data_objects::DataType dyDataType;
-    hipdnn_flatbuffers_sdk::data_objects::DataType dxDataType;
-    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType;
-    hipdnn_flatbuffers_sdk::data_objects::DataType indexDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType dyDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType dxDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType indexDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
 
     GpuResampleBwdSignatureKey() = default;
     constexpr GpuResampleBwdSignatureKey(hipdnn_flatbuffers_sdk::data_objects::DataType dy,
