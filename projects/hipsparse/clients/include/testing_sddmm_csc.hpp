@@ -31,6 +31,7 @@
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_graph.hpp"
+#include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -83,16 +84,13 @@ void testing_sddmm_csc_bad_arg(const Arguments& argus)
     void*    dbuf = (void*)dbuf_managed.get();
 
     // SDDMM structures
-    hipsparseDnMatDescr_t A, B;
     hipsparseSpMatDescr_t C;
 
     size_t bsize;
 
     // Create SDDMM structures
-    verify_hipsparse_status_success(hipsparseCreateDnMat(&A, m, k, m, dA, dataType, orderA),
-                                    "success");
-    verify_hipsparse_status_success(hipsparseCreateDnMat(&B, k, n, k, dB, dataType, orderB),
-                                    "success");
+    hipsparseLocalDnMat A(m, k, m, dA, dataType, orderA);
+    hipsparseLocalDnMat B(k, n, k, dB, dataType, orderB);
     verify_hipsparse_status_success(
         hipsparseCreateCsc(&C, m, n, nnz, dptr, dcol, dval, idxTypeI, idxTypeJ, idxBase, dataType),
         "success");
@@ -177,8 +175,6 @@ void testing_sddmm_csc_bad_arg(const Arguments& argus)
         "Error: dbuf is nullptr");
 
     // Destruct
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(A), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(B), "success");
     verify_hipsparse_status_success(hipsparseDestroySpMat(C), "success");
 
 #endif
@@ -305,9 +301,8 @@ void testing_sddmm_csc(Arguments argus)
         hipsparseCreateCsc(&C2, C_m, C_n, nnz, dptr, dind, dval2, typeI, typeJ, idx_base, typeT));
 
     // Create dense matrices
-    hipsparseDnMatDescr_t A, B;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&A, A_m, A_n, lda, dA, typeT, orderA));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&B, B_m, B_n, ldb, dB, typeT, orderB));
+    hipsparseLocalDnMat A(A_m, A_n, lda, dA, typeT, orderA);
+    hipsparseLocalDnMat B(B_m, B_n, ldb, dB, typeT, orderB);
 
     // Query SDDMM buffer
     size_t bufferSize;
@@ -430,8 +425,6 @@ void testing_sddmm_csc(Arguments argus)
     CHECK_HIP_ERROR(hipFree(buffer));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C2));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(A));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
 
 #endif
 }
