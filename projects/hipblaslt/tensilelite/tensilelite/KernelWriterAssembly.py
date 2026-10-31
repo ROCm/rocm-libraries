@@ -492,7 +492,7 @@ class KernelWriterAssembly(KernelWriter):
       "largest store-neutral K is %u but this kernel needs %u"
       % (withheld, batches, batchesWithout, neutralKTiles * kernel["DepthU"],
          self.rapResidentKTiles(kernel) * kernel["DepthU"]))
-    self.states.overflowedResources = 9
+    self.setOverflowedResources(kernel, 9)
 
   def tailFoldingMxsKSplitOffsetExceedsOneGroup(self, kernel, tc) -> bool:
     """Can a K-split scale wave's offset outrun the last k-tile's K groups?"""
@@ -955,6 +955,7 @@ class KernelWriterAssembly(KernelWriter):
       self.states.overflowedResources = 2
       if self.db["AssertOnSgprOverflow"]:
         raise e
+      self.stopOnOverflowedResources(self.states.kernel)
 
     tmpSgpr = allocTmpGpr(self.sgprPool, num, self.states.regCaps["MaxSgpr"], alignment, tag, overflowListener)
     return tmpSgpr
@@ -964,6 +965,7 @@ class KernelWriterAssembly(KernelWriter):
       self.states.overflowedResources = 2
       if self.db["AssertOnSgprOverflow"]:
         raise e
+      self.stopOnOverflowedResources(self.states.kernel)
 
     tmpSgpr = allocTmpGprList(self.sgprPool, nums, self.states.regCaps["MaxSgpr"], alignments, tag, overflowListener)
     return tmpSgpr
@@ -2572,6 +2574,11 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # deferRegisterOverflowForAllocation
   ##############################################################################
+  def _overflowAwaitsAllocation(self, kernel) -> bool:
+    # The same test deferRegisterOverflowForAllocation applies at the end of codegen.
+    return self.states.overflowedResources in REGISTER_BUDGET_OVERFLOW_CODES \
+      and self.stinkyTofuRegisterAllocationMode(kernel) >= 3
+
   def deferRegisterOverflowForAllocation(self, kernel) -> None:
     """Reopen a register budget verdict, so allocation gets to settle it.
 
@@ -2614,6 +2621,7 @@ class KernelWriterAssembly(KernelWriter):
         them -- which is the one number that says how much allocation moved.
     """
     if self.states.overflowedResources:
+      self.stopOnOverflowedResources(kernel, mkb, afterAllocation)
       self.printRejectionReason(kernel, mkb, afterAllocation)
       self.applyOverflowStub(mkb)
 
@@ -19525,7 +19533,7 @@ class KernelWriterAssembly(KernelWriter):
         # It might be possible to fix globalWriteBatch to handle this case but these
         # are likely to be low-performing so likely not worth optimizing.
         print2("WARNING: half requires at least two elements per batch")
-        self.states.overflowedResources = 3
+        self.setOverflowedResources(kernel, 3)
 
     assert numElementsPerBatch > 0, "numElementsPerBatch=0 for %s"%self.states.kernelName
 
@@ -23807,7 +23815,7 @@ class KernelWriterAssembly(KernelWriter):
     # common multiple of either, so normalizing everything by LdsOffsetA_Blk would
     # land the second group inside the first group's allocation. Refuse instead.
     if self._dcpDivergent(kernel):
-      self.states.overflowedResources = 12
+      self.setOverflowedResources(kernel, 12)
       return mod
     for blk in range(self.states.numLDSBlk - 1, 0, -1):
       inBuffer0 = Label(self.labels.getNameInc("TdmTailDescriptorInBuffer0"), "")
