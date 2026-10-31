@@ -92,13 +92,14 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
                   ? (HERM ? rocblas_operation_conjugate_transpose : rocblas_operation_transpose)
                   : rocblas_operation_none;
 
+        // herk_ex is non-batched; batch_count == 1, so chunk_size == 1, batch_offset == 0.
         // Launch kernel to copy the data from triangular matrix to the workspace memory
         if(rocblas_fill_upper == uplo)
             RETURN_IF_ROCBLAS_ERROR((rocblas_copy_triangular_syrk_herk<true, true, HERM>(
-                handle, n, C, ldc, stride_C, (T*)w_mem, batch_count)));
+                handle, n, C, ldc, stride_C, (T*)w_mem, batch_count, 0)));
         else
             RETURN_IF_ROCBLAS_ERROR((rocblas_copy_triangular_syrk_herk<true, false, HERM>(
-                handle, n, C, ldc, stride_C, (T*)w_mem, batch_count)));
+                handle, n, C, ldc, stride_C, (T*)w_mem, batch_count, 0)));
 
         RETURN_IF_ROCBLAS_ERROR((rocblas_gemm_ex_template<BATCHED>(handle,
                                                                    trans_orig,
@@ -137,10 +138,10 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
         // Launch kernel to copy the data from workspace memory back to triangular matrix
         if(rocblas_fill_upper == uplo)
             RETURN_IF_ROCBLAS_ERROR((rocblas_copy_triangular_syrk_herk<false, true, HERM>(
-                handle, n, C, ldc, stride_C, (T*)w_mem, batch_count)));
+                handle, n, C, ldc, stride_C, (T*)w_mem, batch_count, 0)));
         else
             RETURN_IF_ROCBLAS_ERROR((rocblas_copy_triangular_syrk_herk<false, false, HERM>(
-                handle, n, C, ldc, stride_C, (T*)w_mem, batch_count)));
+                handle, n, C, ldc, stride_C, (T*)w_mem, batch_count, 0)));
 
         return rocblas_status_success;
     }
