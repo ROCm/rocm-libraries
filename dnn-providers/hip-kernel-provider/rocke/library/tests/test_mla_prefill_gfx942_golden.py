@@ -24,6 +24,8 @@ odd head count:
   * ``fwd_h128_agpr`` -- the agpr_acc layout built directly. Admission refuses
     it on llvm20, which the golden records as an expected failure for that
     flavor rather than a case.
+  * ``guard_*`` -- unshipped packings pinned as a drift guard for the shared
+    emitters (see :func:`_cases`).
   * ``*_aq`` -- the unfused ``absorbed_query`` kernel, which a request reaches
     through ``MLARequest.absorbed_query``: the dispatched default layout and
     the agpr_acc layout (the latter refused on llvm20 like ``fwd_h128_agpr``).
@@ -67,15 +69,28 @@ def _cases():
 
     The forward cases take the spec dispatch ships (``dispatched``) or, for
     the agpr_acc layout, build it directly; the probe uses the spec defaults
-    at ``block_q=16``. Codegen levers are deliberately not swept: this fixture
-    pins the *shipped* IR, and sweeping levers here would bless configurations
-    nothing has measured or run on device.
+    at ``block_q=16``. Codegen levers are deliberately not swept: the fixture
+    pins the *shipped* IR. The ``guard_*`` cases are the one exception: three
+    packings dispatch does not ship (eight heads x one tile, two heads x one
+    tile, one head x two tiles), pinned only so an edit to the shared emitters
+    cannot change them unseen while the shipped cases are being re-blessed.
+    They are not a claim that those layouts are measured.
     """
     from kernels.mla.mla_prefill_gfx942 import (
         MlaPrefillSpec,
         build_mla_prefill_fwd,
         build_mla_prefill_score_probe,
+        fwd_layout,
     )
+
+    def layout(num_heads, heads_per_wg, q_tiles_per_wg):
+        return lambda: build_mla_prefill_fwd(
+            MlaPrefillSpec(
+                num_heads=num_heads,
+                **fwd_layout(heads_per_wg=heads_per_wg, q_tiles_per_wg=q_tiles_per_wg),
+            ),
+            arch=_ARCH,
+        )
 
     def agpr(num_heads, absorbed_query=False):
         # The shipped long-key layout, built directly so llvm20's refusal is
@@ -134,6 +149,9 @@ def _cases():
         # refuses it and dispatch falls back to 16 rows per wave).
         "mla_prefill_gfx942/dispatch_fwd_h128_long": dispatched(128, 8192, 8192),
         "mla_prefill_gfx942/fwd_h128_agpr": agpr(128),
+        "mla_prefill_gfx942/guard_fwd_h128_hpw8": layout(128, 8, 1),
+        "mla_prefill_gfx942/guard_fwd_h64_hpw2_qpw1": layout(64, 2, 1),
+        "mla_prefill_gfx942/guard_fwd_h5_qpw2": layout(5, 1, 2),
         # The absorbed_query kernel: rule-picked default layout, and agpr_acc.
         "mla_prefill_gfx942/dispatch_fwd_h128_aq": dispatched(128, absorbed_query=True),
         "mla_prefill_gfx942/fwd_h128_agpr_aq": agpr(128, absorbed_query=True),

@@ -74,6 +74,7 @@ from ._attention_bwd_addr import (
     as_i64,
 )
 from ._attention_bwd_frag import eval_layout
+from ._bf16_rne import HI_HALVES
 
 __all__ = [
     "BF16_CASTS",
@@ -100,10 +101,6 @@ STATS_VECS = (1, 2, 4)
 # does not enumerate it (it stays legal and correct).
 NATIVE_BF16_CVT_ARCHS = ("gfx950",)
 
-# v_perm_b32 selector taking bytes 2, 3 of the low source and bytes 2, 3 of
-# the high source: the upper halves of two words, low element first.
-_HI_HALVES = 0x07060302
-
 
 def rne_noguard_bf16(b: IRBuilder, frag: Value) -> Value:
     """``<n x f32>`` -> ``<n x bf16>`` (``n`` even), round to nearest even, no
@@ -120,7 +117,7 @@ def rne_noguard_bf16(b: IRBuilder, frag: Value) -> Value:
     lsb = b.vector_and(b.vector_lshr(u, splat(16)), splat(1))
     r = b.vector_add(b.vector_add(u, lsb), splat(0x7FFF))
     words = [
-        b.byte_perm(b.vec_extract(r, 2 * j + 1), b.vec_extract(r, 2 * j), _HI_HALVES)
+        b.byte_perm(b.vec_extract(r, 2 * j + 1), b.vec_extract(r, 2 * j), HI_HALVES)
         for j in range(n // 2)
     ]
     return b.vec_bitcast(b.vec_pack(words, I32), VectorType(BF16, n))

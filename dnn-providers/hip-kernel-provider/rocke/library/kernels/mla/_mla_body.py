@@ -35,6 +35,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from typing import Literal
 
 from rocke.core.ir import BF16, F16, F32, I32, IRBuilder, PtrType, Type, Value
 from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
@@ -160,7 +161,9 @@ def shift(b: IRBuilder, offset: int, value: Value) -> Value:
     return value if offset == 0 else b.add(b.const_i32(offset), value)
 
 
-def query_reduce(b: IRBuilder, scalar: Value, *, combine: str) -> Value:
+def query_reduce(
+    b: IRBuilder, scalar: Value, *, combine: Literal["sum", "max"]
+) -> Value:
     """Reduce ``scalar`` across the four 16-lane groups of a wave.
 
     In the transposed score fragment (Sᵀ, ``m = key``, ``n = query``) lane ``l``
@@ -170,6 +173,8 @@ def query_reduce(b: IRBuilder, scalar: Value, *, combine: str) -> Value:
     16 stays inside a 32-lane half and runs as ``ds_swizzle``; XOR 32 crosses
     halves, which ``ds_swizzle`` cannot, and runs as ``ds_bpermute``.
     """
+    if combine not in ("sum", "max"):
+        raise ValueError(f"combine={combine!r}, expected 'sum' or 'max'")
     fold = b.fadd if combine == "sum" else b.fmax
     v = fold(scalar, b.warp_shuffle_xor(scalar, 16))
     return fold(v, b.warp_shuffle_xor(v, 32))
@@ -428,7 +433,10 @@ class KeyMask:
 
     Two bounds, and both land on ``p`` rather than only on ``s``: the ragged
     key bound (the last tile overhangs S_k, where page-granular staging
-    supplies real but meaningless bytes) and the bottom-right causal bound.
+    supplies arbitrary bytes, possibly NaN) and the bottom-right causal bound.
+    The score side is then safe, because a ``select`` replaces the score; the
+    PV side multiplies those rows by ``P == 0``, so a caller whose C rows are
+    also the V operand must zero them (``0 x NaN`` is NaN).
     Masking ``s`` alone is not enough -- with the -1e30 sentinel a fully
     masked row gets m_new == -1e30, so every element would yield
     exp2(s - m_new) == 1 and ``l`` would come out BK, not 0. l == 0 is what

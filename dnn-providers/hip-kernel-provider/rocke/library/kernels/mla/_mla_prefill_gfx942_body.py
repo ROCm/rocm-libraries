@@ -4,10 +4,20 @@
 """Prefill-private emitters of the gfx942 MLA prefill kernels.
 
 :mod:`kernels.mla.mla_prefill_gfx942` holds the spec, admission and the
-builders; this module holds their single-use phases and the gfx942-only
-pieces (the AGPR accumulator's inline asm, the LDS DMA, the permuted PV
-gather). The arch-neutral emitters they share with other MLA kernels live in
-:mod:`kernels.mla._mla_body`.
+builders; this module holds their single-use phases. The arch-neutral emitters
+they share with other MLA kernels live in :mod:`kernels.mla._mla_body`.
+
+Only part of this module is gfx942-specific: :class:`AgprAcc` (inline asm on
+the gfx942 AGPR file), :class:`KvTileDma` (``buffer_load ... lds``), the
+transposed gathers (:func:`read_pv_group`, :func:`expand_k_nope`,
+:func:`project_wuv_heads`), which exist because gfx942
+has no ``ds_read_tr``. The rest is arch-neutral prefill and paging code --
+the varlen prologue (:func:`varlen_tile`, :func:`seq_len_k`,
+:func:`causal_keys`, :func:`causal_k_tiles`, :func:`full_k_tiles`), the block
+table (:class:`PageTable`, :func:`clamp_tile`, :func:`tile_ahead`), query-row
+addressing (:class:`QRows`) and the stores (:func:`store_out_frag`,
+:func:`store_lse`) -- and can move to :mod:`kernels.mla._mla_body` when a
+second kernel adopts it.
 
 Every helper here emits its ops in exactly the order the builders used to emit
 them inline, so moving a builder onto a helper never moves the golden IR. Keep
@@ -1058,6 +1068,21 @@ class KvSharedStager:
             )
 
 
+def dma_rope_rows(d_rope: int) -> int:
+    """RoPE rows one 256 B ``buffer_load ... lds`` instruction covers."""
+    return 256 // (d_rope * 2)
+
+
+def dma_row_split(num_warps: int, d_rope: int) -> int:
+    """The key-row count ``block_k`` must be a multiple of for the DMA.
+
+    Each wave loads an equal run of key rows, whole RoPE chunks at a time, with
+    no remainder handling: a ``block_k`` that is not a multiple leaves rows
+    unloaded and the score reads stale LDS.
+    """
+    return num_warps * dma_rope_rows(d_rope)
+
+
 class KvTileDma:
     """The key tile DMA'd straight into LDS (``buffer_load ... lds``).
 
@@ -1095,7 +1120,15 @@ class KvTileDma:
                 f"d_rope={d_rope} (expected 64) must fit 256 B DMA chunks"
             )
         self.c_chunks_row = (r_kv * 2) // 256
-        self.kr_rows_chunk = 256 // (d_rope * 2)
+        self.kr_rows_chunk = dma_rope_rows(d_rope)
+        # Each wave DMAs rows_w latent rows and rows_w / kr_rows_chunk RoPE
+        # chunks, with no remainder handling: an uneven split leaves key rows
+        # unloaded and the score reads stale LDS.
+        if block_k % dma_row_split(num_warps, d_rope):
+            raise ValueError(
+                f"KvTileDma: block_k={block_k} must split into whole RoPE chunks of "
+                f"{self.kr_rows_chunk} rows across num_warps={num_warps} waves"
+            )
         self.row_bytes = (r_kv + row_pad) * 2
         self.kr_units = (d_rope * 2) // 8
         self.wave_u = b.readfirstlane(lanes.wave)

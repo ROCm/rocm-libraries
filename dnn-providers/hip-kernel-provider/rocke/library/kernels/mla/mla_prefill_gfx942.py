@@ -123,6 +123,7 @@ from kernels.mla._mla_prefill_gfx942_body import (
     causal_keys,
     clamp_tile,
     copy_rows_to_lds,
+    dma_row_split,
     epilogue_lane_row,
     expand_k_nope,
     full_k_tiles,
@@ -597,6 +598,13 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
             return False, (
                 f"agpr_acc DMAs two 128 B RoPE rows per chunk: d_rope={spec.d_rope}, "
                 "expected 64"
+            )
+        # Each wave DMAs an equal run of key rows, whole RoPE chunks at a time.
+        split = dma_row_split(spec.num_warps, spec.d_rope)
+        if spec.block_k % split != 0:
+            return False, (
+                f"agpr_acc splits the key tile across waves in RoPE chunks: "
+                f"block_k={spec.block_k}, expected a multiple of {split}"
             )
     # The PV gathers four latent tiles per read and the epilogue stages W_UV
     # in 64-row latent blocks and EPI_VQ-wide v windows.

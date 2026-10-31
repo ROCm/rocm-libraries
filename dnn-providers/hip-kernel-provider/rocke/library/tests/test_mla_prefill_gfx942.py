@@ -16,10 +16,11 @@ Numeric correctness is NOT covered here; that is the on-GPU comparison against
 
 from __future__ import annotations
 
-import os
 import tempfile
 import unittest
 from pathlib import Path
+
+from rocke.core.lower_llvm import lower_kernel_to_llvm
 
 from kernels.mla.mla_prefill_gfx942 import (
     MlaPrefillSpec,
@@ -35,21 +36,16 @@ from kernels.mla.mla_prefill_gfx942 import (
     supports_mla_prefill,
     supports_mla_score_probe,
 )
-from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+from ._compiler_tools import (
+    compile_for_guard,
+    load_comgr_or_skip,
+    require_tools_or_skip,
+)
 
 
 def _spec(**kw) -> MlaPrefillSpec:
     return MlaPrefillSpec(num_heads=kw.pop("num_heads", 16), **kw)
-
-
-def _require_tools_or_skip(reason: str) -> None:
-    """Skip a resource guard whose compiler tools are missing, unless the run
-    requires them (``ROCKE_REQUIRE_COMPILER_TOOLS=1``, set by the CI lane that
-    supplies them): a gate that skips everywhere looks green and checks
-    nothing."""
-    if os.environ.get("ROCKE_REQUIRE_COMPILER_TOOLS") == "1":
-        raise AssertionError(f"ROCKE_REQUIRE_COMPILER_TOOLS=1 but {reason}")
-    raise unittest.SkipTest(reason)
 
 
 def _assert_no_private_memory(case: unittest.TestCase, ir: str) -> None:
@@ -472,48 +468,27 @@ class _OccupancyGuard:
             pass
         try:
             from rocke.analysis.isa import analyze_hsaco
-            from rocke.helpers.compile import compile_kernel
         except ImportError as exc:  # pragma: no cover - environment-dependent
-            _require_tools_or_skip(f"comgr/resource tools unavailable: {exc}")
+            require_tools_or_skip(f"comgr/resource tools unavailable: {exc}")
         # The forward kernel compiles with ``-amdgpu-mfma-vgpr-form``, which an
         # LLVM 20 comgr (ROCm 7.0/7.1) does not know: its option parser exits
         # the whole process instead of raising. That happens when an earlier
         # test in the session already loaded the system comgr ahead of torch's.
-        try:
-            from rocke.runtime.comgr import _require_compiler_info
-
-            llvm_major = int(_require_compiler_info().llvm_version[0])
-        except (ImportError, OSError, RuntimeError) as exc:  # pragma: no cover
-            _require_tools_or_skip(f"comgr unavailable: {exc}")
-        if llvm_major < 21:
-            raise unittest.SkipTest(
-                f"loaded comgr is LLVM {llvm_major}; the forward kernel's "
-                "-amdgpu-mfma-vgpr-form option needs LLVM 21+"
-            )
+        load_comgr_or_skip(
+            21, "the forward kernel's -amdgpu-mfma-vgpr-form needs LLVM 21+"
+        )
 
         cls.spec = cls.make_spec()
-        try:
-            art = compile_kernel(
-                build_mla_prefill_fwd(cls.spec, arch="gfx942"),
-                arch="gfx942",
-                capture_ir_text=False,
-            )
-        except ImportError as exc:  # pragma: no cover - environment-dependent
-            _require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
-        except RuntimeError as exc:
-            # A forced ROCKE_LLVM_FLAVOR that the loaded comgr cannot take is an
-            # environment mismatch, not a kernel defect. Any other compile
-            # failure is real.
-            if "vintage mismatch" not in str(exc):
-                raise
-            raise unittest.SkipTest(f"comgr cannot take this IR flavor: {exc}")
+        art = compile_for_guard(
+            build_mla_prefill_fwd(cls.spec, arch="gfx942"), arch="gfx942"
+        )
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mla_prefill_fwd.hsaco"
             path.write_bytes(bytes(art.hsaco))
             try:
                 cls.res = analyze_hsaco(path).resources
             except (FileNotFoundError, RuntimeError) as exc:  # pragma: no cover
-                _require_tools_or_skip(f"HSACO introspection unavailable: {exc}")
+                require_tools_or_skip(f"HSACO introspection unavailable: {exc}")
 
     def test_lds_fits_two_workgroups(self):
         self.assertIsNotNone(self.res.lds_bytes)
@@ -655,26 +630,24 @@ class TestAgprAccResources(unittest.TestCase):
         try:
             from rocke.analysis.isa import analyze_hsaco
             from rocke.core.lower_llvm import _is_modern_flavor, _resolve_llvm_flavor
-            from rocke.helpers.compile import compile_kernel
         except ImportError as exc:  # pragma: no cover - environment-dependent
-            _require_tools_or_skip(f"comgr/resource tools unavailable: {exc}")
+            require_tools_or_skip(f"comgr/resource tools unavailable: {exc}")
+        # comgr loads first, so AUTO flavor resolution below cannot fail on it.
+        load_comgr_or_skip(
+            21, "the forward kernel's -amdgpu-mfma-vgpr-form needs LLVM 21+"
+        )
         if not _is_modern_flavor(_resolve_llvm_flavor()):
             raise unittest.SkipTest("agpr_acc needs an llvm22 / llvm23 comgr")
-        try:
-            art = compile_kernel(
-                build_mla_prefill_fwd(_aa_spec(), arch="gfx942"),
-                arch="gfx942",
-                capture_ir_text=False,
-            )
-        except (ImportError, RuntimeError) as exc:  # pragma: no cover
-            _require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
+        art = compile_for_guard(
+            build_mla_prefill_fwd(_aa_spec(), arch="gfx942"), arch="gfx942"
+        )
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mla_prefill_fwd_aa.hsaco"
             path.write_bytes(bytes(art.hsaco))
             try:
                 an = analyze_hsaco(path, keep_text=True)
             except (FileNotFoundError, RuntimeError) as exc:  # pragma: no cover
-                _require_tools_or_skip(f"HSACO introspection unavailable: {exc}")
+                require_tools_or_skip(f"HSACO introspection unavailable: {exc}")
         cls.res = an.resources
         cls.mfma = [
             ln.split("//")[0].strip()
@@ -847,3 +820,68 @@ class TestLdsAdmissionMatchesIntendedOccupancy(unittest.TestCase):
             ok, reason = supports_mla_prefill(spec, arch="gfx942")
         self.assertFalse(ok)
         self.assertIn("c_kv row", reason)
+
+
+class TestSharedEmitterGuards(unittest.TestCase):
+    """The checks that keep a misuse of a shared emitter from building quietly."""
+
+    def test_probe_refuses_a_q_tile_its_staging_cannot_cover(self):
+        # 16 x 192 = 3072 elements is 1.5 passes of 512 threads x 4.
+        with self.assertRaisesRegex(NotImplementedError, "Q tile"):
+            build_mla_prefill_score_probe(_spec(block_q=16, num_warps=8), arch="gfx942")
+
+    def test_kernel_arg_validates_role_dtype_and_key(self):
+        from kernels.mla._mla_body import KernelArg
+
+        KernelArg("out", "out_ptr", "bf16", "out")
+        for kw, field in (
+            ({"role": "inout"}, "role="),
+            ({"dtype": "fp8"}, "dtype="),
+            ({"key": "outp"}, "key="),
+        ):
+            args = {"key": "out", "name": "out_ptr", "dtype": "bf16", "role": "out"}
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, field):
+                KernelArg(**{**args, **kw})
+
+    def test_rne_pack_takes_exactly_four(self):
+        from rocke.core.ir import IRBuilder
+
+        from kernels.common._bf16_rne import bf16x4_rne_finite
+
+        b = IRBuilder("rne_guard")
+        with self.assertRaisesRegex(ValueError, "four"):
+            bf16x4_rne_finite(b, [b.const_f32(0.0)] * 3)
+
+    def test_query_reduce_refuses_an_unknown_combine(self):
+        from rocke.core.ir import IRBuilder
+
+        from kernels.mla._mla_body import query_reduce
+
+        b = IRBuilder("reduce_guard")
+        with self.assertRaisesRegex(ValueError, "combine='add'"):
+            query_reduce(b, b.const_f32(0.0), combine="add")
+
+    def test_kv_tile_dma_refuses_an_uneven_row_split(self):
+        # Three waves over 16 key rows would leave rows unloaded. Admission
+        # cannot reach this today (num_warps is 1/2/4/8); the DMA must refuse.
+        from types import SimpleNamespace
+
+        from rocke.core.ir import IRBuilder
+
+        from kernels.mla._mla_prefill_gfx942_body import KvTileDma
+
+        stager = SimpleNamespace(c_rsrc=None, kr_rsrc=None)
+        with self.assertRaisesRegex(ValueError, "block_k=16"):
+            KvTileDma(
+                IRBuilder("dma_guard"),
+                stager,
+                None,
+                [],
+                [],
+                num_warps=3,
+                block_k=16,
+                r_kv=512,
+                d_rope=64,
+                page_size=16,
+                row_pad=4,
+            )

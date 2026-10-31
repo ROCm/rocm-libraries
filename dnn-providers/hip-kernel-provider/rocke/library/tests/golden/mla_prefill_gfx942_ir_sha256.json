@@ -23,6 +23,18 @@
           "bytes": 744414,
           "sha256": "f81dbfa32375721d1c97955b5aa9b57fa67772f35888a172a9bc9d7a52b97c0c"
         },
+        "mla_prefill_gfx942/guard_fwd_h128_hpw8": {
+          "bytes": 850874,
+          "sha256": "0425e7efe30507e461c484b697766f24bd5bc859f85251608430c0e8f3f8e84c"
+        },
+        "mla_prefill_gfx942/guard_fwd_h5_qpw2": {
+          "bytes": 754323,
+          "sha256": "fb28809d6652e9511a2b44b5984752b58fc958f8633f3eb648c5aa67d3f53667"
+        },
+        "mla_prefill_gfx942/guard_fwd_h64_hpw2_qpw1": {
+          "bytes": 870807,
+          "sha256": "a3afd596a414a6897bd4cb277904f9e0a33c892bc44bb8b8d65dcafd02377291"
+        },
         "mla_prefill_gfx942/probe_h128": {
           "bytes": 166285,
           "sha256": "d9746b07349d49b0c87c5cec00172673b407672d2cdac5317b7e614baffea9fa"
@@ -73,6 +85,18 @@
           "bytes": 682233,
           "sha256": "baf3f59dd8c5d2ef9b7eb2ba5e95cef2201b6a78c96318ebc41093c055badaf4"
         },
+        "mla_prefill_gfx942/guard_fwd_h128_hpw8": {
+          "bytes": 850974,
+          "sha256": "314529ba9fcd0bc371f6757cba143913b8d2655800bdb7d5ce7f85b643d361fc"
+        },
+        "mla_prefill_gfx942/guard_fwd_h5_qpw2": {
+          "bytes": 754423,
+          "sha256": "bc5c9d2634f5899d07cf9cdb39a146dfa9d0280a2ac579281c9caaa51505be31"
+        },
+        "mla_prefill_gfx942/guard_fwd_h64_hpw2_qpw1": {
+          "bytes": 870907,
+          "sha256": "ac315b32c1dbd85812048f3d37b3e9987eda5adec4548cae8ef3e4b4fbfd5d0e"
+        },
         "mla_prefill_gfx942/probe_h128": {
           "bytes": 166292,
           "sha256": "3c2110d1caf41e42ba220bb84bb09ed1b948fad364e0879879fd99361e3a5a34"
@@ -112,6 +136,18 @@
         "mla_prefill_gfx942/fwd_h128_agpr_aq": {
           "bytes": 682297,
           "sha256": "348cb22883ee717f9fb187c479b0fb30536a89107712dd1cd041168781ccc322"
+        },
+        "mla_prefill_gfx942/guard_fwd_h128_hpw8": {
+          "bytes": 851038,
+          "sha256": "4953603671eec31398c542a729a9a35c59690755da808ab0c6471fbc4626ffb9"
+        },
+        "mla_prefill_gfx942/guard_fwd_h5_qpw2": {
+          "bytes": 754487,
+          "sha256": "6a10ce9837ce2d7112b1ee02080971d58a74d868ff565946c50e2166e6c10b30"
+        },
+        "mla_prefill_gfx942/guard_fwd_h64_hpw2_qpw1": {
+          "bytes": 870971,
+          "sha256": "663b3f3569cec79ec71d59d905f1396f1ed26d1e63af79754f480c85a815dcf2"
         },
         "mla_prefill_gfx942/probe_h128": {
           "bytes": 166356,
