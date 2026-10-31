@@ -654,6 +654,14 @@ RppStatus channel_permute_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPt
                                             RpptDescPtr dstDescPtr, Rpp32u* permutationTensor,
                                             RppLayoutParams layoutParams, rpp::Handle& handle);
 
+// -------------------- bayer_to_rgb --------------------
+
+template <typename T>
+RppStatus bayer_to_rgb_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
+                                   RpptDescPtr dstDescPtr, RpptBayerPattern bayerPattern,
+                                   RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                   RppLayoutParams layoutParams, rpp::Handle& handle);
+
 // -------------------- color_to_greyscale --------------------
 
 RppStatus color_to_greyscale_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,

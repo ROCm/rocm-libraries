@@ -365,3 +365,67 @@ RppStatus rppt_yuv_to_rgb_linear_v(RppPtr_t srcYPtr, RppPtr_t srcUVPtr, RpptDesc
 
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
 }
+
+/******************** bayer_to_rgb ********************/
+
+RppStatus rppt_bayer_to_rgb(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
+                            RpptDescPtr dstDescPtr, RpptBayerPattern bayerPattern,
+                            RpptImageBorderType borderType, RpptROIPtr roiTensorPtrSrc,
+                            RpptRoiType roiType, rppHandle_t rppHandle,
+                            RppBackend executionBackend) {
+    if ((bayerPattern < RpptBayerPattern_RGGB) || (bayerPattern > RpptBayerPattern_GBRG))
+        return RPP_ERROR_INVALID_ARGUMENTS;
+    if (borderType != RpptImageBorderType::REFLECT_NO_EDGE) return RPP_ERROR_NOT_IMPLEMENTED;
+    if (srcDescPtr->c != 1) return RPP_ERROR_INVALID_SRC_CHANNELS;
+    if (dstDescPtr->c != 3) return RPP_ERROR_INVALID_DST_CHANNELS;
+    if (srcDescPtr->layout != RpptLayout::NCHW) return RPP_ERROR_INVALID_SRC_LAYOUT;
+    if ((dstDescPtr->layout != RpptLayout::NCHW) && (dstDescPtr->layout != RpptLayout::NHWC))
+        return RPP_ERROR_INVALID_DST_LAYOUT;
+    if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
+    if (srcDescPtr->n != dstDescPtr->n) return RPP_ERROR_INVALID_ARGUMENTS;
+
+    rpp::Handle& handle = rpp::deref(rppHandle);
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
+
+    if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
+        // The source is always single-channel NCHW, so the layout that varies is the destination's.
+        RppLayoutParams layoutParams = get_layout_params(dstDescPtr->layout, dstDescPtr->c);
+
+        if ((srcDescPtr->dataType == RpptDataType::U8) &&
+            (dstDescPtr->dataType == RpptDataType::U8)) {
+            return bayer_to_rgb_host_tensor(
+                static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, bayerPattern,
+                roiTensorPtrSrc, roiType, layoutParams, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
+                   (dstDescPtr->dataType == RpptDataType::F16)) {
+            return bayer_to_rgb_host_tensor(
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
+                srcDescPtr,
+                reinterpret_cast<Rpp16f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
+                dstDescPtr, bayerPattern, roiTensorPtrSrc, roiType, layoutParams, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
+                   (dstDescPtr->dataType == RpptDataType::F32)) {
+            return bayer_to_rgb_host_tensor(
+                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
+                srcDescPtr,
+                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
+                dstDescPtr, bayerPattern, roiTensorPtrSrc, roiType, layoutParams, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
+                   (dstDescPtr->dataType == RpptDataType::I8)) {
+            return bayer_to_rgb_host_tensor(
+                static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, bayerPattern,
+                roiTensorPtrSrc, roiType, layoutParams, handle);
+        } else
+            return RPP_ERROR_NOT_IMPLEMENTED;
+    }
+#ifdef GPU_SUPPORT
+    else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
+             (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
+        return RPP_ERROR_NOT_IMPLEMENTED;  // HIP kernel not yet available
+    }
+#endif
+
+    return RPP_ERROR_INCOMPATIBLE_BACKEND;
+}
