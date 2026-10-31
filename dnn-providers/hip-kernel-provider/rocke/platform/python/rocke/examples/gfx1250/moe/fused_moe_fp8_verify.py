@@ -23,7 +23,7 @@ from rocke.runtime.hip_module import Runtime
 def main() -> int:
     from rocke.runtime.comgr import prefer_bundled_lib
 
-    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
+    prefer_bundled_lib()  # explicitly select torch COMGR; loaded compiler determines LLVM flavor
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--tokens", type=int, default=2)
     p.add_argument("--experts", type=int, default=8)

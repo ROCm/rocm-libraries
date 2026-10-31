@@ -418,12 +418,9 @@ jobs:
           echo "ROCM_SDK_PATH=$ROCM_SDK_PATH"
           echo "ROCM_SDK_PATH=$ROCM_SDK_PATH" >> "$GITHUB_ENV"
 
-          # rocKE loads libamd_comgr through ctypes, not through CMake, so
-          # -DROCM_PATH below is invisible to it. It resolves via $ROCM_PATH in
-          # the environment or a globbed /opt/rocm*, and this runner is
-          # wheel-only: there is no /opt/rocm, and the devel wheel's lib/ holds
-          # headers and CMake config, not the runtime .so. comgr ships in the
-          # sibling _rocm_sdk_core wheel, so name it explicitly.
+          # Standalone native AUTO and packaging probes have no Python package
+          # context. Forward the SDK wheel's COMGR path through their existing
+          # channel; Python's default SDK discovery is tested separately below.
           #
           # Exported under HKP_ROCKE_COMGR_LIB and fed to the configure step as
           # -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB, not as rocke's own
@@ -573,6 +570,15 @@ jobs:
           kpacks=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
           test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
           printf '%s\n' "${kpacks[@]}"
+
+      - name: Check installed rocKE SDK compiler discovery
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/rocke-compiler-smoke"
+          cmake --install build --prefix "$stage"
+          env -u ROCKE_COMGR_LIB -u ROCKE_LLVM_FLAVOR -u ROCM_PATH -u ROCM_HOME \
+            -u PYTHONPATH -u LD_LIBRARY_PATH -u LD_PRELOAD \
+            "$VENV_PYTHON" "$stage/bin/hip_kernel_provider/rocke_installed_smoke.py" --check-comgr
 
       - name: Run tests
         env:

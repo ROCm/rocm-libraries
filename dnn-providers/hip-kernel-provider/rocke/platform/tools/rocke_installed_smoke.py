@@ -13,8 +13,9 @@ pure Python lowering path; the optional pybind backend is opt-in.
 from __future__ import annotations
 
 import argparse
-import os
+import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 
@@ -78,11 +79,11 @@ def _build_smoke_kernel():
 
 def _smoke_python_engine() -> tuple[str, str]:
     from rocke.core.ir_serialize import serialize
-    from rocke.core.lower_llvm import lower_kernel_to_llvm
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
     kernel = _build_smoke_kernel()
     ir_text = serialize(kernel)
-    ll_text = lower_kernel_to_llvm(kernel, arch="gfx950")
+    ll_text = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor="llvm20")
     if "rocke_install_smoke" not in ll_text:
         raise RuntimeError("Python engine smoke did not lower the expected kernel")
     return ir_text, ll_text
@@ -94,7 +95,7 @@ def _smoke_pybind_engine(ir_text: str, py_ll_text: str) -> str:
     cpp_ll_text = rocke_engine.lower_serialized_ir(
         ir_text,
         arch="gfx950",
-        flavor=os.environ.get("ROCKE_LLVM_FLAVOR", ""),
+        flavor="llvm20",
     )
     if cpp_ll_text != py_ll_text:
         raise RuntimeError(
@@ -106,8 +107,34 @@ def _smoke_pybind_engine(ir_text: str, py_ll_text: str) -> str:
     return build_id
 
 
+def _smoke_comgr() -> dict:
+    """Query and compile a minimal kernel using the retained compiler, without HIP."""
+    from rocke.core.ir import IRBuilder
+    from rocke.core.lower_llvm import _resolve_llvm_flavor, _lower_kernel_to_llvm_python
+    from rocke.runtime import comgr
+
+    hint = comgr.resolved_lib_path()
+    info = comgr.loaded_compiler_info()
+    if info is None or info.llvm_version is None or not info.comgr_path:
+        raise RuntimeError(f"Installed COMGR lacks compiler evidence: {info!r}")
+    flavor = _resolve_llvm_flavor()
+    kernel = IRBuilder("rocke_installed_comgr_smoke").kernel
+    text = _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
+    hsaco, _ = comgr.build_hsaco_from_llvm_ir(text, isa="amdgcn-amd-amdhsa--gfx942")
+    if len(hsaco) <= 4 or hsaco[:4] != b"\x7fELF":
+        raise RuntimeError("Installed COMGR did not produce a nonempty ELF HSACO")
+    return dict(
+        candidate=hint, compiler=asdict(info), flavor=flavor, hsaco_bytes=len(hsaco)
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check-comgr",
+        action="store_true",
+        help="Query the selected compiler and compile a minimal kernel without HIP.",
+    )
     parser.add_argument(
         "--check-pybind",
         action="store_true",
@@ -122,6 +149,9 @@ def main() -> int:
     if args.check_pybind:
         build_id = _smoke_pybind_engine(ir_text, py_ll_text)
         print(f"rocKE installed pybind backend smoke: PASS ({build_id})")
+
+    if args.check_comgr:
+        print("rocKE installed COMGR smoke: PASS " + json.dumps(_smoke_comgr()))
 
     return 0
 

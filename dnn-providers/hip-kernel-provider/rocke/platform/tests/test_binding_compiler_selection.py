@@ -37,9 +37,17 @@ from rocke.instances import TileSpec, TraitSpec, UniversalGemmSpec
 from rocke.runtime import comgr
 import rocke_engine
 
-# A bundled compiler and an independently discoverable native candidate differ.
-sys.modules["torch"] = SimpleNamespace(
-    __file__=sys.argv[1], version=SimpleNamespace(hip="99.0"))
+# The SDK compiler and standalone native installation differ. Synthetic package
+# context must not inherit a real installed SDK from the test interpreter.
+from rocke.runtime import runtime_coexistence as coexistence
+coexistence._rocm_sdk_core_dirs = lambda: []
+if sys.argv[2] == "bundled":
+    sys.modules["torch"] = SimpleNamespace(
+        __file__=sys.argv[1], version=SimpleNamespace(hip="99.0"))
+    comgr.prefer_bundled_lib()
+else:
+    from rocke.runtime import runtime_coexistence as coexistence
+    coexistence._rocm_sdk_core_dirs = lambda: [sys.argv[1]]
 assert lower_llvm._resolve_llvm_flavor() == "llvm23"
 spec = UniversalGemmSpec(
     name="binding_compiler_probe",
@@ -85,7 +93,8 @@ assert lower_llvm._datalayout_for_flavor("llvm20") in explicit
 """
 
 
-def test_python_bindings_use_the_compiling_library(tmp_path):
+@pytest.mark.parametrize("selection", ["sdk", "bundled"])
+def test_python_bindings_use_the_compiling_library(tmp_path, selection):
     pytest.importorskip("rocke_engine")
     if sys.platform != "linux" or not shutil.which("cc"):
         pytest.skip("ELF loader fixtures require Linux and a C compiler")
@@ -95,13 +104,24 @@ def test_python_bindings_use_the_compiling_library(tmp_path):
     metadata.mkdir()
     (metadata / "version").write_text("7.1.0\n")
     build_library(tmp_path / "torch" / "lib", source % 23)
+    build_library(tmp_path / "_rocm_sdk_core" / "lib", source % 23, "libamd_comgr.so.3")
     env = dict(os.environ)
     for name in ("ROCKE_LLVM_FLAVOR", "ROCKE_COMGR_LIB", "ROCM_HOME"):
         env.pop(name, None)
     env.update(ROCM_PATH=str(tmp_path / "native"), ROCKE_BACKEND="python")
     env["PYTHONPATH"] = os.pathsep.join(sys.path)
     result = subprocess.run(
-        [sys.executable, "-c", BINDING_PROBE, str(tmp_path / "torch" / "__init__.py")],
+        [
+            sys.executable,
+            "-c",
+            BINDING_PROBE,
+            str(
+                tmp_path / "torch" / "__init__.py"
+                if selection == "bundled"
+                else tmp_path / "_rocm_sdk_core"
+            ),
+            selection,
+        ],
         env=env,
         capture_output=True,
         text=True,
