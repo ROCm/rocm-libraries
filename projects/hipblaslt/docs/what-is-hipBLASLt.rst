@@ -275,9 +275,9 @@ library build and architecture that produced it. Don't carry indices across rele
 Two descriptor attributes deliberately constrain this selection.
 ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``, or the equivalent setting on the handle,
 restricts hipBLASLt to kernels that add up their partial results in a consistent order across the
-``M`` dimension. Identical input rows then yield bitwise identical output rows. Fewer kernels
-qualify, which can cost performance, and the call returns an error rather than quietly giving you a
-non-uniform result. ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` steers selection and grid sizing
+``M`` dimension. This restriction is on by default. Identical input rows then yield bitwise identical
+output rows. Fewer kernels qualify, which can cost performance, and the call returns an error rather
+than quietly giving you a non-uniform result. Set the attribute to ``0`` to turn it off. ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` steers selection and grid sizing
 toward a compute-unit budget, which is useful when a GEMM has to share the device with other work.
 
 :doc:`hipBLASLt PCI chip ID predicates <./conceptual/pci-chip-id-predicates-walkthrough>` describes
