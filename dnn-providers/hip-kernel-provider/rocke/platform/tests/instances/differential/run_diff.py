@@ -169,7 +169,14 @@ def collect_ref_shas(results):
 
 
 MAX_CFG = 256  # default cap on config enumeration per family
-FAMILY_MAX_CFG = {"gfx1250_lowering": 512}
+# A family past its cap fails check_native_golden.py (it asks for one more
+# config), so raise the cap here rather than dropping configs.
+FAMILY_MAX_CFG = {
+    "attention_bwd_body": 512,
+    "attention_bwd_spec": 512,
+    "attention_bwd_unified_main": 512,
+    "gfx1250_lowering": 512,
+}
 TIMEOUT = 120  # seconds per emitter invocation
 
 
