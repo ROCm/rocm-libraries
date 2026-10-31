@@ -342,6 +342,7 @@ namespace rocsparse
     static rocsparse_status csrildlt0_kernel_hash_launch(rocsparse_handle         handle,
                                                          rocsparse_csrildlt0_info csrildlt0_info,
                                                          rocsparse_spmat_descr    A,
+                                                         const numeric_boost*     boost,
                                                          void*                    diag,
                                                          size_t                   buffer_size,
                                                          void*                    buffer)
@@ -367,7 +368,6 @@ namespace rocsparse
             = reinterpret_cast<const double*>(numeric_near->get_tolerance_pointer());
 
         // Boost parameters
-        auto                     boost              = A->info->get_boost();
         const int                boost_enable       = boost->get_enable();
         const rocsparse_datatype boost_tol_datatype = boost->get_tol_datatype();
         const auto               boost_tol_size = rocsparse::datatype_sizeof(boost_tol_datatype);
@@ -429,7 +429,13 @@ namespace rocsparse
     // HASH is selected at runtime based on max_nnz from analysis (like csric0).
 #define INST_HASH_LAUNCH(WF, HASH, T, I, J)                                         \
     template rocsparse_status csrildlt0_kernel_hash_launch<256, WF, HASH, T, I, J>( \
-        rocsparse_handle, rocsparse_csrildlt0_info, rocsparse_spmat_descr, void*, size_t, void*)
+        rocsparse_handle,                                                           \
+        rocsparse_csrildlt0_info,                                                   \
+        rocsparse_spmat_descr,                                                      \
+        const rocsparse::numeric_boost*,                                            \
+        void*,                                                                      \
+        size_t,                                                                     \
+        void*)
 
 #define INST_ALL_HASHES(WF, T, I, J)  \
     INST_HASH_LAUNCH(WF, 1, T, I, J); \
