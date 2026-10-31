@@ -607,6 +607,25 @@ namespace TensileLite
      * (StreamK.py skAssignIters).
      */
     /**
+     * Iterations per indivisible K unit, as it actually applies to one tile.
+     *
+     * A unit larger than one iteration only constrains the split when the
+     * tile's K is a whole number of units. If it is not, the leftover is a
+     * fraction of a unit, and the device hands leftovers out a whole unit at a
+     * time, so quantising the stride would leave that fraction unassigned and
+     * silently drop work. Such a problem gets the historical mapping instead:
+     * no split of a tile whose K is not unit-aligned can put every workgroup on
+     * a unit boundary anyway, so there is nothing to preserve, and falling back
+     * keeps the unsplit case (one workgroup, the whole tile) exactly as it was.
+     */
+    inline size_t skKUnit(size_t itersPerTile, size_t kGranularity)
+    {
+        if(kGranularity <= 1 || itersPerTile == 0 || itersPerTile % kGranularity != 0)
+            return 1;
+        return kGranularity;
+    }
+
+    /**
      * Compute the static two-tile StreamK split.
      *
      * Single source of truth for arithmetic that used to be written out twice
@@ -620,9 +639,14 @@ namespace TensileLite
      * @param skGrid       Resolved StreamK grid. 0 yields an all-zero split.
      * @param skFullTiles  AMDGPU::skFullTiles (TENSILE_STREAMK_FULL_TILES).
      * @param forceDPOnly  SizeMapping::streamKForceDPOnly != 0.
+     * @param kGranularity Iterations per indivisible K unit, skKGranularity().
      */
-    TENSILELITEHOST_EXPORT StreamKStaticSplit streamKStaticSplit(
-        size_t tiles, size_t itersPerTile, size_t skGrid, int skFullTiles, bool forceDPOnly);
+    TENSILELITEHOST_EXPORT StreamKStaticSplit streamKStaticSplit(size_t tiles,
+                                                                 size_t itersPerTile,
+                                                                 size_t skGrid,
+                                                                 int    skFullTiles,
+                                                                 bool   forceDPOnly,
+                                                                 size_t kGranularity = 1);
 
     /**
      * Whether every output tile of a static two-tile StreamK split is folded
@@ -683,6 +707,10 @@ namespace TensileLite
      * skGrid % tiles == 0 and both perTileCapable (InternalArgsSupport::perTileExtraIters)
      * and uniformSummationOrder hold -- the pair the kernel branches on at runtime;
      * otherwise the historical global first-E mapping is used.
+     *
+     * kGranularity is ContractionSolution::skKGranularity(): both mappings hand
+     * out their leftover in units of that many iterations, so every range starts
+     * on a multiple of it.
      */
     struct StreamKWorkgroupIterRange
     {
@@ -696,7 +724,8 @@ namespace TensileLite
         size_t itersPerTile,
         size_t skGrid,
         bool   perTileCapable,
-        bool   uniformSummationOrder);
+        bool   uniformSummationOrder,
+        size_t kGranularity = 1);
 
     /**
      * Thrown when a launch requests uniform summation order but the resolved
@@ -1488,6 +1517,27 @@ namespace TensileLite
         std::map<int, double> ideals;
         LinearModel           linearModel;
         MatchingTag           tag{MatchingTag::Others};
+
+        /**
+         * Unroll iterations spanned by one indivisible unit of K.
+         *
+         * Normally one: a workgroup may be handed any K range. Under the
+         * host-preswizzled MX scale layout the scale period is a fixed 256 K
+         * whatever the data type, so a DepthU below that makes one scale fetch
+         * serve 256/DepthU consecutive iterations. The kernel picks the phase
+         * within that group from a compile-time constant and the swizzle block
+         * is atomic, so a range that begins partway through one is unaddressable
+         * and silently applies the wrong scales. Stream-K divides K in these
+         * units; see the matching skKGranularity() in Components/StreamK.py.
+         */
+        size_t skKGranularity() const
+        {
+            constexpr size_t scaleSwizzleK = 256;
+            if(problemType.mxScaleFormat != 1 || sizeMapping.depthU == 0
+               || sizeMapping.depthU >= scaleSwizzleK || scaleSwizzleK % sizeMapping.depthU != 0)
+                return 1;
+            return scaleSwizzleK / sizeMapping.depthU;
+        }
 
         uint32_t magicNumberAlg1(uint32_t x, uint32_t* magicShift) const;
         uint32_t magicNumberAlg2(uint32_t x, uint32_t* magicShift) const;
