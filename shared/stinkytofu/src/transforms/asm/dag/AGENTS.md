@@ -36,20 +36,23 @@ When two rules want different things, the higher level wins. `PlacementLevel` in
 | --- | --- | --- |
 | L1 | `Barrier` | The barrier lands where it is planned. |
 | L2 | `LastDs` | The last ds before a barrier issues in time for that barrier. |
-| L3 | `WmmaQueue` | The WMMA queue stays busy: no window is wasted (the refill). |
-| L4 | `WmmaTail` | Back-to-back WMMAs before a barrier cover its stall (`kBarrierTailWmmas`, `wmmaBarrierCover`). |
-| L5 | `Prefetch` | Prefetches and global loads issue at their planned window. |
+| L3 | `Prefetch` | Prefetches and global loads issue at their planned window. |
+| L4 | `WmmaQueue` | The WMMA queue stays busy: no window is wasted (the refill). |
+| L5 | `WmmaTail` | Back-to-back WMMAs before a barrier cover its stall (`kBarrierTailWmmas`, `wmmaBarrierCover`). |
 | L6 | `DsPacer` | ds loads are spread over the region (`DsSpreadPacer`). |
 | L7 | `Filler` | SALU and VALU fill whatever slots are left. |
 
 Consequences:
 
 - A lower level never vetoes a higher one. The ds pacer (L6) must not delay the last ds
-  before a barrier (L2). A filler (L7) must not take a prefetch's window (L5).
+  before a barrier (L2). A filler (L7) must not take a prefetch's window (L3).
+- A prefetch goes before the refill. Refill first measured 1.8% slower on `mxf8_tn_medium`,
+  the only perf yaml it changes. Prefetch above the WMMA tail is untested; the tail is a hold on
+  the barrier rule, which runs first.
 - Cover is measured, not counted. `wmma ds×8` does not cover a barrier; `wmma wmma ds×8`
   does. A rule that asks "is the barrier covered" uses `queuedCoverCycles()`, not the number
   of instructions picked.
-- The WMMA tail (L4) exists to provide cover. VALU and SALU may co-issue inside it. Do not
+- The WMMA tail (L5) exists to provide cover. VALU and SALU may co-issue inside it. Do not
   block them there.
 
 ## Rules
