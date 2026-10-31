@@ -374,8 +374,24 @@ namespace TensileLite
                     kind = hipMemcpyHostToDevice;
                 }
 
+                // All three swizzle/data-init paths produce the same bytes on
+                // every eval for a fixed problem, so the cached GPU buffers are
+                // reusable after the first eval:
+                //  - non-MX: data is problem-independent (!m_problemDependentData)
+                //  - needSwizzle: tensor swizzle is a problem-level transform
+                //    (swizzleTensorA/B), constant across solutions
+                //  - gfx1250 MX: scale layout is geometry-based, so the descriptor
+                //    caches added in #11963 make every per-solution regeneration a
+                //    no-op. (gfx950 is excluded because its preswizzle depends on
+                //    the solution's matrix-instruction shape.)
+                bool mxInputsReusable = !needMXSwizzle
+                    || m_mxScaleLayout == MXScaleLayout::GFX1250;
+                bool inputsUnchanged
+                    = mxInputsReusable
+                      && (!m_problemDependentData || needSwizzle || needMXSwizzle);
+
                 if(m_gpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
-                   && !m_problemDependentData && !needSwizzle && !needMXSwizzle)
+                   && inputsUnchanged)
                 {
                     if(m_elementsToValidate)
                     {
