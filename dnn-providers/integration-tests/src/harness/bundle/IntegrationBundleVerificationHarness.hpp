@@ -496,6 +496,7 @@ private:
     VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
 
     RefRunResult runReferenceCapturingOutputs(const ResolvedReference& ref,
+                                              const OutputTensors& engineOutputs,
                                               OutputTensors& refOutputs);
     void markOutputsModified(OutputTensors& outputs) const;
 
