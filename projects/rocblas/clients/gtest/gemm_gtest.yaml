@@ -3606,6 +3606,7 @@ Tests:
   transB: [ N    ]
   alpha: 1
   beta: 1
+  # batched counterpart: gemm_batched_PyTorch_offset_overflow
 
 - name: gemm_ILP64
   category: stress
@@ -3710,6 +3711,24 @@ Tests:
   initialization: hpl
   os_flags: LINUX
 
+# rocm-libraries #8645: on GPUs whose grid Y/Z dimension is limited to 65536 (e.g. gfx1201 /
+# RDNA), a gemm with a large free (N) dimension launched a Tensile solution whose
+# grid.y = ceil(N / MacroTileN) exceeded that limit, so the trailing workgroups were never
+# dispatched and those output columns were left uninitialized (wrong/NaN results). N here is
+# just over 65536 * 32 == 2^21. rocblas_internal_gemm now chunks N (see gemm_templates.cpp),
+# matching the chunking already done on the source-GEMM and _64 paths.
+- name: gemm_large_n_grid_y_limit
+  category: pre_checkin
+  function:
+    - gemm: *single_double_precisions
+  arguments:
+    - { transA: N, transB: N, M: 3, N: 2097153, K: 15, lda: 3, ldb: 15, ldc: 3, ldd: 3 }
+    - { transA: N, transB: T, M: 3, N: 2097153, K: 15, lda: 3, ldb: 2097153, ldc: 3, ldd: 3 }
+  alpha: 1
+  beta: 2
+  api: [ C ]
+  os_flags: LINUX
+
 # Commented out as the category known_bug has currently no good purpose
 # This is category known_bug until the sizes are supported by Tensile,
 # since they take too long with a naive host-side algorithm.
@@ -3736,7 +3755,7 @@ Tests:
   arguments:
     - { transA: N, transB: N, M: 8454144, N: 3, K: 508, lda: 8454144, ldb: 508, ldc: 8454144, ldd: 8454144 }
   alpha: 1
-  beta: 0
+  beta: 1
   api: [ C_64 ]
   os_flags: LINUX
 
