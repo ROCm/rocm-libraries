@@ -33,6 +33,7 @@ from .Common import state, state_key_ordering, IsaInfo
 from .Common.Architectures import gfxToIsa
 from .Common.DataType import DataType
 from .Common.GlobalParameters import internalParameters
+from .Common.SolutionIdGen import read_solution_uid
 from .SolutionStructs import Solution as OriginalSolution
 from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
 from .Toolchain.Component import Assembler
@@ -1025,6 +1026,7 @@ class Solution:
                  'debugKernel',
                  'libraryLogicIndex',
                  'index',
+                 'solutionUid',
                  'ideals',
                  'linearModel']
     HiddenKeys = ['originalSolution']
@@ -1091,6 +1093,7 @@ class Solution:
 
         if 'SolutionIndex' in d:
             rv.index = d['SolutionIndex']
+        rv.solutionUid = read_solution_uid(d)
 
         info = cls.ReadOriginalInfo(d)
         rv.libraryLogicIndex = int(info.get("SolutionIndex", -1))

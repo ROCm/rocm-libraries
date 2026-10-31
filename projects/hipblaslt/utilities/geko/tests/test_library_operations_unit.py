@@ -13,6 +13,7 @@ import yaml
 
 from geko.library import Library
 from geko.library import operations
+from geko import paths
 
 
 def _make_min_library() -> Library:
@@ -82,6 +83,28 @@ def _write_match_table(path: Path, entries) -> Path:
 def test_load_collection_missing_dir_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         operations.load_collection(tmp_path / "missing")
+
+
+def test_merge_solutions_rejects_hipblaslt_path(tmp_path: Path) -> None:
+    """Library merge and dataframe helpers do not take a hipBLASLt path.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a hipBLASLt path argument is accepted.
+    """
+    with pytest.raises(TypeError, match="hipblaslt_path"):
+        operations.merge_solutions(tmp_path, hipblaslt_path=tmp_path)
+    with pytest.raises(TypeError, match="hipblaslt_path"):
+        operations.from_dataframe(pd.DataFrame(), tmp_path, hipblaslt_path=tmp_path)
+    with pytest.raises(TypeError, match="hipblaslt_path"):
+        operations.from_full_dataframe(
+            pd.DataFrame(), tmp_path, tmp_path, hipblaslt_path=tmp_path
+        )
 
 
 def test_merge_solutions_no_files_raises(tmp_path: Path) -> None:
@@ -208,6 +231,90 @@ def test_from_dataframe_happy_path(tmp_path: Path) -> None:
     assert libs[0].name == "a.yaml"
     assert len(libs[0].solutions) == 1
     assert len(libs[0].sizes) == 1
+
+
+def test_from_full_dataframe_replaces_a_copied_reference_uid(tmp_path: Path) -> None:
+    """A reference solution copied into full_libs must not keep its source UID.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the copied Origami UID is still stored.
+    """
+    lib_dir = tmp_path / "libs"
+    lib_dir.mkdir()
+    tuned = [
+        None,
+        None,
+        "gfx950",
+        None,
+        {
+            "TransposeA": 0,
+            "TransposeB": 0,
+            "DataType": 0,
+            "DestDataType": 0,
+            "ComputeDataType": 0,
+        },
+        [{"SolutionIndex": 0, "StaggerU": 0}],
+        [2, 3, 0, 1],
+        [[[16, 16, 1, 16], [0, 100.0]]],
+        None,
+        None,
+        "DeviceEfficiency",
+        "Equality",
+    ]
+    yaml.safe_dump(tuned, (lib_dir / "a.yaml").open("w"), sort_keys=False)
+
+    origami = tmp_path / "origami.yaml"
+    origami_data = [
+        None,
+        None,
+        "gfx950",
+        None,
+        {"TransposeA": 0, "TransposeB": 0, "DataType": 0, "DestDataType": 0, "ComputeDataType": 0},
+        [{"SolutionIndex": 0, "SolutionUID": "0u5", "StaggerU": 0}],
+        [2, 3, 0, 1],
+        [[[16, 16, 1, 16], [0, 100.0]]],
+        None,
+        None,
+        "DeviceEfficiency",
+        "Origami",
+    ]
+    yaml.safe_dump(origami_data, origami.open("w"), sort_keys=False)
+    match_table = _write_match_table(tmp_path, {0: [str(origami), 0]})
+
+    df = pd.DataFrame(
+        [
+            {
+                "lib": "a.yaml",
+                "M": 16,
+                "N": 16,
+                "K": 16,
+                "batch_count": 1,
+                "transA": "N",
+                "transB": "N",
+                "a_type": "f16_r",
+                "b_type": "f16_r",
+                "c_type": "f16_r",
+                "d_type": "f16_r",
+                "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
+                "winner": "reference",
+                "solutionIdx_reference": 0,
+            }
+        ]
+    )
+
+    libs = operations.from_full_dataframe(df, lib_dir, match_table)
+
+    uid = libs[0].solutions[0]["SolutionUID"]
+    assert uid != "0u5"
+    assert uid.startswith("0u")
 
 
 def test_from_dataframe_reuses_solution_for_multiple_sizes(tmp_path: Path) -> None:
@@ -474,10 +581,22 @@ def test_prune_library_missing_hipblaslt_raises(tmp_path: Path) -> None:
 
 
 def test_prune_library_requires_library_type(tmp_path: Path) -> None:
+    """Reject a non-library after binding the checkout for SolutionIdGen.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the type error is not reported or the checkout is not bound.
+    """
     hip = tmp_path / "hip"
     hip.mkdir()
     with pytest.raises(TypeError, match="Must be of type 'Library'"):
         operations.prune_library(hip, base_lib={})
+    assert paths._BOUND_HIPBLASLT_PATH == hip
 
 
 def test_prune_library_requires_sizes(tmp_path: Path) -> None:

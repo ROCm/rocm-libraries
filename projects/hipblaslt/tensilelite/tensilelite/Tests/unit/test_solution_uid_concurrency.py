@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+from pathlib import Path
 from typing import List
 
 import pytest
@@ -16,6 +17,7 @@ from tensilelite.Common.SolutionIdGen import (
     RANDOM_MASK,
     RANDOM_SHIFT,
     _ms_since_epoch,
+    claim_solution_uid,
     decode_solution_id,
     decode_solution_uid,
     encode_solution_uid,
@@ -23,6 +25,7 @@ from tensilelite.Common.SolutionIdGen import (
     generate_solution_id,
     read_solution_uid,
     regenerate_solution_uid,
+    rewrite_colliding_solution_uids,
 )
 
 pytestmark = pytest.mark.unit
@@ -237,3 +240,238 @@ def test_regenerate_solution_uid_replaces_existing_value() -> None:
     new_uid = regenerate_solution_uid(solution)
     assert new_uid != 42
     assert solution["SolutionUID"] == encode_solution_uid(new_uid)
+
+
+def test_claim_solution_uid_keeps_unused_value() -> None:
+    """A stored UID that is not reserved stays on the solution.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the stored UID is replaced.
+    """
+    solution = {"SolutionUID": "0u5"}
+    seen: set[str] = set()
+    assert claim_solution_uid(solution, seen) == "0u5"
+    assert seen == {"0u5"}
+
+
+def test_claim_solution_uid_compares_decoded_identity(monkeypatch) -> None:
+    monkeypatch.setattr("tensilelite.Common.SolutionIdGen.generate_solution_id", lambda: 6)
+    first = {"SolutionUID": "0U5"}
+    second = {"SolutionUID": "0u5"}
+    seen: set[str] = set()
+
+    assert claim_solution_uid(first, seen) == "0u5"
+    assert claim_solution_uid(second, seen) == "0u6"
+    assert read_solution_uid(first) != read_solution_uid(second)
+
+
+def test_rewrite_solution_uid_preserves_yaml_item_and_comment(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("tensilelite.Common.SolutionIdGen.generate_solution_id", lambda: 6)
+    path = tmp_path / "logic.yaml"
+    path.write_text(
+        "Solutions:\n"
+        "- SolutionUID: 0u5 # first\n"
+        "  SolutionIndex: 0\n"
+        "- SolutionUID: 0U5 # duplicate\n"
+        "  SolutionIndex: 1\n",
+        encoding="utf-8",
+    )
+
+    assert rewrite_colliding_solution_uids([path]) == 1
+    assert path.read_text(encoding="utf-8") == (
+        "Solutions:\n"
+        "- SolutionUID: 0u5 # first\n"
+        "  SolutionIndex: 0\n"
+        "- SolutionUID: 0u6 # duplicate\n"
+        "  SolutionIndex: 1\n"
+    )
+
+
+def test_rewrite_solution_uid_strips_quotes_and_preserves_eof(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Quoted UID lines are compared unquoted, and a missing final newline stays missing.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest fixture used to make the replacement UID deterministic.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If quotes remain, the duplicate is kept, or a newline is added.
+    """
+    monkeypatch.setattr("tensilelite.Common.SolutionIdGen.generate_solution_id", lambda: 6)
+    path = tmp_path / "logic.yaml"
+    text = "SolutionUID: \"0U5\" # kept\nSolutionUID: '0u5' # duplicate"
+    assert not text.endswith("\n")
+    path.write_text(text, encoding="utf-8")
+
+    assert rewrite_colliding_solution_uids([path]) == 2
+    written = path.read_text(encoding="utf-8")
+    assert written == "SolutionUID: 0u5 # kept\nSolutionUID: 0u6 # duplicate"
+    assert not written.endswith("\n")
+
+
+def test_claim_solution_uid_regenerates_a_collision() -> None:
+    """A UID already in ``seen`` is replaced.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the colliding UID is kept.
+    """
+    solution = {"SolutionUID": "0u5"}
+    seen = {"0u5"}
+    claimed = claim_solution_uid(solution, seen)
+    assert claimed != "0u5"
+    assert claimed in seen
+    assert solution["SolutionUID"] == claimed
+
+
+def test_rewrite_colliding_solution_uids_changes_only_the_duplicate(tmp_path) -> None:
+    """The second file's colliding line is replaced and the first file is kept.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the first UID changes or the second stays a duplicate.
+    """
+    first = tmp_path / "a.yaml"
+    second = tmp_path / "b.yaml"
+    first.write_text("  SolutionIndex: 0\n  SolutionUID: 0u5\n", encoding="utf-8")
+    second.write_text("  SolutionIndex: 1\n  SolutionUID: 0u5\n", encoding="utf-8")
+    assert rewrite_colliding_solution_uids([first, second]) == 1
+    assert "SolutionUID: 0u5" in first.read_text(encoding="utf-8")
+    second_text = second.read_text(encoding="utf-8")
+    assert "SolutionUID: 0u5" not in second_text
+    assert "SolutionIndex: 1" in second_text
+
+
+def test_claim_solution_uid_invalid_existing_value_regenerates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed existing UID is treated as unusable and replaced.
+
+    Args:
+        monkeypatch: Pytest fixture used to control UID generation.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the malformed UID is preserved.
+    """
+    monkeypatch.setattr(
+        "tensilelite.Common.SolutionIdGen.generate_solution_id",
+        lambda: 6,
+    )
+
+    solution = {"SolutionUID": "0u$"}
+    seen: set[str] = set()
+    claimed = claim_solution_uid(solution, seen)
+
+    assert claimed != "0u$"
+    assert claimed == solution["SolutionUID"]
+    assert claimed in seen
+
+
+def test_claim_solution_uid_raises_after_retry_exhaustion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claiming UID fails after 100 collisions.
+
+    Args:
+        monkeypatch: Pytest fixture used to force repeated collisions.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If retry exhaustion does not raise RuntimeError.
+    """
+    monkeypatch.setattr(
+        "tensilelite.Common.SolutionIdGen.generate_solution_id",
+        lambda: 1,
+    )
+
+    with pytest.raises(RuntimeError, match="could not draw a unique SolutionUID"):
+        claim_solution_uid({}, {"0u1"})
+
+
+def test_rewrite_colliding_solution_uids_replaces_malformed_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed file UID is rewritten to a generated canonical UID.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest fixture used to make replacement deterministic.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If malformed UID is not rewritten.
+    """
+    monkeypatch.setattr(
+        "tensilelite.Common.SolutionIdGen.generate_solution_id",
+        lambda: 6,
+    )
+
+    first = tmp_path / "first.yaml"
+    second = tmp_path / "second.yaml"
+    first.write_text("  SolutionIndex: 0\n  SolutionUID: 0u5\n", encoding="utf-8")
+    second.write_text("  SolutionIndex: 1\n  SolutionUID: 0u$\n", encoding="utf-8")
+
+    assert rewrite_colliding_solution_uids([first, second]) == 1
+    second_text = second.read_text(encoding="utf-8")
+    assert "SolutionUID: 0u$" not in second_text
+    assert "SolutionUID: 0u6" in second_text
+
+
+def test_rewrite_colliding_solution_uids_raises_when_replacement_exhausted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rewrite fails if every generated replacement collides.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest fixture used to force repeated collisions.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If replacement exhaustion does not raise RuntimeError.
+    """
+    monkeypatch.setattr(
+        "tensilelite.Common.SolutionIdGen.generate_solution_id",
+        lambda: 1,
+    )
+
+    first = tmp_path / "first.yaml"
+    second = tmp_path / "second.yaml"
+    first.write_text("  SolutionIndex: 0\n  SolutionUID: 0u1\n", encoding="utf-8")
+    second.write_text("  SolutionIndex: 1\n  SolutionUID: 0u1\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="could not draw a unique SolutionUID"):
+        rewrite_colliding_solution_uids([first, second])

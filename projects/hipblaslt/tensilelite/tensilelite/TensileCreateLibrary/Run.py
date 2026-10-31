@@ -1756,6 +1756,22 @@ def run():
     solutions, masterLibraries, libraryMapping = generateLogicDataAndSolutions(
         logicFiles, arguments, asmToolchain.assembler, isaInfoMap
     )
+    uidMappingPerArch = {}
+    for archName, masterLibrary in masterLibraries.items():
+        archUidMapping = {}
+        for library in (masterLibrary, *masterLibrary.lazyLibraries.values()):
+            for solution in library.solutions.values():
+                uid = solution.solutionUid
+                if uid == 0:
+                    raise ValueError(f"{archName}: zero SolutionUID at index {solution.index}")
+                if uid in archUidMapping and archUidMapping[uid] != solution.index:
+                    raise ValueError(
+                        f"{archName}: duplicate SolutionUID {uid} at indices "
+                        f"{archUidMapping[uid]} and {solution.index}"
+                    )
+                archUidMapping[uid] = solution.index
+        if archUidMapping:
+            uidMappingPerArch[archName] = archUidMapping
     stop_glds = timer()
     print(f"Time to load yaml files (s): {(stop_glds-start_glds):3.2f}")
 
@@ -1840,6 +1856,14 @@ def run():
                 archDir, "TensileLiteLibrary_lazy_" + archName + "_Mapping"
             )
             LibraryIO.write(archMappingFile, archMapping, "msgpack")
+
+        archUidMapping = uidMappingPerArch.get(archName, {})
+        if archUidMapping:
+            archDir = libraryDir(outputPath, outDir)
+            archUidMappingFile = os.path.join(
+                archDir, "TensileLiteLibrary_lazy_" + archName + "_UidMapping"
+            )
+            LibraryIO.write(archUidMappingFile, archUidMapping, "msgpack")
 
     start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():

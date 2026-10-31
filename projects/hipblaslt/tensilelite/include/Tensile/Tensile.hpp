@@ -194,6 +194,7 @@ namespace TensileLite
     enum class LazyLoadingInit;
 
     TENSILELITEHOST_EXPORT std::map<int, std::string> LoadLibraryMapping(std::string const& filename);
+    TENSILELITEHOST_EXPORT std::map<uint64_t, int>     LoadUidMapping(std::string const& filename);
 
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     TENSILELITEHOST_EXPORT std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>

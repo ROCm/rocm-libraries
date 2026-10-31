@@ -30,11 +30,33 @@
 #include "hipblaslt_arguments.hpp"
 #include <fstream>
 #include <hipblaslt_benchmark/benchmark_stats.hpp>
+#include <cstdint>
 #include <string>
 
 namespace ArgumentLogging
 {
     const double NA_value = -1.0; // invalid for time, GFlop, GB
+
+    inline std::string format_solution_uid(uint64_t solution_uid)
+    {
+        static constexpr char base62_alphabet[]
+            = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        if(solution_uid == 0)
+            return "0u0";
+
+        char reversed[11];
+        int  length = 0;
+        while(solution_uid > 0 && length < static_cast<int>(sizeof(reversed)))
+        {
+            reversed[length++] = base62_alphabet[solution_uid % 62];
+            solution_uid /= 62;
+        }
+
+        std::string encoded = "0u";
+        while(length > 0)
+            encoded.push_back(reversed[--length]);
+        return encoded;
+    }
 }
 
 void ArgumentModel_set_log_function_name(bool f);
@@ -163,6 +185,7 @@ public:
                   hipblaslt_internal_ostream& str,
                   size_t                      index,
                   int32_t                     solution_index,
+                  uint64_t                    solution_uid,
                   std::string&                solution_name,
                   std::string&                kernel_name,
                   std::string&                archName,
@@ -342,8 +365,11 @@ public:
 
         if(solution_name != "")
         {
-            str << "    --Solution index: " << solution_index << "\n"
-                << "    --Solution name:  " << solution_name << "\n"
+            str << "    --Solution index: " << solution_index << "\n";
+            if(solution_uid != 0)
+                str << "    --Solution UID:   "
+                    << ArgumentLogging::format_solution_uid(solution_uid) << "\n";
+            str << "    --Solution name:  " << solution_name << "\n"
                 << "    --kernel name:    " << kernel_name << std::endl;
         }
     }

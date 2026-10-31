@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from geko import pipeline
+from geko import paths
 from geko.schemas import RunState
 
 
@@ -355,21 +356,47 @@ def test_run_search_success_writes_final_libs(monkeypatch: pytest.MonkeyPatch, t
         return pd.DataFrame([{"dummy": 1}]), pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])
 
     monkeypatch.setattr(pipeline.optim, "analyze", _fake_analyze)
-    monkeypatch.setattr(
-        pipeline.library,
-        "from_dataframe",
-        lambda *_a, **_k: _FakeLibs(),
-    )
-    monkeypatch.setattr(
-        pipeline.library,
-        "from_full_dataframe",
-        lambda *_a, **_k: _FakeLibs(),
-    )
+
+    def _fake_from_dataframe(*_a, **kwargs):
+        """Return a dumpable library and reject a hipBLASLt path argument.
+
+        Args:
+            *_a: Positional arguments from ``from_dataframe``.
+            **kwargs: Keyword arguments from ``from_dataframe``.
+
+        Returns:
+            _FakeLibs: Empty library that can be dumped.
+
+        Raises:
+            AssertionError: If ``hipblaslt_path`` is passed.
+        """
+        assert "hipblaslt_path" not in kwargs
+        return _FakeLibs()
+
+    def _fake_from_full_dataframe(*_a, **kwargs):
+        """Return a dumpable library and reject a hipBLASLt path argument.
+
+        Args:
+            *_a: Positional arguments from ``from_full_dataframe``.
+            **kwargs: Keyword arguments from ``from_full_dataframe``.
+
+        Returns:
+            _FakeLibs: Empty library that can be dumped.
+
+        Raises:
+            AssertionError: If ``hipblaslt_path`` is passed.
+        """
+        assert "hipblaslt_path" not in kwargs
+        return _FakeLibs()
+
+    monkeypatch.setattr(pipeline.library, "from_dataframe", _fake_from_dataframe)
+    monkeypatch.setattr(pipeline.library, "from_full_dataframe", _fake_from_full_dataframe)
 
     pipeline.run_search(str(hip), str(workload), devices=[0], workdir=str(workdir))
     assert (workdir / "final_libs" / "lib.yaml").is_file()
     assert extracted["match_table"] == hip / "build/release/device-library/MatchTable.yaml"
     assert analyze_called["ref_custom_lib_dir"] is None
+    assert paths._BOUND_HIPBLASLT_PATH == hip
 
 
 def test_run_search_with_custom_lib_src_builds_ref_lib_and_uses_ref_matchtable(
@@ -648,13 +675,37 @@ def test_run_optimize_success_writes_final_libs(monkeypatch: pytest.MonkeyPatch,
             p.mkdir(parents=True, exist_ok=True)
             (p / "lib.yaml").write_text("x\n")
 
-    monkeypatch.setattr(pipeline.library, "merge_solutions", lambda *_a, **_k: _FakeLibs())
-    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: (pd.DataFrame([{"dummy": 1}]), pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])))
-    monkeypatch.setattr(pipeline.library, "from_dataframe", lambda *_a, **_k: _FakeLibs())
-    monkeypatch.setattr(pipeline.library, "from_full_dataframe", lambda *_a, **_k: _FakeLibs())
+    def _fake_merged(*_args, **kwargs):
+        """Return a dumpable library and reject a hipBLASLt path argument.
+
+        Args:
+            *_args: Positional arguments from the library helper.
+            **kwargs: Keyword arguments from the library helper.
+
+        Returns:
+            _FakeLibs: Empty library that can be dumped.
+
+        Raises:
+            AssertionError: If ``hipblaslt_path`` is passed.
+        """
+        assert "hipblaslt_path" not in kwargs
+        return _FakeLibs()
+
+    monkeypatch.setattr(pipeline.library, "merge_solutions", _fake_merged)
+    monkeypatch.setattr(
+        pipeline.optim,
+        "analyze",
+        lambda *_a, **_k: (
+            pd.DataFrame([{"dummy": 1}]),
+            pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}]),
+        ),
+    )
+    monkeypatch.setattr(pipeline.library, "from_dataframe", _fake_merged)
+    monkeypatch.setattr(pipeline.library, "from_full_dataframe", _fake_merged)
 
     pipeline.run_optimize(str(hip), workdir=str(workdir), devices=[0])
     assert (workdir / "final_libs" / "lib.yaml").is_file()
+    assert paths._BOUND_HIPBLASLT_PATH == hip
 
 
 def test_run_optimize_success_without_analysis_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
