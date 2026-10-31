@@ -1383,6 +1383,25 @@ namespace TensileLite
             return m_mxBlockB;
         }
 
+        /// True when the MX scale buffers this caller hands to an *external* custom
+        /// kernel are packed with the compact ceil(K/mxBlock) leading dimension,
+        /// even though mxsa()/mxsb() carry the gfx950 padding setMXScaleA/B applies
+        /// for the Tensile-generated HostPreSwizzle kernels.
+        ///
+        /// hipBLASLt sets it: the user's plain Block_32_UE8M0 scale pointer is
+        /// packed. The TensileLite benchmark client leaves it false: it allocates
+        /// the scale buffer from the padded descriptor and hands that same buffer
+        /// to the custom kernel.
+        void setCustomKernelMXScalesArePacked(bool packed)
+        {
+            m_customKernelMXScalesArePacked = packed;
+        }
+
+        bool customKernelMXScalesArePacked() const
+        {
+            return m_customKernelMXScalesArePacked;
+        }
+
         /// Extent of one scaling tile along the free dimension: M for A, N for
         /// B. 1 means one scale per row/column, the layout that predates 2D MX
         /// scaling. Never 0, so callers can divide by it unconditionally.
@@ -1676,6 +1695,7 @@ namespace TensileLite
         int              m_mxBlockFreeB            = 1;
         rocisa::DataType m_mxTypeA                 = rocisa::DataType::None;
         rocisa::DataType m_mxTypeB                 = rocisa::DataType::None;
+        bool             m_customKernelMXScalesArePacked = false;
 
         KernelLanguage    m_kernelLanguage    = KernelLanguage::Any;
         PerformanceMetric m_performanceMetric = PerformanceMetric::DeviceEfficiency;
