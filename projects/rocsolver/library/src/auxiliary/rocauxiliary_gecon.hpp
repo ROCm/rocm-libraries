@@ -208,6 +208,9 @@ rocblas_status rocsolver_gecon_template(rocblas_handle handle,
         return rocblas_status_success;
     }
 
+    // the triangular solves pass their scalars on the host
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
+
     // Use hybrid storage to get pointers for batched arrays
     rocsolver_hybrid_storage<T, I, U> hA;
     ROCBLAS_CHECK(hA.init_pointers_only(A, shiftA, strideA, batch_count, stream));
