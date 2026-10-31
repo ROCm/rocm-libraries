@@ -109,15 +109,20 @@ def test_ragged_non_causal_cross_length_is_gfx950_cross_attention():
         assert ok, why
 
 
-def test_ragged_non_causal_cross_length_stays_rejected_on_gfx942():
-    from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+def test_ragged_non_causal_cross_length_is_gfx942_cross_attention():
+    # gfx942 dense mirrors gfx950: the ragged body serves full attention between
+    # different lengths (key-pad mask + guarded store).
+    from kernels.gfx942.attention_dense import (
+        Gfx942AttentionDenseSpec,
+        supports_attention_dense as supports_gfx942,
+    )
 
     tile = DENSE_TILE_GEOMETRIES["default"]
-    with pytest.raises(ValueError, match="self-attention only"):
-        Gfx942AttentionDenseSpec(
+    for sq, sk in ((197, 400), (400, 197)):
+        spec = Gfx942AttentionDenseSpec(
             batch=1,
-            seqlen_q=197,
-            seqlen_kv=400,
+            seqlen_q=sq,
+            seqlen_kv=sk,
             num_query_heads=4,
             num_kv_heads=1,
             head_size=128,
@@ -127,6 +132,8 @@ def test_ragged_non_causal_cross_length_stays_rejected_on_gfx942():
             block_n=int(tile["block_n"]),
             ragged=True,
         )
+        ok, why = supports_gfx942(spec, arch="gfx942")
+        assert ok, why
 
 
 @pytest.mark.parametrize("sq,sk", [(1000, 1050), (1050, 1000)])

@@ -140,6 +140,16 @@ P0 is CORRECTNESS-FIRST: the naive-V path (D64) is non-pipelined (a
 single LDS buffer) and reads V element-wise; the remaining perf levers (P2-P4) layer
 on top. It is validated against an fp32 SDPA reference across the in-scope cohort.
 
+The mask is the cuDNN band ``(left = sliding_window, right = right_bound)`` on the
+top-left diagonal, as in the gfx950 sibling: key ``k`` is visible to query ``q`` iff
+``q - k < left`` (when set) and ``k <= q + right`` (``causal=False``: unbounded;
+``causal=True``: ``right_bound``, 0 by default). A row whose band holds no key
+(``seqlen_q > seqlen_kv + window - 1``) outputs zeros. Ragged lengths (any
+``seqlen_q`` / ``seqlen_kv``, including cross-attention) run with a bounds-checked Q
+load, a key-pad mask and a guarded store. Every one of these is emitted only when
+the spec asks for it, so the default kernels' IR is unchanged. Bottom-right alignment
+(``causal_bottom_right``) is plain causal only, as on gfx950.
+
 :func:`supports_attention_dense` is the SINGLE gate: it rejects every spec
 :func:`build_attention_dense` cannot emit -- including the modes deferred to later
 phases -- so ``supports_attention_dense(spec)[0] is True`` implies the build
@@ -174,6 +184,7 @@ never sets a gfx942-private knob -- and every shape-only caller are unchanged.
 
 from __future__ import annotations
 
+from contextlib import nullcontext as _nullcontext
 from dataclasses import dataclass, field, fields as _dataclass_fields
 
 from rocke.core.ir import (
@@ -485,6 +496,24 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   count for short query lengths over long KV (chunked prefill), where one CTA
     #   per (query block, head) leaves most CUs idle. 1 (default) emits nothing new.
     kv_segments: int = field(default=1, kw_only=True)
+    # Keys the query may see AHEAD of its diagonal: key ``k`` is visible to the query
+    # at diagonal position ``d`` iff ``k <= d + right_bound``. Only meaningful with
+    # ``causal=True`` (0 = plain causal, the default; R > 0 = lookahead).
+    # ``causal=False`` is the unbounded right side. ``sliding_window`` still bounds
+    # ``d - k``, so ``(sliding_window, right_bound)`` is the cuDNN ``(left, right)``
+    # band on the top-left diagonal. Same field and semantics as
+    # ``Gfx950AttentionDenseSpec.right_bound``. Keyword-only so the positional
+    # signature is unchanged.
+    right_bound: int = field(default=0, kw_only=True)
+
+    def _supports_noncausal_window(self) -> bool:
+        return True
+
+    def _supports_noncausal_cross_length_ragged(self) -> bool:
+        return True
+
+    def _band_name_parts(self) -> tuple[str, ...]:
+        return (f"rb{self.right_bound}",) if self.right_bound > 0 else ()
 
     @classmethod
     def supported_persist_decodes(cls) -> frozenset[str]:
@@ -506,6 +535,20 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
             raise ValueError(
                 f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
             )
+        if self.right_bound < 0:
+            raise ValueError(
+                f"right_bound must be >= 0 (causal=False is the unbounded side), "
+                f"got {self.right_bound}"
+            )
+        if self.right_bound > 0:
+            if not self.causal:
+                raise ValueError("right_bound > 0 requires causal=True")
+            if self.causal_bottom_right:
+                raise ValueError(
+                    "right_bound > 0 is not supported with causal_bottom_right"
+                )
+            if self.paged or self.varlen:
+                raise ValueError("right_bound > 0 is not supported with paged / varlen")
 
     def resolved_use_cfvst(self) -> bool:
         """Resolved conflict-free-V decision (``None`` -> :func:`_use_cfvst`)."""
@@ -562,11 +605,16 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         decode divides through host-computed fast-division params
         (:attr:`fastdiv_divisors`), so the grid-stride loop stays multiply-and-shift.
         Sliding-window is on the runtime path: its KV-loop prune reads only the query
-        block, the window and the runtime trip count, and its zero-trip guard in
-        :func:`supports_attention_dense` runs per launch, ahead of the cache lookup.
-        ``ragged``/``varlen``/``paged`` never reach the builder
-        (:func:`supports_attention_dense` rejects them) but stay in the predicate,
-        identical to the gfx950 twin, so a later admit lands already excluded.
+        block, the window and the runtime trip count.
+
+        Excluded, and so baked per shape: ``ragged`` (the key-pad mask, the guarded
+        store and the Q buffer extent read seqlen_q / seqlen_kv), and a band with rows
+        that see no key (:meth:`_has_empty_rows`), whose zero-output guard is emitted
+        only for such shapes -- the same shape-dependent exclusion the gfx950 twin
+        makes for a moving bottom-right diagonal. ``varlen``/``paged`` never reach the
+        builder (:func:`supports_attention_dense` rejects them) but stay in the
+        predicate, identical to the gfx950 twin, so a later admit lands already
+        excluded.
 
         Every other knob that forks the body -- :func:`_use_exp2_fast` included --
         is a function of compile-time config only, never of the problem shape, so
@@ -574,7 +622,25 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         way: a policy that reads a shape field would make two shapes share a cache
         key AND a kernel name while lowering to different IR, which neither the
         name assert nor this predicate can catch."""
-        return not (self.ragged or self.varlen or self.paged)
+        return not (self.ragged or self.varlen or self.paged or self._has_empty_rows())
+
+    def _has_empty_rows(self) -> bool:
+        """Whether some query row's band holds no key AND the body must zero it
+        explicitly: a window with ``seqlen_q > seqlen_kv + sliding_window - 1``
+        (row ``q`` sees keys ``(q - W, q + R]`` clipped to ``[0, seqlen_kv)``).
+
+        Not with ``emit_lse`` (its ``row_has_key`` epilogue already zeroes such rows,
+        as on gfx950) nor with ``use_sinks`` (the sink seeds ``m`` / ``l = 1`` and
+        every masked score contributes exp2 of the -1e30 sentinel = 0, so the row
+        is already 0). Read by :attr:`runtime_shape` and the builder, so the guard
+        is emitted exactly on the baked shapes that need it."""
+        return (
+            self.sliding_window > 0
+            and not self.varlen
+            and not self.emit_lse
+            and not self.use_sinks
+            and self.seqlen_q > self.seqlen_kv + self.sliding_window - 1
+        )
 
     @property
     def runtime_param_fields(self) -> tuple[str, ...]:
@@ -1095,9 +1161,11 @@ def supports_attention_dense(
     In scope for this port: gfx942, bf16/fp16, D64/D128, MHA/GQA including
     non-power-of-2 groups, causal or full, the default grid AND the P4 persistent
     grid-stride variant, ``block_n`` dividing the ``block_m`` query tile, within the
-    LDS budget and 32-bit addressing, sliding-window (KV-loop prune + window mask), and
-    attention sinks (alone or with sliding-window). varlen / ragged are later
-    follow-ups (rejected below).
+    LDS budget and 32-bit addressing, ragged lengths (any seqlen_q / seqlen_kv,
+    including cross-attention), the cuDNN band (``sliding_window`` left bound,
+    causal or not, plus the ``right_bound`` lookahead) on the top-left diagonal, and
+    attention sinks (alone or with any band), and plain bottom-right causal (no
+    window or lookahead). varlen is a later follow-up (rejected below).
     """
     if arch != "gfx942":
         return False, f"kernels.gfx942.attention_dense is gfx942-only (got {arch})"
@@ -1142,17 +1210,20 @@ def supports_attention_dense(
     # grid-stride variant, both uniform dense self-attention. Checked HERE and not
     # only in the builder so that support() and build() agree on exactly one set of
     # specs. Persistent needs Sq % block_m == 0 (the grid-stride work count
-    # W = (Sq // block_m) * Hq * B floors); ragged (the ceil case) is rejected
-    # just below, and the seqlen_q check under "Tuning struct" then makes the floor
-    # exact for every spec that reaches the persistent builder.
+    # W = (Sq // block_m) * Hq * B floors) unless ragged, where the builder takes
+    # the ceil; the seqlen_q check under "Tuning struct" makes the floor exact for
+    # every aligned spec that reaches the persistent builder.
     if spec.varlen:
         return False, "gfx942 attention_dense: varlen not yet supported"
-    if spec.ragged:
-        return False, "gfx942 attention_dense: ragged not yet supported"
-    # sliding_window is supported (KV-loop prune + window mask); the shared spec
-    # __post_init__ re-run above enforces its constraints (W % block_n, causal).
-    # use_sinks is supported here (m/l seed per work item). The shared __post_init__
-    # still rejects it combined with paged or varlen.
+    # ragged (seqlen_q / seqlen_kv not tile multiples, any mask, including
+    # cross-attention seqlen_q != seqlen_kv) is supported on both grids: OOB query
+    # rows load through a bounds-checked buffer load, padded keys are masked by the
+    # key-pad mask, and padded output rows are dropped by a guarded store.
+    # sliding_window is supported (KV-loop prune + window mask), causal or not (a
+    # left-only band), as is right_bound (lookahead); the shared spec __post_init__
+    # re-run above enforces their constraints (W % block_n, right_bound >= 0).
+    # use_sinks is supported with every band, as on gfx950 (m/l seed per work
+    # item). The shared __post_init__ still rejects it combined with paged or varlen.
 
     # --- gfx942-private sweep knobs. Validated here rather than only in the builder
     # because the module contract is support() => build(): a knob that only the
@@ -1179,10 +1250,11 @@ def supports_attention_dense(
             f"{spec.block_m // 32 * 64}-thread CTA, past the 1024-thread workgroup "
             f"maximum"
         )
-    # Q is read with a plain global_load_vN (no buffer bound), and the epilogue stores
-    # the same rows, so a query tile that runs past seqlen_q reads and writes out of
-    # bounds. Implied by the dataclass (seqlen_q % 256 == 0) at the default block_m.
-    if spec.seqlen_q % spec.block_m != 0:
+    # Aligned path: Q is read with a plain global_load_vN (no buffer bound), and the
+    # epilogue stores the same rows, so a query tile that runs past seqlen_q reads and
+    # writes out of bounds. Implied by the dataclass (seqlen_q % 256 == 0) at the
+    # default block_m. The ragged path bounds both (buffer load + guarded store).
+    if not spec.ragged and spec.seqlen_q % spec.block_m != 0:
         return False, (
             f"seqlen_q={spec.seqlen_q} must be a multiple of "
             f"block_m={spec.block_m}: the last query tile would otherwise "
@@ -1327,26 +1399,12 @@ def supports_attention_dense(
             f"D={spec.head_size}, which exceeds the {arch} LDS capacity ({capacity} B)"
         )
 
-    # Sliding-window + causal: the last query block's window can start past
-    # seqlen_kv (start_tile >= n_up), giving a zero-trip KV loop -> l == 0 ->
-    # rcp(0) -> NaN. Same class as the block_m % block_n gate above; reject.
-    # Sinks make the zero-trip loop well-defined: l stays at the l0 = 1 seed and
-    # o at zero, so the output is 0, which is softmax([sink]) applied to no values.
-    if spec.sliding_window and spec.causal and not spec.use_sinks:
-        _n_q = spec.seqlen_q // spec.block_m
-        # Floor division, so the guard reads the same tile count the KV loop uses
-        # (n_ktiles = Skv // BN). The shared spec enforces seqlen_kv % block_n == 0,
-        # so floor and ceil coincide for every spec that reaches here.
-        _n_ktiles = spec.seqlen_kv // spec.block_n
-        _n_per = spec.block_m // spec.block_n
-        _swt = spec.sliding_window // spec.block_n
-        if (_n_q - 1) * _n_per - _swt >= _n_ktiles:
-            return False, (
-                f"sliding_window={spec.sliding_window}: last query block's window "
-                f"starts at tile {(_n_q - 1) * _n_per - _swt}, past seqlen_kv tile "
-                f"count {_n_ktiles} -> zero-trip KV loop -> NaN (well-defined "
-                f"with use_sinks)"
-            )
+    # Sliding window past seqlen_kv (the last query block's window starting beyond
+    # the last KV tile, so its KV loop is zero-trip) is NOT rejected: those rows see
+    # no key at all and output zeros, the same contract as the gfx950 sibling and
+    # PyTorch SDPA -- through the builder's empty-row guard (spec._has_empty_rows,
+    # which takes such a shape off the runtime path), the LSE epilogue's row_has_key,
+    # or the sink seed (l = 1, o = 0).
     return True, ""
 
 
@@ -1593,7 +1651,9 @@ def _build_attention_dense_single_buffer(
         V_SWZ_MASK = 0
         V_lds = b.smem_alloc(dtype, [1, BN, LDROW], name_hint="Vlds")
 
-    n_ktiles = Skv // BN
+    RAGGED = spec.ragged
+    # ragged: the partial last KV tile is visited (ceil) and its padded keys masked.
+    n_ktiles = ((Skv + BN - 1) // BN) if RAGGED else (Skv // BN)
     n_per = BLOCK_M // BN
     # Sliding-window left-context length. SW == 0 is full causal (the byte-identical
     # always-on path -- every SW-gated block below is elided so the emitted IR is
@@ -1615,6 +1675,21 @@ def _build_attention_dense_single_buffer(
         if spec.runtime_shape:
             return b.sub(seqlen_kv_p, seqlen_q_p)
         return b.const_i32(Skv - Sq)
+
+    # The attention band (same contract as the gfx950 sibling): key k is visible to
+    # query q iff q - k < SW (when SW > 0) and k <= q + RIGHT (causal only; causal=False
+    # is the unbounded right side). Anchored on the top-left diagonal.
+    RIGHT = spec.right_bound  # keys visible ahead of the diagonal (causal only)
+    # A row whose band holds no key (Sq > Skv + SW - 1, with a window) must output
+    # zeros. Emitted only then, so every other kernel's IR is unchanged. Such a spec
+    # is never runtime_shape (spec._has_empty_rows takes it off the runtime path), so
+    # the predicate reads the baked Sq / Skv. Off with emit_lse / use_sinks, which
+    # already zero those rows.
+    EMPTY_ROWS = spec._has_empty_rows()
+    # ragged: padded keys of the partial last KV tile need an explicit key-pad mask
+    # unless causal already drops them (every real query q < Sq, and q + RIGHT <
+    # Skv <= every padded key).
+    RAG_KBOUND = RAGGED and (Skv % BN != 0) and ((not causal) or Sq + RIGHT > Skv)
 
     # ---- async DMA loaders (arch-neutral; width=1 = CDNA3 legal) ----
     K_LDROW_BYTES = LDROW * 2
@@ -1653,6 +1728,9 @@ def _build_attention_dense_single_buffer(
     else:
         k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * _kv_elem_bytes))
         v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * _kv_elem_bytes))
+    # ragged only (never runtime_shape, so the extent is baked): Q through a buffer
+    # resource so the partial last query block reads 0 past the tensor.
+    q_rsrc = b.buffer_rsrc(q, b.const_i32(B * Sq * Hq * D * 2)) if RAGGED else None
 
     # ---- conflict-free V (P1): perm_b32 store-path transpose into V_lds[dim, token] ----
     # Load V naturally [token, dim] (coalesced VMEM over the contiguous dim axis),
@@ -1810,12 +1888,23 @@ def _build_attention_dense_single_buffer(
         # Q * qk_scale back to bf16/fp16 before the MFMA would cost up to 2^-8
         # relative error per element (bf16), and the score error it causes grows
         # with the scale.
+        # ragged: a bounds-checked buffer load returns 0 for query rows past the
+        # buffer (the last batch's partial block); rows of an inner batch's partial
+        # block read the next batch's rows, which is harmless because their output is
+        # dropped by the guarded store. Aligned: direct global load (unchanged IR).
         q_tok = b.add(q_tok0, lane_m)
         q_packs = []
         for ks in range(K_STEPS):
             col = b.add(b.const_i32(ks * 8), d_base)
             addr = b.add(b.add(q_base, b.mul(q_tok, _stride_q())), col)
-            q_packs.append(b.global_load_vN(q, addr, dtype, 4, align=8))
+            if RAGGED:
+                q_packs.append(
+                    b.buffer_load_vN(
+                        q_rsrc, b.mul(addr, b.const_i32(2)), zero_soff, dtype, 4
+                    )
+                )
+            else:
+                q_packs.append(b.global_load_vN(q, addr, dtype, 4, align=8))
 
         def _async_load(rsrc, lds_base, tile_key0, group_pad=False):
             if ROWS_PER_INSTR == 1:
@@ -1949,29 +2038,48 @@ def _build_attention_dense_single_buffer(
             # mask, so the W == 0 path stays byte-identical. Mirrors the gfx950 dense
             # do_mask (gfx950/attention_dense.py). The mask is on the QK output S
             # (N_SUB x 16 regs) and is independent of the doubled 32x32x8 K/PV loops.
-            if not causal:
+            # Non-causal applies only the window lower bound (a left-only band); the
+            # upper bound is ``ktok <= query_tok + RIGHT`` (RIGHT = 0: plain causal).
+            if not causal and not lower:
                 return
             tile_key0 = b.mul(tile_idx, b.const_i32(BN))
             query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
             if BR:
                 query_tok = b.add(query_tok, diag_off)
             win_lo = b.sub(query_tok, b.const_i32(SW)) if lower else None
+            # upper bound key: q + RIGHT (the window anchor above stays unshifted)
+            up_tok = b.add(query_tok, b.const_i32(RIGHT)) if RIGHT else query_tok
             for nsub in range(N_SUB):
                 sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
                 for i in range(16):
                     ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
-                    if upper:
+                    if upper and causal:
                         s_reg[nsub][i] = b.select(
-                            b.cmp_le(ktok, query_tok), s_reg[nsub][i], neg_inf
+                            b.cmp_le(ktok, up_tok), s_reg[nsub][i], neg_inf
                         )
                     if lower:
                         s_reg[nsub][i] = b.select(
                             b.cmp_gt(ktok, win_lo), s_reg[nsub][i], neg_inf
                         )
 
-        # n_up: causal clamps the KV loop to the diagonal tile of this query block.
-        # The window does not move the upper diagonal, only the lower edge, so n_up
-        # is unchanged by W.
+        def do_kbound_mask(s_reg, tile_idx):
+            """ragged: force scores of padded keys (ktok >= seqlen_kv, the OOB rows of
+            the partial last KV tile) to -inf. Only emitted when causal does not
+            already drop them (see RAG_KBOUND). seqlen_kv is compile-time on the
+            ragged path, so the bound folds to an immediate."""
+            tile_key0 = b.mul(tile_idx, b.const_i32(BN))
+            for nsub in range(N_SUB):
+                sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
+                for i in range(16):
+                    ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                    s_reg[nsub][i] = b.select(
+                        b.cmp_lt(ktok, b.const_i32(Skv)), s_reg[nsub][i], neg_inf
+                    )
+
+        # n_up: causal clamps the KV loop to the last tile holding a visible key of
+        # this query block (its diagonal tile, plus RIGHT keys of lookahead). The
+        # window does not move the upper bound, only the lower edge, so n_up is
+        # unchanged by W.
         # BN is a power of two, so the runtime divide lowers to a shift. The causal
         # clamp below needs no further edit -- it consumes n_ktiles_c, so converting
         # the trip count carries it.
@@ -1995,7 +2103,12 @@ def _build_attention_dense_single_buffer(
             )
             n_up = b.select(b.cmp_lt(n_up, n_ktiles_c), n_up, n_ktiles_c)
         elif causal:
-            n_up = b.add(b.mul(qb, b.const_i32(n_per)), b.const_i32(n_per))
+            # (BLOCK_M - 1 + RIGHT) // BN + 1 == n_per at RIGHT == 0 (block_n divides
+            # block_m), so the plain causal constant -- and its IR -- is unchanged.
+            n_up = b.add(
+                b.mul(qb, b.const_i32(n_per)),
+                b.const_i32((BLOCK_M - 1 + RIGHT) // BN + 1),
+            )
             n_up = b.select(b.cmp_lt(n_up, n_ktiles_c), n_up, n_ktiles_c)
         else:
             n_up = n_ktiles_c
@@ -2016,11 +2129,15 @@ def _build_attention_dense_single_buffer(
             # KV loop runs at least once. With the runtime trip count it cannot see
             # that on its own, and it then clones the epilogue and the grid-stride
             # latch for a zero-trip edge, which costs the outer loop its schedule.
-            # A no-op on every supported shape: the sliding-window guard in
-            # supports_attention_dense keeps the last (latest-starting) query
-            # block's start_tile below n_ktiles, every start_tile is below its own
-            # diagonal, and n_up >= 1 since seqlen_kv >= BN. The default grid runs
-            # one item per CTA, so it keeps its IR unchanged.
+            # A no-op for every query block that sees a key (n_up >= 1 always). A
+            # block whose window starts past seqlen_kv has no visible key at all;
+            # the clamp then runs one fully masked tile instead of a zero-trip
+            # loop, and its rows still output 0 (empty-row guard, LSE row_has_key,
+            # or the sink seed). The default grid runs one item per CTA, so it keeps
+            # its IR unchanged. It needs no clamp either: unlike the gfx950 sibling
+            # there is no prologue that loads start_tile unconditionally, and the
+            # top-tested loop runs zero trips when start_tile >= n_up, so a q-block
+            # past seqlen_kv + W never reads the next batch's keys.
             if spec.persistent:
                 _last = b.sub(n_up, b.const_i32(1))
                 start_tile = b.select(b.cmp_lt(start_tile, _last), start_tile, _last)
@@ -2050,12 +2167,11 @@ def _build_attention_dense_single_buffer(
             l_i = carry[1]
             o_acc = list(carry[2 : 2 + D_TILES])
             s = do_qk()
-            # Every visited tile gets the causal upper bound; W > 0 additionally
-            # applies the window lower bound (redundant no-op compares on tiles
-            # fully inside the window). W == 0 -> lower=False, byte-identical.
-            # do_mask early-returns when non-causal, so upper is only read on the
-            # causal path (where it is the causal bound); the arg is kept for
-            # signature parity with the gfx950 do_mask, which does use upper=False.
+            # Causal tiles get the upper bound k <= q + RIGHT; W > 0 adds the window
+            # lower bound on causal and non-causal bodies alike (redundant no-op
+            # compares on tiles fully inside the window). W == 0 -> lower=False,
+            # byte-identical. do_mask returns early only when neither bound applies
+            # (not causal and not lower), and upper=True is only read under causal.
             # masked=False only for below-diagonal tiles of the diagonal split.
             if masked is True:
                 do_mask(s, j, lower=(SW > 0), upper=True)
@@ -2064,6 +2180,10 @@ def _build_attention_dense_single_buffer(
                 lower, upper = masked
                 if lower or upper:
                     do_mask(s, j, lower=lower, upper=upper)
+            # The key-pad mask applies to every tile, split or not: with
+            # seqlen_q > seqlen_kv the partial last KV tile can sit below the diagonal.
+            if RAG_KBOUND:
+                do_kbound_mask(s, j)
 
             # tile max over keys (both lane-halves) for this query.
             local_max = neg_inf
@@ -2178,8 +2298,9 @@ def _build_attention_dense_single_buffer(
                 # running (m, l, O) state is exactly what a fully masked tile leaves.
                 # The 0/1-trip loop is wave-uniform (readfirstlane), so the K/V
                 # staging above and the trailing barrier stay in every wave.
+                # The last row's upper bound is q + RIGHT (RIGHT = 0: the diagonal).
                 key0 = b.mul(j, b.const_i32(BN))
-                past_diag = b.cmp_gt(key0, b.add(q_tok0, b.const_i32(31)))
+                past_diag = b.cmp_gt(key0, b.add(q_tok0, b.const_i32(31 + RIGHT)))
                 behind_window = b.cmp_le(
                     b.add(key0, b.const_i32(BN - 1)), b.sub(q_tok0, b.const_i32(SW))
                 )
@@ -2368,6 +2489,12 @@ def _build_attention_dense_single_buffer(
             rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
         else:
             rcp_l = b.rcp(l_i)
+        if EMPTY_ROWS:
+            # A row with no visible key keeps m at the finite neg_inf sentinel (every
+            # score it saw was masked to it, or its KV loop was zero-trip): store 0,
+            # not the masked-key average (or 0 * rcp(0) = NaN on a zero-trip loop).
+            # Never with emit_lse: its row_has_key epilogue zeroes those rows.
+            rcp_l = b.select(b.fcmp("ogt", res[0], neg_inf), rcp_l, b.const_f32(0.0))
         o_base = b.add(
             b.mul(
                 b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
@@ -2386,6 +2513,7 @@ def _build_attention_dense_single_buffer(
                 causal=causal,
                 diagonal=0,
                 window=SW,
+                right_bound=RIGHT,
             )
             lse_index = b.add(
                 b.mul(
@@ -2408,20 +2536,31 @@ def _build_attention_dense_single_buffer(
                 else row_has_key
             )
             # Both half-waves hold the same query row; one of them writes its LSE.
-            with b.scf_if(b.cmp_eq(lane_h, b.const_i32(0))):
+            # ragged: a padded query row (qtok >= seqlen_q) would land on the next
+            # head's rows, so it writes nothing.
+            lse_owner = b.cmp_eq(lane_h, b.const_i32(0))
+            if RAGGED:
+                lse_owner = b.land(lse_owner, b.cmp_lt(qtok, b.const_i32(Sq)))
+            with b.scf_if(lse_owner):
                 lse_store(b, lse, lse_index, res[0], l_i, row_has_mass=row_has_mass)
-        _emit_o_store(
-            b,
-            o,
-            q_row_byte,
-            d_half,
-            o_acc,
-            rcp_l,
-            dtype,
-            D_TILES,
-            spec.o_store_width,
-            row_has_key=row_has_key if spec.emit_lse else None,
+        # ragged: drop padded query rows (qtok >= seqlen_q) with a per-lane guard so
+        # they never write (and never clobber the next batch's real rows).
+        o_store_ctx = (
+            b.scf_if(b.cmp_lt(qtok, b.const_i32(Sq))) if RAGGED else _nullcontext()
         )
+        with o_store_ctx:
+            _emit_o_store(
+                b,
+                o,
+                q_row_byte,
+                d_half,
+                o_acc,
+                rcp_l,
+                dtype,
+                D_TILES,
+                spec.o_store_width,
+                row_has_key=row_has_key if spec.emit_lse else None,
+            )
 
     # ---- grid dispatch: default (one CTA per work item) vs persistent (P4) ----
     if spec.persistent:
@@ -2438,28 +2577,34 @@ def _build_attention_dense_single_buffer(
         # a host-computed magic multiplier and shift (spec.fastdiv_divisors) and
         # stays mul-hi + add + shift -- a plain b.div/b.mod on a runtime operand
         # would put the backend's software integer division in every iteration.
-        if not spec.runtime_shape:
-            raise ValueError(
-                "gfx942 attention_dense: the persistent grid needs runtime_shape "
-                "(ragged/varlen/paged are not supported)"
-            )
+        #
+        # Off the runtime path (ragged, or a band with keyless rows -- see
+        # spec._has_empty_rows) the shape is baked: the counts are constants and the
+        # decode divides by constants, which the backend strength-reduces itself.
         NP = spec.num_persistent
-        # ragged rejected -> Sq % BLOCK_M == 0, exact. BLOCK_M is a compile-time
-        # constant, so this per-CTA divide strength-reduces.
-        nqb_p = b.div(seqlen_q_p, b.const_i32(BLOCK_M))
-        w_p = b.mul(b.mul(nqb_p, hq_p), batch_p)
+        if spec.runtime_shape:
+            # Aligned: Sq % BLOCK_M == 0, exact. BLOCK_M is a compile-time
+            # constant, so this per-CTA divide strength-reduces.
+            nqb_p = b.div(seqlen_q_p, b.const_i32(BLOCK_M))
+            w_p = b.mul(b.mul(nqb_p, hq_p), batch_p)
 
-        def _div(n, d):
-            # (umulhi(n, magic) + n) >> shift, exact for n < 2**30 (the add is nsw);
-            # attention_dense_runtime_args holds every decode dividend under that
-            # bound.
-            return b.lshr(
-                b.add(b.umul_hi_i32(n, rt[f"{d}_magic"]), n), rt[f"{d}_shift"]
+            def _div(n, d):
+                # (umulhi(n, magic) + n) >> shift, exact for n < 2**30 (the add is
+                # nsw); attention_dense_runtime_args holds every decode dividend
+                # under that bound.
+                return b.lshr(
+                    b.add(b.umul_hi_i32(n, rt[f"{d}_magic"]), n), rt[f"{d}_shift"]
+                )
+
+            work_shape = DecodeShape(
+                b, spec, {**shape_values, "nqb": nqb_p, "w": w_p}, fastdiv=_div
             )
-
-        work_shape = DecodeShape(
-            b, spec, {**shape_values, "nqb": nqb_p, "w": w_p}, fastdiv=_div
-        )
+        else:
+            # Baked shape: every extent is a constant (DecodeShape with no runtime
+            # values), the query-block count is the ceil (a ragged partial last
+            # block counts) and each decode divides by constants.
+            work_shape = DecodeShape(b, spec)
+            w_p = work_shape.val("w")
         cta_id = b.block_id_x()
         outer = b.scf_for(cta_id, w_p, b.const_i32(NP), iv_name="wi")
         with outer as wi:
@@ -2651,20 +2796,22 @@ def run_attention_dense_torch(
 
     Mirrors ``kernels.gfx950.attention_dense.run_attention_dense_torch`` and keys
     the launcher cache by ``attention_dense_cache_key``. On the runtime-shape path
-    (``spec.runtime_shape``: both grids, sliding-window included) batch, seqlen_q,
+    (``spec.runtime_shape``: both grids, sliding-window included, ragged and
+    keyless-row bands excluded) batch, seqlen_q,
     seqlen_kv and both head counts are kernel params and drop out of that key, so
     one compiled binary serves every shape; every other IR-live field still
     participates without relying on manual name tokens. On the persistent grid the
     key carries the resolved decode order, so one binary serves each order.
 
-    varlen / ragged are rejected by :func:`supports_attention_dense` on gfx942, so the
-    ABI has no ``cu_seqlens`` args (:func:`attention_dense_signature`); passing
-    ``cu_seqlens_*`` is a caller error rather than a silently-ignored argument.
+    varlen is rejected by :func:`supports_attention_dense` on gfx942 (ragged takes
+    its lengths from the baked spec), so the ABI has no ``cu_seqlens`` args
+    (:func:`attention_dense_signature`); passing ``cu_seqlens_*`` is a caller error
+    rather than a silently-ignored argument.
 
     ``spec.emit_lse=True`` requires a caller-owned contiguous FP32 ``lse`` tensor
     [B, Hq, Sq, 1] on the same GPU, separate from every input and output. The kernel
     writes the natural-log softmax normalizer while still returning ``out``. Rows
-    with no allowed key (a sliding window past the end of the keys) write O=0 and
+    with no allowed key (a band that holds no key of that row) write O=0 and
     LSE=-inf; with an attention sink, those rows instead write the sink logit as
     LSE. Supplying ``lse`` with ``emit_lse=False`` is an error."""
     spec = _as_gfx942_spec(spec)

@@ -485,6 +485,17 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
                         "kv_ring_depth!=2 (deep prefetch ring) not yet ported to "
                         "the gfx950 C twin");
     }
+    if(spec->causal_top_left)
+    {
+        /* The gfx950 C++ twin does not implement causal_top_left (gfx950 has it
+         * in the Python engine only); reject rather than silently emit a
+         * bottom-right causal kernel. */
+        rocke_g950_fail(
+            b,
+            ROCKE_ERR_NOTIMPL,
+            "causal_top_left is not implemented by the gfx950 C++ twin (gfx950 implements it "
+            "in the Python engine only)");
+    }
     if(spec->use_q_reread)
     {
         rocke_g950_fail(b,

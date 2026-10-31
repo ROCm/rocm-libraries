@@ -130,8 +130,6 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
             return False, why
         if problem.select_path(req.arch) != "2d":
             return False, "problem routes to 3D, not 2D"
-        if not problem.default_mask:
-            return False, "gfx942 tiled 2D implements only bottom-right causal"
         from kernels.common.attention_unified import _enable_gfx942_fp16_flash
 
         if not _enable_gfx942_fp16_flash(problem, req.arch):
@@ -152,6 +150,11 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
             num_query_heads=problem.num_query_heads,
             num_kv_heads=problem.num_kv_heads,
             name="rocke_attention_gfx942_dense_pipe",
+            causal_top_left=problem.causal_top_left,
+            right_bound=problem.right_bound,
+            # The left bound joins the name only off the default mask, so every
+            # pre-band dense_pipe identity is unchanged.
+            sliding_window=0 if problem.default_mask else problem.sliding_window,
         )
 
     candidate = KernelCandidate(
@@ -169,8 +172,9 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
             # ``_enable_gfx942_fp16_flash`` is the real narrowing; fp8 is
-            # unsupported, but the unified body already shifts causal masking.
-            supports_features=ATTENTION_FEATURES - {"fp8", "band", "full_attention"},
+            # unsupported. The tiled 2D body it builds computes the whole band
+            # (full, top-left / bottom-right, window, right bound).
+            supports_features=ATTENTION_FEATURES - {"fp8"},
         ),
         _supports=support,
         select_spec=select,

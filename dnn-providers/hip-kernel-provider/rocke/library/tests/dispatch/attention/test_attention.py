@@ -65,9 +65,12 @@ EXPECTED_FEATURES = {
         "causal_bottom_right",
         "sliding_window",
     },
+    # gfx942 dense serves the gfx950 dense band plus bottom-right causal.
     "attention_gfx942_dense": {
+        "band",
         "causal",
         "causal_bottom_right",
+        "full_attention",
         "layout_dense",
         "lse",
         "sinks",
@@ -88,8 +91,10 @@ EXPECTED_FEATURES = {
         for kind in ("prefill", "decode")
     },
     "attention_gfx942_dense_pipe": {
+        "band",
         "causal",
         "causal_bottom_right",
+        "full_attention",
         "sinks",
         "sliding_window",
     },
