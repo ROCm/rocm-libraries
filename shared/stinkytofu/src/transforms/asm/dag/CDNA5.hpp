@@ -820,6 +820,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int getMaxSrcDataWait(DAGNode* node) const;
     bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
     bool pipeOpGateBlocks(DAGNode* node) const;
+    bool warGateRelieved(DAGNode* ds) const;
+    bool dsWarClear(DAGNode* ds) const;
     // dagFeatures.prefetchLeadWmmas for this basic block (StageWmmaCounter, set in onInit).
     int blockPrefetchLead_ = 0;
     // Earliest WMMA count at which each prefetch may issue (blockPrefetchLead_).
@@ -1365,6 +1367,23 @@ bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
     return false;
 }
 
+// mode2 WAR gate relief: a gated load may issue before its pipe-op distance closes when its stage
+// is behind its even line (DsSpreadPacer), or when the region's last WMMA has issued, since no
+// later WMMA can close the gap.
+bool CDNA5ReadyQueue::warGateRelieved(DAGNode* ds) const {
+    if (wmmaTotalThisRegion_ > 0 && wmmaIssuedCountThisRegion_ >= wmmaTotalThisRegion_) return true;
+    return dsSpreadOn() && dsSpread_.behind(ds->id, wmmaIssuedCountThisRegion_) > 0;
+}
+
+// May \p ds issue without overwriting a register a queued WMMA still reads? Two checks, one answer:
+// the pipe-op gate holds a load too close after its WMMA reader (a heuristic that avoids an
+// s_wait_alu, lifted when the region is behind its ds rate), and the overlap check against the
+// queued WMMAs' sources (what the hardware does).
+bool CDNA5ReadyQueue::dsWarClear(DAGNode* ds) const {
+    if (!warGateRelieved(ds) && pipeOpGateBlocks(ds)) return false;
+    return !destOverlapsActiveWmmaSrc(ds);
+}
+
 // PipeOps hazard lanes: true when node is a rule.isConsumer whose dest regs are still
 // inside the gap opened by a rule.isProducer read. The gap is measured in issued pipe ops
 // (what va_vdst encodes), so no amount of elapsed time closes it -- only issuing another
@@ -1633,17 +1652,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         }
     };
 
-    // mode2 WAR gate: hold back a ds_load too close after its WMMA reader, unless the region is
-    // behind the ds issue rate its totals imply. Cumulative, so a ratio of 1.19 paces differently
-    // from 2.0 -- a per-window integer share truncates both to 1. Counts, not readiness: once the
-    // region's last WMMA issues, expectedDs reaches the region total and the relief lifts the gate.
-    const int expectedDs =
-        wmmaTotalThisRegion_ > 0
-            ? dsTotalThisRegion_ * wmmaIssuedCountThisRegion_ / wmmaTotalThisRegion_
-            : 0;
-    const bool warGateRelief = dsIssuedThisRegion_ < expectedDs;
-    const bool warTooClose = !warGateRelief && pipeOpGateBlocks(pickedDS);
-    const bool dsBaseOk = pickedDS && !warTooClose && !destOverlapsActiveWmmaSrc(pickedDS);
+    const bool dsBaseOk = pickedDS && dsWarClear(pickedDS);
     int dsCreditWait = 0;
     if (dsBaseOk) {
         dsCreditWait = dsReadInflight_.full() ? std::max(1, dsReadInflight_.minResidual()) : 0;
