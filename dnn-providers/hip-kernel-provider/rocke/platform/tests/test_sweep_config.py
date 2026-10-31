@@ -213,21 +213,38 @@ class TestInertSweepDetection(unittest.TestCase):
             self.skipTest(f"TDM kernels need an llvm23+ flavor, got {flavor}")
 
     def _big_finalists(self):
-        """Champion-class geometry -- big enough that LDS pins occupancy."""
-        from dataclasses import replace
+        """Champion-class geometry -- big enough that LDS pins occupancy.
 
+        One geometry is enough: the detector compiles every value of every
+        swept trait on each geometry it samples, and each test below asks about
+        a single trait, so more geometries only add COMGR compiles.
+        """
         m = _sweep()
         cfg = m.load_config(CONFIGS / "sq4k.json")
         tiles = m.enumerate_tile_configs(cfg)
         big = [s for s in tiles if s.tile.tile_m == 256 and s.tile.tile_n == 256]
         self.assertTrue(big, "expected some 256x256 geometries")
-        return cfg, big[:4]
+        return cfg, big[:1]
+
+    def _warnings_for(self, m, cfg, finalists, key):
+        """The detector's warnings about ``key`` alone.
+
+        Every other swept trait is pinned to its screening value first, so the
+        detector compiles only ``key``'s values rather than the whole sweep.
+        """
+        traits = cfg["traits"]
+        screening = traits.get("screening", {})
+        for other, value in list(traits.items()):
+            if other in ("screening", key) or not isinstance(value, list):
+                continue
+            traits[other] = screening.pop(other)
+        return [w for w in m.warn_if_sweep_is_inert(cfg, finalists) if key in w]
 
     def test_waves_per_eu_is_flagged_on_lds_pinned_tiles(self):
         """Backend-level inertness: the IR differs, the machine code does not."""
         m = _sweep()
         cfg, fin = self._big_finalists()
-        warns = [w for w in m.warn_if_sweep_is_inert(cfg, fin) if "waves_per_eu" in w]
+        warns = self._warnings_for(m, cfg, fin, "waves_per_eu")
         self.assertTrue(warns, "waves_per_eu is a no-op where LDS pins occupancy")
         self.assertIn("SAME kernel", warns[0])
 
@@ -242,9 +259,7 @@ class TestInertSweepDetection(unittest.TestCase):
                 "traits.screening.ab_load_elem_bytes=null",
             ],
         )
-        warns = [
-            w for w in m.warn_if_sweep_is_inert(cfg, fin) if "ab_load_elem_bytes" in w
-        ]
+        warns = self._warnings_for(m, cfg, fin, "ab_load_elem_bytes")
         self.assertTrue(warns)
 
     def test_a_degenerate_sweep_is_reported_separately(self):
@@ -258,7 +273,7 @@ class TestInertSweepDetection(unittest.TestCase):
                 "traits.screening.lds_swizzle=false",
             ],
         )
-        warns = [w for w in m.warn_if_sweep_is_inert(cfg, fin) if "lds_swizzle" in w]
+        warns = self._warnings_for(m, cfg, fin, "lds_swizzle")
         self.assertTrue(warns)
         self.assertIn("degenerate", warns[0])
 
@@ -266,7 +281,7 @@ class TestInertSweepDetection(unittest.TestCase):
         """Guards against a detector that simply warns about everything."""
         m = _sweep()
         cfg, fin = self._big_finalists()
-        warns = [w for w in m.warn_if_sweep_is_inert(cfg, fin) if "lds_k_pad" in w]
+        warns = self._warnings_for(m, cfg, fin, "lds_k_pad")
         self.assertEqual(warns, [], "lds_k_pad changes the kernel; it is live")
 
     def test_diagnostics_never_break_the_run(self):
