@@ -630,6 +630,41 @@ struct fmha_bwd_traits
     // TODO: padding check is inside this api
 };
 
+// Workspace limits of tile-split determinism, in bytes. The launcher aims for the budget when
+// it splits a run into batch/head chunks, and goes over it only as far as needed to keep the
+// GPU busy. The cap is never exceeded: when even one batch and one head would need more, the
+// dispatch picks the persistent instance instead. Both scale with hdim like a dq_acc slot does.
+// CK_DET_WS_BUDGET_MB and CK_DET_WS_CAP_MB override them (MiB; ignored unless positive).
+inline size_t fmha_bwd_det_ws_limit_(const char* env, size_t mib_per_128, int hdim_q)
+{
+    if(const char* e = std::getenv(env))
+    {
+        const long long mib = std::atoll(e);
+        if(mib > 0)
+            return static_cast<size_t>(mib) << 20;
+    }
+    const size_t hdim_mult = hdim_q > 128 ? static_cast<size_t>(hdim_q / 128) : 1;
+    return (mib_per_128 * hdim_mult) << 20;
+}
+inline size_t fmha_bwd_det_ws_budget(int hdim_q)
+{
+    return fmha_bwd_det_ws_limit_("CK_DET_WS_BUDGET_MB", 4096, hdim_q);
+}
+inline size_t fmha_bwd_det_ws_cap(int hdim_q)
+{
+    return fmha_bwd_det_ws_limit_("CK_DET_WS_CAP_MB", 16384, hdim_q);
+}
+
+// Whether a tile-split instance with kv tile size kN0 fits the cap. Its smallest chunk, one
+// batch and one head, still holds one fp32 dq_acc slot per kv tile, so it grows with
+// seqlen_q * seqlen_k; the persistent kernel's workspace grows with seqlen_q only.
+inline bool fmha_bwd_tile_split_fits(const fmha_bwd_traits& t, int kN0)
+{
+    const size_t slots = ck_tile::integer_divide_ceil(t.seqlen_k, kN0);
+    const size_t floor = sizeof(float) * slots * static_cast<size_t>(t.seqlen_q) * t.hdim_q;
+    return floor <= fmha_bwd_det_ws_cap(t.hdim_q);
+}
+
 template <typename T0 /*dot_do_o_trait*/,
           typename T1 /*dq_dk_dv_trait*/,
           typename T2 /*convert_dq_trait*/,
@@ -679,6 +714,15 @@ struct fmha_bwd_launcher
     ~fmha_bwd_launcher() = default;
 
     ck_tile::index_t selected_max_seqlen_q() const { return selected_max_seqlen_q_; }
+    // Whether the workspace must be prepared again before every run because the kernels
+    // accumulate into dq_acc. Otherwise one prepare_workspace_async serves any number of runs
+    // of the same problem.
+    bool needs_prepare_per_run() const { return needs_zero_dq_acc_; }
+    // Deterministic dq reduction of the selected instance: tile split or persistent.
+    bool uses_tile_split() const { return det_tile_split_; }
+    // Heads and batches per launch when a tile-split run is split into chunks; 0 = all.
+    int head_chunk() const { return head_chunk_; }
+    int batch_chunk() const { return batch_chunk_; }
 
     // Stream-async workspace preparation. Zeroes the dq_acc region (if the kernel
     // accumulates) and launches a single-thread device kernel that writes the
@@ -892,11 +936,18 @@ struct fmha_bwd_launcher
         };
     }
 
+    // Splits a tile-split run into batch/head chunks that take turns on one workspace. Returns
+    // the heads per chunk and sets batch_chunk, 0 meaning all. CK_DET_HEAD_CHUNK and
+    // CK_DET_BATCH_CHUNK force a split (a divisor of nhead_q / batch); CK_DET_HEAD_CHUNK=0
+    // turns chunking off.
     int pick_chunks_(const fmha_bwd_traits& t, size_t device_ws_size, int& batch_chunk)
     {
-        constexpr double kChunkTail       = 0.3;
-        constexpr size_t kBudgetMiBPer128 = 4096;
-        batch_chunk                       = 0;
+        // Measured on gfx1250: a chunk that gives each CU a single workgroup runs up to 1.7x
+        // slower under a causal mask, as the uneven kv tiles have nothing to overlap with; two
+        // per CU recover it. Each extra chunk also costs about kChunkTail of a wave.
+        constexpr long long kMinWorkgroupsPerCu = 2;
+        constexpr double kChunkTail             = 0.3;
+        batch_chunk                             = 0;
 
         if(!t.is_deterministic || !det_tile_split_ || t.is_group_mode || device_ws_size == 0 ||
            elem_bytes_ == 0)
@@ -906,54 +957,59 @@ struct fmha_bwd_launcher
         if(t.nhead_q <= 0 || t.nhead_k <= 0 || t.nhead_q % t.nhead_k != 0 || t.batch <= 0)
             return 0;
 
-        int forced = -1;
-        if(const char* e = std::getenv("CK_DET_HEAD_CHUNK"))
+        auto forced = [](const char* name, int n) {
+            const char* e = std::getenv(name);
+            if(e == nullptr || std::string(e) == "auto")
+                return -1;
+            const int k = std::atoi(e);
+            return (k > 0 && k < n && n % k == 0) ? k : 0;
+        };
+        const int forced_h = forced("CK_DET_HEAD_CHUNK", t.nhead_q);
+        const int forced_b = forced("CK_DET_BATCH_CHUNK", t.batch);
+        if(std::getenv("CK_DET_HEAD_CHUNK") && forced_h == 0)
+            return 0;
+        if(forced_h > 0 || forced_b > 0)
         {
-            if(std::string(e) != "auto")
-            {
-                forced = std::atoi(e);
-                if(forced == 0)
-                    return 0;
-            }
+            batch_chunk = forced_b > 0 ? forced_b : 0;
+            return forced_h > 0 ? forced_h : 0;
         }
-        if(forced > 0)
-            return (forced < t.nhead_q && t.nhead_q % forced == 0) ? forced : 0;
 
         const long long denom = 4LL * t.batch * t.nhead_q * t.seqlen_q * t.hdim_q;
-        if(denom <= 0)
+        const long long cus   = static_cast<long long>(ck_tile::get_num_cus());
+        if(denom <= 0 || cus <= 0)
+            return 0;
+        const long long jph = static_cast<long long>(device_ws_size) / denom; // kv tiles per head
+        if(jph <= 0)
             return 0;
 
-        const int jph = static_cast<int>(device_ws_size / denom);
-        const int cus = static_cast<int>(ck_tile::get_num_cus());
-        if(jph <= 0 || cus <= 0)
-            return 0;
+        // Workgroups of a chunk of `units` batch-heads, as FmhaBwdDQDKDVKernel::GridSize lays
+        // them out: mask tile pairing halves the kv tiles while the paired grid still covers
+        // enough CUs.
+        const bool can_pair = CK_TILE_FMHA_BWD_MASK_TILE_PAIRING &&
+                              t.mask_type != mask_enum::no_mask &&
+                              jph <= CK_TILE_FMHA_BWD_PAIRING_MAX_JOBS_PER_HEAD;
+        auto grid_of = [&](long long units) {
+            const long long paired = (jph + 1) / 2 * units;
+            return (can_pair && paired > cus / CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV) ? paired
+                                                                                    : jph * units;
+        };
 
-        const bool pairs = (t.mask_type != mask_enum::no_mask) && (jph <= 160);
-        const int xdim   = pairs ? ((jph + 1) / 2) : jph;
-        if(xdim <= 0)
-            return 0;
-
-        const int hdim_mult = (t.hdim_q > 128) ? (t.hdim_q / 128) : 1;
-        size_t budget_mib   = kBudgetMiBPer128 * static_cast<size_t>(hdim_mult);
-        if(const char* bs = std::getenv("CK_DET_WS_BUDGET_MB"))
-            budget_mib = static_cast<size_t>(std::atoll(bs)); // explicit override wins
-        const size_t budget_bytes = budget_mib * size_t{1024} * 1024;
-
-        const size_t ws_unit = device_ws_size / static_cast<size_t>(t.batch) /
+        const size_t unit_ws = device_ws_size / static_cast<size_t>(t.batch) /
                                static_cast<size_t>(t.nhead_q); // one batch, one head
-        auto ws_of = [&](int bc, int hc) {
-            return ws_unit * static_cast<size_t>(bc) * static_cast<size_t>(hc);
+        const size_t budget = fmha_bwd_det_ws_budget(t.hdim_q);
+        const size_t cap    = fmha_bwd_det_ws_cap(t.hdim_q);
+
+        // In order of preference: the cheapest split within the budget that keeps every CU
+        // busy; the smallest within the cap that does; the cheapest within the cap; the
+        // smallest overall (only when the cap was overridden below what dispatch assumed).
+        struct split
+        {
+            int b       = 0;
+            int h       = 0;
+            size_t ws   = 0;
+            double cost = 0.0;
         };
-        auto cost_of = [&](int bc, int hc) {
-            const long long nch = static_cast<long long>(t.batch / bc) * (t.nhead_q / hc);
-            const long long g   = static_cast<long long>(xdim) * hc * bc;
-            return static_cast<double>(nch * ((g + cus - 1) / cus)) +
-                   kChunkTail * static_cast<double>(nch - 1);
-        };
-        int best_b = 0, best_h = 0;
-        double best_cost = -1.0;
-        int small_b = 0, small_h = 0;
-        size_t small_ws = 0;
+        split in_budget, busy, in_cap, smallest;
         for(int bc = 1; bc <= t.batch; ++bc)
         {
             if(t.batch % bc != 0)
@@ -962,32 +1018,32 @@ struct fmha_bwd_launcher
             {
                 if(t.nhead_q % hc != 0)
                     continue;
-                const size_t w = ws_of(bc, hc);
-                const double c = cost_of(bc, hc);
-                if(small_b == 0 || w < small_ws)
-                {
-                    small_b  = bc;
-                    small_h  = hc;
-                    small_ws = w;
-                }
-                if(budget_bytes > 0 && w > budget_bytes)
+                const long long units = static_cast<long long>(bc) * hc;
+                const long long nch   = static_cast<long long>(t.batch / bc) * (t.nhead_q / hc);
+                const long long g     = grid_of(units);
+                const split s{bc,
+                              hc,
+                              unit_ws * static_cast<size_t>(units),
+                              static_cast<double>(nch * ((g + cus - 1) / cus)) +
+                                  kChunkTail * static_cast<double>(nch - 1)};
+                if(smallest.b == 0 || s.ws < smallest.ws)
+                    smallest = s;
+                if(s.ws > cap)
                     continue;
-                if(best_cost < 0.0 || c < best_cost)
-                {
-                    best_b    = bc;
-                    best_h    = hc;
-                    best_cost = c;
-                }
+                if(in_cap.b == 0 || s.cost < in_cap.cost)
+                    in_cap = s;
+                if(g < kMinWorkgroupsPerCu * cus)
+                    continue;
+                if(busy.b == 0 || s.ws < busy.ws || (s.ws == busy.ws && s.cost < busy.cost))
+                    busy = s;
+                if(s.ws <= budget && (in_budget.b == 0 || s.cost < in_budget.cost))
+                    in_budget = s;
             }
         }
 
-        if(best_b == 0)
-        {
-            best_b = small_b;
-            best_h = small_h;
-        }
-        batch_chunk = (best_b == t.batch) ? 0 : best_b;
-        return (best_h == t.nhead_q) ? 0 : best_h;
+        const split& p = in_budget.b ? in_budget : busy.b ? busy : in_cap.b ? in_cap : smallest;
+        batch_chunk    = (p.b == t.batch) ? 0 : p.b;
+        return (p.h == t.nhead_q) ? 0 : p.h;
     }
 
     public:

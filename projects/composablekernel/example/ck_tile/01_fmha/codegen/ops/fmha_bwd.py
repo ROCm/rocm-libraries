@@ -5,7 +5,7 @@ import copy
 import fnmatch
 import itertools
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import List, Tuple, Dict, Literal, Any
 
@@ -35,13 +35,22 @@ from codegen.utils import check_duplicates_and_paddings, if_, indent, update_fil
 DET_TILE_SPLIT_ARCHS = ("gfx125",)
 
 
-def uses_tile_split(arch_name: str, mode: str, tile) -> bool:
+def uses_tile_split(
+    arch_name: str, mode: str, tile, bias: str, dbias: str, dropout: str
+) -> bool:
     """Whether a deterministic instance on this arch/mode/tile uses tile split: one dq_acc
     slot per kv tile, instead of the persistent kernel's one slot per worker.
 
     Tile split is a batch-mode layout, and the QrQtrDor (decode) tiles write dq directly, so
-    neither has a tile-split variant."""
+    neither has a tile-split variant. Bias, dbias and dropout stay persistent too: the
+    launcher cannot split those runs into chunks, so the per-kv-tile workspace would be
+    unbounded.
+
+    Every tile-split instance also gets a persistent twin, dispatched when the tile-split
+    workspace cannot fit the cap (see fmha_bwd_tile_split_fits)."""
     if arch_name not in DET_TILE_SPLIT_ARCHS:
+        return False
+    if bias != "no" or dbias != "f" or dropout != "no":
         return False
     return mode == "batch" and tile.max_seq_q == 0
 
@@ -933,6 +942,8 @@ class FmhaBwdApiTrait:
     mask_impl: str
     tr_load: str
     tile_split: bool = False  # deterministic only: one dq_acc slot per kv tile
+    # persistent instance standing in for a tile-split one whose workspace does not fit
+    tile_split_twin: bool = False
 
     @property
     def bm0(self) -> int:
@@ -987,13 +998,17 @@ class FmhaBwdApiTrait:
 
     @property
     def extra_cond(self) -> str:
+        cond = ""
         if self.tr_load == "t" and self.tile.max_seq_q == 0 and self.tile.F_bn0 == 128 and self.tile.F_bhdq == 128:
             if self.mode == "group":
-                return " && (t.max_seqlen_k <= 256)"
+                cond = " && (t.max_seqlen_k <= 256)"
             else:
-                return " && (t.seqlen_k <= 256)"
-        else:
-            return ""
+                cond = " && (t.seqlen_k <= 256)"
+        if self.tile_split:
+            cond += f" && fmha_bwd_tile_split_fits(t, {self.bn0})"
+        elif self.tile_split_twin:
+            cond += f" && !fmha_bwd_tile_split_fits(t, {self.bn0})"
+        return cond
 
     @property
     def dot_do_o_kernel(self) -> FmhaBwdOGradDotOKernel:
@@ -1252,16 +1267,11 @@ def get_bwd_blobs(
                 tr_load=tr_load,
                 tile_split=(
                     deterministic == "t"
-                    and uses_tile_split(factory.arch.name, mode, tile)
+                    and uses_tile_split(
+                        factory.arch.name, mode, tile, bias, dbias, dropout
+                    )
                 ),
             )
-
-            if not fnmatch.fnmatch(t.dot_do_o_kernel.name, filter_dot_do_o):
-                continue
-            if not fnmatch.fnmatch(t.convert_dq_kernel.name, filter_convert_dq):
-                continue
-            if not fnmatch.fnmatch(t.dq_dk_dv_kernel.name, filter_dq_dk_dv):
-                continue
 
             # Flash attention integration
             if receipt == 2:
@@ -1336,11 +1346,21 @@ def get_bwd_blobs(
                 if dtype == "fp32":
                     continue
 
-            gen_dot_do_o[t.dot_do_o_kernel] = True
-            gen_dq_dk_dv[t.dq_dk_dv_kernel] = True
-            if not t.convert_dq_kernel.disabled:
-                gen_convert_dq[t.convert_dq_kernel] = True
-            api_pool.register_dq_dk_dv_traits(t)
+            variants = [t]
+            if t.tile_split:
+                variants.append(replace(t, tile_split=False, tile_split_twin=True))
+            for v in variants:
+                if not fnmatch.fnmatch(v.dot_do_o_kernel.name, filter_dot_do_o):
+                    continue
+                if not fnmatch.fnmatch(v.convert_dq_kernel.name, filter_convert_dq):
+                    continue
+                if not fnmatch.fnmatch(v.dq_dk_dv_kernel.name, filter_dq_dk_dv):
+                    continue
+                gen_dot_do_o[v.dot_do_o_kernel] = True
+                gen_dq_dk_dv[v.dq_dk_dv_kernel] = True
+                if not v.convert_dq_kernel.disabled:
+                    gen_convert_dq[v.convert_dq_kernel] = True
+                api_pool.register_dq_dk_dv_traits(v)
 
     return (
         api_pool,
