@@ -32,6 +32,7 @@
 #include "hipcub/util_allocator.hpp"
 #include <cstdlib>
 #include <hipcub/util_allocator.hpp>
+#include <thread>
 
 #if __has_include(<valgrind/valgrind.h>)
     #include <valgrind/valgrind.h>
@@ -417,3 +418,50 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
         ASSERT_EQ(allocator.live_blocks.size(), 0u);
     }
 }
+
+#ifdef __HIP_PLATFORM_AMD__
+// hipStreamPerThread has the same handle value on every thread but names a different
+// stream on each, so a block freed by one thread while its work is still pending must
+// not be handed to another thread without checking the block's ready event.
+TEST(HipcubCachingDeviceAllocatorTests, PerThreadStreamReuseAcrossThreads)
+{
+    int device;
+    HIP_CHECK(hipGetDevice(&device));
+
+    hipcub::CachingDeviceAllocator allocator;
+    allocator.debug = true;
+
+    blocking_kernel blocker(hipStreamPerThread);
+
+    // Allocate on this thread's stream, keep the stream busy, then free the block
+    char* d_a;
+    HIP_CHECK(allocator.DeviceAllocate((void**)&d_a, 999, hipStreamPerThread));
+    blocker.block();
+    HIP_CHECK(allocator.DeviceFree(d_a));
+
+    // Another thread must not receive the block while this thread's stream is busy
+    char* d_b = nullptr;
+    std::thread other(
+        [&]
+        {
+            HIP_CHECK(hipSetDevice(device));
+            HIP_CHECK(allocator.DeviceAllocate((void**)&d_b, 999, hipStreamPerThread));
+        });
+    other.join();
+
+    // The same thread may still reuse the block immediately
+    char* d_c = nullptr;
+    HIP_CHECK(allocator.DeviceAllocate((void**)&d_c, 999, hipStreamPerThread));
+
+    // Release the stream before checking, so a failed check does not leave it spinning
+    blocker.unblock();
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+
+    ASSERT_NE(d_b, nullptr);
+    ASSERT_NE(d_b, d_a);
+    ASSERT_EQ(d_c, d_a);
+
+    HIP_CHECK(allocator.DeviceFree(d_b));
+    HIP_CHECK(allocator.DeviceFree(d_c));
+}
+#endif // __HIP_PLATFORM_AMD__
