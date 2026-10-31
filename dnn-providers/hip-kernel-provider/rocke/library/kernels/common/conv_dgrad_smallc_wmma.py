@@ -47,6 +47,7 @@ from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     _io_type,
     emit_direct_params,
+    one_padding_reason,
 )
 
 WMMA_K = 32
@@ -213,6 +214,9 @@ def dgrad_smallc_reason(spec: DgradSmallcWmmaSpec, arch: str = "gfx1250") -> str
         return "patch embedding: use dgrad_patch_wmma"
     if not 0 <= p.PAD <= min(p.KH, p.KW) - 1:
         return f"PAD {p.PAD} outside 0..K-1"
+    why = one_padding_reason(p)
+    if why is not None:
+        return why
     if p.kpg % 8:
         return f"K {p.kpg} must be a multiple of 8 (16-byte dY rows)"
     if spec.ck % WMMA_K or spec.ck <= 0:
