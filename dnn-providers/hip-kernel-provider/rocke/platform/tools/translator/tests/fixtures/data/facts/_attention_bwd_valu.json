@@ -1,0 +1,211 @@
+{
+ "attrs": {},
+ "built": 118,
+ "configs": 168,
+ "driver": {},
+ "emit": "attention_bwd_valu_emit",
+ "funcs": {
+  "batched_stats_rows": {
+   "args": [
+    "b",
+    "lse2",
+    "dsum",
+    "h",
+    "q0",
+    "rows",
+    "width",
+    "n_heads"
+   ],
+   "calls": 60,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "dsum": [
+     "WorkspaceAddr"
+    ],
+    "h": [
+     "Value"
+    ],
+    "lse2": [
+     "WorkspaceAddr"
+    ],
+    "n_heads": [
+     "Value",
+     "int"
+    ],
+    "q0": [
+     "Value",
+     "int"
+    ],
+    "rows": [
+     "list[Value]"
+    ],
+    "width": [
+     "int"
+    ]
+   },
+   "return": [
+    "None",
+    "list[tuple[Value,Value]]"
+   ],
+   "src": "68b217860dfa"
+  },
+  "cast_c_frag": {
+   "args": [
+    "b",
+    "frag",
+    "elem",
+    "bf16_cast"
+   ],
+   "calls": 36,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "bf16_cast": [
+     "str"
+    ],
+    "elem": [
+     "Type"
+    ],
+    "frag": [
+     "Value"
+    ]
+   },
+   "return": [
+    "None",
+    "Value"
+   ],
+   "src": "39ecc4e9c7ea"
+  },
+  "check_stats_vec_layout": {
+   "args": [
+    "op",
+    "width"
+   ],
+   "calls": 60,
+   "params": {
+    "op": [
+     "MmaOp"
+    ],
+    "width": [
+     "int"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "dd6c5c72463c"
+  },
+  "check_stats_vec_layout.<locals>.<genexpr>#1": {
+   "args": [
+    ".0"
+   ],
+   "calls": 36480,
+   "params": {
+    ".0": [
+     "range_iterator"
+    ]
+   },
+   "return": [
+    "None",
+    "bool"
+   ],
+   "src": "2a965dd83dc9"
+  },
+  "rne_noguard_bf16": {
+   "args": [
+    "b",
+    "frag"
+   ],
+   "calls": 19,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "frag": [
+     "Value"
+    ]
+   },
+   "return": [
+    "None",
+    "Value"
+   ],
+   "src": "87fe7af1ccf6"
+  },
+  "rne_noguard_bf16.<locals>.splat": {
+   "args": [
+    "v"
+   ],
+   "calls": 54,
+   "params": {
+    "v": [
+     "int"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "e841b12829f8"
+  },
+  "softmax_p": {
+   "args": [
+    "b",
+    "sv",
+    "scale_log2",
+    "lse2",
+    "neg_lse2",
+    "bwd_exp2"
+   ],
+   "calls": 28,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "bwd_exp2": [
+     "str"
+    ],
+    "lse2": [
+     "Value"
+    ],
+    "neg_lse2": [
+     "None",
+     "Value"
+    ],
+    "scale_log2": [
+     "Value"
+    ],
+    "sv": [
+     "Value"
+    ]
+   },
+   "return": [
+    "None",
+    "Value"
+   ],
+   "src": "616e540bc8e3"
+  },
+  "stats_rows_neg": {
+   "args": [
+    "b",
+    "stats"
+   ],
+   "calls": 54,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "stats": [
+     "dict[int:tuple[Value,Value]]"
+    ]
+   },
+   "return": [
+    "dict[int:Value]"
+   ],
+   "src": "544bb7987df5"
+  }
+ },
+ "rejected": 50,
+ "seconds": 0.26
+}
