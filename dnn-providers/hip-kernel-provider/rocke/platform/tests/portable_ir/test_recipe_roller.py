@@ -49,6 +49,7 @@ import pytest
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 from test_portable_ir import _env, _online_lib, _replay_cli, _run  # noqa: E402
+from rocke.tests.subprocess_launcher import rocke_python_command  # noqa: E402
 
 _DRIVER = "rocke.portable_ir.drivers.roll_hsaco_parity"
 _PLATFORM = _HERE.parents[1]
@@ -76,7 +77,7 @@ def _have_comgr():
 def _run_driver(*extra):
     lib = _source_matched_lib()
     return subprocess.run(
-        [sys.executable, "-u", "-m", _DRIVER, *extra],
+        rocke_python_command("-m", _DRIVER, *extra, interpreter_flags=("-u",)),
         cwd=str(_PLATFORM),
         env={**_env(), "ROCKE_ONLINE_LIB": lib, "ROCKE_CPP_QUIET_FALLBACK": "1"},
         capture_output=True,
@@ -243,7 +244,7 @@ def test_roll_nd_cross_product():
     unlike the lanes above it cannot skip -- a regression here always shows up.
     """
     r = subprocess.run(
-        [sys.executable, "-u", "-m", _ND_DRIVER, "--ll"],
+        rocke_python_command("-m", _ND_DRIVER, "--ll", interpreter_flags=("-u",)),
         cwd=str(_PLATFORM),
         env=_env(),
         capture_output=True,

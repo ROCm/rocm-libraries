@@ -830,6 +830,8 @@ def test_a_borrowing_lane_refuses_at_its_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A borrowed column keeps Python and C++ diagnostics on its source lane."""
+    if not arch_domain.COLUMN_ALIASES:
+        pytest.skip("every qualified lane has its own committed column")
     monkeypatch.setenv(arch_domain.MODE_ENV, "error")
     tested: list[str] = []
     for lane, source in arch_domain.COLUMN_ALIASES.items():

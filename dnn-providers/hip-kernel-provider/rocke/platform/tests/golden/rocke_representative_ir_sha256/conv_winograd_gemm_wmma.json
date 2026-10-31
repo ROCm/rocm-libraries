@@ -1,7 +1,5 @@
 {
-  "aliases": {
-    "llvm24": "llvm23"
-  },
+  "aliases": {},
   "flavors": {
     "llvm20": {
       "cases": {
@@ -48,6 +46,35 @@
       }
     },
     "llvm23": {
+      "cases": {
+        "conv_winograd_gemm_wmma/gfx1250/bf16_sk_direct_taps2": {
+          "arch": "gfx1250",
+          "bytes": 178113,
+          "family": "conv_winograd_gemm_wmma",
+          "kernel_name": "wino_gemm_wmma_wm2_wn4_fm8_fn4_tk64_st2_ptdm_direct_sk_pf_x8_siterative-ilp_taps2_bf16",
+          "sha256": "c614b6cfcaac5c0d270b9844aa092562f5661e4ca1d05c9369753cd8331d6fc5",
+          "status": "ok"
+        },
+        "conv_winograd_gemm_wmma/gfx1250/fp16_default": {
+          "arch": "gfx1250",
+          "bytes": 211622,
+          "family": "conv_winograd_gemm_wmma",
+          "kernel_name": "wino_gemm_wmma_wm2_wn4_fm8_fn4_tk128_st2_ptdm_tdm_pf_x8_siterative-ilp",
+          "sha256": "77b6c49591490b764e4da2742d6a5b9f02d52ddebb4cede653f6882c276658f7",
+          "status": "ok"
+        },
+        "conv_winograd_gemm_wmma/gfx1250/reduce_fp16": {
+          "arch": "gfx1250",
+          "bytes": 4528,
+          "family": "conv_winograd_gemm_wmma",
+          "kernel_name": "wino_gemm_reduce",
+          "sha256": "b6668987179ab1aec7ce393981ad8d3a6a8910714884641e024f5b6d8b147524",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
       "cases": {
         "conv_winograd_gemm_wmma/gfx1250/bf16_sk_direct_taps2": {
           "arch": "gfx1250",

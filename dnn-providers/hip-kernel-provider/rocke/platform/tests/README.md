@@ -25,7 +25,15 @@ ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23
 
 `conftest.py` puts `rocke/platform/python` on `sys.path` (so `import rocke` works);
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
-across layers without `__init__.py`.
+across layers without `__init__.py`. That `sys.path` change belongs only to the
+pytest process. Tests that launch a Python child which imports `rocke` use
+`rocke.tests.subprocess_launcher.rocke_python_command()` together with
+`rocke_subprocess_env()`. The launcher puts the package under test ahead of the
+child's script and working directories, while the environment makes the same
+package available to grandchildren in both source and installed layouts. A
+Python grandchild that also requires package identity reuses the launcher; bare
+`PYTHONPATH` does not outrank its working directory. Never let an editable
+install or ambient `PYTHONPATH` choose the child's package accidentally.
 
 On Linux, `test_compiler_detection_native.py` compiles its wrapper and fake COMGR
 libraries from stdin and links the production `librocke_core.a`. Installed tests
@@ -166,11 +174,16 @@ expected crash or timeout whose normalized evidence still matches is not rerun
 serially; changed evidence, changed verdicts, unclassified results, and otherwise
 transient-looking results are.
 
-The migration preserves the former pytest item's result mapping:
+The artifact records the exact compiler build that measured it. LLVM development
+builds with the same major can disagree about intrinsic availability and ABI, so
+exact reproduction is applicable only when the host identity matches that
+provenance. A mismatch is reported with both identities and is an explicit
+unvalidated result, not a pass.
 
 | Condition | CTest result |
 |---|---|
-| Committed measurements reproduce cell-for-cell (compiler-build provenance may differ) | Pass |
+| Recorded compiler identity matches and measurements reproduce cell-for-cell | Pass |
+| Host compiler identity differs from the recorded identity | Skip |
 | No clang | Skip |
 | Clang flavor differs from rocKE's resolved flavor | Skip |
 | No committed column for the host flavor | Skip |

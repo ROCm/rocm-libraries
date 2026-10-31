@@ -1,7 +1,5 @@
 {
-  "aliases": {
-    "llvm24": "llvm23"
-  },
+  "aliases": {},
   "flavors": {
     "llvm20": {
       "cases": {
@@ -62,6 +60,35 @@
       "expected_failures": {}
     },
     "llvm23": {
+      "cases": {
+        "conv_wgrad_reduce/gfx942/wgM32_wgN72_fp16": {
+          "arch": "gfx942",
+          "bytes": 3832,
+          "family": "conv_wgrad_reduce",
+          "kernel_name": "irhash_wgrad_reduce_942_m32n72_fp16_N1H1W1C72_K32Y1X1_t4x64_wsr8_fp16",
+          "sha256": "40fed40e4eef3adf2ff3e90de98ee5608ec971d8a13bdf8a454cf77c9d04fb72",
+          "status": "ok"
+        },
+        "conv_wgrad_reduce/gfx950/wgM32_wgN72_fp16": {
+          "arch": "gfx950",
+          "bytes": 3832,
+          "family": "conv_wgrad_reduce",
+          "kernel_name": "irhash_wgrad_reduce_950_m32n72_fp16_N1H1W1C72_K32Y1X1_t4x64_wsr8_fp16",
+          "sha256": "f2d7f324617594b484b640666eb6aab3d2bf32b5080c9ae95dabd912733de29c",
+          "status": "ok"
+        },
+        "conv_wgrad_reduce/gfx950/wgM64_wgN576_bf16": {
+          "arch": "gfx950",
+          "bytes": 3840,
+          "family": "conv_wgrad_reduce",
+          "kernel_name": "irhash_wgrad_reduce_950_m64n576_bf16_N1H1W1C576_K64Y1X1_t4x64_wsr8_bf16",
+          "sha256": "d08e4c9667cb1da58707d58c89102309db875dd2708da18ab4b8e2ee2e36fdae",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
       "cases": {
         "conv_wgrad_reduce/gfx942/wgM32_wgN72_fp16": {
           "arch": "gfx942",

@@ -34,9 +34,11 @@ that gfx942 does not have. gfx950 keeps its own file, byte-identical.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from typing import Optional, Tuple
+
+from kernels.common._lse_store import lse_row_has_mass, lse_store
 
 from rocke.core.ir import (
     BF16,
@@ -478,8 +480,16 @@ class UnifiedAttention2DTiledSpec:
     # only when the kernel is VALU/throughput-bound (the x8 conflict-free-V
     # path); no-op-guarded to sliding_window==0.
     use_causal_mask_phase_split: bool = False
+    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
+    #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
+    #   Off by default; off emits no new IR, so shipped kernels are unchanged.
+    emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
         # gfx942 (CDNA3) variant: the narrow ``16x16x16`` default path only.
         # The wide-K (32x32x16 migration) and transpose-read / native-fp8
         # experimental knobs all depend on gfx950-only ISA (wide-K MFMA atoms,
@@ -1050,6 +1060,7 @@ class UnifiedAttention2DTiledSpec:
             "iglp1" if self.use_iglp_opt else "",
             "cmps" if self.use_causal_mask_phase_split else "",
             "k1buf" if self.use_k_single_buffer else "",
+            "lse" if self.emit_lse else "",
         )
 
 
@@ -1569,6 +1580,14 @@ def build_unified_attention_2d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    # Appended LAST and only when requested, so the LSE-off ABI is unchanged.
+    lse = (
+        b.param(
+            "lse_ptr", PtrType(F32, "global"), noalias=True, writeonly=True, align=4
+        )
+        if spec.emit_lse
+        else None
+    )
 
     if spec.use_q_major_grid:
         q_block_global_idx = b.block_id_x()
@@ -4564,6 +4583,7 @@ def build_unified_attention_2d_tiled(
                 # full ``l_new = alpha * l_old + l_sum`` updates are applied
                 # by that shared downstream block, not here.
                 m_new = [st_m_new for _ in range(SOFTMAX_STATE_SLOTS)]
+                m_carry = [st_m_raw for _ in range(SOFTMAX_STATE_SLOTS)]
                 l_local = [st_l_sum for _ in range(SOFTMAX_STATE_SLOTS)]
                 # In the transposed orientation we already have masked /
                 # scaled / softcapped scores in ``st_scores`` and softmax
@@ -4732,6 +4752,7 @@ def build_unified_attention_2d_tiled(
                     masked[(n, reg)] = score
 
             m_new = []
+            m_carry = []
             s_local = {}
             for reg in range(REGS_PER_LANE):
                 local_max = neg_inf
@@ -4743,6 +4764,7 @@ def build_unified_attention_2d_tiled(
                 full_max_raw = b.fmax(m_vals[reg], tile_max)
                 ok = b.fcmp("ogt", full_max_raw, neg_inf)
                 m_new.append(b.select(ok, full_max_raw, zero_f))
+                m_carry.append(full_max_raw)
 
             l_local = []
             for reg in range(REGS_PER_LANE):
@@ -4821,6 +4843,7 @@ def build_unified_attention_2d_tiled(
             # repeated for every N-tile. Local lane-max across N-tiles, then 4-stage
             # XOR butterfly across the 16 lanes in the row-group.
             m_new = []
+            m_carry = []
             s_local = {}  # (reg, n) -> the lane's masked score (still owned per-lane)
             for reg in range(REGS_PER_LANE):
                 local_max = neg_inf
@@ -4833,6 +4856,7 @@ def build_unified_attention_2d_tiled(
                 full_max_raw = b.fmax(m_vals[reg], tile_max)
                 ok = b.fcmp("ogt", full_max_raw, neg_inf)
                 m_new.append(b.select(ok, full_max_raw, zero_f))
+                m_carry.append(full_max_raw)
 
             # ---- compute P = exp2(S - m_new) and l_local = sum(P) per row ----
             # P_lds[row, col] = exp2(S[row, col] - m_new[row]). Each warp publishes
@@ -5431,9 +5455,14 @@ def build_unified_attention_2d_tiled(
             for atom in range(M_ATOMS_PER_WARP):
                 new_acc[n * M_ATOMS_PER_WARP + atom] = acc_per_atom[atom]
 
+        # Carry the unclamped running max: it stays -inf until the row has seen a
+        # key. ``m_new`` (-inf replaced by 0) is only the exponent reference for
+        # P and alpha. Carrying the clamped 0 instead pins m at 0 when a row's
+        # first tile is fully masked (sliding window), and exp2(s - 0) then
+        # underflows P for very negative scores so the row's O collapses.
         yields = []
         for r in range(SOFTMAX_STATE_SLOTS):
-            yields.append(m_new[r])
+            yields.append(m_carry[r])
             yields.append(new_l_vals[r])
         for n in range(ACC_N_TILES):
             for atom in range(ACC_M_ATOMS):
@@ -5494,6 +5523,12 @@ def build_unified_attention_2d_tiled(
 
     final = kvloop.results
     l_final = [final[2 * r + 1] for r in range(SOFTMAX_STATE_SLOTS)]
+    # Loop carry is (m0, l0, m1, l1, ..., acc...); m is in log2 units
+    # (qk_scale = scale * log2(e)). Read only for LSE so the LSE-off IR is
+    # unchanged.
+    m_final = (
+        [final[2 * r] for r in range(SOFTMAX_STATE_SLOTS)] if spec.emit_lse else None
+    )
     ml_count_final = 2 * SOFTMAX_STATE_SLOTS
     # acc_final indexed by (n * ACC_M_ATOMS + atom)
     acc_final = [
@@ -5505,9 +5540,34 @@ def build_unified_attention_2d_tiled(
     def _acc_final_get(n: int, atom: int) -> Value:
         return acc_final[n * ACC_M_ATOMS + atom]
 
-    # Per-row reciprocal of L (computed once, reused across stripes).
+    # Per-row reciprocal of L (computed once, reused across stripes). Only an
+    # exact-zero L marks a keyless row (stored as 0); a NaN L stays NaN in O.
     rcp_l = [b.rcp(l_final[r]) for r in range(SOFTMAX_STATE_SLOTS)]
-    l_nonzero = [b.fcmp("ogt", l_final[r], zero_f) for r in range(SOFTMAX_STATE_SLOTS)]
+    l_zero = [b.fcmp("oeq", l_final[r], zero_f) for r in range(SOFTMAX_STATE_SLOTS)]
+
+    def _store_row_lse(row: Value, slot: int, writer: Value) -> None:
+        """Write LSE for CTA row ``row`` from softmax state ``slot``.
+
+        Same token/head/validity mapping as the O stores below. ``writer``
+        picks one lane among the lanes that hold a replicated copy of the
+        row's (m, l). ``!(l == 0)`` is the row-has-mass test, the inverse of
+        the O guard: all-masked rows end with l == 0, a zero-trip loop with
+        m == -inf (lse_store writes -inf for both), and a NaN l gives NaN LSE.
+        """
+        pos = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
+        qh = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
+        ok = b.land(b.cmp_lt(pos, cur_batch_q_len), b.cmp_lt(qh, b.const_i32(NUM_QH)))
+        if VALID_ROWS < BLOCK_M:
+            ok = b.land(ok, b.cmp_lt(row, b.const_i32(VALID_ROWS)))
+        with b.scf_if(b.land(writer, ok)):
+            lse_store(
+                b,
+                lse,
+                b.add(b.mul(b.add(cu_q_start, pos), b.const_i32(NUM_QH)), qh),
+                m_final[slot],
+                l_final[slot],
+                row_has_mass=lse_row_has_mass(b, l_final[slot]),
+            )
 
     if USE_MFMA_32X32:
         if TRANSPOSED_QK_32X32:
@@ -5542,7 +5602,26 @@ def build_unified_attention_2d_tiled(
                 dim=b.const_i32(0),
             )
             inv_l_t = b.rcp(l_final[0])
-            l_nonzero_t = b.fcmp("ogt", l_final[0], zero_f)
+            l_zero_t = b.fcmp("oeq", l_final[0], zero_f)
+            if spec.emit_lse:
+                # One query row per lane (lane % 32); lanes l and l^32 hold the
+                # same state (xor-32 reductions). The lower half writes. Slot 0:
+                # scalar state has 1 slot; without it all 16 slots are
+                # identical and O also reads slot 0.
+                # Same operand order as gfx950: the C fastkv_regp wrapper builds
+                # gfx950 kernels through this arch's C epilogue.
+                with b.scf_if(b.land(op_mask_t, b.cmp_eq(lane_half32, b.const_i32(0)))):
+                    lse_store(
+                        b,
+                        lse,
+                        b.add(
+                            b.mul(b.add(cu_q_start, op_pos_t), b.const_i32(NUM_QH)),
+                            op_qh_t,
+                        ),
+                        m_final[0],
+                        l_final[0],
+                        row_has_mass=lse_row_has_mass(b, l_final[0]),
+                    )
             for n in range(ACC_N_TILES):
                 acc32 = _acc_final_get(n, 0)
                 for reg in range(REGS_PER_LANE):
@@ -5552,7 +5631,7 @@ def build_unified_attention_2d_tiled(
                     v = b.vec_extract(acc32, reg)
                     normalized = b.fmul(v, inv_l_t)
                     final_h = b.cast_f32_to(
-                        b.select(l_nonzero_t, normalized, zero_f), dtype
+                        b.select(l_zero_t, zero_f, normalized), dtype
                     )
                     with b.scf_if(op_mask_t):
                         b.global_store(
@@ -5594,6 +5673,17 @@ def build_unified_attention_2d_tiled(
             head=op_qh32_base,
             dim=b.const_i32(0),
         )
+        if spec.emit_lse:
+            # Slot r is C-row wave_row_base + _mfma_32x32_c_row(lane, r); the
+            # 32 lanes of a half share it (_warp_xor_reduce_sum_32lane). Lanes
+            # 0 and 32 write; together they cover the warp's 32 rows. These
+            # stores come before the first Acc_lds b.sync(), so the barrier
+            # pattern is unchanged.
+            writer32 = b.cmp_eq(lane_col32, b.const_i32(0))
+            for r in range(SOFTMAX_STATE_SLOTS):
+                _store_row_lse(
+                    b.add(wave_row_base, _mfma_32x32_c_row(b, lane, r)), r, writer32
+                )
         for n in range(ACC_N_TILES):
             acc32 = _acc_final_get(n, 0)
             for reg in range(REGS_PER_LANE):
@@ -5602,7 +5692,7 @@ def build_unified_attention_2d_tiled(
                 v = b.vec_extract(acc32, reg)
                 normalized = b.fmul(v, rcp_l[reg])
                 final_h = b.cast_f32_to(
-                    b.select(l_nonzero[reg], normalized, zero_f), dtype
+                    b.select(l_zero[reg], zero_f, normalized), dtype
                 )
                 b.smem_store_vN(Acc_lds, [row, col_in_stripe], final_h, 1)
             b.sync()
@@ -5712,7 +5802,7 @@ def build_unified_attention_2d_tiled(
                 v = b.vec_extract(_acc_final_get(n, atom), in_atom)
                 normalized = b.fmul(v, rcp_l[reg])
                 final_h = b.cast_f32_to(
-                    b.select(l_nonzero[reg], normalized, zero_f), dtype
+                    b.select(l_zero[reg], zero_f, normalized), dtype
                 )
                 b.smem_store_vN(Acc_lds, [row, col_in_stripe], final_h, 1)
         b.sync()
@@ -5731,6 +5821,17 @@ def build_unified_attention_2d_tiled(
         if stripe + 1 < OUT_STRIPES:
             b.sync()
 
+    if spec.emit_lse:
+        # After the O stripes, not before: emitted ahead of them, the LSE store
+        # let LLVM fuse the O multiply and FP16 convert into v_fma_mixlo_f16
+        # (one rounding; LSE-off rounds twice), moving FP16 O by 1 ulp versus
+        # LSE-off on MI300X/MI355X (ROCm 10). Here the O ISA matches LSE-off.
+        # Slot r is row wave_row_base + _in_warp_row(r), shared by the 16
+        # lane_col lanes (_warp_xor_reduce_sum). Lanes 0/16/32/48
+        # (lane_col == 0) write; each owns REGS_PER_LANE rows.
+        writer16 = b.cmp_eq(lane_col, b.const_i32(0))
+        for r in range(SOFTMAX_STATE_SLOTS):
+            _store_row_lse(b.add(wave_row_base, _in_warp_row(r)), r, writer16)
     return b.kernel
 
 
@@ -6061,8 +6162,13 @@ def build_gfx942_4warp_gqa(
 ) -> KernelDef:
     """Emit the gfx942 4-warp GQA D256 paged-attention ``KernelDef``."""
     from ..common.attention_arch import require_tiled_attention_arch
+    from ..common.attention_unified import _GFX942_4WARP_LSE_REFUSAL
 
     require_tiled_attention_arch(arch)
+    if spec.emit_lse:
+        # This body has no LSE store; refuse rather than build a kernel that
+        # carries the "lse" name but takes no lse_ptr and writes nothing.
+        raise NotImplementedError(_GFX942_4WARP_LSE_REFUSAL)
     if spec.use_i64_kv_addr:
         # K/V are i32 element offsets. Refuse rather than emit an i32 kernel
         # under a spec that claims i64; dispatch keeps the flag off through
