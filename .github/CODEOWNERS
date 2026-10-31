@@ -255,6 +255,7 @@
 /projects/rocrand/**/.readthedocs.yaml              @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
 /projects/rocrand/docs/                             @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
 /projects/rocrand/library/include/                  @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/rocrand/fortran/                          @ROCm/rocm-fortran-maintainers @ROCm/prims-rands-reviewers
 
 /projects/rocsolver/**/*.md                         @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
 /projects/rocsolver/**/*.rst                        @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
