@@ -822,5 +822,6 @@ def TensileSGEMM5760():
 
 
 # installed "tensile" command
-def main():
-    tensilelite(sys.argv[1:])
+def main(argv=None):
+    tensilelite(sys.argv[1:] if argv is None else argv)
+    return 0

@@ -17,8 +17,9 @@ With one venv shared across worktrees, whichever worktree installed last owns it
 The others silently import that worktree's binary. Nothing errors: for a code
 generator the result is wrong generated output, not a crash.
 
-It is worse with rebuild-on-import (`editable.rebuild`): importing from worktree
-B runs `cmake --build` in worktree A's tree.
+It is worse for a package that opts into rebuild-on-import
+(`editable.rebuild = true`, off by default in scikit-build-core): importing from
+worktree B runs `cmake --build` in worktree A's tree.
 
 ## Detect before acting — two machine shapes
 
@@ -95,7 +96,7 @@ unactivated (`venv/bin/python -m invoke`).
   on `sys.path` and silently serves a stale binary to any worktree without its
   own install. Keep the base venv for shared deps only.
 - **`ROCM_PATH` is needed at import time**, not just build time, when
-  `editable.rebuild` is on — `import` shells out to CMake. The bootstrap covers
+  a package sets `editable.rebuild = true` — `import` then shells out to CMake. The bootstrap covers
   anything using the venv's interpreter; external CI runners need it set too.
 - Ensure `.venv/` is ignored in the worktree.
 
