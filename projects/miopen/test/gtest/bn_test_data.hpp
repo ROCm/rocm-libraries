@@ -83,6 +83,9 @@ template <typename T>
 std::vector<T> Network2DLarge();
 
 template <typename T>
+std::vector<T> Network2DNhwcOddVectorStash();
+
+template <typename T>
 std::vector<T> Network3DBN();
 
 template <typename T>
@@ -148,6 +151,23 @@ inline std::vector<BN2DTestCase> Network2DLarge()
         // Verified end-to-end when run under tuning (MIOPEN_FIND_ENFORCE=SEARCH).
         {8, 24, 56, 56, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
         {8, 24, 56, 56, miopen::batchnorm::Direction::Backward, 0, 1}
+        };
+    // clang-format on
+}
+
+template <>
+inline std::vector<BN2DTestCase> Network2DNhwcOddVectorStash()
+{
+    // NHWC fp16/bf16 spatial with fp32 statistics. C/vectorsize (12/4 = 3) is odd and N is too
+    // small to hold the stash in the N dimension, so the stash must not use the 'odd'
+    // consecutive layout. Small shapes: run in the Standard tier only (see bn_fwd_train.cpp,
+    // bn_bwd.cpp).
+    // clang-format off
+    return {
+        {2, 12, 16, 16, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
+        {2, 12, 16, 16, miopen::batchnorm::Direction::Backward, 1, 0},
+        {2, 12, 64, 64, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
+        {2, 12, 64, 64, miopen::batchnorm::Direction::Backward, 1, 0}
         };
     // clang-format on
 }

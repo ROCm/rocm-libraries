@@ -130,6 +130,16 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN2DTestCase>());
 
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    GPU_BNOCLFWDTrainLarge2D_FP16,
+    testing::Combine(testing::ValuesIn(Network2DNhwcOddVectorStash<BN2DTestCase>()),
+                     testing::ValuesIn({miopenTensorNHWC}),
+                     testing::ValuesIn({miopenBNSpatial}),
+                     testing::ValuesIn({testBNAPIV2}),
+                     testing::ValuesIn({miopenActivationPASTHRU})),
+    TestNameGenerator<BN2DTestCase>());
+
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_BNOCLFWDTrainLarge2D_FP16,
                          testing::Combine(testing::ValuesIn(Network2DLarge<BN2DTestCase>()),
@@ -160,6 +170,16 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::ValuesIn({testBNAPIV2}),
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN2DTestCase>());
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    GPU_BNOCLFWDTrainLarge2D_BFP16,
+    testing::Combine(testing::ValuesIn(Network2DNhwcOddVectorStash<BN2DTestCase>()),
+                     testing::ValuesIn({miopenTensorNHWC}),
+                     testing::ValuesIn({miopenBNSpatial}),
+                     testing::ValuesIn({testBNAPIV2}),
+                     testing::ValuesIn({miopenActivationPASTHRU})),
+    TestNameGenerator<BN2DTestCase>());
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_BNOCLFWDTrainLarge2D_BFP16,
