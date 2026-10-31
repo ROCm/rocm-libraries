@@ -103,6 +103,104 @@ class TestFwd3dXHalo(unittest.TestCase):
                         self._check(prob, tile=tile, **base, **knobs)
 
 
+@pytest.mark.gpu
+@unittest.skipIf(_SKIP, _SKIP)
+class TestFwd3dQuadXposeEpilogue(unittest.TestCase):
+    """epi_quad_xpose (register-only store of the 16x16 atom) against the fp32
+    reference: the x-halo loop and the plain uniform_k_decode loop (B channel
+    permutation of modes 2/3 at both B loaders), partial M tiles, K not a
+    multiple of the tile (the last N tile's 8-channel runs straddle K), and
+    grouped."""
+
+    def _check(self, problem, **kw):
+        err = _run(problem, **kw)
+        self.assertLess(err, _TOL, f"{kw}: rel err {err:.3e}")
+
+    def test_quad_xpose(self):
+        base = dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True)
+        nopad = dict(pH=0, pW=0, pD=0)
+        probs = [
+            _problem(C=64, Hi=10, Wi=10, Di=6, **nopad),
+            _problem(C=64, K=72, Hi=10, Wi=10, Di=6, **nopad),
+            _problem(C=128, K=40, Hi=7, Wi=9, Di=5),
+            _problem(C=256, K=128, groups=2, Hi=10, Wi=10, Di=6, **nopad),
+        ]
+        tile = (64, 64, 32, 2, 2, 16)
+        for mode in (1, 2, 3, 4):
+            for knobs in (
+                dict(uk_xhalo=20, lds_kpack_read=True, xh_wait_smem=True, defer_mfma=2,
+                     vmem_interleave=2, lds_xor_rowkey=True),
+                dict(lds_kpack_read=True),
+            ):
+                for i, prob in enumerate(probs):
+                    with self.subTest(mode=mode, prob=i, **knobs):
+                        self._check(prob, tile=tile, epi_quad_xpose=mode, **base, **knobs)
+
+
+@pytest.mark.gpu
+@unittest.skipIf(_SKIP, _SKIP)
+class TestFwd3dXStrideM(unittest.TestCase):
+    """xh_stride_m (M-strided wave rows of the x-halo loop, own A LDS layout,
+    strided eqx store map) against the fp32 reference: x-halo workgroups,
+    workgroups that fall back (range exceeded, Wo % 4 != 0, padding) with
+    the default store map, mixed in one launch, grouped, K not a multiple of
+    the tile, and the 4-fragment (64-row) waves of the production tile."""
+
+    def test_xh_stride_m(self):
+        base = dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True, xh_stride_m=True)
+        nopad = dict(pH=0, pW=0, pD=0)
+        probs = [
+            _problem(C=64, Hi=10, Wi=10, Di=6, **nopad),           # Wo 8
+            _problem(C=64, K=72, Hi=14, Wi=14, Di=5, **nopad),     # Wo 12, tiles straddle planes
+            _problem(C=64, Hi=8, Wi=11, Di=5, **nopad),            # Wo 9: fallback
+            _problem(C=128, K=40, Hi=7, Wi=9, Di=5),               # padded: fallback
+            _problem(C=256, K=128, groups=2, Hi=10, Wi=10, Di=6, **nopad),
+            _problem(N=2, C=64, Hi=7, Wi=10, Di=5, **nopad),       # Wo 8, planes/images straddled
+        ]
+        xk = dict(lds_kpack_read=True, xh_wait_smem=True, defer_mfma=2,
+                  vmem_interleave=2, lds_xor_rowkey=True)
+        for tile, xh in (((64, 64, 32, 2, 2, 16), 20), ((256, 64, 32, 4, 1, 16), 8)):
+            for knobs in (
+                dict(uk_xhalo=xh, epi_quad_xpose=4, **xk),
+                dict(uk_xhalo=xh, epi_quad_xpose=4, lds_ahead=True, uk_tap_fast=True, **xk),
+                dict(uk_xhalo=xh, epi_quad_xpose=3, lds_kpack_read=True),
+                dict(uk_xhalo=xh, epi_quad_xpose=4),
+            ):
+                for i, prob in enumerate(probs):
+                    with self.subTest(tile=tile, prob=i, **knobs):
+                        err = _run(prob, tile=tile, **base, **knobs)
+                        self.assertLess(err, _TOL, f"xsm {knobs}: rel err {err:.3e}")
+
+
+@pytest.mark.gpu
+@unittest.skipIf(_SKIP, _SKIP)
+class TestFwd3dMBand(unittest.TestCase):
+    """m_band (output-plane band tile order after xcd_remap) against the fp32
+    reference: bands applied (Ho*Wo = 256 -> 4 M tiles per plane, mb 2 and 4),
+    and the launch-order fallback (mb does not divide the plane's tiles,
+    tile_m does not divide Ho*Wo)."""
+
+    def test_m_band(self):
+        base = dict(uniform_k_decode=True, reg_prefetch=1, lds_xor=True, xcd_remap=6)
+        nopad = dict(pH=0, pW=0, pD=0)
+        probs = [
+            _problem(C=64, Hi=18, Wi=18, Di=7, **nopad),
+            _problem(C=64, K=72, Hi=10, Wi=10, Di=6, **nopad),
+            _problem(C=128, K=40, Hi=7, Wi=9, Di=5),
+        ]
+        tile = (64, 64, 32, 2, 2, 16)
+        for mb in (2, 4):
+            for knobs in (
+                dict(uk_xhalo=20, lds_kpack_read=True, xh_wait_smem=True, defer_mfma=2,
+                     vmem_interleave=2, lds_xor_rowkey=True, epi_quad_xpose=4),
+                dict(lds_kpack_read=True),
+            ):
+                for i, prob in enumerate(probs):
+                    with self.subTest(mb=mb, prob=i, **knobs):
+                        err = _run(prob, tile=tile, m_band=mb, **base, **knobs)
+                        self.assertLess(err, _TOL, f"mb={mb} {knobs}: rel err {err:.3e}")
+
+
 class TestFwdLdsKnobSpec(unittest.TestCase):
     """CPU: rejections, name tags and the opt-in AOT env axes."""
 
@@ -131,6 +229,22 @@ class TestFwdLdsKnobSpec(unittest.TestCase):
             dict(rpf_fetch_late=True, vmem_interleave=2),
             dict(lds_kpack_read=True, a_direct=True),
             dict(lds_kpack_read=True, tile_k=16, lds_xor=False),  # one kk step
+        ):
+            with self.subTest(**kw):
+                self.assertNotEqual(_fwd_kloop_conflict(self._spec(**kw)), "")
+
+    def test_quad_xpose_rules(self):
+        from kernels.common.conv_implicit_gemm import _fwd_kloop_conflict
+
+        self.assertEqual(_fwd_kloop_conflict(self._spec(epilogue="cshuffle", epi_quad_xpose=3)), "")
+        self.assertIn("eqx3", self._spec(epilogue="cshuffle", epi_quad_xpose=3).kernel_name())
+        for kw in (
+            dict(epilogue="default", epi_quad_xpose=1),  # replaces the cshuffle store
+            dict(epilogue="cshuffle", epi_quad_xpose=1, split_k=2),
+            dict(epilogue="cshuffle", epi_quad_xpose=1, warp_tile_m=32, warp_tile_n=32,
+                 warp_tile_k=8),  # 16x16 atom only
+            dict(epilogue="cshuffle", epi_quad_xpose=3, tile_n=32, warp_n=2),  # odd N atoms
+            dict(epilogue="cshuffle", epi_quad_xpose=5),
         ):
             with self.subTest(**kw):
                 self.assertNotEqual(_fwd_kloop_conflict(self._spec(**kw)), "")
