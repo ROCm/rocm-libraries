@@ -9,7 +9,8 @@ TestParameters:
 GlobalParameters: {Architecture: gfx1250, SyncsPerBenchmark: 0, NumElementsToValidate: -1,
   KernelTime: false, DataInitTypeA: 3, DataInitTypeB: 3, DataInitTypeC: 3, DataInitTypeD: 2,
   DataInitTypeAlpha: 2, DataInitTypeBeta: 2, ForceGenerateKernel: true, CpuThreads: 8,
-  PrintLevel: 1, NumWarmups: 1, NumBenchmarks: 1, EnqueuesPerSync: 1, PrintSolutionRejectionReason: true}
+  PrintLevel: 1, NumWarmups: 1, NumBenchmarks: 1, EnqueuesPerSync: 1, PrintSolutionRejectionReason: true,
+  UniformSummationOrder: 0}
 BenchmarkProblems:
   - - &dense_problem {OperationType: GEMM, DataType: b, DestDataType: s, ComputeDataType: s,
       HighPrecisionAccumulate: true, TransposeA: true, TransposeB: false, UseBeta: true, Batched: true}
