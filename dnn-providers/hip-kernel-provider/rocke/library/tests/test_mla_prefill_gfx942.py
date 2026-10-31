@@ -34,6 +34,8 @@ from kernels.mla.mla_prefill_gfx942 import (
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 
+from ._attention_bwd_test_utils import skip_where_compiler_refuses_option
+
 
 def _spec(**kw) -> MlaPrefillSpec:
     return MlaPrefillSpec(num_heads=kw.pop("num_heads", 16), **kw)
@@ -427,29 +429,22 @@ class _OccupancyGuard:
             from rocke.helpers.compile import compile_kernel
         except ImportError as exc:  # pragma: no cover - environment-dependent
             raise unittest.SkipTest(f"comgr/resource tools unavailable: {exc}")
-        # The forward kernel compiles with ``-amdgpu-mfma-vgpr-form``, which an
-        # LLVM 20 comgr (ROCm 7.0/7.1) does not know: its option parser exits
-        # the whole process instead of raising. That happens when an earlier
-        # test in the session already loaded the system comgr ahead of torch's.
         try:
             from rocke.runtime.comgr import _require_compiler_info
 
-            llvm_major = int(_require_compiler_info().llvm_version[0])
+            _require_compiler_info()
         except (ImportError, OSError, RuntimeError) as exc:  # pragma: no cover
             raise unittest.SkipTest(f"comgr unavailable: {exc}")
-        if llvm_major < 21:
-            raise unittest.SkipTest(
-                f"loaded comgr is LLVM {llvm_major}; the forward kernel's "
-                "-amdgpu-mfma-vgpr-form option needs LLVM 21+"
-            )
-
         cls.spec = cls.make_spec()
         try:
-            art = compile_kernel(
-                build_mla_prefill_fwd(cls.spec, arch="gfx942"),
-                arch="gfx942",
-                capture_ir_text=False,
-            )
+            # The forward kernel needs -amdgpu-mfma-vgpr-form; an earlier test
+            # in the session may have loaded a comgr that does not accept it.
+            with skip_where_compiler_refuses_option():
+                art = compile_kernel(
+                    build_mla_prefill_fwd(cls.spec, arch="gfx942"),
+                    arch="gfx942",
+                    capture_ir_text=False,
+                )
         except ImportError as exc:  # pragma: no cover - environment-dependent
             raise unittest.SkipTest(f"comgr toolchain unavailable: {exc}")
         except RuntimeError as exc:
