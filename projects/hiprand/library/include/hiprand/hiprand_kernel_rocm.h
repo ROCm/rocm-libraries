@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -377,6 +377,21 @@ QUALIFIERS unsigned int hiprand(StateType* state)
 QUALIFIERS uint4 hiprand4(hiprandStatePhilox4_32_10_t* state)
 {
     return rocrand4(state);
+}
+
+/// \brief Computes one Philox4x32-10 block from a counter and a key.
+///
+/// Applies the ten Philox4x32 rounds to \p counter under \p key without using
+/// a generator state. A ::hiprandStatePhilox4_32_10_t initialized with seed \p s,
+/// subsequence \p ss and offset <tt>4 * n</tt> returns from ::hiprand4 the block
+/// for counter <tt>{lo(n), hi(n), lo(ss), hi(ss)}</tt> and key <tt>{lo(s), hi(s)}</tt>.
+///
+/// \param counter 128-bit counter
+/// \param key 64-bit key
+/// \return Four uniformly distributed random 32-bit <tt>unsigned int</tt>s as \p uint4
+QUALIFIERS uint4 hiprand_Philox4x32_10(uint4 counter, uint2 key)
+{
+    return rocrand_philox4x32_10(counter, key);
 }
 
 /// \brief Generates uniformly distributed random <tt>unsigned long long int</tt>
