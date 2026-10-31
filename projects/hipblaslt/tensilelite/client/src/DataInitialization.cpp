@@ -2274,7 +2274,8 @@ namespace TensileLite
                                       initModeToMXMethod(dataInitMode),
                                       -1.0f,
                                       1.0f,
-                                      initModeToMXMethod(scaleInitMode));
+                                      initModeToMXMethod(scaleInitMode),
+                                      /*returnReference=*/false);
                       if(kFast)
                           restrideMXScaleBufferKFast(
                               scalePtr, compactFree, compactKBlocks, paddedKBlocks, scaleElemSize);
@@ -2341,7 +2342,8 @@ namespace TensileLite
                                           initModeToMXMethod(dataInitMode),
                                           -1.0f,
                                           1.0f,
-                                          initModeToMXMethod(scaleInitMode));
+                                          initModeToMXMethod(scaleInitMode),
+                                          /*returnReference=*/false);
                       }
                       HIP_CHECK_EXC(hipMemcpy(pristineScale.gpuInput.valid.get(),
                                               gpuScaleBuf.data(),
