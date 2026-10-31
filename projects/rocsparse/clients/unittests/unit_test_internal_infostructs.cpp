@@ -35,6 +35,8 @@
 //   * rocsparse::numeric_boost           (common/rocsparse_numeric_boost.cpp)
 //   * _rocsparse_csrmv_info::clear + adaptive/lrb/nnzsplit clear
 //         (header-inline clear; level2/rocsparse_csrmv_{adaptive,lrb,nnzsplit}_info.cpp)
+//   * nnzsplit csrmv analysis buffer returned to the device memory pool on
+//         rocsparse_destroy_spmat_descr (rocm-libraries#6595)
 //   * rocsparse csrgemm_info create/copy/destroy (extra/rocsparse_csrgemm_info.cpp)
 //   * _rocsparse_mat_info lifecycle via the public C API (rocsparse_create/destroy_mat_info)
 //
@@ -217,6 +219,150 @@ TEST(internal_infostructs, csrmv_subinfo_clear_null_safe)
     EXPECT_EQ(nnzsplit.size, 0u);
     EXPECT_EQ(nnzsplit.starting_ids, nullptr);
     EXPECT_EQ(nnzsplit.starting_block_ids, nullptr);
+}
+
+// ===========================================================================
+// nnzsplit csrmv analysis buffer release
+// ===========================================================================
+namespace
+{
+    struct SpmatGuard
+    {
+        rocsparse_spmat_descr mat = nullptr;
+
+        SpmatGuard() = default;
+        ~SpmatGuard()
+        {
+            if(mat != nullptr)
+            {
+                rocsparse_destroy_spmat_descr(mat);
+            }
+        }
+        SpmatGuard(const SpmatGuard&) = delete;
+        SpmatGuard& operator=(const SpmatGuard&) = delete;
+    };
+
+    struct DnvecGuard
+    {
+        rocsparse_dnvec_descr vec = nullptr;
+
+        DnvecGuard() = default;
+        ~DnvecGuard()
+        {
+            if(vec != nullptr)
+            {
+                rocsparse_destroy_dnvec_descr(vec);
+            }
+        }
+        DnvecGuard(const DnvecGuard&) = delete;
+        DnvecGuard& operator=(const DnvecGuard&) = delete;
+    };
+}
+
+// Preprocessing through rocsparse_spmv with rocsparse_spmv_alg_csr_nnzsplit
+// allocates nnzsplit.starting_ids with hipMallocAsync; destroying the matrix
+// descriptor must return it to the device memory pool (rocm-libraries#6595).
+class CsrmvNnzsplitInfo : public HandleTest
+{
+};
+
+TEST_F(CsrmvNnzsplitInfo, destroy_spmat_descr_returns_analysis_buffer)
+{
+    int device = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    int pools_supported = 0;
+    ASSERT_EQ(
+        hipDeviceGetAttribute(&pools_supported, hipDeviceAttributeMemoryPoolsSupported, device),
+        hipSuccess);
+    if(!pools_supported)
+    {
+        GTEST_SKIP() << "device has no stream-ordered memory pool";
+    }
+    hipMemPool_t pool = nullptr;
+    ASSERT_EQ(hipDeviceGetMemPool(&pool, device), hipSuccess);
+
+    const auto pool_used_bytes = [pool]() {
+        uint64_t used = 0;
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(hipMemPoolGetAttribute(pool, hipMemPoolAttrUsedMemCurrent, &used), hipSuccess);
+        return used;
+    };
+
+    const std::vector<int>   h_row_ptr = {0, 2, 3, 5, 6};
+    const std::vector<int>   h_col_ind = {0, 1, 1, 0, 2, 3};
+    const std::vector<float> h_val     = {1.f, 2.f, 3.f, 4.f, 5.f, 6.f};
+    device_vector<int>       d_row_ptr(h_row_ptr);
+    device_vector<int>       d_col_ind(h_col_ind);
+    device_vector<float>     d_val(h_val);
+    device_vector<float>     d_x(std::vector<float>(4, 1.f));
+    device_vector<float>     d_y(std::vector<float>(4, 0.f));
+    ASSERT_TRUE(d_row_ptr.ptr && d_col_ind.ptr && d_val.ptr && d_x.ptr && d_y.ptr);
+
+    DnvecGuard x, y;
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&x.vec, 4, d_x.ptr, rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_dnvec_descr(&y.vec, 4, d_y.ptr, rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+
+    // Creates the matrix, preprocesses it twice and destroys it; stores the
+    // pool usage after the first preprocess.
+    const auto analyse_and_destroy = [&](uint64_t* after_preprocess) {
+        SpmatGuard mat;
+        ASSERT_EQ(rocsparse_create_csr_descr(&mat.mat,
+                                             4,
+                                             4,
+                                             6,
+                                             d_row_ptr.ptr,
+                                             d_col_ind.ptr,
+                                             d_val.ptr,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_index_base_zero,
+                                             rocsparse_datatype_f32_r),
+                  rocsparse_status_success);
+
+        const float alpha       = 1.f;
+        const float beta        = 0.f;
+        size_t      buffer_size = 0;
+        const auto  spmv        = [&](rocsparse_spmv_stage stage, void* buffer) {
+            return rocsparse_spmv(handle,
+                                  rocsparse_operation_none,
+                                  &alpha,
+                                  mat.mat,
+                                  x.vec,
+                                  &beta,
+                                  y.vec,
+                                  rocsparse_datatype_f32_r,
+                                  rocsparse_spmv_alg_csr_nnzsplit,
+                                  stage,
+                                  &buffer_size,
+                                  buffer);
+        };
+        ASSERT_EQ(spmv(rocsparse_spmv_stage_buffer_size, nullptr), rocsparse_status_success);
+        device_vector<char> buffer(buffer_size > 0 ? buffer_size : size_t(1));
+        ASSERT_NE(buffer.ptr, nullptr);
+
+        ASSERT_EQ(spmv(rocsparse_spmv_stage_preprocess, buffer.ptr), rocsparse_status_success);
+        *after_preprocess = pool_used_bytes();
+
+        // A second preprocess reuses the cached analysis and must not allocate again.
+        ASSERT_EQ(spmv(rocsparse_spmv_stage_preprocess, buffer.ptr), rocsparse_status_success);
+        EXPECT_EQ(pool_used_bytes(), *after_preprocess);
+
+        ASSERT_EQ(rocsparse_destroy_spmat_descr(mat.mat), rocsparse_status_success);
+        mat.mat = nullptr;
+    };
+
+    // The first cycle absorbs any one-time pool growth outside the matrix.
+    uint64_t warmup = 0;
+    ASSERT_NO_FATAL_FAILURE(analyse_and_destroy(&warmup));
+
+    const uint64_t before   = pool_used_bytes();
+    uint64_t       analysed = 0;
+    ASSERT_NO_FATAL_FAILURE(analyse_and_destroy(&analysed));
+    const uint64_t after = pool_used_bytes();
+    EXPECT_GT(analysed, before);
+    EXPECT_EQ(after, before);
 }
 
 // ===========================================================================
