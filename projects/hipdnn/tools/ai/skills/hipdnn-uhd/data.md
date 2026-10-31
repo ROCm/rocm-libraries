@@ -47,7 +47,10 @@ dataset. The tools are hipDNN's own: `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_g
   build lists; the provider's `CMakeLists.txt` names both. Without them every graph fails at
   collection with the engine's load error naming the missing file, although the shape set
   (which only asks whether the engine applies) succeeded.
-- **uhd_gen** needs LightGBM, pandas and pyarrow. Run it from the checkout with
+- **uhd_gen** needs LightGBM, scikit-learn, pandas and pyarrow; `train --model-family xgboost`
+  also needs `xgboost` (`pip install -e "projects/hipdnn/tools/uhd_gen[xgboost]"`). Every
+  `--model-family` writes the same `tree_data` model, so the choice needs no runtime change.
+  Run it from the checkout with
   `PYTHONPATH=<checkout>/projects/hipdnn/tools`, or install it into your own environment with
   `pip install -e projects/hipdnn/tools/uhd_gen`. Pass
   `--feature-evaluator <build>/bin/hipdnn_uhd_features` wherever `uhd_gen` takes it.
