@@ -250,7 +250,11 @@ foreach(_hkp_bwd_engine IN ITEMS split merged)
             continue()
         endif()
 
-        hkp_reserve_census_shard(_hkp_bwd_shard_dest ${_hkp_bwd_arch})
+        # The shard names this TOML, so it is reserved with the shard as well as passed as
+        # TEST_CONFIG; hkp_reserve_census_shard() says why.
+        set(_hkp_bwd_toml
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../config/hipkernel_flydsl_sdpa_bwd_${_hkp_bwd_engine}.toml")
+        hkp_reserve_census_shard(_hkp_bwd_shard_dest ${_hkp_bwd_arch} FILES "${_hkp_bwd_toml}")
         add_external_integration_test_target(
             TARGET_NAME hip_kernel_provider_flydsl_sdpa_bwd_${_hkp_bwd_engine}_${_hkp_bwd_arch}_gpu_ref_integration_tests
             PLUGIN_TARGET hip_kernel_provider
@@ -259,7 +263,7 @@ foreach(_hkp_bwd_engine IN ITEMS split merged)
             INSTALL_DESTINATION "${_hkp_bwd_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_${_hkp_bwd_arch}
             REFERENCE_EXECUTOR gpu
-            TEST_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/../../config/hipkernel_flydsl_sdpa_bwd_${_hkp_bwd_engine}.toml"
+            TEST_CONFIG "${_hkp_bwd_toml}"
             GTEST_FILTER "quick_SdpaBackward_Default.*:standard_SdpaBackward_Default.*:comprehensive_SdpaBackward_Default.*:full_SdpaBackward_Default.*"
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
