@@ -63,6 +63,26 @@ namespace
         return problem;
     }
 
+    // A x B -> typeCD with compute-input types computeA/computeB and float
+    // alpha/beta (one of the reference's Float8-output ids when typeCD is an
+    // 8-bit float type and the combination is supported).
+    ContractionProblemGemm makeFloat8OutputProblem(rocisa::DataType typeA,
+                                                   rocisa::DataType typeB,
+                                                   rocisa::DataType typeCD,
+                                                   rocisa::DataType computeA,
+                                                   rocisa::DataType computeB,
+                                                   size_t           M,
+                                                   size_t           N,
+                                                   size_t           K)
+    {
+        auto problem = makePackedProblem(typeA, typeB, typeCD, M, N, K);
+        problem.setComputeInputTypeA(computeA);
+        problem.setComputeInputTypeB(computeB);
+        problem.setAlphaType(rocisa::DataType::Float);
+        problem.setBetaType(rocisa::DataType::Float);
+        return problem;
+    }
+
     // M x 3 column-major Int8 A whose row m sums to rowSums[m] (each within
     // [-3 * 128, 3 * 127]); with B = {1, 1, 1} (K = 3, N = 1), D[m] = alpha * rowSums[m].
     std::vector<int8_t> int8RowsWithSums(std::vector<int> const& rowSums)
@@ -84,13 +104,13 @@ namespace
     }
 
     // Runs the problem on the fast path (which must accept it) and the slow path,
-    // and returns both D buffers. setInputs sets further ContractionInputs fields
-    // (scales) on both runs.
-    template <typename DT, typename SetInputs = void (*)(ContractionInputs&)>
-    std::pair<std::vector<DT>, std::vector<DT>> solveInt8FastAndSlow(
+    // and returns both D buffers (C is zero). setInputs sets further
+    // ContractionInputs fields (scales) on both runs.
+    template <typename DT, typename InT, typename SetInputs = void (*)(ContractionInputs&)>
+    std::pair<std::vector<DT>, std::vector<DT>> solveFastAndSlow(
         ContractionProblemGemm const& problem,
-        std::vector<int8_t> const&    a,
-        std::vector<int8_t> const&    b,
+        std::vector<InT> const&       a,
+        std::vector<InT> const&       b,
         ConstantVariant               alpha,
         ConstantVariant               beta,
         SetInputs                     setInputs = [](ContractionInputs&) {})
@@ -225,7 +245,7 @@ TEST(ReferenceFastPath, Int8Int32EpilogueIsExactAboveFloatRange)
     ASSERT_GT(exactSum, 1 << 24);
     ASSERT_NE(static_cast<int32_t>(static_cast<float>(exactSum)), exactSum);
 
-    auto [dFast, dSlow] = solveInt8FastAndSlow<int32_t>(problem, a, b, int32_t(1), int32_t(0));
+    auto [dFast, dSlow] = solveFastAndSlow<int32_t>(problem, a, b, int32_t(1), int32_t(0));
     EXPECT_EQ(dFast[0], exactSum);
     EXPECT_EQ(dFast[0], dSlow[0]);
 }
@@ -270,7 +290,7 @@ TEST(ReferenceFastPath, Int8OutputSaturatesFromInt32Epilogue)
     std::vector<int8_t> a = int8RowsWithSums(sums);
     std::vector<int8_t> b(3, 1);
 
-    auto [dFast, dSlow] = solveInt8FastAndSlow<int8_t>(problem, a, b, int32_t(1), int32_t(0));
+    auto [dFast, dSlow] = solveFastAndSlow<int8_t>(problem, a, b, int32_t(1), int32_t(0));
     for(size_t m = 0; m < sums.size(); ++m)
     {
         EXPECT_EQ(int(dFast[m]), int(expected[m])) << "sum " << sums[m];
@@ -293,7 +313,7 @@ TEST(ReferenceFastPath, Int8OutputRoundsHalfToEvenThenSaturatesFromFloatEpilogue
     std::vector<int8_t> a = int8RowsWithSums(sums);
     std::vector<int8_t> b(3, 1);
 
-    auto [dFast, dSlow] = solveInt8FastAndSlow<int8_t>(problem, a, b, 0.5f, 0.0f);
+    auto [dFast, dSlow] = solveFastAndSlow<int8_t>(problem, a, b, 0.5f, 0.0f);
     for(size_t m = 0; m < sums.size(); ++m)
     {
         EXPECT_EQ(int(dFast[m]), int(expected[m])) << "sum " << sums[m];
@@ -326,7 +346,7 @@ TEST(ReferenceFastPath, Int8FloatEpilogueFollowsSlowPathOrder)
         ASSERT_NE(static_cast<int32_t>(slowOrder), static_cast<int32_t>(folded));
 
         auto [dFast, dSlow]
-            = solveInt8FastAndSlow<int32_t>(problem, a, b, alpha, 0.0f, [&](ContractionInputs& in) {
+            = solveFastAndSlow<int32_t>(problem, a, b, alpha, 0.0f, [&](ContractionInputs& in) {
                   in.scaleAlphaVec = alphaVec.data();
               });
         EXPECT_EQ(dFast[0], static_cast<int32_t>(slowOrder));
@@ -351,11 +371,173 @@ TEST(ReferenceFastPath, Int8FloatEpilogueFollowsSlowPathOrder)
         ASSERT_NE(static_cast<int32_t>(slowOrder), static_cast<int32_t>(folded));
 
         auto [dFast, dSlow]
-            = solveInt8FastAndSlow<int32_t>(problem, a, b, alpha, 0.0f, [&](ContractionInputs& in) {
+            = solveFastAndSlow<int32_t>(problem, a, b, alpha, 0.0f, [&](ContractionInputs& in) {
                   in.scaleA = scaleA.data();
                   in.scaleB = scaleB.data();
               });
         EXPECT_EQ(dFast[0], static_cast<int32_t>(slowOrder));
         EXPECT_EQ(dFast[0], dSlow[0]);
+    }
+}
+
+TEST(ReferenceFastPath, Float8OutputEligibilityFollowsReferenceTypeIds)
+{
+    using DT = rocisa::DataType;
+    struct Types
+    {
+        DT a, b, cd, computeA, computeB;
+    };
+
+    // The reference's Float8-output ids with float alpha/beta (TypedGemm_*_S).
+    const DT F8 = DT::Float8, B8 = DT::BFloat8, F8N = DT::Float8_fnuz, B8N = DT::BFloat8_fnuz,
+             H  = DT::Half;
+    for(Types t : {Types{F8, F8, F8, F8, F8},          Types{F8, F8, B8, F8, F8},
+                   Types{B8, B8, F8, B8, B8},          Types{B8, B8, B8, B8, B8},
+                   Types{F8, B8, F8, F8, B8},          Types{F8, B8, B8, F8, B8},
+                   Types{B8, F8, F8, B8, F8},          Types{B8, F8, B8, B8, F8},
+                   Types{H, F8, F8, H, H},             Types{F8, H, F8, H, H},
+                   Types{H, F8, F8, F8, F8},           Types{F8, H, F8, F8, F8},
+                   Types{F8N, F8N, F8N, F8N, F8N},     Types{F8N, F8N, B8N, F8N, F8N},
+                   Types{B8N, B8N, F8N, B8N, B8N},     Types{B8N, B8N, B8N, B8N, B8N},
+                   Types{F8N, B8N, F8N, F8N, B8N},     Types{F8N, B8N, B8N, F8N, B8N},
+                   Types{B8N, F8N, F8N, B8N, F8N},     Types{B8N, F8N, B8N, B8N, F8N},
+                   Types{H, F8N, F8N, H, H},           Types{F8N, H, F8N, H, H},
+                   Types{H, F8N, F8N, F8N, F8N},       Types{F8N, H, F8N, F8N, F8N}})
+    {
+        EXPECT_TRUE(isFastPathEligible(
+            makeFloat8OutputProblem(t.a, t.b, t.cd, t.computeA, t.computeB, 4, 4, 4)))
+            << TensileLite::ToString(t.a) << " x " << TensileLite::ToString(t.b) << " -> "
+            << TensileLite::ToString(t.cd) << ", MAC " << TensileLite::ToString(t.computeA)
+            << " x " << TensileLite::ToString(t.computeB);
+    }
+
+    // Not a reference Float8-output id: Float or Half inputs, an output of the other
+    // F8 family, BFloat8 x Half, Float8 x Half with mixed MAC types, a Half
+    // alpha/beta, or Float4 inputs (TypedGemm_F4_F8_S, not part of this fast path).
+    for(Types t : {Types{DT::Float, DT::Float, F8, DT::Float, DT::Float},
+                   Types{H, H, F8, H, H},
+                   Types{F8, F8, F8N, F8, F8},
+                   Types{F8N, F8N, B8, F8N, F8N},
+                   Types{B8, H, B8, H, H},
+                   Types{F8, H, F8, F8, H},
+                   Types{DT::Float4, DT::Float4, F8, DT::Float4, DT::Float4}})
+    {
+        EXPECT_FALSE(isFastPathEligible(
+            makeFloat8OutputProblem(t.a, t.b, t.cd, t.computeA, t.computeB, 4, 4, 4)))
+            << TensileLite::ToString(t.a) << " x " << TensileLite::ToString(t.b) << " -> "
+            << TensileLite::ToString(t.cd) << ", MAC " << TensileLite::ToString(t.computeA)
+            << " x " << TensileLite::ToString(t.computeB);
+    }
+    auto halfAlpha = makeFloat8OutputProblem(F8, F8, F8, F8, F8, 4, 4, 4);
+    halfAlpha.setAlphaType(DT::Half);
+    halfAlpha.setBetaType(DT::Half);
+    EXPECT_FALSE(isFastPathEligible(halfAlpha));
+}
+
+namespace
+{
+    // A = B = 1 (K = 1, N = 1) with scaleAlphaVec[m] = cases[m].first, so the float
+    // value before the output cast is exactly cases[m].first on both paths. Checks
+    // that the Float8/BFloat8 output is cases[m].second on the fast path, and the
+    // same as on the slow path (SaturateCast).
+    template <typename OutT>
+    void checkFloat8OutputCast(rocisa::DataType                           type,
+                               std::vector<std::pair<float, float>> const& cases)
+    {
+        const size_t M       = cases.size();
+        auto         problem = makeFloat8OutputProblem(type, type, type, type, type, M, 1, 1);
+        problem.setUseScaleAlphaVec(1);
+        problem.setScaleAlphaVec(rocisa::DataType::Float, M, /*factorDim=*/0);
+
+        std::vector<float> alphaVec;
+        for(auto const& c : cases)
+            alphaVec.push_back(c.first);
+        std::vector<OutT> a(M, OutT(1.0f));
+        std::vector<OutT> b(1, OutT(1.0f));
+
+        auto [dFast, dSlow]
+            = solveFastAndSlow<OutT>(problem, a, b, 1.0f, 0.0f, [&](ContractionInputs& in) {
+                  in.scaleAlphaVec = alphaVec.data();
+              });
+        for(size_t m = 0; m < M; ++m)
+        {
+            EXPECT_EQ(static_cast<float>(dFast[m]), cases[m].second) << "value " << cases[m].first;
+            EXPECT_EQ(static_cast<float>(dFast[m]), static_cast<float>(dSlow[m]))
+                << "value " << cases[m].first;
+        }
+    }
+} // namespace
+
+// Float8/BFloat8 outputs round to nearest even (ties between two F8 values, also
+// subnormal ones) and saturate to the largest finite value (including values that
+// round up past it). fnuz types have no negative zero: a tiny negative value is +0.
+TEST(ReferenceFastPath, Float8OutputRoundsToNearestEvenAndSaturates)
+{
+    const float tiny = std::ldexp(1.0f, -20);
+    {
+        SCOPED_TRACE("Float8 (E4M3, max 448, smallest subnormal 2^-9)");
+        const float s = std::ldexp(1.0f, -9);
+        checkFloat8OutputCast<Float8>(rocisa::DataType::Float8,
+                                      {{1.0625f, 1.0f},
+                                       {1.1875f, 1.25f},
+                                       {-1.1875f, -1.25f},
+                                       {1.0625f + tiny, 1.125f},
+                                       {17.0f, 16.0f},
+                                       {19.0f, 20.0f},
+                                       {448.0f, 448.0f},
+                                       {464.0f, 448.0f},
+                                       {1000.0f, 448.0f},
+                                       {-1.0e6f, -448.0f},
+                                       {0.5f * s, 0.0f},
+                                       {1.5f * s, 2.0f * s},
+                                       {2.5f * s, 2.0f * s}});
+    }
+    {
+        SCOPED_TRACE("BFloat8 (E5M2, max 57344, smallest subnormal 2^-16)");
+        const float s = std::ldexp(1.0f, -16);
+        checkFloat8OutputCast<BFloat8>(rocisa::DataType::BFloat8,
+                                       {{1.125f, 1.0f},
+                                        {1.375f, 1.5f},
+                                        {-1.375f, -1.5f},
+                                        {9.0f, 8.0f},
+                                        {11.0f, 12.0f},
+                                        {57344.0f, 57344.0f},
+                                        {61440.0f, 57344.0f},
+                                        {1.0e6f, 57344.0f},
+                                        {-1.0e6f, -57344.0f},
+                                        {0.5f * s, 0.0f},
+                                        {1.5f * s, 2.0f * s}});
+    }
+    {
+        SCOPED_TRACE("Float8_fnuz (E4M3, max 240, smallest subnormal 2^-10)");
+        const float s = std::ldexp(1.0f, -10);
+        checkFloat8OutputCast<Float8_fnuz>(rocisa::DataType::Float8_fnuz,
+                                           {{1.0625f, 1.0f},
+                                            {1.1875f, 1.25f},
+                                            {17.0f, 16.0f},
+                                            {19.0f, 20.0f},
+                                            {240.0f, 240.0f},
+                                            {248.0f, 240.0f},
+                                            {1000.0f, 240.0f},
+                                            {-1.0e6f, -240.0f},
+                                            {0.5f * s, 0.0f},
+                                            {-0.5f * s, 0.0f},
+                                            {1.5f * s, 2.0f * s}});
+    }
+    {
+        SCOPED_TRACE("BFloat8_fnuz (E5M2, max 57344, smallest subnormal 2^-17)");
+        const float s = std::ldexp(1.0f, -17);
+        checkFloat8OutputCast<BFloat8_fnuz>(rocisa::DataType::BFloat8_fnuz,
+                                            {{1.125f, 1.0f},
+                                             {1.375f, 1.5f},
+                                             {9.0f, 8.0f},
+                                             {11.0f, 12.0f},
+                                             {57344.0f, 57344.0f},
+                                             {61440.0f, 57344.0f},
+                                             {1.0e6f, 57344.0f},
+                                             {-1.0e6f, -57344.0f},
+                                             {0.5f * s, 0.0f},
+                                             {-0.5f * s, 0.0f},
+                                             {1.5f * s, 2.0f * s}});
     }
 }
