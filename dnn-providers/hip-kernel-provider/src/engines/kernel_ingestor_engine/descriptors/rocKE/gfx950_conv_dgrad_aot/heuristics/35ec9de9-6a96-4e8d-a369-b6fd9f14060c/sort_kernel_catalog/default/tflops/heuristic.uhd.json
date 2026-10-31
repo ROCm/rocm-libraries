@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "id": "81f666a1-6204-40f1-8e6d-ccad01bdbcae",
-  "name": "hipkernel:Gfx950ConvDgradAot (gfx950, 12 contribution(s))",
+  "id": "9ab01cdd-c99c-4c22-87ea-9486bc09d17c",
+  "name": "hipkernel:Gfx950ConvDgradAot (gfx950, 237 contribution(s))",
   "adapter": "tree_data",
   "features_signature": [
     "$device.memory_clock_rate",
@@ -12,7 +12,9 @@
     "$kernel.block_w",
     "$kernel.block_waves",
     "$kernel.ch_per_lane",
+    "$kernel.dgrad_weights_lds",
     "$kernel.direct_variant",
+    "$kernel.dot2",
     "$kernel.dy_halo",
     "$kernel.dy_halo_kouter_pad",
     "$kernel.dy_halo_setprio",
@@ -23,9 +25,16 @@
     "$kernel.k_atoms",
     "$kernel.kernel_family",
     "$kernel.lds_k_outer",
+    "$kernel.lds_only_sync",
+    "$kernel.lds_pad",
     "$kernel.m_tiles",
+    "$kernel.mfma",
     "$kernel.patch",
     "$kernel.pipeline",
+    "$kernel.prefetch_rows",
+    "$kernel.row_exit",
+    "$kernel.stage_out",
+    "$kernel.stage_rows",
     "$kernel.tap_outer_k",
     "$kernel.tile_k",
     "$kernel.tile_m",
@@ -34,13 +43,16 @@
     "$kernel.vector_size_a",
     "$kernel.vector_size_b",
     "$kernel.vector_size_c",
+    "$kernel.w_fold",
     "$kernel.warp_m",
     "$kernel.warp_n",
     "$kernel.warp_tile_k",
     "$kernel.warp_tile_m",
     "$kernel.warp_tile_n",
     "$kernel.waves_k",
+    "$kernel.waves_per_eu",
     "$kernel.waves_q",
+    "$kernel.xcd_tiles",
     "$graph.arithmetic_intensity",
     "$graph.flops",
     "$graph.flops_by_type.ConvolutionBwdAttributes",
@@ -106,10 +118,10 @@
     "$graph.tensors[2].strides[2]",
     "$graph.tensors[2].strides[3]"
   ],
-  "features_hash": "sha256:397066f1cc11c7cc",
+  "features_hash": "sha256:81ac920d93c99810",
   "trained_against": {
     "ued": {
-      "id": "d99af387-1e13-4cf1-8054-ca60f1b65796",
+      "id": "35ec9de9-6a96-4e8d-a369-b6fd9f14060c",
       "revision": "1.0"
     },
     "kmd": {
@@ -132,15 +144,17 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "6f46cb91fe83e8494557157bafd4eb291d34b3be7b977a861f4cd816675641aa"
+    "hash": "f9596055b33d7968e158f7267f48af0ad09bc2fa82923029d78adac45bd1aaf6"
   },
   "categorical_encoding": {
     "$kernel.direct_variant": {
       "depthwise_dgrad": 0,
       "depthwise_dgrad_win": 1,
       "dgrad_mfma_rtc": 2,
-      "grouped_dgrad_mfma": 3,
-      "none": 4
+      "grouped_dgrad_4c": 3,
+      "grouped_dgrad_fused": 4,
+      "grouped_dgrad_mfma": 5,
+      "none": 6
     },
     "$kernel.epilogue": {
       "cshuffle": 0,
