@@ -24,23 +24,18 @@ hook = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(hook)
 
 TL = "projects/hipblaslt/tensilelite"
-OLD_PKG = f"{TL}/Tensile"
 NEW_PKG = f"{TL}/tensilelite"
 
 
 @pytest.mark.parametrize(
     "stmt, module",
     [
-        ("import Tensile", "Tensile"),
-        ("import Tensile.Common.Utilities", "Tensile.Common.Utilities"),
-        ("import Tensile.Common as C", "Tensile.Common"),
-        ("from Tensile import Common", "Tensile"),
-        ("from Tensile.Common import Utilities", "Tensile.Common"),
         ("import tensilelite", "tensilelite"),
         ("import tensilelite.Common.Utilities", "tensilelite.Common.Utilities"),
         ("from tensilelite import Common", "tensilelite"),
         ("from tensilelite.Common import Utilities", "tensilelite.Common"),
-        ("import os, Tensile.Common", "Tensile.Common"),
+        ("import tensilelite.Common as C", "tensilelite.Common"),
+        ("import os, tensilelite.Common", "tensilelite.Common"),
     ],
 )
 def test_banned_forms_are_reported(stmt, module):
@@ -57,7 +52,9 @@ def test_banned_forms_are_reported(stmt, module):
         "import tensilelite_tensile_compat",
         "from TensileCreateLibrary import x",
         "from mytensilelite import x",
-        "import numpy.Tensile",
+        "import numpy.tensilelite",
+        "import Tensile",
+        "from Tensile.Common import Utilities",
     ],
 )
 def test_allowed_forms_are_ignored(stmt):
@@ -67,7 +64,7 @@ def test_allowed_forms_are_ignored(stmt):
 def test_text_that_only_looks_like_an_import_is_ignored():
     source = (
         '"""\n'
-        "from Tensile import Common\n"
+        "from tensilelite import Common\n"
         '"""\n'
         "# import tensilelite\n"
         'code = "from tensilelite import x"\n'
@@ -76,16 +73,8 @@ def test_text_that_only_looks_like_an_import_is_ignored():
 
 
 def test_nested_imports_are_reported():
-    source = "def f():\n    if True:\n        from Tensile.Common import x\n"
-    assert hook.banned_imports(source, "x.py") == [(3, 8, "Tensile.Common")]
-
-
-def test_bridge_import_is_exempt_only_in_the_alias_package():
-    stmt = "from tensilelite._namespace_bridge import install_alias\n"
-    assert hook.banned_imports(stmt, f"{OLD_PKG}/__init__.py") == []
-    assert hook.banned_imports(stmt, f"{NEW_PKG}/__init__.py") != []
-    other = "from tensilelite.Common import x\n"
-    assert hook.banned_imports(other, f"{OLD_PKG}/__init__.py") != []
+    source = "def f():\n    if True:\n        from tensilelite.Common import x\n"
+    assert hook.banned_imports(source, "x.py") == [(3, 8, "tensilelite.Common")]
 
 
 def test_parse_added_lines_reads_hunk_headers():
@@ -148,8 +137,8 @@ def repo(tmp_path, monkeypatch):
 
 LEGACY = (
     "import os\n"
-    "from Tensile.Common import a\n"
-    "from Tensile.Common import b\n"
+    "from tensilelite.Common import a\n"
+    "from tensilelite.Common import b\n"
     "import tensilelite.Common.c\n"
     "\n"
     "\n"
@@ -166,7 +155,7 @@ def _commit_all(repo, message):
 def test_only_the_added_line_is_reported_in_a_file_with_existing_violations(
     repo, capsys
 ):
-    mod = f"{OLD_PKG}/mod.py"
+    mod = f"{NEW_PKG}/mod.py"
     _write(repo, mod, LEGACY)
     _commit_all(repo, "base")
 
@@ -207,10 +196,10 @@ def test_relative_import_added_next_to_existing_absolute_ones_passes(repo):
 
 def test_appending_a_name_to_an_existing_multiline_import_is_not_reported(repo):
     mod = f"{NEW_PKG}/mod.py"
-    _write(repo, mod, "from Tensile.Common import (\n    a,\n)\n")
+    _write(repo, mod, "from tensilelite.Common import (\n    a,\n)\n")
     _commit_all(repo, "base")
 
-    _write(repo, mod, "from Tensile.Common import (\n    a,\n    b,\n)\n")
+    _write(repo, mod, "from tensilelite.Common import (\n    a,\n    b,\n)\n")
     _git(repo, "add", "-A")
 
     assert hook.main([mod]) == 0
@@ -229,7 +218,7 @@ def test_new_file_reports_every_absolute_import(repo, capsys):
 
 
 def test_renamed_file_with_unchanged_imports_passes(repo):
-    old = f"{OLD_PKG}/mod.py"
+    old = f"{NEW_PKG}/Common/mod.py"
     new = f"{NEW_PKG}/mod.py"
     _write(repo, old, LEGACY * 3)
     _commit_all(repo, "base")
@@ -243,43 +232,31 @@ def test_renamed_file_with_unchanged_imports_passes(repo):
 
 def test_files_outside_the_package_roots_are_ignored(repo):
     other = f"{TL}/scripts/tool.py"
-    _write(repo, other, "from Tensile import x\n")
+    _write(repo, other, "from tensilelite import x\n")
     _write(repo, f"{NEW_PKG}/seed.py", "x = 1\n")
     _git(repo, "add", "-A")
 
     assert hook.main([other]) == 0
 
 
-@pytest.mark.parametrize("root", [OLD_PKG, NEW_PKG])
-def test_tests_directories_are_never_checked(repo, root):
-    test_file = f"{root}/Tests/unit/test_x.py"
-    _write(repo, test_file, "from Tensile.Common import a\nimport tensilelite\n")
+def test_tests_directories_are_never_checked(repo):
+    test_file = f"{NEW_PKG}/Tests/unit/test_x.py"
+    _write(repo, test_file, "from tensilelite.Common import a\nimport tensilelite\n")
     _write(repo, f"{NEW_PKG}/seed.py", "x = 1\n")
     _git(repo, "add", "-A")
 
     assert hook.main([test_file]) == 0
     assert not hook._in_scope(test_file)
-    assert hook._in_scope(f"{root}/Common/x.py")
-
-
-def test_missing_package_root_is_skipped_silently(repo, capsys):
-    mod = f"{NEW_PKG}/mod.py"  # the Tensile root does not exist at all
-    _write(repo, mod, "import os\n")
-    _commit_all(repo, "base")
-    _write(repo, mod, "import os\nimport sys\n")
-    _git(repo, "add", "-A")
-
-    assert hook.main([mod]) == 0
-    assert capsys.readouterr().out == ""
+    assert hook._in_scope(f"{NEW_PKG}/Common/x.py")
 
 
 def test_ref_mode_checks_the_range_and_reads_the_to_ref(repo, monkeypatch, capsys):
-    mod = f"{OLD_PKG}/mod.py"
+    mod = f"{NEW_PKG}/mod.py"
     _write(repo, mod, LEGACY)
     _commit_all(repo, "base")
     _git(repo, "branch", "develop")
 
-    _write(repo, mod, LEGACY + "from Tensile.Common import late\n")
+    _write(repo, mod, LEGACY + "from tensilelite.Common import late\n")
     _commit_all(repo, "adds one")
     # A working-tree edit after the commit must not influence a ref-range check.
     _write(repo, mod, LEGACY)
