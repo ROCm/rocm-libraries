@@ -70,3 +70,6 @@ requires a matching gfx1250 device, NumPy, and ml_dtypes; it does not need torch
 Additional E4M3/E5M3 scale encodings use the same packed matrix storage.
 See [independent scale formats](SCALE_FORMATS.md) for the accepted combinations
 and the scale-format example.
+
+For K=16 E4M3 block scales and runtime FP32 tensor factors, see
+[packed NVFP4 GEMM](NVFP4.md).

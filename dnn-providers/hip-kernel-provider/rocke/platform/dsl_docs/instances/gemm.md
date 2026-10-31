@@ -19,7 +19,8 @@ Core GEMM family (all under `instances/common/`):
 - `flatmm.py` -- CK Tile `18_flatmm`
 - `batched_contraction.py` -- CK Tile `41_batched_contraction`
 
-(public symbols re-exported from `rocke.instances`)
+(core public symbols re-exported from `rocke.instances`;
+the [gfx1250 NVFP4 API](#gfx1250-nvfp4-gemm) uses `rocke.instances.gfx1250`)
 
 The main implementation is universal GEMM. Batched GEMM is a thin
 wrapper. Grouped GEMM currently dispatches one universal GEMM kernel
@@ -366,6 +367,58 @@ all f32 output); the i4 mantissa variants and the
 (``mfma_f32_16x16x32_fp8`` / ``_bf8`` and the 32x32x16 siblings) and
 helpers (``i4_dequant``, ``mx_scale``, ``preshuffle``) are the
 pieces the v2 body composes.
+
+## gfx1250 NVFP4 GEMM
+
+[`gfx1250/nvfp4_gemm.py`](../../python/rocke/instances/gfx1250/nvfp4_gemm.py)
+provides a packed-input, RCR GEMM builder. A and B contain low-nibble-first
+E2M1 FP4; each group of 16 values along K has an encoded E4M3 block scale.
+Two runtime FP32 tensor dequantization factors scale the FP32 accumulator
+before BF16 or FP16 output conversion. The FP16 epilogue preserves the FP32
+multiplication boundary with an optimization barrier.
+
+Import the public API from `rocke.instances.gfx1250`:
+
+| Symbol | Contract |
+| --- | --- |
+| `NvFp4GemmSpec` | Frozen spec with `name`, `M`, `N`, `K`, and `dtype_c` (`bf16` by default; `fp16` or its `f16` alias) |
+| `is_valid_nvfp4_gemm_spec` | Returns `(ok, reason)` for the spec and explicit/default `gfx1250` target |
+| `build_nvfp4_gemm` | Builds a `KernelDef`; rejects unsupported specs before IR construction |
+| `nvfp4_gemm_signature` | Returns the pointer, dimension, and runtime tensor-factor argument contract |
+| `nvfp4_gemm_grid` | Returns the launch grid for fixed 16x16 output tiles; `spec.block_size` gives the wave32 block size |
+
+```python
+from rocke.instances.gfx1250 import NvFp4GemmSpec, build_nvfp4_gemm
+
+spec = NvFp4GemmSpec("nvfp4", M=32, N=48, K=256, dtype_c="bf16")
+kernel = build_nvfp4_gemm(spec, arch="gfx1250")
+```
+
+M and N must be positive multiples of 16; K must be a positive multiple of
+128. A and B use contiguous uint8 storage `[M, K/2]` and `[N, K/2]`.
+A-scale storage is uint8 `[M, K/16]`; B-scale storage is uint8 `[K/16, N]`.
+C is row-major BF16 or FP16 `[M, N]`. The ordered kernel ABI is:
+
+```text
+A, B, A_scale, B_scale, C, M, N, K, A_tensor_scale, B_tensor_scale
+```
+
+The last two arguments are FP32 multiplicative dequantization factors.
+Callers holding quantization multipliers must supply their reciprocals.
+The [NVFP4 input contract](../../python/rocke/examples/gfx1250/gemm/NVFP4.md)
+details packing, factor validation, scale-buffer layout, and verifier commands.
+
+The builder selects the shared FP4/E4M3/SCALE16 tensor-scale path.
+It is an untuned standalone builder/example; dispatcher registration and
+production routing are deferred. The complete spec-to-kernel builder is
+Python-only; C++ lowers its serialized IR through LLVM. HIP compilation uses
+Python-generated source only; native HIP is outside this NVFP4 API's scope, and
+its FP16 inline-assembly barrier remains unsupported by that backend.
+NVFP4 LLVM emission uses `llvm23`;
+older emission flavors reject this path. Numerical verification uses bounded
+exact fixtures and establishes neither arbitrary-input accumulation behavior
+nor performance. Quantization, foreign scale-layout conversion, partial tiles,
+and a dynamic K loop remain separate work.
 
 ## MX GEMM `instances/mx_gemm.py::MxGemmSpec` matches CK Tile ``42_mx_gemm``. Uses
 the OCP MX-spec shared-exponent format: each 32-element mantissa

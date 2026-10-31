@@ -23,6 +23,18 @@ ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22
 ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23
 ```
 
+The multi-layer suite can also run directly from the platform directory:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:../library python tests/test_rocke.py
+```
+
+That command covers one test file. A default `python tests/run_all.py` additionally
+runs the corpus validity/domain gates and the full pytest suite, including a
+`ROCKE_BACKEND=both` pass when the extension is importable. Report the actual
+command and any disabled or skipped stages; a runner invocation with
+`--no-pytest` or `--no-gate` establishes only its enabled stages.
+
 `conftest.py` puts `rocke/platform/python` on `sys.path` (so `import rocke` works);
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
 across layers without `__init__.py`.
@@ -54,12 +66,14 @@ for what is actually exercised vs. manual/diagnostic/demo.
 | `tools/` | `test_arch_domain_artifact.py` (source-only structure/generator units), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
 | (root) | `test_rocke.py` (multi-layer monolith), `test_rocke_ci_static.py` | - |
 
-> Notes: `instances/rocke_ir_parity_harness.py` is a helper imported by the
-> gate, not a `test_`-prefixed pytest module. The pybind **`rocke_engine` module
-> has no default-pytest coverage**: the C-engine vs Python-engine equivalence is
-> owned by the byte-identity gate (which builds `rocke_core` and byte-compares the
-> 81 matched `*_emit.c`/`*_emit.py` pairs), and the binding itself by the
-> consistency proof documented in `cpp/bindings/README.md`.
+> Notes: `instances/rocke_ir_parity_harness.py` supplies the representative corpus
+> to `test_rocke_ci_static.py` and the corpus gates. It is not itself a
+> `test_`-prefixed pytest module. `tools/check_byte_identity.py` drives a separate
+> paired-emitter inventory. Representative cases lowered in strict `both` pytest
+> mode compare Python/native bytes through the `rocke_engine` binding; cases
+> registered only in that corpus are not included in the paired-emitter totals.
+> See the [NVFP4 validation commands](../python/rocke/examples/gfx1250/gemm/NVFP4.md#validation-and-scope)
+> for the four representative NVFP4 variants and their focused backend matrix.
 
 ### CMake registration ownership
 
@@ -308,7 +322,12 @@ output. The dedicated Python/C parity emitters cover LLVM, canonical IR, and
 verification; committed golden entries anchor the existing configurations.
 `instances/test_optimization_barrier_numeric.py` compiles through COMGR and
 checks scalar payloads, lane predicates, and intermediate rounding on a GPU.
-Native HIP-source lowering is outside this feature's supported path.
+NVFP4 HIP compilation uses Python-generated source. Native HIP inline-assembly
+lowering, including the FP16 tensor-epilogue barrier, remains unsupported.
+`core/test_optimization_barrier.cpp` checks that the valid FP16 epilogue lowers
+through LLVM but rejects through native HIP, both directly and after
+serialization, on gfx950/gfx1250 with absent/empty clobbers. The existing
+`rocke_optimization_barrier` CTest runs those checks in build and installed trees.
 
 ## Installed pinned-reference suites
 

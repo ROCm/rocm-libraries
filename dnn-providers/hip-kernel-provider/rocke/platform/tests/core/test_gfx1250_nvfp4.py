@@ -1,0 +1,461 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""NVFP4 packed-input contract, tensor-scale epilogue, and reference checks."""
+
+from dataclasses import replace
+import hashlib
+import json
+from pathlib import Path
+import warnings
+
+import numpy as np
+import pytest
+
+from rocke.core.arch import ArchTarget
+from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
+from rocke.core.lower_hip import lower_kernel_to_hip
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.examples.gfx1250.gemm.nvfp4_gemm_verify import (
+    decode_e4m3_scales,
+    make_case_inputs,
+    reference_result,
+)
+from rocke.instances.gfx1250.block_scaled_gemm import (
+    BlockScaledGemmSpec,
+    build_block_scaled_gemm,
+    is_valid_spec as is_valid_block_spec,
+)
+from rocke.instances.gfx1250.nvfp4_gemm import (
+    NvFp4GemmSpec,
+    build_nvfp4_gemm,
+    is_valid_spec,
+    nvfp4_gemm_grid,
+    nvfp4_gemm_signature,
+)
+
+
+@pytest.mark.parametrize(
+    "case,sha",
+    json.loads(
+        Path(__file__).with_name("gfx1250_nvfp4_llvm23.json").read_text()
+    ).items(),
+)
+def test_nvfp4_golden(case, sha):
+    dtype, k = case.split("/")
+    kernel = build_nvfp4_gemm(NvFp4GemmSpec("golden", 32, 48, int(k), dtype))
+    llvm = lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor="llvm23")
+    assert hashlib.sha256(llvm.encode()).hexdigest() == sha
+
+
+def test_nvfp4_output_type_has_distinct_name():
+    spec = NvFp4GemmSpec("nv", 16, 16, 128)
+    assert spec.kernel_name() != replace(spec, dtype_c="fp16").kernel_name()
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+@pytest.mark.parametrize("k", [128, 256])
+def test_nvfp4_kernel_contract(dtype, k):
+    spec = NvFp4GemmSpec("nv", 32, 48, k, dtype)
+    assert is_valid_spec(spec)[0]
+    assert nvfp4_gemm_grid(spec) == (3, 2, 1)
+    assert nvfp4_gemm_signature(spec)[-2:] == [
+        {"name": "A_tensor_scale", "type": "f32"},
+        {"name": "B_tensor_scale", "type": "f32"},
+    ]
+    kernel = build_nvfp4_gemm(spec)
+    llvm = lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor="llvm23")
+    calls = [
+        l
+        for l in llvm.splitlines()
+        if "call <8 x float> @llvm.amdgcn.wmma.scale16" in l
+    ]
+    assert len(calls) == k // 128
+    assert all(
+        l.count("i32 4, <16 x i32>") == 2 and l.count("i32 0, i32 2, i64") == 2
+        for l in calls
+    )
+    assert "fmul float %A_tensor_scale, %B_tensor_scale" in llvm
+    assert llvm.count("fmul float") == 9
+    assert "mul nsw float" not in llvm
+    # Each final conversion consumes the tensor-scaled scalar, not the raw accumulator.
+    scaled_results = {
+        l.strip().split(" = ")[0]
+        for l in llvm.splitlines()
+        if "fmul float" in l and "tensor_scale" not in l
+    }
+    assert len(scaled_results) == 8
+    if dtype == "fp16":
+        barriers = [l for l in llvm.splitlines() if 'asm "", "=v,0"' in l]
+        assert len(barriers) == 8
+        assert all(any(v + ")" in l for l in barriers) for v in scaled_results)
+        scaled_results = {l.strip().split(" = ")[0] for l in barriers}
+    assert all(
+        any(
+            v + " " in l or v + "," in l or v + ")" in l
+            for l in llvm.splitlines()
+            if "fptrunc" in l or "cvt" in l
+        )
+        for v in scaled_results
+    )
+    hip = lower_kernel_to_hip(kernel, arch="gfx1250")
+    assert "A_tensor_scale * B_tensor_scale" in hip
+    assert "0, 2," in hip
+    for flavor in ("llvm20", "llvm22"):
+        with pytest.raises(RuntimeError, match="requires llvm23"):
+            lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor=flavor)
+
+
+@pytest.mark.parametrize(
+    "changes", [{"M": 17}, {"N": 0}, {"K": 192}, {"dtype_c": "fp32"}]
+)
+def test_invalid_nvfp4_spec(changes):
+    spec = replace(NvFp4GemmSpec("nv", 16, 16, 128), **changes)
+    assert not is_valid_spec(spec)[0]
+    with pytest.raises(ValueError):
+        build_nvfp4_gemm(spec)
+
+
+def test_tensor_scale_requires_native_path():
+    assert not is_valid_block_spec(
+        BlockScaledGemmSpec("legacy", 16, 16, 128, tensor_scale=True)
+    )[0]
+
+
+@pytest.mark.parametrize("field", ["tensor_scale", "prefetch"])
+@pytest.mark.parametrize(
+    "value",
+    ["false", "no", "", 0, 1, 0.0, None, np.bool_(False), np.bool_(True)],
+)
+@pytest.mark.parametrize("entrypoint", ["constructor", "validator", "builder"])
+def test_block_spec_rejects_non_boolean_flags(field, value, entrypoint, monkeypatch):
+    from rocke.instances.gfx1250 import block_scaled_gemm
+
+    spec = NvFp4GemmSpec("invalid_flag", 16, 16, 128).block_spec()
+    diagnostic = f"{field} must be a bool"
+    if entrypoint == "constructor":
+        with pytest.raises(TypeError, match=diagnostic):
+            replace(spec, **{field: value})
+        return
+
+    # Exercise the last admission gate even if construction was bypassed.
+    object.__setattr__(spec, field, value)
+    if entrypoint == "validator":
+        ok, reason = is_valid_block_spec(spec)
+        assert not ok and diagnostic in reason
+    else:
+
+        def unexpected(*args, **kwargs):
+            pytest.fail("invalid flag reached IR construction")
+
+        monkeypatch.setattr(block_scaled_gemm, "IRBuilder", unexpected)
+        with pytest.raises(ValueError, match=diagnostic):
+            build_block_scaled_gemm(spec)
+
+
+@pytest.mark.parametrize("tensor_scale", [False, True])
+@pytest.mark.parametrize("prefetch", [False, True])
+def test_block_spec_accepts_boolean_flags(tensor_scale, prefetch):
+    from rocke.instances.gfx1250.block_scaled_gemm import block_scaled_gemm_signature
+
+    spec = replace(
+        NvFp4GemmSpec("valid_flags", 16, 16, 256).block_spec(),
+        tensor_scale=tensor_scale,
+        prefetch=prefetch,
+    )
+    assert is_valid_block_spec(spec)[0]
+    kernel = build_block_scaled_gemm(spec)
+    signature = block_scaled_gemm_signature(spec)
+    assert len(kernel.params) == len(signature) == (10 if tensor_scale else 8)
+    assert ("_tensor_scale" in spec.kernel_name()) == tensor_scale
+    assert ("_pf" in spec.kernel_name()) == prefetch
+
+
+@pytest.mark.parametrize(
+    "a,b,scale,path,bk",
+    [
+        ("fp4", "fp4", "e8m0", "wmma_scale", 32),
+        ("fp8", "bf8", "e8m0", "wmma_scale", 32),
+        ("fp6", "bf6", "e8m0", "wmma_scale16", 16),
+        ("fp8", "fp4", "e8m0", "wmma_scale16", 16),
+        ("fp4", "fp4", "e8m0", "wmma_scale16", 16),
+        ("fp4", "fp4", "e5m3", "wmma_scale16", 16),
+    ],
+)
+def test_tensor_scale_rejects_other_native_contracts(a, b, scale, path, bk):
+    plain = BlockScaledGemmSpec(
+        "native",
+        16,
+        16,
+        128,
+        dtype_a=a,
+        dtype_b=b,
+        scale_dtype=scale,
+        matrix_path=path,
+        block_k=bk,
+    )
+    assert is_valid_block_spec(plain)[0]
+    build_block_scaled_gemm(plain)
+    tensor = replace(plain, tensor_scale=True)
+    ok, reason = is_valid_block_spec(tensor)
+    assert not ok and "NVFP4 contract" in reason
+    with pytest.raises(ValueError, match="NVFP4 contract"):
+        build_block_scaled_gemm(tensor)
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16", "f16"])
+def test_tensor_scale_accepts_normalized_nvfp4_contract(dtype):
+    spec = replace(
+        NvFp4GemmSpec("aliases", 16, 16, 128, dtype).block_spec(),
+        dtype_a="fp4e2m1",
+        dtype_b="fp4",
+        scale_dtype="fp8e4m3",
+    )
+    assert is_valid_block_spec(spec)[0]
+    build_block_scaled_gemm(spec)
+
+
+@pytest.mark.parametrize(
+    "sa,sb", [("e4m3", "e8m0"), ("e5m3", "e4m3"), ("e5m2", "e5m2")]
+)
+def test_invalid_atom_scale_combination(sa, sb):
+    spec = replace(
+        NvFp4GemmSpec("invalid", 16, 16, 128).block_spec(),
+        scale_dtype_a=sa,
+        scale_dtype_b=sb,
+    )
+    assert not is_valid_block_spec(spec)[0]
+    with pytest.raises(ValueError):
+        build_block_scaled_gemm(spec)
+
+
+def test_nvfp4_uses_canonical_scale_contract():
+    spec = NvFp4GemmSpec("catalog", 16, 16, 128).block_spec()
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype=spec.dtype_a,
+        b_dtype=spec.dtype_b,
+        c_dtype=spec.dtype_acc,
+        m=16,
+        n=16,
+        k=128,
+        scales=(*spec.resolved_scale_dtypes(), spec.block_k),
+    )
+    assert atom.op_id == "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e4m3_e4m3_k16"
+    assert gfx1250_scaled_wmma(atom.op_id).scale_formats == (2, 2)
+    assert atom.a_scale_frag_len == atom.b_scale_frag_len == 8
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16", "f16"])
+def test_tensor_scale_has_distinct_signature_and_name(dtype):
+    spec = NvFp4GemmSpec("identity", 16, 16, 128, dtype).block_spec()
+    plain = replace(spec, tensor_scale=False)
+    assert spec.kernel_name() != plain.kernel_name()
+    from rocke.instances.gfx1250.block_scaled_gemm import block_scaled_gemm_signature
+
+    assert block_scaled_gemm_signature(spec)[:-2] == block_scaled_gemm_signature(plain)
+    assert NvFp4GemmSpec("identity", 16, 16, 128, "f16").kernel_name() == (
+        NvFp4GemmSpec("identity", 16, 16, 128, "fp16").kernel_name()
+    )
+
+
+def test_e4m3_scale_decoding_against_numeric_dtype():
+    ml = pytest.importorskip("ml_dtypes")
+    codes = np.arange(127, dtype=np.uint8)
+    np.testing.assert_array_equal(
+        decode_e4m3_scales(codes), codes.view(ml.float8_e4m3fn).astype(np.float64)
+    )
+    for code in (127, 128, 255):
+        with pytest.raises(ValueError):
+            decode_e4m3_scales(np.array([code], dtype=np.uint8))
+
+
+def test_tensor_scale_direction_and_conversion_order():
+    # One nonzero FP4 product: 1 * 1. E4M3 scales are 1.25 * 1.75.
+    a = np.zeros((16, 64), dtype=np.uint8)
+    a[:, 0] = 2
+    sa = np.full((16, 8), 58, dtype=np.uint8)
+    sb = np.full((8, 16), 62, dtype=np.uint8)
+    result = reference_result(a, a, sa, sb, (0.5, 2.0), dtype_c="fp16")
+    np.testing.assert_array_equal(result, np.full((16, 16), 2.1875))
+    result = reference_result(a, a, sa, sb, (0.5, 0.5), dtype_c="fp16")
+    np.testing.assert_array_equal(result, np.full((16, 16), 0.546875))
+
+
+def test_tensor_rounding_fixture_requires_fp32_intermediate():
+    # This real GEMM cell lies on an FP16 tie after FP32 multiplication.
+    # Fusing the multiply and FP16 conversion instead returns -375.25.
+    spec = NvFp4GemmSpec("rounding", 32, 48, 256, "fp16")
+    inputs, factors = make_case_inputs(spec, "tensor-rounding")
+    result = reference_result(*inputs, factors, dtype_c="fp16")
+    assert result[0, 13] == -375.5
+    factor = np.float32(factors[0]) * np.float32(factors[1])
+    assert np.float16(np.float64(-412.5) * np.float64(factor)) == -375.25
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "neutral",
+        "a-only",
+        "b-only",
+        "mixed",
+        "tensor",
+        "tensor-rounding",
+        "zero-tensor",
+        "zero-block",
+        "group-15",
+        "codes-127",
+    ],
+)
+def test_bounded_reference_fixtures(case):
+    spec = NvFp4GemmSpec("nv", 32, 48, 256)
+    inputs, factors = make_case_inputs(spec, case)
+    result = reference_result(*inputs, factors)
+    assert result.shape == (32, 48) and np.isfinite(result).all()
+    if case in ("zero-tensor", "zero-block"):
+        assert not np.any(result)
+    else:
+        assert np.any(result)
+
+
+def test_default_fp4_api_keeps_kernel_identity():
+    spec = BlockScaledGemmSpec(
+        "fp4",
+        16,
+        16,
+        128,
+        dtype_a="fp4",
+        dtype_b="fp4",
+        matrix_path="wmma_scale16",
+        block_k=16,
+        scale_dtype="e8m0",
+    )
+    explicit = replace(spec, scale_dtype_a="i8", scale_dtype_b="e8m0")
+    assert spec.kernel_name() == explicit.kernel_name()
+    assert lower_kernel_to_llvm(
+        build_block_scaled_gemm(spec), arch="gfx1250", llvm_flavor="llvm23"
+    ) == lower_kernel_to_llvm(
+        build_block_scaled_gemm(explicit), arch="gfx1250", llvm_flavor="llvm23"
+    )
+
+
+@pytest.mark.parametrize(
+    "tensor_scales",
+    [None, (1.3, 0.7), (1, 2), np.array([1.3, 0.7], dtype=np.float32)],
+)
+def test_launcher_tensor_factor_argument_bytes(tensor_scales):
+    import ctypes
+    import struct
+    from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import _launch
+
+    # ABI-byte test double; device operations and launch geometry are outside this test.
+    class Runtime:
+        def __init__(self):
+            self.pointers = []
+            self.freed = []
+
+        def alloc(self, _size):
+            pointer = 4096 * (len(self.pointers) + 1)
+            self.pointers.append(pointer)
+            return pointer
+
+        def memcpy_h2d(self, *_args):
+            pass
+
+        def launch(self, _fn, _grid, _block, args):
+            self.args = args
+
+        def sync(self):
+            pass
+
+        def memcpy_d2h(self, destination, _pointer, size):
+            ctypes.memset(destination, 0, size)
+
+        def free(self, pointer):
+            self.freed.append(pointer)
+
+    spec = replace(
+        NvFp4GemmSpec("launch", 16, 16, 128).block_spec(),
+        tensor_scale=tensor_scales is not None,
+    )
+    inputs, _ = make_case_inputs(NvFp4GemmSpec("launch", 16, 16, 128), "mixed")
+    runtime = Runtime()
+    _launch(runtime, None, spec, inputs, tensor_scales=tensor_scales)
+    expected = struct.pack("<QQQQQiii", *runtime.pointers, spec.M, spec.N, spec.K)
+    if tensor_scales is not None:
+        expected += struct.pack("<ff", *tensor_scales)
+    assert runtime.args == expected
+    assert runtime.freed == runtime.pointers
+
+
+@pytest.mark.parametrize(
+    "enabled,factors",
+    [
+        (True, None),
+        (False, (1.3, 0.7)),
+        (True, (1.0,)),
+        (True, (1.0, 2.0, 3.0)),
+        (True, (float("nan"), 1.0)),
+        (True, (1.0, float("inf"))),
+    ],
+)
+def test_launcher_rejects_invalid_tensor_factors_before_allocation(enabled, factors):
+    from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import _launch
+
+    class Runtime:
+        def alloc(self, _size):
+            pytest.fail("invalid factors reached GPU allocation")
+
+        def launch(self, *_args):
+            pytest.fail("invalid factors reached GPU launch")
+
+    spec = replace(
+        NvFp4GemmSpec("invalid_factors", 16, 16, 128).block_spec(),
+        tensor_scale=enabled,
+    )
+    with pytest.raises(ValueError, match="tensor"):
+        _launch(Runtime(), None, spec, (), tensor_scales=factors)
+
+
+@pytest.mark.parametrize(
+    "factors",
+    [
+        pytest.param(("1.3", "0.7"), id="strings"),
+        pytest.param(np.array([1.3 + 2j, 0.7 + 3j]), id="complex"),
+        pytest.param(np.array([1.3 + 0j, 0.7 + 0j]), id="real-valued-complex"),
+        pytest.param(np.array([True, False]), id="boolean"),
+        pytest.param(np.array([1.3, 0.7], dtype=object), id="object"),
+        pytest.param(np.array([[1.3, 0.7]]), id="rank-two"),
+        pytest.param((1.3,), id="short"),
+        pytest.param((float("nan"), 1.0), id="nan"),
+        pytest.param((1.0, float("inf")), id="infinite"),
+        pytest.param((np.finfo(np.float64).max, 1.0), id="fp32-overflow"),
+    ],
+)
+@pytest.mark.parametrize("entrypoint", ["launcher", "reference"])
+def test_rejects_malformed_tensor_factors_without_casting(entrypoint, factors):
+    from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import _launch
+
+    class Runtime:
+        def alloc(self, _size):
+            pytest.fail("invalid factors reached GPU allocation")
+
+    spec = NvFp4GemmSpec("invalid_factors", 16, 16, 128)
+    inputs, _ = make_case_inputs(spec, "mixed")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError, match="tensor"):
+            if entrypoint == "launcher":
+                _launch(
+                    Runtime(), None, spec.block_spec(), inputs, tensor_scales=factors
+                )
+            else:
+                reference_result(*inputs, factors)
+
+
+@pytest.mark.parametrize("factors", [(1, 2), np.array([1.3, 0.7], dtype=np.float32)])
+def test_reference_accepts_real_numeric_tensor_factors(factors):
+    spec = NvFp4GemmSpec("real_factors", 16, 16, 128)
+    inputs, _ = make_case_inputs(spec, "mixed")
+    expected = reference_result(*inputs, tuple(float(factor) for factor in factors))
+    np.testing.assert_array_equal(reference_result(*inputs, factors), expected)

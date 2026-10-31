@@ -21,11 +21,9 @@
  *   - the IR side-table machinery is wired: the ds_read transpose loads
  *     (ds_read_tr16_b64/b128) resolve their LDS storage via rocke_h_smem_storage,
  *     and scf.yield walks the enclosing scf.for via h_find_enclosing_for.
- * The remaining ROCKE_ERR_NOTIMPL handlers here are NOT stubs but FAITHFUL parity
- * with Python's own NotImplementedError: tile.inline_asm and tile.ds_read_tr_b8
- * have no _op_ method in lower_hip.py (the HIP source backend deliberately does
- * not lower raw inline-asm payloads nor the 8-bit transpose read), so Python's
- * getattr-dispatch raises immediately and we reproduce that same rejection.
+ * ROCKE_ERR_NOTIMPL marks unsupported native inline-asm forms and
+ * tile.ds_read_tr_b8. Unlike Python, this backend does not lower raw inline-asm
+ * payloads, including the empty tied-VGPR optimization barrier.
  * Every opcode is registered in the dispatch table; none is dropped.
  */
 #include <ctype.h>
@@ -345,12 +343,7 @@ static rocke_status_t rocke_h_op_tile_register_p_from_qk_c(rocke_h_lowerer_t* lw
     return lw->status;
 }
 
-/* tile.inline_asm has NO _op_tile_inline_asm method in lower_hip.py: the HIP
- * source backend does not lower raw inline-asm payloads. Python's lower_op
- * getattr-dispatch therefore returns None and raises
- *   NotImplementedError(f"no HIP lowering for op {op.name!r}")
- * Faithful parity: set the sticky ROCKE_ERR_NOTIMPL with the same message shape
- * the central dispatcher (rocke_h_lower_op) uses for an unhandled op. */
+/* Native HIP inline-asm lowering remains unsupported, including value barriers. */
 static rocke_status_t rocke_h_op_tile_inline_asm(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     if(!rocke_h_live(lw))
