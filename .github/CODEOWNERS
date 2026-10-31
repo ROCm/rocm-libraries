@@ -205,6 +205,7 @@
 /projects/hiprand/**/.readthedocs.yaml              @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
 /projects/hiprand/docs/                             @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
 /projects/hiprand/library/include/                  @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/hiprand/fortran/                          @ROCm/rocm-fortran-maintainers @ROCm/prims-rands-reviewers
 
 /projects/hipsolver/**/*.md                         @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
 /projects/hipsolver/**/*.rst                        @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
