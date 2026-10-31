@@ -8,6 +8,7 @@ Outputs boolean flags per component via GITHUB_OUTPUT:
   - miopen=true/false
   - tensilelite_coverage=true/false
   - hipblaslt_library_uniqueness=true/false
+  - hipblaslt_library_audit=true/false
 
 Each component defines a set of path patterns. If any changed file matches,
 that component is marked as triggered.
@@ -51,6 +52,11 @@ COMPONENTS = {
         "test_solution_uid_uniqueness.py",
         "projects/hipblaslt/tensilelite/tox.ini",
         ".github/workflows/component-ci-library-uniqueness.yml",
+    ],
+    "hipblaslt_library_audit": [
+        "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/**",
+        "projects/hipblaslt/utilities/library_audit/**",
+        ".github/workflows/component-ci-library-audit.yml",
     ],
 }
 
