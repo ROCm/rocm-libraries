@@ -287,7 +287,7 @@ CACHE_DGRAD_B_KPACK: Tuple[int, ...] = tuple(
 # "@<regex>" gives its set its own scope (see ROCKE_AOT_DGRAD_XHK_SCOPE). An
 # empty set is the plain binary; unset = that alone.
 def _parse_dgrad_xh_knobs(text: str) -> Tuple[Tuple[Tuple[str, int], ...], ...]:
-    keys = {"ilv", "xhx", "xcd", "kpad", "mch", "sk", "lda", "wpe", "lsb", "sp", "lxor", "bw", "bpad", "ak4", "xo", "xdf", "mb"}
+    keys = {"ilv", "xhx", "xcd", "kpad", "mch", "sk", "lda", "wpe", "lsb", "sp", "lxor", "bw", "bpad", "ak4", "xo", "xdf", "xfa", "xep", "xhp", "mb"}
     out = []
     for part in text.split(";"):
         kv = []
@@ -347,6 +347,14 @@ def _dgrad_xh_knob_cfg(knobs, *, tpf: int, grouped: bool, epilogue: str):
         if tpf not in (1, 3):
             return None
         cfg["xh_defer"] = d["xdf"]
+    if d.get("xfa"):
+        cfg["xh_fast_a"] = d["xfa"]
+    if d.get("xhp"):
+        cfg["xh_persist"] = d["xhp"]
+    if d.get("xep"):
+        if epilogue != "cshuffle":
+            return None
+        cfg["xh_epi"] = d["xep"]
     if d.get("bw"):
         if tpf not in (1, 3):
             return None
@@ -386,7 +394,7 @@ def _dgrad_xh_knob_cfg(knobs, *, tpf: int, grouped: bool, epilogue: str):
 # an "@<regex>" scope on the plain binary's label (unscoped sets are
 # ignored, so the plain grid never grows by accident). Unset = none.
 def _parse_dgrad_pp_knobs(text: str):
-    keys = {"bpp", "pps", "ppe", "xcd", "kpad", "lxor", "mch", "wpe", "sk", "sapl", "mb"}
+    keys = {"bpp", "pps", "ppe", "ppp", "ppx", "zt", "pbs", "xcd", "kpad", "lxor", "mch", "wpe", "sk", "sapl", "mb"}
     out = []
     for part in text.split(";"):
         kv = []
@@ -428,6 +436,14 @@ def _dgrad_pp_knob_cfg(knobs, *, epilogue: str):
         cfg["tapk_pp_sched"] = d["pps"]
     if d.get("ppe"):
         cfg["tapk_pp_epi"] = d["ppe"]
+    if d.get("ppp"):
+        cfg["tapk_pp_persist"] = d["ppp"]
+    if d.get("ppx"):
+        cfg["tapk_pp_xhalo"] = d["ppx"]
+    if d.get("zt"):
+        cfg["tapk_ztrim"] = d["zt"]
+    if d.get("pbs"):
+        cfg["tapk_pp_bslab"] = d["pbs"]
     if d.get("lxor"):
         cfg["lds_xor"] = True
         cfg["lds_k_pad"] = 0
@@ -2466,6 +2482,9 @@ def _dgrad_jobs(
                     ]
                 for kcfg, kscope in knob_cfgs:
                     jcfg = {**cfg, **kcfg}
+                    # The x-halo ping-pong (ppx) bakes the filter width and
+                    # serves pW == 0, as the x-halo loop does.
+                    _ppx = bool(kcfg.get("tapk_pp_xhalo"))
                     ident = KernelIdentity(
                         arch=arch,
                         direction="dgrad",
@@ -2480,7 +2499,7 @@ def _dgrad_jobs(
                         stride_w=caps.get("stride", 0),
                         dilation_h=caps.get("dilation", 0),
                         dilation_w=caps.get("dilation", 0),
-                        **filt,
+                        **({**filt, "filter_w": 3} if _ppx else filt),
                         **jcfg,
                     )
                     if kcfg and kscope:
@@ -2491,6 +2510,7 @@ def _dgrad_jobs(
                                     k: KernelIdentity.__dataclass_fields__[k].default
                                     for k in kcfg
                                 },
+                                **({"filter_w": filt.get("filter_w", 0)} if _ppx else {}),
                             }
                         ).label()
                         if not _re.search(kscope, base_label):
@@ -2499,7 +2519,7 @@ def _dgrad_jobs(
                         identity=ident,
                         direction="dgrad",
                         spec_kwargs=jcfg,
-                        caps=job_caps,
+                        caps={**job_caps, "xhalo": True} if _ppx else job_caps,
                     )
 
         # The dY halo mode of the tap-outer loop (stride 1 / dilation 1, the

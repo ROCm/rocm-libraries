@@ -4477,6 +4477,13 @@ def _run_dgrad_sweep(
         # Conv group rides blockIdx.y (see conv_implicit_gemm_dgrad); the tilde
         # sub-GEMM geometry is channel-independent so flat_tiles is per-group.
         _groups = max(int(spec.problem.groups), 1)
+        if spec.tapk_pp_persist or spec.xh_persist:
+            from kernels.common.conv_implicit_gemm_dgrad import dgrad_persistent_grid
+            from rocke.runtime.hip_module import get_device_num_cus
+
+            flat_tiles = dgrad_persistent_grid(
+                flat_tiles, 1, get_device_num_cus(0), per_cu=spec.xh_persist or 1
+            )
         grid = (flat_tiles, _groups, resolved_split_k)
         # AOT: the whole problem shape travels as kernargs, including the
         # tilde record buffer the CTA dispatch search reads.
@@ -6367,6 +6374,19 @@ def _cached_bind(
                 rt.memset_async(d_ptr, 0, d_bytes, stream)
             _launch()
 
+    elif direction == "dgrad" and extras.get("dx_zero_from_row") is not None:
+        # tapk_pp_persist 2: zero the stream-K tail's dX rows.
+        _launch = run
+        from kernels.common.conv_implicit_gemm_dgrad import _dg_M
+
+        _rows = max(1, _dg_M(problem))
+        _off = min(sizes[2], extras["dx_zero_from_row"] * (sizes[2] // _rows))
+
+        def run(_launch=_launch, dx_ptr=ptrs[2] + _off, dx_bytes=sizes[2] - _off, stream=stream):
+            if dx_bytes > 0:
+                rt.memset_async(dx_ptr, 0, dx_bytes, stream)
+            _launch()
+
     elif direction == "dgrad" and ident.split_k > 1:
         # Split-K dgrad (the x-halo loop's whole-tile slices) atomically
         # accumulates into dX, so every launch zeroes it first -- part of
@@ -6462,6 +6482,26 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
             -(-sg.gemm_m // ident.tile_m) * -(-sg.gemm_n // ident.tile_n)
             for sg in sub_gemms
         )
+        if getattr(ident, "tapk_pp_persist", 0) or getattr(ident, "xh_persist", 0):
+            # A persistent binary walks the tiles itself (the ping-pong: one
+            # workgroup per CU; the x-halo kernel: xh_persist per CU).
+            from kernels.common.conv_implicit_gemm_dgrad import dgrad_persistent_grid
+            from rocke.runtime.hip_module import get_device_num_cus
+
+            n_tiles = blocks
+            blocks = dgrad_persistent_grid(
+                blocks,
+                1,
+                get_device_num_cus(0),
+                per_cu=getattr(ident, "xh_persist", 0) or 1,
+            )
+            if ident.tapk_pp_persist == 2:
+                # Stream-K tail: the tiles past the whole rounds accumulate
+                # into dX atomically; their rows (from the first tail tile's
+                # M tile on) are zeroed before every launch.
+                n_full = n_tiles - n_tiles % blocks
+                n_pid_n = -(-sub_gemms[0].gemm_n // ident.tile_n)
+                extras["dx_zero_from_row"] = (n_full // n_pid_n) * ident.tile_m
         # The flat tile count is per group; the kernel reads its conv group
         # from blockIdx.y, as in the dispatcher's _dgrad_grid.
         return extras, (blocks, max(1, problem.groups), max(1, ident.split_k))

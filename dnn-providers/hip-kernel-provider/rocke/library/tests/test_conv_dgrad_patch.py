@@ -289,6 +289,7 @@ class TestPatchIdentity(unittest.TestCase):
             "epi_store_fast", "split_xcd_remap", "split_streamk", "split_flag_store", "split_zero_first",
             "xh_subtile", "pp_fetch_deep", "pp_split_fetch", "fb_skip_empty", "pp_end_guard", "epi_lds_barriers",
             "split_hybrid", "sched_strategy", "split_tail_compact",
+            "tapk_pp_persist", "tapk_pp_xhalo", "tapk_ztrim", "tapk_pp_bslab", "xh_fast_a", "xh_epi", "xh_persist",
         ):
             del fields[name]
         if fields["streamk"] == "off" and not fields["streamk_reduction"]:

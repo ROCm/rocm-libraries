@@ -233,11 +233,25 @@ class KernelIdentity:
     tapk_pp_sched: int = 0
     # dgrad only (DgradConvSpec.tapk_pp_epi). Left out of the hash at 0.
     tapk_pp_epi: int = 0
+    # dgrad only (DgradConvSpec.tapk_pp_persist). Left out of the hash at 0.
+    tapk_pp_persist: int = 0
+    # dgrad only (DgradConvSpec.tapk_pp_xhalo). Left out of the hash at 0.
+    tapk_pp_xhalo: int = 0
+    # dgrad only (DgradConvSpec.tapk_ztrim). Left out of the hash at 0.
+    tapk_ztrim: int = 0
+    # dgrad only (DgradConvSpec.tapk_pp_bslab). Left out of the hash at 0.
+    tapk_pp_bslab: int = 0
     # dgrad only (DgradConvSpec.xh_a_k4 / xh_order / xh_defer). Left out of
     # the hash at False / 0 / 0.
     xh_a_k4: bool = False
     xh_order: int = 0
     xh_defer: int = 0
+    # dgrad only (DgradConvSpec.xh_fast_a). Left out of the hash at 0.
+    xh_fast_a: int = 0
+    # dgrad only (DgradConvSpec.xh_epi). Left out of the hash at 0.
+    xh_epi: int = 0
+    # dgrad only (DgradConvSpec.xh_persist). Left out of the hash at 0.
+    xh_persist: int = 0
     # fwd only (ImplicitGemmConvSpec.split_addr_k_decode): the per-tile
     # reduction decode of the 3-D split-addressing path. Serves only problems
     # whose cpg is a multiple of tile_k (see identity_supports_problem). Left
@@ -476,7 +490,15 @@ class KernelIdentity:
             del fields["tapk_pp_sched"]
         if not fields["tapk_pp_epi"]:
             del fields["tapk_pp_epi"]
-        for name in ("xh_a_k4", "xh_order", "xh_defer"):
+        if not fields["tapk_pp_persist"]:
+            del fields["tapk_pp_persist"]
+        if not fields["tapk_pp_xhalo"]:
+            del fields["tapk_pp_xhalo"]
+        if not fields["tapk_ztrim"]:
+            del fields["tapk_ztrim"]
+        if not fields["tapk_pp_bslab"]:
+            del fields["tapk_pp_bslab"]
+        for name in ("xh_a_k4", "xh_order", "xh_defer", "xh_fast_a", "xh_epi", "xh_persist"):
             if not fields[name]:
                 del fields[name]
         if not fields["split_addr_k_decode"]:
@@ -976,6 +998,12 @@ def identity_supports_problem(
         # filter width it unrolls is baked (filter_w, matched above).
         if identity.tapk_xhalo and int(getattr(problem, "pW", 0)) != 0:
             return False, "tapk_xhalo serves pW == 0 only"
+        if identity.tapk_pp_xhalo and int(getattr(problem, "pW", 0)) != 0:
+            return False, "tapk_pp_xhalo serves pW == 0 only"
+        if identity.tapk_pp_xhalo >= 2 and int(getattr(problem, "Wi", 0)) < 32:
+            # The gapped halo tile is sized for W rows of >= 32 pixels
+            # (conv_implicit_gemm_dgrad.PP_XHALO_GAP_MIN_WI).
+            return False, "tapk_pp_xhalo 2/3 serves Wi >= 32 only"
         # x-halo split-K accumulates through a packed-atomic store that
         # treats dX as one dense (M, C) matrix: ungrouped problems only.
         if (
@@ -984,6 +1012,11 @@ def identity_supports_problem(
             and int(getattr(problem, "groups", 1)) != 1
         ):
             return False, "x-halo split-K serves groups == 1 only"
+        # The persistent kernels walk the tiles of one group.
+        if (identity.tapk_pp_persist or identity.xh_persist) and int(
+            getattr(problem, "groups", 1)
+        ) != 1:
+            return False, "tapk_pp_persist serves groups == 1 only"
         # The dY halo loop shifts the linear pixel index by whole output
         # rows, so the output must be the input's size, and its LDS tile
         # is sized for halo_max_wo. The filter (filter_h/w, baked) is
@@ -1070,6 +1103,9 @@ IDENTITY_CAPABILITY_FIELDS = (
     "max_sub_gemms",
     "tap_outer_k",
     "tapk_xhalo",
+    "tapk_pp_xhalo",
+    "tapk_pp_persist",
+    "xh_persist",
     "dy_halo",
     "halo_max_wo",
     "split_addr_k_decode",

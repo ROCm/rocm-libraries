@@ -331,7 +331,8 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
         del fields["a_direct"], fields["uk_tap_fast"]  # fwd LDS-lean knobs, off
         for name in ("cshuffle_m_chunks", "tapk_ilv", "tapk_lds_ahead", "tapk_lds_barrier", "tapk_setprio",
                      "xh_b_kpad", "xh_b_wide", "xhalo_exact", "xh_a_k4", "xh_order", "xh_defer",
-                     "tapk_pingpong", "tapk_pp_sched", "tapk_pp_epi"):  # dgrad x-halo and ping-pong knobs, off
+                     "tapk_pingpong", "tapk_pp_sched", "tapk_pp_epi", "tapk_pp_persist", "tapk_pp_xhalo",
+                     "tapk_ztrim", "tapk_pp_bslab", "xh_fast_a", "xh_epi", "xh_persist"):  # dgrad x-halo and ping-pong knobs, off
             del fields[name]
         for name in ("defer_mfma", "defer_mfma_per_write", "lds_ahead", "lds_kpack_read", "rpf_fetch_late",
                      "rpf_lds_barrier", "rpf_setprio", "split_tail", "uk_chunk_group", "uk_nopad", "uk_xhalo",
