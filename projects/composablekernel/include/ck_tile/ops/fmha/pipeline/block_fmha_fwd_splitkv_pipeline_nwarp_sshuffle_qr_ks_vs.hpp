@@ -60,6 +60,8 @@ struct BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS
     static constexpr bool kHasUnevenSplits  = Problem::kHasUnevenSplits;
     static constexpr bool kHasSink          = Problem::kHasSink;
 
+    static_assert(!Problem::kPageShorterThanTile,
+                  "the cross-page merge is implemented by BlockFmhaFwdSplitKVPipelineQRKSVS only");
     static_assert((CK_TILE_FMHA_FWD_FAST_EXP2 &&
                    (kHasLogitsSoftCap && Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS ||
                     !kHasLogitsSoftCap)) ||

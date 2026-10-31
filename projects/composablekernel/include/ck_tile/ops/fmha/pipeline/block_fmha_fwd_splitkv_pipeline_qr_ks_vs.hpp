@@ -56,8 +56,14 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
     static constexpr auto BiasEnum          = Problem::BiasEnum;
     static constexpr bool kStoreLSE         = Problem::kStoreLSE;
     static constexpr bool kIsPagedKV        = Problem::kIsPagedKV;
-    static constexpr bool kHasUnevenSplits  = Problem::kHasUnevenSplits;
-    static constexpr bool kHasSink          = Problem::kHasSink;
+    // Set by codegen on the cross-page tile only. Such an instance checks at run
+    // time whether each K/V tile crosses into the next page block and, if so,
+    // loads both blocks and merges them; that also happens with a page longer
+    // than kN0 whose boundaries are not tile aligned. Every other instance
+    // compiles the merge out entirely.
+    static constexpr bool kPageShorterThanTile = Problem::kPageShorterThanTile;
+    static constexpr bool kHasUnevenSplits     = Problem::kHasUnevenSplits;
+    static constexpr bool kHasSink             = Problem::kHasSink;
 
     static_assert((CK_TILE_FMHA_FWD_FAST_EXP2 &&
                    (kHasLogitsSoftCap && Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS ||
@@ -343,8 +349,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
         }
         const index_t physical_seqlen_k_start = logical_seqlen_k_start + kv_l2p_offset;
         const index_t physical_seqlen_k_end   = logical_seqlen_k_end + kv_l2p_offset;
-        // make sure the first tile is completely located in page-block (page-block size should be
-        // divisible by kN0)
+        // align the first tile to kN0 so that every tile origin is kN0 aligned. With a page that is
+        // a multiple of kN0 each tile then lies in one page-block; the cross-page tile relies on
+        // the same alignment to reach at most one page-block ahead.
         // relationship between each *_start variables: aligned_physical_seqlen_k_start <=
         // physical_seqlen_k_start, logical_seqlen_k_start <= physical_seqlen_k_start
         const index_t aligned_physical_seqlen_k_start =
@@ -398,6 +405,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
 
         static_assert(2 <= k0_loops);
         static_assert(1 <= k1_loops);
+        // The cross-page merge covers the K tile and the V prefetch. The V loads
+        // inside the k1 loop of stage 3 are not merged; kN0 == kK1 leaves it empty.
+        static_assert(!kPageShorterThanTile || kN0 == kK1,
+                      "the cross-page merge requires kN0 == kK1");
         do
         {
             // STAGE 1, QK gemm
@@ -406,14 +417,49 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                 Policy::template MakeKDramTileDistribution<Problem>()); // K DRAM tile window for
                                                                         // load
 
-            auto k_block_tile = load_tile(k_dram_window);
+            // Paged KV whose seq tile crosses a page boundary: the rows past the
+            // current page block fall outside that block's buffer range and the
+            // buffer load returns zero for them. Keep a mirror window on the next
+            // page, whose rows before it read zero the same way, so the two halves
+            // sum back into a whole tile.
+            auto k_dram_window_b = k_dram_window;
+            bool k_is_cross      = false;
+            if constexpr(kPageShorterThanTile)
+            {
+                k_is_cross =
+                    k_page_block_navigator.is_cross_block(i_page_block_k, k_dram_block_window);
+                if(k_is_cross)
+                {
+                    k_page_block_navigator.move_to_block(
+                        i_page_block_k, k_dram_window_b, i_page_block_k + 1);
+                }
+            }
+            auto load_k_merged = [&]() {
+                auto t = load_tile(k_dram_window);
+                if constexpr(kPageShorterThanTile)
+                {
+                    if(k_is_cross)
+                    {
+                        const auto tb = load_tile(k_dram_window_b);
+                        tile_elementwise_inout([](auto& a, const auto& b) { a += b; }, t, tb);
+                    }
+                }
+                return t;
+            };
+
+            auto k_block_tile = load_k_merged();
             {
                 // moving k_dram_window is an in-page-block operation, so there is
                 // no need to invoke k_page_block_navigator.move_tile_window() here.
                 move_tile_window(k_dram_window, {0, kK0});
+                if constexpr(kPageShorterThanTile)
+                {
+                    if(k_is_cross)
+                        move_tile_window(k_dram_window_b, {0, kK0});
+                }
                 clear_tile(s_acc); // initialize C
                 store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
-                k_block_tile = load_tile(k_dram_window);
+                k_block_tile = load_k_merged();
             }
             const bool is_sink_tile = ((num_sink_loop - 1) == i_total_loops);
 
@@ -453,16 +499,35 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                            k_lds_window);
                     block_sync_lds();
                     move_tile_window(k_dram_window, {0, kK0});
+                    if constexpr(kPageShorterThanTile)
+                    {
+                        if(k_is_cross)
+                            move_tile_window(k_dram_window_b, {0, kK0});
+                    }
 
                     store_tile(
                         k_lds_window,
                         tile_elementwise_in(k_element_func, k_block_tile)); // LDS write i + 1
-                    k_block_tile = load_tile(k_dram_window);                // global read i + 2
+                    k_block_tile = load_k_merged();                         // global read i + 2
                 });
             }
 
-            const auto v_prefetch = load_tile(v_dram_window); // prefetch load v tile
-            {                                                 // tail
+            auto v_prefetch = load_tile(v_dram_window); // prefetch load v tile
+            if constexpr(kPageShorterThanTile)
+            {
+                // Same overflow as K: pull the remainder from the next page and
+                // add it back (the OOB half of each read is zero).
+                if(v_page_block_navigator.is_cross_block(i_page_block_v, v_dram_window))
+                {
+                    auto v_dram_window_b = v_dram_window;
+                    v_page_block_navigator.move_to_block(
+                        i_page_block_v, v_dram_window_b, i_page_block_v + 1);
+                    const auto v_overflow = load_tile(v_dram_window_b);
+                    tile_elementwise_inout(
+                        [](auto& a, const auto& b) { a += b; }, v_prefetch, v_overflow);
+                }
+            }
+            { // tail
                 block_sync_lds();
                 gemm_0(s_acc,
                        get_slice_tile(q_tile,
