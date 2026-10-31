@@ -12,6 +12,7 @@
 
 #include <miopen/filesystem.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <type_traits>
 
@@ -545,6 +546,30 @@ ConvSolution CkImplLibLoader::GetSolution(CKSolverType solver,
     auto status       = solver_fns_[ToSolverIndex(solver)].get_solution(
         &ctx, &problem, kernel_id.c_str(), use_tf32, &ptr);
     return ExtractSolution(status, ptr, "get_solution");
+}
+
+ConvSolution CkImplLibLoader::GetSolutionTf32Aware(CKSolverType solver,
+                                                   const ExecutionContext& ctx,
+                                                   const conv::ProblemDescription& problem,
+                                                   const std::string& kernel_id) const
+{
+    const auto dtype = problem.GetInDataType();
+    bool use_tf32    = (dtype == miopenFloat) && problem.UseTF32();
+    // A perf-db-restored config carries only kernel_id; if it was chosen via the FP32 fallback (no
+    // TF32 instance for this problem) a TF32 build would fail and log a spurious error. Decide
+    // before building: use TF32 only if kernel_id is in the TF32 valid set -- the same predicate
+    // the config build used in FillValidKernelsWithTf32Fallback.
+    if(use_tf32)
+    {
+        // bwd-data/wrw solvers store kernel_id as "<type>+<split_k>", but FillValidKernels returns
+        // the bare type string; strip the suffix before the membership test, as the invoker does.
+        const auto pos          = kernel_id.find_last_of('+');
+        const auto type_string  = (pos == std::string::npos) ? kernel_id : kernel_id.substr(0, pos);
+        const auto tf32_kernels = FillValidKernels(solver, problem, dtype, true);
+        use_tf32 =
+            std::find(tf32_kernels.begin(), tf32_kernels.end(), type_string) != tf32_kernels.end();
+    }
+    return GetSolution(solver, ctx, problem, kernel_id, use_tf32);
 }
 
 std::vector<std::string> CkImplLibLoader::GetAllKernelTypeStrings(CKSolverType solver) const
