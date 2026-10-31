@@ -207,8 +207,7 @@ suffix only when the readable part is not already unique.
 **Do not write cases by hand.** Generate them with `import_graph.py` (see
 [Adding Tests](adding-tests.md#add-a-bundle)). You can edit a field of an existing
 case, for example to add its `golden` pointer. Do not rename ids without a
-reason, because support-claim sidecars and the `ffm-quick` tier of
-miopen-provider name cases by id.
+reason, because support-claim sidecars name cases by id.
 
 #### `tensor_patches`
 
@@ -545,8 +544,6 @@ execution_settings:
   `DISABLED` and is never launched. Variants are generated for each `ex_gpu_*`
   label declared in the file, not for the arch that you build. To select one, use
   `ctest -L ex_gpu_<arch>`.
-- miopen-provider's `ffm-quick` lists exact test names (sweep case ids).
-  Regenerating a sweep can rename those ids and silently shrink that tier.
 
 ## Where each format is enforced
 
