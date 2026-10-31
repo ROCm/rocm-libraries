@@ -345,6 +345,9 @@ class _PapTdmDescriptorRefreshWriter:
     def tdmApplyTileKOffsetWaveSeparated(self, kernel, tpa, tpb):
         return _module_with_comment("tdmApplyTileKOffsetWaveSeparated", "unit: StreamK offset")
 
+    def papTdmRefreshPairs(self, kernel, tpa, tpb):
+        return kwa_module.KernelWriterAssembly.papTdmRefreshPairs(self, kernel, tpa, tpb)
+
 
 class _TrackingRegisterPool(RegisterPool):
     def __init__(self, register_type):
@@ -1353,12 +1356,8 @@ _PRISTINE_TDMFUSE_SOLUTION = copy.deepcopy(dict(defaultSolution))
 _MI_W4 = [16, 16, 128, 1, 1, 2, 4, 2, 2]
 
 
-# Canonical PAP grouping-reject phrase.
-_PAP_GROUPING_MSG = "needs each TDM scale on its own descriptor set"
-
-
-# TDMFuse decline phrase; must keep precedence over the PAP reject.
-_FUSE_DECLINED_MSG = "was declined"
+# Canonical PAP grouping-reject phrase: only a lone scale on a data tensor's set is refused.
+_PAP_GROUPING_MSG = "refreshes MX scale descriptors only as a pair"
 
 
 # ---------------------------------------------------------------------------
@@ -1388,15 +1387,23 @@ def test_shared_sets_read_off_the_resolved_grouping(fuse, expected):
     assert tdmScaleSharesDataSet(_ks(fuse=fuse)) == expected
 
 
-@pytest.mark.parametrize("fuse", [1, 2])
-def test_reason_fires_for_every_sharing_grouping(fuse):
-    reason = tdmPapRejectReason(_ks(fuse=fuse))
-    assert reason is not None
+@pytest.mark.parametrize("fuse", [1, 2, 3])
+@pytest.mark.parametrize("num_waves", [2, 4])
+def test_reason_is_silent_for_scales_on_both_tensors(fuse, num_waves):
+    """PAP refreshes and re-banks every set through its owner, scale sets included."""
+    ks = _ks(fuse=fuse, NumWaves=num_waves)
+    assert tdmScaleSharesDataSet(ks), "the cell must exercise a shared set"
+    assert tdmPapRejectReason(ks) is None
+
+
+@pytest.mark.parametrize("fuse", [1, 2, 3])
+@pytest.mark.parametrize("live", [{"MXBlockA": 32, "MXBlockB": 0}, {"MXBlockA": 0, "MXBlockB": 32}])
+def test_reason_names_the_grouping_of_a_lone_scale_on_a_data_set(fuse, live):
+    reason = tdmPapRejectReason(_ks(fuse=fuse, ProblemType=live))
     assert _PAP_GROUPING_MSG in reason
-    # Must name the aliased register ranges, not merely the knob.
-    assert "tdmMXSAGroup0/tdmMXSBGroup0" in reason
-    assert "tdmAGroup0/tdmBGroup0" in reason
-    assert tdmGrouping(_ks(fuse=fuse)).name in reason
+    assert tdmGrouping(_ks(fuse=fuse, ProblemType=live)).name in reason
+    # The old text claimed a missing tdmMXSAMXSBIncs, which TDMFuse=1 allocates.
+    assert "tdmMXSAMXSBIncs" not in reason
 
 
 def test_default_grouping_is_not_rejected():
@@ -1411,12 +1418,15 @@ def test_declined_grouping_answers_with_the_fallback(decline):
     assert tdmPapRejectReason(_ks(fuse=2, **decline)) is None
 
 
-@pytest.mark.parametrize("missing", [{"MXBlockA": 0, "MXBlockB": 32},
-                                     {"MXBlockA": 32, "MXBlockB": 0},
-                                     {"MXBlockA": 0, "MXBlockB": 0}])
-def test_scale_less_types_share_nothing(missing):
+def test_scale_less_types_share_nothing():
     """No live MXSA/MXSB means no scale to seat on a data tensor's set."""
-    assert tdmPapRejectReason(_ks(fuse=1, ProblemType=missing)) is None
+    assert tdmPapRejectReason(_ks(fuse=1, ProblemType={"MXBlockA": 0, "MXBlockB": 0})) is None
+
+
+@pytest.mark.parametrize("live", [{"MXBlockA": 32, "MXBlockB": 0}, {"MXBlockA": 0, "MXBlockB": 32}])
+def test_a_lone_scale_still_rides_a_data_tensors_set(live):
+    """Solution rejects MX on one tensor first; the grouping alone keeps the live scale paired."""
+    assert _PAP_GROUPING_MSG in tdmPapRejectReason(_ks(fuse=1, ProblemType=live))
 
 
 @pytest.mark.parametrize("row, shares", [("MX_AB", False), ("paired", True),
@@ -1531,12 +1541,13 @@ def test_pap_on_the_default_grouping_is_accepted(_gp_gfx1250, gfx1250_iim, assem
 
 
 @pytest.mark.parametrize("fuse", [1, 2])
-def test_pap_with_a_shared_scale_set_is_rejected(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+def test_pap_with_a_shared_scale_set_is_accepted(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     sol, out = _derive(gfx1250_iim, assembler, capsys,
                        PrefetchAcrossPersistent=1, TDMFuse=fuse)
-    assert sol.get("Valid") is False, "TDMFuse=%d + PAP was accepted" % fuse
-    assert _PAP_GROUPING_MSG in out, "rejected for another reason: %r" % out
-    assert _FUSE_DECLINED_MSG not in out
+    assert sol.get("Valid") is True, "TDMFuse=%d + PAP was rejected: %r" % (fuse, out)
+    assert _PAP_GROUPING_MSG not in out
+    # The requested row is the one in effect, not a declined fallback to TDMFuse=0's.
+    assert tdmScaleSharesDataSet(sol), "TDMFuse=%d fell back to %s" % (fuse, tdmGrouping(sol).name)
 
 
 @pytest.mark.parametrize("fuse", [1, 2])
@@ -1552,28 +1563,17 @@ def test_tdmfuse_own_guards_keep_precedence(_gp_gfx1250, gfx1250_iim, assembler,
     sol, out = _derive(gfx1250_iim, assembler, capsys, PrefetchAcrossPersistent=1,
                        TDMFuse=2, mi=[16, 16, 128, 1, 1, 2, 4, 2, 4])
     assert sol.get("Valid") is False
-    assert "TDMFuse=2 requires NumWaves=4 for its 2/1/1 split" in out
+    assert "TDMFuse=2 with MX scales on both tensors supports 2 or 4 waves; got NumWaves=8" in out
     assert _PAP_GROUPING_MSG not in out
-
-
-@pytest.mark.parametrize("fuse", [0, 1, 2, 3])
-def test_no_accepted_pap_solution_aliases_a_scale_onto_a_data_set(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
-    """The invariant every PAP TDM helper is written against."""
-    sol, _ = _derive(gfx1250_iim, assembler, capsys,
-                     PrefetchAcrossPersistent=1, TDMFuse=fuse)
-    if not sol.get("Valid"):
-        pytest.skip("TDMFuse=%d + PAP is refused, nothing to check" % fuse)
-    assert tdmScaleSharesDataSet(sol) == (), (
-        "accepted a PAP solution whose %s grouping shares a descriptor set with "
-        "a scale tensor" % tdmGrouping(sol).name)
 
 
 # Non-idempotent `s_add_u32 dst, dst, x` sites. papTdmSetTailLdsBank is excluded:
 # it normalizes to bank 0 first, so applying it more than once is by design.
 _NON_IDEMPOTENT_BANK_SITES = {
     "papTdmRestoreLdsBank": ("shift A/B descriptor to PAP bank",
-                             "shift MX descriptor to PAP bank"),
+                             "shift MX descriptor to PAP bank",
+                             "shift tdmBGroup0 descriptor set to PAP bank",
+                             "shift tdmMXSBGroup0 descriptor set to PAP bank"),
     "papTdmUpdateDescriptor": ("restore PAP LDS bank after descriptor refresh",),
 }
 
@@ -1803,3 +1803,334 @@ def test_nonpersistent_vector_epilogue_keeps_its_existing_lds_layout(
     assert not sol["_SeparateEpilogueLds"]
     assert sol["LdsOffsetBias"] == 0
     assert sol["LdsNumBytes"] == baseline["LdsNumBytes"]
+
+
+# PAP and RAP on TDMFuse 1-3.
+
+
+# MIWaveGroup [2,1] -> NumWaves 2: TDMFuse 2/3 put MXSA and MXSB on wave 1, MXSB on a set of its own.
+_MI_W2 = [16, 16, 128, 1, 1, 2, 4, 2, 1]
+_ROW_OF_FUSE = {1: "paired", 2: "A_MX", 3: "B_MX"}
+
+# (TDMFuse, MatrixInstruction) of every PAP arrangement with MX scales on both tensors.
+_PAP_MX_BOTH_CELLS = [(1, _MI_W4), (2, _MI_W4), (3, _MI_W4), (1, _MI_W2), (2, _MI_W2), (3, _MI_W2)]
+
+# The PAP shape test_persistent_vector_scratch_is_separate_only_with_pap accepts without MX scales.
+_NO_MX_COMMON = dict(ProblemType=_BF16_VECTOR_EPILOGUE, mi=_BF16_VECTOR_MI, DepthU=128,
+                     SuppressNoLoadLoop=False)
+# Emission takes a 64x64 tile on four waves: at the 256x256 tile the PAP and RAP kernels overflow the VGPRs.
+_NO_MX_EMIT = dict(_NO_MX_COMMON, mi=[16, 16, 32, 1, 1, 2, 2, 2, 2])
+
+
+class _PapSetRefreshWriter:
+    """Records the pairs the PAP refresh and the PAP tail reset program, in order."""
+
+    def __init__(self):
+        self.calls = []
+        self.labels = _StubLabels()
+        self._next_tmp_sgpr = 300
+
+    @contextmanager
+    def allocTmpSgpr(self, size, alignment=1, tag=""):
+        base = self._next_tmp_sgpr
+        self._next_tmp_sgpr += size + alignment
+        yield SimpleNamespace(idx=base, size=size)
+
+    def papTdmRefreshPairs(self, kernel, tpa, tpb):
+        return kwa_module.KernelWriterAssembly.papTdmRefreshPairs(self, kernel, tpa, tpb)
+
+    def papTdmDescriptorSetOwners(self, kernel):
+        return kwa_module.KernelWriterAssembly.papTdmDescriptorSetOwners(self, kernel)
+
+    def tdmDescriptorSetOwner(self, kernel, tc):
+        return kwa_module.KernelWriterAssembly.tdmDescriptorSetOwner(self, kernel, tc)
+
+    def isTdmWaveSeparated(self, kernel):
+        return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
+
+    def _record(self, step, tpa, tpb):
+        self.calls.append((step, tpa["tensorChar"], tpb["tensorChar"]))
+        return Module(step)
+
+    def papTdmRecomputeWaveIdx(self, kernel, wave_idx_sgpr):
+        return Module("recompute WaveIdx")
+
+    def initTDMDescriptorWaveSeparated(self, kernel, tpa, tpb, wave_idx_sgpr="WaveIdx"):
+        return self._record("init", tpa, tpb)
+
+    def tdmGlobalOffsetWaveSeparated(self, kernel, tpa, tpb, wave_idx_sgpr="WaveIdx"):
+        return self._record("offset", tpa, tpb)
+
+    def tdmApplyTileKOffsetWaveSeparated(self, kernel, tpa, tpb):
+        return self._record("k offset", tpa, tpb)
+
+    def tdmApplyTileTailOffsetWaveSeparated(self, kernel, tpa, tpb):
+        return self._record("tail offset", tpa, tpb)
+
+    def resetTDMDescriptorForTailWaveSeparated(self, kernel, tpa, tpb):
+        return self._record("tail reset", tpa, tpb)
+
+    def papTdmSelectTailLdsBank(self, kernel, dst_sgpr):
+        return Module("select tail bank")
+
+    def papTdmSetTailLdsBank(self, kernel, lds_addr_sgpr_name, tail_bank_sgpr):
+        self.calls.append(("tail bank", lds_addr_sgpr_name))
+        return Module("tail bank")
+
+
+def _pap_set_kernel(fuse, num_waves, mx):
+    blocks = {"MXBlockA": 32, "MXBlockB": 32} if mx else {"MXBlockA": 0, "MXBlockB": 0}
+    return _ks(fuse=fuse, NumWaves=num_waves, ProblemType=blocks, LdsOffsetA_Blk=0x8000,
+               TileProcessingStrategy="StreamK", WorkAssignment="StaticGrid")
+
+
+def _pap_set_calls(kernel, entry, monkeypatch):
+    """[(writer calls, rendered module)] of the A/B call and, with MX scales, the scale call."""
+    monkeypatch.setattr(kwa_module.TensorDataMoverLoad, "find", lambda writer: _StubTdmComp())
+    tpa = {"tensorChar": "A", "MX": {"tensorChar": "MXSA"}}
+    tpb = {"tensorChar": "B", "MX": {"tensorChar": "MXSB"}}
+    pairs = [(tpa, tpb)]
+    if kernel["ProblemType"]["MXBlockA"]:
+        pairs.append((tpa["MX"], tpb["MX"]))
+    writer, out = _PapSetRefreshWriter(), []
+    for pa, pb in pairs:
+        writer.calls = []
+        module = entry(writer, kernel, pa, pb)
+        out.append((writer.calls, str(module)))
+    return out
+
+
+# (TDMFuse, NumWaves, MX scales on both tensors, descriptor set owners); TDMFuse=0 is the control.
+_PAP_SET_CELLS = [
+    (0, 4, True, ["A", "MXSA"]), (0, 4, False, ["A"]),
+    (1, 4, True, ["A", "B"]), (2, 4, True, ["A", "B"]), (3, 4, True, ["A", "B"]),
+    (1, 2, True, ["A", "B"]), (2, 2, True, ["A", "B", "MXSB"]), (3, 2, True, ["A", "B", "MXSB"]),
+    (1, 4, False, ["A", "B"]), (2, 4, False, ["A", "B"]), (3, 4, False, ["A", "B"]),
+]
+
+
+def _expected_pap_calls(fuse, mx, steps, tail):
+    """Per call: TDMFuse=0 programs its own pair; separate sets all go through the A/B call."""
+    pairs = [("A", "B")] + ([("MXSA", "MXSB")] if mx else [])
+    if fuse == 0:
+        return [[(step,) + pair for step in steps] + tail(pair) for pair in pairs]
+    return [[(step,) + pair for step in steps for pair in pairs] + tail(None)] + ([[]] if mx else [])
+
+
+@pytest.mark.parametrize("fuse, num_waves, mx, owners", _PAP_SET_CELLS)
+def test_pap_refresh_rebuilds_every_set_before_offsetting_any(monkeypatch, fuse, num_waves, mx, owners):
+    """The scale pair of a separate-set row is refreshed on the A/B call, each bank restored once."""
+    kernel = _pap_set_kernel(fuse, num_waves, mx)
+    assert _PapSetRefreshWriter().papTdmDescriptorSetOwners(kernel) == owners
+    out = _pap_set_calls(kernel, kwa_module.KernelWriterAssembly.papTdmUpdateDescriptor, monkeypatch)
+    expected = _expected_pap_calls(fuse, mx, ("init", "offset", "k offset"), lambda pair: [])
+    assert [calls for calls, _ in out] == expected
+    restored = [re.findall(r"s_add_u32 s\[sgprtdm(\w+)Group0\+1\][^\n]*restore PAP LDS bank", text)
+                for _, text in out]
+    if fuse == 0:
+        assert restored == [["A"]] + ([["MXSA"]] if mx else [])
+    else:
+        assert restored == [owners] + ([[]] if mx else [])
+
+
+@pytest.mark.parametrize("fuse, num_waves, mx, owners", _PAP_SET_CELLS)
+def test_pap_tail_reset_rebuilds_every_set_before_offsetting_any(monkeypatch, fuse, num_waves, mx, owners):
+    """A tail offset on a set the scale call has not rebuilt yet is lost to that rebuild."""
+    kernel = _pap_set_kernel(fuse, num_waves, mx)
+    out = _pap_set_calls(kernel, kwa_module.KernelWriterAssembly.papResetTDMDescriptorForTailWaveSeparated,
+                         monkeypatch)
+
+    def tail(pair):
+        tensors = pair if pair is not None else owners
+        return [("tail bank", "tdm%sGroup0+1" % tc) for tc in tensors]
+
+    expected = _expected_pap_calls(fuse, mx, ("init", "offset", "tail offset", "tail reset"), tail)
+    assert [calls for calls, _ in out] == expected
+
+
+@pytest.mark.parametrize("fuse", [1, 2, 3])
+@pytest.mark.parametrize("in_pap_next_tile_prefetch", [False, True])
+def test_rap_nulls_an_every_wave_a_set_on_every_wave(fuse, in_pap_next_tile_prefetch):
+    """Without MX scales A rides every wave on a set of its own, so no wave parity selects it."""
+    kernel = dict(_ks(fuse=fuse, ProblemType={"MXBlockA": 0, "MXBlockB": 0}), WavefrontSize=32)
+    rendered = str(kwa_module.KernelWriterAssembly.rapNullTdmDescriptorForEvenWaves(
+        _RapTdmNullWriter(in_pap_next_tile_prefetch), kernel, "tdmAGroup0+0"))
+    assert "s[sgprArgType]" not in rendered, "an every-wave A set was nulled by wave parity"
+    assert ("s[sgprWorkGroup2], s[sgprRAPResidentBatch]" in rendered) is in_pap_next_tile_prefetch
+    assert "s[sgprtdmAGroup0+0], 0" in rendered
+
+
+def test_rap_keeps_wave_parity_on_the_default_grouping():
+    kernel = dict(_ks(fuse=0, ProblemType={"MXBlockA": 0, "MXBlockB": 0}), WavefrontSize=32)
+    rendered = str(kwa_module.KernelWriterAssembly.rapNullTdmDescriptorForEvenWaves(
+        _RapTdmNullWriter(False), kernel, "tdmAGroup0+0"))
+    assert "s[sgprArgType]" in rendered
+
+
+@pytest.mark.parametrize("fuse, mi", _PAP_MX_BOTH_CELLS)
+def test_pap_accepts_scales_on_both_tensors_on_tdmfuse_1_3(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, mi):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, PrefetchAcrossPersistent=1, TDMFuse=fuse, mi=mi)
+    assert sol.get("Valid") is True, "TDMFuse=%d + PAP was rejected: %r" % (fuse, out)
+    assert sol.get("PrefetchAcrossPersistent") == 1
+    assert tdmGrouping(sol).name == _ROW_OF_FUSE[fuse]
+
+
+@pytest.mark.parametrize("fuse", [1, 2, 3])
+@pytest.mark.parametrize("pap, rap", [(1, 0), (0, 1), (1, 1)])
+def test_pap_and_rap_accept_tdmfuse_1_3_without_scales(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, pap, rap):
+    # RAP needs NoTailLoop; PAP alone keeps the K tail so the tail reset is emitted.
+    overrides = dict(_NO_MX_COMMON, PrefetchAcrossPersistent=pap, ReuseAcrossPersistent=rap,
+                     AssertSummationElementMultiple=128 if rap else 1)
+    control, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, **overrides)
+    if not control.get("Valid"):
+        pytest.skip("the TDMFuse=0 control is refused: %r" % out)
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, **overrides)
+    assert sol.get("Valid") is True, "TDMFuse=%d without MX scales was rejected: %r" % (fuse, out)
+    assert (sol.get("PrefetchAcrossPersistent"), sol.get("ReuseAcrossPersistent")) == (pap, rap)
+    assert tdmGrouping(sol).name == _ROW_OF_FUSE[fuse]
+
+
+def _owner_hits(asm, phys, comments):
+    """Physical registers of the `s_add_u32 tdm*Group0+n` lines carrying one of `comments`."""
+    hits = []
+    for line in asm.splitlines():
+        # StinkyTofu may fold the copy before an add into the add's first source.
+        m = re.search(r"s_add_u32 s\[(sgprtdm\w+Group0\+\d)\], \S+, \S+\s*//\s*(.*)", line)
+        if m and m.group(2).strip() in comments:
+            hits.append(phys(m.group(1)))
+    return hits
+
+
+_PAP_EMIT_CELLS = ([dict(TDMFuse=fuse, mi=mi) for fuse, mi in _PAP_MX_BOTH_CELLS]
+                   + [dict(_NO_MX_EMIT, TDMFuse=fuse) for fuse in (1, 2, 3)]
+                   + [dict(TDMFuse=0), dict(_NO_MX_EMIT, TDMFuse=0)])
+
+
+@pytest.mark.parametrize("cell", _PAP_EMIT_CELLS,
+                         ids=lambda c: "f%d_%s_%s" % (c["TDMFuse"], "bf16" if "ProblemType" in c else "mx",
+                                                      "w2" if c.get("mi") == _MI_W2 else "w4"))
+def test_pap_moves_each_descriptor_set_once(_gp_gfx1250, gfx1250_iim, assembler, capsys, cell):
+    """The PAP bank restore, refresh and tail offset reach every live set, each the same number of times."""
+    sol, asm = _emit_asm(gfx1250_iim, assembler, PrefetchAcrossPersistent=1, **cell)
+    out = capsys.readouterr().out
+    assert asm, "rejected or not emitted: %r" % out
+    resolved, phys = _resolve_sets(asm)
+    for comments, word, once in ((_NON_IDEMPOTENT_BANK_SITES["papTdmRestoreLdsBank"], 1, True),
+                                 (_NON_IDEMPOTENT_BANK_SITES["papTdmUpdateDescriptor"], 1, True),
+                                 (("Apply StreamK tail K-offset to TDM global addr",), 2, False)):
+        allocated = {phys("sgprtdm%sGroup0+%d" % (tc, word)) for tc in ("A", "B", "MXSA", "MXSB")} - {None}
+        hits = _owner_hits(asm, phys, comments)
+        if not hits and not once:
+            # No K tail in this shape, so no PAP tail reset to offset.
+            continue
+        if once and not sol.get("LdsOffsetA_Blk"):
+            # LdsOffsetA_Blk == 0 folds the bank helpers out: no set has a bank to move to.
+            assert not [line for line in asm.splitlines() if any(c in line for c in comments)], comments
+            continue
+        counts = {reg: hits.count(reg) for reg in hits}
+        assert set(counts) == allocated, (comments, sorted(counts), sorted(allocated))
+        assert len(set(counts.values())) == 1 and (not once or set(counts.values()) == {1}), (comments, counts)
+    undefined = sorted(s for s in set(re.findall(r"\bsgprtdm\w*Incs\b", asm)) if resolved.get(s) is None)
+    assert not undefined, "referenced with no .set: %s" % undefined
+
+
+_RAP_NO_MX = dict(_NO_MX_EMIT, ReuseAcrossPersistent=1, AssertSummationElementMultiple=128)
+
+
+def _labelsDefinedTwice(text):
+    """Labels the assembly text defines more than once, sorted."""
+    import re
+    from collections import Counter
+    counts = Counter(re.findall(r"^([A-Za-z_.$][\w.$]*):", text, re.M))
+    return sorted(name for name, n in counts.items() if n > 1)
+
+
+@contextmanager
+def _stinkyTofuInputs():
+    """Collects the text of every module handed to StinkyTofu inside the block.
+
+    StinkyTofu's CFG builder aborts the process on a module that defines a label twice, so such a
+    module is stopped here, before the pipeline sees it, and the test fails instead of the worker.
+    """
+    import rocisa
+    original = rocisa.toStinkyTofuModule
+    inputs = []
+
+    def checked(body, *args, **kwargs):
+        text = str(body)
+        inputs.append(text)
+        twice = _labelsDefinedTwice(text)
+        if twice:
+            raise AssertionError("labels defined twice: %s" % twice)
+        return original(body, *args, **kwargs)
+
+    rocisa.toStinkyTofuModule = checked
+    try:
+        yield inputs
+    finally:
+        rocisa.toStinkyTofuModule = original
+
+
+def _assertReuseCopyOwnsItsShadowInit(text):
+    """The RAP reuse copy re-emits the shadow-init block under its own names and branches only to them."""
+    import re
+    fill, rest = text.split("label_RAP_IterN:", 1)
+    reuse = rest.split("label_RAP_StoreJoin:", 1)[0]
+    assert re.search(r"^label_ShadowInitStart:", fill, re.M)
+    assert set(re.findall(r"\blabel_ShadowInitStart\w*", reuse)) == {"label_ShadowInitStart_RAPIterN"}
+
+
+def test_rap_with_shadow_init_emits_each_label_once(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+    """TDMFuse=0 and RAP with shadow init at its default. The reuse copy re-emits the shadow-init block,
+    whose labels were built from literals, so each was defined twice and StinkyTofu's CFG builder
+    aborted the process; they now go through rapLabel."""
+    with _stinkyTofuInputs() as inputs:
+        sol, asm = _emit_asm(gfx1250_iim, assembler, TDMFuse=0, **_RAP_NO_MX)
+    out = capsys.readouterr().out
+    assert [_labelsDefinedTwice(text) for text in inputs] == [[]]
+    assert asm, "rejected or not emitted: %r" % out
+    assert not sol["ForceDisableShadowInit"]
+    _assertReuseCopyOwnsItsShadowInit(inputs[0])
+    assert "RAP: even wave carries A" in inputs[0]
+    assert _labelsDefinedTwice(asm) == []
+
+
+@pytest.mark.parametrize("fuse", [1, 2, 3])
+def test_rap_without_scales_silences_a_on_every_wave(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+    """Without MX scales A has its own set on every wave, so keeping A resident nulls that set on
+    every wave; the reuse copy keeps its own shadow-init labels here too."""
+    with _stinkyTofuInputs() as inputs:
+        _, asm = _emit_asm(gfx1250_iim, assembler, TDMFuse=fuse, **_RAP_NO_MX)
+    out = capsys.readouterr().out
+    assert [_labelsDefinedTwice(text) for text in inputs] == [[]]
+    assert asm, "rejected or not emitted: %r" % out
+    _assertReuseCopyOwnsItsShadowInit(inputs[0])
+    assert "RAP: every wave carries A" in inputs[0]
+    assert "RAP: even wave carries A" not in inputs[0]
+    assert _labelsDefinedTwice(asm) == []
+
+
+@pytest.mark.parametrize("pap", [0, 1], ids=["rap", "paprap"])
+@pytest.mark.parametrize("fuse", [2, 3])
+def test_rap_rejects_a_shared_scale_set(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, pap):
+    """RAP silences A by wave parity, which the shared-scale rows do not give it.
+
+    TDMFuse 2/3 with both scales seat A on part of the waves, so Solution rejects
+    ReuseAcrossPersistent there rather than letting the parity null reach the writer."""
+    extra = dict(PrefetchAcrossPersistent=1) if pap else {}
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, mi=_MI_W2,
+                       ReuseAcrossPersistent=1, AssertSummationElementMultiple=256, **extra)
+    assert sol.get("Valid") is not True, "TDMFuse=%d + RAP was accepted" % fuse
+    assert "ReuseAcrossPersistent is not implemented with TDMFuse=%d" % fuse in out, out[-2000:]
+
+
+@pytest.mark.parametrize("fuse", [1, 2, 3])
+def test_rap_accepts_the_every_wave_pair(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
+    """Without MX scales TDMFuse 1-3 give A and B a set each on every wave, which RAP can silence."""
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, mi=_MI_W2,
+                       ReuseAcrossPersistent=1, AssertSummationElementMultiple=256,
+                       ProblemType={"MacDataTypeB": "F8", "MXBlockA": 0, "MXBlockB": 0})
+    assert sol.get("Valid") is True, "TDMFuse=%d + RAP without scales was rejected: %r" % (fuse, out)
+    assert sol.get("ReuseAcrossPersistent") == 1
