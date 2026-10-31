@@ -135,5 +135,33 @@ if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
     target_link_libraries(tensilelite-client PRIVATE rocprofiler-sdk)
 endif()
 
+# The toolchain tags the executables' search path as DT_RUNPATH, which the
+# loader consults only after LD_LIBRARY_PATH. Tools that put <ROCM>/lib on
+# LD_LIBRARY_PATH (rocprofv3, the rocprofiler-sdk modulefiles) then make the
+# client load that ROCm's libtensilelite-host.so.1 instead of the one it was
+# built against; both share the SONAME but not the ABI or library format.
+# Re-tagging the same path list as DT_RPATH puts it ahead of LD_LIBRARY_PATH.
+# The list is read back from the binary rather than recomputed, so it stays
+# whatever CMake (or a superbuild) chose, and install-time RPATH_CHANGE keeps
+# the tag.
+option(TENSILELITE_CLIENT_FORCE_RPATH
+    "Tag the client executables' search path as DT_RPATH instead of DT_RUNPATH" ON)
+if(TENSILELITE_CLIENT_FORCE_RPATH AND UNIX AND NOT APPLE)
+    find_program(TENSILELITE_PATCHELF patchelf)
+    if(TENSILELITE_PATCHELF)
+        foreach(_client IN ITEMS tensilelite-client cpu-gemm-driver)
+            add_custom_command(TARGET ${_client} POST_BUILD
+                COMMAND sh -c "r=$(\"$0\" --print-rpath \"$1\") || exit 1; [ -z \"$r\" ] || exec \"$0\" --force-rpath --set-rpath \"$r\" \"$1\""
+                        "${TENSILELITE_PATCHELF}" "$<TARGET_FILE:${_client}>"
+                VERBATIM)
+        endforeach()
+    else()
+        message(WARNING
+            "patchelf not found: tensilelite-client keeps DT_RUNPATH, so an "
+            "LD_LIBRARY_PATH holding another ROCm's lib/ can replace its "
+            "tensilelite-host library at run time.")
+    endif()
+endif()
+
 add_subdirectory(include)
 add_subdirectory(src)
