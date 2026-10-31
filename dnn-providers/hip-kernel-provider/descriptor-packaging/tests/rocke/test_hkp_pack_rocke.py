@@ -590,6 +590,8 @@ def test_rocke_compiles_and_packs(
         "by_value",
         "by_value",
         "by_value",
+        "by_value",
+        "by_value",
     ]
     assert [a["name"] for a in signature] == [
         "q_ptr",
@@ -600,6 +602,8 @@ def test_rocke_compiles_and_packs(
         "batch",
         "seqlen_q",
         "seqlen_kv",
+        "num_query_heads",
+        "num_kv_heads",
     ]
 
 

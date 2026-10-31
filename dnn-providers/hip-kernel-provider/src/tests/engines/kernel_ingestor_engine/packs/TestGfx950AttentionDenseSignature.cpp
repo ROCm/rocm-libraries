@@ -88,7 +88,7 @@ constexpr uint32_t SCALAR_BYTES = 4;
 
 constexpr std::size_t SCALE_INDEX = 4;
 
-constexpr std::size_t LAST_INDEX = 7;
+constexpr std::size_t LAST_INDEX = 9;
 
 /// The argument list attention_dense_signature declares, under the names it gives them.
 std::vector<KernelArgument> pythonAbi()
@@ -100,11 +100,13 @@ std::vector<KernelArgument> pythonAbi()
             KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "scale"},
             KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "batch"},
             KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "seqlen_q"},
-            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "seqlen_kv"}};
+            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "seqlen_kv"},
+            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "num_query_heads"},
+            KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, "num_kv_heads"}};
 }
 
 /// The form a persistent body would take: the same four pointers and scale, with the
-/// shape tail dropped because `num_persistent` bakes the work-item space.
+/// shape and head tail dropped because `num_persistent` bakes the work-item space.
 std::vector<KernelArgument> persistentAbi()
 {
     auto signature = pythonAbi();
@@ -313,11 +315,11 @@ TEST(TestGfx950AttentionDenseSignature, AcceptsTheAbiThePythonDeclares)
 
 TEST(TestGfx950AttentionDenseSignature, RefusesADroppedTrailingArgument)
 {
-    // seqlen_kv gone. Seven arguments against eight: the kernel would read the kernarg
+    // num_kv_heads gone. Nine arguments against ten: the kernel would read the kernarg
     // segment one slot past what the host wrote.
     auto signature = pythonAbi();
     signature.pop_back();
-    expectRefused(signature, "a seven-argument list is not this ABI");
+    expectRefused(signature, "a nine-argument list is not this ABI");
 }
 
 TEST(TestGfx950AttentionDenseSignature, RefusesAnExtraTrailingArgument)
@@ -326,7 +328,7 @@ TEST(TestGfx950AttentionDenseSignature, RefusesAnExtraTrailingArgument)
     // add. Every argument the host does write still lands correctly, so nothing faults.
     auto signature = pythonAbi();
     signature.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, ""});
-    expectRefused(signature, "a nine-argument list is not this ABI");
+    expectRefused(signature, "an eleven-argument list is not this ABI");
 }
 
 TEST(TestGfx950AttentionDenseSignature, RefusesThePersistentFiveArgumentForm)
@@ -354,13 +356,13 @@ TEST(TestGfx950AttentionDenseSignature, RefusesAPointerInAScalarSlot)
 
 TEST(TestGfx950AttentionDenseSignature, RefusesBuffersAndScalarsTransposed)
 {
-    // The by-value tail ahead of the pointers. Same eight entries, same four of each
-    // kind, and the comparison is positional, so only the order distinguishes this from
-    // the shipped ABI.
+    // The by-value tail ahead of the pointers. Same ten entries, the same four buffers
+    // and six scalars, and the comparison is positional, so only the order distinguishes
+    // this from the shipped ABI.
     const KernelArgument buffer{BUFFER_KIND, POINTER_BYTES, 0, ""};
     const KernelArgument scalar{BY_VALUE_KIND, SCALAR_BYTES, 0, ""};
     const std::vector<KernelArgument> transposed{
-        scalar, scalar, scalar, scalar, buffer, buffer, buffer, buffer};
+        scalar, scalar, scalar, scalar, scalar, scalar, buffer, buffer, buffer, buffer};
     expectRefused(transposed, "the four pointers come first");
 }
 
@@ -378,8 +380,8 @@ TEST(TestGfx950AttentionDenseSignature, RefusesANarrowedPointerSlot)
 
 TEST(TestGfx950AttentionDenseSignature, RefusesAWidenedScalarSlot)
 {
-    // seqlen_kv as an i64. The shape parameters are i32 and the pack marshals int32_t, so
-    // a 64-bit slot would take the next four bytes of the segment as its high half.
+    // num_kv_heads as an i64. The shape parameters are i32 and the pack marshals int32_t,
+    // so a 64-bit slot would read four bytes past the segment as its high half.
     expectRefused(withArgument(LAST_INDEX, KernelArgument{BY_VALUE_KIND, POINTER_BYTES, 0, ""}),
                   "the shape parameters are 32-bit");
 }

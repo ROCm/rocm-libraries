@@ -198,6 +198,8 @@ from kernels.common.attention_dense_decode import (
     PersistHkvMajor,
     PersistHqMinorSwz,
     PersistQbMajor,
+    fastdiv_kernargs,
+    make_fastdiv,
 )
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
@@ -593,37 +595,6 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         if not self.runtime_shape:
             return ()
         return ("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")
-
-    @property
-    def fastdiv_divisors(self) -> tuple[str, ...]:
-        """The runtime divisors the persistent work decode divides by on every
-        grid-stride iteration, in kernarg order. Empty off the persistent grid, whose
-        one divide (``gqa``) runs once per CTA.
-
-        Each one gets a host-computed magic multiplier and shift
-        (:func:`_fastdiv_kernargs`), so the in-loop divide stays a mul-hi, an add and
-        a shift instead of the backend's software integer division. Each decode
-        class declares its own (``PersistDecode.fastdiv_divisors``); a decode
-        without the kv head as a digit lists ``gqa`` for ``hkv = hq / gqa``.
-
-        A function of the resolved decode order only, never of the shape, so it is
-        fixed by the cache key: the key carries the resolved order on the persistent
-        grid (``attention_dense_cache_key``)."""
-        if not (self.persistent and self.runtime_shape):
-            return ()
-        return PERSIST_DECODES[self.resolved_persist_decode].fastdiv_divisors
-
-    @property
-    def runtime_kernarg_fields(self) -> tuple[str, ...]:
-        """The full runtime-kernarg ABI after ``scale``: :attr:`runtime_param_fields`,
-        then a ``<divisor>_magic`` / ``<divisor>_shift`` i32 pair per
-        :attr:`fastdiv_divisors` entry. The body's param declarations,
-        :func:`attention_dense_signature` and :func:`attention_dense_runtime_args`
-        all read this one tuple. The fast-division pairs are derived values, not spec
-        fields, so they play no part in the cache key."""
-        return self.runtime_param_fields + tuple(
-            f"{d}_{part}" for d in self.fastdiv_divisors for part in ("magic", "shift")
-        )
 
     def _shape_name_parts(self) -> tuple[str, ...]:
         return () if self.runtime_shape else super()._shape_name_parts()
@@ -2448,17 +2419,11 @@ def _build_attention_dense_single_buffer(
         # constant, so this per-CTA divide strength-reduces.
         nqb_p = b.div(seqlen_q_p, b.const_i32(BLOCK_M))
         w_p = b.mul(b.mul(nqb_p, hq_p), batch_p)
-
-        def _div(n, d):
-            # (umulhi(n, magic) + n) >> shift, exact for n < 2**30 (the add is nsw);
-            # attention_dense_runtime_args holds every decode dividend under that
-            # bound.
-            return b.lshr(
-                b.add(b.umul_hi_i32(n, rt[f"{d}_magic"]), n), rt[f"{d}_shift"]
-            )
-
         work_shape = DecodeShape(
-            b, spec, {**shape_values, "nqb": nqb_p, "w": w_p}, fastdiv=_div
+            b,
+            spec,
+            {**shape_values, "nqb": nqb_p, "w": w_p},
+            fastdiv=make_fastdiv(b, rt),
         )
         cta_id = b.block_id_x()
         outer = b.scf_for(cta_id, w_p, b.const_i32(NP), iv_name="wi")
@@ -2571,54 +2536,15 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     return sig.build()
 
 
-# The persistent decode's fast division is exact for dividends below 2**30: the
-# mul-hi + dividend add is emitted nsw, and mul-hi(n, magic) < n doubles at most.
-_FASTDIV_DIVIDEND_LIMIT = 1 << 30
-
-
-def _fastdiv_kernargs(spec: Gfx942AttentionDenseSpec) -> dict[str, int]:
-    """``{<divisor>_magic, <divisor>_shift}`` for every ``spec.fastdiv_divisors``
-    entry, from :func:`rocke.helpers.magic_division.calculate_magic_numbers`. The magic
-    is a uint32 passed as its two's-complement i32 bit pattern, which is what the
-    kernel's unsigned mul-hi reads.
-
-    Raises when a decode dividend can reach the fast-division dividend limit (the
-    work-item count, or the decode's own bound): past it the quotient is wrong with
-    no fault."""
-    if not spec.fastdiv_divisors:
-        return {}
-    from rocke.helpers.magic_division import calculate_magic_numbers
-
-    nqb = spec.seqlen_q // spec.block_m
-    bound = PERSIST_DECODES[spec.resolved_persist_decode].fastdiv_dividend_bound(spec)
-    if bound >= _FASTDIV_DIVIDEND_LIMIT:
-        raise ValueError(
-            f"gfx942 attention_dense: persistent decode dividend bound {bound} "
-            f"(the work-item count nqb*Hq*B, or the decode's own) must be below "
-            f"2**30 for the work decode's fast division"
-        )
-    value = {
-        "batch": spec.batch,
-        "num_query_heads": spec.num_query_heads,
-        "gqa": spec.num_queries_per_kv,
-        "nqb": nqb,
-    }
-    out = {}
-    for d in spec.fastdiv_divisors:
-        magic, shift = calculate_magic_numbers(value[d])
-        out[f"{d}_magic"] = magic - (1 << 32) if magic >= (1 << 31) else magic
-        out[f"{d}_shift"] = shift
-    return out
-
-
 def attention_dense_runtime_args(spec: AttentionDenseSpec) -> dict[str, int]:
     """Kernarg values for every ``spec.runtime_kernarg_fields`` entry: the shape
     params read off the spec, then the persistent decode's fast-division pairs
-    (:func:`_fastdiv_kernargs`). Empty on the baked paths. Every launcher merges
-    this into its pointer/scale args rather than listing the fields itself."""
+    (:func:`~kernels.common.attention_dense_decode.fastdiv_kernargs`). Empty on the
+    baked paths. Every launcher merges this into its pointer/scale args rather than
+    listing the fields itself."""
     spec = _as_gfx942_spec(spec)
     args = {f: int(getattr(spec, f)) for f in spec.runtime_param_fields}
-    args.update(_fastdiv_kernargs(spec))
+    args.update(fastdiv_kernargs(spec, "gfx942"))
     return args
 
 
