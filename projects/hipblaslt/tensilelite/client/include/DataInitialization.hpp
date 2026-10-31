@@ -1183,6 +1183,18 @@ namespace TensileLite
                 // unknown (not written yet).
                 std::optional<BatchedPointersKey> gpuBatchKey;
 
+                // MX scales with the gfx950 HostPreSwizzle layout. mxCompactScale: the
+                // generator's compact canonical scale of each batch (cpuInput.valid holds it
+                // restrided for K-fast layouts), kept from the problem's generation.
+                // mxSwizzledScale: its GFX950-swizzled layout, built from it on first use.
+                // gpuMXSwizzled: a separate GPU copy of mxSwizzledScale (gpuMXSwizzledCurrent
+                // says it holds the current one), so solutions reading the canonical layout
+                // (gpuInput.valid) and the swizzled one do not overwrite each other.
+                std::vector<uint8_t>  mxCompactScale;
+                std::vector<uint8_t>  mxSwizzledScale;
+                std::shared_ptr<void> gpuMXSwizzled;
+                bool                  gpuMXSwizzledCurrent = false;
+
                 MemoryInput& getInputByKind(hipMemcpyKind kind)
                 {
                     if(kind == hipMemcpyHostToHost || kind == hipMemcpyDeviceToHost)
@@ -1229,6 +1241,19 @@ namespace TensileLite
             {
                 p.gpuValidElements = 0;
             }
+
+            // Uploads p.mxSwizzledScale to p.gpuMXSwizzled (allocated on first use, as large as
+            // gpuInput.valid) unless p.gpuMXSwizzledCurrent says it already holds it (then, with
+            // m_verifyUploadSkip, reads it back and throws if it differs). Returns whether it
+            // uploaded.
+            bool uploadMXSwizzledToGPU(TensorDescriptor const& scaleDesc, PristineUnit& p);
+
+            // The GPU buffer the input copies read tensor i from: gpuInput.valid, or
+            // gpuMXSwizzled for an MX scale whose current solution reads the GFX950-swizzled
+            // layout (m_mxPreswizzledA/B). On gfx950 a set flag implies gpuMXSwizzled is
+            // allocated; gfx1250 sets the flag but swizzles into gpuInput.valid and never
+            // allocates gpuMXSwizzled, so it keeps reading gpuInput.valid.
+            void* gpuValidSource(size_t i, PristineUnit& p) const;
 
             void initializeGPUBatchedInputs(ContractionProblemGemm const& problem);
 
@@ -1371,13 +1396,14 @@ namespace TensileLite
 
             int m_mxScaleFormat = 0;
             MXScaleLayout m_mxScaleLayout = MXScaleLayout::None;
-            // Set by initializeMXData when a preswizzled scale was uploaded
-            // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
-            // hand back gpuInput.valid as-is rather than re-swizzling).
+            // Set by initializeMXData when the current solution's preswizzled scale is on the
+            // GPU (gfx950: in gpuMXSwizzled; gfx1250: uploaded straight into gpuInput.valid),
+            // so copySwizzledToGPUBuffer does not re-swizzle. Cleared for solutions that read
+            // the canonical scale.
             bool m_mxPreswizzledA = false;
             bool m_mxPreswizzledB = false;
 
-            // Scale descriptor most recently swizzled into gpuInput.valid, per
+            // Scale descriptor most recently swizzled into gpuInput.valid (gfx1250), per
             // tensor index. The MX equivalent of g_swizzleCache.
             std::map<size_t, TensorDescriptor> m_mxSwizzledDescriptor;
             InputEpoch                         m_inputEpoch = 0;

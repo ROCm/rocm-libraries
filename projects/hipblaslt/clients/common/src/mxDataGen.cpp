@@ -379,6 +379,30 @@ void makeIntegerExactMX(std::vector<uint8_t>& dataBytes,
     }
 }
 
+// The {MN, K block} grid the GFX950 layout swizzles a generated scale of scaleElements scales
+// as. The generator emits one scale per (MN, K block) pair, so the MN extent divides straight
+// back out of the scale's size. It is read from the size instead of from row/col because the
+// generator sizes the scale from the strides it was passed, which can span more rows than M*N
+// when the caller pads its leading dimension. The swizzle rejects any grid whose product is not
+// exactly the scale's size, so the grid has to describe the buffer that exists, not the
+// logical extent.
+static MXScaleGrid gfx950ScaleGrid(size_t   scaleElements,
+                                   uint64_t row,
+                                   uint64_t col,
+                                   bool     isTranspose,
+                                   bool     isMatrixA,
+                                   int      elementsPerMXBlock)
+{
+    bool const   kIsRows  = (isMatrixA && isTranspose) || (!isMatrixA && !isTranspose);
+    size_t const kExtent  = static_cast<size_t>(kIsRows ? row : col);
+    size_t const block    = elementsPerMXBlock > 0 ? static_cast<size_t>(elementsPerMXBlock) : 0;
+    size_t const kBlocks  = block > 0 ? (kExtent + block - 1) / block : 0;
+    size_t const mnExtent = (kBlocks > 0 && scaleElements % kBlocks == 0)
+                                ? scaleElements / kBlocks
+                                : static_cast<size_t>(kIsRows ? col : row);
+    return {scaleElements, mnExtent, kBlocks};
+}
+
 template <typename T, typename DT>
 std::vector<float> generateData(T                           dgen,
                                 void*                       data,
@@ -432,31 +456,10 @@ std::vector<float> generateData(T                           dgen,
     {
     case MXScaleLayout::GFX950:
     {
-        bool const   kIsRows = (isMatrixA && isTranspose) || (!isMatrixA && !isTranspose);
-        size_t const kExtent = static_cast<size_t>(kIsRows ? sizes[0] : sizes[1]);
-        size_t const kBlocks
-            = (elementsPerMXBlock > 0)
-                  ? (kExtent + static_cast<size_t>(elementsPerMXBlock) - 1)
-                        / static_cast<size_t>(elementsPerMXBlock)
-                  : 0;
-
-        // Number of scale rows in scaleBytes. The generator emits one scale per
-        // (MN, K block) pair, so scaleBytes.size() == mnExtent * kBlocks and the
-        // row count divides straight back out.
-        //
-        // This is read from the buffer instead of from sizes[] because the
-        // generator sizes the buffer from the strides it was passed, which can
-        // span more rows than M*N when the caller pads its leading dimension.
-        // The swizzle rejects any grid whose product is not exactly
-        // scaleBytes.size(), so the grid has to describe the buffer that exists,
-        // not the logical extent.
-        size_t const mnExtent
-            = (kBlocks > 0 && scaleBytes.size() % kBlocks == 0)
-                  ? scaleBytes.size() / kBlocks
-                  : static_cast<size_t>(kIsRows ? sizes[1] : sizes[0]);
-
+        MXScaleGrid const grid = gfx950ScaleGrid(
+            scaleBytes.size(), sizes[0], sizes[1], isTranspose, isMatrixA, elementsPerMXBlock);
         swizzledScaleBytes = DGen::preSwizzleScalesGFX950(
-            scaleBytes, {/*numScaleRows=*/mnExtent, /*numScaleCols=*/kBlocks});
+            scaleBytes, {/*numScaleRows=*/grid.mnExtent, /*numScaleCols=*/grid.kBlocks});
         break;
     }
     case MXScaleLayout::GFX1250:
@@ -765,6 +768,25 @@ void applyMXScaleLayoutInPlace(uint8_t*      scale,
         break;
     }
     std::memcpy(scale, scaleBytes.data(), scaleBytes.size() * sizeof(uint8_t));
+}
+
+MXScaleGrid mxScaleGridGFX950(uint64_t  row,
+                              uint64_t  col,
+                              uint64_t  stride,
+                              bool      isTranspose,
+                              int const scaleBlockRowSize,
+                              int const scaleBlockColSize,
+                              bool      isMatrixA)
+{
+    // generateMXInput blocks the stride-1 dimension (row) by the product of the block sizes.
+    int const     elementsPerMXBlock = scaleBlockRowSize * scaleBlockColSize;
+    DGen::index_t scaleElements      = 0;
+    if(elementsPerMXBlock > 0)
+        scaleElements = DGen::ScaleBlockLayout{static_cast<DGen::index_t>(row),
+                                               static_cast<DGen::index_t>(elementsPerMXBlock)}
+                            .numScaleBlocks(static_cast<DGen::index_t>(stride * col));
+    return gfx950ScaleGrid(
+        static_cast<size_t>(scaleElements), row, col, isTranspose, isMatrixA, elementsPerMXBlock);
 }
 
 MXScaleLayout mxScaleLayoutForArchName(std::string_view archName)

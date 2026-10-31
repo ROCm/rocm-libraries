@@ -197,9 +197,11 @@ TIMING_HIERARCHY = {
                 "pre_solution_listener.DataInitialization": {
                     "pre_solution_mx_check": {},
                     # initOneMXSide runs once per side (A, B) per call: it either reuses its
-                    # cache or really regenerates data + scales.
+                    # cache, builds and uploads the gfx950 swizzled scale from the problem's
+                    # canonical one (swizzle), or really regenerates data + scales.
                     "pre_solution_mx_init_data": {
                         "pre_solution_mx_side_cache_hit": {},
+                        "pre_solution_mx_side_swizzle": {},
                         "pre_solution_mx_side_regenerate": {},
                     },
                     # These run for every gated solution; the suffix says whether the MX data
