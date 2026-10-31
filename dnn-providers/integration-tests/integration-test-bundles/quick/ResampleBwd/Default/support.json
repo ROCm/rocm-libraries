@@ -1,0 +1,55 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "1_2_4_5_3_bfp16_ncdhw_padding_modeneg_inf_pad_postpad1x0x1_prepad1x0x1",
+          "1_2_4_5_3_bfp16_ncdhw_padding_modezero_pad_postpad0x0x0_prepad0x0x0",
+          "1_2_4_5_3_bfp16_ndhwc_padding_modeneg_inf_pad_postpad1x0x1_prepad1x0x1",
+          "1_2_4_5_3_bfp16_ndhwc_padding_modezero_pad_postpad0x0x0_prepad0x0x0",
+          "1_2_4_5_3_fp16_ncdhw_padding_modeneg_inf_pad_postpad1x0x1_prepad1x0x1",
+          "1_2_4_5_3_fp16_ncdhw_padding_modezero_pad_postpad0x0x0_prepad0x0x0",
+          "1_2_4_5_3_fp16_ndhwc_padding_modeneg_inf_pad_postpad1x0x1_prepad1x0x1",
+          "1_2_4_5_3_fp16_ndhwc_padding_modezero_pad_postpad0x0x0_prepad0x0x0",
+          "1_2_4_5_3_fp32_ncdhw_padding_modeneg_inf_pad_postpad1x0x1_prepad1x0x1",
+          "1_2_4_5_3_fp32_ncdhw_padding_modezero_pad_postpad0x0x0_prepad0x0x0",
+          "1_2_4_5_3_fp32_ndhwc_padding_modeneg_inf_pad_postpad1x0x1_prepad1x0x1",
+          "1_2_4_5_3_fp32_ndhwc_padding_modezero_pad_postpad0x0x0_prepad0x0x0",
+          "1_2_8_6_bfp16_nchw_padding_modeneg_inf_pad_postpad1x1_prepad1x1",
+          "1_2_8_6_bfp16_nchw_padding_modezero_pad_postpad0x0_prepad0x0",
+          "1_2_8_6_bfp16_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+          "1_2_8_6_fp16_nchw_padding_modeneg_inf_pad_postpad1x1_prepad1x1",
+          "1_2_8_6_fp16_nchw_padding_modezero_pad_postpad0x0_prepad0x0",
+          "1_2_8_6_fp16_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+          "1_2_8_6_fp32_nchw_padding_modeneg_inf_pad_postpad1x1_prepad1x1",
+          "1_2_8_6_fp32_nchw_padding_modezero_pad_postpad0x0_prepad0x0",
+          "1_2_8_6_fp32_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+          "2_3_7_5_bfp16_nchw_padding_modeneg_inf_pad_postpad1x1_prepad1x1",
+          "2_3_7_5_bfp16_nchw_padding_modezero_pad_postpad0x0_prepad0x0",
+          "2_3_7_5_bfp16_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+          "2_3_7_5_bfp16_nhwc_padding_modeneg_inf_pad_postpad1x1_prepad1x1",
+          "2_3_7_5_bfp16_nhwc_padding_modezero_pad_postpad0x0_prepad0x0",
+          "2_3_7_5_bfp16_nhwc_padding_modezero_pad_postpad1x1_prepad1x1",
+          "2_3_7_5_fp16_nchw_padding_modeneg_inf_pad_postpad1x1_prepad1x1",
+          "2_3_7_5_fp16_nchw_padding_modezero_pad_postpad0x0_prepad0x0",
+          "2_3_7_5_fp16_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+          "2_3_7_5_fp16_nhwc_padding_modeneg_inf_pad_postpad1x1_prepad1x1",
+          "2_3_7_5_fp16_nhwc_padding_modezero_pad_postpad0x0_prepad0x0",
+          "2_3_7_5_fp16_nhwc_padding_modezero_pad_postpad1x1_prepad1x1",
+          "2_3_7_5_fp32_nchw_padding_modeneg_inf_pad_postpad1x1_prepad1x1",
+          "2_3_7_5_fp32_nchw_padding_modezero_pad_postpad0x0_prepad0x0",
+          "2_3_7_5_fp32_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+          "2_3_7_5_fp32_nhwc_padding_modeneg_inf_pad_postpad1x1_prepad1x1",
+          "2_3_7_5_fp32_nhwc_padding_modezero_pad_postpad0x0_prepad0x0",
+          "2_3_7_5_fp32_nhwc_padding_modezero_pad_postpad1x1_prepad1x1"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}
