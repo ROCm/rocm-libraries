@@ -777,7 +777,6 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         adam.cpp
         addlayernorm.cpp
         cat.cpp
-        exec_utils.cpp
         groupnorm.cpp
         getitem.cpp
         glu.cpp
