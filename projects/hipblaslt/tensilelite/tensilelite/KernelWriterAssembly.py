@@ -2614,47 +2614,59 @@ class KernelWriterAssembly(KernelWriter):
         them -- which is the one number that says how much allocation moved.
     """
     if self.states.overflowedResources:
-      if self.states.overflowedResources == 1:
-        msg = "too many vgprs"
-      elif self.states.overflowedResources == 2:
-        msg = "too many sgprs"
-      elif self.states.overflowedResources == 3:
-        msg = "half store requires at least two elements per batch"
-      elif self.states.overflowedResources == 4:
-        msg = "Occupancy limit"
-      elif self.states.overflowedResources == 5:
-        if kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
-          msg = "cannot schedule local read with DirectToLds"
-        else:
-          msg = "reading and writing LDS at same time require 2 LDS buffer"
-      elif self.states.overflowedResources == 6:
-        msg = "SIA2 better with occupancy 2"
-      elif self.states.overflowedResources == 7:
-        msg = "invalid LSU code due to assertion fail"
-      elif self.states.overflowedResources == 8:
-        msg = "not enough LDS space"
-      elif self.states.overflowedResources == 9:
-        msg = self.states.rapStoreNeutralityMsg
-      elif self.states.overflowedResources == 10:
-        msg = "no workgroup-wide position for a rebuilt LDS barrier"
-      elif self.states.overflowedResources == 11:
-        msg = "decoupled PGR thick-wait not covered in the emitted assembly"
-      elif self.states.overflowedResources == 12:
-        msg = "tail LDS reset has one block stride and a divergent pair has two"
-      else:
-        msg = "unknown"
-
-      if afterAllocation:
-        counts = "vgprs=%u, sgprs=%u after register allocation, pool estimate vgprs=%u, sgprs=%u" \
-          % (mkb.getNextFreeVgpr(), mkb.getNextFreeSgpr(), \
-          self.vgprPool.size(), self.sgprPool.size())
-      else:
-        counts = "vgprs=%u, sgprs=%u" % (self.vgprPool.size(), self.sgprPool.size())
-
-      if self.debugConfig.printSolutionRejectionReason:
-        printWarning("%s overflowed resources.  errorCode=%d, msg=\"%s\", %s" \
-          % (self.states.kernelName, self.states.overflowedResources, msg, counts))
+      self.printRejectionReason(kernel, mkb, afterAllocation)
       self.applyOverflowStub(mkb)
+
+  ##############################################################################
+  # printRejectionReason
+  ##############################################################################
+  def printRejectionReason(self, kernel, mkb=None, afterAllocation: bool = False) -> None:
+    """Print why overflowedResources rejects the kernel (PrintSolutionRejectionReason only).
+
+    mkb and afterAllocation are applyOverflowVerdict's: with afterAllocation the
+    counts come from the kernel body, next to the pool estimate.
+    """
+    if not self.debugConfig.printSolutionRejectionReason:
+      return
+    if self.states.overflowedResources == 1:
+      msg = "too many vgprs"
+    elif self.states.overflowedResources == 2:
+      msg = "too many sgprs"
+    elif self.states.overflowedResources == 3:
+      msg = "half store requires at least two elements per batch"
+    elif self.states.overflowedResources == 4:
+      msg = "Occupancy limit"
+    elif self.states.overflowedResources == 5:
+      if kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
+        msg = "cannot schedule local read with DirectToLds"
+      else:
+        msg = "reading and writing LDS at same time require 2 LDS buffer"
+    elif self.states.overflowedResources == 6:
+      msg = "SIA2 better with occupancy 2"
+    elif self.states.overflowedResources == 7:
+      msg = "invalid LSU code due to assertion fail"
+    elif self.states.overflowedResources == 8:
+      msg = "not enough LDS space"
+    elif self.states.overflowedResources == 9:
+      msg = self.states.rapStoreNeutralityMsg
+    elif self.states.overflowedResources == 10:
+      msg = "no workgroup-wide position for a rebuilt LDS barrier"
+    elif self.states.overflowedResources == 11:
+      msg = "decoupled PGR thick-wait not covered in the emitted assembly"
+    elif self.states.overflowedResources == 12:
+      msg = "tail LDS reset has one block stride and a divergent pair has two"
+    else:
+      msg = "unknown"
+
+    if afterAllocation:
+      counts = "vgprs=%u, sgprs=%u after register allocation, pool estimate vgprs=%u, sgprs=%u" \
+        % (mkb.getNextFreeVgpr(), mkb.getNextFreeSgpr(), \
+        self.vgprPool.size(), self.sgprPool.size())
+    else:
+      counts = "vgprs=%u, sgprs=%u" % (self.vgprPool.size(), self.sgprPool.size())
+
+    printWarning("%s overflowed resources.  errorCode=%d, msg=\"%s\", %s" \
+      % (self.states.kernelName, self.states.overflowedResources, msg, counts))
 
   ##############################################################################
   # applyOverflowStub
