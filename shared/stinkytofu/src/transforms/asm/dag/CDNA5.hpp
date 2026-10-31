@@ -469,13 +469,15 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // The queue model runs only with depth > 1 and a cover > 0; otherwise the depth is 1.
     int wmmaQueueDepth() const {
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
-        return f.wmmaQueueCoverCycles > 0 ? std::max(1, f.wmmaQueueDepth) : 1;
+        return f.wmmaQueueCoverCycles != 0 ? std::max(1, f.wmmaQueueDepth) : 1;
     }
-    // Cycles of queued WMMA work needed before a non-WMMA pick may issue (0 = off).
+    // Cycles of queued WMMA work needed before a non-WMMA pick may issue (0 = off). Automatic
+    // (the option below 0): one WMMA short of a full queue.
     int wmmaQueueCover() const {
         if (wmmaQueueDepth() <= 1) return 0;
-        return std::max(0,
-                        getPassContext().getPassFeatureConfig().dagFeatures.wmmaQueueCoverCycles);
+        const int cover = getPassContext().getPassFeatureConfig().dagFeatures.wmmaQueueCoverCycles;
+        if (cover >= 0) return cover;
+        return (wmmaQueueDepth() - 1) * std::max(1, wmmaIssueConfig.latency);
     }
     // WMMA refill (see PassFeatureConfig::DagFeatures::wmmaRefillMode). A refill starts when the
     // queued cover drops below the refill line (wmmaQueueCover()) with room in the queue, and
