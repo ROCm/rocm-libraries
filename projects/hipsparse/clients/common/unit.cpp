@@ -409,3 +409,12 @@ void unit_check_near(int64_t           M,
         }
     }
 }
+
+void unit_check_condition(bool cond)
+{
+#ifdef GOOGLE_TEST
+    ASSERT_TRUE(cond);
+#else
+    assert(cond);
+#endif
+}
