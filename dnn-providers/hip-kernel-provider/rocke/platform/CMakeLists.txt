@@ -363,6 +363,7 @@ if(ROCKE_INSTALL_TESTS)
     install(FILES "${_ROCKE_DIFFERENTIAL_DIR}/run_diff.py"
                   "${_ROCKE_DIFFERENTIAL_DIR}/python_batch_worker.py"
                   "${_ROCKE_DIFFERENTIAL_DIR}/golden_store.py"
+                  "${_ROCKE_DIFFERENTIAL_DIR}/check_native_golden.py"
                   "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR}/tests/instances/differential)
     install(FILES "${_ROCKE_DIFFERENTIAL_DIR}/golden/llvm_gfx_all.json"
@@ -542,6 +543,26 @@ if(ROCKE_INSTALL_TESTS)
            "add_test(rocke_differential_golden_canonical python \"${_ROCKE_RUN_DIFF}\" --mode ir --canonical --python-only --check-golden)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_differential_golden_canonical PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT 300)\n")
+
+    # The C++ side of the same golden: the parity emitters built and installed
+    # by tests/cmake/NativeGoldenTests.cmake, checked against the hashes the
+    # Python reference is checked against above. Both passing means C++ == Python.
+    get_property(_ROCKE_NATIVE_GOLDEN_EMITTERS GLOBAL PROPERTY ROCKE_INSTALL_NATIVE_GOLDEN_EMITTERS)
+    if(_ROCKE_NATIVE_GOLDEN_EMITTERS)
+      set(_rocke_native_golden_args "")
+      foreach(_rocke_emitter ${_ROCKE_NATIVE_GOLDEN_EMITTERS})
+        string(REPLACE "=" ";" _rocke_emitter "${_rocke_emitter}")
+        list(GET _rocke_emitter 0 _rocke_emitter_family)
+        list(GET _rocke_emitter 1 _rocke_emitter_target)
+        rocke_cxx_test_installed_name(_rocke_installed_name ${_rocke_emitter_target})
+        string(APPEND _rocke_native_golden_args
+               " \"${_rocke_emitter_family}=${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}\"")
+      endforeach()
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_native_golden_ll python \"${ROCKE_TEST_CTEST_REL}tests/instances/differential/check_native_golden.py\" --flavor llvm20,llvm22,llvm23,llvm24${_rocke_native_golden_args})\n")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "set_tests_properties(rocke_native_golden_ll PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT 600)\n")
+    endif()
 
     if(ROCKE_INSTALL_PLATFORM_PYTEST)
       # Full pytest suite. PYTHONPATH points at the CTestTestfile's working
