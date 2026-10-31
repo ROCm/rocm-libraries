@@ -1188,6 +1188,56 @@ void testing_amax(const Arguments& argus)
     EXPECT_EQ(max_value, static_cast<T>(2 * argus.size));
 }
 
+template <typename T>
+void testing_amax_ties(void)
+{
+    // Above the OpenMP threshold, with 2 threads, so that the host backend runs threaded and
+    // the static schedule splits the vector at size / 2
+    int64_t size = 1 << 16;
+    int64_t half = size / 2;
+
+    set_omp_threads_rocalution(2);
+    set_omp_threshold_rocalution(0);
+
+    LocalVector<T> vec;
+    vec.Allocate("TestVector", size);
+
+    T       max_value;
+    int64_t max_index;
+
+    // All entries equal: the first one is the maximum
+    vec.Ones();
+    max_value = 0;
+    max_index = vec.Amax(max_value);
+    EXPECT_EQ(max_index, 0);
+    EXPECT_EQ(max_value, static_cast<T>(1));
+
+    // Tied maxima on both sides of the chunk boundary
+    vec[half - 1] = static_cast<T>(2);
+    vec[half]     = static_cast<T>(2);
+    max_value     = 0;
+    max_index     = vec.Amax(max_value);
+    EXPECT_EQ(max_index, half - 1);
+    EXPECT_EQ(max_value, static_cast<T>(2));
+
+    // Tied in magnitude only
+    vec[half - 1] = static_cast<T>(-2);
+    max_value     = 0;
+    max_index     = vec.Amax(max_value);
+    EXPECT_EQ(max_index, half - 1);
+    EXPECT_EQ(max_value, static_cast<T>(2));
+
+    vec[half - 1] = static_cast<T>(2);
+    vec[half]     = static_cast<T>(-2);
+    max_value     = 0;
+    max_index     = vec.Amax(max_value);
+    EXPECT_EQ(max_index, half - 1);
+    EXPECT_EQ(max_value, static_cast<T>(2));
+
+    // Default threshold; the thread count is reset by the next init_rocalution()
+    set_omp_threshold_rocalution(10000);
+}
+
 // Helper function to read binary file contents into a vector
 template <typename ValueType>
 std::vector<ValueType> ReadBinaryFile(const std::string& filename, size_t& size_out)

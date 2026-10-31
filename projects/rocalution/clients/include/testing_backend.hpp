@@ -27,8 +27,14 @@
 
 #include "utility.hpp"
 
+#include <cstdio>
+#include <cstdlib>
 #include <gtest/gtest.h>
 #include <rocalution/rocalution.hpp>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 using namespace rocalution;
 
@@ -113,6 +119,131 @@ void testing_backend(Arguments argus)
 
     // Stop rocalution platform
     stop_rocalution();
+}
+
+// On Windows, omp.h only declares the OpenMP 2.0 API
+#if defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+// Set the pre-init OpenMP state, then initialize a host-only platform with 2 threads
+void backend_omp_init(int levels, int nthreads)
+{
+    omp_set_dynamic(0);
+    omp_set_max_active_levels(levels);
+    omp_set_num_threads(nthreads);
+
+    disable_accelerator_rocalution(true);
+    set_omp_affinity_rocalution(false);
+    set_device_rocalution(device);
+    init_rocalution();
+    set_omp_threads_rocalution(2);
+}
+
+void backend_omp_stop(void)
+{
+    stop_rocalution();
+    set_omp_affinity_rocalution(true);
+    disable_accelerator_rocalution(false);
+}
+
+// Team size of a region on the calling thread: same thread and ICVs as the library's host
+// kernels, which use "omp parallel for" after omp_set_num_threads(OpenMP_threads)
+int backend_omp_team_size(void)
+{
+    int team_size = 0;
+#pragma omp parallel
+    {
+        if(omp_get_thread_num() == 0)
+        {
+            team_size = omp_get_num_threads();
+        }
+    }
+    return team_size;
+}
+#endif
+
+void testing_backend_omp_parallel_region(void)
+{
+#if defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+    // OMP_THREAD_LIMIT=1 legitimately caps every team at one thread
+    if(omp_get_thread_limit() < 2)
+    {
+        GTEST_SKIP() << "OpenMP thread limit is " << omp_get_thread_limit();
+    }
+
+    int def_dynamic = omp_get_dynamic();
+    int def_levels  = omp_get_max_active_levels();
+    int def_threads = omp_get_max_threads();
+
+    // Nesting disabled before init: the outermost level must stay active
+    backend_omp_init(1, 3);
+    EXPECT_EQ(omp_get_max_active_levels(), 1);
+    EXPECT_EQ(omp_get_max_threads(), 2);
+    EXPECT_EQ(backend_omp_team_size(), 2);
+    backend_omp_stop();
+
+    // Nesting enabled before init (OMP_MAX_ACTIVE_LEVELS=4, OMP_NESTED=true,
+    // OMP_NUM_THREADS=4,2): rocALUTION disables nesting only. Run in a child process
+    // without stop_rocalution(), which is covered by testing_backend_omp_restore_state().
+    EXPECT_EXIT(
+        {
+            backend_omp_init(4, 3);
+            int levels    = omp_get_max_active_levels();
+            int team_size = backend_omp_team_size();
+            fprintf(stderr, "max_active_levels %d, team size %d\n", levels, team_size);
+            exit((levels == 1 && team_size == 2) ? 0 : 1);
+        },
+        ::testing::ExitedWithCode(0),
+        "max_active_levels 1, team size 2");
+
+    // All parallel regions disabled by the user before init: rocALUTION keeps them disabled
+    backend_omp_init(0, 3);
+    EXPECT_EQ(omp_get_max_active_levels(), 0);
+    EXPECT_EQ(backend_omp_team_size(), 1);
+    backend_omp_stop();
+
+    omp_set_dynamic(def_dynamic);
+    omp_set_max_active_levels(def_levels);
+    omp_set_num_threads(def_threads);
+#else
+    GTEST_SKIP() << "rocalution-test is built without the OpenMP 3.0 API";
+#endif
+}
+
+void testing_backend_omp_restore_state(void)
+{
+#if defined(_OPENMP) && _OPENMP >= 200805 && !defined(_WIN32)
+    int def_dynamic = omp_get_dynamic();
+    int def_levels  = omp_get_max_active_levels();
+    int def_threads = omp_get_max_threads();
+
+    backend_omp_init(1, 3);
+    backend_omp_stop();
+    EXPECT_EQ(omp_get_max_active_levels(), 1);
+    EXPECT_EQ(omp_get_max_threads(), 3);
+
+    backend_omp_init(0, 3);
+    backend_omp_stop();
+    EXPECT_EQ(omp_get_max_active_levels(), 0);
+    EXPECT_EQ(omp_get_max_threads(), 3);
+
+    // Run in a child process, since stop_rocalution() may abort
+    EXPECT_EXIT(
+        {
+            backend_omp_init(4, 3);
+            backend_omp_stop();
+            int levels  = omp_get_max_active_levels();
+            int threads = omp_get_max_threads();
+            fprintf(stderr, "max_active_levels %d, max_threads %d\n", levels, threads);
+            exit((levels == 4 && threads == 3) ? 0 : 1);
+        },
+        ::testing::ExitedWithCode(0),
+        "max_active_levels 4, max_threads 3");
+
+    omp_set_dynamic(def_dynamic);
+    omp_set_max_active_levels(def_levels);
+    omp_set_num_threads(def_threads);
+#else
+    GTEST_SKIP() << "rocalution-test is built without the OpenMP 3.0 API";
+#endif
 }
 
 #endif // TESTING_BACKEND_HPP
