@@ -4,10 +4,10 @@
 """What preflight asks of the tilewright Python module, which the stages
 load to score, rank and check models: that it imports, computes this
 checkout's feature catalogs and builds kernel configs as this checkout's
-engine does, and that it knows every serving option the models of the run
-declare (the CU floor of the v3 catalog, the alignment veto of
-deploy.alignment_veto, the kernel guards flag of
-correctness.guard_unguarded_custom). A module that predates an option
+engine does, and that it knows the serving options preflight checks for
+the models of the run: the CU floor of the v3 catalog, the alignment veto
+of deploy.alignment_veto and the kernel guards flag of
+correctness.guard_unguarded_custom. A module that predates an option
 refuses the models that declare it ('unknown serving flags'), which only a
 stage after the training would show. run_orchestrator.py's preflight calls
 these; each returns the errors that keep a run from starting.
