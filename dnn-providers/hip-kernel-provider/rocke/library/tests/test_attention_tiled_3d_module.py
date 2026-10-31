@@ -188,7 +188,9 @@ def test_module_predicate_rejects_segment_lds_overflow():
     [
         (dict(head_size=96), "head_size"),
         (dict(block_size=128), "block_size"),
-        (dict(num_query_heads=24, num_kv_heads=8), "num_queries_per_kv"),
+        # Ratios 1-16 build (a ratio that does not divide the 16-row tile masks its
+        # padding rows); above 16 is refused.
+        (dict(num_query_heads=32, num_kv_heads=1), "num_queries_per_kv"),
         (dict(num_segments=(1 << 14) + 1), "num_segments"),
     ],
 )

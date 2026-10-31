@@ -42,10 +42,13 @@ from dispatch.attention.strided_decode import make_candidate
 
 NUM_CUS = 304
 BATCHES = (1, 3, 64)
-HEADS = ((8, 1), (32, 8), (12, 4), (32, 1), (16, 16))  # (Hq, Hkv)
+# (Hq, Hkv): GQA ratios 8, 4, 3, 32, 1, 16 and 2. Every ratio the engine ships (1, 2, 4, 8,
+# 16) is sampled, plus 3 (rocKE admits it, v1 refuses it) and 32 (both refuse it).
+HEADS = ((8, 1), (32, 8), (12, 4), (32, 1), (16, 16), (16, 1), (8, 4))
 SEQLEN_Q = (1, 2)
 SEQLEN_K = (1, 64, 256, 512, 8192)
-HEAD_SIZES = (64, 96, 128, 256)
+# 192: rocKE admits it, v1 refuses it. 96: both refuse it.
+HEAD_SIZES = (64, 96, 128, 192, 256)
 DTYPES = ("fp16", "bf16")
 # (C++ mask spelling, rocKE mask type, sliding_window)
 MASKS = (

@@ -14,9 +14,11 @@
 # derived from the segment spec inside build_unified_attention_3d_module, so the
 # one segment spec below fully identifies both kernels.
 #
-# Scope (v1): dense (strided) KV, seqlen_q == 1, no
-# sliding window, no stats (LSE) output. Admission is parity with rocKE's
-# `attention_strided_decode` candidate (dispatch/attention/strided_decode.py).
+# Scope (v1): dense (strided) KV, seqlen_q == 1, head size 64/128/256, GQA ratio
+# 1/2/4/8/16, no sliding window, no stats (LSE) output. Admission is parity with
+# rocKE's `attention_strided_decode` candidate (dispatch/attention/strided_decode.py)
+# inside that scope; the candidate also admits head size 192, every GQA ratio from 1
+# to 16 and a sliding window, which v1 refuses.
 #
 # Mask: at seqlen_q == 1 a bottom-right-aligned causal mask keeps every key
 # (the single query row sits on the last key), so NO_MASK and
@@ -139,7 +141,7 @@ enumerate:
   fixed: {arch: gfx942, kv_layout: strided, seqlen_q: 1, mask_type: BOTTOM_RIGHT_CAUSAL, num_cus: 304, sliding_window: 0}
   # Crossed in order, first group outermost (the catalog order). Every cell is
   # admitted by the candidate: D 64/128/256 x fp16/bf16
-  # x kv_block_size 16/32/64 x every GQA ratio it takes (1/2/4/8/16).
+  # x kv_block_size 16/32/64 x the GQA ratios v1 ships (1/2/4/8/16).
   #
   # List order is the default-arm mechanism: a merged cell's default is its first
   # combo's pick, and the first combo takes the first value of every selector
@@ -334,10 +336,11 @@ launch_surface:
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dNative.cpp:gfx942AttentionUnified3dGraphMatches
     kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, sliding_window, block_size, tile_size_override, num_segments]
     guard: >
-      graph_match restates make_candidate().admits() (Sq 1; D 64/128/256;
-      fp16/bf16; GQA ratio 1/2/4/8/16; not top-left causal) plus the strided
-      binding's tensor contract (contiguous [B,Hq,1,D] Q/O; KvTensorLayout's
-      K/V rules), and refuses in v1 every window, stats/LSE, attn-mask,
+      graph_match restates make_candidate().admits() within the v1 scope (Sq 1;
+      fp16/bf16; not top-left causal) plus the strided binding's tensor
+      contract (contiguous [B,Hq,1,D] Q/O; KvTensorLayout's K/V rules), and
+      refuses in v1 head sizes other than 64/128/256 and GQA ratios outside
+      1/2/4/8/16 (both admitted by rocKE), every window, stats/LSE, attn-mask,
       dropout, sinks, page tables, seq_len tensors, FP8 scales, ALiBi and
       padding masks. kernelMatches() compares dtype, head_size,
       num_query_heads and num_kv_heads exactly and requires sliding_window 0;

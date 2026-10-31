@@ -464,7 +464,8 @@ bool maskAccepted(const data_objects::SdpaAttributes& attributes)
     }
 }
 
-/// The GQA ratios the 16-row query tile divides (`strided_decode.py`).
+/// The GQA ratios this engine ships. rocKE's strided decode admits every ratio from 1 to 16
+/// (it masks the unused rows of the 16-row query tile); v1 builds kernels for these five.
 bool isSupportedGqaRatio(int64_t ratio)
 {
     return ratio == 1 || ratio == 2 || ratio == 4 || ratio == 8 || ratio == 16;
@@ -476,17 +477,18 @@ bool isSupportedGqaRatio(int64_t ratio)
  * rocKE's admission (`strided_decode.py::make_candidate`) for the request a dense hipDNN
  * graph maps to (`kv_layout="strided"`, arch gfx942):
  *
- *  - `seqlen_q` 1 (capability), head size 64, 128 or 256 (capability), fp16/bf16;
- *  - `nhead_q / nhead_k` in {1, 2, 4, 8, 16};
+ *  - `seqlen_q` 1 (capability), fp16/bf16;
  *  - not top-left causal;
  *  - `_strided_3d_specs_from_problem` builds (no LDS overflow on gfx942 for any shipped
  *    head size and block size; TestGfx942AttentionUnified3dAdmission pins this);
  *  - the binding's tensor contract: Q/O contiguous `[B, Hq, D]`, K/V positive
  *    non-overlapping strided views with unit D stride (stridedKvRefusal).
  *
- * Refused in v1 although rocKE admits or could serve them: any sliding window or band, the
- * stats/LSE outputs, an attention-mask tensor, dropout, sinks, page tables, seq_len tensors
- * (ragged), FP8 scales, ALiBi, padding masks, block masks and a device scale tensor.
+ * Refused in v1 although rocKE admits or could serve them: head sizes other than 64, 128
+ * and 256 (rocKE also admits 192), GQA ratios outside {1, 2, 4, 8, 16} (rocKE admits every
+ * ratio from 1 to 16), any sliding window or band, the stats/LSE outputs, an attention-mask
+ * tensor, dropout, sinks, page tables, seq_len tensors (ragged), FP8 scales, ALiBi, padding
+ * masks, block masks and a device scale tensor. The catalog holds no kernel for any of them.
  *
  * Batch and Skv are not limited here: the kernel takes both at run time (grid and
  * seq_lens). kernelMatches declines each candidate whose num_segments would take an
@@ -579,7 +581,7 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
         return std::nullopt;
     }
 
-    // --- 4. rocKE capability: seqlen_q 1, head size 64/128/256, GQA ratio.
+    // --- 4. seqlen_q 1 (rocKE capability); head size and GQA ratio (the v1 catalog).
     if(problem.seqLenQ != 1)
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"seqlen_q"}
@@ -592,7 +594,7 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"head_size"}
                                << "head size " << problem.headSize
-                               << " is not supported; the kernel is built for 64, 128 and 256");
+                               << " is not served; this engine ships head sizes 64, 128 and 256");
         return std::nullopt;
     }
     if(problem.numQueryHeads % problem.numKvHeads != 0
@@ -601,8 +603,7 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
         HIPDNN_PLUGIN_LOG_INFO(Declined{"gqa"}
                                << "query heads " << problem.numQueryHeads
                                << " over key/value heads " << problem.numKvHeads
-                               << " is not a GQA ratio in {1, 2, 4, 8, 16}; the ratio must "
-                                  "divide the 16-row query tile");
+                               << " is not a GQA ratio this engine ships (1, 2, 4, 8 or 16)");
         return std::nullopt;
     }
 

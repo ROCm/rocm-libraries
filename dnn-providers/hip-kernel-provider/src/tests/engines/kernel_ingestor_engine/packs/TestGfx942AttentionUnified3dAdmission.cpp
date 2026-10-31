@@ -27,12 +27,17 @@
  * For each row this builds the hipDNN graph and asserts:
  *
  *     graph match accepts  <=>  (rocKE admits at SOME kv_block_size) AND not windowed
+ *                               AND the v1 catalog ships the shape
  *
- * THE ONE DELIBERATE EXCEPTION is the window: rocKE admits a bottom-right sliding window,
- * this engine refuses every window at graph match in v1 (no shipped variant carries a
- * sliding_window, and the scorer's split rule holds only without one). Those rows are
- * asserted refused, and the test also asserts rocKE does admit some of them, so the
- * exception stays visible rather than vacuous.
+ * THE DELIBERATE EXCEPTIONS are v1 scope, refused at graph match whatever rocKE says:
+ *
+ *  - the window: rocKE admits a bottom-right sliding window; no shipped variant carries a
+ *    sliding_window, and the scorer's split rule holds only without one;
+ *  - head sizes other than 64, 128 and 256: rocKE also admits 192;
+ *  - GQA ratios outside {1, 2, 4, 8, 16}: rocKE admits every ratio from 1 to 16.
+ *
+ * Those rows are asserted refused, and the test also asserts rocKE does admit some of each,
+ * so every exception stays visible rather than vacuous.
  *
  * Then, for every row the graph match accepts, kernel match against a synthetic record
  * of the graph's cell at each block size accepts exactly when that block size's row was
@@ -115,24 +120,39 @@ std::string describe(const AdmissionRow& row)
 
 TEST(TestGfx942AttentionUnified3dAdmission, TableCoversThePlannedGrid)
 {
-    // 3 batches x 5 head pairs x 2 Sq x 5 Skv x 4 D x 2 dtypes x 4 masks.
-    EXPECT_EQ(std::size(ADMISSION_TABLE), 3U * 5U * 2U * 5U * 4U * 2U * 4U);
+    // 3 batches x 7 head pairs x 2 Sq x 5 Skv x 5 D x 2 dtypes x 4 masks.
+    EXPECT_EQ(std::size(ADMISSION_TABLE), 3U * 7U * 2U * 5U * 5U * 2U * 4U);
 }
 
-TEST(TestGfx942AttentionUnified3dAdmission, GraphMatchAgreesWithRocKeExceptForWindows)
+/// The head sizes and GQA ratios the v1 catalog ships.
+bool shippedByV1(const AdmissionRow& row)
+{
+    const bool headSize = row.headSize == 64 || row.headSize == 128 || row.headSize == 256;
+    const int64_t ratio = row.hq % row.hkv == 0 ? row.hq / row.hkv : 0;
+    const bool gqa = ratio == 1 || ratio == 2 || ratio == 4 || ratio == 8 || ratio == 16;
+    return headSize && gqa;
+}
+
+TEST(TestGfx942AttentionUnified3dAdmission, GraphMatchAgreesWithRocKeExceptForV1Scope)
 {
     std::size_t accepted = 0;
     std::size_t windowedAdmittedByRocKe = 0;
+    std::size_t unshippedAdmittedByRocKe = 0;
     for(const auto& row : ADMISSION_TABLE)
     {
         const bool rocKeAdmits = row.admitted16 || row.admitted32 || row.admitted64;
         const bool windowed = row.mask == AdmissionMask::WINDOW_128;
+        const bool shipped = shippedByV1(row);
         if(windowed && rocKeAdmits)
         {
             ++windowedAdmittedByRocKe;
         }
-        // v1 exception: every window is refused, whatever rocKE says.
-        const bool expected = rocKeAdmits && !windowed;
+        if(!windowed && !shipped && rocKeAdmits)
+        {
+            ++unshippedAdmittedByRocKe;
+        }
+        // v1 exceptions: every window and every unshipped shape is refused.
+        const bool expected = rocKeAdmits && !windowed && shipped;
         const bool actual = graphMatches(graphFor(row));
         EXPECT_EQ(actual, expected) << describe(row) << " (rocKE admits: " << rocKeAdmits << ")";
         accepted += actual ? 1 : 0;
@@ -141,6 +161,9 @@ TEST(TestGfx942AttentionUnified3dAdmission, GraphMatchAgreesWithRocKeExceptForWi
     EXPECT_GT(windowedAdmittedByRocKe, 0U)
         << "rocKE no longer admits any windowed row: the documented window exception is "
            "vacuous and this test should be revisited";
+    EXPECT_GT(unshippedAdmittedByRocKe, 0U)
+        << "rocKE no longer admits any head size or GQA ratio outside the v1 catalog: the "
+           "documented scope exception is vacuous and this test should be revisited";
 }
 
 TEST(TestGfx942AttentionUnified3dAdmission, KernelMatchAgreesPerBlockSize)
