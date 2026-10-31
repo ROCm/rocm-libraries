@@ -995,9 +995,7 @@ rocsparselt_status
                               "value type");
                     return rocsparselt_status_invalid_value;
                 }
-                if(_matmulDescr->gate_residual_desc != nullptr)
-                    delete _matmulDescr->gate_residual_desc;
-                _matmulDescr->gate_residual_desc = _gateDesc->clone();
+                _matmulDescr->gate_residual_desc = const_cast<_rocsparselt_mat_descr*>(_gateDesc);
                 status                           = rocsparselt_status_success;
                 break;
             }
