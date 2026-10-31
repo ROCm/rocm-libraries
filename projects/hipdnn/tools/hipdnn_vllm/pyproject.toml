@@ -1,0 +1,41 @@
+[build-system]
+# Built with --no-build-isolation inside the pinned vLLM venv: _C is ABI-coupled
+# to the exact torch and rocm-sdk-devel there (see BUILD_PINS.toml, setup.py).
+# scripts/build_wheel.sh checks the venv's setuptools against this floor, which
+# the SPDX `license` string below needs.
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hipdnn-vllm"
+description = "hipDNN drop-in backend for vLLM (attention backend HIPDNN, hipDNN ops)"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "Advanced Micro Devices, Inc." }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+]
+# version and dependencies (== pins from BUILD_PINS.toml) are set by setup.py.
+dynamic = ["version", "dependencies"]
+
+[project.entry-points."vllm.general_plugins"]
+hipdnn = "hipdnn_vllm:register"
+
+[project.scripts]
+hipdnn-vllm = "hipdnn_vllm.__main__:main"
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["hipdnn_vllm", "hipdnn_vllm.attention", "hipdnn_vllm.ops"]
+include-package-data = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: needs a HIP device and the built _C extension",
+    "vllm: needs the pinned vLLM install",
+]
