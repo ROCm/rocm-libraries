@@ -8,12 +8,17 @@
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 #include <initializer_list>
+#include <limits>
 #include <optional>
+#include <sstream>
 #include <string>
+#include <unordered_map>
 
 namespace asm_sdpa_engine
 {
@@ -295,12 +300,111 @@ inline std::optional<std::string> tryGetDeviceString(hipStream_t stream, const c
     }
 }
 
+// =============================================================================
+// Attention scale
+// =============================================================================
+
 // The attention scale the kernels apply when the graph has no scale tensor:
 // attn_scale_value, or 1.0 (no scaling, cuDNN's default) when it is unset.
 template <typename SdpaAttrsT>
 float attnScaleOrDefault(const SdpaAttrsT& attrs)
 {
     return attrs.attn_scale_value().value_or(1.0f);
+}
+
+// False for an attention scale the kernels are known to mishandle: one that is
+// not a finite, positive, normal float (FLT_MIN <= scale <= FLT_MAX, so NaN
+// fails). cuDNN and hipDNN accept any scale value, so the engine must decline
+// these. Passing this check is necessary, not sufficient: large finite scales can
+// still fail (see below).
+//
+// The kernels write -inf into every masked score (causal and sliding-window masks,
+// and the padding past S_kv in the last K tile) and only then multiply the scores
+// by scale * log2(e). A scale of 0 turns those scores into NaN (-inf * 0), and a
+// negative scale turns them into +inf. The bf16 forward kernels also start the
+// running row max at max(-FLT_MAX, -FLT_MAX / (scale * log2(e))). That is positive
+// for a negative scale and +inf for -0.0, so even with no mask the exp2 inputs
+// overflow, or for -0.0 are NaN (-0 * +inf). 32-bit denormals are flushed, so a
+// subnormal scale acts as 0.
+//
+// Large scales are not checked, because the limit depends on the input. With
+// c = scale * log2(e), the forward computes each exp2 input as
+// fma(score, c, -(c * row max)), with the product rounded. For the row's max score
+// only the rounding residue is left, up to half an ulp of the product, so exp2 can
+// overflow or underflow once |c * row max of the raw scores| reaches 2^31. On
+// gfx942, scales of 1e37 and 1e38 gave NaN O this way with raw scores around 1e-3.
+// The backward subtracts a rounded LSE * log2(e) the same way; it was not tested
+// with such scales.
+//
+// The fp8 forward instead multiplies the scores by scale * log2(e) * q_descale *
+// k_descale, and starts the row max at max(-FLT_MAX, -FLT_MAX / (q_descale *
+// k_descale)). The descales live in device memory and are not checked, so a
+// descale product that is not positive, or small enough to flush that factor to
+// 0, fails like an unsupported scale.
+//
+// (From the gfx942 .co disassembly. The gfx950 bf16 forward kernels contain the
+// same sentinel, row max start and fma.)
+inline bool isSupportedAttnScale(float scale)
+{
+    return scale >= std::numeric_limits<float>::min() && scale <= std::numeric_limits<float>::max();
+}
+
+// An attention scale as text, for decline reasons and errors.
+inline std::string attnScaleToString(float scale)
+{
+    std::ostringstream text;
+    text << scale;
+    return text.str();
+}
+
+// The attention scale the kernels will receive, if it is known before execute:
+// attn_scale_value or its default when the graph has no scale tensor, or else the
+// value of a compile-time constant or runtime-with-default pass-by-value scale
+// tensor, which buildPlan bakes. Narrowed to the f32 kernarg, as execute narrows
+// it. std::nullopt for a pure runtime pass-by-value scale tensor, whose value
+// arrives at execute. Throws, as buildPlan would, when the scale tensor's value
+// cannot be read.
+template <typename SdpaAttrsT>
+std::optional<float> attnScaleBeforeExecute(
+    const SdpaAttrsT& attrs,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    if(!attrs.scale_tensor_uid().has_value())
+    {
+        return attnScaleOrDefault(attrs);
+    }
+    const auto operand = hipdnn_plugin_sdk::makeScalarOperand(
+        tensorMap, attrs.scale_tensor_uid().value(), "attn_scale");
+    if(operand.isRuntimeUserSupplied)
+    {
+        return std::nullopt;
+    }
+    return static_cast<float>(hipdnn_plugin_sdk::toDouble(operand.bakedDefault));
+}
+
+// Resolves the attention scale into the f32 kernarg at execute. Throws
+// HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM) for a scale the kernels
+// mishandle (see isSupportedAttnScale), so call it before the first launch.
+// isApplicable declines every other such scale, so only a pure runtime
+// pass-by-value scale tensor can fail here.
+inline float resolveSupportedAttnScale(const hipdnn_plugin_sdk::ScalarOperand& attnScale,
+                                       const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                       uint32_t numDeviceBuffers,
+                                       const char* caller)
+{
+    const auto scale = static_cast<float>(hipdnn_plugin_sdk::toDouble(
+        hipdnn_plugin_sdk::resolveScalarOperand(attnScale, deviceBuffers, numDeviceBuffers)));
+    if(!isSupportedAttnScale(scale))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            std::string(caller)
+                + ": attention scale must be a finite, positive, normal float (Actual value: "
+                + attnScaleToString(scale) + ")");
+    }
+    return scale;
 }
 
 } // namespace plan_utils

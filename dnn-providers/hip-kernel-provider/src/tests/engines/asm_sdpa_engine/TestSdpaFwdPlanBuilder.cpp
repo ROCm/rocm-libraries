@@ -15,10 +15,12 @@
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaFwdPlan.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaAttnScaleCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -568,6 +570,193 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+// =============================================================================
+// Attention scale range
+// =============================================================================
+
+TEST(TestSdpaPlanUtils, IsSupportedAttnScaleRequiresFinitePositiveNormalFloat)
+{
+    for(const auto& [scale, name] : unsupportedAttnScales())
+    {
+        EXPECT_FALSE(plan_utils::isSupportedAttnScale(scale)) << name;
+    }
+    for(const auto& [scale, name] : supportedAttnScales())
+    {
+        EXPECT_TRUE(plan_utils::isSupportedAttnScale(scale)) << name;
+    }
+    // The bound is inclusive: the smallest normal float is supported.
+    EXPECT_TRUE(plan_utils::isSupportedAttnScale(std::numeric_limits<float>::min()));
+}
+
+// The scale isApplicable checks is the one execute will pass to the kernel.
+TEST(TestSdpaPlanUtils, AttnScaleBeforeExecute)
+{
+    const auto scaleOf = [](const flatbuffers::FlatBufferBuilder& builder) {
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        const auto& attrs
+            = graphWrapper.nodeWrappers()
+                  .front()
+                  ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+        return plan_utils::attnScaleBeforeExecute(attrs, graphWrapper.getTensorMap());
+    };
+
+    EXPECT_EQ(scaleOf(createSdpaFwdGraph()), 1.0F) << "unset attn_scale_value";
+    EXPECT_EQ(scaleOf(withAttnScale(createSdpaFwdGraph(), AttnScaleSource::ATTRIBUTE, 0.5F)), 0.5F);
+    EXPECT_EQ(scaleOf(withAttnScale(createSdpaFwdGraph(), AttnScaleSource::CONSTANT_TENSOR, 0.25F)),
+              0.25F);
+    EXPECT_EQ(scaleOf(withAttnScale(
+                  createSdpaFwdGraph(), AttnScaleSource::RUNTIME_TENSOR_WITH_DEFAULT, 0.125F)),
+              0.125F);
+    EXPECT_FALSE(scaleOf(createSdpaFwdGraphWithRuntimePbvScale()).has_value())
+        << "pure runtime scale tensor";
+    EXPECT_THROW(scaleOf(withUnreadableScaleTensor(createSdpaFwdGraph())),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// Scales the kernels mishandle, from attn_scale_value, a constant scale tensor or
+// the default of a runtime scale tensor, and a scale tensor whose value cannot be
+// read. On gfx942 a negative scale or -0.0 gave NaN O and Inf LSE even with no
+// mask, and 0 or 1e-40 did with a bottom-right causal mask or S_kv = 200.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsUnsupportedAttnScale)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<GraphTest> declineTests;
+    for(const auto& [scale, scaleName] : unsupportedAttnScales())
+    {
+        for(const auto& [source, sourceName] : attnScaleSources())
+        {
+            declineTests.emplace_back(withAttnScale(createSdpaFwdGraph(), source, scale),
+                                      attnScaleCaseName(scaleName, sourceName));
+        }
+    }
+    declineTests.emplace_back(withUnreadableScaleTensor(createSdpaFwdGraph()),
+                              "FP8_E4M3 constant scale tensor");
+
+    for(const auto& test : declineTests)
+    {
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// Finite, positive, normal scales from every source, the unset default (1.0), and
+// a pure runtime scale tensor, which execute checks.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsSupportedAttnScale)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<GraphTest> acceptTests;
+    acceptTests.emplace_back(createSdpaFwdGraph(), "unset attn_scale_value");
+    for(const auto& [scale, scaleName] : supportedAttnScales())
+    {
+        for(const auto& [source, sourceName] : attnScaleSources())
+        {
+            acceptTests.emplace_back(withAttnScale(createSdpaFwdGraph(), source, scale),
+                                     attnScaleCaseName(scaleName, sourceName));
+        }
+    }
+    acceptTests.emplace_back(createSdpaFwdGraphWithRuntimePbvScale(), "pure runtime scale tensor");
+
+    for(const auto& test : acceptTests)
+    {
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// A forward plan for a [1, 1, 128, 128] bf16 problem, with no loaded kernel, whose
+// scale is a pure runtime pass-by-value FLOAT tensor. Launching it fails with
+// INTERNAL_ERROR, so BAD_PARAM shows that execute threw before the launch.
+constexpr int64_t K_FWD_RUNTIME_SCALE_UID = 5;
+const std::vector<int64_t> K_FWD_TENSOR_UIDS = {1, 2, 3, 4};
+
+SdpaFwdPlan createFwdPlanWithRuntimeScale()
+{
+    constexpr unsigned int K_ROW = 128;
+    constexpr unsigned int K_HEAD = 128 * 128;
+
+    SdpaFwdParams params{};
+    params.qUid = 1;
+    params.kUid = 2;
+    params.vUid = 3;
+    params.oUid = 4;
+    params.batchSize = 1;
+    params.numHeadsQ = 1;
+    params.numHeadsKv = 1;
+    params.seqLenQ = 128;
+    params.seqLenKv = 128;
+    params.headDimQk = 128;
+    params.headDimV = 128;
+    params.qStrideSeq = K_ROW;
+    params.qStrideRow = K_ROW;
+    params.qStrideHead = K_HEAD;
+    params.qStrideBatch = K_HEAD;
+    params.kStrideSeq = K_ROW;
+    params.kStrideHead = K_HEAD;
+    params.kStrideBatch = K_HEAD;
+    params.vStrideSeq = K_ROW;
+    params.vStrideHead = K_HEAD;
+    params.vStrideBatch = K_HEAD;
+    params.oStrideSeq = K_ROW;
+    params.oStrideHead = K_HEAD;
+    params.oStrideBatch = K_HEAD;
+    params.tileSizeQo = 128;
+    params.archString = "gfx942";
+    params.maskType = plan_utils::MaskType::NO_MASK;
+    params.attnScale = hipdnn_plugin_sdk::ScalarOperand{
+        K_FWD_RUNTIME_SCALE_UID, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, true, 0.0};
+    return {std::make_shared<HipModuleGuard>(), params};
+}
+
+// A pure runtime scale tensor's value arrives only at execute, so execute returns
+// BAD_PARAM for an unsupported one, before the launch.
+TEST(TestSdpaFwdPlanExecute, RejectsUnsupportedRuntimeAttnScale)
+{
+    const SdpaFwdPlan plan = createFwdPlanWithRuntimeScale();
+    for(const auto& [scale, name] : unsupportedAttnScales())
+    {
+        EXPECT_EQ(
+            executeWithRuntimeScale(plan, K_FWD_TENSOR_UIDS, K_FWD_RUNTIME_SCALE_UID, scale, 0),
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+            << name;
+    }
+}
+
+// A supported runtime scale passes the check and reaches the launch, which fails
+// because the plan has no kernel.
+TEST(TestSdpaFwdPlanExecute, PassesSupportedRuntimeAttnScaleToLaunch)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const SdpaFwdPlan plan = createFwdPlanWithRuntimeScale();
+    for(const auto& [scale, name] : supportedAttnScales())
+    {
+        EXPECT_EQ(
+            executeWithRuntimeScale(plan, K_FWD_TENSOR_UIDS, K_FWD_RUNTIME_SCALE_UID, scale, 0),
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR)
+            << name;
+    }
+
+    // Clear the HIP error state left by the intentional failed launch, or the
+    // HipErrorHandler listener fails this test for it.
+    static_cast<void>(hipGetLastError());
+    static_cast<void>(hipExtGetLastError());
 }
 
 // =============================================================================

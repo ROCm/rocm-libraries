@@ -12,11 +12,13 @@
 #include "asm_fmha_v3_bwd_configs.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaBwdPlan.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaKernelUtils.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaAttnScaleCases.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
@@ -368,6 +370,180 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+// =============================================================================
+// Attention scale range
+// =============================================================================
+
+// Scales the kernels mishandle, from attn_scale_value, a constant scale tensor or
+// the default of a runtime scale tensor, and a scale tensor whose value cannot be
+// read. On gfx942, 0, -0.0, 1e-40 and -1.2 gave NaN or Inf dQ, dK and dV with a
+// causal or sliding-window mask, and NaN dQ with S_kv = 128 and no mask (the
+// hd128 K tile is 192).
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsUnsupportedAttnScale)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<GraphTest> declineTests;
+    for(const auto& [scale, scaleName] : unsupportedAttnScales())
+    {
+        for(const auto& [source, sourceName] : attnScaleSources())
+        {
+            declineTests.emplace_back(withAttnScale(createSdpaBwdGraph(), source, scale),
+                                      attnScaleCaseName(scaleName, sourceName));
+        }
+    }
+    declineTests.emplace_back(withUnreadableScaleTensor(createSdpaBwdGraph()),
+                              "FP8_E4M3 constant scale tensor");
+
+    for(const auto& test : declineTests)
+    {
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// Finite, positive, normal scales from every source, the unset default (1.0), and
+// a pure runtime scale tensor, which execute checks.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsSupportedAttnScale)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<GraphTest> acceptTests;
+    acceptTests.emplace_back(createSdpaBwdGraph(), "unset attn_scale_value");
+    for(const auto& [scale, scaleName] : supportedAttnScales())
+    {
+        for(const auto& [source, sourceName] : attnScaleSources())
+        {
+            acceptTests.emplace_back(withAttnScale(createSdpaBwdGraph(), source, scale),
+                                     attnScaleCaseName(scaleName, sourceName));
+        }
+    }
+    acceptTests.emplace_back(createSdpaBwdGraphWithRuntimePbvScale(), "pure runtime scale tensor");
+
+    for(const auto& test : acceptTests)
+    {
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
+}
+
+// A backward A32 plan for a [1, 1, 128, 128] bf16 problem, with no loaded kernels,
+// whose scale is a pure runtime pass-by-value FLOAT tensor. Launching it fails with
+// INTERNAL_ERROR, so BAD_PARAM shows that execute threw before the first launch.
+constexpr int64_t K_BWD_RUNTIME_SCALE_UID = 10;
+const std::vector<int64_t> K_BWD_TENSOR_UIDS = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+
+SdpaBwdPlan createBwdPlanWithRuntimeScale()
+{
+    constexpr unsigned int K_ROW = 128;
+    constexpr unsigned int K_HEAD = 128 * 128;
+
+    SdpaBwdParams params{};
+    params.qUid = 1;
+    params.kUid = 2;
+    params.vUid = 3;
+    params.oUid = 4;
+    params.doUid = 5;
+    params.statsUid = 6;
+    params.dqUid = 7;
+    params.dkUid = 8;
+    params.dvUid = 9;
+    params.batchSize = 1;
+    params.numHeadsQ = 1;
+    params.numHeadsKv = 1;
+    params.seqLenQ = 128;
+    params.seqLenKv = 128;
+    params.headDimQk = 128;
+    params.headDimV = 128;
+    for(auto* stride : {&params.qStrideSeq,
+                        &params.kStrideSeq,
+                        &params.vStrideSeq,
+                        &params.oStrideSeq,
+                        &params.doStrideSeq,
+                        &params.dqStrideSeq,
+                        &params.dkStrideSeq,
+                        &params.dvStrideSeq})
+    {
+        *stride = K_ROW;
+    }
+    for(auto* stride : {&params.qStrideHead,
+                        &params.qStrideBatch,
+                        &params.kStrideHead,
+                        &params.kStrideBatch,
+                        &params.vStrideHead,
+                        &params.vStrideBatch,
+                        &params.oStrideHead,
+                        &params.oStrideBatch,
+                        &params.doStrideHead,
+                        &params.doStrideBatch,
+                        &params.dqStrideHead,
+                        &params.dqStrideBatch,
+                        &params.dkStrideHead,
+                        &params.dkStrideBatch,
+                        &params.dvStrideHead,
+                        &params.dvStrideBatch})
+    {
+        *stride = K_HEAD;
+    }
+    params.statsStrideHead = 128;
+    params.statsStrideBatch = 128;
+    params.odoTiles.ts = 128;
+    params.dqdkdvTiles.ts = 192;
+    params.dqConvertTiles.ts = 64;
+    params.accumulatorType = AccumulatorType::A32;
+    params.attnScale = hipdnn_plugin_sdk::ScalarOperand{
+        K_BWD_RUNTIME_SCALE_UID, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, true, 0.0};
+    return {std::make_shared<HipModuleGuard>(),
+            std::make_shared<HipModuleGuard>(),
+            std::make_shared<HipModuleGuard>(),
+            params};
+}
+
+// A pure runtime scale tensor's value arrives only at execute, so execute returns
+// BAD_PARAM for an unsupported one, before the first launch.
+TEST(TestSdpaBwdPlanExecute, RejectsUnsupportedRuntimeAttnScale)
+{
+    const SdpaBwdPlan plan = createBwdPlanWithRuntimeScale();
+    const size_t workspaceSize = plan.getWorkspaceSize(Handle{});
+    for(const auto& [scale, name] : unsupportedAttnScales())
+    {
+        EXPECT_EQ(executeWithRuntimeScale(
+                      plan, K_BWD_TENSOR_UIDS, K_BWD_RUNTIME_SCALE_UID, scale, workspaceSize),
+                  HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+            << name;
+    }
+}
+
+// A supported runtime scale passes the check and reaches the first launch, which
+// fails because the plan has no kernels.
+TEST(TestSdpaBwdPlanExecute, PassesSupportedRuntimeAttnScaleToLaunch)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const SdpaBwdPlan plan = createBwdPlanWithRuntimeScale();
+    const size_t workspaceSize = plan.getWorkspaceSize(Handle{});
+    for(const auto& [scale, name] : supportedAttnScales())
+    {
+        EXPECT_EQ(executeWithRuntimeScale(
+                      plan, K_BWD_TENSOR_UIDS, K_BWD_RUNTIME_SCALE_UID, scale, workspaceSize),
+                  HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR)
+            << name;
+    }
+
+    // Clear the HIP error state left by the intentional failed launch, or the
+    // HipErrorHandler listener fails this test for it.
+    static_cast<void>(hipGetLastError());
+    static_cast<void>(hipExtGetLastError());
 }
 
 TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeSmallUnaligned)
