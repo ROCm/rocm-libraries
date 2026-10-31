@@ -55,6 +55,11 @@ namespace TensileLite
             // or no enqueues requested either by count or by flops.
             static bool nothingIsTimed(po::variables_map const& args);
 
+            // True when the warmup timing events may be read: postWarmup reads them when the
+            // skip-slow ratio is set, validateWarmups under sync-after-warmups. Kept whenever
+            // something is timed.
+            static bool readsWarmupEvents(po::variables_map const& args);
+
             virtual bool needMoreBenchmarkRuns() const override;
             virtual void preBenchmarkRun() override;
             virtual void postBenchmarkRun() override;

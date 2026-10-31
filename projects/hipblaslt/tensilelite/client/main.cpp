@@ -974,6 +974,10 @@ int main(int argc, const char* argv[])
         exit(1);
     }
 
+    // Only BenchmarkTimer reads the warmup timing events; without a reader the warmups are
+    // launched without events and the listeners get empty event sets.
+    bool const warmupEvents = BenchmarkTimer::readsWarmupEvents(args);
+
     std::shared_ptr<DataInitialization> dataInit;
     {
         // Re-seed before data init: HIP runtime init above may consume rand() non-deterministically
@@ -1289,9 +1293,20 @@ int main(int argc, const char* argv[])
                                 auto const   warmupSetupStart  = TimingClock::now();
                                 size_t       warmupInvocations = listeners.numWarmupRuns();
                                 size_t       warmupEventCount  = kernels[0].size();
-                                TimingEvents warmupStartEvents(warmupInvocations, warmupEventCount);
-                                TimingEvents warmupStopEvents(warmupInvocations, warmupEventCount);
+                                size_t       warmupEventSets = warmupEvents ? warmupInvocations : 0;
+                                TimingEvents warmupStartEvents(warmupEventSets, warmupEventCount);
+                                TimingEvents warmupStopEvents(warmupEventSets, warmupEventCount);
                                 recordTimingSince("warmup_events_setup", warmupSetupStart);
+
+                                auto launchWarmup = [&](size_t i, size_t kIdx) {
+                                    if(warmupEvents)
+                                        return adapter.launchKernels(kernels[kIdx],
+                                                                     stream,
+                                                                     warmupStartEvents[i],
+                                                                     warmupStopEvents[i]);
+                                    return adapter.launchKernels(
+                                        kernels[kIdx], stream, nullptr, nullptr);
+                                };
 
                                 // I-cache rotation counter: increments per launchKernels call
                                 // and selects which hipModule_t copy services the next launch.
@@ -1311,10 +1326,7 @@ int main(int argc, const char* argv[])
                                     {
                                         ScopedTimer timer("warmup_runs");
                                         listeners.preWarmup();
-                                        HIP_CHECK_EXC(adapter.launchKernels(kernels[0],
-                                                                            stream,
-                                                                            warmupStartEvents[0],
-                                                                            warmupStopEvents[0]));
+                                        HIP_CHECK_EXC(launchWarmup(0, 0));
                                         iterationLaunched = true;
                                     }
 
@@ -1337,13 +1349,7 @@ int main(int argc, const char* argv[])
                                     {
                                         ScopedTimer timer("warmup_runs");
                                         for(int i = 1; i < warmupInvocations; i++)
-                                        {
-                                            size_t kIdx = i % kernels.size();
-                                            HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
-                                                                                stream,
-                                                                                warmupStartEvents[i],
-                                                                                warmupStopEvents[i]));
-                                        }
+                                            HIP_CHECK_EXC(launchWarmup(i, i % kernels.size()));
                                         listeners.postWarmup(
                                             warmupStartEvents, warmupStopEvents, stream);
                                     }

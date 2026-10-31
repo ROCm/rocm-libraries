@@ -159,6 +159,12 @@ namespace TensileLite
                        && args["min-flops-per-sync"].as<size_t>() == 0);
         }
 
+        bool BenchmarkTimer::readsWarmupEvents(po::variables_map const& args)
+        {
+            return !nothingIsTimed(args) || args["skip-slow-solution-ratio"].as<float>() != 0
+                   || args["sync-after-warmups"].as<bool>();
+        }
+
         bool BenchmarkTimer::needMoreBenchmarkRuns() const
         {
             return m_numBenchmarksRun < m_numBenchmarks;
