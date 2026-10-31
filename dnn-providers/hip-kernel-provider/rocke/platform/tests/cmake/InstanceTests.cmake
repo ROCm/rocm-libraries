@@ -218,3 +218,21 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/attention_bwd_spec_reinit.cpp")
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                rocke_attention_bwd_spec_reinit)
 endif()
+
+# DmaSlabLayout sizes and offsets are 64-bit (Python's ints never wrap):
+# the case past 2^31 bytes a 32-bit build returned as -57.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/attention_bwd_dma_slab_int64.cpp")
+  add_executable(rocke_attention_bwd_dma_slab_int64 instances/attention_bwd_dma_slab_int64.cpp)
+  target_link_libraries(rocke_attention_bwd_dma_slab_int64 PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_attention_bwd_dma_slab_int64 PRIVATE m)
+  endif()
+  add_test(NAME rocke_attention_bwd_dma_slab_int64 COMMAND rocke_attention_bwd_dma_slab_int64)
+  set_tests_properties(rocke_attention_bwd_dma_slab_int64 PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_attention_bwd_dma_slab_int64)
+  set_target_properties(rocke_attention_bwd_dma_slab_int64
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_attention_bwd_dma_slab_int64 RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_attention_bwd_dma_slab_int64)
+endif()
