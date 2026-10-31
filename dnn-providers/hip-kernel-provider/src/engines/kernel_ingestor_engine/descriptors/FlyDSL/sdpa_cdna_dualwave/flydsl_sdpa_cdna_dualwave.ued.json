@@ -10,7 +10,8 @@
     "default": "314784cc-5d55-54b3-a5ce-160aeed54a19"
   },
   "predict_engine": {
-    "default": "5d156390-4d28-54bd-af50-8ac27bd21890"
+    "default": "5d156390-4d28-54bd-af50-8ac27bd21890",
+    "gfx950": "daa6edb7-9c7b-4fe5-ac27-22ce0098d3c7"
   },
   "metadata": "798ed3e1-93e3-5c95-8bab-c8c767225601",
   "knobs": [
