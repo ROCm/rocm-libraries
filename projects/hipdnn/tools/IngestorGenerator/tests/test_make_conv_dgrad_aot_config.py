@@ -88,16 +88,20 @@ def _document(kind):
     return json.loads((_SHIPPED_DIR / f"{_SLUG}.{kind}.json").read_text())
 
 
-def test_the_catalog_is_320_selectable_kernels_and_4_helpers_per_dtype(specs):
+def test_the_catalog_is_227_selectable_kernels_and_4_helpers_per_dtype(specs):
+    """227 (164 implicit-GEMM + 63 direct) selectable kernels and 4 helpers per dtype,
+    the set in docs/dgrad_instances_v3.txt (454 instances total), replacing the
+    prune-150 catalog (203) on 2026-10-30 -- see
+    docs/HANDOFF-conv-instance-catalog.md."""
     by_dtype = collections.defaultdict(collections.Counter)
     for spec in specs:
         by_dtype[spec.dtype][(spec.kernel_family, spec.direct_variant)] += 1
     for dtype in ("bf16", "fp16"):
         assert by_dtype[dtype] == {
-            (0, "none"): 247,
-            (1, "depthwise_dgrad"): 12,
-            (1, "depthwise_dgrad_win"): 37,
-            (1, "grouped_dgrad_fused"): 18,
+            (0, "none"): 164,
+            (1, "depthwise_dgrad"): 10,
+            (1, "depthwise_dgrad_win"): 31,
+            (1, "grouped_dgrad_fused"): 16,
             (1, "grouped_dgrad_mfma"): 3,
             (1, "grouped_dgrad_4c"): 2,
             (1, "dgrad_mfma_rtc"): 1,
@@ -106,8 +110,8 @@ def test_the_catalog_is_320_selectable_kernels_and_4_helpers_per_dtype(specs):
             (2, "transpose_rtc"): 1,
             (2, "reorganize_rtc"): 1,
         }
-    assert sum(1 for s in specs if not s.is_helper) == 640
-    assert len(specs) == 648
+    assert sum(1 for s in specs if not s.is_helper) == 454
+    assert len(specs) == 462
 
 
 def test_instance_id_is_the_identity_stable_hash(identities):
@@ -469,9 +473,7 @@ def test_a_variant_may_state_only_the_knobs_its_mode_uses(identities):
     """A variant's knobs are what it may set, not what it must: the windowed
     depthwise has a dot2 and an MFMA mode taking different ones, and the sweep
     states only the mode's. An omitted knob keeps rocKE's own default."""
-    windowed = [
-        i for i in identities if i["algorithm"] == "direct_depthwise_dgrad_win"
-    ]
+    windowed = [i for i in identities if i["algorithm"] == "direct_depthwise_dgrad_win"]
     assert windowed, "the catalog must carry the windowed depthwise pipeline"
 
     modes = {("mfma" in i["knobs"], "dot2" in i["knobs"]) for i in windowed}

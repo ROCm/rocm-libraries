@@ -98,22 +98,19 @@ def _label(identity):
 
 @pytest.fixture(scope="module")
 def catalog():
-    """The committed catalog's identities, in file order."""
-    return tool.read_labels(tool.CATALOG_LABELS)
+    """rocKE's own registered gfx950 forward catalog, in rocKE's on-disk order."""
+    return tool.read_rocke_catalog("fwd")
 
 
-def test_the_catalog_lists_568_kernels_per_dtype_the_same_in_both(catalog):
-    """366 implicit-GEMM and 202 direct kernels per dtype, and the two dtypes list the
-    same kernels."""
+def test_the_catalog_lists_the_same_kernels_for_both_dtypes(catalog):
+    """A set, not a fixed count (rocKE's own catalog is the source of truth, so its
+    size is not pinned here): both dtypes list the same kernels, and the same number
+    of them."""
     by_dtype = collections.defaultdict(list)
     for identity in catalog:
         by_dtype[identity["dtype_a"]].append(identity)
     assert sorted(by_dtype) == sorted(tool.DTYPES)
-    for identities in by_dtype.values():
-        families = collections.Counter(
-            i["algorithm"] == "implicit_gemm" for i in identities
-        )
-        assert families == {True: 366, False: 202}
+    assert len({len(v) for v in by_dtype.values()}) == 1
 
     def without_dtype(identity):
         return tuple(
@@ -212,16 +209,15 @@ def test_written_instances_are_one_compact_entry_per_line(tmp_path, synthetic_gr
 
 
 def _fake_main(tmp_path, monkeypatch, identities, swept=None):
-    """Run main() over a label file of ``identities``, every one of them a sweep
-    identity unless ``swept`` says otherwise. Returns main()'s status and the written
-    lists, by dtype."""
+    """Run main() over a fake rocKE catalog of ``identities``, every one of them a
+    sweep identity unless ``swept`` says otherwise. Returns main()'s status and the
+    written lists, by dtype."""
     tmp_path.mkdir(parents=True, exist_ok=True)
-    labels = tmp_path / "labels.txt"
-    labels.write_text("".join(f"{_label(i)}\n" for i in identities))
+    monkeypatch.setattr(tool, "read_rocke_catalog", lambda direction: list(identities))
     hashes = {tool.stable_hash(i) for i in identities} if swept is None else swept
     monkeypatch.setattr(tool, "sweep_hashes", lambda dtype, jobs: hashes)
     out = tmp_path / "lists"
-    argv = ["--rocke-root", str(_ROCKE), "--labels", str(labels)]
+    argv = ["--rocke-root", str(_ROCKE)]
     status = tool.main(argv + ["--output-dir", str(out), "--jobs", "1"])
     if not out.exists():
         return status, None

@@ -3,15 +3,18 @@
 # SPDX-License-Identifier: MIT
 """Build the rocKE gfx950 backward-data conv AOT instance lists the hipkernel pack ships.
 
-The dgrad sibling of ``enumerate_conv_aot_instances.py``. The catalog is a curated list
-of rocKE kernels (:data:`CATALOG_LABELS`), one ``KernelIdentity.label()`` per line.
+The dgrad sibling of ``enumerate_conv_aot_instances.py``. The catalog is rocKE's own
+registered instance list (``dispatch/grouped_convolution_instances/gfx950_dgrad.json``,
+read with :func:`read_rocke_catalog`) -- rocKE is the only source of "what instances
+exist"; this tool mirrors nothing by hand. :data:`EXCLUDES` (optional; empty when
+absent) names instances rocKE registers that the pack must not ship (for example a
+rocKE kernel known to compute wrong results), each with a reason -- the one
+legitimate thing hand curation used to do beyond mirroring rocKE.
 Implicit-GEMM entries must be identities of the dgrad AOT sweep
 (``benchmarks/common/kernel_sweep.py``) and direct entries dgrad identities of the
 direct sweep (``benchmarks/common/direct_kernel_sweep.py``), for gfx950, fp16 or bf16.
 Every entry must also convert (``make_conv_dgrad_aot_config.py``); nothing is dropped
-silently. Kernels left out of the catalog on purpose (for example a rocKE kernel known
-to compute wrong results) are removed from the labels file, with the reason in its
-``#`` header.
+silently.
 
 The MFMA direct pipelines (``direct_variants.DIRECT_MFMA_DGRAD``) launch weight-transform
 helper kernels the labels do not name: the transpose always, the reorganize (keyed on
@@ -48,14 +51,16 @@ DTYPES = _fwd.DTYPES
 #: File name of one dtype's instance list.
 INSTANCE_LIST = "gfx950_conv_dgrad_aot_{dtype}.instances.json"
 DEFAULT_OUTPUT_DIR = _fwd.DEFAULT_OUTPUT_DIR
-#: The curated catalog: one ``KernelIdentity.label()`` per line; blank lines and
-#: lines starting with ``#`` are ignored.
-CATALOG_LABELS = DEFAULT_OUTPUT_DIR / "gfx950_conv_dgrad_aot.labels.txt"
+#: Known-bug exclusions: instances rocKE registers that this pack must not ship,
+#: each with a reason. JSON list of ``{"label": ..., "reason": ...}``; absent
+#: file means no exclusions.
+EXCLUDES = DEFAULT_OUTPUT_DIR / "gfx950_conv_dgrad_aot.excludes.json"
 #: The family order of the written lists.
 FAMILIES = ("implicit", "direct", "helper")
 
 _bind_rocke = _fwd._bind_rocke
-read_labels = _fwd.read_labels
+read_rocke_catalog = _fwd.read_rocke_catalog
+read_excludes = _fwd.read_excludes
 stable_hash = _fwd.stable_hash
 compact_identity = _fwd.compact_identity
 write_instances = _fwd.write_instances
@@ -118,11 +123,19 @@ def helper_identities(identity: dict) -> list:
     caps = dks._caps_of(ident)
     knobs = json.loads(ident.knobs) if ident.knobs else {}
     out = []
-    for helper_variant, helper_knobs, _source, _destination in (
-        direct_dgrad_weight_transforms(knobs, variant)
-    ):
+    for (
+        helper_variant,
+        helper_knobs,
+        _source,
+        _destination,
+    ) in direct_dgrad_weight_transforms(knobs, variant):
         helper = dks._helper_identity(
-            ident.arch, ident.wave_size, helper_variant, caps, helper_knobs, ident.dtype_a
+            ident.arch,
+            ident.wave_size,
+            helper_variant,
+            caps,
+            helper_knobs,
+            ident.dtype_a,
         )
         out.append(replace(helper, llvm_flavor=ident.llvm_flavor).to_dict())
     return out
@@ -159,11 +172,12 @@ def main(argv=None) -> int:
         help="rocKE tree (platform/, library/).",
     )
     parser.add_argument(
-        "--labels",
+        "--excludes",
         type=Path,
-        default=CATALOG_LABELS,
-        help="The curated catalog, one KernelIdentity label per line "
-        "(default: %(default)s).",
+        default=EXCLUDES,
+        help="Known-bug exclusions from rocKE's catalog, JSON "
+        '[{"label":..., "reason":...}, ...] (default: %(default)s; absent '
+        "file means none).",
     )
     parser.add_argument(
         "--output-dir",
@@ -180,20 +194,30 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     _bind_rocke(args.rocke_root)
 
-    try:
-        listed = read_labels(args.labels)
-    except ValueError as error:
-        print(error, file=sys.stderr)
+    rocke_catalog = read_rocke_catalog("dgrad")
+    excludes = read_excludes(args.excludes)
+    rocke_labels = {identity_label(i) for i in rocke_catalog}
+    stale = set(excludes) - rocke_labels
+    if stale:
+        print(
+            f"{args.excludes}: exclude(s) not in rocKE's gfx950 dgrad catalog: "
+            f"{sorted(stale)}",
+            file=sys.stderr,
+        )
         return 1
+    listed = [i for i in rocke_catalog if identity_label(i) not in excludes]
     others = sorted({i["dtype_a"] for i in listed} - set(DTYPES))
     if others:
-        print(f"{args.labels}: dtype(s) {others} are not packaged", file=sys.stderr)
+        print(
+            f"rocKE's gfx950 dgrad catalog: dtype(s) {others} are not packaged",
+            file=sys.stderr,
+        )
         return 1
     helpers_listed = [i for i in listed if family(i) == "helper"]
     if helpers_listed:
         print(
-            f"{args.labels}: helper kernels are derived, not listed: "
-            f"{identity_label(helpers_listed[0])}",
+            f"rocKE's gfx950 dgrad catalog: helper kernels are derived, not "
+            f"registered: {identity_label(helpers_listed[0])}",
             file=sys.stderr,
         )
         return 1

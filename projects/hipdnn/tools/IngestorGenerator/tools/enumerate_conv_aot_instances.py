@@ -3,14 +3,19 @@
 # SPDX-License-Identifier: MIT
 """Build the rocKE gfx950 forward-conv AOT instance lists the hipkernel pack ships.
 
-The catalog is a curated list of rocKE kernels (:data:`CATALOG_LABELS`): one
-``KernelIdentity.label()`` per line, which :meth:`KernelIdentity.from_label` turns
-back into the identity. Implicit-GEMM entries must be identities of the AOT sweep
-grid (``benchmarks/common/kernel_sweep.py``) and direct entries identities of the
-direct sweep grid (``benchmarks/common/direct_kernel_sweep.py``), for gfx950,
-forward, fp16 or bf16. Every entry must also convert: an identity
-``make_conv_aot_config.py`` refuses, because the packaged launch does not run it,
-fails the run. Nothing is dropped silently.
+The catalog is rocKE's own registered instance list
+(``dispatch/grouped_convolution_instances/gfx950_fwd.json``, read with
+:func:`read_rocke_catalog`) -- rocKE is the only source of "what instances
+exist"; this tool mirrors nothing by hand. :data:`EXCLUDES` (optional; empty
+when absent) names instances rocKE registers that the pack must not ship
+(e.g. a known-wrong kernel), each with a reason -- the one legitimate thing
+hand curation used to do beyond mirroring rocKE. Implicit-GEMM entries must
+be identities of the AOT sweep grid (``benchmarks/common/kernel_sweep.py``)
+and direct entries identities of the direct sweep grid
+(``benchmarks/common/direct_kernel_sweep.py``), for gfx950, forward, fp16 or
+bf16. Every entry must also convert: an identity ``make_conv_aot_config.py``
+refuses, because the packaged launch does not run it, fails the run. Nothing
+is dropped silently.
 
 Which instance serves a given problem, and which serving instances run, is decided
 at runtime, not here.
@@ -47,9 +52,10 @@ INSTANCE_LIST = "gfx950_conv_fwd_aot_{dtype}.instances.json"
 _HERE = Path(__file__).resolve().parent
 DEFAULT_OUTPUT_DIR = _HERE.parent / "configs"
 
-#: The curated catalog: one ``KernelIdentity.label()`` per line; blank lines and
-#: lines starting with ``#`` are ignored.
-CATALOG_LABELS = DEFAULT_OUTPUT_DIR / "gfx950_conv_fwd_aot.labels.txt"
+#: Known-bug exclusions: instances rocKE registers that this pack must not ship,
+#: each with a reason. JSON list of ``{"label": ..., "reason": ...}``; absent
+#: file means no exclusions.
+EXCLUDES = DEFAULT_OUTPUT_DIR / "gfx950_conv_fwd_aot.excludes.json"
 
 
 def _bind_rocke(rocke_root: Path) -> None:
@@ -92,6 +98,34 @@ def read_labels(path: Path) -> list:
         seen.add(identity.stable_hash())
         identities.append(identity.to_dict())
     return identities
+
+
+def read_rocke_catalog(direction: str) -> list:
+    """rocKE's own registered instances of ``(ARCH, direction)``, as dicts, in
+    rocKE's on-disk order -- rocKE is a set, not a priority order
+    (``dispatch.grouped_convolution``'s module docstring), so this makes no
+    claim about that order mattering; it is simply whatever rocKE's loader
+    returns. rocKE must already be bound (:func:`_bind_rocke`)."""
+    from dispatch.grouped_convolution import (
+        _INSTANCE_DIR,
+        _INSTANCE_LISTS,
+        load_instance_list,
+    )
+
+    path = _INSTANCE_DIR / _INSTANCE_LISTS[(ARCH, direction)]
+    return [i.to_dict() for i in load_instance_list(path).identities]
+
+
+def read_excludes(path: Path) -> dict:
+    """``label -> reason`` of :data:`EXCLUDES`-style instances; ``{}`` when
+    ``path`` does not exist."""
+    if not path.exists():
+        return {}
+    entries = json.loads(path.read_text())
+    out = {}
+    for entry in entries:
+        out[entry["label"]] = entry["reason"]
+    return out
 
 
 def sweep_hashes(dtype: str, jobs: int) -> set:
@@ -168,11 +202,12 @@ def main(argv=None) -> int:
         help="rocKE tree (platform/, library/).",
     )
     parser.add_argument(
-        "--labels",
+        "--excludes",
         type=Path,
-        default=CATALOG_LABELS,
-        help="The curated catalog, one KernelIdentity label per line "
-        "(default: %(default)s).",
+        default=EXCLUDES,
+        help="Known-bug exclusions from rocKE's catalog, JSON "
+        '[{"label":..., "reason":...}, ...] (default: %(default)s; absent '
+        "file means none).",
     )
     parser.add_argument(
         "--output-dir",
@@ -190,14 +225,24 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     _bind_rocke(args.rocke_root)
 
-    try:
-        listed = read_labels(args.labels)
-    except ValueError as error:
-        print(error, file=sys.stderr)
+    rocke_catalog = read_rocke_catalog("fwd")
+    excludes = read_excludes(args.excludes)
+    rocke_labels = {identity_label(i) for i in rocke_catalog}
+    stale = set(excludes) - rocke_labels
+    if stale:
+        print(
+            f"{args.excludes}: exclude(s) not in rocKE's gfx950 fwd catalog: "
+            f"{sorted(stale)}",
+            file=sys.stderr,
+        )
         return 1
+    listed = [i for i in rocke_catalog if identity_label(i) not in excludes]
     others = sorted({i["dtype_a"] for i in listed} - set(DTYPES))
     if others:
-        print(f"{args.labels}: dtype(s) {others} are not packaged", file=sys.stderr)
+        print(
+            f"rocKE's gfx950 fwd catalog: dtype(s) {others} are not packaged",
+            file=sys.stderr,
+        )
         return 1
 
     lists, failed = {}, False
