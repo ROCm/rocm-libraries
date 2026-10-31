@@ -938,6 +938,18 @@ rocke_value_t* rocke_b_param(rocke_ir_builder_t* b,
         {
             rocke_attr_set_str(b, &p->attrs, "addr_space", opts->addr_space);
         }
+        if(opts->nocapture_set)
+        {
+            rocke_attr_set_bool(b, &p->attrs, "nocapture", opts->nocapture);
+        }
+        if(opts->nonnull_set)
+        {
+            rocke_attr_set_bool(b, &p->attrs, "nonnull", opts->nonnull);
+        }
+        if(opts->dereferenceable_set)
+        {
+            rocke_attr_set_int(b, &p->attrs, "dereferenceable", opts->dereferenceable);
+        }
     }
 
     if(rocke_kernel_params_add(b, p) != 0)

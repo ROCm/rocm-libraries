@@ -98,8 +98,10 @@ extern "C" {
  *    _total_k return long long (they returned int), which changes their
  *    signature.
  * 9: rocke_block_scale_gemm_spec_t lost per_input_row at its end, which
- *    changes its size. */
-#define ROCKE_ABI_VERSION 9
+ *    changes its size.
+ * 10: rocke_param_opts_t gained nocapture, nonnull and dereferenceable (each
+ *     with a *_set flag) at its end, which changes its size. */
+#define ROCKE_ABI_VERSION 10
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

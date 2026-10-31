@@ -1277,6 +1277,102 @@ static void import_region_ops(importer_t* im, const jval_t* region)
         import_op(im, ops->arr[i]);
 }
 
+/* Read a param's attrs into *opts. Every key is one rocke_param_opts_t carries,
+ * with a value of its kind; anything else fails the import, because a dropped
+ * attr would silently change the lowered kernel. */
+static bool
+    import_param_attrs(importer_t* im, const char* name, const jval_t* pa, rocke_param_opts_t* opts)
+{
+    memset(opts, 0, sizeof *opts);
+    if(!pa)
+        return true;
+    if(pa->kind != J_OBJ)
+    {
+        imp_fail(im, "param '%s' attrs is not an object", name);
+        return false;
+    }
+    for(int k = 0; k < pa->obj_len; k++)
+    {
+        const char* key = pa->obj[k].key;
+        const jval_t* v = pa->obj[k].val;
+        bool* flag = NULL;
+        bool* flag_set = NULL;
+        if(strcmp(key, "noalias") == 0)
+        {
+            flag = &opts->noalias;
+            flag_set = &opts->noalias_set;
+        }
+        else if(strcmp(key, "readonly") == 0)
+        {
+            flag = &opts->readonly;
+            flag_set = &opts->readonly_set;
+        }
+        else if(strcmp(key, "writeonly") == 0)
+        {
+            flag = &opts->writeonly;
+            flag_set = &opts->writeonly_set;
+        }
+        else if(strcmp(key, "nocapture") == 0)
+        {
+            flag = &opts->nocapture;
+            flag_set = &opts->nocapture_set;
+        }
+        else if(strcmp(key, "nonnull") == 0)
+        {
+            flag = &opts->nonnull;
+            flag_set = &opts->nonnull_set;
+        }
+        if(flag)
+        {
+            if(v->kind != J_BOOL)
+            {
+                imp_fail(im, "param '%s' attr %s is not a bool", name, key);
+                return false;
+            }
+            *flag = v->b;
+            *flag_set = true;
+        }
+        else if(strcmp(key, "align") == 0)
+        {
+            int64_t align;
+            if(!import_int_value(im, "param align", v, &align) || align < INT_MIN
+               || align > INT_MAX)
+            {
+                if(!im->failed)
+                    imp_fail(im, "param align is outside the int range");
+                return false;
+            }
+            opts->align = (int)align;
+            opts->align_set = true;
+        }
+        else if(strcmp(key, "dereferenceable") == 0)
+        {
+            if(!import_int_value(im, "param dereferenceable", v, &opts->dereferenceable))
+                return false;
+            opts->dereferenceable_set = true;
+        }
+        else if(strcmp(key, "addr_space") == 0)
+        {
+            if(v->kind != J_STR)
+            {
+                imp_fail(im, "param '%s' attr addr_space is not a string", name);
+                return false;
+            }
+            opts->addr_space = v->str;
+        }
+        else
+        {
+            imp_fail(
+                im,
+                "param '%s' has unknown attr '%s' -- a param attr is one of " ROCKE_PARAM_ATTR_KEYS,
+                name,
+                key);
+            return false;
+        }
+    }
+    return true;
+}
+
 static void import_params(importer_t* im, const jval_t* params)
 {
     if(!params)
@@ -1297,48 +1393,8 @@ static void import_params(importer_t* im, const jval_t* params)
             return;
         }
         rocke_param_opts_t opts;
-        memset(&opts, 0, sizeof opts);
-        const jval_t* pa = jobj_get(p, "attrs");
-        if(pa && pa->kind == J_OBJ)
-        {
-            for(int k = 0; k < pa->obj_len; k++)
-            {
-                const char* key = pa->obj[k].key;
-                const jval_t* v = pa->obj[k].val;
-                if(strcmp(key, "noalias") == 0)
-                {
-                    opts.noalias = v->b;
-                    opts.noalias_set = true;
-                }
-                else if(strcmp(key, "readonly") == 0)
-                {
-                    opts.readonly = v->b;
-                    opts.readonly_set = true;
-                }
-                else if(strcmp(key, "writeonly") == 0)
-                {
-                    opts.writeonly = v->b;
-                    opts.writeonly_set = true;
-                }
-                else if(strcmp(key, "align") == 0)
-                {
-                    int64_t align;
-                    if(!import_int_value(im, "param align", v, &align) || align < INT_MIN
-                       || align > INT_MAX)
-                    {
-                        if(!im->failed)
-                            imp_fail(im, "param align is outside the int range");
-                        return;
-                    }
-                    opts.align = (int)align;
-                    opts.align_set = true;
-                }
-                else if(strcmp(key, "addr_space") == 0)
-                {
-                    opts.addr_space = v->str;
-                }
-            }
-        }
+        if(!import_param_attrs(im, name, jobj_get(p, "attrs"), &opts))
+            return;
         rocke_value_t* pv = rocke_b_param(im->b, name, type, &opts);
         if(!pv)
         {
