@@ -1578,7 +1578,7 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
             procs.append((
                 group,
                 subprocess.Popen(
-                    [sys.executable, "-m", "Tensile.TensileCreateLibrary"]
+                    [sys.executable, "-m", "tensilelite.TensileCreateLibrary"]
                     + _argvForArchitectures(argv, group, groupJobs),
                     env=env,
                 ),
