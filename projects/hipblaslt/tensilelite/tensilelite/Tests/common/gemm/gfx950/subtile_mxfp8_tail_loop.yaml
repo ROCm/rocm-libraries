@@ -79,11 +79,3 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [[256], [256], [1], [32, 32, 512]]   # K = 32..512 step 32 (MX block granularity)
-
-LibraryLogic:
-    ScheduleName: "gfx950"
-    DeviceNames: ["Device 75a0"]
-    ArchitectureName: "gfx950"
-    LibraryType: "Prediction"
-
-LibraryClient:

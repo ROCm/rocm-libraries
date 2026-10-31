@@ -119,11 +119,3 @@ BenchmarkProblems:
           # ===== Control sizes (synthetic small-K smokes) =====
           - Exact: [    2048,   2048, 1,   256]   # smoke (K=1*DU)
           - Exact: [    4096,   3072, 1,   768]   # smoke (K=3*DU)
-
-LibraryLogic:
-    ScheduleName: "gfx950"
-    DeviceNames: ["Device 75a0"]
-    ArchitectureName: "gfx950"
-    LibraryType: "Prediction"
-
-LibraryClient:

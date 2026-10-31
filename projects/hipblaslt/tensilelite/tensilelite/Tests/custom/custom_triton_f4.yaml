@@ -74,9 +74,3 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [4096, 4096, 1, 8192]
-
-LibraryLogic:
-    ScheduleName: "gfx950"
-    DeviceNames: ["Device 0049", "Device 0050"]
-    ArchitectureName: "gfx950"
-    LibraryType: "GridBased"

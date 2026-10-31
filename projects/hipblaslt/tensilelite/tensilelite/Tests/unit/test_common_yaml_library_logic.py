@@ -49,65 +49,15 @@ class LibrarySectionsAllowed:
             )
 
 
-_DUCTILE_REASON = "Ductile backend config: LibraryLogic writes a logic file from the GA results"
-_MXFP8_REASON = "MXFP8 config: Prediction LibraryLogic and LibraryClient (Origami selection)"
-_CUSTOM_REASON = "custom kernel config: LibraryLogic writes a GridBased logic file"
-
 _LIBRARY_SECTIONS_ALLOWED = {
-    LibrarySectionsAllowed("common/ductile/gfx1250/bbs_tn_dp.yaml", _DUCTILE_REASON),
-    LibrarySectionsAllowed(
-        "common/ductile/gfx1250/bbs_tn_multi_size_single_kernel.yaml", _DUCTILE_REASON
-    ),
-    LibrarySectionsAllowed("common/ductile/gfx1250/bbs_tn_streamK.yaml", _DUCTILE_REASON),
-    LibrarySectionsAllowed("common/ductile/gfx1250/f32_tt_batched.yaml", _DUCTILE_REASON),
-    LibrarySectionsAllowed("common/ductile/gfx1250/f8_tn_mx.yaml", _DUCTILE_REASON),
-    LibrarySectionsAllowed("common/ductile/gfx1250/hhs_nt_multi_size.yaml", _DUCTILE_REASON),
-    LibrarySectionsAllowed("common/ductile/gfx950/bf16_tn_dp.yaml", _DUCTILE_REASON),
-    LibrarySectionsAllowed(
-        "common/ductile/gfx950/bf16_tn_multi_size_single_kernel.yaml", _DUCTILE_REASON
-    ),
-    LibrarySectionsAllowed("common/ductile/gfx950/bf16_tn_streamK.yaml", _DUCTILE_REASON),
-    LibrarySectionsAllowed("common/ductile/gfx950/f16_nt_multi_size.yaml", _DUCTILE_REASON),
-    LibrarySectionsAllowed("common/ductile/gfx950/f32_tt_batched.yaml", _DUCTILE_REASON),
-    LibrarySectionsAllowed("common/ductile/gfx950/f8_tn_mx_subtile.yaml", _DUCTILE_REASON),
-    LibrarySectionsAllowed("common/ductile/gfx950/f8bf16_tn_cms.yaml", _DUCTILE_REASON),
-    LibrarySectionsAllowed("common/ductile/gfx950/xf32_nn.yaml", _DUCTILE_REASON),
     LibrarySectionsAllowed(
         "common/gemm/fp8nfp16mix_hfp8ns.yaml",
         "LibraryLogic built from real benchmark data (mixed FP8/F16 inputs)",
     ),
     LibrarySectionsAllowed(
-        "common/gemm/gfx950/mxfp8_residual_fail_classes_repro.yaml", _MXFP8_REASON
-    ),
-    LibrarySectionsAllowed("common/gemm/gfx950/mxfp8_verify_fail_repro.yaml", _MXFP8_REASON),
-    LibrarySectionsAllowed(
         "common/gemm/gfx950/prediction_bf16.yaml",
         "only end-to-end Prediction coverage: logic write, library build, Origami selection",
     ),
-    LibrarySectionsAllowed(
-        "common/gemm/gfx950/subtile_mxfp8_correctness_regression.yaml", _MXFP8_REASON
-    ),
-    LibrarySectionsAllowed(
-        "common/gemm/gfx950/subtile_mxfp8_correctness_regression_mt192x256_plr1_wgm4.yaml",
-        _MXFP8_REASON,
-    ),
-    LibrarySectionsAllowed(
-        "common/gemm/gfx950/subtile_mxfp8_correctness_regression_mt256x192_plr1_wgm1.yaml",
-        _MXFP8_REASON,
-    ),
-    LibrarySectionsAllowed(
-        "common/gemm/gfx950/subtile_mxfp8_correctness_regression_mt256x320_plr0_wgm1.yaml",
-        _MXFP8_REASON,
-    ),
-    LibrarySectionsAllowed(
-        "common/gemm/gfx950/subtile_mxfp8_correctness_regression_mt320x256_plr1_wgm4.yaml",
-        _MXFP8_REASON,
-    ),
-    LibrarySectionsAllowed(
-        "common/gemm/gfx950/subtile_mxfp8_multi_du_multi_partition.yaml", _MXFP8_REASON
-    ),
-    LibrarySectionsAllowed("common/gemm/gfx950/subtile_mxfp8_tail_loop.yaml", _MXFP8_REASON),
-    LibrarySectionsAllowed("common/gemm/gfx950/subtile_mxfp8_tail_loop_smoke.yaml", _MXFP8_REASON),
     LibrarySectionsAllowed(
         "common/gemm/xfp32.yaml",
         "GridBased LibraryLogic and LibraryClient built from real benchmark data (XF32)",
@@ -128,18 +78,6 @@ _LIBRARY_SECTIONS_ALLOWED = {
         "common/sparse/gfx94x/libray_logic.yaml",
         "sparse GEMM LibraryLogic built from real benchmark data",
     ),
-    LibrarySectionsAllowed("custom/custom_aiter_bf16.yaml", _CUSTOM_REASON),
-    LibrarySectionsAllowed("custom/custom_aiter_f4.yaml", _CUSTOM_REASON),
-    LibrarySectionsAllowed("custom/custom_ck.yaml", _CUSTOM_REASON),
-    LibrarySectionsAllowed("custom/custom_rocblas_gemv_bf16_tn_m1.yaml", _CUSTOM_REASON),
-    LibrarySectionsAllowed("custom/custom_rocblas_gemv_bf16_tn_m2.yaml", _CUSTOM_REASON),
-    LibrarySectionsAllowed("custom/custom_rocblas_gemv_bf16_tn_m4.yaml", _CUSTOM_REASON),
-    LibrarySectionsAllowed("custom/custom_rr.yaml", _CUSTOM_REASON),
-    LibrarySectionsAllowed("custom/custom_rr_f6.yaml", _CUSTOM_REASON),
-    LibrarySectionsAllowed("custom/custom_rr_mx.yaml", _CUSTOM_REASON),
-    LibrarySectionsAllowed("custom/custom_tensile_sk.yaml", _CUSTOM_REASON),
-    LibrarySectionsAllowed("custom/custom_triton_f4.yaml", _CUSTOM_REASON),
-    LibrarySectionsAllowed("custom/custom_wave_bf16.yaml", _CUSTOM_REASON),
 }
 _LIBRARY_SECTIONS_ALLOWED_PATHS = {entry.path for entry in _LIBRARY_SECTIONS_ALLOWED}
 

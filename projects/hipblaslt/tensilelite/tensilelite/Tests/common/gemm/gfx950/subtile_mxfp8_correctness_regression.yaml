@@ -150,11 +150,3 @@ BenchmarkProblems:
           # ===== Control sizes (PASSed at this tile in PR 7767 snapshot) =====
           - Exact: [2048, 6784, 1,  768]    # snapshot PASS, norm_error ≈ 7.6e-05 (K=3*DU)
           - Exact: [7808, 5760, 1,  256]    # snapshot PASS, norm_error ≈ 7.0e-05 (K=1*DU)
-
-LibraryLogic:
-    ScheduleName: "gfx950"
-    DeviceNames: ["Device 75a0"]
-    ArchitectureName: "gfx950"
-    LibraryType: "Prediction"
-
-LibraryClient:

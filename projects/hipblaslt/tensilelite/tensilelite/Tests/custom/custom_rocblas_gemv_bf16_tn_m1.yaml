@@ -89,9 +89,3 @@ BenchmarkProblems:
           - Exact: [2048, 1, 1, 73728]
           # Padded leading dimensions: [m, n, batch, K, ldd, ldc, lda, ldb].
           - Exact: [4096, 1, 1, 2048, 4104, 4104, 2056, 2056]
-
-LibraryLogic:
-    ScheduleName: "gfx950"
-    DeviceNames: ["Device 0049", "Device 0050"]
-    ArchitectureName: "gfx950"
-    LibraryType: "GridBased"
