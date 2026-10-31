@@ -484,6 +484,7 @@ class ConvArgs:
         streamk: Optional[str] = None,
         split_k: bool = False,
         split_tail: bool = False,
+        split_flags: bool = False,
     ) -> List[ArgSpec]:
         """The ordered kernarg ABI of the kernel these args launch.
 
@@ -501,6 +502,7 @@ class ConvArgs:
             streamk=streamk,
             split_k=split_k,
             split_tail=split_tail,
+            **({"split_flags": True} if split_flags else {}),
         )
 
     # ---- GEMM view (implicit GEMM only) ----
@@ -768,6 +770,8 @@ class ConvArgs:
             and split_k > 1,
             # A fwd split_tail binary: passing full_tiles selects its ABI.
             split_tail=full_tiles is not None,
+            # A fwd split_flag_store binary: passing sk_flags selects its ABI.
+            split_flags=self.direction == "fwd" and sk_flags is not None,
         )
         names = [n for n, _ in abi]
         values: Dict[str, int] = dict(

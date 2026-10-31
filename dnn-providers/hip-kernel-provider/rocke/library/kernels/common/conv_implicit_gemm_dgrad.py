@@ -1191,6 +1191,11 @@ class DgradConvSpec:
     # the f32 -> bf16 rounding without the NaN fix-up (_pp_f32_to_bf16).
     # Default 0; tags ``ppe<n>``.
     tapk_pp_epi: int = 0
+    # split_k > 1 on the x-halo / ping-pong cshuffle atomic store: one bf16
+    # pair per lane, lanes contiguous along C (CShuffleEpilogue.
+    # atomic_pair_lanes) -- an atomic instruction covers 256 contiguous bytes
+    # instead of 64 pairs at a store_vec stride. Tags ``sapl``.
+    split_atomic_pairs: bool = False
     # With tapk_xhalo and lds_xor: store the A (dY halo) LDS tile as K0 x Mp x
     # 4 (slabs of 4-element k groups, Mp rows each) instead of XOR-swizzled
     # rows. An MFMA operand fetch (16 lanes, 16 consecutive rows, 8 bytes
@@ -1541,6 +1546,7 @@ class DgradConvSpec:
                 f"bpp{self.tapk_pingpong}": self.tapk_pingpong > 0,
                 f"pps{self.tapk_pp_sched}": self.tapk_pp_sched > 0,
                 f"ppe{self.tapk_pp_epi}": self.tapk_pp_epi > 0,
+                "sapl": self.split_atomic_pairs,
                 "ak4": self.xh_a_k4,
                 f"xo{self.xh_order}": self.xh_order > 0,
                 f"xdf{self.xh_defer}": self.xh_defer > 0,
@@ -1851,6 +1857,14 @@ def _tap_outer_k_conflict(spec: DgradConvSpec) -> str:
 
 def _tapk_pingpong_conflict(spec: DgradConvSpec) -> str:
     """Why ``spec.tapk_pingpong`` cannot be honoured, or ``""``."""
+    if spec.split_atomic_pairs and not (
+        spec.split_k > 1
+        and (spec.tapk_xhalo or spec.tapk_pingpong)
+        and spec.epilogue == "cshuffle"
+        and spec.data.dtype_d == "bf16"
+        and spec.wave_size == 64
+    ):
+        return "split_atomic_pairs: the split-K x-halo / ping-pong cshuffle bf16 atomic store only"
     if spec.tapk_pp_epi not in (0, 1, 2) or (
         spec.tapk_pp_epi
         and not (
@@ -3853,6 +3867,8 @@ def _build_tilde_dgrad(
                 max_store_vec=_dgrad_store_vec(spec),
                 out_dtype=spec.data.dtype_d,
             )
+            if spec.split_atomic_pairs:
+                _epi = dc_replace(_epi, atomic_pair_lanes=True)
             _epi.atomic_store(
                 b, accs=final_accs, dw_ptr=dX, wg_N=c_C, bounds=(rec_gemm_m, c_dg_N)
             )

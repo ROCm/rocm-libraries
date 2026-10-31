@@ -384,7 +384,7 @@ def _dgrad_xh_knob_cfg(knobs, *, tpf: int, grouped: bool, epilogue: str):
 # an "@<regex>" scope on the plain binary's label (unscoped sets are
 # ignored, so the plain grid never grows by accident). Unset = none.
 def _parse_dgrad_pp_knobs(text: str):
-    keys = {"bpp", "pps", "ppe", "xcd", "kpad", "lxor", "mch", "wpe", "sk"}
+    keys = {"bpp", "pps", "ppe", "xcd", "kpad", "lxor", "mch", "wpe", "sk", "sapl"}
     out = []
     for part in text.split(";"):
         kv = []
@@ -443,6 +443,9 @@ def _dgrad_pp_knob_cfg(knobs, *, epilogue: str):
         if epilogue != "cshuffle" or not d.get("bpp"):
             return None
         cfg["split_k"] = d["sk"]
+        if d.get("sapl"):
+            # lane-contiguous split-K atomic pairs (DgradConvSpec.split_atomic_pairs)
+            cfg["split_atomic_pairs"] = True
     return cfg
 
 
@@ -998,6 +1001,54 @@ def _fwd_pingpong_k_loops(k_loops: List[dict], pipeline: str) -> List[dict]:
             d = dict(kl, **v)
             if d not in out:
                 out.append(d)
+    # ROCKE_AOT_FWD_PP_MCH=2[,4]: the ping-pong loops also with the C tile
+    # staged in m-chunks (cshuffle_m_chunks; built only where the C tile
+    # does not fit the LDS, see _fwd_r2_in_scope), with the row-keyed
+    # swizzle when ROCKE_AOT_FWD_PP_MCH_LXRK=1.
+    _mch = [int(t) for t in _os.environ.get("ROCKE_AOT_FWD_PP_MCH", "").split(",") if t.strip()]
+    _mx = _os.environ.get("ROCKE_AOT_FWD_PP_MCH_LXRK", "0") not in ("", "0")
+    out = out + [
+        dict(d, cshuffle_m_chunks=m, **({"lds_xor_rowkey": True} if _mx else {}))
+        for m in _mch for d in out if not d.get("pp_b_double")
+    ]
+    # ROCKE_AOT_FWD_ESF=1: the ping-pong loops also with the constant-step
+    # in-bounds cshuffle store (epi_store_fast).
+    if _os.environ.get("ROCKE_AOT_FWD_ESF", "0") not in ("", "0"):
+        out = out + [dict(d, epi_store_fast=True) for d in out if not d.get("cshuffle_m_chunks")]
+    # ROCKE_AOT_FWD_PP_CG=2[,4]: the tap-fastest ping-pong loops also with the
+    # channel chunks grouped (uk_chunk_group; split binaries need uk_nopad).
+    for g in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_PP_CG", "").split(",") if t.strip()):
+        out = out + [
+            dict(d, uk_chunk_group=g) for d in out
+            if d.get("uk_tap_fast") and not d.get("uk_chunk_group") and not d.get("uk_xhalo")
+        ]
+    # ROCKE_AOT_FWD_PSF=3[,4]: the pp5 loops also with their global reads
+    # split between [mem A] and [compute B] (pp_split_fetch).
+    for n in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_PSF", "").split(",") if t.strip()):
+        out = out + [
+            dict(d, pp_split_fetch=n)
+            for d in out
+            if d.get("rpf_pingpong") == 5 and not d.get("uk_xhalo") and not d.get("pp_split_fetch")
+        ]
+    # ROCKE_AOT_FWD_FBSE=1: the variants the two axes above add
+    # (pp_split_fetch / uk_chunk_group) skip the empty fallback loop's
+    # prologue (fb_skip_empty).
+    if _os.environ.get("ROCKE_AOT_FWD_FBSE", "0") not in ("", "0"):
+        out = [dict(d, fb_skip_empty=True)
+               if d.get("pp_split_fetch") or d.get("uk_chunk_group") else d for d in out]
+    # ROCKE_AOT_FWD_ELB=1: ... and LDS-only epilogue barriers (epi_lds_barriers).
+    if _os.environ.get("ROCKE_AOT_FWD_ELB", "0") not in ("", "0"):
+        out = [dict(d, epi_lds_barriers=True)
+               if d.get("pp_split_fetch") or d.get("uk_chunk_group") else d for d in out]
+    # ROCKE_AOT_FWD_XSUB=32[,..]: the pp5 loops (no pp_b_double) also as the
+    # x-halo sub-tile ping-pong (xh_subtile) staging tile_m + n pixels.
+    for n in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_XSUB", "").split(",") if t.strip()):
+        out = out + [
+            dict(d, uk_xhalo=n, uk_nopad=False, xh_subtile=True)
+            for d in out
+            if d.get("rpf_pingpong") == 5 and not d.get("pp_b_double")
+            and not d.get("uk_xhalo")
+        ]
     return out
 
 
@@ -1078,6 +1129,10 @@ _FWD_SCOPED_KNOBS = _FWD_R2_KNOBS + (
 
 
 def _fwd_r2_in_scope(kloop: dict, tm: int, tn: int, tk: int, wm: int, wn: int, wt: int) -> bool:
+    if kloop.get("cshuffle_m_chunks", 1) > 1 and tm * tn * 2 <= 65536:
+        # (ROCKE_AOT_FWD_PP_MCH) m-chunks only where the bf16 C tile does not
+        # fit the LDS.
+        return False
     if kloop.get("rpf_pingpong"):
         # The ping-pong loops have their own scope (ROCKE_AOT_FWD_PP_SCOPE).
         return _fwd_pp_geometry_in_scope(tm, tn, tk, wm, wn, wt)
@@ -1307,6 +1362,59 @@ def _fwd_job_variants(
     return out
 
 
+_FWD_SAA_TOKENS = {"a": dict(split_atomic_agent=True), "p": dict(split_atomic_pairs=True),
+                   "ap": dict(split_atomic_agent=True, split_atomic_pairs=True),
+                   "pf": dict(split_atomic_pairs=True, split_atomic_fast=True)}
+
+
+def _fwd_split_atomic_variants(kloop: dict, variant: tuple) -> Tuple[dict, ...]:
+    """Split-K store/order variants built for one forward split variant
+    ``(split_k, split_addr_k_decode, split_tail)``: ``{}`` plus, on the
+    ping-pong split binaries, with ``ROCKE_AOT_FWD_SAA="a,p,ap"``
+    device-scope atomics (a = split_atomic_agent), lane-contiguous pairs
+    (p = split_atomic_pairs) or both (ap); with ``ROCKE_AOT_FWD_SKX=6`` each
+    of those also with the slice-major XCD remap (split_xcd_remap) where the
+    loop has no xcd_remap and the variant no split tail; with
+    ``ROCKE_AOT_FWD_FSK=1`` (same condition) each also as stream-K
+    (split_streamk)."""
+    split_k = variant[0]
+    out = [{}]
+    if split_k > 1 and kloop.get("rpf_pingpong"):
+        for tok in _os.environ.get("ROCKE_AOT_FWD_SAA", "").split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            if tok not in _FWD_SAA_TOKENS:
+                raise ValueError(f"ROCKE_AOT_FWD_SAA: {tok!r} is not one of a, p, ap, pf")
+            if _FWD_SAA_TOKENS[tok] not in out:
+                out.append(_FWD_SAA_TOKENS[tok])
+        # ROCKE_AOT_FWD_SFS=1: each also with the flag-ordered split store
+        # (split_flag_store: slice 0 stores, no zeroed D).
+        if _os.environ.get("ROCKE_AOT_FWD_SFS", "0") not in ("", "0"):
+            out = out + [dict(v, split_flag_store=True) for v in out]
+        # ROCKE_AOT_FWD_SZF=1: each also zeroing its own D tile (split_zero_first).
+        if _os.environ.get("ROCKE_AOT_FWD_SZF", "0") not in ("", "0"):
+            out = out + [dict(v, split_zero_first=True) for v in out
+                         if not v.get("split_flag_store")]
+        flat = not variant[2] and not kloop.get("xcd_remap")
+        # ROCKE_AOT_FWD_FSK=1: each also as a stream-K binary (split_streamk).
+        fsk = _os.environ.get("ROCKE_AOT_FWD_FSK", "0") not in ("", "0")
+        skx = [int(t) for t in _os.environ.get("ROCKE_AOT_FWD_SKX", "").split(",") if t.strip()]
+        base = list(out)
+        base = [v for v in base
+                if not v.get("split_flag_store") and not v.get("split_zero_first")]
+        if fsk and flat:
+            out = out + [dict(v, split_streamk=True) for v in base]
+        # ROCKE_AOT_FWD_SHY=24[,32,..]: each also as a split_hybrid binary
+        # (aligned slices + whole-tile remainders on the stream-K grid).
+        shy = [int(t) for t in _os.environ.get("ROCKE_AOT_FWD_SHY", "").split(",") if t.strip()]
+        if shy and flat:
+            out = out + [dict(v, split_hybrid=e) for e in shy for v in base]
+        if skx and flat:
+            out = out + [dict(v, split_xcd_remap=n) for n in skx for v in base]
+    return tuple(out)
+
+
 def _fwd_split_tails(kloop: dict, split_k: int) -> Tuple[bool, ...]:
     """``split_tail`` values built for one forward split variant: the
     tail-only split (ImplicitGemmConvSpec.split_tail) is opt-in
@@ -1530,14 +1638,20 @@ def _fwd_jobs(
                     vector_size_c=vec_c,
                     **kloop,
                 )
-                for split_k, sakd, spt in _fwd_job_variants(
-                    kloop, (tile_m, tile_n, tile_k, warp_m, warp_n, wt), epilogue, caps
+                for (split_k, sakd, spt), saa in (
+                    (v, saa)
+                    for v in _fwd_job_variants(
+                        kloop, (tile_m, tile_n, tile_k, warp_m, warp_n, wt), epilogue, caps
+                    )
+                    for saa in _fwd_split_atomic_variants(kloop, v)
                 ):
                     job_cfg = dict(cfg, split_k=split_k) if split_k > 1 else cfg
                     if sakd:
                         job_cfg = dict(job_cfg, split_addr_k_decode=True)
                     if spt:
                         job_cfg = dict(job_cfg, split_tail=True)
+                    if saa:
+                        job_cfg = dict(job_cfg, **saa)
                     # The identity's prefetch_regs is an int shared with
                     # wgrad (fwd's bool True is 1).
                     id_cfg = (
@@ -2678,7 +2792,8 @@ def count_jobs(
                 lean = geo[7] == "default" and 1 not in _VECS
                 g6 = geo[:6]
                 total += (len(_VECS) if lean else vecs) * sum(
-                    len(_fwd_job_variants(kl, g6, geo[7], caps))
+                    sum(len(_fwd_split_atomic_variants(kl, v))
+                        for v in _fwd_job_variants(kl, g6, geo[7], caps))
                     for kl in _fwd_k_loops(pipeline, target.gfx)
                     if (not lean or kl.get("lds_xor")) and _fwd_r2_in_scope(kl, *g6)
                     for caps in _layout_caps()

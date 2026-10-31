@@ -282,6 +282,41 @@ class KernelIdentity:
     lds_xor_rowkey: bool = False
     # fwd only (ImplicitGemmConvSpec.xh_wait_smem). Left out of the hash while False.
     xh_wait_smem: bool = False
+    # fwd only (ImplicitGemmConvSpec.split_atomic_agent). Left out of the hash while False.
+    split_atomic_agent: bool = False
+    # fwd (ImplicitGemmConvSpec) and dgrad (DgradConvSpec) split_atomic_pairs.
+    # Left out of the hash while False.
+    split_atomic_pairs: bool = False
+    # fwd only (ImplicitGemmConvSpec.split_xcd_remap). Left out of the hash at 0.
+    split_xcd_remap: int = 0
+    # fwd only (ImplicitGemmConvSpec.split_atomic_fast). Left out of the hash while False.
+    split_atomic_fast: bool = False
+    # fwd only (ImplicitGemmConvSpec.epi_store_fast). Left out of the hash while False.
+    epi_store_fast: bool = False
+    # fwd only (ImplicitGemmConvSpec.split_zero_first). Left out of the hash while False.
+    split_zero_first: bool = False
+    # fwd only (ImplicitGemmConvSpec.split_streamk). Left out of the hash while False.
+    split_streamk: bool = False
+    # fwd only (ImplicitGemmConvSpec.split_flag_store). Left out of the hash while False.
+    split_flag_store: bool = False
+    # fwd only (ImplicitGemmConvSpec.xh_subtile). Left out of the hash while False.
+    xh_subtile: bool = False
+    # fwd only (ImplicitGemmConvSpec.pp_fetch_deep). Left out of the hash while False.
+    pp_fetch_deep: bool = False
+    # fwd only (ImplicitGemmConvSpec.pp_split_fetch). Left out of the hash at 0.
+    pp_split_fetch: int = 0
+    # fwd only (ImplicitGemmConvSpec.fb_skip_empty). Left out of the hash while False.
+    fb_skip_empty: bool = False
+    # fwd only (ImplicitGemmConvSpec.pp_end_guard). Left out of the hash while False.
+    pp_end_guard: bool = False
+    # fwd only (ImplicitGemmConvSpec.epi_lds_barriers). Left out of the hash while False.
+    epi_lds_barriers: bool = False
+    # fwd only (ImplicitGemmConvSpec.split_hybrid). Left out of the hash at 0.
+    split_hybrid: int = 0
+    # fwd only (ImplicitGemmConvSpec.sched_strategy). Left out of the hash at 0.
+    sched_strategy: int = 0
+    # fwd only (ImplicitGemmConvSpec.split_tail_compact). Left out of the hash at False.
+    split_tail_compact: bool = False
     # dgrad only (DgradConvSpec.dy_halo / dy_halo_setprio /
     # dy_halo_kouter_pad): the dY halo mode of the tap-outer K loop and its
     # knobs. A halo binary also bakes its filter (filter_h/w) and the widest
@@ -443,6 +478,11 @@ class KernelIdentity:
             "defer_mfma_per_write",
             "lds_kpack_read", "uk_chunk_group", "rpf_lds_barrier", "rpf_fetch_late",
             "uk_xhalo", "xh_dpp", "rpf_setprio", "rpf_pingpong", "pp_pre_mfma", "xh_wait_smem", "pp_b_double", "lds_xor_rowkey",
+            "split_atomic_agent", "split_atomic_pairs", "split_xcd_remap",
+            "split_streamk", "split_flag_store", "xh_subtile", "split_atomic_fast",
+            "epi_store_fast", "split_zero_first", "pp_fetch_deep",
+            "pp_split_fetch", "fb_skip_empty", "pp_end_guard",
+            "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact",
         ):
             if not fields[name]:
                 del fields[name]

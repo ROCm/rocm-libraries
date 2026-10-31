@@ -452,8 +452,13 @@ class CoalescedTileLoader:
         descriptor: DescriptorFn,
         rsrc: Optional[Value] = None,
         ptr: Optional[Value] = None,
+        vec_range: Optional[Tuple[int, int]] = None,
     ) -> list:
         """Emit only the global memory reads (buffer_load_vN / global_load_vN).
+
+        ``vec_range=(e0, e1)`` emits only the thread's vectors ``e0 <= e < e1``
+        (default: all ``vecs_per_thread``), so a pipeline can spread one
+        tile's reads over several phases.
 
         Returns a list of ``(row, col, v)`` triples — the tile-local coordinates
         and the loaded VGPR value — that can later be passed to
@@ -483,7 +488,8 @@ class CoalescedTileLoader:
         c_oob = b.const_i32(self.oob_sentinel)
 
         staged = []
-        for e in range(self.vecs_per_thread):
+        e0, e1 = vec_range if vec_range is not None else (0, self.vecs_per_thread)
+        for e in range(e0, e1):
             row, col = self._chunk_row_col(
                 b, e, tid, c_threads=c_threads, c_span=c_span, c_load_vec=c_load_vec
             )

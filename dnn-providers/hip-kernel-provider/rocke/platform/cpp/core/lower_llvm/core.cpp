@@ -1324,7 +1324,8 @@ static void
         for(int r = 0; r < op->num_regions; r++)
         {
             int child_loop_end;
-            if(op->opcode == ROCKE_OP_SCF_FOR)
+            if(op->opcode == ROCKE_OP_SCF_FOR
+               && !rocke_attr_get_bool(&op->attrs, "smem_iter_local", false))
             {
                 int own_last = idx + ll_subtree_size(op) - 1;
                 child_loop_end

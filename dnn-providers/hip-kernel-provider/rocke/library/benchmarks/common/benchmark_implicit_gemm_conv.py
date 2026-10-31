@@ -5232,7 +5232,8 @@ def _launch_problem(direction, problem):
 
 def _extras_bytes(extras) -> int:
     """Device bytes :func:`_extras_and_grid` allocated for one launch config."""
-    return int(extras.get("ws_bytes", 0)) + int(extras.get("sub_gemm_bytes", 0))
+    return (int(extras.get("ws_bytes", 0)) + int(extras.get("sub_gemm_bytes", 0))
+            + int(extras.get("sk_flags_bytes", 0)))
 
 
 def _fast_rank_candidates(
@@ -5339,7 +5340,7 @@ def _fast_rank_candidates(
     def _release(mine) -> None:
         for extras in mine:
             held["bytes"] -= _extras_bytes(extras)
-            for key in ("ws_ptr", "sub_gemm_buf"):
+            for key in ("ws_ptr", "sub_gemm_buf", "sk_flags"):
                 if key in extras:
                     rt.free(extras[key])
 
@@ -5636,6 +5637,8 @@ def _signature_for_identity(ident, dtype):
         is_3d=ident.is_3d,
         split_k=ident.split_k > 1,
         split_tail=bool(getattr(ident, "split_tail", False)),
+        split_flags=bool(getattr(ident, "split_flag_store", False)
+                         or getattr(ident, "split_zero_first", False)),
     )
 
 
@@ -6036,6 +6039,9 @@ def _runtime_split_ks(
         )
         if getattr(ident, "split_tail", False):
             return _fwd_split_tail_launches(problem, ident) if requested in (0, -1) else ()
+        if getattr(ident, "split_streamk", False) or getattr(ident, "split_hybrid", 0):
+            # A stream-K (or split_hybrid) binary's degree is its workgroup count.
+            return _fwd_streamk_launches(problem, ident) if requested in (0, -1) else swept
         return fwd_degrees
     return _split_k_degrees(
         problem,
@@ -6116,6 +6122,30 @@ class TailSplit(int):
 
     def __format__(self, spec: str) -> str:
         return str(self) if not spec else format(int(self), spec)
+
+
+# Stream-K (split_streamk) workgroup counts, in resident workgroups per CU.
+_FWD_STREAMK_WGS_PER_CU = (1, 2)
+
+
+def _fwd_streamk_launches(problem, ident) -> tuple:
+    """Launches of a ``split_streamk`` binary: its workgroup count G (the
+    split degree kernarg), one or two resident workgroups per CU, while every
+    workgroup keeps a few K tiles of work."""
+    from kernels.common.conv_args import ConvArgs
+
+    num_cus = _device_num_cus()
+    if not num_cus or max(1, problem.groups) != 1:
+        return ()
+    args_ = ConvArgs.from_problem(
+        problem, tile_m=ident.tile_m, tile_n=ident.tile_n, tile_k=ident.tile_k
+    )
+    iters = args_.num_pid_m * args_.num_pid_n * -(-args_.gemm_k // ident.tile_k)
+    return tuple(
+        g
+        for g in (n * num_cus for n in _FWD_STREAMK_WGS_PER_CU)
+        if g * _FWD_SPLIT_MIN_TILES_PER_SLICE <= iters
+    )
 
 
 # Tail-split degrees tried per full-tile count; a few: the tail is short.
@@ -6303,6 +6333,12 @@ def _cached_bind(
             rt.memset_async(dw_ptr, 0, dw_bytes, stream)
             _launch()
 
+    elif direction == "fwd" and ident.split_k > 1 and (
+        getattr(ident, "split_flag_store", False) or getattr(ident, "split_zero_first", False)
+    ):
+        # Slice 0 of every split tile stores plainly (split_flag_store): D
+        # needs no clear.
+        pass
     elif direction == "fwd" and ident.split_k > 1:
         # The forward split-K epilogue atomic-adds every K slice into D, so
         # each launch zeroes D first -- part of the algorithm's cost. A
@@ -6474,7 +6510,25 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
         if getattr(ident, "split_tail", False):
             # The tiles that run unsplit (TailSplit); 0 = split every tile.
             extras["full_tiles"] = getattr(split_k, "full_tiles", 0)
+        if getattr(ident, "split_streamk", False) or getattr(ident, "split_hybrid", 0):
+            # Stream-K / split_hybrid: a flat grid of ``split_k`` workgroups.
+            return extras, (int(split_k), 1, 1)
+        if getattr(ident, "split_flag_store", False) or getattr(ident, "split_zero_first", False):
+            # Two i32 per output tile, zeroed once: the kernel resets them.
+            _a = ConvArgs.from_problem(
+                problem, tile_m=ident.tile_m, tile_n=ident.tile_n, tile_k=ident.tile_k
+            )
+            nb = 8 * _a.num_pid_m * _a.num_pid_n * max(1, problem.groups)
+            fl = rt.alloc(nb)
+            rt.memset(fl, 0, nb)
+            extras["sk_flags"] = fl
+            extras["sk_flags_bytes"] = nb
         gx, gy, gz = _grid_for(direction, problem, ident)
+        if getattr(ident, "split_tail_compact", False):
+            # Compact split_tail grid: the full tiles once, the tail per slice.
+            _tiles = gx * gy
+            _full = min(int(extras.get("full_tiles", 0) or 0), _tiles)
+            return extras, (_full + (_tiles - _full) * int(split_k), 1, gz)
         return extras, (gx, gy, gz * split_k)
 
     return extras, _grid_for(direction, problem, ident)

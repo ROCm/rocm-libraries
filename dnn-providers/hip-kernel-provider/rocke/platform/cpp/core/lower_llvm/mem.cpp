@@ -277,12 +277,15 @@ static void op_memref_global_flag_wait_eq(rocke_lower_t* L, const rocke_op_t* op
     cur->terminated = true;
     val = rocke_ll_fresh(L, "flag");
     hit = rocke_ll_fresh(L, "flag.hit");
+    /* Optional "ordering" attr ("monotonic": the caller fences once after). */
+    const char* wait_ord = ll_attr_str(op, "ordering", "acquire");
     rocke_ll_block_emitf(L,
                          spin,
-                         "  %s = load atomic i32, ptr addrspace(1) %s%s acquire, align 4",
+                         "  %s = load atomic i32, ptr addrspace(1) %s%s %s, align 4",
                          val,
                          gep,
-                         ll_syncscope(L, scope));
+                         ll_syncscope(L, scope),
+                         wait_ord);
     rocke_ll_block_emitf(
         L, spin, "  %s = icmp eq i32 %s, %s", hit, val, rocke_ll_operand(L, expect));
     done = rocke_ll_new_block(L, "flag.done");
@@ -372,6 +375,9 @@ static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op
     const char* idx_ty = rocke_ll_llvm_type(L, idx->type);
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* ordering = ll_attr_str(op, "ordering", "monotonic");
+    /* Optional "syncscope" attr (Python: same); absent = system scope. */
+    const char* scope = ll_attr_str(op, "syncscope", NULL);
+    const char* sc = scope ? rocke_arena_printf(&L->arena, " syncscope(\"%s\")", scope) : "";
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds bfloat, ptr addrspace(1) %s, %s %s",
                    gep,
@@ -380,13 +386,14 @@ static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op
                    rocke_ll_operand(L, idx));
     L->needs_fp_atomic_md = true;
     rocke_ll_emitf(L,
-                   "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x bfloat> %s %s"
+                   "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x bfloat> %s%s %s"
                    ", !amdgpu.no.fine.grained.memory !1"
                    ", !amdgpu.no.remote.memory !1"
                    ", !amdgpu.ignore.denormal.mode !1",
                    ll_res(op),
                    gep,
                    rocke_ll_operand(L, val),
+                   sc,
                    ordering);
 }
 

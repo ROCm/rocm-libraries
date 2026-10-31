@@ -2089,8 +2089,14 @@ class IRBuilder:
         value: Value,
         *,
         ordering: str = "monotonic",
+        syncscope: Optional[str] = None,
     ) -> Value:
         """Packed-bf16 atomic add: two bf16 lanes per transaction.
+
+        ``syncscope`` (``None`` = LLVM's default system scope, which sets SC1
+        on gfx94x and performs the atomic beyond the L2) may name ``"agent"``:
+        device scope, performed in the L2 (SC1 clear). Omitted from the op's
+        attributes when ``None``, so existing kernels are unchanged.
 
         Lowers to AMDGPU's ``llvm.amdgcn.global.atomic.fadd.v2bf16``
         intrinsic (gfx940+); returns the pre-add value. ``value``
@@ -2115,7 +2121,16 @@ class IRBuilder:
             "memref.global_atomic_add_pk_bf16",
             [ptr, idx, value],
             [value.type],
-            attrs={"elem_type": "bf16", "vec": 2, "ordering": ordering},
+            attrs=(
+                {"elem_type": "bf16", "vec": 2, "ordering": ordering}
+                if syncscope is None
+                else {
+                    "elem_type": "bf16",
+                    "vec": 2,
+                    "ordering": ordering,
+                    "syncscope": syncscope,
+                }
+            ),
             result_name_hint="atom_bf16",
         ).result
 
@@ -2208,8 +2223,12 @@ class IRBuilder:
         expect: Value,
         *,
         scope: str = "agent",
+        ordering: str = "acquire",
     ) -> None:
         """Spin until the i32 flag ``ptr[idx]`` equals ``expect``.
+
+        ``ordering="monotonic"`` spins on relaxed loads (no cache
+        invalidate per poll); the caller then places one acquire fence.
 
         Lowers to a self-contained loop around an ``acquire`` atomic load at
         ``scope``, so global loads issued after the wait observe every store
@@ -2224,10 +2243,13 @@ class IRBuilder:
             )
         if scope not in _FENCE_SCOPES:
             raise ValueError(f"unknown flag scope {scope!r}")
+        if ordering not in ("acquire", "monotonic"):
+            raise ValueError(f"unknown flag wait ordering {ordering!r}")
         self._op(
             "memref.global_flag_wait_eq",
             [ptr, idx, expect],
-            attrs={"scope": scope},
+            attrs={"scope": scope} if ordering == "acquire"
+            else {"scope": scope, "ordering": ordering},
         )
 
     def fp16_zero(self) -> Value:

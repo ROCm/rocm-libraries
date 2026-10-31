@@ -392,7 +392,11 @@ class TestTapOuterKIdentity(unittest.TestCase):
         for name in ("defer_mfma", "defer_mfma_per_write", "lds_ahead", "lds_kpack_read", "rpf_fetch_late",
                      "rpf_lds_barrier", "rpf_setprio", "split_tail", "uk_chunk_group", "uk_nopad", "uk_xhalo",
                      "vmem_interleave", "xh_dpp", "rpf_pingpong", "pp_pre_mfma",
-                     "xh_wait_smem", "pp_b_double", "lds_xor_rowkey"):  # fwd K-loop / x-halo knobs, off
+                     "xh_wait_smem", "pp_b_double", "lds_xor_rowkey",
+                     "split_atomic_agent", "split_atomic_pairs", "split_atomic_fast",
+                     "epi_store_fast", "split_xcd_remap", "split_streamk", "split_flag_store",
+                     "split_zero_first", "xh_subtile",
+                     "pp_fetch_deep", "pp_split_fetch", "fb_skip_empty", "pp_end_guard", "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact",):  # fwd K-loop / x-halo / split-store knobs, off
             del fields[name]
         legacy = hashlib.sha1(
             json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()
