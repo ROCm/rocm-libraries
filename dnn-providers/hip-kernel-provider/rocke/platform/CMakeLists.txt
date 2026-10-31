@@ -316,6 +316,63 @@ if(ROCKE_BUILD_PYBIND)
   add_subdirectory(cpp/bindings)
 endif()
 
+# Authorize only exact output directories from this configuration to search for
+# the top-level SDK descriptor. A nonce makes markers from older configurations
+# unusable after their output directories are no longer registered.
+string(RANDOM LENGTH 32 ALPHABET 0123456789abcdef _ROCKE_SDK_BUILD_ID)
+file(WRITE "${CMAKE_BINARY_DIR}/rocke_sdk_build_id.txt"
+     "rocke-sdk-build-v1\n${_ROCKE_SDK_BUILD_ID}\n")
+set(_ROCKE_SDK_OUTPUT_MARKER "rocke-sdk-output-v1\n${_ROCKE_SDK_BUILD_ID}\n")
+# Enroll a consumer's exact output directory for native build-tree SDK discovery.
+function(rocke_mark_compiler_output target)
+  file(GENERATE OUTPUT "$<TARGET_FILE_DIR:${target}>/rocke_sdk_output_target_${target}.txt"
+       CONTENT "${_ROCKE_SDK_OUTPUT_MARKER}")
+endfunction()
+# Enroll the engine subtree's native targets after its child scopes are configured.
+function(_rocke_mark_directory_outputs directory)
+  get_property(_targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(_target IN LISTS _targets)
+    get_target_property(_type "${_target}" TYPE)
+    if(_type MATCHES "^(EXECUTABLE|STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY)$")
+      rocke_mark_compiler_output("${_target}")
+    endif()
+  endforeach()
+  get_property(_children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+  foreach(_child IN LISTS _children)
+    _rocke_mark_directory_outputs("${_child}")
+  endforeach()
+endfunction()
+_rocke_mark_directory_outputs("${CMAKE_CURRENT_SOURCE_DIR}")
+# Provider consumers added later use these inherited output directories. Respect
+# CMake's multi-config suffix and per-config override rules, including genex paths.
+set(_ROCKE_OUTPUT_CONFIGS "${CMAKE_CONFIGURATION_TYPES}")
+if(NOT _ROCKE_OUTPUT_CONFIGS)
+  set(_ROCKE_OUTPUT_CONFIGS "${CMAKE_BUILD_TYPE}")
+endif()
+foreach(_kind RUNTIME LIBRARY)
+  set(_generic_conditions 1)
+  foreach(_config IN LISTS _ROCKE_OUTPUT_CONFIGS)
+    string(TOUPPER "${_config}" _upper_config)
+    if(CMAKE_${_kind}_OUTPUT_DIRECTORY_${_upper_config})
+      list(APPEND _generic_conditions "$<NOT:$<CONFIG:${_config}>>")
+      get_filename_component(_output "${CMAKE_${_kind}_OUTPUT_DIRECTORY_${_upper_config}}"
+                             ABSOLUTE BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+      file(GENERATE OUTPUT "${_output}/rocke_sdk_output_variable_${_kind}_${_upper_config}.txt"
+           CONTENT "${_ROCKE_SDK_OUTPUT_MARKER}" CONDITION "$<CONFIG:${_config}>")
+    endif()
+  endforeach()
+  if(CMAKE_${_kind}_OUTPUT_DIRECTORY)
+    get_filename_component(_output "${CMAKE_${_kind}_OUTPUT_DIRECTORY}" ABSOLUTE
+                           BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+    if(CMAKE_CONFIGURATION_TYPES AND NOT _output MATCHES "\\$<")
+      string(APPEND _output "/$<CONFIG>")
+    endif()
+    string(JOIN "," _generic_condition ${_generic_conditions})
+    file(GENERATE OUTPUT "${_output}/rocke_sdk_output_variable_${_kind}.txt"
+         CONTENT "${_ROCKE_SDK_OUTPUT_MARKER}" CONDITION "$<AND:${_generic_condition}>")
+  endif()
+endforeach()
+
 # --- Installable engine + test artifacts -------------------------------------
 install(TARGETS rocke_core
         EXPORT ckcTargets

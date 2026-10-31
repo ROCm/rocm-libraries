@@ -84,8 +84,12 @@ Native AUTO uses the physical loaded module or executable, independent of
 layouts include `<prefix>/bin`, `<prefix>/lib` or `lib64` (including nested
 library directories), and Python `site-packages`. Lookup stays within that
 prefix or site; it never selects SDK metadata from a parent installation.
-A build-tree descriptor resolves relative to its physical directory. Nested
-CMake outputs locate it at the nearest top-level CMake build marker.
+A build-tree descriptor resolves relative to its physical directory. CMake enrolls
+exact output directories with build-only markers tied to its current configuration.
+Only those outputs may search ancestors for the descriptor at the nearest CMake
+build root. Enrollment is not inherited by installed descendants, and stale markers
+from a previous configuration do not qualify. The markers and build identity are
+never installed. Custom targets can enroll with `rocke_mark_compiler_output(target)`.
 
 To relocate an installed native deployment, move the whole prefix, including
 its SDK metadata and payload. If the SDK lives elsewhere, update the runtime

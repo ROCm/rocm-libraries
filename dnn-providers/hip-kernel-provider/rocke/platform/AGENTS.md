@@ -238,8 +238,12 @@ installation prefix. Build-tree binaries also read an SDK site descriptor genera
 build root by CMake for its selected Python interpreter. It uses a relative site
 path when possible and a marked absolute site path for cross-drive Windows
 builds; regenerate absolute descriptors after moving the SDK. The descriptor
-stays in the build tree and is never installed. Deployments outside those locations
-must use `ROCKE_COMGR_LIB`. Explicit offline IR emission still requires no compiler.
+stays in the build tree and is never installed. Only exact output directories
+marked by the current CMake configuration may search ancestors for that descriptor;
+installed descendants and stale output markers do not qualify. The output markers
+and build identity also stay in the build tree. Custom consumer targets can enroll
+their output with `rocke_mark_compiler_output(target)`. Deployments outside those
+locations must use `ROCKE_COMGR_LIB`. Explicit offline IR emission still requires no compiler.
 The compatibility hook `comgr.prefer_bundled_lib()` uses this resolver without
 importing torch. Successful loads are retained; the loaded compiler's LLVM
 version determines AUTO, while package release metadata is informational.

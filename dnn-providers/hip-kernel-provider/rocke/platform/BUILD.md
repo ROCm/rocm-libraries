@@ -143,8 +143,13 @@ For native standalone AUTO discovery, install the SDK distribution and its
 metadata under the same prefix as the engine or executable, using the layouts
 listed in the [native deployment contract](dsl_docs/runtime/comgr_and_hipmodule.md#comgr).
 The build-tree `rocke_sdk_site.txt` descriptor is not installed: an installed
-consumer does not retain the configure machine's SDK path. A consumer deployed
-outside those layouts needs an explicit `ROCKE_COMGR_LIB` override.
+consumer does not retain the configure machine's SDK path, even when the install
+prefix is below the build directory. Only exact output directories enrolled by the
+current CMake configuration can search ancestors for the descriptor. Enrollment
+markers and the build identity are never installed; old markers cease to qualify
+after reconfiguration. Custom build consumers with target-specific output locations
+can call `rocke_mark_compiler_output(target)` after defining their target. A consumer
+deployed outside the supported layouts needs an explicit `ROCKE_COMGR_LIB` override.
 
 ## The rocke_engine Python binding (optional)
 

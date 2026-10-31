@@ -304,6 +304,17 @@ std::optional<std::string> build_sdk_comgr_in(const fs::path& root)
     return selected ? *selected : std::string();
 }
 
+std::string build_marker_id(const fs::path& path, const char* expected)
+{
+    std::ifstream marker(path);
+    std::string kind, id, extra;
+    if(!std::getline(marker, kind) || kind != expected || !std::getline(marker, id)
+       || id.size() != 32 || std::getline(marker, extra)
+       || !std::all_of(id.begin(), id.end(), [](unsigned char c) { return std::isxdigit(c); }))
+        return {};
+    return id;
+}
+
 std::string discover_sdk_comgr()
 {
     std::vector<fs::path> visited;
@@ -335,17 +346,29 @@ std::string discover_sdk_comgr()
         }
         if(auto selected = build_sdk_comgr_in(directory); selected)
             return *selected;
-        if(directory != prefix)
-            if(auto selected = build_sdk_comgr_in(prefix); selected)
-                return *selected;
-        // Nested CMake outputs may be below the top-level build root. Only a
-        // CMake build marker permits this lookup; never search ancestor SDKs.
+        std::vector<std::string> output_ids;
+        for(const auto& marker : children(directory))
+            if(path_text(marker.filename()).starts_with("rocke_sdk_output_")
+               && marker.extension() == ".txt")
+            {
+                auto id = build_marker_id(marker, "rocke-sdk-output-v1");
+                if(!id.empty())
+                    output_ids.push_back(id);
+            }
+        if(output_ids.empty())
+            continue;
+        // Only this exact output directory is enrolled. An installed descendant
+        // cannot inherit enrollment from a parent, even when it is inside a build.
         for(auto root = directory; !root.empty(); root = root.parent_path())
         {
             if(fs::is_regular_file(root / "CMakeCache.txt", error))
             {
-                if(auto selected = build_sdk_comgr_in(root); selected)
-                    return *selected;
+                const auto id
+                    = build_marker_id(root / "rocke_sdk_build_id.txt", "rocke-sdk-build-v1");
+                if(!id.empty()
+                   && std::find(output_ids.begin(), output_ids.end(), id) != output_ids.end())
+                    if(auto selected = build_sdk_comgr_in(root); selected)
+                        return *selected;
                 break;
             }
             if(root == root.parent_path())

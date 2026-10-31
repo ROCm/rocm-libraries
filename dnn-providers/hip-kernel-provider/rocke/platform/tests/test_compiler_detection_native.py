@@ -1180,6 +1180,185 @@ def build_native_probe(native_detector, binary):
     )
 
 
+@pytest.mark.parametrize("shared", [False, True])
+@pytest.mark.parametrize("local_sdk", [False, True])
+@pytest.mark.parametrize("nested_output", [False, True])
+def test_installed_consumer_does_not_use_parent_build_descriptor(
+    native_detector, tmp_path, shared, local_sdk, nested_output
+):
+    build = tmp_path / "build"
+    build.mkdir()
+    build_site = tmp_path / "build-env" / "site-packages"
+    sdk_fixture(
+        build_site,
+        text=(
+            "void amd_comgr_get_version(void){}\n"
+            "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=20;*b=0;*c=1;}\n"
+        ),
+    )
+    (build / "CMakeCache.txt").write_text("CMAKE_HOME_DIRECTORY:INTERNAL=source\n")
+    (build / "rocke_sdk_site.txt").write_text(
+        "rocke-sdk-site-v1\n" + os.path.relpath(build_site, build) + "\n"
+    )
+    # A marker in an ancestor output directory must not authorize descendants.
+    output = build / "bin"
+    output.mkdir()
+    build_id = "0" * 32
+    (build / "rocke_sdk_build_id.txt").write_text(
+        "rocke-sdk-build-v1\n" + build_id + "\n"
+    )
+    (output / "rocke_sdk_output_test.txt").write_text(
+        "rocke-sdk-output-v1\n" + build_id + "\n"
+    )
+    prefix = (output if nested_output else build) / "deployment"
+    site = prefix / "lib" / "python3.12" / "site-packages"
+    library = sdk_fixture(site) if local_sdk else None
+    binary = prefix / "bin" / "probe"
+    if shared:
+        native = prefix / "lib" / native_detector.name
+        native.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(native_detector, native)
+        binary.parent.mkdir(parents=True)
+        # A native launcher gives both anchors the deployed prefix; a Python
+        # interpreter could legitimately supply its own SDK as the second anchor.
+        source = (
+            "#include <cstdio>\n#include <dlfcn.h>\n"
+            "struct Info{unsigned major,minor,patch;const char* source,*requested,*comgr,*query;};\n"
+            "int main(int argc,char**argv){if(argc!=2)return 1;\n"
+            "auto h=dlopen(argv[1],RTLD_NOW|RTLD_LOCAL);if(!h)return 2;\n"
+            'auto query=reinterpret_cast<const Info*(*)()>(dlsym(h,"rocke_loaded_compiler_info"));\n'
+            "if(!query)return 3;auto p=query();\n"
+            'if(!p){std::puts("0\\n");return 0;}\n'
+            'std::printf("%u\\n%s\\n",p->major,p->requested);return 0;}\n'
+        )
+        subprocess.run(
+            ["c++", "-std=c++20", "-x", "c++", "-", "-ldl", "-o", str(binary)],
+            input=source,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        command = [str(binary), str(native)]
+    else:
+        build_native_probe(native_detector, binary)
+        command = [str(binary)]
+    env = automatic_env(build_site)
+    env.pop("PYTHONPATH", None)
+    result = subprocess.run(
+        command, env=env, check=True, capture_output=True, text=True
+    )
+    assert result.stdout.splitlines() == (
+        ["23", str(library)] if local_sdk else ["0", ""]
+    )
+
+
+@pytest.mark.parametrize(
+    "layout", ["genex", "multi-config", "per-config", "per-config-single"]
+)
+def test_cmake_output_enrollment_tracks_configuration(
+    native_detector, tmp_path, layout
+):
+    if not (PLATFORM / "CMakeLists.txt").is_file():
+        pytest.skip("source CMake project is absent from installed tests")
+    if not shutil.which("ninja"):
+        pytest.skip("output enrollment fixture requires Ninja")
+    site = tmp_path / "compiler-site"
+    library = sdk_fixture(site)
+    project = tmp_path / "project"
+    project.mkdir()
+    build = tmp_path / "build"
+    env = automatic_env(site)
+    env.pop("PYTHONPATH", None)
+
+    def configure(output_root):
+        suffix = "/$<CONFIG>" if layout == "genex" else ""
+        properties = (
+            f'set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "{output_root.as_posix()}/bin{suffix}")\n'
+            f'set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "{output_root.as_posix()}/lib{suffix}")\n'
+            f'set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "{build.as_posix()}/archive")\n'
+        )
+        if layout.startswith("per-config"):
+            properties += (
+                f'set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE "{output_root.as_posix()}/chosen/bin")\n'
+                f'set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE "{output_root.as_posix()}/chosen/lib")\n'
+            )
+        (project / "CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.16)\nproject(output_enrollment LANGUAGES CXX)\n"
+            + properties
+            + f'add_subdirectory("{PLATFORM.as_posix()}" engine)\n'
+        )
+        generator = (
+            "Ninja"
+            if layout in ("genex", "per-config-single")
+            else "Ninja Multi-Config"
+        )
+        subprocess.run(
+            [
+                "cmake",
+                "-G",
+                generator,
+                "-S",
+                str(project),
+                "-B",
+                str(build),
+                "-DCMAKE_BUILD_TYPE=Release",
+                "-DBUILD_TESTING=OFF",
+                "-DROCKE_INSTALL_TESTS=OFF",
+                "-DROCKE_BUILD_PYBIND=OFF",
+                f"-DPython3_EXECUTABLE={sys.executable}",
+            ],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        (build / "rocke_sdk_site.txt").write_text(
+            "rocke-sdk-site-v1\n" + os.path.relpath(site, build) + "\n"
+        )
+        if layout.startswith("per-config"):
+            assert not (
+                output_root
+                / "bin"
+                / "Release"
+                / "rocke_sdk_output_variable_RUNTIME.txt"
+            ).exists()
+            return output_root / "chosen" / "bin"
+        return output_root / "bin" / "Release"
+
+    old_directory = configure(build / "old")
+    old_binary = old_directory / "probe"
+    build_native_probe(native_detector, old_binary)
+    first = subprocess.run(
+        [str(old_binary)], env=env, check=True, capture_output=True, text=True
+    )
+    assert first.stdout.splitlines() == ["23", str(library)]
+    previous_marker = next(old_directory.glob("rocke_sdk_output_*.txt"))
+    previous_id = previous_marker.read_text().splitlines()[1]
+    new_directory = configure(build / "new")
+    assert (build / "rocke_sdk_build_id.txt").read_text().splitlines()[1] != previous_id
+    stale = subprocess.run(
+        [str(old_binary)], env=env, check=True, capture_output=True, text=True
+    )
+    assert stale.stdout.splitlines() == ["0", ""]
+    new_binary = new_directory / "probe"
+    build_native_probe(native_detector, new_binary)
+    current = subprocess.run(
+        [str(new_binary)], env=env, check=True, capture_output=True, text=True
+    )
+    assert current.stdout.splitlines() == ["23", str(library)]
+    relocated = tmp_path / "relocated-build"
+    relative_binary = new_binary.relative_to(build)
+    build.rename(relocated)
+    moved = subprocess.run(
+        [str(relocated / relative_binary)],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert moved.stdout.splitlines() == ["23", str(library)]
+
+
 @pytest.mark.parametrize("local_sdk", [False, True])
 def test_native_discovery_stays_in_physical_prefix(
     native_detector, tmp_path, local_sdk
