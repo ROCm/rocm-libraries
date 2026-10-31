@@ -82,6 +82,12 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | `rfc-review` | Reviewing a technical RFC across the structured perspectives. Follow-ups: `rfc-review-compatibility`, `rfc-review-ops`, `rfc-review-security`. |
 | `rfc-backlog` | Turning an RFC into a backlog of Jira stories and tasks. |
 
+### MIOpen
+
+| Skill | Path | Use it when |
+| --- | --- | --- |
+| `miopen-deep-review` | [`projects/miopen/skills/miopen-deep-review/`](projects/miopen/skills/miopen-deep-review/SKILL.md) | Running a multi-agent deep review of a MIOpen PR, branch or commit range, with every finding verified and a ledger carried across rounds. |
+
 ### StinkyTofu
 
 | Skill | Path | Use it when |
@@ -112,6 +118,7 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 | hipBLASLt | [`projects/hipblaslt/AGENTS.md`](projects/hipblaslt/AGENTS.md) (reference material in `AGENTS_reference.md`) |
 | TensileLite | [`projects/hipblaslt/tensilelite/AGENTS.md`](projects/hipblaslt/tensilelite/AGENTS.md) |
 | hipDNN | [`projects/hipdnn/docs/ai-rules.md`](projects/hipdnn/docs/ai-rules.md) |
+| MIOpen | [`projects/miopen/skills/`](projects/miopen/skills/) (no component `AGENTS.md` yet) |
 | MIOpen provider | [`dnn-providers/miopen-provider/docs/ai-rules.md`](dnn-providers/miopen-provider/docs/ai-rules.md) |
 | rocKE | [`dnn-providers/hip-kernel-provider/rocke/AGENTS.md`](dnn-providers/hip-kernel-provider/rocke/AGENTS.md) |
 | rocRoller | [`shared/rocroller/docs/ai-rules.md`](shared/rocroller/docs/ai-rules.md) |
