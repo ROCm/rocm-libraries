@@ -1,5 +1,5 @@
 {
-    "generated_on": "03 Jul 2026, 13:56:50",
+    "generated_on": "11 Oct 2026, 18:10:39",
     "gpu": {
         "num_cu": 256,
         "arch": "gfx950"
@@ -8,12 +8,20 @@
         "miopen_version": "3.5.2"
     },
     "sessions": [
-        1
+        1,
+        3,
+        7,
+        8,
+        10,
+        11,
+        14,
+        16,
+        17
     ],
-    "note": "Data merged from sessions: [1]",
+    "note": "Data merged from sessions: [1, 3, 7, 8, 10, 11, 14, 16, 17]",
     "num_inputs": 24,
-    "num_solvers": 12,
-    "num_outputs": 12,
+    "num_solvers": 13,
+    "num_outputs": 13,
     "encodings": {
         "in_layout": {
             "NCDHW": 0,
@@ -42,15 +50,16 @@
             "ConvDirectNaiveConvBwd": 0,
             "ConvDirectNaiveConvFwd": 1,
             "ConvDirectNaiveConvWrw": 2,
-            "ConvHipImplicitGemm3DGroupBwdXdlops": 3,
-            "ConvHipImplicitGemm3DGroupFwdXdlops": 4,
-            "ConvHipImplicitGemm3DGroupWrwXdlops": 5,
-            "GemmBwd1x1_stride1": 6,
-            "GemmBwdRest": 7,
-            "GemmFwd1x1_0_1": 8,
-            "GemmFwdRest": 9,
-            "GemmWrw1x1_stride1": 10,
-            "GemmWrwUniversal": 11
+            "ConvHipConv": 3,
+            "ConvHipImplicitGemm3DGroupBwdXdlops": 4,
+            "ConvHipImplicitGemm3DGroupFwdXdlops": 5,
+            "ConvHipImplicitGemm3DGroupWrwXdlops": 6,
+            "GemmBwd1x1_stride1": 7,
+            "GemmBwdRest": 8,
+            "GemmFwd1x1_0_1": 9,
+            "GemmFwdRest": 10,
+            "GemmWrw1x1_stride1": 11,
+            "GemmWrwUniversal": 12
         }
     },
     "conv_params_used_as_features": [
@@ -85,5 +94,26 @@
         "dilation_h": 1,
         "dilation_w": 1,
         "bias": 0
-    }
+    },
+    "derived_features": [
+        "log_flops",
+        "log_gemm_m",
+        "log_gemm_n",
+        "log_gemm_k",
+        "gemm_m_over_n",
+        "gemm_m_over_k",
+        "gemm_n_over_k",
+        "log_gemm_size",
+        "log_work_per_cu",
+        "spatial_reduction",
+        "filter_coverage",
+        "channel_ratio",
+        "group_density",
+        "log_h_in",
+        "log_w_in",
+        "log_c_in",
+        "log_c_out",
+        "log_batch",
+        "log_d_in"
+    ]
 }
