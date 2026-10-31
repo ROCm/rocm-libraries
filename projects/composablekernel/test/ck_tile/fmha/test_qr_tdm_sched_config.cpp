@@ -203,4 +203,87 @@ TYPED_TEST(QrTdmSchedConfig, OutputRescaleModesRejectConflictingOwners)
     EXPECT_EQ(Early::kIsLegal, !streaming);
 }
 
+// ---------------------------------------------------------------------------
+// qr_tdm split-kv copy
+//
+// BlockFmhaFwdSplitKVPipelineQRKSVSTdm carries only the single-V / double-K
+// path of BlockFmhaPipelineQRKSVSTdm. It does not go through
+// FmhaTdmSchedSupportedGeometry, so nothing else pins its tile down; these
+// cases do. They also pin the three flags the copy overrides locally instead of
+// reading from the problem -- each one was a bug at some point during the port.
+// ---------------------------------------------------------------------------
+
+template <typename T, int D, int N, int V>
+struct QrTdmSplitConfig
+{
+    // bm0 64 is the tile codegen pairs with this pipeline (occupancy 2).
+    using Model    = test::SplitKVModel<D, false, T, N, V, true, 64>;
+    using Problem  = typename Model::Problem;
+    using Pipeline = typename Model::TdmPipeline;
+    using Policy   = BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
+    using Layout   = typename Policy::template LdsArenaLayout<Problem>;
+};
+
+using QrTdmSplitConfigs = ::testing::Types<QrTdmSplitConfig<bf16_t, 128, 64, 128>,
+                                           QrTdmSplitConfig<half_t, 128, 64, 128>>;
+
+template <typename T>
+class QrTdmSplitKVConfig : public ::testing::Test
+{
+};
+TYPED_TEST_SUITE(QrTdmSplitKVConfig, QrTdmSplitConfigs);
+
+TYPED_TEST(QrTdmSplitKVConfig, UsesTheSingleVArenaLayout)
+{
+    using Layout   = typename TypeParam::Layout;
+    using Pipeline = typename TypeParam::Pipeline;
+    // The whole point of this copy: the shared policy must resolve to the
+    // single-V layout, which it does because split-kv problems hardwire
+    // kUseDoubleKVLdsBuffer to false. V1 collapsing onto V0 is what proves it,
+    // and the S region only exists on this path.
+    EXPECT_EQ(Layout::kV1Offset, Layout::kV0Offset);
+    EXPECT_GT(Layout::kSOffset, 0);
+    EXPECT_EQ(Pipeline::GetSmemSize(), Layout::kArenaBytes);
+}
+
+// These flags are hardwired in the pipeline, so the assertions restate the
+// declaration rather than probe behaviour. They are here because each one was
+// wrong once during the port and the names are easy to drop while refactoring;
+// the load-bearing part of this suite is that instantiating the pipeline at all
+// fires LdsArenaLayout's budget static_asserts.
+TYPED_TEST(QrTdmSplitKVConfig, KernelPathFlagsAreDeclared)
+{
+    using Pipeline = typename TypeParam::Pipeline;
+    // fmha_fwd_kernel.hpp and fmha_fwd_splitkv_kernel.hpp do NOT default to the
+    // same K/V views, which is why the prefill pipeline declares neither flag
+    // and still works there. This copy must declare both: it steps V with a
+    // seqlen stride on dim 0 (needs the untransposed view) and loads K/V with
+    // bare load_tile_tdm (needs the unpadded affine view).
+    EXPECT_TRUE(Pipeline::kUsesUntransposedVKernelPath);
+    EXPECT_TRUE(Pipeline::kUsesTdmAffineDramPath);
+}
+
+TYPED_TEST(QrTdmSplitKVConfig, ProgressiveKReloadStaysOn)
+{
+    using Pipeline = typename TypeParam::Pipeline;
+    // Progressive K reload is the single biggest contributor to this pipeline's
+    // speed: the bn0 32 tile probe, which has to fall back to the plain
+    // traversal, measured 4-5x slower. The split-kv problem hardwires
+    // kProgressiveDsLoadK to false, so this copy overrides it locally, gated on
+    // the bn0 == 64 the reload's own static_asserts require. This model is
+    // built with N = 64, so the assertion only states that the gate tracks kN0;
+    // that codegen really hands this pipeline a bn0 64 tile is asserted in
+    // test_fmha_fwd_codegen.py, which is the side that can change.
+    EXPECT_TRUE(Pipeline::kProgressiveDsLoadK);
+    EXPECT_EQ(Pipeline::kN0, 64);
+    EXPECT_FALSE(Pipeline::kSkipMinSeqlenQ);
+}
+
+TYPED_TEST(QrTdmSplitKVConfig, SplitTailIsAlwaysPredicated)
+{
+    using Pipeline = typename TypeParam::Pipeline;
+    EXPECT_TRUE(Pipeline::kHasUnevenSplits);
+    EXPECT_EQ(Pipeline::kM0, 64);
+}
+
 } // namespace
