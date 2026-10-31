@@ -101,10 +101,28 @@ property of signed attention inputs. Deterministic rounding may be correlated
 across identical rows. Those metrics remain diagnostics and are compared with
 same-input stock `qr_tdm` controls in the PR evidence.
 
-The formal generated-dispatch tests run each of their 40 shapes with signed,
-constant and nonnegative V, with LSE off/on, for FP16 and BF16: 240 tests per
-dtype, 480 total. This covers the existing batch/group, layouts, masks, tails,
-virtual sinks and selector boundaries without duplicating kernel geometry.
+The formal generated-dispatch tests run each of their 72 shape configurations
+with signed, constant and nonnegative V, with LSE off/on, for FP16 and BF16:
+432 tests per dtype, 864 total. The corpus covers batch/group modes, BSHD/BHSD
+layouts, padded row/head/batch strides, rectangular and partial queries, key
+tails, per-sequence and cumulative Q/K metadata (including Q-only and K-only
+batch metadata), virtual sinks and selector boundaries. Mask cases include
+full causal, square finite-left windows and a rectangular right-window case;
+the D64 cases check both eligible N128 selection and retained N64 fallbacks.
+Each run compares every logical O component and requested LSE against the
+independent FP32 reference. Physical layouts with gaps are exercised, but
+unused output slots do not have sentinel-preservation assertions.
+
+The dedicated BHSD finite-left fixture is counted separately: nine direct
+kernel variants, three square sequence/window pairs, two LSE states and two
+seeds give 108 tests per dtype, 216 total. It validates the square BHSD strides
+and finite-left/right-zero causal conditions before launch, then compares all
+logical O components and requested LSE. Together with the generated fixture,
+these are 1080 full forward reference checks. Other component/sink suites are
+separate checks and are not included in that count. The direct fixtures use
+simplified masks; they do not establish generic `mc` finite-left API support
+or N128 production selection for every narrow window.
+
 Constant channels use several exactly representable signed mantissas based on
 `{0.75, -1.25, 1.5, -1.75}`, with head variation. Without a virtual sink, exact
 arithmetic returns the constant on each nonempty attention row, independent
