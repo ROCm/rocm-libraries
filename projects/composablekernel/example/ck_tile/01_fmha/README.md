@@ -112,6 +112,14 @@ not establish production dispatch or performance coverage, or generic `mc`
 finite-left-window API support. This order changes workgroup traversal, so
 its timing benefit depends on launch supply and cache reuse.
 
+The separate `test_ck_tile_fmha_qr_tdm_sched_generic_fwd_bf16` and `_fp16`
+suites use production-generated generic `mc` D64 N128 instances and their
+dispatcher. They check the selected kernel, every O element, and requested LSE
+for B=1, one Q/KV head, Sq=Sk=4096, and full top-left causal attention, with LSE
+off/on: four cases across both dtypes. The instances retain the production
+template and compiler options. These suites do not cover generic finite-left
+windows.
+
 The implementation separates tile selection, data operations, and placement:
 
 ```text
