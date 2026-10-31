@@ -1,0 +1,1871 @@
+{
+  "component": "hiprand",
+  "arch": "gfx942",
+  "family": "gfx94X-dcgpu",
+  "test_type": "standard",
+  "note": "hipRAND quick and standard labels select the same five binaries",
+  "run_id": 35149252929,
+  "job_id": 105040205819,
+  "run_url": "https://github.com/ROCm/rocm-libraries/actions/runs/35149252929",
+  "job_url": "https://github.com/ROCm/rocm-libraries/actions/runs/35149252929/job/105040205819",
+  "repo": "ROCm/rocm-libraries",
+  "workflow": "therock-multi-arch-ci.yml",
+  "head_sha": "090d28078ce85d7250c9e46f89511590b01f40b7",
+  "head_branch": "develop",
+  "runner_label": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
+  "ctest_command": "ctest -L '^standard$' -LE ex_gpu --output-on-failure --parallel 1 --timeout 7200 --test-dir build/bin/hipRAND",
+  "ctest_summary": {
+    "passed": 5,
+    "failed": 0,
+    "total_seconds": 2.93
+  },
+  "ctest": [
+    {
+      "id": "test_hiprand_api",
+      "status": "passed",
+      "seconds": 1.12
+    },
+    {
+      "id": "test_hiprand_cpp_wrapper",
+      "status": "passed",
+      "seconds": 1.28
+    },
+    {
+      "id": "test_hiprand_kernel",
+      "status": "passed",
+      "seconds": 0.46
+    },
+    {
+      "id": "test_hiprand_linkage",
+      "status": "passed",
+      "seconds": 0.04
+    },
+    {
+      "id": "test_hiprand_c_compile",
+      "status": "passed",
+      "seconds": 0.03
+    }
+  ],
+  "gtest": [
+    {
+      "id": "hiprand_32/hiprand_api_32.hiprand_generate_test/0",
+      "status": "passed",
+      "seconds": 0.455
+    },
+    {
+      "id": "hiprand_32/hiprand_api_32.hiprand_generate_test/1",
+      "status": "passed",
+      "seconds": 0.013
+    },
+    {
+      "id": "hiprand_32/hiprand_api_32.hiprand_generate_test/2",
+      "status": "passed",
+      "seconds": 0.042
+    },
+    {
+      "id": "hiprand_32/hiprand_api_32.hiprand_generate_test/3",
+      "status": "passed",
+      "seconds": 0.088
+    },
+    {
+      "id": "hiprand_32/hiprand_api_32.hiprand_generate_test/4",
+      "status": "passed",
+      "seconds": 0.016
+    },
+    {
+      "id": "hiprand_32/hiprand_api_32.hiprand_generate_test/5",
+      "status": "passed",
+      "seconds": 0.002
+    },
+    {
+      "id": "hiprand_32/hiprand_api_32.hiprand_generate_test/6",
+      "status": "passed",
+      "seconds": 0.003
+    },
+    {
+      "id": "hiprand_64/hiprand_api_64.hiprand_generate_long_long_test/0",
+      "status": "passed",
+      "seconds": 0.003
+    },
+    {
+      "id": "hiprand_64/hiprand_api_64.hiprand_generate_long_long_test/1",
+      "status": "passed",
+      "seconds": 0.004
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_test/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_test/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_test/2",
+      "status": "passed",
+      "seconds": 0.002
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_test/3",
+      "status": "passed",
+      "seconds": 0.039
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_test/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_test/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_test/6",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_test/7",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_test/8",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_double_test/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_double_test/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_double_test/2",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_double_test/3",
+      "status": "passed",
+      "seconds": 0.039
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_double_test/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_double_test/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_double_test/6",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_double_test/7",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_uniform_double_test/8",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_test/0",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_test/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_test/2",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_test/3",
+      "status": "passed",
+      "seconds": 0.039
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_test/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_test/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_test/6",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_test/7",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_test/8",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_double_test/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_double_test/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_double_test/2",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_double_test/3",
+      "status": "passed",
+      "seconds": 0.039
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_double_test/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_double_test/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_double_test/6",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_double_test/7",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_normal_double_test/8",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_test/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_test/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_test/2",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_test/3",
+      "status": "passed",
+      "seconds": 0.039
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_test/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_test/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_test/6",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_test/7",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_test/8",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_double_test/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_double_test/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_double_test/2",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_double_test/3",
+      "status": "passed",
+      "seconds": 0.039
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_double_test/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_double_test/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_double_test/6",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_double_test/7",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_lognormal_double_test/8",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_poisson_test/0",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_poisson_test/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_poisson_test/2",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_poisson_test/3",
+      "status": "passed",
+      "seconds": 0.039
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_poisson_test/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_poisson_test/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_poisson_test/6",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_poisson_test/7",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_api.hiprand_generate_poisson_test/8",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_ordering_test/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_ordering_test/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_ordering_test/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_ordering_test/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_ordering_test/4",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_ordering_test/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_invalid_ordering_test/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_invalid_ordering_test/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_invalid_ordering_test/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_invalid_ordering_test/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_invalid_ordering_test/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_invalid_ordering_test/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_host.hiprand_generate_uniform_host/0",
+      "status": "passed",
+      "seconds": 0.007
+    },
+    {
+      "id": "hiprand_cpp_wrapper.hiprand_error",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper.hiprand_prng_default_seed",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper.hiprand_normal_dist_param",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper.hiprand_lognormal_dist_param",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper.hiprand_poisson_dist_param",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/0.hiprand_rng_ctor",
+      "status": "passed",
+      "seconds": 0.152
+    },
+    {
+      "id": "hiprand_cpp_wrapper/0.hiprand_rng_stream",
+      "status": "passed",
+      "seconds": 0.05
+    },
+    {
+      "id": "hiprand_cpp_wrapper/0.hiprand_uniform_real_dist_float",
+      "status": "passed",
+      "seconds": 0.068
+    },
+    {
+      "id": "hiprand_cpp_wrapper/0.hiprand_uniform_real_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/0.hiprand_normal_dist_float",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/0.hiprand_normal_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/0.hiprand_lognormal_dist_float",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/0.hiprand_lognormal_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/0.hiprand_poisson_dist",
+      "status": "passed",
+      "seconds": 0.004
+    },
+    {
+      "id": "hiprand_cpp_wrapper/1.hiprand_rng_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/1.hiprand_rng_stream",
+      "status": "passed",
+      "seconds": 0.021
+    },
+    {
+      "id": "hiprand_cpp_wrapper/1.hiprand_uniform_real_dist_float",
+      "status": "passed",
+      "seconds": 0.113
+    },
+    {
+      "id": "hiprand_cpp_wrapper/1.hiprand_uniform_real_dist_double",
+      "status": "passed",
+      "seconds": 0.039
+    },
+    {
+      "id": "hiprand_cpp_wrapper/1.hiprand_normal_dist_float",
+      "status": "passed",
+      "seconds": 0.039
+    },
+    {
+      "id": "hiprand_cpp_wrapper/1.hiprand_normal_dist_double",
+      "status": "passed",
+      "seconds": 0.039
+    },
+    {
+      "id": "hiprand_cpp_wrapper/1.hiprand_lognormal_dist_float",
+      "status": "passed",
+      "seconds": 0.039
+    },
+    {
+      "id": "hiprand_cpp_wrapper/1.hiprand_lognormal_dist_double",
+      "status": "passed",
+      "seconds": 0.039
+    },
+    {
+      "id": "hiprand_cpp_wrapper/1.hiprand_poisson_dist",
+      "status": "passed",
+      "seconds": 0.237
+    },
+    {
+      "id": "hiprand_cpp_wrapper/2.hiprand_rng_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/2.hiprand_rng_stream",
+      "status": "passed",
+      "seconds": 0.021
+    },
+    {
+      "id": "hiprand_cpp_wrapper/2.hiprand_uniform_real_dist_float",
+      "status": "passed",
+      "seconds": 0.017
+    },
+    {
+      "id": "hiprand_cpp_wrapper/2.hiprand_uniform_real_dist_double",
+      "status": "passed",
+      "seconds": 0.002
+    },
+    {
+      "id": "hiprand_cpp_wrapper/2.hiprand_normal_dist_float",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand_cpp_wrapper/2.hiprand_normal_dist_double",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand_cpp_wrapper/2.hiprand_lognormal_dist_float",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand_cpp_wrapper/2.hiprand_lognormal_dist_double",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand_cpp_wrapper/2.hiprand_poisson_dist",
+      "status": "passed",
+      "seconds": 0.008
+    },
+    {
+      "id": "hiprand_cpp_wrapper/3.hiprand_rng_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/3.hiprand_rng_stream",
+      "status": "passed",
+      "seconds": 0.003
+    },
+    {
+      "id": "hiprand_cpp_wrapper/3.hiprand_uniform_real_dist_float",
+      "status": "passed",
+      "seconds": 0.015
+    },
+    {
+      "id": "hiprand_cpp_wrapper/3.hiprand_uniform_real_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/3.hiprand_normal_dist_float",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/3.hiprand_normal_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/3.hiprand_lognormal_dist_float",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/3.hiprand_lognormal_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/3.hiprand_poisson_dist",
+      "status": "passed",
+      "seconds": 0.004
+    },
+    {
+      "id": "hiprand_cpp_wrapper/4.hiprand_rng_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/4.hiprand_rng_stream",
+      "status": "passed",
+      "seconds": 0.004
+    },
+    {
+      "id": "hiprand_cpp_wrapper/4.hiprand_uniform_real_dist_float",
+      "status": "passed",
+      "seconds": 0.002
+    },
+    {
+      "id": "hiprand_cpp_wrapper/4.hiprand_uniform_real_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/4.hiprand_normal_dist_float",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/4.hiprand_normal_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/4.hiprand_lognormal_dist_float",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/4.hiprand_lognormal_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/4.hiprand_poisson_dist",
+      "status": "passed",
+      "seconds": 0.002
+    },
+    {
+      "id": "hiprand_cpp_wrapper/5.hiprand_rng_ctor",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand_cpp_wrapper/5.hiprand_rng_stream",
+      "status": "passed",
+      "seconds": 0.003
+    },
+    {
+      "id": "hiprand_cpp_wrapper/5.hiprand_uniform_real_dist_float",
+      "status": "passed",
+      "seconds": 0.002
+    },
+    {
+      "id": "hiprand_cpp_wrapper/5.hiprand_uniform_real_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/5.hiprand_normal_dist_float",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/5.hiprand_normal_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/5.hiprand_lognormal_dist_float",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/5.hiprand_lognormal_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/5.hiprand_poisson_dist",
+      "status": "passed",
+      "seconds": 0.002
+    },
+    {
+      "id": "hiprand_cpp_wrapper/6.hiprand_rng_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/6.hiprand_rng_stream",
+      "status": "passed",
+      "seconds": 0.003
+    },
+    {
+      "id": "hiprand_cpp_wrapper/6.hiprand_uniform_real_dist_float",
+      "status": "passed",
+      "seconds": 0.002
+    },
+    {
+      "id": "hiprand_cpp_wrapper/6.hiprand_uniform_real_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/6.hiprand_normal_dist_float",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/6.hiprand_normal_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/6.hiprand_lognormal_dist_float",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/6.hiprand_lognormal_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/6.hiprand_poisson_dist",
+      "status": "passed",
+      "seconds": 0.002
+    },
+    {
+      "id": "hiprand_cpp_wrapper/7.hiprand_rng_ctor",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand_cpp_wrapper/7.hiprand_rng_stream",
+      "status": "passed",
+      "seconds": 0.003
+    },
+    {
+      "id": "hiprand_cpp_wrapper/7.hiprand_uniform_real_dist_float",
+      "status": "passed",
+      "seconds": 0.002
+    },
+    {
+      "id": "hiprand_cpp_wrapper/7.hiprand_uniform_real_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/7.hiprand_normal_dist_float",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/7.hiprand_normal_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/7.hiprand_lognormal_dist_float",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/7.hiprand_lognormal_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/7.hiprand_poisson_dist",
+      "status": "passed",
+      "seconds": 0.002
+    },
+    {
+      "id": "hiprand_cpp_wrapper/8.hiprand_rng_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/8.hiprand_rng_stream",
+      "status": "passed",
+      "seconds": 0.003
+    },
+    {
+      "id": "hiprand_cpp_wrapper/8.hiprand_uniform_real_dist_float",
+      "status": "passed",
+      "seconds": 0.039
+    },
+    {
+      "id": "hiprand_cpp_wrapper/8.hiprand_uniform_real_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/8.hiprand_normal_dist_float",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/8.hiprand_normal_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/8.hiprand_lognormal_dist_float",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/8.hiprand_lognormal_dist_double",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper/8.hiprand_poisson_dist",
+      "status": "passed",
+      "seconds": 0.006
+    },
+    {
+      "id": "hiprand_cpp_wrapper_prng/0.hiprand_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_prng/0.hiprand_seed",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_prng/1.hiprand_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_prng/1.hiprand_seed",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_prng/2.hiprand_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_prng/2.hiprand_seed",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_prng/3.hiprand_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_prng/3.hiprand_seed",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_prng/4.hiprand_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_prng/4.hiprand_seed",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_32/0.hiprand_rng_result_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_32/0.hiprand_uniform_int_dist_32",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_32/1.hiprand_rng_result_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_32/1.hiprand_uniform_int_dist_32",
+      "status": "passed",
+      "seconds": 0.039
+    },
+    {
+      "id": "hiprand_cpp_wrapper_32/2.hiprand_rng_result_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_32/2.hiprand_uniform_int_dist_32",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "hiprand_cpp_wrapper_32/3.hiprand_rng_result_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_32/3.hiprand_uniform_int_dist_32",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_32/4.hiprand_rng_result_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_32/4.hiprand_uniform_int_dist_32",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_32/5.hiprand_rng_result_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_32/5.hiprand_uniform_int_dist_32",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_32/6.hiprand_rng_result_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_32/6.hiprand_uniform_int_dist_32",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_64/0.hiprand_rng_result_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_64/0.hiprand_uniform_int_dist_64",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_64/1.hiprand_rng_result_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_64/1.hiprand_uniform_int_dist_64",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_offset/0.hiprand_rng_offset_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_offset/0.hiprand_rng_offset",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_offset/1.hiprand_rng_offset_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_offset/1.hiprand_rng_offset",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_offset/2.hiprand_rng_offset_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_offset/2.hiprand_rng_offset",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_offset/3.hiprand_rng_offset_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_offset/3.hiprand_rng_offset",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_offset/4.hiprand_rng_offset_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_offset/4.hiprand_rng_offset",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_offset/5.hiprand_rng_offset_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_offset/5.hiprand_rng_offset",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_offset/6.hiprand_rng_offset_type",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_offset/6.hiprand_rng_offset",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_qrng/0.hiprand_qrng_default_num_dimensions",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_qrng/0.hiprand_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_qrng/0.hiprand_dims",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_qrng/1.hiprand_qrng_default_num_dimensions",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_qrng/1.hiprand_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_qrng/1.hiprand_dims",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_qrng/2.hiprand_qrng_default_num_dimensions",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_qrng/2.hiprand_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_qrng/2.hiprand_dims",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_qrng/3.hiprand_qrng_default_num_dimensions",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_qrng/3.hiprand_ctor",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_cpp_wrapper_qrng/3.hiprand_dims",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_ordering_test/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_ordering_test/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_ordering_test/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_ordering_test/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_ordering_test/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_ordering_test/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_invalid_ordering_test/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_invalid_ordering_test/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_invalid_ordering_test/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_invalid_ordering_test/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_invalid_ordering_test/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand/hiprand_ordering.hiprand_invalid_ordering_test/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10.hiprand_init",
+      "status": "passed",
+      "seconds": 0.214
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10.hiprand",
+      "status": "passed",
+      "seconds": 0.027
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10.hiprand_uniform",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10.hiprand_normal",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10.hiprand_log_normal",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a.hiprand_init",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a.hiprand",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a.hiprand_uniform",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a.hiprand_normal",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a.hiprand_log_normal",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow.hiprand_init",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow.hiprand",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow.hiprand_uniform",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow.hiprand_normal",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow.hiprand_log_normal",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default.hiprand_init",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default.hiprand",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default.hiprand_uniform",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default.hiprand_normal",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default.hiprand_log_normal",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32.hiprand_init",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32.hiprand",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32.hiprand_uniform",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32.hiprand_normal",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32.hiprand_log_normal",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64.hiprand_init",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64.hiprand",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64.hiprand_uniform",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64.hiprand_normal",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64.hiprand_log_normal",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32.hiprand_init",
+      "status": "passed",
+      "seconds": 0.029
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32.hiprand",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32.hiprand_uniform",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32.hiprand_normal",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32.hiprand_log_normal",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "sobol_tests/0.sobol_tests",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "id": "sobol_tests/1.sobol_tests",
+      "status": "passed",
+      "seconds": 0.006
+    },
+    {
+      "id": "sobol_tests/2.sobol_tests",
+      "status": "passed",
+      "seconds": 0.002
+    },
+    {
+      "id": "sobol_tests/3.sobol_tests",
+      "status": "passed",
+      "seconds": 0.007
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10_poisson/hiprand_kernel_h_philox4x32_10_poisson.hiprand_poisson/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10_poisson/hiprand_kernel_h_philox4x32_10_poisson.hiprand_poisson/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10_poisson/hiprand_kernel_h_philox4x32_10_poisson.hiprand_poisson/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10_poisson/hiprand_kernel_h_philox4x32_10_poisson.hiprand_poisson/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10_poisson/hiprand_kernel_h_philox4x32_10_poisson.hiprand_poisson/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10_poisson/hiprand_kernel_h_philox4x32_10_poisson.hiprand_poisson/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10_poisson/hiprand_kernel_h_philox4x32_10_poisson.hiprand_discrete/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10_poisson/hiprand_kernel_h_philox4x32_10_poisson.hiprand_discrete/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10_poisson/hiprand_kernel_h_philox4x32_10_poisson.hiprand_discrete/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10_poisson/hiprand_kernel_h_philox4x32_10_poisson.hiprand_discrete/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10_poisson/hiprand_kernel_h_philox4x32_10_poisson.hiprand_discrete/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_philox4x32_10_poisson/hiprand_kernel_h_philox4x32_10_poisson.hiprand_discrete/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a_poisson/hiprand_kernel_h_mrg32k3a_poisson.hiprand_poisson/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a_poisson/hiprand_kernel_h_mrg32k3a_poisson.hiprand_poisson/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a_poisson/hiprand_kernel_h_mrg32k3a_poisson.hiprand_poisson/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a_poisson/hiprand_kernel_h_mrg32k3a_poisson.hiprand_poisson/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a_poisson/hiprand_kernel_h_mrg32k3a_poisson.hiprand_poisson/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a_poisson/hiprand_kernel_h_mrg32k3a_poisson.hiprand_poisson/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a_poisson/hiprand_kernel_h_mrg32k3a_poisson.hiprand_discrete/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a_poisson/hiprand_kernel_h_mrg32k3a_poisson.hiprand_discrete/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a_poisson/hiprand_kernel_h_mrg32k3a_poisson.hiprand_discrete/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a_poisson/hiprand_kernel_h_mrg32k3a_poisson.hiprand_discrete/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a_poisson/hiprand_kernel_h_mrg32k3a_poisson.hiprand_discrete/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mrg32k3a_poisson/hiprand_kernel_h_mrg32k3a_poisson.hiprand_discrete/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow_poisson/hiprand_kernel_h_xorwow_poisson.hiprand_poisson/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow_poisson/hiprand_kernel_h_xorwow_poisson.hiprand_poisson/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow_poisson/hiprand_kernel_h_xorwow_poisson.hiprand_poisson/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow_poisson/hiprand_kernel_h_xorwow_poisson.hiprand_poisson/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow_poisson/hiprand_kernel_h_xorwow_poisson.hiprand_poisson/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow_poisson/hiprand_kernel_h_xorwow_poisson.hiprand_poisson/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow_poisson/hiprand_kernel_h_xorwow_poisson.hiprand_discrete/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow_poisson/hiprand_kernel_h_xorwow_poisson.hiprand_discrete/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow_poisson/hiprand_kernel_h_xorwow_poisson.hiprand_discrete/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow_poisson/hiprand_kernel_h_xorwow_poisson.hiprand_discrete/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow_poisson/hiprand_kernel_h_xorwow_poisson.hiprand_discrete/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_xorwow_poisson/hiprand_kernel_h_xorwow_poisson.hiprand_discrete/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default_poisson/hiprand_kernel_h_default_poisson.hiprand_poisson/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default_poisson/hiprand_kernel_h_default_poisson.hiprand_poisson/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default_poisson/hiprand_kernel_h_default_poisson.hiprand_poisson/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default_poisson/hiprand_kernel_h_default_poisson.hiprand_poisson/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default_poisson/hiprand_kernel_h_default_poisson.hiprand_poisson/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default_poisson/hiprand_kernel_h_default_poisson.hiprand_poisson/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default_poisson/hiprand_kernel_h_default_poisson.hiprand_discrete/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default_poisson/hiprand_kernel_h_default_poisson.hiprand_discrete/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default_poisson/hiprand_kernel_h_default_poisson.hiprand_discrete/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default_poisson/hiprand_kernel_h_default_poisson.hiprand_discrete/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default_poisson/hiprand_kernel_h_default_poisson.hiprand_discrete/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_default_poisson/hiprand_kernel_h_default_poisson.hiprand_discrete/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32_poisson/hiprand_kernel_h_sobol_32_poisson.hiprand_poisson/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32_poisson/hiprand_kernel_h_sobol_32_poisson.hiprand_poisson/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32_poisson/hiprand_kernel_h_sobol_32_poisson.hiprand_poisson/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32_poisson/hiprand_kernel_h_sobol_32_poisson.hiprand_poisson/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32_poisson/hiprand_kernel_h_sobol_32_poisson.hiprand_poisson/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32_poisson/hiprand_kernel_h_sobol_32_poisson.hiprand_poisson/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32_poisson/hiprand_kernel_h_sobol_32_poisson.hiprand_discrete/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32_poisson/hiprand_kernel_h_sobol_32_poisson.hiprand_discrete/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32_poisson/hiprand_kernel_h_sobol_32_poisson.hiprand_discrete/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32_poisson/hiprand_kernel_h_sobol_32_poisson.hiprand_discrete/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32_poisson/hiprand_kernel_h_sobol_32_poisson.hiprand_discrete/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_32_poisson/hiprand_kernel_h_sobol_32_poisson.hiprand_discrete/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64_poisson/hiprand_kernel_h_sobol_64_poisson.hiprand_poisson/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64_poisson/hiprand_kernel_h_sobol_64_poisson.hiprand_poisson/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64_poisson/hiprand_kernel_h_sobol_64_poisson.hiprand_poisson/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64_poisson/hiprand_kernel_h_sobol_64_poisson.hiprand_poisson/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64_poisson/hiprand_kernel_h_sobol_64_poisson.hiprand_poisson/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64_poisson/hiprand_kernel_h_sobol_64_poisson.hiprand_poisson/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64_poisson/hiprand_kernel_h_sobol_64_poisson.hiprand_discrete/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64_poisson/hiprand_kernel_h_sobol_64_poisson.hiprand_discrete/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64_poisson/hiprand_kernel_h_sobol_64_poisson.hiprand_discrete/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64_poisson/hiprand_kernel_h_sobol_64_poisson.hiprand_discrete/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64_poisson/hiprand_kernel_h_sobol_64_poisson.hiprand_discrete/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_sobol_64_poisson/hiprand_kernel_h_sobol_64_poisson.hiprand_discrete/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32_poisson/hiprand_kernel_h_mtgp_32_poisson.hiprand_poisson/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32_poisson/hiprand_kernel_h_mtgp_32_poisson.hiprand_poisson/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32_poisson/hiprand_kernel_h_mtgp_32_poisson.hiprand_poisson/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32_poisson/hiprand_kernel_h_mtgp_32_poisson.hiprand_poisson/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32_poisson/hiprand_kernel_h_mtgp_32_poisson.hiprand_poisson/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32_poisson/hiprand_kernel_h_mtgp_32_poisson.hiprand_poisson/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32_poisson/hiprand_kernel_h_mtgp_32_poisson.hiprand_discrete/0",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32_poisson/hiprand_kernel_h_mtgp_32_poisson.hiprand_discrete/1",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32_poisson/hiprand_kernel_h_mtgp_32_poisson.hiprand_discrete/2",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32_poisson/hiprand_kernel_h_mtgp_32_poisson.hiprand_discrete/3",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32_poisson/hiprand_kernel_h_mtgp_32_poisson.hiprand_discrete/4",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_kernel_h_mtgp_32_poisson/hiprand_kernel_h_mtgp_32_poisson.hiprand_discrete/5",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_linkage_tests.get_version_test",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_c_compile_tests.hiprand_header_only",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_c_compile_tests.hiprand_then_hip_runtime",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "id": "hiprand_c_compile_tests.hip_runtime_then_hiprand",
+      "status": "passed",
+      "seconds": 0.0
+    }
+  ]
+}
