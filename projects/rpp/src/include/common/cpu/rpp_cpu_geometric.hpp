@@ -75,6 +75,18 @@ inline void compute_resize_nn_src_loc_sse(__m128& pDstLoc, __m128& pScale, __m12
     _mm_storeu_si128((__m128i*)srcLoc, pxLocFloor);
 }
 
+inline void compute_resize_nn_src_loc_sse_mirror(__m128& pDstLoc, __m128& pScale, __m128& pLimit,
+                                                 Rpp32s* srcLoc, __m128 pOffset = xmm_p0,
+                                                 bool hasRGBChannels = false) {
+    __m128 pLoc = _mm_fmadd_ps(pDstLoc, pScale, pOffset);
+    pDstLoc = _mm_sub_ps(pDstLoc, xmm_p4);
+    __m128 pLocFloor = _mm_floor_ps(pLoc);
+    pLocFloor = _mm_max_ps(_mm_min_ps(pLocFloor, pLimit), xmm_p0);
+    if (hasRGBChannels) pLocFloor = _mm_mul_ps(pLocFloor, xmm_p3);
+    __m128i pxLocFloor = _mm_cvtps_epi32(pLocFloor);
+    _mm_storeu_si128((__m128i*)srcLoc, pxLocFloor);
+}
+
 inline void compute_resize_bilinear_src_loc_and_weights_avx(__m256& pDstLoc, __m256& pScale,
                                                             Rpp32s* srcLoc, __m256* pWeight,
                                                             __m256i& pxLoc, __m256 pOffset = avx_p0,
