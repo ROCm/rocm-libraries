@@ -3,8 +3,7 @@
 """Edge-tile store vector width from AssertFree0ElementMultiple (AF0EM).
 
 gfx1250 non-sparse MFMA kernels store edge tiles with the widest
-StoreVectorWidth/2^n that divides AF0EM; other archs, sparse, OutputAmaxD
-and GSU AtomicDest partial stores keep the old width.
+StoreVectorWidth/2^n that divides AF0EM; other archs and sparse keep VW1.
 AF0EM -1 resolves to StoreVectorWidth on gfx1250.
 """
 
@@ -52,12 +51,12 @@ def test_other_archs_and_sparse_keep_vw1(isa, sparse):
 
 
 @pytest.mark.parametrize("kw, edge", [
-    ({"lsu": 2}, 4), ({"amax": True}, 1),
+    ({"lsu": 2}, 4), ({"amax": True}, 4),
     ({"gsu": 2, "gsua": "SingleBuffer"}, 4),
-    ({"gsu": 2, "gsua": "AtomicDest"}, 2),          # packed bf16 atomics: pairs, as before
+    ({"gsu": 2, "gsua": "AtomicDest"}, 4),
     ({"gsu": 2, "gsua": "MultipleBuffer"}, 4),
 ])
-def test_gated_paths_keep_old_width(kw, edge):
+def test_epilogue_paths_use_af0em_width(kw, edge):
     assert _edge_vw(4, 4, **kw)[1] == edge
 
 

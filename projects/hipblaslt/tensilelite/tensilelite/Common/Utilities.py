@@ -45,11 +45,8 @@ import pickle
 
 def edgeStoreVectorWidthSupported(kernel) -> bool:
     """Edge tiles may store wider than VW1 (up to the AF0EM-dividing StoreVectorWidth).
-    gfx1250 non-sparse only; paths without validation coverage keep VW1."""
-    gsu = kernel["GlobalSplitU"]
-    return tuple(kernel["ISA"])[:2] == (12, 5) and not kernel["ProblemType"]["Sparse"] \
-        and not kernel["ProblemType"].get("OutputAmaxD", False) \
-        and not ((gsu > 1 or gsu == -1) and kernel["GlobalSplitUAlgorithm"] == "AtomicDest")
+    gfx1250 non-sparse only."""
+    return tuple(kernel["ISA"])[:2] == (12, 5) and not kernel["ProblemType"]["Sparse"]
 
 
 def fastdeepcopy(x):
