@@ -55,7 +55,6 @@ def _lower(kernel, *, arch="gfx1250", flavor="llvm23"):
 class TestGfx1250LlvmBridge(unittest.TestCase):
     def test_exact_control_intrinsics_and_inline_asm(self):
         llvm = _lower(_build_all())
-        self.assertEqual(llvm, _lower(_build_all(), flavor="llvm24"))
         expected = (
             "call void @llvm.amdgcn.s.wait.tensorcnt(i16 3)",
             "call void @llvm.amdgcn.s.barrier.signal(i32 1)",
@@ -78,6 +77,24 @@ class TestGfx1250LlvmBridge(unittest.TestCase):
             "ptr addrspace(3) nocapture, i32)",
             llvm,
         )
+
+    def test_llvm24_named_barriers_use_addrspace15(self):
+        llvm = _lower(_build_all(), flavor="llvm24")
+        self.assertEqual(llvm.count(" = addrspacecast ptr addrspace(3) "), 4)
+        for intrinsic in (
+            "s.barrier.init",
+            "s.barrier.signal.var",
+            "s.barrier.join",
+            "s.wakeup.barrier",
+        ):
+            with self.subTest(intrinsic=intrinsic):
+                self.assertIn(
+                    f"call void @llvm.amdgcn.{intrinsic}(ptr addrspace(15)", llvm
+                )
+                self.assertIn(
+                    f"declare void @llvm.amdgcn.{intrinsic}(ptr addrspace(15)",
+                    llvm,
+                )
 
     def test_exact_memory_intrinsics(self):
         llvm = _lower(_build_all())
