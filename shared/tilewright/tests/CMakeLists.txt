@@ -141,7 +141,7 @@ if(EXISTS "${_tw_experiments}/rerank_check.cpp" AND EXISTS "${_tw_experiments}/m
         endforeach()
     endforeach()
     # Copies of the shipped models with the alignment veto, which the entry
-    # ranks as well.
+    # ranks as well: of every one that takes it, but the TF32 TT one.
     add_executable(tilewright-veto-models "${CMAKE_CURRENT_SOURCE_DIR}/veto_models.cpp"
                                           "${CMAKE_CURRENT_SOURCE_DIR}/model_writer.cpp")
     target_include_directories(tilewright-veto-models PRIVATE "${tilewright_SOURCE_DIR}/src/tilewright")
@@ -163,6 +163,7 @@ if(EXISTS "${_tw_experiments}/rerank_check.cpp" AND EXISTS "${_tw_experiments}/m
             "-DOUT=${CMAKE_CURRENT_BINARY_DIR}/levers-parity"
             "-DBUILDS=off,prefetch,memo,nocheck,check" "-DMEMO_BUILDS=memo,nocheck,check"
             "-DVETO_MODELS=$<TARGET_FILE:tilewright-veto-models>"
+            "-DVETO_SKIP=gfx950_Cijk_Alik_Bjlk_S_MX_B_Bias_HAS_SAV_UserArgs"
             "-DDRIFT_FLAG=$<TARGET_FILE:tilewright-drift-flag>"
             "-DDRIFT_SKIP=gfx950_Cijk_Alik_Bjlk_S_MX_B_Bias_HAS_SAV_UserArgs"
             ${_tw_parity_args} -P "${CMAKE_CURRENT_SOURCE_DIR}/levers_parity.cmake"

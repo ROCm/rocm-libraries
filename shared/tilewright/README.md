@@ -851,7 +851,9 @@ alignment veto can serve (the drift fallback's copies among them), given the
 veto whether or not they ship with one (`tests/veto_models.cpp`), on problems
 of the two layouts it applies to, with each sample kernel's non-temporal
 siblings in the pool, and requires the veto to change some of their hashes
-against the copies without it. Without a materialized shipped model it is
+against the copies without it. It makes no drift copy of the models
+`DRIFT_SKIP` names and no veto copy of those `VETO_SKIP` names
+(`tests/CMakeLists.txt`). Without a materialized shipped model it is
 skipped.
 
 As a subproject, `add_subdirectory(shared/tilewright)` provides the static

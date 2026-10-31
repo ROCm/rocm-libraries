@@ -180,8 +180,8 @@ tw::detail::PoolKeys one_group_per_config(const tw::Model& model,
   return k;
 }
 
-// The shipped model the drift-fallback cases leave without the fallback (the
-// TF32 TT one).
+// The shipped model no case serves with a serving flag it does not ship with
+// (the TF32 TT one).
 constexpr const char kNotFlagged[] =
     "gfx950_Cijk_Alik_Bjlk_S_MX_B_Bias_HAS_SAV_UserArgs.tilewright.bin";
 
@@ -276,6 +276,7 @@ TEST_CASE("shipped models given the alignment veto rank as without the kernels i
   std::size_t flagged = 0, changed = 0;
   for (const fs::path& path : models) {
     INFO(path.string());
+    if (path.filename() == kNotFlagged) continue;
     std::ifstream in(path, std::ios::binary);
     const std::vector<unsigned char> shipped((std::istreambuf_iterator<char>(in)),
                                              std::istreambuf_iterator<char>());

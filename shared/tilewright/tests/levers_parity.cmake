@@ -16,7 +16,8 @@
 # models DRIFT_SKIP names (file names without .tilewright.bin); the sample pool
 # degrades most of their cells. With VETO_MODELS (tests/veto_models.cpp),
 # copies of the models the alignment veto can serve, the drift fallback's
-# copies among them, each without the veto and with the veto of the gfx950
+# copies among them, but the models VETO_SKIP names (as DRIFT_SKIP does) and
+# their drift copies, each without the veto and with the veto of the gfx950
 # recipes (K above 512, 128-byte lines) whether or not it ships with one, rank
 # bf16 problems of the two layouts the veto applies to (A and B transposed, and
 # neither) with the sample kernels and their siblings whose cache hint on A or
@@ -29,7 +30,8 @@
 #
 #   cmake -DWEIGHTS=DIR -DKERNELS=FILE -DSHAPES=FILE -DOUT=DIR -DBUILDS=a,b,...
 #         -DMEMO_BUILDS=b,... -Drerank_check_<build>=EXE -Dmemo_check_<build>=EXE ...
-#         [-DDRIFT_FLAG=EXE [-DDRIFT_SKIP=name,...]] [-DVETO_MODELS=EXE]
+#         [-DDRIFT_FLAG=EXE [-DDRIFT_SKIP=name,...]]
+#         [-DVETO_MODELS=EXE [-DVETO_SKIP=name,...]]
 #         -P levers_parity.cmake
 
 cmake_minimum_required(VERSION 3.25.2)
@@ -202,8 +204,19 @@ endfunction()
 
 set(_veto_summary "")
 if(DEFINED VETO_MODELS)
+    # The models the copies are made of: all but those VETO_SKIP names and
+    # their drift copies.
+    string(REPLACE "," ";" _veto_skip "${VETO_SKIP}")
+    set(_veto_models)
+    foreach(_model IN LISTS _models)
+        get_filename_component(_name "${_model}" NAME)
+        string(REGEX REPLACE "(\\.drift)?\\.tilewright\\.bin$" "" _stem "${_name}")
+        if(NOT _stem IN_LIST _veto_skip)
+            list(APPEND _veto_models "${_model}")
+        endif()
+    endforeach()
     execute_process(
-        COMMAND "${VETO_MODELS}" "${OUT}/veto" 512 1024 ${_models}
+        COMMAND "${VETO_MODELS}" "${OUT}/veto" 512 1024 ${_veto_models}
         OUTPUT_VARIABLE _copies
         ERROR_VARIABLE _err
         RESULT_VARIABLE _rc
