@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -168,6 +169,20 @@ TEST(TestGfx942AttentionUnified3dArguments, BshdAnchor)
 TEST(TestGfx942AttentionUnified3dArguments, RefusesSpanOutsideInt32)
 {
     EXPECT_THROW(gfx942StridedKvArguments({1, 1, 1 << 20, 1024}, {1LL << 30, 1LL << 30, 1024, 1}),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// The token stride and span are in range, so only a batch or head stride's byte value can
+// overflow: INT64_MAX / 2 elements still fit in bytes (x2), one more does not.
+TEST(TestGfx942AttentionUnified3dArguments, RefusesBatchOrHeadStrideOverflowingInt64)
+{
+    constexpr int64_t FITS = std::numeric_limits<int64_t>::max() / 2;
+    const auto args = gfx942StridedKvArguments({1, 1, 16, 64}, {FITS, FITS, 64, 1});
+    EXPECT_EQ(args.strideBatchBytes, 2 * FITS);
+    EXPECT_EQ(args.strideHeadBytes, 2 * FITS);
+    EXPECT_THROW(gfx942StridedKvArguments({1, 1, 16, 64}, {FITS + 1, 1024, 64, 1}),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(gfx942StridedKvArguments({1, 1, 16, 64}, {1024, FITS + 1, 64, 1}),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
