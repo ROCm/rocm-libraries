@@ -9,7 +9,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <cstdint>
+#include <random>
 #include <utility>
 #include <vector>
 
@@ -539,5 +541,196 @@ TEST(ReferenceFastPath, Float8OutputRoundsToNearestEvenAndSaturates)
                                              {0.5f * s, 0.0f},
                                              {-0.5f * s, 0.0f},
                                              {1.5f * s, 2.0f * s}});
+    }
+}
+
+namespace
+{
+    // Complex (C_C_C or Z_Z_Z) M x N x K problem, A and B conjugated as requested.
+    ContractionProblemGemm makeComplexProblem(
+        rocisa::DataType type, size_t M, size_t N, size_t K, bool conjA, bool conjB)
+    {
+        auto problem = makePackedProblem(type, type, type, M, N, K);
+        if(conjA)
+            problem.setAOps({TensorOp::ComplexConjugate()});
+        if(conjB)
+            problem.setBOps({TensorOp::ComplexConjugate()});
+        return problem;
+    }
+
+    // Runs a complex problem on the fast path (which must accept it) and the slow
+    // path with the given C, and returns both D buffers.
+    template <typename CT>
+    std::pair<std::vector<CT>, std::vector<CT>>
+        solveComplexFastAndSlow(ContractionProblemGemm const& problem,
+                                std::vector<CT> const&        a,
+                                std::vector<CT> const&        b,
+                                std::vector<CT> const&        c,
+                                CT                            alpha,
+                                CT                            beta)
+    {
+        std::vector<CT> dFast(c.size());
+        std::vector<CT> dSlow(c.size());
+
+        EXPECT_TRUE(isFastPathEligible(problem));
+        ContractionInputs fastInputs(a.data(), b.data(), c.data(), dFast.data(), alpha, beta);
+        SolveGemmCPU(problem, fastInputs, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
+        ContractionInputs slowInputs(a.data(), b.data(), c.data(), dSlow.data(), alpha, beta);
+        SolveGemmCPU(problem, slowInputs, /*elementsToValidate=*/-1, /*tryFastPath=*/false);
+        return {dFast, dSlow};
+    }
+
+    // D = alpha * sum_k op(A[k]) * op(B[k]) + beta * C for M = N = 1, K = 2, with
+    // op = conj where requested; small integer parts, so every value is exact.
+    template <typename T>
+    void checkComplexConjugation(rocisa::DataType type)
+    {
+        using CT                    = std::complex<T>;
+        const std::vector<CT> a     = {CT(1, 2), CT(3, -1)};
+        const std::vector<CT> b     = {CT(2, 1), CT(-1, 4)};
+        const std::vector<CT> c     = {CT(1, -1)};
+        const CT              alpha = CT(0, 1);
+        const CT              beta  = CT(2, -3);
+
+        std::vector<CT> results;
+        for(bool conjA : {false, true})
+        {
+            for(bool conjB : {false, true})
+            {
+                SCOPED_TRACE(testing::Message() << "conjA " << conjA << ", conjB " << conjB);
+                auto     opA = [&](CT v) { return conjA ? std::conj(v) : v; };
+                auto     opB = [&](CT v) { return conjB ? std::conj(v) : v; };
+                const CT expected
+                    = alpha * (opA(a[0]) * opB(b[0]) + opA(a[1]) * opB(b[1])) + beta * c[0];
+
+                auto [dFast, dSlow] = solveComplexFastAndSlow(
+                    makeComplexProblem(type, 1, 1, 2, conjA, conjB), a, b, c, alpha, beta);
+                EXPECT_EQ(dFast[0], expected);
+                EXPECT_EQ(dSlow[0], expected);
+                results.push_back(expected);
+            }
+        }
+        // The four conjugation combinations give four different results.
+        for(size_t i = 0; i < results.size(); ++i)
+            for(size_t j = i + 1; j < results.size(); ++j)
+                EXPECT_NE(results[i], results[j]);
+    }
+
+    // Random (-1, 1) parts in A, B and C, complex alpha and beta, sizes that are not
+    // multiples of the fast path's tiles: fast and slow D must be identical, for
+    // each conjugation combination (both sum op(A) * op(B) in K order from zero and
+    // apply alpha and beta the same way).
+    template <typename T>
+    void checkComplexFastMatchesSlow(rocisa::DataType type)
+    {
+        using CT       = std::complex<T>;
+        const size_t M = 37, N = 45, K = 53;
+
+        std::mt19937                      gen(7);
+        std::uniform_real_distribution<T> dist(-1, 1);
+        auto                              fill = [&](size_t n) {
+            std::vector<CT> v(n);
+            for(auto& x : v)
+            {
+                const T re = dist(gen);
+                const T im = dist(gen);
+                x          = CT(re, im);
+            }
+            return v;
+        };
+        const auto a = fill(M * K);
+        const auto b = fill(K * N);
+        const auto c = fill(M * N);
+
+        for(bool conjA : {false, true})
+        {
+            for(bool conjB : {false, true})
+            {
+                SCOPED_TRACE(testing::Message() << "conjA " << conjA << ", conjB " << conjB);
+                auto [dFast, dSlow]
+                    = solveComplexFastAndSlow(makeComplexProblem(type, M, N, K, conjA, conjB),
+                                              a,
+                                              b,
+                                              c,
+                                              CT(0.7, -1.3),
+                                              CT(0.25, 0.5));
+                size_t mismatches = 0;
+                for(size_t i = 0; i < dFast.size(); ++i)
+                    mismatches += (dFast[i] != dSlow[i]);
+                EXPECT_EQ(mismatches, 0u);
+            }
+        }
+    }
+} // namespace
+
+TEST(ReferenceFastPath, ComplexEligibilityFollowsReferenceTypeIds)
+{
+    using DT          = rocisa::DataType;
+    const DT complexF = DT::ComplexFloat;
+    const DT complexD = DT::ComplexDouble;
+
+    for(DT t : {complexF, complexD})
+    {
+        SCOPED_TRACE(TensileLite::ToString(t));
+        EXPECT_TRUE(isFastPathEligible(makeComplexProblem(t, 4, 4, 4, false, false)));
+        EXPECT_TRUE(isFastPathEligible(makeComplexProblem(t, 4, 4, 4, true, true)));
+
+        // Not C_C_C / Z_Z_Z.
+        auto realAlpha = makeComplexProblem(t, 4, 4, 4, false, false);
+        realAlpha.setAlphaType(DT::Float);
+        realAlpha.setBetaType(DT::Float);
+        EXPECT_FALSE(isFastPathEligible(realAlpha));
+        EXPECT_FALSE(isFastPathEligible(makePackedProblem(t, t, DT::Float, 4, 4, 4)));
+        EXPECT_FALSE(isFastPathEligible(makePackedProblem(DT::Float, DT::Float, t, 4, 4, 4)));
+
+        // Epilogue inputs the slow path reads as zero (or, for activation, ignores)
+        // for complex types stay on the slow path.
+        auto bias = makeComplexProblem(t, 4, 4, 4, false, false);
+        bias.setUseBias(1);
+        bias.setBias(t, 4, 4);
+        EXPECT_FALSE(isFastPathEligible(bias));
+        for(const char* mode : {"Scalar", "Vector"})
+        {
+            auto scaleAB = makeComplexProblem(t, 4, 4, 4, false, false);
+            scaleAB.setUseScaleAB(mode);
+            EXPECT_FALSE(isFastPathEligible(scaleAB)) << "ScaleAB " << mode;
+        }
+        auto scaleAlphaVec = makeComplexProblem(t, 4, 4, 4, false, false);
+        scaleAlphaVec.setUseScaleAlphaVec(1);
+        scaleAlphaVec.setScaleAlphaVec(t, 4, /*factorDim=*/0);
+        EXPECT_FALSE(isFastPathEligible(scaleAlphaVec));
+        auto activation = makeComplexProblem(t, 4, 4, 4, false, false);
+        activation.setActivationType(ActivationType::Relu);
+        EXPECT_FALSE(isFastPathEligible(activation));
+        auto gateResidual = makeComplexProblem(t, 4, 4, 4, false, false);
+        gateResidual.setUseGateResidual(true);
+        EXPECT_FALSE(isFastPathEligible(gateResidual));
+    }
+    EXPECT_FALSE(isFastPathEligible(makePackedProblem(complexF, complexD, complexD, 4, 4, 4)));
+}
+
+// TensorOp::ComplexConjugate on A and/or B conjugates that operand before the
+// multiply (the slow path's Transform<T>::Input), on both paths.
+TEST(ReferenceFastPath, ComplexConjugatesTheRequestedOperands)
+{
+    {
+        SCOPED_TRACE("ComplexFloat");
+        checkComplexConjugation<float>(rocisa::DataType::ComplexFloat);
+    }
+    {
+        SCOPED_TRACE("ComplexDouble");
+        checkComplexConjugation<double>(rocisa::DataType::ComplexDouble);
+    }
+}
+
+TEST(ReferenceFastPath, ComplexMatchesSlowPathExactly)
+{
+    {
+        SCOPED_TRACE("ComplexFloat");
+        checkComplexFastMatchesSlow<float>(rocisa::DataType::ComplexFloat);
+    }
+    {
+        SCOPED_TRACE("ComplexDouble");
+        checkComplexFastMatchesSlow<double>(rocisa::DataType::ComplexDouble);
     }
 }

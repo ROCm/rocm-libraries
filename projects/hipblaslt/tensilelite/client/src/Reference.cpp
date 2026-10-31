@@ -31,7 +31,9 @@
 #include "TimingInstrumentation.hpp"
 #include "TypedId.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <complex>
 #include <cstddef>
 #include <iostream>
 #include <omp.h>
@@ -188,6 +190,10 @@ namespace TensileLite
         // When `computeInputType` is set and is narrower than `type`, each element
         // is additionally rounded through `computeInputType` to mirror what the
         // GPU MFMA / slow-path validator do (see quantizeThroughComputeInputType).
+        //
+        // When `conjugate` is set (TensorOp::ComplexConjugate on the operand) and
+        // AccumT is complex, the shadow holds the conjugate of each element, as the
+        // slow path's Transform<T>::Input reads it. Real types have no conjugate.
         template <typename AccumT = float>
         class ShadowBuffer
         {
@@ -199,7 +205,8 @@ namespace TensileLite
             ShadowBuffer(void const*      ptr,
                          rocisa::DataType type,
                          size_t           N,
-                         rocisa::DataType computeInputType = rocisa::DataType::None)
+                         rocisa::DataType computeInputType = rocisa::DataType::None,
+                         bool             conjugate        = false)
             {
                 if(ptr == nullptr)
                 {
@@ -224,6 +231,15 @@ namespace TensileLite
                         m_storage = loadTo<AccumT, double>(ptr, N);
                         m_ptr     = m_storage.data();
                     }
+                }
+                else if(type == rocisa::DataType::ComplexFloat
+                        || type == rocisa::DataType::ComplexDouble)
+                {
+                    // Complex tensors are only read with their own type as AccumT
+                    // (the complex fast path: C_C_C, Z_Z_Z).
+                    if(type != TypeInfo<AccumT>::Enum)
+                        throw std::runtime_error("Unsupported complex type for ShadowBuffer");
+                    m_ptr = static_cast<const AccumT*>(ptr);
                 }
                 else if(type == rocisa::DataType::Half)
                 {
@@ -287,11 +303,23 @@ namespace TensileLite
                 // where we hold a writable shadow copy (not for the
                 // direct-pointer Float case, which is already at full
                 // precision and never narrower than itself).
-                if(computeInputType != rocisa::DataType::None
-                   && computeInputType != type
-                   && !m_storage.empty())
+                if constexpr(!TypeInfo<AccumT>::IsComplex)
                 {
-                    quantizeThroughComputeInputType(m_storage, computeInputType);
+                    if(computeInputType != rocisa::DataType::None && computeInputType != type
+                       && !m_storage.empty())
+                    {
+                        quantizeThroughComputeInputType(m_storage, computeInputType);
+                        m_ptr = m_storage.data();
+                    }
+                }
+                else if(conjugate && m_ptr != nullptr)
+                {
+                    // Complex types have no narrower compute-input type; conjugate
+                    // a copy if requested.
+                    if(m_storage.empty())
+                        m_storage.assign(m_ptr, m_ptr + N);
+                    for(auto& v : m_storage)
+                        v = std::conj(v);
                     m_ptr = m_storage.data();
                 }
             }
@@ -1212,6 +1240,21 @@ namespace TensileLite
             }
         }
 
+        // ComplexFloat/ComplexDouble A, B, C or D: the fast path accepts exactly the
+        // slow path's complex type ids, C_C_C and Z_Z_Z (every tensor, alpha/beta and
+        // the MAC in that type; solveCPUFast<std::complex<...>>).
+        bool isComplexFastPathTypeId(ContractionProblemGemm const& problem)
+        {
+            switch(getInputContractionInputsTypeId(problem))
+            {
+            case TypedGemm_C_C_C::TypeId():
+            case TypedGemm_Z_Z_Z::TypeId():
+                return true;
+            default:
+                return false;
+            }
+        }
+
         bool isFastPathEligible(ContractionProblemGemm const& problem)
         {
 
@@ -1231,6 +1274,10 @@ namespace TensileLite
                 return t == rocisa::DataType::Float8 || t == rocisa::DataType::BFloat8
                        || t == rocisa::DataType::Float8_fnuz
                        || t == rocisa::DataType::BFloat8_fnuz;
+            };
+
+            auto isComplexType = [](rocisa::DataType t) {
+                return t == rocisa::DataType::ComplexFloat || t == rocisa::DataType::ComplexDouble;
             };
 
             auto isSupportedInputType = [&](rocisa::DataType t) {
@@ -1255,7 +1302,13 @@ namespace TensileLite
             const bool isFloat8Output = isFloat8Type(problem.c().dataType())
                                         || isFloat8Type(problem.d().dataType());
 
-            if(!isInt8Input && !isFloat8Output
+            // Complex A, B, C or D: the types are checked against the slow path's
+            // complex type ids below (isComplexFastPathTypeId).
+            const bool isComplex
+                = isComplexType(problem.a().dataType()) || isComplexType(problem.b().dataType())
+                  || isComplexType(problem.c().dataType()) || isComplexType(problem.d().dataType());
+
+            if(!isInt8Input && !isFloat8Output && !isComplex
                && (!isSupportedInputType(problem.a().dataType())
                    || !isSupportedInputType(problem.b().dataType())
                    || !isSupportedOutputType(problem.c().dataType())
@@ -1280,9 +1333,11 @@ namespace TensileLite
 
             if(mxBlockA > 0 || mxBlockB > 0)
             {
-                // MX block scaling needs a floating-point MAC type (solveCPUFast).
+                // MX block scaling needs a real floating-point MAC type (solveCPUFast).
                 if(isInt8Input)
                     return rejectFast("int8_mx");
+                if(isComplex)
+                    return rejectFast("complex_mx");
 
                 // One-sided MX (only A or only B scaled) is not supported. The
                 // slow path's columnMajorGemm reference also rejects this case,
@@ -1348,6 +1403,24 @@ namespace TensileLite
             if(isFloat8Output && !isFloat8OutputFastPathTypeId(problem))
             {
                 return rejectFast("unsupported_float8_output_type_combination");
+            }
+
+            if(isComplex && !isComplexFastPathTypeId(problem))
+            {
+                return rejectFast("unsupported_complex_type_combination");
+            }
+
+            // The slow path reads complex bias, ScaleAB, scaleAlphaVec and gate
+            // residual values as zero (GetValue has no complex case) and leaves complex
+            // values unchanged by activation. The complex fast path does not take these
+            // inputs, so such problems stay on the slow path.
+            if(isComplex
+               && (problem.useBias() || problem.useScaleAB() == "Scalar"
+                   || problem.useScaleAB() == "Vector" || problem.useScaleAlphaVec()
+                   || problem.activationType() != ActivationType::None
+                   || problem.useGateResidual()))
+            {
+                return rejectFast("complex_epilogue_input");
             }
 
             if(problem.useScaleCD())
@@ -1535,9 +1608,10 @@ namespace TensileLite
         // Solve GEMM problems using efficient tiled CPU code.
         // This function assumes the problem is eligible for the fast path — callers
         // must check isFastPathEligible() first.
-        // AccumT: epilogue type (float, double, or int32_t for Int8 inputs with int32
-        // alpha). Alpha, beta, the ScaleAB and scaleAlphaVec scales, C, bias,
-        // activation and gate residual are applied in it, and D is written back from it.
+        // AccumT: epilogue type (float, double, int32_t for Int8 inputs with int32
+        // alpha, or std::complex<float/double> for the complex C_C_C/Z_Z_Z types).
+        // Alpha, beta, the ScaleAB and scaleAlphaVec scales, C, bias, activation and
+        // gate residual are applied in it, and D is written back from it.
         // OperandMathOpT: per-operand math type used immediately before multiply.
         // XFloat32, for example, truncates float operands to a 10-bit mantissa.
         // Default matches AccumT; when it also matches MacT the operand cast is a no-op.
@@ -1565,8 +1639,9 @@ namespace TensileLite
             // Int8 output cast. The other types keep the folded order below.
             constexpr bool slowPathEpilogueOrder = std::is_integral_v<MacT>;
 
-            // MX block scaling is floating-point only; isFastPathEligible rejects MX
-            // with Int8 inputs, and the MX branch below is not compiled for them.
+            // MX block scaling is real floating-point only; isFastPathEligible rejects
+            // MX with Int8 or complex inputs, and the MX branch below is not compiled
+            // for them.
             constexpr bool macSupportsMX = std::is_floating_point_v<MacT>;
             if(!macSupportsMX && (problem.mxBlockA() > 0 || problem.mxBlockB() > 0))
             {
@@ -1611,14 +1686,23 @@ namespace TensileLite
             // pre-quantized to mirror the GPU MFMA / slow-path semantics when
             // storage is wider than the MAC input (e.g. Half storage with F8
             // compute-input). C/D never have a separate MAC-input type.
+            // Complex A and B are conjugated in the shadow when the problem has a
+            // TensorOp::ComplexConjugate on them, as the slow path reads them.
+            auto hasConjugateOp = [](TensorOps const& ops) {
+                return std::any_of(ops.begin(), ops.end(), [](TensorOp const& op) {
+                    return op.type == TensorOp::Type::ComplexConjugate;
+                });
+            };
             ShadowBuffer<MacT> shadowA(inputs.a,
                                        problem.a().dataType(),
                                        problem.a().totalAllocatedElements(),
-                                       problem.computeInputTypeA());
+                                       problem.computeInputTypeA(),
+                                       hasConjugateOp(problem.aOps()));
             ShadowBuffer<MacT> shadowB(inputs.b,
                                        problem.b().dataType(),
                                        problem.b().totalAllocatedElements(),
-                                       problem.computeInputTypeB());
+                                       problem.computeInputTypeB(),
+                                       hasConjugateOp(problem.bOps()));
             ShadowBuffer<AccumT> shadowC(
                 inputs.c, problem.c().dataType(), problem.c().totalAllocatedElements());
 
@@ -1636,6 +1720,10 @@ namespace TensileLite
             }
             else if(problem.d().dataType() == rocisa::DataType::Int32
                     && std::is_same_v<AccumT, int32_t>)
+            {
+                ptrD = static_cast<AccumT*>(inputs.d);
+            }
+            else if(TypeInfo<AccumT>::IsComplex && problem.d().dataType() == TypeInfo<AccumT>::Enum)
             {
                 ptrD = static_cast<AccumT*>(inputs.d);
             }
@@ -1994,7 +2082,11 @@ namespace TensileLite
             }
 
             // 6. Write Back
-            if(problem.d().dataType() == rocisa::DataType::Half)
+            if constexpr(TypeInfo<AccumT>::IsComplex)
+            {
+                // Complex D has the epilogue type and was written in place (ptrD).
+            }
+            else if(problem.d().dataType() == rocisa::DataType::Half)
             {
                 storeFrom<AccumT, TensileLite::Half>(
                     inputs.d, shadowD, problem.d().totalAllocatedElements());
@@ -3501,6 +3593,12 @@ namespace TensileLite
                     else
                         solveCPUFast<float, int32_t, int32_t>(problem, inputs);
                 }
+                // Complex (C_C_C, Z_Z_Z): every tensor, alpha/beta and the MAC in the
+                // slow path's accumulator type.
+                else if(problem.d().dataType() == rocisa::DataType::ComplexFloat)
+                    solveCPUFast<std::complex<float>>(problem, inputs);
+                else if(problem.d().dataType() == rocisa::DataType::ComplexDouble)
+                    solveCPUFast<std::complex<double>>(problem, inputs);
                 else if(isDouble)
                     solveCPUFast<double>(problem, inputs);
                 else if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
