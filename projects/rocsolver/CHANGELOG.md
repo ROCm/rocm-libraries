@@ -3,6 +3,22 @@
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
 
+## (Unreleased) rocSOLVER
+
+### Added
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+
+* Fixed wrong eigenvalues in STEDCJ, and therefore in SYEVDJ and HEEVDJ, when two nearly equal
+  eigenvalues of the merged blocks were not deflated: the deflation criterion is now that of LAPACK.
+
+### Known issues
+### Upcoming changes
+
+
+
 ## rocSOLVER 3.38.0 for ROCm 10.2.0
 
 ### Added
