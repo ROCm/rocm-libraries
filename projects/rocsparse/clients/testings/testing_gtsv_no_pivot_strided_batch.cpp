@@ -111,14 +111,20 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
     host_vector<T> hd(batch_stride * batch_count, static_cast<T>(7));
     host_vector<T> hdu(batch_stride * batch_count, static_cast<T>(7));
 
+    // A zero matrix selects the identity. Every other matrix is tridiagonal.
+    const bool diagonal = arg.matrix == rocsparse_matrix_zero;
+
     // initialize tri-diagonal matrix
     for(rocsparse_int j = 0; j < batch_count; ++j)
     {
         for(rocsparse_int i = 0; i < m; ++i)
         {
-            hdl[j * batch_stride + i] = random_cached_generator<T>(1, 8);
-            hd[j * batch_stride + i]  = random_cached_generator<T>(17, 32);
-            hdu[j * batch_stride + i] = random_cached_generator<T>(1, 8);
+            hdl[j * batch_stride + i]
+                = diagonal ? static_cast<T>(0) : random_cached_generator<T>(1, 8);
+            hd[j * batch_stride + i]
+                = diagonal ? static_cast<T>(1) : random_cached_generator<T>(17, 32);
+            hdu[j * batch_stride + i]
+                = diagonal ? static_cast<T>(0) : random_cached_generator<T>(1, 8);
         }
 
         hdl[j * batch_stride + 0]     = std::numeric_limits<T>::infinity();

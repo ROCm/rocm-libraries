@@ -318,6 +318,105 @@ namespace
     // Above 1024 rows the SPIKE decomposition runs; num_spikes = 2 * ceil(m / 256) picks the
     // reduced solver (4..1024 spikes) and a reduced system above 1024 recurses.
     const int32_t k_medium_sizes[] = {1025, 2048, 3000, 5000, 9000, 20000, 40000, 70000, 135000};
+
+    // Strictly diagonal: both off-diagonals are zero and every diagonal entry is
+    // nonzero, so the solution is x_i = b_i / d_i. A tolerance comparison does not
+    // reject NaN, so the entries are checked for finiteness first.
+    template <typename T>
+    system_t<T> make_diagonal_system(int32_t m, int32_t n, int seed)
+    {
+        system_t<T> s;
+        s.dl.assign(m, make_value<T>(0.0));
+        s.du.assign(m, make_value<T>(0.0));
+        s.d.resize(m);
+        s.x.resize(static_cast<size_t>(m) * n);
+        s.b.resize(static_cast<size_t>(m) * n);
+        for(int32_t i = 0; i < m; ++i)
+        {
+            const double im_part = is_cplx<T> ? 0.05 * (((i + seed) % 3) - 1) : 0.0;
+            s.d[i]               = make_value<T>(2.0 + 0.25 * (i % 5), im_part);
+        }
+        for(int32_t c = 0; c < n; ++c)
+        {
+            for(int32_t i = 0; i < m; ++i)
+            {
+                const size_t k = static_cast<size_t>(c) * m + i;
+                s.b[k]         = make_value<T>(0.4 + 0.07 * ((i * 5 + c * 3 + seed) % 13),
+                                       is_cplx<T> ? 0.03 * ((i + c) % 4) : 0.0);
+                s.x[k]         = from_cd<T>(to_cd(s.b[k]) / to_cd(s.d[i]));
+            }
+        }
+        return s;
+    }
+
+    template <typename T>
+    void expect_finite_solution(const std::vector<T>& got, const std::string& what)
+    {
+        for(size_t i = 0; i < got.size(); ++i)
+        {
+            EXPECT_TRUE(std::isfinite(re(got[i])) && std::isfinite(im(got[i])))
+                << what << " index " << i;
+        }
+    }
+
+    template <typename T>
+    void run_diagonal_multi_rhs(rocsparse_handle handle, int32_t m, int32_t n)
+    {
+        SCOPED_TRACE("diagonal no_pivot m=" + std::to_string(m) + " n=" + std::to_string(n));
+        const system_t<T> s = make_diagonal_system<T>(m, n, 3);
+        device_vector<T>  ddl{s.dl}, dd{s.d}, ddu{s.du}, dB{s.b};
+        ASSERT_TRUE(ddl.ptr && dd.ptr && ddu.ptr && dB.ptr);
+        size_t size = 0;
+        ASSERT_EQ(gtsv_no_pivot_buffer_size<T>(handle, m, n, ddl, dd, ddu, dB, m, &size),
+                  rocsparse_status_success);
+        device_vector<char> buffer{size ? size : size_t{1}};
+        ASSERT_TRUE(buffer.ptr);
+        ASSERT_EQ(gtsv_no_pivot<T>(handle, m, n, ddl, dd, ddu, dB, m, buffer.ptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        const auto got = to_host(dB);
+        expect_finite_solution(got, "gtsv_no_pivot");
+        expect_solution(got, s.x, "gtsv_no_pivot solution");
+    }
+
+    template <typename T>
+    void run_diagonal_strided(rocsparse_handle handle, int32_t m, int32_t batch_count)
+    {
+        SCOPED_TRACE("diagonal strided m=" + std::to_string(m)
+                     + " batch=" + std::to_string(batch_count));
+        std::vector<T>              dl(static_cast<size_t>(m) * batch_count);
+        std::vector<T>              d = dl, du = dl, b = dl;
+        std::vector<std::vector<T>> want;
+        for(int32_t k = 0; k < batch_count; ++k)
+        {
+            const system_t<T> s = make_diagonal_system<T>(m, 1, k + 1);
+            std::copy(s.dl.begin(), s.dl.end(), dl.begin() + static_cast<size_t>(k) * m);
+            std::copy(s.d.begin(), s.d.end(), d.begin() + static_cast<size_t>(k) * m);
+            std::copy(s.du.begin(), s.du.end(), du.begin() + static_cast<size_t>(k) * m);
+            std::copy(s.b.begin(), s.b.end(), b.begin() + static_cast<size_t>(k) * m);
+            want.push_back(s.x);
+        }
+        device_vector<T> ddl{dl}, dd{d}, ddu{du}, dx{b};
+        ASSERT_TRUE(ddl.ptr && dd.ptr && ddu.ptr && dx.ptr);
+        size_t size = 0;
+        ASSERT_EQ(strided_buffer_size<T>(handle, m, ddl, dd, ddu, dx, batch_count, m, &size),
+                  rocsparse_status_success);
+        device_vector<char> buffer{size ? size : size_t{1}};
+        ASSERT_TRUE(buffer.ptr);
+        ASSERT_EQ(strided_solve<T>(handle, m, ddl, dd, ddu, dx, batch_count, m, buffer.ptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        const auto got = to_host(dx);
+        expect_finite_solution(got, "gtsv_no_pivot_strided_batch");
+        for(int32_t k = 0; k < batch_count; ++k)
+        {
+            const std::vector<T> sol(got.begin() + static_cast<size_t>(k) * m,
+                                     got.begin() + static_cast<size_t>(k) * m + m);
+            expect_solution(sol, want[k], "batch " + std::to_string(k));
+        }
+    }
 }
 
 class PrecondTridiagonal : public HandleTest
@@ -386,6 +485,22 @@ TEST_F(PrecondTridiagonal, strided_batch_small_sizes)
         }
         run_strided<T>(handle, 17, 5, 4);
     });
+}
+
+// A strictly diagonal system of 1025 rows is the smallest SPIKE solve. The reduced
+// system has zero diagonal entries there, so a no-pivot solve of it used to return NaNs.
+TEST_F(PrecondTridiagonal, strictly_diagonal)
+{
+    for(const int32_t m : {1024, 1025, 1280})
+    {
+        for_all_types([&](auto tag) {
+            using T = decltype(tag);
+            run_diagonal_multi_rhs<T>(handle, m, 1);
+            run_diagonal_multi_rhs<T>(handle, m, 8);
+            run_diagonal_strided<T>(handle, m, 1);
+            run_diagonal_strided<T>(handle, m, 8);
+        });
+    }
 }
 
 TEST_F(PrecondTridiagonal, strided_batch_medium_sizes)
