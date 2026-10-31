@@ -178,6 +178,8 @@ def test_metadata_fans_out_to_all_placement_aliases():
         pgr=2,
         mathclk=4,
         customKernelDef=None,
+        ldsNumBytes=1024,
+        loopIters=8,
     )
 
     passPostKernelInfoToSolution(
@@ -186,6 +188,8 @@ def test_metadata_fans_out_to_all_placement_aliases():
 
     assert [solution._state["CUOccupancy"] for solution in solutions] == [3, 3]
     assert [solution._state["PrefetchGlobalRead"] for solution in solutions] == [2, 2]
+    assert [solution._state["LdsNumBytes"] for solution in solutions] == [1024, 1024]
+    assert [solution._state["LoopIters"] for solution in solutions] == [8, 8]
 
 
 def test_thread_tile_distinguishes_non_matrix_kernels():
