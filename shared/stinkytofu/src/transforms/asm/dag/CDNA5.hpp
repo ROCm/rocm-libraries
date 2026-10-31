@@ -1367,9 +1367,11 @@ bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
     return false;
 }
 
-// mode2 WAR gate relief: the ds_load's stage is behind its even line (DsSpreadPacer), so a gated
-// load may issue before its pipe-op distance closes. Without a pacer plan there is no relief.
+// mode2 WAR gate relief: a gated load may issue before its pipe-op distance closes when its stage
+// is behind its even line (DsSpreadPacer), or when the region's last WMMA has issued, since no
+// later WMMA can close the gap.
 bool CDNA5ReadyQueue::warGateRelieved(DAGNode* ds) const {
+    if (wmmaTotalThisRegion_ > 0 && wmmaIssuedCountThisRegion_ >= wmmaTotalThisRegion_) return true;
     return dsSpreadOn() && dsSpread_.behind(ds->id, wmmaIssuedCountThisRegion_) > 0;
 }
 
