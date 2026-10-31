@@ -368,6 +368,25 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
         auto ck_val_creator = MakeCKValidatorCreator(
             loader, CKSolverType::GrpConvWrw, problem.GetInDataType(), mode_use_tf32);
 
+        // Per-candidate applicability for the lazy (precomputed-vocab) fast path. kernel_id already
+        // carries the "+split_k" suffix; split_k is passed separately only for the deterministic gate.
+        auto is_args_supported =
+            [&loader, &problem, is_deterministic, mode_use_tf32](const std::string& kernel_id,
+                                                                 int split_k) {
+                if(is_deterministic && split_k != 1)
+                    return false;
+                // Same split_k policy as the enumeration path's is_valid (range/power-of-2 and
+                // autodeduce-only-when-supported), so the fast path cannot admit a split_k the
+                // solver forbids (e.g. autodeduce -1 where it is unsupported).
+                if(!k2DWrwSolverConfig.IsValidSplitK(split_k))
+                    return false;
+                return loader.IsArgsSupported(CKSolverType::GrpConvWrw,
+                                              problem,
+                                              kernel_id,
+                                              problem.GetInDataType(),
+                                              mode_use_tf32);
+            };
+
         if(RunAIHeuristics(k2DWrwSolverConfig,
                            state,
                            ctx,
@@ -376,7 +395,8 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
                            fill_valid_kernels,
                            ktn_runner,
                            ck_val_creator,
-                           mode_use_tf32))
+                           mode_use_tf32,
+                           is_args_supported))
         {
             return;
         }

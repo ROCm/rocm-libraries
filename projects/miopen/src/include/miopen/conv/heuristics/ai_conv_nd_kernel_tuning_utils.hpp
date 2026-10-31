@@ -32,6 +32,7 @@
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/timer.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
@@ -395,7 +396,8 @@ bool RunKTNGeneric(ConfigType& config,
  */
 template <typename FillKernelsFunc,
           typename KTNRunnerFunc          = std::nullptr_t,
-          typename CKValidatorCreatorFunc = std::nullptr_t>
+          typename CKValidatorCreatorFunc = std::nullptr_t,
+          typename IsArgsSupportedFunc    = std::nullptr_t>
 bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                      HeuristicInitState& state,
                      const miopen::ExecutionContext& ctx,
@@ -404,7 +406,8 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                      FillKernelsFunc&& fill_valid_kernels,
                      KTNRunnerFunc&& ktn_runner              = nullptr,
                      CKValidatorCreatorFunc&& ck_val_creator = nullptr,
-                     bool use_tf32                           = false)
+                     bool use_tf32                           = false,
+                     IsArgsSupportedFunc&& is_args_supported = nullptr)
 {
     const std::string& arch = ctx.GetStream().GetDeviceName();
 
@@ -424,6 +427,41 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
     {
         MIOPEN_LOG_I2(solver_cfg.solver_name << ": Candidate Selection heuristics for " << arch);
         std::string solver_name = solver_cfg.GetSolverNameForArch(arch);
+
+        // Fast path: when the caller supplies an is_args_supported callback and a precomputed config
+        // vocabulary (v3 table) is installed, rank the whole vocabulary by model score and check
+        // applicability lazily top-down, skipping the (often ~200 ms) FillValidKernels enumeration.
+        // Behaviour-preserving: first applicable in score order is the argmax over applicable
+        // candidates. Falls through to the enumeration path when no vocab is installed or none of the
+        // ranked candidates is applicable.
+        if constexpr(!std::is_same_v<IsArgsSupportedFunc, std::nullptr_t>)
+        {
+            // Whole fast-path attempt (features + rank + lazy applicability). Compare against the
+            // enumeration path's "GetDefaultPerformanceConfig(default path)" span to see the win.
+            const miopen::ScopedTimeLogger fastpath_timer(
+                std::string{solver_cfg.solver_name} + " CandidateSelection.lazy_fastpath");
+            std::map<std::string, float> fp_features =
+                GetFeaturesND(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
+            auto lazy = ai::tuning::candidate_selection::SelectBestVocabCandidate(
+                arch, solver_name, fp_features, is_args_supported);
+            if(lazy)
+            {
+                const std::string& kid = lazy->first;
+                const int split_k      = lazy->second;
+                // Recover the base GetTypeString (strip the "+<split_k>" after the final '>').
+                std::string base = kid;
+                const auto gt    = kid.rfind('>');
+                const auto plus  = kid.find('+', gt == std::string::npos ? 0 : gt);
+                if(plus != std::string::npos)
+                    base = kid.substr(0, plus);
+                state.valid_kernels = {base};
+                state.SetResult(0, split_k, solver_cfg.uses_split_k);
+                MIOPEN_LOG_I(solver_cfg.solver_name
+                             << ": Candidate Selection (lazy applicability) selected: "
+                             << state.kernel_id);
+                return true;
+            }
+        }
 
         // Fill valid kernels with TF32 fallback support
         // If use_tf32 is true, first try with TF32; if no kernels, retry without TF32

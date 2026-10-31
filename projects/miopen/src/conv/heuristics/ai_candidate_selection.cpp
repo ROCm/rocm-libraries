@@ -31,6 +31,7 @@
  *******************************************************************************/
 
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
+#include <miopen/timer.hpp>
 #include <nlohmann/json.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
@@ -611,8 +612,22 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
                     N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
     engineered.insert(engineered.end(), derived.begin(), derived.end());
 
+    // The two-tower CandidateSelection encoders are trained with log1p(in_d) appended for BOTH 2D
+    // and 3D: the training preprocessor gates this on in_d being present in the metadata, which is
+    // a constant (= 1) for 2D, so the 2D encoders carry it as log1p(1). The shared
+    // EngineeredConvFeatures only emits it for 3D -- and it is also consumed by the TunaNet path,
+    // which must stay at the 2D width -- so append the 2D depth constant (D_in == 1 here) only in
+    // this path, keeping the deploy feature width and order matched to the config-selection
+    // encoders.
+    std::size_t depth_feature = 0;
+    if(!is_3d)
+    {
+        engineered.push_back(static_cast<float>(std::log1p(static_cast<double>(D_in))));
+        depth_feature = 1;
+    }
+
     const std::size_t expected_size = in_layout.size() + fil_layout.size() + out_layout.size() +
-                                      precision.size() + raw_count + derived.size();
+                                      precision.size() + raw_count + derived.size() + depth_feature;
     if(engineered.size() != expected_size)
     {
         MIOPEN_THROW("EngineerCandidateSelectionInputFeatures: expected " +
@@ -948,6 +963,12 @@ std::vector<std::vector<float>> CandidateSelectionModel::EncodeKernelConfigs(
     const std::vector<std::vector<float>>& encoded_candidates,
     const std::vector<std::string>* candidate_kernel_names) const
 {
+    // Precomputed config-tower fast path. Keyed on the raw EncodeKernelParams vectors (before any
+    // feature engineering), so it must run here -- ahead of EngineerKernelConfigFeaturesImpl -- and
+    // replaces the entire config tower (engineering + fdeep). nullopt on any miss -> neural path.
+    if(auto cached = TryEncodeKernelConfigsFromTable(encoded_candidates, arch_, solver_))
+        return std::move(*cached);
+
     // Engineered kernel-config path for 2D/3D models (see EncodeInputFeatures).
     if(!UsesEngineeredInputFeatures(metadata_))
     {
@@ -1617,6 +1638,89 @@ ModelSelectBestCandidate(const std::string& arch,
         MIOPEN_LOG_I2(
             "[Warning] Candidate selection model failed with std exception: " << ex.what());
         return CandidateSelectionResult{{}, {}};
+    }
+}
+
+MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>>
+SelectBestVocabCandidate(
+    const std::string& arch,
+    const std::string& solver,
+    const std::map<std::string, float>& features,
+    const std::function<bool(const std::string&, int)>& is_args_supported)
+{
+    // Parse the "+<split_k>" a split-k solver appends after the closing '>' of the GetTypeString.
+    // The base kernel string itself can contain '+' (e.g. "<256l+256m, ...>"), so search only after
+    // the final '>'. No suffix (non-split-k solvers) -> split_k 1.
+    const auto split_k_of = [](const std::string& kid) -> int {
+        const auto gt   = kid.rfind('>');
+        const auto plus = kid.find('+', gt == std::string::npos ? 0 : gt);
+        if(plus == std::string::npos)
+            return 1;
+        try
+        {
+            return std::stoi(kid.substr(plus + 1));
+        }
+        catch(...)
+        {
+            return 1;
+        }
+    };
+
+    try
+    {
+        // Total time of the lazy-applicability selection, directly comparable to the enumeration
+        // path's "GetDefaultPerformanceConfig(default path)" span.
+        const miopen::ScopedTimeLogger total_timer(solver + " lazy_applicability.total");
+
+        const auto& vocab = GetConfigEmbeddingVocab(arch, solver);
+        if(vocab.empty())
+            return std::nullopt; // no v3 table -> caller uses the FillValidKernels path
+
+        // Rank the whole vocabulary best-first using the stored config embeddings (no fdeep config
+        // encoder, no FillValidKernels).
+        std::vector<std::pair<int, float>> scored;
+        {
+            const miopen::ScopedTimeLogger rank_timer(
+                solver + " lazy_applicability.rank (" + std::to_string(vocab.size()) + " vocab)");
+            const auto& model           = GetCandidateSelectionModel(arch, solver);
+            const auto encoded_features = model.EncodeInputFeatures(features);
+            std::vector<std::vector<float>> vocab_embeddings;
+            vocab_embeddings.reserve(vocab.size());
+            for(const auto& entry : vocab)
+                vocab_embeddings.push_back(entry.second);
+            scored = model.SelectBestCandidateIndices(encoded_features, vocab_embeddings);
+        }
+
+        // Walk best-first, checking applicability lazily; this span + the check count show how much
+        // of the old ~200 ms enumeration we replaced (ideally one check instead of ~thousands).
+        const miopen::ScopedTimeLogger check_timer(solver +
+                                                   " lazy_applicability.is_args_supported");
+        int checks = 0;
+        for(const auto& [idx, score] : scored)
+        {
+            if(idx < 0 || static_cast<std::size_t>(idx) >= vocab.size())
+                continue;
+            const std::string& kernel_id = vocab[idx].first;
+            const int split_k            = split_k_of(kernel_id);
+            ++checks;
+            if(is_args_supported(kernel_id, split_k))
+            {
+                MIOPEN_LOG_I2("Lazy-applicability selected: "
+                              << kernel_id << " (split_k=" << split_k << ", score=" << score
+                              << ") after " << checks << " applicability check(s) of "
+                              << vocab.size() << " vocab");
+                return std::make_pair(kernel_id, split_k);
+            }
+        }
+        MIOPEN_LOG_I2("Lazy-applicability: none of "
+                      << vocab.size() << " vocab applicable for " << solver << " on " << arch
+                      << " (" << checks << " checks); falling back to FillValidKernels");
+        return std::nullopt;
+    }
+    catch(const std::exception& ex)
+    {
+        MIOPEN_LOG_I2("[Warning] SelectBestVocabCandidate failed: " << ex.what());
+        return std::nullopt;
     }
 }
 
