@@ -6,7 +6,7 @@
  *
  * The build entry mirrors the Python build_mx_gemm one op at a time so a
  * reviewer can diff line by line: same param order/attrs, same K-group
- * scf.for_iter, same per-group E8M0 decode + scale-fold, same store epilogue.
+ * scf.for_iter, same per-group E8M0 scale-fold, same store epilogue.
  *
  * Builder primitives are rocke/ir.h's rocke_b_*; the MX scale decode, quant type
  * map, MFMA atom, and GEMM load/store helpers are the already-ported C helpers.
@@ -15,6 +15,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <utility>
+#include <vector>
 
 #include "rocke/instance_mx_gemm.h"
 
@@ -27,6 +30,56 @@
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err, rocke_i_live */
 #include "rocke/lower_llvm.h"
+
+/* Python _SCALE_LOADS_FIRST: sched_barrier mask, every instruction class may
+ * be scheduled across the barrier except VMEM (0x10) and VMEM read (0x20). */
+#define ROCKE_MX_GEMM_SCALE_LOADS_FIRST 0x7CF
+/* Python _E8M0_CODE_FOR_ONE: the E8M0 scale code of 2^0. */
+#define ROCKE_MX_GEMM_E8M0_CODE_FOR_ONE 127
+
+/* ===================================================================== *
+ *  mx_gemm_element_format(mantissa_dtype, arch)
+ *
+ * Python _MFMA_ELEMENT_FORMATS: the fp8 / bf8 encoding the MFMA of each
+ * target reads, the FNUZ encodings on gfx942 and the OCP ones on gfx950.
+ * ===================================================================== */
+const rocke_mx_element_format_t* rocke_mx_gemm_element_format(const char* mantissa_dtype,
+                                                              const char* arch,
+                                                              char* err,
+                                                              size_t err_cap)
+{
+    bool fp8;
+    bool bf8;
+
+    if(mantissa_dtype == NULL || arch == NULL)
+    {
+        if(err != NULL && err_cap > 0)
+        {
+            snprintf(err, err_cap, "mx_gemm_element_format: NULL argument");
+        }
+        return NULL;
+    }
+    fp8 = strcmp(mantissa_dtype, "fp8e4m3") == 0;
+    bf8 = strcmp(mantissa_dtype, "bf8e5m2") == 0;
+    if(strcmp(arch, "gfx942") == 0 && (fp8 || bf8))
+    {
+        return fp8 ? &ROCKE_FP8_E4M3_FNUZ : &ROCKE_BF8_E5M2_FNUZ;
+    }
+    if(strcmp(arch, "gfx950") == 0 && (fp8 || bf8))
+    {
+        return fp8 ? &ROCKE_FP8_E4M3_OCP : &ROCKE_BF8_E5M2_OCP;
+    }
+    if(err != NULL && err_cap > 0)
+    {
+        snprintf(err,
+                 err_cap,
+                 "mx_gemm: no %s element format known for %s; the MX GEMM reads "
+                 "fp8e4m3 / bf8e5m2 on gfx942 and gfx950",
+                 mantissa_dtype,
+                 arch);
+    }
+    return NULL;
+}
 
 /* ===================================================================== *
  *  rocke_mx_gemm_spec_default -- Python MxGemmSpec dataclass defaults.
@@ -247,9 +300,11 @@ rocke_kernel_def_t*
     rocke_value_t* n_global_col;
     rocke_value_t* a_scale_row_base;
 
-    rocke_iter_arg_t iter_arg;
+    rocke_value_t* unit_scale_code;
     rocke_for_t outer;
     rocke_value_t* acc_final;
+    const rocke_mx_element_format_t* element_format;
+    rocke_mx_scale_split_t scale_split;
 
     if(b == NULL || spec == NULL)
     {
@@ -288,6 +343,30 @@ rocke_kernel_def_t*
         return NULL;
     }
     BS = rocke_mx_gemm_block_size(spec);
+    /* The split that makes each group's scale update exact, derived from the
+     * bounds of a group's dot product in the elements the MFMA reads:
+     *     element_format = mx_gemm_element_format(spec.mantissa_dtype, arch)
+     *     scale_split = exact_mx_scale_split(element_format, element_format,
+     *                                        spec.group_k) */
+    element_format
+        = rocke_mx_gemm_element_format(spec->mantissa_dtype, arch, reason, sizeof(reason));
+    if(element_format == NULL)
+    {
+        return (rocke_kernel_def_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
+    }
+    {
+        char split_err[512];
+        if(rocke_exact_mx_scale_split(element_format,
+                                      element_format,
+                                      spec->group_k,
+                                      &scale_split,
+                                      split_err,
+                                      sizeof(split_err))
+           != ROCKE_OK)
+        {
+            return (rocke_kernel_def_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", split_err);
+        }
+    }
 
     /* b.kernel.attrs["max_workgroup_size"] = BS */
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", BS);
@@ -380,44 +459,63 @@ rocke_kernel_def_t*
     /* a_scale_row_base = b.mul(m_global_row, b.const_i32(k_scale_count)) */
     a_scale_row_base = rocke_b_mul(b, m_global_row, rocke_b_const_i32(b, k_scale_count));
 
-    /* outer = b.scf_for_iter(0, k_scale_count, 1, [("oacc", atom.zero_acc(b))],
-     *                        iv_name="kg")
+    /* The fold runs one group late (see the Python comment): iteration kg
+     * issues its loads, folds group kg - 1 (prev_group with its two scale
+     * codes) while they are in flight, then runs its own MFMA; the last group
+     * is folded after the loop.
+     *
+     * unit_scale_code = b.trunc(b.const_i32(_E8M0_CODE_FOR_ONE), I8) */
+    unit_scale_code
+        = rocke_b_trunc(b, rocke_b_const_i32(b, ROCKE_MX_GEMM_E8M0_CODE_FOR_ONE), rocke_i8());
+
+    /* outer = b.scf_for_iter(0, k_scale_count, 1,
+     *     [("oacc", atom.zero_acc(b)), ("prev_group", atom.zero_acc(b)),
+     *      ("prev_a_code", unit_scale_code), ("prev_b_code", unit_scale_code)],
+     *     iv_name="kg")
      *
      * Python evaluates the call arguments left-to-right: the three
      * ``const_i32`` bounds (lb/ub/step) are emitted *before* the iter_args
-     * list, whose only entry's init is ``atom.zero_acc(b)`` (the
-     * zero-vector). Each ``const_i32`` and the zero-vector consume one SSA
-     * value-counter tick, so the order is load-bearing for byte-identical
-     * value numbering -- the three constants MUST be emitted before the
-     * zero-vector accumulator. */
+     * list, whose two zero-vector inits come next. Each ``const_i32`` and
+     * zero-vector consumes one SSA value-counter tick, so the order is
+     * load-bearing for byte-identical value numbering. */
     {
         rocke_value_t* lb = rocke_b_const_i32(b, 0);
         rocke_value_t* ub = rocke_b_const_i32(b, k_scale_count);
         rocke_value_t* step = rocke_b_const_i32(b, 1);
-        iter_arg.name = "oacc";
-        iter_arg.init = rocke_b_zero_vec_f32(b, atom->c_per_lane); /* atom.zero_acc(b) */
+        rocke_iter_arg_t iter_args[4];
+        iter_args[0].name = "oacc";
+        iter_args[0].init = rocke_b_zero_vec_f32(b, atom->c_per_lane); /* atom.zero_acc(b) */
+        iter_args[1].name = "prev_group";
+        iter_args[1].init = rocke_b_zero_vec_f32(b, atom->c_per_lane); /* atom.zero_acc(b) */
+        iter_args[2].name = "prev_a_code";
+        iter_args[2].init = unit_scale_code;
+        iter_args[3].name = "prev_b_code";
+        iter_args[3].init = unit_scale_code;
         /* Python scf_for_iter signature defaults elide_trailing_barrier=True
          * (unroll=False); build_mx_gemm relies on those defaults. The C wrapper
          * takes them as explicit trailing args, so pass unroll=false,
          * elide_trailing_barrier=true to match the emitted scf.for attribute. */
-        outer = rocke_b_scf_for_iter(b, lb, ub, step, &iter_arg, 1, "kg", false, true);
+        outer = rocke_b_scf_for_iter(b, lb, ub, step, iter_args, 4, "kg", false, true);
     }
 
-    /* with outer as (kg, (outer_acc,)): */
+    /* with outer as (kg, (outer_acc, prev_group, prev_a_code, prev_b_code)): */
     rocke_b_region_enter(b, outer.body);
     {
         rocke_value_t* kg = outer.iv;
         rocke_value_t* outer_acc = outer.iter_vars[0];
+        rocke_value_t* prev_group = outer.iter_vars[1];
+        rocke_value_t* prev_a_code = outer.iter_vars[2];
+        rocke_value_t* prev_b_code = outer.iter_vars[3];
 
         rocke_value_t* a_scale_off;
         rocke_value_t* b_scale_off;
-        rocke_value_t* a_scale;
-        rocke_value_t* b_scale;
-        rocke_value_t* ab_scale;
+        rocke_value_t* a_scale_code;
+        rocke_value_t* b_scale_code;
         rocke_value_t* k_group_base;
         rocke_value_t* group_acc;
-        rocke_value_t* ab_scale_vec;
         rocke_value_t* new_outer;
+        /* operands = [] (one (a_vec, b_vec) pair per MFMA atom) */
+        std::vector<std::pair<rocke_value_t*, rocke_value_t*>> operands;
 
         /* a_scale_off = b.add(a_scale_row_base, kg) */
         a_scale_off = rocke_b_add(b, a_scale_row_base, kg);
@@ -425,18 +523,16 @@ rocke_kernel_def_t*
         b_scale_off
             = rocke_b_add(b, rocke_b_mul(b, kg, rocke_b_const_i32(b, spec->N)), n_global_col);
 
-        /* a_scale = decode_mx_scale_e8m0(b, b.global_load_i8(AScale, a_scale_off)) */
-        a_scale = rocke_decode_mx_scale_e8m0(b, rocke_b_global_load_i8(b, AScale, a_scale_off, 0));
-        /* b_scale = decode_mx_scale_e8m0(b, b.global_load_i8(BScale, b_scale_off)) */
-        b_scale = rocke_decode_mx_scale_e8m0(b, rocke_b_global_load_i8(b, BScale, b_scale_off, 0));
-        /* ab_scale = b.fmul(a_scale, b_scale) */
-        ab_scale = rocke_b_fmul(b, a_scale, b_scale);
+        /* a_scale_code = b.global_load_i8(AScale, a_scale_off) */
+        a_scale_code = rocke_b_global_load_i8(b, AScale, a_scale_off, 0);
+        /* b_scale_code = b.global_load_i8(BScale, b_scale_off) */
+        b_scale_code = rocke_b_global_load_i8(b, BScale, b_scale_off, 0);
+        /* b.sched_barrier(_SCALE_LOADS_FIRST) */
+        rocke_b_sched_barrier(b, ROCKE_MX_GEMM_SCALE_LOADS_FIRST);
 
         /* k_group_base = b.mul(kg, b.const_i32(group_k)) */
         k_group_base = rocke_b_mul(b, kg, rocke_b_const_i32(b, spec->group_k));
 
-        /* group_acc = atom.zero_acc(b) */
-        group_acc = rocke_b_zero_vec_f32(b, atom->c_per_lane);
         /* for kt_local in range(atoms_per_group): */
         for(kt_local = 0; kt_local < atoms_per_group; ++kt_local)
         {
@@ -454,25 +550,49 @@ rocke_kernel_def_t*
              *             n_tile_base, k_tile_base, N=spec.N) */
             b_vec = rocke_load_b_col_strided_scalars(
                 b, Bp, atom, &lane_decode, n_tile_base, k_tile_base, spec->N);
-            /* group_acc = atom.emit(b, a_vec, b_vec, group_acc) -> b.mma(name,...) */
-            group_acc = rocke_b_mma(b, atom->name, a_vec, b_vec, group_acc, NULL, 0);
+            /* operands.append((a_vec, b_vec)) */
+            operands.emplace_back(a_vec, b_vec);
         }
 
-        /* ab_scale_vec = b.vector_splat(ab_scale, atom.c_per_lane) */
-        ab_scale_vec = rocke_b_vector_splat(b, ab_scale, atom->c_per_lane);
-        /* new_outer = b.vector_fma(group_acc, ab_scale_vec, outer_acc) */
-        new_outer = rocke_b_vector_fma(b, group_acc, ab_scale_vec, outer_acc);
-        /* b.scf_yield(new_outer) */
+        /* new_outer = fma_with_mx_scale_pair(b, prev_group, prev_a_code,
+         *                                    prev_b_code, outer_acc,
+         *                                    split=scale_split) */
+        new_outer = rocke_fma_with_mx_scale_pair(
+            b, prev_group, prev_a_code, prev_b_code, outer_acc, &scale_split);
+
+        /* group_acc = atom.zero_acc(b) */
+        group_acc = rocke_b_zero_vec_f32(b, atom->c_per_lane);
+        /* for a_vec, b_vec in operands:
+         *     group_acc = atom.emit(b, a_vec, b_vec, group_acc) -> b.mma(name,...) */
+        for(const auto& [a_vec, b_vec] : operands)
         {
-            rocke_value_t* yvals[1];
+            group_acc = rocke_b_mma(b, atom->name, a_vec, b_vec, group_acc, NULL, 0);
+        }
+        /* b.scf_yield(new_outer, group_acc, a_scale_code, b_scale_code) */
+        {
+            rocke_value_t* yvals[4];
             yvals[0] = new_outer;
-            rocke_b_scf_yield(b, yvals, 1);
+            yvals[1] = group_acc;
+            yvals[2] = a_scale_code;
+            yvals[3] = b_scale_code;
+            rocke_b_scf_yield(b, yvals, 4);
         }
     }
     rocke_b_region_leave(b);
 
-    /* acc_final = outer.results[0] */
-    acc_final = (outer.op != NULL && outer.op->num_results > 0) ? outer.op->results[0] : NULL;
+    /* outer_acc, last_group, last_a_code, last_b_code = outer.results
+     * acc_final = fma_with_mx_scale_pair(b, last_group, last_a_code,
+     *                                    last_b_code, outer_acc) */
+    if(!rocke_i_live(b) || outer.op == NULL || outer.op->num_results < 4)
+    {
+        return NULL;
+    }
+    acc_final = rocke_fma_with_mx_scale_pair(b,
+                                             outer.op->results[1],
+                                             outer.op->results[2],
+                                             outer.op->results[3],
+                                             outer.op->results[0],
+                                             &scale_split);
 
     /* store_acc_to_global(b, C=C, atom, lane_decode, m_tile_base, n_tile_base,
      *                     acc=acc_final, N=spec.N, out_dtype="f32") */

@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 # The representative-IR parity harness lives in the instances test layer; make
 # it importable from this root-level CI test (run via pytest or directly).
@@ -29,9 +31,11 @@ from rocke.benchmark.gemm.fp16_rcr_sweep import (
     expand_sweep,
 )
 from rocke.core.arch import known_arches
+from rocke.core.ir_golden import load_golden
 from rocke_ir_parity_harness import (  # noqa: E402 -- after sys.path shim
     cases,
     check_golden,
+    write_golden,
 )
 
 _HERE = Path(__file__).resolve().parents[0]
@@ -44,9 +48,7 @@ _EXAMPLES = (
     else _PY_ROOT / "rocke" / "examples"
 )
 _GOLDEN = (
-    Path(__file__).resolve().parents[0]
-    / "golden"
-    / "rocke_representative_ir_sha256.json"
+    Path(__file__).resolve().parents[0] / "golden" / "rocke_representative_ir_sha256"
 )
 
 
@@ -120,9 +122,10 @@ class TestIrParityCoverage(unittest.TestCase):
         expected failures) must match the committed golden, for EVERY llvm
         flavor the golden holds -- not just the one this host autodetects, or
         the llvm23 sub-document would go unchecked below ROCm 7.13. A drift
-        here means emitted IR changed -- if intended & reviewed, re-bless with:
+        here means emitted IR changed -- if intended & reviewed, re-bless the
+        changed families' shards with:
           python tests/instances/rocke_ir_parity_harness.py \\
-            --write tests/golden/rocke_representative_ir_sha256.json
+            --write tests/golden/rocke_representative_ir_sha256 --only <family>
 
         """
         self.assertTrue(
@@ -131,6 +134,68 @@ class TestIrParityCoverage(unittest.TestCase):
         )
         drift = check_golden(_GOLDEN)
         self.assertEqual(drift, [], "IR drift vs golden:\n  " + "\n  ".join(drift))
+
+
+class TestGoldenShardWriter(unittest.TestCase):
+    """``--write`` splits the golden per family; ``--only`` rewrites just those."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+
+    @staticmethod
+    def _fake_build(case_ids):
+        def build(shards=None):
+            keep = [c for c in case_ids if shards is None or c.split("/")[0] in shards]
+            return {
+                "schema": "s",
+                "aliases": {},
+                "flavors": {
+                    "llvm20": {
+                        "cases": {c: {"sha256": c} for c in keep if c != "b/fail"},
+                        "expected_failures": (
+                            {"b/fail": {"type": "E", "message": "m"}}
+                            if "b/fail" in keep
+                            else {}
+                        ),
+                    }
+                },
+            }
+
+        return build
+
+    def _write(self, case_ids, shards=None):
+        with patch("rocke_ir_parity_harness.build_golden", self._fake_build(case_ids)):
+            write_golden(self.dir, shards)
+
+    def test_one_shard_per_family(self):
+        self._write(["a/1", "a/2", "b/1", "b/fail"])
+        self.assertEqual(
+            sorted(p.name for p in self.dir.glob("*.json")), ["a.json", "b.json"]
+        )
+        b = json.loads((self.dir / "b.json").read_text())
+        self.assertEqual(set(b["flavors"]["llvm20"]["cases"]), {"b/1"})
+        self.assertEqual(set(b["flavors"]["llvm20"]["expected_failures"]), {"b/fail"})
+        self.assertNotIn("summary", b["flavors"]["llvm20"])
+        merged = load_golden(self.dir)["flavors"]["llvm20"]
+        self.assertEqual(set(merged["cases"]), {"a/1", "a/2", "b/1"})
+
+    def test_only_leaves_other_shards_untouched(self):
+        self._write(["a/1", "b/1"])
+        a_before = (self.dir / "a.json").read_text()
+        self._write(["a/1", "a/new", "b/1", "b/2"], shards={"b"})
+        self.assertEqual((self.dir / "a.json").read_text(), a_before)
+        b = json.loads((self.dir / "b.json").read_text())
+        self.assertEqual(set(b["flavors"]["llvm20"]["cases"]), {"b/1", "b/2"})
+
+    def test_removed_family_shard_deleted(self):
+        self._write(["a/1", "b/1", "c/1"])
+        self._write(["a/1", "c/1"], shards={"b"})
+        self.assertFalse((self.dir / "b.json").exists())
+        self.assertTrue((self.dir / "c.json").exists())
+        self._write(["a/1"])
+        self.assertEqual([p.name for p in self.dir.glob("*.json")], ["a.json"])
 
 
 if __name__ == "__main__":

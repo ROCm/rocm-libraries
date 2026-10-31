@@ -170,6 +170,21 @@ the cost of one HIP device query per execute. A handle on another device fails w
 ``HIPDNN_STATUS_BAD_PARAM`` before any plugin is called. If the device could not be
 determined when the plan was created, the check is skipped.
 
+The binding exists because a finalized plan holds provider state created on its device:
+kernel modules loaded on that device, MIOpen compiled fusion invokers, and the hipBLASLt
+algorithm chosen on that device. HIP refuses to launch a module from a stream on another
+device, even when both devices have the same architecture. Two devices with identical
+properties therefore cannot share one plan object.
+
+To run a plan on another device, serialize it with
+``hipdnnBackendGetSerializedExecutionPlan_ext()`` (frontend:
+``Graph::serialize_compiled_plan()``) and deserialize it with a handle on the target
+device (``hipdnnBackendCreateAndDeserializeExecutionPlan_ext()``, frontend:
+``Graph::deserialize_compiled_plan()``). The deserialized plan is bound to that device.
+The target device must be able to run the stored plan; the provider checks this when it
+loads the plan. Alternatively, build the plan again from its graph with a handle on the
+target device.
+
 
 Handle destruction (implicit via RAII)
 --------------------------------------

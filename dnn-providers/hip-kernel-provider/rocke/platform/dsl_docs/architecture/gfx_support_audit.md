@@ -96,7 +96,7 @@ MFMA-authored and have no WMMA path.
 | gfx1250 | ✓ | ✓ (mostly GEMM) | ✗ (no numeric gate) |
 | gfx11-generic | ✓ | ✓ (alias) | ✗ |
 
-Source: `tests/instances/test_rocke_multiarch.py`, `tests/golden/rocke_representative_ir_sha256.json`,
+Source: `tests/instances/test_rocke_multiarch.py`, `tests/golden/rocke_representative_ir_sha256/`,
 `tests/instances/test_rocke_numeric.py`.
 
 ## Common vs arch-lane summary

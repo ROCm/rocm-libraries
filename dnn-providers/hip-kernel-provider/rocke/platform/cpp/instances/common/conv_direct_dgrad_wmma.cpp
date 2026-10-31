@@ -3,8 +3,9 @@
 /*
  * conv_direct_dgrad_wmma.cpp -- C++ port of build_direct_dgrad_wmma
  * (library/kernels/common/conv_direct_dgrad_wmma.py): the wave32 WMMA direct
- * stride-1 dgrad for gfx1250. See the header and the Python module for the
- * algorithm.
+ * dgrad for gfx1250 (stride 1 or 2, per-axis dilation, packed small groups,
+ * split barrier, per-wave epilogue). See the header and the Python module for
+ * the algorithm.
  *
  * Every helper emits in PYTHON EVALUATION ORDER (arguments left-to-right,
  * innermost call first) so the SSA sequence -- and therefore the .ll bytes --
@@ -42,6 +43,12 @@ int dgw_ceil_div(int a, int b)
     return (a + b - 1) / b;
 }
 
+/* pack_groups serves cpg / kpg in (2, 4, 8, 16). */
+bool dgw_packable(int c)
+{
+    return c == 2 || c == 4 || c == 8 || c == 16;
+}
+
 void dgw_set_reason(char* reason, size_t reason_cap, const char* msg)
 {
     if(reason && reason_cap > 0)
@@ -60,14 +67,93 @@ bool dgw_is_bf16(const rocke_direct_dgrad_wmma_spec_t* spec)
     return strcmp(dgw_dtype(spec), "bf16") == 0;
 }
 
+/* Python floor division / modulo (the C operators truncate toward zero). */
+long long dgw_floordiv(long long a, long long b)
+{
+    long long q = a / b;
+    return (a % b != 0 && ((a < 0) != (b < 0))) ? q - 1 : q;
+}
+
+/* _axis_plan(K, PAD, dil, S): output row S * i + a (phase a) collects filter
+ * row r from dY row i + delta(r), delta(r) = (a + PAD - r * dil) / S, for the
+ * one phase a that makes it exact. Fills the phase and the halo offset
+ * (delta - dmin) of every tap, the halo rows past the tile (dmax - dmin) and
+ * the halo origin shift (-dmin). */
+struct dgw_plan
+{
+    std::vector<int> phase;
+    std::vector<int> delta;
+    int ext = 0;
+    int shift = 0;
+};
+
+dgw_plan dgw_axis_plan(int K, int PAD, int dil, int S)
+{
+    dgw_plan pl;
+    std::vector<long long> d;
+    for(int r = 0; r < K; ++r)
+    {
+        for(int a = 0; a < S; ++a)
+        {
+            long long x = (long long)a + PAD - (long long)r * dil;
+            if(x % S == 0)
+            {
+                pl.phase.push_back(a);
+                d.push_back(dgw_floordiv(x, S));
+                break;
+            }
+        }
+    }
+    if(d.empty())
+        return pl; /* K < 1 or S < 1: rejected by the validator */
+    long long dmin = d[0], dmax = d[0];
+    for(long long v : d)
+    {
+        if(v < dmin)
+            dmin = v;
+        if(v > dmax)
+            dmax = v;
+    }
+    for(long long v : d)
+        pl.delta.push_back((int)(v - dmin));
+    pl.ext = (int)(dmax - dmin);
+    pl.shift = (int)(-dmin);
+    return pl;
+}
+
+dgw_plan dgw_plan_h(const rocke_direct_dgrad_wmma_spec_t* s)
+{
+    return dgw_axis_plan(s->problem.KH, s->problem.PAD, s->problem.dil_h, s->problem.stride);
+}
+dgw_plan dgw_plan_w(const rocke_direct_dgrad_wmma_spec_t* s)
+{
+    return dgw_axis_plan(s->problem.KW, s->problem.PAD, s->problem.dil_w, s->problem.stride);
+}
+
 /* Spec @property helpers the builder shares. */
+int dgw_phases(const rocke_direct_dgrad_wmma_spec_t* s)
+{
+    return s->problem.stride * s->problem.stride;
+}
+int dgw_cpg_eff(const rocke_direct_dgrad_wmma_spec_t* s)
+{
+    return s->pack_groups * s->problem.cpg;
+}
+int dgw_kpg_eff(const rocke_direct_dgrad_wmma_spec_t* s)
+{
+    return s->pack_groups * s->problem.kpg;
+}
+int dgw_groups_eff(const rocke_direct_dgrad_wmma_spec_t* s)
+{
+    return s->pack_groups != 0 ? s->problem.groups / s->pack_groups : 0;
+}
 int dgw_halo_h(const rocke_direct_dgrad_wmma_spec_t* s)
 {
-    return rocke_direct_dgrad_wmma_tile_h(s) + s->problem.KH - 1;
+    return rocke_direct_dgrad_wmma_tile_h(s) + dgw_plan_h(s).ext;
 }
 int dgw_halo_w(const rocke_direct_dgrad_wmma_spec_t* s)
 {
-    return s->tile_w + s->problem.KW - 1;
+    return s->tile_w + dgw_plan_w(s).ext;
 }
 int dgw_x_pitch(const rocke_direct_dgrad_wmma_spec_t* s)
 {
@@ -91,7 +177,8 @@ int dgw_wei_elems(const rocke_direct_dgrad_wmma_spec_t* s)
 }
 int dgw_halo_slack(const rocke_direct_dgrad_wmma_spec_t* s)
 {
-    return (s->problem.KW - 1 - s->problem.PAD) * dgw_x_pitch(s);
+    /* A left-edge block's last row wraps up to PADD_W columns past the ring. */
+    return dgw_plan_w(s).shift * dgw_x_pitch(s);
 }
 
 } // namespace
@@ -117,6 +204,9 @@ rocke_direct_dgrad_wmma_spec_t rocke_direct_dgrad_wmma_spec_default(void)
     s.prefetch = false;
     s.sched = NULL;
     s.wave_size = 32;
+    s.pack_groups = 1;
+    s.split_barrier = false;
+    s.wave_epilogue = false;
     return s;
 }
 
@@ -145,17 +235,23 @@ long rocke_direct_dgrad_wmma_lds_bytes(const rocke_direct_dgrad_wmma_spec_t* spe
 {
     long ring = (long)spec->stages
                 * ((long)dgw_halo_elems(spec) + dgw_halo_slack(spec) + dgw_wei_elems(spec));
-    long epi = (long)rocke_direct_dgrad_wmma_block_p(spec) * dgw_w_pitch(spec);
+    long epi = (long)dgw_phases(spec) * rocke_direct_dgrad_wmma_block_p(spec) * dgw_w_pitch(spec);
+    if(spec->wave_epilogue)
+    {
+        long n_waves = (long)spec->waves_c * spec->waves_p;
+        epi = n_waves * spec->tiles_p * 16 * (spec->tiles_c * 16 + DGW_CH_PAD);
+    }
     return 2 * (ring > epi ? ring : epi);
 }
 
 void rocke_direct_dgrad_wmma_grid(const rocke_direct_dgrad_wmma_spec_t* spec, int grid[3])
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
-    int n_ct = dgw_ceil_div(p->cpg, rocke_direct_dgrad_wmma_block_c(spec));
-    int n_ht = dgw_ceil_div(p->H, rocke_direct_dgrad_wmma_tile_h(spec));
-    int n_wt = dgw_ceil_div(p->W, spec->tile_w);
-    grid[0] = dgw_ceil_div(p->N, spec->tile_n) * p->groups * n_ht * n_wt * n_ct;
+    int S = p->stride;
+    int n_ct = dgw_ceil_div(dgw_cpg_eff(spec), rocke_direct_dgrad_wmma_block_c(spec));
+    int n_ht = dgw_ceil_div(dgw_ceil_div(p->H, S), rocke_direct_dgrad_wmma_tile_h(spec));
+    int n_wt = dgw_ceil_div(dgw_ceil_div(p->W, S), spec->tile_w);
+    grid[0] = dgw_ceil_div(p->N, spec->tile_n) * dgw_groups_eff(spec) * n_ht * n_wt * n_ct;
     grid[1] = 1;
     grid[2] = 1;
 }
@@ -165,6 +261,7 @@ rocke_status_t rocke_direct_dgrad_wmma_kernel_name(const rocke_direct_dgrad_wmma
                                                    size_t out_cap)
 {
     char f[32], pad[32], wc[32], wp[32], tc[32], tp[32], tw[32], tn[32], ck[32], st[32];
+    char str[32], dil[48], pg[64];
     std::string sched;
     const rocke_direct_conv_problem_t* p = &spec->problem;
     snprintf(f, sizeof f, "f%dx%d", p->KH, p->KW);
@@ -182,8 +279,35 @@ rocke_status_t rocke_direct_dgrad_wmma_kernel_name(const rocke_direct_dgrad_wmma
     snprintf(st, sizeof st, "st%d", spec->stages);
     if(spec->sched != NULL && spec->sched[0] != '\0')
         sched = std::string("s") + spec->sched;
-    const char* parts[]
-        = {f, pad, wc, wp, tc, tp, tw, tn, ck, st, spec->prefetch ? "pf" : "", sched.c_str()};
+    if(p->stride > 1)
+        snprintf(str, sizeof str, "str%d", p->stride);
+    else
+        str[0] = '\0';
+    if(p->dil_h != 1 || p->dil_w != 1)
+        snprintf(dil, sizeof dil, "dil%dx%d", p->dil_h, p->dil_w);
+    else
+        dil[0] = '\0';
+    if(spec->pack_groups > 1)
+        snprintf(pg, sizeof pg, "pg%dc%dk%d", spec->pack_groups, p->cpg, p->kpg);
+    else
+        pg[0] = '\0';
+    const char* parts[] = {f,
+                           pad,
+                           wc,
+                           wp,
+                           tc,
+                           tp,
+                           tw,
+                           tn,
+                           ck,
+                           st,
+                           spec->prefetch ? "pf" : "",
+                           sched.c_str(),
+                           str,
+                           dil,
+                           pg,
+                           spec->split_barrier ? "sb" : "",
+                           spec->wave_epilogue ? "we" : ""};
     const char* flag_names[] = {"bf16"};
     int flag_on[] = {dgw_is_bf16(spec) ? 1 : 0};
     return rocke_kernel_name_join(spec->name ? spec->name : "direct_dgrad_wmma",
@@ -210,7 +334,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
     const rocke_archtarget_t* target;
     const rocke_direct_conv_problem_t* p;
     const char* ab;
-    int tw, block_p, vgprs;
+    int tw, block_p, vgprs, G;
 
     if(spec == NULL)
     {
@@ -251,30 +375,87 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
         dgw_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(p->stride != 1)
+    if(p->stride != 1 && p->stride != 2)
     {
-        snprintf(msg, sizeof msg, "stride %d != 1", p->stride);
+        snprintf(msg, sizeof msg, "stride %d not in (1, 2)", p->stride);
         dgw_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(p->dil_h != 1 || p->dil_w != 1)
+    if(p->stride > 1 && (p->dil_h != 1 || p->dil_w != 1))
     {
-        dgw_set_reason(reason, reason_cap, "dilation is not supported");
+        dgw_set_reason(reason, reason_cap, "a strided dilated dgrad is not supported");
         return false;
     }
-    if(!(0 <= p->PAD && p->PAD <= p->KH - 1 && p->PAD <= p->KW - 1))
+    if(p->dil_h < 1 || p->dil_w < 1)
     {
-        snprintf(msg, sizeof msg, "PAD %d outside 0..K-1", p->PAD);
+        snprintf(msg, sizeof msg, "dilation %dx%d < 1", p->dil_h, p->dil_w);
         dgw_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(p->cpg % 8 != 0 || p->kpg % 8 != 0)
+    if(p->KH < 1 || p->KW < 1)
+    {
+        snprintf(msg, sizeof msg, "filter %dx%d is not positive", p->KH, p->KW);
+        dgw_set_reason(reason, reason_cap, msg);
+        return false;
+    }
+    if(p->PAD < 0 || dgw_plan_h(spec).shift < 0 || dgw_plan_w(spec).shift < 0)
+    {
+        snprintf(msg, sizeof msg, "PAD %d outside 0..(K-1)*dilation", p->PAD);
+        dgw_set_reason(reason, reason_cap, msg);
+        return false;
+    }
+    if(rocke_direct_conv_one_padding_reason(p, "", reason, reason_cap))
+        return false;
+    G = spec->pack_groups;
+    if(G < 1)
+    {
+        snprintf(msg, sizeof msg, "pack_groups %d < 1", G);
+        dgw_set_reason(reason, reason_cap, msg);
+        return false;
+    }
+    if(G > 1)
+    {
+        if(p->groups % G != 0)
+        {
+            snprintf(msg, sizeof msg, "groups %d not a multiple of pack_groups %d", p->groups, G);
+            dgw_set_reason(reason, reason_cap, msg);
+            return false;
+        }
+        if(!dgw_packable(p->cpg) || !dgw_packable(p->kpg))
+        {
+            snprintf(
+                msg, sizeof msg, "packed cpg %d / kpg %d not in (2, 4, 8, 16)", p->cpg, p->kpg);
+            dgw_set_reason(reason, reason_cap, msg);
+            return false;
+        }
+        if(dgw_kpg_eff(spec) > spec->ck)
+        {
+            snprintf(msg,
+                     sizeof msg,
+                     "packed kpg %d > ck %d (one dY chunk)",
+                     dgw_kpg_eff(spec),
+                     spec->ck);
+            dgw_set_reason(reason, reason_cap, msg);
+            return false;
+        }
+        if(dgw_cpg_eff(spec) > rocke_direct_dgrad_wmma_block_c(spec))
+        {
+            snprintf(msg,
+                     sizeof msg,
+                     "packed cpg %d > block_c %d",
+                     dgw_cpg_eff(spec),
+                     rocke_direct_dgrad_wmma_block_c(spec));
+            dgw_set_reason(reason, reason_cap, msg);
+            return false;
+        }
+    }
+    if(dgw_cpg_eff(spec) % 8 != 0 || dgw_kpg_eff(spec) % 8 != 0)
     {
         snprintf(msg,
                  sizeof msg,
                  "cpg %d and kpg %d must be multiples of 8 (16-byte rows)",
-                 p->cpg,
-                 p->kpg);
+                 dgw_cpg_eff(spec),
+                 dgw_kpg_eff(spec));
         dgw_set_reason(reason, reason_cap, msg);
         return false;
     }
@@ -302,8 +483,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
         dgw_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(!(tw == 1 || tw == 2 || tw == 4 || tw == 8 || tw % 16 == 0)
-       || block_p % (tw * spec->tile_n) != 0)
+    if(block_p % (tw * spec->tile_n) != 0)
     {
         snprintf(
             msg, sizeof msg, "tile_w %d x tile_n %d must divide %d", tw, spec->tile_n, block_p);
@@ -321,6 +501,22 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
                        reason_cap,
                        "tile_n needs one more wave than images (one dY transfer per image)");
         return false;
+    }
+    if((spec->split_barrier || spec->wave_epilogue) && (p->stride > 1 || G > 1))
+    {
+        dgw_set_reason(
+            reason, reason_cap, "split_barrier / wave_epilogue serve stride-1 unpacked tiles only");
+        return false;
+    }
+    if(spec->wave_epilogue)
+    {
+        int wpx = spec->tiles_p * 16;
+        if(wpx % tw != 0 || (rocke_direct_dgrad_wmma_tile_h(spec) * tw) % wpx != 0)
+        {
+            dgw_set_reason(
+                reason, reason_cap, "wave_epilogue needs whole rows of one image per wave");
+            return false;
+        }
     }
     if(rocke_direct_dgrad_wmma_threads_per_block(spec)
        > rocke_archtarget_max_threads_per_block(target))
@@ -353,7 +549,7 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
         dgw_set_reason(reason, reason_cap, msg);
         return false;
     }
-    vgprs = 8 * spec->tiles_c * spec->tiles_p
+    vgprs = 8 * dgw_phases(spec) * spec->tiles_c * spec->tiles_p
             + 8 * (spec->tiles_c + spec->tiles_p) * (spec->prefetch ? 2 : 1);
     if(vgprs > DGW_VGPR_BUDGET)
     {
@@ -369,18 +565,26 @@ bool rocke_direct_dgrad_wmma_is_valid_spec(const rocke_direct_dgrad_wmma_spec_t*
     }
     /* Global offsets are i32 bytes and the tile index is a flat block id. */
     {
-        long long Ho = (long long)p->H + 2 * p->PAD - p->KH + 1;
-        long long Wo = (long long)p->W + 2 * p->PAD - p->KW + 1;
+        /* DirectConvProblem.Ho / .Wo: strided, dilated output extents. */
+        long long Ho
+            = dgw_floordiv((long long)p->H + 2 * p->PAD - (long long)(p->KH - 1) * p->dil_h - 1,
+                           p->stride)
+              + 1;
+        long long Wo
+            = dgw_floordiv((long long)p->W + 2 * p->PAD - (long long)(p->KW - 1) * p->dil_w - 1,
+                           p->stride)
+              + 1;
         long long total_k = (long long)p->groups * p->kpg;
         long long total_c = (long long)p->groups * p->cpg;
         long long bytes[3] = {2 * p->N * Ho * Wo * total_k,
                               2 * total_k * p->KH * p->KW * p->cpg,
                               2 * p->N * (long long)p->H * p->W * total_c};
         long long mx = bytes[0];
-        long long tiles = (long long)dgw_ceil_div(p->N, spec->tile_n) * p->groups
-                          * dgw_ceil_div(p->H, rocke_direct_dgrad_wmma_tile_h(spec))
-                          * dgw_ceil_div(p->W, spec->tile_w)
-                          * dgw_ceil_div(p->cpg, rocke_direct_dgrad_wmma_block_c(spec));
+        long long tiles
+            = (long long)dgw_ceil_div(p->N, spec->tile_n) * dgw_groups_eff(spec)
+              * dgw_ceil_div(dgw_ceil_div(p->H, p->stride), rocke_direct_dgrad_wmma_tile_h(spec))
+              * dgw_ceil_div(dgw_ceil_div(p->W, p->stride), spec->tile_w)
+              * dgw_ceil_div(dgw_cpg_eff(spec), rocke_direct_dgrad_wmma_block_c(spec));
         if(bytes[1] > mx)
             mx = bytes[1];
         if(bytes[2] > mx)
@@ -416,12 +620,14 @@ struct dgw_ctx
     const rocke_type_t* io_type;
     const char* wmma_op_id;
 
-    int KH, KW, PADD_H, PADD_W;
+    int KH, KW, PADD_H, PADD_W, S, G, NPH;
+    bool SB;
+    dgw_plan plan_h, plan_w;
     int WAVE, WC, WP, TM, TN, THREADS, BC, TH, TW, HALO_H, HALO_W, CK, NS;
     int XP, WPITCH, HALO, WEI, NB, IMG, HALO_STAGE, TAPS, WEI0;
 
     rocke_value_t *c0, *c1, *c2, *c8, *c16;
-    rocke_value_t *c_cpg, *c_kpg, *c_N, *c_H, *c_W, *c_Ho, *c_Wo;
+    rocke_value_t *c_groups, *c_cpg, *c_kpg, *c_N, *c_H, *c_W, *c_Ho, *c_Wo;
     rocke_value_t *tid, *wave_id, *lane, *l16, *lhalf, *wave_c, *wave_p;
     rocke_value_t *n_base, *c_base, *h_tile, *w_tile, *k_grp, *c_grp, *w_row, *c_CK, *n_chunks;
     rocke_value_t *lds, *halo_addr, *wei_addr;
@@ -585,6 +791,8 @@ void issue(dgw_ctx& c, rocke_value_t* chunk)
         }
         rocke_b_region_leave(b);
     }
+    if(c.G > 1)
+        return; /* the packed weights are staged once, before the loop */
     {
         rocke_value_t* cnb = ci(c, c.NB);
         rocke_value_t* cond = rocke_b_cmp_eq(b, c.wave_id, cnb);
@@ -646,32 +854,68 @@ rocke_value_t* read_a(dgw_ctx& c, rocke_value_t* stage_base, int m, int row_off)
     return rocke_b_vec_concat(b, lo, hi);
 }
 
+/* One step per (k-step, halo shift): the taps sharing a shift (strided
+ * phases) share its B fragments. Stride 1 has one tap per shift. */
 struct dgw_step
 {
-    int ks, r, s;
+    int ks, dh, dw;
+    std::vector<int> taps; /* r * KW + s */
+    std::vector<int> phs; /* a_h * S + a_w */
 };
 
-/* _frags(step): TN B fragments, then TM A fragments. */
+std::vector<dgw_step> make_steps(const dgw_ctx& c)
+{
+    std::vector<dgw_step> steps;
+    for(int ks = 0; ks < c.CK / DGW_WMMA_K; ++ks)
+    {
+        /* Python dict: shifts in first-seen order. */
+        size_t first = steps.size();
+        for(int r = 0; r < c.KH; ++r)
+            for(int s = 0; s < c.KW; ++s)
+            {
+                int dh = c.plan_h.delta[r], dw = c.plan_w.delta[s];
+                int ph = c.plan_h.phase[r] * c.S + c.plan_w.phase[s];
+                size_t k = first;
+                while(k < steps.size() && !(steps[k].dh == dh && steps[k].dw == dw))
+                    ++k;
+                if(k == steps.size())
+                {
+                    dgw_step st;
+                    st.ks = ks;
+                    st.dh = dh;
+                    st.dw = dw;
+                    steps.push_back(st);
+                }
+                steps[k].taps.push_back(r * c.KW + s);
+                steps[k].phs.push_back(ph);
+            }
+    }
+    return steps;
+}
+
+/* _frags(step): TN B fragments, then TM A fragments per tap of the step. */
 void frags(dgw_ctx& c,
            rocke_value_t* halo_base,
            rocke_value_t* wei_base,
            const dgw_step& st,
-           std::vector<rocke_value_t*>& af,
+           std::vector<std::vector<rocke_value_t*>>& af,
            std::vector<rocke_value_t*>& bf)
 {
-    int tap = st.r * c.KW + st.s;
-    int tap_off = ((c.KH - 1 - st.r) * c.HALO_W + (c.KW - 1 - st.s)) * c.XP + st.ks * DGW_WMMA_K;
-    int row_off = (tap * c.CK + st.ks * DGW_WMMA_K) * c.WPITCH;
+    int tap_off = (st.dh * c.HALO_W + st.dw) * c.XP + st.ks * DGW_WMMA_K;
     bf.assign(c.TN, NULL);
-    af.assign(c.TM, NULL);
+    af.assign(st.taps.size(), std::vector<rocke_value_t*>());
     for(int tn = 0; tn < c.TN; ++tn)
         bf[tn] = read_b(c, halo_base, tn, tap_off);
-    for(int m = 0; m < c.TM; ++m)
-        af[m] = read_a(c, wei_base, m, row_off);
+    for(size_t t = 0; t < st.taps.size(); ++t)
+    {
+        af[t].assign(c.TM, NULL);
+        for(int m = 0; m < c.TM; ++m)
+            af[t][m] = read_a(c, wei_base, m, (st.taps[t] * c.CK + st.ks * DGW_WMMA_K) * c.WPITCH);
+    }
 }
 
-/* _chunk(kc, accs): publish chunk kc, refill the ring, multiply the chunk. */
-void chunk(dgw_ctx& c, rocke_value_t* kc, std::vector<rocke_value_t*>& accs)
+/* _wait_landed(kc): wait until this wave's transfer of chunk kc has landed. */
+void wait_landed(dgw_ctx& c, rocke_value_t* kc)
 {
     rocke_ir_builder_t* b = c.b;
     if(c.NS == 2)
@@ -691,7 +935,32 @@ void chunk(dgw_ctx& c, rocke_value_t* kc, std::vector<rocke_value_t*>& accs)
         rocke_b_s_wait_tensorcnt(b, 0);
         rocke_b_region_leave(b);
     }
-    rocke_b_sync_lds_only(b);
+}
+
+/* _signal_next(kc): split barrier, first half -- this wave's reads of chunk
+ * kc are done and its transfer of chunk kc + 1 has landed. */
+void signal_next(dgw_ctx& c, rocke_value_t* kc)
+{
+    rocke_ir_builder_t* b = c.b;
+    rocke_b_s_waitcnt(b, -1, 0, -1);
+    rocke_value_t* nx = rocke_b_add(b, kc, c.c1);
+    wait_landed(c, nx);
+    rocke_b_s_barrier_signal(b, 0xFFFFFFFFu);
+}
+
+/* _chunk(kc, accs): publish chunk kc, refill the ring, multiply the chunk. */
+void chunk(dgw_ctx& c, rocke_value_t* kc, std::vector<rocke_value_t*>& accs)
+{
+    rocke_ir_builder_t* b = c.b;
+    if(c.SB)
+    {
+        rocke_b_s_barrier_wait(b, 0xFFFF);
+    }
+    else
+    {
+        wait_landed(c, kc);
+        rocke_b_sync_lds_only(b);
+    }
     {
         rocke_value_t* x = ci(c, c.NS - 1);
         rocke_value_t* nxt = rocke_b_add(b, kc, x);
@@ -716,14 +985,11 @@ void chunk(dgw_ctx& c, rocke_value_t* kc, std::vector<rocke_value_t*>& accs)
         rocke_value_t* x = ci(c, c.WEI);
         wei_base = rocke_b_mul(b, stage, x);
     }
-    std::vector<dgw_step> steps;
-    for(int ks = 0; ks < c.CK / DGW_WMMA_K; ++ks)
-        for(int r = 0; r < c.KH; ++r)
-            for(int s = 0; s < c.KW; ++s)
-                steps.push_back(dgw_step{ks, r, s});
+    std::vector<dgw_step> steps = make_steps(c);
 
     rocke_b_s_setprio(b, 1);
-    std::vector<rocke_value_t*> af, bf, naf, nbf;
+    std::vector<std::vector<rocke_value_t*>> af, naf;
+    std::vector<rocke_value_t*> bf, nbf;
     if(c.spec->prefetch)
         frags(c, halo_base, wei_base, steps[0], naf, nbf);
     for(size_t j = 0; j < steps.size(); ++j)
@@ -739,54 +1005,121 @@ void chunk(dgw_ctx& c, rocke_value_t* kc, std::vector<rocke_value_t*>& accs)
         {
             frags(c, halo_base, wei_base, steps[j], af, bf);
         }
-        for(int m = 0; m < c.TM; ++m)
-            for(int tn = 0; tn < c.TN; ++tn)
-            {
-                int i = m * c.TN + tn;
-                accs[i] = rocke_b_mma(b, c.wmma_op_id, af[m], bf[tn], accs[i], NULL, 0);
-            }
+        if(c.SB && j == steps.size() - 1)
+            signal_next(c, kc);
+        for(size_t t = 0; t < steps[j].taps.size(); ++t)
+        {
+            int ph = steps[j].phs[t];
+            for(int m = 0; m < c.TM; ++m)
+                for(int tn = 0; tn < c.TN; ++tn)
+                {
+                    int i = (ph * c.TM + m) * c.TN + tn;
+                    accs[i] = rocke_b_mma(b, c.wmma_op_id, af[t][m], bf[tn], accs[i], NULL, 0);
+                }
+        }
     }
     rocke_b_s_setprio(b, 0);
 }
 
-/* _epilogue(accs): stage the dX tile in LDS, one TDM store per image. */
+/* _epilogue(accs): stage the dX tile in LDS, one TDM store per image. With
+ * stride S the phases interleave into the dense S*TH x S*TW tile. */
 void epilogue(dgw_ctx& c, rocke_value_t* const* accs)
 {
     rocke_ir_builder_t* b = c.b;
     const rocke_dconv_params_t* params = &c.params;
+    const int S = c.S;
     rocke_b_sync_lds_only(b);
-    for(int m = 0; m < c.TM; ++m)
+    for(int ph = 0; ph < c.NPH; ++ph)
     {
-        rocke_value_t* col;
+        const int a_h = ph / S, a_w = ph % S;
+        for(int m = 0; m < c.TM; ++m)
         {
-            rocke_value_t* x = ci(c, c.TM);
-            rocke_value_t* y = rocke_b_mul(b, c.wave_c, x);
-            rocke_value_t* z = ci(c, m);
-            rocke_value_t* u = rocke_b_add(b, y, z);
-            rocke_value_t* v = rocke_b_mul(b, u, c.c16);
-            rocke_value_t* w = rocke_b_mul(b, c.lhalf, c.c8);
-            col = rocke_b_add(b, v, w);
-        }
-        for(int tn = 0; tn < c.TN; ++tn)
-        {
-            rocke_value_t* px;
+            rocke_value_t* col;
             {
-                rocke_value_t* x = ci(c, c.TN);
-                rocke_value_t* y = rocke_b_mul(b, c.wave_p, x);
-                rocke_value_t* z = ci(c, tn);
+                rocke_value_t* x = ci(c, c.TM);
+                rocke_value_t* y = rocke_b_mul(b, c.wave_c, x);
+                rocke_value_t* z = ci(c, m);
                 rocke_value_t* u = rocke_b_add(b, y, z);
                 rocke_value_t* v = rocke_b_mul(b, u, c.c16);
-                px = rocke_b_add(b, v, c.l16);
+                rocke_value_t* w = rocke_b_mul(b, c.lhalf, c.c8);
+                col = rocke_b_add(b, v, w);
             }
-            rocke_value_t* val = rocke_b_vec_cast_f32_to(b, accs[m * c.TN + tn], c.io_type);
-            rocke_value_t* x = ci(c, c.WPITCH);
-            rocke_value_t* y = rocke_b_mul(b, px, x);
-            rocke_value_t* z = rocke_b_add(b, y, col);
-            rocke_value_t* idx[2] = {c.c0, z};
-            rocke_b_smem_store_vN(b, c.lds, idx, 2, val, 8);
+            for(int tn = 0; tn < c.TN; ++tn)
+            {
+                rocke_value_t* px;
+                {
+                    rocke_value_t* x = ci(c, c.TN);
+                    rocke_value_t* y = rocke_b_mul(b, c.wave_p, x);
+                    rocke_value_t* z = ci(c, tn);
+                    rocke_value_t* u = rocke_b_add(b, y, z);
+                    rocke_value_t* v = rocke_b_mul(b, u, c.c16);
+                    px = rocke_b_add(b, v, c.l16);
+                }
+                if(S > 1)
+                {
+                    /* Phase-grid pixel (ti, tj) -> dX tile pixel
+                     * (S * ti + a_h, S * tj + a_w). */
+                    rocke_value_t* f = px;
+                    rocke_value_t* nb = NULL;
+                    if(c.NB > 1)
+                    {
+                        rocke_value_t* x = ci(c, c.TH * c.TW);
+                        nb = rocke_b_div(b, f, x);
+                        rocke_value_t* y = ci(c, c.TH * c.TW);
+                        f = rocke_b_mod(b, f, y);
+                    }
+                    rocke_value_t* ti;
+                    rocke_value_t* tj;
+                    {
+                        rocke_value_t* x = ci(c, c.TW);
+                        ti = rocke_b_div(b, f, x);
+                        rocke_value_t* y = ci(c, c.TW);
+                        tj = rocke_b_mod(b, f, y);
+                    }
+                    rocke_value_t* row;
+                    {
+                        rocke_value_t* x = ci(c, S);
+                        rocke_value_t* y = rocke_b_mul(b, ti, x);
+                        rocke_value_t* z = ci(c, a_h);
+                        rocke_value_t* u = rocke_b_add(b, y, z);
+                        rocke_value_t* v = ci(c, S * c.TW);
+                        row = rocke_b_mul(b, u, v);
+                    }
+                    rocke_value_t* colx;
+                    {
+                        rocke_value_t* x = ci(c, S);
+                        rocke_value_t* y = rocke_b_mul(b, tj, x);
+                        rocke_value_t* z = ci(c, a_w);
+                        colx = rocke_b_add(b, y, z);
+                    }
+                    px = rocke_b_add(b, row, colx);
+                    if(c.NB > 1)
+                    {
+                        rocke_value_t* x = ci(c, S * S * c.TH * c.TW);
+                        rocke_value_t* y = rocke_b_mul(b, nb, x);
+                        px = rocke_b_add(b, px, y);
+                    }
+                }
+                rocke_value_t* val
+                    = rocke_b_vec_cast_f32_to(b, accs[(ph * c.TM + m) * c.TN + tn], c.io_type);
+                rocke_value_t* x = ci(c, c.WPITCH);
+                rocke_value_t* y = rocke_b_mul(b, px, x);
+                rocke_value_t* z = rocke_b_add(b, y, col);
+                rocke_value_t* idx[2] = {c.c0, z};
+                rocke_b_smem_store_vN(b, c.lds, idx, 2, val, 8);
+            }
         }
     }
     rocke_b_sync_lds_only(b);
+    rocke_value_t* hx_tile = c.h_tile;
+    rocke_value_t* wx_tile = c.w_tile;
+    if(S != 1)
+    {
+        rocke_value_t* x = ci(c, S);
+        hx_tile = rocke_b_mul(b, c.h_tile, x);
+        rocke_value_t* y = ci(c, S);
+        wx_tile = rocke_b_mul(b, c.w_tile, y);
+    }
     for(int im = 0; im < c.NB; ++im)
     {
         rocke_value_t* cim = ci(c, im);
@@ -805,15 +1138,15 @@ void epilogue(dgw_ctx& c, rocke_value_t* const* accs)
             }
             {
                 rocke_value_t* x = rocke_b_mul(b, n_img, params->p_D_stride_n);
-                rocke_value_t* y = rocke_b_mul(b, c.h_tile, params->p_D_stride_ho);
+                rocke_value_t* y = rocke_b_mul(b, hx_tile, params->p_D_stride_ho);
                 rocke_value_t* z = rocke_b_add(b, x, y);
-                rocke_value_t* u = rocke_b_mul(b, c.w_tile, params->p_D_stride_wo);
+                rocke_value_t* u = rocke_b_mul(b, wx_tile, params->p_D_stride_wo);
                 rocke_value_t* v = rocke_b_add(b, c.c_grp, c.c_base);
                 rocke_value_t* w = rocke_b_add(b, u, v);
                 off = rocke_b_add(b, z, w);
             }
             {
-                rocke_value_t* x = rocke_b_sub(b, c.c_H, c.h_tile);
+                rocke_value_t* x = rocke_b_sub(b, c.c_H, hx_tile);
                 h_ext = rocke_b_smax(b, x, c.c0);
             }
             {
@@ -829,15 +1162,15 @@ void epilogue(dgw_ctx& c, rocke_value_t* const* accs)
             }
             rocke_value_t* lds_src;
             {
-                rocke_value_t* x = ci(c, (int64_t)im * c.TH * c.TW * c.WPITCH * 2);
+                rocke_value_t* x = ci(c, (int64_t)im * c.NPH * c.TH * c.TW * c.WPITCH * 2);
                 lds_src = rocke_b_add(b, c.halo_addr, x);
             }
             rocke_value_t* w_ext;
             {
-                rocke_value_t* x = rocke_b_sub(b, c.c_W, c.w_tile);
+                rocke_value_t* x = rocke_b_sub(b, c.c_W, wx_tile);
                 w_ext = rocke_b_smax(b, x, c.c0);
             }
-            rocke_value_t* th = ci(c, c.TH);
+            rocke_value_t* th = ci(c, S * c.TH);
             tdm_descriptor_3d(c,
                               dst,
                               lds_src,
@@ -847,11 +1180,224 @@ void epilogue(dgw_ctx& c, rocke_value_t* const* accs)
                               params->p_D_stride_wo,
                               params->p_D_stride_ho,
                               c.WPITCH,
-                              c.TW,
+                              S * c.TW,
                               th,
                               d);
             rocke_b_tensor_store_from_lds(b, d[0], d[1], d[2], d[3], d[4], 0);
             rocke_b_s_wait_tensorcnt(b, 0);
+        }
+        rocke_b_region_leave(b);
+    }
+}
+
+/* _epilogue_wave(accs): each wave stages its own tiles in a private LDS
+ * region and stores them with its own TDM transfer (wave_epilogue). */
+void epilogue_wave(dgw_ctx& c, rocke_value_t* const* accs)
+{
+    rocke_ir_builder_t* b = c.b;
+    const rocke_dconv_params_t* params = &c.params;
+    if(!c.SB)
+        rocke_b_sync_lds_only(b); /* every wave is done with the ring */
+    const int WPX = c.TN * 16;
+    const int EP = c.TM * 16 + DGW_CH_PAD;
+    const int ROWS = WPX / c.TW;
+    rocke_value_t* base;
+    {
+        rocke_value_t* x = ci(c, (int64_t)WPX * EP);
+        base = rocke_b_mul(b, c.wave_id, x);
+    }
+    for(int m = 0; m < c.TM; ++m)
+    {
+        rocke_value_t* col;
+        {
+            rocke_value_t* x = ci(c, m * 16);
+            rocke_value_t* y = rocke_b_mul(b, c.lhalf, c.c8);
+            col = rocke_b_add(b, x, y);
+        }
+        for(int tn = 0; tn < c.TN; ++tn)
+        {
+            rocke_value_t* px;
+            {
+                rocke_value_t* x = ci(c, tn * 16);
+                px = rocke_b_add(b, x, c.l16);
+            }
+            rocke_value_t* val = rocke_b_vec_cast_f32_to(b, accs[m * c.TN + tn], c.io_type);
+            rocke_value_t* x = ci(c, EP);
+            rocke_value_t* y = rocke_b_mul(b, px, x);
+            rocke_value_t* z = rocke_b_add(b, y, col);
+            rocke_value_t* u = rocke_b_add(b, base, z);
+            rocke_value_t* idx[2] = {c.c0, u};
+            rocke_b_smem_store_vN(b, c.lds, idx, 2, val, 8);
+        }
+    }
+    rocke_b_s_waitcnt(b, -1, 0, -1);
+    rocke_value_t *px0, *img, *row0, *n_img, *h_w, *c_w, *off, *c_ext_w, *h_ext, *dst;
+    {
+        rocke_value_t* x = ci(c, WPX);
+        px0 = rocke_b_mul(b, c.wave_p, x);
+    }
+    {
+        rocke_value_t* x = ci(c, c.TH * c.TW);
+        img = rocke_b_div(b, px0, x);
+    }
+    {
+        rocke_value_t* x = ci(c, c.TH * c.TW);
+        rocke_value_t* y = rocke_b_mod(b, px0, x);
+        rocke_value_t* z = ci(c, c.TW);
+        row0 = rocke_b_div(b, y, z);
+    }
+    n_img = rocke_b_add(b, c.n_base, img);
+    h_w = rocke_b_add(b, c.h_tile, row0);
+    {
+        rocke_value_t* x = ci(c, c.TM * 16);
+        rocke_value_t* y = rocke_b_mul(b, c.wave_c, x);
+        c_w = rocke_b_add(b, c.c_base, y);
+    }
+    {
+        rocke_value_t* x = rocke_b_mul(b, n_img, params->p_D_stride_n);
+        rocke_value_t* y = rocke_b_mul(b, h_w, params->p_D_stride_ho);
+        rocke_value_t* z = rocke_b_add(b, x, y);
+        rocke_value_t* u = rocke_b_mul(b, c.w_tile, params->p_D_stride_wo);
+        rocke_value_t* v = rocke_b_add(b, c.c_grp, c_w);
+        rocke_value_t* w = rocke_b_add(b, u, v);
+        off = rocke_b_add(b, z, w);
+    }
+    {
+        rocke_value_t* x = rocke_b_sub(b, c.c_cpg, c_w);
+        rocke_value_t* y = ci(c, c.TM * 16);
+        rocke_value_t* z = rocke_b_smin(b, x, y);
+        c_ext_w = rocke_b_smax(b, z, c.c0);
+    }
+    {
+        rocke_value_t* x = rocke_b_sub(b, c.c_H, h_w);
+        h_ext = rocke_b_smax(b, x, c.c0);
+    }
+    {
+        rocke_value_t* x = rocke_b_mul(b, off, c.c2);
+        dst = rocke_b_global_ptr_add(b, params->D, x);
+    }
+    if(c.NB > 1)
+    {
+        rocke_value_t* n_ok = rocke_b_cmp_lt(b, n_img, c.c_N);
+        h_ext = rocke_b_select(b, n_ok, h_ext, c.c0);
+        rocke_value_t* zb = rocke_b_global_ptr_add(b, params->D, c.c0);
+        dst = rocke_b_select(b, n_ok, dst, zb);
+    }
+    rocke_value_t* lds_src;
+    {
+        rocke_value_t* x = rocke_b_mul(b, base, c.c2);
+        lds_src = rocke_b_add(b, c.halo_addr, x);
+    }
+    rocke_value_t* w_ext;
+    {
+        rocke_value_t* x = rocke_b_sub(b, c.c_W, c.w_tile);
+        w_ext = rocke_b_smax(b, x, c.c0);
+    }
+    rocke_value_t* rows = ci(c, ROWS);
+    rocke_value_t* d[5];
+    tdm_descriptor_3d(c,
+                      dst,
+                      lds_src,
+                      c_ext_w,
+                      w_ext,
+                      h_ext,
+                      params->p_D_stride_wo,
+                      params->p_D_stride_ho,
+                      EP,
+                      c.TW,
+                      rows,
+                      d);
+    rocke_b_tensor_store_from_lds(b, d[0], d[1], d[2], d[3], d[4], 0);
+    rocke_b_s_wait_tensorcnt(b, 0);
+}
+
+/* Stage the super-group's block-diagonal weights into slot 0 once: zero the
+ * slot, then each lane copies one CPG-wide row of one group (pack_groups). */
+void stage_packed_weights(dgw_ctx& c)
+{
+    rocke_ir_builder_t* b = c.b;
+    const rocke_dconv_params_t* params = &c.params;
+    const int CPG0 = c.spec->problem.cpg, KPG0 = c.spec->problem.kpg;
+    rocke_value_t* zero_v = rocke_b_zero_vec(b, c.io_type, 8);
+    const int nvec = c.WEI / 8;
+    for(int j = 0; j < nvec; j += c.THREADS)
+    {
+        rocke_value_t* cj = ci(c, j);
+        rocke_value_t* v = rocke_b_add(b, c.tid, cj);
+        rocke_value_t* cn = ci(c, nvec);
+        rocke_value_t* cond = rocke_b_cmp_lt(b, v, cn);
+        rocke_if_t gate = rocke_b_scf_if(b, cond);
+        rocke_b_region_enter(b, gate.then_region);
+        {
+            rocke_value_t* x = ci(c, 8);
+            rocke_value_t* y = rocke_b_mul(b, v, x);
+            rocke_value_t* z = ci(c, c.WEI0);
+            rocke_value_t* u = rocke_b_add(b, y, z);
+            rocke_value_t* idx[2] = {c.c0, u};
+            rocke_b_smem_store_vN(b, c.lds, idx, 2, zero_v, 8);
+        }
+        rocke_b_region_leave(b);
+    }
+    rocke_b_sync_lds_only(b);
+    const int VEC = CPG0 < 8 ? CPG0 : 8;
+    const int PARTS = CPG0 / VEC;
+    const int KQ = c.G * KPG0;
+    const int total = c.TAPS * KQ * PARTS;
+    for(int j = 0; j < total; j += c.THREADS)
+    {
+        rocke_value_t* cj = ci(c, j);
+        rocke_value_t* v = rocke_b_add(b, c.tid, cj);
+        rocke_value_t* ct = ci(c, total);
+        rocke_value_t* cond = rocke_b_cmp_lt(b, v, ct);
+        rocke_if_t gate = rocke_b_scf_if(b, cond);
+        rocke_b_region_enter(b, gate.then_region);
+        {
+            rocke_value_t *part, *rw, *tap, *kq, *gi, *pv, *gidx, *val, *loff;
+            {
+                rocke_value_t* x = ci(c, PARTS);
+                part = rocke_b_mod(b, v, x);
+                rocke_value_t* y = ci(c, PARTS);
+                rw = rocke_b_div(b, v, y);
+            }
+            {
+                rocke_value_t* x = ci(c, KQ);
+                tap = rocke_b_div(b, rw, x);
+                rocke_value_t* y = ci(c, KQ);
+                kq = rocke_b_mod(b, rw, y);
+            }
+            {
+                rocke_value_t* x = ci(c, KPG0);
+                gi = rocke_b_div(b, kq, x);
+            }
+            {
+                rocke_value_t* x = ci(c, VEC);
+                pv = rocke_b_mul(b, part, x);
+            }
+            {
+                rocke_value_t* x = rocke_b_add(b, c.k_grp, kq);
+                rocke_value_t* y = ci(c, (int64_t)c.TAPS * CPG0);
+                rocke_value_t* z = rocke_b_mul(b, x, y);
+                rocke_value_t* u = ci(c, CPG0);
+                rocke_value_t* w = rocke_b_mul(b, tap, u);
+                rocke_value_t* q = rocke_b_add(b, w, pv);
+                gidx = rocke_b_add(b, z, q);
+            }
+            val = rocke_b_global_load_vN(b, params->Bp, gidx, c.io_type, VEC, 0);
+            {
+                rocke_value_t* x = ci(c, c.CK);
+                rocke_value_t* y = rocke_b_mul(b, tap, x);
+                rocke_value_t* z = rocke_b_add(b, y, kq);
+                rocke_value_t* u = ci(c, c.WPITCH);
+                rocke_value_t* w = rocke_b_mul(b, z, u);
+                rocke_value_t* q = ci(c, CPG0);
+                rocke_value_t* r = rocke_b_mul(b, gi, q);
+                rocke_value_t* t = rocke_b_add(b, r, pv);
+                loff = rocke_b_add(b, w, t);
+            }
+            rocke_value_t* x = ci(c, c.WEI0);
+            rocke_value_t* y = rocke_b_add(b, loff, x);
+            rocke_value_t* idx[2] = {c.c0, y};
+            rocke_b_smem_store_vN(b, c.lds, idx, 2, val, VEC);
         }
         rocke_b_region_leave(b);
     }
@@ -881,8 +1427,14 @@ rocke_kernel_def_t* rocke_build_direct_dgrad_wmma(rocke_ir_builder_t* b,
     c.spec = spec;
     c.KH = p->KH;
     c.KW = p->KW;
-    c.PADD_H = c.KH - 1 - p->PAD;
-    c.PADD_W = c.KW - 1 - p->PAD;
+    c.S = p->stride;
+    c.G = spec->pack_groups;
+    c.NPH = dgw_phases(spec);
+    c.SB = spec->split_barrier;
+    c.plan_h = dgw_plan_h(spec);
+    c.plan_w = dgw_plan_w(spec);
+    c.PADD_H = c.plan_h.shift; /* padding of the equivalent forward pass */
+    c.PADD_W = c.plan_w.shift;
     c.io_type = rocke_b_io_ir_type(b, dgw_dtype(spec));
     if(c.io_type == NULL)
         return NULL;
@@ -929,8 +1481,20 @@ rocke_kernel_def_t* rocke_build_direct_dgrad_wmma(rocke_ir_builder_t* b,
     c.c0 = ci(c, 0);
     c.c1 = ci(c, 1);
     c.c2 = ci(c, 2);
-    c.c_cpg = rocke_b_div(b, params->p_total_c, params->p_groups);
-    c.c_kpg = rocke_b_div(b, params->p_total_k, params->p_groups);
+    if(c.G > 1)
+    {
+        /* Super-groups of G groups; the packed channel counts are baked. */
+        rocke_value_t* x = ci(c, c.G);
+        c.c_groups = rocke_b_div(b, params->p_groups, x);
+        c.c_cpg = ci(c, dgw_cpg_eff(spec));
+        c.c_kpg = ci(c, dgw_kpg_eff(spec));
+    }
+    else
+    {
+        c.c_groups = params->p_groups;
+        c.c_cpg = rocke_b_div(b, params->p_total_c, c.c_groups);
+        c.c_kpg = rocke_b_div(b, params->p_total_k, c.c_groups);
+    }
     c.c_N = params->p_N;
     c.c_H = params->p_Hi;
     c.c_W = params->p_Wi;
@@ -954,22 +1518,39 @@ rocke_kernel_def_t* rocke_build_direct_dgrad_wmma(rocke_ir_builder_t* b,
     }
 
     /* ---- tile of this block. */
-    rocke_value_t *n_ct, *n_ht, *n_wt;
+    rocke_value_t *n_ct, *n_ht, *n_wt, *c_Hq, *c_Wq;
     {
         rocke_value_t* x = ci(c, c.BC - 1);
         rocke_value_t* y = rocke_b_add(b, c.c_cpg, x);
         rocke_value_t* z = ci(c, c.BC);
         n_ct = rocke_b_div(b, y, z);
     }
+    if(c.S > 1)
+    {
+        /* Tiles index the phase grid: output row S * i + a, i < ceil(H / S). */
+        rocke_value_t* x = ci(c, c.S - 1);
+        rocke_value_t* y = rocke_b_add(b, c.c_H, x);
+        rocke_value_t* z = ci(c, c.S);
+        c_Hq = rocke_b_div(b, y, z);
+        rocke_value_t* u = ci(c, c.S - 1);
+        rocke_value_t* v = rocke_b_add(b, c.c_W, u);
+        rocke_value_t* w = ci(c, c.S);
+        c_Wq = rocke_b_div(b, v, w);
+    }
+    else
+    {
+        c_Hq = c.c_H;
+        c_Wq = c.c_W;
+    }
     {
         rocke_value_t* x = ci(c, c.TH - 1);
-        rocke_value_t* y = rocke_b_add(b, c.c_H, x);
+        rocke_value_t* y = rocke_b_add(b, c_Hq, x);
         rocke_value_t* z = ci(c, c.TH);
         n_ht = rocke_b_div(b, y, z);
     }
     {
         rocke_value_t* x = ci(c, c.TW - 1);
-        rocke_value_t* y = rocke_b_add(b, c.c_W, x);
+        rocke_value_t* y = rocke_b_add(b, c_Wq, x);
         rocke_value_t* z = ci(c, c.TW);
         n_wt = rocke_b_div(b, y, z);
     }
@@ -980,9 +1561,9 @@ rocke_kernel_def_t* rocke_build_direct_dgrad_wmma(rocke_ir_builder_t* b,
     t = rocke_b_div(b, t, n_wt);
     rocke_value_t* ht = rocke_b_mod(b, t, n_ht);
     t = rocke_b_div(b, t, n_ht);
-    rocke_value_t* g = rocke_b_mod(b, t, params->p_groups);
+    rocke_value_t* g = rocke_b_mod(b, t, c.c_groups);
     {
-        rocke_value_t* x = rocke_b_div(b, t, params->p_groups);
+        rocke_value_t* x = rocke_b_div(b, t, c.c_groups);
         rocke_value_t* y = ci(c, c.NB);
         c.n_base = rocke_b_mul(b, x, y);
     }
@@ -1199,6 +1780,9 @@ rocke_kernel_def_t* rocke_build_direct_dgrad_wmma(rocke_ir_builder_t* b,
         c.wei_off[m] = rocke_b_add(b, y, v);
     }
 
+    if(c.G > 1)
+        stage_packed_weights(c);
+
     /* ---- main loop over dY channel chunks. */
     for(int st = 0; st < c.NS - 1; ++st)
     {
@@ -1209,7 +1793,13 @@ rocke_kernel_def_t* rocke_build_direct_dgrad_wmma(rocke_ir_builder_t* b,
         issue(c, ci(c, st));
         rocke_b_region_leave(b);
     }
-    int n_acc = c.TM * c.TN;
+    if(c.SB)
+    {
+        rocke_b_s_waitcnt(b, -1, 0, -1); /* the edge zeroing */
+        wait_landed(c, c.c0);
+        rocke_b_s_barrier_signal(b, 0xFFFFFFFFu);
+    }
+    int n_acc = c.NPH * c.TM * c.TN;
     rocke_value_t* zero_acc = rocke_b_zero_vec_f32(b, 8);
     std::vector<std::string> names(n_acc);
     std::vector<rocke_iter_arg_t> iargs(n_acc);
@@ -1230,7 +1820,12 @@ rocke_kernel_def_t* rocke_build_direct_dgrad_wmma(rocke_ir_builder_t* b,
         rocke_b_scf_yield(b, accs.data(), n_acc);
     }
     rocke_b_region_leave(b);
-    epilogue(c, loop.op->results);
+    if(c.SB)
+        rocke_b_s_barrier_wait(b, 0xFFFF);
+    if(spec->wave_epilogue)
+        epilogue_wave(c, loop.op->results);
+    else
+        epilogue(c, loop.op->results);
     if(!rocke_ir_builder_ok(b))
         return NULL;
     return b->kernel;
