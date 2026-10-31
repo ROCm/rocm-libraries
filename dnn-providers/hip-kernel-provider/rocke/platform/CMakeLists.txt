@@ -751,9 +751,15 @@ if(ROCKE_INSTALL_TESTS)
            "  TIMEOUT 300)\n")
 
     # GDN/KDA decode CPU tests: spec validation, IR emission and load order,
-    # the golden IR hashes, the performance knobs, and dispatch selection. None
-    # needs a GPU; the GPU numeric suites are in rocke_library_gpu_pytest. Same
-    # PYTHONPATH rule as the conv entry.
+    # the golden IR hashes, the performance knobs, dispatch selection, and the
+    # sweep / defaults-report tools and their shared timing helpers. None
+    # needs a GPU. The fp32 pass test and the rotation sizing are torch-free
+    # (dispatch/gdn/gate_rules.py) and tested without torch, as is how the
+    # sweep and both benchmarks act on a failed verdict. The tests that build
+    # CPU tensors (the driver's tensor code) need torch: where torch is
+    # missing they skip (see -rs) instead of running, and the tensor
+    # reductions inside gate() are then covered only by the GPU numeric suites
+    # in rocke_library_gpu_pytest. Same PYTHONPATH rule as the conv entry.
     #
     # Not registered on Windows. The Windows CI shard runs close to its time
     # limit, and test_gdn_decode_fused.py::test_lowers_and_compiles_without_scratch
@@ -768,10 +774,15 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_gdn_decode_load_order.py"
         "tests/library/tests/test_gdn_decode_golden.py"
         "tests/library/tests/test_gdn_decode_knobs.py"
-        "tests/library/tests/test_gdn_decode_tune.py"
+        "tests/library/tests/test_gdn_decode_timing.py"
+        "tests/library/tests/test_gdn_decode_table_sweep.py"
+        "tests/library/tests/test_gdn_decode_defaults_report.py"
+        "tests/library/tests/test_kda_decode_benchmark.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_registry.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_wiring.py"
         "tests/library/tests/dispatch/gdn/test_tuning_contract.py"
+        "tests/library/tests/dispatch/gdn/test_cli_args.py"
+        "tests/library/tests/dispatch/gdn/test_gate_rules.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py")
     set(_ROCKE_LIBRARY_GDN_TESTS "")
     foreach(_rocke_gdn_test ${_ROCKE_LIBRARY_GDN_TEST_RELPATHS})

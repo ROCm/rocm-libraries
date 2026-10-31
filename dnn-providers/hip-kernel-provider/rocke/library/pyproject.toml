@@ -41,3 +41,5 @@ dispatch = ["grouped_convolution_instances/*.json"]
 rocke-attention-combo-sweep = "benchmarks.common.attention_combo_sweep:main"
 rocke-dense-prefill-table-sweep = "benchmarks.gfx950.attention.prefill.dense_prefill_table_sweep:main"
 rocke-decode-table-sweep = "benchmarks.gfx950.attention.decode.decode_table_sweep:main"
+rocke-gdn-decode-table-sweep = "benchmarks.gfx950.gdn.decode_table_sweep:main"
+rocke-gdn-decode-defaults-report = "benchmarks.gfx950.gdn.decode_defaults_report:main"
