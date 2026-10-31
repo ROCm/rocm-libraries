@@ -61,6 +61,19 @@ struct SolutionTimeComparator
 
 namespace {
 
+/// The solution a run uses: the perf-db configuration, else the default one; no tuning.
+/// PrepareInvoker() builds the invoker from it and GetSolutions() sizes the workspace by it, so
+/// both must resolve the configuration the same way.
+solver::ConvSolution FindRunSolution(ExecutionContext ctx,
+                                     const conv::ProblemDescription& problem,
+                                     const solver::AnySolver& solver)
+{
+    ctx.do_search              = false;
+    ctx.disable_search_enforce = true;
+    auto db                    = MakeConvDbGetter(ctx);
+    return solver.FindSolution(ctx, problem, db, {});
+}
+
 template <class TDb>
 std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
                                                const conv::ProblemDescription& problem,
@@ -130,19 +143,15 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     ///   solver whose tuned configuration fits the buffer.
     /// - The reported size is the same, except in Find (non-zero InvokeParams), which reports
     ///   the solver's GetWorkspaceSize(), i.e. the maximum over its configurations, like GWSS.
-    /// - GWSS disables perf-db access and only uses the solver id, so the configuration is not
-    ///   resolved there and GetWorkspaceSize() is used.
+    /// - With perf-db access disabled (GWSS), the configuration is not resolved and
+    ///   GetWorkspaceSize() is both checked and reported; GWSS returns that value.
     ///
     /// The loop below does all the above at once.
     std::sort(begin(interim), end(interim), SolutionTimeComparator{});
     auto out = std::vector<miopenConvSolution_t>{};
     out.reserve(maxSolutionCount);
-    auto n_copied                  = 0;
-    auto run_ctx                   = ctx;
-    run_ctx.do_search              = false;
-    run_ctx.disable_search_enforce = true;
-    auto db                        = MakeConvDbGetter(run_ctx);
-    const auto resolves_config     = [&](const solver::AnySolver& solver) {
+    auto n_copied              = 0;
+    const auto resolves_config = [&](const solver::AnySolver& solver) {
         return solver.IsTunable() && !ctx.disable_perfdb_access;
     };
     const auto run_workspace = [&](const solver::AnySolver& solver) -> std::size_t {
@@ -150,7 +159,7 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
             return 0;
         if(resolves_config(solver))
         {
-            const auto solution = solver.FindSolution(run_ctx, problem, db, {});
+            const auto solution = FindRunSolution(ctx, problem, solver);
             if(solution.Succeeded())
                 return solution.workspace_sz;
         }
@@ -169,13 +178,10 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
             (invokeParams != nullptr && solver.MayNeedWorkspace() && resolves_config(solver))
                 ? solver.GetWorkspaceSize(ctx, problem)
                 : required;
-        if(reported != s.workspace_size)
-        {
-            MIOPEN_LOG_I2(solver_id.ToString()
-                          << ": find-db workspace " << s.workspace_size << " differs from required "
-                          << reported << ", using the latter");
-            s.workspace_size = reported;
-        }
+        if(required != s.workspace_size)
+            MIOPEN_LOG_I2(solver_id.ToString() << ": find-db workspace " << s.workspace_size
+                                               << " differs from required " << required);
+        s.workspace_size = reported;
         out.push_back(s);
         if(++n_copied >= maxSolutionCount)
             break;
@@ -216,12 +222,9 @@ static Invoker PrepareInvoker(ExecutionContext ctx,
 {
     problem.SetupFloats(ctx);
     problem.SetupComputeType(ctx);
-    ctx.do_search              = false;
-    ctx.disable_search_enforce = true;
 
     const auto solver = solver_id.GetSolver();
-    auto db           = MakeConvDbGetter(ctx);
-    auto solution     = solver.FindSolution(ctx, problem, db, {}); // auto tune is not expected here
+    auto solution     = FindRunSolution(ctx, problem, solver);
     auto& handle      = ctx.GetStream();
     // NOLINTBEGIN (bugprone-unchecked-optional-access)
     auto invoker =
@@ -426,8 +429,18 @@ std::vector<Solution> VerifiedFDBSolution(const ExecutionContext& ctx,
                 auto copy_sols         = conv.GetSolutions(ctx, problem, 4, &fallback, &invoke_ctx);
                 for(const auto& s : copy_sols)
                 {
-                    auto solution = Solution{solver::Id{s.solution_id}, s.time, s.workspace_size};
-                    core_result.solutions.emplace_back(std::move(solution));
+                    // Find reports the maximum workspace over configurations; the user find-db
+                    // stores the workspace of the configuration that runs, as Normal Find does.
+                    const auto id       = solver::Id{s.solution_id};
+                    const auto& solver  = id.GetSolver();
+                    auto workspace_size = s.workspace_size;
+                    if(solver.MayNeedWorkspace() && solver.IsTunable())
+                    {
+                        const auto run = FindRunSolution(ctx, problem, solver);
+                        if(run.Succeeded())
+                            workspace_size = run.workspace_sz;
+                    }
+                    core_result.solutions.emplace_back(Solution{id, s.time, workspace_size});
                 }
                 return core_result;
             }
@@ -1095,8 +1108,9 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
     /// Similar to GetSolutions() above: when InvokeParams is provided (immediate mode),
     /// the workspace size is often limited to what the "best" solver needs. To avoid
     /// false warnings, we check IsEnoughWorkspace only for the top maxSolutionCount
-    /// solutions after sorting by estimated performance. See the detailed explanation
-    /// in GetSolutions() for the full rationale.
+    /// solutions after sorting by estimated performance. Unlike GetSolutions(), this path checks
+    /// and reports GetWorkspaceSize(), the maximum over configurations, which is never too small
+    /// for the configuration that runs.
     std::sort(begin(interim), end(interim), SolutionTimeComparator{});
 
     auto out = std::vector<miopenConvSolution_t>{};
