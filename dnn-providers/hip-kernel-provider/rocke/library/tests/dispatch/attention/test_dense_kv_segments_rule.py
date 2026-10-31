@@ -86,9 +86,8 @@ def _gfx942_spec(sq, sk, hq, hkv=8, mask_type=2, num_cus=304, **over):
         arch="gfx942",
         mask_type=mask_type,
         kv_block_size=64,
-        dtype="bf16",
         num_cus=num_cus,
-        **over,
+        **{"dtype": "bf16", **over},
     )
     return attention.attention_tuning_spec(req, "gfx942_dense").kernel_spec
 
@@ -114,8 +113,12 @@ def test_gfx942_bottom_right_geometry(sq, sk, hq, block_m, persistent, segments)
 
 def test_gfx942_equal_length_keeps_default_geometry():
     spec = _gfx942_spec(2048, 2048, 32, mask_type=1)
-    assert not spec.causal_bottom_right and not spec.causal_diag_split
+    # Top-left causal: no bottom-right offset or KV split. The diagonal split is
+    # the top-left bf16 D128 default, not the chunked rule.
+    assert not spec.causal_bottom_right and spec.causal_diag_split
     assert spec.kv_segments == 1 and spec.persistent
+    fp16 = _gfx942_spec(2048, 2048, 32, mask_type=1, dtype="fp16")
+    assert not fp16.causal_bottom_right and not fp16.causal_diag_split
 
 
 @pytest.mark.parametrize(

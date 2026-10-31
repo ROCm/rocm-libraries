@@ -448,6 +448,14 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   vmcnt(0) and the trailing sync_lds_only() WAR guard assume one buffer, and
     #   NBUF=2 only fits at block_n=32, which was measured negative.
     lds_num_buffers: int = field(default=1, kw_only=True)
+    # kv_prefetch: register-staged next-tile prefetch (conflict-free-V path only).
+    #   Each iteration stores the K and V tile that the previous iteration loaded
+    #   into VGPRs, publishes it with the tile-start barrier, then issues the loads
+    #   for the next tile so their latency overlaps this tile's score, softmax and
+    #   PV. K goes through VGPRs and ds_write instead of the async LDS DMA, so no
+    #   in-flight LDS write forces a wait ahead of the score-step K reads. LDS
+    #   stays single-buffered. Off by default.
+    kv_prefetch: bool = field(default=False, kw_only=True)
     # iglp_mode: the iglp_opt argument emitted when ``iglp`` is on (0 or 1).
     iglp_mode: int = field(default=_DEFAULT_IGLP_MODE, kw_only=True)
     # pv_loop_order: PV MFMA traversal. "d_major" keeps the output tile outer,
@@ -769,6 +777,8 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
         parts.append("lse")
     if spec.kv_segments != 1:
         parts.append(f"kvs{spec.kv_segments}")
+    if spec.kv_prefetch:
+        parts.append("kvpf")
     return "".join(f"_{p}" for p in parts)
 
 
@@ -1234,6 +1244,18 @@ def supports_attention_dense(
             f"lds_num_buffers={spec.lds_num_buffers}: only 1 is implemented (the "
             f"tile-start wait and trailing WAR barrier assume one K/V buffer)"
         )
+    if spec.kv_prefetch and (
+        not spec.resolved_use_cfvst()
+        or spec.sliding_window
+        or spec.kv_segments != 1
+        or spec.iglp
+        or (spec.block_n * spec.head_size) % (spec.block_m // 32 * 64 * 8) != 0
+    ):
+        return False, (
+            "kv_prefetch needs the conflict-free-V path, a KV loop that starts at "
+            "tile 0 (no sliding window, no KV segments), no iglp hint, and a K "
+            "tile that splits into whole 8-element chunks per thread"
+        )
     if spec.iglp_mode not in (0, 1):
         return False, f"iglp_mode must be 0 or 1, got {spec.iglp_mode}"
     if spec.iglp_mode != _DEFAULT_IGLP_MODE and not spec.iglp:
@@ -1453,6 +1475,16 @@ def _build_attention_dense_single_buffer(
     PV_PRIORITY = spec.pv_priority
     PV_FENCE_MASK = spec.pv_sched_fence_mask
     DIAG_SPLIT = spec.causal_diag_split
+    KVPF = spec.kv_prefetch
+    if KVPF and (
+        spec.sliding_window or spec.kv_segments != 1 or not spec.resolved_use_cfvst()
+    ):
+        # The prologue stages tile 0 and the loop clamps its prefetch to the last
+        # tile, so a loop that starts elsewhere would consume the wrong tile.
+        raise ValueError(
+            "kv_prefetch needs the conflict-free-V path and a KV loop starting at "
+            "tile 0 (no sliding window, no KV segments)"
+        )
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
@@ -1906,6 +1938,68 @@ def _build_attention_dense_single_buffer(
                 payload.append((d0, t0, b.bitcast(x0, I32), b.bitcast(x1, I32)))
             return payload
 
+        # kv_prefetch: per-thread tile-invariant coordinates, computed once per work
+        # item. V items reuse the cfvst (d0, t0) split; K is cut into 8-element
+        # chunks (16 B), consecutive threads covering one K row contiguously.
+        if KVPF:
+            v_coords = []
+            for it in range(V_ITEMS):
+                blk = b.add(b.mul(b.const_i32(it), b.const_i32(THREADS)), tid)
+                tg = b.div(blk, b.const_i32(V_DIM_PAIRS))
+                dg = b.mod(blk, b.const_i32(V_DIM_PAIRS))
+                v_coords.append((b.mul(dg, b.const_i32(2)), b.mul(tg, b.const_i32(2))))
+            k_coords = []
+            for it in range(BN * D // (THREADS * 8)):
+                ch = b.add(b.mul(b.const_i32(it), b.const_i32(THREADS)), tid)
+                k_coords.append(
+                    (
+                        b.div(ch, b.const_i32(D // 8)),
+                        b.mul(b.mod(ch, b.const_i32(D // 8)), b.const_i32(8)),
+                    )
+                )
+
+        def _prefetch_kv(tile_idx):
+            """kv_prefetch: issue one tile's K and V loads into VGPRs (K chunks
+            first, then the V i32 pairs); returns them in that order."""
+            tile_tok0 = b.mul(tile_idx, b.const_i32(BN))
+            regs = []
+            for krow_, kcol_ in k_coords:
+                koff = b.add(
+                    b.add(k_base, b.mul(b.add(tile_tok0, krow_), _stride_k())), kcol_
+                )
+                regs.append(
+                    b.buffer_load_vN(
+                        k_rsrc, b.mul(koff, b.const_i32(2)), zero_soff, dtype, 8
+                    )
+                )
+            for d0, t0 in v_coords:
+                gk0 = b.add(tile_tok0, t0)
+                gk1 = b.add(gk0, b.const_i32(1))
+                eoff0 = b.add(b.add(k_base, b.mul(gk0, _stride_k())), d0)
+                eoff1 = b.add(b.add(k_base, b.mul(gk1, _stride_k())), d0)
+                x0 = b.buffer_load_vN(
+                    v_rsrc, b.mul(eoff0, b.const_i32(2)), zero_soff, dtype, 2
+                )
+                x1 = b.buffer_load_vN(
+                    v_rsrc, b.mul(eoff1, b.const_i32(2)), zero_soff, dtype, 2
+                )
+                regs += [b.bitcast(x0, I32), b.bitcast(x1, I32)]
+            return regs
+
+        def _store_kv(regs):
+            """kv_prefetch: write a staged tile (``_prefetch_kv`` order) to K_lds and
+            the transposed V_lds."""
+            nk = len(k_coords)
+            for (krow_, kcol_), kv in zip(k_coords, regs[:nk]):
+                b.smem_store_vN(K_lds, [b.const_i32(0), krow_, kcol_], kv, 8)
+            vr = regs[nk:]
+            _cfvst_store_v(
+                [
+                    (d0, t0, vr[2 * i], vr[2 * i + 1])
+                    for i, (d0, t0) in enumerate(v_coords)
+                ]
+            )
+
         def do_qk():
             """S^T = K@Q^T via the 32x32x8 atom (K-doubled)."""
             s_reg = []
@@ -2042,6 +2136,13 @@ def _build_attention_dense_single_buffer(
         iter_args = [("m", m0), ("l", l0)] + [
             (f"o{dt}", o0[dt]) for dt in range(D_TILES)
         ]
+        if KVPF:
+            # Prologue: stage tile 0 in VGPRs. The prefetch index of the last
+            # iteration clamps to the last tile (a redundant, in-bounds reload).
+            iter_args += [
+                (f"kv{i}", r) for i, r in enumerate(_prefetch_kv(b.const_i32(0)))
+            ]
+            last_tile = b.sub(n_up, b.const_i32(1))
 
         def tile_compute(j, carry, masked):
             """Score, mask, online-softmax and PV for one staged tile; returns
@@ -2143,7 +2244,17 @@ def _build_attention_dense_single_buffer(
                 # Only meaningful on the cfvst path (in-loop ds_write to interleave).
                 b.iglp_opt(spec.iglp_mode)
 
-            if USE_CFVST:
+            kv_next = []
+            if KVPF:
+                # Store the tile staged by the previous iteration (or the
+                # prologue), publish it, then issue the next tile's loads.
+                b.s_waitcnt(vmcnt=0)
+                _store_kv(list(carry[2 + D_TILES :]))
+                b.sync_lds_only()
+                nxt = b.add(j, b.const_i32(1))
+                nxt = b.select(b.cmp_lt(nxt, last_tile), nxt, last_tile)
+                kv_next = _prefetch_kv(nxt)
+            elif USE_CFVST:
                 load_tile(j)  # K async DMA -> K_lds
                 v_payload = _cfvst_load_v(
                     j
@@ -2223,7 +2334,7 @@ def _build_attention_dense_single_buffer(
             # across a bare s_barrier_bare(). Correct there only by scheduler luck;
             # tracked separately, do not copy that idiom.
             b.sync_lds_only()
-            b.scf_yield(m_new, l_new, *o_acc)
+            b.scf_yield(m_new, l_new, *o_acc, *kv_next)
 
         # elide_trailing_barrier=False: the trailing barrier is NOT an optimizable
         # rendezvous -- it is the WAR guard on the SINGLE K/V LDS buffer. The elide

@@ -166,7 +166,25 @@ def _make_spec(
             "gfx942 dense: cross-length NO_MASK requests are not served by the "
             "dense kernel"
         )
-    diag_split = False
+    # Top-left causal bf16 D128 without window or sinks: an unmasked loop over
+    # the tiles below the query block's diagonal plus a masked diagonal tail
+    # drops the per-score mask from most tiles. Measured on the 304-CU part:
+    # ahead on every bf16 D128 shape (512 to 8192 query rows); fp16 D128 at
+    # 1024 query rows or fewer is behind, so fp16 keeps the single masked loop.
+    diag_split = (
+        mask_type != AttentionMaskType.NO_MASK
+        and not bottom_right
+        and dtype == "bf16"
+        and head_size == 128
+        and not ragged
+        and not int(req.sliding_window)
+        and not req.use_sinks
+        and not req.emit_lse
+    )
+    # The same bf16 D128 causal cohort stages the next K/V tile in VGPRs while the
+    # current one computes (measured ahead on every bf16 D128 shape on the 304-CU
+    # part; fp16 at 2048 query rows or fewer is behind).
+    kv_prefetch = diag_split
     kv_segments = 1
     if bottom_right and not ragged:
         # Chunked prefill: the unmasked body loop skips the mask on every tile
@@ -220,6 +238,7 @@ def _make_spec(
         causal_diag_split=diag_split,
         kv_segments=kv_segments,
         window_wave_skip=window_wave_skip,
+        kv_prefetch=kv_prefetch,
     )
 
 

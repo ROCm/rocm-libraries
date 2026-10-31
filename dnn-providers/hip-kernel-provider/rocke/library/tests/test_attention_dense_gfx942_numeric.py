@@ -442,6 +442,7 @@ def test_dense_kv_segments_numeric_vs_fp32_sdpa(
         causal_diag_split=diag_split,
         kv_segments=segments,
         block_m=128,
+        kv_prefetch=False,  # the prefetch body serves only a KV loop from tile 0
     )
     run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
     torch.cuda.synchronize()
@@ -1304,7 +1305,8 @@ def test_exp2_fast_matches_plain_exp2(dtype, d, hq, hkv, persistent):
 
 # Performance-only codegen knobs. None of them changes arithmetic (PV order keeps
 # each output tile's key-step order, a width only splits the same stores, the
-# diagonal split skips selects whose condition is always true), so every override
+# diagonal split skips selects whose condition is always true, the K/V prefetch
+# only moves when each tile is loaded), so every override
 # must be BIT-identical to the shipped default. Sq=512 gives a second query block,
 # whose below-diagonal tiles are what the split leaves unmasked.
 _KNOB_AB_COHORT = [
@@ -1317,6 +1319,9 @@ _KNOB_AB_COHORT = [
     ("bf16", 64, True, dict(o_store_width=2)),
     ("fp16", 128, False, dict(pv_priority=2, pv_sched_fence_mask=0)),
     ("fp16", 128, False, dict(iglp=True, iglp_mode=1)),
+    ("bf16", 128, True, dict(kv_prefetch=True)),
+    ("fp16", 128, False, dict(kv_prefetch=True)),
+    ("bf16", 128, True, dict(kv_prefetch=True, causal_diag_split=True)),
 ]
 
 

@@ -53,6 +53,14 @@
           "sha256": "7de383bf9c4c1b56da6e27660421710833cd62079d180f81ec3abc3d7edc82d8",
           "status": "ok"
         },
+        "attention_dense/gfx942/persist_dsplit_kvpf_sq512": {
+          "arch": "gfx942",
+          "bytes": 221565,
+          "family": "attention_dense",
+          "kernel_name": "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2_dsplit_kvpf",
+          "sha256": "ff7be7a168a9ee12b6dd2301ab437c498db7a21ac5a54580bb8864914dc011b3",
+          "status": "ok"
+        },
         "attention_dense/gfx942/persist_hkvmaj_sq512": {
           "arch": "gfx942",
           "bytes": 136123,
@@ -498,6 +506,14 @@
           "sha256": "cfb5e7f336d8861b09bf134cead432d7d278513350a2cd1ff6f7212c65be4fce",
           "status": "ok"
         },
+        "attention_dense/gfx942/persist_dsplit_kvpf_sq512": {
+          "arch": "gfx942",
+          "bytes": 221661,
+          "family": "attention_dense",
+          "kernel_name": "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2_dsplit_kvpf",
+          "sha256": "9bd9bff50def390dd8d62088c9789761b08f368441f6e3d7375ef61b77f8d607",
+          "status": "ok"
+        },
         "attention_dense/gfx942/persist_hkvmaj_sq512": {
           "arch": "gfx942",
           "bytes": 136219,
@@ -941,6 +957,14 @@
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2",
           "sha256": "ece339fc1b026970905ed3ef3ad3a8fc9e5b45c8b986aa0bf81a9d5b134f354a",
+          "status": "ok"
+        },
+        "attention_dense/gfx942/persist_dsplit_kvpf_sq512": {
+          "arch": "gfx942",
+          "bytes": 221725,
+          "family": "attention_dense",
+          "kernel_name": "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2_dsplit_kvpf",
+          "sha256": "ff744abfee173682bcd56975a3e906a49435bf172991da18e8abaa4aa6c7c02a",
           "status": "ok"
         },
         "attention_dense/gfx942/persist_hkvmaj_sq512": {
