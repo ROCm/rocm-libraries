@@ -225,6 +225,7 @@
         {"family": "wmma", "a": "fp8", "b": "bf8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_fp8_bf8"},
         {"family": "wmma", "a": "bf8", "b": "fp8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_bf8_fp8"},
         {"family": "wmma", "a": "bf8", "b": "bf8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_bf8_bf8"},
+        {"family": "wmma", "a": "fp8", "b": "fp8", "c": "fp32", "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_f8f6f4"},
         {
           "generate": "gfx1250_wmma_scaled_v1",
           "family": "wmma_scaled",

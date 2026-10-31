@@ -26,6 +26,7 @@
 #include "rocke/instance_gemm_internal.h"
 #include "rocke/instance_gemm_universal.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
+#include "rocke/tdm.h" /* rocke_tdm_padding_for_tile */
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.core.arch.h"
@@ -85,15 +86,59 @@ static const rocke_mmaop_t* rocke_gemm_resolve_mma_op(const rocke_gemm_universal
                                          nullptr);
 }
 
-/* _storage_dtype(spec): validate homogeneous A/B/C + fp32 acc (fp64 acc for
- * fp64 storage) + RCR layout, then map the storage dtype string to its IR
- * type. On a Python ValueError path this returns NULL and sets the builder's
- * sticky error. */
+/* _FP8_AB_DTYPES: A/B storage dtypes that are 8-bit floats -- the one case where
+ * the GEMM's A/B storage dtype differs from its C storage dtype. */
+static bool rocke_gemm_is_fp8_ab(const char* name)
+{
+    return name != NULL && (strcmp(name, "fp8e4m3") == 0 || strcmp(name, "bf8e5m2") == 0);
+}
+
+/* _dtype_ir(name): resolve a GEMM storage dtype string to its IR scalar type.
+ * fp64 maps to F64; the 8-bit cases are resolved here rather than in
+ * io_ir_type, whose contract is deliberately f16/bf16-only. */
+static const rocke_type_t* rocke_gemm_dtype_ir(rocke_ir_builder_t* b, const char* name)
+{
+    if(name != NULL && strcmp(name, "fp64") == 0)
+    {
+        return rocke_f64();
+    }
+    if(rocke_gemm_is_fp8_ab(name))
+    {
+        return (strcmp(name, "fp8e4m3") == 0) ? rocke_fp8e4m3() : rocke_bf8e5m2();
+    }
+    return rocke_b_io_ir_type(b, name);
+}
+
+/* _validate_storage(spec): validate the spec's storage dtypes, then map the A/B
+ * storage dtype string to its IR type and write C's to `c_ty_out` (when
+ * non-NULL). A/B/C are homogeneous (f32 acc, or fp64 acc for fp64 storage)
+ * except on the gfx1250 fp8/bf8 WMMA path, where A/B are 8-bit floats and C
+ * stays 16-bit (there is no fp8 accumulator).
+ * On a Python ValueError path this returns NULL and sets the builder's sticky
+ * error. */
 static const rocke_type_t* rocke_gemm_storage_dtype(rocke_ir_builder_t* b,
-                                                    const rocke_gemm_universal_spec_t* spec)
+                                                    const rocke_gemm_universal_spec_t* spec,
+                                                    const rocke_type_t** c_ty_out)
 {
     const rocke_gemm_data_spec_t* d = &spec->data;
-    if(strcmp(d->dtype_a, d->dtype_b) != 0 || strcmp(d->dtype_a, d->dtype_c) != 0)
+    const rocke_type_t* ty;
+    const rocke_type_t* c_ty;
+
+    if(rocke_gemm_is_fp8_ab(d->dtype_a) || rocke_gemm_is_fp8_ab(d->dtype_b))
+    {
+        if(strcmp(d->dtype_a, d->dtype_b) != 0)
+        {
+            /* "fp8/bf8 GEMM requires matching A/B dtypes" */
+            return rocke_b_io_ir_type(b, "");
+        }
+        if(strcmp(d->dtype_c, "f16") != 0 && strcmp(d->dtype_c, "fp16") != 0
+           && strcmp(d->dtype_c, "bf16") != 0)
+        {
+            /* "fp8/bf8 GEMM requires an f16/bf16 C dtype" */
+            return rocke_b_io_ir_type(b, "");
+        }
+    }
+    else if(strcmp(d->dtype_a, d->dtype_b) != 0 || strcmp(d->dtype_a, d->dtype_c) != 0)
     {
         /* "requires homogeneous A/B/C dtypes" */
         return rocke_b_io_ir_type(b, "");
@@ -113,11 +158,47 @@ static const rocke_type_t* rocke_gemm_storage_dtype(rocke_ir_builder_t* b,
     {
         return rocke_b_io_ir_type(b, "");
     }
-    if(strcmp(d->dtype_a, "fp64") == 0)
+    ty = rocke_gemm_dtype_ir(b, d->dtype_a);
+    c_ty = rocke_gemm_dtype_ir(b, d->dtype_c);
+    if(ty == NULL || c_ty == NULL)
     {
-        return rocke_f64();
+        return NULL;
     }
-    return rocke_b_io_ir_type(b, d->dtype_a); /* _dtype_ir == io_ir_type */
+    if(c_ty_out != NULL)
+    {
+        *c_ty_out = c_ty;
+    }
+    return ty;
+}
+
+/* _ab_dtype_bytes(spec): bytes per A/B element -- 2 for f16/bf16, 1 for the
+ * fp8/bf8 operands. Python: dtype_info(spec.data.dtype_a).encoded_bits // 8.
+ * Non-static: gemm_mma.cpp needs it to size the global load vector. Declared
+ * in instance_gemm_internal.h. Same value as rocke_gemm_elem_bytes, except
+ * that an unknown dtype falls back to 2. */
+int rocke_gemm_ab_dtype_bytes(const rocke_gemm_universal_spec_t* spec)
+{
+    const rocke_dtype_info_t* info = rocke_dtype_info(spec->data.dtype_a);
+    return (info != NULL) ? (info->encoded_bits / 8) : 2;
+}
+
+/* Mirrors Python _dtype_bytes(dtype). */
+int rocke_gemm_dtype_bytes(const char* dtype)
+{
+    const rocke_dtype_info_t* info = rocke_dtype_info(dtype);
+    return (info != NULL) ? (info->encoded_bits / 8) : 2;
+}
+
+/* Mirrors Python _tdm_pipelined(trait). */
+bool rocke_gemm_tdm_pipelined(const rocke_gemm_trait_spec_t* trait)
+{
+    return trait->tdm && trait->tdm_depth >= 2;
+}
+
+/* Mirrors Python _tdm_ring_depth(trait). */
+int rocke_gemm_tdm_ring_depth(const rocke_gemm_trait_spec_t* trait)
+{
+    return (trait->tdm && trait->tdm_depth >= 3) ? trait->tdm_depth : 0;
 }
 
 /* _ilog2(x): bit_length()-1 for powers of two, else -1 (Python returns None). */
@@ -491,7 +572,9 @@ rocke_kernel_def_t* rocke_build_wsp3_gemm(rocke_ir_builder_t* b,
         return NULL;
     }
     rocke_gemm_atom_frag_lengths(op, &a_per_lane, &b_per_lane, &c_per_lane);
-    storage_dtype = rocke_gemm_storage_dtype(b, spec);
+    /* Python gemm_wsp3.py calls _storage_dtype(spec) (= _validate_storage(spec)[0]);
+     * A/B are fp16-only here (rejected above), so C never differs. */
+    storage_dtype = rocke_gemm_storage_dtype(b, spec, NULL);
     if(storage_dtype == NULL)
     {
         return NULL;
@@ -1015,7 +1098,7 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->trait.waves_per_eu);
     }
 
-    ctx.storage_dtype = rocke_gemm_storage_dtype(b, spec);
+    ctx.storage_dtype = rocke_gemm_storage_dtype(b, spec, &ctx.c_storage_dtype);
     if(ctx.storage_dtype == NULL)
     {
         return NULL;
@@ -1058,7 +1141,7 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
             opts.writeonly_set = true;
             opts.align = 16;
             opts.align_set = true;
-            ctx.C = rocke_b_param(b, "C", ptr_storage, &opts);
+            ctx.C = rocke_b_param(b, "C", rocke_ptr_type(b, ctx.c_storage_dtype, "global"), &opts);
         }
 
         ctx.M = rocke_b_param(b, "M", rocke_i32(), NULL);
@@ -1222,8 +1305,8 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     }
 
     /* ---- AB LDS double-buffer plan (_ab_lds_plan) -- */
-    ctx.prefetch = spec->trait.dtl_prefetch;
-    if(ctx.prefetch && !spec->trait.direct_to_lds)
+    ctx.prefetch = spec->trait.dtl_prefetch || rocke_gemm_tdm_pipelined(&spec->trait);
+    if(spec->trait.dtl_prefetch && !spec->trait.direct_to_lds)
     {
         /* "dtl_prefetch requires direct_to_lds=True" -- ValueError path. */
         return NULL;
@@ -1258,12 +1341,17 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         db = spec->trait.pipeline != NULL && strcmp(spec->trait.pipeline, "compv4") == 0
              && spec->trait.epilogue != NULL && strcmp(spec->trait.epilogue, "cshuffle") != 0
              && !spec->trait.direct_to_lds && db_fits_2wg;
-        two_buf = (spec->trait.dtl_prefetch ? true : false) || db;
+        two_buf = (spec->trait.dtl_prefetch ? true : false) || db
+                  || rocke_gemm_tdm_pipelined(&spec->trait);
         ctx.db = db;
         ctx.two_buf = two_buf;
     }
-    ctx.A_LDS_M = (ctx.two_buf ? 2 : 1) * ctx.block_m;
-    ctx.B_LDS_N = (ctx.two_buf ? 2 : 1) * ctx.block_n;
+    ctx.tdm_ring = rocke_gemm_tdm_ring_depth(&spec->trait);
+    {
+        int nbuf = ctx.tdm_ring ? ctx.tdm_ring : (ctx.two_buf ? 2 : 1);
+        ctx.A_LDS_M = nbuf * ctx.block_m;
+        ctx.B_LDS_N = nbuf * ctx.block_n;
+    }
     ctx.lds_pad = spec->trait.direct_to_lds ? 0 : spec->trait.lds_k_pad;
     ctx.lds_k = ctx.block_k + ctx.lds_pad;
     {
@@ -1429,6 +1517,33 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         ctx.dtl_c_cols_per_chunk
             = rocke_b_const_i32(b, ctx.dtl_sub_elem ? ctx.dtl_bytes_per_lane : ctx.dtl_halves);
         ctx.dtl_c_block_size = rocke_b_const_i32(b, spec->block_size);
+    }
+
+    /* ---- TDM plumbing. Mirrors Python's `if spec.trait.tdm:` prologue. ---- */
+    if(spec->trait.tdm)
+    {
+        ctx.tdm_elem_bytes = rocke_gemm_dtype_bytes(spec->data.dtype_a);
+        rocke_tdm_padding_for_tile(ctx.tdm_elem_bytes,
+                                   ctx.block_k,
+                                   spec->trait.lds_k_pad,
+                                   &ctx.tdm_pad_enable,
+                                   &ctx.tdm_pad_interval,
+                                   &ctx.tdm_pad_amount,
+                                   NULL,
+                                   0);
+        ctx.tdm_a_lds_base = rocke_b_smem_addr_of(b, ctx.A_smem);
+        ctx.tdm_b_lds_base = rocke_b_smem_addr_of(b, ctx.B_smem);
+        ctx.tdm_a_buf_bytes = ctx.block_m * ctx.lds_k * ctx.tdm_elem_bytes;
+        ctx.tdm_b_buf_bytes = ctx.block_n * ctx.lds_k * ctx.tdm_elem_bytes;
+        ctx.tdm_waves = spec->tile.warp_m * spec->tile.warp_n * spec->tile.warp_k;
+        if(ctx.tdm_waves > 1)
+        {
+            ctx.tdm_wave_id = rocke_b_readfirstlane(b, rocke_b_div(b, ctx.tid, ctx.c_wave));
+        }
+        else
+        {
+            ctx.tdm_wave_id = rocke_b_const_i32(b, 0);
+        }
     }
 
     /* ---- active-tile gate (batched && active_tile_skip) -- */

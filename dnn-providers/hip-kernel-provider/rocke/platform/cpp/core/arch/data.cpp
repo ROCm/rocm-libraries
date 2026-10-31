@@ -977,6 +977,119 @@ static const rocke_layout_map_t lm_wmma_gfx1250_32_a
 static const rocke_layout_map_t lm_wmma_gfx1250_32_b
     = {ROCKE_MMA_ROLE_B, 16, 32, _wmma_gfx1250_b_16x16x32};
 
+/* gfx1250 WMMA 16x16x64 fp8/bf8 A operand (wave32): row = lane % 16,
+ * k = (lane / 16) * 32 + slot * 4  (slot in 0..7, a_frag_len=8).
+ * Unlike the K=32 maps, slot indexes a dword of the <8 x i32> carrier rather
+ * than an element: slot i is the dword holding K .. K+3, so an 8-slot walk
+ * spans 32 K-elements. Mirrors _wmma_gfx1250_a_16x16x64_f8 in target.py. */
+static void _wmma_gfx1250_a_16x16x64_f8(rocke_ir_builder_t* b,
+                                        rocke_value_t* lane,
+                                        int slot,
+                                        rocke_value_t** out0,
+                                        rocke_value_t** out1)
+{
+    rocke_value_t *c16, *row, *k_half, *k;
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    c16 = rocke_b_const_i32(b, 16);
+    row = rocke_b_mod(b, lane, c16);
+    k_half = rocke_b_div(b, lane, c16);
+    {
+        rocke_value_t* k_mul = rocke_b_mul(b, k_half, rocke_b_const_i32(b, 32));
+        k = rocke_b_add(b, k_mul, rocke_b_const_i32(b, slot * 4));
+    }
+    if(out0)
+        *out0 = row;
+    if(out1)
+        *out1 = k;
+}
+
+/* gfx1250 WMMA 16x16x64 fp8/bf8 B operand (wave32): k = (lane / 16) * 32 +
+ * slot * 4, col = lane % 16  (slot in 0..7, b_frag_len=8). Slot is a dword of
+ * the <8 x i32> carrier, as for A above.
+ * Mirrors _wmma_gfx1250_b_16x16x64_f8 in target.py. */
+static void _wmma_gfx1250_b_16x16x64_f8(rocke_ir_builder_t* b,
+                                        rocke_value_t* lane,
+                                        int slot,
+                                        rocke_value_t** out0,
+                                        rocke_value_t** out1)
+{
+    rocke_value_t *c16, *col, *k_half, *k;
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    c16 = rocke_b_const_i32(b, 16);
+    col = rocke_b_mod(b, lane, c16);
+    k_half = rocke_b_div(b, lane, c16);
+    {
+        rocke_value_t* k_mul = rocke_b_mul(b, k_half, rocke_b_const_i32(b, 32));
+        k = rocke_b_add(b, k_mul, rocke_b_const_i32(b, slot * 4));
+    }
+    if(out0)
+        *out0 = k;
+    if(out1)
+        *out1 = col;
+}
+
+/* --- wmma_gfx1250_f32_16x16x64_{fp8,bf8}_{fp8,bf8}: frag 8/8/8, wave32 --- */
+static const rocke_layout_map_t lm_wmma_gfx1250_64_f8_a
+    = {ROCKE_MMA_ROLE_A, 8, 32, _wmma_gfx1250_a_16x16x64_f8};
+static const rocke_layout_map_t lm_wmma_gfx1250_64_f8_b
+    = {ROCKE_MMA_ROLE_B, 8, 32, _wmma_gfx1250_b_16x16x64_f8};
+
+/* gfx1250 WMMA 16x16x128 f8f6f4 A operand (wave32): row = lane % 16,
+ * k = (lane / 16) * 64 + slot * 4  (slot in 0..15, a_frag_len=16).
+ * Same lane math as the K=64 fp8 map with the per-lane K span doubled from 32
+ * bytes to 64, carried as <16 x i32>.
+ * Mirrors _wmma_gfx1250_a_16x16x128_f8f6f4 in target.py. */
+static void _wmma_gfx1250_a_16x16x128_f8f6f4(rocke_ir_builder_t* b,
+                                             rocke_value_t* lane,
+                                             int slot,
+                                             rocke_value_t** out0,
+                                             rocke_value_t** out1)
+{
+    rocke_value_t *c16, *row, *k_half, *k;
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    c16 = rocke_b_const_i32(b, 16);
+    row = rocke_b_mod(b, lane, c16);
+    k_half = rocke_b_div(b, lane, c16);
+    {
+        rocke_value_t* k_mul = rocke_b_mul(b, k_half, rocke_b_const_i32(b, 64));
+        k = rocke_b_add(b, k_mul, rocke_b_const_i32(b, slot * 4));
+    }
+    if(out0)
+        *out0 = row;
+    if(out1)
+        *out1 = k;
+}
+
+/* gfx1250 WMMA 16x16x128 f8f6f4 B operand (wave32): k = (lane / 16) * 64 +
+ * slot * 4, col = lane % 16  (slot in 0..15, b_frag_len=16).
+ * Mirrors _wmma_gfx1250_b_16x16x128_f8f6f4 in target.py. */
+static void _wmma_gfx1250_b_16x16x128_f8f6f4(rocke_ir_builder_t* b,
+                                             rocke_value_t* lane,
+                                             int slot,
+                                             rocke_value_t** out0,
+                                             rocke_value_t** out1)
+{
+    rocke_value_t *c16, *col, *k_half, *k;
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    c16 = rocke_b_const_i32(b, 16);
+    col = rocke_b_mod(b, lane, c16);
+    k_half = rocke_b_div(b, lane, c16);
+    {
+        rocke_value_t* k_mul = rocke_b_mul(b, k_half, rocke_b_const_i32(b, 64));
+        k = rocke_b_add(b, k_mul, rocke_b_const_i32(b, slot * 4));
+    }
+    if(out0)
+        *out0 = k;
+    if(out1)
+        *out1 = col;
+}
+
+/* --- wmma_gfx1250_f32_16x16x128_f8f6f4: frag 16/16/8, wave32 --- */
+static const rocke_layout_map_t lm_wmma_gfx1250_128_f8f6f4_a
+    = {ROCKE_MMA_ROLE_A, 16, 32, _wmma_gfx1250_a_16x16x128_f8f6f4};
+static const rocke_layout_map_t lm_wmma_gfx1250_128_f8f6f4_b
+    = {ROCKE_MMA_ROLE_B, 16, 32, _wmma_gfx1250_b_16x16x128_f8f6f4};
+
 /* =========================================================================
  * op_id -> accumulator fragment length (the c_frag_len projection of
  * target.py::_MMA_FRAGMENT_INFO).
@@ -1070,6 +1183,7 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"wmma_gfx1250_f32_16x16x64_fp8_bf8", 8},
     {"wmma_gfx1250_f32_16x16x64_bf8_fp8", 8},
     {"wmma_gfx1250_f32_16x16x64_bf8_bf8", 8},
+    {"wmma_gfx1250_f32_16x16x128_f8f6f4", 8},
 };
 
 /* The frag-table row registered for op_id itself, or NULL. */
@@ -2496,8 +2610,8 @@ static constexpr rocke_mma_op_t k_mma_gfx1250_unscaled[] = {
      8,
      8,
      32,
-     NULL,
-     NULL,
+     &lm_wmma_gfx1250_64_f8_a,
+     &lm_wmma_gfx1250_64_f8_b,
      &lm_wmma_gfx12_c},
     {"wmma",
      "fp8e4m3",
@@ -2511,8 +2625,8 @@ static constexpr rocke_mma_op_t k_mma_gfx1250_unscaled[] = {
      8,
      8,
      32,
-     NULL,
-     NULL,
+     &lm_wmma_gfx1250_64_f8_a,
+     &lm_wmma_gfx1250_64_f8_b,
      &lm_wmma_gfx12_c},
     {"wmma",
      "bf8e5m2",
@@ -2526,8 +2640,8 @@ static constexpr rocke_mma_op_t k_mma_gfx1250_unscaled[] = {
      8,
      8,
      32,
-     NULL,
-     NULL,
+     &lm_wmma_gfx1250_64_f8_a,
+     &lm_wmma_gfx1250_64_f8_b,
      &lm_wmma_gfx12_c},
     {"wmma",
      "bf8e5m2",
@@ -2541,8 +2655,23 @@ static constexpr rocke_mma_op_t k_mma_gfx1250_unscaled[] = {
      8,
      8,
      32,
-     NULL,
-     NULL,
+     &lm_wmma_gfx1250_64_f8_a,
+     &lm_wmma_gfx1250_64_f8_b,
+     &lm_wmma_gfx12_c},
+    {"wmma",
+     "fp8e4m3",
+     "fp8e4m3",
+     "fp32",
+     16,
+     16,
+     128,
+     "wmma_gfx1250_f32_16x16x128_f8f6f4",
+     16,
+     16,
+     8,
+     32,
+     &lm_wmma_gfx1250_128_f8f6f4_a,
+     &lm_wmma_gfx1250_128_f8f6f4_b,
      &lm_wmma_gfx12_c},
 };
 
@@ -2553,7 +2682,7 @@ static constexpr rocke_mma_op_t k_mma_gfx1250_unscaled[] = {
 namespace
 {
 constexpr int k_scaled_count = 86;
-constexpr int k_unscaled_count = 7;
+constexpr int k_unscaled_count = 8;
 constexpr const char* k_inputs[] = {"fp8", "bf8", "fp6", "bf6", "fp4"};
 constexpr const char* k_input_dtypes[] = {"fp8e4m3", "bf8e5m2", "fp6e2m3", "fp6e3m2", "fp4e2m1"};
 constexpr const char* k_scales[] = {"e8m0", "e5m3", "e4m3"};

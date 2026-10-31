@@ -16,6 +16,7 @@
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
+#include "rocke/tdm.h"
 #include "rocke/verify.h"
 #include "rocke/wmma_scale_internal.h"
 
@@ -571,6 +572,101 @@ typedef struct config
 /* Each gfx1250 config that tests a *choice* of encoding is followed by its
  * gfx950 twin, so the pair pins both branches. Index-for-index with the Python
  * emitter's CONFIGS list. */
+
+/* Mirrors gfx1250_lowering_emit.py build_tdm_descriptor: a real rank-2 TDM
+ * descriptor rather than the zeroed placeholder build_tensor_transfers uses.
+ * Pins the GROUP0 / GROUP1 bit packing, the readfirstlane on every runtime
+ * word, and the row-pad encode -- the half where a wrong bit gives garbage or
+ * a hang rather than a compile error. Built at a 1-byte element width because
+ * every 8-bit defect in this load path has been a 2-bytes-per-element
+ * assumption. */
+static void build_tdm_descriptor(rocke_ir_builder_t* b)
+{
+    rocke_tdm_descriptor_2d_args_t args;
+    rocke_value_t* groups[5];
+    int pad_enable = 0;
+    int pad_interval = 0;
+    int pad_amount = 0;
+
+    rocke_tdm_padding_for_tile(1, 128, 80, &pad_enable, &pad_interval, &pad_amount, NULL, 0);
+
+    memset(&args, 0, sizeof(args));
+    args.global_addr = rocke_b_const_i64(b, 0);
+    args.lds_addr = rocke_b_const_i64(b, 0);
+    args.tensor_dim0 = rocke_b_const_i32(b, 4096);
+    args.tensor_dim1 = rocke_b_const_i32(b, 8192);
+    args.dim0_stride_value = NULL;
+    args.elem_bytes = 1;
+    args.tile_dim0 = 128;
+    args.tile_dim1 = 128;
+    args.dim0_stride = 8192;
+    args.dim1_stride = 1;
+    args.pad_enable = pad_enable;
+    args.pad_interval = pad_interval;
+    args.pad_amount = pad_amount;
+
+    if(rocke_tdm_build_descriptor_2d(b, &args, groups) != ROCKE_OK)
+        return;
+    rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_ret(b);
+}
+
+/* A full rank-2 TDM descriptor fed by global_addr_of; runtime_pitch switches
+ * word 5 between a folded constant and a readfirstlane'd IR value. */
+static void tdm_descriptor(rocke_ir_builder_t* b, bool runtime_pitch)
+{
+    rocke_param_opts_t o;
+    const int shape[] = {64, 48};
+    rocke_tdm_descriptor_2d_args_t args;
+    rocke_value_t* groups[5];
+
+    memset(&o, 0, sizeof(o));
+    o.noalias = true;
+    o.noalias_set = true;
+    o.readonly = true;
+    o.readonly_set = true;
+    o.align = 16;
+    o.align_set = true;
+    rocke_value_t* a_ptr = rocke_b_param(b, "A", rocke_ptr_type(b, rocke_bf16(), "global"), &o);
+    rocke_value_t* k_dim = rocke_b_param(b, "K", rocke_i32(), NULL);
+    rocke_value_t* smem = rocke_b_smem_alloc(b, rocke_bf16(), shape, 2, "tile");
+    rocke_value_t* zero = rocke_b_const_i32(b, 0);
+    rocke_value_t* gaddr = rocke_b_global_addr_of(b, a_ptr, zero);
+    rocke_value_t* lds = rocke_b_smem_addr_of(b, smem);
+    rocke_value_t* rows = rocke_b_const_i32(b, 64);
+
+    memset(&args, 0, sizeof(args));
+    args.global_addr = gaddr;
+    args.lds_addr = lds;
+    args.elem_bytes = 2;
+    args.tensor_dim0 = k_dim;
+    args.tensor_dim1 = rows;
+    args.tile_dim0 = 32;
+    args.tile_dim1 = 64;
+    args.dim0_stride_value = runtime_pitch ? k_dim : NULL;
+    args.dim0_stride = 4096;
+    args.dim1_stride = 1;
+    args.pad_enable = 1;
+    args.pad_interval = 3;
+    args.pad_amount = 7;
+    if(rocke_tdm_build_descriptor_2d(b, &args, groups) != ROCKE_OK)
+        return;
+    rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_ret(b);
+}
+
+static void build_tdm_descriptor_const_pitch(rocke_ir_builder_t* b)
+{
+    tdm_descriptor(b, false);
+}
+
+static void build_tdm_descriptor_runtime_pitch(rocke_ir_builder_t* b)
+{
+    tdm_descriptor(b, true);
+}
+
 static const config_t BASE_CONFIGS[] = {
     {build_wmma_k32_f16, "gfx1250"},
     {build_wmma_k32_bf16, "gfx1250"},
@@ -727,13 +823,24 @@ static const config_t FEATURE_CONFIGS[] = {
 };
 static const int NUM_FEATURE_CONFIGS = (int)(sizeof(FEATURE_CONFIGS) / sizeof(FEATURE_CONFIGS[0]));
 
+/* The TDM descriptor builder, then the TDM descriptor lowered with a fixed and
+ * with a runtime row pitch. Last, mirroring the Python: inserting earlier would
+ * renumber every later config in both emitters. */
+static const config_t TDM_DESCRIPTOR_CONFIGS[] = {
+    {build_tdm_descriptor, "gfx1250"},
+    {build_tdm_descriptor_const_pitch, "gfx1250"},
+    {build_tdm_descriptor_runtime_pitch, "gfx1250"},
+};
+static const int NUM_TDM_DESCRIPTOR_CONFIGS
+    = (int)(sizeof(TDM_DESCRIPTOR_CONFIGS) / sizeof(TDM_DESCRIPTOR_CONFIGS[0]));
+
 static const int NUM_BASE_CONFIGS = (int)(sizeof(BASE_CONFIGS) / sizeof(BASE_CONFIGS[0]));
 static const char* const MATRIX_DTYPES[] = {"fp8", "bf8", "fp6", "bf6", "fp4"};
 static const char* const SCALE_DTYPES[] = {"e8m0", "e5m3", "e4m3"};
 static const int NUM_MATRIX_DTYPES = (int)(sizeof(MATRIX_DTYPES) / sizeof(MATRIX_DTYPES[0]));
 static const int NUM_SCALE_DTYPES = (int)(sizeof(SCALE_DTYPES) / sizeof(SCALE_DTYPES[0]));
 static const int NUM_CONFIGS
-    = NUM_BASE_CONFIGS + NUM_FEATURE_CONFIGS
+    = NUM_BASE_CONFIGS + NUM_FEATURE_CONFIGS + NUM_TDM_DESCRIPTOR_CONFIGS
       + 2 * (2 * (NUM_MATRIX_DTYPES - 1) * (NUM_SCALE_DTYPES - 1) + NUM_SCALE_DTYPES - 1);
 
 /* Mirror the Python emitter's supported scale pairs in their original order.
@@ -748,9 +855,15 @@ static bool select_config(int idx, config_t* out)
         *out = BASE_CONFIGS[idx];
         return true;
     }
-    if(idx >= NUM_CONFIGS - NUM_FEATURE_CONFIGS)
+    if(idx >= NUM_CONFIGS - NUM_TDM_DESCRIPTOR_CONFIGS)
     {
-        *out = FEATURE_CONFIGS[idx - (NUM_CONFIGS - NUM_FEATURE_CONFIGS)];
+        *out = TDM_DESCRIPTOR_CONFIGS[idx - (NUM_CONFIGS - NUM_TDM_DESCRIPTOR_CONFIGS)];
+        return true;
+    }
+    if(idx >= NUM_CONFIGS - NUM_TDM_DESCRIPTOR_CONFIGS - NUM_FEATURE_CONFIGS)
+    {
+        *out = FEATURE_CONFIGS[idx
+                               - (NUM_CONFIGS - NUM_TDM_DESCRIPTOR_CONFIGS - NUM_FEATURE_CONFIGS)];
         return true;
     }
     idx -= NUM_BASE_CONFIGS;

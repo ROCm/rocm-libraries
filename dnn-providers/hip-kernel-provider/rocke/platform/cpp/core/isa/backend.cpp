@@ -329,6 +329,13 @@ static const rocke_wmma_spec_t GFX1250_WMMA[] = {
      "i32",
      8,
      ROCKE_WMMA_SHAPE_GFX1250_FP8},
+    {"tile.wmma_gfx1250_f32_16x16x128_f8f6f4",
+     "wmma.gfx1250.f32.16x16x128.f8f6f4",
+     "llvm.amdgcn.wmma.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+     "i32",
+     "i32",
+     16,
+     ROCKE_WMMA_SHAPE_GFX1250_F8F6F4},
 };
 static const int GFX1250_WMMA_N = (int)(sizeof(GFX1250_WMMA) / sizeof(GFX1250_WMMA[0]));
 
@@ -514,6 +521,29 @@ int rocke_isa_emit_wmma_call(rocke_strbuf_t* out,
                                     "<%d x %s> %s, <%d x %s> %s, "
                                     "i16 0, <8 x float> %s, "
                                     "i1 false, i1 false)\n",
+                                    result_name,
+                                    spec->intrinsic,
+                                    w,
+                                    spec->call_elt,
+                                    a_arg,
+                                    w,
+                                    spec->call_elt,
+                                    b_arg,
+                                    c_name)
+                       != 0
+                   ? -1
+                   : 0;
+    }
+    if(spec->shape == ROCKE_WMMA_SHAPE_GFX1250_F8F6F4)
+    {
+        /* gfx1250 dense K=128 6-operand form: (i32 fmtA, A, i32 fmtB, B,
+         * i16 modC, C). fmt 0 selects FP8 (E4M3) for both matrices; there are
+         * no trailing reuse flags on this opcode. */
+        return rocke_strbuf_appendf(out,
+                                    "  %s = call <8 x float> @%s("
+                                    "i32 0, <%d x %s> %s, "
+                                    "i32 0, <%d x %s> %s, "
+                                    "i16 0, <8 x float> %s)\n",
                                     result_name,
                                     spec->intrinsic,
                                     w,

@@ -29,6 +29,19 @@
 
 #include "rocke/helper_rocke.helpers.grid.h" /* rocke_chiplet_aware_super_tile_dynamic */
 #include "rocke/instance_gemm_internal.h"
+#include "rocke/tdm.h" /* rocke_tdm_build_descriptor_2d */
+
+/* Widest global A/B load vector, in elements: the 4-dword buffer_load limit is
+ * 16 bytes, so a 1-byte operand tops out at 16 elements. The pad_k gather
+ * arrays below are sized to this. */
+#define ROCKE_GEMM_MAX_LOAD_VEC 16
+
+/* storage_dtype in (FP8E4M3, BF8E5M2) -- the 8-bit A/B operands of the gfx1250
+ * low-bit WMMA path, which the f16/bf16 storage paths never produce. */
+static bool rocke_gemm_storage_is_fp8(const rocke_type_t* ty)
+{
+    return rocke_type_eq(ty, rocke_fp8e4m3()) || rocke_type_eq(ty, rocke_bf8e5m2());
+}
 
 /* ===================================================================== *
  *  _swz_col -- the LDS XOR-swizzle column rewrite (Python inner closure).
@@ -98,6 +111,54 @@ static rocke_value_t* rocke_gemm_dtl_off_bytes(rocke_gemm_build_ctx_t* ctx,
  *  lds_parity is int|Value: parity_v != NULL => runtime Value form; else
  *  parity_imm carries the compile-time 0/1 parity.
  * ===================================================================== */
+/* _issue: one TDM descriptor moving a [rows, block_k] tile of `ptr` whose
+ * first row is `row_off` into LDS at `lds_base`. Mirrors Python _issue
+ * closure inside emit_load_phase. */
+static void rocke_gemm_tdm_issue(rocke_gemm_build_ctx_t* ctx,
+                                 rocke_value_t* ptr,
+                                 rocke_value_t* row_off,
+                                 int rows,
+                                 rocke_value_t* extent,
+                                 rocke_value_t* lds_base,
+                                 rocke_value_t* batch_off,
+                                 rocke_value_t* k_off,
+                                 rocke_value_t* k_remaining,
+                                 rocke_value_t* zero,
+                                 rocke_gemm_emit_hook_t before_issue)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* origin
+        = rocke_b_add(b, batch_off, rocke_b_add(b, rocke_b_mul(b, row_off, ctx->K), k_off));
+    rocke_tdm_descriptor_2d_args_t args;
+    rocke_value_t* groups[5];
+    memset(&args, 0, sizeof(args));
+    args.global_addr = rocke_b_global_addr_of(b, ptr, origin);
+    args.lds_addr = lds_base;
+    args.elem_bytes = ctx->tdm_elem_bytes;
+    args.tensor_dim0 = k_remaining;
+    /* The TENSOR's remaining extent from this tile's origin, not the tile
+     * height. The mover bounds its address generation on this, so a constant
+     * tile height describes a tensor ending `rows` past every origin -- wrong
+     * for every tile but the first. pad_m/pad_n are not consulted precisely
+     * because OOB is handled here, by clipping the extent. */
+    args.tensor_dim1 = rocke_b_smax(b, rocke_b_sub(b, extent, row_off), zero);
+    args.tile_dim0 = ctx->block_k;
+    args.tile_dim1 = rows;
+    /* dim0_stride_value = K (runtime row pitch). Mirrors Python: dim0_stride=K. */
+    args.dim0_stride_value = ctx->K;
+    args.dim1_stride = 1;
+    args.pad_enable = ctx->tdm_pad_enable;
+    args.pad_interval = ctx->tdm_pad_interval;
+    args.pad_amount = ctx->tdm_pad_amount;
+    if(rocke_tdm_build_descriptor_2d(b, &args, groups) != ROCKE_OK)
+    {
+        return;
+    }
+    if(before_issue.fn != NULL)
+        before_issue.fn(ctx, before_issue.user);
+    rocke_b_tensor_load_to_lds(b, groups[0], groups[1], groups[2], groups[3], groups[4], 0);
+}
+
 void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                                 rocke_value_t* A_dst,
                                 rocke_value_t* B_dst,
@@ -105,12 +166,142 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                                 int parity_imm,
                                 rocke_value_t* parity_v)
 {
+    rocke_gemm_emit_hook_t none = {NULL, NULL};
+    rocke_gemm_emit_load_phase_ex(ctx, A_dst, B_dst, k_off, parity_imm, parity_v, none);
+}
+
+void rocke_gemm_emit_load_phase_ex(rocke_gemm_build_ctx_t* ctx,
+                                   rocke_value_t* A_dst,
+                                   rocke_value_t* B_dst,
+                                   rocke_value_t* k_off,
+                                   int parity_imm,
+                                   rocke_value_t* parity_v,
+                                   rocke_gemm_emit_hook_t before_issue)
+{
     rocke_ir_builder_t* b = ctx->b;
     const rocke_gemm_universal_spec_t* spec = ctx->spec;
     const rocke_gemm_tile_spec_t* t = &spec->tile;
     const rocke_type_t* I64 = rocke_i64();
     (void)A_dst; /* Python emit_load_phase's A_dst/B_dst args are unused in body. */
     (void)B_dst;
+
+    /* ----------------------- TDM path ----------------------- *
+     * Mirrors Python's `if spec.trait.tdm:` branch at the top of emit_load_phase.
+     * One descriptor per operand moves the whole tile; returns early. */
+    if(spec->trait.tdm)
+    {
+        rocke_value_t* zero = rocke_b_const_i32(b, 0);
+        rocke_value_t* a_lds;
+        rocke_value_t* b_lds;
+        rocke_value_t* k_remaining;
+        /* Every builder call gets its own statement. C leaves the evaluation
+         * order of function arguments unspecified (see tdm.cpp). */
+        if(parity_v != NULL)
+        {
+            rocke_value_t* a_off = rocke_b_zext(
+                b, rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->tdm_a_buf_bytes)), I64);
+            a_lds = rocke_b_smem_ptr_add(b, ctx->tdm_a_lds_base, a_off);
+            rocke_value_t* b_off = rocke_b_zext(
+                b, rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->tdm_b_buf_bytes)), I64);
+            b_lds = rocke_b_smem_ptr_add(b, ctx->tdm_b_lds_base, b_off);
+        }
+        else if(parity_imm)
+        {
+            rocke_value_t* a_off
+                = rocke_b_zext(b, rocke_b_const_i32(b, parity_imm * ctx->tdm_a_buf_bytes), I64);
+            a_lds = rocke_b_smem_ptr_add(b, ctx->tdm_a_lds_base, a_off);
+            rocke_value_t* b_off
+                = rocke_b_zext(b, rocke_b_const_i32(b, parity_imm * ctx->tdm_b_buf_bytes), I64);
+            b_lds = rocke_b_smem_ptr_add(b, ctx->tdm_b_lds_base, b_off);
+        }
+        else
+        {
+            a_lds = ctx->tdm_a_lds_base;
+            b_lds = ctx->tdm_b_lds_base;
+        }
+
+        k_remaining = rocke_b_smax(b, rocke_b_sub(b, ctx->K, k_off), zero);
+
+        /* tensor_load_to_lds is wave-level; one wave owns each operand. */
+        if(ctx->tdm_waves > 1)
+        {
+            /* Waves 2p / 2p+1 own the fills of half p with
+             * tdm_alternate_issuers; waves 0 / 1 otherwise. The default emits
+             * the B-wave constant after the A gate, where it always has. */
+            rocke_value_t* a_wave = zero;
+            rocke_value_t* b_wave = NULL;
+            if(spec->trait.tdm_alternate_issuers)
+            {
+                if(parity_v != NULL)
+                {
+                    rocke_value_t* c2 = rocke_b_const_i32(b, 2);
+                    a_wave = rocke_b_mul(b, parity_v, c2);
+                }
+                else
+                {
+                    a_wave = rocke_b_const_i32(b, 2 * parity_imm);
+                }
+                rocke_value_t* c1 = rocke_b_const_i32(b, 1);
+                b_wave = rocke_b_add(b, a_wave, c1);
+            }
+            rocke_if_t a_gate = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tdm_wave_id, a_wave));
+            rocke_b_region_enter(b, a_gate.then_region);
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->A,
+                                 ctx->block_m_off,
+                                 ctx->block_m,
+                                 ctx->M,
+                                 a_lds,
+                                 ctx->batch_off_a,
+                                 k_off,
+                                 k_remaining,
+                                 zero,
+                                 before_issue);
+            rocke_b_region_leave(b);
+            if(b_wave == NULL)
+                b_wave = rocke_b_const_i32(b, 1);
+            rocke_if_t b_gate = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tdm_wave_id, b_wave));
+            rocke_b_region_enter(b, b_gate.then_region);
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->Bp,
+                                 ctx->block_n_off,
+                                 ctx->block_n,
+                                 ctx->N,
+                                 b_lds,
+                                 ctx->batch_off_b,
+                                 k_off,
+                                 k_remaining,
+                                 zero,
+                                 before_issue);
+            rocke_b_region_leave(b);
+        }
+        else
+        {
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->A,
+                                 ctx->block_m_off,
+                                 ctx->block_m,
+                                 ctx->M,
+                                 a_lds,
+                                 ctx->batch_off_a,
+                                 k_off,
+                                 k_remaining,
+                                 zero,
+                                 before_issue);
+            rocke_gemm_tdm_issue(ctx,
+                                 ctx->Bp,
+                                 ctx->block_n_off,
+                                 ctx->block_n,
+                                 ctx->N,
+                                 b_lds,
+                                 ctx->batch_off_b,
+                                 k_off,
+                                 k_remaining,
+                                 zero,
+                                 before_issue);
+        }
+        return;
+    }
 
     /* ----------------------- DirectToLDS path ----------------------- */
     if(spec->trait.direct_to_lds)
@@ -215,6 +406,16 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
     int load_vec = ctx->load_vec;
     bool db = ctx->db;
 
+    /* The pad_k sub-paths below gather load_vec scalars into a fixed
+     * ROCKE_GEMM_MAX_LOAD_VEC-element array before packing. load_vec is capped
+     * at 16/elem_bytes by rocke_choose_load_vec, so with a 1-byte operand it is
+     * exactly 16 -- the array is full with no headroom. Clamp rather than
+     * overrun if that invariant ever moves. */
+    if(load_vec > ROCKE_GEMM_MAX_LOAD_VEC)
+    {
+        load_vec = ROCKE_GEMM_MAX_LOAD_VEC;
+    }
+
     /* a_global_tile / b_global_tile / a_lds_tile / b_lds_tile. */
     rocke_tile_window_t a_global_tile, b_global_tile, a_lds_tile, b_lds_tile;
     {
@@ -247,9 +448,15 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
                               : (rvar))))
 
 #define PADK_VALID(elem_col) rocke_b_cmp_lt(b, rocke_b_add(b, k_off, (elem_col)), ctx->K)
-#define STORAGE_ZERO()                              \
-    (rocke_type_eq(ctx->storage_dtype, rocke_f64()) \
-         ? rocke_b_const_f64(b, 0.0)                \
+/* _zero_storage_scalar(): cast_f32_to has no 8-bit arm, and the cvt_f32_to_fp8
+ * route would burn a conversion intrinsic to produce a byte we already know:
+ * +0.0 is all-zero in both e4m3 and e5m2, and both lower to i8, so truncating a
+ * zero i32 is the whole job. fp64 takes an f64 constant. */
+#define STORAGE_ZERO()                                                   \
+    (rocke_gemm_storage_is_fp8(ctx->storage_dtype)                       \
+         ? rocke_b_trunc(b, rocke_b_const_i32(b, 0), ctx->storage_dtype) \
+     : rocke_type_eq(ctx->storage_dtype, rocke_f64())                    \
+         ? rocke_b_const_f64(b, 0.0)                                     \
          : rocke_b_cast_f32_to(b, rocke_b_const_f32(b, 0.0), ctx->storage_dtype))
 #define MASK_STORAGE(value, valid) rocke_b_select(b, (valid), (value), STORAGE_ZERO())
 
@@ -264,7 +471,7 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
         rocke_value_t* col = (load_vec > 1) ? rocke_b_mul(b, col_v, ctx->c_load_vec) : col_v;
         if(spec->trait.pad_k)
         {
-            rocke_value_t* comps[16];
+            rocke_value_t* comps[ROCKE_GEMM_MAX_LOAD_VEC];
             rocke_value_t* a_val;
             for(int i = 0; i < load_vec; ++i)
             {
@@ -325,7 +532,7 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
             rocke_value_t* col = (load_vec > 1) ? rocke_b_mul(b, col_v, ctx->c_load_vec) : col_v;
             if(spec->trait.pad_k)
             {
-                rocke_value_t* comps[16];
+                rocke_value_t* comps[ROCKE_GEMM_MAX_LOAD_VEC];
                 rocke_value_t* b_val;
                 for(int i = 0; i < load_vec; ++i)
                 {
@@ -380,7 +587,7 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
             rocke_value_t* col = (load_vec > 1) ? rocke_b_mul(b, col_v, ctx->c_load_vec) : col_v;
             if(spec->trait.pad_k)
             {
-                rocke_value_t* comps[16];
+                rocke_value_t* comps[ROCKE_GEMM_MAX_LOAD_VEC];
                 rocke_value_t* b_val;
                 for(int i = 0; i < load_vec; ++i)
                 {
@@ -444,6 +651,30 @@ rocke_value_t* rocke_gemm_emit_frag_smem_load(rocke_gemm_build_ctx_t* ctx,
     rocke_ir_builder_t* b = ctx->b;
     rocke_value_t* lds_row = rocke_b_add(b, atom_mn_base, mn_in_atom);
     rocke_value_t* lds_col = rocke_b_add(b, k_tile_base, k_in_atom);
+    /* fp8/bf8 is the one case where frag_len is not an element count: the
+     * gfx1250 K=64 WMMA carries its operands as <frag_len x i32>, one dword per
+     * slot covering four K-contiguous bytes. 8-bit LDS loads cap at 16 elements
+     * (ds_read_b128), so read the 4*frag_len bytes as 16-byte chunks, bitcast
+     * each to <4 x i32>, and concatenate into the <frag_len x i32> operand. */
+    if(rocke_gemm_storage_is_fp8(ctx->storage_dtype))
+    {
+        const rocke_type_t* dword4 = rocke_vector_type(b, rocke_i32(), 4);
+        rocke_value_t* fp8_frag = NULL;
+
+        for(int off = 0; off < frag_len * 4; off += 16)
+        {
+            rocke_value_t* chunk
+                = rocke_gemm_emit_smem_load(b,
+                                            src,
+                                            lds_row,
+                                            rocke_b_add(b, lds_col, rocke_b_const_i32(b, off)),
+                                            16,
+                                            ctx->storage_dtype);
+            rocke_value_t* dwords = rocke_b_vec_bitcast(b, chunk, dword4);
+            fp8_frag = (fp8_frag == NULL) ? dwords : rocke_b_vec_concat(b, fp8_frag, dwords);
+        }
+        return fp8_frag;
+    }
     /* max_vec = 8 if storage_dtype in (F16, BF16) else frag_len */
     bool is_half = rocke_type_eq(ctx->storage_dtype, rocke_f16())
                    || rocke_type_eq(ctx->storage_dtype, rocke_bf16());
@@ -478,7 +709,28 @@ void rocke_gemm_emit_wmma_phase(rocke_gemm_build_ctx_t* ctx,
                                 rocke_value_t* B_src,
                                 rocke_value_t* const* iter_vars,
                                 int num_iter_vars,
+                                int parity_imm,
+                                rocke_value_t* parity_v,
                                 rocke_value_t** out_accs)
+{
+    rocke_gemm_emit_hook_t none = {NULL, NULL};
+    rocke_gemm_emit_wmma_phase_ex(
+        ctx, A_src, B_src, iter_vars, num_iter_vars, parity_imm, parity_v, out_accs, none, none);
+}
+
+/* after_last_reads is emitted once the last k-atom's fragment loads are issued
+ * and before its WMMAs -- the earliest point at which this wave has no further
+ * reads of the tile (the split-barrier signal). */
+void rocke_gemm_emit_wmma_phase_ex(rocke_gemm_build_ctx_t* ctx,
+                                   rocke_value_t* A_src,
+                                   rocke_value_t* B_src,
+                                   rocke_value_t* const* iter_vars,
+                                   int num_iter_vars,
+                                   int parity_imm,
+                                   rocke_value_t* parity_v,
+                                   rocke_value_t** out_accs,
+                                   rocke_gemm_emit_hook_t after_last_reads,
+                                   rocke_gemm_emit_hook_t after_first_row)
 {
     rocke_ir_builder_t* b = ctx->b;
     const rocke_gemm_tile_spec_t* t = &ctx->spec->tile;
@@ -501,6 +753,30 @@ void rocke_gemm_emit_wmma_phase(rocke_gemm_build_ctx_t* ctx,
     rocke_value_t* warp_n_off
         = rocke_b_mul(b, ctx->warp_n_idx, rocke_b_const_i32(b, ctx->mfmas_n * t->warp_tile_n));
 
+    /* The ring/ping-pong slot this K-tile was filled into. The load side already
+     * offsets its LDS destination by the parity; without the same shift here
+     * every WMMA reads slot 0 while the mover is filling another -- a read/write
+     * race, not a wrong-address bug. */
+    bool parity_is_value = parity_v != NULL;
+    rocke_value_t* a_par_row_v;
+    rocke_value_t* b_par_row_v;
+    int a_par_row_static;
+    int b_par_row_static;
+    if(ctx->prefetch && parity_is_value)
+    {
+        a_par_row_v = rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->block_m));
+        b_par_row_v = rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->block_n));
+        a_par_row_static = 0;
+        b_par_row_static = 0;
+    }
+    else
+    {
+        a_par_row_v = NULL;
+        b_par_row_v = NULL;
+        a_par_row_static = ctx->prefetch ? parity_imm * ctx->block_m : 0;
+        b_par_row_static = ctx->prefetch ? parity_imm * ctx->block_n : 0;
+    }
+
     /* new_accs = list(iter_vars) */
     for(int i = 0; i < ctx->num_accs; ++i)
         out_accs[i] = iter_vars[i];
@@ -514,18 +790,25 @@ void rocke_gemm_emit_wmma_phase(rocke_gemm_build_ctx_t* ctx,
         rocke_value_t* k_tile_base = rocke_b_const_i32(b, kk * t->warp_tile_k);
         for(int mi = 0; mi < ctx->mfmas_m; ++mi)
         {
-            rocke_value_t* atom_row
-                = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, mi * t->warp_tile_m));
+            rocke_value_t* atom_row = rocke_b_add(
+                b, warp_m_off, rocke_b_const_i32(b, mi * t->warp_tile_m + a_par_row_static));
+            if(a_par_row_v != NULL)
+                atom_row = rocke_b_add(b, atom_row, a_par_row_v);
             a_rows[mi] = rocke_gemm_emit_frag_smem_load(
                 ctx, A_src, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, ctx->a_per_lane);
         }
         for(int ni = 0; ni < ctx->mfmas_n; ++ni)
         {
-            rocke_value_t* atom_row
-                = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * t->warp_tile_n));
+            rocke_value_t* atom_row = rocke_b_add(
+                b, warp_n_off, rocke_b_const_i32(b, ni * t->warp_tile_n + b_par_row_static));
+            if(b_par_row_v != NULL)
+                atom_row = rocke_b_add(b, atom_row, b_par_row_v);
             b_cols[ni] = rocke_gemm_emit_frag_smem_load(
                 ctx, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, ctx->b_per_lane);
         }
+        bool last_k_atom = kk == ctx->k_atoms - 1;
+        if(after_last_reads.fn != NULL && last_k_atom)
+            after_last_reads.fn(ctx, after_last_reads.user);
         int flat = 0;
         for(int mi = 0; mi < ctx->mfmas_m; ++mi)
         {
@@ -535,6 +818,8 @@ void rocke_gemm_emit_wmma_phase(rocke_gemm_build_ctx_t* ctx,
                     = rocke_gemm_emit_mma(b, ctx->op, a_rows[mi], b_cols[ni], out_accs[flat]);
                 ++flat;
             }
+            if(after_first_row.fn != NULL && last_k_atom && mi == 0)
+                after_first_row.fn(ctx, after_first_row.user);
         }
     }
 }

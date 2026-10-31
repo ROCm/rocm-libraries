@@ -28,6 +28,7 @@ import enum
 import os
 import sys
 from dataclasses import dataclass, field
+from math import gcd as _gcd
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .arch import target as _arch
@@ -3063,6 +3064,16 @@ class IRBuilder:
                 f"unsupported vector width for smem_store_vN of {elem_name}: {n} "
                 f"(allowed: {allowed_n})"
             )
+        # The natural alignment is n * elem_bytes, but that only holds if every
+        # address the store can land on is that aligned. An LDS tile advances by
+        # its innermost dimension per row, so a pad that makes that dimension a
+        # non-multiple of n -- lds_k_pad's whole purpose -- leaves alternate rows
+        # off the natural boundary. gcd bounds the claim to what every row start
+        # actually guarantees. Overstating alignment is undefined behaviour even
+        # where the hardware tolerates the access; understating it only affects
+        # instruction selection.
+        shape = getattr(smem.type, "shape", None)
+        align_elems = _gcd(n, int(shape[-1])) if shape else n
         self._op(
             "tile.smem_store_vN",
             [smem, *indices, value],
@@ -3070,7 +3081,7 @@ class IRBuilder:
                 "rank": len(indices),
                 "elem_type": elem_name,
                 "vec": n,
-                "align": n * elem_bytes,
+                "align": align_elems * elem_bytes,
             },
         )
 
@@ -3288,6 +3299,22 @@ class IRBuilder:
     def wmma_gfx1250_f32_16x16x64_bf8_bf8(self, a: Value, b: Value, c: Value) -> Value:
         """gfx1250 (gfx1250) BF8 K=64 WMMA. Thin wrapper over :meth:`mma`."""
         return self.mma("wmma_gfx1250_f32_16x16x64_bf8_bf8", a, b, c)
+
+    def wmma_gfx1250_f32_16x16x128_f8f6f4(self, a: Value, b: Value, c: Value) -> Value:
+        """gfx1250 dense FP8 WMMA at K=128: D[16x16] += A[16x128] * B[128x16].
+
+        The wide low-bit atom, reached through the ``f8f6f4`` opcode with both
+        matrix-format immediates pinned to FP8 (E4M3). Per lane ``a`` and ``b``
+        are 64 fp8 bytes carried as ``<16 x i32>`` -- twice the K=64 atom's
+        operand -- while the accumulator ``c`` / result stay ``<8 x float>``.
+
+        This is the **dense** use of ``f8f6f4``: no scale operands, unlike
+        :meth:`mma` on the ``*_scale_e8m0_*`` atoms that share the same shape
+        and carrier width. Lowered through
+        :meth:`rocke.core.isa.Gfx1250Backend.emit_wmma` to
+        ``llvm.amdgcn.wmma.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32``. Thin
+        wrapper over :meth:`mma`."""
+        return self.mma("wmma_gfx1250_f32_16x16x128_f8f6f4", a, b, c)
 
     def mfma_f32_16x16x16_f16(self, a: Value, b: Value, c: Value) -> Value:
         return self.mma("mfma_f32_16x16x16_f16", a, b, c)
@@ -4820,6 +4847,19 @@ class IRBuilder:
             [smem],
             [I64],
             result_name_hint="lds_addr",
+        ).result
+
+    def global_addr_of(self, ptr: Value, index: Value) -> Value:
+        """The i64 address of ``ptr[index]`` in global memory.
+
+        The TDM descriptor carries a raw 57-bit global address rather than a
+        pointer, so the element GEP has to be materialised as an integer.
+        """
+        return self._op(
+            "tile.global_addr_of",
+            [ptr, index],
+            [I64],
+            result_name_hint="gaddr",
         ).result
 
     def smem_ptr_add(self, lds_addr: Value, byte_off: Value) -> Value:
@@ -6479,6 +6519,7 @@ PURE_OP_NAMES = {
     "tile.wave_ballot",
     "tile.sync_half_block",
     "tile.smem_addr_of",
+    "tile.global_addr_of",
     "tile.smem_ptr_add",
     "tile.global_ptr_to_i64",
     "tile.global_ptr_offset",

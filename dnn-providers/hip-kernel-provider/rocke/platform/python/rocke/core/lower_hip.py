@@ -928,6 +928,18 @@ class _Lowerer:
     def _op_tile_wmma_gfx1250_f32_16x16x64_bf8_bf8(self, op: Op) -> None:
         self._emit_wmma_gfx1250_fp8(op, "bf8_bf8")
 
+    def _op_tile_wmma_gfx1250_f32_16x16x128_f8f6f4(self, op: Op) -> None:
+        # gfx1250 dense K=128 builtin: A/B are <16 x i32> (64 low-bit bytes per
+        # lane), 6-operand form (fmtA, A, fmtB, B, modC, C) -- a format
+        # immediate per matrix (0 = FP8/E4M3) and no reuse flags.
+        self._require_wmma_arch("wmma_gfx1250_f32_16x16x128_f8f6f4")
+        a, b, c = op.operands
+        self._emit(
+            f"f32x8 {_name(op.result)} = "
+            f"__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4("
+            f"0, {_name(a)}, 0, {_name(b)}, (int16_t)0, {_name(c)});"
+        )
+
     def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
         # gfx1250 K=64 FP8/BF8 builtin: A/B are passed as i32x8 (32 low-bit
         # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).
@@ -1136,6 +1148,15 @@ class _Lowerer:
         if storage is None:
             raise RuntimeError("smem_addr_of before smem_alloc was lowered")
         self._emit(f"int64_t {_name(op.result)} = (int64_t)(&{storage}[0]);")
+
+    def _op_tile_global_addr_of(self, op: Op) -> None:
+        # Integer arithmetic, not &ptr[index]: a clipped TDM fill can point past
+        # the allocation, and pointer arithmetic past an object is undefined.
+        ptr, index = op.operands
+        self._emit(
+            f"int64_t {_name(op.result)} = (int64_t)(uintptr_t){_name(ptr)} "
+            f"+ (int64_t){_name(index)} * (int64_t)sizeof(*{_name(ptr)});"
+        )
 
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
         base, off = op.operands

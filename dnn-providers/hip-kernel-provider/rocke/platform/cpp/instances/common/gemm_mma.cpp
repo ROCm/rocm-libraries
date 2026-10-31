@@ -191,8 +191,13 @@ int rocke_gemm_choose_load_vec(const rocke_gemm_universal_spec_t* spec)
 {
     const rocke_gemm_tile_spec_t* t = &spec->tile;
     int vec = 0;
+    /* The picker caps the vector at 16/elem_bytes, so passing the real A/B
+     * width is what lets a 1-byte operand use all 16 bytes.
+     * trait.ab_load_elem_bytes overrides it. */
+    int elem_bytes = spec->trait.ab_load_elem_bytes_set ? spec->trait.ab_load_elem_bytes
+                                                        : rocke_gemm_elem_bytes(spec);
     rocke_status_t st = rocke_choose_load_vec(
-        t->tile_m, t->tile_n, t->tile_k, spec->block_size, rocke_gemm_elem_bytes(spec), &vec);
+        t->tile_m, t->tile_n, t->tile_k, spec->block_size, elem_bytes, &vec);
     if(st != ROCKE_OK)
         return 0; /* Python raises ValueError; unreachable for a valid spec. */
     return vec;

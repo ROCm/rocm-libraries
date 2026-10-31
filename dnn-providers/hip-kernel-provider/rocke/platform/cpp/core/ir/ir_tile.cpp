@@ -346,7 +346,19 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     rocke_attr_set_int(b, &attrs, "rank", (int64_t)num_indices);
     rocke_attr_set_str(b, &attrs, "elem_type", elem_name);
     rocke_attr_set_int(b, &attrs, "vec", (int64_t)n);
-    rocke_attr_set_int(b, &attrs, "align", (int64_t)(n * elem_bytes));
+    /* Mirrors ir.py smem_store_vN. The natural alignment is n * elem_bytes,
+     * but that only holds if every address the store can land on is that
+     * aligned. An LDS tile advances by its innermost dimension per row, so a
+     * pad making that dimension a non-multiple of n -- lds_k_pad's whole
+     * purpose -- leaves alternate rows off the natural boundary. gcd bounds
+     * the claim to what every row start actually guarantees. Overstating
+     * alignment is undefined behaviour even where the hardware tolerates the
+     * access; understating it only affects instruction selection. */
+    rocke_attr_set_int(
+        b,
+        &attrs,
+        "align",
+        (int64_t)(rocke_i_smem_vec_align_elems(smem ? smem->type : NULL, n) * elem_bytes));
     rocke_i_op0(b, ROCKE_OP_TILE_SMEM_STORE_VN, ops, nops, &attrs);
 }
 
