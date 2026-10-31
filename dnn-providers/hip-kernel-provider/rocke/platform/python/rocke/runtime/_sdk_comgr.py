@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import re
 from importlib import metadata
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 
 def _distribution():
@@ -35,7 +35,8 @@ def _payloads(distribution, windows: bool) -> list[str]:
             or not re.fullmatch(filename, parts[2])
         ):
             continue
-        path = os.path.abspath(distribution.locate_file(entry))
+        # Metadata sites may contain symlink-sensitive '..'; anchor, do not normalize.
+        path = str(Path(distribution.locate_file(entry)).absolute())
         if os.path.isfile(path):
             paths.append(path)
     return sorted(set(paths), key=lambda path: (len(os.path.basename(path)), path))

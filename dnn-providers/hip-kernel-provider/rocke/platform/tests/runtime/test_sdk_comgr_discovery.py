@@ -311,6 +311,63 @@ def test_record_rejects_unowned_or_malformed_paths(sdk_site):
     assert comgr.resolved_lib_path() is None
 
 
+@pytest.mark.parametrize("suffix", ["", "_nonce"])
+@pytest.mark.parametrize("windows", [False, True])
+@pytest.mark.parametrize("relative_site", [False, True])
+@pytest.mark.parametrize("decoy_present", [False, True])
+def test_metadata_site_preserves_symlink_parent_traversal(
+    sdk_site, tmp_path, monkeypatch, suffix, windows, relative_site, decoy_present
+):
+    from rocke.runtime import _sdk_comgr
+
+    deployment = tmp_path / "deployment"
+    site = deployment / "physical" / "site-packages"
+    site.parent.mkdir(parents=True)
+    sdk_site.parent.rename(site)
+    core = site / ("_rocm_sdk_core" + suffix)
+    if suffix:
+        (site / "_rocm_sdk_core").rename(core)
+    relative = "bin/amd_comgr0702.dll" if windows else "lib/libamd_comgr.so.3"
+    library = core / relative
+    library.parent.mkdir()
+    library.touch()
+    next(site.glob("*.dist-info")).joinpath("RECORD").write_text(
+        f"{core.name}/{relative},,\n"
+    )
+    child = site.parent / "child"
+    child.mkdir()
+    alias = deployment / "alias"
+    try:
+        alias.symlink_to(child, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlink unavailable: {error}")
+    decoy = deployment / "site-packages" / core.name / relative
+    if decoy_present:
+        decoy.parent.mkdir(parents=True)
+        decoy.touch()
+    monkeypatch.chdir(tmp_path)
+    spelling = os.path.join(str(alias), "..", "site-packages")
+    if relative_site:
+        spelling = os.path.join("deployment", "alias", "..", "site-packages")
+    monkeypatch.syspath_prepend(spelling)
+    monkeypatch.setattr(rc, "_IS_WINDOWS", windows)
+
+    distribution = _sdk_comgr._distribution()
+    assert os.path.samefile(
+        distribution.locate_file(f"{core.name}/{relative}"), library
+    )
+    selected = _sdk_comgr.candidates(windows=windows)
+    assert len(selected) == 1
+    assert os.path.isabs(selected[0])
+    assert os.path.samefile(selected[0], library)
+    assert _sdk_comgr.release_for_path(str(library)) == (7, 9)
+    if decoy_present:
+        assert _sdk_comgr.release_for_path(str(decoy)) is None
+    assert comgr.resolved_lib_path() == selected[0]
+    for name in ("torch", "rocm_sdk", core.name):
+        assert name not in sys.modules
+
+
 def test_compatibility_hook_never_imports_torch(sdk_site, monkeypatch):
     library = sdk_site / "lib/libamd_comgr.so.3"
     library.parent.mkdir()
