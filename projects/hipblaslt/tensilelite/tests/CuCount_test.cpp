@@ -922,8 +922,9 @@ namespace
     class TestSolutionIterator : public Client::SolutionIterator
     {
     public:
-        explicit TestSolutionIterator(std::shared_ptr<Hardware> hardware)
-            : SolutionIterator(nullptr, std::move(hardware), false)
+        explicit TestSolutionIterator(std::shared_ptr<Hardware> hardware,
+                                      bool                      printRejectedPredicates = false)
+            : SolutionIterator(nullptr, std::move(hardware), false, printRejectedPredicates)
         {
         }
 
@@ -1072,6 +1073,44 @@ TEST(StreamKDynamicQueueXcdGateTest, ClientIteratorFiltersOnlyUnsupportedDynamic
     initEquality512Solution(staticSolution, 3);
     EXPECT_TRUE(iterator.accepts(staticSolution, problem, true))
         << "The topology guard must retain static StreamK coverage on MI300A";
+}
+
+// The predicate evaluation of a rejected solution (debugEval) is logged only with
+// the client's print-rejected-predicates option, even at a log level that would
+// print it; the solution is rejected either way.
+TEST(SolutionIteratorPredicateDumpTest, DumpOnlyWithOption)
+{
+    auto hardware = std::make_shared<hip::HipAMDGPU>(makeGfx942DeviceWithXcd(8));
+    auto problem  = makeGemmProblem(512, 512, 512);
+
+    ContractionSolution problemRejected;
+    problemRejected.problemPredicate
+        = std::make_shared<Predicates::False<ContractionProblemGemm>>();
+    ContractionSolution hardwareRejected;
+    hardwareRejected.hardwarePredicate = std::make_shared<Predicates::False<Hardware>>();
+
+    for(bool printRejectedPredicates : {false, true})
+    {
+        for(ContractionSolution* solution : {&problemRejected, &hardwareRejected})
+        {
+            TestSolutionIterator iterator(hardware, printRejectedPredicates);
+            std::ostringstream   logOutput;
+            auto reporter = std::make_shared<Client::LogReporter>(
+                Client::LogLevel::Debug,
+                std::initializer_list<std::string>{Client::ResultKey::Validation},
+                logOutput,
+                false,
+                false);
+            iterator.setReporter(reporter);
+
+            EXPECT_FALSE(iterator.accepts(*solution, problem, true));
+            bool dumped = logOutput.str().find("FalsePred") != std::string::npos;
+            EXPECT_EQ(dumped, printRejectedPredicates)
+                << (solution == &problemRejected ? "problem" : "hardware")
+                << " predicate, print-rejected-predicates=" << printRejectedPredicates << ", log:\n"
+                << logOutput.str();
+        }
+    }
 }
 
 // ===========================================================================

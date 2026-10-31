@@ -324,6 +324,9 @@ namespace TensileLite
                 ("csv-export-extra-cols",    po::value<bool>()->default_value(false), "CSV exports winner information")
                 ("csv-merge-same-problems",  po::value<bool>()->default_value(false), "CSV merge rows of same problem id")
                 ("PrintWinnersOnly",         po::value<bool>()->default_value(false), "PrintWinnersOnly")
+                ("print-rejected-predicates", po::value<bool>()->default_value(false), "Log the evaluation of every predicate of "
+                                                                                       "solutions rejected by their predicates (needs "
+                                                                                       "log-level Verbose or Debug).")
 
                 ("problem-size,p",           vector_default_empty<std::string>(), "Specify a problem size.  Comma-separated list of "
                                                                                   "sizes, in the order of the Einstein notation.")

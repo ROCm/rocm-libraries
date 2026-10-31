@@ -168,6 +168,7 @@ def _set_all_gp(monkeypatch):
         "ClientLogLevel": 1,
         "MaxWorkspaceSize": 32 * 1024 * 1024,
         "PrintWinnersOnly": False,
+        "PrintRejectedPredicates": False,
         "GranularityThreshold": 0.0,
         "PredictionThreshold": 100.0,
         "PristineOnGPU": True,
@@ -543,6 +544,16 @@ class TestWriteClientConfigIniPlain:
         content = _write_ini(tmp_path, monkeypatch, pt, _PLAIN_GEMM_PT_DICT,
                              extra_gp={"CheckSynchronizer": enabled})
         assert f"check-synchronizer={enabled}" in content
+
+    def test_print_rejected_predicates_written_only_when_set(self, tmp_path, monkeypatch):
+        """PrintRejectedPredicates turns on the client's predicate dump; the
+        client's default is off, so the key is omitted when the parameter is off."""
+        pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
+        content = _write_ini(tmp_path, monkeypatch, pt, _PLAIN_GEMM_PT_DICT)
+        assert "print-rejected-predicates" not in content
+        content = _write_ini(tmp_path, monkeypatch, pt, _PLAIN_GEMM_PT_DICT,
+                             extra_gp={"PrintRejectedPredicates": True})
+        assert "print-rejected-predicates=True" in content
 
     def test_print_tensor_flags_written_when_set(self, tmp_path, monkeypatch):
         """Lines 667-686: PrintTensor* flags written to INI when enabled."""

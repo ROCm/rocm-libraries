@@ -805,6 +805,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("log-level",                ClientLogLevel(globalParameters["ClientLogLevel"]).name)
         param("max-workspace-size",       globalParameters["MaxWorkspaceSize"])
         param("PrintWinnersOnly",         globalParameters["PrintWinnersOnly"])
+        if globalParameters["PrintRejectedPredicates"]:
+          param("print-rejected-predicates", True)
         param("granularity-threshold",    globalParameters["GranularityThreshold"])
         param("prediction-threshold",     globalParameters["PredictionThreshold"])
         param("pristine-on-gpu",          globalParameters["PristineOnGPU"])

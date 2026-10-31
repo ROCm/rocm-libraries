@@ -261,6 +261,9 @@ globalParameters["PrintTensorGate"] = 0
 globalParameters["PrintTensorScaleAlphaVec"] = 0  # Print TensorScaleAlphaVec after initialization
 globalParameters["PrintTensorAmaxD"] = 0  # Print AmaxD after validation
 globalParameters["PrintWinnersOnly"] = False  # Only print the solutions which become the fastest
+globalParameters["PrintRejectedPredicates"] = (
+    False  # client logs the evaluation of every predicate of solutions rejected by their predicates; needs ClientLogLevel >= 2
+)
 globalParameters["PrintCodeCommands"] = (
     False  # print the commands used to generate the code objects (asm,link,hip-clang, etc)
 )
