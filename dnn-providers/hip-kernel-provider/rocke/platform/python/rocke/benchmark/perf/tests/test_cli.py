@@ -200,6 +200,40 @@ class TestOccupancyCmd(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(err.getvalue(), "")
 
+    def test_occupancy_arch_in_either_triple_spelling_is_not_a_mismatch(self):
+        # A real gfx942 code object, with --arch given as a full ISA name in both
+        # spellings compilers write: the command reads the processor from it and
+        # warns about nothing.
+        llc = _find_llvm_tool("llc")
+        if llc is None or _find_llvm_tool("llvm-readelf") is None:
+            self.skipTest("llc or llvm-readelf not found")
+        with tempfile.NamedTemporaryFile(suffix=".o") as f:
+            f.write(_llc_code_object(llc, "gfx942", 64, wave_size=64))
+            f.flush()
+            for arch in (
+                "amdgcn-amd-amdhsa--gfx942",
+                "amdgcn-amd-amdhsa-unknown-gfx942",
+            ):
+                with self.subTest(arch=arch):
+                    err = io.StringIO()
+                    with redirect_stderr(err):
+                        code, out = _run(
+                            ["--json", "occupancy", f.name, "--arch", arch]
+                        )
+                    self.assertEqual(code, 0)
+                    self.assertEqual(json.loads(out)["target_arch"], "gfx942")
+                    self.assertEqual(err.getvalue(), "")
+
+    def test_occupancy_refuses_an_arch_that_is_not_a_target_id(self):
+        # --arch is read with the target-note rules, so a malformed value stops
+        # the command with the reason before any code object is modelled.
+        with tempfile.NamedTemporaryFile(suffix=".hsaco") as f:
+            f.write(b"\x7fELF fake")
+            f.flush()
+            with self.assertRaises(SystemExit) as ctx:
+                _run(["occupancy", f.name, "--arch", "gfx942:xnack"])
+        self.assertIn("'gfx942:xnack' is not a target ID", str(ctx.exception))
+
     def test_occupancy_empty_errors(self):
         orig = cli_mod._occupancy.resources
         cli_mod._occupancy.resources = lambda data, arch: {}

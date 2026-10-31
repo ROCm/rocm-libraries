@@ -757,11 +757,19 @@ static const char* rocke_generic_arch_alias(const char* target_id)
     return NULL;
 }
 
-/* Length of a base architecture that remains a prefix of target_id; consult the
- * shared catalog so names such as gfx11-generic are preserved before removing
- * profile suffixes. Generic aliases are handled separately because their catalog
- * names are not prefixes of the concrete processor names. */
-static size_t rocke_base_arch_length(const char* target_id)
+static bool rocke_is_lower_alnum(char c)
+{
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z');
+}
+
+/* Length of the processor at the start of target_id (Python:
+ * processor_from_target_id). A catalog name is kept whole, so names such as
+ * gfx11-generic are preserved before removing profile suffixes; otherwise the
+ * leading gfx token. Python also tries the generic-target members before the
+ * token; every member is a gfx token, so both give the same length. Generic
+ * aliases are handled separately because their catalog names are not prefixes
+ * of the concrete processor names. */
+static size_t rocke_processor_length(const char* target_id)
 {
     size_t name_len = strcspn(target_id, ":");
     size_t best = 0;
@@ -811,6 +819,77 @@ const char* rocke_target_id_from_isa(const char* isa, char* out, size_t out_cap)
     return rocke_copy_target(target, strlen(target), out, out_cap);
 }
 
+/* Start of the target ID when the whole of value has the form parse_target_id
+ * accepts, else NULL. Python: the _TARGET_ID pattern in rocke.core.arch.target. */
+static const char* rocke_strict_target_id_start(const char* value)
+{
+    static const char triple[] = "amdgcn-amd-amdhsa-";
+    const char* p = value;
+    if(strncmp(p, triple, sizeof(triple) - 1) == 0)
+    {
+        p += sizeof(triple) - 1;
+        if(strncmp(p, "unknown-", 8) == 0)
+            p += 8;
+        else if(*p == '-')
+            ++p;
+        else
+            return NULL;
+    }
+    const char* start = p;
+    if(strncmp(p, "gfx", 3) != 0)
+        return NULL;
+    p += 3;
+    if(!rocke_is_lower_alnum(*p))
+        return NULL;
+    while(rocke_is_lower_alnum(*p))
+        ++p;
+    while(*p == '-')
+    {
+        ++p;
+        if(!rocke_is_lower_alnum(*p))
+            return NULL;
+        while(rocke_is_lower_alnum(*p))
+            ++p;
+    }
+    while(*p == ':')
+    {
+        ++p;
+        if(!rocke_is_lower_alnum(*p) && *p != '_')
+            return NULL;
+        while(rocke_is_lower_alnum(*p) || *p == '_')
+            ++p;
+        if(*p != '+' && *p != '-')
+            return NULL;
+        ++p;
+    }
+    return *p == '\0' ? start : NULL;
+}
+
+const char*
+    rocke_parse_target_id(const char* value, char* out, size_t out_cap, char* err, size_t err_cap)
+{
+    if(!value || !out || out_cap == 0)
+        return NULL;
+    const char* target = rocke_strict_target_id_start(value);
+    if(target)
+        return rocke_copy_target(target, strlen(target), out, out_cap);
+    if(err && err_cap != 0)
+        snprintf(err,
+                 err_cap,
+                 "'%s' is not a target ID: expected an optional amdgcn-amd-amdhsa-- or "
+                 "amdgcn-amd-amdhsa-unknown- prefix, a processor such as gfx942 or "
+                 "gfx11-generic, then any :feature+ or :feature- suffixes",
+                 value);
+    return NULL;
+}
+
+const char* rocke_processor_from_target_id(const char* target_id, char* out, size_t out_cap)
+{
+    if(!target_id || !out || out_cap == 0)
+        return NULL;
+    return rocke_copy_target(target_id, rocke_processor_length(target_id), out, out_cap);
+}
+
 const char* rocke_base_arch_from_target_id(const char* target_id, char* out, size_t out_cap)
 {
     if(!target_id || !out || out_cap == 0)
@@ -818,7 +897,7 @@ const char* rocke_base_arch_from_target_id(const char* target_id, char* out, siz
     const char* alias = rocke_generic_arch_alias(target_id);
     if(alias)
         return rocke_copy_target(alias, strlen(alias), out, out_cap);
-    return rocke_copy_target(target_id, rocke_base_arch_length(target_id), out, out_cap);
+    return rocke_copy_target(target_id, rocke_processor_length(target_id), out, out_cap);
 }
 
 const char* rocke_compiler_target_from_target_id(const char* target_id, char* out, size_t out_cap)
@@ -827,7 +906,7 @@ const char* rocke_compiler_target_from_target_id(const char* target_id, char* ou
         return NULL;
     size_t name_len = strcspn(target_id, ":");
     const char* features = target_id + name_len;
-    size_t base_len = rocke_base_arch_length(target_id);
+    size_t base_len = rocke_processor_length(target_id);
     if(base_len < name_len && target_id[base_len] == '-')
         name_len = base_len;
     if(name_len >= out_cap)
@@ -841,7 +920,7 @@ const char* rocke_generic_arch_from_target_id(const char* target_id, char* out, 
 {
     if(!target_id || !out || out_cap == 0)
         return NULL;
-    size_t base_len = rocke_base_arch_length(target_id);
+    size_t base_len = rocke_processor_length(target_id);
     for(const rocke_ati_generic_row_t* row = rocke_ati_generic_targets; row->generic != NULL; ++row)
     {
         bool match
