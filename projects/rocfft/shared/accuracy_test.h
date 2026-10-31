@@ -36,6 +36,7 @@
 #include "fft_params.h"
 #include "fftw_transform.h"
 #include "gpubuf.h"
+#include "input_preservation.h"
 #include "reference_fft_data.h"
 #include "rocfft_against_fftw.h"
 #include "sys_mem.h"
@@ -338,11 +339,12 @@ void check_output_strides(const std::vector<hostbuf>& output, Tparams& params)
 
 // run rocFFT inverse transform
 template <class Tparams>
-inline void run_round_trip_inverse(Tparams&              params,
-                                   std::vector<gpubuf>&  obuffer,
-                                   std::vector<void*>&   pibuffer,
-                                   std::vector<void*>&   pobuffer,
-                                   std::vector<hostbuf>& gpu_output)
+inline void run_round_trip_inverse(Tparams&                           params,
+                                   std::vector<gpubuf>&               obuffer,
+                                   std::vector<void*>&                pibuffer,
+                                   std::vector<void*>&                pobuffer,
+                                   std::vector<hostbuf>&              gpu_output,
+                                   input_preservation_check<Tparams>& input_check)
 {
     if(params.run_callbacks == fft_callback_type_jit)
     {
@@ -394,8 +396,14 @@ inline void run_round_trip_inverse(Tparams&              params,
         params.multi_gpu_prepare(cpu_input, obuffer, pibuffer, pobuffer);
     }
 
+    // Arm the check here rather than at the call site: validate() above is what
+    // computes this transform's isize, and pibuffer is only final now.
+    input_check = input_preservation_check<Tparams>(params, pibuffer);
+
     // execute GPU transform
     execute_gpu_fft(params, pibuffer, pobuffer, obuffer, gpu_output, true);
+
+    input_check.snapshot_after();
 }
 
 // compare rocFFT inverse transform with forward transform input
@@ -670,7 +678,13 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     std::vector<hostbuf> gpu_output
         = allocate_host_buffer(params.precision, params.otype, params.osize);
 
+    input_preservation_check input_check(params, pibuffer);
+
     execute_gpu_fft(params, pibuffer, pobuffer, *obuffer, gpu_output);
+
+    // Grab the input image before the round-trip inverse below, which writes
+    // its output into pibuffer and so destroys this transform's input.
+    input_check.snapshot_after();
 
     params.free();
 
@@ -732,8 +746,9 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     if(compare_output.valid())
         compare_output.get();
 
-    Tparams              params_inverse;
-    std::vector<hostbuf> roundtrip_output_buffers;
+    Tparams                           params_inverse;
+    std::vector<hostbuf>              roundtrip_output_buffers;
+    input_preservation_check<Tparams> inverse_input_check;
 
     if(round_trip)
     {
@@ -741,8 +756,12 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         params_inverse.compute_osize();
         roundtrip_output_buffers = allocate_host_buffer(params_inverse.obuffer_sizes());
 
-        run_round_trip_inverse<Tparams>(
-            params_inverse, *obuffer, pobuffer, pibuffer, roundtrip_output_buffers);
+        run_round_trip_inverse<Tparams>(params_inverse,
+                                        *obuffer,
+                                        pobuffer,
+                                        pibuffer,
+                                        roundtrip_output_buffers,
+                                        inverse_input_check);
     }
 
     if(fftw_compare)
@@ -819,6 +838,20 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                                                 cpu_input_norm.get(),
                                                 total_length);
         }
+    }
+
+    // Report a clobbered input only once the transform is known to be
+    // otherwise correct.  A transform that gets the wrong answer is diagnosed
+    // by the accuracy failure above, and adding a second failure on top of it
+    // just obscures which one to chase.
+    if(!::testing::Test::HasFailure())
+    {
+        const auto input_modified = input_check.verify();
+        EXPECT_TRUE(input_modified.empty()) << input_modified << params.str();
+
+        const auto inverse_input_modified = inverse_input_check.verify();
+        EXPECT_TRUE(inverse_input_modified.empty())
+            << "round-trip inverse: " << inverse_input_modified << params_inverse.str();
     }
 }
 
