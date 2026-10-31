@@ -1595,15 +1595,28 @@ def supports_unified_attention_3d_module(
 ) -> Tuple[bool, str]:
     """Spec-first predicate for :func:`build_unified_attention_3d_module`.
 
-    Functional limits only: the segment kernel's shape gate, its Q/K/V tiles
-    fitting LDS (the same bound the strided runtime enforces), and the reduce
+    Functional limits only: the segment kernel's shape gate, its KV tile, its Q/K/V
+    tiles fitting LDS (the same bound the strided runtime enforces), and the reduce
     kernel derived by :func:`reduce_spec_for_segment`.
+
+    The KV tile (``spec.tile_size``: ``tile_size_override``, else ``block_size``) must
+    be a positive multiple of ``MFMA_N`` that divides ``block_size``: the builder walks
+    a page in whole tiles and a tile in whole 16-wide MFMA steps. With the gate's head
+    sizes (multiples of 64) that also splits a tile into whole async K/V copies.
     """
     from ..common.attention_unified import _strided_3d_lds_reason
 
     ok, reason = supports_tiled_3d_spec(spec, arch=arch)
     if not ok:
         return False, reason
+    tile = spec.tile_size
+    if tile <= 0 or tile % MFMA_N != 0 or spec.block_size % tile != 0:
+        return (
+            False,
+            f"tiled 3D kernel needs a KV tile that is a positive multiple of {MFMA_N} "
+            f"dividing block_size {spec.block_size} (tile_size_override "
+            f"{spec.tile_size_override})",
+        )
     reduce = reduce_spec_for_segment(spec)
     ok, reason = supports_unified_attention_reduce_tiled(reduce, arch=arch)
     if not ok:
