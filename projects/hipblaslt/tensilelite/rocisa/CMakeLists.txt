@@ -132,6 +132,7 @@ block()
 
     nanobind_add_module(_rocisa ${_rocisa_nb_flags}
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/main.cpp"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/asm_caps_cache.cpp"
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/base.cpp"
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/code.cpp"
                             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/container.cpp"
@@ -147,6 +148,23 @@ block()
     target_include_directories(_rocisa PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
     )
+
+    # The on-disk cache of probed assembler capabilities is keyed by the probe
+    # sources, so editing a probe stops rocisa from using older entries. CMake
+    # re-runs when they change.
+    set(_rocisa_probe_sources
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include/hardware_caps.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include/helper.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/helper.cpp")
+    set(_rocisa_probe_hashes "")
+    foreach(_rocisa_probe_source IN LISTS _rocisa_probe_sources)
+        file(SHA256 "${_rocisa_probe_source}" _rocisa_probe_source_hash)
+        string(APPEND _rocisa_probe_hashes "${_rocisa_probe_source_hash}")
+    endforeach()
+    string(SHA256 _rocisa_probe_hash "${_rocisa_probe_hashes}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_rocisa_probe_sources})
+    set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/asm_caps_cache.cpp"
+        PROPERTIES COMPILE_DEFINITIONS "ROCISA_ASM_CAPS_PROBE_HASH=\"${_rocisa_probe_hash}\"")
 
     if(ROCISA_ENABLE_COVERAGE)
         target_compile_options(_rocisa PRIVATE -fprofile-instr-generate -fcoverage-mapping)

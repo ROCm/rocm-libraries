@@ -30,6 +30,15 @@
 
 #include "helper.hpp"
 
+// Set on the calling thread when an assembler run ends other than by accepting
+// (0) or rejecting (1) its source, e.g. by crashing or being killed. That run
+// says nothing about the instruction, so results probed with it must not be cached.
+inline bool& unusualAssemblerExit()
+{
+    thread_local bool seen = false;
+    return seen;
+}
+
 inline bool tryAssembler(const IsaVersion&  isaVersion,
                          const std::string& assemblerPath,
                          const std::string& asmString,
@@ -72,6 +81,8 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
     // which is not the same as the assembler rejecting this particular ISA/instruction.
     if(rcode == 127)
         throw std::runtime_error("Assembler not found or not executable: " + assemblerPath);
+    if(rcode != 0 && rcode != 1)
+        unusualAssemblerExit() = true;
     if(rcode != 0)
         return false;
     return true;
