@@ -120,15 +120,15 @@ the strategy's biggest holes live (see
   error budget. The gfx1151/gfx1201 cohorts exercise standalone FP16 WMMA kernels. The gfx1201
   replacement compiles for `gfx12-generic`; gfx1200 uses the same compile target
   but remains qualification-only until its own certificate and archive exist. Required
-  executions fail when hardware or qualification is missing. Each architecture cohort
-  is enrolled in installed tests when a qualified bundle is supplied at build time.
+  executions fail when hardware or qualification is missing. Each published variant's
+  cohort is enrolled in installed tests when its qualified bundle is supplied at build time.
   Provider builds enable `ROCKE_INSTALL_TEST_GPU_REFERENCES` by default. Run
   `dvc pull --recursive dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles`
   from the repository root before configuring. TheRock already performs this
-  DVC download during source preparation. CMake extracts the archive, validates
-  every payload hash against
-  [`baseline_lock.json`](library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json), and
-  installs it under `engines/test_arch_content/rocke/sdpa/<arch>/` relative to
+  DVC download during source preparation. CMake extracts each archive, validates
+  every payload hash against its variant's lock, such as
+  [`baseline_lock.json`](library/tests/sdpa_reference/architectures/gfx942/dense/baseline_lock.json), and
+  installs it under `engines/test_arch_content/rocke/sdpa/<arch>/<variant>/` relative to
   the test root (`bin/hip_kernel_provider/` for provider builds). TheRock captures
   this in the test component and splits it into the matching architecture artifact,
   while the Python harness and trusted locks remain in the generic test artifact.
@@ -142,7 +142,8 @@ the strategy's biggest holes live (see
   Existing build directories retain their cached option value.
   To select a bundle for a pytest run without installing it, pass
   `--rocke-reference-bundle` with `--rocke-reference-operation` and
-  `--rocke-reference-arch`. Use `--rocke-reference-lock` for a candidate lock.
+  `--rocke-reference-arch`, and `--rocke-reference-variant` when the architecture
+  enrolls several variants. Use `--rocke-reference-lock` for a candidate lock.
   Normal installed CI omits path overrides and finds the packaged bundle
   automatically. CTest's explicit operation/architecture selection makes the
   suite required, including failure on a missing bundle. Standalone
@@ -151,9 +152,10 @@ the strategy's biggest holes live (see
   `python library/tests/run_sdpa_reference.py verify --arch gfx942 --bundle <qualified-bundle> --current-root .`
   from the rocKE root with NumPy, HIP, and COMGR; Torch is not required.
   Add `--case <id>` to run only selected cases; that subset run is not a full
-  verification. The same CLI's `cases` and `diff` commands list an
-  architecture's enrolled cases and compare them with a bundle without a GPU;
-  see the [workflow](library/tests/reference_common/docs/gpu-reference-workflow.md#decide-what-must-change).
+  verification. The same CLI's `cases`, `diff`, and `status` commands list an
+  architecture's enrolled cases by variant, compare them with a bundle, and
+  summarize every variant's publication without a GPU; see the
+  [workflow](library/tests/reference_common/docs/gpu-reference-workflow.md#decide-what-must-change).
   The installed GPU suite reuses separate baseline and current worker processes
   across cases. Each case still executes both versions twice and validates its
   outputs independently; worker failures and timeouts fail the test.
@@ -162,28 +164,33 @@ the strategy's biggest holes live (see
   Architecture enrollments are listed in
   [`architectures/registry.json`](library/tests/sdpa_reference/architectures/registry.json),
   used by Python qualification and verification. CMake publication is separate.
-  Each architecture has its own source-dispatch adapter and, once published,
-  baseline lock under `sdpa_reference/architectures/<arch>/`, with a separate
-  DVC archive under `reference_bundles/sdpa/<arch>.tar.gz`. gfx942 and gfx950
-  define their own case lists; gfx1151, gfx1200, and gfx1201 share the WMMA
-  cohort in `sdpa_reference/implementations/wmma.py`, so editing it requires
-  requalifying every published WMMA pair. Each operation owns its directory
-  under `reference_bundles/`, and convolution references use
-  `reference_bundles/conv/<arch>.tar.gz` and can be updated independently.
-  Source pytest looks for extracted bundles under `reference_bundles/sdpa/<arch>/`;
-  the runtime override can select another directory. Installed bundles
-  live under `engines/test_arch_content/rocke/sdpa/<arch>/` relative to the test
+  Each architecture enrolls one variant per kernel family: a source-dispatch
+  adapter and, once published, baseline lock under
+  `sdpa_reference/architectures/<arch>/<variant>/`, with a separate DVC archive
+  `reference_bundles/sdpa/<arch>/<variant>.tar.gz`. gfx942 and gfx950 enroll
+  `dense` with their own case lists; gfx1151, gfx1200, and gfx1201 enroll `wmma`
+  and share its cohort in `sdpa_reference/implementations/wmma.py`, so editing it
+  requires requalifying every published WMMA variant. Each operation owns its
+  directory under `reference_bundles/`, and convolution references use
+  `reference_bundles/conv/<arch>/<variant>.tar.gz`; each variant can be updated
+  independently. Source pytest looks for extracted bundles under
+  `reference_bundles/sdpa/<arch>/<variant>/`; the runtime override can select
+  another directory. Installed bundles live under
+  `engines/test_arch_content/rocke/sdpa/<arch>/<variant>/` relative to the test
   root. The `engines/test_arch_content` spelling is required by TheRock's artifact
   manifest and the hipkernelprovider kpack splitting handler. `arch_content` is
   reserved for runtime content and must not be used for these test references.
-  When reference installation is enabled, CMake installs each pair in
+  When reference installation is enabled, CMake installs every variant with a
+  committed lock under each architecture in
   `platform/cmake/PublishedGpuReferences.cmake`; TheRock splits the payloads by target.
   The operation's architecture registry describes supported qualification cohorts,
-  not publication status; that CMake file is the list of published pairs. Adding
-  another published pair requires its adapter, independently qualified lock,
-  retrievable bundle, and publication entry.
-  Qualification accepts `--arch` and freezes the shared worker and architecture
-  adapters into the new bundle. Existing bundles keep their original frozen code.
+  not publication status; that CMake file lists the published architectures, and
+  `library/tests/reference_common/artifact.py published` lists their variants.
+  Publishing a variant requires its adapter, independently qualified lock,
+  retrievable bundle, and, for a new architecture, its publication entry.
+  Qualification accepts `--arch` and `--variant` and freezes the shared worker and
+  architecture adapters into the new bundle. Existing bundles keep their original
+  frozen code.
 
 - The [convolution reference lane](library/tests/conv_reference/docs/conv-test-reference.md) implements the
   same offline qualification and GPU replay workflow for bounded forward cohorts.
@@ -809,11 +816,14 @@ reference them, don't copy them here.*
 Detailed guides live in the reference harnesses' `docs/` directories under
 `library/tests/`. Kernel authors start with the
 [quickstart](library/tests/reference_common/docs/quickstart.md), which covers
-running the pinned suites and adding cases, architectures, and operations. The
+running the pinned suites and adding cases, variants, architectures, and
+operations. The
 [documentation hub](library/tests/reference_common/docs/README.md) covers kernel
-compatibility, the baseline lifecycle, and a glossary.
+compatibility, the baseline lifecycle, a glossary, and migration from the
+per-architecture layout.
 
 - [Adding or updating a reference: authoritative workflow](library/tests/reference_common/docs/gpu-reference-workflow.md)
+- [Variants, new kernel families, and concurrent pull requests](library/tests/reference_common/docs/gpu-reference-workflow.md#variants-and-concurrent-changes)
 - [Triage a failing pinned test](library/tests/reference_common/docs/gpu-reference-workflow.md#triage)
 
 - [SDPA implementation and usage](library/tests/sdpa_reference/docs/sdpa-test-reference.md)
@@ -823,8 +833,9 @@ compatibility, the baseline lifecycle, and a glossary.
 
 ## Pinned convolution references
 
-Each published forward suite runs the cases its architecture enrolls and three
-failure controls without Torch; from the rocKE root,
+Each published forward suite runs the cases of every variant its architecture
+publishes, with three failure controls per variant, without Torch; from the
+rocKE root,
 `python library/tests/run_conv_reference.py cases --arch <arch>` lists them.
 Published bundles are installed by default for provider artifact builds. See the
 [convolution reference guide](library/tests/conv_reference/docs/conv-test-reference.md)
@@ -864,21 +875,27 @@ or kernel-pack execution. See the [six-lane validation record](docs/conv-six-lan
 Use [Adding or updating a pinned GPU reference](library/tests/reference_common/docs/gpu-reference-workflow.md)
 for archive creation, qualification, publication, and enrollment. Both operations
 use `library/tests/reference_common/artifact.py`; archive commands require an
-explicit `--operation`, authenticate against a reviewed lock, and use only the
-Python standard library. They do not qualify GPU results. Schema-1 tensor bundles
-are not supported.
+explicit `--operation`, accept the lock's `--variant`, authenticate against a
+reviewed lock, and use only the Python standard library. They do not qualify
+GPU results. Schema-1 tensor bundles are not supported. The `published` command
+lists the published variants for tools that would otherwise build archive or
+install paths; see the
+[migration note](library/tests/reference_common/docs/README.md#migrating-from-the-per-architecture-layout).
 
 ### Installing enrolled GPU reference bundles
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES` is the single installation switch. It defaults
 ON for provider artifact builds and OFF for standalone and rocm-libraries
 superbuild configurations. Host reference tests remain installed when it is OFF.
-CMake installs all pairs listed in
-[`PublishedGpuReferences.cmake`](platform/cmake/PublishedGpuReferences.cmake),
+CMake installs every variant with a committed lock under the architectures
+listed in [`PublishedGpuReferences.cmake`](platform/cmake/PublishedGpuReferences.cmake),
 failing on missing archives, missing locks, or failed integrity checks. Fetch all
-published archives before configuring. Each operation/architecture keeps its own
-archive, committed lock, and installed payload. Qualification registries enable
-offline work; only the CMake publication lists enroll installation.
+published archives before configuring. Each variant keeps its own archive,
+committed lock, and installed payload. Qualification registries enable offline
+work; only the CMake publication lists enroll installation. Every configuration
+that installs the Python tests, the default, also fails, even with the option
+OFF, when a committed lock lacks its adapter, DVC pointer, or publication entry,
+or when a lock or pointer remains at its path from before variants.
 
 ### Running installed reference tests without Torch
 
@@ -896,10 +913,10 @@ The patterns follow the `rocke_<operation>_reference_unit_pytest` and
 is published. Inspect the selected tests: disabling reference installation omits
 the GPU entries, and entries for other architectures skip. A successful CTest
 command alone does not establish GPU coverage. On the matching GPU, each
-operation's entry runs one comparison for every case that
-`python library/tests/run_<operation>_reference.py cases --arch <arch>` lists
-from the rocKE root, plus three failure controls. Confirm the matching entries
-executed with zero selected GPU skips.
+operation's entry runs, for each published variant, one comparison for every
+case that `python library/tests/run_<operation>_reference.py cases --arch <arch>`
+lists for it from the rocKE root, plus three failure controls. Confirm the
+matching entries executed with zero selected GPU skips.
 
 For `AMDGPU_TARGETS=gfx1200,gfx1201`, a gfx1200 runner skips the gfx1201 pinned
 entry with code 77. There is no installed gfx1200 pinned entry until its own
@@ -907,9 +924,9 @@ archive is qualified and published. See
 [gfx120X family selection](library/tests/sdpa_reference/docs/sdpa-test-reference.md#gfx120x-family-ci-selection)
 for the distinction between a valid skip and GPU reference coverage.
 
-Default publication supplies one bundle for each pair that
-`PublishedGpuReferences.cmake` lists. Fetch all of their DVC archives before
-configuring; missing published archives fail configuration.
+Default publication supplies one bundle for each published variant of the
+architectures that `PublishedGpuReferences.cmake` lists. Fetch all of their DVC
+archives before configuring; missing published archives fail configuration.
 
 The generic gfx1201 replacement is published. A fresh anonymous download matches
 its committed DVC pointer and baseline lock. From the rocm-libraries root:
@@ -929,9 +946,10 @@ verification. This restriction is confined to reference workers and does not
 change the runtime's behavior for other callers or the legacy Torch test suites.
 
 Each installed operation/architecture pair has its own CTest entry:
-`rocke_<operation>_gpu_<arch>_pytest`, with a five-minute timeout. CTest passes
-`--rocke-reference-operation` and `--rocke-reference-arch` to select that cohort;
-shared negative checks still run for the selected architecture. A different GPU
+`rocke_<operation>_gpu_<arch>_pytest`, with a timeout of five minutes per
+installed variant. CTest passes `--rocke-reference-operation` and
+`--rocke-reference-arch` to select that architecture's variants; shared
+negative checks still run for each selected variant. A different GPU
 lane exits with code 77, recorded by CTest as skipped. On the intended lane,
 missing hardware, missing bundles, and validation errors fail the test.
 
@@ -949,4 +967,5 @@ See the [processor-selection rules](library/tests/reference_common/docs/gpu-refe
 Adding a
 published architecture creates a separate CTest automatically, which the
 provider category YAML selects by pattern. The new architecture also needs an
-adapter, a qualified bundle, and matching CI hardware.
+adapter, a qualified bundle, and matching CI hardware. A new variant on a
+published architecture joins that architecture's existing entry.
