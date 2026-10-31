@@ -39,6 +39,27 @@ namespace
 {
 namespace fs = std::filesystem;
 
+// Internal path strings and CompilerInfo provenance are UTF-8 on Windows.
+// Keep conversion explicit: filesystem's narrow constructor uses the native code page.
+fs::path file_path(const std::string& text)
+{
+#ifdef _WIN32
+    return fs::u8path(text);
+#else
+    return fs::path(text);
+#endif
+}
+
+std::string path_text(const fs::path& path)
+{
+#ifdef _WIN32
+    const auto text = path.u8string();
+    return std::string(reinterpret_cast<const char*>(text.data()), text.size());
+#else
+    return path.string();
+#endif
+}
+
 template <typename T>
 T symbol(void* library, const char* name)
 {
@@ -52,7 +73,7 @@ T symbol(void* library, const char* name)
 void* load(const std::string& path)
 {
 #ifdef _WIN32
-    fs::path candidate(path);
+    fs::path candidate = file_path(path);
     if(candidate.has_parent_path())
         return LoadLibraryExW(fs::absolute(candidate).c_str(),
                               nullptr,
@@ -78,7 +99,7 @@ std::string library_for_symbol(void* address, bool physical = false)
         return {};
     std::vector<wchar_t> path(32768);
     DWORD size = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
-    return size && size < path.size() ? fs::path(path.data()).string() : std::string();
+    return size && size < path.size() ? path_text(fs::path(path.data())) : std::string();
 #else
 #ifdef __linux__
     if(!physical)
@@ -105,13 +126,13 @@ std::string library_for_symbol(void* address, bool physical = false)
         auto start = std::strtoull(range.c_str(), nullptr, 16);
         auto end = std::strtoull(range.c_str() + separator + 1, nullptr, 16);
         if(start <= value && value < end)
-            return fs::path(path).is_absolute() ? path : std::string();
+            return file_path(path).is_absolute() ? path : std::string();
     }
     return {};
 #else
     Dl_info info{};
     if(dladdr(address, &info) && info.dli_fname
-       && (!physical || fs::path(info.dli_fname).is_absolute()))
+       && (!physical || file_path(info.dli_fname).is_absolute()))
         return info.dli_fname;
     return {};
 #endif
@@ -125,7 +146,7 @@ bool comgr_name(const fs::path& path, bool mapped = false)
 #else
     constexpr bool windows = false;
 #endif
-    return ckc::comgr_library_name(path.filename().string(), windows, mapped);
+    return ckc::comgr_library_name(path_text(path.filename()), windows, mapped);
 }
 
 std::vector<fs::path> children(const fs::path& root)
@@ -192,12 +213,12 @@ std::optional<std::string> sdk_comgr_in(const fs::path& site)
         std::vector<std::string> matches;
         while(std::getline(record, line))
         {
-            fs::path relative(record_path(line));
+            fs::path relative = file_path(record_path(line));
             if(relative.is_absolute())
                 continue;
             std::vector<std::string> parts;
             for(const auto& part : relative)
-                parts.push_back(part.string());
+                parts.push_back(path_text(part));
             if(parts.size() != 3
                || !(parts[0] == "_rocm_sdk_core"
                     || (parts[0].starts_with("_rocm_sdk_core_") && parts[0].size() > 15)))
@@ -210,12 +231,13 @@ std::optional<std::string> sdk_comgr_in(const fs::path& site)
             std::error_code error;
             if(parts[1] == library_dir && comgr_name(relative)
                && fs::is_regular_file(site / relative, error))
-                matches.push_back(fs::absolute(site / relative).lexically_normal().string());
+                matches.push_back(path_text(fs::absolute(site / relative).lexically_normal()));
         }
         if(!matches.empty())
         {
             std::sort(matches.begin(), matches.end(), [](const auto& a, const auto& b) {
-                auto an = fs::path(a).filename().string(), bn = fs::path(b).filename().string();
+                auto an = path_text(file_path(a).filename()),
+                     bn = path_text(file_path(b).filename());
                 return an.size() != bn.size() ? an.size() < bn.size() : a < b;
             });
             return matches[0];
@@ -231,11 +253,11 @@ std::string executable_path()
 #ifdef _WIN32
     std::vector<wchar_t> buffer(32768);
     auto size = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-    return size && size < buffer.size() ? fs::path(buffer.data()).string() : std::string();
+    return size && size < buffer.size() ? path_text(fs::path(buffer.data())) : std::string();
 #else
     std::error_code error;
     auto path = fs::read_symlink("/proc/self/exe", error);
-    return error ? std::string() : path.string();
+    return error ? std::string() : path_text(path);
 #endif
 }
 
@@ -246,7 +268,7 @@ fs::path installation_root(const fs::path& directory)
     for(auto root = directory; !root.empty() && root != root.parent_path();
         root = root.parent_path())
     {
-        auto name = root.filename().string();
+        auto name = path_text(root.filename());
 #ifdef _WIN32
         std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
             return static_cast<char>(std::tolower(c));
@@ -270,7 +292,7 @@ std::optional<std::string> build_sdk_comgr_in(const fs::path& root)
     if((!absolute && marker != "rocke-sdk-site-v1") || !std::getline(descriptor, location)
        || location.empty())
         return std::string();
-    const fs::path site(location);
+    const fs::path site = file_path(location);
     if(site.is_absolute() != absolute || (!absolute && site.has_root_path()))
         return std::string();
     // The writer computes relative paths from the physical build directory.
@@ -291,9 +313,9 @@ std::string discover_sdk_comgr()
         if(anchor.empty())
             continue;
         std::error_code error;
-        if(!fs::path(anchor).is_absolute())
+        if(!file_path(anchor).is_absolute())
             continue;
-        auto physical = fs::canonical(anchor, error);
+        auto physical = fs::canonical(file_path(anchor), error);
         if(error)
             continue;
         const auto directory = physical.parent_path();
@@ -307,7 +329,7 @@ std::string discover_sdk_comgr()
                 return *selected;
             for(const char* lib : {"lib", "lib64"})
                 for(const auto& python : children(prefix / lib))
-                    if(python.filename().string().starts_with("python"))
+                    if(path_text(python.filename()).starts_with("python"))
                         if(auto selected = sdk_comgr_in(python / "site-packages"); selected)
                             return *selected;
         }
@@ -392,7 +414,7 @@ bool compatible_with_mapped(const fs::path& candidate)
             fields >> field;
         std::getline(fields >> std::ws, path);
         auto name = path.ends_with(" (deleted)") ? path.substr(0, path.size() - 10) : path;
-        if(comgr_name(fs::path(name)))
+        if(comgr_name(file_path(name)))
             mapped.emplace_back(path);
 #ifdef __linux__
         auto separator = range.find('-');
@@ -426,9 +448,15 @@ bool compatible_with_mapped(const fs::path& candidate)
 
 void* load_comgr(std::string& requested)
 {
+#ifdef _WIN32
+    const wchar_t* override = _wgetenv(L"ROCKE_COMGR_LIB");
+    std::string candidate
+        = override && *override ? path_text(fs::path(override)) : discover_sdk_comgr();
+#else
     const char* override = std::getenv("ROCKE_COMGR_LIB");
     std::string candidate = override && *override ? override : discover_sdk_comgr();
-    if(!candidate.empty() && compatible_with_mapped(candidate))
+#endif
+    if(!candidate.empty() && compatible_with_mapped(file_path(candidate)))
     {
         if(void* library = load(candidate))
         {

@@ -145,6 +145,133 @@ def native_detector(tmp_path_factory):
     return output
 
 
+@pytest.fixture(scope="module")
+def windows_detector(tmp_path_factory):
+    if sys.platform != "win32":
+        pytest.skip("Windows loader execution requires Windows")
+    compiler = shutil.which("clang++") or shutil.which("amdclang++")
+    if not compiler:
+        pytest.skip("Windows source detector requires an LLVM C++ compiler")
+    detector = PLATFORM / "cpp" / "core" / "lower_llvm" / "compiler_version.cpp"
+    if not detector.is_file():
+        pytest.skip("native source detector is absent from installed tests")
+    root = tmp_path_factory.mktemp("windows-detector")
+    source = root / "probe.cpp"
+    source.write_text(
+        '#include "compiler_version.h"\n'
+        "#include <windows.h>\n#include <cstdio>\n"
+        "int wmain(int argc,wchar_t**argv){\n"
+        "if(argc>1&&!LoadLibraryExW(argv[1],nullptr,"
+        "LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_DEFAULT_DIRS))return 2;\n"
+        "auto p=ckc::candidate_compiler_info();\n"
+        'if(!p){std::puts("unavailable");return 0;}\n'
+        'std::printf("%u.%u.%u\\n%s\\n%s\\n",p->llvm_major,p->llvm_minor,p->llvm_patch,\n'
+        'p->requested_comgr?p->requested_comgr:"",p->comgr_path?p->comgr_path:"");\n'
+        "return 0;}\n"
+    )
+    binary = root / "probe.exe"
+    subprocess.run(
+        [
+            compiler,
+            "-std=c++20",
+            "-D_CRT_SECURE_NO_WARNINGS",
+            "-I",
+            str(detector.parent),
+            str(source),
+            str(detector),
+            "-o",
+            str(binary),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return SimpleNamespace(binary=binary, compiler=compiler)
+
+
+def windows_library(compiler, root, name="amd_comgr0702.dll", major=23):
+    root.mkdir(parents=True, exist_ok=True)
+    source = root / "compiler.cpp"
+    source.write_text(
+        'extern "C" __declspec(dllexport) void amd_comgr_get_version(){}\n'
+        'extern "C" __declspec(dllexport) void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c)'
+        f"{{*a={major};*b=0;*c=1;}}\n"
+    )
+    library = root / name
+    subprocess.run(
+        [compiler, "-shared", str(source), "-o", str(library)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return library
+
+
+@pytest.mark.parametrize("selection", ["relative", "absolute", "override"])
+def test_windows_native_unicode_compiler_paths(windows_detector, tmp_path, selection):
+    prefix = tmp_path / "Jos\u00e9-\u4f8b"
+    site = prefix / "env" / "Lib" / "site-packages"
+    library = windows_library(
+        windows_detector.compiler, site / "_rocm_sdk_core_nonce" / "bin"
+    )
+    dist = site / "rocm_sdk_core-7.9.0.dist-info"
+    dist.mkdir()
+    (dist / "METADATA").write_text("Name: rocm-sdk-core\nVersion: 7.9.0\n")
+    (dist / "RECORD").write_text(
+        "_rocm_sdk_core_nonce/bin/amd_comgr0702.dll,,\n", encoding="utf-8"
+    )
+    build = prefix / "build"
+    build.mkdir()
+    binary = build / "probe.exe"
+    shutil.copy2(windows_detector.binary, binary)
+    marker = (
+        "rocke-sdk-site-v1" if selection == "relative" else "rocke-sdk-site-absolute-v1"
+    )
+    location = os.path.relpath(site, build) if selection == "relative" else str(site)
+    (build / "rocke_sdk_site.txt").write_text(
+        marker + "\n" + location + "\n", encoding="utf-8"
+    )
+    env = automatic_env(site)
+    if selection == "override":
+        env["ROCKE_COMGR_LIB"] = str(library)
+    result = subprocess.run(
+        [str(binary)], env=env, check=True, capture_output=True, encoding="utf-8"
+    )
+    lines = result.stdout.splitlines()
+    assert lines[0] == "23.0.1", result.stdout
+    assert os.path.samefile(lines[1], library)
+    assert os.path.samefile(lines[2], library)
+
+
+@pytest.mark.parametrize("mapped_alias", [False, True])
+def test_windows_native_guard_recognizes_driver_dll(
+    windows_detector, tmp_path, mapped_alias
+):
+    library = windows_library(windows_detector.compiler, tmp_path / "selected")
+    mapped = tmp_path / "mapped" / "AMD_COMGR_3.DLL"
+    if mapped_alias:
+        mapped.parent.mkdir()
+        os.link(library, mapped)
+    else:
+        windows_library(windows_detector.compiler, mapped.parent, mapped.name, major=20)
+    env = automatic_env(tmp_path / "no-site")
+    env["ROCKE_COMGR_LIB"] = str(library)
+    result = subprocess.run(
+        [str(windows_detector.binary), str(mapped)],
+        env=env,
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+    )
+    if mapped_alias:
+        lines = result.stdout.splitlines()
+        assert lines[0] == "23.0.1", result.stdout
+        assert os.path.samefile(lines[1], library)
+        assert os.path.samefile(lines[2], mapped)
+    else:
+        assert result.stdout.splitlines() == ["unavailable"]
+
+
 def build_library(root, text, name="libamd_comgr.so", extra=()):
     root.mkdir(parents=True, exist_ok=True)
     output = root / name

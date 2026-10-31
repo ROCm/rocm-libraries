@@ -11,7 +11,8 @@ namespace ckc
  * record are borrowed, immutable after the query, and valid for process
  * lifetime. llvm_major==0 means the loaded compiler could not be queried;
  * NULL paths mean the dynamic loader could not report their origin.
- * requested_comgr is the loader input, not necessarily the resolved path. */
+ * requested_comgr is the loader input, not necessarily the resolved path.
+ * Path strings use UTF-8 on Windows and native filesystem bytes on POSIX. */
 struct CompilerInfo
 {
     unsigned llvm_major;
