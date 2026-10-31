@@ -122,9 +122,10 @@ static void rv_name(rvm_t* vm, rocke_value_t* v, const char* bind)
 /* Portable-IR opcode alias.
  *
  * A few Python IRBuilder ops are dtype-GENERIC -- their spelling carries no
- * dtype and the element type rides in the `elem_type` attr (tile.buffer_load,
- * tile.buffer_load_vN, tile.buffer_store...). The engine's opcode registry
- * instead keys those by a dtype suffix (tile.buffer_load_f16 / _bf16). Resolve
+ * dtype and the element type rides in the `elem_type` attr (tile.buffer_load_vN,
+ * tile.buffer_store...). The engine's opcode registry instead keys those by a
+ * dtype suffix (tile.buffer_load_vN_f16 / _bf16). tile.buffer_load has its own
+ * dtype-generic opcode, so the exact name resolves it. Resolve
  * the exact name first, then "<name>_<elem_type>", then fall back to the _f16
  * entry -- which is what cpp/helpers/loads.cpp emits natively for this path, so
  * the replayed graph matches a native C++ build. An unrepresentable dtype
