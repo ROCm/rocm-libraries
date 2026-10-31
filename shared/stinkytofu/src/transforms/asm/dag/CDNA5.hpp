@@ -982,7 +982,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // new rule is a promoteDue*() function plus one row in decidePromote()'s rule
     // table at its level; a rule at an in-between level is a new enumerator.
     // A rule returns true once it has set promotedNode_.
-    enum class PlacementLevel { Barrier, LastDs, WmmaQueue, Prefetch, DsPacer, Filler };
+    enum class PlacementLevel { Barrier, LastDs, Prefetch, WmmaQueue, DsPacer, Filler };
     void decidePromote();
     void promote(PromotePhase phase, DAGNode* node, int kind = -1);
     bool promoteDueBarrier();
