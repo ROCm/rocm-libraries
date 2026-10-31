@@ -10,6 +10,7 @@
 
 #include "fast_check.hpp"
 #include "hipBuffer.hpp"
+#include "hipblaslt_test.hpp"
 #include "host_memory.hpp"
 
 #include <cstdlib>
@@ -131,6 +132,28 @@ namespace
         EXPECT_NE(why.find("could not allocate 1.07e+09 GiB of pinned host memory"),
                   std::string::npos)
             << why;
+    }
+
+    TEST(HostMemory_pre_checkin, memory_shortages_are_listed_with_their_reasons)
+    {
+        MemoryShortageLog log;
+        EXPECT_EQ(log.summary(), "");
+        log.record("Suite.passes", "Succeeded");
+        log.record("Suite.other_skip", "streamk is not available");
+        log.record("Suite.no_message", nullptr);
+        EXPECT_EQ(log.count(), 0u);
+
+        log.record("Suite.big",
+                   "Skipped\n" MEMORY_SHORTAGE_STRING
+                   "this case needs 48 GiB of host memory and 30 GiB is available");
+        log.record("Suite.huge",
+                   MEMORY_SHORTAGE_STRING "a device allocation failed: out of memory");
+        EXPECT_EQ(log.count(), 2u);
+        EXPECT_EQ(log.summary(),
+                  "[ MEMORY   ] 2 tests stopped because memory was short:\n"
+                  "[ MEMORY   ] Suite.big: this case needs 48 GiB of host memory and 30 GiB is "
+                  "available\n"
+                  "[ MEMORY   ] Suite.huge: a device allocation failed: out of memory\n");
     }
 
 #ifndef _WIN32
