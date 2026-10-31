@@ -480,26 +480,41 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // WMMA refill (see PassFeatureConfig::DagFeatures::wmmaRefillMode). A refill starts when the
     // queued cover drops below the refill line (wmmaQueueCover()) with room in the queue, and
     // keeps issuing WMMAs ahead of other work until it is done: Fixed after wmmaBatchSize
-    // WMMAs, Dynamic once the queued cover reaches the refill target. Returns whether a refill
-    // is under way. wmmaLatency is the next WMMA's latency (sizes the auto target).
-    bool wmmaRefillActive(int wmmaLatency) {
-        if (wmmaQueueCover() <= 0) return false;
+    // WMMAs, Dynamic once the queued cover reaches the refill target. wmmaLatency is the next
+    // WMMA's latency (sizes the auto target).
+    // wmmaRefillState() reads the state and says whether a refill is under way and how many
+    // WMMAs it still has; wmmaRefillActive() also records that state.
+    struct WmmaRefillState {
+        bool active = false;
+        int left = 0;
+    };
+    WmmaRefillState wmmaRefillState(int wmmaLatency) const {
+        if (wmmaQueueCover() <= 0) return {wmmaRefilling_, wmmaRefillLeft_};
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
         const bool room = outstandingWmmas() < wmmaQueueDepth();
-        if (wmmaRefilling_) {
+        WmmaRefillState st{wmmaRefilling_, wmmaRefillLeft_};
+        if (st.active) {
             const int target = f.wmmaRefillToCycles > 0
                                    ? f.wmmaRefillToCycles
                                    : wmmaQueueDepth() * std::max(1, wmmaLatency);
             const bool more = f.wmmaRefillMode == PassFeatureConfig::WmmaRefillMode::Fixed
-                                  ? wmmaRefillLeft_ > 0
+                                  ? st.left > 0
                                   : queuedCoverCycles() < target;
-            if (!room || !more) wmmaRefilling_ = false;
+            if (!room || !more) st.active = false;
         }
-        if (!wmmaRefilling_ && room && queuedCoverCycles() < wmmaQueueCover()) {
-            wmmaRefilling_ = true;
-            wmmaRefillLeft_ = std::max(1, f.wmmaBatchSize);
+        if (!st.active && room && queuedCoverCycles() < wmmaQueueCover()) {
+            st.active = true;
+            st.left = std::max(1, f.wmmaBatchSize);
         }
-        return wmmaRefilling_;
+        return st;
+    }
+    // Whether a refill is under way, as the pick sees it.
+    bool wmmaRefillActive(int wmmaLatency) {
+        if (wmmaQueueCover() <= 0) return false;
+        const WmmaRefillState st = wmmaRefillState(wmmaLatency);
+        wmmaRefilling_ = st.active;
+        wmmaRefillLeft_ = st.left;
+        return st.active;
     }
     // Cycles until the pipe has run everything queued.
     int queuedCoverCycles() const {
