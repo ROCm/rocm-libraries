@@ -627,6 +627,42 @@ _WGRAD_XWIN_M: Tuple[int, ...] = tuple(
 )
 _WGRAD_XWIN_N384_WT = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_N384_WT", "0") or 0)
 _WGRAD_XWIN_CB = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_CB", "0") or 0)
+# ROCKE_AOT_WGRAD_XWIN_WSR=<r>[,<r>...] with ROCKE_AOT_WGRAD_XWIN_WSR_MIN_M=<m>:
+# also a ws_replicas=<r> copy of the X-window twins (after the WPE copies)
+# with tile_m >= m. Their Stage 1 atomics go to fewer scratch slabs, so the
+# per-launch scratch clear and the Stage 2 fold touch r instead of 8
+# dW-sized f32 slabs -- what the medium shapes (dW of 0.4-3.5 M elements at
+# split 6-48) pay outside Stage 1. Default unset: no extra jobs.
+_WGRAD_XWIN_WSR: Tuple[int, ...] = tuple(
+    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_WSR", "") or "").split(",") if v
+)
+_WGRAD_XWIN_WSR_MIN_M = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_WSR_MIN_M", "0") or 0)
+# ROCKE_AOT_WGRAD_XWIN_TK2=<k> with ROCKE_AOT_WGRAD_XWIN_TK2_MIN_M=<m> and
+# ROCKE_AOT_WGRAD_XWIN_TK2_WSR=<r>: also the X-window twins at tile_k == k
+# (16: one K tile per output row of a Wo=16 problem) with tile_m >= m, only
+# as their waves_per_eu copies (ROCKE_AOT_WGRAD_XWIN_WPE) with ws_replicas=r.
+_WGRAD_XWIN_TK2 = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_TK2", "0") or 0)
+_WGRAD_XWIN_TK2_MIN_M = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_TK2_MIN_M", "0") or 0)
+_WGRAD_XWIN_TK2_WSR = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_TK2_WSR", "0") or 0)
+# ROCKE_AOT_WGRAD_XWIN_MROW=<n>[,<n>...] with ROCKE_AOT_WGRAD_XWIN_MROW_MIN_M=<m>
+# and ROCKE_AOT_WGRAD_XWIN_MROW_WSR=<r>: also xwin_mrow=<n> copies (K tile = n
+# output rows of Wo = tile_k / n: the Wo 16 / 8 shapes) of the X-window
+# twins with tile_m >= m, only of their waves_per_eu copies, with
+# ws_replicas=r. Unset: no jobs.
+_WGRAD_XWIN_MROW: Tuple[int, ...] = tuple(
+    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_MROW", "") or "").split(",") if v
+)
+_WGRAD_XWIN_MROW_MIN_M = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_MROW_MIN_M", "0") or 0)
+_WGRAD_XWIN_MROW_WSR = int(_os.environ.get("ROCKE_AOT_WGRAD_XWIN_MROW_WSR", "0") or 0)
+# ROCKE_AOT_WGRAD_XWIN_PP=<n>[,<n>...]: also an 8-wave block ping-pong copy
+# (xwin_groups=8/waves, xwin_pp=<n>, waves_per_eu=2) of the 2-wave 64-row
+# (w1x2), 4-wave 128-row and 8-wave 256-row (w4x2, one tile) xwin twins on
+# 16x16 atoms (plain "mem" pipeline, no pfr_sched). Launch degrees must be
+# multiples of xwin_groups (4 / 2 / 1).
+# Unset: no jobs.
+_WGRAD_XWIN_PP: Tuple[int, ...] = tuple(
+    int(v) for v in (_os.environ.get("ROCKE_AOT_WGRAD_XWIN_PP", "") or "").split(",") if v
+)
 
 # ---- wgrad stream-K axis (opt-in) -------------------------------------------
 # Stream-K (WgradConvSpec.streamk) bakes its launch mode and its partial-sum
@@ -1993,11 +2029,18 @@ def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
         if _WGRAD_BSWZ_WPE and cfg.get("tile_k") == 32:
             bswz = bswz + tuple(dict(v, waves_per_eu=_WGRAD_BSWZ_WPE) for v in bswz)
         variants = variants + bswz
+    _tk2 = bool(
+        _WGRAD_XWIN_TK2
+        and cfg.get("tile_k") == _WGRAD_XWIN_TK2
+        and cfg.get("tile_m", 0) >= _WGRAD_XWIN_TK2_MIN_M
+        and _WGRAD_XWIN_TK2_WSR
+        and _WGRAD_XWIN_WPE
+    )
     if (
         _WGRAD_XWIN
         and cfg.get("split_k", 1) > 1
         and cfg.get("two_stage")
-        and (not _WGRAD_XWIN_TK or cfg.get("tile_k") == _WGRAD_XWIN_TK)
+        and (not _WGRAD_XWIN_TK or cfg.get("tile_k") == _WGRAD_XWIN_TK or _tk2)
         and (not _WGRAD_XWIN_M or cfg.get("tile_m", 0) in _WGRAD_XWIN_M)
     ):
         tn = cfg.get("tile_n", 0)
@@ -2031,7 +2074,62 @@ def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
                 xw = xw + tuple(
                     dict(v, waves_per_eu=w) for w in _WGRAD_XWIN_WPE for v in xw
                 )
-            variants = variants + xw
+            if _tk2 and not (_WGRAD_XWIN_TK and cfg.get("tile_k") == _WGRAD_XWIN_TK):
+                xw = tuple(
+                    dict(v, ws_replicas=_WGRAD_XWIN_TK2_WSR)
+                    for v in xw
+                    if v.get("waves_per_eu")
+                )
+                variants = variants + xw
+                return variants
+            _nw = cfg.get("warp_m", 0) * cfg.get("warp_n", 0)
+            if (
+                _WGRAD_XWIN_PP
+                and (
+                    (cfg.get("tile_m") == 64 and cfg.get("warp_m") == 1 and _nw == 2)
+                    or (cfg.get("tile_m") == 128 and _nw == 4)
+                    or (cfg.get("tile_m") == 256 and cfg.get("warp_m") == 4 and _nw == 8)
+                )
+                and cfg.get("warp_tile_m") == 16
+                and cfg.get("pipeline") == "mem"
+            ):
+                _pp = tuple(
+                    dict(v, xwin_groups=8 // _nw, xwin_pp=n, waves_per_eu=2)
+                    if _nw < 8
+                    else dict(v, xwin_pp=n, waves_per_eu=2)
+                    for n in _WGRAD_XWIN_PP
+                    for v in xw
+                    if not v.get("pfr_sched") and not v.get("waves_per_eu")
+                )
+                # + the groups-over-consecutive-tiles twins of the multi-group
+                # ones (xwin_gn 1; 2 = with the dY tile shared in LDS)
+                _pp = _pp + tuple(
+                    dict(v, xwin_gn=gn)
+                    for gn in (1, 2)
+                    for v in _pp
+                    if v.get("xwin_groups", 1) > 1
+                )
+                xw = xw + _pp
+            if _WGRAD_XWIN_MROW and cfg.get("tile_m", 0) >= _WGRAD_XWIN_MROW_MIN_M:
+                mrow = tuple(
+                    dict(v, xwin_mrow=n, **(
+                        {"ws_replicas": _WGRAD_XWIN_MROW_WSR} if _WGRAD_XWIN_MROW_WSR else {}
+                    ))
+                    for n in _WGRAD_XWIN_MROW
+                    for v in xw
+                    if v.get("waves_per_eu") and not v.get("xwin_pp")
+                    and cfg.get("tile_k", 0) % n == 0 and (cfg.get("tile_k", 0) // n) % 4 == 0
+                )
+            else:
+                mrow = ()
+            if _WGRAD_XWIN_WSR and cfg.get("tile_m", 0) >= _WGRAD_XWIN_WSR_MIN_M:
+                xw = xw + tuple(
+                    dict(v, ws_replicas=r)
+                    for r in _WGRAD_XWIN_WSR
+                    if r != cfg.get("ws_replicas")
+                    for v in xw
+                )
+            variants = variants + xw + mrow
     return variants
 
 

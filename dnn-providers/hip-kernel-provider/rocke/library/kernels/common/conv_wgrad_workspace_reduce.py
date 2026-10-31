@@ -95,6 +95,10 @@ class WgradReduceSpec:
     # the sum; folding more reads past the buffer. Shares Stage 1's default
     # constant rather than restating it, so the two cannot drift.
     ws_replicas: int = _DEFAULT_WS_REPLICAS
+    # Elements per thread along N ("v<n>", 4: one 16-byte f32 load per slab
+    # and one 8-byte bf16 / 16-byte f32 store per thread). Needs wg_N % vec
+    # == 0 (the launcher checks). Default 1: the scalar kernel, unchanged.
+    vec: int = 1
 
     @property
     def block_size(self) -> int:
@@ -115,6 +119,8 @@ class WgradReduceSpec:
         # fold, and the name is what the launcher and artifact cache key on.
         if self.ws_replicas > 1:
             parts.append(f"wsr{self.ws_replicas}")
+        if self.vec > 1:
+            parts.append(f"v{self.vec}")
         parts.append(self.dtype_d)
         return kernel_name_join(self.name, *parts)
 
@@ -185,6 +191,10 @@ def build_conv_wgrad_workspace_reduce(
     c_m = b.add(b.mul(blk_m, b.const_i32(tile_m)), t_m)
     c_n = b.add(b.mul(blk_n, b.const_i32(tile_n)), t_n)
 
+    if spec.vec > 1:
+        _emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, grp_id)
+        return b.kernel
+
     # OOB guard — threads outside [0, wg_M) x [0, wg_N) do nothing.
     in_bounds = b.land(b.cmp_lt(c_m, wg_M_param), b.cmp_lt(c_n, wg_N_param))
     with b.scf_if(in_bounds):
@@ -229,10 +239,46 @@ def build_conv_wgrad_workspace_reduce(
     return b.kernel
 
 
+def _emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_param, wg_N_param, c_m, c_n, grp_id):
+    """``vec`` consecutive N elements per thread (wg_N % vec == 0): one
+    ``vec``-wide f32 load per slab, the fold, one ``vec``-wide store."""
+    from rocke.helpers.io import io_ir_type, pack_f32_to
+
+    v = spec.vec
+    c_n = b.mul(c_n, b.const_i32(v))
+    in_bounds = b.land(b.cmp_lt(c_m, wg_M_param), b.cmp_lt(c_n, wg_N_param))
+    with b.scf_if(in_bounds):
+        grp_stride = b.mul(wg_M_param, wg_N_param)
+        elem_in_slab = b.add(b.mul(c_m, wg_N_param), c_n)
+        dw_off = b.add(b.mul(grp_id, grp_stride), elem_in_slab)
+        reps = spec.ws_replicas
+        ws_base = (
+            dw_off
+            if reps == 1
+            else b.add(b.mul(b.mul(grp_id, b.const_i32(reps)), grp_stride), elem_in_slab)
+        )
+        parts = [
+            b.global_load_vN(
+                ws_ptr,
+                ws_base if r == 0 else b.add(ws_base, b.mul(b.const_i32(r), grp_stride)),
+                F32,
+                v,
+            )
+            for r in range(reps)
+        ]
+        tot = [b.vec_extract(parts[0], i) for i in range(v)]
+        for pv in parts[1:]:
+            tot = [b.fadd(t, b.vec_extract(pv, i)) for i, t in enumerate(tot)]
+        if spec.dtype_d in ("fp32", "f32"):
+            b.global_store_vN(dw_ptr, dw_off, b.vec_pack(tot, F32), v)
+        else:
+            b.global_store_vN(dw_ptr, dw_off, pack_f32_to(b, tot, dtype=spec.dtype_d), v)
+
+
 def wgrad_reduce_grid(spec: WgradReduceSpec) -> Tuple[int, int, int]:
     """Return the ``(x, y, z)`` grid dimensions for this reduce spec."""
     return (
-        ceil_div(spec.wg_N, spec.tile_n),
+        ceil_div(spec.wg_N, spec.tile_n * spec.vec),
         ceil_div(spec.wg_M, spec.tile_m),
         spec.groups,
     )

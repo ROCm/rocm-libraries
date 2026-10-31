@@ -443,6 +443,61 @@ X times fewer X reads and LDS stores than the `tile_n x tile_k` tile.
   `ROCKE_AOT_WGRAD_XWIN` and its scope variables (`aot_jobs.py`). Python AOT path
   only; the C++ engine twin is a follow-up.
 
+### xwin block ping-pong (`xwin_groups`, `xwin_pp`, `xwin_gn`)
+
+The 2-wave 64-row xwin CTA (one GEMM dimension 64) runs at ~3 waves/SIMD and is
+bound by the latency of its per-step chain (loads -> LDS store -> barrier ->
+fragment reads -> MFMAs -> barrier): at 2 waves/SIMD it loses ~12% free-running.
+`xwin_pp` turns 8 waves into a block ping-pong so 2 waves/SIMD alternate
+memory and MFMA phases:
+
+* **Groups.** `xwin_groups = G` packs G independent xwin sub-tiles (G slices of
+  one (M, N) tile, or with `xwin_gn` G consecutive tiles of the flat
+  N-fastest order -- mostly neighbouring filter rows of one K slice, which read
+  the same dY tile together) into one workgroup, each with its own LDS tiles;
+  the launch's z extent is `ks_count / G` (the host requires `G | split_k`).
+  `G = 1` with 8 waves is one tile whose two halves both store their share of
+  the next tile. `xwin_gn = 2` additionally shares the dY tile of one K slice
+  in LDS: two slots (G consecutive tiles span at most two slices), each loaded
+  and stored by its leader group; the other groups' dY reads go to the OOB
+  sentinel (no traffic) and their stores to a trash slot.
+* **Phases** (`xwin_pp = 8`): per K tile `[mem A]` every fragment read of the
+  tile (then the next-next tile's read offsets while they fly), `[compute A]`
+  the first half of the k atoms' MFMAs with the next tile's v_perm packs and
+  global reads interleaved one slice per MFMA (sched_barrier-fenced; each read
+  issued right after the packs that free its registers, so no back-edge copies),
+  `[mem B]` the next tile's LDS stores, `[compute B]` the other half with the
+  scalar decode of the tile three ahead. Each phase ends in `lgkmcnt(0)` +
+  `s_barrier`; the upper half of the groups (or waves 4-7) runs one barrier
+  behind, so the two waves of a SIMD alternate. `s_setprio 1` on the memory
+  phases (they are the longer ones).
+* **LDS rows** are permuted `r ^ ((r >> 2) & 4)` (rows 16-31 of every 32 XOR 4):
+  a fragment read's 16 rows stay one 16-row group, while the transposed stores
+  of rows 8 apart spread over all banks (2-way instead of 4-way).
+* `xwin_pp = 8` is the only value: the number of the placement that won among
+  the measured variants (loads in [mem B], 3 tiles in flight, offsets in
+  [compute B], no hand interleave, ... -- see the round-4 r4-wgrad notes).
+
+`xwin_mrow = n` (K tile = n whole output rows of `Wo = tile_k / n`, one window
+per row) admits the Wo 16 / 8 shapes at `tile_k` 32; measured slower than
+`tile_k` 16 xwin and the plain kernels there, so not in the AOT env.
+
+AOT axes (all opt-in): `ROCKE_AOT_WGRAD_XWIN_PP=8` (ping-pong copies of the
+64-row w1x2, 128-row 4-wave and 256-row w4x2 a16 twins, + `xwin_gn` twins),
+`ROCKE_AOT_WGRAD_XWIN_WSR=1,2` (+`_MIN_M`: `ws_replicas` copies),
+`ROCKE_AOT_WGRAD_XWIN_TK2=16` (+`_MIN_M`, `_WSR`: `tile_k` 16 twins for Wo = 16),
+`ROCKE_AOT_WGRAD_XWIN_MROW` (+`_MIN_M`, `_WSR`).
+
+### Two-stage scratch slabs
+
+Stage 1 accumulates slice `z` into slab `z % ws_replicas`; a launch at
+`split_k < ws_replicas` touches only `split_k` slabs, so the cached-kernel
+launcher (`benchmark_implicit_gemm_conv._ws_slabs_used`) sizes, zeroes and folds
+`min(ws_replicas, split_k)` of them (ungrouped launches; dW bit-identical). For
+small grids (split 2-12) with large dW (0.4-3.5 M elements) the clear + fold of
+8 slabs was 10-25% of the call; `ws_replicas` 1/2 twins cut it further.
+`ROCKE_WGRAD_WS_ALL_SLABS=1` restores the full clear.
+
 ## Next steps
 
 ### K0-M-K1 LDS layout

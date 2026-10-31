@@ -165,6 +165,17 @@ class KernelIdentity:
     # wgrad only (WgradConvSpec.xwin_rows): filter rows per xwin B tile.
     # Left out of the hash at 1.
     xwin_rows: int = 1
+    # wgrad only (WgradConvSpec.xwin_groups / xwin_pp): xwin sub-tiles per
+    # workgroup (stacked along split-K z) and the block ping-pong K loop.
+    # Left out of the hash at 1 / 0.
+    xwin_groups: int = 1
+    xwin_pp: int = 0
+    # wgrad only (WgradConvSpec.xwin_mrow): output rows per xwin K tile.
+    # Left out of the hash at 1.
+    xwin_mrow: int = 1
+    # wgrad only (WgradConvSpec.xwin_gn): groups over consecutive flat tiles.
+    # Left out of the hash at 0.
+    xwin_gn: int = 0
     # dgrad (DgradConvSpec.uniform_k_decode) and fwd
     # (ImplicitGemmConvSpec.uniform_k_decode): the per-tile reduction decode
     # K loop. Left out of the hash while False, like prefetch_addr.
@@ -372,6 +383,14 @@ class KernelIdentity:
             del fields["xwin"]
         if fields["xwin_rows"] == 1:
             del fields["xwin_rows"]
+        if fields["xwin_groups"] == 1:
+            del fields["xwin_groups"]
+        if not fields["xwin_pp"]:
+            del fields["xwin_pp"]
+        if fields["xwin_mrow"] == 1:
+            del fields["xwin_mrow"]
+        if not fields["xwin_gn"]:
+            del fields["xwin_gn"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
         if not fields["reg_prefetch"]:
@@ -753,7 +772,13 @@ def identity_supports_problem(
             return False, "xwin serves groups == 1 only"
         if cpg % cb:
             return False, f"xwin needs cpg % {cb} == 0 (cpg={cpg})"
-        if int(getattr(problem, "Wo", 0)) % max(1, identity.tile_k):
+        mr = max(1, getattr(identity, "xwin_mrow", 1) or 1)
+        if mr > 1:
+            if int(getattr(problem, "Wo", 0)) * mr != identity.tile_k:
+                return False, f"xwin_mrow={mr} needs Wo == tile_k / {mr} (Wo={getattr(problem, 'Wo', None)})"
+            if int(getattr(problem, "Ho", 0)) % mr:
+                return False, f"xwin_mrow={mr} needs Ho % {mr} == 0"
+        elif int(getattr(problem, "Wo", 0)) % max(1, identity.tile_k):
             return False, f"xwin needs Wo % tile_k == 0 (Wo={getattr(problem, 'Wo', None)})"
 
     # uk_nopad drops the per-tap bounds checks: unpadded problems only.
@@ -982,6 +1007,7 @@ IDENTITY_CAPABILITY_FIELDS = (
     "uk_nopad",
     "xwin",
     "xwin_rows",
+    "xwin_mrow",
 )
 
 #: Problem attributes the predicate reads when the identity is a *direct* one.

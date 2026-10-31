@@ -5652,6 +5652,32 @@ def _ws_replicas_of(ident) -> int:
     return _DEFAULT_WS_REPLICAS
 
 
+def _ws_slabs_used(problem, ident, split_k) -> int:
+    """Scratch slabs a two-stage wgrad launch at ``split_k`` actually touches.
+
+    Stage 1 picks slab ``blockIdx.z % R`` (ungrouped, no group merging), and
+    z runs over the ``split_k`` slices only, so a launch whose degree is below
+    the binary's replica count ``R`` never writes slabs ``split_k .. R-1``.
+    Zeroing and folding just the first ``min(R, split_k)`` slabs gives the
+    same dW bit for bit (the skipped slabs only ever add +0.0) and saves
+    ``(R - split_k)`` dW-sized f32 clears and reads -- at split_k 2 and R 8,
+    ~3/4 of a two-stage launch's memory traffic outside Stage 1. Grouped /
+    group-merged launches index slabs by group too and keep all ``R``.
+    ``ROCKE_WGRAD_WS_ALL_SLABS=1`` restores the full clear and fold.
+    """
+    reps = _ws_replicas_of(ident)
+    if (
+        os.environ.get("ROCKE_WGRAD_WS_ALL_SLABS", "0") not in ("", "0")
+        or max(1, problem.groups) > 1
+        or max(1, getattr(ident, "group_merge", 1) or 1) > 1
+        or getattr(ident, "streamk", "off") != "off"
+        or not split_k
+        or split_k < 1
+    ):
+        return reps
+    return max(1, min(reps, int(split_k)))
+
+
 def _stage2_reduce(problem, dtype_d, arch, compiled, KernelLauncher, ws_replicas):
     """Stage 2 (scratch fold + cast to dW) for a cached two-stage wgrad kernel.
 
@@ -5668,13 +5694,21 @@ def _stage2_reduce(problem, dtype_d, arch, compiled, KernelLauncher, ws_replicas
         wgrad_reduce_signature,
     )
 
+    # 4 N elements per thread (16-byte f32 loads, 8-byte bf16 stores) when the
+    # dW row length allows; ROCKE_WGRAD_S2_VEC=1 keeps the scalar fold.
+    vec = int(os.environ.get("ROCKE_WGRAD_S2_VEC", "4") or 4)
+    from kernels.common.conv_wgrad_workspace_reduce import _wg_N as _s2_wg_N
+
+    if vec <= 1 or _s2_wg_N(problem) % vec:
+        vec = 1
     spec = WgradReduceSpec(
         problem=problem,
         dtype_d=dtype_d,
         groups=problem.groups,
         ws_replicas=ws_replicas,
+        **({"vec": vec} if vec > 1 else {}),
     )
-    key = (dtype_d, ws_replicas)
+    key = (dtype_d, ws_replicas, vec)
     if key not in compiled:
         art = compile_kernel(build_conv_wgrad_workspace_reduce(spec), arch=arch)
         compiled[key] = KernelLauncher(
@@ -6317,7 +6351,7 @@ def _cached_bind(
             arch,
             stage2_kernels,
             KernelLauncher,
-            _ws_replicas_of(ident),
+            extras.get("ws_slabs", _ws_replicas_of(ident)),
         )
         s2_values, s2_cfg = _stage2_launch(
             s2_spec,
@@ -6403,6 +6437,19 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
         if split_k is None:
             split_k = max(1, ident.split_k)
         extras["split_k"] = split_k
+        _xg = max(1, getattr(ident, "xwin_groups", 1) or 1)
+        if _xg > 1 and split_k % _xg:
+            raise ValueError(
+                f"xwin_groups={_xg} runs {_xg} K slices per workgroup: "
+                f"split_k={split_k} is not a multiple"
+            )
+        if getattr(ident, "xwin_gn", 0) == 2:
+            _gx = _grid_for(direction, problem, ident, split_k)[0]
+            if _gx < _xg:
+                raise ValueError(
+                    f"xwin_gn=2 shares the dY tile over {_xg} consecutive N tiles: "
+                    f"needs >= {_xg} N tiles (got {_gx})"
+                )
         if ident.two_stage:
             # One slab per (group, replica), not per K-slice: the slices
             # atomic-add into the replica slabs (see WgradConvSpec.ws_replicas).
@@ -6410,7 +6457,9 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
                 wgrad_workspace_nbytes,
             )
 
-            ws_bytes = wgrad_workspace_nbytes(problem, _ws_replicas_of(ident))
+            ws_slabs = _ws_slabs_used(problem, ident, split_k)
+            ws_bytes = wgrad_workspace_nbytes(problem, ws_slabs)
+            extras["ws_slabs"] = ws_slabs
             ws = rt.alloc(ws_bytes)
             rt.memset(ws, 0, ws_bytes)
             extras["ws_ptr"] = ws
@@ -6443,6 +6492,8 @@ def _grid_for(direction, problem, ident, split_k=None):
         # A group-merged kernel runs one workgroup per Gm groups; the group
         # and the K-slice share z (z = groups/Gm * split_k).
         grid_groups = max(1, problem.groups) // max(1, ident.group_merge)
+        # xwin_groups: G slices per workgroup (G | sk, checked by the caller).
+        sk //= max(1, getattr(ident, "xwin_groups", 1) or 1)
         return gx, gy, grid_groups * sk
     if direction == "dgrad":
         return ConvArgs.from_problem(

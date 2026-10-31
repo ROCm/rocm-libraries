@@ -283,7 +283,7 @@ class TestPatchIdentity(unittest.TestCase):
             "tapk_ilv", "tapk_lds_ahead", "tapk_lds_barrier", "tapk_pingpong", "tapk_pp_epi", "tapk_pp_sched",
             "tapk_prefetch", "tapk_setprio", "tapk_xhalo", "uk_chunk_group", "uk_nopad", "uk_tap_fast",
             "uk_xhalo", "vmem_interleave", "xcd_remap", "xh_a_k4", "xh_b_kpad", "xh_b_wide",
-            "xh_defer", "xh_dpp", "xh_order", "xh_wait_smem", "xhalo_exact", "xwin", "xwin_rows",
+            "xh_defer", "xh_dpp", "xh_order", "xh_wait_smem", "xhalo_exact", "xwin", "xwin_gn", "xwin_groups", "xwin_mrow", "xwin_pp", "xwin_rows",
         ):
             del fields[name]
         if fields["streamk"] == "off" and not fields["streamk_reduction"]:
