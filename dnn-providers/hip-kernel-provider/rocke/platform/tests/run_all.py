@@ -12,7 +12,7 @@
 # Usage:
 #   python rocke/platform/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
 #       [--no-both] [--only SUBSTR] [--only-ir SUBSTR] [--build-root DIR]
-#       [--config CONFIG]
+#       [--config CONFIG] [--pytest-target PATH_OR_NODE_ID]
 #
 # The two filters are separate by *vocabulary*, not by gate. `--only` selects
 # *families* for the byte-identity gate; `--only-ir` selects *case ids*
@@ -46,6 +46,16 @@ TOOLS = ROCKE / "tools"
 # instead of restating them here and letting the two drift.
 if str(ROCKE / "python") not in sys.path:
     sys.path.insert(0, str(ROCKE / "python"))
+# Source runs keep helpers under tools/. Installed tests stage the same helper
+# beside the arch-domain generator instead. Bootstrap the first complete home so
+# importing this runner by path never depends on another test's sys.path changes.
+for helper_root in (TOOLS, TESTS / "arch_domain"):
+    if (helper_root / "_hostcaps.py").is_file():
+        if str(helper_root) not in sys.path:
+            sys.path.insert(0, str(helper_root))
+        break
+
+from _hostcaps import available_cpus
 
 # Files that may reference an absolute repo path or a path that escapes rocke/platform/
 # break the verbatim-copy contract. Enforce on code/build files only (docs are
@@ -143,6 +153,9 @@ def ctest_ready(build_root: Path, config: str) -> bool:
 # instead of skipping: (env var, CTest name, label). The installed rocke_pytest
 # CTest entry (platform/CMakeLists.txt) sets the same variables to the installed
 # binaries; add a new pair in both places.
+_ARCH_DOMAIN_COMPLETE_ENV = "ROCKE_RUN_ALL_ARCH_DOMAIN_COMPLETE"
+
+
 NATIVE_PARITY_TESTS = (
     ("ROCKE_STORAGE_TEST", "rocke_storage", "native storage parity"),
     ("ROCKE_IR_TYPES_TEST", "rocke_ir_types", "native IR type rule parity"),
@@ -239,6 +252,9 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     env.pop("ROCKE_ONLINE_LIB", None)
     env.pop("ROCKE_REPLAY_CLI", None)
     env.pop("ROCKE_PROVENANCE_MANIFEST", None)
+    # Only this runner may claim that its own complete corpus gate succeeded.
+    # An ambient value must not suppress the standalone pytest delegation.
+    env.pop(_ARCH_DOMAIN_COMPLETE_ENV, None)
     if (build_root / "CMakeCache.txt").is_file():
         subprocess.run(
             [
@@ -247,6 +263,8 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
                 str(build_root),
                 "--config",
                 config,
+                "--parallel",
+                str(available_cpus()),
             ],
             check=True,
         )
@@ -334,7 +352,38 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     return env
 
 
-def differential_pytest_pass(env: dict[str, str]) -> int:
+def pytest_targets(selectors: list[str]) -> list[str]:
+    """Resolve focused pytest paths/node IDs without allowing tree escapes."""
+    if not selectors:
+        return [str(TESTS)]
+
+    targets: list[str] = []
+    for selector in selectors:
+        path_text, separator, node_id = selector.partition("::")
+        path = Path(path_text)
+        if not path.is_absolute():
+            parts = path.parts
+            if parts and parts[0] == "tests":
+                path = Path(*parts[1:])
+            path = TESTS / path
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(TESTS.resolve())
+        except ValueError as exc:
+            raise ValueError(f"pytest target escapes {TESTS}: {selector}") from exc
+        if not resolved.exists():
+            raise ValueError(f"pytest target does not exist: {selector}")
+        target = str(resolved)
+        if separator:
+            if not node_id:
+                raise ValueError(f"pytest target has an empty node ID: {selector}")
+            target += f"::{node_id}"
+        if target not in targets:
+            targets.append(target)
+    return targets
+
+
+def differential_pytest_pass(env: dict[str, str], targets: list[str]) -> int:
     """Re-run pytest with ``ROCKE_BACKEND=both`` (the cross-engine gate).
 
     The default pass exercises one engine per assertion, so two engines that
@@ -369,7 +418,8 @@ def differential_pytest_pass(env: dict[str, str]) -> int:
         return 0
     from rocke.core.backend import CPP_UNPORTED_ARCHES
 
-    print("\n== pytest (ROCKE_BACKEND=both) ==")
+    scope = "FOCUSED, " if targets != [str(TESTS)] else ""
+    print(f"\n== pytest ({scope}ROCKE_BACKEND=both) ==")
     if CPP_UNPORTED_ARCHES:
         print(
             "   no fallback to Python in this lane; skips are the known C++ "
@@ -384,7 +434,7 @@ def differential_pytest_pass(env: dict[str, str]) -> int:
         )
     env = dict(env, ROCKE_BACKEND="both")
     return subprocess.run(
-        [sys.executable, "-m", "pytest", str(TESTS), "-rs"], cwd=str(TESTS), env=env
+        [sys.executable, "-m", "pytest", *targets, "-rs"], cwd=str(TESTS), env=env
     ).returncode
 
 
@@ -423,14 +473,29 @@ def main() -> int:
         "family/arch/variant",
     )
     ap.add_argument(
+        "--pytest-target",
+        action="append",
+        default=[],
+        metavar="PATH_OR_NODE_ID",
+        help="run only this pytest path or node ID, relative to tests/; repeatable. "
+        "Other gates and CTest remain complete",
+    )
+    ap.add_argument(
         "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
     )
     ap.add_argument(
         "--config", default="Release", help="native test build/CTest configuration"
     )
     args = ap.parse_args()
+    try:
+        selected_pytests = pytest_targets(args.pytest_target)
+    except ValueError as exc:
+        ap.error(str(exc))
+    pytest_focused = bool(args.pytest_target)
+    run_focused = bool(args.only or args.only_ir or args.pytest_target)
 
     status = 0
+    arch_domain_complete = False
 
     if not args.no_guard:
         status |= relative_path_guard()
@@ -472,23 +537,30 @@ def main() -> int:
         # check_ir_validity. See the note at the top of this file.
         if args.only_ir:
             ad_gate += ["--only", args.only_ir]
-        status |= subprocess.run(ad_gate).returncode
+        arch_domain_status = subprocess.run(ad_gate).returncode
+        status |= arch_domain_status
+        arch_domain_complete = arch_domain_status == 0 and not args.only_ir
 
     if not args.no_pytest:
         try:
             build_root = Path(args.build_root).resolve()
             configure_pytest_build(build_root, args.config)
             pytest_env = native_pytest_env(build_root, args.config)
+            if arch_domain_complete:
+                pytest_env[_ARCH_DOMAIN_COMPLETE_ENV] = "1"
         except (OSError, ValueError, subprocess.CalledProcessError) as exc:
             print(f"native parity test setup failed: {exc}", file=sys.stderr)
             return 1
-        print("\n== pytest ==")
+        label = "pytest (FOCUSED)" if pytest_focused else "pytest"
+        print(f"\n== {label} ==")
         status |= subprocess.run(
-            [sys.executable, "-m", "pytest", str(TESTS)], cwd=str(TESTS), env=pytest_env
+            [sys.executable, "-m", "pytest", *selected_pytests],
+            cwd=str(TESTS),
+            env=pytest_env,
         ).returncode
 
     if not args.no_pytest and not args.no_both:
-        status |= differential_pytest_pass(pytest_env)
+        status |= differential_pytest_pass(pytest_env, selected_pytests)
 
     build_root = Path(args.build_root)
     # Run the entire registered suite once any executable is built; partial
@@ -505,7 +577,8 @@ def main() -> int:
             cwd=str(build_root),
         ).returncode
 
-    print("\nRESULT:", "GREEN" if status == 0 else "RED")
+    result_scope = "FOCUSED " if run_focused else ""
+    print("\nRESULT:", result_scope + ("GREEN" if status == 0 else "RED"))
     return status
 
 
