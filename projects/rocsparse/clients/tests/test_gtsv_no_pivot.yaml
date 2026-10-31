@@ -304,8 +304,9 @@ Tests:
 # and both kernels index with NUM_RHS * hipBlockIdx_y + rhs and no loop, so the launch
 # became illegal once the count of right-hand side blocks passed the hardware cap of
 # 65535, i.e. from n = 524281 on. The small path is already correct because it puts the
-# same count on grid.x. The medium path now clamps grid.y and both kernels grid-stride
-# over the blocks in steps of NUM_RHS.
+# same count on grid.x. The medium path clamps grid.y. Launches that fit in the grid
+# and whose pre-clamp index expressions do not overflow keep a single-iteration kernel;
+# the rest grid-stride over the blocks in steps of NUM_RHS.
 #
 # m = 1025 is the smallest size that forces the medium path; a small-m case passes
 # against the unfixed code and proves nothing. n = 524289 asks for 65537 blocks, the
