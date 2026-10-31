@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -379,6 +380,150 @@ TEST(TestSdpaFwdNode, PreValidateFailsAttnScaleTensorAndValueBothSet)
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsWithSinkToken)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+
+    // One FP32 sink logit per Q head: [1, H_q, 1, 1]
+    auto sink = makeTensor4D(1, 8, 1, 1);
+    sink->set_data_type(DataType::FLOAT);
+    attrs.set_sink_token(sink);
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsWithSinkTokenGqa)
+{
+    // The sink is per Q head, not per KV head.
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 2, 32, 64);
+    auto v = makeTensor4D(2, 2, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_sink_token(makeTensor4D(1, 8, 1, 1));
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsSinkTokenKvHeads)
+{
+    // Sized by KV heads instead of Q heads.
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 2, 32, 64);
+    auto v = makeTensor4D(2, 2, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_sink_token(makeTensor4D(1, 2, 1, 1));
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("SINK_TOKEN"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsSinkTokenPerBatch)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_sink_token(makeTensor4D(2, 8, 1, 1));
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsSinkTokenRank1)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+
+    auto sink = std::make_shared<TensorAttributes>();
+    sink->set_dim({8});
+    attrs.set_sink_token(sink);
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsSinkTokenNonFloat)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+
+    auto sink = makeTensor4D(1, 8, 1, 1);
+    sink->set_data_type(DataType::HALF);
+    attrs.set_sink_token(sink);
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("FLOAT"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, GraphValidateRejectsUntypedSinkTokenInHalfGraph)
+{
+    // Graph::validate() gives an untyped input the graph's IO type before nodes are
+    // checked, so a sink without an explicit FLOAT dtype arrives as HALF and is rejected
+    // (cuDNN behaves the same way). With FLOAT set, the same graph validates.
+    for(const bool setFloat : {false, true})
+    {
+        Graph graph;
+        graph.set_io_data_type(DataType::HALF)
+            .set_intermediate_data_type(DataType::FLOAT)
+            .set_compute_data_type(DataType::FLOAT);
+
+        auto makeInput = [](int64_t uid, std::vector<int64_t> dims) {
+            auto t = std::make_shared<TensorAttributes>();
+            t->set_uid(uid).set_dim(dims).set_stride(
+                hipdnn_data_sdk::utilities::generateStrides(dims));
+            return t;
+        };
+        auto sink = makeInput(4, {1, 8, 1, 1});
+        if(setFloat)
+        {
+            sink->set_data_type(DataType::FLOAT);
+        }
+
+        SdpaAttributes attrs;
+        attrs.set_sink_token(sink);
+        auto [o, stats] = graph.sdpa(makeInput(1, {2, 8, 16, 64}),
+                                     makeInput(2, {2, 8, 32, 64}),
+                                     makeInput(3, {2, 8, 32, 64}),
+                                     attrs);
+        o->set_uid(5).set_output(true);
+
+        auto err = graph.validate();
+        if(setFloat)
+        {
+            EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+        }
+        else
+        {
+            EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+            EXPECT_NE(err.err_msg.find("SINK_TOKEN must be FLOAT"), std::string::npos)
+                << err.err_msg;
+        }
+    }
 }
 
 TEST(TestSdpaFwdNode, InferPropertiesSetsOutputShape)
