@@ -889,6 +889,23 @@ class KernelWriterAssembly(KernelWriter):
     tP["localReadStrideCoalesced"] = localReadStrideCoalesced
     tP["localReadInstruction"]     = instructions[lrInstPoolName][localReadInstructionIdx]
 
+  def _checkedOutRegs(self):
+    """{(pool, index): tag} of every sgpr/vgpr currently checked out."""
+    from rocisa.register import RegisterPool
+    regs = {}
+    for name, pool in (("s", self.sgprPool), ("v", self.vgprPool)):
+      for idx, reg in enumerate(pool.getPool()):
+        if reg.status == RegisterPool.Status.InUse:
+          regs[(name, idx)] = reg.tag
+    return regs
+
+  def _assertStillCheckedOut(self, regs, where):
+    """Assert every register of a _checkedOutRegs() snapshot is still
+    checked out under the same tag at ``where``."""
+    now = self._checkedOutRegs()
+    freed = sorted("%s%u(%s)" % (p, i, t) for (p, i), t in regs.items() if now.get((p, i)) != t)
+    assert not freed, "registers live across %s were checked in before it: %s" % (where, ", ".join(freed))
+
   def allocTmpSgpr(self, num: int, alignment=None, tag=None):
     def overflowListener(e):
       self.states.overflowedResources = 2
@@ -19054,6 +19071,11 @@ class KernelWriterAssembly(KernelWriter):
       # (their deferred Fixup/Partials blocks are emitted only by the post-loop store,
       # so referencing them from the NLL would leave undefined symbols).
       fusedFullTileStore = self.states.subtileFusedFullTileStore
+      # Under the arrival fixup these registers are live across writePartials
+      # (see usesArrivalFixup); snapshot them to assert that.
+      arrivalFixup = processingComponent is not None and not fusedFullTileStore \
+        and processingComponent.usesArrivalFixup(self, kernel)
+      liveAcrossPartials = self._checkedOutRegs() if arrivalFixup else None
       if processingComponent is not None and not fusedFullTileStore:
         module.add(processingComponent.storeBranches(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct))
 
@@ -19263,11 +19285,19 @@ class KernelWriterAssembly(KernelWriter):
             self.states.deferredActivationModules = activationModules
         else:
           module.appendModule(activationModules)
-        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
-        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
+        # Under the arrival fixup these are live across writePartials.
+        if not arrivalFixup:
+          self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
+          self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
 
       if processingComponent is not None and not fusedFullTileStore:
+        if liveAcrossPartials is not None:
+          self._assertStillCheckedOut(liveAcrossPartials, "writePartials (StreamK arrival fixup)")
         module.add(processingComponent.writePartials(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct, endLabel))
+
+      if activationLabelList and arrivalFixup:
+        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
+        self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
 
       # End label
       module.add(endLabel)
