@@ -28,11 +28,8 @@ def _isolated_source(tmp_path):
 def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatch):
     """rocisa is currently provisioned from source, not resolved by pip."""
     source_root = _isolated_source(tmp_path)
-    rocm_root = tmp_path / "rocm"
-    (rocm_root / ".info").mkdir(parents=True)
-    (rocm_root / ".info/version").write_text("7.2.4\n", encoding="utf-8")
-    monkeypatch.setenv("ROCM_PATH", str(rocm_root))
-    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.setenv("TENSILELITE_ROCM_VERSION", "7.0.0")
+    monkeypatch.delenv("ROCM_PATH", raising=False)
 
     subprocess.run(
         [
@@ -52,6 +49,8 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
         text=True,
     )
 
+    assert not (source_root / "tensilelite.egg-info").exists()
+
     wheel = next(tmp_path.glob("*.whl"))
     with zipfile.ZipFile(wheel) as archive:
         archived_names = set(archive.namelist())
@@ -63,7 +62,7 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
         ).decode("utf-8")
 
     component_version = (source_root / "VERSION").read_text(encoding="utf-8").strip()
-    assert f"Version: {component_version}+rocm7.2.4" in metadata
+    assert f"Version: {component_version}+rocm7.0.0" in metadata
     assert "Requires-Dist: rocisa" not in metadata
 
     parsed_entry_points = configparser.ConfigParser()
@@ -76,7 +75,33 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
     assert "_tensilelite_client_binding.py" in archived_names
     assert "tensilelite_configure_client.py" in archived_names
 
+def test_direct_wheel_build_requires_explicit_rocm_identity(tmp_path, monkeypatch):
+    source_root = _isolated_source(tmp_path)
+    rocm_root = tmp_path / "ambient-rocm"
+    (rocm_root / ".info").mkdir(parents=True)
+    (rocm_root / ".info/version").write_text("9.9.9\n", encoding="utf-8")
+    monkeypatch.setenv("ROCM_PATH", str(rocm_root))
+    monkeypatch.delenv("TENSILELITE_ROCM_VERSION", raising=False)
 
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-build-isolation",
+            "--no-deps",
+            "--wheel-dir",
+            str(tmp_path / "wheels"),
+            ".",
+        ],
+        cwd=source_root,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "TENSILELITE_ROCM_VERSION" in result.stderr
 def test_uv_lock_matches_dynamic_package_metadata():
     lock = tomllib.loads((_PROJECT_ROOT / "uv.lock").read_text(encoding="utf-8"))
     package = next(package for package in lock["package"] if package["name"] == "tensilelite")

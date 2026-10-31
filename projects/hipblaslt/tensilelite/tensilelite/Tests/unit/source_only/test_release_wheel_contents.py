@@ -77,16 +77,8 @@ def test_release_source_staging_excludes_shared_build_state(tmp_path):
 
 def test_canonical_and_compatibility_release_wheels_validate_independently(tmp_path):
     source_root = _isolated_source(tmp_path)
-    rocm_root = tmp_path / "rocm"
-    (rocm_root / ".info").mkdir(parents=True)
-    (rocm_root / ".info/version").write_text("7.2.4\n", encoding="utf-8")
-    environment = dict(
-        os.environ,
-        ROCM_PATH=str(rocm_root),
-        # PR 8 derives release identity from the selected ROCm root. A later
-        # TheRock build-input migration deliberately changes this contract.
-        TENSILELITE_ROCM_VERSION="8.0.0",
-    )
+    environment = dict(os.environ, TENSILELITE_ROCM_VERSION="7.2.4")
+    environment.pop("ROCM_PATH", None)
 
     for mode, source, pattern in (
         ("canonical", source_root, "tensilelite-*.whl"),
@@ -224,10 +216,8 @@ def test_installer_removes_stale_wheel_owned_files_only(tmp_path):
 
 def test_compatibility_sdist_builds_a_self_contained_wheel(tmp_path):
     source_root = _isolated_source(tmp_path)
-    rocm_root = tmp_path / "rocm"
-    (rocm_root / ".info").mkdir(parents=True)
-    (rocm_root / ".info/version").write_text("7.2.4\n", encoding="utf-8")
-    environment = dict(os.environ, ROCM_PATH=str(rocm_root))
+    environment = dict(os.environ, TENSILELITE_ROCM_VERSION="7.2.4")
+    environment.pop("ROCM_PATH", None)
     sdist_dir = tmp_path / "sdist"
     wheel_dir = tmp_path / "wheel"
     sdist_dir.mkdir()
@@ -242,6 +232,9 @@ def test_compatibility_sdist_builds_a_self_contained_wheel(tmp_path):
     )
     assert sdist.returncode == 0, sdist.stderr
     archive = next(sdist_dir.glob("*.tar.gz"))
+    wheel_environment = dict(environment)
+    wheel_environment.pop("TENSILELITE_ROCM_VERSION")
+    wheel_environment.pop("ROCM_PATH", None)
 
     wheel = subprocess.run(
         [
@@ -257,12 +250,29 @@ def test_compatibility_sdist_builds_a_self_contained_wheel(tmp_path):
             str(archive),
         ],
         cwd=tmp_path,
-        env=environment,
+        env=wheel_environment,
         capture_output=True,
         text=True,
     )
     assert wheel.returncode == 0, wheel.stderr
-    assert next(wheel_dir.glob("tensilelite_tensile_compat-*.whl")).is_file()
+    built_wheel = next(wheel_dir.glob("tensilelite_tensile_compat-*.whl"))
+    validation = subprocess.run(
+        [
+            sys.executable,
+            str(_VALIDATOR),
+            "--mode",
+            "compatibility",
+            "--wheel",
+            str(built_wheel),
+            "--expected-version",
+            "5.0.0+rocm7.2.4",
+            "--source-root",
+            str(source_root),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert validation.returncode == 0, validation.stderr
 
 
 def test_validator_rejects_cross_package_leaks_and_missing_runtime_dependencies(tmp_path):
