@@ -342,3 +342,73 @@ open(sys.argv[1], "w").write(
         text=True,
     )
     assert f"kernel attr '{key}'" not in got.stderr, got.stderr[-2000:]
+
+
+def test_standalone_importers_carry_and_refuse_param_attrs(tmp_path):
+    """Both C++ importers carry every pointer attribute the lowerer emits, and
+    refuse a param attr they cannot read.
+
+    ``nonnull``, ``dereferenceable`` and an explicit ``nocapture=False`` change
+    the emitted argument list, so the replay of a kernel that states them must
+    still match the Python lowerer byte for byte. A key the importers do not
+    know is an error rather than silently dropped, in both artifact forms."""
+    cli = _replay_cli()
+    author = """
+import json, sys
+from rocke.core import ir_export
+from rocke.core.ir import F32, IRBuilder, PtrType
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.portable_ir.src.recording_builder import record_kernel
+
+
+def build():
+    b = IRBuilder("param_attr_probe")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    src = b.param(
+        "src", PtrType(F32, "global"), nonnull=True, dereferenceable=256, align=16
+    )
+    dst = b.param("dst", PtrType(F32, "global"), nocapture=False, writeonly=True)
+    tid = b.thread_id_x()
+    b.global_store(dst, tid, b.global_load_f32(src, tid, align=4), align=4)
+    b.ret()
+    return b.kernel
+
+
+out = sys.argv[1]
+kernel, recipe = record_kernel(build)
+open(out + "/k.ir.json", "w").write(ir_export.export_kernel_ir_json(kernel))
+open(out + "/k.recipe.json", "w").write(json.dumps(recipe))
+open(out + "/py.ll", "w").write(
+    lower_kernel_to_llvm(kernel, llvm_flavor="llvm20", arch="gfx950"))
+"""
+    r = _run([sys.executable, "-c", author, str(tmp_path)])
+    assert r.returncode == 0, r.stderr[-4000:]
+
+    import json
+
+    expected = (tmp_path / "py.ll").read_text()
+    assert "nonnull" in expected and "dereferenceable(256)" in expected
+    ir_doc = json.loads((tmp_path / "k.ir.json").read_text())
+    recipe = json.loads((tmp_path / "k.recipe.json").read_text())
+    ir_doc["kernel"]["params"][0]["attrs"]["el"] = 1048576
+    first_param = next(i for i in recipe["program"] if i.get("op") == "param")
+    first_param["attrs"]["el"] = 1048576
+    (tmp_path / "bad.ir.json").write_text(json.dumps(ir_doc))
+    (tmp_path / "bad.recipe.json").write_text(json.dumps(recipe))
+
+    def replay(flag, path):
+        return subprocess.run(
+            [cli, flag, str(path), "--arch", "gfx950", "--flavor", "llvm20"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    for form, flag in (("ir.json", "--ir"), ("recipe.json", "--recipe")):
+        got = replay(flag, tmp_path / f"k.{form}")
+        assert got.returncode == 0, f"{form}: {got.stderr[-2000:]}"
+        assert got.stdout == expected, f"{form}: replay diverged from Python"
+
+        got = replay(flag, tmp_path / f"bad.{form}")
+        assert got.returncode != 0, f"{form}: an unknown param attr was accepted"
+        assert "param 'src' has unknown attr 'el'" in got.stderr, got.stderr[-2000:]

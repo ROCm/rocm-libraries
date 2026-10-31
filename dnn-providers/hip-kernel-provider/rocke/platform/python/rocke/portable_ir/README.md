@@ -275,6 +275,13 @@ The `program` is a flat list of instructions. Kernel arguments first:
 }
 ```
 
+A param's `attrs` are the pointer argument attributes the lowerer emits:
+`noalias`, `readonly`, `writeonly`, `nocapture`, `nonnull` (bools), `align`,
+`dereferenceable` (ints) and `addr_space` (a string). Both C++ importers (the
+recipe VM and the concrete-IR importer) refuse any other key, and a value of the
+wrong kind, rather than drop it: a dropped attribute would change the lowered
+kernel without a word.
+
 then the ops, in emission order:
 
 ```json
