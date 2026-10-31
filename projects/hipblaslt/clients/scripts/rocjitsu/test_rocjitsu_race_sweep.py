@@ -311,6 +311,59 @@ class SweepTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["outcome"], "INFRASTRUCTURE_ERROR")
         self.assertEqual(result["results"][0]["errors"], ["SystemExit('worker stopped')"])
 
+    def test_memory_budget_limits_concurrent_estimates(self):
+        costs = [4, 4, 4, 9, 12, 1, 1, 3]
+        batches = [[{"id": i, "cost": cost, "cases": []}] for i, cost in enumerate(costs)]
+        lock = threading.Lock()
+        running, peaks, alone = {}, [], []
+
+        def execute(batch, slot):
+            job = batch[0]
+            with lock:
+                running[job["id"]] = job["cost"]
+                peaks.append(sum(running.values()))
+                if job["cost"] > 10:
+                    alone.append(len(running) == 1)
+            time.sleep(0.02)
+            with lock:
+                del running[job["id"]]
+            return [{"id": job["id"], "failed": False, "cases": []}]
+
+        result = sweep.run_queue(
+            batches,
+            4,
+            execute,
+            lambda value: None,
+            memory=(lambda batch: batch[0]["cost"], 10),
+        )
+        self.assertEqual(sorted(r["id"] for r in result["results"]), list(range(len(costs))))
+        self.assertEqual(alone, [True])
+        self.assertTrue(all(peak <= 10 or peak == 12 for peak in peaks))
+        self.assertEqual(result["max_reserved_memory_gib"], 12)
+        # Smaller later batches start while the next one in order cannot fit.
+        self.assertLess(result["assigned_job_ids"].index(5), result["assigned_job_ids"].index(3))
+
+    def test_code_object_size_reads_compressed_bundle_header(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            compressed = Path(tmp) / "compressed.co"
+            compressed.write_bytes(
+                b"CCOB"
+                + (3).to_bytes(2, "little")
+                + (1).to_bytes(2, "little")
+                + (40).to_bytes(8, "little")
+                + (5 << 30).to_bytes(8, "little")
+                + bytes(16)
+            )
+            plain = Path(tmp) / "plain.co"
+            plain.write_bytes(b"\x7fELF" + bytes(1020))
+            self.assertEqual(sweep.code_object_bytes(str(compressed)), 5 << 30)
+            self.assertEqual(sweep.code_object_bytes(str(plain)), 1024)
+            job = {"code_objects": [str(compressed), str(plain), "Kernels.hsaco"]}
+            self.assertAlmostEqual(
+                sweep.batch_memory_gib([job, job]),
+                sweep.MEMORY_BASE_GIB + sweep.MEMORY_PER_CODE_OBJECT_GIB * (5 + 1024 / (1 << 30)),
+            )
+
     def test_infrastructure_error_preserves_prior_pass_and_numerical_history(self):
         good = {
             "id": 0,

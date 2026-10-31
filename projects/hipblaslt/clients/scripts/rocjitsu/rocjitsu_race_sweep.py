@@ -6,6 +6,7 @@
 import argparse
 import copy
 import csv
+import functools
 import html
 import json
 import math
@@ -33,6 +34,38 @@ from tensilelite.Utilities.ClientConfig import problemTypeOptions
 
 DEFAULT_BATCH_SIZES = {"bench": 32, "tensile": 1}
 CHECKPOINT_SECONDS = 5
+# Peak resident memory of one emulated native process, measured on gfx942 with
+# rocjitsu's race plugin: about 0.30 GiB plus 5.24 times the uncompressed size
+# of the Tensile code objects it loads. Decompression, loader staging and the
+# emulated device copy each hold the code. The base includes a 0.45 GiB margin
+# for the largest observed underestimate.
+MEMORY_BASE_GIB = 0.75
+MEMORY_PER_CODE_OBJECT_GIB = 5.24
+
+
+@functools.cache
+def code_object_bytes(path):
+    """Uncompressed size of a code object, reading a compressed bundle's header."""
+    with open(path, "rb") as stream:
+        header = stream.read(24)
+    if header[:4] != b"CCOB":
+        return os.path.getsize(path)
+    version = int.from_bytes(header[4:6], "little")
+    if version == 1:
+        return int.from_bytes(header[8:12], "little")
+    if version == 2:
+        return int.from_bytes(header[12:16], "little")
+    if version == 3:
+        return int.from_bytes(header[16:24], "little")
+    raise ValueError(f"{path}: unsupported compressed bundle version {version}")
+
+
+def batch_memory_gib(batch):
+    """Estimated peak memory of the native process that runs a batch."""
+    paths = {path for job in batch for path in job.get("code_objects", ()) if path.endswith(".co")}
+    return MEMORY_BASE_GIB + MEMORY_PER_CODE_OBJECT_GIB * sum(
+        code_object_bytes(path) for path in paths
+    ) / (1 << 30)
 
 
 def write_text(path, value):
@@ -1034,11 +1067,17 @@ def run_queue(
     deadline=None,
     continue_on_failure=False,
     recover=None,
+    memory=None,
 ):
     """The calling thread owns scheduling, results, retries and progress writes.
 
     Each worker receives a private batch and transfers its completed results
     through a Queue. After that transfer it never accesses those results again.
+
+    ``memory`` is an optional ``(estimate, budget)`` pair. A batch starts only
+    while the estimates of running batches, including its own, fit the budget;
+    the first pending batch that fits is chosen. A batch always starts when
+    nothing else is running, so an oversized batch runs alone.
     """
     pending = deque(copy.deepcopy(batches))
     original_ids = [job["id"] for batch in batches for job in batch]
@@ -1047,9 +1086,12 @@ def run_queue(
     work = [queue.Queue() for _ in range(workers)]
     finished = queue.Queue()
     results, active = {}, {}
+    reserved = {}
+    costs = {}
     assigned = []
     assigned_ids = set()
     maximum = 0
+    maximum_reserved = 0.0
     stop_snapshot = None
 
     def stop(reason, trigger_job=None):
@@ -1065,6 +1107,12 @@ def run_queue(
 
     def expired():
         return deadline is not None and time.monotonic() >= deadline
+
+    def cost_of(batch):
+        key = tuple(job["id"] for job in batch)
+        if key not in costs:
+            costs[key] = memory[0](batch)
+        return costs[key]
 
     def worker(slot):
         while (batch := work[slot].get()) is not None:
@@ -1096,7 +1144,7 @@ def run_queue(
             finished.put((slot, completed))
 
     def dispatch():
-        nonlocal maximum
+        nonlocal maximum, maximum_reserved
         for slot in range(workers):
             if not pending or stop_snapshot is not None:
                 break
@@ -1105,13 +1153,31 @@ def run_queue(
             if expired():
                 stop("suite-timeout")
                 break
-            batch = pending.popleft()
+            position, cost = 0, 0.0
+            if memory is not None:
+                budget = memory[1]
+                in_use = sum(reserved.values())
+                position = next(
+                    (
+                        i
+                        for i, candidate in enumerate(pending)
+                        if not active or in_use + cost_of(candidate) <= budget
+                    ),
+                    None,
+                )
+                if position is None:
+                    break
+                cost = cost_of(pending[position])
+            batch = pending[position]
+            del pending[position]
             for job in batch:
                 if job["id"] not in assigned_ids:
                     assigned.append(job["id"])
                     assigned_ids.add(job["id"])
             active[slot] = batch
+            reserved[slot] = cost
             maximum = max(maximum, len(active))
+            maximum_reserved = max(maximum_reserved, sum(reserved.values()))
             work[slot].put(batch)
 
     threads = [threading.Thread(target=worker, args=(slot,)) for slot in range(workers)]
@@ -1122,6 +1188,7 @@ def run_queue(
         while active:
             slot, completed = finished.get()
             batch = active.pop(slot)
+            reserved.pop(slot, None)
             recovery = recover(batch, completed) if recover and not expired() else []
             for result in completed:
                 previous = results.get(result["id"])
@@ -1171,6 +1238,7 @@ def run_queue(
         "unstarted": [job_id for job_id in original_ids if job_id not in assigned_ids],
         "assigned_job_ids": assigned,
         "max_active": maximum,
+        "max_reserved_memory_gib": round(maximum_reserved, 3),
         "stop": stop_snapshot,
     }
 
@@ -1349,6 +1417,11 @@ def run(args):
                 "continue_on_failure": continuation,
                 "recover_unexecuted": getattr(args, "recover_unexecuted", False),
                 "library_dir": manifest["library_dir"],
+                "memory_budget_gib": getattr(args, "memory_budget", None),
+                "memory_model_gib": {
+                    "base": MEMORY_BASE_GIB,
+                    "per_uncompressed_code_object": MEMORY_PER_CODE_OBJECT_GIB,
+                },
                 "controlled_environment": {
                     k: env[k]
                     for k in (
@@ -1588,6 +1661,11 @@ def run(args):
             deadline=deadline,
             continue_on_failure=continuation,
             recover=recover if args.backend == "bench" and continuation else None,
+            memory=(
+                None
+                if getattr(args, "memory_budget", None) is None
+                else (batch_memory_gib, args.memory_budget)
+            ),
         )
         if not execution_batches and time.monotonic() >= deadline:
             summary["stop"] = {
@@ -1863,6 +1941,14 @@ def main():
         type=float,
         help="Optional overall time budget in seconds, including inventory preparation",
     )
+    parser.add_argument(
+        "--memory-budget",
+        type=float,
+        help=(
+            "Optional GiB limit on the estimated memory of concurrently running native "
+            "processes; batches wait until their estimate fits"
+        ),
+    )
     args = parser.parse_args()
     if args.policy is None:
         args.policy = REGULAR_POLICY if args.backend == "bench" else POLICY
@@ -1900,10 +1986,15 @@ def main():
             args.suite_timeout is not None
             and (not math.isfinite(args.suite_timeout) or args.suite_timeout <= 0)
         )
+        or (
+            args.memory_budget is not None
+            and (not math.isfinite(args.memory_budget) or args.memory_budget <= 0)
+        )
     ):
         parser.error(
             "Require at least one worker, 0 <= range begin < range end <= 2**31, "
-            "finite positive timeouts, positive reduction blocks, and finite scalars"
+            "finite positive timeouts and memory budget, positive reduction blocks, "
+            "and finite scalars"
         )
     for key in ("rocjitsu", "client", "config", "library_dir", "reports", "resume_from"):
         if getattr(args, key) is not None:
