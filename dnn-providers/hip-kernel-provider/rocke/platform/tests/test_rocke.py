@@ -70,6 +70,10 @@ from rocke.helpers import (
     make_gemm_manifest,
 )
 from rocke.helpers.compile import _comgr_options_for_kernel
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
     DirectConv16cSpec,
@@ -2188,10 +2192,10 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         env.update(env_overrides)
         env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
         out = subprocess.run(
-            [sys.executable, "-c", _FLAVOR_AUTO_PROBE],
+            rocke_python_command("-c", _FLAVOR_AUTO_PROBE),
             capture_output=True,
             text=True,
-            env=env,
+            env=rocke_subprocess_env(env),
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         py_dl, cpp_dl = out.stdout.strip().splitlines()[-2:]

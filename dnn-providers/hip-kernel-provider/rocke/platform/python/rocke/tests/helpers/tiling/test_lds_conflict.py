@@ -19,6 +19,10 @@ from rocke.helpers.tiling.kernels.tiling_gemm_interleaved_demo import (
     _wave_descs_interleaved,
     _transpose_desc,
 )
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
 # The winner CRC A local store: macro tile_m=256, tile_k=32, 16 waves; wave read m_sub=4,n_sub=4,k_sub=2.
 TILE_FREE, WTAG, DEPTH16 = 256, "b128", 16
@@ -814,9 +818,7 @@ def test_gfx90a_read_model_is_registered_at_import():
     sibling tests call `register_read_model` themselves -- so the state under test is repaired by
     whoever ran first, and deleting the module-scope registration leaves the suite green.
     """
-    import os
     import subprocess
-    import sys
 
     probe = (
         "from rocke.helpers.tiling import lds_conflict as lc;"
@@ -824,14 +826,11 @@ def test_gfx90a_read_model_is_registered_at_import():
         "assert 'gfx90a' in lc._READ_MODELS, 'read model NOT registered at import';"
         "print('ok')"
     )
-    # Propagate this interpreter's sys.path: a bare subprocess gets neither the test runner's
-    # rootdir insertion nor an exported PYTHONPATH, so `rocke` is unimportable from any cwd but
-    # platform/python -- which surfaces as a FALSE "not registered at import" rather than an
-    # ImportError. The test would be red on any CI runner and green only on a shell that happens
-    # to export PYTHONPATH.
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
     r = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, env=env
+        rocke_python_command("-c", probe),
+        capture_output=True,
+        text=True,
+        env=rocke_subprocess_env(),
     )
     assert (
         r.returncode == 0
