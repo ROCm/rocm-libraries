@@ -34,7 +34,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
-    ROCSPARSE_CHECKARG_POINTER(1, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, info);
     ROCSPARSE_CHECKARG(2, tol, (tol < 0), rocsparse_status_invalid_value);
 
     auto csric0_info  = info->get_csric0_info();
