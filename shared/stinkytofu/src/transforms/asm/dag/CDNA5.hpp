@@ -2556,6 +2556,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         const bool refillActive = wmmaRefillActive(bestWMMA->inst->latencyCycles);
         // The refill only hides a stall: a non-WMMA pick that carries no wait issues now, so a
         // ready ds_load at a region start does not wait for the queue to fill.
+        // A promoted prefetch (decidePromote) goes before the refill: refill first measured 1.8%
+        // slower on mxf8_tn_medium, the only yaml it changes.
         const bool preemptForQueue = refillActive && (!hasPickableNonWmma || pickWait > 0);
         const bool blockWmmaForActiveWindow = !preemptForQueue && !quotaClosedWindow &&
                                               (coIssueCyclePos_ < activeWmmaLatency_) &&
