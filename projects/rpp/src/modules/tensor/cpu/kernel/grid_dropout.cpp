@@ -84,14 +84,22 @@ RppStatus grid_dropout_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                 dstPtrRowB += dstDescPtr->strides.hStride;
             }
             for (int count = 0; count < numBoxes; count++) {
-                Rpp32u x1 = static_cast<Rpp32u>(RPPPRANGECHECK(
-                    anchorBoxInfo[count].lt.x, roi.xywhROI.xy.x, roi.xywhROI.roiWidth));
-                Rpp32u y1 = static_cast<Rpp32u>(RPPPRANGECHECK(
-                    anchorBoxInfo[count].lt.y, roi.xywhROI.xy.y, roi.xywhROI.roiHeight));
-                Rpp32u x2 = static_cast<Rpp32u>(
-                    RPPPRANGECHECK(anchorBoxInfo[count].rb.x, x1, roi.xywhROI.roiWidth));
-                Rpp32u y2 = static_cast<Rpp32u>(
-                    RPPPRANGECHECK(anchorBoxInfo[count].rb.y, y1, roi.xywhROI.roiHeight));
+                // Clamp anchor box coordinates to ROI bounds in image space, then convert to
+                // ROI-local coordinates so they line up with the packed-origin destination
+                Rpp32u x1 = static_cast<Rpp32u>(
+                    RPPPRANGECHECK(anchorBoxInfo[count].lt.x, roi.xywhROI.xy.x,
+                                   roi.xywhROI.xy.x + roi.xywhROI.roiWidth - 1));
+                Rpp32u y1 = static_cast<Rpp32u>(
+                    RPPPRANGECHECK(anchorBoxInfo[count].lt.y, roi.xywhROI.xy.y,
+                                   roi.xywhROI.xy.y + roi.xywhROI.roiHeight - 1));
+                Rpp32u x2 = static_cast<Rpp32u>(RPPPRANGECHECK(
+                    anchorBoxInfo[count].rb.x, x1, roi.xywhROI.xy.x + roi.xywhROI.roiWidth - 1));
+                Rpp32u y2 = static_cast<Rpp32u>(RPPPRANGECHECK(
+                    anchorBoxInfo[count].rb.y, y1, roi.xywhROI.xy.y + roi.xywhROI.roiHeight - 1));
+                x1 -= roi.xywhROI.xy.x;
+                y1 -= roi.xywhROI.xy.y;
+                x2 -= roi.xywhROI.xy.x;
+                y2 -= roi.xywhROI.xy.y;
 
                 Rpp32u pixelLocation =
                     (y1 * dstDescPtr->strides.hStride) + (x1 * dstDescPtr->strides.wStride);
@@ -142,14 +150,22 @@ RppStatus grid_dropout_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
             }
 
             for (int count = 0; count < numBoxes; count++) {
-                Rpp32u x1 = static_cast<Rpp32u>(RPPPRANGECHECK(
-                    anchorBoxInfo[count].lt.x, roi.xywhROI.xy.x, roi.xywhROI.roiWidth));
-                Rpp32u y1 = static_cast<Rpp32u>(RPPPRANGECHECK(
-                    anchorBoxInfo[count].lt.y, roi.xywhROI.xy.y, roi.xywhROI.roiHeight));
-                Rpp32u x2 = static_cast<Rpp32u>(
-                    RPPPRANGECHECK(anchorBoxInfo[count].rb.x, x1, roi.xywhROI.roiWidth));
-                Rpp32u y2 = static_cast<Rpp32u>(
-                    RPPPRANGECHECK(anchorBoxInfo[count].rb.y, y1, roi.xywhROI.roiHeight));
+                // Clamp anchor box coordinates to ROI bounds in image space, then convert to
+                // ROI-local coordinates so they line up with the packed-origin destination
+                Rpp32u x1 = static_cast<Rpp32u>(
+                    RPPPRANGECHECK(anchorBoxInfo[count].lt.x, roi.xywhROI.xy.x,
+                                   roi.xywhROI.xy.x + roi.xywhROI.roiWidth - 1));
+                Rpp32u y1 = static_cast<Rpp32u>(
+                    RPPPRANGECHECK(anchorBoxInfo[count].lt.y, roi.xywhROI.xy.y,
+                                   roi.xywhROI.xy.y + roi.xywhROI.roiHeight - 1));
+                Rpp32u x2 = static_cast<Rpp32u>(RPPPRANGECHECK(
+                    anchorBoxInfo[count].rb.x, x1, roi.xywhROI.xy.x + roi.xywhROI.roiWidth - 1));
+                Rpp32u y2 = static_cast<Rpp32u>(RPPPRANGECHECK(
+                    anchorBoxInfo[count].rb.y, y1, roi.xywhROI.xy.y + roi.xywhROI.roiHeight - 1));
+                x1 -= roi.xywhROI.xy.x;
+                y1 -= roi.xywhROI.xy.y;
+                x2 -= roi.xywhROI.xy.x;
+                y2 -= roi.xywhROI.xy.y;
 
                 Rpp32u pixelLocation =
                     (y1 * dstDescPtr->strides.hStride) + (x1 * dstDescPtr->strides.wStride);
@@ -185,17 +201,25 @@ RppStatus grid_dropout_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
             }
 
             for (int count = 0; count < numBoxes; count++) {
-                Rpp32u x1 = static_cast<Rpp32u>(RPPPRANGECHECK(
-                    anchorBoxInfo[count].lt.x, roi.xywhROI.xy.x, roi.xywhROI.roiWidth));
-                Rpp32u y1 = static_cast<Rpp32u>(RPPPRANGECHECK(
-                    anchorBoxInfo[count].lt.y, roi.xywhROI.xy.y, roi.xywhROI.roiHeight));
-                Rpp32u x2 = static_cast<Rpp32u>(
-                    RPPPRANGECHECK(anchorBoxInfo[count].rb.x, x1, roi.xywhROI.roiWidth));
-                Rpp32u y2 = static_cast<Rpp32u>(
-                    RPPPRANGECHECK(anchorBoxInfo[count].rb.y, y1, roi.xywhROI.roiHeight));
+                // Clamp anchor box coordinates to ROI bounds in image space, then convert to
+                // ROI-local coordinates so they line up with the packed-origin destination
+                Rpp32u x1 = static_cast<Rpp32u>(
+                    RPPPRANGECHECK(anchorBoxInfo[count].lt.x, roi.xywhROI.xy.x,
+                                   roi.xywhROI.xy.x + roi.xywhROI.roiWidth - 1));
+                Rpp32u y1 = static_cast<Rpp32u>(
+                    RPPPRANGECHECK(anchorBoxInfo[count].lt.y, roi.xywhROI.xy.y,
+                                   roi.xywhROI.xy.y + roi.xywhROI.roiHeight - 1));
+                Rpp32u x2 = static_cast<Rpp32u>(RPPPRANGECHECK(
+                    anchorBoxInfo[count].rb.x, x1, roi.xywhROI.xy.x + roi.xywhROI.roiWidth - 1));
+                Rpp32u y2 = static_cast<Rpp32u>(RPPPRANGECHECK(
+                    anchorBoxInfo[count].rb.y, y1, roi.xywhROI.xy.y + roi.xywhROI.roiHeight - 1));
+                x1 -= roi.xywhROI.xy.x;
+                y1 -= roi.xywhROI.xy.y;
+                x2 -= roi.xywhROI.xy.x;
+                y2 -= roi.xywhROI.xy.y;
 
                 Rpp32u pixelLocation =
-                    (y1 * srcDescPtr->strides.hStride) + (x1 * srcDescPtr->strides.wStride);
+                    (y1 * dstDescPtr->strides.hStride) + (x1 * dstDescPtr->strides.wStride);
                 Rpp32u boxHeight = y2 - y1 + 1;
                 Rpp32u boxWidth = x2 - x1 + 1;
 
@@ -224,17 +248,23 @@ RppStatus grid_dropout_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
             }
 
             for (int count = 0; count < numBoxes; count++) {
+                // Clamp anchor box coordinates to ROI bounds in image space, then convert to
+                // ROI-local coordinates so they line up with the packed-origin destination
                 Rpp32u x1 = (Rpp32u)RPPPRANGECHECK(anchorBoxInfo[count].lt.x, roi.xywhROI.xy.x,
-                                                   roi.xywhROI.roiWidth);
+                                                   roi.xywhROI.xy.x + roi.xywhROI.roiWidth - 1);
                 Rpp32u y1 = (Rpp32u)RPPPRANGECHECK(anchorBoxInfo[count].lt.y, roi.xywhROI.xy.y,
-                                                   roi.xywhROI.roiHeight);
-                Rpp32u x2 =
-                    (Rpp32u)RPPPRANGECHECK(anchorBoxInfo[count].rb.x, x1, roi.xywhROI.roiWidth);
-                Rpp32u y2 =
-                    (Rpp32u)RPPPRANGECHECK(anchorBoxInfo[count].rb.y, y1, roi.xywhROI.roiHeight);
+                                                   roi.xywhROI.xy.y + roi.xywhROI.roiHeight - 1);
+                Rpp32u x2 = (Rpp32u)RPPPRANGECHECK(anchorBoxInfo[count].rb.x, x1,
+                                                   roi.xywhROI.xy.x + roi.xywhROI.roiWidth - 1);
+                Rpp32u y2 = (Rpp32u)RPPPRANGECHECK(anchorBoxInfo[count].rb.y, y1,
+                                                   roi.xywhROI.xy.y + roi.xywhROI.roiHeight - 1);
+                x1 -= roi.xywhROI.xy.x;
+                y1 -= roi.xywhROI.xy.y;
+                x2 -= roi.xywhROI.xy.x;
+                y2 -= roi.xywhROI.xy.y;
 
                 Rpp32u pixelLocation =
-                    (y1 * srcDescPtr->strides.hStride) + (x1 * srcDescPtr->strides.wStride);
+                    (y1 * dstDescPtr->strides.hStride) + (x1 * dstDescPtr->strides.wStride);
                 Rpp32u boxHeight = y2 - y1 + 1;
                 Rpp32u boxWidth = x2 - x1 + 1;
 
@@ -259,17 +289,25 @@ RppStatus grid_dropout_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
             }
 
             for (int count = 0; count < numBoxes; count++) {
-                Rpp32u x1 = static_cast<Rpp32u>(RPPPRANGECHECK(
-                    anchorBoxInfo[count].lt.x, roi.xywhROI.xy.x, roi.xywhROI.roiWidth));
-                Rpp32u y1 = static_cast<Rpp32u>(RPPPRANGECHECK(
-                    anchorBoxInfo[count].lt.y, roi.xywhROI.xy.y, roi.xywhROI.roiHeight));
-                Rpp32u x2 = static_cast<Rpp32u>(
-                    RPPPRANGECHECK(anchorBoxInfo[count].rb.x, x1, roi.xywhROI.roiWidth));
-                Rpp32u y2 = static_cast<Rpp32u>(
-                    RPPPRANGECHECK(anchorBoxInfo[count].rb.y, y1, roi.xywhROI.roiHeight));
+                // Clamp anchor box coordinates to ROI bounds in image space, then convert to
+                // ROI-local coordinates so they line up with the packed-origin destination
+                Rpp32u x1 = static_cast<Rpp32u>(
+                    RPPPRANGECHECK(anchorBoxInfo[count].lt.x, roi.xywhROI.xy.x,
+                                   roi.xywhROI.xy.x + roi.xywhROI.roiWidth - 1));
+                Rpp32u y1 = static_cast<Rpp32u>(
+                    RPPPRANGECHECK(anchorBoxInfo[count].lt.y, roi.xywhROI.xy.y,
+                                   roi.xywhROI.xy.y + roi.xywhROI.roiHeight - 1));
+                Rpp32u x2 = static_cast<Rpp32u>(RPPPRANGECHECK(
+                    anchorBoxInfo[count].rb.x, x1, roi.xywhROI.xy.x + roi.xywhROI.roiWidth - 1));
+                Rpp32u y2 = static_cast<Rpp32u>(RPPPRANGECHECK(
+                    anchorBoxInfo[count].rb.y, y1, roi.xywhROI.xy.y + roi.xywhROI.roiHeight - 1));
+                x1 -= roi.xywhROI.xy.x;
+                y1 -= roi.xywhROI.xy.y;
+                x2 -= roi.xywhROI.xy.x;
+                y2 -= roi.xywhROI.xy.y;
 
                 Rpp32u pixelLocation =
-                    (y1 * srcDescPtr->strides.hStride) + (x1 * srcDescPtr->strides.wStride);
+                    (y1 * dstDescPtr->strides.hStride) + (x1 * dstDescPtr->strides.wStride);
                 Rpp32u boxHeight = y2 - y1 + 1;
                 Rpp32u boxWidth = x2 - x1 + 1;
                 T* dstPtrTemp;
