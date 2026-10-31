@@ -16,6 +16,7 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -43,6 +44,10 @@ namespace hipdnn_plugin_sdk::ingestor
 
 namespace detail
 {
+
+/// Lets tests build a UhdKernelHeuristic around an adapter of their own; create() builds
+/// adapters only from descriptors. Defined by the tests.
+class UhdKernelHeuristicAccess;
 
 /// Converts a scalar metadata value; `vector<int64_t>` yields nullopt and stays unbound,
 /// so a bare reference to it fails closed (RFC 0019 §5).
@@ -147,6 +152,92 @@ inline uhd::FeatureExtractionContext::ValueMap kernelVarsFrom(const KernelDefini
 
     // `id` is deliberately unbound: it is a UUID, and it already breaks ties in rank().
     return vars;
+}
+
+/// One `$kernel.*` name a signature reads, parsed once so a candidate is bound without
+/// building kernelVarsFrom's whole map.
+struct KernelVarSlot
+{
+    std::string boundName; ///< `kernel.tile[0]`: the binding key, without the sigil.
+    std::string field; ///< `tile[0]`: the name kernelVarsFrom binds it under.
+    std::string arrayField; ///< `tile` when `field` spells an array element.
+    std::optional<size_t> index; ///< The element `field` spells, if it spells one.
+};
+
+/// Parses `kernel.<field>`. An element index is read only in the spelling kernelVarsFrom
+/// writes (std::to_string: digits, no sign, no leading zero), so any other spelling stays
+/// unbound as it does there.
+inline KernelVarSlot kernelVarSlot(const std::string& boundName)
+{
+    constexpr std::string_view PREFIX = "kernel.";
+    KernelVarSlot slot{boundName, boundName.substr(PREFIX.size()), {}, std::nullopt};
+    const auto& field = slot.field;
+    const auto open = field.rfind('[');
+    if(field.empty() || field.back() != ']' || open == std::string::npos)
+    {
+        return slot;
+    }
+    const std::string_view digits(field.data() + open + 1, field.size() - open - 2);
+    const bool canonical
+        = !digits.empty() && digits.size() <= 18 && (digits.size() == 1 || digits.front() != '0')
+          && std::all_of(digits.begin(), digits.end(), [](char c) { return c >= '0' && c <= '9'; });
+    if(canonical)
+    {
+        slot.arrayField = field.substr(0, open);
+        size_t index = 0;
+        for(const char c : digits)
+        {
+            index = index * 10 + static_cast<size_t>(c - '0');
+        }
+        slot.index = index;
+    }
+    return slot;
+}
+
+/// The `kernel.*` names @p extractor reads, as slots.
+inline std::vector<KernelVarSlot> kernelVarSlots(const uhd::FeatureExtractor& extractor)
+{
+    constexpr std::string_view PREFIX = "$kernel.";
+    std::vector<KernelVarSlot> slots;
+    for(const auto& reference : extractor.getVariableRefs())
+    {
+        if(reference.compare(0, PREFIX.size(), PREFIX) == 0)
+        {
+            slots.push_back(kernelVarSlot(reference.substr(1)));
+        }
+    }
+    return slots;
+}
+
+/// The value kernelVarsFrom(@p kernel) holds for @p slot's field, or nullopt where it binds
+/// nothing. Same precedence: a scalar field of that exact name, then the element of an
+/// integer-array field, then the declared priority for `priority`.
+inline std::optional<uhd::VariableContext::ValueType> kernelVarOf(const KernelDefinition& kernel,
+                                                                  const KernelVarSlot& slot)
+{
+    if(const auto found = kernel.metadata.find(slot.field); found != kernel.metadata.end())
+    {
+        if(auto scalar = toValueType(found->second))
+        {
+            return scalar;
+        }
+    }
+    if(slot.index)
+    {
+        if(const auto found = kernel.metadata.find(slot.arrayField); found != kernel.metadata.end())
+        {
+            if(const auto* array = std::get_if<std::vector<int64_t>>(&found->second);
+               array != nullptr && *slot.index < array->size())
+            {
+                return uhd::VariableContext::ValueType{(*array)[*slot.index]};
+            }
+        }
+    }
+    if(slot.field == "priority")
+    {
+        return uhd::VariableContext::ValueType{kernel.priority};
+    }
+    return std::nullopt;
 }
 
 } // namespace detail
@@ -501,6 +592,8 @@ public:
     }
 
 private:
+    friend class detail::UhdKernelHeuristicAccess;
+
     /// tryCreate() without the ERROR: why the UHD was refused goes to @p failure, so a caller
     /// that retries can report it once. @p awaitingArtifact is set when the refusal is only
     /// that the model artifact is not deployed yet, so a later call may succeed.
@@ -818,8 +911,12 @@ private:
             for(const KernelDefinition* entry : catalog.entries)
             {
                 const auto tailStart = Clock::now();
-                ctx.clearKernelVars();
-                ctx.bindKernelVars(detail::kernelVarsFrom(*entry));
+                // Rebind only the kernel names the signature reads, with the values
+                // kernelVarsFrom would give them; the rest of the metadata is never read.
+                for(const auto& slot : _kernelSlots)
+                {
+                    ctx.setKernelVar(slot.boundName, detail::kernelVarOf(*entry, slot));
+                }
 
                 _extractor->extractKernelInto(ctx, features);
                 tailNs += elapsedNs(tailStart);
@@ -829,6 +926,14 @@ private:
             const auto scoreStart = Clock::now();
             const auto raw = _adapter->scoreBatch(rows);
             const auto scoreNs = elapsedNs(scoreStart);
+            if(raw.size() != rows.size())
+            {
+                // Indexing a short result reads out of bounds, and a long one means the
+                // scores cannot be matched to candidates either.
+                throw std::runtime_error("the adapter returned " + std::to_string(raw.size())
+                                         + " scores for " + std::to_string(rows.size())
+                                         + " candidates");
+            }
 
             // Read the group from the scored row, not metadata, which derived or categorical
             // features could make disagree.
@@ -978,6 +1083,8 @@ private:
         : _config(std::move(config))
         , _adapter(std::move(adapter))
         , _extractor(std::move(extractor))
+        , _kernelSlots(_extractor ? detail::kernelVarSlots(*_extractor)
+                                  : std::vector<detail::KernelVarSlot>{})
         , _objectiveSign(objectiveSignOf(_config.objective))
         , _positiveRequired(
               uhd::score_transform::isPhysicalScore(_config.scoreMetric, _config.scoreTransform))
@@ -1102,6 +1209,8 @@ private:
     std::shared_ptr<const IKernelHeuristic> _direct;
     std::shared_ptr<const uhd::IUhdAdapter> _adapter;
     std::shared_ptr<const uhd::FeatureExtractor> _extractor;
+    /// The `$kernel.*` names `_extractor` reads; rankWith rebinds only these per candidate.
+    std::vector<detail::KernelVarSlot> _kernelSlots;
     double _objectiveSign = 1.0;
     /// Whether §8.3 requires this model's recovered score to be positive as well as finite.
     bool _positiveRequired = true;

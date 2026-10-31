@@ -79,6 +79,19 @@ public:
         }
     }
 
+    /// Binds @p bareName, which must not carry the sigil. Rebinding a bound name reuses its
+    /// entry, so a per-candidate rebind does not allocate a key.
+    void bindBare(const std::string& bareName, ValueType value)
+    {
+        _bindings.insert_or_assign(bareName, std::move(value));
+    }
+
+    /// Unbinds @p bareName, which must not carry the sigil.
+    void unbindBare(const std::string& bareName)
+    {
+        _bindings.erase(bareName);
+    }
+
     const ValueType* find(const std::string& name) const
     {
         const auto it = !name.empty() && name.front() == '$' ? _bindings.find(name.substr(1))
