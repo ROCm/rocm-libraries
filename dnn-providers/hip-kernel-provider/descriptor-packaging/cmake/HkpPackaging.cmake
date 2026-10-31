@@ -6,6 +6,7 @@
 # hkp = Hip Kernel-provider Packaging.
 
 include_guard(GLOBAL)
+include("${CMAKE_CURRENT_LIST_DIR}/../../rocke/platform/cmake/RockeTestEnvironment.cmake")
 
 # Captured at include time so it survives into functions: inside a function
 # CMAKE_CURRENT_LIST_DIR reflects the invoking listfile, not this module.
@@ -253,8 +254,8 @@ function(_hkp_pack_producer)
     # ROCKE_CPP_QUIET_FALLBACK is deliberately unset: silencing that warning
     # hides the degradation these pins exist to catch.
     #
-    # ROCKE_COMGR_LIB overrides a shadowed System32 amd_comgr on Windows; forward
-    # it when set (runtime resolution, no find_library).
+    # Forward the build-package compiler or explicit override. An unset value
+    # leaves rocKE to resolve the COMGR owned by the supplied interpreter's SDK.
     set(_tool_env "ROCKE_BACKEND=python" "ROCKE_CPP_STRICT=1")
     if(ARG_PACK_JOBS)
         list(APPEND _tool_env "HKP_PACK_JOBS=${ARG_PACK_JOBS}")
@@ -724,54 +725,13 @@ endfunction()
 #   would not.
 # ---------------------------------------------------------------------------
 function(hkp_imported_library_location target out_path)
-    set(_derived "")
-    # A multi-config generator does not know the configuration at configure
-    # time, so CMAKE_BUILD_TYPE may be empty and the rest of the order decides.
-    # NOCONFIG is what an export() with no build type emits.
-    set(_preferred "")
-    if(CMAKE_BUILD_TYPE)
-        string(TOUPPER "${CMAKE_BUILD_TYPE}" _preferred)
-    endif()
-    list(APPEND _preferred RELEASE RELWITHDEBINFO MINSIZEREL DEBUG NOCONFIG)
-
-    # IN_LIST against a NOTFOUND property is a hard error, which is what the
-    # guard prevents.
-    get_target_property(_cfgs ${target} IMPORTED_CONFIGURATIONS)
-    if(_cfgs)
-        foreach(_cfg IN LISTS _preferred)
-            if(NOT _cfg IN_LIST _cfgs)
-                continue()
-            endif()
-            get_target_property(_loc ${target} IMPORTED_LOCATION_${_cfg})
-            if(_loc AND EXISTS "${_loc}")
-                set(_derived "${_loc}")
-                break()
-            endif()
-        endforeach()
-    endif()
-    # Nothing preferred resolved: any real library beats none.
-    if(NOT _derived AND _cfgs)
-        foreach(_cfg IN LISTS _cfgs)
-            get_target_property(_loc ${target} IMPORTED_LOCATION_${_cfg})
-            if(_loc AND EXISTS "${_loc}")
-                set(_derived "${_loc}")
-                break()
-            endif()
-        endforeach()
-    endif()
-    # A package that exports no configurations at all.
-    if(NOT _derived)
-        get_target_property(_loc ${target} IMPORTED_LOCATION)
-        if(_loc AND EXISTS "${_loc}")
-            set(_derived "${_loc}")
-        endif()
-    endif()
-    set(${out_path} "${_derived}" PARENT_SCOPE)
+    rocke_imported_library_location(${target} _location)
+    set(${out_path} "${_location}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
 # hkp_default_rocke_comgr_lib()
-#   Give HIPKERNELPROVIDER_ROCKE_COMGR_LIB a package-derived default in the
+#   Give HIPKERNELPROVIDER_ROCKE_COMGR_LIB a build-package default in the
 #   CALLER's scope, so a correctly configured build needs no explicit path.
 #   Does nothing when the variable already holds a value.
 #
@@ -780,10 +740,9 @@ endfunction()
 #   override is non-empty, and to the pack step and ctest entries -- one value,
 #   or configure validates something the build does not use.
 #
-#   Every path out of here says what it decided. Staying empty is safe, because
-#   rocke then resolves comgr itself, but it is indistinguishable at a glance
-#   from "no override was wanted" -- and on Windows rocke's own search can reach
-#   a System32 amd_comgr.dll, which is the failure this default exists to avoid.
+#   Every path out of here says what it decided. An absent package leaves the
+#   value empty so rocKE can use the supplied interpreter's SDK. This is build
+#   toolchain wiring, not a fallback added to rocKE's runtime resolver.
 # ---------------------------------------------------------------------------
 function(hkp_default_rocke_comgr_lib)
     if(HIPKERNELPROVIDER_ROCKE_COMGR_LIB)
@@ -798,7 +757,7 @@ function(hkp_default_rocke_comgr_lib)
         message(STATUS
             "hkp: no amd_comgr target and no amd_comgr CONFIG package, so "
             "HIPKERNELPROVIDER_ROCKE_COMGR_LIB stays empty and rocke will "
-            "resolve comgr by its own search.")
+            "resolve comgr from the supplied interpreter's SDK.")
         return()
     endif()
     hkp_imported_library_location(amd_comgr _derived)
@@ -815,7 +774,7 @@ function(hkp_default_rocke_comgr_lib)
         message(STATUS
             "hkp: the amd_comgr target exists but exports no library path that "
             "is present on disk, so HIPKERNELPROVIDER_ROCKE_COMGR_LIB stays "
-            "empty and rocke will resolve comgr by its own search. Exported "
+            "empty and rocke will resolve comgr from the supplied interpreter's SDK. Exported "
             "configurations: ${_cfgs}")
     endif()
 endfunction()
@@ -830,16 +789,14 @@ endfunction()
 #   private import directory is populated at build time, and the build imports
 #   from those wheels rather than from the source tree.
 #
-#   An explicitly-set ROCKE_COMGR_LIB is checked as an ASSERTION, which rocKE
-#   itself does not do: `_candidate_lib_paths` puts the override first and
-#   `_load_lib` falls through to the next candidate when it does not load. The
-#   override exists for Windows, where a System32 amd_comgr.dll can shadow the
-#   ROCm one -- so falling through lands on the shadowing DLL, i.e. the override
-#   fails open into the exact failure it was set to prevent. Comparing what
-#   loaded against what was asked for turns that into a configure error.
+#   An explicit ROCKE_COMGR_LIB is checked against the loaded handle. rocKE
+#   treats it as the sole candidate and rejects failed loads. The caller supplies
+#   an explicit override or the build's exported amd_comgr library. Without either,
+#   the supplied interpreter must already have rocm-sdk-core installed; importing
+#   the resolver does not load a system or CMake-package compiler as a fallback.
 #
-#   The probe reads the resolver from the source tree deliberately: it asks
-#   about the machine's comgr, not about the wheels.
+#   The probe reads the source resolver because the private rocKE wheels are
+#   not built yet. The pack step uses the same interpreter and compiler selection.
 # ---------------------------------------------------------------------------
 function(hkp_probe_comgr_resolvable out_ok out_detail)
     set(_rocke_root "${HKP_PKG_DIR}/../rocke")
@@ -1424,18 +1381,19 @@ endfunction()
 # ---------------------------------------------------------------------------
 function(_hkp_resolve_rocke_args out_args out_comgr_lib)
     set(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "" CACHE PATH
-        "Explicit libamd_comgr for the rocKE producer to load. Forwarded into \
-ROCKE_COMGR_LIB for the pack step and the ctest entries. Leave it empty for \
-the normal case: the path is then derived from the amd_comgr package, and it \
-stays empty only when no usable location can be derived, which configure \
-reports and which leaves rocke to resolve comgr by its own search. Set it to \
-override that -- needed on Windows, where a System32 amd_comgr.dll can shadow \
-the ROCm one. rocke treats the value as the first CANDIDATE and falls through \
-when it does not load, so configure asserts that the library which loaded is \
-the one named here.")
+        "Explicit COMGR library for the rocKE producer. Forwarded into \
+ROCKE_COMGR_LIB for the configure probe, pack step and ctest entries. Leave \
+it empty to derive the compiler from the build's amd_comgr package, or use \
+Python3_EXECUTABLE's rocm-sdk-core when no package library is available. \
+A nonempty selection is the sole candidate; a failed load is a configure error.")
 
-    # Runs before the copy below and before the probe, so the derived value is
-    # what both of them see. An explicitly-set value is left alone.
+    # Keep this build-local default out of the cache, and resolve it before both
+    # the configure probe and the returned pack/CTest environment are assembled.
+    # An explicit CMake override is preserved; ROCKE_COMGR_LIB in the inherited
+    # environment also remains authoritative when no CMake override was supplied.
+    if(NOT HIPKERNELPROVIDER_ROCKE_COMGR_LIB AND NOT "$ENV{ROCKE_COMGR_LIB}" STREQUAL "")
+        rocke_normalize_comgr_path(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "$ENV{ROCKE_COMGR_LIB}")
+    endif()
     hkp_default_rocke_comgr_lib()
 
     # ROCKE_COMGR_LIB is rocke's runtime environment variable, not a CMake variable: the
@@ -1448,9 +1406,11 @@ the one named here.")
         message(FATAL_ERROR
             "hkp: comgr could not be resolved, so no rocKE kernel can be lowered. "
             "HIPKERNELPROVIDER_ENABLE_ROCKE is ON, which makes comgr a requirement "
-            "of every descriptor root. comgr ships with ROCm. Set "
-            "HIPKERNELPROVIDER_ROCKE_COMGR_LIB to an explicit libamd_comgr, make "
-            "one discoverable, or configure with -DHIPKERNELPROVIDER_ENABLE_ROCKE=OFF "
+            "of every descriptor root. Supply the build's amd_comgr package, "
+            "install rocke[sdk-core] from an AMD ROCm "
+            "wheel index into Python3_EXECUTABLE's environment before configure, "
+            "set HIPKERNELPROVIDER_ROCKE_COMGR_LIB to an explicit COMGR library, "
+            "or configure with -DHIPKERNELPROVIDER_ENABLE_ROCKE=OFF "
             "to pack without rocKE. Resolver said:\n"
             "${_comgr_detail}")
     endif()
@@ -1833,11 +1793,8 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     if(rocm_kpack_dir)
         list(APPEND _pyenv "HIPKERNELPROVIDER_ROCM_KPACK_DIR=${rocm_kpack_dir}")
     endif()
-    # Forward the rocke comgr override so the comgr-dependent tier resolves the
-    # same library the pack step does.
-    if(rocke_comgr_lib)
-        list(APPEND _pyenv "ROCKE_COMGR_LIB=${rocke_comgr_lib}")
-    endif()
+    # Use the pack compiler by default, preserving a runtime caller override.
+    rocke_comgr_test_launcher(_comgr_test_launch "${rocke_comgr_lib}")
 
     execute_process(
         COMMAND "${Python3_EXECUTABLE}" -c "import pytest"
@@ -1857,13 +1814,13 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     endif()
 
     add_test(NAME hip-kernel-provider-hkp-pack-quick
-             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m quick -v
+             COMMAND ${_comgr_test_launch} "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m quick -v
                      ${_rocke_ignore})
     set_tests_properties(hip-kernel-provider-hkp-pack-quick PROPERTIES
         ENVIRONMENT "${_pyenv}")
 
     add_test(NAME hip-kernel-provider-hkp-pack
-             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m "not quick" -v
+             COMMAND ${_comgr_test_launch} "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m "not quick" -v
                      ${_rocke_ignore})
     set_tests_properties(hip-kernel-provider-hkp-pack PROPERTIES
         ENVIRONMENT "${_pyenv}")

@@ -4,6 +4,113 @@
 
 ## COMGR
 
+### Installing the compiler
+
+The `rocke` wheel contains no COMGR, LLVM or Clang binaries. Its base install
+requires only NumPy; the optional `sdk-core` extra installs the shared
+`rocm-sdk-core` package. Neither discovery nor COMGR loading imports torch or
+calls `rocm_sdk.initialize_process` to initialize HIP.
+
+From the `platform` directory, create a virtualenv and install the extra using
+an AMD package index. The venv also avoids PEP 668 restrictions on
+distribution-managed Python installations:
+
+```sh
+python -m venv ../compiler-env
+. ../compiler-env/bin/activate
+# PowerShell: ../compiler-env/Scripts/Activate.ps1
+python -m pip install -e '.[sdk-core]' --extra-index-url https://stable.repo.amd.com/rocm/whl-next/
+```
+
+For an already published wheel, replace `-e '.[sdk-core]'` with
+`'rocke[sdk-core]'`. PyPI's `rocm-sdk-core==0.1.0` placeholder contains no
+compiler and does not satisfy the extra's version requirement. Choose the
+same SDK release/index as any other ROCm framework in the environment; the
+extra does not force a separate private compiler version.
+
+Package availability and rocKE's compiler baseline are separate:
+
+| SDK wheel version | Linux x86-64 COMGR | Windows x86-64 COMGR | Meaning |
+| --- | --- | --- | --- |
+| `6.5.0rc20250601` | `_rocm_sdk_core/lib/libamd_comgr.so.3` | No Windows wheel in the retained index at this version | Earliest retained Linux nightly inspected; ships LLVM 19 |
+| `7.0.0rc20250701` | Linux nightlies also published | `_rocm_sdk_core/bin/amd_comgr0605.dll` | Earliest retained Windows nightly inspected |
+| `7.9.0rc1` | `_rocm_sdk_core/lib/libamd_comgr.so.3` | `_rocm_sdk_core/bin/amd_comgr0701.dll` | Minimum SDK package version requested by `rocke[sdk-core]`; Linux ships LLVM 20 |
+| `7.10.0` | `_rocm_sdk_core/lib/libamd_comgr.so.3` | `_rocm_sdk_core/bin/amd_comgr0702.dll` | Later stable SDK package; Linux ships LLVM 22 |
+
+These are TheRock SDK **package versions**, not a claim that identically
+numbered HIP components or distribution releases introduced Python packaging.
+The early development wheels demonstrate that SDK packaging predates the
+`7.9` series. The extra deliberately uses the common `7.9.0rc1` floor on Linux
+and Windows rather than selecting the oldest available wheel on each OS:
+older packages can predate the LLVM 20 emission baseline. AUTO still queries
+the loaded compiler, and compilation checks the IR/compiler flavor contract;
+the package floor does not establish support for every target or compiler build.
+
+The historical wheel contents and versions can be inspected at AMD's
+[legacy nightly index](https://rocm.nightlies.amd.com/v2/gfx1151/rocm-sdk-core/)
+and [legacy release index](https://repo.amd.com/rocm/whl/gfx1151/rocm-sdk-core/).
+Legacy multi-arch packages start at `7.13` in the
+[multi-arch release index](https://repo.amd.com/rocm/whl-multi-arch/rocm-sdk-core/).
+For current stable releases, use the
+[stable SDK index](https://stable.repo.amd.com/rocm/whl-next/rocm-sdk-core/).
+TheRock documents the current versus historical index split in
+[its release guide](https://github.com/ROCm/TheRock/blob/main/RELEASES.md).
+
+Discovery reads the installed `rocm-sdk-core` distribution's file metadata
+without importing `rocm_sdk` or a payload package. It locates Linux
+`libamd_comgr.so` and numeric SONAME variants under the payload's `lib`
+directory, or Windows `amd_comgr.dll` and numeric versioned DLL names under
+`bin`. Both `_rocm_sdk_core` and `_rocm_sdk_core_<suffix>` payloads are
+supported. Windows registers the selected DLL directory for its dependencies.
+Wheel inspection establishes package contents; it is not a Windows runtime
+compilation result.
+
+For source-only use without installing rocKE, provision `rocm-sdk-core` in
+that interpreter's venv and set `PYTHONPATH` to `platform/python`. Alternatively,
+select a specific compiler explicitly (POSIX example, from `platform`):
+
+```sh
+export PYTHONPATH="$PWD/python"
+export ROCKE_COMGR_LIB=/path/to/compiler/lib/libamd_comgr.so.3
+python -c 'from rocke.runtime.comgr import loaded_compiler_info; print(loaded_compiler_info())'
+```
+
+On PowerShell, use `$env:PYTHONPATH = (Join-Path $PWD "python")` and
+`$env:ROCKE_COMGR_LIB = "C:\compiler\bin\amd_comgr.dll"`. An override names
+one file; an unavailable file fails even if another SDK is installed.
+
+Native AUTO uses the physical loaded module or executable, independent of
+`argv[0]`, the working directory, and symlink aliases. Supported adjacent
+layouts include `<prefix>/bin`, `<prefix>/lib` or `lib64` (including nested
+library directories), and Python `site-packages`. Lookup stays within that
+prefix or site; it never selects SDK metadata from a parent installation.
+A build-tree descriptor resolves relative to its physical directory. Nested
+CMake outputs locate it at the nearest top-level CMake build marker.
+
+To relocate an installed native deployment, move the whole prefix, including
+its SDK metadata and payload. If the SDK lives elsewhere, update the runtime
+override to its new location before launching the consumer:
+
+```sh
+export ROCKE_COMGR_LIB=/new/sdk/lib/libamd_comgr.so.3
+/new/install/bin/my_native_consumer
+```
+
+CMake's provider override, inherited configure-time override, or exported
+`amd_comgr` package can supply the build compiler. Source/build-tree CTests
+use that selection as a default; a nonempty override supplied when running
+CTest takes precedence. Installed CTest manifests contain no build compiler
+path, so provision the runtime SDK or set a deployment-valid override.
+
+An existing system ROCm/HIP SDK compiler remains usable without the extra by
+setting `ROCKE_COMGR_LIB` to that library. `ROCM_PATH`, `ROCM_HOME`, and
+`HIP_PATH` do not select COMGR. To author
+LLVM IR without any COMGR installed, pass an explicit `llvm_flavor` to lowering
+or set `ROCKE_LLVM_FLAVOR`. GPU launch still requires a suitable HIP runtime,
+GPU and driver; the `sdk-core` extra does not provide the driver.
+
+### Compilation pipeline
+
 `libamd_comgr.so` is the ROCm compiler-support library. Its API lets a process compile LLVM IR text to a HSA code object (HSACO) without spawning hipcc or clang. The DSL drives the following chain:
 
 ```text
@@ -30,68 +137,58 @@ AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE  = 0x7
 AMD_COMGR_STATUS_SUCCESS                         = 0
 ```
 
-Library loading: the runtime defers `dlopen` until the first comgr call,
-then resolves the library in this order (see
-`runtime/runtime_coexistence.py::_candidate_lib_paths`):
+Library loading is deferred until the first compiler query or compilation.
+Both Python and native C++ select COMGR with this policy:
 
-1. `$ROCKE_COMGR_LIB` if set (explicit override; full path).
-2. If `torch` is already in `sys.modules`, the comgr torch uses: an
-   unambiguous mapped copy, else `<torch>/lib/libamd_comgr.so`, else
-   `_rocm_sdk_core/lib/libamd_comgr.so*` (TheRock wheels, only when
-   `rocm_sdk` is imported). Exception: when that comgr is stale (below), it
-   moves after step 3.
-3. A ROCm install: `$ROCM_PATH/lib` / `$ROCM_HOME/lib`, then
-   `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib` newest first; in each,
-   `libamd_comgr.so` then `.so.3` for the SONAME.
-4. Bare `libamd_comgr.so` via the dynamic linker's search path.
+1. A nonempty `$ROCKE_COMGR_LIB` selects that explicit library.
+2. Otherwise, select COMGR owned by the installed `rocm-sdk-core` distribution.
 
-With multiple distinct mapped copies, the mapped tier prefers the sole copy
-under torch or its active `_rocm_sdk_core` wheel. Ambiguous mappings are
-skipped rather than chosen by address order.
+An unloadable override fails rather than falling back to the SDK. Missing SDK
+metadata, a missing COMGR payload, or a missing compiler dependency produces an
+actionable error. Neither torch imports, mapped foreign libraries, system ROCm
+roots, `ROCM_PATH`/`ROCM_HOME`/`HIP_PATH`, nor bare library names supply an
+automatic COMGR fallback. An empty override is equivalent to unset.
+Successful loads are retained for the lifetime of the process; later imports
+or environment changes do not replace that compiler. AUTO flavor selection
+queries its LLVM version, independently of package release metadata.
 
-Stale torch comgr (`_torch_comgr_is_stale`): rocke reads the release of
-torch's comgr from its location, the same way `resolved_lib_rocm_version`
-does (in `_rocm_sdk_core`: the wheel's release, `rocm_sdk.__version__` or
-the installed `rocm-sdk-core` version; elsewhere: `torch.version.hip`), and
-compares it with the release of the first step 3 install whose version it
-can read. If both are known and torch's is older, the torch comgr is
-demoted below every step 3 candidate, still ahead of step 4, because an
-older comgr rejects ISAs newer than its ROCm. If either version is unknown,
-the order above stands. A `_rocm_sdk_core` comgr already mapped into the
-process is never demoted (see the LLVM abort below): it stays first, and
-if it cannot handle the target ISA the compile fails at `set_isa`.
+Python obtains payload ownership from `importlib.metadata`. Native standalone
+AUTO reads distribution metadata under installation locations adjacent to the
+loaded engine or executable, including `site-packages`, Linux
+`lib/python*/site-packages` and `lib64/python*/site-packages`, and Windows
+`Lib/site-packages`. An installed shared engine or executable and its SDK can
+move together without a build-machine SDK path. CMake also writes
+`rocke_sdk_site.txt` at the top-level build root for its selected Python
+interpreter, allowing build-tree binaries to locate that interpreter's SDK.
+The site path is relative when possible. Cross-drive Windows builds use the
+`rocke-sdk-site-absolute-v1` marker with an absolute site directory, still
+resolving the compiler through distribution metadata. This descriptor stays in
+the build tree and is never installed. Reconfigure when changing interpreters
+or moving an SDK referenced by an absolute descriptor; relative descriptors
+support moving the build and environment together.
+Standalone consumers outside those installation locations and the configured
+build tree must select COMGR with `ROCKE_COMGR_LIB`. Python bindings continue
+delegating AUTO to Python's resolver. The native adapter queries compiler version; it does not implement
+Python's COMGR-to-HSACO compilation pipeline.
 
-The torch step exists because PyTorch+ROCm wheels load their own
-`libamdhip64` and `libamd_comgr` on `import torch`: older wheels from
-`<torch>/lib/`, TheRock wheels from `_rocm_sdk_core/lib/` (preloaded by
-`rocm_sdk.initialize_process`, SONAME only). A second copy of HIP loaded
-by rocke from `/opt/rocm/lib` would be a different runtime instance with
-disjoint state: modules loaded via one are invisible to
-`hipModuleGetFunction` from the other, surfacing as `hipError(500) named
-symbol not found`. Preferring the copy torch loaded (and lazily resolving
-on first use, so import order does not matter) keeps both halves of the
-process talking to the same runtime. `ComgrError` is raised if no
-candidate loads.
+The compatibility hook `comgr.prefer_bundled_lib()` remains callable. It uses
+the same resolver without importing torch and returns informational package
+release metadata.
 
-The same resolution order applies to `libamdhip64.so` (env var
-`ROCKE_HIP_LIB`, SONAME `.so.7`), without the stale demotion: HIP always
-keeps step 2, since a second HIP runtime breaks module lookup.
+On Linux, before opening the selected COMGR, both loaders reject a distinct
+mapped COMGR file. Aliases of the same file are accepted. The ordinary TheRock
+torch/rocKE shared SDK case therefore reuses one compiler. A different system
+or legacy torch compiler already mapped is a conflict, even in a torch-free
+process, and is never adopted automatically. Loading another COMGR can also
+load another LLVM and abort before an error is returned. Compile in a separate
+process before loading the conflicting framework, then hand the HSACO bytes
+to its launch process. Mapped-file checks establish COMGR file identity; they
+do not prove isolation of every LLVM dependency. An unavailable mapping
+inventory cannot establish that another compiler is absent.
 
-Do not load a comgr built from a different LLVM than the one torch already
-loaded. TheRock torch preloads its comgr with `RTLD_GLOBAL`; loading a
-second LLVM into the process aborts with `LLVM ERROR: support is already
-registered for analysis` (seen with the ROCm 10.1 wheel comgr, LLVM 23,
-beside the ROCm 10.2 `/opt/rocm` comgr, LLVM 24). The stale demotion skips
-a mapped wheel comgr for this reason. On Linux, when exactly one distinct
-COMGR path is mapped, the Python loader rejects an existing
-`ROCKE_COMGR_LIB` file with an ELF header that differs from it before
-calling `dlopen`. An alias of the same file still works. Missing or non-ELF
-overrides retain the existing load-failure fallback. With multiple mapped
-paths or unreadable maps, override priority is unchanged. This check does
-not govern native C++ COMGR AUTO discovery. To compile with another comgr, do
-it in a separate process before importing torch, and hand the HSACO bytes
-to the torch process. A stale mapped comgr rejecting an unsupported ISA
-still reports the ordinary `set_isa` error; #12919 tracks that diagnostic.
+HIP keeps its independent runtime policy, described below. Sharing the HIP
+runtime used by torch matters because a second HIP instance has disjoint module
+state; COMGR's env-or-SDK policy does not change HIP selection.
 
 ## Entry Point
 
@@ -171,15 +268,17 @@ links its modules in-process, so it refuses a kernel carrying the attribute
 
 ### Library loading
 
-The HIP module loader follows the same `_candidate_lib_paths` order as
-COMGR: `$ROCKE_HIP_LIB` override, then, if torch is already imported, the
+The HIP module loader retains its runtime discovery order:
+`$ROCKE_HIP_LIB` override, then, if torch is already imported, the
 `libamdhip64` torch uses (an unambiguous mapped copy, else
 `<torch>/lib/libamdhip64.so`, else `_rocm_sdk_core/lib/libamdhip64.so*` when
 `rocm_sdk` is imported), then the ROCm installs (`libamdhip64.so` and the
 `.so.7` SONAME), then bare `libamdhip64.so` via the dynamic linker.
 Preferring the copy torch loaded keeps rocke and torch on the same HIP
-runtime instance. The stale-comgr demotion does not apply to HIP: its torch
-step is never moved.
+runtime instance. Linux HIP does not add a standalone SDK tier; Windows also
+looks for SDK runtime DLLs and under `HIP_PATH`, `ROCM_PATH`, or `ROCM_HOME`
+before a bare DLL name. COMGR's env-or-SDK policy does not change these HIP
+candidates.
 
 Failure raises `HipError`.
 

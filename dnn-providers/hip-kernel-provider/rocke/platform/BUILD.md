@@ -109,53 +109,42 @@ does not exist is now an error rather than a cue to go and find another one.
 
 ## Runtime: finding ROCm (libamd_comgr / libamdhip64)
 
-In-process compile + launch needs the ROCm shared libs at runtime. The Python
-runtime resolves them WITHOUT importing torch
-(`python/rocke/runtime/runtime_coexistence._candidate_lib_paths` /
-`_rocm_root_libdirs`), in priority order:
+COMGR uses a nonempty `ROCKE_COMGR_LIB` override or the compiler owned by the
+installed `rocm-sdk-core` distribution. Install the platform wheel with
+`[sdk-core]` into the runtime interpreter's environment using an AMD package
+index. Discovery does not import torch or initialize the SDK. `ROCM_PATH` and
+`ROCM_HOME` do not select COMGR; a failed selected compiler does not fall back
+to a system or torch compiler.
 
-1. explicit full-path override env var: `ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`;
-2. the lib torch uses, only if torch is already imported (the resolver never
-   imports torch to obtain it): an unambiguous mapped copy, else
-   `<torch>/lib/lib*.so`, else TheRock's `_rocm_sdk_core/lib/lib*.so*` (only
-   when `rocm_sdk` is imported, i.e. the torch is TheRock's). Exception for
-   comgr only: a stale torch comgr moves below every step 3 candidate (see
-   below);
-3. a real ROCm install discovered without torch: `$ROCM_PATH` / `$ROCM_HOME` ->
-   `<root>/lib`, then globbed `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib`,
-   newest version first (a packaged ROCm 7.2 keeps the runtime under a versioned
-   `core-*/lib`, not always plain `/opt/rocm/lib`);
-4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
+HIP retains its independent runtime discovery and `ROCKE_HIP_LIB` override.
+torch remains optional for building, lowering, COMGR compilation and NumPy
+launches. See [COMGR and HIP runtime documentation](dsl_docs/runtime/comgr_and_hipmodule.md)
+for installation commands, library ownership, mapped-file checks and HIP discovery.
 
-With multiple distinct copies in `/proc/self/maps`, the mapped tier prefers
-the sole copy under imported torch or the active `_rocm_sdk_core`. It skips
-ambiguous mappings rather than treating address order as load order.
+### Installing with CMake
 
-Stale torch comgr (`_torch_comgr_is_stale`, comgr only, never HIP): the release
-of torch's comgr is read from its location (in `_rocm_sdk_core`: the wheel's
-release, `rocm_sdk.__version__` or the installed `rocm-sdk-core` version;
-elsewhere: `torch.version.hip`), the same way `resolved_lib_rocm_version` does,
-and compared with the release of the first step 3 install whose version is
-readable. If both are known and torch's is older, torch's comgr is tried after
-every step 3 candidate (still before step 4), because an older comgr rejects
-ISAs newer than its ROCm. A `_rocm_sdk_core` comgr already mapped into the
-process is never demoted: TheRock's `rocm_sdk.initialize_process` loaded it
-`RTLD_GLOBAL`, and a second comgr beside it aborts the process with `LLVM
-ERROR: support is already registered for analysis`. It stays first; if it
-cannot handle the target ISA, the compile fails at `set_isa`.
+`cmake --install <build> --prefix <prefix>` installs the engine and, when
+`ROCKE_INSTALL_PYTHON_PACKAGE=ON`, copies the Python frontend. It does not run
+pip, resolve `[sdk-core]`, or install `rocm-sdk-core`. Provision the SDK in the
+deployment environment separately, for example by installing the platform
+wheel with `[sdk-core]` before running installed tests. The wheel contains no
+native engine or compiler libraries.
 
-On Linux, the Python COMGR loader rejects `ROCKE_COMGR_LIB` before `dlopen` if
-it names an existing file with an ELF header different from the only mapped
-COMGR path. An alias of the same file remains valid. Missing or non-ELF
-overrides retain the existing load-failure fallback. With multiple mapped
-paths or unreadable maps, override precedence remains unchanged. Compile
-with another COMGR in a separate process before importing torch.
+Standalone Python files and the optional `rocke_engine` binding use
+`ROCKE_PYTHON_INSTALL_DIR`, relative to the install prefix. Its default is
+`${CMAKE_INSTALL_LIBDIR}/pythonX.Y/site-packages`; set it to the deployment
+interpreter's site-packages location relative to that prefix when needed
+(for example, `Lib/site-packages` for a Windows virtualenv). Provider test
+artifacts instead copy the frontend to `bin/<provider-test-subdir>/rocke` and
+stage wheels beside it; the test runner must install the platform wheel with
+`[sdk-core]` into its own environment.
 
-torch is therefore **optional** — required only for the `torch.fx` fusion
-frontend, torch-tensor launch (`runtime/torch_interop.py`), and on-GPU torch-eager
-numeric checks. Building the engine, lowering, `comgr` compile, numpy launch, and
-the byte-identity gate need no torch. If a torch-less process reports `cannot load
-libamd_comgr.so`, set `ROCM_PATH` (or `ROCKE_COMGR_LIB`) to your ROCm install.
+For native standalone AUTO discovery, install the SDK distribution and its
+metadata under the same prefix as the engine or executable, using the layouts
+listed in the [native deployment contract](dsl_docs/runtime/comgr_and_hipmodule.md#comgr).
+The build-tree `rocke_sdk_site.txt` descriptor is not installed: an installed
+consumer does not retain the configure machine's SDK path. A consumer deployed
+outside those layouts needs an explicit `ROCKE_COMGR_LIB` override.
 
 ## The rocke_engine Python binding (optional)
 

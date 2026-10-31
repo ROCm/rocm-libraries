@@ -12,7 +12,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/tiled_attention_2d_reentrancy.c
     target_link_libraries(rocke_tiled_attention_2d_reentrancy PRIVATE m)
   endif()
   add_test(NAME rocke_tiled_attention_2d_reentrancy
-           COMMAND rocke_tiled_attention_2d_reentrancy)
+           COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_tiled_attention_2d_reentrancy>)
   set_tests_properties(rocke_tiled_attention_2d_reentrancy
                        PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_tiled_attention_2d_reentrancy)
@@ -36,7 +36,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/unified_attention_scalar_lower_
     target_link_libraries(rocke_unified_attention_scalar_lower_to_llvm PRIVATE m)
   endif()
   add_test(NAME rocke_unified_attention_scalar_lower_to_llvm
-           COMMAND rocke_unified_attention_scalar_lower_to_llvm)
+           COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_unified_attention_scalar_lower_to_llvm>)
   set_tests_properties(rocke_unified_attention_scalar_lower_to_llvm
                        PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name
@@ -61,7 +61,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/moe_fused_mega_spec_guards.cpp"
     target_link_libraries(rocke_moe_fused_mega_spec_guards PRIVATE m)
   endif()
   add_test(NAME rocke_moe_fused_mega_spec_guards
-           COMMAND rocke_moe_fused_mega_spec_guards)
+           COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_moe_fused_mega_spec_guards>)
   set_tests_properties(rocke_moe_fused_mega_spec_guards
                        PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_moe_fused_mega_spec_guards)
@@ -82,7 +82,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/conv_direct_dw_dgrad_host.cpp")
   if(UNIX)
     target_link_libraries(rocke_conv_direct_dw_dgrad_host PRIVATE m)
   endif()
-  add_test(NAME rocke_conv_direct_dw_dgrad_host COMMAND rocke_conv_direct_dw_dgrad_host)
+  add_test(NAME rocke_conv_direct_dw_dgrad_host COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_conv_direct_dw_dgrad_host>)
   set_tests_properties(rocke_conv_direct_dw_dgrad_host PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_conv_direct_dw_dgrad_host)
   set_target_properties(rocke_conv_direct_dw_dgrad_host
@@ -102,7 +102,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/streamk_iter_partition.cpp")
   if(UNIX)
     target_link_libraries(rocke_streamk_iter_partition PRIVATE m)
   endif()
-  add_test(NAME rocke_streamk_iter_partition COMMAND rocke_streamk_iter_partition)
+  add_test(NAME rocke_streamk_iter_partition COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_streamk_iter_partition>)
   set_tests_properties(rocke_streamk_iter_partition PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_streamk_iter_partition)
   set_target_properties(rocke_streamk_iter_partition
@@ -123,7 +123,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/wgrad_streamk_host.cpp")
   if(UNIX)
     target_link_libraries(rocke_wgrad_streamk_host PRIVATE m)
   endif()
-  add_test(NAME rocke_wgrad_streamk_host COMMAND rocke_wgrad_streamk_host)
+  add_test(NAME rocke_wgrad_streamk_host COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_wgrad_streamk_host>)
   set_tests_properties(rocke_wgrad_streamk_host PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_wgrad_streamk_host)
   set_target_properties(rocke_wgrad_streamk_host
@@ -145,7 +145,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/wmma_fmha_decode_host.cpp")
   if(UNIX)
     target_link_libraries(rocke_wmma_fmha_decode_host PRIVATE m)
   endif()
-  add_test(NAME rocke_wmma_fmha_decode_host COMMAND rocke_wmma_fmha_decode_host)
+  add_test(NAME rocke_wmma_fmha_decode_host COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_wmma_fmha_decode_host>)
   set_tests_properties(rocke_wmma_fmha_decode_host PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_wmma_fmha_decode_host)
   set_target_properties(rocke_wmma_fmha_decode_host

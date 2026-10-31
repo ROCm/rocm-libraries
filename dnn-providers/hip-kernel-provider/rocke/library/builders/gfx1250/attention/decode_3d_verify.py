@@ -76,7 +76,7 @@ def _ref_decode(q_f32, kc_f32, vc_f32, *, block_tables, seq_lens, scale, sinks_f
 def main() -> int:
     from rocke.runtime.comgr import prefer_bundled_lib
 
-    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
+    prefer_bundled_lib()  # Query the selected compiler for informational release metadata.
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--arch", default=None, help="default: auto-detect the local device"

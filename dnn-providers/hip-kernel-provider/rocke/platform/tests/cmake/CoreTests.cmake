@@ -12,6 +12,17 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/smoke.cpp")
 endif()
 
 if(BUILD_TESTING)
+  # Source configure/relocation regressions require files absent from installed
+  # test assets. The provider's source CI runs build-tree CTest with pytest.
+  if(Python3_Interpreter_FOUND AND HIPKERNELPROVIDER_ENABLE_TESTS)
+    add_test(NAME rocke_compiler_discovery_source
+      COMMAND ${_ROCKE_TEST_LAUNCH} "${Python3_EXECUTABLE}" -m pytest
+              "${CMAKE_CURRENT_SOURCE_DIR}/test_compiler_detection_native.py" -q)
+    set_tests_properties(rocke_compiler_discovery_source PROPERTIES
+      LABELS "ckc;python;host;quick;standard;comprehensive;full"
+      TIMEOUT 600
+      ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python;ROCKE_TEST_ENGINE_ARCHIVE=$<TARGET_FILE:rocke_core>")
+  endif()
   # Build-tree artifact-reproduction gate, deliberately separate from pytest.
   # It re-probes the full intrinsic/architecture matrix and therefore has a
   # different timeout, resource, and skip contract from Python unit tests. The
@@ -20,7 +31,7 @@ if(BUILD_TESTING)
   if(Python3_Interpreter_FOUND)
     add_test(
       NAME rocke_arch_domain_reproducibility
-      COMMAND "${Python3_EXECUTABLE}" -u
+      COMMAND ${_ROCKE_TEST_LAUNCH} "${Python3_EXECUTABLE}" -u
               "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen_arch_domain.py"
               --check --unvalidated-exit-code 77)
     set_tests_properties(
@@ -39,7 +50,7 @@ if(BUILD_TESTING)
 
   add_executable(rocke_optimization_barrier core/test_optimization_barrier.cpp)
   target_link_libraries(rocke_optimization_barrier PRIVATE rocke_core)
-  add_test(NAME rocke_optimization_barrier COMMAND rocke_optimization_barrier)
+  add_test(NAME rocke_optimization_barrier COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_optimization_barrier>)
   set_tests_properties(rocke_optimization_barrier
                       PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name
@@ -53,7 +64,7 @@ if(BUILD_TESTING)
 
   add_executable(rocke_tf32 core/test_tf32.cpp)
   target_link_libraries(rocke_tf32 PRIVATE rocke_core)
-  add_test(NAME rocke_tf32 COMMAND rocke_tf32)
+  add_test(NAME rocke_tf32 COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_tf32>)
   set_tests_properties(rocke_tf32 PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_tf32)
   set_target_properties(rocke_tf32 PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
@@ -62,7 +73,7 @@ if(BUILD_TESTING)
 
   add_executable(rocke_fp8_scale_conversion_gate core/test_fp8_scale_conversion_gate.cpp)
   target_link_libraries(rocke_fp8_scale_conversion_gate PRIVATE rocke_core)
-  add_test(NAME rocke_fp8_scale_conversion_gate COMMAND rocke_fp8_scale_conversion_gate)
+  add_test(NAME rocke_fp8_scale_conversion_gate COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_fp8_scale_conversion_gate>)
   set_tests_properties(rocke_fp8_scale_conversion_gate PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_fp8_scale_conversion_gate)
   set_target_properties(rocke_fp8_scale_conversion_gate
@@ -74,7 +85,7 @@ if(BUILD_TESTING)
 
   add_executable(rocke_storage core/test_storage.cpp)
   target_link_libraries(rocke_storage PRIVATE rocke_core)
-  add_test(NAME rocke_storage COMMAND rocke_storage)
+  add_test(NAME rocke_storage COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_storage>)
   set_tests_properties(rocke_storage PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_storage)
   set_target_properties(rocke_storage PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
@@ -83,7 +94,7 @@ if(BUILD_TESTING)
 
   add_executable(rocke_ir_types core/test_ir_types.cpp)
   target_link_libraries(rocke_ir_types PRIVATE rocke_core)
-  add_test(NAME rocke_ir_types COMMAND rocke_ir_types)
+  add_test(NAME rocke_ir_types COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_ir_types>)
   set_tests_properties(rocke_ir_types PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_types)
   set_target_properties(rocke_ir_types PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
@@ -92,7 +103,7 @@ if(BUILD_TESTING)
 
   add_executable(rocke_dtypes core/test_dtypes.cpp)
   target_link_libraries(rocke_dtypes PRIVATE rocke_core)
-  add_test(NAME rocke_dtypes COMMAND rocke_dtypes)
+  add_test(NAME rocke_dtypes COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_dtypes>)
   set_tests_properties(rocke_dtypes PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_dtypes)
   set_target_properties(rocke_dtypes
@@ -106,7 +117,7 @@ if(BUILD_TESTING)
   target_link_libraries(rocke_mma_catalog_lookup PRIVATE rocke_core Threads::Threads)
   target_include_directories(rocke_mma_catalog_lookup PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../cpp/core/arch")
-  add_test(NAME rocke_mma_catalog_lookup COMMAND rocke_mma_catalog_lookup)
+  add_test(NAME rocke_mma_catalog_lookup COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_mma_catalog_lookup>)
   set_tests_properties(rocke_mma_catalog_lookup PROPERTIES LABELS
     "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_mma_catalog_lookup)
@@ -119,7 +130,7 @@ if(BUILD_TESTING)
 
   add_executable(rocke_arch_target_identity core/test_arch_target_identity.cpp)
   target_link_libraries(rocke_arch_target_identity PRIVATE rocke_core)
-  add_test(NAME rocke_arch_target_identity COMMAND rocke_arch_target_identity)
+  add_test(NAME rocke_arch_target_identity COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_arch_target_identity>)
   set_tests_properties(rocke_arch_target_identity PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_arch_target_identity)
   set_target_properties(rocke_arch_target_identity
@@ -139,7 +150,7 @@ if(BUILD_TESTING)
       target_link_libraries(rocke_ir_serialize_roundtrip PRIVATE m)
     endif()
     add_test(NAME rocke_ir_serialize_roundtrip
-             COMMAND rocke_ir_serialize_roundtrip)
+             COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_ir_serialize_roundtrip>)
     set_tests_properties(rocke_ir_serialize_roundtrip
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_serialize_roundtrip)
@@ -156,7 +167,7 @@ if(BUILD_TESTING)
     add_executable(rocke_future_intrinsic_lowering core/future_intrinsic_lowering.cpp)
     target_link_libraries(rocke_future_intrinsic_lowering PRIVATE rocke_core)
     add_test(NAME rocke_future_intrinsic_lowering
-             COMMAND rocke_future_intrinsic_lowering)
+             COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_future_intrinsic_lowering>)
     set_tests_properties(rocke_future_intrinsic_lowering
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_future_intrinsic_lowering)
@@ -173,7 +184,7 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_arch_domain_refusal.cpp")
     add_executable(rocke_arch_domain_refusal core/test_arch_domain_refusal.cpp)
     target_link_libraries(rocke_arch_domain_refusal PRIVATE rocke_core)
-    add_test(NAME rocke_arch_domain_refusal COMMAND rocke_arch_domain_refusal)
+    add_test(NAME rocke_arch_domain_refusal COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_arch_domain_refusal>)
     set_tests_properties(rocke_arch_domain_refusal
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_arch_domain_refusal)
@@ -190,7 +201,7 @@ if(BUILD_TESTING)
     add_executable(rocke_qk_scale_spec_validate core/test_qk_scale_spec_validate.cpp)
     target_link_libraries(rocke_qk_scale_spec_validate PRIVATE rocke_core)
     add_test(NAME rocke_qk_scale_spec_validate
-             COMMAND rocke_qk_scale_spec_validate)
+             COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_qk_scale_spec_validate>)
     set_tests_properties(rocke_qk_scale_spec_validate
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_qk_scale_spec_validate)
@@ -209,7 +220,7 @@ if(BUILD_TESTING)
     add_executable(rocke_tensor_view_buffer_errors core/test_tensor_view_buffer_errors.cpp)
     target_link_libraries(rocke_tensor_view_buffer_errors PRIVATE rocke_core)
     add_test(NAME rocke_tensor_view_buffer_errors
-             COMMAND rocke_tensor_view_buffer_errors)
+             COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_tensor_view_buffer_errors>)
     set_tests_properties(rocke_tensor_view_buffer_errors
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_tensor_view_buffer_errors)
@@ -226,7 +237,7 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_nontemporal_hip.cpp")
     add_executable(rocke_nontemporal_hip core/test_nontemporal_hip.cpp)
     target_link_libraries(rocke_nontemporal_hip PRIVATE rocke_core)
-    add_test(NAME rocke_nontemporal_hip COMMAND rocke_nontemporal_hip)
+    add_test(NAME rocke_nontemporal_hip COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_nontemporal_hip>)
     set_tests_properties(rocke_nontemporal_hip PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_nontemporal_hip)
     set_target_properties(rocke_nontemporal_hip
@@ -242,7 +253,7 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_buffer_rsrc_hip.cpp")
     add_executable(rocke_buffer_rsrc_hip core/test_buffer_rsrc_hip.cpp)
     target_link_libraries(rocke_buffer_rsrc_hip PRIVATE rocke_core)
-    add_test(NAME rocke_buffer_rsrc_hip COMMAND rocke_buffer_rsrc_hip)
+    add_test(NAME rocke_buffer_rsrc_hip COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_buffer_rsrc_hip>)
     set_tests_properties(rocke_buffer_rsrc_hip PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_buffer_rsrc_hip)
     set_target_properties(rocke_buffer_rsrc_hip
@@ -258,7 +269,7 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_loop_carried_descriptor.cpp")
     add_executable(rocke_loop_carried_descriptor core/test_loop_carried_descriptor.cpp)
     target_link_libraries(rocke_loop_carried_descriptor PRIVATE rocke_core)
-    add_test(NAME rocke_loop_carried_descriptor COMMAND rocke_loop_carried_descriptor)
+    add_test(NAME rocke_loop_carried_descriptor COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_loop_carried_descriptor>)
     set_tests_properties(rocke_loop_carried_descriptor PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_loop_carried_descriptor)
     set_target_properties(rocke_loop_carried_descriptor
@@ -273,7 +284,7 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_tanh_lowering.cpp")
     add_executable(rocke_tanh_lowering core/test_tanh_lowering.cpp)
     target_link_libraries(rocke_tanh_lowering PRIVATE rocke_core)
-    add_test(NAME rocke_tanh_lowering COMMAND rocke_tanh_lowering)
+    add_test(NAME rocke_tanh_lowering COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_tanh_lowering>)
     set_tests_properties(rocke_tanh_lowering
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_tanh_lowering)
@@ -289,7 +300,7 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_barrier_fence.cpp")
     add_executable(rocke_barrier_fence core/test_barrier_fence.cpp)
     target_link_libraries(rocke_barrier_fence PRIVATE rocke_core)
-    add_test(NAME rocke_barrier_fence COMMAND rocke_barrier_fence)
+    add_test(NAME rocke_barrier_fence COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_barrier_fence>)
     set_tests_properties(rocke_barrier_fence
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_barrier_fence)
@@ -305,7 +316,7 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_xf32_bf16x3_lowering.cpp")
     add_executable(rocke_xf32_bf16x3_lowering core/test_xf32_bf16x3_lowering.cpp)
     target_link_libraries(rocke_xf32_bf16x3_lowering PRIVATE rocke_core)
-    add_test(NAME rocke_xf32_bf16x3_lowering COMMAND rocke_xf32_bf16x3_lowering)
+    add_test(NAME rocke_xf32_bf16x3_lowering COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_xf32_bf16x3_lowering>)
     set_tests_properties(rocke_xf32_bf16x3_lowering
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_xf32_bf16x3_lowering)
@@ -322,7 +333,7 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_unsigned_int_ops.cpp")
     add_executable(rocke_unsigned_int_ops core/test_unsigned_int_ops.cpp)
     target_link_libraries(rocke_unsigned_int_ops PRIVATE rocke_core)
-    add_test(NAME rocke_unsigned_int_ops COMMAND rocke_unsigned_int_ops)
+    add_test(NAME rocke_unsigned_int_ops COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_unsigned_int_ops>)
     set_tests_properties(rocke_unsigned_int_ops
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_unsigned_int_ops)
@@ -338,7 +349,7 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_f64_lowering.cpp")
     add_executable(rocke_f64_lowering core/test_f64_lowering.cpp)
     target_link_libraries(rocke_f64_lowering PRIVATE rocke_core)
-    add_test(NAME rocke_f64_lowering COMMAND rocke_f64_lowering)
+    add_test(NAME rocke_f64_lowering COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_f64_lowering>)
     set_tests_properties(rocke_f64_lowering
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_f64_lowering)
@@ -354,7 +365,7 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_opcode_values.cpp")
     add_executable(rocke_opcode_values core/test_opcode_values.cpp)
     target_link_libraries(rocke_opcode_values PRIVATE rocke_core)
-    add_test(NAME rocke_opcode_values COMMAND rocke_opcode_values)
+    add_test(NAME rocke_opcode_values COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_opcode_values>)
     set_tests_properties(rocke_opcode_values
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_opcode_values)
@@ -370,7 +381,7 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_mx_scale_decode.cpp")
     add_executable(rocke_mx_scale_decode core/test_mx_scale_decode.cpp)
     target_link_libraries(rocke_mx_scale_decode PRIVATE rocke_core)
-    add_test(NAME rocke_mx_scale_decode COMMAND rocke_mx_scale_decode)
+    add_test(NAME rocke_mx_scale_decode COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_mx_scale_decode>)
     set_tests_properties(rocke_mx_scale_decode
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_mx_scale_decode)
@@ -387,7 +398,7 @@ if(BUILD_TESTING)
     add_executable(rocke_flavor_datalayout_ssot core/flavor_datalayout_ssot.cpp)
     target_link_libraries(rocke_flavor_datalayout_ssot PRIVATE rocke_core)
     add_test(NAME rocke_flavor_datalayout_ssot
-             COMMAND rocke_flavor_datalayout_ssot)
+             COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_flavor_datalayout_ssot>)
     set_tests_properties(rocke_flavor_datalayout_ssot
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_flavor_datalayout_ssot)
@@ -408,7 +419,7 @@ if(BUILD_TESTING)
       target_link_libraries(rocke_mma_frag_ssot PRIVATE m)
     endif()
     add_test(NAME rocke_mma_frag_ssot
-             COMMAND rocke_mma_frag_ssot)
+             COMMAND ${_ROCKE_TEST_LAUNCH} $<TARGET_FILE:rocke_mma_frag_ssot>)
     set_tests_properties(rocke_mma_frag_ssot
                          PROPERTIES LABELS "ckc;unit;host")
     rocke_cxx_test_installed_name(_rocke_installed_name rocke_mma_frag_ssot)

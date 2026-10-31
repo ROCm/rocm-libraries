@@ -2,26 +2,35 @@
 // SPDX-License-Identifier: MIT
 /* Native AUTO convenience adapter for runtime.comgr.loaded_compiler_info.
  * Paths locate candidate libraries; only the loaded compiler determines the
- * version. Retain the queried candidate for stable AUTO selection. A caller that owns
- * compilation must pass its compiler's flavor explicitly; this private handle
- * is not shared with an external compilation stage. */
+ * version. Retain the queried candidate for stable AUTO selection. A caller
+ * that owns compilation must pass its compiler's flavor explicitly; this
+ * private handle is not shared with an external compilation stage. */
 #include "compiler_version.h"
 
-#include <cstdint>
-
 #include <algorithm>
+#include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
+#include <optional>
+#include <regex>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
+
+#include <tlhelp32.h>
 #else
 #include <dlfcn.h>
+#ifdef __linux__
+#include <link.h>
+#endif
 #endif
 
 namespace
@@ -53,11 +62,12 @@ void* load(const std::string& path)
 }
 
 /* Query loaded-module provenance without opening or parsing version files. */
-std::string library_for_symbol(void* address)
+std::string library_for_symbol(void* address, bool physical = false)
 {
     if(!address)
         return {};
 #ifdef _WIN32
+    (void)physical;
     HMODULE module = nullptr;
     if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
                                | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
@@ -68,91 +78,368 @@ std::string library_for_symbol(void* address)
     DWORD size = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
     return size && size < path.size() ? fs::path(path.data()).string() : std::string();
 #else
+#ifdef __linux__
+    if(!physical)
+    {
+        Dl_info info{};
+        return dladdr(address, &info) && info.dli_fname ? info.dli_fname : "";
+    }
+    // dladdr may retain relative argv[0] or a relative dlopen name. Resolve the
+    // containing mapping by address, never against a later working directory.
+    std::ifstream maps("/proc/self/maps");
+    std::string line;
+    const auto value = reinterpret_cast<uintptr_t>(address);
+    while(std::getline(maps, line))
+    {
+        std::istringstream fields(line);
+        std::string range, field, path;
+        fields >> range;
+        for(int i = 0; i < 4; ++i)
+            fields >> field;
+        std::getline(fields >> std::ws, path);
+        auto separator = range.find('-');
+        if(separator == std::string::npos)
+            continue;
+        auto start = std::strtoull(range.c_str(), nullptr, 16);
+        auto end = std::strtoull(range.c_str() + separator + 1, nullptr, 16);
+        if(start <= value && value < end)
+            return fs::path(path).is_absolute() ? path : std::string();
+    }
+    return {};
+#else
     Dl_info info{};
-    return dladdr(address, &info) && info.dli_fname ? info.dli_fname : "";
+    if(dladdr(address, &info) && info.dli_fname
+       && (!physical || fs::path(info.dli_fname).is_absolute()))
+        return info.dli_fname;
+    return {};
+#endif
 #endif
 }
 
-/* Match Python's numeric ordering for discovered installation names. */
-bool newer(const std::string& a, const std::string& b)
+bool comgr_name(const fs::path& path, bool mapped = false)
 {
-    auto numbers = [](const std::string& text) {
-        std::vector<unsigned long> result;
-        const char* p = text.c_str();
-        while(*p)
-        {
-            if(*p >= '0' && *p <= '9')
-            {
-                char* end = nullptr;
-                result.push_back(std::strtoul(p, &end, 10));
-                p = end;
-            }
-            else
-                ++p;
-        }
-        return result;
-    };
-    return numbers(a) > numbers(b);
+    auto name = path.filename().string();
+#ifdef _WIN32
+    static const std::regex pattern("amd_comgr[0-9]*\\.dll");
+    if(mapped)
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+#else
+    static const std::regex pattern("libamd_comgr\\.so(\\.[0-9]+)*");
+    (void)mapped;
+#endif
+    return std::regex_match(name, pattern);
 }
 
-std::vector<std::string> children(const fs::path& root, const char* prefix)
+std::vector<fs::path> children(const fs::path& root)
 {
-    std::vector<std::string> paths;
+    std::vector<fs::path> paths;
     std::error_code error;
     for(fs::directory_iterator it(root, error), end; !error && it != end; it.increment(error))
-    {
-        if(it->path().filename().string().starts_with(prefix))
-            paths.push_back(it->path().string());
-    }
-    std::sort(paths.begin(), paths.end(), newer);
+        paths.push_back(it->path());
+    std::sort(paths.begin(), paths.end());
     return paths;
+}
+
+/* Wheel RECORD paths use CSV quoting, including commas in payload names. */
+std::string record_path(const std::string& line)
+{
+    if(line.empty() || line[0] != '"')
+        return line.substr(0, line.find(','));
+    std::string result;
+    for(size_t i = 1; i < line.size(); ++i)
+    {
+        if(line[i] != '"')
+            result += line[i];
+        else if(i + 1 < line.size() && line[i + 1] == '"')
+        {
+            result += '"';
+            ++i;
+        }
+        else
+            return result;
+    }
+    return {};
+}
+
+/* Mirrors runtime._sdk_comgr: distribution ownership, not package imports or
+ * guessed payload globs. Native installations place the SDK wheel in the same
+ * prefix as the engine/executable. Resolve at runtime so moving the whole
+ * prefix works, without retaining a build-machine SDK path or requiring Python.
+ */
+std::optional<std::string> sdk_comgr_in(const fs::path& site)
+{
+    for(const auto& dist : children(site))
+    {
+        if(dist.extension() != ".dist-info")
+            continue;
+        std::ifstream metadata(dist / "METADATA");
+        std::string line;
+        bool owned = false;
+        while(std::getline(metadata, line))
+        {
+            if(!line.starts_with("Name: "))
+                continue;
+            auto name = line.substr(6);
+            if(!name.empty() && name.back() == '\r')
+                name.pop_back();
+            std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
+                return c == '_' || c == '.' ? '-' : static_cast<char>(std::tolower(c));
+            });
+            owned = name == "rocm-sdk-core";
+            break;
+        }
+        if(!owned)
+            continue;
+        std::ifstream record(dist / "RECORD");
+        std::vector<std::string> matches;
+        while(std::getline(record, line))
+        {
+            fs::path relative(record_path(line));
+            if(relative.is_absolute())
+                continue;
+            std::vector<std::string> parts;
+            for(const auto& part : relative)
+                parts.push_back(part.string());
+            if(parts.size() != 3
+               || !(parts[0] == "_rocm_sdk_core"
+                    || (parts[0].starts_with("_rocm_sdk_core_") && parts[0].size() > 15)))
+                continue;
+#ifdef _WIN32
+            const char* library_dir = "bin";
+#else
+            const char* library_dir = "lib";
+#endif
+            std::error_code error;
+            if(parts[1] == library_dir && comgr_name(relative)
+               && fs::is_regular_file(site / relative, error))
+                matches.push_back(fs::absolute(site / relative).lexically_normal().string());
+        }
+        if(!matches.empty())
+        {
+            std::sort(matches.begin(), matches.end(), [](const auto& a, const auto& b) {
+                auto an = fs::path(a).filename().string(), bn = fs::path(b).filename().string();
+                return an.size() != bn.size() ? an.size() < bn.size() : a < b;
+            });
+            return matches[0];
+        }
+        // Like importlib.metadata.distribution(), use the selected distribution.
+        return std::string();
+    }
+    return std::nullopt;
+}
+
+std::string executable_path()
+{
+#ifdef _WIN32
+    std::vector<wchar_t> buffer(32768);
+    auto size = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    return size && size < buffer.size() ? fs::path(buffer.data()).string() : std::string();
+#else
+    std::error_code error;
+    auto path = fs::read_symlink("/proc/self/exe", error);
+    return error ? std::string() : path.string();
+#endif
+}
+
+// Recognize adjacent installed layouts. Unknown layouts can use metadata or a
+// descriptor in the module's own directory, or an explicit runtime override.
+fs::path installation_root(const fs::path& directory)
+{
+    for(auto root = directory; !root.empty() && root != root.parent_path();
+        root = root.parent_path())
+    {
+        auto name = root.filename().string();
+#ifdef _WIN32
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+#endif
+        if(name == "site-packages")
+            return root;
+        if(name == "bin" || name == "sbin" || name == "libexec" || name == "lib" || name == "lib64")
+            return root.parent_path();
+    }
+    return directory;
+}
+
+std::optional<std::string> build_sdk_comgr_in(const fs::path& root)
+{
+    std::ifstream descriptor(root / "rocke_sdk_site.txt");
+    std::string marker, location;
+    if(!std::getline(descriptor, marker))
+        return std::nullopt;
+    const bool absolute = marker == "rocke-sdk-site-absolute-v1";
+    if((!absolute && marker != "rocke-sdk-site-v1") || !std::getline(descriptor, location)
+       || location.empty())
+        return std::string();
+    const fs::path site(location);
+    if(site.is_absolute() != absolute || (!absolute && site.has_root_path()))
+        return std::string();
+    // The writer computes relative paths from the physical build directory.
+    std::error_code error;
+    auto physical_root = fs::canonical(root, error);
+    if(error)
+        return std::string();
+    auto selected = sdk_comgr_in(absolute ? site : physical_root / site);
+    return selected ? *selected : std::string();
+}
+
+std::string discover_sdk_comgr()
+{
+    std::vector<fs::path> visited;
+    for(const auto& anchor :
+        {library_for_symbol(reinterpret_cast<void*>(&discover_sdk_comgr), true), executable_path()})
+    {
+        if(anchor.empty())
+            continue;
+        std::error_code error;
+        if(!fs::path(anchor).is_absolute())
+            continue;
+        auto physical = fs::canonical(anchor, error);
+        if(error)
+            continue;
+        const auto directory = physical.parent_path();
+        const auto prefix = installation_root(directory);
+        if(std::find(visited.begin(), visited.end(), prefix) == visited.end())
+        {
+            visited.push_back(prefix);
+            if(auto selected = sdk_comgr_in(prefix); selected)
+                return *selected;
+            if(auto selected = sdk_comgr_in(prefix / "Lib" / "site-packages"); selected)
+                return *selected;
+            for(const char* lib : {"lib", "lib64"})
+                for(const auto& python : children(prefix / lib))
+                    if(python.filename().string().starts_with("python"))
+                        if(auto selected = sdk_comgr_in(python / "site-packages"); selected)
+                            return *selected;
+        }
+        if(auto selected = build_sdk_comgr_in(directory); selected)
+            return *selected;
+        if(directory != prefix)
+            if(auto selected = build_sdk_comgr_in(prefix); selected)
+                return *selected;
+        // Nested CMake outputs may be below the top-level build root. Only a
+        // CMake build marker permits this lookup; never search ancestor SDKs.
+        for(auto root = directory; !root.empty(); root = root.parent_path())
+        {
+            if(fs::is_regular_file(root / "CMakeCache.txt", error))
+            {
+                if(auto selected = build_sdk_comgr_in(root); selected)
+                    return *selected;
+                break;
+            }
+            if(root == root.parent_path())
+                break;
+        }
+    }
+    return {};
+}
+
+/* Check mapped files before dlopen/LoadLibrary. Distinct COMGR copies can bring
+ * distinct LLVM command-line registries; RTLD_LOCAL does not isolate them. */
+bool compatible_with_mapped(const fs::path& candidate)
+{
+    std::vector<fs::path> mapped;
+#ifdef _WIN32
+    HANDLE snapshot
+        = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
+    if(snapshot == INVALID_HANDLE_VALUE)
+        return false;
+    {
+        MODULEENTRY32W entry{};
+        entry.dwSize = sizeof(entry);
+        if(!Module32FirstW(snapshot, &entry))
+        {
+            CloseHandle(snapshot);
+            return false;
+        }
+        do
+        {
+            if(comgr_name(fs::path(entry.szExePath), true))
+                mapped.emplace_back(entry.szExePath);
+        } while(Module32NextW(snapshot, &entry));
+        const auto status = GetLastError();
+        CloseHandle(snapshot);
+        if(status != ERROR_NO_MORE_FILES)
+            return false;
+    }
+#else
+#ifdef __linux__
+    struct mapped_module
+    {
+        uintptr_t address;
+        bool found = false;
+    };
+    std::vector<mapped_module> modules;
+    // Join retained loader names to actual mapped files. NFS renames unlinked
+    // libraries to .nfs*, and the original name may already name a new inode.
+    dl_iterate_phdr(
+        [](dl_phdr_info* info, size_t, void* state) {
+            fs::path path(info->dlpi_name ? info->dlpi_name : "");
+            if(comgr_name(path))
+                static_cast<std::vector<mapped_module>*>(state)->push_back(
+                    {static_cast<uintptr_t>(info->dlpi_addr)});
+            return 0;
+        },
+        &modules);
+#endif
+    std::ifstream maps("/proc/self/maps");
+    std::string line;
+    while(std::getline(maps, line))
+    {
+        std::istringstream fields(line);
+        std::string range, field, path;
+        fields >> range;
+        for(int i = 0; i < 4; ++i)
+            fields >> field;
+        std::getline(fields >> std::ws, path);
+        auto name = path.ends_with(" (deleted)") ? path.substr(0, path.size() - 10) : path;
+        if(comgr_name(fs::path(name)))
+            mapped.emplace_back(path);
+#ifdef __linux__
+        auto separator = range.find('-');
+        if(separator != std::string::npos)
+        {
+            auto start = std::strtoull(range.c_str(), nullptr, 16);
+            auto end = std::strtoull(range.c_str() + separator + 1, nullptr, 16);
+            for(auto& module : modules)
+                if(!path.empty() && start <= module.address && module.address < end)
+                {
+                    mapped.emplace_back(path);
+                    module.found = true;
+                }
+        }
+#endif
+    }
+#ifdef __linux__
+    for(const auto& module : modules)
+        if(!module.found)
+            return false;
+#endif
+#endif
+    for(const auto& path : mapped)
+    {
+        std::error_code error;
+        if(!fs::equivalent(candidate, path, error) || error)
+            return false;
+    }
+    return true;
 }
 
 void* load_comgr(std::string& requested)
 {
-    std::vector<std::string> candidates;
-    if(const char* path = std::getenv("ROCKE_COMGR_LIB"); path && *path)
-        candidates.emplace_back(path);
-#ifdef _WIN32
-    for(const char* name : {"HIP_PATH", "ROCM_PATH", "ROCM_HOME"})
+    const char* override = std::getenv("ROCKE_COMGR_LIB");
+    std::string candidate = override && *override ? override : discover_sdk_comgr();
+    if(!candidate.empty() && compatible_with_mapped(candidate))
     {
-        if(const char* root = std::getenv(name); root && *root)
-        {
-            auto paths = children(fs::path(root) / "bin", "amd_comgr");
-            for(const auto& path : paths)
-                if(fs::path(path).extension() == ".dll")
-                    candidates.push_back(path);
-        }
-    }
-    candidates.emplace_back("amd_comgr.dll");
-#else
-    auto add_libdir = [&](const fs::path& dir) {
-        candidates.push_back((dir / "libamd_comgr.so").string());
-        candidates.push_back((dir / "libamd_comgr.so.3").string());
-    };
-    for(const char* name : {"ROCM_PATH", "ROCM_HOME"})
-        if(const char* root = std::getenv(name); root && *root)
-            add_libdir(fs::path(root) / "lib");
-    auto roots = children("/opt", "rocm");
-    std::vector<std::string> cores;
-    for(const auto& root : roots)
-    {
-        auto paths = children(root, "core-");
-        cores.insert(cores.end(), paths.begin(), paths.end());
-    }
-    std::sort(cores.begin(), cores.end(), newer);
-    for(const auto& core : cores)
-        add_libdir(fs::path(core) / "lib");
-    for(const auto& root : roots)
-        add_libdir(fs::path(root) / "lib");
-    candidates.emplace_back("libamd_comgr.so");
-#endif
-    for(const auto& candidate : candidates)
         if(void* library = load(candidate))
         {
             requested = candidate;
             return library;
         }
+    }
     return nullptr;
 }
 

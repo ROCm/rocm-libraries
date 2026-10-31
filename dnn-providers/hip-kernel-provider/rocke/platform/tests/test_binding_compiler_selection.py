@@ -37,7 +37,7 @@ from rocke.instances import TileSpec, TraitSpec, UniversalGemmSpec
 from rocke.runtime import comgr
 import rocke_engine
 
-# A bundled compiler and an independently discoverable native candidate differ.
+# SDK selection wins over a distinct system installation and torch package.
 sys.modules["torch"] = SimpleNamespace(
     __file__=sys.argv[1], version=SimpleNamespace(hip="99.0"))
 assert lower_llvm._resolve_llvm_flavor() == "llvm23"
@@ -94,12 +94,23 @@ def test_python_bindings_use_the_compiling_library(tmp_path):
     metadata = tmp_path / "native" / ".info"
     metadata.mkdir()
     (metadata / "version").write_text("7.1.0\n")
-    build_library(tmp_path / "torch" / "lib", source % 23)
+    build_library(tmp_path / "torch" / "lib", source % 20)
+    site = tmp_path / "site-packages"
+    core = site / "_rocm_sdk_core_binding_nonce" / "lib"
+    build_library(core, source % 23, name="libamd_comgr.so.3")
+    distribution = site / "rocm_sdk_core-10.1.0.dist-info"
+    distribution.mkdir()
+    (distribution / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: rocm-sdk-core\nVersion: 10.1.0\n"
+    )
+    (distribution / "RECORD").write_text(
+        "_rocm_sdk_core_binding_nonce/lib/libamd_comgr.so.3,,\n"
+    )
     env = dict(os.environ)
     for name in ("ROCKE_LLVM_FLAVOR", "ROCKE_COMGR_LIB", "ROCM_HOME"):
         env.pop(name, None)
     env.update(ROCM_PATH=str(tmp_path / "native"), ROCKE_BACKEND="python")
-    env["PYTHONPATH"] = os.pathsep.join(sys.path)
+    env["PYTHONPATH"] = os.pathsep.join([str(site)] + sys.path)
     result = subprocess.run(
         [sys.executable, "-c", BINDING_PROBE, str(tmp_path / "torch" / "__init__.py")],
         env=env,

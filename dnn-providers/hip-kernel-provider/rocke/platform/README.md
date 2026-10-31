@@ -35,10 +35,17 @@ two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.m
 
 ## Prerequisites
 
-- **ROCm 7.x** with `libamd_comgr` and `libamdhip64` on the dynamic-linker path
-  (7.2 recommended). AUTO selects the IR flavor from the loaded COMGR
-  compiler’s LLVM version; ROCm release metadata does not select it. ROCm is a
-  system dependency, not a pip package.
+- **COMGR for compilation**, supplied by `rocke[sdk-core]` through the shared
+  `rocm-sdk-core` package, or selected explicitly with `ROCKE_COMGR_LIB`.
+  Automatic COMGR discovery uses only the installed SDK distribution; system
+  ROCm roots and torch packages are not compiler fallbacks. The base wheel requires
+  only NumPy and contains no compiler binaries. Install the extra from an AMD
+  wheel index; see [COMGR installation and release support](dsl_docs/runtime/comgr_and_hipmodule.md#installing-the-compiler).
+  AUTO selects the IR flavor from the loaded COMGR compiler's LLVM version;
+  ROCm release metadata does not select it. Offline IR emission requires an
+  explicit LLVM flavor when no compiler is installed.
+- **HIP for GPU launch**, from an existing ROCm runtime. The `sdk-core` extra
+  does not install a GPU driver or initialize HIP.
 - **Python 3.10+**, a C++20 compiler (`amdclang++`/`clang++`/`g++`), CMake 3.16+
   (3.18+ for the `cpp/bindings` pybind module). The C++ build needs the Python
   interpreter too: it generates the engine's intrinsic arch-domain table from the

@@ -17,6 +17,38 @@ include(GNUInstallDirs)
 # Required: the engine's copy of the intrinsic arch-domain table is generated
 # at build time from the committed JSON columns (see below).
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/RockeTestEnvironment.cmake")
+set(_ROCKE_BUILD_COMGR_DEFAULT "${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}")
+if(NOT _ROCKE_BUILD_COMGR_DEFAULT)
+  set(_ROCKE_BUILD_COMGR_DEFAULT "$ENV{ROCKE_COMGR_LIB}")
+endif()
+if(NOT _ROCKE_BUILD_COMGR_DEFAULT)
+  # The provider's packaging assertion is configured later, so resolve the same
+  # exported build package here without persisting a default as a user override.
+  if(HIPKERNELPROVIDER_ENABLE_ROCKE AND NOT TARGET amd_comgr)
+    find_package(amd_comgr CONFIG QUIET)
+  endif()
+  if(TARGET amd_comgr)
+    rocke_imported_library_location(amd_comgr _ROCKE_BUILD_COMGR_DEFAULT)
+  endif()
+endif()
+rocke_comgr_test_launcher(_ROCKE_TEST_LAUNCH "${_ROCKE_BUILD_COMGR_DEFAULT}")
+
+# Build-tree executables need the selected interpreter's SDK site even when the
+# build lives outside its virtualenv. Keep a site descriptor at the top-level
+# build root. Never install it or embed a build-machine SDK library path.
+# The descriptor is relative unless Windows drives require an absolute site.
+# Preserve interpreter package visibility, including user-site SDKs.
+execute_process(
+  COMMAND "${Python3_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_sdk_comgr_location.py"
+          --build-root "${CMAKE_BINARY_DIR}"
+  RESULT_VARIABLE _ROCKE_SDK_SITE_RESULT)
+if(NOT _ROCKE_SDK_SITE_RESULT EQUAL 0)
+  message(FATAL_ERROR "Could not generate the native build-tree SDK site descriptor")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_sdk_comgr_location.py")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -320,10 +352,9 @@ if(ROCKE_INSTALL_PYTHON_PACKAGE)
           PATTERN "__pycache__" EXCLUDE
           REGEX "\\.pyc$" EXCLUDE)
 
-  # Also install pre-built wheels when available. These are not yet consumed
-  # by CI (the existing PYTHONPATH=. approach is still used), but shipping
-  # them in the artifact prepares for a future migration to pip-installed
-  # wheels and enables the library tests to run.
+  # Stage pre-built wheels for CI/test runners to install. The platform wheel
+  # must be installed with [sdk-core] in the runner's Python environment;
+  # CMake's file-copy installation does not resolve Python dependencies.
   if(ROCKE_BUILD_PYENV)
     install(FILES
             "${ROCKE_WHEEL_DIR}/rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl"
