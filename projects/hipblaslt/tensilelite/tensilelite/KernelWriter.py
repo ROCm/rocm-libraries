@@ -10647,6 +10647,26 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   def checkResources(self, kernel, mkb) -> None:
     pass
 
+  @abc.abstractmethod
+  def printRejectionReason(self, kernel) -> None:
+    """Print why overflowedResources rejects the kernel (PrintSolutionRejectionReason only)."""
+    pass
+
+  def _rejectStaticVgprOverflow(self, kernel) -> None:
+    """Stop before generating a kernel whose static VGPR allocation already exceeds MaxVgpr.
+
+    _initKernel creates the VGPR pool with the static allocation and the pool only grows, so
+    checkResources is certain to reject the kernel (overflowedResources 1, "too many vgprs")
+    after the whole kernel has been generated. Raise the same error now instead, unless
+    ForceGenerateKernel asks for the source anyway.
+    """
+    if self.debugConfig.forceGenerateKernel:
+      return
+    if self.vgprPool.size() > self.states.regCaps["MaxVgpr"]:
+      self.states.overflowedResources = 1
+      self.printRejectionReason(kernel)
+      raise RuntimeError("Generating kernel source resulted in error {}".format(self.states.overflowedResources))
+
   ##############################################################################
   # Global Read Addresses: Work-Group
   ##############################################################################
@@ -11853,6 +11873,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     tensorParametersA = {}
     tensorParametersB = {}
     self._initKernel(kernel, tensorParametersA, tensorParametersB)
+    self._rejectStaticVgprOverflow(kernel)
 
     self._registerKernelArgs(kernel)
     gridX = "TilesXYBatchGSU"

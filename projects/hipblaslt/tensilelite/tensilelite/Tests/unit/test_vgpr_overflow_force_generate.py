@@ -8,11 +8,17 @@ inside ``_initKernel``, long before ``checkResources()`` runs, so it bypassed
 the whole solution-rejection pipeline: ``ForceGenerateKernel=1`` (which exists
 precisely to keep the generated source of a rejected kernel for inspection)
 could never take effect for a VGPR overflow. The guard now only warns, and the
-overflow is reported through the normal path instead:
+overflow is reported through the rejection path instead:
 
     vgprAllocationImplClassic  warns, keeps the real totalVgprs
-      -> checkResources        sets overflowedResources = 1 ("too many vgprs")
-      -> _getKernelSource      raises, unless ForceGenerateKernel=1
+      -> _getKernelSource      right after _initKernel, _rejectStaticVgprOverflow
+                               sets overflowedResources = 1 ("too many vgprs") and
+                               raises, unless ForceGenerateKernel=1
+      -> checkResources        at the end of codegen, sets overflowedResources = 1
+                               for VGPRs allocated during generation (and for a
+                               static overflow kept by ForceGenerateKernel=1);
+                               _getKernelSource then raises, unless
+                               ForceGenerateKernel=1
 
 so an oversized kernel is still rejected by default and is only allowed
 through when the user explicitly asked for it.
@@ -191,8 +197,9 @@ class TestOverflowStillRejectsTheKernel:
         )
 
     def test_checkResources_flags_the_overflow(self):
-        # This is the rejection the removed raise used to pre-empt: error code
-        # 1 == "too many vgprs".
+        # The end-of-codegen rejection for VGPRs allocated during generation (a
+        # static overflow is already stopped by _rejectStaticVgprOverflow unless
+        # ForceGenerateKernel=1): error code 1 == "too many vgprs".
         writer = self._resourceWriter(vgprs=300)
         _exec(self._checkResourcesGuard(), {"self": writer})
         assert writer.states.overflowedResources == 1
@@ -211,16 +218,23 @@ class TestForceGenerateKernel:
         # SimpleNamespace standing in for a real writer must carry what that path
         # reads: the arg-registration hook, the kernel name and the collected arg
         # definitions. A real KernelWriter always has all three.
-        return SimpleNamespace(
+        # It also runs the static VGPR check right after _initKernel (the real method,
+        # bound below); the static allocation here fits, so the overflow is only found
+        # by the end-of-codegen check, as for a kernel that overflows during generation.
+        writer = SimpleNamespace(
             _initKernel=lambda kernel, tPA, tPB: None,
             _registerKernelArgs=lambda kernel: None,
-            states=SimpleNamespace(kernelName="test_kernel"),
+            states=SimpleNamespace(kernelName="test_kernel", regCaps={"MaxVgpr": 256}),
+            vgprPool=SimpleNamespace(size=lambda: 128),
             kernelArgDefs=[],
             stringIdx=0,
             kernelBody=lambda kernel, tPA, tPB: (error, "s_endpgm\n"),
             kernelBodySubtile=lambda kernel, tPA, tPB: (error, "s_endpgm\n"),
             debugConfig=SimpleNamespace(forceGenerateKernel=forceGenerateKernel),
         )
+        writer._rejectStaticVgprOverflow = lambda kernel: KernelWriter._rejectStaticVgprOverflow(
+            writer, kernel)
+        return writer
 
     def _kernel(self):
         # The solution keys that same metadata is built from; a real Solution always
