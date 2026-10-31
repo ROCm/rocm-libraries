@@ -91,5 +91,5 @@ bool rocke_wmma_fwd_gate(const rocke_direct_conv_problem_t* p,
         gate_set_reason(reason, reason_cap, msg);
         return false;
     }
-    return true;
+    return !rocke_direct_conv_one_padding_reason(p, "", reason, reason_cap);
 }
