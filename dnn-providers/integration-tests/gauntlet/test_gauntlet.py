@@ -11,10 +11,12 @@ the same command line and writes the same outcome-report JSON Lines. Run with::
 
 from __future__ import annotations
 
+import ast
 import copy
 import fnmatch
 import hashlib
 import importlib.util
+import itertools
 import json
 import os
 import random
@@ -30,6 +32,7 @@ from pathlib import Path
 
 import pytest
 
+import pairwise
 import run_gauntlet_fuzz as fuzz
 import sampler
 import space as space_lib
@@ -4727,3 +4730,836 @@ def test_shrink_search_ends_on_a_value_the_oracle_accepted_even_when_it_is_not_m
     assert (axes["n"], steps) == (48, 1)  # 33 lies below the refused 40
     assert len(asked) == len(set(asked))  # no candidate is asked twice
     assert 64 not in asked  # the original is never run again
+
+
+# --------------------------------------------------------------------------
+# Pairwise generation (pairwise.py)
+# --------------------------------------------------------------------------
+
+# The completeness tests cover SDPA forward: the spaces of its three engines (ASM_SDPA,
+# HIP_FLASH2, rocKE dense) and the probe space. The generator runs on any space; for the others
+# only that it returns (and what it does when its search is capped) is tested.
+SDPA_FWD_SPACES = [
+    "SdpaFwd/Default",
+    "SdpaFwd/Flash2Region",
+    "SdpaFwd/Gfx950Dense",
+    "SdpaFwd/Flash2",
+]
+PROBE_SPACE = "SdpaFwd/Flash2"
+PAIRWISE_SEED = 1
+
+
+def _same_value(a, b):
+    return type(a) is type(b) and a == b
+
+
+def _rendered(sp, values):
+    """The case an axis-value row renders to, as text, without the fields that only name the
+    row (the id and the notes); None when the row is not legal."""
+    try:
+        row = sampler.sample_from_axes(sp, values, 0).row
+    except (sampler.InvalidRowError, space_lib.SpaceError):
+        return None
+    shown = {k: v for k, v in row.items() if k != "id"}
+    shown["metadata"] = {k: v for k, v in row["metadata"].items() if k != "notes"}
+    return json.dumps(shown, sort_keys=True, default=repr)
+
+
+def _live_axes(sp, levels, values):
+    """The axes whose value matters in a legal row: some other level of the axis gives a legal
+    row that renders differently."""
+    base = _rendered(sp, values)
+    assert base is not None, values
+    live = set()
+    for axis, options in levels.items():
+        for level in options:
+            if _same_value(level, values[axis]):
+                continue
+            alt = _rendered(sp, {**values, axis: level})
+            if alt is not None and alt != base:
+                live.add(axis)
+                break
+    return live
+
+
+def _tuple_key(a, va, b, vb):
+    return ((a, repr(va)), (b, repr(vb)))
+
+
+def _tuple_universe(levels):
+    return {
+        _tuple_key(a, va, b, vb)
+        for a, b in itertools.combinations(levels, 2)
+        for va in levels[a]
+        for vb in levels[b]
+    }
+
+
+def _held_live(levels, values, live):
+    """The tuples of a row whose two values are levels and live in it."""
+    held = [
+        a
+        for a in levels
+        if a in live and any(_same_value(values[a], level) for level in levels[a])
+    ]
+    return {
+        _tuple_key(a, values[a], b, values[b])
+        for a, b in itertools.combinations(held, 2)
+    }
+
+
+def _covered(sp, levels, rows):
+    covered = set()
+    for values in rows:
+        covered |= _held_live(levels, values, _live_axes(sp, levels, values))
+    return covered
+
+
+def _flagged(result, kind):
+    return {
+        _tuple_key(a, va, b, vb)
+        for (a, va), (b, vb) in (finding.pair for finding in getattr(result, kind))
+    }
+
+
+def _brute_force(sp, levels):
+    """Every legal row of the product of the levels, and from them the tuples some legal row
+    holds with both values live (covered), the tuples no legal row holds (illegal) and the
+    rest (dead). No pruning: only for a space of a few axes."""
+    covered, held = set(), set()
+    for combo in itertools.product(*levels.values()):
+        values = dict(zip(levels, combo))
+        if _rendered(sp, values) is None:
+            continue
+        live = _live_axes(sp, levels, values)
+        for a, b in itertools.combinations(levels, 2):
+            key = _tuple_key(a, values[a], b, values[b])
+            held.add(key)
+            if a in live and b in live:
+                covered.add(key)
+    universe = _tuple_universe(levels)
+    return covered, universe - held, held - covered
+
+
+# A toy space for each way a tuple can fail to be covered, small enough for the product.
+TOY_PAIRWISE = {
+    # lv is used only while use is "on": with use "off" it is inert, so (off, lv) is dead.
+    "gated": {
+        "decl": {
+            "axes": {
+                "use": {"values": ["off", "on"]},
+                "lv": {"values": [1, 2, 3]},
+                "other": {"values": [True, False]},
+            },
+            "derive": {"eff": "lv if use == 'on' else 0"},
+            "constraints": [],
+            "case": {
+                "values": {"use": "${use}", "eff": "${eff}", "other": "${other}"},
+                "metadata": {},
+            },
+        },
+        "illegal": set(),
+        "dead": {_tuple_key("use", "off", "lv", lv) for lv in (1, 2, 3)},
+    },
+    # a + b <= 4 forbids three of the nine (a, b) tuples and, at (1, 3) and (3, 1), every other
+    # level of one value, which leaves it inert.
+    "constrained": {
+        "decl": {
+            "axes": {
+                "a": {"values": [1, 2, 3]},
+                "b": {"values": [1, 2, 3]},
+                "c": {"values": [0, 1]},
+            },
+            "derive": {},
+            "constraints": [{"rule": "a + b <= 4", "reason": "the sum must fit"}],
+            "case": {
+                "values": {"a": "${a}", "b": "${b}", "c": "${c}"},
+                "metadata": {},
+            },
+        },
+        "illegal": {_tuple_key("a", a, "b", b) for a, b in ((2, 3), (3, 2), (3, 3))},
+        # a stays at 1 (or 3) only with b at 3 (or 1): every other level of a is illegal there, so
+        # a is inert, and (1, 3), (3, 1) are dead.
+        "dead": {_tuple_key("a", a, "b", b) for a, b in ((1, 3), (3, 1))},
+    },
+    # n = 1 is legal only with m = 1 (so m is inert at n = 1: (1, 1) is dead); the interior
+    # level of n meets every m.
+    "ranged": {
+        "decl": {
+            "axes": {
+                "n": {"range": [1, 40], "boundaries": [1, 40]},
+                "m": {"values": [1, 2, 3]},
+            },
+            "derive": {},
+            "constraints": [
+                {"rule": "n != 1 or m == 1", "reason": "n = 1 needs m = 1"}
+            ],
+            "case": {"values": {"n": "${n}", "m": "${m}"}, "metadata": {}},
+        },
+        "illegal": {_tuple_key("n", 1, "m", m) for m in (2, 3)},
+        "dead": {_tuple_key("n", 1, "m", 1)},
+    },
+    # All three at once: n >= 3 * eff, so n = 1 never goes with use "on" (illegal), and goes
+    # with lv only where use is "off" and lv is inert (dead).
+    "mixed": {
+        "decl": {
+            "axes": {
+                "use": {"values": ["off", "on"]},
+                "lv": {"values": [1, 2, 3]},
+                "n": {"range": [1, 30], "boundaries": [1, 30]},
+            },
+            "derive": {"eff": "lv if use == 'on' else 0"},
+            "constraints": [{"rule": "n >= eff * 3", "reason": "n must reach 3 * eff"}],
+            "case": {
+                "values": {"use": "${use}", "eff": "${eff}", "n": "${n}"},
+                "metadata": {},
+            },
+        },
+        "illegal": {_tuple_key("use", "on", "n", 1)},
+        "dead": {_tuple_key("use", "off", "lv", lv) for lv in (1, 2, 3)}
+        | {_tuple_key("lv", lv, "n", 1) for lv in (1, 2, 3)},
+    },
+}
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+@pytest.mark.parametrize("toy", sorted(TOY_PAIRWISE))
+def test_pairwise_matches_a_brute_force_over_the_whole_product_of_a_toy_space(
+    tmp_path, toy, seed
+):
+    sp = space_lib.load_space(write_space(tmp_path, **TOY_PAIRWISE[toy]["decl"]))
+    result = pairwise.build(sp, seed)
+    covered, illegal, dead = _brute_force(sp, result.levels)
+    # the rows cover exactly what can be covered, and nothing else is left unexplained
+    assert _covered(sp, result.levels, result.rows) == covered
+    assert _flagged(result, "illegal") == illegal
+    assert _flagged(result, "dead") == dead
+    assert result.unproven == []
+    assert result.tuples_total == len(covered) + len(illegal) + len(dead)
+    # and the brute force sees the cases each toy is there for
+    assert TOY_PAIRWISE[toy]["illegal"] <= illegal
+    assert TOY_PAIRWISE[toy]["dead"] <= dead
+    if toy in ("gated", "constrained", "ranged"):
+        assert (illegal, dead) == (
+            TOY_PAIRWISE[toy]["illegal"],
+            TOY_PAIRWISE[toy]["dead"],
+        )
+    for values in result.rows:
+        assert _rendered(sp, values) is not None
+        assert all(
+            any(_same_value(v, level) for level in result.levels[a])
+            for a, v in values.items()
+        )
+
+
+def test_a_gated_value_is_dead_not_covered_and_a_constrained_pair_is_illegal(tmp_path):
+    (tmp_path / "gated").mkdir()
+    gated = space_lib.load_space(
+        write_space(tmp_path / "gated", **TOY_PAIRWISE["gated"]["decl"])
+    )
+    result = pairwise.build(gated, 1)
+    dead = TOY_PAIRWISE["gated"]["dead"]
+    assert _flagged(result, "dead") == dead
+    assert result.illegal == [] and result.unproven == []
+    assert all("never both live" in f.detail for f in result.dead)
+    # legal rows hold each of these tuples, but lv is inert in all of them
+    assert not dead & _covered(gated, result.levels, result.rows)
+    for _a, (_b, value) in (f.pair for f in result.dead):
+        legal = {"use": "off", "lv": value, "other": True}
+        assert _rendered(gated, legal) is not None
+        assert "lv" not in _live_axes(gated, result.levels, legal)
+
+    (tmp_path / "constrained").mkdir()
+    constrained = space_lib.load_space(
+        write_space(tmp_path / "constrained", **TOY_PAIRWISE["constrained"]["decl"])
+    )
+    result = pairwise.build(constrained, 1)
+    assert _flagged(result, "illegal") == TOY_PAIRWISE["constrained"]["illegal"]
+    assert _flagged(result, "dead") == TOY_PAIRWISE["constrained"]["dead"]
+    assert result.unproven == []
+    assert all("a + b <= 4" in f.detail for f in result.illegal)
+
+
+RANGED = TOY_PAIRWISE["ranged"]["decl"]
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_a_range_axis_has_its_boundaries_and_one_seeded_interior_level(tmp_path, seed):
+    sp = space_lib.load_space(write_space(tmp_path, **RANGED))
+    found = pairwise.levels(sp, "n", seed)
+    assert found[:2] == [1, 40] and len(found) == 3 and 1 < found[2] < 40
+    assert (
+        pairwise.levels(sp, sp.axes["n"], seed)
+        == found
+        == pairwise.levels(sp, "n", seed)
+    )
+    assert pairwise.build(sp, seed).levels["n"] == found
+    # the interior level meets every value of the other axis
+    rows = pairwise.build(sp, seed).rows
+    assert {r["m"] for r in rows if r["n"] == found[2]} == {1, 2, 3}
+
+
+def test_the_interior_level_depends_on_the_seed(tmp_path):
+    sp = space_lib.load_space(write_space(tmp_path, **RANGED))
+    assert len({pairwise.levels(sp, "n", seed)[2] for seed in range(8)}) > 1
+
+
+def test_range_ends_are_levels_only_when_declared_and_values_are_deduplicated(tmp_path):
+    sp = space_lib.load_space(
+        write_space(
+            tmp_path,
+            axes={
+                "n": {"range": [5, 9]},
+                "k": {"range": [1, 100], "boundaries": [1, 7]},
+                "w": {"values": ["none", "none", "sliding", "none"]},
+                "t": {"values": [1, True, 1.0, 1]},
+            },
+            derive={},
+            constraints=[],
+            case={
+                "values": {"n": "${n}", "k": "${k}", "w": "${w}", "t": "${t}"},
+                "metadata": {},
+            },
+        )
+    )
+    n = pairwise.levels(sp, "n", 4)
+    assert len(n) == 1 and 5 < n[0] < 9  # no declared boundary: the interior alone
+    k = pairwise.levels(sp, "k", 4)
+    assert k[:2] == [1, 7] and len(k) == 3 and 1 < k[2] < 7
+    assert pairwise.levels(sp, "w", 4) == ["none", "sliding"]
+    assert [repr(v) for v in pairwise.levels(sp, "t", 4)] == ["1", "True", "1.0"]
+
+
+def test_only_pairwise_strength_is_built(tmp_path):
+    sp = space_lib.load_space(write_space(tmp_path))
+    with pytest.raises(ValueError, match="strength"):
+        pairwise.build(sp, 1, strength=3)
+
+
+def test_sample_from_axes_names_its_generator_and_origin_and_defaults_to_the_fuzzer(
+    tmp_path,
+):
+    sp = space_lib.load_space(write_space(tmp_path))
+    plain = sampler.sample_from_axes(sp, {"a": 1, "n": 5}, 3).row["metadata"]
+    assert plain["generator"] == "gauntlet-fuzz"
+    assert plain["notes"].startswith(
+        "gauntlet-fuzz sample: space Toy/Default, explicit row,"
+    )
+    named = sampler.sample_from_axes(
+        sp,
+        {"a": 1, "n": 5},
+        3,
+        "pw2",
+        generator="gauntlet-pairwise",
+        origin="pairwise seed 9, row 2",
+    ).row
+    assert (
+        named["id"] == "pw2" and named["metadata"]["generator"] == "gauntlet-pairwise"
+    )
+    assert named["metadata"]["notes"].startswith(
+        "gauntlet-pairwise sample: space Toy/Default, pairwise seed 9, row 2, axes"
+    )
+
+
+@pytest.fixture(scope="module")
+def pairwise_builds():
+    """``build(space_id, seed)`` -> (``pairwise.build`` result, seconds): each (space, seed) is
+    built once for the whole module."""
+    cache = {}
+
+    def build(space_id, seed=PAIRWISE_SEED):
+        if (space_id, seed) not in cache:
+            started = time.perf_counter()
+            result = pairwise.build(space_by_id(space_id), seed)
+            cache[space_id, seed] = (result, time.perf_counter() - started)
+        return cache[space_id, seed]
+
+    return build
+
+
+@pytest.mark.parametrize("space_id", SDPA_FWD_SPACES)
+def test_sdpa_forward_rows_re_render_and_every_tuple_is_accounted_for(
+    pairwise_builds, space_id
+):
+    result, seconds = pairwise_builds(space_id)
+    sp = space_by_id(space_id)
+    for k, values in enumerate(result.rows):
+        sample = sampler.sample_from_axes(
+            sp,
+            values,
+            7,
+            f"pw{k}",
+            generator="gauntlet-pairwise",
+            origin=f"pairwise seed {PAIRWISE_SEED}, row {k}",
+        )
+        assert sample.axis_values == values
+    assert len(result.rows) >= result.lower_bound
+    assert result.unproven == []
+    universe = _tuple_universe(result.levels)
+    assert result.tuples_total == len(universe)
+    illegal, dead = _flagged(result, "illegal"), _flagged(result, "dead")
+    assert len(illegal) == len(result.illegal) and len(dead) == len(result.dead)
+    assert not illegal & dead and (illegal | dead) <= universe
+    print(
+        f"\n{space_id}: {len(result.rows)} rows (lower bound {result.lower_bound}),"
+        f" {result.tuples_total} tuples, {len(illegal)} illegal, {len(dead)} dead,"
+        f" {len(result.unproven)} unproven, built in {seconds:.1f} s"
+    )
+
+
+@pytest.mark.parametrize("space_id", SDPA_FWD_SPACES)
+def test_sdpa_forward_rows_cover_every_tuple_that_is_not_illegal_or_dead(
+    pairwise_builds, space_id
+):
+    result, _ = pairwise_builds(space_id)
+    sp = space_by_id(space_id)
+    # liveness recomputed here from the rendered rows, swapping each value for the other levels
+    covered = _covered(sp, result.levels, result.rows)
+    flagged = _flagged(result, "illegal") | _flagged(result, "dead")
+    missed = _tuple_universe(result.levels) - covered - flagged
+    assert (
+        not missed
+    ), f"{len(missed)} tuples have no row with both values live: {sorted(missed)[:5]}"
+    assert not covered & flagged, sorted(covered & flagged)[:5]
+
+
+@pytest.mark.parametrize("space_id", SDPA_FWD_SPACES)
+def test_no_random_legal_row_covers_a_tuple_the_build_calls_illegal_or_dead(
+    pairwise_builds, space_id
+):
+    result, _ = pairwise_builds(space_id)
+    sp = space_by_id(space_id)
+    flagged = _flagged(result, "illegal") | _flagged(result, "dead")
+    rng = random.Random(f"pairwise-refutation:{space_id}")
+    names = list(result.levels)
+    checked = 0
+    while checked < 150:
+        values = {a: copy.deepcopy(rng.choice(result.levels[a])) for a in names}
+        if _rendered(sp, values) is None:
+            continue
+        checked += 1
+        held = _held_live(result.levels, values, _live_axes(sp, result.levels, values))
+        assert not held & flagged, (values, sorted(held & flagged)[:3])
+
+
+def _expression_names(source):
+    return {
+        n.id
+        for n in ast.walk(ast.parse(source.strip(), mode="eval"))
+        if isinstance(n, ast.Name)
+    }
+
+
+def _substitutions(node):
+    """The expression of every ``${...}`` string in a JSON tree."""
+    if isinstance(node, str):
+        if node.startswith("${") and node.endswith("}"):
+            yield node[2:-1]
+    elif isinstance(node, list):
+        for v in node:
+            yield from _substitutions(v)
+    elif isinstance(node, dict):
+        for v in node.values():
+            yield from _substitutions(v)
+
+
+class _Prover:
+    """Decides whether a legal row holds two values with both live, by exhaustive search. Coded
+    apart from pairwise.py: it shares only the space's ``derive_env``, ``render`` and constraint
+    expressions. A row is legal when no constraint is false; an axis is live in a row when
+    another of its levels gives a legal row whose whole render differs. The search is plain
+    recursion over the axes the question depends on (the axes read together with either value,
+    and by the constraints that reach them); the others take the values of one legal row.
+    """
+
+    def __init__(self, sp, levels):
+        self.sp = sp
+        self.levels = levels
+        self.axes = list(sp.axes)
+        reads = {a: {a} for a in self.axes}
+        for name, expr in sp.derive.items():
+            reads[name] = set().union(
+                *(reads[n] for n in _expression_names(expr.source) if n in reads)
+            )
+
+        def axes_of(source):
+            return frozenset().union(
+                *(reads[n] for n in _expression_names(source) if n in reads)
+            )
+
+        self.rules = [(c.expr, axes_of(c.rule)) for c in sp.constraints]
+        case = json.loads(sp.path.read_text(encoding="utf-8"))["case"]
+        self.groups = []
+        for key in ("values", "metadata"):
+            self.groups += [axes_of(s) for s in _substitutions(case.get(key, {}))]
+        for key in ("add_tensors", "node_patches", "tensor_patches"):
+            for entry in case.get(key, []):
+                self.groups.append(
+                    frozenset().union(*(axes_of(s) for s in _substitutions(entry)))
+                )
+        self.reads = reads
+        direct = {n: _expression_names(e.source) for n, e in sp.derive.items()}
+        self.readers = {
+            a: [n for n, names in direct.items() if a in names] for a in self.axes
+        }
+        self.in_case = set()
+        for source in _substitutions(case):
+            self.in_case |= _expression_names(source)
+        self.filler = sampler.sample(sp, 1).axis_values
+        self.memo = {}
+
+    def reach(self, axis):
+        """The axes read together with ``axis`` by a constraint or a case group, and itself."""
+        found = {axis}
+        for scope in [s for _, s in self.rules] + self.groups:
+            if axis in scope:
+                found |= scope
+        return frozenset(found)
+
+    def relevant(self, fixed):
+        found = set()
+        for axis in fixed:
+            found |= self.reach(axis)
+        grew = True
+        while grew:
+            grew = False
+            for _rule, scope in self.rules:
+                if scope & found and not scope <= found:
+                    found |= scope
+                    grew = True
+        return found
+
+    def _is_live(self, axis, values):
+        sp = self.sp
+        try:
+            base = json.dumps(sp.render(sp.derive_env(values)), sort_keys=True)
+        except space_lib.SpaceError:
+            return False
+        rules = [rule for rule, scope in self.rules if axis in scope]
+        for level in self.levels[axis]:
+            if _same_value(level, values[axis]):
+                continue
+            try:
+                env = sp.derive_env({**values, axis: level})
+                if not all(rule.evaluate(env) for rule in rules):
+                    continue
+                if json.dumps(sp.render(env), sort_keys=True) != base:
+                    return True
+            except space_lib.SpaceError:
+                continue
+        return False
+
+    def holds(self, rule, values):
+        try:
+            return bool(rule.evaluate(self.sp.derive_env(values)))
+        except space_lib.SpaceError:
+            return True  # not decidable on a partial row: the full row is checked at the end
+
+    def _some_alt(self, axis, rules, watch, values):
+        """Does some other level of ``axis`` keep every rule of ``rules`` true and, if ``watch``
+        names derived values, change one of them? (Undecidable on a partial row: yes.)
+        """
+        sp = self.sp
+        try:
+            before = sp.derive_env(values)
+        except space_lib.SpaceError:
+            return True
+        for level in self.levels[axis]:
+            if _same_value(level, values[axis]):
+                continue
+            try:
+                env = sp.derive_env({**values, axis: level})
+                if not all(rule.evaluate(env) for rule in rules):
+                    continue
+            except space_lib.SpaceError:
+                return True
+            if watch is None or any(repr(env[n]) != repr(before[n]) for n in watch):
+                return True
+        return False
+
+    def search(self, fixed, must_be_live):
+        """A row of axis values with the ``fixed`` ones (axis -> value) that is legal and has
+        every axis of ``must_be_live`` live; None if there is none."""
+        relevant = self.relevant(fixed)
+        pending = [
+            ("legal", scope, rule) for rule, scope in self.rules if scope <= relevant
+        ]
+        for axis in must_be_live:
+            # cheap necessary conditions first, each readable from a few axes: some other level
+            # keeps one constraint true; some derived value that reads the axis changes (unless
+            # the case names the axis itself); then liveness itself
+            for rule, scope in self.rules:
+                if axis in scope:
+                    pending.append(("alt", scope | {axis}, (axis, [rule], None)))
+            if axis not in self.in_case:
+                readers = self.readers[axis]
+                scope = frozenset({axis}).union(*(self.reads[n] for n in readers))
+                pending.append(("alt", scope, (axis, [], readers)))
+            pending.append(("live", self.reach(axis), axis))
+        pending = [c for c in pending if c[1] <= relevant]
+        assigned = set(fixed)
+        stages = []
+
+        def take():
+            nonlocal pending
+            due = [c for c in pending if c[1] <= assigned]
+            pending = [c for c in pending if not c[1] <= assigned]
+            stages.append(due)
+
+        take()
+        order = list(fixed)
+        rest = sorted(relevant - assigned, key=self.axes.index)
+        while rest:
+            nxt = min(
+                rest,
+                key=lambda a: (
+                    -sum(1 for c in pending if c[1] <= assigned | {a}),
+                    -sum(1 for c in pending if a in c[1]),
+                    len(self.levels[a]),
+                ),
+            )
+            rest.remove(nxt)
+            assigned.add(nxt)
+            order.append(nxt)
+            take()
+        values = {**self.filler, **fixed}
+
+        def passes(stage):
+            for kind, scope, what in stage:
+                if kind == "legal":
+                    if not self.holds(what, values):
+                        return False
+                    continue
+                key = (
+                    kind,
+                    (
+                        what
+                        if kind == "live"
+                        else (
+                            what[0],
+                            tuple(id(r) for r in what[1]),
+                            tuple(what[2] or ()),
+                        )
+                    ),
+                    tuple(repr(values[a]) for a in sorted(scope)),
+                )
+                if key not in self.memo:
+                    self.memo[key] = (
+                        self._is_live(what, values)
+                        if kind == "live"
+                        else self._some_alt(*what, values)
+                    )
+                if not self.memo[key]:
+                    return False
+            return True
+
+        def descend(depth):
+            if depth == len(order):
+                row = dict(values)
+                try:
+                    legal = self.sp.first_violation(self.sp.derive_env(row)) is None
+                except space_lib.SpaceError:
+                    legal = False
+                return row if legal else None
+            axis = order[depth]
+            kept = values[axis]
+            for level in self.levels[axis]:
+                values[axis] = level
+                if passes(stages[depth + 1 - len(fixed)]):
+                    found = descend(depth + 1)
+                    if found is not None:
+                        return found
+            values[axis] = kept
+            return None
+
+        if any(len(self.levels[a]) < 2 for a in must_be_live):
+            return None  # an axis with one level has no other level to change to
+        if not passes(stages[0]):
+            return None
+        return descend(len(fixed))
+
+    def classify(self, a, va, b, vb):
+        fixed = {a: va, b: vb}
+        if self.search(fixed, [a, b]) is not None:
+            return "feasible"
+        return "illegal" if self.search(fixed, []) is None else "dead"
+
+
+@pytest.mark.parametrize("space_id", SDPA_FWD_SPACES)
+def test_every_illegal_or_dead_tuple_is_confirmed_by_an_independent_search(
+    pairwise_builds, space_id
+):
+    result, _ = pairwise_builds(space_id)
+    prover = _Prover(space_by_id(space_id), result.levels)
+    started = time.perf_counter()
+    for kind in ("illegal", "dead"):
+        for finding in getattr(result, kind):
+            (a, va), (b, vb) = finding.pair
+            assert prover.classify(a, va, b, vb) == kind, (space_id, finding)
+    print(
+        f"\n{space_id}: {len(result.illegal)} illegal and {len(result.dead)} dead tuples"
+        f" confirmed in {time.perf_counter() - started:.1f} s"
+    )
+
+
+def test_the_independent_search_finds_a_row_for_a_tuple_that_can_be_covered(
+    pairwise_builds,
+):
+    result, _ = pairwise_builds("SdpaFwd/Default")
+    prover = _Prover(space_by_id("SdpaFwd/Default"), result.levels)
+    flagged = _flagged(result, "dead")
+    checked = 0
+    for a, b in itertools.combinations(result.levels, 2):
+        va, vb = result.levels[a][0], result.levels[b][-1]
+        if _tuple_key(a, va, b, vb) in flagged:
+            continue
+        assert prover.classify(a, va, b, vb) == "feasible", (a, va, b, vb)
+        checked += 1
+    assert checked > 50
+
+
+@pytest.mark.parametrize("space_id", SDPA_FWD_SPACES)
+def test_the_same_seed_gives_the_same_rows(pairwise_builds, space_id):
+    first, _ = pairwise_builds(space_id)
+    again = pairwise.build(space_by_id(space_id), PAIRWISE_SEED)
+    assert again.rows == first.rows
+    assert _flagged(again, "illegal") == _flagged(first, "illegal")
+    assert _flagged(again, "dead") == _flagged(first, "dead")
+
+
+def test_the_rows_do_not_depend_on_the_hash_seed(pairwise_builds):
+    first, _ = pairwise_builds("SdpaFwd/Flash2Region")
+    code = (
+        "import hashlib, json, pairwise, space\n"
+        "sp = next(s for s in space.load_spaces() if s.space_id == 'SdpaFwd/Flash2Region')\n"
+        "rows = pairwise.build(sp, 1).rows\n"
+        "print(hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest())\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=HERE,
+        env={**os.environ, "PYTHONHASHSEED": "12345"},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert (
+        out
+        == hashlib.sha256(json.dumps(first.rows, sort_keys=True).encode()).hexdigest()
+    )
+
+
+@pytest.mark.parametrize("space_id", ["SdpaFwd/Default", "SdpaFwd/Flash2Region"])
+def test_a_different_seed_gives_a_different_row_set(pairwise_builds, space_id):
+    one, _ = pairwise_builds(space_id)
+    other, _ = pairwise_builds(space_id, PAIRWISE_SEED + 1)
+
+    def as_set(result):
+        return {json.dumps(r, sort_keys=True) for r in result.rows}
+
+    assert as_set(one) != as_set(other)
+    assert other.unproven == []
+    # the classification does not depend on the seed (levels do not change what is feasible)
+    assert len(other.rows) >= other.lower_bound
+
+
+def test_the_probe_space_is_all_pairs_of_27_rows(pairwise_builds):
+    result, _ = pairwise_builds(PROBE_SPACE)
+    assert len(result.rows) == 27
+    assert result.illegal == [] and result.dead == [] and result.unproven == []
+
+
+def _coverage_space(tmp_path):
+    return space_lib.load_space(
+        write_space(
+            tmp_path,
+            axes={
+                "use": {"values": ["off", "on"]},
+                "lv": {"values": [1, 2]},
+                "n": {"range": [1, 9], "boundaries": [1, 9]},
+            },
+            derive={"eff": "lv if use == 'on' else 0"},
+            constraints=[],
+            case={
+                "values": {"use": "${use}", "eff": "${eff}", "n": "${n}"},
+                "metadata": {},
+            },
+        )
+    )
+
+
+def test_pair_coverage_counts_drawn_passed_and_declined_tuples_of_hand_made_records(
+    tmp_path,
+):
+    sp = _coverage_space(tmp_path)
+    levels = pairwise.build(sp, 1).levels
+    interior = levels["n"][2]
+    off_level = next(v for v in (2, 3, 4, 5, 6) if v not in levels["n"])
+
+    def row(use, lv, n):
+        return {"use": use, "lv": lv, "n": n}
+
+    records = [
+        (row("on", 1, 1), "PASS"),
+        (row("on", 2, 9), "DECLINED"),
+        (row("off", 1, interior), "UNCLAIMED_PASS"),  # lv is inert here
+        (row("on", 1, off_level), "PASS"),  # n holds no level
+        (row("on", 2, 1), "WRONG"),
+    ]
+    coverage = pairwise.pair_coverage(sp, records, levels)
+
+    def key(*pair):
+        return tuple(pair)
+
+    assert coverage["tuples"] == 4 + 6 + 6
+    # drawn: (on,1) (on,2) | (on,n=1) (on,n=9) (off,n=interior) | (1,n=1) (2,n=9) (2,n=1)
+    assert coverage["drawn"] == 8
+    # passed: (on,1) (on,n=1) (off,n=interior) (1,n=1)
+    assert coverage["passed"] == 4
+    # drawn only by the DECLINED record: (on,n=9) and (2,n=9); (on,2) was also WRONG
+    assert coverage["declined_only"] == 2
+    assert coverage["never_passed"] == 4
+    not_passed = coverage["not_passed"]
+    assert len(not_passed) == 12
+    assert (("use", "on"), ("lv", 1)) not in not_passed
+    assert (("use", "on"), ("n", 1)) not in not_passed
+    assert (("use", "off"), ("n", interior)) not in not_passed
+    assert (("lv", 1), ("n", 1)) not in not_passed
+    # an inert value is not counted: lv = 1 in the off record draws nothing with n = interior
+    assert (("lv", 1), ("n", interior)) in not_passed
+    assert (("use", "off"), ("lv", 1)) in not_passed
+    # a value that is not a level is not counted either
+    assert all(("n", off_level) not in pair for pair in not_passed)
+    assert (("use", "on"), ("n", 9)) in not_passed and (
+        ("lv", 2),
+        ("n", 1),
+    ) in not_passed
+
+
+def test_pairwise_runs_on_a_space_outside_sdpa_forward(pairwise_builds):
+    # RMSNorm is outside the completeness tests: the build only has to return rows that render
+    result, seconds = pairwise_builds("RMSNorm/Default")
+    sp = space_by_id("RMSNorm/Default")
+    assert result.rows
+    for k, values in enumerate(result.rows):
+        sampler.sample_from_axes(sp, values, 7, f"pw{k}")
+    print(
+        f"\nRMSNorm/Default: {len(result.rows)} rows, {len(result.illegal)} illegal,"
+        f" {len(result.dead)} dead, {len(result.unproven)} unproven, {seconds:.1f} s"
+    )
+
+
+def test_a_capped_search_reports_unproven_and_never_counts_the_tuple_covered(tmp_path):
+    sp = space_lib.load_space(write_space(tmp_path, **TOY_PAIRWISE["mixed"]["decl"]))
+    full = pairwise.build(sp, 1)
+    assert full.unproven == []
+    # a search that may visit no node settles only the tuples whose two axes decide them
+    capped = pairwise.build(sp, 1, cap=0)
+    assert capped.unproven
+    flagged = _flagged(capped, "illegal") | _flagged(capped, "dead")
+    unproven = _flagged(capped, "unproven")
+    assert len(unproven) == len(capped.unproven) and not unproven & flagged
+    covered = _covered(sp, capped.levels, capped.rows)
+    assert not covered & (flagged | unproven)
+    # every tuple is covered, proven impossible or reported unproven: none is dropped
+    assert covered | flagged | unproven == _tuple_universe(capped.levels)

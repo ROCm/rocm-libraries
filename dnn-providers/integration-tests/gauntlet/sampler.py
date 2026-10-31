@@ -179,14 +179,25 @@ def _check_axis_value(axis, value):
     return None
 
 
-def sample_from_axes(space, axis_values, data_seed, row_case_id=DEFAULT_ROW_CASE_ID):
+def sample_from_axes(
+    space,
+    axis_values,
+    data_seed,
+    row_case_id=DEFAULT_ROW_CASE_ID,
+    generator=GENERATOR,
+    origin=None,
+):
     """The sample of ``space`` with these axis values, as ``sample()`` would render it.
 
     ``axis_values`` names every axis of the space, late ones included, and nothing else; each
     value must be one the axis can draw. The constraints are checked again on the derived
     environment, so a row that violates one is an error that names the rule and its reason.
     ``data_seed`` becomes ``metadata.seed`` and ``row_case_id`` is the row's id, which fixes the
-    GTest name. Raises ``InvalidRowError`` for any of these; ``ValueError`` for a bad data seed.
+    GTest name. ``generator`` is the row's ``metadata.generator`` and the name its notes open with
+    (``gauntlet-fuzz`` unless a generator of explicit rows says otherwise); ``origin`` is the
+    phrase the notes give for where the axis values came from (``explicit row`` by default; a
+    generator names its seed and the row there). Raises ``InvalidRowError`` for any of these;
+    ``ValueError`` for a bad data seed.
     """
     check_data_seed(data_seed)
     if not isinstance(row_case_id, str) or not _CASE_ID_RE.fullmatch(row_case_id):
@@ -225,17 +236,25 @@ def sample_from_axes(space, axis_values, data_seed, row_case_id=DEFAULT_ROW_CASE
         None,
         data_seed,
         axis_values,
-        _row(space, row_case_id, "explicit row", data_seed, axis_values, case),
+        _row(
+            space,
+            row_case_id,
+            "explicit row" if origin is None else origin,
+            data_seed,
+            axis_values,
+            case,
+            generator,
+        ),
         1,
     )
 
 
-def _row(space, row_id, origin, data_seed, axis_values, case):
+def _row(space, row_id, origin, data_seed, axis_values, case, generator=GENERATOR):
     notes = (
-        f"gauntlet-fuzz sample: space {space.space_id}, {origin},"
+        f"{generator} sample: space {space.space_id}, {origin},"
         f" axes {json.dumps(axis_values, sort_keys=True, separators=(',', ':'))}"
     )
-    metadata = {"format_version": 1, "generator": GENERATOR, "notes": notes}
+    metadata = {"format_version": 1, "generator": generator, "notes": notes}
     metadata.update(case["metadata"])
     metadata.setdefault("purpose", DEFAULT_PURPOSE)
     metadata["seed"] = data_seed
