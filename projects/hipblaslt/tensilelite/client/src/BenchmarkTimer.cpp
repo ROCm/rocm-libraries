@@ -136,6 +136,7 @@ namespace TensileLite
             , m_useGPUTimer(args["use-gpu-timer"].as<bool>())
             , m_sleepPercent(args["sleep-percent"].as<int>())
             , m_csvExportExtraCols(args["csv-export-extra-cols"].as<bool>())
+            , m_nothingTimed(nothingIsTimed(args))
             , m_timeInSolution(0)
             , m_totalGPUTime(0)
             , m_currentBestWarmUpTime(std::numeric_limits<double>::max())
@@ -146,6 +147,16 @@ namespace TensileLite
             , m_numSolutionSkip(0)
             , m_prob_sol_map(args["prob-sol-map"].as<prob_sol_map>())
         {
+        }
+
+        bool BenchmarkTimer::nothingIsTimed(po::variables_map const& args)
+        {
+            // Mirrors numSyncs() and numEnqueuesPerSync(): the timed loop runs only when both
+            // are non-zero. Negative counts and caps cast to a huge size_t, so they time.
+            return args["num-syncs-per-benchmark"].as<int>() == 0
+                   || args["max-enqueues-per-sync"].as<int>() == 0
+                   || (args["num-enqueues-per-sync"].as<int>() == 0
+                       && args["min-flops-per-sync"].as<size_t>() == 0);
         }
 
         bool BenchmarkTimer::needMoreBenchmarkRuns() const
@@ -271,54 +282,64 @@ namespace TensileLite
             {
                 ScopedTimer timer("post_solution_perf_calc");
                 bool   sol_is_skipped    = (m_skiprun_from_map || m_skip_slow_solution);
-                timePerEnqueue_us = !sol_is_skipped ? double_micros(m_timeInSolution).count()
-                                                                     / m_numEnqueuesInSolution
-                                                                 - m_flushTimeUs
-                                                           : std::numeric_limits<double>::quiet_NaN();
-
-                ContractionSolution::ProjectedPerformance pp;
-                double                                    flopCount = 0;
-                if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
+                if(m_nothingTimed && !sol_is_skipped)
                 {
-                    pp        = m_solution->projectedPerformance(problem->gemms[0], m_hardware);
-                    flopCount = problem->gemms[0].flopCount();
-                }
-                else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
-                {
-                    pp        = m_solution->projectedPerformance(*problem, m_hardware);
-                    flopCount = problem->flopCount();
+                    // Without timed enqueues the calculation below divides a zero time by zero
+                    // enqueues, and the resulting NaN carries through every value. That 0/0 is
+                    // the default NaN, which has the sign bit set and prints as -nan.
+                    timePerEnqueue_us = gflops = gflopsPerCu = bandwidthGbps
+                        = -std::numeric_limits<double>::quiet_NaN();
                 }
                 else
                 {
-                    throw std::runtime_error(
-                        "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
-                }
+                    timePerEnqueue_us = !sol_is_skipped ? double_micros(m_timeInSolution).count()
+                                                                  / m_numEnqueuesInSolution
+                                                              - m_flushTimeUs
+                                                        : std::numeric_limits<double>::quiet_NaN();
 
-                gflops      = !sol_is_skipped ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
-                int    tiles       = pp.granularities.tilesPerCu * perf.CUs;
-                int    usedCus     = std::min(tiles, perf.CUs);
-                gflopsPerCu = gflops / usedCus;
-
-                if(!sol_is_skipped)
-                {
-                    double totalBytes = 0.0;
-                    if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                    double flopCount = 0;
+                    if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
                     {
-                        totalBytes = computeByteRWForGEMM(*problem);
+                        flopCount = problem->gemms[0].flopCount();
                     }
-                    else if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
+                    else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
                     {
-                        for (const auto &gemm : problem->gemms)
-                            totalBytes += computeByteRWForGEMM(gemm);
+                        flopCount = problem->flopCount();
                     }
                     else
                     {
                         throw std::runtime_error(
                             "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
                     }
+                    auto const& pp = projectedPerformance();
 
-                    // Calculate total GB/s bandwidth from timePerEnqueue_us and update the report.
-                    bandwidthGbps = (totalBytes / timePerEnqueue_us) / (double)1e3;
+                    gflops      = !sol_is_skipped ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
+                    int tiles   = pp.granularities.tilesPerCu * perf.CUs;
+                    int usedCus = std::min(tiles, perf.CUs);
+                    gflopsPerCu = gflops / usedCus;
+
+                    if(!sol_is_skipped)
+                    {
+                        double totalBytes = 0.0;
+                        if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                        {
+                            totalBytes = computeByteRWForGEMM(*problem);
+                        }
+                        else if(auto problem
+                                = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
+                        {
+                            for(const auto& gemm : problem->gemms)
+                                totalBytes += computeByteRWForGEMM(gemm);
+                        }
+                        else
+                        {
+                            throw std::runtime_error("[BenchmarkTimer] Failed to cast problem to "
+                                                     "any ContractionProblem.");
+                        }
+
+                        // Calculate total GB/s bandwidth from timePerEnqueue_us and update the report.
+                        bandwidthGbps = (totalBytes / timePerEnqueue_us) / (double)1e3;
+                    }
                 }
             }
 

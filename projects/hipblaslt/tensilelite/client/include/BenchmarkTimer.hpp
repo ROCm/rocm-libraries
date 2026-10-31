@@ -51,6 +51,10 @@ namespace TensileLite
                            Hardware const&          hardware,
                            float                    flushTimeUs);
 
+            // True when the arguments rule out any timed enqueue: no syncs, a zero enqueue cap,
+            // or no enqueues requested either by count or by flops.
+            static bool nothingIsTimed(po::variables_map const& args);
+
             virtual bool needMoreBenchmarkRuns() const override;
             virtual void preBenchmarkRun() override;
             virtual void postBenchmarkRun() override;
@@ -111,6 +115,7 @@ namespace TensileLite
             const bool m_syncAfterWarmups = true;
             const int  m_sleepPercent;
             const bool m_csvExportExtraCols;
+            const bool m_nothingTimed;
 
             int m_numBenchmarksRun = 0;
 
