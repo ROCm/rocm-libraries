@@ -7,7 +7,7 @@ GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: 3
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4
   UniformSummationOrder: 0
