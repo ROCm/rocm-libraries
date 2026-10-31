@@ -287,7 +287,7 @@ CACHE_DGRAD_B_KPACK: Tuple[int, ...] = tuple(
 # "@<regex>" gives its set its own scope (see ROCKE_AOT_DGRAD_XHK_SCOPE). An
 # empty set is the plain binary; unset = that alone.
 def _parse_dgrad_xh_knobs(text: str) -> Tuple[Tuple[Tuple[str, int], ...], ...]:
-    keys = {"ilv", "xhx", "xcd", "kpad", "mch", "sk", "lda", "wpe", "lsb", "sp", "lxor", "bw", "bpad", "ak4", "xo", "xdf", "xfa", "xep", "xhp", "mb"}
+    keys = {"ilv", "xhx", "xcd", "kpad", "mch", "sk", "lda", "wpe", "lsb", "sp", "lxor", "bw", "bpad", "ak4", "xo", "xdf", "xfa", "xep", "xhp", "mb", "xsm", "nag", "zt"}
     out = []
     for part in text.split(";"):
         kv = []
@@ -373,6 +373,12 @@ def _dgrad_xh_knob_cfg(knobs, *, tpf: int, grouped: bool, epilogue: str):
         cfg["xcd_remap"] = d["xcd"]
     if d.get("mb"):
         cfg["m_band"] = d["mb"]
+    if d.get("xsm"):
+        cfg["xh_stride_m"] = True
+    if d.get("zt"):
+        cfg["tapk_ztrim"] = d["zt"]
+    if d.get("nag"):
+        cfg["no_agpr"] = True
     if d.get("kpad"):
         cfg["lds_k_pad"] = d["kpad"]
     if d.get("wpe"):

@@ -343,11 +343,11 @@ class KernelIdentity:
     split_tail_compact: bool = False
     # fwd only (ImplicitGemmConvSpec.epi_quad_xpose). Left out of the hash at 0.
     epi_quad_xpose: int = 0
-    # fwd only (ImplicitGemmConvSpec.no_agpr). Left out of the hash while False.
+    # fwd and dgrad (ImplicitGemmConvSpec.no_agpr, DgradConvSpec.no_agpr). Left out of the hash while False.
     no_agpr: bool = False
     # fwd and dgrad (ImplicitGemmConvSpec.m_band, DgradConvSpec.m_band). Left out of the hash at 0.
     m_band: int = 0
-    # fwd only (ImplicitGemmConvSpec.xh_stride_m). Left out of the hash while False.
+    # fwd and dgrad (ImplicitGemmConvSpec.xh_stride_m, DgradConvSpec.xh_stride_m). Left out of the hash while False.
     xh_stride_m: bool = False
     # dgrad only (DgradConvSpec.dy_halo / dy_halo_setprio /
     # dy_halo_kouter_pad): the dY halo mode of the tap-outer K loop and its
