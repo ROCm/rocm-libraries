@@ -3,11 +3,145 @@
 
 #pragma once
 
+#include <chrono>
+#include <functional>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace hipdnn_integration_tests
 {
+
+/// Whether one of the modes that stop every test before it executes is on. Both
+/// --benchmark and --benchmark-reference refuse these: they would time nothing and
+/// leave the run green.
+inline bool
+    stopsBeforeExecution(bool skipGraphValidation, bool captureBundles, bool writeSupportClaims)
+{
+    return skipGraphValidation || captureBundles || writeSupportClaims;
+}
+
+/// The --benchmark-reference flag as typed, plus the flags that stop a test before
+/// it executes.
+struct ReferenceBenchmarkRequest
+{
+    bool enabled = false;
+    bool skipGraphValidation = false;
+    bool captureBundles = false;
+    bool writeSupportClaims = false;
+};
+
+/// The reason --benchmark-reference cannot be used with the other flags, if any.
+inline std::optional<std::string>
+    validateReferenceBenchmark(const ReferenceBenchmarkRequest& request)
+{
+    if(request.enabled
+       && stopsBeforeExecution(
+           request.skipGraphValidation, request.captureBundles, request.writeSupportClaims))
+    {
+        return "--benchmark-reference cannot be combined with --skip-graph-validation, "
+               "--capture-bundles or --write-support-claims: those modes do not "
+               "execute the reference";
+    }
+    return std::nullopt;
+}
+
+/// What became of one attempted reference. Only VERIFIED and MISMATCH ran to the
+/// comparison, so only they carry timings; DECLINED and ERRORED attempts have none
+/// and must not be read as zero-cost references.
+enum class ReferenceBenchmarkStatus
+{
+    /// Created, not yet settled. TestBody() reports anything still pending as ERRORED:
+    /// the attempt ended in a throw that skipped the code that would have settled it.
+    PENDING,
+    VERIFIED,
+    MISMATCH,
+    /// The reference said it cannot run this graph; the next oracle gets its turn.
+    DECLINED,
+    ERRORED,
+};
+
+inline const char* toString(ReferenceBenchmarkStatus status)
+{
+    switch(status)
+    {
+    case ReferenceBenchmarkStatus::PENDING:
+        return "pending";
+    case ReferenceBenchmarkStatus::VERIFIED:
+        return "verified";
+    case ReferenceBenchmarkStatus::MISMATCH:
+        return "mismatch";
+    case ReferenceBenchmarkStatus::DECLINED:
+        return "declined";
+    case ReferenceBenchmarkStatus::ERRORED:
+        return "error";
+    default:
+        return "unknown";
+    }
+}
+
+struct ReferenceBenchmarkResult
+{
+    std::string reference;
+    std::string validator;
+    ReferenceBenchmarkStatus status = ReferenceBenchmarkStatus::PENDING;
+    double prepareMs = 0.0;
+    double executeMs = 0.0;
+    double materializeMs = 0.0;
+
+    double totalMs() const
+    {
+        return prepareMs + executeMs + materializeMs;
+    }
+
+    /// Whether the reference ran to the comparison, so its timings are a sample.
+    bool hasSample() const
+    {
+        return status == ReferenceBenchmarkStatus::VERIFIED
+               || status == ReferenceBenchmarkStatus::MISMATCH;
+    }
+};
+
+/// A failed device synchronize around a reference phase. It is the harness's fault,
+/// not the reference's, so it fails the test instead of falling through to the next
+/// reference: a fallback would report a verified reference after a broken device.
+class ReferenceBenchmarkError : public std::runtime_error
+{
+public:
+    using std::runtime_error::runtime_error;
+};
+
+/// Times one reference phase in wall-clock milliseconds. The synchronize before the
+/// start keeps outstanding engine work out of the phase; the one before the stop
+/// keeps the reference's own queued device work in it.
+class ReferenceBenchmarkTimer
+{
+public:
+    using Clock = std::chrono::steady_clock;
+    using Now = std::function<Clock::time_point()>;
+
+    explicit ReferenceBenchmarkTimer(
+        std::function<void()> synchronize = [] {}, Now now = [] { return Clock::now(); })
+        : _synchronize(std::move(synchronize))
+        , _now(std::move(now))
+    {
+    }
+
+    template <typename Work>
+    void measure(double& elapsedMs, Work&& work) const
+    {
+        _synchronize();
+        const auto start = _now();
+        std::forward<Work>(work)();
+        _synchronize();
+        elapsedMs += std::chrono::duration<double, std::milli>(_now() - start).count();
+    }
+
+private:
+    std::function<void()> _synchronize;
+    Now _now;
+};
 
 /// How --benchmark times one verified graph.
 struct BenchmarkSettings
@@ -55,7 +189,8 @@ inline BenchmarkResolution resolveBenchmark(const BenchmarkRequest& request)
         return {};
     }
 
-    if(request.skipGraphValidation || request.captureBundles || request.writeSupportClaims)
+    if(stopsBeforeExecution(
+           request.skipGraphValidation, request.captureBundles, request.writeSupportClaims))
     {
         return {std::nullopt,
                 "--benchmark cannot be combined with --skip-graph-validation, "

@@ -3,6 +3,7 @@
 
 #include "harness/bundle/HarnessDependencies.hpp"
 
+#include "harness/ReferenceBenchmarkSync.hpp"
 #include "harness/ReferenceExecutorPool.hpp"
 #include "harness/bundle/FrontendGraphEngineRunner.hpp"
 #include "harness/bundle/ProductionPolicy.hpp"
@@ -20,6 +21,7 @@ HarnessDependencies productionDependencies(TensorPlacement placement,
     deps.reporter = std::make_shared<GlobalVerificationReporter>();
     deps.policy = productionPolicy(placement);
     deps.deviceFiller = std::move(deviceFiller);
+    deps.referenceTimer = productionReferenceTimer();
     return deps;
 }
 
