@@ -3,6 +3,8 @@
 # ordering matters for pytest.
 #
 # pytest -- the descriptor-packaging suite, and the frontend wheel tests.
+# jsonschema -- imported by the descriptor-packaging suite to check the UED
+#   fixtures against the plugin SDK's JSON Schema.
 # build  -- the PEP 517 frontend that packs the frontend wheel.
 # numpy  -- imported by frontend_wheel_package/tests, not by the build.
 # jsonschema -- the descriptor-packaging suite validates UHD sidecars against
@@ -15,6 +17,7 @@
 #
 # Installed with --upgrade, so nothing else is pinned here.
 pytest
+jsonschema
 build
 numpy
 jsonschema

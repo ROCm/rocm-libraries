@@ -1133,7 +1133,7 @@ fields` in one direction and `UHD features ⊄ knobs` in the other.
 that read like attributes are dims: for a rank-4 SDPA tensor laid out as
 `(batch, heads, sequence, head_dim)`, batch is `$q.dims[0]`, head count `$q.dims[1]`, sequence length
 `$q.dims[2]`, and head size `$q.dims[3]`. A node's `$<node>.*` namespace carries **scalar attributes**
-only — `$sdpa_fwd.dropout_probability` and the like — so a signature that reads a size reads a dim.
+only — `$sdpa.dropout_probability` and the like — so a signature that reads a size reads a dim.
 
 **The bound set is op-specific.** Which tensors a pattern binds, and what each
 dim index means, differ per operation; the engine is op-scoped, so its UHD's references are valid for
@@ -1307,14 +1307,14 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
      unknown at load and this validation cannot run — for a UHD exactly as for a UMD or UDD. A stale
      reference fails at match time rather than being an error at load; for a UHD that is the
      [Section 5](#5-selection-flow) step 8 path (model not used, error logged, `static_order`). Checks
-     2–4 still apply in full. RFC 0020 records this as a limitation of the hatch, which is why the
-     declarative arm is the format's steady state.
+     2–4 still apply in full. RFC 0020 §4.5 lists this among the trade-offs between the two
+     `graph_match` arms.
    - **No `graph_match` at all.** The engine publishes an empty table, so a `features_signature` may
      reference only `$kernel.*` and `$device.*`. A model needing problem features requires the engine to
      declare a pattern.
 
-   This bears on sequencing: the engines shipping first use the native arm, so the load-time guarantee
-   arrives with the declarative pattern rather than with the first shipped model.
+   This bears on sequencing: the shipped engines use the native arm, so their models do not get this
+   load-time check.
 2. **Signature → KMD → knobs.** Two assertions over the same set. Let `F` be the `$kernel.*` fields
    reachable from the `features_signature`, including those nested inside computed (expression) entries,
    each named by its base field — `$kernel.tile[0]` contributes `tile`:

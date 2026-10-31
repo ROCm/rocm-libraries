@@ -167,7 +167,10 @@ def describe_ids(report: IdReport, fresh: bool = False) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate a hipDNN generic-kernel-ingestor descriptor bundle "
-        "from a YAML config."
+        "from a YAML config. The emitted UED's graph_match uses the native arm "
+        "and names the stub's graph_match symbol. To use the declarative arm, "
+        "replace it by hand with a graph_match.nodes pattern (RFC 0020 section "
+        "4.3); hkp_pack and hipdnn_validate_descriptors check either arm."
     )
     parser.add_argument(
         "--config",
@@ -194,7 +197,7 @@ def main() -> None:
         help="Required to overwrite an existing, non-empty output directory. "
         "Without it, an existing non-empty output directory is an error -- "
         "regenerating over a live tree would silently clobber hand-filled "
-        "content (e.g. a completed graph_match body). Descriptor ids are kept "
+        "content (e.g. a completed native graph_match body). Descriptor ids are kept "
         "across a regeneration either way (see --ids-from). A run that would "
         "write a KDP beside the same pack's DVC artifact under artifacts/ is "
         "refused even with --force.",

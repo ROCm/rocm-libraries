@@ -1,0 +1,6 @@
+{
+  "description": "A number under an extension key overflows a double; the document parse refuses it although the value is otherwise ignored.",
+  "valid": false,
+  "error": "number overflow parsing '1e400'",
+  "ued_text": "{\"version\": \"1.0\", \"id\": \"411495a2-b175-557d-9d0a-58e8568cd0a0\", \"name\": \"ued_fixture:extension_value_number_overflow\", \"metadata\": \"0aa5cce1-c877-5f16-93ff-54252ba4baf5\", \"x-value\": 1e400, \"graph_match\": {\"nodes\": [{\"kind\": \"op\", \"id\": \"pointwise\", \"op\": \"pointwise\", \"operands\": {\"in_0\": \"$input_a\", \"in_1\": \"$input_b\"}, \"results\": {\"out_0\": \"$output\"}}]}}"
+}

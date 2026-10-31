@@ -1,0 +1,328 @@
+{
+  "generator": "scripts/gen_op_schema_registry.py",
+  "ops": {
+    "batchnorm": {
+      "operands": [
+        {"name": "x", "optional": false},
+        {"name": "scale", "optional": false},
+        {"name": "bias", "optional": false},
+        {"name": "epsilon", "optional": false},
+        {"name": "prev_running_mean", "optional": true},
+        {"name": "prev_running_variance", "optional": true},
+        {"name": "momentum", "optional": true}
+      ],
+      "results": [
+        {"name": "y", "optional": false},
+        {"name": "mean", "optional": true},
+        {"name": "inv_variance", "optional": true},
+        {"name": "next_running_mean", "optional": true},
+        {"name": "next_running_variance", "optional": true}
+      ]
+    },
+    "batchnorm_bwd": {
+      "operands": [
+        {"name": "dy", "optional": false},
+        {"name": "x", "optional": false},
+        {"name": "mean", "optional": true},
+        {"name": "inv_variance", "optional": true},
+        {"name": "scale", "optional": false}
+      ],
+      "results": [
+        {"name": "dx", "optional": false},
+        {"name": "dscale", "optional": false},
+        {"name": "dbias", "optional": false}
+      ]
+    },
+    "batchnorm_inference": {
+      "operands": [
+        {"name": "x", "optional": false},
+        {"name": "mean", "optional": false},
+        {"name": "inv_variance", "optional": false},
+        {"name": "scale", "optional": false},
+        {"name": "bias", "optional": false}
+      ],
+      "results": [
+        {"name": "y", "optional": false}
+      ]
+    },
+    "batchnorm_inference_variance_ext": {
+      "operands": [
+        {"name": "x", "optional": false},
+        {"name": "mean", "optional": false},
+        {"name": "variance", "optional": false},
+        {"name": "scale", "optional": false},
+        {"name": "bias", "optional": false},
+        {"name": "epsilon", "optional": false}
+      ],
+      "results": [
+        {"name": "y", "optional": false}
+      ]
+    },
+    "block_scale_dequantize": {
+      "operands": [
+        {"name": "x", "optional": false},
+        {"name": "scale", "optional": false}
+      ],
+      "results": [
+        {"name": "y", "optional": false}
+      ]
+    },
+    "block_scale_quantize": {
+      "operands": [
+        {"name": "x", "optional": false}
+      ],
+      "results": [
+        {"name": "y", "optional": false},
+        {"name": "scale", "optional": false}
+      ]
+    },
+    "convolution": {
+      "operands": [
+        {"name": "x", "optional": false},
+        {"name": "w", "optional": false}
+      ],
+      "results": [
+        {"name": "y", "optional": false}
+      ]
+    },
+    "convolution_bwd_data": {
+      "operands": [
+        {"name": "dy", "optional": false},
+        {"name": "w", "optional": false}
+      ],
+      "results": [
+        {"name": "dx", "optional": false}
+      ]
+    },
+    "convolution_bwd_filter": {
+      "operands": [
+        {"name": "x", "optional": false},
+        {"name": "dy", "optional": false}
+      ],
+      "results": [
+        {"name": "dw", "optional": false}
+      ]
+    },
+    "custom_op": {
+      "operands": [],
+      "results": []
+    },
+    "gdn": {
+      "operands": [
+        {"name": "q", "optional": false},
+        {"name": "k", "optional": false},
+        {"name": "v", "optional": false},
+        {"name": "g", "optional": false},
+        {"name": "beta", "optional": false},
+        {"name": "cu_seqlens", "optional": false},
+        {"name": "initial_state", "optional": true},
+        {"name": "a_log", "optional": true},
+        {"name": "dt_bias", "optional": true},
+        {"name": "state_indices", "optional": true}
+      ],
+      "results": [
+        {"name": "o", "optional": false},
+        {"name": "final_state", "optional": true},
+        {"name": "state_checkpoints", "optional": true}
+      ]
+    },
+    "kda": {
+      "operands": [
+        {"name": "q", "optional": false},
+        {"name": "k", "optional": false},
+        {"name": "v", "optional": false},
+        {"name": "g", "optional": false},
+        {"name": "beta", "optional": false},
+        {"name": "cu_seqlens", "optional": false},
+        {"name": "initial_state", "optional": true},
+        {"name": "a_log", "optional": true},
+        {"name": "dt_bias", "optional": true},
+        {"name": "state_indices", "optional": true}
+      ],
+      "results": [
+        {"name": "o", "optional": false},
+        {"name": "final_state", "optional": true},
+        {"name": "state_checkpoints", "optional": true}
+      ]
+    },
+    "layernorm": {
+      "operands": [
+        {"name": "x", "optional": false},
+        {"name": "scale", "optional": false},
+        {"name": "bias", "optional": false},
+        {"name": "epsilon", "optional": false}
+      ],
+      "results": [
+        {"name": "y", "optional": false},
+        {"name": "mean", "optional": true},
+        {"name": "inv_variance", "optional": true}
+      ]
+    },
+    "layernorm_bwd": {
+      "operands": [
+        {"name": "dy", "optional": false},
+        {"name": "x", "optional": false},
+        {"name": "scale", "optional": false},
+        {"name": "mean", "optional": true},
+        {"name": "inv_variance", "optional": true},
+        {"name": "epsilon", "optional": true}
+      ],
+      "results": [
+        {"name": "dx", "optional": false},
+        {"name": "dscale", "optional": false},
+        {"name": "dbias", "optional": false}
+      ]
+    },
+    "matmul": {
+      "operands": [
+        {"name": "a", "optional": false},
+        {"name": "b", "optional": false}
+      ],
+      "results": [
+        {"name": "c", "optional": false}
+      ]
+    },
+    "moe_grouped_matmul": {
+      "operands": [
+        {"name": "token", "optional": false},
+        {"name": "weight", "optional": false},
+        {"name": "first_token_offset", "optional": false},
+        {"name": "token_index", "optional": true},
+        {"name": "token_ks", "optional": true}
+      ],
+      "results": [
+        {"name": "output", "optional": false}
+      ]
+    },
+    "moe_grouped_matmul_bwd": {
+      "operands": [
+        {"name": "doutput", "optional": false},
+        {"name": "token", "optional": false},
+        {"name": "first_token_offset", "optional": false}
+      ],
+      "results": [
+        {"name": "dweight", "optional": false}
+      ]
+    },
+    "pointwise": {
+      "operands": [
+        {"name": "in_0", "optional": false},
+        {"name": "in_1", "optional": true},
+        {"name": "in_2", "optional": true}
+      ],
+      "results": [
+        {"name": "out_0", "optional": false}
+      ]
+    },
+    "reduction": {
+      "operands": [
+        {"name": "in", "optional": false}
+      ],
+      "results": [
+        {"name": "out", "optional": false}
+      ]
+    },
+    "resample": {
+      "operands": [
+        {"name": "x", "optional": false}
+      ],
+      "results": [
+        {"name": "y", "optional": false},
+        {"name": "index", "optional": true}
+      ]
+    },
+    "resample_bwd": {
+      "operands": [
+        {"name": "dy", "optional": false},
+        {"name": "index", "optional": true}
+      ],
+      "results": [
+        {"name": "dx", "optional": false}
+      ]
+    },
+    "rmsnorm": {
+      "operands": [
+        {"name": "x", "optional": false},
+        {"name": "scale", "optional": false},
+        {"name": "epsilon", "optional": false},
+        {"name": "bias", "optional": true}
+      ],
+      "results": [
+        {"name": "y", "optional": false},
+        {"name": "inv_rms", "optional": true}
+      ]
+    },
+    "rmsnorm_bwd": {
+      "operands": [
+        {"name": "dy", "optional": false},
+        {"name": "x", "optional": false},
+        {"name": "scale", "optional": false},
+        {"name": "inv_rms", "optional": false}
+      ],
+      "results": [
+        {"name": "dx", "optional": false},
+        {"name": "dscale", "optional": false},
+        {"name": "dbias", "optional": true}
+      ]
+    },
+    "sdpa": {
+      "operands": [
+        {"name": "q", "optional": false},
+        {"name": "k", "optional": false},
+        {"name": "v", "optional": false},
+        {"name": "attn_mask", "optional": true},
+        {"name": "scale", "optional": true},
+        {"name": "seq_len_q", "optional": true},
+        {"name": "seq_len_kv", "optional": true},
+        {"name": "seed", "optional": true},
+        {"name": "offset", "optional": true},
+        {"name": "dropout_mask", "optional": true},
+        {"name": "dropout_scale", "optional": true},
+        {"name": "page_table_k", "optional": true},
+        {"name": "page_table_v", "optional": true},
+        {"name": "block_mask", "optional": true},
+        {"name": "sink_token", "optional": true},
+        {"name": "descale_q", "optional": true},
+        {"name": "descale_k", "optional": true},
+        {"name": "descale_v", "optional": true},
+        {"name": "descale_s", "optional": true},
+        {"name": "scale_s", "optional": true},
+        {"name": "scale_o", "optional": true}
+      ],
+      "results": [
+        {"name": "o", "optional": false},
+        {"name": "stats", "optional": true},
+        {"name": "max", "optional": true},
+        {"name": "sum_exp", "optional": true},
+        {"name": "rng_dump", "optional": true},
+        {"name": "amax_s", "optional": true},
+        {"name": "amax_o", "optional": true}
+      ]
+    },
+    "sdpa_bwd": {
+      "operands": [
+        {"name": "q", "optional": false},
+        {"name": "k", "optional": false},
+        {"name": "v", "optional": false},
+        {"name": "o", "optional": false},
+        {"name": "do", "optional": false},
+        {"name": "stats", "optional": false},
+        {"name": "scale", "optional": true},
+        {"name": "attn_mask", "optional": true},
+        {"name": "seq_len_q", "optional": true},
+        {"name": "seq_len_kv", "optional": true},
+        {"name": "seed", "optional": true},
+        {"name": "offset", "optional": true},
+        {"name": "dropout_mask", "optional": true},
+        {"name": "dropout_scale", "optional": true},
+        {"name": "dropout_scale_inv", "optional": true}
+      ],
+      "results": [
+        {"name": "dq", "optional": false},
+        {"name": "dk", "optional": false},
+        {"name": "dv", "optional": false},
+        {"name": "dbias", "optional": true}
+      ]
+    }
+  }
+}

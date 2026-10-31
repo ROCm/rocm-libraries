@@ -2,6 +2,7 @@ operation:
   name: "MoeGroupedMatmul"
   class_name: "MoeGroupedMatmulOperationDescriptor"
   fbs_table: "MoeGroupedMatmulAttributes"
+  matcher_opcode: "moe_grouped_matmul"
   fbs_generated_header: "moe_grouped_matmul_attributes_generated.h"
 
   descriptor_type:
@@ -77,30 +78,36 @@ operation:
   tensor_fields:
     - name: "token"
       fbs_field: "token_tensor_uid"
+      direction: "input"
       attr_suffix: "TOKEN_DESC"
       required: true
     - name: "weight"
       fbs_field: "weight_tensor_uid"
+      direction: "input"
       attr_suffix: "WEIGHT_DESC"
       required: true
     - name: "first_token_offset"
       fbs_field: "first_token_offset_tensor_uid"
+      direction: "input"
       attr_suffix: "FIRST_TOKEN_OFFSET_DESC"
       required: true
       expected_data_type: "INT32"
       work_data_dependent: true
     - name: "token_index"
       fbs_field: "token_index_tensor_uid"
+      direction: "input"
       attr_suffix: "TOKEN_INDEX_DESC"
       required: false
       expected_data_type: "INT32"
     - name: "token_ks"
       fbs_field: "token_ks_tensor_uid"
+      direction: "input"
       attr_suffix: "TOKEN_KS_DESC"
       required: false
       expected_data_type: "INT32"
     - name: "output"
       fbs_field: "output_tensor_uid"
+      direction: "output"
       attr_suffix: "OUTPUT_DESC"
       required: true
 

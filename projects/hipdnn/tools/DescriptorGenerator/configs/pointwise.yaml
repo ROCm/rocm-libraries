@@ -2,6 +2,7 @@ operation:
   name: "Pointwise"
   class_name: "PointwiseOperationDescriptor"
   fbs_table: "PointwiseAttributes"
+  matcher_opcode: "pointwise"
   fbs_generated_header: "pointwise_attributes_generated.h"
 
   descriptor_type:
@@ -55,21 +56,25 @@ operation:
   tensor_fields:
     - name: "in_0"
       fbs_field: "in_0_tensor_uid"
+      direction: "input"
       attr_suffix: "IN_0_EXT"
       required: true
 
     - name: "out_0"
       fbs_field: "out_0_tensor_uid"
+      direction: "output"
       attr_suffix: "OUT_0_EXT"
       required: true
 
     - name: "in_1"
       fbs_field: "in_1_tensor_uid"
+      direction: "input"
       attr_suffix: "IN_1_EXT"
       required: false
 
     - name: "in_2"
       fbs_field: "in_2_tensor_uid"
+      direction: "input"
       attr_suffix: "IN_2_EXT"
       required: false
 

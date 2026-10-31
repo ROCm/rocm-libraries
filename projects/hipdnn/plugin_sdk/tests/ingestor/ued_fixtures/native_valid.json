@@ -1,0 +1,13 @@
+{
+  "description": "The native arm names a symbol.",
+  "valid": true,
+  "ued": {
+    "version": "1.0",
+    "id": "a91b67a7-28f8-594f-a592-bd97fb416d46",
+    "name": "ued_fixture:native_valid",
+    "metadata": "894abf62-5d91-5ba7-915c-bc8c18691ae8",
+    "graph_match": {
+      "native": "hipkernel.pointwise.graph_match"
+    }
+  }
+}

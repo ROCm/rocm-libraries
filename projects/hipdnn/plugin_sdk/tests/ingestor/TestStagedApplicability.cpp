@@ -84,7 +84,7 @@ std::unique_ptr<StagedEngine> makeEngine(const IDeviceResolver<StubHandle>& reso
         makeStubDispatches(),
         std::move(packs),
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        GRAPH_SYMBOL,
+        NativeGraphMatch{GRAPH_SYMBOL},
         "engine 'staged fixture'");
     return std::make_unique<StagedEngine>(
         makeEngineWithKnobs({BLOCK_SIZE}), std::move(manager), resolver);

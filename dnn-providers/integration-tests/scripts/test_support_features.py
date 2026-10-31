@@ -101,7 +101,11 @@ def _schema_text(name: str) -> str:
 
 
 def _block(text: str, keyword: str, name: str) -> str:
-    match = re.search(rf"\b{keyword}\s+{name}\s*\{{(.*?)\}}", text, re.S)
+    # A declaration may carry FlatBuffers metadata between its name and body,
+    # e.g. `table T (matcher_opcode: "t") {`.
+    match = re.search(
+        rf"\b{keyword}\s+{name}\s*(?:\([^)]*\)\s*)?\{{(.*?)\}}", text, re.S
+    )
     assert match, f"{keyword} {name} not found"
     return match.group(1)
 
