@@ -93,6 +93,21 @@ except ImportError as e:
         f"ROCm DLLs under bin/).\nOriginal error: {e}"
     ) from e
 
+# cuDNN's module-level names, so `import hipdnn_frontend as cudnn` code finds
+# them. Each is the hipDNN object itself; `pygraph` comes from the extension.
+tensor = Tensor
+data_type = DataType
+heur_mode = HeuristicMode
+norm_forward_phase = NormFwdPhase
+reduction_mode = ReductionMode
+convolution_mode = ConvolutionMode
+build_plan_policy = BuildPlanPolicy
+behavior_note = BehaviorNote
+diagonal_alignment = DiagonalAlignment
+attention_implementation = AttentionImplementation
+moe_grouped_matmul_mode = MoeGroupedMatmulMode
+cudnnGraphNotSupportedError = GraphNotSupportedError
+
 # Package metadata. The installed wheel metadata is generated from pyproject.toml.
 try:
     __version__ = _distribution_version("hipdnn-frontend")
