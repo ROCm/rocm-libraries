@@ -18,9 +18,9 @@
 #include <string>
 #include <vector>
 
-namespace {
-
 #ifndef _WIN32
+
+namespace {
 
 struct CPU_Process_NONE : ::testing::Test
 {
@@ -32,6 +32,11 @@ struct CPU_Process_NONE : ::testing::Test
         EXPECT_FALSE(miopen::fs::exists(marker)) << "a shell interpreted the input";
     }
 };
+
+} // namespace
+
+// TEST_F stays outside the anonymous namespace: cppcheck otherwise reports a false syntaxError
+// (https://trac.cppcheck.net/ticket/9160).
 
 TEST_F(CPU_Process_NONE, ArgumentMetacharactersAreLiteral)
 {
@@ -165,5 +170,3 @@ TEST_F(CPU_Process_NONE, ConcurrentAsyncProcesses)
 }
 
 #endif // !_WIN32
-
-} // namespace
