@@ -189,8 +189,8 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
         TIMEOUT 180)
 
-    # generate.py -m generic emits these pipelines with GenericAttentionMask, which no other
-    # test instantiates; compile one blob per pipeline path (device -fsyntax-only, no GPU).
+    # Check GenericAttentionMask compatibility across pipeline paths with one blob
+    # per path (device -fsyntax-only, no GPU); numerical coverage is separate below.
     list(GET FMHA_QR_TDM_SCHED_GPU_TARGETS 0 FMHA_QR_TDM_SCHED_FIRST_GPU_TARGET)
     # The blobs need the configure-level GPU feature macros (CK_USE_GFX1250, CK_TILE_USE_WMMA, ...).
     get_directory_property(FMHA_QR_TDM_SCHED_DEFINITIONS COMPILE_DEFINITIONS)
@@ -208,6 +208,80 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     set_tests_properties(test_ck_tile_fmha_qr_tdm_sched_generic_mask PROPERTIES
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
         TIMEOUT 1200)
+
+    # Numerical coverage uses the actual generated generic mc specializations and
+    # dispatcher, with the same compiler options as production. Keep this library
+    # separate from the default simplified-mask forward instances.
+    if(TARGET ${FMHA_FWD_INSTANCES})
+        set(generic_fwd_example ${PROJECT_SOURCE_DIR}/example/ck_tile/01_fmha)
+        set(generic_fwd_dir ${CMAKE_CURRENT_BINARY_DIR}/qr_tdm_sched_generic_fwd)
+        set(generic_fwd_list ${generic_fwd_dir}/fwd_blob_list.txt)
+        set(generic_fwd_filter
+            "fmha_fwd_d64_*_batch_b128x128x32x64x32x64_r4x1x1_r4x1x1_w16x16x32_w16x16x32_o3_qr_tdm_sched_vr_npad_nlogits_nbias_mc_*_ndropout_nskip_nqscale_ntrload_nsink")
+        set(generic_fwd_codegen_args
+            ${generic_fwd_example}/generate.py
+            --targets ${FMHA_QR_TDM_SCHED_FIRST_GPU_TARGET}
+            --api fwd --optdim 64 -m generic --filter ${generic_fwd_filter})
+        file(MAKE_DIRECTORY ${generic_fwd_dir})
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} ${generic_fwd_codegen_args}
+                --list_blobs ${generic_fwd_list}
+            RESULT_VARIABLE generic_fwd_result)
+        if(NOT generic_fwd_result EQUAL 0)
+            message(FATAL_ERROR "Failed to list generic mc D64 N128 forward test instances")
+        endif()
+        file(STRINGS ${generic_fwd_list} generic_fwd_blobs)
+        list(LENGTH generic_fwd_blobs generic_fwd_blob_count)
+        # Four kernels: BF16/FP16 x LSE off/on, plus the generated API.
+        if(NOT generic_fwd_blob_count EQUAL 5)
+            message(FATAL_ERROR "Expected four generic mc D64 N128 kernels and their API")
+        endif()
+        file(GLOB_RECURSE generic_fwd_codegen_scripts CONFIGURE_DEPENDS
+            ${generic_fwd_example}/codegen/*.py)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+            ${generic_fwd_example}/generate.py ${generic_fwd_codegen_scripts})
+        add_custom_command(
+            OUTPUT ${generic_fwd_blobs}
+            COMMAND ${Python3_EXECUTABLE} ${generic_fwd_codegen_args}
+                --output_dir ${generic_fwd_dir}
+            DEPENDS ${generic_fwd_example}/generate.py ${generic_fwd_codegen_scripts}
+            VERBATIM)
+        set_source_files_properties(${generic_fwd_blobs} PROPERTIES LANGUAGE HIP)
+        set(generic_fwd_instances test_qr_tdm_sched_generic_fwd_instances)
+        add_library(${generic_fwd_instances} OBJECT EXCLUDE_FROM_ALL ${generic_fwd_blobs})
+        target_include_directories(${generic_fwd_instances} PRIVATE ${generic_fwd_example})
+        set_property(TARGET ${generic_fwd_instances} PROPERTY HIP_ARCHITECTURES
+            ${FMHA_QR_TDM_SCHED_GPU_TARGETS})
+        get_target_property(generic_fwd_private_options ${FMHA_FWD_INSTANCES} COMPILE_OPTIONS)
+        get_target_property(generic_fwd_interface_options ${FMHA_FWD_INSTANCES}
+            INTERFACE_COMPILE_OPTIONS)
+        if(generic_fwd_private_options)
+            target_compile_options(${generic_fwd_instances} PRIVATE ${generic_fwd_private_options})
+        endif()
+        if(generic_fwd_interface_options)
+            target_compile_options(${generic_fwd_instances} INTERFACE ${generic_fwd_interface_options})
+        endif()
+        # Production applies the RDNA BF16 conversion definition per source.
+        get_target_property(production_fwd_blobs ${FMHA_FWD_INSTANCES} SOURCES)
+        foreach(blob IN LISTS production_fwd_blobs)
+            if(blob MATCHES "_gfx125\\.cpp$")
+                get_source_file_property(generic_fwd_definitions ${blob}
+                    TARGET_DIRECTORY ${FMHA_FWD_INSTANCES} COMPILE_DEFINITIONS)
+                break()
+            endif()
+        endforeach()
+        include(${generic_fwd_example}/cmake/fmha_fwd_source_flags.cmake)
+        foreach(blob IN LISTS generic_fwd_blobs)
+            get_filename_component(blob_name ${blob} NAME)
+            if(blob_name MATCHES "_gfx125\\.cpp$" AND generic_fwd_definitions)
+                set_property(SOURCE ${blob} APPEND PROPERTY COMPILE_DEFINITIONS
+                    ${generic_fwd_definitions})
+            endif()
+            ck_tile_fmha_fwd_get_source_compile_options(${blob_name} generic_fwd_source_options)
+            set_property(SOURCE ${blob} APPEND PROPERTY COMPILE_OPTIONS
+                ${generic_fwd_source_options})
+        endforeach()
+    endif()
 
     foreach(dtype IN ITEMS bf16 fp16)
         set(window_target test_ck_tile_fmha_qr_tdm_bhsd_window_${dtype})
@@ -227,6 +301,16 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
                 target_compile_definitions(${target} PRIVATE DataTypeConfig=FmhaFwdBf16)
             endif()
             target_compile_options(${target} PRIVATE -Wno-float-equal)
+
+            set(target test_ck_tile_fmha_qr_tdm_sched_generic_fwd_${dtype})
+            add_qr_tdm_sched_gtest(${target} test_qr_tdm_sched_generic_fwd.cpp)
+            target_link_libraries(${target} PRIVATE ${generic_fwd_instances})
+            if(dtype STREQUAL "fp16")
+                target_compile_definitions(${target} PRIVATE DataTypeConfig=FmhaFwdFp16)
+            else()
+                target_compile_definitions(${target} PRIVATE DataTypeConfig=FmhaFwdBf16)
+            endif()
+            set_tests_properties(${target} PROPERTIES TIMEOUT 300)
         endif()
         set(target test_ck_tile_fmha_qr_tdm_sched_layout_${dtype})
         add_qr_tdm_sched_gtest(${target} test_qr_tdm_sched_layout.cpp)

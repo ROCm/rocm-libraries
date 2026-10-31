@@ -4,9 +4,9 @@
 """Device compile checks for qr_tdm_sched forward kernels with the generic mask.
 
 The default codegen emits SimplifiedGenericAttentionMask kernels; generate.py -m generic
-emits the same pipelines with GenericAttentionMask, which no other test instantiates. A
-pipeline call to a member that only the simplified mask provides therefore breaks every
-generic-mask kernel without any other test noticing. This test generates the -m generic
+emits the same pipelines with GenericAttentionMask. The dedicated generic-forward suites
+numerically check D64 N128 causal instances; this test also checks template compatibility
+across the remaining generic pipeline paths. It generates the -m generic
 qr_tdm_sched blobs and runs device-side semantic analysis (-fsyntax-only, so every template
 is instantiated but no code is generated) on one blob per pipeline path. No GPU work is
 launched.
