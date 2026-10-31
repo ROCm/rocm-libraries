@@ -17,14 +17,15 @@ strategy** for scaling to more toolchains and more targets.
 > obsolete. Probe results in §2.4 are LLVM-23 observations; re-run before
 > trusting them on another compiler.
 >
-> **Superseded in part.** §4's R1 has since shipped as
-> `tools/gen_arch_domain.py`, and the §2.4 hand-probes are no longer the data —
-> the generated columns under
-> `python/rocke/core/arch/data/intrinsic_arch_domain.<flavor>.json` are. All
-> three flavors are committed (`llvm20`, `llvm22`, `llvm23`), so the survey
-> above now has a machine-checked column behind it. Where §2.4
-> and the artifacts disagree, the artifacts win — see
-> [`arch_axis_proposal.md`](arch_axis_proposal.md) §3.2 for the rows that changed.
+> **Historical architecture snapshot.** §1–§2 predate the explicit LLVM24
+> compiler lane and emission-profile model. Current code separates qualified
+> compiler lanes from structural profiles; LLVM23 and LLVM24 share one profile,
+> and future compiler majors fail closed. The authoritative current description
+> is [`../ir_lowering/backend_details.md`](../ir_lowering/backend_details.md#llvm-intrinsic-flavor).
+> §4's R1 also shipped as `tools/gen_arch_domain.py`; committed columns currently
+> cover llvm20, llvm22, and llvm23, while LLVM24 artifact generation is separate
+> follow-up work. Treat the remaining tables and proposals as historical design
+> rationale, not current API documentation.
 
 ---
 
@@ -147,7 +148,7 @@ Twelve tests. They fall into three groups, and the sizes are the interesting par
 
 | gate | flavor coverage | why |
 |---|---|---|
-| golden (`rocke_representative_ir_sha256.json`) | **all three, from any host** | flavor is an explicit *input* to `lower_case(case, flavor)`; pure Python emission, no toolchain needed. The JSON stores one sub-document per flavor under `flavors:`. |
+| golden (`rocke_representative_ir_sha256/`) | **all three, from any host** | flavor is an explicit *input* to `lower_case(case, flavor)`; pure Python emission, no toolchain needed. Each per-family JSON shard stores one sub-document per flavor under `flavors:`. |
 | emitted-IR validity (`tools/check_ir_validity.py`) | **host flavor only** | it compiles and links; only the installed toolchain can judge |
 | byte-identity (`tools/check_byte_identity.py`) | one flavor per run, selected **ambiently** | no `--flavor` argument; both engines read `ROCKE_LLVM_FLAVOR`, so CLAUDE.md's recipe is three separate invocations with the env var set |
 

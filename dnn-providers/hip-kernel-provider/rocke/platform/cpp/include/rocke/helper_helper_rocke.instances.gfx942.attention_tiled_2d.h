@@ -178,6 +178,7 @@ typedef struct rocke_attention_tiled_2d_spec
     const char* kv_cache_policy; /* "stream" */
     bool use_global_load_lds_k; /* False */
     bool use_q_major_grid; /* False */
+    bool use_qblock_reverse; /* False (gfx950: longest-first query blocks) */
     /* Causal diagonal alignment (gfx942 body only). false = bottom-right
      * (context_len = seq_len - q_len), true = top-left (context_len = 0); every
      * bound derived from context_len follows, ALiBi/qq_bias offsets included.

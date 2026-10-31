@@ -182,7 +182,47 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_i64_kv_addr = true;
         s->use_global_load_lds_k = true;
         break;
-    case 11: /* cfg5 + causal_top_left (top-left diagonal, "tl" tag). */
+    /* head_size=192 MHA prefill selector spec */
+    case 11:
+        s->head_size = 192;
+        s->block_size = 16;
+        s->num_query_heads = 96;
+        s->num_kv_heads = 96;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 2;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_register_pv = true;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        break;
+    /* head_size=192 MHA prefill selector spec (wide flash geometry) */
+    case 12:
+        s->head_size = 192;
+        s->block_size = 16;
+        s->num_query_heads = 96;
+        s->num_kv_heads = 96;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 2;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32x8 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_k_single_buffer = true;
+        s->kv_cache_policy = "all";
+        break;
+    case 13: /* cfg5 + causal_top_left (top-left diagonal, "tl" tag). */
         s->head_size = 128;
         s->block_size = 32;
         s->num_query_heads = 8;
@@ -200,7 +240,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_k_single_buffer = false;
         s->causal_top_left = true;
         break;
-    case 12: /* cfg0 + causal_top_left + ALiBi (SW range on the TL diagonal). */
+    case 14: /* cfg0 + causal_top_left + ALiBi (SW range on the TL diagonal). */
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -212,7 +252,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_alibi = true;
         s->causal_top_left = true;
         break;
-    case 13: /* cfg11 + scalar_state + mask_once (st_causal_lim_iter on TL). */
+    case 15: /* cfg13 + scalar_state + mask_once (st_causal_lim_iter on TL). */
         s->head_size = 128;
         s->block_size = 32;
         s->num_query_heads = 8;

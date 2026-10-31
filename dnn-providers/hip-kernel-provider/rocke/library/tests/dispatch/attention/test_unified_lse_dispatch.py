@@ -91,10 +91,13 @@ def test_pinned_split_kv_spec_follows_the_request(arch):
 # additive-bias field, gfx942's with the band fields ``causal_top_left`` /
 # ``right_bound`` its tiled specs gained); emit_lse must leave them exactly as
 # develop computes them.
+# Both split-KV config_keys moved again once decode kept K/V cacheable when it
+# fits the last-level cache: this shape's 64 MiB of K/V now records
+# kv_cache_policy="all", not "stream".
 _PRE_LSE_UNPINNED_SPEC_HASH = "65416b2a8b9ffa90"
 _PRE_LSE_PIN = {
-    "gfx942": ("splitkv_seg16_t1xb_wpenone@b563a09d0af6dd29", "5df0e1213ecf4c03"),
-    "gfx950": ("splitkv_seg16_t1xb_wpenone@79ee1d118140d024", "b9c537be7298900c"),
+    "gfx942": ("splitkv_seg16_t1xb_wpenone@8704739b58cc687c", "5f60850414a02ac3"),
+    "gfx950": ("splitkv_seg16_t1xb_wpenone@2e6392907c305942", "2aa486d787146a27"),
 }
 
 

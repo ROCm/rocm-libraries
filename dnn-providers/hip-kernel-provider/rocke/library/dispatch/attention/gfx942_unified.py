@@ -128,7 +128,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
-        if problem.select_path() != "2d":
+        if problem.select_path(req.arch) != "2d":
             return False, "problem routes to 3D, not 2D"
         from kernels.common.attention_unified import _enable_gfx942_fp16_flash
 

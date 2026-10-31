@@ -167,15 +167,37 @@ class TestTuningSpace(unittest.TestCase):
         # use_kv_lds_swizzle x use_wave_page_id_load.
         self.assertEqual(len(specs), 40)
 
+    def test_3d_space_drops_kv_lds_swizzle_at_head_size_192(self):
+        """24 chunks per K/V row: the XOR swizzle would leave the row."""
+        for arch in ("gfx950", "gfx942"):
+            with self.subTest(arch=arch):
+                specs = _sampled(
+                    f"attention_{arch}_u3d_splitkv_seg64_t1xb",
+                    256,
+                    arch=arch,
+                    seqlen_q=1,
+                    seqlen_k=4096,
+                    hdim_q=192,
+                    hdim_v=192,
+                )
+                self.assertTrue(specs)
+                self.assertFalse(any(s.kernel_spec.use_kv_lds_swizzle for s in specs))
+
     def test_3d_cache_policy_base_follows_the_problem(self):
         """The 3D builder resolves the K/V cache policy per problem
         (``_kv_cache_policy_3d``): restating it names the default kernel, the
         other value stays reachable, and every id records the policy built."""
         for arch in ("gfx950", "gfx942"):
-            for seqlen_q, auto in ((1, "stream"), (1024, "all")):
-                with self.subTest(arch=arch, seqlen_q=seqlen_q):
+            # Decode streams K/V past the caches only when it exceeds the
+            # last-level cache (64 x 4096 tokens x 8 heads here, not 1 x 4096).
+            for seqlen_q, batch, auto in (
+                (1, 64, "stream"),
+                (1, 1, "all"),
+                (1024, 1, "all"),
+            ):
+                with self.subTest(arch=arch, seqlen_q=seqlen_q, batch=batch):
                     prefix = f"attention_{arch}_u3d_splitkv_seg64_t1xb"
-                    kw = dict(arch=arch, seqlen_q=seqlen_q, seqlen_k=4096)
+                    kw = dict(arch=arch, batch=batch, seqlen_q=seqlen_q, seqlen_k=4096)
                     specs = _sampled(prefix, 1000, **kw)
                     kernels = {repr(s.kernel_spec) for s in specs}
                     self.assertEqual(len(kernels), len(specs))
@@ -1040,6 +1062,9 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
                 _gfx942_request(
                     dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1
                 ),
+                # A wide sliding window keeps the default geometry, so the
+                # window-only knobs are swept from their defaults.
+                _gfx942_request(sliding_window=512),
             )
         )
         missing = _dense_swept_fields("gfx942") - changed

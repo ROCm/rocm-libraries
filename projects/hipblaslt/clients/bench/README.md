@@ -41,6 +41,8 @@ cd hipBLASLt; cd build/release
 --batch_count <value>      Number of matrices. Only applicable to batched and strided_batched routines          (Default value is: 1)
 --HMM                      Parameter requesting the use of HipManagedMemory
 --verify |-v               Validate GPU results with CPU?
+--verify_strict            Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose failed). Checks D only. Implies --verify. Computes a CPU reference per problem and copies and compares D on the host for each solution.
+--post_bench_verify_iters <value> After timing, relaunch each solution this many more times, untimed and without host synchronization between relaunches, and check on the GPU that every relaunch gives the same D, bit for bit, as the first launch. The timed launches are not checked. Implies --verify, so it also runs the CPU reference. (Default value is: 0, off)
 --iters |-i <value>        Iterations to run inside timing loop                                                 (Default value is: 10)
 --cold_iters |-j <value>   Cold Iterations to run before entering the timing loop                               (Default value is: 2)
 --adaptive                       Enable adaptive timing; not compatible with --iters / --cold_iters
@@ -130,12 +132,22 @@ Run fp32 GEMM with validation
 - `norm_error` is the Frobenius norm of the difference divided by the Frobenius norm of the reference, summed over batches and gemms. It averages over each whole matrix, so a few wrong elements in a large result can still give a small value.
 - `atol` and `rtol` come from an element-wise check. It tries the pairs 1e-6, 1e-5, ..., 1e-1 for each, tightest `atol` first, and reports the first pair under which every element satisfies `|reference - result| <= atol + rtol * |result|`. With several batches, or the gemms of a grouped GEMM, the columns show the loosest pair any one matrix needed. `failed` means at least one element is outside even `atol 0.1 + rtol 0.1 * |result|`.
 
-When the element-wise check fails, the bench also prints one line per failing gemm to stderr:
+The norm check of D fails when any one batch's norm_error reaches the same limit `hipblaslt-test` uses for the GEMM. The limit is the largest tolerance among the output and both input types (1e-5 for f32, 0.01 for f16, 0.1 for bf16); f32 output with `c_f32_fast_bf16_r` uses at least 0.5. For example, f16 inputs with f32 output use 0.01. The limit applies to each batch, not to the sum in the `norm_error` column. `hipblaslt-test` applies the same limit to the sum instead, so with many batches it can fail a result the bench passes. When a check fails, the bench prints one line per failing gemm to stderr, then a line naming the solution:
 ```
-allclose check failed for D of gemm 0: 3 of 18 elements are outside atol 0.1 + rtol 0.1 * |result|; the worst is batch 2, row 1, column 1: result 9, reference 4
+norm check failed for D of gemm 0: batch 2 has norm_error 0.408248, at or above the GEMM limit of 1e-05
+allclose check failed for D of gemm 0: 1 of 96 elements are outside atol 0.1 + rtol 0.1 * |result|; the worst is batch 2, row 5, column 0: result 7, reference 2
+the failed checks above are for solution 3 of 12 (library index 8805, kernel <kernel name>)
 ```
 
-The exit code is 0 whether or not a check fails. Only the first launch of each solution is compared with the reference; the launches timed by `--iters` and `--cold_iters` are not checked.
+If D's type has no norm limit, or isn't one the norm check can compare, the bench prints that D was not verified and counts it as a failed check.
+
+By default the exit code is 0 whether or not a check fails. With `--verify_strict`, the bench exits with code 2 when any check of D failed. It checks D only: the checks of E, the bias gradient and amaxD, and `--ulp`, don't affect the exit code. Only the first launch of each solution is compared with the reference; the launches timed by `--iters` and `--cold_iters` are not checked.
+
+Verification computes a CPU reference for each problem and copies and compares D on the host for each solution, including every selected datafile record. This work is outside the timed GEMM launches and can substantially increase the total runtime of `--algo_method all` sweeps.
+
+To catch a solution that is wrong only on some launches, add `--post_bench_verify_iters N`. After timing each solution, the bench relaunches it N more times, untimed and without a co-tenant or cache flush, and compares each relaunch's D bit for bit with the first launch's D, which the checks above compared with the CPU. The timed launches themselves are not checked, so a fast timing says nothing about whether those launches were right. The comparison runs on the GPU after each relaunch, and the host doesn't synchronize between relaunches. A small compare kernel (and one capture kernel per copy of D) runs between two GEMMs, so the load isn't the same as in the timed loop. It needs a second copy of D in device memory. The option implies `--verify`, so it also computes the CPU reference for every problem.
+
+When a relaunch differs, the bench prints how many of the N relaunches differed and, for the first one, how many elements changed and the first changed element with its old and new values, in hex and (when it isn't NaN) decoded. It names the solution by library index and kernel, as the first-launch check does. A difference counts as a failed check for `--verify_strict`, but it doesn't remove the solution from the ranking or from the `HIPBLASLT_TUNING_FILE` output, so read stderr before using a tuning result. The comparison is bitwise, so it fits solutions that give the same bits on every launch. A solution whose summation order changes from launch to launch (some split-K kernels that accumulate with atomics, for example) can differ by a few units in the last place and still be right, and it will be reported; there is no tolerance mode. If the first launch already failed the CPU check, the relaunches still run and are compared with that D, and the bench says so; a match then doesn't mean the result is right. Relaunches use the first rotation block only, and `--c_equal_d` with a nonzero beta is refused, since each launch then reads the D the previous launch wrote. With `--adaptive`, N stays the number given; it doesn't follow the number of timed launches. The relaunches run between solutions, so timings from a run with this option may not be comparable with timings from a run without it; this hasn't been measured.
 
 Show the frequency with environment variable
 ```

@@ -175,10 +175,47 @@ _CONFIGS = {
         use_i64_kv_addr=True,
         use_global_load_lds_k=True,
     ),
-    # cfg11: cfg5 + causal_top_left (top-left diagonal: context_len = const 0, so
+    # --- idx11: head_size=192 MHA prefill selector spec
+    11: dict(
+        head_size=192,
+        block_size=16,
+        num_query_heads=96,
+        num_kv_heads=96,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=1,
+        num_warps=2,
+        waves_per_eu=2,
+        use_register_pv=True,
+        tile_size=32,
+    ),
+    # --- idx12: head_size=192 MHA prefill on the wide flash geometry (an explicit spec;
+    #     the bf16 causal selector now routes D192 to the lean 4-warp body)
+    12: dict(
+        head_size=192,
+        block_size=16,
+        num_query_heads=96,
+        num_kv_heads=96,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=1,
+        num_warps=2,
+        waves_per_eu=2,
+        tile_size=64,
+        block_m_per_warp=32,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_k_single_buffer=True,
+        kv_cache_policy="all",
+    ),
+    # cfg13: cfg5 + causal_top_left (top-left diagonal: context_len = const 0, so
     # every bound derived from it follows). Pins the C-twin "tl" variant on the
     # transposed-x8 D128 geometry.
-    11: dict(
+    13: dict(
         head_size=128,
         block_size=32,
         num_query_heads=8,
@@ -195,10 +232,10 @@ _CONFIGS = {
         use_k_single_buffer=False,
         causal_top_left=True,
     ),
-    # cfg12: cfg0 + causal_top_left + ALiBi. Covers the sliding-window range
+    # cfg14: cfg0 + causal_top_left + ALiBi. Covers the sliding-window range
     # sites (first/last allowed key) on the top-left diagonal, and proves the
     # ALiBi position offset follows the top-left context_len (= 0).
-    12: dict(
+    14: dict(
         head_size=64,
         block_size=32,
         num_query_heads=32,
@@ -210,11 +247,11 @@ _CONFIGS = {
         use_alibi=True,
         causal_top_left=True,
     ),
-    # cfg13: cfg11 + transposed scalar_state + mask_once. Covers the per-iter
+    # cfg15: cfg13 + transposed scalar_state + mask_once. Covers the per-iter
     # transposed causal limit (st_causal_lim_iter = context_len + st_qp_iter)
     # on the top-left diagonal. use_transposed_invariant_hoist is left off:
     # the gfx942 C twin does not port that path (pre-existing, not TL).
-    13: dict(
+    15: dict(
         head_size=128,
         block_size=32,
         num_query_heads=8,

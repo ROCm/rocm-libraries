@@ -25,11 +25,14 @@ band suite (`test_attention_band_gfx942_numpy_numeric.py`) was added on
 2026-10-27: 29 cases passed with 0 skips on gfx942 (MI300A) with `import torch`
 blocked.
 A source-declared shape is not necessarily selected, executed, or passed in CI.
-One edit postdates that inventory: the `expected_spec_id` values of the
-`test_kda_dispatch_band_launches_selected_kernel` rows use the tile-named KDA
-spec ids (`kda_nw<N>_wtk<K>_bpv<B>`) that later replaced the work-band names;
-the tests and shapes are unchanged. GPU tests added after the inventory are not
-listed here.
+Two edits postdate that inventory, both to the KDA decode dispatch rows. The
+`expected_spec_id` values use the tile-named KDA spec ids
+(`kda_nw<N>_wtk<K>_bpv<B>`) that replaced the work-band names. The work-keyed
+tile table was later replaced by one static `auto` configuration per case: the
+band test is now `test_kda_dispatch_launches_the_auto_kernel` and the tuned-tile
+test `test_every_kda_auto_tile_is_correct`, with the `auto` tiles as their
+shapes. Both also run with an `f32` state; those state-width rows are not
+listed. Other GPU tests added after the inventory are not listed here.
 
 ## Reading this map
 
@@ -1260,12 +1263,12 @@ not a rocKE kernel execution; it remains here to expose that distinction.
 | [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_kda_warp_tiled_matches_reference | gfx950 | 3 | 1 | 16 | 32 | 128 | 128 | bf16 | {"batch": 3}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
 | [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_kda_warp_tiled_matches_reference | gfx950 | 16 | 1 | 16 | 32 | 128 | 128 | bf16 | {"batch": 16}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
 | [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_kda_warp_tiled_matches_reference | gfx950 | 64 | 1 | 16 | 32 | 128 | 128 | bf16 | {"batch": 64}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
-| [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_every_kda_tuned_tile_is_correct | gfx950 | 16 | 1 | 16 | 32 | 128 | 128 | bf16 | {"batch": 16, "tile": [4, 16, 4]}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
-| [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_every_kda_tuned_tile_is_correct | gfx950 | 16 | 1 | 16 | 32 | 128 | 128 | bf16 | {"batch": 16, "tile": [1, 16, 4]}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
-| [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_every_kda_tuned_tile_is_correct | gfx950 | 16 | 1 | 16 | 32 | 128 | 128 | bf16 | {"batch": 16, "tile": [2, 16, 1]}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
-| [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_kda_dispatch_band_launches_selected_kernel | gfx950 | 1 | 1 | 32 | 32 | 128 | 128 | bf16 | {"batch": 1, "expected_spec_id": "kda_nw4_wtk16_bpv4", "expected_tile": [4, 16, 4]}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
-| [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_kda_dispatch_band_launches_selected_kernel | gfx950 | 8 | 1 | 32 | 32 | 128 | 128 | bf16 | {"batch": 8, "expected_spec_id": "kda_nw1_wtk16_bpv4", "expected_tile": [1, 16, 4]}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
-| [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_kda_dispatch_band_launches_selected_kernel | gfx950 | 32 | 1 | 32 | 32 | 128 | 128 | bf16 | {"batch": 32, "expected_spec_id": "kda_nw2_wtk16_bpv1", "expected_tile": [2, 16, 1]}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
+| [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_every_kda_auto_tile_is_correct | gfx950 | 16 | 1 | 16 | 32 | 128 | 128 | bf16 | {"batch": 16, "tile": [1, 16, 8]}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
+| [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_every_kda_auto_tile_is_correct | gfx950 | 16 | 1 | 16 | 32 | 128 | 128 | bf16 | {"batch": 16, "tile": [1, 16, 16]}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
+| [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_every_kda_auto_tile_is_correct | gfx950 | 16 | 1 | 16 | 32 | 128 | 128 | bf16 | {"batch": 16, "tile": [4, 8, 1]}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
+| [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_kda_dispatch_launches_the_auto_kernel | gfx950 | 1 | 1 | 32 | 32 | 128 | 128 | bf16 | {"batch": 1, "expected_spec_id": "kda_nw1_wtk16_bpv8", "expected_tile": [1, 16, 8]}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
+| [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_kda_dispatch_launches_the_auto_kernel | gfx950 | 8 | 1 | 32 | 32 | 128 | 128 | bf16 | {"batch": 8, "expected_spec_id": "kda_nw1_wtk16_bpv8", "expected_tile": [1, 16, 8]}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
+| [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_kda_dispatch_launches_the_auto_kernel | gfx950 | 32 | 1 | 32 | 32 | 128 | 128 | bf16 | {"batch": 32, "expected_spec_id": "kda_nw1_wtk16_bpv8", "expected_tile": [1, 16, 8]}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
 | [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_kda_mha_shape_matches_reference | gfx950 | 8 | 1 | 32 | 32 | 128 | 128 | bf16 | {}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
 | [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_precomputed_decay_matches_reference | gfx950 | 1 | 1 | 16 | 32 | 128 | 128 | bf16 | {"batch": 1}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |
 | [test_kda_decode_gfx950_numeric.py](../library/tests/test_kda_decode_gfx950_numeric.py) :: test_precomputed_decay_matches_reference | gfx950 | 16 | 1 | 16 | 32 | 128 | 128 | bf16 | {"batch": 16}; output and updated state checked; state [pool,Hv,DV,DK] | Selected by library CTest file list |

@@ -223,7 +223,13 @@ def _base_2d_generic_fields(problem: UnifiedAttentionProblem, arch: str) -> dict
     combo = _enable_combo_2d(problem, arch)
     combo_no_sw = combo and problem.sliding_window == 0
     subflags = _enable_transposed_subflags(problem, arch)
-    scalar_state = combo or subflags
+    # Sinks on the transposed 32x32 path seed the running max per lane row, which
+    # only the scalar-state layout maps correctly, so sinks always take it.
+    scalar_state = (
+        combo
+        or subflags
+        or (problem.use_sinks and _enable_transposed_qk_32x32(problem, arch))
+    )
     skip_legacy_qreg = combo or subflags
     _bias_active = problem.softcap > 0 or _has_score_bias(problem)
     mask_opts = (combo_no_sw and not _bias_active) or subflags

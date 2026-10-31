@@ -2288,6 +2288,7 @@ def setup_multiple_gemm_dispatchers(
     max_workers: Optional[int] = None,
     *,
     errors: Optional[Dict[str, str]] = None,
+    build_timeout: Optional[int] = None,
 ) -> List[Optional[Path]]:
     """Codegen + compile each config into its own .so. Returns .so paths.
 
@@ -2311,6 +2312,12 @@ def setup_multiple_gemm_dispatchers(
     Without this the reasons are computed and thrown away unless verbose=True
     -- which is how a TheRock image with a bad HIP_CLANG_PATH produced 64 lines
     of "build_fail" with an empty reason instead of one "clang++: not found".
+
+    ``build_timeout`` (seconds) replaces the per-step limits of every kernel's
+    codegen, compile and link. ``None`` keeps them: 300 s each, except 1200 s to
+    compile a fixed-vector-width kernel. Each step is a wall-clock limit, so a
+    build sharing the host with many parallel workers may need a larger one. A
+    step that times out is reported as ``Timeout: <step> exceeded N s``.
     """
     import sys
 
@@ -2428,6 +2435,8 @@ def setup_multiple_gemm_dispatchers(
                 "variant": c.variant,
             }
         )
+        if build_timeout:
+            codegen_args[-1]["timeout"] = build_timeout
 
     if verbose:
         print(
@@ -2467,6 +2476,8 @@ def setup_multiple_gemm_dispatchers(
         if hdr is None:
             continue
         job, _ = _build_compile_jobs(configs[i], hdr)
+        if build_timeout:
+            job["compile_timeout"] = job["link_timeout"] = build_timeout
         compile_jobs.append(job)
         job_index.append(i)
 
@@ -2634,13 +2645,16 @@ def _gfx1250_pipeline_supported(
     layout: str = "",
     dtype: str = "",
     warp_tile_k: int = 0,
+    warp_tile_m: int = 0,
+    warp_tile_n: int = 0,
 ) -> bool:
     """False iff the (pipeline, epilogue) pair is a gfx1250 combination that
     the codegen would reject for this arch/variant/trait.
 
     ``layout`` is the A/B/C layout code (e.g. ``rcr``); empty skips the
     comp_async layout rule. ``dtype``/``warp_tile_k`` feed the comp_async
-    8-bit warp_tile_k rule; an empty dtype skips it."""
+    8-bit warp_tile_k rule; an empty dtype skips it. ``warp_tile_m``/
+    ``warp_tile_n`` feed the comp_async 8-bit warp_tile_m/n rule; 0 skips it."""
     reason = _codegen_common().gfx1250_pipeline_reject_reason(
         arch,
         pipeline,
@@ -2648,6 +2662,8 @@ def _gfx1250_pipeline_supported(
         scheduler,
         num_waves=wave_m * wave_n * wave_k,
         warp_tile_k=warp_tile_k,
+        warp_tile_m=warp_tile_m,
+        warp_tile_n=warp_tile_n,
         dtype_a=dtype,
         dtype_b=dtype,
         layout=layout,
@@ -2933,6 +2949,8 @@ def expand_sweep(
             layout=layout,
             dtype=dtype,
             warp_tile_k=wtk,
+            warp_tile_m=wtm,
+            warp_tile_n=wtn,
         ):
             continue
         if epi == "cshuffle" and not _cshuffle_store_ok(

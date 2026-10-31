@@ -208,7 +208,12 @@ class UnifiedAttentionProblem:
         as ``num_cus * 4`` (4 CTAs/CU)."""
         return self.target_ctas if self.target_ctas > 0 else self.num_cus * 4
 
-    def select_path(self) -> str:
+    def select_path(self, arch: str | None = None) -> str:
+        """2D or 3D route. ``arch`` adds per-arch decode routing on top of the
+        shared selector (``_decode_prefers_3d``); None keeps the shared
+        selector alone."""
+        if arch is not None and _decode_prefers_3d(self, arch):
+            return "3d"
         target = self._effective_target_ctas
         num_2d = self.total_num_q_blocks_upper_bound * self.num_kv_heads
         return (
@@ -482,7 +487,7 @@ def _tiled_3d_impl(arch: str):
 # rejects a problem the kernel would in fact have run, so new coverage added
 # here would simply never become reachable. Exporting the sets makes that
 # impossible by construction.
-UNIFIED_HEAD_SIZES: Tuple[int, ...] = (64, 128, 256)
+UNIFIED_HEAD_SIZES: Tuple[int, ...] = (64, 128, 192, 256)
 """Head sizes the scalar 2D backend covers.
 
 The kernel loops over head_size with ``b.unroll(p.head_size)``, so any head
@@ -800,18 +805,19 @@ def _cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     ``arch`` sits at index 1 like every other key family in this module, so
     ``_assert_cache_key_arch`` can check key-vs-compile agreement uniformly and
     two arches can never alias to one cached kernel.
+
+    Like the tiled keys, it holds only fields the scalar 2D build reads. The
+    dynamic shape (``total_q``, ``num_seqs``, ``max_seqlen_q``, ``max_seqlen_k``)
+    reaches the kernel as kernargs or the launch grid, never as IR, so one binary
+    serves every batch. ``test_attention_scalar_cache_key.py`` enforces this.
     """
     return (
         "scalar",
         arch,
-        problem.total_q,
-        problem.num_seqs,
         problem.num_query_heads,
         problem.num_kv_heads,
         problem.head_size,
         problem.block_size,
-        problem.max_seqlen_q,
-        problem.max_seqlen_k,
         problem.dtype,
         problem.q_dtype,
         problem.sliding_window,
@@ -993,6 +999,8 @@ def _d256_gfx950_spec_overrides() -> dict:
         # conflict on the QK K read for a ~25% Sq8192 latency win.
         use_kq_lds_pad=True,
         kq_lds_pad_halves=16,
+        # Longest-first causal query blocks: the long-block tail dominated.
+        use_qblock_reverse=True,
     )
 
 
@@ -1058,8 +1066,9 @@ def _enable_softmax_mfma_interleave(
     ESCAPE HATCH: ``HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE=0`` (or off/no/false)
     force-DISABLES the lever, restoring the prior nw=2 / no-interleave routing.
     """
-    # Shape checks first, as in _enable_d128_small_tile.
-    if problem.head_size != 128 or problem.use_fp8:
+    # Shape checks first, as in _enable_d128_small_tile. d192 takes the d128
+    # interleave + nw=4 geometry.
+    if problem.head_size not in (128, 192) or problem.use_fp8:
         return False
     env = (
         __import__("os")
@@ -1136,10 +1145,15 @@ def _d256_gfx942_fast(problem: "UnifiedAttentionProblem", arch: str) -> bool:
     prefill GQA 16/2 bs=16): OURS/AITER ~= 0.98x @ Sq4096 (parity), ~= 0.94x @
     Sq8192 (OURS ~6% faster). Measured on MI300A 2026-07-11 (MI300X prototype
     run: 0.97x / 0.94x); OURS matches the fp32 reference + AITER within bf16 tol.
+
+    D192 bf16 causal prefill rides the same lean body: the 2-wave wide-flash
+    kernel it otherwise takes needs 48 KB LDS and over 256 registers per lane,
+    so one 2-wave CTA fits per CU and half the SIMDs idle. The lean body fits
+    D192 in 24 KB LDS and under 256 VGPRs with four waves per CTA.
     """
     return (
         _gfx942_4warp_eligible(problem, arch)
-        and problem.head_size == 256
+        and problem.head_size in (192, 256)
         and problem.dtype == "bf16"
         and problem.sliding_window == 0
         # tile_size==32 requires block_size in {16, 32} (tile % block == 0).
@@ -1303,16 +1317,16 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
     # combo and a much heavier prelude.
     if _enable_combo_2d(problem, arch) and problem.sliding_window > 0:
         return problem.block_size
-    # fp16 D128 single-batch sliding-window: force T=64. The generic
+    # fp16 & bf16 D128 single-batch sliding-window: force T=64. The generic
     # 2*block_size tile would give T=32 at block_size=16, whose 256 outer
     # iterations at S=8192 under-amortise the per-iter cost. T=64 halves the
-    # iteration count; measured ~1.65x on gfx950 (numerically identical --
-    # both paths max_abs 1.95e-3).
+    # iteration count; faster on gfx950 for both dtypes, within tolerance of
+    # the narrow path's output on each (fp16 max_abs 1.95e-3, bf16 max_abs
+    # 1.5625e-02 -- larger due to bf16's lower precision, not a routing bug).
     if (
         _enable_single_batch_combo(problem, arch)
         and problem.sliding_window > 0
         and problem.head_size == 128
-        and problem.dtype == "fp16"
     ):
         return 64
     # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort.
@@ -1352,6 +1366,11 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
         # barrier (all QK reads drained) so it cannot WAR-race -- avoiding the
         # documented gfx942 naive-single-buffer hazard. Default-OFF behind the
         # same env opt-in (golden/production routing unchanged) until landed.
+        # FP8 K/V d128 and d192: T=64. The FP8 sync-dequant loader and the
+        # wider d192 rows both amortise the per-iteration cost better over a
+        # 64-token tile than over 2*block_size (measured on gfx950).
+        if problem.use_fp8 or problem.head_size == 192:
+            return 64
         if _enable_d128_small_tile(problem, arch):
             return 2 * problem.block_size
         return 2 * problem.block_size
@@ -2013,18 +2032,19 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         transposed routing.
       * dtype in {bf16, fp16} (the transposed softmax keeps m/l/acc in f32;
         fp16 winners were as accurate as flash).
-      * no FP8 K/V (the combo reads bf16 K from LDS; the fp8 cache path uses
-        the sync-dequant loader and its own routing).
-      * no softcap / sinks (not wired into the transposed softmax VALU opts;
-        the spec validator rejects them).
+      * FP8 K/V is admitted without sliding window or sinks: the sync-dequant
+        loader stages K/V in LDS at the working dtype, which is what the combo
+        reads. The schedule levers the FP8 loader does not wire (K single-buffer,
+        early-V, V double-buffer, Q direct-reg) stay off for it.
+      * no softcap.
       * ALiBi / QQ bias ARE admitted: the transposed softmax body applies
         them per-score, so biased single-batch prefill takes the combo path
-        instead of the fallback. Only softcap/sinks are excluded (above)
-        because the mask-limit shortcut can't fold them.
-      * sliding window: fp16 D128 only -- the transposed-32x32 path is ~1.65x
-        faster here than the narrow 16x16 path (both numerically equal); other
-        SW shapes keep their existing routing, and the no-SW VALU sub-flags
-        auto-disable via _enable_transposed_subflags.
+        instead of the fallback.
+      * sliding window and sinks: D64 and D128, both dtypes, every block size.
+        The narrow 16x16 path they otherwise take is far slower there. The
+        no-SW VALU sub-flags auto-disable via _enable_transposed_subflags, and
+        sinks take the scalar-state layout (the only one that seeds the sink
+        on the right rows).
       * head_size in {64, 128}.
       * max_seqlen_q > 256 (long prefill; decode-class shapes route to the 3D
         split-KV path via ``select_path``, and the autotuner's win starts at
@@ -2036,27 +2056,20 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         return False
     if problem.dtype not in ("bf16", "fp16"):
         return False
-    if problem.use_fp8:
+    if problem.softcap > 0:
         return False
-    if problem.softcap > 0 or problem.use_sinks:
+    # FP8 K/V rides the combo through the sync-dequant loader (K/V land in LDS
+    # at the working dtype), with no sliding window and no sinks.
+    if problem.use_fp8 and (problem.sliding_window > 0 or problem.use_sinks):
         return False
-    # fp16 D128 sliding-window (block_size==16 only) routes to the transposed-
-    # 32x32 fp32 online-softmax path (~1.65x faster here than the narrow 16x16
-    # path; both numerically equal). Scoped to block_size==16 because that is the
-    # cohort we measured. bs in {32,64} would now also build safely under the
-    # combo -- the _enable_k_single_buffer geometry guard derives block_m <=
-    # tile_size, so the former block_m=128 > tile_size=64 collision no longer
-    # raises -- but their combo speedup is unmeasured, so they keep their
-    # existing routing. bf16 D128 SW and all other SW shapes also stay on their
-    # existing paths; the no-SW VALU sub-flags auto-disable for SW via
-    # _enable_transposed_subflags.
-    if problem.sliding_window > 0 and not (
-        problem.head_size == 128
-        and problem.dtype == "fp16"
-        and problem.block_size == 16
-    ):
+    # Sliding window and sinks ride the combo at D64 and D128, both dtypes and
+    # every block size: the narrow 16x16 path they otherwise take is far slower
+    # there. The no-SW VALU sub-flags auto-disable for SW via
+    # _enable_transposed_subflags, and sinks take the scalar-state layout.
+    windowed_or_sinks = problem.sliding_window > 0 or problem.use_sinks
+    if windowed_or_sinks and problem.head_size not in (64, 128):
         return False
-    if problem.head_size not in (64, 128):
+    if problem.head_size not in (64, 128, 192):
         return False
     if problem.max_seqlen_q <= 256:
         return False
@@ -2090,11 +2103,15 @@ def _enable_v_double_buffer(problem: UnifiedAttentionProblem, arch: str) -> bool
     """
     if not _enable_single_batch_combo(problem, arch):
         return False
+    # The FP8 sync-dequant loader has no in-flight V DMA to prefetch.
+    if problem.use_fp8:
+        return False
     if _enable_early_v_schedule(problem, arch):
         return False
     # d128: vdbuf is a net drag (see docstring) -- OFF; the nw=2 / no-prefetch
-    # path is the winner. This also auto-disables sched_barrier.
-    if problem.head_size == 128:
+    # path is the winner. This also auto-disables sched_barrier. d192 follows
+    # d128.
+    if problem.head_size != 64:
         return False
     return problem.max_seqlen_q <= 1024
 
@@ -2141,6 +2158,9 @@ def _enable_early_v_schedule(problem: UnifiedAttentionProblem, arch: str) -> boo
         143us) -> OFF; d128 long gets no V schedule flag.
     """
     if not _enable_single_batch_combo(problem, arch):
+        return False
+    # The FP8 sync-dequant loader has no async V issue to move earlier.
+    if problem.use_fp8:
         return False
     return problem.head_size == 64 and problem.max_seqlen_q >= 2048
 
@@ -2391,7 +2411,7 @@ def _enable_gfx942_bf16_flash(problem: UnifiedAttentionProblem, arch: str) -> bo
     """
     return (
         arch == "gfx942"
-        and problem.head_size in (64, 128)
+        and problem.head_size in (64, 128, 192)
         and problem.dtype == "bf16"
         and not problem.use_fp8
         # D128 sliding-window prefill rides the non-ring wide flash
@@ -2457,7 +2477,9 @@ def _gfx942_bf16_wide_geometry(
     cfvst is not enabled on D128 (it needs nw=4, which only fits with the
     sliced-K ring, and the ring regressed -- see _gfx942_bf16_wide_use_cfvst).
     """
-    if problem.head_size == 128:
+    # D192 takes the D128 geometry: its nw=4 double-buffered form exceeds the
+    # 64 KB LDS cap as well.
+    if problem.head_size in (128, 192):
         # gfx942 bf16 D128 small-tile double-K (synthesized from the gfx942
         # prefill campaign; ex-T2). At T=32 (BLOCK_M = nw*32 = 64) the K_lds
         # DOUBLE buffer is 2*32*128*2 = 16 KB + V 8 KB = 24 KB -> still 2 WG/CU,
@@ -2607,6 +2629,10 @@ def _enable_gfx942_flash_mask_limit(
     # which is invalid once a sliding window must be applied. Disable it for SW so
     # the emitter's per-element window mask (dist < sliding_window) runs.
     if problem.sliding_window > 0:
+        return False
+    # D192 keeps the plain wide flash body: the transposed softmax VALU stack is
+    # validated at D64/D128 only.
+    if problem.head_size == 192:
         return False
     env = __import__("os").environ.get("HIPDNN_GFX942_FLASH_MLIM", "").strip().lower()
     if env in ("0", "off", "disable", "disabled", "no", "false"):
@@ -3487,14 +3513,22 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem, arch: str) -> 
 _PRE_BUMP_CUS = 120
 
 
-def _pre_bump_segments(problem: UnifiedAttentionProblem) -> int:
+def _pre_bump_segments(
+    problem: UnifiedAttentionProblem, *, decode_grid: bool = False
+) -> int:
     """Segment count the split-KV formula produced at the historical
     ``num_cus=120`` (target 480) for this shape -- the arch-independent safe
     ceiling every arch's clamp bounds to, so raising ``num_cus`` can never
     over-split an already-3D shape. One source of truth (gfx942 / gfx950, and
-    gfx1250 when it lands) rather than pasted per arch.
+    gfx1250 when it lands) rather than pasted per arch. ``decode_grid`` counts
+    one q-block per sequence (the all-decode launch grid) instead of the
+    prefill upper bound, which doubles the count at one query row per q-block.
     """
-    num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
+    num_2d = (
+        _num_q_blocks(problem, 1, decode_grid=True)
+        if decode_grid
+        else problem.total_num_q_blocks_upper_bound
+    ) * problem.num_kv_heads
     min_seg = 16 if problem.block_size <= 16 else 8
     return max(
         min(_next_power_of_2((_PRE_BUMP_CUS * 4 + num_2d - 1) // num_2d), 128),
@@ -3522,7 +3556,22 @@ def _num_segments(problem: UnifiedAttentionProblem, arch: str) -> int:
             per_cu = 6 if problem.head_size == 64 else 4
             cap = 64 if problem.max_seqlen_k < 8192 else 128
             return max(2, min(per_cu * problem.num_cus // ctas, cap))
-        pre_bump = _pre_bump_segments(problem)
+        if (
+            problem.all_decode
+            and problem.head_size == 256
+            and problem.block_size == 16
+            and int(problem.target_ctas) <= 0
+            and _kv_storage_dtype(problem) is None
+        ):
+            # Head-size-256 decode: about 2 CTAs per CU (its LDS footprint
+            # halves the resident CTAs of the smaller heads), and at least two
+            # pages per segment.
+            ctas = problem.num_seqs * problem.num_kv_heads
+            return max(
+                2,
+                min(2 * problem.num_cus // ctas, 128, problem.max_seqlen_k // 32),
+            )
+        pre_bump = _pre_bump_segments(problem, decode_grid=problem.all_decode)
         if problem.max_seqlen_q == 1:
             # DECODE: boundaries measured on gfx942 (Level 1, fp32-gated).
             if problem.max_seqlen_k <= 2048:
@@ -3588,6 +3637,16 @@ def _num_segments(problem: UnifiedAttentionProblem, arch: str) -> int:
                 return max(1, min(segments, kv // 64))
             return max(2, min(4 * cus // ctas, 64 if kv < 8192 else 128))
         pre_bump = _pre_bump_segments(problem)
+        if (
+            problem.all_decode
+            and problem.head_size == 256
+            and problem.block_size == 16
+            and _kv_storage_dtype(problem) is None
+        ):
+            # Few-CTA head-size-256 decode (outside the split rule above): keep
+            # at least two pages per segment; one-page segments leave the
+            # segment kernel latency-bound and double the reduce input.
+            return max(1, min(segments, pre_bump, problem.max_seqlen_k // 32))
         return min(segments, pre_bump)
     return segments
 
@@ -3649,19 +3708,35 @@ def _use_decode_grid(problem: UnifiedAttentionProblem, arch: str) -> bool:
     return problem.all_decode and arch in ("gfx942", "gfx950")
 
 
+# Last-level (Infinity Cache) capacity of gfx942/gfx950 parts, in bytes.
+_DECODE_KV_LLC_BYTES = 256 << 20
+
+
 def _kv_cache_policy_3d(problem: UnifiedAttentionProblem, arch: str) -> str:
     """Cache policy of the gfx942/gfx950 3D segment kernels' K/V copies.
 
-    "stream" (NT) when every sequence decodes: each K/V byte is then read once,
-    so keeping it in the caches only evicts other data. Otherwise "all". fp8
-    K/V loads synchronously and keeps "all".
+    "stream" (NT) when every sequence decodes and the K/V the call reads is
+    larger than the last-level cache: each K/V byte is read once per call, so
+    keeping it cached only evicts other data. A decode whose K/V fits keeps
+    "all", so the next call over the same cache (the next decode step of a
+    model whose K/V fits) can hit in the last-level cache. Otherwise "all".
+    fp8 K/V loads synchronously and keeps "all".
     """
     if (
         arch in ("gfx942", "gfx950")
         and problem.all_decode
         and _kv_storage_dtype(problem) is None
     ):
-        return "stream"
+        kv_bytes = (
+            2
+            * problem.num_seqs
+            * problem.max_seqlen_k
+            * problem.num_kv_heads
+            * problem.head_size
+            * (1 if problem.use_fp8 else 2)
+        )
+        if kv_bytes > _DECODE_KV_LLC_BYTES:
+            return "stream"
     return "all"
 
 
@@ -3721,6 +3796,47 @@ def _gfx942_3d_decode_ctas_per_segment(
     ):
         return ctas
     return None
+
+
+# Head sizes per arch for which decode routes to the 3D segment kernel past the
+# shared selector (``_decode_prefers_3d``).
+_DECODE_3D_HEAD_SIZES = {"gfx942": (64, 128, 256), "gfx950": (128, 256)}
+
+
+def _decode_prefers_3d(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """Decode routes to the split-KV 3D kernel even where the shared selector
+    picks 2D (2D grid past the subscription target, or KV <= 512 tokens).
+
+    The tiled 2D decode bodies run one single-wave workgroup per q-block: a
+    large-batch grid is bound by the workgroups per CU its LDS footprint allows
+    (one on gfx942), and a small-batch short-KV grid of a few workgroups walks
+    its tiles serially. The 3D segment kernel splits KV across several waves per
+    CU in both cases. Scope: gfx942/gfx950 decode split rule cohorts (fp16/bf16,
+    the head sizes in ``_DECODE_3D_HEAD_SIZES``, 16-token pages, no sliding
+    window, no explicit target_ctas) and, on gfx942, a cache the 3D kernel's K/V
+    loader can address (it has no i64 path).
+    """
+    arch = _canonical_arch_for_selection(arch)
+    if not (
+        problem.all_decode
+        and problem.head_size in _DECODE_3D_HEAD_SIZES.get(arch, ())
+        and problem.block_size == 16
+        and problem.sliding_window == 0
+        and int(problem.target_ctas) <= 0
+        and not problem.use_fp8
+        and _kv_storage_dtype(problem) is None
+    ):
+        return False
+    if arch == "gfx942":
+        if problem.num_kv_blocks <= 0:
+            problem = replace(
+                problem,
+                num_kv_blocks=problem.num_seqs
+                * -(-problem.max_seqlen_k // problem.block_size),
+            )
+        if _enable_i64_kv_addr_3d(problem, arch):
+            return False
+    return supports_native_unified_attention_3d_tiled(problem, arch)[0]
 
 
 def _gfx950_3d_tile_size_override(
@@ -4906,8 +5022,9 @@ class _Attention3DPrepared:
 class _Attention2DLaunchMeta:
     grid: Tuple[int, int, int]
     block: Tuple[int, int, int]
-    # What the compiled kernel addresses, from ``_spec_kv_addr_limit``.
-    kv_addr_limit: _KvAddrLimit | None
+    # What the compiled kernel addresses, from ``_spec_kv_addr_limit``. None skips
+    # the launch-time width check, so callers built before the field still work.
+    kv_addr_limit: _KvAddrLimit | None = None
 
 
 # Compiled state is shared; scratch belongs to an execution, invocation or graph.
@@ -5776,7 +5893,7 @@ def _get_scalar_launcher(
         kernel_name=kname,
         signature=_attn_signature(
             problem.dtype,
-            include_bt_stride=False,
+            include_bt_stride=True,
             kv_dtype=_kv_storage_dtype(problem),
         ),
         cache_key=("scalar",) + cache_key,
@@ -6209,7 +6326,18 @@ def run_unified_attention_torch(
     # 150× the right path's cost) while keeping the decode-shape 3D
     # wins on the parity harness (those shapes still satisfy the "3D
     # is fine" branch of ``use_2d_kernel``).
-    prefer_2d = backend == "auto" and problem.select_path() == "2d"
+    prefer_2d = backend == "auto" and problem.select_path(_launch_arch) == "2d"
+    # FP8 K/V prefill that no tiled 2D kernel serves (gfx942 has no FP8 2D
+    # path) runs on the 3D split-KV kernel, which handles multi-token query
+    # blocks, instead of the scalar fallback. use_fp8 is checked first so other
+    # launches skip the support walk.
+    if (
+        prefer_2d
+        and problem.use_fp8
+        and tuning_spec is None
+        and not _explicit_path_supported(problem, None, "2d", _launch_arch)[0]
+    ):
+        prefer_2d = False
     if backend == "3d" or (backend == "auto" and not prefer_2d):
         ok_3d, reason_3d = _explicit_path_supported(
             problem, tuning_spec, "3d", _launch_arch
@@ -6401,7 +6529,7 @@ def run_unified_attention_torch(
         softcap=softcap,
         sinks=sinks,
         bt_stride=bt_stride,
-        include_bt_stride=False,
+        include_bt_stride=True,
         k_scale=k_scale,
         v_scale=v_scale,
         out_scale=out_scale,
@@ -6443,7 +6571,6 @@ class UnifiedAttention2DSpec:
         p = self.problem
         return kernel_name_join(
             self.name,
-            f"q{p.total_q}",
             f"h{p.num_query_heads}",
             f"kv{p.num_kv_heads}",
             f"d{p.head_size}",
@@ -6548,6 +6675,7 @@ def build_unified_attention_2d(
     _out_scale = b.param("out_scale", F32)
     softcap = b.param("softcap", F32)
     num_seqs = b.param("num_seqs", I32)
+    bt_stride = b.param("block_table_stride", I32)
 
     q_tok = b.block_id_x()
     q_head = b.block_id_y()
@@ -6604,16 +6732,8 @@ def build_unified_attention_2d(
         iv_name="kpos",
     )
     with loop as (kpos, (m_val, l_val, acc_val)):
-        block_idx, token_in_block = _magic_div_mod(b, kpos, p.block_size)
-        physical = b.global_load_i32(
-            block_tables,
-            b.add(
-                b.mul(
-                    seq_idx,
-                    b.const_i32((p.max_seqlen_k + p.block_size - 1) // p.block_size),
-                ),
-                block_idx,
-            ),
+        physical, token_in_block = _physical_block_and_token(
+            b, p, block_tables, bt_stride, seq_idx, kpos
         )
 
         # Vectorised QK dot product. Both Q[q_tok, q_head, :] and
@@ -6727,7 +6847,6 @@ class UnifiedAttention3DSpec(UnifiedAttention2DSpec):
         p = self.problem
         return kernel_name_join(
             self.name,
-            f"q{p.total_q}",
             f"h{p.num_query_heads}",
             f"kv{p.num_kv_heads}",
             f"d{p.head_size}",
@@ -6785,6 +6904,7 @@ def build_unified_attention_3d(
     scale = abi["scale"]
     _softcap = b.param("softcap", F32)
     num_seqs = b.param("num_seqs", I32)
+    bt_stride = b.param("block_table_stride", I32)
 
     q_tok = b.block_id_x()
     q_head = b.block_id_y()
@@ -6835,6 +6955,7 @@ def build_unified_attention_3d(
             query,
             key,
             block_tables,
+            bt_stride,
             seq_idx,
             q_tok,
             q_head,
@@ -6860,7 +6981,9 @@ def build_unified_attention_3d(
         alpha = b.exp2(b.fsub(m_val, new_m))
         prob = b.exp2(b.fsub(score, new_m))
         new_l = b.fadd(b.fmul(l_val, alpha), prob)
-        vv = _emit_v_load(b, p, dtype, value, block_tables, seq_idx, kv_head, kpos, dim)
+        vv = _emit_v_load(
+            b, p, dtype, value, block_tables, bt_stride, seq_idx, kv_head, kpos, dim
+        )
         new_acc = b.fadd(b.fmul(acc_val, alpha), b.fmul(prob, vv))
         b.scf_yield(new_m, new_l, new_acc)
 
@@ -6897,7 +7020,6 @@ class UnifiedAttentionReduceSpec:
         p = self.problem
         return kernel_name_join(
             self.name,
-            f"q{p.total_q}",
             f"h{p.num_query_heads}",
             f"d{p.head_size}",
             f"seg{self.num_segments}",
@@ -7136,6 +7258,7 @@ def _emit_qk_score(
     query: Value,
     key: Value,
     block_tables: Value,
+    bt_stride: Value,
     seq_idx: Value,
     q_tok: Value,
     q_head: Value,
@@ -7164,7 +7287,7 @@ def _emit_qk_score(
     """
     score = b.const_f32(0.0)
     physical, token_in_block = _physical_block_and_token(
-        b, p, block_tables, seq_idx, kpos
+        b, p, block_tables, bt_stride, seq_idx, kpos
     )
     q_desc = _q_descriptor(p)
     kv_desc = _paged_kv_descriptor(p)
@@ -7215,13 +7338,14 @@ def _emit_v_load(
     dtype: Type,
     value: Value,
     block_tables: Value,
+    bt_stride: Value,
     seq_idx: Value,
     kv_head: Value,
     kpos: Value,
     dim: Value,
 ) -> Value:
     physical, token_in_block = _physical_block_and_token(
-        b, p, block_tables, seq_idx, kpos
+        b, p, block_tables, bt_stride, seq_idx, kpos
     )
     v_off = _paged_kv_descriptor(p).offset(
         b,
@@ -7237,12 +7361,17 @@ def _physical_block_and_token(
     b: IRBuilder,
     p: UnifiedAttentionProblem,
     block_tables: Value,
+    bt_stride: Value,
     seq_idx: Value,
     kpos: Value,
 ) -> Tuple[Value, Value]:
+    """Look up ``kpos``'s physical KV block in row ``seq_idx`` of the block table.
+
+    ``bt_stride`` is the table's row stride kernarg, not a value derived from
+    ``max_seqlen_k``: callers may allocate rows wider than the longest sequence.
+    """
     block_idx, token_in_block = _magic_div_mod(b, kpos, p.block_size)
-    max_blocks = (p.max_seqlen_k + p.block_size - 1) // p.block_size
     physical = b.global_load_i32(
-        block_tables, b.add(b.mul(seq_idx, b.const_i32(max_blocks)), block_idx)
+        block_tables, b.add(b.mul(seq_idx, bt_stride), block_idx)
     )
     return physical, token_in_block

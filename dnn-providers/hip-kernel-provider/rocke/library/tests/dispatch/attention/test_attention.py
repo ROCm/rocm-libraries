@@ -30,6 +30,7 @@ _GFX950_DENSE_FEATURES = {
     "band",
     "causal",
     "full_attention",
+    "layout_dense",
     "lse",
     "sinks",
     "sliding_window",
@@ -58,12 +59,23 @@ _RDNA_WMMA_FEATURES = {
 EXPECTED_FEATURES = {
     "attention_strided_decode": {
         "strided_kv",
+        "layout_dense",
+        "layout_bhsd",
         "causal",
         "causal_bottom_right",
         "sliding_window",
     },
-    # gfx942 dense serves the same band as the gfx950 persistent bodies.
-    "attention_gfx942_dense": set(_GFX950_DENSE_FEATURES),
+    # gfx942 dense serves the gfx950 dense band plus bottom-right causal.
+    "attention_gfx942_dense": {
+        "band",
+        "causal",
+        "causal_bottom_right",
+        "full_attention",
+        "layout_dense",
+        "lse",
+        "sinks",
+        "sliding_window",
+    },
     "attention_gfx950_dense_grid": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_qbminor": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_persist": set(_GFX950_DENSE_FEATURES),

@@ -1,0 +1,71 @@
+{
+  "aliases": {
+    "llvm24": "llvm23"
+  },
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "attention_d128_swa/gfx942/4warp_gqa_fold": {
+          "arch": "gfx942",
+          "bytes": 414797,
+          "family": "attention_d128_swa",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
+          "sha256": "b748d05694e19dc30041b31660e0f27cf5c27a8832d18d25363404400577dadc",
+          "status": "ok"
+        },
+        "attention_d128_swa/gfx942/4warp_gqa_fold_top_left": {
+          "arch": "gfx942",
+          "bytes": 415193,
+          "family": "attention_d128_swa",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_tl_wpe2_mw32_4wgqa_fold",
+          "sha256": "7d28e7852fb3de99f8f439973f04db4b342a8bbbcd2bfcd9f08852e6c23690bc",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm22": {
+      "cases": {
+        "attention_d128_swa/gfx942/4warp_gqa_fold": {
+          "arch": "gfx942",
+          "bytes": 414804,
+          "family": "attention_d128_swa",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
+          "sha256": "ade57079caeb6c596241f65ee45978f105ea934a6a76b9c71cf54ea3f2e387b0",
+          "status": "ok"
+        },
+        "attention_d128_swa/gfx942/4warp_gqa_fold_top_left": {
+          "arch": "gfx942",
+          "bytes": 415200,
+          "family": "attention_d128_swa",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_tl_wpe2_mw32_4wgqa_fold",
+          "sha256": "4dd154e994d2439813b841066f27e0b3764a8a77b773ff7d5afa586237cb7f6b",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm23": {
+      "cases": {
+        "attention_d128_swa/gfx942/4warp_gqa_fold": {
+          "arch": "gfx942",
+          "bytes": 414868,
+          "family": "attention_d128_swa",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_wpe2_mw32_4wgqa_fold",
+          "sha256": "cca7c69ab21d9e97c4fca699d43347f7c5551bf8f54cd52080105e3fe9047c51",
+          "status": "ok"
+        },
+        "attention_d128_swa/gfx942/4warp_gqa_fold_top_left": {
+          "arch": "gfx942",
+          "bytes": 415264,
+          "family": "attention_d128_swa",
+          "kernel_name": "rocke_uattn2d_tiled_d128_b16_t32_h32kv8_bf16_sw4096_tl_wpe2_mw32_4wgqa_fold",
+          "sha256": "37bf5d9bdd052dceaddbd6d179d8dc43da5aef19eada32e0752613f099951bda",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    }
+  },
+  "schema": "ck.dsl.ir_golden_sha256/v2"
+}
