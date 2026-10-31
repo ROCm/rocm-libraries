@@ -6573,13 +6573,10 @@ def _scalar_band_ok(
     context_len,
     query_pos,
     kpos,
-    *,
-    window: bool = True,
 ) -> Optional[Value]:
     """Visibility of key ``kpos`` for the query: the right bound ``k <= d + right``
     (``d = context_len + query_pos``) AND the left bound ``d - k < sliding_window``.
     ``None`` when neither bounds anything (the loop range already limits to kv_len).
-    ``window=False`` skips the left bound.
     """
     ok = None
     if p.right_bound >= 0:
@@ -6587,7 +6584,7 @@ def _scalar_band_ok(
         if p.right_bound > 0:
             upper = b.add(upper, b.const_i32(p.right_bound))
         ok = b.cmp_le(kpos, upper)
-    if window and p.sliding_window > 0:
+    if p.sliding_window > 0:
         dist = b.sub(b.add(context_len, query_pos), kpos)
         sw_ok = b.cmp_lt(dist, b.const_i32(p.sliding_window))
         ok = sw_ok if ok is None else b.land(ok, sw_ok)
@@ -6763,9 +6760,11 @@ def build_unified_attention_2d(
         if band_ok is not None:
             score = b.select(band_ok, score, neg_inf)
         new_m_raw = b.fmax(m_val, score)
-        # If both running max and current score are -inf, the row is fully
-        # masked; force m to 0 so the resulting alpha/prob are 0 instead of NaN
-        # (matches Triton's `m_j = tl.where(m_j > -inf, m_j, 0.0)`).
+        # If both running max and current score are -inf, the row has seen no key
+        # yet; use 0 as the exponent reference so alpha/prob are 0 instead of NaN
+        # (matches Triton's `m_j = tl.where(m_j > -inf, m_j, 0.0)`). Carry the raw
+        # max: carrying the 0 pins m at 0 past masked leading keys (sliding
+        # window), and exp2(s - 0) then underflows P for very negative scores.
         is_finite = b.fcmp("ogt", new_m_raw, neg_inf)
         new_m = b.select(is_finite, new_m_raw, zero_f)
         alpha = b.exp2(b.fsub(m_val, new_m))
@@ -6783,14 +6782,14 @@ def build_unified_attention_2d(
         if p.use_fp8:
             vv = b.fmul(vv, v_scale)
         new_acc = b.fadd(b.fmul(acc_val, alpha), b.fmul(prob, vv))
-        b.scf_yield(new_m, new_l, new_acc)
+        b.scf_yield(new_m_raw, new_l, new_acc)
 
     out_val = b.fmul(loop.results[2], b.rcp(loop.results[1]))
-    if not p.default_mask:
-        # Rows can see no key at all (e.g. top-left rows past ``kv_len`` with a window
-        # or a right bound): emit 0 instead of acc * rcp(0) == NaN, like the tiled
-        # kernels. The default mask never produces such a row, so its IR is unchanged.
-        out_val = b.select(b.fcmp("ogt", loop.results[1], zero_f), out_val, zero_f)
+    # Rows can see no key at all under any mask (bottom-right causal with Sq > Skv,
+    # or a window / right bound): store 0 instead of acc * rcp(0) == NaN. This is
+    # the tiled 2D epilogue's rule: only an exact-zero sum counts as keyless, so a
+    # NaN ``l`` still reaches O.
+    out_val = b.select(b.fcmp("oeq", loop.results[1], zero_f), zero_f, out_val)
     out_cast = b.cast_f32_to(out_val, dtype)
     out_off, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=dim)
     valid = b.land(active, b.cmp_lt(dim, b.const_i32(p.head_size)))
@@ -6819,9 +6818,7 @@ class UnifiedAttention3DSpec(UnifiedAttention2DSpec):
             flags={
                 "tl": p.causal_top_left,
                 **_right_bound_flag(p),
-                # The default-mask 3D scalar kernel never applied the window (its name
-                # and IR are pinned); every other mask does.
-                "sw": p.sliding_window > 0 and not p.default_mask,
+                "sw": p.sliding_window > 0,
             },
         )
 
@@ -6927,20 +6924,20 @@ def build_unified_attention_3d(
             scale,
             rcp_ln2,
         )
-        # The scalar 3D segment kernel has never applied the left bound; keep that
-        # for the default mask (its IR is pinned) and honour it for every other mask.
-        band_ok = _scalar_band_ok(
-            b, p, context_len, query_pos, kpos, window=not p.default_mask
-        )
+        # Every mask, the default one included: the right (causal) bound, and
+        # the left (sliding-window) bound whenever sliding_window > 0.
+        band_ok = _scalar_band_ok(b, p, context_len, query_pos, kpos)
         if band_ok is not None:
             score = b.select(band_ok, score, neg_inf)
-        new_m = b.fmax(m_val, score)
-        if not p.default_mask:
-            # Non-default masks can leave whole segments fully masked (top-left
-            # decode sees only key 0; a window or right bound skips others). Force m
-            # to 0 there so alpha/prob are 0 rather than NaN, which the reduce would
-            # propagate as NaN * 0. The default mask never hits this: IR unchanged.
-            new_m = b.select(b.fcmp("ogt", new_m, neg_inf), new_m, zero_f)
+        new_m_raw = b.fmax(m_val, score)
+        # A segment, or a segment's leading keys, can be fully masked for a row:
+        # a default-mask prefill row whose causal limit ends before a trailing
+        # segment, top-left decode (only key 0 visible), a window or right bound.
+        # Use 0 as the exponent reference there so alpha/prob are 0 rather than
+        # exp2(-inf - -inf) = NaN, but carry and store the raw max: it stays -inf
+        # until a key is seen, so the reduce ignores an empty segment and a
+        # masked prefix cannot pin m at 0.
+        new_m = b.select(b.fcmp("ogt", new_m_raw, neg_inf), new_m_raw, zero_f)
         alpha = b.exp2(b.fsub(m_val, new_m))
         prob = b.exp2(b.fsub(score, new_m))
         new_l = b.fadd(b.fmul(l_val, alpha), prob)
@@ -6948,7 +6945,7 @@ def build_unified_attention_3d(
             b, p, dtype, value, block_tables, bt_stride, seq_idx, kv_head, kpos, dim
         )
         new_acc = b.fadd(b.fmul(acc_val, alpha), b.fmul(prob, vv))
-        b.scf_yield(new_m, new_l, new_acc)
+        b.scf_yield(new_m_raw, new_l, new_acc)
 
     ml_desc, out_desc = _segm_descriptors(p, spec.num_segments)
     base, _ = out_desc.offset(b, token=q_tok, head=q_head, seg=segm_idx, dim=dim)
@@ -7033,11 +7030,20 @@ def build_unified_attention_reduce(
         [("mx", neg_inf)],
         iv_name="seg",
     )
+    # A segment that saw no key stores max = -inf with sum = 0: the segment kernel
+    # carries the raw max, so the max pass ignores that segment as is, and the
+    # combine pass weights it by exp2(-inf - ref) = 0 whenever ref is finite. ref
+    # is the overall max, or 0 when every segment is empty (overall = -inf), the
+    # same exponent-reference clamp the segment kernel uses: a row with no key at
+    # all then has den = 0 and gets O = 0 instead of NaN from exp2(-inf - -inf) or
+    # acc * rcp(0). Only an exact zero den counts as empty, so a NaN sum or
+    # denominator still yields NaN.
     with max_loop as (seg, (mx,)):
         idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
         mv = b.global_load_f32(segm_max, idx)
         b.scf_yield(b.fmax(mx, mv))
     overall = max_loop.results[0]
+    ref = b.select(b.fcmp("ogt", overall, neg_inf), overall, zero)
     red = b.scf_for_iter(
         b.const_i32(0),
         b.const_i32(spec.num_segments),
@@ -7049,7 +7055,7 @@ def build_unified_attention_reduce(
         idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
         mv = b.global_load_f32(segm_max, idx)
         lv = b.global_load_f32(segm_expsum, idx)
-        factor = b.exp2(b.fsub(mv, overall))
+        factor = b.exp2(b.fsub(mv, ref))
         den2 = b.fadd(den, b.fmul(lv, factor))
         out_idx, _ = seg_out_desc.offset(
             b,
@@ -7062,6 +7068,7 @@ def build_unified_attention_reduce(
         acc2 = b.fadd(acc, b.fmul(ov, factor))
         b.scf_yield(den2, acc2)
     result = b.fmul(red.results[1], b.rcp(red.results[0]))
+    result = b.select(b.fcmp("oeq", red.results[0], zero), zero, result)
     cast = b.cast_f32_to(result, dtype)
     out_idx, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=dim)
     with b.scf_if(active):
