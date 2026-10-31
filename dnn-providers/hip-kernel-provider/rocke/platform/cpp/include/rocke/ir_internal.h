@@ -17,6 +17,7 @@
 #define ROCKE_IR_INTERNAL_H
 
 #include "rocke/ir.h"
+#include "rocke/strbuf.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -326,6 +327,34 @@ const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
                                    const rocke_type_t* operand_type,
                                    char* buf,
                                    size_t cap);
+
+/* ------------------------------------------------------- parameter facts */
+
+/* Receives one message from rocke_param_fact_errors. */
+typedef void (*rocke_param_fact_sink_t)(void* ctx, const char* message);
+
+/* Mirrors ir.param_fact_errors: hands `sink` every rule the declaration
+ * params[index] breaks, in order, with the Python texts, and returns their
+ * count. `params` is the kernel's parameter list in declaration order (a
+ * relation may name only parameters before `index`). rocke_b_param raises the
+ * first message; rocke_verify reports all of them. (cpp/core/ir/param_facts.cpp) */
+int rocke_param_fact_errors(const rocke_param_t* const* params,
+                            int count,
+                            int index,
+                            rocke_param_fact_sink_t sink,
+                            void* ctx);
+
+/* Mirrors ir_print._format_param's facts: appends " {ge = %N, le = 4096}" for
+ * the facts `p` states, nothing when it states none. */
+void rocke_param_facts_print(const rocke_param_t* p, rocke_strbuf_t* out);
+
+/* The canonical JSON (sorted keys, no spaces) of the relation stored in
+ * `text`, with each param leaf renamed through `rename` (NULL keeps names),
+ * allocated in `arena`; NULL when `text` holds no relation. */
+char* rocke_relation_canonical(const char* text,
+                               rocke_arena_t* arena,
+                               const char* (*rename)(void* ctx, const char* name),
+                               void* ctx);
 
 /* ------------------------------------------------------------- DPP helpers */
 

@@ -277,10 +277,15 @@ The `program` is a flat list of instructions. Kernel arguments first:
 
 A param's `attrs` are the pointer argument attributes the lowerer emits:
 `noalias`, `readonly`, `writeonly`, `nocapture`, `nonnull` (bools), `align`,
-`dereferenceable` (ints) and `addr_space` (a string). Both C++ importers (the
-recipe VM and the concrete-IR importer) refuse any other key, and a value of the
-wrong kind, rather than drop it: a dropped attribute would change the lowered
-kernel without a word.
+`dereferenceable` (ints) and `addr_space` (a string); and an integer
+parameter's facts: `ge`, `gt`, `le`, `lt`, `eq` (an int, or a relation over
+earlier parameters as its canonical intexpr JSON string, e.g.
+`"{\"mul\":[{\"param\":\"M\"},{\"param\":\"ldc\"}]}"`) and
+`multiple_of` (an int). Both C++ importers (the recipe VM and the concrete-IR
+importer) refuse any other key, and a value of the wrong kind, rather than drop
+it: a dropped attribute would change the lowered kernel without a word. A
+declaration the builder refuses (two upper bounds, a relation naming an unknown
+parameter, ...) fails the import with the builder's text.
 
 then the ops, in emission order:
 

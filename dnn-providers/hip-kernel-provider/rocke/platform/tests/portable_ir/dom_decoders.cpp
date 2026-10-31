@@ -354,6 +354,68 @@ void test_recipe_shaped_map(rocke_arena_t* a)
 
 } // namespace
 
+// The importer reads an integer parameter's facts: an int, or a relation (the
+// canonical intexpr JSON string), and refuses a declaration the builder would
+// refuse, with the builder's text.
+void test_concrete_importer_param_facts()
+{
+    const auto artifact = [](const char* ldc_attrs) {
+        return std::string(
+                   R"json({"schema":"rocke.ir/v1","kernel":{"name":"fact_probe","attrs":{},"params":[{"name":"M","type":"i32","attrs":{"ge":1,"multiple_of":8}},{"name":"ldc","type":"i32","attrs":)json")
+               + ldc_attrs + R"json(}],"body":{"label":"entry","ops":[]}}})json";
+    };
+    {
+        rocke_ir_builder_t builder;
+        rocke_kernel_def_t* kernel = nullptr;
+        char err[ROCKE_ERR_MSG_CAP] = {};
+        const rocke_status_t status = rocke_import_kernel_from_json(
+            artifact(R"json({"ge":"{\"param\":\"M\"}","le":4096})json").c_str(),
+            nullptr,
+            &builder,
+            &kernel,
+            err,
+            sizeof err);
+        check(status == ROCKE_OK && kernel != nullptr && kernel->num_params == 2,
+              "concrete facts import");
+        if(status == ROCKE_OK && kernel && kernel->num_params == 2)
+        {
+            int64_t value = 0;
+            check(rocke_attr_get_int(&kernel->params[0]->attrs, "multiple_of", &value)
+                      && value == 8,
+                  "concrete multiple_of is carried");
+            const char* ge = rocke_attr_get_str(&kernel->params[1]->attrs, "ge");
+            check(ge && std::strcmp(ge, "{\"param\":\"M\"}") == 0, "concrete relation is carried");
+            check(rocke_attr_get_int(&kernel->params[1]->attrs, "le", &value) && value == 4096,
+                  "concrete int bound is carried");
+        }
+        if(status == ROCKE_OK)
+        {
+            rocke_ir_builder_free(&builder);
+        }
+    }
+    const char* const bad[][2] = {
+        {R"json({"ge":"{\"param\":\"K\"}"})json",
+         "ldc: the relation names K, which is not a parameter of this kernel"},
+        {R"json({"lt":4096,"le":4095})json",
+         "param ldc: states two upper bounds (lt, le) -- state one"},
+        {R"json({"ge":true})json", "param fact"},
+    };
+    for(const auto& c : bad)
+    {
+        rocke_ir_builder_t builder;
+        rocke_kernel_def_t* kernel = nullptr;
+        char err[ROCKE_ERR_MSG_CAP] = {};
+        const rocke_status_t status = rocke_import_kernel_from_json(
+            artifact(c[0]).c_str(), nullptr, &builder, &kernel, err, sizeof err);
+        check(status != ROCKE_OK && kernel == nullptr, c[0]);
+        if(std::strstr(err, c[1]) == nullptr)
+        {
+            std::printf("  FAIL: %s does not name the defect (got: %s)\n", c[0], err);
+            ++g_fail;
+        }
+    }
+}
+
 int main()
 {
     rocke_arena_t a;
@@ -370,6 +432,7 @@ int main()
     test_concrete_importer_preserves_nonfinite_float_attrs();
     test_concrete_importer_rejects_invalid_integer_attrs();
     test_concrete_importer_param_attrs();
+    test_concrete_importer_param_facts();
     test_malformed_input_is_rejected(&a);
     test_recipe_shaped_map(&a);
     rocke_arena_destroy(&a);

@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "rocke/arena.h"
+#include "rocke/error.hpp"
 
 /* ====================================================================== */
 /* Minimal JSON DOM + parser                                              */
@@ -1277,6 +1278,22 @@ static void import_region_ops(importer_t* im, const jval_t* region)
         import_op(im, ops->arr[i]);
 }
 
+/* The bound a fact word names (ge / gt / le / lt / eq), or NULL for another key. */
+static rocke_int_bound_t* import_fact_bound(rocke_int_facts_t* facts, const char* key)
+{
+    if(strcmp(key, "ge") == 0)
+        return &facts->ge;
+    if(strcmp(key, "gt") == 0)
+        return &facts->gt;
+    if(strcmp(key, "le") == 0)
+        return &facts->le;
+    if(strcmp(key, "lt") == 0)
+        return &facts->lt;
+    if(strcmp(key, "eq") == 0)
+        return &facts->eq;
+    return NULL;
+}
+
 /* Read a param's attrs into *opts. Every key is one rocke_param_opts_t carries,
  * with a value of its kind; anything else fails the import, because a dropped
  * attr would silently change the lowered kernel. */
@@ -1360,6 +1377,25 @@ static bool
             }
             opts->addr_space = v->str;
         }
+        else if(strcmp(key, "multiple_of") == 0)
+        {
+            if(!import_int_value(im, "param multiple_of", v, &opts->facts.multiple_of))
+                return false;
+            opts->facts.multiple_of_set = true;
+        }
+        else if(rocke_int_bound_t* bound = import_fact_bound(&opts->facts, key))
+        {
+            /* An int, or a relation (its canonical intexpr JSON, a string). */
+            if(v->kind == J_STR)
+            {
+                bound->relation = v->str;
+            }
+            else if(!import_int_value(im, "param fact", v, &bound->value))
+            {
+                return false;
+            }
+            bound->set = true;
+        }
         else
         {
             imp_fail(
@@ -1395,7 +1431,18 @@ static void import_params(importer_t* im, const jval_t* params)
         rocke_param_opts_t opts;
         if(!import_param_attrs(im, name, jobj_get(p, "attrs"), &opts))
             return;
-        rocke_value_t* pv = rocke_b_param(im->b, name, type, &opts);
+        /* The builder raises (ckc::Error) a declaration it refuses, such as a
+         * fact it cannot state; report its text as the import's failure. */
+        rocke_value_t* pv = NULL;
+        try
+        {
+            pv = rocke_b_param(im->b, name, type, &opts);
+        }
+        catch(const ckc::Error& error)
+        {
+            imp_fail(im, "%s", error.what());
+            return;
+        }
         if(!pv)
         {
             imp_fail(im, "param '%s' build failed", name);
