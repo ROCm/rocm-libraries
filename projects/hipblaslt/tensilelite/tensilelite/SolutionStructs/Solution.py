@@ -2212,7 +2212,8 @@ class Solution(collections.abc.Mapping):
       # AF0EM -1: StoreVectorWidth where wide edge stores are supported (else 1).
       # SVW is only known after derivation, so derive a probe first; the logic
       # then stores the numeric AF0EM and rebuilds the same kernel.
-      state["AssertFree0ElementMultiple"] = 1
+      # Packed AtomicDest stores need an even AF0EM, also in the probe.
+      state["AssertFree0ElementMultiple"] = 2 if state["GlobalSplitUAlgorithm"] == "AtomicDest" else 1
       if tuple(state["ISA"])[:2] == (12, 5) and not state["ProblemType"]["Sparse"]:
         probe = copy.deepcopy(state)
         Solution.assignDerivedParameters(probe, splitGSU, False, False, isaInfoMap, rocmVersion)
