@@ -93,6 +93,15 @@
         }                                                     \
     } while(0)
 
+// WHY is empty when the host allocations succeeded, and otherwise says which one failed.
+#define CHECK_HOST_ALLOCATION(WHY) \
+    do                             \
+    {                              \
+        std::string why__ = (WHY); \
+        if(!why__.empty())         \
+            GTEST_SKIP() << why__; \
+    } while(0)
+
 #define CHECK_SOLUTION_FOUND(SOL_COUNT)     \
     do                                      \
     {                                       \
@@ -141,6 +150,17 @@ inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expe
     } while(0)
 
 #define CHECK_DEVICE_ALLOCATION CHECK_HIP_ERROR
+
+#define CHECK_HOST_ALLOCATION(WHY)                             \
+    do                                                         \
+    {                                                          \
+        std::string why__ = (WHY);                             \
+        if(!why__.empty())                                     \
+        {                                                      \
+            hipblaslt_cerr << "error: " << why__ << std::endl; \
+            return;                                            \
+        }                                                      \
+    } while(0)
 
 #define EXPECT_HIPBLAS_STATUS hipblaslt_expect_status
 
