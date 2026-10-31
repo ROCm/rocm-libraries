@@ -817,11 +817,24 @@ namespace TensileLite
                 }
             }
 
+            // OpenMP chunk size (loop iterations) of the init loops below. They use a dynamic
+            // schedule so that a core shared with another process does not hold up the whole
+            // loop, as a static schedule's fixed share per thread does. No value depends on the
+            // schedule: Trig, Serial and Identity values depend only on the element index; the
+            // Random modes use per-thread generators seeded from std::random_device, or a
+            // generator shared by all threads (rand(), rocm_random). With several threads the
+            // shared generator's values reach elements in thread-timing order (static schedule:
+            // at any size; dynamic: once a loop has more than one chunk), so no reproducible
+            // output changes; a loop of at most one chunk now runs on one thread in element
+            // order. 4096 was the fastest chunk, or within noise of it, from 64K to 16M
+            // elements on 25 threads, with and without a busy core.
+            static constexpr size_t initLoopChunk = 4096;
+
             template <typename T, InitMode Mode>
             void initArray(T* array, size_t elements)
             {
                 const size_t numPacks = elements / TypeInfo<T>::Packing;
-#pragma omp parallel for shared(array) firstprivate(numPacks)
+#pragma omp parallel for schedule(dynamic, initLoopChunk) shared(array) firstprivate(numPacks)
                 for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = getValue<T, Mode>();
@@ -829,10 +842,10 @@ namespace TensileLite
             }
 
             template <typename T>
-            void initArrayConvert(T* array, size_t elements)
+            static void initArrayConvert(T* array, size_t elements)
             {
                 const size_t numPacks = elements / TypeInfo<T>::Packing;
-#pragma omp parallel for shared(array) firstprivate(numPacks)
+#pragma omp parallel for schedule(dynamic, initLoopChunk) shared(array) firstprivate(numPacks)
                 for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = ConvertTo<T>(i);
@@ -847,11 +860,11 @@ namespace TensileLite
             }
 
             template <typename T>
-            void initArraySerialIdx(T* array, TensorDescriptor const& tensor)
+            static void initArraySerialIdx(T* array, TensorDescriptor const& tensor)
             {
                 const auto& sizes = tensor.sizes();
                 const auto  count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for shared(array, tensor, sizes, count)
+#pragma omp parallel for schedule(dynamic, initLoopChunk) shared(array, tensor, sizes, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -862,11 +875,11 @@ namespace TensileLite
             }
 
             template <typename T>
-            void initArraySerialDim(T* array, int dim, TensorDescriptor const& tensor)
+            static void initArraySerialDim(T* array, int dim, TensorDescriptor const& tensor)
             {
                 const auto& sizes = tensor.sizes();
                 const auto  count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for shared(array, tensor, sizes, count, dim)
+#pragma omp parallel for schedule(dynamic, initLoopChunk) shared(array, tensor, sizes, count, dim)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -881,7 +894,7 @@ namespace TensileLite
             {
                 const auto& sizes = tensor.sizes();
                 const auto  count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for shared(array, tensor, sizes, count, dim)
+#pragma omp parallel for schedule(dynamic, initLoopChunk) shared(array, tensor, sizes, count, dim)
                 for(size_t idx = 0; idx < count; idx++)
                 {
                     union
@@ -897,11 +910,11 @@ namespace TensileLite
             }
 
             template <typename T>
-            void initArrayIdentity(T* array, TensorDescriptor const& tensor)
+            static void initArrayIdentity(T* array, TensorDescriptor const& tensor)
             {
                 const auto& sizes = tensor.sizes();
                 const auto  count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for shared(array, tensor, sizes, count)
+#pragma omp parallel for schedule(dynamic, initLoopChunk) shared(array, tensor, sizes, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
@@ -938,7 +951,7 @@ namespace TensileLite
 #pragma omp parallel shared(array, tensor, sizes, count)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
-#pragma omp for
+#pragma omp for schedule(dynamic, initLoopChunk)
                     for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                     {
                         CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
@@ -951,7 +964,7 @@ namespace TensileLite
             template <typename T, bool useCos, bool useAbs>
             static void initArrayTrig(T* array, size_t elements)
             {
-#pragma omp parallel for shared(array) firstprivate(elements)
+#pragma omp parallel for schedule(dynamic, initLoopChunk) shared(array) firstprivate(elements)
                 for(size_t i = 0; i < elements; i += TypeInfo<T>::Packing)
                 {
                     array[i / TypeInfo<T>::Packing] = getTrigValue<T>(i, useCos, useAbs);
