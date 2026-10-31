@@ -92,7 +92,7 @@ from ..Toolchain.Component import Assembler
 from ..Utilities.Decorators.Profile import profile
 from ..Utilities.Decorators.Timing import timing
 
-from .ParseArguments import parseArguments
+from .parse_arguments import parseArguments
 
 
 def libraryRoot(outputPath: Union[str, Path]) -> Path:
@@ -1578,7 +1578,7 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
             procs.append((
                 group,
                 subprocess.Popen(
-                    [sys.executable, "-m", "tensilelite.TensileCreateLibrary"]
+                    [sys.executable, "-m", "tensilelite.create_library"]
                     + _argvForArchitectures(argv, group, groupJobs),
                     env=env,
                 ),

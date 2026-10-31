@@ -624,8 +624,6 @@ class TestRunNewClient:
 # ---------------------------------------------------------------------------
 
 class TestGetClientExecutablePath:
-    """getClientExecutablePath exercises lines 804-814."""
-
     def test_raises_when_file_not_found(self, monkeypatch):
         """Lines 807-813: raises FileNotFoundError when PrebuiltClient doesn't exist."""
         monkeypatch.setitem(globalParameters, "PrebuiltClient", "/nonexistent/fake_client")
