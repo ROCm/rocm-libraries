@@ -13,6 +13,13 @@
  * and clears it so it is reported once. Buffers declared too narrow to scan
  * in full produce a warning and are skipped.
  *
+ * The check covers every launch of a solution: main hands each run
+ * iteration's inputs to beginRunIteration() before its launches and calls
+ * checkRunIteration() at its end (GuardPageAll solutions run two iterations,
+ * and the second one places the buffer at a different address), and
+ * postSolution() checks launches an exception left unchecked, then reports
+ * the solution's verdict.
+ *
  * On by default (GlobalParameters CheckSynchronizer); --check-synchronizer=0
  * turns it off. A default must not change what a config does, so the listener
  * is passive and skips solutions known not to use the Synchronizer.
@@ -29,6 +36,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <hip/hip_runtime.h>
+#include <memory>
+#include <vector>
 
 namespace TensileLite
 {
@@ -62,15 +71,26 @@ namespace TensileLite
             virtual void postProblem() override {}
 
             virtual void preSolution(ContractionSolution* const solution) override;
+            // Checks launches the end-of-iteration check missed (an exception
+            // ended the iteration), then reports. Never throws.
             virtual void postSolution() override;
+
+            /// Inputs the run iteration's kernels are solved with (one per
+            /// rotating buffer), before its launches.
+            void beginRunIteration(std::vector<std::shared_ptr<ProblemInputs>> const& inputs);
+
+            /// Checks the buffers after the launches of one run iteration,
+            /// before the next iteration's input reset. Does nothing if nothing
+            /// launched since the last check. Throws on a HIP error (e.g. a
+            /// kernel fault surfacing in the readback), after marking the
+            /// solution failed.
+            void checkRunIteration();
 
             // Passive: inspect launches other listeners drive, never request
             // one. Configs with NumElementsToValidate 0 and SyncsPerBenchmark 0
             // launch no kernels by design; requesting a run there would cost
             // NumWarmups launches per solution and observe nothing. Where
             // nothing launches there is no residue, so this costs no coverage.
-            // Configs that do launch already drive a warmup via
-            // ReferenceValidator, so validateWarmups still fires.
             virtual bool needMoreRunsInSolution() const override
             {
                 return false;
@@ -80,17 +100,29 @@ namespace TensileLite
                 return 0;
             }
             virtual void setNumWarmupRuns(size_t count) override {}
-            virtual void preWarmup() override {}
+            virtual void preWarmup() override
+            {
+                m_launchedSinceCheck = true;
+            }
             virtual void postWarmup(TimingEvents const& startEvents,
                                     TimingEvents const& stopEvents,
                                     hipStream_t const&  stream) override
             {
             }
-            // Runs after the first warmup launch; later warmups are not
-            // observed, so a check covers the launches since the previous one.
+            // Not a check point: later launches of the iteration would go
+            // unobserved (see checkRunIteration()).
             virtual void validateWarmups(std::shared_ptr<ProblemInputs> inputs,
                                          TimingEvents const&            startEvents,
-                                         TimingEvents const&            stopEvents) override;
+                                         TimingEvents const&            stopEvents) override
+            {
+            }
+
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+            virtual void preProfiler() override
+            {
+                m_launchedSinceCheck = true;
+            }
+#endif
 
             virtual size_t numSyncs() override
             {
@@ -105,14 +137,17 @@ namespace TensileLite
                 return 0;
             }
             virtual void setNumEnqueuesPerSync(size_t count) override {}
-            virtual void preEnqueues(hipStream_t const& stream) override {}
+            virtual void preEnqueues(hipStream_t const& stream) override
+            {
+                m_launchedSinceCheck = true;
+            }
             virtual void postEnqueues(TimingEvents const& startEvents,
                                       TimingEvents const& stopEvents,
                                       hipStream_t const&  stream) override
             {
             }
-            // Deliberately unchecked: the readback synchronizes the stream,
-            // perturbing the back-to-back cadence these enqueues exercise.
+            // Deliberately unchecked: a readback here would synchronize the
+            // stream, perturbing the back-to-back cadence these enqueues exercise.
             virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
                                           TimingEvents const&            startEvents,
                                           TimingEvents const&            stopEvents) override
@@ -127,9 +162,15 @@ namespace TensileLite
             }
 
         private:
-            /// Checks every Synchronizer buffer reachable from *inputs*.
+            /// Checks the launches since the last check, if any (with the
+            /// iteration's inputs); marks the solution failed if dirty or if
+            /// the check throws, and rethrows.
+            void checkLaunches(char const* stage);
+
+            /// Checks every distinct Synchronizer buffer reachable from the
+            /// iteration's inputs (rotating buffers may share it or not).
             /// `stage` names the launch phase, for the diagnostic.
-            void checkInputs(std::shared_ptr<ProblemInputs> inputs, char const* stage);
+            void checkInputs(char const* stage);
 
             /// Reads back one buffer, re-zeroing it only when dirty.
             /// Returns false when dirty.
@@ -148,6 +189,11 @@ namespace TensileLite
             ContractionProblem* m_problem      = nullptr;
             uint8_t*            m_staging      = nullptr;
             size_t              m_stagingBytes = 0;
+            // The current run iteration's inputs: its buffer addresses depend on
+            // the iteration (GuardPageFront / GuardPageBack).
+            std::vector<std::shared_ptr<ProblemInputs>> m_iterationInputs;
+            // Set by the pre-launch hooks, cleared by a check.
+            bool m_launchedSinceCheck = false;
 
         protected:
             // Keep device transfers overridable for host-only lifecycle tests.

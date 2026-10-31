@@ -6,6 +6,7 @@
 
 #include "ResultReporter.hpp"
 
+#include <Tensile/Utils.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <algorithm>
@@ -112,63 +113,109 @@ namespace TensileLite
 
         void SynchronizerValidator::postSolution()
         {
+            // Guard 2: an exception ended the solution's last run iteration
+            // before its check. A usable device is checked as normal; a lost
+            // one fails the readback, which only fails the solution: nothing
+            // may throw out of postSolution.
+            try
+            {
+                checkLaunches("interrupted run iteration");
+            }
+            catch(std::exception const& err)
+            {
+                m_reporter->log(LogLevel::Error,
+                                concatenate("Synchronizer check failed: ", err.what(), "\n"));
+            }
+            catch(...)
+            {
+                m_reporter->log(LogLevel::Error, "Synchronizer check failed.\n");
+            }
+
             if(m_failedInSolution)
             {
                 m_errorsReported++;
                 // Overrides the reference verdict so the CSV and library logic
-                // fed from it cannot crown a solution that corrupts the buffer.
+                // fed from it cannot crown a solution that corrupts the buffer
+                // (also main's INVALID: the exception is still logged and counted).
                 m_reporter->report(ResultKey::Validation, "FAILED");
             }
 
             m_failedInSolution = false;
+            m_iterationInputs.clear();
         }
 
-        void SynchronizerValidator::validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                                    TimingEvents const&            startEvents,
-                                                    TimingEvents const&            stopEvents)
+        void SynchronizerValidator::beginRunIteration(
+            std::vector<std::shared_ptr<ProblemInputs>> const& inputs)
         {
+            m_iterationInputs = inputs;
+        }
+
+        void SynchronizerValidator::checkRunIteration()
+        {
+            checkLaunches("run iteration");
+        }
+
+        void SynchronizerValidator::checkLaunches(char const* stage)
+        {
+            // Guard 1: nothing launched, nothing to check (postSolution also
+            // runs for rejected and never-run solutions).
+            if(!m_launchedSinceCheck)
+                return;
+            m_launchedSinceCheck = false;
+
             try
             {
-                ScopedTimer timer("validate_synchronizer_check");
-                checkInputs(inputs, "warmup");
+                ScopedTimer timer("synchronizer_check");
+                checkInputs(stage);
             }
             catch(...)
             {
-                // main catches checker exceptions and continues to postSolution.
                 // Preserve failure even when the buffer's contents could not be checked.
                 m_failedInSolution = true;
                 throw;
             }
         }
 
-        void SynchronizerValidator::checkInputs(std::shared_ptr<ProblemInputs> inputs,
-                                                char const*                    stage)
+        void SynchronizerValidator::checkInputs(char const* stage)
         {
-            if(!active() || m_problem == nullptr || inputs == nullptr)
+            if(!active() || m_problem == nullptr || m_iterationInputs.empty())
             {
                 // Solution cannot use the Synchronizer (or the check is off): nothing to read.
-                ScopedTimer timer("validate_synchronizer_inactive");
+                ScopedTimer timer("synchronizer_inactive");
                 return;
             }
 
-            if(auto problems = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
+            // Rotating-buffer inputs usually share the Synchronizer, but they are
+            // built once per problem, so under GuardPageAll they keep the first
+            // iteration's address while the reset inputs move: read each buffer once.
+            std::vector<void const*> checked;
+
+            auto checkOnce
+                = [&](ContractionProblemGemm const& problem, void* buffer, size_t gemmIdx) {
+                      if(std::find(checked.begin(), checked.end(), buffer) != checked.end())
+                          return;
+                      checked.push_back(buffer);
+                      if(!checkBuffer(problem, buffer, stage, gemmIdx))
+                          m_failedInSolution = true;
+                  };
+
+            for(auto const& inputs : m_iterationInputs)
             {
-                auto const& result = dynamic_cast<ContractionGroupedInputs const&>(*inputs);
-                for(size_t j = 0; j < problems->gemms.size(); j++)
+                if(auto problems = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
                 {
-                    if(!checkBuffer(problems->gemms[j], result.grouped[j].Synchronizer, stage, j))
-                        m_failedInSolution = true;
+                    auto const& result = dynamic_cast<ContractionGroupedInputs const&>(*inputs);
+                    for(size_t j = 0; j < problems->gemms.size(); j++)
+                        checkOnce(problems->gemms[j], result.grouped[j].Synchronizer, j);
                 }
-            }
-            else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
-            {
-                auto const& result = dynamic_cast<ContractionInputs const&>(*inputs);
-                if(!checkBuffer(*problem, result.Synchronizer, stage, 0))
-                    m_failedInSolution = true;
-            }
-            else
-            {
-                throw std::runtime_error("Failed to cast to any ContractionProblem.");
+                else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                {
+                    auto const& result = dynamic_cast<ContractionInputs const&>(*inputs);
+                    checkOnce(*problem, result.Synchronizer, 0);
+                }
+                else
+                {
+                    throw std::runtime_error("Failed to cast to any ContractionProblem.");
+                }
             }
         }
 
@@ -213,7 +260,7 @@ namespace TensileLite
         {
             if(deviceSynchronizer == nullptr)
             {
-                ScopedTimer timer("validate_synchronizer_no_buffer");
+                ScopedTimer timer("synchronizer_no_buffer");
                 return true;
             }
 
@@ -242,18 +289,18 @@ namespace TensileLite
                 return true;
             }
 
-            // Once per solution, so the copy is hot: pinned staging avoids the
-            // pageable bounce buffer.
+            // Once per run iteration, so the copy is hot: pinned staging avoids
+            // the pageable bounce buffer.
             uint8_t* host;
             {
-                ScopedTimer timer("validate_synchronizer_readback");
+                ScopedTimer timer("synchronizer_readback");
                 host = readBuffer(deviceSynchronizer, bytes);
             }
 
             SynchronizerResidue residue;
             bool                dirty;
             {
-                ScopedTimer timer("validate_synchronizer_scan");
+                ScopedTimer timer("synchronizer_scan");
                 dirty = scanSynchronizerResidue(host, bytes, residue);
             }
             if(!dirty)
