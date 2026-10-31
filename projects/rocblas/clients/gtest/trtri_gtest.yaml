@@ -158,9 +158,10 @@ Tests:
   diag: [ N ]
   matrix_size:
     - { N:    32, lda:    32 }
+    # N > 2 * ROCBLAS_TRTRI_NB reaches the batched block-GEMM path.
+    - { N:    64, lda:    64 }
   batch_count: [ 2 ]
   graph_test: true
-
 
 - name: trtri_repeatability_check
   category: stress
