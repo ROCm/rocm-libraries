@@ -49,6 +49,7 @@ from ..Common import (
     HR,
     IsaVersion,
     ParallelMap2,
+    poolSizeBudget,
     print1,
     print2,
     printWarning,
@@ -1224,10 +1225,8 @@ def _includeGemmA2AFusionProblemType(problemType, enabled: bool) -> bool:
 # Tensile Create Library
 ################################################################################
 def _cpuCount() -> int:
-    if os.name == "nt":
-        # Matches CPUThreadCount: the Windows scheduler caps waitable handles.
-        return min(os.cpu_count() or 1, 61)
-    return len(os.sched_getaffinity(0))
+    """The pool budget CPUThreadCount gives one process: the groups build in place of it."""
+    return poolSizeBudget()
 
 
 def _jobsPerGroup(requested: int, groups: List[List[str]]) -> List[int]:
@@ -1246,7 +1245,7 @@ def _jobsPerGroup(requested: int, groups: List[List[str]]) -> List[int]:
     unambiguous abbreviation of ``--jobs``) to avoid silently dropping them.
     """
     # 0 disables threading and has to survive the split intact; -1 is the
-    # documented "use every CPU" default.
+    # documented "use the whole budget" default.
     if requested == 0:
         return [0] * len(groups)
     total = _cpuCount() if requested < 0 else min(_cpuCount(), requested)

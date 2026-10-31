@@ -2598,7 +2598,7 @@ def _spawnedCommands(monkeypatch, groups, argv=PARENT_ARGV, requestedJobs=-1):
     """The argv and environment of every child _buildGroupsSeparately starts.
 
     ``requestedJobs`` is the parsed ``CpuThreads``; -1 is its default, meaning
-    "every CPU".
+    "the whole pool budget".
     """
     from Tensile.TensileCreateLibrary import Run
 
@@ -2780,10 +2780,44 @@ def test_windows_caps_the_thread_count_it_shares_out(monkeypatch):
     handles, which CPUThreadCount already respects."""
     from Tensile.TensileCreateLibrary import Run
 
+    # Standalone: no pytest-xdist workers or pod request shrinking the budget.
+    monkeypatch.delenv("PYTEST_XDIST_WORKER_COUNT", raising=False)
+    monkeypatch.delenv("KUBE_CPU_REQUEST", raising=False)
     monkeypatch.setattr(Run.os, "name", "nt")
     monkeypatch.setattr(Run.os, "cpu_count", lambda: 128)
 
     assert Run._cpuCount() == 61
+
+
+@pytest.mark.parametrize(
+    "affinity, workers, kube, budget",
+    [
+        (64, None, None, 64),  # standalone: every CPU, as before
+        (25, "4", None, 12),  # one of 4 pytest-xdist workers on 25 CPUs
+        (192, None, "25", 25),  # a pod that sees the whole node but requested 25
+    ],
+)
+def test_the_groups_share_the_pool_budget_of_one_process(
+    monkeypatch, affinity, workers, kube, budget
+):
+    """The groups build in place of this one process, so together they get what
+    CPUThreadCount would give it: under pytest-xdist or a pod's CPU request that
+    is less than the machine, and counting the machine would oversubscribe it."""
+    from Tensile.TensileCreateLibrary import Run
+
+    Parallel = importlib.import_module("Tensile.Common.Parallel")
+    monkeypatch.setattr(Parallel.os, "sched_getaffinity", lambda pid: set(range(affinity)))
+    monkeypatch.setattr(Parallel, "lokyCpuCount", lambda: affinity)
+    for name, value in (("PYTEST_XDIST_WORKER_COUNT", workers), ("KUBE_CPU_REQUEST", kube)):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+
+    assert Run._cpuCount() == budget
+    groups = [[GFX1250], [GFX1250_STRICT]]
+    assert Run._jobsPerGroup(-1, groups) == [budget // 2] * 2
+    assert Run._jobsPerGroup(100, groups) == [budget // 2] * 2
 
 
 def test_a_child_still_running_is_stopped_when_a_spawn_fails(monkeypatch):
