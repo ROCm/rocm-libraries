@@ -87,10 +87,29 @@ set_target_properties(rocalution-unit-test PROPERTIES
 
 set(ROCALUTION_UNIT_TEST_LABELS "quick;standard;comprehensive;full")
 
+# TheRock's test artifact includes bin/rocalution/** and bin/rocalution-test*,
+# and ctest runs from bin/rocalution. These binaries do not match
+# bin/rocalution-test*, so install them beside CTestTestfile.cmake. That is one
+# directory deeper than rocalution-test, so the RPATH gains an extra "..".
+function(rocalution_install_unit_test target)
+  # TheRock's post-configure hook rewrites INSTALL_RPATH for every executable
+  # as if it lived in bin/, unless it is told the real directory. Elsewhere these
+  # are the directories rocm_install gives rocalution-test, one level up.
+  set_property(TARGET ${target} PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
+    "${CMAKE_INSTALL_BINDIR}/rocalution")
+  set_property(TARGET ${target} PROPERTY INSTALL_RPATH
+    "$ORIGIN/../../lib"
+    "$ORIGIN/../../lib/${PROJECT_NAME}/lib")
+  install(
+    TARGETS ${target}
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/rocalution"
+    COMPONENT tests)
+endfunction()
+
 add_test(NAME rocalution-unit-test COMMAND rocalution-unit-test)
 set_tests_properties(rocalution-unit-test PROPERTIES LABELS "${ROCALUTION_UNIT_TEST_LABELS}" TIMEOUT 3600)
 
-rocm_install(TARGETS rocalution-unit-test COMPONENT tests)
+rocalution_install_unit_test(rocalution-unit-test)
 
 # Initialization and shutdown change process-wide state, so they are tested in
 # a separate executable without a global environment, one process per test
@@ -143,15 +162,15 @@ gtest_discover_tests(rocalution-unit-test-lifecycle
   PROPERTIES LABELS "${ROCALUTION_UNIT_TEST_LABELS}"
 )
 
-rocm_install(TARGETS rocalution-unit-test-lifecycle COMPONENT tests)
+rocalution_install_unit_test(rocalution-unit-test-lifecycle)
 
-# The installed CTestTestfile.cmake is in bin/rocalution, and the binaries are in bin.
+# The binaries are installed next to the installed CTestTestfile.cmake in bin/rocalution.
 # The lifecycle test names are only known after the build, so that binary runs as one test.
 if(ROCALUTION_CTEST_INSTALL_FILE)
   file(APPEND "${ROCALUTION_CTEST_INSTALL_FILE}"
-    "add_test(rocalution-unit-test \"../rocalution-unit-test\")\n"
+    "add_test(rocalution-unit-test \"./rocalution-unit-test\")\n"
     "set_tests_properties(rocalution-unit-test PROPERTIES LABELS \"${ROCALUTION_UNIT_TEST_LABELS}\" TIMEOUT 3600)\n"
-    "add_test(rocalution-unit-test-lifecycle \"../rocalution-unit-test-lifecycle\")\n"
+    "add_test(rocalution-unit-test-lifecycle \"./rocalution-unit-test-lifecycle\")\n"
     "set_tests_properties(rocalution-unit-test-lifecycle PROPERTIES LABELS \"${ROCALUTION_UNIT_TEST_LABELS}\" TIMEOUT 600)\n"
   )
 endif()

@@ -368,7 +368,7 @@ HIP+OpenMP), host (`--host`), and MPI (`--host --mpi=on --no-openmp`).
 | Validation Area | Required Before Merge | Owner | Notes |
 |---|---|---|---|
 | Build (HIP, host, static; MPI variant) | Yes | CI / DevOps | TheRock CI; Jenkins `precheckin`/`debug`/`staticlibrary` (legacy) |
-| Unit / host-backend tests | Yes | Component team | The host-backend runs of `rocalution-test` are in the CTest `standard` category (regression subset). The installed `CTestTestfile.cmake` runs both unit-test binaries in every category; the emulation variables do not apply to them |
+| Unit / host-backend tests | Yes | Component team | The host-backend runs of `rocalution-test` are in the CTest `standard` category (regression subset). Both unit-test binaries are installed next to the installed `CTestTestfile.cmake` in `bin/rocalution`, which runs them in every category; the emulation variables do not apply to them |
 | Integration tests | Yes | Component team | TheRock `standard` = regression subset (`ROCALUTION_EMULATION_REGRESSION=1`); legacy Jenkins runs the full suite (filter commented out) |
 | Formatting | Yes | CI / DevOps | Repo-wide `pre-commit` |
 | Static analysis | No (informational) | CI / DevOps | `clang-tidy`, `codeql`, Jenkins `staticanalysis.groovy` |
