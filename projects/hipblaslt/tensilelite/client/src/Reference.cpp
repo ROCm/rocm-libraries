@@ -50,7 +50,9 @@ namespace TensileLite
     {
 
         // Helper to load data from various source types into an AccumT buffer.
-        // Sub-float types go through float first since they lack operator AccumT().
+        // Sub-float types go through float first since they lack operator AccumT();
+        // integer types convert directly (exact for Int8 into int32_t, and the same
+        // conversion as the slow path's cast<> for Int32 into float).
         template <typename AccumT, typename SrcType>
         std::vector<AccumT> loadTo(void const* src, size_t N)
         {
@@ -58,7 +60,10 @@ namespace TensileLite
             const SrcType*      sPtr = static_cast<const SrcType*>(src);
             for(size_t i = 0; i < N; ++i)
             {
-                buffer[i] = static_cast<AccumT>(static_cast<float>(sPtr[i]));
+                if constexpr(std::is_integral_v<SrcType>)
+                    buffer[i] = static_cast<AccumT>(sPtr[i]);
+                else
+                    buffer[i] = static_cast<AccumT>(static_cast<float>(sPtr[i]));
             }
             return buffer;
         }
@@ -248,6 +253,21 @@ namespace TensileLite
                 else if(type == rocisa::DataType::BFloat8_fnuz)
                 {
                     m_storage = loadTo<AccumT, TensileLite::BFloat8_fnuz>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+                else if(type == rocisa::DataType::Int32)
+                {
+                    if constexpr(std::is_same_v<AccumT, int32_t>)
+                        m_ptr = static_cast<const int32_t*>(ptr);
+                    else
+                    {
+                        m_storage = loadTo<AccumT, int32_t>(ptr, N);
+                        m_ptr     = m_storage.data();
+                    }
+                }
+                else if(type == rocisa::DataType::Int8)
+                {
+                    m_storage = loadTo<AccumT, int8_t>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
 #ifndef _WIN32
@@ -1123,6 +1143,36 @@ namespace TensileLite
         }
 
 
+        uint64_t getInputContractionInputsTypeId(ContractionProblemGemm const& problem);
+
+        // Fast-path epilogue type for Int8 A/B: the slow path's Accumulator for the
+        // problem's TypedGemm_I8_* id (int32_t for int32 alpha/beta, float for float
+        // alpha/beta; see SolveCPUTemplates). The K loop is int32_t for all of them.
+        // None: not one of those type ids, so no fast-path instantiation.
+        enum class Int8FastPathEpilogue
+        {
+            None,
+            Int32,
+            Float
+        };
+
+        Int8FastPathEpilogue getInt8FastPathEpilogue(ContractionProblemGemm const& problem)
+        {
+            switch(getInputContractionInputsTypeId(problem))
+            {
+            case TypedGemm_I8_I8_I32::TypeId():
+            case TypedGemm_I8_I32_I32::TypeId():
+                return Int8FastPathEpilogue::Int32;
+            case TypedGemm_I8_I32_S::TypeId():
+            case TypedGemm_I8_I8_S::TypeId():
+            case TypedGemm_I8_H_S::TypeId():
+            case TypedGemm_I8_B_S::TypeId():
+                return Int8FastPathEpilogue::Float;
+            default:
+                return Int8FastPathEpilogue::None;
+            }
+        }
+
         bool isFastPathEligible(ContractionProblemGemm const& problem)
         {
 
@@ -1153,10 +1203,16 @@ namespace TensileLite
                 return false;
             };
 
-            if(!isSupportedInputType(problem.a().dataType())
-               || !isSupportedInputType(problem.b().dataType())
-               || !isSupportedOutputType(problem.c().dataType())
-               || !isSupportedOutputType(problem.d().dataType()))
+            // Int8 A or B: the types are checked against the slow path's Int8 type
+            // ids below (getInt8FastPathEpilogue).
+            const bool isInt8Input = problem.a().dataType() == rocisa::DataType::Int8
+                                     || problem.b().dataType() == rocisa::DataType::Int8;
+
+            if(!isInt8Input
+               && (!isSupportedInputType(problem.a().dataType())
+                   || !isSupportedInputType(problem.b().dataType())
+                   || !isSupportedOutputType(problem.c().dataType())
+                   || !isSupportedOutputType(problem.d().dataType())))
             {
                 std::string detail = "unsupported_type"
                     " A=" + TensileLite::ToString(problem.a().dataType())
@@ -1177,6 +1233,10 @@ namespace TensileLite
 
             if(mxBlockA > 0 || mxBlockB > 0)
             {
+                // MX block scaling needs a floating-point MAC type (solveCPUFast).
+                if(isInt8Input)
+                    return rejectFast("int8_mx");
+
                 // One-sided MX (only A or only B scaled) is not supported. The
                 // slow path's columnMajorGemm reference also rejects this case,
                 // so the two paths agree on what "MX" means.
@@ -1229,6 +1289,13 @@ namespace TensileLite
             if(problem.useE())
             {
                 return rejectFast("useE");
+            }
+
+            // After the useE check: with useE, getInputContractionInputsTypeId throws
+            // if the alpha and beta types differ.
+            if(isInt8Input && getInt8FastPathEpilogue(problem) == Int8FastPathEpilogue::None)
+            {
+                return rejectFast("unsupported_int8_type_combination");
             }
 
             if(problem.useScaleCD())
@@ -1399,19 +1466,33 @@ namespace TensileLite
             }
         }
 
+        // Fast-path write-back with the slow path's output cast, SaturateCast<DstType>
+        // (Int8 output: round half to even from float, then clamp to [-128, 127]).
+        template <typename AccumT, typename DstType>
+        void storeSaturateCast(void* dst, const std::vector<AccumT>& buffer, size_t N)
+        {
+            DstType* dPtr = static_cast<DstType*>(dst);
+            for(size_t i = 0; i < N; ++i)
+            {
+                dPtr[i] = SaturateCast<DstType>(buffer[i]);
+            }
+        }
+
         // Solve GEMM problems using efficient tiled CPU code.
         // This function assumes the problem is eligible for the fast path — callers
         // must check isFastPathEligible() first.
-        // AccumT: epilogue type (float or double). Alpha, beta, the ScaleAB and
-        // scaleAlphaVec scales, C, bias, activation and gate residual are applied in
-        // it, and D is written back from it.
+        // AccumT: epilogue type (float, double, or int32_t for Int8 inputs with int32
+        // alpha). Alpha, beta, the ScaleAB and scaleAlphaVec scales, C, bias,
+        // activation and gate residual are applied in it, and D is written back from it.
         // OperandMathOpT: per-operand math type used immediately before multiply.
         // XFloat32, for example, truncates float operands to a 10-bit mantissa.
         // Default matches AccumT; when it also matches MacT the operand cast is a no-op.
         // MacT: K-loop multiply-accumulate type. The A/B shadow copies, the tile
         // registers and the K-loop sums (including the MX block scaling) are in it;
         // each finished sum is converted to AccumT once, before the epilogue.
-        // Default matches AccumT, making that conversion a no-op.
+        // Default matches AccumT, making that conversion a no-op. An integer MacT
+        // (int32_t, Int8 inputs) makes the K loop exact, and the epilogue then follows
+        // the slow path's operation order (see slowPathEpilogueOrder below).
         template <typename AccumT = float, typename OperandMathOpT = AccumT, typename MacT = AccumT>
         void solveCPUFast(ContractionProblemGemm const& problem,
                           ContractionInputs const&      inputs)
@@ -1421,6 +1502,22 @@ namespace TensileLite
                 throw std::runtime_error(
                     "solveCPUFast called on an ineligible problem. "
                     "Callers must check isFastPathEligible() first.");
+            }
+
+            // Int8 inputs (integer MacT): the epilogue applies alpha, the ScaleAB
+            // scales, scaleAlphaVec, beta * C, bias, activation and the output cast in
+            // the slow path's order and types (ReferenceSolution<...>::SolveCPU), so D
+            // matches the slow path exactly, including round-half-to-even ties of the
+            // Int8 output cast. The other types keep the folded order below.
+            constexpr bool slowPathEpilogueOrder = std::is_integral_v<MacT>;
+
+            // MX block scaling is floating-point only; isFastPathEligible rejects MX
+            // with Int8 inputs, and the MX branch below is not compiled for them.
+            constexpr bool macSupportsMX = std::is_floating_point_v<MacT>;
+            if(!macSupportsMX && (problem.mxBlockA() > 0 || problem.mxBlockB() > 0))
+            {
+                throw std::runtime_error("solveCPUFast: MX block scaling needs a "
+                                         "floating-point MAC type.");
             }
 
             bool                doActivation = false;
@@ -1483,6 +1580,11 @@ namespace TensileLite
             {
                 ptrD = static_cast<AccumT*>(inputs.d);
             }
+            else if(problem.d().dataType() == rocisa::DataType::Int32
+                    && std::is_same_v<AccumT, int32_t>)
+            {
+                ptrD = static_cast<AccumT*>(inputs.d);
+            }
             else
             {
                 shadowD.resize(problem.d().totalAllocatedElements());
@@ -1508,6 +1610,8 @@ namespace TensileLite
             ScaleABMode          scaleABMode = ScaleABMode::None;
             ShadowBuffer<AccumT> shadowScaleA, shadowScaleB;
             AccumT               scaleABScalar = AccumT(1); // pre-multiplied scalar for Scalar mode
+            AccumT               scaleAScalar  = AccumT(1); // Scalar mode, slowPathEpilogueOrder
+            AccumT               scaleBScalar  = AccumT(1);
             {
                 std::string useScaleAB = problem.useScaleAB();
                 if(useScaleAB == "Vector")
@@ -1521,7 +1625,10 @@ namespace TensileLite
                     scaleABMode = ScaleABMode::Scalar;
                     ShadowBuffer<AccumT> tmpA(inputs.scaleA, problem.alphaType(), 1);
                     ShadowBuffer<AccumT> tmpB(inputs.scaleB, problem.alphaType(), 1);
-                    scaleABScalar = tmpA[0] * tmpB[0];
+                    scaleAScalar = tmpA[0];
+                    scaleBScalar = tmpB[0];
+                    if constexpr(!slowPathEpilogueOrder)
+                        scaleABScalar = scaleAScalar * scaleBScalar;
                 }
             }
 
@@ -1591,54 +1698,60 @@ namespace TensileLite
 
                         if(hasMX)
                         {
-                            // K divisibility follows from isFastPathEligible's MX checks.
-                            assert(sizeK % BLOCK_K == 0
-                                   && "MX fast path requires K divisible by BLOCK_K");
-                            for(size_t k = 0; k < kTiles; ++k)
+                            if constexpr(macSupportsMX)
                             {
-                                auto k0 = k * BLOCK_K;
-                                loadFastPathATile<BLOCK_M, BLOCK_K>(curBatchA,
-                                                                    aReg.data(),
-                                                                    m0,
-                                                                    k0,
-                                                                    sizeM,
-                                                                    sizeK,
-                                                                    strideMA,
-                                                                    strideKA);
-                                loadFastPathBTile<BLOCK_K, BLOCK_N>(curBatchB,
-                                                                    bReg.data(),
-                                                                    n0,
-                                                                    k0,
-                                                                    sizeN,
-                                                                    sizeK,
-                                                                    strideNB,
-                                                                    strideKB);
+                                // K divisibility follows from isFastPathEligible's MX checks.
+                                assert(sizeK % BLOCK_K == 0
+                                       && "MX fast path requires K divisible by BLOCK_K");
+                                for(size_t k = 0; k < kTiles; ++k)
+                                {
+                                    auto k0 = k * BLOCK_K;
+                                    loadFastPathATile<BLOCK_M, BLOCK_K>(curBatchA,
+                                                                        aReg.data(),
+                                                                        m0,
+                                                                        k0,
+                                                                        sizeM,
+                                                                        sizeK,
+                                                                        strideMA,
+                                                                        strideKA);
+                                    loadFastPathBTile<BLOCK_K, BLOCK_N>(curBatchB,
+                                                                        bReg.data(),
+                                                                        n0,
+                                                                        k0,
+                                                                        sizeN,
+                                                                        sizeK,
+                                                                        strideNB,
+                                                                        strideKB);
 
-                                std::array<MacT, BLOCK_M * BLOCK_N> tilePartial = {0};
-                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K, OperandMathOpT>(
-                                    aReg.data(), bReg.data(), tilePartial.data());
+                                    std::array<MacT, BLOCK_M * BLOCK_N> tilePartial = {0};
+                                    innerFastPathReduction<BLOCK_M,
+                                                           BLOCK_N,
+                                                           BLOCK_K,
+                                                           OperandMathOpT>(
+                                        aReg.data(), bReg.data(), tilePartial.data());
 
-                                size_t mxsaI
-                                    = (mxBlockA > 0) ? k0 / mxBlockA : 0;
-                                size_t mxsbI
-                                    = (mxBlockB > 0) ? k0 / mxBlockB : 0;
+                                    size_t mxsaI
+                                        = (mxBlockA > 0) ? k0 / mxBlockA : 0;
+                                    size_t mxsbI
+                                        = (mxBlockB > 0) ? k0 / mxBlockB : 0;
 
-                                accumulateMXScaledTile<BLOCK_M, BLOCK_N>(cReg.data(),
-                                                                         tilePartial.data(),
-                                                                         m0,
-                                                                         n0,
-                                                                         sizeM,
-                                                                         sizeN,
-                                                                         mxsaBatch,
-                                                                         mxsbBatch,
-                                                                         mxsaI,
-                                                                         mxsbI,
-                                                                         mxBlockA,
-                                                                         mxBlockB,
-                                                                         strideMxsaM,
-                                                                         strideMxsaBlk,
-                                                                         strideMxsbN,
-                                                                         strideMxsbBlk);
+                                    accumulateMXScaledTile<BLOCK_M, BLOCK_N>(cReg.data(),
+                                                                             tilePartial.data(),
+                                                                             m0,
+                                                                             n0,
+                                                                             sizeM,
+                                                                             sizeN,
+                                                                             mxsaBatch,
+                                                                             mxsbBatch,
+                                                                             mxsaI,
+                                                                             mxsbI,
+                                                                             mxBlockA,
+                                                                             mxBlockB,
+                                                                             strideMxsaM,
+                                                                             strideMxsaBlk,
+                                                                             strideMxsbN,
+                                                                             strideMxsbBlk);
+                                }
                             }
                         }
                         else
@@ -1705,26 +1818,52 @@ namespace TensileLite
                                     }
                                     else if(scaleABMode == ScaleABMode::Scalar)
                                     {
-                                        alpha *= scaleABScalar;
-                                    }
-                                    if(useScaleAlphaVec)
-                                    {
-                                        if(factorDim == 1)
+                                        if constexpr(slowPathEpilogueOrder)
                                         {
-                                            alpha *= shadowAlphaVec[global_n];
+                                            alpha *= scaleAScalar;
+                                            alpha *= scaleBScalar;
                                         }
                                         else
                                         {
-                                            alpha *= shadowAlphaVec[global_m];
+                                            alpha *= scaleABScalar;
                                         }
                                     }
-                                    if(beta != AccumT(0))
+                                    if constexpr(slowPathEpilogueOrder)
                                     {
-                                        current = (alpha * current) + (beta * startingC);
+                                        // Slow path: (alpha * sum) * scaleAlphaVec + beta * C,
+                                        // each step rounded on its own.
+                                        current = alpha * current;
+                                        if(useScaleAlphaVec)
+                                        {
+                                            current *= shadowAlphaVec[factorDim == 1 ? global_n
+                                                                                     : global_m];
+                                        }
+                                        if(beta != AccumT(0))
+                                        {
+                                            current += beta * startingC;
+                                        }
                                     }
                                     else
                                     {
-                                        current = (alpha * current);
+                                        if(useScaleAlphaVec)
+                                        {
+                                            if(factorDim == 1)
+                                            {
+                                                alpha *= shadowAlphaVec[global_n];
+                                            }
+                                            else
+                                            {
+                                                alpha *= shadowAlphaVec[global_m];
+                                            }
+                                        }
+                                        if(beta != AccumT(0))
+                                        {
+                                            current = (alpha * current) + (beta * startingC);
+                                        }
+                                        else
+                                        {
+                                            current = (alpha * current);
+                                        }
                                     }
 
                                     bool                 aConjugate = false;
@@ -1809,6 +1948,18 @@ namespace TensileLite
             else if(problem.d().dataType() == rocisa::DataType::BFloat16)
             {
                 storeFrom<AccumT, TensileLite::BFloat16>(
+                    inputs.d, shadowD, problem.d().totalAllocatedElements());
+            }
+            else if(problem.d().dataType() == rocisa::DataType::Int8)
+            {
+                storeSaturateCast<AccumT, int8_t>(
+                    inputs.d, shadowD, problem.d().totalAllocatedElements());
+            }
+            else if(problem.d().dataType() == rocisa::DataType::Int32
+                    && !std::is_same_v<AccumT, int32_t>)
+            {
+                // float epilogue (I8_I32_S); an int32_t epilogue wrote D directly.
+                storeSaturateCast<AccumT, int32_t>(
                     inputs.d, shadowD, problem.d().totalAllocatedElements());
             }
 
@@ -3267,7 +3418,16 @@ namespace TensileLite
             {
                 ScopedTimer timer(solveCpuFastCategory());
                 bool isDouble = (problem.d().dataType() == rocisa::DataType::Double);
-                if(isDouble)
+                bool isInt8   = (problem.a().dataType() == rocisa::DataType::Int8);
+                if(isInt8)
+                {
+                    // Exact int32_t K loop; epilogue in the slow path's accumulator type.
+                    if(getInt8FastPathEpilogue(problem) == Int8FastPathEpilogue::Int32)
+                        solveCPUFast<int32_t, int32_t, int32_t>(problem, inputs);
+                    else
+                        solveCPUFast<float, int32_t, int32_t>(problem, inputs);
+                }
+                else if(isDouble)
                     solveCPUFast<double>(problem, inputs);
                 else if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
                     solveCPUFast<float, XFloat32>(problem, inputs);

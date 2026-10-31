@@ -62,8 +62,11 @@
  * # BF16 run with validation enabled
  * ./cpu_gemm_driver --type bf16 --M 512 --N 512 --K 256 --validate 1
  *
- * # Int8 inputs, Int8 output, float alpha/beta (slow path)
+ * # Int8 inputs, Int8 output, float alpha/beta
  * ./cpu_gemm_driver --type i8 --typeCD i8 --typeAlpha f32 --alpha 0.001953125 --validate
+ *
+ * # Int8 inputs, Int8 output, int32 alpha/beta, A/B in [-3, 3] (mostly unsaturated D)
+ * ./cpu_gemm_driver --type i8 --typeCD i8 --int8Min -3 --int8Max 3 --validate --tryFastPath
  *
  * # Benchmark mode (validation disabled)
  * ./cpu_gemm_driver --M 2048 --N 2048 --K 2048 --validate 0 --tryFastPath 1
@@ -500,7 +503,9 @@ int runGemm(size_t         m,
             int                mxBlockB      = 0,
             size_t             batchCount    = 1,
             bool               isTF32        = false,
-            bool               outputAmaxD   = false)
+            bool               outputAmaxD   = false,
+            int                int8Min       = -128,
+            int                int8Max       = 127)
 {
     if(batchCount == 0)
     {
@@ -664,8 +669,9 @@ int runGemm(size_t         m,
     // For FP4 with mxBlockA/B>0 (mxfp4), inputs are drawn from the discrete
     // E2M1-representable value set so the MX-scale logic is exercised.
     //
-    // Int8 inputs are drawn from the full range [-128, 127], so the integer
-    // accumulation, large sums and saturating Int8 output are exercised.
+    // Int8 inputs are drawn from [int8Min, int8Max], by default the full range
+    // [-128, 127], so the integer accumulation, large sums and saturating Int8
+    // output are exercised. A narrower range keeps most Int8 outputs in range.
     size_t                                seed = 42;
     std::mt19937                          gen(seed);
     std::uniform_int_distribution<>       binary_distribution(0, 1);
@@ -726,7 +732,7 @@ int runGemm(size_t         m,
 #endif
             if constexpr(std::is_same_v<T, int8_t>)
             {
-                std::uniform_int_distribution<int> int8Dist(-128, 127);
+                std::uniform_int_distribution<int> int8Dist(int8Min, int8Max);
                 std::generate(vec.begin(), vec.end(),
                               [&]() { return static_cast<T>(int8Dist(gen)); });
             }
@@ -1162,7 +1168,9 @@ int main(int argc, char* argv[])
         "mxBlockA", po::value<int>()->default_value(0), "MX block size for the A side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together)")(
         "mxBlockB", po::value<int>()->default_value(0), "MX block size for the B side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together)")(
         "batchCount", po::value<size_t>()->default_value(1), "Batch count (default 1)")(
-        "outputAmaxD", po::value<bool>()->default_value(false), "Also output AMAX-D (max |D|) and validate it against the golden GEMM");
+        "outputAmaxD", po::value<bool>()->default_value(false), "Also output AMAX-D (max |D|) and validate it against the golden GEMM")(
+        "int8Min", po::value<int>()->default_value(-128), "Smallest i8 A/B value (i8 inputs only; default -128)")(
+        "int8Max", po::value<int>()->default_value(127), "Largest i8 A/B value (i8 inputs only; default 127)");
 
     po::variables_map vm;
     try
@@ -1237,6 +1245,8 @@ int main(int argc, char* argv[])
     int         mxBlockB                 = vm["mxBlockB"].as<int>();
     size_t      batchCount               = vm["batchCount"].as<size_t>();
     bool        outputAmaxD              = vm["outputAmaxD"].as<bool>();
+    int         int8Min                  = vm["int8Min"].as<int>();
+    int         int8Max                  = vm["int8Max"].as<int>();
     const bool  typeAIsTF32              = (typeAStr == "tf32");
     const bool  typeBIsTF32              = (typeBStr == "tf32");
     const bool  isTF32                   = typeAIsTF32 && typeBIsTF32;
@@ -1265,6 +1275,13 @@ int main(int argc, char* argv[])
     if(isInt8 && (computeInputAStr != "i8" || computeInputBStr != "i8"))
     {
         std::cerr << "Error: i8 inputs do not support a computeInput override" << std::endl;
+        return 1;
+    }
+    const bool isFullInt8Range = (int8Min == -128 && int8Max == 127);
+    if(isInt8 ? !(-128 <= int8Min && int8Min <= int8Max && int8Max <= 127) : !isFullInt8Range)
+    {
+        std::cerr << "Error: --int8Min/--int8Max need i8 inputs and -128 <= int8Min <= int8Max"
+                  << " <= 127 (int8Min=" << int8Min << ", int8Max=" << int8Max << ")" << std::endl;
         return 1;
     }
 
@@ -1382,7 +1399,7 @@ int main(int argc, char* argv[])
             validate, injectValidationFailure, tryFastPath,
             useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
             computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount, isTF32,
-            outputAmaxD);
+            outputAmaxD, int8Min, int8Max);
     };
 
     auto dispatchB = [&](auto aTag) -> int {
