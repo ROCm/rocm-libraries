@@ -30,6 +30,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   the 2 GiB bound are restored where the tuned config passes the new check. This restores
   ResNet-50/101 FP32 batch-1024 backward-weights speed. FP16/BF16 keep the 2 GiB bound, and so
   does the weight tensor in every case.
+* [FP8] Fixed wrong FP8 and BF8 results on gfx942 from a library built for several targets that
+  include gfx950 or gfx12 ([#14375](https://github.com/ROCm/rocm-libraries/issues/14375)). The
+  FP8 exponent bias was picked once at build time from `GPU_TARGETS`. MIOpen now picks it at run
+  time from the device: the IEEE bias on gfx950 and gfx12, the FNUZ bias everywhere else.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
@@ -50,6 +54,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Removed
 * Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
 * Removed `miopenAlphaBetaCase_t` and its unprefixed enumerators `DEFAULT`, `SCALE`, `BILINEAR` and `ERROR_STATE` from `miopen.h` (source-level only, ABI-neutral).
+* Removed the `MIOPEN_FP8_IEEE_EXPONENT_BIAS` CMake option and its `config.h` define. The FP8
+  exponent bias now follows the device at run time.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
