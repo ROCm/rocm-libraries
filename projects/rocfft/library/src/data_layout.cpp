@@ -568,6 +568,15 @@ std::optional<data_layout_t>
                                     + ROCFFT_CURRENT_FUNCTION);
     }
 
+    // a Hermitian innermost length of 1 can only come from a real innermost length of 1
+    if(is_real_domain(fft_type, other_io) && (*this)[0].logical_span() == 1
+       && !other_innermost_length_is_odd)
+    {
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                    + " requires an odd real innermost length for a Hermitian"
+                                      " innermost length of 1.");
+    }
+
     // real transform: unit stride is required along the innermost axis
     if((*this)[0].logical_span() > 1 && (*this)[0].inbuffer_stride != 1)
         return std::nullopt;
