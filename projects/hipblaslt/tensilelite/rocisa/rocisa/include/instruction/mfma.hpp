@@ -172,8 +172,8 @@ namespace rocisa
         }
 
         // gfx1250 K=128 FP8/BF8 uses the dedicated v_wmma_*_16x16x128_{fp8,bf8}_{fp8,bf8}
-        // opcodes instead of f8f6f4. They are absent on gfx1250 (gfx1250v0), so the
-        // strict/v0 builds (forceScaledWMMA toggle) keep the scaled f8f6f4 form.
+        // opcodes instead of f8f6f4. The f32 ones are absent on gfx1250v0, so the strict/v0
+        // builds (forceScaledWMMA toggle) keep the scaled f8f6f4 form for f32 accumulation.
         bool useNativeFp8WMMA() const
         {
             return capOrDefault(getAsmCaps(), "HasWMMA_V3") && variant[2] == 128
@@ -184,7 +184,9 @@ namespace rocisa
         {
             size_t f8f6f4_k = capOrDefault(getAsmCaps(), "HasWMMA_V3") ? 128 : 64;
             size_t f4_t     = capOrDefault(getAsmCaps(), "HasWMMA_V3") ? 32 : 0;
-            bool   useF8f6f4 = (variant[2] >= f8f6f4_k) && !useNativeFp8WMMA();
+            // f8f6f4 has no f16-accumulate form; f16 accumulation keeps the fp8/bf8 opcodes.
+            bool   useF8f6f4 = (variant[2] >= f8f6f4_k) && !useNativeFp8WMMA()
+                             && (accType != InstType::INST_F16);
 
             switch(iType)
             {
@@ -510,6 +512,10 @@ namespace rocisa
                     break;
                 default:
                     break;
+                }
+                if(typeConvert(instType) != "f8f6f4")
+                {
+                    inputPermuteStr = "";
                 }
                 if(forceScaledWMMA())
                 {

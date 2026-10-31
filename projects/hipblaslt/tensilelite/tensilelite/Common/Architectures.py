@@ -252,8 +252,12 @@ ARCH_CAP_OVERRIDES = {
     "gfx1250-strict": {
         "asmCaps": {
             "HasWMMA_f4_32x16": False,  # no fp4 32x16 WMMA opcode
+            # The dedicated 16x16x128 fp8 / bf8 WMMA: the f32 form is absent (rocisa keeps the scaled f8f6f4
+            # form) and the f16-accumulate form gives wrong results on this hardware.
+            "HasWMMA_fp8_16x16x128": False,
         },
         "archCaps": {
+            "HasCvtScalePk8FP4": False,  # no v_cvt_scale_pk8_*_fp4 (block16-cvt-scale-insts)
             "HasTDMMulticast": False,
             # RequiresXCntForVolatileVMEM is deliberately absent: gfx1250-strict
             # still needs the XNACK-replay xcnt drain, so it inherits the probed True.

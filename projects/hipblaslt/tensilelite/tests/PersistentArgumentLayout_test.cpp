@@ -203,6 +203,37 @@ TEST(PersistentArgumentLayout, DataParallelV1PayloadChangesOnlySchedulingSlots)
     }
 }
 
+TEST(PersistentArgumentLayout, HalfAlphaAndBetaEachFillOnePackedSlot)
+{
+    for(int outer : {0, 3})
+    {
+        SCOPED_TRACE(outer);
+        ContractionSolution solution;
+        configurePersistentSolution(solution, outer, 0);
+        auto problem = persistentProblem();
+        problem.setAlphaType(rocisa::DataType::Half);
+        problem.setBetaType(rocisa::DataType::Half);
+        auto device = persistentDevice();
+        auto call = solution.generateSingleCall<true>(
+            problem, persistentInputs(), device, solution.resolvePersistentSettings(problem, device), GSUSettings{});
+        auto const& args = call.args;
+        EXPECT_FLOAT_EQ(static_cast<float>(value<Half>(args, "alpha")), 2.5f);
+        EXPECT_FLOAT_EQ(static_cast<float>(value<Half>(args, "alpha_2")), 2.5f);
+        EXPECT_FLOAT_EQ(static_cast<float>(value<Half>(args, "beta")), -1.25f);
+        EXPECT_FLOAT_EQ(static_cast<float>(value<Half>(args, "beta_2")), -1.25f);
+        EXPECT_EQ(offset(args, "alpha_2"), offset(args, "alpha") + 2);
+        EXPECT_EQ(offset(args, "beta"), offset(args, "alpha") + 4);
+        EXPECT_EQ(offset(args, "beta_2"), offset(args, "beta") + 2);
+
+        auto zeroInputs = persistentInputs(-0.0f);
+        zeroInputs.beta = -0.0f;
+        auto zeroCall = solution.generateSingleCall<true>(
+            problem, zeroInputs, device, solution.resolvePersistentSettings(problem, device), GSUSettings{});
+        auto start = offset(zeroCall.args, "alpha");
+        EXPECT_EQ(bytes(zeroCall.args, start, start + 8), std::vector<uint8_t>(8, 0));
+    }
+}
+
 TEST(PersistentArgumentLayout, FullTileIterationsAndCoverageIncludeBatchesAndZeroK)
 {
     for(auto [m, n, k, batches, grid] : std::vector<std::tuple<size_t, size_t, size_t, size_t, size_t>>{
@@ -848,6 +879,19 @@ TEST(PersistentArgumentLayout, UnevenStaticSplitsStayInsideTheirOutputBlocks)
             problem, clusterInputs(), device, launch, GSUSettings{});
         const bool active = value<uint32_t>(call.args, "magicShiftItersPerTile") & 0x20000000u;
         ASSERT_EQ(active, capability && test.active);
+        // The f16-accumulation reference, which rejects StreamK clusters, re-derives each launch's K order
+        // from launchSummationOrder.
+        if(!clustered)
+        {
+            // calculateTiles reads the macro tile from the kernel record a generated solution carries.
+            solution.customKernel.macrotile.x = solution.sizeMapping.macroTile.x;
+            solution.customKernel.macrotile.y = solution.sizeMapping.macroTile.y;
+            const auto order = solution.launchSummationOrder(problem, device);
+            if(order.persistent == ContractionSolution::LaunchSummationOrder::Persistent::StreamK)
+                EXPECT_EQ(order.perTileExtraIters, active);
+            else
+                EXPECT_TRUE(test.uniform || !active);
+        }
         if(!active)
             continue;
         const size_t blocks = clustered ? launch.clusterSchedule.blocks : launch.totalTiles;

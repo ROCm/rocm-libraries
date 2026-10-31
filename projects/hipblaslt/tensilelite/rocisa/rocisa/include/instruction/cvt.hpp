@@ -882,4 +882,55 @@ namespace rocisa
             return std::make_shared<VCvtScalePk8F32toBF8>(*this);
         }
     };
+
+    // The scale operand holds E8M0 bytes (0x7f is 1.0); lanes 0-15 read byte 0 and lanes 16-31 byte 1.
+    struct VCvtScalePk8FP4toF16 : public VCvtInstruction
+    {
+        VCvtScalePk8FP4toF16(const std::shared_ptr<RegisterContainer>& dst,
+                             const std::shared_ptr<Container>&         src,
+                             const InstructionInput&                   scale,
+                             std::optional<SDWAModifiers>              sdwa    = std::nullopt,
+                             std::optional<VOP3PModifiers>             vop3    = std::nullopt,
+                             const std::string&                        comment = "")
+            : VCvtInstruction(
+                CvtType::CVT_SCALE_PK8_F16_FP4, dst, {src, scale}, sdwa, vop3, comment)
+        {
+            setInst("v_cvt_scale_pk8_f16_fp4");
+        }
+
+        VCvtScalePk8FP4toF16(const VCvtScalePk8FP4toF16& other)
+            : VCvtInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCvtScalePk8FP4toF16>(*this);
+        }
+    };
+
+    struct VCvtScalePk8F16toFP8 : public VCvtInstruction
+    {
+        VCvtScalePk8F16toFP8(const std::shared_ptr<RegisterContainer>& dst,
+                             const std::shared_ptr<Container>&         src,
+                             const InstructionInput&                   scale,
+                             std::optional<SDWAModifiers>              sdwa    = std::nullopt,
+                             std::optional<VOP3PModifiers>             vop3    = std::nullopt,
+                             const std::string&                        comment = "")
+            : VCvtInstruction(
+                CvtType::CVT_SCALEF32_PK8_FP8_F16, dst, {src, scale}, sdwa, vop3, comment)
+        {
+            setInst("v_cvt_scalef32_pk8_fp8_f16");
+        }
+
+        VCvtScalePk8F16toFP8(const VCvtScalePk8F16toFP8& other)
+            : VCvtInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCvtScalePk8F16toFP8>(*this);
+        }
+    };
 } // namespace rocisa

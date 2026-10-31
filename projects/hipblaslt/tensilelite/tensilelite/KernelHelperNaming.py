@@ -28,6 +28,7 @@ from copy import deepcopy
 from enum import IntEnum
 
 from .Common.GlobalParameters import internalParameters
+from .SolutionStructs.Problem import isF16Accumulation
 from .KernelWriterBetaOnly import KernelWriterBetaOnly
 from .KernelWriterConversion import KernelWriterConversion
 from .KernelWriterActivationEnumHeader import KernelWriterActivationEnumHeader
@@ -49,6 +50,9 @@ def conversionKernelNames(solution):
   # e.g. usebias got set to zero if gradient which changes behavior of name function.
   conversionKernelNames = []
   loadVectorWidth = [1, 2] if solution["ProblemType"]["DataType"].isDouble() else [1, 2, 4]
+  if isF16Accumulation(solution["ProblemType"]):
+    # initConversionKernelObjects builds the same list
+    loadVectorWidth = [1, 2, 4, 8]
   gsuList = [internalParameters["GlobalSplitUPGR"]]
   if solution["GlobalSplitUAlgorithm"] == "AtomicDest":
     # The GSU slices already produced the final D in place.
@@ -161,6 +165,9 @@ def initConversionKernelObjects(solution, isaInfoMap):
   conversionKernelObjects = []
   loadVectorWidth = [1] if solution["ProblemType"]["DataType"].numBytes() > 8 else \
     [1, 2] if solution["ProblemType"]["DataType"].numBytes() > 4 else [1, 2, 4]
+  if isF16Accumulation(solution["ProblemType"]):
+    # conversionKernelNames builds the same list; the host picks VW8 only for f16 accumulation
+    loadVectorWidth = [1, 2, 4, 8]
   genPGRPostKernels = True
   gsuList = [internalParameters["GlobalSplitUPGR"]]
   if solution["GlobalSplitUAlgorithm"] == "AtomicDest":
