@@ -109,11 +109,11 @@ The following table lists all operations currently supported in the CPU Referenc
 
 | Operation Type | Plan Builder | Signature Key | Supported Operations |
 |----------------|-------------|---------------|---------------------|
-| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD |
-| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, MAX, MIN, CMP_GT, RELU_BWD, SIGMOID_BWD, TANH_BWD |
+| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD, IDENTITY, EXP, LOG, SQRT, RSQRT, RECIPROCAL, SIN, TAN, ERF, CEIL, FLOOR, ELU_FWD, SOFTPLUS_FWD, LOGICAL_NOT (BOOLEAN only), GEN_INDEX (FLOAT/HALF/BFLOAT16/INT32 output) |
+| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, DIV, ADD_SQUARE, MAX, MIN, CMP_EQ, CMP_NEQ, CMP_GT, CMP_GE, CMP_LT, CMP_LE, LOGICAL_AND (BOOLEAN only), LOGICAL_OR (BOOLEAN only), RELU_BWD, SIGMOID_BWD, TANH_BWD, GELU_BWD, GELU_APPROX_TANH_BWD, SWISH_BWD, ELU_BWD, SOFTPLUS_BWD |
 | Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | BINARY_SELECT (BOOLEAN mask) |
 
-`CMP_GT` outputs must have their tensor data type explicitly set to `BOOLEAN`; generic
+`CMP_*` outputs must have their tensor data type explicitly set to `BOOLEAN`; generic
 pointwise output inference otherwise uses the graph's intermediate data type.
 
 ## Operation Restrictions

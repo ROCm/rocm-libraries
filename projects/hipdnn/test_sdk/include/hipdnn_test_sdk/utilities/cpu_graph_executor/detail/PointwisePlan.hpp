@@ -33,7 +33,8 @@ struct PointwiseParams
         std::optional<float> reluLowerClipSlopeLocal,
         std::optional<float> swishBetaLocal,
         std::optional<float> eluAlphaLocal,
-        std::optional<float> softplusBetaLocal)
+        std::optional<float> softplusBetaLocal,
+        std::optional<int64_t> axisLocal = std::nullopt)
         : in0Tensor(unpackTensorAttributes(in0Attributes))
         , out0Tensor(unpackTensorAttributes(out0Attributes))
         , mode(pointwiseMode)
@@ -43,6 +44,7 @@ struct PointwiseParams
         , swishBeta(swishBetaLocal)
         , eluAlpha(eluAlphaLocal)
         , softplusBeta(softplusBetaLocal)
+        , axis(axisLocal)
     {
         if(optionalIn1Attributes != nullptr)
         {
@@ -66,6 +68,7 @@ struct PointwiseParams
     std::optional<float> swishBeta;
     std::optional<float> eluAlpha;
     std::optional<float> softplusBeta;
+    std::optional<int64_t> axis;
 };
 
 template <typename Input0Type, typename Input1Type, typename Input2Type, typename OutputType>
@@ -85,7 +88,8 @@ public:
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
         if(_params.reluLowerClip.has_value() || _params.reluUpperClip.has_value()
-           || _params.reluLowerClipSlope.has_value() || _params.swishBeta.has_value())
+           || _params.reluLowerClipSlope.has_value() || _params.swishBeta.has_value()
+           || _params.eluAlpha.has_value() || _params.softplusBeta.has_value())
         {
             executeParameterized(variantPack);
         }
@@ -104,7 +108,17 @@ private:
         auto shallowOut0Tensor = createShallowTensor<OutputType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
 
-        if(hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(_params.mode))
+        if(_params.mode == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX)
+        {
+            if(!_params.axis.has_value())
+            {
+                throw std::runtime_error("GEN_INDEX requires an axis");
+            }
+
+            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
+                _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, _params.axis.value());
+        }
+        else if(hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(_params.mode))
         {
             utilities::CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
                 _params.mode, *shallowOut0Tensor, *shallowIn0Tensor);
@@ -175,7 +189,9 @@ private:
                 _params.reluUpperClip.has_value() ? _params.reluUpperClip.value()
                                                   : std::numeric_limits<float>::max(),
                 _params.reluLowerClipSlope.has_value() ? _params.reluLowerClipSlope.value() : 0.0f,
-                _params.swishBeta.has_value() ? _params.swishBeta.value() : 1.0f);
+                _params.swishBeta.has_value() ? _params.swishBeta.value() : 1.0f,
+                _params.eluAlpha.has_value() ? _params.eluAlpha.value() : 1.0f,
+                _params.softplusBeta.has_value() ? _params.softplusBeta.value() : 1.0f);
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(_params.mode))
         {
@@ -197,7 +213,10 @@ private:
                     _params.reluUpperClip.has_value() ? _params.reluUpperClip.value()
                                                       : std::numeric_limits<float>::max(),
                     _params.reluLowerClipSlope.has_value() ? _params.reluLowerClipSlope.value()
-                                                           : 0.0f);
+                                                           : 0.0f,
+                    _params.swishBeta.has_value() ? _params.swishBeta.value() : 1.0f,
+                    _params.eluAlpha.has_value() ? _params.eluAlpha.value() : 1.0f,
+                    _params.softplusBeta.has_value() ? _params.softplusBeta.value() : 1.0f);
         }
         else
         {
@@ -325,10 +344,36 @@ public:
                                      "in PointwisePlanBuilder for the Cpu Graph Executor");
         }
 
-        if(nodeAttributes->elu_alpha().has_value() || nodeAttributes->softplus_beta().has_value())
+        using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+        if(nodeAttributes->elu_alpha().has_value()
+           && nodeAttributes->operation() != PointwiseMode::ELU_FWD
+           && nodeAttributes->operation() != PointwiseMode::ELU_BWD)
         {
-            throw std::runtime_error("ELU and Softplus parameters are not supported "
-                                     "in PointwisePlanBuilder for the Cpu Graph Executor yet");
+            throw std::runtime_error("elu_alpha is only supported for ELU_FWD and ELU_BWD in "
+                                     "PointwisePlanBuilder for the Cpu Graph Executor");
+        }
+
+        if(nodeAttributes->softplus_beta().has_value()
+           && nodeAttributes->operation() != PointwiseMode::SOFTPLUS_FWD
+           && nodeAttributes->operation() != PointwiseMode::SOFTPLUS_BWD)
+        {
+            throw std::runtime_error(
+                "softplus_beta is only supported for SOFTPLUS_FWD and SOFTPLUS_BWD in "
+                "PointwisePlanBuilder for the Cpu Graph Executor");
+        }
+
+        if(nodeAttributes->operation() == PointwiseMode::GEN_INDEX
+           && !nodeAttributes->axis_tensor_uid().has_value())
+        {
+            throw std::runtime_error("GEN_INDEX requires an axis in "
+                                     "PointwisePlanBuilder for the Cpu Graph Executor");
+        }
+
+        if(nodeAttributes->operation() != PointwiseMode::GEN_INDEX
+           && nodeAttributes->axis_tensor_uid().has_value())
+        {
+            throw std::runtime_error("axis is only supported for GEN_INDEX in "
+                                     "PointwisePlanBuilder for the Cpu Graph Executor");
         }
 
         return std::make_unique<PointwisePlan<Input0Type, Input1Type, Input2Type, OutputType>>(
@@ -342,7 +387,8 @@ public:
                             nodeAttributes->relu_lower_clip_slope(),
                             nodeAttributes->swish_beta(),
                             nodeAttributes->elu_alpha(),
-                            nodeAttributes->softplus_beta()));
+                            nodeAttributes->softplus_beta(),
+                            nodeAttributes->axis_tensor_uid()));
     }
 };
 
