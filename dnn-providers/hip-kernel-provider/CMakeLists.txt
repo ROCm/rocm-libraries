@@ -111,9 +111,27 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     # while looking like an upgrade.
     option(HIP_FLASH2_BUILD_VARIANTS "Regenerate the Flash2 kernel variant .co files" OFF)
     if(HIP_FLASH2_BUILD_VARIANTS)
-        find_program(HIP_FLASH2_HIPCC hipcc HINTS ${ROCM_PATH}/bin /opt/rocm/bin)
-        if(NOT HIP_FLASH2_HIPCC)
-            message(FATAL_ERROR "HIP_FLASH2_BUILD_VARIANTS=ON but hipcc was not found")
+        # Use the HIP compiler directly instead of hipcc.
+        if(CMAKE_HIP_COMPILER)
+            set(HIP_FLASH2_COMPILER "${CMAKE_HIP_COMPILER}")
+        else()
+            set(HIP_FLASH2_COMPILER "${CMAKE_CXX_COMPILER}")
+        endif()
+        if(NOT HIP_FLASH2_COMPILER)
+            message(FATAL_ERROR "HIP_FLASH2_BUILD_VARIANTS=ON but no HIP compiler was found")
+        endif()
+        # Derive hip-path and device-lib-path for the compiler.
+        if(hip_DIR)
+            get_filename_component(_f2_hip_path "${hip_DIR}/../../.." ABSOLUTE)
+        else()
+            set(_f2_hip_path "")
+        endif()
+        get_filename_component(_f2_compiler_dir "${HIP_FLASH2_COMPILER}" DIRECTORY)
+        set(_f2_device_lib_candidate "${_f2_compiler_dir}/../amdgcn/bitcode")
+        if(IS_DIRECTORY "${_f2_device_lib_candidate}")
+            get_filename_component(_f2_device_lib_path "${_f2_device_lib_candidate}" ABSOLUTE)
+        else()
+            set(_f2_device_lib_path "")
         endif()
 
         # Respect GPU_TARGETS rather than hardcoding gfx942: hardcoding both the
@@ -152,8 +170,10 @@ if(ENABLE_HIP_FLASH2_ENGINE)
             set(_co ${_f2_out}/hip_flash2_fwd_${_f2_arch}_${_tag}.co)
             add_custom_command(
                 OUTPUT ${_co}
-                COMMAND ${HIP_FLASH2_HIPCC} --genco -O3 -std=c++17
-                        --offload-arch=${_f2_arch}
+                COMMAND ${HIP_FLASH2_COMPILER} --offload-device-only -x hip
+                        -O3 -std=c++17 --offload-arch=${_f2_arch}
+                        "$<$<BOOL:${_f2_hip_path}>:--hip-path=${_f2_hip_path}>"
+                        "$<$<BOOL:${_f2_device_lib_path}>:--hip-device-lib-path=${_f2_device_lib_path}>"
                         -DF2_WAVES=${_waves} -DF2_QG=${_qg} -DF2_KG=${_kg}
                         ${_f2_src} -o ${_co}
                 DEPENDS ${_f2_src}

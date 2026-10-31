@@ -82,7 +82,7 @@ endfunction()
 #   Elsewhere in this repo a gfxNNX-style label is a selector matched against a
 #   concrete arch (shared/ctest/parse_test_categories.py,
 #   test/therock/test_runner.py, .github/scripts/amdgpu_family_matrix.py); here
-#   the value reaches hipcc's --offload-arch, where a family name is unusable
+#   the value reaches --offload-arch, where a family name is unusable
 #   rather than coarse. Hence drop-with-warning, not passthrough, and no
 #   family-to-arch expansion table.
 # ---------------------------------------------------------------------------
@@ -106,7 +106,7 @@ function(hkp_selected_arches out_var)
         if(NOT _bare MATCHES "^gfx[0-9a-f]+$")
             message(WARNING
                 "hkp: ignoring '${_arch}' from ${_source}; it is not a concrete gfx "
-                "architecture and cannot be passed to hipcc --offload-arch. Nothing "
+                "architecture and cannot be passed to --offload-arch. Nothing "
                 "is packed for it. Name real gfx architectures in ${_source} to pack "
                 "for them.")
             continue()
@@ -140,7 +140,8 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 # hkp_wire_pack_step(STAMP <file> SOURCE_ROOT <dir> OUT_ROOT <dir>
-#                    INTER_ROOT <dir> ARCHES <list> HIPCC <path>
+#                    INTER_ROOT <dir> ARCHES <list> HIP_COMPILER <path>
+#                    HIP_PATH <path> DEVICE_LIB_PATH <path>
 #                    ROCM_KPACK_DIR <dir> INTERP <path> WHAT <string>
 #                    [GROUP <name>] [INTERP_DEP <path>] [WHEEL_STAMP <path>]
 #                    [TOOL_ENV <list>] [COMMENT <string>]
@@ -164,7 +165,8 @@ endfunction()
 #   COMMENT is the build-progress line.
 # ---------------------------------------------------------------------------
 function(hkp_wire_pack_step)
-    set(_one STAMP SOURCE_ROOT OUT_ROOT INTER_ROOT HIPCC ROCM_KPACK_DIR INTERP
+    set(_one STAMP SOURCE_ROOT OUT_ROOT INTER_ROOT HIP_COMPILER HIP_PATH
+        DEVICE_LIB_PATH ROCM_KPACK_DIR INTERP
         WHAT GROUP INTERP_DEP WHEEL_STAMP COMMENT STAGE_ROOT)
     set(_multi ARCHES TOOL_ENV)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "${_multi}")
@@ -211,7 +213,9 @@ function(hkp_wire_pack_step)
                 --source-root "${ARG_SOURCE_ROOT}"
                 --out-root "${ARG_OUT_ROOT}"
                 --arches "${_arch_csv}"
-                --hipcc "${ARG_HIPCC}"
+                --hip-compiler "${ARG_HIP_COMPILER}"
+                --hip-path "${ARG_HIP_PATH}"
+                --hip-device-lib-path "${ARG_DEVICE_LIB_PATH}"
                 --inter-root "${ARG_INTER_ROOT}"
                 --kpack-python-dir "${ARG_ROCM_KPACK_DIR}"
                 ${_wheel_stamp_arg} ${_group_arg}
@@ -296,7 +300,8 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 # hkp_wire_root(NAME <label> GROUP <archive-group> SOURCE_ROOT <dir>
-#               ENABLE_ROCKE <bool> ARCHES <list> HIPCC <path>
+#               ENABLE_ROCKE <bool> ARCHES <list> HIP_COMPILER <path>
+#               HIP_PATH <path> DEVICE_LIB_PATH <path>
 #               ROCM_KPACK_DIR <dir> STAGE_ROOT <dir>
 #               [INSTALL_BASE <dir>] [REQUIRE_HIPCC <bool>]
 #               [ROCKE_INTERP <path>] [ROCKE_COMGR_LIB <path>]
@@ -322,7 +327,7 @@ endfunction()
 #                   sibling in one tree.
 #     INSTALL_BASE  set to install the packed tree; omit for a root that exists
 #                   only for tests.
-#     REQUIRE_HIPCC ON makes a missing hipcc a configure error, OFF warns and
+#     REQUIRE_HIPCC ON makes a missing HIP compiler a configure error, OFF warns and
 #                   skips. A release must not silently ship nothing; a test
 #                   fixture must not break a developer's build.
 #
@@ -340,7 +345,8 @@ endfunction()
 #   Empty ARCHES wires nothing.
 # ---------------------------------------------------------------------------
 function(hkp_wire_root)
-    set(_one NAME GROUP SOURCE_ROOT ENABLE_ROCKE ARCHES HIPCC ROCM_KPACK_DIR
+    set(_one NAME GROUP SOURCE_ROOT ENABLE_ROCKE ARCHES HIP_COMPILER HIP_PATH
+        DEVICE_LIB_PATH ROCM_KPACK_DIR
         INSTALL_BASE STAGE_ROOT REQUIRE_HIPCC ROCKE_INTERP ROCKE_COMGR_LIB
         ROCKE_WHEEL_STAMP)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
@@ -370,19 +376,17 @@ function(hkp_wire_root)
             "stage source root '${ARG_NAME}'; skipping it.")
         return()
     endif()
-    if(NOT ARG_HIPCC)
+    if(NOT ARG_HIP_COMPILER)
         # Fatal for a shipping root, skip for a fixture: see REQUIRE_HIPCC above.
         if(ARG_REQUIRE_HIPCC)
             message(FATAL_ERROR
-                "hkp: source root '${ARG_NAME}' requires hipcc but it was not "
-                "found (searched hipcc, hipcc.bat, hipcc.bin.exe). Ensure the "
-                "ROCm bin dir is on PATH or CMAKE_PROGRAM_PATH.")
+                "hkp: source root '${ARG_NAME}' requires a HIP compiler but "
+                "none was found. Set CMAKE_HIP_COMPILER or CMAKE_CXX_COMPILER "
+                "to clang++/amdclang++.")
         endif()
         message(WARNING
-            "hkp: hipcc not found (searched hipcc, hipcc.bat, hipcc.bin.exe); "
-            "source root '${ARG_NAME}' cannot be compiled and will not be "
-            "staged. Tests that load it will skip. Put the ROCm bin dir on PATH "
-            "to build it.")
+            "hkp: no HIP compiler found; source root '${ARG_NAME}' cannot be "
+            "compiled and will not be staged. Tests that load it will skip.")
         return()
     endif()
 
@@ -392,7 +396,7 @@ function(hkp_wire_root)
 
     # The rocKE producer needs the wheel-provisioned interpreter so its UKDs
     # import; a hip-only pack runs under the base interpreter (hip compiles shell
-    # out to hipcc and are interpreter-agnostic).
+    # out to clang++ and are interpreter-agnostic).
     set(_interp "${Python3_EXECUTABLE}")
     set(_interp_what "base interpreter (hip-only, root '${ARG_NAME}')")
     set(_interp_dep "")
@@ -442,7 +446,9 @@ function(hkp_wire_root)
         OUT_ROOT "${_out_root}"
         INTER_ROOT "${_inter_root}"
         ARCHES ${ARG_ARCHES}
-        HIPCC "${ARG_HIPCC}"
+        HIP_COMPILER "${ARG_HIP_COMPILER}"
+        HIP_PATH "${ARG_HIP_PATH}"
+        DEVICE_LIB_PATH "${ARG_DEVICE_LIB_PATH}"
         ROCM_KPACK_DIR "${ARG_ROCM_KPACK_DIR}"
         GROUP "${ARG_GROUP}"
         INTERP "${_interp}"
@@ -710,7 +716,7 @@ endfunction()
 #   Root empty = production packaging dormant. Root set but not a directory =
 #   fatal. Root set with neither switch on = fatal, because it would otherwise
 #   pack nothing and silently install an empty tree. Configure hard-fails when an
-#   ON switch's configure-discoverable toolchain is missing (hip -> hipcc;
+#   ON switch's configure-discoverable toolchain is missing (hip -> HIP compiler;
 #   rocke -> the ENABLE_ROCKE + wheel-env + importable conjunction). The tests
 #   are wired regardless: they drive the fixture slice directly, never a
 #   production source root.
@@ -721,10 +727,34 @@ function(hkp_add_packaging)
     hkp_resolve_kpack(_rocm_kpack_dir "${Python3_EXECUTABLE}")
     hkp_selected_arches(_arches)
 
-    # hipcc is the perl/bat driver that honors --genco; on Windows it is
-    # hipcc.exe or hipcc.bat. hipcc.bin.exe is the raw clang driver and is only
-    # a last-resort fallback.
-    find_program(HKP_HIPCC NAMES hipcc hipcc.bat hipcc.bin.exe)
+    # Use the HIP compiler (clang++/amdclang++) directly with
+    # --offload-device-only instead of hipcc --genco. CMAKE_HIP_COMPILER is
+    # set by TheRock's toolchain; fall back to CMAKE_CXX_COMPILER.
+    if(CMAKE_HIP_COMPILER)
+        set(HKP_HIP_COMPILER "${CMAKE_HIP_COMPILER}")
+    else()
+        set(HKP_HIP_COMPILER "${CMAKE_CXX_COMPILER}")
+    endif()
+
+    # Derive --hip-path from find_package(hip)'s hip_DIR.
+    if(hip_DIR)
+        get_filename_component(HKP_HIP_PATH "${hip_DIR}/../../.." ABSOLUTE)
+    else()
+        set(HKP_HIP_PATH "")
+    endif()
+
+    # Derive --hip-device-lib-path from the compiler location.
+    if(HKP_HIP_COMPILER)
+        get_filename_component(_compiler_dir "${HKP_HIP_COMPILER}" DIRECTORY)
+        set(_device_lib_path "${_compiler_dir}/../amdgcn/bitcode")
+        if(IS_DIRECTORY "${_device_lib_path}")
+            get_filename_component(HKP_DEVICE_LIB_PATH "${_device_lib_path}" ABSOLUTE)
+        else()
+            set(HKP_DEVICE_LIB_PATH "")
+        endif()
+    else()
+        set(HKP_DEVICE_LIB_PATH "")
+    endif()
 
     hkp_install_base(_install_base)
 
@@ -735,7 +765,7 @@ per-integration folders) and each descriptor's authored subpath is preserved \
 into the staged and installed trees. Empty leaves production packaging dormant.")
     set(HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP OFF CACHE BOOL
         "Allow the hip producer to run over the production source root. \
-Requires a configure-discoverable hipcc.")
+Requires a HIP compiler (clang++/amdclang++).")
     set(HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE OFF CACHE BOOL
         "Allow the rocKE producer to run over the production source root. \
 Requires HIPKERNELPROVIDER_ENABLE_ROCKE, the rocke wheel-env, and importable \
@@ -764,12 +794,12 @@ rocke/kernels packages.")
             "pack step would ship an empty tree.")
     endif()
 
-    # The hip producer requires the configure-discoverable hipcc.
-    if(_source_root AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP AND NOT HKP_HIPCC)
+    # The hip producer requires a HIP compiler.
+    if(_source_root AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP AND NOT HKP_HIP_COMPILER)
         message(FATAL_ERROR
-            "hkp: HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP is ON but hipcc was "
-            "not found (searched hipcc, hipcc.bat, hipcc.bin.exe). Ensure the "
-            "ROCm bin dir is on PATH or CMAKE_PROGRAM_PATH.")
+            "hkp: HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP is ON but no HIP "
+            "compiler was found. Set CMAKE_HIP_COMPILER or CMAKE_CXX_COMPILER "
+            "to clang++/amdclang++.")
     endif()
 
     set(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "" CACHE PATH
@@ -817,7 +847,7 @@ assertion: an unloadable path silently falls through to the next candidate.")
     endif()
 
     # Two roots, one mechanism. They differ only in what is declared here: the
-    # product root installs and demands hipcc; the test fixture does neither.
+    # product root installs and demands a HIP compiler; the test fixture does neither.
     # Their archive GROUPS differ, which is what lets both stage as siblings in
     # one descriptor tree without either overwriting the other.
     if(_source_root)
@@ -827,7 +857,9 @@ assertion: an unloadable path silently falls through to the next candidate.")
             SOURCE_ROOT "${_source_root}"
             ENABLE_ROCKE "${_enable_rocke}"
             ARCHES "${_arches}"
-            HIPCC "${HKP_HIPCC}"
+            HIP_COMPILER "${HKP_HIP_COMPILER}"
+            HIP_PATH "${HKP_HIP_PATH}"
+            DEVICE_LIB_PATH "${HKP_DEVICE_LIB_PATH}"
             ROCM_KPACK_DIR "${_rocm_kpack_dir}"
             INSTALL_BASE "${_install_base}"
             STAGE_ROOT "${HIPDNN_DESCRIPTOR_BUILD_DIR}"
@@ -853,7 +885,9 @@ assertion: an unloadable path silently falls through to the next candidate.")
             SOURCE_ROOT "${HKP_TESTFIXTURE_SOURCE_ROOT}"
             ENABLE_ROCKE OFF
             ARCHES "${_arches}"
-            HIPCC "${HKP_HIPCC}"
+            HIP_COMPILER "${HKP_HIP_COMPILER}"
+            HIP_PATH "${HKP_HIP_PATH}"
+            DEVICE_LIB_PATH "${HKP_DEVICE_LIB_PATH}"
             ROCM_KPACK_DIR "${_rocm_kpack_dir}"
             STAGE_ROOT "${HIPDNN_DESCRIPTOR_BUILD_DIR}"
             REQUIRE_HIPCC OFF)
@@ -861,13 +895,15 @@ assertion: an unloadable path silently falls through to the next candidate.")
 
     hkp_stage_all()
 
-    hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}"
+    hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIP_COMPILER}"
+                       "${HKP_HIP_PATH}" "${HKP_DEVICE_LIB_PATH}"
                        "${HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP}"
                        "${_rocke_comgr_lib}")
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_register_tests(<rocm_kpack_dir> <hipcc> <hip_enabled> <rocke_comgr_lib>)
+# hkp_register_tests(<rocm_kpack_dir> <hip_compiler> <hip_path>
+#                     <device_lib_path> <hip_enabled> <rocke_comgr_lib>)
 #   Register the pytest suite as two build-tree ctest entries running disjoint
 #   sets: a quick entry (`-m quick`, the no-compile subset) and a standard entry
 #   (`-m "not quick"`, the rest). Tier labels come from HKP_PACK_test_categories,
@@ -875,18 +911,19 @@ endfunction()
 #   Python3_EXECUTABLE cannot import pytest the entries register DISABLED so
 #   they list as skipped, not absent.
 #
-#   Configure hard-fails on a missing hipcc only when the hip producer is
+#   Configure hard-fails on a missing HIP compiler only when the hip producer is
 #   enabled (a tests-only ingestor build configures clean on a bare box; the
-#   compile-dependent tests self-skip via the hipcc/rocke fixtures, and CI
+#   compile-dependent tests self-skip via the hip_compiler/rocke fixtures, and CI
 #   hard-gates them via the REQUIRE_* env vars forwarded below).
 # ---------------------------------------------------------------------------
-function(hkp_register_tests rocm_kpack_dir hipcc hip_enabled rocke_comgr_lib)
+function(hkp_register_tests rocm_kpack_dir hip_compiler hip_path
+         device_lib_path hip_enabled rocke_comgr_lib)
     if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
         return()
     endif()
-    if(hip_enabled AND NOT hipcc)
+    if(hip_enabled AND NOT hip_compiler)
         message(FATAL_ERROR
-            "hkp: the hip production producer is enabled but hipcc was not found.")
+            "hkp: the hip production producer is enabled but no HIP compiler was found.")
     endif()
 
     # These were read from the environment (conftest.py:71,109) but declared
@@ -894,14 +931,14 @@ function(hkp_register_tests rocm_kpack_dir hipcc hip_enabled rocke_comgr_lib)
     # documented. Declaring them as cache BOOLs makes the gate discoverable and
     # settable with -D, symmetric with every other knob here.
     #
-    # What they buy is durability, not coverage: the comgr and hipcc tiers pass
+    # What they buy is durability, not coverage: the comgr and HIP-compiler tiers pass
     # today because the toolchains happen to be present. Their fixtures SKIP
     # when a probe fails, so a ROCm wheel bump that moves or drops comgr would
     # turn the tier green-by-skipping with nobody told. ON converts that skip
     # into a hard failure.
     set(HIPKERNELPROVIDER_KPACK_REQUIRE_HIPCC OFF CACHE BOOL
-        "Fail (rather than skip) the hipcc-dependent packaging tests when hipcc \
-is unavailable. Set ON in CI so the tier cannot silently stop running.")
+        "Fail (rather than skip) the HIP-compiler-dependent packaging tests when \
+a HIP compiler is unavailable. Set ON in CI so the tier cannot silently stop running.")
     set(HIPKERNELPROVIDER_KPACK_REQUIRE_COMGR OFF CACHE BOOL
         "Fail (rather than skip) the comgr-dependent rocKE packaging tests when \
 rocke/kernels or libamd_comgr are unavailable. Set ON in CI so the tier cannot \
@@ -915,8 +952,17 @@ silently stop running.")
     # conftest.py reads HIPKERNELPROVIDER_ROCM_KPACK_DIR, so that is the name
     # forwarded here regardless of which variable resolved it.
     set(_pyenv "PYTHONPATH=${HKP_PYTHON_ROOT}")
-    if(hipcc)
-        list(APPEND _pyenv "HKP_HIPCC=${hipcc}")
+    # HKP_HIP_COMPILER names the HIP compiler (clang++) that configure found.
+    # HKP_HIP_PATH and HKP_DEVICE_LIB_PATH supply the --hip-path and
+    # --hip-device-lib-path flags the compiler needs (hipcc auto-injected these).
+    if(hip_compiler)
+        list(APPEND _pyenv "HKP_HIP_COMPILER=${hip_compiler}")
+    endif()
+    if(hip_path)
+        list(APPEND _pyenv "HKP_HIP_PATH=${hip_path}")
+    endif()
+    if(device_lib_path)
+        list(APPEND _pyenv "HKP_DEVICE_LIB_PATH=${device_lib_path}")
     endif()
     if(rocm_kpack_dir)
         list(APPEND _pyenv "HIPKERNELPROVIDER_ROCM_KPACK_DIR=${rocm_kpack_dir}")

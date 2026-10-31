@@ -50,28 +50,39 @@ def rocm_kpack_dir():
 
 
 @pytest.fixture(scope="session")
-def hipcc():
-    """The hipcc driver used for real --genco compilation.
+def hip_compiler():
+    """The HIP compiler (clang++/amdclang++) used for --offload-device-only compilation.
 
-    Resolved from HKP_HIPCC (set by CMake) or PATH. A missing hipcc skips the
-    compile-dependent tests so a toolchain-less box is a no-op, symmetric to
-    rocke_available; HIPKERNELPROVIDER_KPACK_REQUIRE_HIPCC (set in CI) turns the
-    miss into a hard failure so CI cannot silently skip. A real hipcc compile
-    error is not caught here — it surfaces from the pipeline as a failure.
+    Resolved from HKP_HIP_COMPILER (set by CMake) or PATH. A missing compiler
+    skips the compile-dependent tests so a toolchain-less box is a no-op,
+    symmetric to rocke_available; HIPKERNELPROVIDER_KPACK_REQUIRE_HIPCC (set in
+    CI) turns the miss into a hard failure so CI cannot silently skip.
     """
-    exe = os.environ.get("HKP_HIPCC")
+    exe = os.environ.get("HKP_HIP_COMPILER")
     if not exe:
-        for name in ("hipcc", "hipcc.bat"):
+        for name in ("amdclang++", "clang++"):
             found = shutil.which(name)
             if found:
                 exe = found
                 break
     if not exe:
-        msg = "hipcc not found (set HKP_HIPCC or put hipcc on PATH)"
+        msg = "HIP compiler not found (set HKP_HIP_COMPILER or put amdclang++/clang++ on PATH)"
         if os.environ.get("HIPKERNELPROVIDER_KPACK_REQUIRE_HIPCC"):
             pytest.fail(msg)
         pytest.skip(msg)
     return exe
+
+
+@pytest.fixture(scope="session")
+def hip_path():
+    """The HIP runtime root for --hip-path, or None."""
+    return os.environ.get("HKP_HIP_PATH") or None
+
+
+@pytest.fixture(scope="session")
+def device_lib_path():
+    """The device bitcode library directory for --hip-device-lib-path, or None."""
+    return os.environ.get("HKP_DEVICE_LIB_PATH") or None
 
 
 def _probe_rocke():

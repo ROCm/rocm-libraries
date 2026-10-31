@@ -666,7 +666,7 @@ def hsaco_corpus(tmp_path):
     Kept out of the selection corpus deliberately: it makes
     `compile_intermediate` raise, which would stop the golden-sequence corpus
     from being walkable. The hsaco entry is authored first so the walk reaches
-    its error before it would need a real hipcc for the hip entry.
+    its error before it would need a real compiler for the hip entry.
     """
     dest = tmp_path / "hsaco-corpus"
     dest.mkdir()
@@ -710,7 +710,7 @@ def test_prewarm_skips_hsaco_kind(hsaco_corpus, tmp_path):
             flat,
             hsaco_corpus,
             TARGET_ARCH,
-            "hipcc",
+            "compiler-not-invoked",
             tmp_path / "inter",
             log=_silent,
         )
@@ -742,7 +742,7 @@ def _synthetic_job(corpus, block):
         rel_dir=".",
         source_root=str(corpus),
         out_dir="",
-        hipcc="",
+        hip_compiler="",
         arch=TARGET_ARCH,
     )
 
@@ -777,7 +777,7 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
     tally = tmp_path / "tally"
     tally.mkdir()
     failing = jobs[3]
-    hipcc = _stub_hipcc(tmp_path, fail_out=f"{failing.vk}.co", delay=1.0, tally=tally)
+    hip_compiler = _stub_hip_compiler(tmp_path, fail_out=f"{failing.vk}.co", delay=1.0, tally=tally)
 
     variant_co = {}
     variant_symbol = {}
@@ -786,7 +786,7 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
             flat,
             corpus,
             TARGET_ARCH,
-            hipcc,
+            hip_compiler,
             tmp_path / "inter",
             variant_co,
             variant_symbol,
@@ -926,7 +926,7 @@ def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
             flat,
             failing_corpus,
             TARGET_ARCH,
-            "hipcc",
+            "compiler-not-invoked",
             tmp_path / "inter",
             log=_silent,
         )
@@ -966,7 +966,7 @@ def test_compile_one_variant_returns_errors_and_computes_no_keys(tmp_path, monke
         rel_dir=".",
         source_root=str(tmp_path),
         out_dir=str(tmp_path / "inter"),
-        hipcc="hipcc",
+        hip_compiler="compiler-not-invoked",
         arch=TARGET_ARCH,
     )
 
@@ -981,7 +981,7 @@ def test_compile_one_variant_returns_errors_and_computes_no_keys(tmp_path, monke
     assert calls == []
 
 
-_STUB_HIPCC_BODY = r"""
+_STUB_HIP_COMPILER_BODY = r"""
 import hashlib
 import os
 import sys
@@ -1001,7 +1001,7 @@ if TALLY:
     open(os.path.join(TALLY, os.path.basename(out)), "wb").close()
 
 if FAIL_OUT and os.path.basename(out) == FAIL_OUT:
-    sys.stderr.write("stub hipcc: refusing " + FAIL_OUT + chr(10))
+    sys.stderr.write("stub compiler: refusing " + FAIL_OUT + chr(10))
     sys.exit(2)
 
 if DELAY:
@@ -1013,8 +1013,8 @@ with open(out, "wb") as fh:
 """
 
 
-def _stub_hipcc(tmp_path, *, fail_out=None, delay=0.0, tally=None):
-    """Path to a hipcc stand-in that writes a .co and exits 0.
+def _stub_hip_compiler(tmp_path, *, fail_out=None, delay=0.0, tally=None):
+    """Path to a HIP compiler stand-in that writes a .co and exits 0.
 
     Lets the pool run to success on a box with no toolchain, which is what makes
     the success path testable at all. The bytes are derived from every argument
@@ -1028,22 +1028,22 @@ def _stub_hipcc(tmp_path, *, fail_out=None, delay=0.0, tally=None):
     race, and `tally` collects one marker per attempt.
 
     A launcher script rather than the interpreter directly, because the producer
-    invokes `hipcc` as argv[0] of a subprocess.
+    invokes the compiler as argv[0] of a subprocess.
     """
-    stub = tmp_path / "stub_hipcc.py"
+    stub = tmp_path / "stub_hip_compiler.py"
     stub.write_text(
-        _STUB_HIPCC_BODY.format(
+        _STUB_HIP_COMPILER_BODY.format(
             fail_out=fail_out, delay=delay, tally=str(tally) if tally else None
         ),
         encoding="utf-8",
     )
     if sys.platform == "win32":
-        launcher = tmp_path / "stub_hipcc.bat"
+        launcher = tmp_path / "stub_hip_compiler.bat"
         launcher.write_text(
             f'@echo off\r\n"{sys.executable}" "{stub}" %*\r\n', encoding="utf-8"
         )
     else:
-        launcher = tmp_path / "stub_hipcc.sh"
+        launcher = tmp_path / "stub_hip_compiler.sh"
         launcher.write_text(
             f'#!/bin/sh\nexec "{sys.executable}" "{stub}" "$@"\n', encoding="utf-8"
         )
@@ -1076,7 +1076,7 @@ def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
         load_flat_input(corpus, log=_silent),
         corpus,
         TARGET_ARCH,
-        _stub_hipcc(tmp_path),
+        _stub_hip_compiler(tmp_path),
         tmp_path / "inter",
         variant_co,
         variant_symbol,
@@ -1110,7 +1110,7 @@ def _staged_tree(corpus, out_dir):
         load_flat_input(corpus, log=_silent),
         corpus,
         TARGET_ARCH,
-        _stub_hipcc(out_dir.parent),
+        _stub_hip_compiler(out_dir.parent),
         out_dir,
         log=_silent,
     )
@@ -1165,7 +1165,7 @@ def test_pack_jobs_one_starts_no_pool(tmp_path, monkeypatch):
         load_flat_input(corpus, log=_silent),
         corpus,
         TARGET_ARCH,
-        _stub_hipcc(tmp_path),
+        _stub_hip_compiler(tmp_path),
         tmp_path / "inter",
         variant_co,
         {},

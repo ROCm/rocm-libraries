@@ -34,14 +34,20 @@ def hip_variant_key(rel_source, build):
     return _hash_payload(Path(rel_source).stem, payload)
 
 
-def _hipcc_command(hipcc, source_path, arch, build, out_co):
-    cmd = [hipcc, "--genco", f"--offload-arch={arch}"]
+def _hip_compile_command(
+    compiler, source_path, arch, build, out_co, hip_path=None, device_lib_path=None
+):
+    cmd = [compiler, "--offload-device-only", "-x", "hip", f"--offload-arch={arch}"]
+    if hip_path:
+        cmd.append(f"--hip-path={hip_path}")
+    if device_lib_path:
+        cmd.append(f"--hip-device-lib-path={device_lib_path}")
     for name, val in (build.get("defines") or {}).items():
         if isinstance(val, bool):
             val = "1" if val else "0"
         cmd.append(f"-D{name}={val}")
     cmd += list(build.get("flags") or [])
-    # Pin the compilation-unit id: hipcc otherwise defaults it to random, which
+    # Pin the compilation-unit id: clang++ otherwise defaults it to random, which
     # perturbs the __hip_cuid_ symbol so identical inputs emit different .co bytes
     # and an unstable sha256/provenance stamp. Appended after the authored build
     # flags so clang's last-flag-wins keeps this value; authored -fuse-cuid flags
@@ -51,7 +57,10 @@ def _hipcc_command(hipcc, source_path, arch, build, out_co):
     return cmd
 
 
-def compile_hip_variant(hipcc, source_root, rel_dir, source, build, arch, out_dir):
+def compile_hip_variant(
+    hip_compiler, source_root, rel_dir, source, build, arch, out_dir,
+    hip_path=None, device_lib_path=None,
+):
     """Compile one (source, build) variant for one arch into out_dir.
 
     Resolves `source` **relative to the descriptor that named it** —
@@ -64,7 +73,7 @@ def compile_hip_variant(hipcc, source_root, rel_dir, source, build, arch, out_di
     folders stays expressible by saying so: `"../shared/Kernel.cpp"`. The
     resolved path must stay inside the root.
 
-    Missing source -> 'source not found'; a non-zero hipcc -> 'compile failed'.
+    Missing source -> 'source not found'; a non-zero compile -> 'compile failed'.
     Both are hard errors, never skips.
     """
     root = Path(source_root).resolve()
@@ -86,7 +95,9 @@ def compile_hip_variant(hipcc, source_root, rel_dir, source, build, arch, out_di
         out_dir / f"{hip_variant_key(hip_source_relpath(rel_dir, source), build)}.co"
     )
 
-    cmd = _hipcc_command(hipcc, source_path, arch, build, out_co)
+    cmd = _hip_compile_command(
+        hip_compiler, source_path, arch, build, out_co, hip_path, device_lib_path
+    )
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0 or not out_co.is_file():
         raise HkpPackError(

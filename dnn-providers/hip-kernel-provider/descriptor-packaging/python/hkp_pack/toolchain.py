@@ -2,9 +2,9 @@
 
 The authored fields (source, entry, build / builder, spec) say what was *asked
 for*. They do not say what answered. Two builds of byte-identical descriptors
-can differ because hipcc changed, comgr changed, or the rocKE wheel changed --
-and without this, a shipped artifact carries no way to tell those apart after
-the fact.
+can differ because the HIP SDK changed, comgr changed, or the rocKE wheel
+changed -- and without this, a shipped artifact carries no way to tell those
+apart after the fact.
 
 This belongs in provenance, not in the variant key. In the key, a wheel bump
 would rename every rocKE artifact including kernels it could not have affected;
@@ -12,35 +12,68 @@ in provenance it is traceability, while the build-level wheel digest handles
 invalidation.
 
 Probes are memoized per process: the answers cannot change mid-run, and
-`hipcc --version` is a subprocess we should not pay per kernel.
+reading a version file is cheap but still should not be repeated per kernel.
 """
 
 import functools
 import hashlib
-import subprocess
+import re
 from pathlib import Path
 
 
-@functools.lru_cache(maxsize=None)
-def hipcc_version(hipcc):
-    """First line of `hipcc --version`, or None if it cannot be determined.
+_HIP_VERSION_PARTS = ("MAJOR", "MINOR", "PATCH")
 
-    Best-effort by design: provenance is a record, not a gate. A hipcc that
-    cannot report a version still compiles, and failing the pack over a missing
-    version string would trade a real artifact for a cosmetic one.
+
+def _read_hip_build_version(path):
+    """Parse HIP_VERSION_MAJOR/MINOR/PATCH from a HIP metadata file.
+
+    Handles both ``share/hip/version`` (KEY=VALUE) and
+    ``include/hip/hip_version.h`` (#define) formats.
     """
-    if not hipcc:
-        return None
     try:
-        proc = subprocess.run(
-            [hipcc, "--version"], capture_output=True, text=True, timeout=60
+        contents = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    values = []
+    for part in _HIP_VERSION_PARTS:
+        match = re.search(
+            rf"^\s*(?:#define\s+)?HIP_VERSION_{part}(?:\s*=\s*|\s+)(\d+)",
+            contents,
+            re.MULTILINE,
         )
-    except (OSError, subprocess.SubprocessError):
+        if not match:
+            return None
+        values.append(match.group(1))
+    githash = re.search(
+        r'^\s*(?:#define\s+)?HIP_VERSION_GITHASH(?:\s*=\s*|\s+)"?(\w+)"?',
+        contents,
+        re.MULTILINE,
+    )
+    version = ".".join(values)
+    if githash:
+        version = f"{version}-{githash.group(1)}"
+    return version
+
+
+@functools.lru_cache(maxsize=None)
+def hip_version(hip_path):
+    """HIP SDK version from the version metadata files under hip_path.
+
+    Best-effort by design: provenance is a record, not a gate. A build that
+    cannot determine the HIP version still compiles, and failing the pack over
+    a missing version string would trade a real artifact for a cosmetic one.
+
+    Reads ``share/hip/version`` first (KEY=VALUE), falling back to
+    ``include/hip/hip_version.h`` (#define).
+    """
+    if not hip_path:
         return None
-    text = (proc.stdout or proc.stderr or "").strip()
-    if not text:
-        return None
-    return text.splitlines()[0].strip()
+    root = Path(hip_path)
+    for rel in ("share/hip/version", "include/hip/hip_version.h"):
+        version = _read_hip_build_version(root / rel)
+        if version:
+            return version
+    return None
 
 
 @functools.lru_cache(maxsize=None)
@@ -104,7 +137,7 @@ def rocke_provenance(wheel_stamp=None):
     return fields
 
 
-def hip_provenance(hipcc):
+def hip_provenance(hip_path):
     """Toolchain fields for a hip-produced kernel."""
-    version = hipcc_version(hipcc)
-    return {"hipcc_version": version} if version else {}
+    version = hip_version(hip_path)
+    return {"hip_version": version} if version else {}
