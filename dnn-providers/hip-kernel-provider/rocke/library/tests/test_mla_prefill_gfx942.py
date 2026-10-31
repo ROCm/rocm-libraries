@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU-only coverage for the gfx942 MLA prefill score probe.
+"""CPU-only coverage for the gfx942 MLA prefill kernels.
 
 Everything here runs without a GPU: spec validation, the arch gate, launch
 geometry, and a full lower of the emitted ``KernelDef`` to LLVM IR. The lowering
@@ -31,12 +31,22 @@ from kernels.mla.mla_prefill_gfx942 import (
     mla_prefill_score_probe_grid,
     mla_prefill_score_probe_signature,
     supports_mla_prefill,
+    supports_mla_score_probe,
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 
 
 def _spec(**kw) -> MlaPrefillSpec:
     return MlaPrefillSpec(num_heads=kw.pop("num_heads", 16), **kw)
+
+
+def _odd_spec(**kw) -> MlaPrefillSpec:
+    """The layout dispatch ships for an odd head count: one head x four tiles."""
+    kw.setdefault("heads_per_wg", 1)
+    kw.setdefault("q_tiles_per_wg", 4)
+    kw.setdefault("num_warps", 4)
+    kw.setdefault("block_q", 64)
+    return _spec(num_heads=kw.pop("num_heads", 5), **kw)
 
 
 class TestMlaPrefillSpec(unittest.TestCase):
@@ -107,8 +117,18 @@ class TestMlaPrefillSpec(unittest.TestCase):
 class TestMlaPrefillGate(unittest.TestCase):
     """``supports_*`` reports rather than raises, and only on arch/atom fit."""
 
-    def test_default_spec_supported_on_gfx942(self):
-        self.assertEqual(supports_mla_prefill(_spec(), arch="gfx942"), (True, ""))
+    def test_default_spec_is_not_a_forward_layout(self):
+        # The layout fields are chosen per request by dispatch; their defaults
+        # (one head x one tile at four warps) do not form one.
+        ok, reason = supports_mla_prefill(_spec(), arch="gfx942")
+        self.assertFalse(ok)
+        self.assertIn("num_warps must be their product", reason)
+        self.assertEqual(supports_mla_prefill(_odd_spec(), arch="gfx942"), (True, ""))
+
+    def test_probe_spec_supported_on_gfx942(self):
+        self.assertEqual(
+            supports_mla_score_probe(_spec(block_q=16), arch="gfx942"), (True, "")
+        )
 
     def test_other_arch_refused(self):
         ok, reason = supports_mla_prefill(_spec(), arch="gfx950")
@@ -123,10 +143,22 @@ class TestMlaPrefillGate(unittest.TestCase):
         self.assertIn("d_rope", reason)
 
     def test_n_tiles_must_cover_every_wave(self):
-        # d_v/16 = 4 epilogue n-tiles cannot be split across 8 waves.
-        ok, reason = supports_mla_prefill(_spec(num_warps=8, d_v=64), arch="gfx942")
+        # The probe splits d_nope/16 = 4 n-tiles of its K expansion across
+        # waves; 8 waves cannot take them.
+        ok, reason = supports_mla_score_probe(
+            _spec(block_q=16, num_warps=8, d_nope=64), arch="gfx942"
+        )
         self.assertFalse(ok)
         self.assertIn("n-tiles", reason)
+
+    def test_probe_q_staging_must_cover_the_tile(self):
+        # A 16 x 192 query tile is 3072 elements, 1.5 passes of 512 threads x 4:
+        # the probe stages whole passes only, so it would drop the tail.
+        ok, reason = supports_mla_score_probe(
+            _spec(block_q=16, num_warps=8), arch="gfx942"
+        )
+        self.assertFalse(ok)
+        self.assertIn("Q tile", reason)
 
 
 class TestMlaPrefillLaunchGeometry(unittest.TestCase):
@@ -210,11 +242,12 @@ class TestMlaPrefillLowering(unittest.TestCase):
 
 
 class TestMlaPrefillFwdLowering(unittest.TestCase):
-    """The forward kernel lowers, and fits gfx942's 64 KiB of LDS."""
+    """The forward kernel, at the odd-head-count layout, lowers and fits two
+    workgroups per CU in gfx942's 64 KiB of LDS."""
 
     @classmethod
     def setUpClass(cls):
-        cls.kernel = build_mla_prefill_fwd(_spec(num_heads=128), arch="gfx942")
+        cls.kernel = build_mla_prefill_fwd(_odd_spec(), arch="gfx942")
         cls.ir = lower_kernel_to_llvm(cls.kernel, arch="gfx942")
 
     def test_lowers_to_nonempty_ir(self):
@@ -222,29 +255,11 @@ class TestMlaPrefillFwdLowering(unittest.TestCase):
         self.assertIn(self.kernel.name, self.ir)
 
     def test_lds_slot_is_shared(self):
-        # Six buffers, 71808 B if none aliased, packed by the lowerer's
-        # liveness pass into 27392 B. That is under gfx942's 65536 B workgroup
-        # limit -- a hard gate, the kernel cannot launch above it -- and, the
-        # point of the layout, under 32768 B, so two workgroups fit per CU.
-        #
-        # The achieved layout at block_q=32, by phase (bf16 except s_part,
-        # which is f32). qa_lds holds one 288-column window of the absorbed
-        # query and accl_lds one wave's 128 latent columns, each for both
-        # 16-row M tiles:
-        #
-        #   offset  buffer                       bytes
-        #        0  wq_lds / s_part / accl_lds   8704 / 8192 / 8448
-        #     8704  qa_lds / kv_lds / wt_lds     18688 / 18560 / 9216
-        #                                 total = 27392 (prologue peak)
-        #
-        # Each phase packs from the base on its own: the prologue pair is dead
-        # before the k-loop (the score A operand is read into registers
-        # first), and everything is dead by the epilogue. The small buffer of
-        # each later phase is allocated first so it takes the base slot and
-        # the large one lands on the next dead slot. ``_fwd_lds_bytes`` models
-        # exactly this so the admission check can predict it without lowering.
+        # The loop holds one shared kv_lds (18560 B) plus the four waves'
+        # parked Q_rope (8704 B); the epilogue's W_UV block (17408 B) pools
+        # onto them. Under 32768 B, so two workgroups fit per CU.
         self.assertIn(f"@smem_pool.{self.kernel.name}", self.ir)
-        self.assertIn("[27392 x i8]", self.ir)
+        self.assertIn("[27264 x i8]", self.ir)
 
     def test_no_transpose_read(self):
         self.assertNotIn("ds_read_tr", self.ir)
@@ -261,7 +276,7 @@ class TestMlaPrefillFwdLowering(unittest.TestCase):
 
     def test_build_refuses_unsupported_arch(self):
         with self.assertRaises(NotImplementedError):
-            build_mla_prefill_fwd(_spec(), arch="gfx950")
+            build_mla_prefill_fwd(_odd_spec(), arch="gfx950")
 
 
 def _hpw_spec(**kw) -> MlaPrefillSpec:
@@ -316,12 +331,12 @@ class TestMlaPrefillHeadsPerWg(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("block_q=64", reason)
 
-    def test_xcd_reorder_is_one_wave_per_head_only(self):
+    def test_xcd_reorder(self):
         with self.assertRaisesRegex(ValueError, "num_xcds"):
             _spec(num_xcds=-1)
-        ok, reason = supports_mla_prefill(_spec(num_xcds=6), arch="gfx942")
-        self.assertFalse(ok)
-        self.assertIn("num_xcds", reason)
+        self.assertEqual(
+            supports_mla_prefill(_odd_spec(num_xcds=6), arch="gfx942"), (True, "")
+        )
         self.assertIn("_x6", _hpw_spec(num_xcds=6).fwd_kernel_name())
 
     def test_eight_heads_admitted(self):
@@ -372,12 +387,18 @@ class TestMlaPrefillAbsorbedQuery(unittest.TestCase):
         self.assertIn("[27264 x i8]", self.ir)
         self.assertNotIn("scratch", self.ir)
 
-    def test_one_head_layout_refused(self):
-        ok, reason = supports_mla_prefill(
-            _spec(num_heads=128, absorbed_query=True), arch="gfx942"
+    def test_odd_head_layout_admitted(self):
+        self.assertEqual(
+            supports_mla_prefill(_odd_spec(absorbed_query=True), arch="gfx942"),
+            (True, ""),
+        )
+
+    def test_probe_refuses_absorbed_query(self):
+        ok, reason = supports_mla_score_probe(
+            _spec(block_q=16, absorbed_query=True), arch="gfx942"
         )
         self.assertFalse(ok)
-        self.assertIn("absorbed_query", reason)
+        self.assertIn("projected query", reason)
 
 
 if __name__ == "__main__":
@@ -505,12 +526,23 @@ class TestShippedLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
         ).spec
 
 
-class TestDefaultLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
-    """The single-head default, which dispatch falls back to."""
+class TestOddHeadsLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
+    """The layout dispatch ships for an odd head count."""
 
     @staticmethod
     def make_spec():
-        return _spec(num_heads=128)
+        from dispatch.mla import MLARequest, dispatch_mla
+
+        return dispatch_mla(
+            MLARequest(
+                num_heads=5,
+                total_q=64,
+                num_seqs=2,
+                max_seqlen_k=96,
+                arch="gfx942",
+                num_kv_blocks=12,
+            )
+        ).spec
 
 
 def _aa_spec(**kw) -> MlaPrefillSpec:
@@ -674,12 +706,17 @@ class TestLdsModelMatchesEmittedPool(unittest.TestCase):
         with _llvm22_env():
             specs = {
                 "two heads x two tiles": shipped(),
-                "odd heads, single-head": shipped(num_heads=5),
+                "odd heads, one head x four tiles": shipped(num_heads=5),
                 "agpr_acc": shipped(total_q=8192, max_seqlen_k=8192),
             }
             self.assertTrue(specs["agpr_acc"].agpr_acc)
-            self.assertEqual(specs["odd heads, single-head"].heads_per_wg, 1)
-            for name in ("two heads x two tiles", "agpr_acc"):
+            odd = specs["odd heads, one head x four tiles"]
+            self.assertEqual((odd.heads_per_wg, odd.q_tiles_per_wg), (1, 4))
+            for name in (
+                "two heads x two tiles",
+                "odd heads, one head x four tiles",
+                "agpr_acc",
+            ):
                 specs[f"{name}, absorbed_query"] = replace(
                     specs[name], absorbed_query=True
                 )
@@ -719,8 +756,8 @@ class TestLdsModelMatchesEmittedPool(unittest.TestCase):
                     continue
                 if not supports_mla_prefill(spec, arch="gfx942")[0]:
                     continue
-                # r_kv_tile only reaches LDS in the single-head layout.
-                key = (hpw, qpw, nw, bq, bk, aa, aq, rt if hpw == qpw == 1 else 0)
+                # r_kv_tile does not reach the forward kernel's LDS.
+                key = (hpw, qpw, nw, bq, bk, aa, aq)
                 if key in seen:
                     continue
                 seen.add(key)
@@ -750,13 +787,6 @@ class TestLdsAdmissionMatchesIntendedOccupancy(unittest.TestCase):
         )
         self.assertEqual(_fwd_lds_bytes(spec), 45824)
         ok, reason = supports_mla_prefill(spec, arch="gfx942")
-        self.assertFalse(ok)
-        self.assertIn("32768 B that 2 workgroup(s) per CU", reason)
-
-    def test_single_head_layout_over_32k_refused(self):
-        ok, reason = supports_mla_prefill(
-            _spec(r_kv_tile=64, block_q=16), arch="gfx942"
-        )
         self.assertFalse(ok)
         self.assertIn("32768 B that 2 workgroup(s) per CU", reason)
 
