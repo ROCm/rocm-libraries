@@ -180,6 +180,14 @@ namespace
         args["min-flops-per-sync"].value()      = minFlops;
         return args;
     }
+
+    po::variables_map warmupArgs(int syncs, float skipSlowRatio, bool syncAfterWarmups)
+    {
+        po::variables_map args                   = timingArgs(syncs, 1, -1, 1);
+        args["skip-slow-solution-ratio"].value() = skipSlowRatio;
+        args["sync-after-warmups"].value()       = syncAfterWarmups;
+        return args;
+    }
 } // namespace
 
 // The four syncs/enqueues/min-flops combinations measured in
@@ -202,4 +210,15 @@ TEST(BenchmarkTimerNothingIsTimed, CapsAndNegativeValues)
     EXPECT_FALSE(BenchmarkTimer::nothingIsTimed(timingArgs(1, 1, 1, 0)));
     EXPECT_FALSE(BenchmarkTimer::nothingIsTimed(timingArgs(-1, 1, -1, 0)));
     EXPECT_FALSE(BenchmarkTimer::nothingIsTimed(timingArgs(1, -1, -1, 0)));
+}
+
+// Warmup events are dropped only when nothing is timed, the skip-slow ratio is 0 and
+// sync-after-warmups is off; any one reader keeps them.
+TEST(BenchmarkTimerReadsWarmupEvents, NothingTimedSkipSlowSyncAfterWarmups)
+{
+    EXPECT_FALSE(BenchmarkTimer::readsWarmupEvents(warmupArgs(0, 0.0f, false)));
+    EXPECT_TRUE(BenchmarkTimer::readsWarmupEvents(warmupArgs(0, 0.5f, false)));
+    EXPECT_TRUE(BenchmarkTimer::readsWarmupEvents(warmupArgs(0, 0.0f, true)));
+    EXPECT_TRUE(BenchmarkTimer::readsWarmupEvents(warmupArgs(1, 0.0f, false)));
+    EXPECT_TRUE(BenchmarkTimer::readsWarmupEvents(warmupArgs(1, 0.5f, true)));
 }

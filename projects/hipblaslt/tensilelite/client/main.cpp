@@ -980,6 +980,10 @@ int main(int argc, const char* argv[])
         exit(1);
     }
 
+    // Only BenchmarkTimer reads the warmup timing events; without a reader the warmups are
+    // launched without events and the listeners get empty event sets.
+    bool const warmupEvents = BenchmarkTimer::readsWarmupEvents(args);
+
     {
         // Re-seed before data init: HIP runtime init above may consume rand() non-deterministically
         srand(seed);
@@ -1312,10 +1316,11 @@ int main(int argc, const char* argv[])
                                 auto const   warmupSetupStart  = TimingClock::now();
                                 size_t       warmupInvocations = listeners.numWarmupRuns();
                                 size_t       warmupEventCount  = kernels[0][0].size();
+                                size_t       warmupEventSets = warmupEvents ? warmupInvocations : 0;
                                 TimingEvents warmupStartEvents(
-                                    devices, warmupInvocations, warmupEventCount);
+                                    devices, warmupEventSets, warmupEventCount);
                                 TimingEvents warmupStopEvents(
-                                    devices, warmupInvocations, warmupEventCount);
+                                    devices, warmupEventSets, warmupEventCount);
                                 recordTimingSince("warmup_events_setup", warmupSetupStart);
 
                                 // I-cache rotation counter: increments per launchKernels call
@@ -1355,12 +1360,19 @@ int main(int argc, const char* argv[])
                                 // end-of-iteration attribution sync below).
                                 bool iterationLaunched = false;
 
+                                auto launchWarmup = [&](size_t i) {
+                                    if(warmupEvents)
+                                        launchAll(&warmupStartEvents, &warmupStopEvents, i);
+                                    else
+                                        launchAll(nullptr, nullptr, 0);
+                                };
+
                                 if(warmupInvocations > 0)
                                 {
                                     {
                                         ScopedTimer timer("warmup_runs");
                                         listeners.preWarmup();
-                                        launchAll(&warmupStartEvents, &warmupStopEvents, 0);
+                                        launchWarmup(0);
                                         iterationLaunched = true;
                                     }
 
@@ -1385,7 +1397,7 @@ int main(int argc, const char* argv[])
                                     {
                                         ScopedTimer timer("warmup_runs");
                                         for(int i = 1; i < warmupInvocations; i++)
-                                            launchAll(&warmupStartEvents, &warmupStopEvents, i);
+                                            launchWarmup(i);
                                         listeners.postWarmup(warmupStartEvents, warmupStopEvents);
                                     }
                                 }
