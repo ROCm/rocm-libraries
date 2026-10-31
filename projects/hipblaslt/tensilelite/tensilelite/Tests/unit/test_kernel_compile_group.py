@@ -180,6 +180,8 @@ def test_metadata_fans_out_to_all_placement_aliases():
         customKernelDef=None,
         ldsNumBytes=1024,
         loopIters=8,
+        subtileUnitScaleVgpr=5,
+        ldsOffsetBias=512,
     )
 
     passPostKernelInfoToSolution(
@@ -190,6 +192,12 @@ def test_metadata_fans_out_to_all_placement_aliases():
     assert [solution._state["PrefetchGlobalRead"] for solution in solutions] == [2, 2]
     assert [solution._state["LdsNumBytes"] for solution in solutions] == [1024, 1024]
     assert [solution._state["LoopIters"] for solution in solutions] == [8, 8]
+    # Values codegen leaves on the kernel it generated reach only that solution: in-process
+    # codegen does not touch the alias either.
+    assert solutions[0]._state["_subtileUnitScaleVgpr"] == 5
+    assert solutions[0]._state["LdsOffsetBias"] == 512
+    assert "_subtileUnitScaleVgpr" not in solutions[1]._state
+    assert "LdsOffsetBias" not in solutions[1]._state
 
 
 def test_thread_tile_distinguishes_non_matrix_kernels():

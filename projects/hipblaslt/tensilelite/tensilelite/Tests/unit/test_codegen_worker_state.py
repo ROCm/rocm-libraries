@@ -12,7 +12,8 @@ and from them Data/*.yaml.
 Both ways are run here on kernels of real configs and the complete state of every solution
 (all attributes, compared deeply) must match, so a value codegen writes onto the kernel that
 the copy-back misses fails the test, not only the ones known when it was written (LdsNumBytes
-from the subtile LDS layout, LoopIters from ForceUnrollSubIter).
+from the subtile LDS layout, LoopIters from ForceUnrollSubIter, _subtileUnitScaleVgpr from
+plain-FP8 subtile kernels, LdsOffsetBias from the GlobalSplitU epilogue).
 """
 
 import enum
@@ -36,7 +37,7 @@ from Tensile.TensileCreateLibrary.Run import (
 
 pytestmark = pytest.mark.unit
 
-_GFX950 = "tensilelite/Tests/common/gemm/gfx950/"
+_COMMON = "tensilelite/Tests/common/"
 
 # Toolchain objects every solution shares by reference; they are not solution state and are
 # not serialized.
@@ -105,7 +106,7 @@ def _codegen(solutions, assembler, inWorker):
 
 def _solutions(config, problemIndex, limit, assembler, isaInfoMap):
     return _solutions_from_config_unguarded(
-        _GFX950 + config, assembler, isaInfoMap, limit, problemIndex
+        _COMMON + config, assembler, isaInfoMap, limit, problemIndex
     )
 
 
@@ -113,9 +114,15 @@ def _solutions(config, problemIndex, limit, assembler, isaInfoMap):
     "config,problemIndex,limit,changedKey",
     [
         # Subtile kernels: SubtileLdsLayout.applyLdsLayout sets LdsNumBytes.
-        ("subtile_mxfp4.yaml", 0, 2, "LdsNumBytes"),
+        ("gemm/gfx950/subtile_mxfp4.yaml", 0, 2, "LdsNumBytes"),
         # The f8 problem's kernel takes ForceUnrollSubIter: KernelWriter sets LoopIters.
-        ("custom_mainloop_scheduling.yaml", 6, None, "LoopIters"),
+        ("gemm/gfx950/custom_mainloop_scheduling.yaml", 6, None, "LoopIters"),
+        # Plain FP8 subtile kernel (MatrixInstK 128, no MX scale): Components/Subtile/Kernel.py
+        # stores the unit-scale VGPR as _subtileUnitScaleVgpr.
+        ("gemm/gfx950/subtile_fp8.yaml", 0, None, "_subtileUnitScaleVgpr"),
+        # GlobalSplitU 2 kernels with a bias epilogue: the epilogue codegen switches
+        # LdsOffsetBias between LdsOffsetBiasGSU / LdsOffsetBiasNonGSU and leaves the last.
+        ("sparse/gfx94x/bf16_activation.yaml", 0, None, "LdsOffsetBias"),
     ],
 )
 def test_worker_codegen_leaves_solutions_as_in_process(config, problemIndex, limit, changedKey):
