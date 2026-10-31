@@ -86,6 +86,103 @@ void testing_gtsv_no_pivot_strided_batch_bad_arg(const Arguments& arg)
 #undef PARAMS_SOLVE
 }
 
+// mode 0 is the historical random tridiagonal system. Modes 1-3 are diagonally
+// dominant zero-off-diagonal systems: diagonal, upper bidiagonal, and lower
+// bidiagonal. Modes 4-7 use unit diagonals and off-diagonals of +/-1 with a
+// non-constant solution, so a repair that drops a fill term cannot hide inside
+// a tiny coupling. The right-hand side matches that solution exactly.
+template <typename T>
+static void gtsv_no_pivot_strided_batch_init_system(int             mode,
+                                                    rocsparse_int   m,
+                                                    rocsparse_int   batch_count,
+                                                    rocsparse_int   batch_stride,
+                                                    host_vector<T>& hdl,
+                                                    host_vector<T>& hd,
+                                                    host_vector<T>& hdu,
+                                                    host_vector<T>& hx)
+{
+    if(mode == 0)
+    {
+        for(rocsparse_int j = 0; j < batch_count; ++j)
+        {
+            for(rocsparse_int i = 0; i < m; ++i)
+            {
+                hdl[j * batch_stride + i] = random_cached_generator<T>(1, 8);
+                hd[j * batch_stride + i]  = random_cached_generator<T>(17, 32);
+                hdu[j * batch_stride + i] = random_cached_generator<T>(1, 8);
+            }
+
+            hdl[j * batch_stride + 0]     = std::numeric_limits<T>::infinity();
+            hdu[j * batch_stride + m - 1] = std::numeric_limits<T>::infinity();
+        }
+
+        for(rocsparse_int j = 0; j < batch_count; ++j)
+        {
+            for(rocsparse_int i = 0; i < m; ++i)
+            {
+                hx[j * batch_stride + i] = random_cached_generator<T>(-10, 10);
+            }
+        }
+        return;
+    }
+
+    const T zero = static_cast<T>(0);
+    const T one  = static_cast<T>(1);
+
+    const bool unit_coupling = mode >= 4;
+    const bool upper         = (mode == 2 || mode == 6 || mode == 7);
+    const bool lower         = (mode == 3 || mode == 4 || mode == 5);
+    const T    diag = unit_coupling ? one : (mode == 1 ? static_cast<T>(2) : static_cast<T>(4));
+    const T    off  = (mode == 5 || mode == 7) ? static_cast<T>(-1) : one;
+
+    for(rocsparse_int j = 0; j < batch_count; ++j)
+    {
+        const rocsparse_int offset = batch_stride * j;
+        for(rocsparse_int i = 0; i < m; ++i)
+        {
+            hdl[offset + i] = lower ? off : zero;
+            hdu[offset + i] = upper ? off : zero;
+            hd[offset + i]  = diag;
+        }
+
+        // The first subdiagonal and the last superdiagonal are outside the system.
+        hdl[offset]         = std::numeric_limits<T>::infinity();
+        hdu[offset + m - 1] = std::numeric_limits<T>::infinity();
+
+        for(rocsparse_int i = 0; i < m; ++i)
+        {
+            if(!unit_coupling)
+            {
+                if(mode == 1)
+                {
+                    hx[offset + i] = static_cast<T>(4);
+                }
+                else if(mode == 2)
+                {
+                    hx[offset + i] = (i == m - 1) ? static_cast<T>(4) : static_cast<T>(5);
+                }
+                else
+                {
+                    hx[offset + i] = (i == 0) ? static_cast<T>(4) : static_cast<T>(5);
+                }
+                continue;
+            }
+
+            const T x_i = static_cast<T>((i % 7) - 3);
+            T       rhs = diag * x_i;
+            if(lower && i > 0)
+            {
+                rhs = rhs + off * static_cast<T>(((i - 1) % 7) - 3);
+            }
+            if(upper && i + 1 < m)
+            {
+                rhs = rhs + off * static_cast<T>(((i + 1) % 7) - 3);
+            }
+            hx[offset + i] = rhs;
+        }
+    }
+}
+
 template <typename T>
 void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
 {
@@ -106,37 +203,18 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
 
     rocsparse_seedrand();
 
-    // Host tri-diagonal matrix
+    // rocsparse_matrix_zero selects the zero-off-diagonal systems above, not an
+    // all-zero matrix.
+    const int mode_begin = (arg.matrix == rocsparse_matrix_zero) ? 1 : 0;
+    const int mode_end   = (arg.matrix == rocsparse_matrix_zero) ? 7 : 0;
+
+    // Host tri-diagonal matrix. Entries past m stay at 7 and are not referenced.
     host_vector<T> hdl(batch_stride * batch_count, static_cast<T>(7));
     host_vector<T> hd(batch_stride * batch_count, static_cast<T>(7));
     host_vector<T> hdu(batch_stride * batch_count, static_cast<T>(7));
 
-    // initialize tri-diagonal matrix
-    for(rocsparse_int j = 0; j < batch_count; ++j)
-    {
-        for(rocsparse_int i = 0; i < m; ++i)
-        {
-            hdl[j * batch_stride + i] = random_cached_generator<T>(1, 8);
-            hd[j * batch_stride + i]  = random_cached_generator<T>(17, 32);
-            hdu[j * batch_stride + i] = random_cached_generator<T>(1, 8);
-        }
-
-        hdl[j * batch_stride + 0]     = std::numeric_limits<T>::infinity();
-        hdu[j * batch_stride + m - 1] = std::numeric_limits<T>::infinity();
-    }
-
     // Host dense rhs
     host_vector<T> hx(batch_stride * batch_count, static_cast<T>(7));
-
-    for(rocsparse_int j = 0; j < batch_count; ++j)
-    {
-        for(rocsparse_int i = 0; i < m; ++i)
-        {
-            hx[j * batch_stride + i] = random_cached_generator<T>(-10, 10);
-        }
-    }
-
-    host_vector<T> hx_original = hx;
 
     // Device tri-diagonal matrix
     device_vector<T> ddl(batch_stride * batch_count);
@@ -146,12 +224,6 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
     // Device dense rhs
     device_vector<T> dx(batch_stride * batch_count);
 
-    // Copy to device
-    ddl.transfer_from(hdl);
-    dd.transfer_from(hd);
-    ddu.transfer_from(hdu);
-    dx.transfer_from(hx);
-
     // Obtain required buffer size
     size_t buffer_size;
     CHECK_ROCSPARSE_ERROR(rocsparse_gtsv_no_pivot_strided_batch_buffer_size<T>(PARAMS_BUFFER_SIZE));
@@ -159,53 +231,65 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
     void* dbuffer;
     CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
 
-    if(arg.unit_check)
+    for(int mode = mode_begin; mode <= mode_end; ++mode)
     {
-        CHECK_ROCSPARSE_ERROR(testing::rocsparse_gtsv_no_pivot_strided_batch<T>(PARAMS_SOLVE));
+        gtsv_no_pivot_strided_batch_init_system<T>(
+            mode, m, batch_count, batch_stride, hdl, hd, hdu, hx);
+        host_vector<T> hx_original = hx;
 
-        hx.transfer_from(dx);
+        ddl.transfer_from(hdl);
+        dd.transfer_from(hd);
+        ddu.transfer_from(hdu);
+        dx.transfer_from(hx);
 
-        // Check
-        std::vector<T> hresult(batch_stride * batch_count, static_cast<T>(7));
-
-        for(rocsparse_int j = 0; j < batch_count; j++)
+        if(arg.unit_check)
         {
-            rocsparse_int offset = batch_stride * j;
+            CHECK_ROCSPARSE_ERROR(testing::rocsparse_gtsv_no_pivot_strided_batch<T>(PARAMS_SOLVE));
 
-            hresult[offset] = hd[offset + 0] * hx[offset] + hdu[offset + 0] * hx[offset + 1];
-            hresult[offset + m - 1] = hdl[offset + m - 1] * hx[offset + m - 2]
-                                      + hd[offset + m - 1] * hx[offset + m - 1];
+            hx.transfer_from(dx);
+
+            // Check
+            std::vector<T> hresult(batch_stride * batch_count, static_cast<T>(7));
+
+            for(rocsparse_int j = 0; j < batch_count; j++)
+            {
+                rocsparse_int offset = batch_stride * j;
+
+                hresult[offset] = hd[offset + 0] * hx[offset] + hdu[offset + 0] * hx[offset + 1];
+                hresult[offset + m - 1] = hdl[offset + m - 1] * hx[offset + m - 2]
+                                          + hd[offset + m - 1] * hx[offset + m - 1];
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
 #endif
-            for(rocsparse_int i = 1; i < m - 1; i++)
-            {
-                hresult[offset + i] = hdl[offset + i] * hx[offset + i - 1]
-                                      + hd[offset + i] * hx[offset + i]
-                                      + hdu[offset + i] * hx[offset + i + 1];
+                for(rocsparse_int i = 1; i < m - 1; i++)
+                {
+                    hresult[offset + i] = hdl[offset + i] * hx[offset + i - 1]
+                                          + hd[offset + i] * hx[offset + i]
+                                          + hdu[offset + i] * hx[offset + i + 1];
+                }
             }
+
+            near_check_segments<T>(batch_stride * batch_count, hx_original.data(), hresult.data());
         }
 
-        near_check_segments<T>(batch_stride * batch_count, hx_original.data(), hresult.data());
-    }
+        if(arg.timing && mode == mode_begin)
+        {
+            const double gpu_solve_time_used = rocsparse_clients::run_benchmark(
+                arg, rocsparse_gtsv_no_pivot_strided_batch<T>, PARAMS_SOLVE);
 
-    if(arg.timing)
-    {
-        const double gpu_solve_time_used = rocsparse_clients::run_benchmark(
-            arg, rocsparse_gtsv_no_pivot_strided_batch<T>, PARAMS_SOLVE);
-
-        double gbyte_count = gtsv_strided_batch_gbyte_count<T>(m, batch_count);
-        double gpu_gbyte   = get_gpu_gbyte(gpu_solve_time_used, gbyte_count);
-        display_timing_info(display_key_t::M,
-                            m,
-                            display_key_t::batch_count,
-                            batch_count,
-                            display_key_t::batch_stride,
-                            batch_stride,
-                            display_key_t::bandwidth,
-                            gpu_gbyte,
-                            display_key_t::time_ms,
-                            get_gpu_time_msec(gpu_solve_time_used));
+            double gbyte_count = gtsv_strided_batch_gbyte_count<T>(m, batch_count);
+            double gpu_gbyte   = get_gpu_gbyte(gpu_solve_time_used, gbyte_count);
+            display_timing_info(display_key_t::M,
+                                m,
+                                display_key_t::batch_count,
+                                batch_count,
+                                display_key_t::batch_stride,
+                                batch_stride,
+                                display_key_t::bandwidth,
+                                gpu_gbyte,
+                                display_key_t::time_ms,
+                                get_gpu_time_msec(gpu_solve_time_used));
+        }
     }
 
     // Free buffer
