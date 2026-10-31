@@ -12,11 +12,21 @@
 #include <rocm_kpack/kpack.h>
 
 #include <filesystem>
+#include <memory>
 #include <string>
+#include <type_traits>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+
+#include "asm_fmha_v3_fwd_configs.hpp"
+#include "engines/asm_sdpa_engine/asm/AsmKernelPath.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaFwdLaunchParams.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaKernelUtils.hpp"
+#include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 
 #ifndef ASM_KPACK_TEST_DIR
 #error "ASM_KPACK_TEST_DIR must be defined (set via CMake compile definition)"
@@ -152,6 +162,95 @@ TEST(TestAsmKpackLoading, Gfx950FwdHd128)
 TEST(TestAsmKpackLoading, Gfx950BwdHd64Odo)
 {
     verifyKernelExtraction(kpackPath("gfx950"), "fmha_v3_bwd/bwd_hd64_odo_bf16.co", "gfx950");
+}
+
+// =============================================================================
+// Forward launch limits — every config row for the current device
+// =============================================================================
+//
+// Loads each forward kernel the config table offers for this device and checks
+// that the block size the plan launches with is within the kernel's own
+// max-threads-per-block limit. A row whose kernel cannot take that block passes
+// the table lookup but fails at hipModuleLaunchKernel, which is how the gfx950
+// hd192x128 kernel (limit 256) was once launched with 512 threads.
+
+/// TOC keys for one forward config row. gfx942 ships MI300 and MI308 builds of
+/// each kernel and the builder picks one by PCI chip ID, so both are checked.
+std::vector<std::string> fwdTocKeys(const fmha_v3_fwdConfig& config)
+{
+    const auto tocKey = getAsmKernelTocKey(config.co_name);
+    if(config.arch != "gfx942")
+    {
+        return {tocKey};
+    }
+    const auto pos = tocKey.rfind('/');
+    return {tocKey.substr(0, pos + 1) + "MI300/" + tocKey.substr(pos + 1),
+            tocKey.substr(0, pos + 1) + "MI308/" + tocKey.substr(pos + 1)};
+}
+
+TEST(TestGpuSdpaFwdLaunchLimits, EveryConfigRowFitsKernelMaxThreads)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const auto arch = hip_kernel_provider_common::getDeviceString(nullptr);
+    const auto path = kpackPath(arch);
+    if(!std::filesystem::exists(path))
+    {
+        GTEST_SKIP() << "No kpack archive for " << arch << " at " << path;
+    }
+
+    kpack_archive_t rawArchive = nullptr;
+    ASSERT_EQ(kpack_open(path.c_str(), &rawArchive), KPACK_SUCCESS) << path;
+    const auto archive
+        = std::unique_ptr<std::remove_pointer_t<kpack_archive_t>, decltype(&kpack_close)>(
+            rawArchive, &kpack_close);
+
+    size_t checked = 0;
+    for(const auto& [name, config] : cfg_fmha_fwd)
+    {
+        if(config.arch != arch)
+        {
+            continue;
+        }
+
+        SdpaFwdParams params{};
+        params.batchSize = 1U;
+        params.numHeadsQ = 1U;
+        params.seqLenQ = static_cast<unsigned int>(config.ts_qo);
+        params.headDimQk = static_cast<unsigned int>(config.hdim_q);
+        params.headDimV = static_cast<unsigned int>(config.hdim_v);
+        params.tileSizeQo = static_cast<unsigned int>(config.ts_qo);
+        params.archString = arch;
+        params.maskType = static_cast<plan_utils::MaskType>(config.mask);
+        const auto blockDimX = computeFwdLaunchParams(params).blockDimX;
+
+        for(const auto& tocKey : fwdTocKeys(config))
+        {
+            SCOPED_TRACE("tocKey=" + tocKey + " kernel=" + config.knl_name);
+
+            void* rawData = nullptr;
+            size_t size = 0;
+            ASSERT_EQ(
+                kpack_get_kernel(archive.get(), tocKey.c_str(), arch.c_str(), &rawData, &size),
+                KPACK_SUCCESS);
+            const auto data
+                = std::unique_ptr<void, decltype(&kpack_free_kernel)>(rawData, &kpack_free_kernel);
+
+            const auto kernel
+                = loadKernelModuleFromMemory(data.get(), size, config.knl_name.c_str());
+            ASSERT_TRUE(kernel.has_value());
+
+            const auto maxThreads = getMaxThreadsPerBlock(kernel->function());
+            ASSERT_TRUE(maxThreads.has_value());
+            EXPECT_LE(blockDimX, *maxThreads);
+            ++checked;
+        }
+    }
+
+    if(checked == 0)
+    {
+        GTEST_SKIP() << "No forward config rows for " << arch;
+    }
 }
 
 // =============================================================================
