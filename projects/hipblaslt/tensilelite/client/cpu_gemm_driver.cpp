@@ -28,6 +28,7 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <complex>
 #include <iostream>
 #include <limits>
 #include <random>
@@ -70,6 +71,9 @@
  *
  * # Float8 x Half inputs (MAC on Half), Float8 output
  * ./cpu_gemm_driver --typeA f8 --typeB f16 --computeInputA f16 --typeCD f8 --validate
+ *
+ * # Complex float (C_C_C) with conjugated A
+ * ./cpu_gemm_driver --type c --transA --conjA --validate --tryFastPath
  *
  * # Benchmark mode (validation disabled)
  * ./cpu_gemm_driver --M 2048 --N 2048 --K 2048 --validate 0 --tryFastPath 1
@@ -147,6 +151,21 @@ namespace
         static constexpr rocisa::DataType value = rocisa::DataType::BFloat8_fnuz;
     };
 
+    template <>
+    struct TypeTraits<std::complex<float>>
+    {
+        static constexpr rocisa::DataType value = rocisa::DataType::ComplexFloat;
+    };
+
+    template <>
+    struct TypeTraits<std::complex<double>>
+    {
+        static constexpr rocisa::DataType value = rocisa::DataType::ComplexDouble;
+    };
+
+    template <typename T>
+    constexpr bool isComplexV = TypeInfo<T>::IsComplex;
+
     // 8-bit float storage family: OCP (Float8, BFloat8) or fnuz (Float8_fnuz, BFloat8_fnuz).
     enum class Float8Family
     {
@@ -193,6 +212,10 @@ namespace
     //   AccumT         — epilogue type (float, double or int32_t): alpha, beta,
     //                    the scale/bias vectors, C and D are in this type. It is
     //                    also the K-loop accumulation type unless MacT is given.
+    //                    Complex inputs use their own type (std::complex<float>
+    //                    or std::complex<double>) for everything, as the
+    //                    reference's C_C_C/Z_Z_Z do; A or B is conjugated by the
+    //                    caller (no scale vectors, bias or activation).
     //   OperandMathOpT — per-operand math type used immediately before multiply.
     //                    XFloat32, for example, truncates float operands to a
     //                    10-bit mantissa.
@@ -236,6 +259,19 @@ namespace
         default:
             throw std::runtime_error("Unsupported compute-input type for golden GEMM quantizer.");
         }
+    }
+
+    // A golden operand rounded through its compute-input type (quantize == nullptr:
+    // unchanged). Complex operands have no compute-input override.
+    template <typename MacT>
+    MacT quantizeOperand(QuantizeFn quantize, MacT v)
+    {
+        if(!quantize)
+            return v;
+        if constexpr(isComplexV<MacT>)
+            throw std::runtime_error("Complex operands cannot be quantized.");
+        else
+            return static_cast<MacT>(quantize(static_cast<float>(v)));
     }
 
 #ifndef _WIN32
@@ -387,8 +423,8 @@ namespace
                             size_t l    = lBase + t;
                             MacT   aVal = a[i * strideAM + l * strideAK];
                             MacT   bVal = b[l * strideBK + j * strideBN];
-                            if(quantizeA) aVal = static_cast<MacT>(quantizeA(static_cast<float>(aVal)));
-                            if(quantizeB) bVal = static_cast<MacT>(quantizeB(static_cast<float>(bVal)));
+                            aVal        = quantizeOperand(quantizeA, aVal);
+                            bVal        = quantizeOperand(quantizeB, bVal);
                             blockSum
                                 += static_cast<MacT>(static_cast<OperandMathOpT>(aVal))
                                    * static_cast<MacT>(static_cast<OperandMathOpT>(bVal));
@@ -415,8 +451,8 @@ namespace
                     {
                         MacT aVal = a[i * strideAM + l * strideAK];
                         MacT bVal = b[l * strideBK + j * strideBN];
-                        if(quantizeA) aVal = static_cast<MacT>(quantizeA(static_cast<float>(aVal)));
-                        if(quantizeB) bVal = static_cast<MacT>(quantizeB(static_cast<float>(bVal)));
+                        aVal      = quantizeOperand(quantizeA, aVal);
+                        bVal      = quantizeOperand(quantizeB, bVal);
                         sum += static_cast<MacT>(static_cast<OperandMathOpT>(aVal))
                                * static_cast<MacT>(static_cast<OperandMathOpT>(bVal));
                     }
@@ -445,7 +481,11 @@ namespace
 
                 if(activation == ActivationType::Relu)
                 {
-                    result = std::max(WideT(0), result);
+                    if constexpr(!isComplexV<AccumT>)
+                        result = std::max(WideT(0), result);
+                    else
+                        throw std::runtime_error(
+                            "CPU reference GEMM: no activation for complex types.");
                 }
                 else
                 {
@@ -500,8 +540,9 @@ namespace
  *
  * InputT: The C++ type used for storage of A and B matrices (e.g. float, half).
  * AccumulateT: alpha/beta type, which is also the reference's epilogue type
- *              (float, double, or int32_t for Int8 inputs).
+ *              (float, double, int32_t for Int8 inputs, or the complex input type).
  * OutputT: C/D storage type (defaults to AccumulateT).
+ * conjA/conjB: TensorOp::ComplexConjugate on A/B (complex inputs only).
  */
 template <typename InputAT,
           typename InputBT     = InputAT,
@@ -530,7 +571,9 @@ int runGemm(size_t         m,
             bool               isTF32        = false,
             bool               outputAmaxD   = false,
             int                int8Min       = -128,
-            int                int8Max       = 127)
+            int                int8Max       = 127,
+            bool               conjA         = false,
+            bool               conjB         = false)
 {
     if(batchCount == 0)
     {
@@ -557,6 +600,12 @@ int runGemm(size_t         m,
                   "Int8 input storage must be used for both A and B, or neither.");
     // Golden K-loop type: exact integer accumulation for Int8 (see columnMajorGemm).
     using MacT = std::conditional_t<isInt8, int64_t, AccumulateT>;
+
+    constexpr bool isComplex = isComplexV<InputAT>;
+    static_assert(!isComplex
+                      || (std::is_same_v<InputAT, InputBT> && std::is_same_v<InputAT, AccumulateT>
+                          && std::is_same_v<InputAT, OutputT>),
+                  "Complex inputs use one complex type for A, B, C, D and alpha/beta.");
 
     if constexpr(!isFP4)
     {
@@ -655,6 +704,11 @@ int runGemm(size_t         m,
     if(isTF32)
         contraction.setF32XdlMathOp(rocisa::DataType::XFloat32);
 
+    if(conjA)
+        contraction.setAOps({TensorOp::ComplexConjugate()});
+    if(conjB)
+        contraction.setBOps({TensorOp::ComplexConjugate()});
+
     // Allocate host memory for inputs and outputs. Each batch slice is packed.
     size_t numA = m * k;
     size_t numB = k * n;
@@ -697,12 +751,22 @@ int runGemm(size_t         m,
     // Int8 inputs are drawn from [int8Min, int8Max], by default the full range
     // [-128, 127], so the integer accumulation, large sums and saturating Int8
     // output are exercised. A narrower range keeps most Int8 outputs in range.
+    //
+    // Complex A, B and C get +-1 in both the real and the imaginary part, so a
+    // missing or misplaced conjugation changes the result.
     size_t                                seed = 42;
     std::mt19937                          gen(seed);
     std::uniform_int_distribution<>       binary_distribution(0, 1);
     std::uniform_real_distribution<float> realDist(-1.0f, 1.0f);
 
     auto randomGen = [&]() { return binary_distribution(gen) ? 1.0f : -1.0f; };
+    // A complex T with +-1 parts, real part drawn first.
+    auto randomComplexGen = [&](auto tag) {
+        using T       = decltype(tag);
+        const auto re = static_cast<typename T::value_type>(randomGen());
+        const auto im = static_cast<typename T::value_type>(randomGen());
+        return T(re, im);
+    };
 
 #ifndef _WIN32
     if constexpr(isFP4)
@@ -761,6 +825,10 @@ int runGemm(size_t         m,
                 std::generate(vec.begin(), vec.end(),
                               [&]() { return static_cast<T>(int8Dist(gen)); });
             }
+            else if constexpr(isComplexV<T>)
+            {
+                std::generate(vec.begin(), vec.end(), [&]() { return randomComplexGen(T{}); });
+            }
             else if(quantizes)
             {
                 // Values representable in storage but not on the compute-input grid -
@@ -781,7 +849,10 @@ int runGemm(size_t         m,
         initOperand(a, quantizesA);
         initOperand(b, quantizesB);
     }
-    std::generate(c.begin(), c.end(), [&]() { return static_cast<OutputT>(randomGen()); });
+    if constexpr(isComplex)
+        std::generate(c.begin(), c.end(), [&]() { return randomComplexGen(OutputT{}); });
+    else
+        std::generate(c.begin(), c.end(), [&]() { return static_cast<OutputT>(randomGen()); });
 
     // Optional feature buffers — typed as AccumulateT so the slow path's
     // GetValue(alphaType, ...) reads the correct byte width.
@@ -930,8 +1001,11 @@ int runGemm(size_t         m,
     auto                                      end      = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end - start;
     std::cout << "Execution Time: " << duration.count() << " ms" << std::endl;
-    if(outputAmaxD)
-        std::cout << "AmaxD: " << static_cast<double>(amaxD) << std::endl;
+    if constexpr(!isComplex)
+    {
+        if(outputAmaxD)
+            std::cout << "AmaxD: " << static_cast<double>(amaxD) << std::endl;
+    }
 
     if(injectValidationFailure)
     {
@@ -986,6 +1060,17 @@ int runGemm(size_t         m,
             bRef.resize(totalB);
             for(size_t i = 0; i < totalB; i++)
                 bRef[i] = static_cast<MacT>(b[i]);
+            if constexpr(isComplex)
+            {
+                if(conjA)
+                    std::transform(aRef.begin(), aRef.end(), aRef.begin(), [](MacT v) {
+                        return std::conj(v);
+                    });
+                if(conjB)
+                    std::transform(bRef.begin(), bRef.end(), bRef.begin(), [](MacT v) {
+                        return std::conj(v);
+                    });
+            }
         }
 
         std::vector<AccumulateT> cRef(c.size());
@@ -1085,7 +1170,8 @@ int runGemm(size_t         m,
             }
         };
 
-        if constexpr(isInt8)
+        // Int8 and complex: no operand math-op type (the MAC type itself).
+        if constexpr(isInt8 || isComplex)
             runGoldenRef(MacT{});
         else if(isTF32)
             runGoldenRef(XFloat32{});
@@ -1121,26 +1207,42 @@ int runGemm(size_t         m,
         bool   allClose = true;
         double maxDiff  = 0.0;
 
-        for(size_t i = 0; i < totalC; i++)
-        {
-            double valDut = static_cast<double>(d[i]);
-            double valRef = static_cast<double>(saturateCastLikeReference<OutputT>(dRef[i]));
-            // Equal values (also equal infinities) and NaN on both sides match; a NaN on
-            // one side only (e.g. an unsaturated Float8 overflow) is an infinite difference,
-            // which the tolerance check below would otherwise miss.
+        // Equal values (also equal infinities) and NaN on both sides match; a NaN on
+        // one side only (e.g. an unsaturated Float8 overflow) is an infinite difference,
+        // which the tolerance check below would otherwise miss.
+        auto valueDiff = [](double valDut, double valRef) {
             const bool bothNaN = std::isnan(valDut) && std::isnan(valRef);
             double     diff    = (valDut == valRef || bothNaN) ? 0.0 : std::abs(valDut - valRef);
             if(std::isnan(diff))
                 diff = std::numeric_limits<double>::infinity();
-            maxDiff       = std::max(maxDiff, diff);
+            return diff;
+        };
+
+        for(size_t i = 0; i < totalC; i++)
+        {
+            // Complex: the larger of the real-part and imaginary-part differences.
+            const auto valDut = d[i];
+            const auto valRef = saturateCastLikeReference<OutputT>(dRef[i]);
+            double     diff;
+            if constexpr(isComplex)
+                diff = std::max(valueDiff(valDut.real(), valRef.real()),
+                                valueDiff(valDut.imag(), valRef.imag()));
+            else
+                diff = valueDiff(static_cast<double>(valDut), static_cast<double>(valRef));
+            maxDiff = std::max(maxDiff, diff);
 
             if(diff > tolerance)
             {
                 allClose = false;
                 if(i < 10)
                 {
-                    std::cout << "Mismatch at " << i << ": observed=" << valDut
-                              << " expected=" << valRef << " diff=" << diff << std::endl;
+                    std::cout << "Mismatch at " << i << ": observed=";
+                    if constexpr(isComplex)
+                        std::cout << valDut << " expected=" << valRef;
+                    else
+                        std::cout << static_cast<double>(valDut)
+                                  << " expected=" << static_cast<double>(valRef);
+                    std::cout << " diff=" << diff << std::endl;
                 }
             }
         }
@@ -1156,24 +1258,27 @@ int runGemm(size_t         m,
         }
 
         // AMAX-D is checked against the golden D, whichever CPU path computed it.
-        if(outputAmaxD)
+        if constexpr(!isComplex)
         {
-            double goldenAmaxD = 0.0;
-            for(size_t i = 0; i < totalC; i++)
-                goldenAmaxD = std::max(goldenAmaxD, std::abs(static_cast<double>(dRef[i])));
+            if(outputAmaxD)
+            {
+                double goldenAmaxD = 0.0;
+                for(size_t i = 0; i < totalC; i++)
+                    goldenAmaxD = std::max(goldenAmaxD, std::abs(static_cast<double>(dRef[i])));
 
-            double amaxDiff = std::abs(static_cast<double>(amaxD) - goldenAmaxD);
-            if(amaxDiff <= tolerance)
-            {
-                std::cout << "AmaxD PASSED! (observed=" << static_cast<double>(amaxD)
-                          << " expected=" << goldenAmaxD << ")" << std::endl;
-            }
-            else
-            {
-                std::cout << "AmaxD FAILED! (observed=" << static_cast<double>(amaxD)
-                          << " expected=" << goldenAmaxD << " diff=" << amaxDiff << ")"
-                          << std::endl;
-                return 1;
+                double amaxDiff = std::abs(static_cast<double>(amaxD) - goldenAmaxD);
+                if(amaxDiff <= tolerance)
+                {
+                    std::cout << "AmaxD PASSED! (observed=" << static_cast<double>(amaxD)
+                              << " expected=" << goldenAmaxD << ")" << std::endl;
+                }
+                else
+                {
+                    std::cout << "AmaxD FAILED! (observed=" << static_cast<double>(amaxD)
+                              << " expected=" << goldenAmaxD << " diff=" << amaxDiff << ")"
+                              << std::endl;
+                    return 1;
+                }
             }
         }
     }
@@ -1193,11 +1298,11 @@ int main(int argc, char* argv[])
         "transB", po::value<bool>()->default_value(false), "Transpose B")(
         "alpha", po::value<float>()->default_value(1.0f), "Alpha scalar")(
         "beta", po::value<float>()->default_value(0.0f), "Beta scalar")(
-        "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f64, tf32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4, i8)")(
+        "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f64, tf32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4, i8, c = complex f32, z = complex f64)")(
         "typeA", po::value<std::string>()->default_value(""), "Override A storage type (defaults to --type)")(
         "typeB", po::value<std::string>()->default_value(""), "Override B storage type (defaults to --type)")(
-        "typeCD", po::value<std::string>()->default_value(""), "C/D (output) type: f32, f64, f16, bf16, i8, i32, f8, bf8, f8fnuz, bf8fnuz. Defaults to i32 for i8 inputs, f64 for f64 inputs, else f32; i8 inputs take any of i8, i32, f16, bf16; 8-bit float inputs of one family (OCP or fnuz) take that family's f8/bf8, f8 x f16 takes f8 (f8fnuz x f16: f8fnuz); other inputs only the default")(
-        "typeAlpha", po::value<std::string>()->default_value(""), "Alpha/beta type, also the reference's epilogue type: f32, f64, i32. Defaults to i32 when --typeCD is i8 or i32, f64 for f64 inputs, else f32; i32 needs integer --alpha/--beta")(
+        "typeCD", po::value<std::string>()->default_value(""), "C/D (output) type: f32, f64, f16, bf16, i8, i32, f8, bf8, f8fnuz, bf8fnuz. Defaults to i32 for i8 inputs, f64 for f64 inputs, the input type for c/z inputs, else f32; i8 inputs take any of i8, i32, f16, bf16; 8-bit float inputs of one family (OCP or fnuz) take that family's f8/bf8, f8 x f16 takes f8 (f8fnuz x f16: f8fnuz); other inputs only the default")(
+        "typeAlpha", po::value<std::string>()->default_value(""), "Alpha/beta type, also the reference's epilogue type: f32, f64, i32. Defaults to i32 when --typeCD is i8 or i32, f64 for f64 inputs, the input type for c/z inputs (real --alpha/--beta), else f32; i32 needs integer --alpha/--beta")(
         "computeInputA", po::value<std::string>()->default_value(""), "Override A compute-input type for MAC (defaults to --typeA). Set smaller than storage to mimic kernels that quantize A.")(
         "computeInputB", po::value<std::string>()->default_value(""), "Override B compute-input type for MAC (defaults to --typeB). Set smaller than storage to mimic kernels that quantize B.")(
         "validate", po::value<bool>()->default_value(true), "Run validation against ref")(
@@ -1213,7 +1318,9 @@ int main(int argc, char* argv[])
         "batchCount", po::value<size_t>()->default_value(1), "Batch count (default 1)")(
         "outputAmaxD", po::value<bool>()->default_value(false), "Also output AMAX-D (max |D|) and validate it against the golden GEMM")(
         "int8Min", po::value<int>()->default_value(-128), "Smallest i8 A/B value (i8 inputs only; default -128)")(
-        "int8Max", po::value<int>()->default_value(127), "Largest i8 A/B value (i8 inputs only; default 127)");
+        "int8Max", po::value<int>()->default_value(127), "Largest i8 A/B value (i8 inputs only; default 127)")(
+        "conjA", po::value<bool>()->default_value(false), "Conjugate A (TensorOp::ComplexConjugate; c/z inputs only)")(
+        "conjB", po::value<bool>()->default_value(false), "Conjugate B (TensorOp::ComplexConjugate; c/z inputs only)");
 
     po::variables_map vm;
     try
@@ -1261,6 +1368,8 @@ int main(int argc, char* argv[])
         if(s == "f8fnuz")         { out = rocisa::DataType::Float8_fnuz;  return true; }
         if(s == "bf8fnuz")        { out = rocisa::DataType::BFloat8_fnuz; return true; }
         if(s == "i8")             { out = rocisa::DataType::Int8;         return true; }
+        if(s == "c")              { out = rocisa::DataType::ComplexFloat; return true; }
+        if(s == "z")              { out = rocisa::DataType::ComplexDouble; return true; }
 #ifndef _WIN32
         if(s == "f4")             { out = rocisa::DataType::Float4;       return true; }
 #endif
@@ -1290,6 +1399,8 @@ int main(int argc, char* argv[])
     bool        outputAmaxD              = vm["outputAmaxD"].as<bool>();
     int         int8Min                  = vm["int8Min"].as<int>();
     int         int8Max                  = vm["int8Max"].as<int>();
+    bool        conjA                    = vm["conjA"].as<bool>();
+    bool        conjB                    = vm["conjB"].as<bool>();
     const bool  typeAIsTF32              = (typeAStr == "tf32");
     const bool  typeBIsTF32              = (typeBStr == "tf32");
     const bool  isTF32                   = typeAIsTF32 && typeBIsTF32;
@@ -1328,14 +1439,50 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    // Complex inputs (c, z): A and B of one complex type, which is also the C/D and
+    // alpha/beta type (the reference's C_C_C / Z_Z_Z), optionally conjugated
+    // (--conjA, --conjB). The reference's fast path takes no bias, ScaleAB,
+    // scaleAlphaVec, activation or AMAX-D for them (the slow path reads complex bias
+    // and scale values as zero), and the golden has no complex activation.
+    const bool typeAIsComplex = (typeAStr == "c" || typeAStr == "z");
+    const bool typeBIsComplex = (typeBStr == "c" || typeBStr == "z");
+    const bool isComplex      = typeAIsComplex && typeBIsComplex;
+    if(typeAIsComplex != typeBIsComplex || (isComplex && typeAStr != typeBStr))
+    {
+        std::cerr << "Error: complex inputs need the same complex type for A and B (typeA="
+                  << typeAStr << ", typeB=" << typeBStr << ")" << std::endl;
+        return 1;
+    }
+    if(isComplex && (computeInputAStr != typeAStr || computeInputBStr != typeBStr))
+    {
+        std::cerr << "Error: complex inputs do not support a computeInput override" << std::endl;
+        return 1;
+    }
+    if(isComplex
+       && (useBias || activationStr != "none" || useScaleAlphaVec || useScaleAB != "none"
+           || outputAmaxD))
+    {
+        std::cerr << "Error: complex inputs do not support --bias, --activation, --scaleAlphaVec,"
+                  << " --useScaleAB or --outputAmaxD" << std::endl;
+        return 1;
+    }
+    if(!isComplex && (conjA || conjB))
+    {
+        std::cerr << "Error: --conjA/--conjB need complex inputs (c or z)" << std::endl;
+        return 1;
+    }
+
     const bool        isF64        = (typeAStr == "f64" && typeBStr == "f64");
     std::string       typeCDStr    = vm["typeCD"].as<std::string>();
     std::string       typeAlphaStr = vm["typeAlpha"].as<std::string>();
-    const std::string defaultCD    = isInt8 ? "i32" : (isF64 ? "f64" : "f32");
+    // Default C/D and alpha/beta type for non-integer outputs: the input type for f64
+    // and complex inputs, else f32.
+    const std::string defaultType  = isF64 ? "f64" : (isComplex ? typeAStr : "f32");
+    const std::string defaultCD    = isInt8 ? "i32" : defaultType;
     if(typeCDStr.empty())
         typeCDStr = defaultCD;
     const bool        isIntCD      = (typeCDStr == "i8" || typeCDStr == "i32");
-    const std::string defaultAlpha = isIntCD ? "i32" : (isF64 ? "f64" : "f32");
+    const std::string defaultAlpha = isIntCD ? "i32" : defaultType;
     if(typeAlphaStr.empty())
         typeAlphaStr = defaultAlpha;
 
@@ -1451,7 +1598,7 @@ int main(int argc, char* argv[])
             validate, injectValidationFailure, tryFastPath,
             useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
             computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount, isTF32,
-            outputAmaxD, int8Min, int8Max);
+            outputAmaxD, int8Min, int8Max, conjA, conjB);
     };
 
     // Float8/BFloat8 C/D with float alpha/beta: the reference's Float8-output type ids.
@@ -1500,6 +1647,8 @@ int main(int argc, char* argv[])
             using BT = decltype(bTag);
             constexpr bool isAInt8 = std::is_same_v<AT, int8_t>;
             constexpr bool isBInt8 = std::is_same_v<BT, int8_t>;
+            constexpr bool isAComplex = isComplexV<AT>;
+            constexpr bool isBComplex = isComplexV<BT>;
 #ifndef _WIN32
             constexpr bool isMixedFP4 = std::is_same_v<AT, Float4x2>
                                         != std::is_same_v<BT, Float4x2>;
@@ -1515,6 +1664,20 @@ int main(int argc, char* argv[])
             {
                 std::cerr << "Error: mixed i8 / non-i8 input is not supported." << std::endl;
                 return 1;
+            }
+            else if constexpr(isAComplex || isBComplex)
+            {
+                // C_C_C / Z_Z_Z: the complex type for every tensor and alpha/beta.
+                if constexpr(std::is_same_v<AT, BT>)
+                {
+                    return runTyped(AT{}, BT{}, AT{}, AT{});
+                }
+                else
+                {
+                    std::cerr << "Error: complex inputs need the same complex type for A and B."
+                              << std::endl;
+                    return 1;
+                }
             }
             else if constexpr(isAInt8)
             {
@@ -1556,6 +1719,8 @@ int main(int argc, char* argv[])
         if(typeBStr == "f8fnuz")     return callB(Float8_fnuz{});
         if(typeBStr == "bf8fnuz")    return callB(BFloat8_fnuz{});
         if(typeBStr == "i8")         return callB(int8_t{});
+        if(typeBStr == "c")          return callB(std::complex<float>{});
+        if(typeBStr == "z")          return callB(std::complex<double>{});
 #ifndef _WIN32
         if(typeBStr == "f4")         return callB(Float4x2{});
 #endif
@@ -1574,6 +1739,8 @@ int main(int argc, char* argv[])
         if(typeAStr == "f8fnuz")     return dispatchB(Float8_fnuz{});
         if(typeAStr == "bf8fnuz")    return dispatchB(BFloat8_fnuz{});
         if(typeAStr == "i8")         return dispatchB(int8_t{});
+        if(typeAStr == "c")          return dispatchB(std::complex<float>{});
+        if(typeAStr == "z")          return dispatchB(std::complex<double>{});
 #ifndef _WIN32
         if(typeAStr == "f4")         return dispatchB(Float4x2{});
 #endif
