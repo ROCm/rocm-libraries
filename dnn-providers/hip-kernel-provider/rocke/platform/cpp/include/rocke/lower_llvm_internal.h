@@ -70,23 +70,30 @@ typedef struct rocke_ll_decl
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_COUNT;
 
-/* The LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES): same keys,
- * different decl text. */
+/* Per-generation overrides: each array holds only the entries whose text
+ * changed AT that declaration ABI generation (same keys as the base table,
+ * different decl text). A generation inherits every older generation's array
+ * in rocke_ll_declaration_abi_t order. */
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
 
-/* The LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): the LLVM22
- * set plus declarations whose ABI changed again. */
-extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[];
-extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
-
-/* The LLVM24 overrides (Python _INTRINSIC_DECLS_LLVM24_OVERRIDES): the LLVM23
- * set with addrspace(15) named-barrier pointers. */
+/* LLVM24's own overrides (Python _INTRINSIC_DECLS_LLVM24_OVERRIDES):
+ * the named-barrier declarations with addrspace(15) pointers. */
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM24_OVERRIDES_COUNT;
 
-/* Resolve the flavor-specific override table (NULL/0 for non-modern flavors). */
-const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count);
+/* One declaration ABI generation's own override array (NULL/0 for LLVM20,
+ * which is the base, and for a generation with no text of its own). */
+const rocke_ll_decl_t* rocke_ll_declaration_abi_own_overrides(rocke_ll_declaration_abi_t abi,
+                                                              int* out_count);
+
+/* The resolved declaration table of one flavor (Python _decls_for_flavor):
+ * rocke_ll_decl_text gives one key's text -- the newest override at or below
+ * the generation `flavor`'s emission profile selects, else the base text; NULL
+ * for an unknown key or a flavor without a profile. rocke_ll_decl_at gives entry `index` in emit order, which is the
+ * base table's order, index in [0, ROCKE_LL_INTRINSIC_DECLS_COUNT). */
+const char* rocke_ll_decl_text(rocke_llvm_flavor_t flavor, const char* key);
+rocke_ll_decl_t rocke_ll_decl_at(rocke_llvm_flavor_t flavor, int index);
 
 /* ---------------------------------------------------------- anyptr overloads */
 

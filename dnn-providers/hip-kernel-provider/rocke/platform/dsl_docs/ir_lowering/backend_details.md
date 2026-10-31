@@ -48,6 +48,8 @@ The profiles capture these differences:
 
 The compiler resolver never infers structural compatibility from a lane name. Emission decisions consult the selected profile rather than exact `llvm23` comparisons. Python and C++ must emit byte-identical IR for the same kernel, target, and lane.
 
+A lane's declaration table is resolved in one place, `_decls_for_flavor` (`core/lower_llvm.py`): the base table `_INTRINSIC_DECLS` (the LLVM 20 shapes), then the own overrides of every declaration ABI generation up to and including the one the lane's profile selects, oldest first in `_LlvmDeclarationAbi` order. Each override table holds only the entries whose text changed at that generation, so the LLVM23 generation reaches the LLVM22 overrides through inheritance and `_INTRINSIC_DECLS_LLVM23_OVERRIDES` holds only its own changes (none today; the C++ engine then has no LLVM23 array), while `_INTRINSIC_DECLS_LLVM24_OVERRIDES` holds only the four named-barrier declarations. The C++ engine resolves the same chain (`rocke_ll_decl_text` / `rocke_ll_decl_at` in `cpp/core/lower_llvm/data.cpp`, walking `rocke_ll_declaration_abi_t`).
+
 Detection (`core/lower_llvm.py::_detect_llvm_flavor`):
 
 1. A supported `ROCKE_LLVM_FLAVOR` value selects offline emission without loading COMGR.
