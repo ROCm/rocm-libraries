@@ -806,6 +806,120 @@ foreach(PATH fast slow)
     )
 endforeach()
 
+#################################################
+#     Float8 output tests (fast & slow)         #
+#################################################
+# Float8/BFloat8 (OCP and fnuz) C/D with float alpha/beta. Each entry is one of
+# the reference's Float8-output type ids (named as in TypedId.hpp):
+# NAME;typeA;typeB;typeCD;compute-input flags ("-" for none);test set.
+# The golden casts its float result to C/D the way the reference's
+# SaturateCast does (round to nearest even, saturate to the largest finite
+# value) and the driver compares Float8 outputs exactly: every K-loop sum is
+# exact in float and the epilogue rounds the same operations in the same order
+# (+-1 C/bias/scaleAlphaVec, integer scales; see cpu_gemm_driver.cpp), so fast,
+# slow and golden must give the same F8 value.
+# K = 151 with +-1 data makes every sum odd, so the sums with 16 < |sum| < 32
+# (e4m3) or 8 < |sum| < 16 (e5m2) are ties between two F8 values; ScaleAB
+# (scales up to 100 x 100) saturates most of D.
+#
+# Test sets: "full" for the four ids with the same type in A, B and C/D;
+# "basic" for the cross-output and hybrid ids and Float8 x Half with a Half MAC;
+# "noscale" for Float8 x Half with a Float8 MAC (--computeInput f8 on the Half
+# operand). The slow path handles ScaleAB differently when the storage is wider
+# than the compute-input type (Scalar: scales the Half value before quantizing
+# it, Vector: drops that side's scale), for any output type, so ScaleAB is not
+# tested there.
+if(NOT WIN32)
+    foreach(PATH fast slow)
+        if("${PATH}" STREQUAL "fast")
+            set(PATH_FLAGS --tryFastPath)
+        else()
+            set(PATH_FLAGS "")
+        endif()
+
+        foreach(COMBO
+                "F8_F8_S;f8;f8;f8;-;full"
+                "B8_B8_S;bf8;bf8;bf8;-;full"
+                "F8N_F8N_S;f8fnuz;f8fnuz;f8fnuz;-;full"
+                "B8N_B8N_S;bf8fnuz;bf8fnuz;bf8fnuz;-;full"
+                "F8_B8_S;f8;f8;bf8;-;basic"
+                "B8_F8_S;bf8;bf8;f8;-;basic"
+                "F8B8_F8_S;f8;bf8;f8;-;basic"
+                "F8B8_B8_S;f8;bf8;bf8;-;basic"
+                "B8F8_F8_S;bf8;f8;f8;-;basic"
+                "B8F8_B8_S;bf8;f8;bf8;-;basic"
+                "F8N_B8N_S;f8fnuz;f8fnuz;bf8fnuz;-;basic"
+                "B8N_F8N_S;bf8fnuz;bf8fnuz;f8fnuz;-;basic"
+                "F8B8N_F8N_S;f8fnuz;bf8fnuz;f8fnuz;-;basic"
+                "F8B8N_B8N_S;f8fnuz;bf8fnuz;bf8fnuz;-;basic"
+                "B8F8N_F8N_S;bf8fnuz;f8fnuz;f8fnuz;-;basic"
+                "B8F8N_B8N_S;bf8fnuz;f8fnuz;bf8fnuz;-;basic"
+                "F8H_H_FP8_S;f8;f16;f8;--computeInputA f16;basic"
+                "HF8_H_FP8_S;f16;f8;f8;--computeInputB f16;basic"
+                "F8NH_H_FP8_S;f8fnuz;f16;f8fnuz;--computeInputA f16;basic"
+                "HF8N_H_FP8_S;f16;f8fnuz;f8fnuz;--computeInputB f16;basic"
+                "F8H_FP8_FP8_S;f8;f16;f8;--computeInputB f8;noscale"
+                "HF8_FP8_FP8_S;f16;f8;f8;--computeInputA f8;noscale"
+                "F8NH_FP8_FP8_S;f8fnuz;f16;f8fnuz;--computeInputB f8fnuz;noscale"
+                "HF8N_FP8_FP8_S;f16;f8fnuz;f8fnuz;--computeInputA f8fnuz;noscale")
+            list(GET COMBO 0 NAME)
+            list(GET COMBO 1 TYPE_A)
+            list(GET COMBO 2 TYPE_B)
+            list(GET COMBO 3 TYPE_CD)
+            list(GET COMBO 4 COMPUTE_FLAGS)
+            list(GET COMBO 5 TEST_SET)
+            if("${COMPUTE_FLAGS}" STREQUAL "-")
+                set(COMPUTE_FLAGS "")
+            endif()
+            separate_arguments(COMPUTE_FLAGS)
+            set(F8OUT_ARGS ${F16_SIZES} --typeA ${TYPE_A} --typeB ${TYPE_B} --typeCD ${TYPE_CD} ${COMPUTE_FLAGS} --validate ${PATH_FLAGS})
+
+            add_cpu_gemm_test(${PATH}_${NAME}_NN
+                ARGS ${F8OUT_ARGS}
+            )
+            # alpha 0.3: values off the F8 grid before the cast.
+            add_cpu_gemm_test(${PATH}_${NAME}_TN_AllFeatures
+                ARGS ${F8OUT_ARGS} --transA --alpha 0.3 --beta 0.5 --bias --activation relu --scaleAlphaVec
+            )
+            if(NOT "${TEST_SET}" STREQUAL "noscale")
+                add_cpu_gemm_test(${PATH}_${NAME}_ScaleAB_Scalar
+                    ARGS ${F8OUT_ARGS} --useScaleAB Scalar
+                )
+            endif()
+            if("${TEST_SET}" STREQUAL "full")
+                foreach(TRANS TN NT TT)
+                    get_trans_flags(${TRANS} TFLAGS)
+                    add_cpu_gemm_test(${PATH}_${NAME}_${TRANS}
+                        ARGS ${F8OUT_ARGS} ${TFLAGS}
+                    )
+                endforeach()
+                add_cpu_gemm_test(${PATH}_${NAME}_Beta
+                    ARGS ${F8OUT_ARGS} --beta 0.5
+                )
+                add_cpu_gemm_test(${PATH}_${NAME}_Bias
+                    ARGS ${F8OUT_ARGS} --bias
+                )
+                add_cpu_gemm_test(${PATH}_${NAME}_Alpha
+                    ARGS ${F8OUT_ARGS} --alpha 0.3
+                )
+                add_cpu_gemm_test(${PATH}_${NAME}_ScaleAB_Vector
+                    ARGS ${F8OUT_ARGS} --useScaleAB Vector --scaleAlphaVec --factorDim 1
+                )
+                add_cpu_gemm_test(${PATH}_${NAME}_Batched
+                    ARGS ${F8OUT_ARGS} --batchCount 3
+                )
+            endif()
+        endforeach()
+
+        # A perturbed (here saturated) Float8 D element must fail validation.
+        add_test(
+            NAME "CPUGemm.${PATH}_F8_F8_S_InjectedFailure_Rejected"
+            COMMAND cpu-gemm-driver ${F16_SIZES} --type f8 --typeCD f8 --useScaleAB Scalar --validate --injectValidationFailure ${PATH_FLAGS}
+        )
+        set_tests_properties("CPUGemm.${PATH}_F8_F8_S_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
+    endforeach()
+endif()
+
 # Option checks: these must be rejected.
 foreach(CASE
         "I8_MixedA;--typeA i8 --typeB f32"
@@ -814,7 +928,12 @@ foreach(CASE
         "I8_Int8RangeOutOfBounds;--type i8 --int8Min -129"
         "I8_Int8RangeEmpty;--type i8 --int8Min 3 --int8Max 2"
         "F32_Int8Range;--type f32 --int8Max 3"
-        "F32_TypeCD;--type f32 --typeCD f16")
+        "F32_TypeCD;--type f32 --typeCD f16"
+        "F32_F8CD;--type f32 --typeCD f8"
+        "F8_F8CDOtherFamily;--type f8 --typeCD f8fnuz"
+        "F8_F8CDTypeAlpha;--type f8 --typeCD f8 --typeAlpha f64"
+        "B8H_B8CD;--typeA bf8 --typeB f16 --computeInputA f16 --typeCD bf8"
+        "F8H_F8CDNoTypeId;--typeA f8 --typeB f16 --typeCD f8")
     list(GET CASE 0 NAME)
     list(GET CASE 1 FLAGS)
     separate_arguments(FLAGS)
