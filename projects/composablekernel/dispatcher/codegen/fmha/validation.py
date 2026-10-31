@@ -367,6 +367,19 @@ DT_FP32 = {"fp32"}
 # this set can pass the per-clause checks yet hand gemm1 rows it does not own.
 GFX11_BATCH_PREFILL_SHAPES = {
     ((128, 32, 32, 128, 32, 128), (8, 1, 1, 8, 1, 1), (16, 16, 16, 16, 16, 16)),
+    ((64, 32, 32, 96, 32, 96), (4, 1, 1, 4, 1, 1), (16, 16, 16, 16, 16, 16)),
+    ((64, 32, 32, 64, 32, 64), (4, 1, 1, 4, 1, 1), (16, 16, 16, 16, 16, 16)),
+}
+
+# gfx1100 batch_prefill: each head-dim pair maps to the one M0 that has device
+# evidence. Each warp owns one 16-row WMMA slice, so the block is M0 / 16 warps of
+# 32 lanes, i.e. M0 * 2 threads: M0=128 lands on Gfx11Policy's Independent-V path
+# (block 256) and M0=64 on the fallback gemm1, which the pipeline reaches by
+# permuting P into that gemm's A distribution.
+GFX11_BATCH_PREFILL_M0 = {
+    (128, 128): 128,
+    (96, 96): 64,
+    (64, 64): 64,
 }
 
 
@@ -905,28 +918,41 @@ def validate_config(
                 "gfx1100 batch_prefill must use batch_prefill_gfx11 policy"
             )
         if pipeline == "batch_prefill_gfx11":
-            # Mirror of Gfx11Policy::UseIndependentVBuffer. Outside this
-            # predicate gemm1 falls back to a shape gfx11 WMMA cannot consume.
+            # Mirror of the emission table; see GFX11_BATCH_PREFILL_M0.
             if arch != "gfx1100":
                 result.add_error("batch_prefill_gfx11 is only supported on gfx1100")
             if sig.get("kv_memory_layout") != "linear":
                 result.add_error(
                     "batch_prefill_gfx11 currently supports only linear KV layout"
                 )
-            if (hdim_q, hdim_v) != (128, 128):
-                result.add_error("batch_prefill_gfx11 currently supports only hdim 128")
+            if (hdim_q, hdim_v) not in GFX11_BATCH_PREFILL_M0:
+                result.add_error(
+                    "batch_prefill_gfx11 supports hdim pairs "
+                    f"{sorted(GFX11_BATCH_PREFILL_M0, reverse=True)}, got "
+                    f"({hdim_q}, {hdim_v})"
+                )
             if sig.get("dropout", False):
                 result.add_error("batch_prefill_gfx11 does not support dropout")
+            # gfx1100 builds with CK_TILE_FMHA_FWD_FAST_EXP2=0, and the pipeline
+            # asserts that soft cap requires fast-exp2.
+            if sig.get("logits", False):
+                result.add_error(
+                    "batch_prefill_gfx11 does not support logits soft cap: "
+                    "gfx1100 compiles with CK_TILE_FMHA_FWD_FAST_EXP2=0"
+                )
+            expected_m0 = GFX11_BATCH_PREFILL_M0.get((hdim_q, hdim_v))
             wave = alg["wave"]
             if len(wave) >= 6:
                 gemm0_warps = wave[0] * wave[1] * wave[2]
                 gemm1_warps = wave[3] * wave[4] * wave[5]
                 block_size = max(gemm0_warps, gemm1_warps) * 32
-                if block_size != 256:
+                if expected_m0 is not None and block_size != expected_m0 * 2:
                     result.add_error(
-                        f"batch_prefill_gfx11 requires block size 256, got {block_size} "
-                        f"(GEMM0={gemm0_warps} warps, GEMM1={gemm1_warps} warps)"
+                        f"batch_prefill_gfx11 requires block size {expected_m0 * 2}, "
+                        f"got {block_size} (GEMM0={gemm0_warps} warps, "
+                        f"GEMM1={gemm1_warps} warps) for hdim ({hdim_q}, {hdim_v})"
                     )
+                # Mirror of TileFmhaShape: NumGemm1Warps % NumGemm0Warps == 0
                 if (
                     gemm0_warps <= 0
                     or gemm1_warps <= 0
@@ -936,13 +962,21 @@ def validate_config(
                         "batch_prefill_gfx11 requires GEMM1 warps to be a positive "
                         f"multiple of GEMM0 warps, got GEMM0={gemm0_warps}, GEMM1={gemm1_warps}"
                     )
-            if len(tile) >= 5 and (tile[1], tile[3], tile[4]) != (32, 128, 32):
+            if expected_m0 is not None and len(tile) >= 1 and tile[0] != expected_m0:
                 result.add_error(
-                    "batch_prefill_gfx11 requires tile N0=32, N1=128, K1=32"
+                    f"batch_prefill_gfx11 requires tile M0={expected_m0} "
+                    f"for hdim ({hdim_q}, {hdim_v}), got M0={tile[0]}"
                 )
-            if len(tile) >= 6 and tile[5] != 128:
+            if len(tile) >= 5 and (tile[1], tile[3], tile[4]) != (32, hdim_v, 32):
                 result.add_error(
-                    f"batch_prefill_gfx11 requires tile QK head dimension 128, got {tile[5]}"
+                    f"batch_prefill_gfx11 requires tile N0=32, N1={hdim_v}, K1=32"
+                )
+            # These instances are native, so the Q tile length is the head dim
+            # itself rather than ceil_to_qualified_tile_length(hdim_q).
+            if len(tile) >= 6 and tile[5] != hdim_q:
+                result.add_error(
+                    f"batch_prefill_gfx11 requires tile QK head dimension {hdim_q}, "
+                    f"got {tile[5]}"
                 )
             # The async copy strides K into LDS by kK1 while gemm0 reads kK0-deep
             # chunks out of the same buffer, so the pipeline static_asserts that
