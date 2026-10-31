@@ -1,7 +1,5 @@
 {
-  "aliases": {
-    "llvm24": "llvm23"
-  },
+  "aliases": {},
   "flavors": {
     "llvm20": {
       "cases": {
@@ -62,6 +60,35 @@
       "expected_failures": {}
     },
     "llvm23": {
+      "cases": {
+        "attention_d256/gfx942/4warp_gqa": {
+          "arch": "gfx942",
+          "bytes": 471641,
+          "family": "attention_d256",
+          "kernel_name": "rocke_uattn2d_tiled_d256_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
+          "sha256": "365c38d6e523b041970c06a2aa1fe6aaa4879dbd4b9126afecd6d9ab6df13f98",
+          "status": "ok"
+        },
+        "attention_d256/gfx942/4warp_gqa_d192": {
+          "arch": "gfx942",
+          "bytes": 363631,
+          "family": "attention_d256",
+          "kernel_name": "rocke_uattn2d_tiled_d192_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
+          "sha256": "01b216f302206495d970142af4a2ae7296765dd60faf44a565b1b9b899954d8a",
+          "status": "ok"
+        },
+        "attention_d256/gfx950/pad_interleave": {
+          "arch": "gfx950",
+          "bytes": 598367,
+          "family": "attention_d256",
+          "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_h16kv2_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg_qrev",
+          "sha256": "074ec36d6193ae0db410de0f2b157ad4323a592a6bc9f2f28d70384808ca5abe",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
       "cases": {
         "attention_d256/gfx942/4warp_gqa": {
           "arch": "gfx942",

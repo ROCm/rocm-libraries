@@ -174,11 +174,16 @@ expected crash or timeout whose normalized evidence still matches is not rerun
 serially; changed evidence, changed verdicts, unclassified results, and otherwise
 transient-looking results are.
 
-The migration preserves the former pytest item's result mapping:
+The artifact records the exact compiler build that measured it. LLVM development
+builds with the same major can disagree about intrinsic availability and ABI, so
+exact reproduction is applicable only when the host identity matches that
+provenance. A mismatch is reported with both identities and is an explicit
+unvalidated result, not a pass.
 
 | Condition | CTest result |
 |---|---|
-| Committed measurements reproduce cell-for-cell (compiler-build provenance may differ) | Pass |
+| Recorded compiler identity matches and measurements reproduce cell-for-cell | Pass |
+| Host compiler identity differs from the recorded identity | Skip |
 | No clang | Skip |
 | Clang flavor differs from rocKE's resolved flavor | Skip |
 | No committed column for the host flavor | Skip |

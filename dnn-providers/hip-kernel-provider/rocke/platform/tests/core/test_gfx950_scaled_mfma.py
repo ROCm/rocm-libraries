@@ -19,7 +19,7 @@ from rocke.core.arch.mfma_scale import matrix_layout
 from rocke.core.ir import IRBuilder
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.core.verify import verify
 from rocke.instances.gfx950.block_scaled_gemm import (
     BlockScaledGemmSpec,
@@ -91,7 +91,7 @@ def test_catalog_and_logical_layouts(a, b):
 
 
 @pytest.mark.parametrize("idx", range(50))
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_complete_kernel_golden_and_native_identity(idx, flavor, monkeypatch):
 
     spec = BlockScaledGemmSpec(
@@ -191,7 +191,7 @@ def test_long_native_kernel_names(name_bytes):
     native_ir = engine.gfx950_block_scaled_gemm_serialize_ir(asdict(spec), "gfx950")
     assert native_ir == serialize(kernel)
     assert engine.gfx950_block_scaled_gemm_verify(asdict(spec), "gfx950") == []
-    for flavor in ("llvm20", "llvm22", "llvm23"):
+    for flavor in LLVM_FLAVORS:
         assert engine.lower_serialized_ir(native_ir, "gfx950", flavor) == (
             _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
         )
