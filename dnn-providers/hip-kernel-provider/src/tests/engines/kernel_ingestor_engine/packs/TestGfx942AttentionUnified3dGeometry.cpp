@@ -78,6 +78,22 @@ TEST(TestGfx942AttentionUnified3dGeometry, WorkspaceAlignsEveryRegion)
     EXPECT_EQ(w.totalBytes, 3328);
 }
 
+// The cu_seqlens_q tail holds B + 1 int32, and only a B that is a multiple of 64 makes the
+// extra 4 bytes cross a 256-byte boundary: at B 1 and 3 above, B and B + 1 entries round
+// to the same total. B=64, Hq=1, nseg=2, D=64 -> 128 rows:
+//   segm_output 128*64*4 = 32,768 at 0; segm_max 512 at 32,768; segm_expsum 512 at 33,280;
+//   seqused_k 256 at 33,792; cu_seqlens_q 65*4 = 260 at 34,048, end 34,308 -> 34,560.
+//   (B entries instead of B + 1 would end at 34,304, already aligned.)
+TEST(TestGfx942AttentionUnified3dGeometry, WorkspaceCountsTheCuSeqlensTail)
+{
+    const auto w = gfx942AttentionUnified3dWorkspace(64, 1, 2, 64);
+    EXPECT_EQ(w.segmMax, 32768);
+    EXPECT_EQ(w.segmExpsum, 33280);
+    EXPECT_EQ(w.sequsedK, 33792);
+    EXPECT_EQ(w.cuSeqlensQ, 34048);
+    EXPECT_EQ(w.totalBytes, 34560);
+}
+
 // _gfx942_3d_tile_size_override: block_size // 2 iff head_size >= 128 and
 // block_size >= 32, else None (one block per tile).
 TEST(TestGfx942AttentionUnified3dGeometry, TileOverrideTable)
