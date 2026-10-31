@@ -2076,6 +2076,7 @@ INCLUDE_FILE_PATTERNS  =
 PREDEFINED             = __attribute__(x)= \
                          __inline= \
                          HIPBLASLT_EXPORT= \
+                         HIPBLASLT_ENABLE_EXPERIMENTAL_API=HIPBLASLT_EXPERIMENTAL_API_VERSION \
                          __HIP_PLATFORM_AMD__
 
 # If the MACRO_EXPANSION and EXPAND_ONLY_PREDEF tags are set to YES then this

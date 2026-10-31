@@ -1,0 +1,60 @@
+name: hipBLASLt Experimental API
+
+# Fails a PR that breaks the hipBLASLt experimental API without bumping
+# HIPBLASLT_EXPERIMENTAL_API_VERSION, and tests the feature-deadline registry.
+# Policy: projects/hipblaslt/docs/reference/experimental-api.rst.
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - "projects/hipblaslt/library/include/hipblaslt/hipblaslt-experimental*.h"
+      - "projects/hipblaslt/library/include/hipblaslt-experimental-features.h.in"
+      - "projects/hipblaslt/library/experimental/**"
+      - "projects/hipblaslt/cmake/hipblaslt_experimental.cmake"
+      - "projects/hipblaslt/clients/tests/src/experimental/**"
+      - "projects/hipblaslt/tools/scripts/check_experimental_api.py"
+      - "projects/hipblaslt/tools/scripts/tests/test_check_experimental_api.py"
+      - "projects/hipblaslt/tools/scripts/tests/test_experimental_registry.py"
+      - "projects/hipblaslt/CMakeLists.txt"
+      - ".github/workflows/hipblaslt-experimental-api.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: "Experimental API checks"
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: projects/hipblaslt
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Full history (without blobs) so the checker can read the PR's base revision.
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: |
+            projects/hipblaslt
+            .github
+          sparse-checkout-cone-mode: true
+
+      - name: Install pytest
+        run: python3 -m pip install pytest
+
+      - name: Test the checker and the deadline registry
+        run: python3 -m pytest -v tools/scripts/tests/test_check_experimental_api.py tools/scripts/tests/test_experimental_registry.py
+
+      - name: Does this PR need an experimental API bump?
+        if: github.event_name == 'pull_request'
+        run: python3 tools/scripts/check_experimental_api.py --base ${{ github.event.pull_request.base.sha }}
