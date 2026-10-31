@@ -37,6 +37,9 @@ _rocsparse_nnzsplit_info::~_rocsparse_nnzsplit_info()
     this->starting_block_ids     = nullptr;
     this->size                   = 0;
     this->use_starting_block_ids = false;
+    this->block_size             = 0;
+    this->nnz_per_thread         = 0;
+    this->max_row_nnz            = 0;
 }
 
 void _rocsparse_nnzsplit_info::clear()
@@ -50,4 +53,7 @@ void _rocsparse_nnzsplit_info::clear()
     this->starting_block_ids     = nullptr;
     this->size                   = 0;
     this->use_starting_block_ids = false;
+    this->block_size             = 0;
+    this->nnz_per_thread         = 0;
+    this->max_row_nnz            = 0;
 }

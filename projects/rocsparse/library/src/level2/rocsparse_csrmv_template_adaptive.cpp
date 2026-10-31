@@ -43,10 +43,13 @@
 #define ROWS_FOR_VECTOR 1
 #define WG_SIZE 256
 
+static_assert(rocsparse::adaptive_block_nnz == BLOCK_SIZE,
+              "adaptive row-block size drifted from the analysis predicate");
+
 namespace rocsparse
 {
     // numThreadsForReduction() and flp2() were lifted (behavior-preserving) into
-    // library/src/include/rocsparse_csrmv_adaptive_analysis.hpp so they can be
+    // library/src/level2/rocsparse_csrmv_adaptive_analysis.hpp so they can be
     // unit-tested without linking this device translation unit. The call sites
     // below use the default wg_size argument, which equals WG_SIZE (256).
 
@@ -340,6 +343,7 @@ namespace rocsparse
             rowBlockSize = total_row_blocks;
         }
     }
+
 }
 
 template <typename I, typename J, typename A>
@@ -353,20 +357,20 @@ rocsparse_status
                                                          const A*                  csr_val,
                                                          const I*                  csr_row_ptr,
                                                          const J*                  csr_col_ind,
-                                                         rocsparse_csrmv_info*     p_csrmv_info)
+                                                         rocsparse_csrmv_info*     p_csrmv_info,
+                                                         bool                      allow_retarget)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    p_csrmv_info[0]                 = new _rocsparse_csrmv_info();
-    rocsparse_csrmv_info csrmv_info = p_csrmv_info[0];
+    // Allocate only when this routine keeps the matrix. A retarget calls nnz-split
+    // analysis, which allocates the info object itself. p_csrmv_info[0] is still
+    // null here: the caller clears it, and nothing has been allocated yet.
+    rocsparse_csrmv_info csrmv_info = nullptr;
 
     if(trans == rocsparse_operation_none)
     {
         // Stream
         hipStream_t stream = handle->stream;
-
-        // row blocks size
-        csrmv_info->adaptive.size = 0;
 
         // Temporary arrays to hold device data
         std::vector<I> hptr(m + 1);
@@ -382,33 +386,46 @@ rocsparse_status
         const uint32_t gen_wg = rocsparse::general_wg_size(handle, m, nnz);
 
         // Determine row blocks array size
-        ComputeRowBlocks<I, J>((I*)NULL,
-                               (J*)NULL,
-                               csrmv_info->adaptive.size,
-                               csrmv_info->adaptive.first_row,
-                               csrmv_info->adaptive.last_row,
-                               hptr.data(),
-                               m,
-                               gen_wg,
-                               false);
+        size_t  row_block_size = 0;
+        int64_t first_row      = 0;
+        int64_t last_row       = 0;
+        ComputeRowBlocks<I, J>(
+            (I*)NULL, (J*)NULL, row_block_size, first_row, last_row, hptr.data(), m, gen_wg, false);
 
         // Create row blocks and workgroup data structures
-        std::vector<I> row_blocks(csrmv_info->adaptive.size, 0);
-        std::vector<J> wg_ids(csrmv_info->adaptive.size, 0);
+        std::vector<I> row_blocks(row_block_size, 0);
+        std::vector<J> wg_ids(row_block_size, 0);
 
         ComputeRowBlocks<I, J>(row_blocks.data(),
                                wg_ids.data(),
-                               csrmv_info->adaptive.size,
-                               csrmv_info->adaptive.first_row,
-                               csrmv_info->adaptive.last_row,
+                               row_block_size,
+                               first_row,
+                               last_row,
                                hptr.data(),
                                m,
                                gen_wg,
                                true);
 
+        // Only default analysis may leave adaptive. allow_retarget is false when
+        // the caller selected adaptive explicitly. Nothing has been allocated yet.
+        if(allow_retarget
+           && adaptive_partition_should_retarget(
+               row_blocks.data(), row_block_size, hptr.data(), static_cast<I>(m), gen_wg))
+        {
+            return rocsparse::csrmv_analysis_nnzsplit_template_dispatch(
+                handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, p_csrmv_info);
+        }
+
+        p_csrmv_info[0] = new _rocsparse_csrmv_info();
+        csrmv_info      = p_csrmv_info[0];
+
+        csrmv_info->adaptive.size      = row_block_size;
+        csrmv_info->adaptive.first_row = first_row;
+        csrmv_info->adaptive.last_row  = last_row;
+
         if(descr->type == rocsparse_matrix_type_symmetric)
         {
-            csrmv_info->max_rows = maxRowsInABlock(row_blocks.data(), csrmv_info->adaptive.size);
+            csrmv_info->max_rows = maxRowsInABlock(row_blocks.data(), row_block_size);
         }
 
         // Allocate memory on device to hold csrmv info, if required
@@ -447,6 +464,12 @@ rocsparse_status
             RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
         }
     }
+    else
+    {
+        p_csrmv_info[0] = new _rocsparse_csrmv_info();
+        csrmv_info      = p_csrmv_info[0];
+    }
+
     // Store some pointers to verify correct execution
     csrmv_info->trans       = trans;
     csrmv_info->m           = m;
@@ -904,7 +927,8 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         const ATYPE*              csr_val,                                          \
         const ITYPE*              csr_row_ptr,                                      \
         const JTYPE*              csr_col_ind,                                      \
-        rocsparse_csrmv_info*     info);
+        rocsparse_csrmv_info*     info,                                             \
+        bool                      allow_retarget);
 
 // Uniform precision
 INSTANTIATE(int32_t, int32_t, float);
