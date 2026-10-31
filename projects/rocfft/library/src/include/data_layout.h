@@ -286,10 +286,28 @@ struct data_layout_t
      * (same number of length and batch axes).
      * @return `true` iff all axes of either layout cover the same logical index range.
      * 
-     * @throw An `std::invalid_argument` is thrown if `other` is not dimensionally consistent
-     * with this object.
+     * @throw An `std::invalid_argument` is thrown if `other` has a different number of
+     * batch axes, or a different number of length axes while having the same batch range.
      */
     bool has_same_logical_range_as(const data_layout_t& other) const;
+
+    /**
+     * @param[in] other data layout with as many length axes as this one.
+     * @return `true` iff all length axes of either layout cover the same logical index range.
+     *
+     * @throw An `std::invalid_argument` is thrown if `other` has a different number of
+     * length axes.
+     */
+    bool has_same_length_range_as(const data_layout_t& other) const;
+
+    /**
+     * @param[in] other data layout with as many batch axes as this one.
+     * @return `true` iff all batch axes of either layout cover the same logical index range.
+     *
+     * @throw An `std::invalid_argument` is thrown if `other` has a different number of
+     * batch axes.
+     */
+    bool has_same_batch_range_as(const data_layout_t& other) const;
 
     /**
      * @param[in] first a data_layout_t object
