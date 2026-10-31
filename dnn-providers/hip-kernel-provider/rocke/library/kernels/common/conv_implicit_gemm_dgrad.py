@@ -94,6 +94,7 @@ from rocke.helpers.transforms import (
     unmerge_magic,
     unmerge_magic_dynamic,
 )
+from kernels.common.conv_m_band import emit_m_band_order
 from kernels.common.conv_abi import conv_arg_names
 from kernels.common._conv_implicit_gemm_common import (
     ConvAccumulatorEpilogue,
@@ -1117,6 +1118,12 @@ class DgradConvSpec:
     # default of _XCD_TILE_ORDER_ARCHES (grouped launches only). Tags
     # ``xcd<n>``.
     xcd_remap: int = 0
+    # Output-plane band order of the M tiles on top of the XCD tile order:
+    # each XCD's run of tiles walks bands of ``m_band`` tiles of one dX plane
+    # (Hi*Wi pixels) through every plane, so its concurrent tiles' dY rows
+    # stay in its L2 (kernels/common/conv_m_band.py). Needs the XCD tile
+    # order and the folded (stride-1) record. 0 = off. Tags ``mb<n>``.
+    m_band: int = 0
     # cshuffle epilogue: stage C through LDS in ``cshuffle_m_chunks`` row
     # slabs (tile_m / m_chunks rows each), so the C staging buffer no longer
     # sets the kernel's LDS (and occupancy). Default 1; tags ``mch<n>``.
@@ -1536,6 +1543,7 @@ class DgradConvSpec:
                 f"ilv{self.tapk_ilv}": self.tapk_ilv > 0,
                 "xhx": self.xhalo_exact,
                 f"xcd{self.xcd_remap}": self.xcd_remap > 0,
+                f"mb{self.m_band}": self.m_band > 0,
                 f"mch{self.cshuffle_m_chunks}": self.cshuffle_m_chunks > 1,
                 f"lda{self.tapk_lds_ahead}": self.tapk_lds_ahead > 0,
                 "lsb": self.tapk_lds_barrier,
@@ -2297,6 +2305,9 @@ def _xhalo_knob_conflict(spec: DgradConvSpec) -> str:
         return "xhalo_exact needs tapk_xhalo"
     if spec.xcd_remap < 0:
         return "xcd_remap must be >= 0"
+    if spec.m_band < 0 or (spec.m_band and (
+            not spec.xcd_remap or spec.split_k != 1 or not spec.folds_sub_gemm_record)):
+        return "m_band needs xcd_remap, split_k 1 and the folded (stride-1) record"
     mc = spec.cshuffle_m_chunks
     if mc != 1:
         if mc < 1 or spec.epilogue != "cshuffle" or spec.split_k != 1:
@@ -3024,6 +3035,12 @@ def _build_tilde_dgrad(
     local_flat = flat_block_id if fold_record else b.sub(flat_block_id, rec_block_start)
     local_m_tile = b.div(local_flat, rec_num_n_tiles)
     local_n_tile = b.mod(local_flat, rec_num_n_tiles)
+    if spec.m_band and fold_record:
+        # Output-plane band order (DgradConvSpec.m_band).
+        local_m_tile = emit_m_band_order(
+            b, local_m_tile, num_m_tiles=p_num_pid_m, plane=b.mul(p_Hi, p_Wi),
+            tile_m=block_m, m_band=spec.m_band,
+        )
 
     # Warp grid: bind() emits tid/lane/warp decomposition. We override
     # block_m/n_off with our own local tile offsets (not from block_id_x/y).

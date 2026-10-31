@@ -589,6 +589,13 @@ class WgradConvSpec:
     #
     # Default 0 (off): byte-identical IR and kernel name.
     xcd_remap: int = 0
+    # Output-plane band order of the split-K slices (with xcd_remap): slice s
+    # covers output pixels [s*ks, (s+1)*ks); the slices are walked in bands of
+    # ``m_band`` slice positions of one output plane through every plane
+    # (kernels/common/conv_m_band.py), so the X rows of a slice's z taps are
+    # still in the XCD's L2 from the slices of the planes before. Each slice
+    # is still computed once (a bijection). 0 = off. Tags ``mb<n>``.
+    m_band: int = 0
 
     # Separable operand addressing ("sepa"). The generic descriptors turn
     # every (row, col) chunk into an address through the whole transform DAG,
@@ -932,6 +939,7 @@ class WgradConvSpec:
                 "pfr3": self.prefetch_regs == 3,
                 f"kp{self.lds_kpack}": self.lds_kpack > 1,
                 f"xcd{self.xcd_remap}": self.xcd_remap > 1,
+                f"mb{self.m_band}": self.m_band > 0,
                 "sepa": self.sep_addr == 1,
                 "sepa2": self.sep_addr == 2,
                 "pfe": self.pfr_sched == 1,
@@ -1523,6 +1531,8 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
         or spec.group_merge > 1
     ):
         return "xcd_remap needs the grid-per-tile kernel (no stream-K, chiplet_swizzle or group_merge)"
+    if spec.m_band < 0 or (spec.m_band and (spec.xcd_remap in (0, 1) or spec.streamk != "off")):
+        return "m_band (split-K slice band order) needs xcd_remap and the grid-per-tile kernel"
     if spec.xwin:
         _why = _xwin_conflict(spec)
         if _why:
@@ -2775,6 +2785,13 @@ def build_implicit_gemm_conv_wgrad(
                 slice_v = slice_id
         else:
             slice_id = b.mod(z_id, _ks_count_param)
+        if spec.m_band:
+            from kernels.common.conv_m_band import emit_m_band_order
+
+            slice_id = emit_m_band_order(
+                b, slice_id, num_m_tiles=_ks_count_param, plane=b.mul(p_Ho, p_Wo),
+                tile_m=c_ks, m_band=spec.m_band,
+            )
         k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
         k_hi = b.to_sgpr_u32(b.add(k_lo, c_ks))
 

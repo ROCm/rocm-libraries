@@ -276,6 +276,7 @@ class TestPatchIdentity(unittest.TestCase):
         # Opt-in conv knobs, all off here: stable_hash leaves them out at their defaults.
         for name in (
             "a_direct", "b_kpack", "cshuffle_m_chunks", "defer_mfma", "defer_mfma_per_write", "dy_halo",
+            "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m",
             "dy_halo_kouter_pad", "dy_halo_setprio", "halo_max_wo", "kp_line", "lds_ahead", "lds_bswz",
             "lds_kpack", "lds_kpack_read", "lds_xor", "lds_xor_rowkey", "pfr_sched", "pp_b_double",
             "pp_pre_mfma", "prefetch_regs", "reg_prefetch", "rpf_fetch_late", "rpf_lds_barrier",

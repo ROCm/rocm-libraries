@@ -61,6 +61,7 @@ from typing import Callable, List, Optional, Sequence, Tuple
 from rocke.core.ir import (
     VectorType,
     BF16,
+    F16 as _F16,
     F32,
     I32,
     IRBuilder,
@@ -85,6 +86,7 @@ from rocke.helpers.transforms import (
     pad,
     unmerge_magic,
 )
+from kernels.common.conv_m_band import emit_m_band_order
 from kernels.common.conv_abi import conv_fwd_problem_block
 
 # ImplicitGemmConvSpec.sched_strategy -> AMDGPU machine-scheduler strategy.
@@ -671,6 +673,44 @@ class ImplicitGemmConvSpec:
     # attribute): 0 = LLVM's default, 1 max-ilp, 2 max-memory-clause,
     # 3 iterative-ilp, 4 iterative-minreg, 5 iterative-maxocc. Tags ``mss<n>``.
     sched_strategy: int = 0
+    # cshuffle epilogue replaced by a register-only store (16x16 MFMA atom,
+    # bf16/f16 output, no split-K): each quad of lanes transposes its 4x4
+    # block of the accumulator (DPP quad_perm + v_perm_b32), so every lane
+    # holds 4 consecutive output channels of one output pixel and stores
+    # them with one 8-byte buffer_store -- no LDS staging, no barriers, each
+    # wave finishes on its own. 2: the B tile's columns are read in the
+    # order that makes a lane's channels of two neighbouring N atoms one
+    # contiguous run of 8 (atom ni, column j -> channel 32*(ni/2) +
+    # 8*(j/4) + 4*(ni%2) + j%4), stored with one 16-byte buffer_store.
+    # 3: the transpose across lanes l ^ 4 / l ^ 8 instead (B channel order
+    # 8*(j%4) + j/4), so lanes l..l+3 store 64 contiguous bytes of one
+    # output pixel (coalesced). 4: as 3 with a 4-VALU bf16 round-to-nearest-
+    # even (NaN -> canonical quiet NaN) instead of fptrunc's 5.
+    # 0 = off. Tags ``eqx<n>``.
+    epi_quad_xpose: int = 0
+    # Keep the MFMA accumulators in arch VGPRs (LLVM "amdgpu-agpr-alloc"="0,0"):
+    # no v_accvgpr_write zeroing / v_accvgpr_read before the epilogue. Only
+    # for kernels whose total register need fits the VGPR file. Tags ``nag``.
+    no_agpr: bool = False
+    # Output-plane band order of the M tiles (with ``xcd_remap``): each XCD's
+    # contiguous run of tiles walks bands of ``m_band`` tiles of one output
+    # plane (Ho*Wo pixels) through all planes (z) before the next band, so
+    # the tiles an XCD runs at one time cover a compact z-y block whose input
+    # rows (the z/y taps) stay in that XCD's L2. A plane need not be a whole
+    # number of tiles (rows of round(Ho*Wo / tile_m) tiles, a narrower last
+    # band; kernels/common/conv_m_band.py). 0 = off. Tags ``mb<n>``.
+    m_band: int = 0
+    # x-halo M-strided wave rows: MFMA fragment mi, atom row r of a wave holds
+    # output pixel wave_m0 + mfmas_m * r + mi (not mi * 16 + r). Tap x of
+    # fragment mi is then tap x - 1 of fragment mi + 1 (the same registers):
+    # per kk step the three x taps read mfmas_m + 2 A fragments from LDS
+    # instead of 3 * mfmas_m, with no DPP. The x-halo A tile gets its own LDS
+    # layout (rows rotated within groups of 4, chunk key (r>>2)+(r>>4)) so the
+    # 4-strided fragment rows stay conflict-free; the eqx epilogue stores
+    # with the strided row map when the workgroup ran the x-halo loop (its
+    # fallback loops keep the default map). Needs Wo % mfmas_m == 0 (per
+    # workgroup, with the other x-halo conditions). Tags ``xsm``.
+    xh_stride_m: bool = False
 
     @property
     def block_size(self) -> int:
@@ -807,6 +847,10 @@ class ImplicitGemmConvSpec:
                 f"mss{self.sched_strategy}": self.sched_strategy > 0,
                 "stc": self.split_tail_compact,
                 f"psf{self.pp_split_fetch}": self.pp_split_fetch > 0,
+                "nag": self.no_agpr,
+                f"mb{self.m_band}": self.m_band > 0,
+                "xsm": self.xh_stride_m,
+                f"eqx{self.epi_quad_xpose}": self.epi_quad_xpose > 0,
                 "nopad": self.uk_nopad,
                 f"dpw{self.defer_mfma_per_write}": self.defer_mfma_per_write > 0,
                 # The occupancy target changes the register allocation.
@@ -993,6 +1037,8 @@ def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
         return _sched_why
     if spec.xcd_remap and spec.chiplet_swizzle:
         return "xcd_remap and chiplet_swizzle both remap the grid; set one"
+    if spec.m_band < 0 or (spec.m_band and (not spec.xcd_remap or spec.split_tail)):
+        return "m_band needs xcd_remap (and no split_tail)"
     if spec.lds_xor:
         if not (spec.uniform_k_decode or spec.reg_prefetch or _fwd_pfr_single_buffer(spec)):
             return (
@@ -1079,6 +1125,19 @@ def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
         return "lds_xor_rowkey re-keys the k-packed lds_xor swizzle of tile_k 32 only"
     if spec.xh_wait_smem and not spec.uk_xhalo:
         return "xh_wait_smem shapes the uk_xhalo loop"
+    if spec.epi_quad_xpose and not (
+        spec.epilogue == "cshuffle" and spec.split_k <= 1 and spec.pipeline != "wavelet"
+        and spec.warp_tile_m == spec.warp_tile_n == 16 and spec.data.dtype_d in ("bf16", "fp16")
+    ):
+        return ("epi_quad_xpose replaces the unsplit cshuffle store of the 16x16 MFMA "
+                "atom (bf16/f16 output)")
+    if spec.epi_quad_xpose not in (0, 1, 2, 3, 4) or (
+        spec.epi_quad_xpose >= 2 and (
+            (spec.tile_n // spec.warp_n) % 32 or not spec.uniform_k_decode
+            or spec.reg_prefetch != 1 or spec.a_direct or spec.rpf_pingpong)
+    ):
+        return ("epi_quad_xpose is 1..4 (2-4: the uniform_k_decode reg_prefetch=1 "
+                "loops, an even number of N atoms per wave)")
     if spec.pp_b_double and not (
         spec.rpf_pingpong and (
             (spec.lds_kpack_read and (spec.tile_k // spec.warp_tile_k // 2) % 2 == 0)
@@ -1110,6 +1169,13 @@ def _fwd_kloop_conflict(spec: "ImplicitGemmConvSpec") -> str:
         return "pp_pre_mfma must be >= 0"
     if spec.xh_dpp and not spec.uk_xhalo:
         return "xh_dpp shifts the x-halo A fragments; it needs uk_xhalo"
+    if spec.xh_stride_m and not (
+        spec.uk_xhalo and spec.uk_xhalo % 4 == 0 and spec.epi_quad_xpose in (3, 4)
+        and not spec.xh_dpp
+        and not spec.rpf_pingpong and spec.mfmas_per_warp_m >= _XHALO_TAPS - 1
+    ):
+        return ("xh_stride_m needs uk_xhalo (a multiple of 4), epi_quad_xpose 3/4, mfmas_per_warp_m >= 2 "
+                "and no xh_dpp / rpf_pingpong")
     if spec.rpf_fetch_late and (
         spec.reg_prefetch != 1 or spec.vmem_interleave or spec.a_direct
     ):
@@ -1372,6 +1438,9 @@ _XHALO_TAPS = 3
 def _xhalo_a_rows(spec: "ImplicitGemmConvSpec") -> int:
     """A LDS rows: tile_m (or, with uk_xhalo, the staged range of tile_m +
     uk_xhalo pixels plus one scratch row the loader's surplus chunks write)."""
+    if spec.uk_xhalo and spec.xh_stride_m:
+        # whole groups of 4 rows (the xh_stride_m layout rotates rows in them)
+        return -(-(spec.tile_m + spec.uk_xhalo + 1) // 4) * 4
     return spec.tile_m + spec.uk_xhalo + 1 if spec.uk_xhalo else spec.tile_m
 
 
@@ -1890,6 +1959,8 @@ def _build_implicit_gemm_conv_impl(
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
     if spec.sched_strategy:
         b.kernel.attrs["scheduler_strategy"] = _SCHED_STRATEGIES[spec.sched_strategy]
+    if spec.no_agpr:
+        b.kernel.attrs["agpr_alloc"] = "0,0"
 
     A = b.param(
         "A", PtrType(ir_dtype_a, "global"), noalias=True, readonly=True, align=16
@@ -2230,7 +2301,14 @@ def _build_implicit_gemm_conv_impl(
             logical = chiplet_transform_chunked_runtime(
                 b, wgid_flat, num_wgs=num_wgs, num_xcds=spec.xcd_remap
             )
-        block_m_off_v = b.mul(b.div(logical, p_num_pid_n), b.const_i32(block_m))
+        _mt = b.div(logical, p_num_pid_n)
+        if spec.m_band:
+            # Output-plane band order (kernels/common/conv_m_band.py).
+            _mt = emit_m_band_order(
+                b, _mt, num_m_tiles=p_num_pid_m, plane=b.mul(p_Ho, p_Wo),
+                tile_m=block_m, m_band=spec.m_band,
+            )
+        block_m_off_v = b.mul(_mt, b.const_i32(block_m))
         block_n_off_v = b.mul(b.mod(logical, p_num_pid_n), b.const_i32(block_n))
         grid = dc_replace(grid, block_m_off=block_m_off_v, block_n_off=block_n_off_v)
     else:
@@ -2941,6 +3019,17 @@ def _build_implicit_gemm_conv_impl(
         rmask = b_.land(row, b_.const_i32(block_k // 8 - 1))
         return b_.xor(col, b_.shl(rmask, b_.const_i32(3)))
 
+    def _xa(b_: IRBuilder, row: Value, col: Value):
+        """xh_stride_m: LDS (row, col) of x-halo A element (row, col): row bit 0
+        flipped by row bit 2 (which half of a 128-byte bank line the row
+        takes) and the 16-byte chunk XOR (row / 4) % 4. Searched to be
+        conflict-free for ds_read_b128 of 4-strided fragment rows (8-lane
+        phases {0-3, 20-23}, {4-7, 16-19}, ...) at every row offset."""
+        hi = b_.lshr(row, b_.const_i32(2))
+        prow = b_.xor(row, b_.land(hi, b_.const_i32(1)))
+        key = b_.land(hi, b_.const_i32(3))
+        return prow, b_.xor(col, b_.shl(key, b_.const_i32(3)))
+
     # a_direct: per lane, the a_per_lane * k_atoms k-contiguous elements of
     # each fragment row, loaded straight into registers; MFMA step kk takes
     # elements [kk * a_per_lane, (kk + 1) * a_per_lane) of them.
@@ -2967,6 +3056,28 @@ def _build_implicit_gemm_conv_impl(
     _vmi_pending = [0]
 
     _xh_lane15 = []
+    # xh_stride_m: whether this workgroup ran the x-halo loop (the epilogue's
+    # row map), set by _emit_xhalo_loop.
+    _xsm_ok = []
+
+    def _eqx_chan(b_: IRBuilder, r: Value) -> Value:
+        """epi_quad_xpose 2/3: the output channel (tile-relative) whose
+        weights the B LDS row ``r`` holds, so that MFMA column j of N atom ni
+        (row 16*ni + j) is channel 32*(ni/2) + 4*(ni%2) + 8*(j/4) + j%4 (2)
+        or 32*(ni/2) + 4*(ni%2) + 8*(j%4) + j/4 (3); identity otherwise."""
+        if spec.epi_quad_xpose not in (2, 3, 4):
+            return r
+        p32 = b_.land(r, b_.const_i32(~31))
+        ni_lo = b_.land(r, b_.const_i32(16))     # 16 * (ni % 2)
+        j = b_.land(r, b_.const_i32(15))
+        if spec.epi_quad_xpose == 2:
+            jj = b_.add(b_.mul(b_.land(j, b_.const_i32(12)), b_.const_i32(2)),
+                        b_.land(j, b_.const_i32(3)))
+        else:
+            jj = b_.add(b_.mul(b_.land(j, b_.const_i32(3)), b_.const_i32(8)),
+                        b_.div(j, b_.const_i32(4)))
+        return b_.add(b_.add(p32, b_.div(ni_lo, b_.const_i32(4))), jj)
+
 
     def _xh_shift(cur: Value, nxt: Value) -> Value:
         """xh_dpp: fragment ``cur`` one row down (lane i <- lane i+1 of its
@@ -3044,16 +3155,21 @@ def _build_implicit_gemm_conv_impl(
                 for mi in range(0 if _skip_a else mfmas_m):
                     if a_shift_prev is not None and mi < mfmas_m - 1:
                         prev = a_shift_prev[("p", kk)]
-                        pairs[0].append(_xh_shift(prev[mi], prev[mi + 1]))
+                        pairs[0].append(prev[mi + 1] if spec.xh_stride_m
+                                        else _xh_shift(prev[mi], prev[mi + 1]))
                         continue
                     a_row = a_lds_rows[mi] if a_lds_rows is not None else b.add(
                         warp_m_off, b.add(b.const_i32(mi * spec.warp_tile_m), m_in_atom)
                     )
-                    v = _emit_smem_load(
-                        b, A_src, a_row,
-                        lds_swz(b, a_row, cb) if spec.lds_xor else cb,
-                        2 * a_per_lane, smem_dtype=_smem_dtype,
-                    )
+                    if spec.xh_stride_m and a_lds_rows is not None:
+                        v = _emit_smem_load(b, A_src, *_xa(b, a_row, cb),
+                                            2 * a_per_lane, smem_dtype=_smem_dtype)
+                    else:
+                        v = _emit_smem_load(
+                            b, A_src, a_row,
+                            lds_swz(b, a_row, cb) if spec.lds_xor else cb,
+                            2 * a_per_lane, smem_dtype=_smem_dtype,
+                        )
                     pairs[0].append(v)
                 if a_rec is not None:
                     a_rec[("p", kk)] = list(pairs[0])
@@ -3121,7 +3237,11 @@ def _build_implicit_gemm_conv_impl(
                     )
                 elif a_shift_prev is not None and mi < mfmas_m - 1:
                     prev = a_shift_prev[("k", kk)]
-                    a_rows.append(_xh_shift(prev[mi], prev[mi + 1]))
+                    a_rows.append(prev[mi + 1] if spec.xh_stride_m
+                                  else _xh_shift(prev[mi], prev[mi + 1]))
+                elif spec.xh_stride_m and a_lds_rows is not None:
+                    a_rows.append(_emit_smem_load(b, A_src, *_xa(b, a_row, col_base),
+                                                  a_per_lane, smem_dtype=_smem_dtype))
                 else:
                     a_rows.append(
                         _emit_smem_load(
@@ -3185,9 +3305,10 @@ def _build_implicit_gemm_conv_impl(
 
         def _n_dsr(kk: int) -> int:
             # DS reads one kk step issues (k-packed: both steps' at even kk).
+            _na = 1 if (spec.xh_stride_m and a_shift_prev is not None) else mfmas_m
             if _kprd:
-                return 0 if kk % 2 else mfmas_m + mfmas_n
-            return mfmas_n if a_regs is not None else mfmas_m + mfmas_n
+                return 0 if kk % 2 else _na + mfmas_n
+            return mfmas_n if a_regs is not None else _na + mfmas_n
         frags = load_frags(0) if _lds_ahead else None
         for kk in range(k_atoms):
             if _lds_ahead:
@@ -3337,8 +3458,124 @@ def _build_implicit_gemm_conv_impl(
             p_load.cpg, p_load.kpg, spec.data.dtype_d
         )[2]
 
+    def _emit_fwd_epilogue_qx(final_accs_in):
+        """epi_quad_xpose: register-only store of the 16x16-atom accumulators.
+
+        Atom layout: lane l, slot i holds C[4*(l/16) + i][l % 16]. Within a
+        quad (lanes 4j..4j+3, q = l % 4) the four lanes hold four consecutive
+        columns of the same four rows; a 4x4 transpose (two DPP quad_perm
+        exchanges) leaves lane q with row 4*(l/16) + q, columns
+        (l % 16) & ~3 .. +3, which one 8-byte store writes."""
+        mfmas_m = spec.mfmas_per_warp_m
+        mfmas_n = spec.mfmas_per_warp_n
+        _dt = BF16 if spec.data.dtype_d == "bf16" else _F16
+        # Mode 3 transposes across lanes {l, l^4, l^8, l^12} instead of the
+        # quad: the "q" bits are lane bits 2-3, so lanes l..l+3 end on one
+        # output pixel and consecutive 16-byte chunks (coalesced stores).
+        x3 = spec.epi_quad_xpose in (3, 4)
+        fast_cvt = spec.epi_quad_xpose == 4 and spec.data.dtype_d == "bf16"
+        c1_ = b.const_i32(4 if x3 else 1)
+        c2_ = b.const_i32(8 if x3 else 2)
+        q_hi = b.cmp_ne(b.land(lane, c2_), c0)       # q in {2, 3}
+        q_odd = b.cmp_ne(b.land(lane, c1_), c0)      # q in {1, 3}
+
+        def _xchg1(v):
+            if not x3:
+                return b.dpp_xor(v, 1)
+            # lane ^ 4 inside the 16-lane row: row_shl:4 / row_shr:4.
+            return b.select(q_odd, b.mov_dpp(v, row_shr=4), b.mov_dpp(v, row_shl=4))
+        # odd lanes send (A.lo, B.lo), even (A.hi, B.hi); then
+        # even: o0 = (A.lo, T.lo), o1 = (B.lo, T.hi);
+        # odd:  o0 = (T.lo, A.hi), o1 = (T.hi, B.hi).
+        sel_s = b.select(q_odd, b.const_i32(0x05040100), b.const_i32(0x07060302))
+        sel_o0 = b.select(q_odd, b.const_i32(0x03020504), b.const_i32(0x05040100))
+        sel_o1 = b.select(q_odd, b.const_i32(0x03020706), b.const_i32(0x07060100))
+        if x3:
+            row_in = b.add(b.mul(b.div(lane, b.const_i32(16)), b.const_i32(4)),
+                           b.land(b.div(lane, b.const_i32(4)), b.const_i32(3)))
+            # lane's channels: 32*p + 8*(l & 3) + 0..7 -> col_in + col_in = 8*(l & 3)
+            col_in = b.mul(b.land(lane, b.const_i32(3)), b.const_i32(4))
+        else:
+            row_in = b.add(b.mul(b.div(lane, b.const_i32(16)), b.const_i32(4)), b.land(lane, b.const_i32(3)))
+            col_in = b.land(lane, b.const_i32(12))
+        m_base = b.add(b.add(block_m_off_v, grid.warp_m_off(b)), row_in)
+        n_base = b.add(b.add(block_n_off_v, grid.warp_n_off(b)), col_in)
+        c_eb_d = b.const_i32(2)
+        oob = b.const_i32((1 << 31) - 1)
+        wt2 = VectorType(I32, 2)
+        wide = spec.epi_quad_xpose in (2, 3, 4)
+        c_lsb_sh = b.const_i32(16)
+        c1_one = b.const_i32(1)
+        c_7fff = b.const_i32(0x7FFF)
+        c_qnan = b.const_i32(0x7FC00000)
+        s_hi2 = b.const_i32(0x07060302)
+
+        def _cvt_pair(acc, i0):
+            # bf16 round-to-nearest-even of elements i0, i0+1, packed (lo =
+            # i0): u + 0x7fff + lsb, NaN -> canonical qNaN.
+            ts = []
+            for i in (i0, i0 + 1):
+                f = b.vec_extract(acc, i)
+                u = b.bitcast(f, I32)
+                lsb = b.land(b.lshr(u, c_lsb_sh), c1_one)
+                t = b.add(b.add(u, c_7fff), lsb)
+                ts.append(b.select(b.fcmp("uno", f, f), c_qnan, t))
+            return b.perm_b32(ts[1], ts[0], s_hi2)
+        if wide:
+            # lane channels of the atom pair: 32*p + 2*(l & 12) + 0..7
+            n_base = b.add(b.add(block_n_off_v, grid.warp_n_off(b)), b.add(col_in, col_in))
+        if spec.xh_stride_m:
+            m_wave = b.add(block_m_off_v, grid.warp_m_off(b))
+            m_str = b.add(m_wave, b.mul(row_in, b.const_i32(mfmas_m)))
+        for mi in range(mfmas_m):
+            m_val = b.add(m_base, b.const_i32(mi * 16))
+            if spec.xh_stride_m:
+                m_val = b.select(_xsm_ok[0], b.add(m_str, b.const_i32(mi)), m_val)
+            off0, valid = d_addr(b, m_val, n_base)
+            m_ok = b.cmp_lt(m_val, p_M)
+            if valid is not None:
+                m_ok = b.land(m_ok, valid)
+            _pend = []
+            for ni in range(mfmas_n):
+                acc = final_accs_in[mi * mfmas_n + ni]
+                if fast_cvt:
+                    w0 = _cvt_pair(acc, 0)
+                    w1 = _cvt_pair(acc, 2)
+                else:
+                    w = b.vec_bitcast(b.vec_cast_f32_to(acc, _dt), wt2)
+                    w0 = b.vec_extract(w, 0)   # rows 0, 1 (lo, hi)
+                    w1 = b.vec_extract(w, 1)   # rows 2, 3
+                # stage 1 (lanes q ^ 2): q < 2 keeps rows 0,1, q >= 2 rows 2,3.
+                snd = b.select(q_hi, w0, w1)
+                rcv = b.dpp_xor(snd, 8 if x3 else 2)
+                a_ = b.select(q_hi, rcv, w0)    # column with bit 1 clear
+                bv = b.select(q_hi, w1, rcv)    # column with bit 1 set
+                # stage 2 (lanes q ^ 1): even lanes keep row lo, odd row hi;
+                # the per-lane byte selectors pick the halves (v_perm_b32:
+                # bytes 0-3 = src1, 4-7 = src0).
+                t_ = _xchg1(b.perm_b32(bv, a_, sel_s))
+                o0 = b.perm_b32(t_, a_, sel_o0)
+                o1 = b.perm_b32(t_, bv, sel_o1)
+                if wide and ni % 2 == 0:
+                    _pend = [o0, o1]
+                    continue
+                words = _pend + [o0, o1] if wide else [o0, o1]
+                nw = len(words)
+                n_rel = 32 * (ni // 2) if wide else 16 * ni
+                n_val = b.add(n_base, b.const_i32(n_rel))
+                ok = b.land(m_ok, b.cmp_le(b.add(n_val, b.const_i32(2 * nw)), c_N_bound))
+                off = b.add(off0, b.const_i32(n_rel))
+                safe = b.select(ok, b.mul(off, c_eb_d), oob)
+                v = b.vec_bitcast(b.vec_pack(words, I32), VectorType(_dt, 2 * nw))
+                if _dt == BF16:
+                    b.buffer_store_vN_bf16(d_rsrc, safe, c0, v, nw)
+                else:
+                    b.buffer_store_vN_f16(d_rsrc, safe, c0, v, nw)
+
     def _emit_fwd_epilogue(final_accs_in):
         """Store the accumulators through ``d_addr`` with runtime bounds."""
+        if spec.epi_quad_xpose:
+            return _emit_fwd_epilogue_qx(final_accs_in)
         if spec.epilogue == "cshuffle":
             cshuffle_kwargs = {
                 "out_dtype": spec.data.dtype_d,
@@ -4599,9 +4836,13 @@ def _build_implicit_gemm_conv_impl(
                 # Output row boundaries only at a wave's M extent.
                 conds.append(b.cmp_eq(
                     b.mod(p_Wo, b.const_i32(mfmas_m * spec.warp_tile_m)), c0))
+            if spec.xh_stride_m:
+                # pixels 4r + mi, mi < mfmas_m - 1, never end an output row.
+                conds.append(b.cmp_eq(b.mod(p_Wo, b.const_i32(mfmas_m)), c0))
             xh_ok = conds[0]
             for c_ in conds[1:]:
                 xh_ok = b.land(xh_ok, c_)
+            _xsm_ok[:] = [xh_ok]
             # (chunk, z, y) tiles: Z*Y*cpg / tile_k of them.
             xh_hi = b.select(xh_ok, b.mul(b.mul(p_Z, p_Y), p_cpg), c0)
             a_base0 = b.mul(lin0, s_wi)
@@ -4628,6 +4869,11 @@ def _build_implicit_gemm_conv_impl(
                     v = b.add(b.const_i32(e * threads), tid)
                     surplus = (e + 1) * threads > total
                     row = b.div(v, b.const_i32(cpv))
+                    if spec.xh_stride_m and cap_row == R and cpv == 4:
+                        # xh_stride_m: lanes 4t..4t+3 store row t ^ ((t/4) & 1)
+                        # of their 16-row block, so each 8-lane write phase
+                        # pairs two rows on different bank-line halves.
+                        row = b.xor(row, b.land(b.lshr(row, b.const_i32(2)), c1))
                     col = b.mul(b.mod(v, b.const_i32(cpv)), b.const_i32(vec))
                     live = None
                     if surplus:
@@ -4652,7 +4898,7 @@ def _build_implicit_gemm_conv_impl(
                 c_tn = b.const_i32(block_n)
                 for row, col, live in b_slots:
                     x_ = b.div(row, c_tn)
-                    k_out = b.add(block_n_off_v, b.mod(row, c_tn))
+                    k_out = b.add(block_n_off_v, _eqx_chan(b, b.mod(row, c_tn)))
                     if grouped:
                         k_out = b.add(k_out_group_base, k_out)
                     off = b.add(b.add(b.mul(k_out, p_B_stride_k), b.mul(x_, p_B_stride_x)),
@@ -4666,7 +4912,10 @@ def _build_implicit_gemm_conv_impl(
                 B_dst = B_smem if B_dst is None else B_dst
                 for dst, st, vec in ((A_smem, staged[0], load_vec_a), (B_dst, staged[1], load_vec_b)):
                     for row, col, v in st:
-                        b.smem_store_vN(dst, [row, lds_swz(b, row, col)], v, vec)
+                        if spec.xh_stride_m and dst is A_smem:
+                            b.smem_store_vN(dst, list(_xa(b, row, col)), v, vec)
+                        else:
+                            b.smem_store_vN(dst, [row, lds_swz(b, row, col)], v, vec)
 
             def xh_adv(st):
                 c_t, y_t, z_t = st
@@ -4705,7 +4954,11 @@ def _build_implicit_gemm_conv_impl(
             wm_off = grid.warp_m_off(b)
             base_rows = []
             for mi in range(mfmas_m):
-                a_row = b.add(wm_off, b.add(b.const_i32(mi * spec.warp_tile_m), dec.m_in_atom))
+                if spec.xh_stride_m:
+                    a_row = b.add(wm_off, b.add(b.mul(dec.m_in_atom, b.const_i32(mfmas_m)),
+                                                b.const_i32(mi)))
+                else:
+                    a_row = b.add(wm_off, b.add(b.const_i32(mi * spec.warp_tile_m), dec.m_in_atom))
                 base_rows.append(b.sub(lin_of(b, b.add(m0, a_row)), lin0))
 
             def xh_mfma(accs_t, defer_last: bool = False):
@@ -4716,10 +4969,11 @@ def _build_implicit_gemm_conv_impl(
                         # barrier, interleaved with the next tile's LDS store.
                         _mfma_defer.update(on=True, n=spec.defer_mfma, fns=[])
                     rows = base_rows if x == 0 else [b.add(r, b.const_i32(x)) for r in base_rows]
-                    rec = {} if spec.xh_dpp else None
+                    _shr = spec.xh_dpp or spec.xh_stride_m
+                    rec = {} if _shr else None
                     accs_t = emit_mfma_phase(A_smem, B_smem, accs_t, a_lds_rows=rows,
                                              b_row_off=x * block_n,
-                                             a_shift_prev=prev if spec.xh_dpp else None,
+                                             a_shift_prev=prev if _shr else None,
                                              a_rec=rec)
                     prev = rec
                 _mfma_defer["on"] = False
@@ -4883,7 +5137,7 @@ def _build_implicit_gemm_conv_impl(
 
         def b_uk(b_: IRBuilder, row: Value, col: Value):
             _h, _w, _d, _a, b_off, t_ok = uk_cap[0]
-            k_out = b_.add(block_n_off_v, row)
+            k_out = b_.add(block_n_off_v, _eqx_chan(b_, row))
             if grouped:
                 k_out = b_.add(k_out_group_base, k_out)
             off = b_.add(b_.add(b_.mul(k_out, params["p_B_stride_k"]), col), b_off)

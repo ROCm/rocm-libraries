@@ -317,6 +317,14 @@ class KernelIdentity:
     sched_strategy: int = 0
     # fwd only (ImplicitGemmConvSpec.split_tail_compact). Left out of the hash at False.
     split_tail_compact: bool = False
+    # fwd only (ImplicitGemmConvSpec.epi_quad_xpose). Left out of the hash at 0.
+    epi_quad_xpose: int = 0
+    # fwd only (ImplicitGemmConvSpec.no_agpr). Left out of the hash while False.
+    no_agpr: bool = False
+    # fwd and dgrad (ImplicitGemmConvSpec.m_band, DgradConvSpec.m_band). Left out of the hash at 0.
+    m_band: int = 0
+    # fwd only (ImplicitGemmConvSpec.xh_stride_m). Left out of the hash while False.
+    xh_stride_m: bool = False
     # dgrad only (DgradConvSpec.dy_halo / dy_halo_setprio /
     # dy_halo_kouter_pad): the dY halo mode of the tap-outer K loop and its
     # knobs. A halo binary also bakes its filter (filter_h/w) and the widest
@@ -483,6 +491,7 @@ class KernelIdentity:
             "epi_store_fast", "split_zero_first", "pp_fetch_deep",
             "pp_split_fetch", "fb_skip_empty", "pp_end_guard",
             "epi_lds_barriers", "split_hybrid", "sched_strategy", "split_tail_compact",
+            "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m",
         ):
             if not fields[name]:
                 del fields[name]
@@ -829,6 +838,26 @@ def identity_supports_problem(
     ):
         return False, "uk_nopad serves unpadded problems only"
 
+    # m_band (fwd / dgrad): a band at least as wide as the output plane's
+    # tile row is the launch order, i.e. the same binary as without it --
+    # leave it out instead of offering a duplicate candidate.
+    if (
+        identity.m_band
+        and not identity.is_direct
+        and identity.direction in ("fwd", "dgrad")
+        and identity.tile_m
+    ):
+        if identity.direction == "fwd":
+            _plane = int(getattr(problem, "Ho", 0) or 0) * int(getattr(problem, "Wo", 0) or 0)
+        else:
+            _plane = int(getattr(problem, "Hi", 0) or 0) * int(getattr(problem, "Wi", 0) or 0)
+        _R = max(1, (_plane + identity.tile_m // 2) // identity.tile_m)
+        if _plane and _R <= identity.m_band:
+            return False, (
+                f"m_band {identity.m_band} >= the {_R} tiles of an output plane: "
+                "the launch order (same as without m_band)"
+            )
+
     # The split-addressing per-tile reduction decode has no fallback: a K
     # tile must lie inside one filter tap, i.e. cpg % tile_k == 0. (The
     # uniform_k_decode loop keeps the plain loop for the rest.)
@@ -1048,6 +1077,7 @@ IDENTITY_CAPABILITY_FIELDS = (
     "xwin",
     "xwin_rows",
     "xwin_mrow",
+    "m_band",
 )
 
 #: Problem attributes the predicate reads when the identity is a *direct* one.

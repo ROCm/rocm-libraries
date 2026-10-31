@@ -287,7 +287,7 @@ CACHE_DGRAD_B_KPACK: Tuple[int, ...] = tuple(
 # "@<regex>" gives its set its own scope (see ROCKE_AOT_DGRAD_XHK_SCOPE). An
 # empty set is the plain binary; unset = that alone.
 def _parse_dgrad_xh_knobs(text: str) -> Tuple[Tuple[Tuple[str, int], ...], ...]:
-    keys = {"ilv", "xhx", "xcd", "kpad", "mch", "sk", "lda", "wpe", "lsb", "sp", "lxor", "bw", "bpad", "ak4", "xo", "xdf"}
+    keys = {"ilv", "xhx", "xcd", "kpad", "mch", "sk", "lda", "wpe", "lsb", "sp", "lxor", "bw", "bpad", "ak4", "xo", "xdf", "mb"}
     out = []
     for part in text.split(";"):
         kv = []
@@ -363,6 +363,8 @@ def _dgrad_xh_knob_cfg(knobs, *, tpf: int, grouped: bool, epilogue: str):
         cfg["xhalo_exact"] = True
     if d.get("xcd"):
         cfg["xcd_remap"] = d["xcd"]
+    if d.get("mb"):
+        cfg["m_band"] = d["mb"]
     if d.get("kpad"):
         cfg["lds_k_pad"] = d["kpad"]
     if d.get("wpe"):
@@ -384,7 +386,7 @@ def _dgrad_xh_knob_cfg(knobs, *, tpf: int, grouped: bool, epilogue: str):
 # an "@<regex>" scope on the plain binary's label (unscoped sets are
 # ignored, so the plain grid never grows by accident). Unset = none.
 def _parse_dgrad_pp_knobs(text: str):
-    keys = {"bpp", "pps", "ppe", "xcd", "kpad", "lxor", "mch", "wpe", "sk", "sapl"}
+    keys = {"bpp", "pps", "ppe", "xcd", "kpad", "lxor", "mch", "wpe", "sk", "sapl", "mb"}
     out = []
     for part in text.split(";"):
         kv = []
@@ -433,6 +435,8 @@ def _dgrad_pp_knob_cfg(knobs, *, epilogue: str):
         cfg["lds_k_pad"] = d["kpad"]
     if d.get("xcd"):
         cfg["xcd_remap"] = d["xcd"]
+    if d.get("mb"):
+        cfg["m_band"] = d["mb"]
     if d.get("wpe"):
         cfg["waves_per_eu"] = d["wpe"]
     if d.get("mch", 1) > 1:
@@ -1103,7 +1107,7 @@ def _fwd_sched_variants() -> Tuple[dict, ...]:
 # cache can carry them where they win without multiplying the whole grid.
 _FWD_R2_KNOBS = ("uk_xhalo", "lds_kpack_read", "uk_chunk_group", "rpf_lds_barrier",
                  "rpf_fetch_late", "xh_dpp", "waves_per_eu", "rpf_setprio", "xh_wait_smem",
-                 "lds_xor_rowkey")
+                 "lds_xor_rowkey", "epi_quad_xpose", "no_agpr", "m_band", "xh_stride_m")
 _FWD_R2_SCOPE_RE = re.compile(r"^(\d+)x(\d+)x(\d+)(?:w(\d+)x(\d+))?(?:a(\d+))?$")
 
 
@@ -1206,6 +1210,34 @@ def _fwd_sched_k_loops(k_loops: List[dict]) -> List[dict]:
         k_loops = [dict(kl, xh_wait_smem=True) if kl.get("uk_xhalo") else kl for kl in k_loops]
     elif _xws not in ("", "0"):
         k_loops = k_loops + [dict(kl, xh_wait_smem=True) for kl in k_loops if kl.get("uk_xhalo")]
+    # ROCKE_AOT_FWD_EQX=<n>[n][,...]: the x-halo loops also with the register-only
+    # epi_quad_xpose=<n> store, a trailing "n" adding no_agpr (accumulators in
+    # arch VGPRs) (=only:...: in place of the cshuffle store); jobs the store
+    # does not apply to (split-K, 32x32 atom) are rejected.
+    _eqx = _os.environ.get("ROCKE_AOT_FWD_EQX", "").strip()
+    if _eqx:
+        _only = _eqx.startswith("only:")
+        _toks = [t.strip() for t in _eqx.split(":")[-1].split(",") if t.strip()]
+        _vs = [dict(epi_quad_xpose=int(t.rstrip("n")), **({"no_agpr": True} if t.endswith("n") else {}))
+               for t in _toks]
+        _xh = [dict(kl, **v) for kl in k_loops if kl.get("uk_xhalo") for v in _vs]
+        k_loops = ([kl for kl in k_loops if not kl.get("uk_xhalo")] if _only else k_loops) + _xh
+    # ROCKE_AOT_FWD_MB=<n>[,...]: those register-store (epi_quad_xpose) x-halo
+    # loops also with the output-plane band tile order m_band=<n> (needs
+    # xcd_remap; the jobs without it are rejected).
+    for _mb in (int(t) for t in _os.environ.get("ROCKE_AOT_FWD_MB", "").split(",") if t.strip()):
+        k_loops = k_loops + [
+            dict(kl, m_band=_mb) for kl in k_loops
+            if kl.get("uk_xhalo") and kl.get("epi_quad_xpose") and not kl.get("m_band")
+        ]
+    # ROCKE_AOT_FWD_XSM=1: those register-store (epi_quad_xpose 3/4) x-halo
+    # loops also with M-strided wave rows (xh_stride_m).
+    if _os.environ.get("ROCKE_AOT_FWD_XSM", "").strip() == "1":
+        k_loops = k_loops + [
+            dict(kl, xh_stride_m=True) for kl in k_loops
+            if kl.get("uk_xhalo") and kl.get("epi_quad_xpose") in (3, 4)
+            and not kl.get("xh_dpp") and not kl.get("xh_stride_m")
+        ]
     # ROCKE_AOT_FWD_XH_VMI=2[,4]: those (xh_wait_smem) x-halo loops also with
     # the next tile's global reads spread over the first tap's MFMAs
     # (vmem_interleave, any pipeline).
@@ -2195,7 +2227,7 @@ def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
                     if v.get("waves_per_eu")
                 )
                 variants = variants + xw
-                return variants
+                return _wgrad_m_band_variants(cfg, variants)
             _nw = cfg.get("warp_m", 0) * cfg.get("warp_n", 0)
             if (
                 _WGRAD_XWIN_PP
@@ -2244,6 +2276,20 @@ def _wgrad_kloop_variants(arch: str, cfg: dict) -> Tuple[dict, ...]:
                     for v in xw
                 )
             variants = variants + xw + mrow
+    return _wgrad_m_band_variants(cfg, variants)
+
+
+def _wgrad_m_band_variants(cfg: dict, variants: tuple) -> tuple:
+    """ROCKE_AOT_WGRAD_MB=<n>[,...]: the split-K xwin variants with xcd_remap
+    also with the split-K slice band order m_band=<n> (WgradConvSpec.m_band)."""
+    _wmb = [int(t) for t in _os.environ.get("ROCKE_AOT_WGRAD_MB", "").split(",") if t.strip()]
+    if _wmb and cfg.get("split_k", 1) > 1:
+        variants = variants + tuple(
+            dict(v, m_band=m)
+            for m in _wmb
+            for v in variants
+            if v.get("xwin") and v.get("xcd_remap", 0) > 1 and not v.get("m_band")
+        )
     return variants
 
 
