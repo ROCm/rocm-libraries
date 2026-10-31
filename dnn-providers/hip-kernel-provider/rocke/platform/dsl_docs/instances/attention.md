@@ -583,6 +583,35 @@ So shape validity belongs in `supports_attention_dense`, which runs **per launch
 
 The 32-bit bound is **signed**: offsets are built from IRBuilder `add`/`mul`, which lower to `add nsw` / `mul nsw` i32, where overflow is UB rather than a wrap. The buffer-resource `num_records` field is unsigned in hardware, but it is emitted through `const_i32` with no range check and the voffset feeding it is signed, so 2³¹ binds on both paths.
 
+## MLA (library: `kernels/mla/`)
+
+Multi-head latent attention is its own dispatch family (`dispatch.mla`, op
+`mla_fwd`), not an `attention_unified` candidate: its query, key and value
+widths all differ, which a single `head_size` cannot name.
+
+| Kernel | Spec | Builder | Arches |
+|---|---|---|---|
+| prefill forward | `MlaPrefillSpec` | `build_mla_prefill_fwd` | gfx942 |
+| decode latent (weight-absorbed) | `MlaDecodeSpec` / `MlaDecodeGfx950Spec` | `build_mla_decode` / `build_mla_decode_gfx950` | gfx942 / gfx950 |
+| decode split-KV combine | `MlaDecodeCombineSpec` | `build_mla_decode_combine` | gfx942, gfx950 |
+
+`max_seqlen_q` picks the regime and `MLARequest.absorbed_query` states the
+input contract. `max_seqlen_q == 1` routes to decode, which serves only the
+absorbed contract and so requires the flag (decode's capability lists it in
+`requires_features`); `max_seqlen_q >= 2` routes to prefill (gfx942 only),
+which serves both. Prefill takes no one-query request, so a one-query request
+that decode cannot serve is refused. The decode kernel
+takes the absorbed query `[Q_nope @ W_UK_nopeᵀ | Q_rope]` and returns the
+normalized latent and the LSE; `W_UV` is the caller's batched GEMM. The prefill kernel
+takes the projected, RoPE-rotated query and the per-head `W_UK` and returns the
+attention output. Decode puts heads on the MFMA n axis (64 per workgroup), and
+split-KV writes fp32 partials that the arch-neutral combine merges
+(`dispatch.mla.mla_decode_launch` describes both launches). The kernel as
+built, its contract and its correctness record:
+`library/examples/gfx942/mla_decode/README.md`, which also lists where it
+departs from the earlier design note `library/builders/mla/DESIGN.md`. GPU
+parity: `library/builders/mla/verify_mla_decode.py`.
+
 ## Attention Failure Modes
 
 - Comparing 2D CK against 3D Triton or vice versa without labeling algorithm.

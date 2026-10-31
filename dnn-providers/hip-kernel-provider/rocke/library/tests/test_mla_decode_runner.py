@@ -1,0 +1,454 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""CPU checks for :class:`builders.mla.mla_decode_runner.MlaDecodeRunner`.
+
+The runner's host-side refusals are what keep a mismatched tensor from being
+read or written out of bounds on the device, so they are tested without one:
+the input checks run on CPU tensors through a runner that never compiled, and
+the ``num_seg`` override is refused before anything is compiled.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+torch = pytest.importorskip("torch", reason="torch required")
+
+from builders.mla.mla_decode_runner import (  # noqa: E402
+    MlaDecodeRunner,
+    bmm_absorb_query,
+    bmm_project_latent,
+)
+from builders.mla.ref_mla_decode import absorb_query  # noqa: E402
+from dispatch.mla import MLARequest, dispatch_mla, mla_decode_launch  # noqa: E402
+
+H, T, B, MAX_K = 128, 3, 4, 100  # one sequence has no query
+PAGES = -(-MAX_K // 16)
+
+
+@pytest.fixture(autouse=True)
+def _llvm22(monkeypatch):
+    """Decode admission refuses llvm20; pin a flavor it serves."""
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm22")
+
+
+def _result(**overrides):
+    req = dict(
+        num_heads=H,
+        total_q=T,
+        num_seqs=B,
+        max_seqlen_q=1,
+        max_seqlen_k=MAX_K,
+        arch="gfx942",
+        num_cus=304,
+        absorbed_query=True,
+    )
+    req.update(overrides)
+    return dispatch_mla(MLARequest(**req))
+
+
+def _uncompiled_runner(result) -> MlaDecodeRunner:
+    """A runner holding ``result``'s contract, without compiling a kernel."""
+    runner = object.__new__(MlaDecodeRunner)
+    runner.launch = mla_decode_launch(result)
+    runner.request = result.request
+    runner.spec = result.spec
+    return runner
+
+
+def _inputs(**overrides) -> dict:
+    t = {
+        "qa": torch.zeros(T, H, 576, dtype=torch.bfloat16),
+        "c_kv": torch.zeros(B * PAGES, 16, 512, dtype=torch.bfloat16),
+        "k_rope": torch.zeros(B * PAGES, 16, 64, dtype=torch.bfloat16),
+        "cu_seqlens_q": torch.tensor([0, 1, 1, 2, 3], dtype=torch.int32),
+        "cu_seqlens_k": torch.tensor([0, 100, 150, 160, 260], dtype=torch.int32),
+        "block_table": torch.zeros(B, PAGES, dtype=torch.int32),
+        "out": torch.zeros(T, H, 512, dtype=torch.bfloat16),
+        "lse": torch.zeros(T, H, dtype=torch.float32),
+    }
+    t.update(overrides)
+    return t
+
+
+def _check(runner, t):
+    runner._check_inputs(
+        t["qa"],
+        t["c_kv"],
+        t["k_rope"],
+        t["cu_seqlens_q"],
+        t["cu_seqlens_k"],
+        t["block_table"],
+        t["out"],
+        t["lse"],
+    )
+
+
+class TestInputChecks:
+    def test_well_formed_inputs_pass(self):
+        _check(_uncompiled_runner(_result()), _inputs())
+
+    @pytest.mark.parametrize(
+        "name, bad, match",
+        [
+            ("qa", torch.zeros(T + 1, H, 576, dtype=torch.bfloat16), "qa has shape"),
+            ("qa", torch.zeros(T, H, 576, dtype=torch.float16), "qa must be"),
+            (
+                "cu_seqlens_q",
+                torch.tensor([0, 1, 1, 2, 3], dtype=torch.int64),
+                "cu_seqlens_q must be",
+            ),
+            ("out", torch.zeros(T, H, 128, dtype=torch.bfloat16), "out has shape"),
+            ("out", torch.zeros(T, H, 512, dtype=torch.float32), "out must be"),
+            (
+                "out",
+                torch.zeros(H, T, 512, dtype=torch.bfloat16).transpose(0, 1),
+                "out must be contiguous",
+            ),
+            ("lse", torch.zeros(T, H + 1, dtype=torch.float32), "lse has shape"),
+            (
+                "c_kv",
+                torch.zeros(4, 16, 256, dtype=torch.bfloat16),
+                "c_kv must be paged",
+            ),
+            ("k_rope", torch.zeros(4, 16, 64, dtype=torch.float32), "k_rope must be"),
+            # One page id indexes both caches: a shorter k_rope reads past it.
+            (
+                "k_rope",
+                torch.zeros(B * PAGES - 1, 16, 64, dtype=torch.bfloat16),
+                "k_rope has 27 pages, c_kv 28",
+            ),
+            (
+                "block_table",
+                torch.zeros(B, PAGES, dtype=torch.int64),
+                "block_table must be torch.int32",
+            ),
+            # Too narrow for max_seqlen_k -- and a zero-width table, whose
+            # slot 0 the kernel would read for every sequence.
+            (
+                "block_table",
+                torch.zeros(B, PAGES - 1, dtype=torch.int32),
+                "block_table has 6 columns",
+            ),
+            (
+                "block_table",
+                torch.zeros(B, 0, dtype=torch.int32),
+                "block_table has 0 columns",
+            ),
+            (
+                "block_table",
+                torch.zeros(B - 1, PAGES, dtype=torch.int32),
+                "rows < num_seqs=4",
+            ),
+            (
+                "block_table",
+                torch.zeros(PAGES, B, dtype=torch.int32).t(),
+                "unit column stride",
+            ),
+            (
+                "qa",
+                torch.zeros(H, T, 576, dtype=torch.bfloat16).transpose(0, 1),
+                "qa must be contiguous",
+            ),
+            (
+                "block_table",
+                torch.zeros(B, PAGES, dtype=torch.int32, device="meta"),
+                "block_table is on meta",
+            ),
+        ],
+    )
+    def test_mismatched_inputs_are_refused(self, name, bad, match):
+        with pytest.raises(ValueError, match=match):
+            _check(_uncompiled_runner(_result()), _inputs(**{name: bad}))
+
+    def test_block_table_pitch_past_i32_is_refused(self):
+        # seq * pitch + slot is i32 in the kernel: a 2**30 pitch puts row 3
+        # past it. Meta tensors carry the stride without the storage.
+        t = {k: v.to("meta") for k, v in _inputs().items()}
+        t["block_table"] = torch.empty_strided(
+            (B, PAGES), (2**30, 1), dtype=torch.int32, device="meta"
+        )
+        with pytest.raises(ValueError, match="kernel's i32 offsets"):
+            _check(_uncompiled_runner(_result()), t)
+
+    @staticmethod
+    def _check_pitch(pitch, num_seqs):
+        """_check_inputs on meta tensors for a num_seqs-row table of ``pitch``."""
+        result = _result(total_q=1, num_seqs=num_seqs)
+        meta = dict(dtype=torch.bfloat16, device="meta")
+        t = {k: v.to("meta") for k, v in _inputs().items()}
+        t["qa"] = torch.empty(1, H, 576, **meta)
+        t["out"] = torch.empty(1, H, 512, **meta)
+        t["lse"] = torch.empty(1, H, dtype=torch.float32, device="meta")
+        for name in ("cu_seqlens_q", "cu_seqlens_k"):
+            t[name] = torch.empty(num_seqs + 1, dtype=torch.int32, device="meta")
+        t["block_table"] = torch.empty_strided(
+            (num_seqs, PAGES), (pitch, 1), dtype=torch.int32, device="meta"
+        )
+        _check(_uncompiled_runner(result), t)
+
+    def test_block_table_pitch_alone_past_i32_is_refused(self):
+        # One sequence: the last element read is pages - 1, so only the pitch
+        # itself (passed to the kernel as an i32) can overflow.
+        with pytest.raises(ValueError, match="row pitch 2147483648"):
+            self._check_pitch(2**31, num_seqs=1)
+
+    def test_block_table_pitch_i32_boundary(self):
+        # Last element read = pitch + PAGES - 1: 2**31 - 1 fits, 2**31 does not.
+        self._check_pitch(2**31 - PAGES, num_seqs=2)
+        with pytest.raises(ValueError, match="kernel's i32 offsets"):
+            self._check_pitch(2**31 - PAGES + 1, num_seqs=2)
+
+    def test_contents_must_respect_the_request(self):
+        runner = _uncompiled_runner(_result())
+        t = _inputs()
+        runner.check_contents(t["cu_seqlens_q"], t["cu_seqlens_k"])
+        two = torch.tensor([0, 2, 2, 2, 3], dtype=torch.int32)
+        with pytest.raises(ValueError, match="max_seqlen_q=1"):
+            runner.check_contents(two, t["cu_seqlens_k"])
+        long_k = torch.tensor([0, 101, 150, 160, 260], dtype=torch.int32)
+        with pytest.raises(ValueError, match="max_seqlen_k=100"):
+            runner.check_contents(t["cu_seqlens_q"], long_k)
+        decreasing = torch.tensor([0, 1, 0, 2, 3], dtype=torch.int32)
+        with pytest.raises(ValueError, match="non-decreasing"):
+            runner.check_contents(decreasing, t["cu_seqlens_k"])
+        # Every length <= 1, but the offsets address rows past total_q.
+        shifted = torch.tensor([2, 3, 3, 4, 5], dtype=torch.int32)
+        with pytest.raises(ValueError, match="total_q=3"):
+            runner.check_contents(shifted, t["cu_seqlens_k"])
+        # In range and one query per sequence, but row 2 is never written.
+        short = torch.tensor([0, 1, 1, 2, 2], dtype=torch.int32)
+        with pytest.raises(ValueError, match=r"must span \[0"):
+            runner.check_contents(short, t["cu_seqlens_k"])
+        # Ends at total_q, but starts at 1: row 0 is never written.
+        late = torch.tensor([1, 1, 2, 2, 3], dtype=torch.int32)
+        with pytest.raises(ValueError, match=r"must span \[0"):
+            runner.check_contents(late, t["cu_seqlens_k"])
+
+    def test_contents_check_used_page_ids_only(self):
+        runner = _uncompiled_runner(_result())
+        t = _inputs()
+        bt = torch.zeros(B, PAGES, dtype=torch.int32)
+        bt[2, 1:] = -1  # sequence 2 (10 keys) owns one page: a poisoned tail
+        runner.check_contents(t["cu_seqlens_q"], t["cu_seqlens_k"], bt, num_pages=8)
+        bt[0, 3] = 8  # a used slot past the cache
+        with pytest.raises(ValueError, match="row 0 names a page outside"):
+            runner.check_contents(t["cu_seqlens_q"], t["cu_seqlens_k"], bt, num_pages=8)
+
+
+class TestNumSegOverride:
+    @pytest.mark.parametrize("num_seg", [1.9, True, "2"])
+    def test_non_int_override_is_refused(self, num_seg):
+        # 1.9 would truncate to 1: a single-pass binary, not the split asked for.
+        with pytest.raises(ValueError, match="num_seg must be an int"):
+            mla_decode_launch(_result()).with_num_seg(num_seg)
+
+    def test_override_past_the_i32_workspace_is_refused(self):
+        # 2000 tokens x 128 heads x 512 x 64 segments overflows i32 offsets;
+        # dispatch would have clamped it, and the override must not bypass that.
+        result = _result(total_q=2000, num_seqs=2000)
+        with pytest.raises(ValueError, match="i32 offsets"):
+            MlaDecodeRunner(result, num_seg=64)
+
+    @pytest.fixture
+    def no_compile(self, monkeypatch):
+        """Construct a runner without comgr or a device."""
+        import types
+
+        import rocke
+        import rocke.runtime
+
+        monkeypatch.setattr(
+            rocke,
+            "compile_kernel",
+            lambda kernel, **kw: types.SimpleNamespace(
+                hsaco=b"", kernel_name=kernel.name
+            ),
+        )
+        monkeypatch.setattr(
+            rocke.runtime, "KernelLauncher", lambda **kw: types.SimpleNamespace(**kw)
+        )
+
+    @pytest.mark.parametrize("num_seg", [1, 7])
+    def test_override_rebuilds_grid_signature_and_identity(self, no_compile, num_seg):
+        result = _result(max_seqlen_k=8192)
+        assert result.spec.num_seg not in (1, 7)  # the override changes it
+        runner = MlaDecodeRunner(result, num_seg=num_seg)
+        forced = runner.launch.result
+        assert runner.spec.num_seg == forced.spec.num_seg == num_seg
+        assert runner.grid == (2, 4, num_seg)
+        assert f"num_seg forced to {num_seg}" in forced.explanation
+        names = [a["name"] for a in runner._latent.signature]
+        if num_seg == 1:
+            # Split -> single pass is a different binary: a new identity.
+            assert forced.kernel_id.compile_key != result.kernel_id.compile_key
+            assert runner._combine is None
+            assert runner.launch.workspace_shapes() == {}
+            assert "num_seg" not in names
+        else:
+            assert runner._combine is not None
+            assert runner.launch.workspace_shapes()["part_acc_ptr"] == (
+                T,
+                num_seg,
+                128,
+                512,
+            )
+            assert names[-1] == "num_seg"
+
+
+class TestTorchStages:
+    """[A] and [D] are ``torch.bmm`` over transposed views: checked on CPU, in
+    fp32, against the fp64 reference's own absorb and ``W_UV`` contraction."""
+
+    T, HEADS, D_NOPE, D_ROPE, R_KV, D_V = 3, 4, 8, 4, 16, 12  # every width distinct
+
+    def _weights(self, rng):
+        return rng.standard_normal(
+            (self.HEADS, self.R_KV, self.D_NOPE + self.D_V)
+        ).astype(np.float32)
+
+    def test_absorb_matches_the_reference(self):
+        rng = np.random.default_rng(0)
+        q_nope = rng.standard_normal((self.T, self.HEADS, self.D_NOPE)).astype(
+            np.float32
+        )
+        q_rope = rng.standard_normal((self.T, self.HEADS, self.D_ROPE)).astype(
+            np.float32
+        )
+        w_uk = self._weights(rng)
+        out = torch.full((self.T, self.HEADS, self.R_KV + self.D_ROPE), float("nan"))
+        bmm_absorb_query(
+            q_nope=torch.from_numpy(q_nope),
+            q_rope=torch.from_numpy(q_rope),
+            w_uk=torch.from_numpy(w_uk),
+            out=out,
+        )
+        want = absorb_query(q_nope, q_rope, w_uk)
+        np.testing.assert_allclose(out.numpy(), want, rtol=1e-5, atol=1e-5)
+
+    def test_project_matches_the_reference(self):
+        rng = np.random.default_rng(1)
+        latent = rng.standard_normal((self.T, self.HEADS, self.R_KV)).astype(np.float32)
+        w_uk = self._weights(rng)
+        out = torch.full((self.T, self.HEADS, self.D_V), float("nan"))
+        bmm_project_latent(
+            latent=torch.from_numpy(latent),
+            w_uk=torch.from_numpy(w_uk),
+            d_nope=self.D_NOPE,
+            out=out,
+        )
+        want = np.einsum(
+            "thr,hrv->thv", latent.astype(np.float64), w_uk[:, :, self.D_NOPE :]
+        )
+        np.testing.assert_allclose(out.numpy(), want, rtol=1e-5, atol=1e-5)
+
+
+class TestForwardChecks:
+    """forward() checks the projections before any GEMM: [A] and [D] split
+    ``w_uk`` at ``q_nope``'s width, which the fixed-width ``qa`` check cannot
+    see. Runs on CPU: the refusal comes before any stream is touched."""
+
+    def _args(self, **overrides):
+        t = _inputs()
+        args = dict(
+            q_nope=torch.zeros(T, H, 128, dtype=torch.bfloat16),
+            q_rope=torch.zeros(T, H, 64, dtype=torch.bfloat16),
+            w_uk=torch.zeros(H, 512, 256, dtype=torch.bfloat16),
+            c_kv=t["c_kv"],
+            k_rope=t["k_rope"],
+            cu_seqlens_q=t["cu_seqlens_q"],
+            cu_seqlens_k=t["cu_seqlens_k"],
+            block_table=t["block_table"],
+            scale=0.1,
+        )
+        args.update(overrides)
+        return args
+
+    @pytest.mark.parametrize(
+        "name, bad",
+        [
+            # 64 + 192 = 256 still matches w_uk: the split would move silently.
+            ("q_nope", torch.zeros(T, H, 64, dtype=torch.bfloat16)),
+            ("q_rope", torch.zeros(T, H, 32, dtype=torch.bfloat16)),
+            ("w_uk", torch.zeros(H, 512, 192, dtype=torch.bfloat16)),
+            ("w_uk", torch.zeros(H, 256, 256, dtype=torch.bfloat16)),
+            ("q_nope", torch.zeros(T + 1, H, 128, dtype=torch.bfloat16)),
+        ],
+    )
+    def test_mismatched_projection_shapes_are_refused(self, name, bad):
+        runner = _uncompiled_runner(_result())
+        with pytest.raises(ValueError, match=f"{name} has shape"):
+            runner.forward(**self._args(**{name: bad}))
+
+    @pytest.mark.parametrize(
+        "name, shape",
+        [("q_nope", (T, H, 128)), ("q_rope", (T, H, 64)), ("w_uk", (H, 512, 256))],
+    )
+    def test_projection_dtype_is_checked(self, name, shape):
+        runner = _uncompiled_runner(_result())
+        bad = torch.zeros(*shape, dtype=torch.float32)
+        with pytest.raises(ValueError, match=f"{name} must be torch.bfloat16"):
+            runner.forward(**self._args(**{name: bad}))
+
+
+class TestBindLatent:
+    """bind_latent() enqueues exactly what latent() does, checked and packed once."""
+
+    class _Recorder:
+        def __init__(self, name, log):
+            self.name, self.log = name, log
+
+        def __call__(self, vals, *, config):
+            self.log.append((self.name, dict(vals), config))
+
+        def bind(self, vals, *, config):
+            snapshot = (self.name, dict(vals), config)
+            self.log.append(("bound",) + snapshot)
+            return lambda: self.log.append(snapshot)
+
+    def _runner(self, num_seg, log):
+        launch = mla_decode_launch(_result()).with_num_seg(num_seg)
+        runner = object.__new__(MlaDecodeRunner)
+        runner.launch, runner.spec = launch, launch.spec
+        runner.request = launch.result.request
+        runner.grid = tuple(launch.result.grid)
+        runner.block = tuple(launch.result.block)
+        runner._workspace = None
+        runner._latent = self._Recorder("latent", log)
+        runner._combine = (
+            self._Recorder("combine", log) if launch.combine_spec is not None else None
+        )
+        return runner
+
+    @pytest.mark.parametrize("num_seg", [1, 2])
+    def test_bound_launches_are_the_unbound_ones(self, num_seg):
+        args = dict(_inputs(), scale=0.1, stream=7)
+        eager, bound = [], []
+        self._runner(num_seg, eager).latent(**args)
+        run = self._runner(num_seg, bound).bind_latent(**args)
+        assert [e[1] for e in bound if e[0] == "bound"] == [e[0] for e in eager]
+        assert [e[0] for e in eager] == (
+            ["latent"] if num_seg == 1 else ["latent", "combine"]
+        )
+        del bound[:]
+        run()
+        run()  # replayable: no re-check, no re-pack
+        assert len(bound) == 2 * len(eager)
+        for got, want in zip(bound, eager * 2):
+            assert got[0] == want[0] and got[2] == want[2] and got[2].stream == 7
+            assert got[1].keys() == want[1].keys()
+            for k, w in want[1].items():
+                g = got[1][k]
+                if k.startswith("part_"):  # each runner owns its workspace
+                    assert g.shape == w.shape
+                else:
+                    assert g is w or g == w, k
+
+    def test_bind_checks_inputs_before_returning(self):
+        log = []
+        t = _inputs(qa=torch.zeros(T + 1, H, 576, dtype=torch.bfloat16))
+        with pytest.raises(ValueError, match="qa has shape"):
+            self._runner(1, log).bind_latent(**t, scale=0.1)
+        assert log == []
