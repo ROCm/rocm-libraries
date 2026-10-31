@@ -133,6 +133,26 @@ jobs:
       contents: read
       id-token: write
 
+  rocjitsu_gemm_race_checks_gfx950:
+    name: rocjitsu GEMM race checks (gfx950)
+    needs: [setup, linux_build_and_test]
+    if: >-
+      ${{
+        !cancelled() &&
+        contains(needs.setup.outputs.linux_build_config, 'gfx950-dcgpu') &&
+        needs.linux_build_and_test.result != 'skipped'
+      }}
+    uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
+    with:
+      therock_ref: ${{ needs.setup.outputs.ref }}
+      build_runs_on: ${{ fromJSON(needs.setup.outputs.linux_build_config).build_runs_on_medium }}
+      amdgpu_families: gfx950-dcgpu
+      amdgpu_targets: gfx950
+      workload: random-gemms
+      workers: 8
+      random_gemm_count: 100
+      random_gemm_seed: 0
+
   multi_arch_ci_summary:
     name: Multi-Arch CI Summary
     if: always()

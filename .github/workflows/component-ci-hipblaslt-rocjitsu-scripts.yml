@@ -1,0 +1,27 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+name: "Component CI: hipBLASLt rocjitsu scripts"
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: projects/hipblaslt/clients/scripts/rocjitsu
+          persist-credentials: false
+
+      # The tests use stand-in benchmarks and emulators, so the GEMM workload
+      # runners need no build, artifacts or GPU here.
+      - name: Run unit tests
+        run: python3 -B -m unittest discover -v -s projects/hipblaslt/clients/scripts/rocjitsu -p 'test_*.py'
