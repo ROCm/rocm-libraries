@@ -177,5 +177,108 @@ class TestWgradXwin(unittest.TestCase):
         self.assertIn("alignbyte", ll)
 
 
+class TestWgradXwinRound4(unittest.TestCase):
+    """xwin_groups / xwin_pp (block ping-pong) / xwin_mrow and the scratch
+    slab count of the cached two-stage launcher."""
+
+    def test_defaults_untagged(self):
+        spec = _spec(xwin=3)
+        self.assertEqual((spec.xwin_groups, spec.xwin_pp, spec.xwin_mrow), (1, 0, 1))
+        name = spec.kernel_name()
+        for tag in ("_xg", "_xpp", "_xmr"):
+            self.assertNotIn(tag, name)
+        self.assertEqual(spec.block_size, spec.group_block_size)
+
+    def test_groups_and_pp_gates(self):
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        pp = _spec(xwin=3, xwin_groups=4, xwin_pp=8, waves_per_eu=2)
+        ok, why = is_valid_wgrad_spec(pp, arch="gfx942")
+        self.assertTrue(ok, why)
+        for gn in (1, 2):
+            ok, why = is_valid_wgrad_spec(replace(pp, xwin_gn=gn), arch="gfx942")
+            self.assertTrue(ok, (gn, why))
+        self.assertEqual(pp.block_size, 512)
+        self.assertIn("_xg4_xpp8", pp.kernel_name())
+        for bad in (
+            dict(xwin=3, xwin_pp=8),  # 2 waves, not 8
+            dict(xwin=3, xwin_groups=3, xwin_pp=8),  # odd group count
+            dict(xwin=3, xwin_groups=4, xwin_pp=99),
+            dict(xwin_groups=4),  # needs xwin
+            dict(xwin=3, xwin_groups=4, xwin_gn=2),  # shared dY needs the ping-pong
+            dict(xwin=3, xwin_groups=4, xwin_pp=8, xwin_gn=3),
+        ):
+            ok, _ = is_valid_wgrad_spec(_spec(**bad), arch="gfx942")
+            self.assertFalse(ok, bad)
+
+    def test_mrow_window_and_capability(self):
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+            xwin_window_pitch,
+            xwin_window_stride,
+        )
+        from kernels.conv.kernel_identity import identity_supports_problem
+
+        self.assertEqual(xwin_window_pitch(32, 3, 2), 20)
+        self.assertEqual(xwin_window_stride(32, 3, 2), 44)
+        self.assertEqual(xwin_window_stride(32, 3, 1), xwin_window_stride(32, 3))
+        ok, why = is_valid_wgrad_spec(_spec(xwin=3, xwin_mrow=2), arch="gfx942")
+        self.assertTrue(ok, why)
+        self.assertFalse(is_valid_wgrad_spec(_spec(xwin=3, xwin_mrow=3), arch="gfx942")[0])
+        ident = _ident(xwin_mrow=2)
+        self.assertIn("-xmr2-", ident.label())
+        self.assertTrue(identity_supports_problem(ident, _problem(Wi=18, Hi=18))[0])
+        self.assertFalse(identity_supports_problem(ident, _problem(Wi=34))[0])  # Wo 32
+        self.assertFalse(identity_supports_problem(ident, _problem(Wi=18, Hi=17))[0])  # Ho 15
+
+    def test_label_round_trip(self):
+        from kernels.conv.kernel_identity import KernelIdentity
+
+        ident = _ident(xwin_groups=4, xwin_pp=8, waves_per_eu=2)
+        lab = ident.label()
+        self.assertIn("-xg4-xpp8-", lab)
+        self.assertEqual(KernelIdentity.from_label(lab), ident)
+        self.assertNotEqual(ident.stable_hash(), _ident(waves_per_eu=2).stable_hash())
+
+    def test_ws_slabs_used(self):
+        from benchmarks.common.benchmark_implicit_gemm_conv import _ws_slabs_used
+
+        ident = _ident(ws_replicas=8)
+        p = _problem()
+        self.assertEqual(_ws_slabs_used(p, ident, 2), 2)
+        self.assertEqual(_ws_slabs_used(p, ident, 760), 8)
+        self.assertEqual(_ws_slabs_used(_problem(C=128, K=128, groups=2), ident, 2), 8)
+
+    def test_stage2_vec_fold(self):
+        from kernels.common.conv_wgrad_workspace_reduce import (
+            WgradReduceSpec,
+            build_conv_wgrad_workspace_reduce,
+            wgrad_reduce_grid,
+        )
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        p = _problem()
+        s1 = WgradReduceSpec(problem=p, dtype_d="bf16", ws_replicas=2)
+        s4 = WgradReduceSpec(problem=p, dtype_d="bf16", ws_replicas=2, vec=4)
+        self.assertNotIn("_v4", s1.kernel_name())
+        self.assertIn("_v4_", s4.kernel_name())
+        gx1, gy1, _ = wgrad_reduce_grid(s1)
+        gx4, gy4, _ = wgrad_reduce_grid(s4)
+        self.assertEqual(gy1, gy4)
+        self.assertEqual(gx4, -(-s1.wg_N // (s1.tile_n * 4)))
+        ll = lower_kernel_to_llvm(build_conv_wgrad_workspace_reduce(s4), arch="gfx942")
+        self.assertIn("<4 x float>", ll)
+
+    def test_lowers_pingpong(self):
+        from kernels.common.conv_implicit_gemm_wgrad import build_implicit_gemm_conv_wgrad
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        spec = _spec(xwin=3, xwin_groups=4, xwin_pp=8, waves_per_eu=2)
+        ll = lower_kernel_to_llvm(build_implicit_gemm_conv_wgrad(spec, arch="gfx942"), arch="gfx942")
+        # four groups' A + window tiles
+        self.assertIn(f"[{4 * (64 * 36 + 72 * 36) * 2} x i8]", ll)
+        self.assertIn("s.setprio", ll)
+
+
 if __name__ == "__main__":
     unittest.main()
