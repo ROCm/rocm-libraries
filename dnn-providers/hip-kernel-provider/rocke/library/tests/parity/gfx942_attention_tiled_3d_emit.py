@@ -303,6 +303,34 @@ _CONFIGS = {
         tile_size_override=16,
         use_wave_page_id_load=True,
     ),
+    18: dict(
+        # num_queries_per_kv=5 does not divide BLOCK_M=16: padded q-block.
+        head_size=128,
+        block_size=16,
+        num_query_heads=40,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
+    # --- idx19: head_size=192 MHA decode selector spec
+    19: dict(
+        head_size=192,
+        block_size=16,
+        num_query_heads=96,
+        num_kv_heads=96,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_segments=16,
+        num_seqs=1,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+    ),
 }
 
 
