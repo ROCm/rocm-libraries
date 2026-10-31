@@ -233,10 +233,13 @@ TIMING_HIERARCHY = {
             "warmup_first_sync": {},
             "run_iteration_sync": {},
             # Per run iteration that launched (and in post_solution for launches an exception left
-            # unchecked): read the Synchronizer buffer back and scan it for residue. Only solutions
-            # that may use the Synchronizer (StreamK, MBSK, GSU partial reduction, amaxD) do the
-            # readback and scan; the rest are "inactive".
+            # unchecked): check the Synchronizer buffer for residue. Only solutions that may use
+            # the Synchronizer (StreamK, MBSK, GSU partial reduction, amaxD) are checked; the rest
+            # are "inactive". The check OR-reduces the buffer on the GPU (reduce: kernel + 4-byte
+            # readback); readback + scan run only when it is dirty, or for every check on the host
+            # path (FFM emulator, no code object for the device; older logs: always).
             "synchronizer_check": {
+                "synchronizer_reduce": {},
                 "synchronizer_readback": {},
                 "synchronizer_scan": {},
                 "synchronizer_inactive": {},
