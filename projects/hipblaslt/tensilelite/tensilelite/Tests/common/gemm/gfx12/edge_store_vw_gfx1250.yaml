@@ -24,7 +24,7 @@ GlobalParameters:
   DataInitTypeScaleB: 2
   DataInitTypeScaleC: 1
   DataInitTypeScaleD: 2
-  DataInitTypeScaleAlphaVec: 13
+  DataInitTypeScaleAlphaVec: 1
 BenchmarkProblems:
 - - OperationType: GEMM
     DataType: h
@@ -958,6 +958,7 @@ BenchmarkProblems:
     - ProblemSizes:
       - Exact: [33, 65, 2, 1031]
       - Exact: [34, 65, 2, 1031]
+      - Exact: [40, 65, 2, 1031]
 - - OperationType: GEMM
     DataType: F8
     DestDataType: F8
