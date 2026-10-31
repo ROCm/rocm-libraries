@@ -2248,6 +2248,287 @@ namespace
         return problem;
     }
 
+    // A dynamic worker can consume several full tiles. Old generated libraries
+    // do not promise to preserve the packed stagger argument between those tiles.
+    TEST(RowUniformityGridSteering_pre_checkin, DynamicStaggerRequiresPersistentCapability)
+    {
+        auto solution = uniformitySteeringSolution();
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::Hybrid;
+        solution->internalArgsSupport.perTileExtraIters = true;
+        solution->sizeMapping.staggerUMapping = 1;
+        solution->sizeMapping.staggerU = 8;
+        solution->sizeMapping.staggerStrideShift = 2;
+        auto device = uniformitySteeringDevice();
+        device.persistentFixedGrid = 8;
+        auto problem = uniformityGemm(3072, 128, 4096);
+        problem.setParams().setUniformSummationOrder(true);
+        problem.setParams().setStreamKTileSchedulingMode(1);
+        ASSERT_TRUE(solution->streamK5EffectiveDynamic(problem, device));
+        const auto tiles = problem.getNumTiles(solution->sizeMapping, 1);
+        ASSERT_EQ(tiles, 24u);
+        const auto grid = solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree);
+        ASSERT_EQ(grid, 8u);
+        const auto wgm = std::get<0>(solution->calculateAutoWGM(problem, &device, grid));
+        EXPECT_FALSE(solution->internalArgsSupport.persistentStaggerU);
+        for(bool capability : {false, true})
+        {
+            SCOPED_TRACE(capability);
+            solution->internalArgsSupport.persistentStaggerU = capability;
+            const auto [mapping, stagger, shift]
+                = solution->calculateAutoStaggerU(problem, &device, grid, wgm);
+            EXPECT_EQ(mapping, capability ? 1u : 0u);
+            EXPECT_EQ(stagger, capability ? 8u : 0u);
+            EXPECT_EQ(shift, capability ? 2u : 0u);
+            EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, device));
+        }
+
+        // Static SK5 snaps to one workgroup per tile and remains compatible
+        // with the pre-existing perTileExtraIters capability.
+        solution->internalArgsSupport.persistentStaggerU = false;
+        problem.setParams().setStreamKTileSchedulingMode(0);
+        ASSERT_FALSE(solution->streamK5EffectiveDynamic(problem, device));
+        const auto staticGrid
+            = solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree);
+        ASSERT_EQ(staticGrid, tiles);
+        const auto staticWgm
+            = std::get<0>(solution->calculateAutoWGM(problem, &device, staticGrid));
+        const auto [mapping, stagger, shift]
+            = solution->calculateAutoStaggerU(problem, &device, staticGrid, staticWgm);
+        EXPECT_EQ(mapping, 1u);
+        EXPECT_EQ(stagger, 8u);
+        EXPECT_EQ(shift, 2u);
+    }
+
+    TEST(RowUniformityGridSteering_pre_checkin, PersistentStaggerKeepsMappingAndRuntimeGates)
+    {
+        auto solution = uniformitySteeringSolution();
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::Hybrid;
+        solution->internalArgsSupport.perTileExtraIters = true;
+        solution->internalArgsSupport.persistentStaggerU = true;
+        solution->sizeMapping.staggerU = 8;
+        solution->sizeMapping.staggerStrideShift = 2;
+        auto device = uniformitySteeringDevice();
+        device.persistentFixedGrid = 8;
+        auto problem = uniformityGemm(3072, 128, 4096);
+        problem.setParams().setUniformSummationOrder(true);
+        problem.setParams().setStreamKTileSchedulingMode(1);
+        for(unsigned mapping : {0u, 1u, 2u, 3u, 4u})
+        {
+            SCOPED_TRACE(mapping);
+            solution->sizeMapping.staggerUMapping = mapping;
+            const auto resolved = solution->calculateAutoStaggerU(problem, &device, 8, 1);
+            EXPECT_EQ(std::get<1>(resolved), mapping == 1 ? 8u : 0u);
+        }
+        solution->sizeMapping.staggerUMapping = 1;
+        solution->internalArgsSupport.staggerU = false;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 0u);
+        solution->internalArgsSupport.staggerU = true;
+
+        // A dynamic queue (SK5 resolved dynamic, below SK4) only ever hands out
+        // whole tiles under uniform summation order, so it needs the kernel to
+        // preserve the packed stagger across tiles, not the per-tile K-split
+        // mapping.
+        ASSERT_TRUE(solution->streamK5EffectiveDynamic(problem, device));
+        solution->internalArgsSupport.perTileExtraIters = false;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 8u);
+        solution->internalArgsSupport.persistentStaggerU = false;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 0u);
+        solution->internalArgsSupport.perTileExtraIters = true;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 0u)
+            << "perTileExtraIters does not cover a dynamic queue";
+
+        // SK4 follows the same rule.
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
+        solution->internalArgsSupport.perTileExtraIters = false;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 0u);
+        solution->internalArgsSupport.persistentStaggerU = true;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 8u);
+        solution->internalArgsSupport.staggerU = false;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 0u);
+        solution->internalArgsSupport.staggerU = true;
+
+        // Static assignment still needs the per-tile extra-iters capability,
+        // whatever the persistent-stagger capability says.
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 0u);
+        solution->internalArgsSupport.perTileExtraIters = true;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 8u);
+    }
+
+    TEST(RowUniformityGridSteering_pre_checkin, PersistentStaggerDoesNotAdmitDynamicPartialTiles)
+    {
+        auto solution = uniformitySteeringSolution();
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::Hybrid;
+        solution->internalArgsSupport.perTileExtraIters = true;
+        solution->internalArgsSupport.persistentStaggerU = true;
+        solution->sizeMapping.staggerUMapping = 1;
+        solution->sizeMapping.staggerU = 8;
+        auto device = uniformitySteeringDevice();
+        device.persistentFixedGrid = 8;
+        auto problem = uniformityGemm(3072, 128, 4096);
+        problem.setParams().setUniformSummationOrder(true);
+        problem.setParams().setStreamKTileSchedulingMode(1);
+        ASSERT_TRUE(solution->uniformSummationOrderSupported(problem, device));
+        for(int skTiles : {1, 24})
+        {
+            SCOPED_TRACE(skTiles);
+            device.skTiles = skTiles;
+            EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, device));
+        }
+        device.skTiles = 0;
+        solution->sizeMapping.streamKAtomic = 1;
+        EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, device));
+    }
+
+    TEST(RowUniformityGridSteering_pre_checkin, PersistentStaggerGateUsesResolvedSchedulingMode)
+    {
+        auto solution = uniformitySteeringSolution();
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::Hybrid;
+        solution->internalArgsSupport.perTileExtraIters = true;
+        solution->sizeMapping.staggerUMapping = 1;
+        solution->sizeMapping.staggerU = 8;
+        auto device = uniformitySteeringDevice();
+        auto problem = uniformityGemm(4096, 4096, 64);
+        problem.setParams().setSmCountTarget(128);
+        for(int requestedMode : {0, 2})
+        {
+            SCOPED_TRACE(requestedMode);
+            problem.setParams().setStreamKTileSchedulingMode(requestedMode);
+            ASSERT_TRUE(solution->streamK5EffectiveDynamic(problem, device));
+            problem.setParams().setUniformSummationOrder(false);
+            EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 128, 1)), 8u);
+            problem.setParams().setUniformSummationOrder(true);
+            EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 128, 1)), 0u)
+                << "OFF with a CU target can resolve dynamic and needs the same capability as ON";
+            solution->internalArgsSupport.persistentStaggerU = true;
+            EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 128, 1)), 8u);
+            solution->internalArgsSupport.persistentStaggerU = false;
+        }
+    }
+
+    TEST(RowUniformityGridSteering_pre_checkin, Sk4DynamicStaggerRequiresPersistentCapability)
+    {
+        auto solution                                = uniformitySteeringSolution();
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
+        solution->internalArgsSupport.perTileExtraIters = true;
+        solution->sizeMapping.staggerUMapping           = 1;
+        solution->sizeMapping.staggerU                  = 8;
+        solution->sizeMapping.staggerStrideShift        = 2;
+        ASSERT_TRUE(solution->sizeMapping.hasDynamicAssignment());
+        ASSERT_FALSE(solution->sizeMapping.hasHybridAssignment());
+        auto device                = uniformitySteeringDevice();
+        device.persistentFixedGrid = 8;
+        auto problem               = uniformityGemm(3072, 128, 4096);
+        problem.setParams().setUniformSummationOrder(true);
+        const auto tiles = problem.getNumTiles(solution->sizeMapping, 1);
+        ASSERT_EQ(tiles, 24u);
+        const auto grid = solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree);
+        ASSERT_GT(grid, 0u);
+        const auto wgm = std::get<0>(solution->calculateAutoWGM(problem, &device, grid));
+        EXPECT_FALSE(solution->internalArgsSupport.persistentStaggerU);
+        for(bool capability : {false, true})
+        {
+            SCOPED_TRACE(capability);
+            solution->internalArgsSupport.persistentStaggerU = capability;
+            const auto [mapping, stagger, shift]
+                = solution->calculateAutoStaggerU(problem, &device, grid, wgm);
+            EXPECT_EQ(mapping, capability ? 1u : 0u);
+            EXPECT_EQ(stagger, capability ? 8u : 0u);
+            EXPECT_EQ(shift, capability ? 2u : 0u);
+            EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, device));
+        }
+
+        for(int requestedMode : {0, 1, 2})
+        {
+            SCOPED_TRACE(requestedMode);
+            problem.setParams().setStreamKTileSchedulingMode(requestedMode);
+            solution->internalArgsSupport.persistentStaggerU = false;
+            EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, grid, wgm)),
+                      0u);
+            solution->internalArgsSupport.persistentStaggerU = true;
+            EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, grid, wgm)),
+                      8u);
+        }
+    }
+
+    TEST(RowUniformityGridSteering_pre_checkin, Sk4PersistentStaggerKeepsMappingAndRuntimeGates)
+    {
+        auto solution                                = uniformitySteeringSolution();
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
+        solution->internalArgsSupport.perTileExtraIters  = true;
+        solution->internalArgsSupport.persistentStaggerU = true;
+        solution->sizeMapping.staggerU                   = 8;
+        solution->sizeMapping.staggerStrideShift         = 2;
+        auto device                                      = uniformitySteeringDevice();
+        device.persistentFixedGrid                       = 8;
+        auto problem                                     = uniformityGemm(3072, 128, 4096);
+        problem.setParams().setUniformSummationOrder(true);
+        for(unsigned mapping : {0u, 1u, 2u, 3u, 4u})
+        {
+            SCOPED_TRACE(mapping);
+            solution->sizeMapping.staggerUMapping = mapping;
+            const auto resolved = solution->calculateAutoStaggerU(problem, &device, 8, 1);
+            EXPECT_EQ(std::get<1>(resolved), mapping == 1 ? 8u : 0u);
+        }
+        solution->sizeMapping.staggerUMapping  = 1;
+        solution->internalArgsSupport.staggerU = false;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 0u);
+        solution->internalArgsSupport.staggerU = true;
+
+        // A dynamic queue only ever hands out whole tiles under uniform
+        // summation order, so it needs the kernel to preserve the packed
+        // stagger across tiles, not the per-tile K-split mapping.
+        solution->internalArgsSupport.perTileExtraIters = false;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 8u);
+        solution->internalArgsSupport.persistentStaggerU = false;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 0u);
+        solution->internalArgsSupport.perTileExtraIters = true;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 0u)
+            << "perTileExtraIters does not cover a dynamic queue";
+            
+        problem.setParams().setUniformSummationOrder(false);
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 8u);
+        problem.setParams().setUniformSummationOrder(true);
+
+        solution->sizeMapping.workAssignment             = TensileLite::WorkAssignment::StaticGrid;
+        solution->internalArgsSupport.perTileExtraIters  = false;
+        solution->internalArgsSupport.persistentStaggerU = true;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 0u);
+        solution->internalArgsSupport.perTileExtraIters = true;
+        EXPECT_EQ(std::get<1>(solution->calculateAutoStaggerU(problem, &device, 8, 1)), 8u);
+    }
+
+    TEST(RowUniformityGridSteering_pre_checkin, Sk4PersistentStaggerDoesNotAdmitDynamicPartialTiles)
+    {
+        auto solution                                = uniformitySteeringSolution();
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
+        solution->internalArgsSupport.perTileExtraIters  = true;
+        solution->internalArgsSupport.persistentStaggerU = true;
+        solution->sizeMapping.staggerUMapping            = 1;
+        solution->sizeMapping.staggerU                   = 8;
+        auto device                                      = uniformitySteeringDevice();
+        device.persistentFixedGrid                       = 8;
+        auto problem                                     = uniformityGemm(3072, 128, 4096);
+        problem.setParams().setUniformSummationOrder(true);
+        ASSERT_TRUE(solution->uniformSummationOrderSupported(problem, device));
+        for(int skTiles : {1, 24})
+        {
+            SCOPED_TRACE(skTiles);
+            device.skTiles = skTiles;
+            EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, device));
+        }
+        device.skTiles                      = 0;
+        solution->sizeMapping.streamKAtomic = 1;
+        EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, device));
+    }
+
     TEST(RowUniformityGridSteering_pre_checkin, KeepParallelUnderUniformSummationOrderWhenEligible)
     {
         auto solution = uniformitySteeringSolution();
