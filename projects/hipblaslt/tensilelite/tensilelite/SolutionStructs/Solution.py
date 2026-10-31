@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from ..ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy, usesStreamKArrivalFixup
+from ..ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy, usesStreamKArrivalFixup, usesStreamKDynamicParallel
 
 import collections
 import copy
@@ -482,6 +482,16 @@ def _supportStreamKArrivalFixup(state, hasSAtomic):
               and not isCustomKernelConfig(state)
               and usesStreamKArrivalFixup(state.get("DebugStreamK", 0), hasSAtomic,
                                           bool(state.get("PrefetchAcrossPersistent", 0))))
+
+
+def _supportStreamKDynamicParallel(state):
+  """SupportStreamKDynamicParallel: generated StreamK Hybrid kernels where
+  usesStreamKDynamicParallel holds."""
+  return bool(isStreamK(state) and hasHybridAssignment(state)
+              and not isCustomKernelConfig(state)
+              and usesStreamKDynamicParallel(state.get("DebugStreamK", 0),
+                                             state.get("StreamKAtomic", 0),
+                                             bool(state.get("PrefetchAcrossPersistent", 0))))
 
 
 def _supportOccupancyProbe(state):
@@ -7693,6 +7703,9 @@ class Solution(collections.abc.Mapping):
     # generator knows which fixup protocol it emits (StreamK.arrivalFixupSupported).
     state["InternalSupportParams"]["SupportStreamKArrivalFixup"] = \
         _supportStreamKArrivalFixup(state, isaInfoMap[isa].asmCaps["HasSAtomic"])
+    # Same for the dynamic parallel reduction (StreamKHybrid.usesDynamicParallel).
+    state["InternalSupportParams"]["SupportStreamKDynamicParallel"] = \
+        _supportStreamKDynamicParallel(state)
     state["AssignedDerivedParameters"] = True
 
     # Set E
