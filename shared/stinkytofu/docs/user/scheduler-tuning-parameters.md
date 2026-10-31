@@ -55,9 +55,9 @@ Each parameter resolves independently, first match wins:
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
 | `WmmaQueueDepth` | 8 (`stinkytofu-opt`: 1) | `--wmma-queue-depth=N` | Max WMMAs outstanding in the pipe. A WMMA is appended whenever fewer than N are outstanding; it waits only when the queue is full. 1 = one WMMA at a time (queue model off). |
-| `WmmaQueueCoverCycles` | 56 (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | Cycles of queued WMMA work that must remain before a ds_load, filler or `tensor_load` may issue. Below N, and with room in the queue, the next ready WMMA goes first, so the pipe never runs dry. Forced picks (a promoted barrier) are not held. Useful range is up to about 64 (the pipe buffers ~8 WMMAs of 8 cycles). |
+| `WmmaQueueCoverCycles` | -1 = automatic, (`WmmaQueueDepth` - 1) x WMMA latency (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | Cycles of queued WMMA work that must remain before a ds_load, filler or `tensor_load` may issue. Below N, and with room in the queue, the next ready WMMA goes first, so the pipe never runs dry. Forced picks (a promoted barrier) are not held. Useful range is up to about 64 (the pipe buffers ~8 WMMAs of 8 cycles). |
 
-The queue model runs only with **both** `WmmaQueueDepth > 1` and `WmmaQueueCoverCycles > 0`, which
+The queue model runs only with **both** `WmmaQueueDepth > 1` and `WmmaQueueCoverCycles != 0`, which
 is the production default. With either one off, the schedule is the original single-window one.
 
 ```

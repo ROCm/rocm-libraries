@@ -66,7 +66,7 @@ is in [Scheduler tuning parameters](../user/scheduler-tuning-parameters.md). `st
 | `EvenSpreadFillers` | true | – | filler quota per window |
 | `WarGateWmmas` | -1 | `--war-gate-wmmas=N` | WMMA-src → ds_load overwrite gap; -1 = derived |
 | `WmmaQueueDepth` | 8 (`stinkytofu-opt`: 1) | `--wmma-queue-depth=N` | WMMAs outstanding in the matrix pipe (it buffers ~8); a WMMA is appended whenever fewer are outstanding. 1 = one WMMA at a time (queue model off). > 1 also merges the waits of back-to-back WMMAs onto the first one |
-| `WmmaQueueCoverCycles` | 56 (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | cycles of queued WMMA work that must remain before a ds_load, filler or tensor_load may issue; below it, with room in the queue, the next ready WMMA goes first. Ignored at depth 1; forced picks (a promoted barrier) are not held |
+| `WmmaQueueCoverCycles` | -1 = automatic, (`WmmaQueueDepth` - 1) x WMMA latency (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | cycles of queued WMMA work that must remain before a ds_load, filler or tensor_load may issue; below it, with room in the queue, the next ready WMMA goes first. Ignored at depth 1; forced picks (a promoted barrier) are not held |
 
 ## Measured effect
 
