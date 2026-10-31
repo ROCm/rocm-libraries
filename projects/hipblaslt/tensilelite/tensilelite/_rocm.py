@@ -20,10 +20,6 @@ from pathlib import Path
 _PYTHON_SDK_SOURCE = "active Python rocm_sdk_core"
 _THEROCK_CI_SOURCE = "TheRock CI build"
 
-# Temporary compatibility gate. Keep the Python-SDK implementation below intact
-# until TheRock provides the required SDK client/tool payload.
-_ENABLE_PYTHON_ROCM_RUNTIME = False
-
 class TensileLiteRuntimeError(ImportError):
     """The installed TensileLite wheel and ROCm runtime do not match."""
 
@@ -72,10 +68,9 @@ def validate_distribution(
         return _validate_therock_ci(
             distribution, distribution_version, expected, therock_ci_version
         )
-    if _ENABLE_PYTHON_ROCM_RUNTIME:
-        python_sdk_version = _python_sdk_version()
-        if python_sdk_version is not None:
-            return _validate_python_sdk(distribution, distribution_version, expected, python_sdk_version)
+    python_sdk_version = _python_sdk_version()
+    if python_sdk_version is not None:
+        return _validate_python_sdk(distribution, distribution_version, expected, python_sdk_version)
     return _validate_system_rocm(distribution, distribution_version, expected)
 
 
