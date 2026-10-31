@@ -37,25 +37,46 @@
 namespace hiptensor
 {
     using CkScale             = ck::tensor_operation::element_wise::Scale;
-    using CkScaleF64          = ck::tensor_operation::element_wise::ScaleF64;
     using CkPassThrough       = ck::tensor_operation::element_wise::PassThrough;
     using CkHiptensorUnaryOp  = ck::tensor_operation::element_wise::HiptensorUnaryOp;
     using CkHiptensorBinaryOp = ck::tensor_operation::element_wise::HiptensorBinaryOp;
     using CkBilinearUnary     = ck::tensor_operation::element_wise::BilinearUnary;
+
     using CkUnaryCombinedOp
         = ck::tensor_operation::element_wise::UnaryCombinedOp<CkHiptensorUnaryOp, CkScale>;
-    using CkPermutationUnaryCombinedOpF64
-        = ck::tensor_operation::element_wise::UnaryCombinedOp<CkHiptensorUnaryOp, CkScaleF64>;
+
     using CkPermutationUnaryCombinedOp
         = ck::tensor_operation::element_wise::UnaryCombinedOp<CkHiptensorUnaryOp, CkScale>;
+
     using CkPermutationPassThroughCombinedOp
         = ck::tensor_operation::element_wise::UnaryCombinedOp<CkPassThrough, CkPassThrough>;
+
     using CkBinaryWithUnaryCombinedOp = ck::tensor_operation::element_wise::
         BinaryWithUnaryCombinedOp<CkHiptensorBinaryOp, CkUnaryCombinedOp, CkUnaryCombinedOp>;
+
     using CkTrinaryWithUnaryCombinedOp
         = ck::tensor_operation::element_wise::TrinaryWithUnaryCombinedOp<CkHiptensorBinaryOp,
                                                                          CkHiptensorBinaryOp,
                                                                          CkUnaryCombinedOp,
                                                                          CkUnaryCombinedOp,
                                                                          CkUnaryCombinedOp>;
+
+    // F64
+    using CkScaleF64 = ck::tensor_operation::element_wise::ScaleF64;
+
+    using CkUnaryCombinedOpF64
+        = ck::tensor_operation::element_wise::UnaryCombinedOp<CkHiptensorUnaryOp, CkScaleF64>;
+
+    using CkPermutationUnaryCombinedOpF64
+        = ck::tensor_operation::element_wise::UnaryCombinedOp<CkHiptensorUnaryOp, CkScaleF64>;
+
+    using CkBinaryWithUnaryCombinedOpF64 = ck::tensor_operation::element_wise::
+        BinaryWithUnaryCombinedOp<CkHiptensorBinaryOp, CkUnaryCombinedOpF64, CkUnaryCombinedOpF64>;
+
+    using CkTrinaryWithUnaryCombinedOpF64
+        = ck::tensor_operation::element_wise::TrinaryWithUnaryCombinedOp<CkHiptensorBinaryOp,
+                                                                         CkHiptensorBinaryOp,
+                                                                         CkUnaryCombinedOpF64,
+                                                                         CkUnaryCombinedOpF64,
+                                                                         CkUnaryCombinedOpF64>;
 }
