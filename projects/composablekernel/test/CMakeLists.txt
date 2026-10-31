@@ -35,6 +35,8 @@ set(REGRESSION_TESTS
     test_grouped_convnd_bwd_weight
     test_softmax_rank3
     test_softmax_rank4
+    test_ck_tile_fmha_qr_tdm_sched_fwd_bf16
+    test_ck_tile_fmha_qr_tdm_sched_fwd_fp16
     test_batchnorm_fwd_rank_4
     test_batchnorm_bwd_rank_4
     test_grouped_convnd_bwd_data_xdl
