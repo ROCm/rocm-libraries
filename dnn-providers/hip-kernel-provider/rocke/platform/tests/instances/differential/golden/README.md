@@ -32,9 +32,22 @@ every flavor (the flavor is an argument to lowering). Both commands must print `
 (exit 0). CI runs exactly these from the installed test tree, as the quick-tier CTest
 entries `rocke_differential_golden_ll` and `rocke_differential_golden_canonical`.
 
-`GOLDEN OK` answers *"does output match the blessed hashes"* and nothing else; it is not the
-parity verdict. The byte-identity gate (`tools/check_byte_identity.py`, or `run_diff.py`
-without `--python-only`) is what compares the C++ engine with Python.
+`GOLDEN OK` answers *"does output match the blessed hashes"* and nothing else. On its own
+it is not the parity verdict. The byte-identity gate (`tools/check_byte_identity.py`, or
+`run_diff.py` without `--python-only`) is what compares the C++ engine with Python, and it
+needs the engine source, so CI cannot run it.
+
+For the 20 attention backward families (`attention_bwd_*`, `attention_dense_bwd_*`) CI also
+checks the C++ side. The quick-tier CTest entry `rocke_native_golden_ll`
+(`check_native_golden.py`, emitters built by `tests/cmake/NativeGoldenTests.cmake`) runs
+the installed C++ emitters against the same `ll` hashes at llvm20, llvm22, llvm23 and
+llvm24. These are library families, so their hashes live in the library's golden
+(`library/tests/parity/golden/llvm_gfx_all.json`), not in this directory. A config the
+golden blesses must give that `.ll`; any other config must be refused; and the C++
+emitter must end at the same config as the Python one.
+With `rocke_differential_golden_ll` passing (Python == golden), that is C++ == Python, so for
+these families the two entries together are the parity verdict in CI. Re-bless with
+`run_diff.py` after a Python change, then make the C++ twin match.
 
 `--only <family>` checks just the matching families; the rest are not compared and not
 reported missing. It matches by substring (`--only conv_implicit_gemm` also selects
