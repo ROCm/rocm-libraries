@@ -35,6 +35,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.
+* [Conv] Added `ConvGenericDepthwiseFwd2D`, a general-shape 2D depthwise forward solver for gfx950.
+  It runs a plain HIP kernel (no Composable Kernel) on every packed NCHW fp16/bf16 depthwise
+  shape whose plane sizes and launch grid fit in 32 bits (filters up to 15x15, stride and
+  dilation up to 8), and is selected through Find mode next to the CK-based
+  `ConvDepthwiseFwd2D`, which is unchanged.
 
 ### Changed
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
