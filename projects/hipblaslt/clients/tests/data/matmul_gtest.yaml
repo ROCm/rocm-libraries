@@ -3363,7 +3363,8 @@ Tests:
 #
 # A case that checks several solutions launches them all into the same D, in
 # the hipblaslt-test loop and in the hipblaslt-bench candidate search (timing
-# 1). D is filled with all ones before each solution, so a solution that never
+# 1). D is filled with the fast_check NaN sentinel before each solution (all-ones
+# bytes for D types the sentinel does not cover), so a solution that never
 # stores D fails instead of passing on the previous solution's result.
 ###############################################################################
 
