@@ -8,6 +8,7 @@ default-on step needs its ``--no-...`` flag added to the argv lists below.
 """
 
 import importlib.util
+import inspect
 import json
 from pathlib import Path
 import subprocess
@@ -408,7 +409,9 @@ def test_installed_runner_bootstraps_staged_hostcaps(runner, tmp_path):
     arch_domain = installed_tests / "arch_domain"
     arch_domain.mkdir(parents=True)
     shutil.copy2(runner.TESTS / "run_all.py", installed_tests / "run_all.py")
-    shutil.copy2(runner.TOOLS / "_hostcaps.py", arch_domain / "_hostcaps.py")
+    shutil.copy2(
+        Path(inspect.getfile(runner.available_cpus)), arch_domain / "_hostcaps.py"
+    )
 
     proc = subprocess.run(
         [sys.executable, "-I", str(installed_tests / "run_all.py"), "--help"],
