@@ -26,13 +26,18 @@ from pathlib import Path
 # (D64, D128, D192 N64), the index loop (D192 N128), K-padding, group mode and fp16. The
 # value is (file name pattern, FmhaMasks alias of the blob): "mc" blobs use the causal form
 # and "mg" blobs the windowed form of GenericAttentionMask.
+# Pin both D64 tile widths so filename ordering cannot replace N64 causal coverage with N128.
 _SELECTED_BLOBS = {
     "d64_countdown_window": (
-        r"^fmha_fwd_d64_bf16_batch_.*_npad_.*_nbias_mg_lse_",
+        r"^fmha_fwd_d64_bf16_batch_b128x64x.*_npad_.*_nbias_mg_lse_",
         "GenericMask",
     ),
     "d64_padded_causal": (
-        r"^fmha_fwd_d64_bf16_batch_.*_pssk_.*_nbias_mc_lse_",
+        r"^fmha_fwd_d64_bf16_batch_b128x64x.*_pssk_.*_nbias_mc_lse_",
+        "CausalMask",
+    ),
+    "d64_n128_padded_causal": (
+        r"^fmha_fwd_d64_bf16_batch_b128x128x.*_pssk_.*_nbias_mc_lse_",
         "CausalMask",
     ),
     "d128_countdown_window": (
@@ -158,6 +163,9 @@ class TestQrTdmSchedGenericMask(unittest.TestCase):
 
     def test_d64_padded_causal(self):
         self.check("d64_padded_causal")
+
+    def test_d64_n128_padded_causal(self):
+        self.check("d64_n128_padded_causal")
 
     def test_d128_countdown_window(self):
         self.check("d128_countdown_window")
