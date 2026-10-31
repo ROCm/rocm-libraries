@@ -430,12 +430,16 @@ This gate and §4.4 overlap on purpose and neither subsumes the other:
 ### 4.6 Does the measured arch-domain artifact reproduce?
 
 The warning gate consumes committed measurements; it does not prove that this
-host's toolchain reproduces them. The `rocke_arch_domain_reproducibility` CTest
-runs `tools/gen_arch_domain.py --check` over the full intrinsic/architecture
-matrix for the host flavor and compares the result with the committed column.
-This is an artifact-reproduction gate backed by the host toolchain, not a Python
-unit test: it owns external compiler processes, a dedicated timeout and resource
-policy, and an explicit CTest skip result.
+host's toolchain reproduces them. When the host compiler identity matches the
+provenance recorded in the committed column, the
+`rocke_arch_domain_reproducibility` CTest runs
+`tools/gen_arch_domain.py --check` over the full intrinsic/architecture matrix
+and compares the result with that column. LLVM development builds with the same
+major can disagree about intrinsic availability and ABI, so a different compiler
+identity is explicitly unvalidated rather than compared as though it asked the
+same question. This is an artifact-reproduction gate backed by the host
+toolchain, not a Python unit test: it owns external compiler processes, a
+dedicated timeout and resource policy, and an explicit CTest skip result.
 
 The gate is registered in both execution environments. A developer build runs
 the source tool against the source package data. Provider CI runs a packaged,
@@ -444,9 +448,10 @@ installed `rocke` package. This follows the library-side test contract: CMake
 stages every input, CTest supplies artifact-relative paths, and the test never
 configures or reaches back into a source checkout.
 
-The result mapping deliberately preserves the former pytest item's behavior:
-no clang, no committed host-flavor column, and a clang/resolved-flavor mismatch
-skip; a partial or internally inconsistent LLVM installation fails. Flavor
+The result mapping distinguishes applicability from failure: no clang, no
+committed host-flavor column, a clang/resolved-flavor mismatch, or a compiler
+identity different from the column's provenance skips with a named reason. A
+partial or internally inconsistent LLVM installation fails. Flavor
 auto-detection errors, including unavailable COMGR evidence, also remain
 failures during this migration.
 
@@ -469,9 +474,10 @@ CTest is categorized as standard in both build-tree and installed manifests, so
 installed-artifact CI can schedule the reproduction result without adding the
 external process sweep to the quick or FFM pytest pools. A named skip is not
 reproduction coverage: check the CTest result and reason, especially when the
-compiler's exact major differs from rocKE's resolved flavor or no committed
-column exists. Keeping one generator implementation behind two thin
-registrations preserves local coverage while avoiding duplicated test logic.
+compiler identity differs from the committed provenance, its major differs from
+rocKE's resolved flavor, or no committed column exists. Keeping one generator
+implementation behind two thin registrations preserves local coverage while
+avoiding duplicated test logic.
 
 **Kernel-author routing.** Ordinary kernel work does not need a separate focused
 run beyond the full pre-merge `tests/run_all.py`; once that runner has configured

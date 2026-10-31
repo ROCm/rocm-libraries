@@ -39,10 +39,14 @@ from rocke.core.arch import ArchTarget
 from rocke.core.backend import BackendError, _lower_via_cpp_engine
 from rocke.core.ir import F32, TF32, IRBuilder, KernelDef, VectorType
 from rocke.core.ir_serialize import serialize
-from rocke.core.lower_llvm import _flavor_for_llvm, _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import (
+    LLVM_FLAVORS,
+    _flavor_for_llvm,
+    _lower_kernel_to_llvm_python,
+)
 
 _ARCH = "gfx950"
-_FLAVORS = ("llvm20", "llvm22", "llvm23")
+_FLAVORS = LLVM_FLAVORS
 
 # Every emulated atom the catalog ships, paired with the bf16 atom it expands
 # to. Kept as literals rather than read back out of the catalog: this file is
