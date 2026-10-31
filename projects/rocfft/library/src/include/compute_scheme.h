@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -84,6 +84,8 @@ enum ComputeScheme
     CS_3D_PP,
     CS_KERNEL_3D_STOCKHAM_BLOCK_CC, // not implemented yet
     CS_KERNEL_3D_SINGLE // not implemented yet
+    // adding a scheme after this one? update lastScheme in
+    // tests/kernel_name_test.cpp so the new scheme gets tested
 };
 
 // print abbreviation for kernel scheme
