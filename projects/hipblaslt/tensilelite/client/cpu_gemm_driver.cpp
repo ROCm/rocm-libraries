@@ -78,6 +78,9 @@
  * # Half with bias and relu, also writing E (the value before activation)
  * ./cpu_gemm_driver --type f16 --bias --activation relu --useE --validate --tryFastPath
  *
+ * # Half gradient GEMM: D times relu(E) (E an input), bias gradient reduced from A
+ * ./cpu_gemm_driver --type f16 --gradient --activation relu --useE --bias --biasSrc a --validate
+ *
  * # Benchmark mode (validation disabled)
  * ./cpu_gemm_driver --M 2048 --N 2048 --K 2048 --validate 0 --tryFastPath 1
  *
@@ -213,6 +216,10 @@ namespace
     //
     // preActivation (if not null) receives the value before activation, i.e.
     // after bias, which the reference writes to E (useE).
+    //
+    // gradientE (if not null) makes it a gradient GEMM: the caller passes no bias
+    // (the reference adds none), and with an activation the value is multiplied by
+    // the activation of gradientE[i + j * m] (E, an input) instead of activated.
     //
     // Template parameters:
     //   AccumT         — epilogue type (float, double or int32_t): alpha, beta,
@@ -370,7 +377,8 @@ namespace
                          int            factorDim     = 0,
                          QuantizeFn     quantizeA     = nullptr,
                          QuantizeFn     quantizeB     = nullptr,
-                         AccumT*        preActivation = nullptr
+                         AccumT*        preActivation = nullptr,
+                         const AccumT*  gradientE     = nullptr
 #ifndef _WIN32
                          ,
                          MXGemmOperand  mxA           = {},
@@ -492,7 +500,14 @@ namespace
                 if(activation == ActivationType::Relu)
                 {
                     if constexpr(!isComplexV<AccumT>)
-                        result = std::max(WideT(0), result);
+                    {
+                        if(gradientE)
+                            result = checkedInt32(
+                                result
+                                * std::max(WideT(0), static_cast<WideT>(gradientE[i + j * m])));
+                        else
+                            result = std::max(WideT(0), result);
+                    }
                     else
                         throw std::runtime_error(
                             "CPU reference GEMM: no activation for complex types.");
@@ -554,6 +569,9 @@ namespace
  * OutputT: C/D storage type (defaults to AccumulateT).
  * conjA/conjB: TensorOp::ComplexConjugate on A/B (complex inputs only).
  * useE: the reference also writes E (the value before activation), in OutputT.
+ * gradient: gradient GEMM. E (useE) is an input instead, and with an activation D
+ *           is multiplied by the activation of E. With useBias the bias is an output
+ *           instead: the bias gradient, reduced from biasSrc (D, A or B).
  */
 template <typename InputAT,
           typename InputBT     = InputAT,
@@ -585,7 +603,9 @@ int runGemm(size_t         m,
             int                int8Max       = 127,
             bool               conjA         = false,
             bool               conjB         = false,
-            bool               useE          = false)
+            bool               useE          = false,
+            bool               gradient      = false,
+            ContractionProblemGemm::TENSOR biasSrc = ContractionProblemGemm::D)
 {
     if(batchCount == 0)
     {
@@ -746,7 +766,8 @@ int runGemm(size_t         m,
     std::vector<OutputT>     c(numC * batchCount);
     std::vector<OutputT>     d(numC * batchCount);
     // E (useE) has D's sizes, a packed layout and the C/D type. It starts at zero,
-    // so an unwritten E fails validation (almost every golden value is nonzero).
+    // so an unwritten E fails validation (almost every golden value is nonzero);
+    // with --gradient it is an input, set below.
     std::vector<OutputT>     e(useE ? numC * batchCount : 0);
 
     // Initialize inputs with random values. We use ±1 (binary) for A and B by
@@ -869,17 +890,36 @@ int runGemm(size_t         m,
     else
         std::generate(c.begin(), c.end(), [&]() { return static_cast<OutputT>(randomGen()); });
 
+    // Gradient E (an input): +-1 and +-2, exact in every C/D type, so the relu of E
+    // scales D by 0, 1 or 2.
+    if(gradient)
+        std::generate(e.begin(), e.end(), [&]() {
+            return static_cast<OutputT>(randomGen() * (binary_distribution(gen) ? 2.0f : 1.0f));
+        });
+
     // Optional feature buffers — typed as AccumulateT so the slow path's
     // GetValue(alphaType, ...) reads the correct byte width.
     std::vector<AccumulateT> biasVec;
     std::vector<AccumulateT> scaleAlphaVecBuf;
 
+    // The bias is one M vector added to D. With --gradient it is an output, the bias
+    // gradient: reduced from D or A (length M) or B (length N). It then starts as
+    // NaN (integers: the largest value), so an unwritten element fails validation.
     if(useBias)
     {
-        biasVec.resize(m);
-        std::generate(biasVec.begin(), biasVec.end(), [&]() { return static_cast<AccumulateT>(randomGen()); });
+        const size_t biasLength = (gradient && biasSrc == ContractionProblemGemm::B) ? n : m;
+        biasVec.resize(biasLength);
+        if(!gradient)
+            std::generate(biasVec.begin(), biasVec.end(), [&]() {
+                return static_cast<AccumulateT>(randomGen());
+            });
+        else if constexpr(std::is_floating_point_v<AccumulateT>)
+            std::fill(
+                biasVec.begin(), biasVec.end(), std::numeric_limits<AccumulateT>::quiet_NaN());
+        else
+            std::fill(biasVec.begin(), biasVec.end(), std::numeric_limits<AccumulateT>::max());
         contraction.setUseBias(1);
-        contraction.setBias(accumDtypeEnum, m, m);
+        contraction.setBias(accumDtypeEnum, biasLength, biasLength, /*isOutput=*/gradient, biasSrc);
     }
 
     if(useScaleAlphaVec)
@@ -932,6 +972,9 @@ int runGemm(size_t         m,
         contraction.setParams().setActivationEnum(activation);
     }
 
+    if(gradient)
+        contraction.setUseGradient(true);
+
     // AMAX-D: the reference writes max |D| over every batch as one AccumulateT.
     // Start from -1, which no absolute maximum can be, so an unwritten value
     // fails validation.
@@ -942,12 +985,13 @@ int runGemm(size_t         m,
         contraction.setAmaxD(accumDtypeEnum, /*isOutput=*/true);
     }
 
-    // useE must be set before setE, which skips the tensor otherwise.
+    // useE must be set before setE, which skips the tensor otherwise. With
+    // --gradient E is an input.
     if(useE)
     {
         contraction.setUseE(true);
         contraction.setE(
-            outputDtypeEnum, contraction.d().sizes(), /*strides=*/{}, /*isOutput=*/true);
+            outputDtypeEnum, contraction.d().sizes(), /*strides=*/{}, /*isOutput=*/!gradient);
     }
 
 #ifndef _WIN32
@@ -1105,7 +1149,12 @@ int runGemm(size_t         m,
         std::vector<AccumulateT> dRef(d.size());
         // eRef: the golden value before activation (useE), compared with E after
         // the cast to OutputT, as D is.
-        std::vector<AccumulateT> eRef(e.size());
+        std::vector<AccumulateT> eRef(gradient ? 0 : e.size());
+        // Gradient: E (an input) as the reference reads it, in AccumulateT; zero
+        // without useE.
+        std::vector<AccumulateT> gradientERef(gradient ? totalC : 0);
+        for(size_t i = 0; i < e.size() && gradient; i++)
+            gradientERef[i] = static_cast<AccumulateT>(e[i]);
 
         // If the storage type is wider than the compute-input type, the GPU
         // (and slow-path validator) quantize the operand down before the MAC.
@@ -1159,7 +1208,9 @@ int runGemm(size_t         m,
                 const MacT*        bPtr = bRef.data() + batch * numB;
                 const AccumulateT* cPtr = cRef.data() + batch * numC;
                 AccumulateT*       dPtr = dRef.data() + batch * numC;
-                AccumulateT*       ePtr = useE ? eRef.data() + batch * numC : nullptr;
+                AccumulateT*       ePtr = eRef.empty() ? nullptr : eRef.data() + batch * numC;
+                const AccumulateT* gradientEPtr
+                    = gradient ? gradientERef.data() + batch * numC : nullptr;
 
                 columnMajorGemm<AccumulateT, MathOpT, MacT>(
                     aPtr,
@@ -1173,7 +1224,7 @@ int runGemm(size_t         m,
                     transB,
                     goldenAlpha,
                     static_cast<AccumulateT>(beta),
-                    useBias ? biasVec.data() : nullptr,
+                    (useBias && !gradient) ? biasVec.data() : nullptr,
                     useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr,
                     activation,
                     (useScaleAB == "Vector") ? scaleABuf.data() : nullptr,
@@ -1181,7 +1232,8 @@ int runGemm(size_t         m,
                     factorDim,
                     quantA,
                     quantB,
-                    ePtr
+                    ePtr,
+                    gradientEPtr
 #ifndef _WIN32
                     ,
                     MXGemmOperand{
@@ -1244,19 +1296,21 @@ int runGemm(size_t         m,
             return diff;
         };
 
-        // Compares an output (D or E) with its golden values cast to OutputT and
-        // prints the result, each line starting with `label`. Returns true if
-        // every element is within the tolerance.
-        auto compareOutput = [&](std::vector<OutputT> const&     dut,
+        // Compares an output (D or E in OutputT, or the bias gradient in AccumulateT)
+        // with its golden values cast to the output's type and prints the result, each
+        // line starting with `label`. Returns true if every element is within the
+        // tolerance.
+        auto compareOutput = [&](auto const&                     dut,
                                  std::vector<AccumulateT> const& ref,
                                  std::string const&              label) {
+            using DutT      = typename std::decay_t<decltype(dut)>::value_type;
             bool   allClose = true;
             double maxDiff  = 0.0;
-            for(size_t i = 0; i < totalC; i++)
+            for(size_t i = 0; i < dut.size(); i++)
             {
                 // Complex: the larger of the real-part and imaginary-part differences.
                 const auto valDut = dut[i];
-                const auto valRef = saturateCastLikeReference<OutputT>(ref[i]);
+                const auto valRef = saturateCastLikeReference<DutT>(ref[i]);
                 double     diff;
                 if constexpr(isComplex)
                     diff = std::max(valueDiff(valDut.real(), valRef.real()),
@@ -1289,9 +1343,40 @@ int runGemm(size_t         m,
         if(!compareOutput(d, dRef, ""))
             return 1;
 
-        // E (the value before activation) is checked against the golden as D is.
-        if(useE && !compareOutput(e, eRef, "E "))
+        // E (the value before activation) is checked against the golden as D is
+        // (with --gradient it is an input).
+        if(useE && !gradient && !compareOutput(e, eRef, "E "))
             return 1;
+
+        // The bias gradient: bias[i] is the sum, in AccumulateT and in the reference's
+        // order (ReductionCPU), of the golden D before its cast to OutputT along N
+        // (source D), of A as stored along K (source A), or of B along K (source B,
+        // bias[j]). One batch (the driver rejects more).
+        if(gradient && useBias)
+        {
+            using WideT = GoldenWideT<AccumulateT>;
+            std::vector<AccumulateT> biasRef(biasVec.size());
+            for(size_t i = 0; i < biasRef.size(); i++)
+            {
+                const bool fromD = (biasSrc == ContractionProblemGemm::D);
+                const bool fromA = (biasSrc == ContractionProblemGemm::A);
+                WideT      sum   = WideT(0);
+                for(size_t l = 0; l < (fromD ? n : k); l++)
+                {
+                    AccumulateT val;
+                    if(fromD)
+                        val = dRef[i + l * m];
+                    else if(fromA)
+                        val = static_cast<AccumulateT>(aRef[transA ? l + i * k : i + l * m]);
+                    else
+                        val = static_cast<AccumulateT>(bRef[transB ? i + l * n : l + i * k]);
+                    sum = checkedInt32(sum + static_cast<WideT>(val));
+                }
+                biasRef[i] = static_cast<AccumulateT>(sum);
+            }
+            if(!compareOutput(biasVec, biasRef, "Bias "))
+                return 1;
+        }
 
         // AMAX-D is checked against the golden D, whichever CPU path computed it.
         if constexpr(!isComplex)
@@ -1357,7 +1442,9 @@ int main(int argc, char* argv[])
         "int8Max", po::value<int>()->default_value(127), "Largest i8 A/B value (i8 inputs only; default 127)")(
         "conjA", po::value<bool>()->default_value(false), "Conjugate A (TensorOp::ComplexConjugate; c/z inputs only)")(
         "conjB", po::value<bool>()->default_value(false), "Conjugate B (TensorOp::ComplexConjugate; c/z inputs only)")(
-        "useE", po::value<bool>()->default_value(false), "Also output E (the value before activation, in the C/D type) and validate it against the golden GEMM (not for c/z inputs)");
+        "useE", po::value<bool>()->default_value(false), "Also output E (the value before activation, in the C/D type) and validate it against the golden GEMM (not for c/z inputs)")(
+        "gradient", po::value<bool>()->default_value(false), "Gradient GEMM (not for c/z inputs): no bias is added; with --activation relu, D is multiplied by relu(E), E being an input with --useE (else zero); with --bias, the reference writes the bias gradient (see --biasSrc; --batchCount 1 only), validated against the golden GEMM")(
+        "biasSrc", po::value<std::string>()->default_value("d"), "Bias-gradient source with --gradient --bias: d (bias[i] = sum over N of D), a (sum over K of A, length M), b (sum over K of B, length N; a and b not for f4 inputs)");
 
     po::variables_map vm;
     try
@@ -1439,6 +1526,8 @@ int main(int argc, char* argv[])
     bool        conjA                    = vm["conjA"].as<bool>();
     bool        conjB                    = vm["conjB"].as<bool>();
     bool        useE                     = vm["useE"].as<bool>();
+    bool        gradient                 = vm["gradient"].as<bool>();
+    std::string biasSrcStr               = vm["biasSrc"].as<std::string>();
     const bool  typeAIsTF32              = (typeAStr == "tf32");
     const bool  typeBIsTF32              = (typeBStr == "tf32");
     const bool  isTF32                   = typeAIsTF32 && typeBIsTF32;
@@ -1499,10 +1588,10 @@ int main(int argc, char* argv[])
     }
     if(isComplex
        && (useBias || activationStr != "none" || useScaleAlphaVec || useScaleAB != "none"
-           || outputAmaxD || useE))
+           || outputAmaxD || useE || gradient))
     {
         std::cerr << "Error: complex inputs do not support --bias, --activation, --scaleAlphaVec,"
-                  << " --useScaleAB, --outputAmaxD or --useE" << std::endl;
+                  << " --useScaleAB, --outputAmaxD, --useE or --gradient" << std::endl;
         return 1;
     }
     if(!isComplex && (conjA || conjB))
@@ -1612,6 +1701,35 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    // Bias gradient: the reference reduces one batch only (ReductionCPU), and has no
+    // reduction of FP4 A or B.
+    ContractionProblemGemm::TENSOR biasSrc = ContractionProblemGemm::D;
+    if(biasSrcStr == "a")
+        biasSrc = ContractionProblemGemm::A;
+    else if(biasSrcStr == "b")
+        biasSrc = ContractionProblemGemm::B;
+    else if(biasSrcStr != "d")
+    {
+        std::cerr << "Unknown biasSrc: " << biasSrcStr << " (d, a or b)" << std::endl;
+        return 1;
+    }
+    if(biasSrc != ContractionProblemGemm::D && !(gradient && useBias))
+    {
+        std::cerr << "Error: --biasSrc needs --gradient and --bias" << std::endl;
+        return 1;
+    }
+    if(gradient && useBias && batchCount > 1)
+    {
+        std::cerr << "Error: --gradient with --bias needs --batchCount 1 (the reference"
+                  << " reduces the bias gradient of one batch only)" << std::endl;
+        return 1;
+    }
+    if(biasSrc != ContractionProblemGemm::D && typeAStr == "f4")
+    {
+        std::cerr << "Error: --biasSrc a/b is not supported for f4 inputs" << std::endl;
+        return 1;
+    }
+
     std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k
               << " TypeA=" << typeAStr << " TypeB=" << typeBStr
               << " TypeCD=" << typeCDStr << " TypeAlpha=" << typeAlphaStr
@@ -1637,7 +1755,7 @@ int main(int argc, char* argv[])
             validate, injectValidationFailure, tryFastPath,
             useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
             computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount, isTF32,
-            outputAmaxD, int8Min, int8Max, conjA, conjB, useE);
+            outputAmaxD, int8Min, int8Max, conjA, conjB, useE, gradient, biasSrc);
     };
 
     // Float8/BFloat8 C/D with float alpha/beta: the reference's Float8-output type ids.

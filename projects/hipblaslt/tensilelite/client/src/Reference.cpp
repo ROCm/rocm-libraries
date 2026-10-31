@@ -946,6 +946,13 @@ namespace TensileLite
             return val;
         }
 
+        // ReductionCPU (the bias gradient) reduces a 2-D tensor, or a 3-D one with a
+        // single batch; other shapes are not supported.
+        bool isBiasReductionShapeSupported(TensorDescriptor const& tensor)
+        {
+            return (tensor.dimensions() == 3 && tensor.sizes()[2] == 1) || tensor.dimensions() == 2;
+        }
+
         template <
             typename Input,
             typename Accumulator,
@@ -972,7 +979,7 @@ namespace TensileLite
 
             Input const* srcTyped = (Input const*)src;
             // For 2D bias reduction, d batch = 1
-            if((tensor.dimensions() == 3 && tensor.sizes()[2] == 1) || tensor.dimensions() == 2)
+            if(isBiasReductionShapeSupported(tensor))
             {
 #pragma omp parallel for
                 for(size_t bNum = 0; bNum < biasTensor.totalLogicalElements();
@@ -1381,9 +1388,16 @@ namespace TensileLite
                 return rejectFast("no_batch_indices");
             }
 
-            if(problem.useGradient())
+            // The bias gradient is reduced by ReductionCPU on both paths. For a source
+            // shape it does not support, the slow path does not report the error
+            // (and frees its D workspace twice); such problems stay on it.
+            if(problem.useGradient() && problem.useBias())
             {
-                return rejectFast("gradient");
+                auto src = problem.biasSrc();
+                if((src == ContractionProblemGemm::A || src == ContractionProblemGemm::B
+                    || src == ContractionProblemGemm::D)
+                   && !isBiasReductionShapeSupported(problem.tensor(src)))
+                    return rejectFast("gradient_bias_reduction_shape");
             }
 
             if(problem.outputAmaxD())
@@ -1613,6 +1627,80 @@ namespace TensileLite
             }
         }
 
+        // The bias gradient (useGradient with useBias) on the fast path: the slow path's
+        // ReductionCPU, in the epilogue type AccumT, of D (the workspace ws: the
+        // epilogue values before gate residual, at D's offsets) or of A or B as stored.
+        template <typename AccumT>
+        void reduceBiasGradient(ContractionProblemGemm const& problem,
+                                ContractionInputs const&      inputs,
+                                AccumT const*                 ws,
+                                size_t                        elementsToValidate)
+        {
+            auto const& biasTensor = problem.tensor(ContractionProblemGemm::TENSOR::BIAS);
+
+            auto reduceInput
+                = [&](TensorDescriptor const& tensor, void const* src, size_t reducIdx) {
+                      switch(tensor.dataType())
+                      {
+                      case rocisa::DataType::Float:
+                          return ReductionCPU<float, AccumT>(
+                              biasTensor, tensor, src, inputs, elementsToValidate, reducIdx);
+                      case rocisa::DataType::Double:
+                          return ReductionCPU<double, AccumT>(
+                              biasTensor, tensor, src, inputs, elementsToValidate, reducIdx);
+                      case rocisa::DataType::Half:
+                          return ReductionCPU<Half, AccumT>(
+                              biasTensor, tensor, src, inputs, elementsToValidate, reducIdx);
+                      case rocisa::DataType::BFloat16:
+                          return ReductionCPU<BFloat16, AccumT>(
+                              biasTensor, tensor, src, inputs, elementsToValidate, reducIdx);
+                      case rocisa::DataType::Int32:
+                          return ReductionCPU<int32_t, AccumT>(
+                              biasTensor, tensor, src, inputs, elementsToValidate, reducIdx);
+                      case rocisa::DataType::Int8:
+                          return ReductionCPU<int8_t, AccumT>(
+                              biasTensor, tensor, src, inputs, elementsToValidate, reducIdx);
+                      case rocisa::DataType::Float8:
+                          return ReductionCPU<Float8, AccumT>(
+                              biasTensor, tensor, src, inputs, elementsToValidate, reducIdx);
+                      case rocisa::DataType::BFloat8:
+                          return ReductionCPU<BFloat8, AccumT>(
+                              biasTensor, tensor, src, inputs, elementsToValidate, reducIdx);
+                      case rocisa::DataType::Float8_fnuz:
+                          return ReductionCPU<Float8_fnuz, AccumT>(
+                              biasTensor, tensor, src, inputs, elementsToValidate, reducIdx);
+                      case rocisa::DataType::BFloat8_fnuz:
+                          return ReductionCPU<BFloat8_fnuz, AccumT>(
+                              biasTensor, tensor, src, inputs, elementsToValidate, reducIdx);
+                      default:
+                          // As the slow path's ReductionCPU for other input types.
+                          throw std::runtime_error("Unsupported input type.");
+                      }
+                  };
+
+            std::string msg;
+            switch(problem.biasSrc())
+            {
+            case ContractionProblemGemm::D:
+                msg = ReductionCPU<AccumT, AccumT>(
+                    biasTensor, problem.d(), ws, inputs, elementsToValidate, 1);
+                break;
+            case ContractionProblemGemm::A:
+                msg = reduceInput(problem.a(), inputs.a, problem.transA() ? 0 : 1);
+                break;
+            case ContractionProblemGemm::B:
+                msg = reduceInput(problem.b(), inputs.b, problem.transB() ? 1 : 0);
+                break;
+            default:
+                throw std::runtime_error("Unsupported bias reduction source "
+                                         + std::to_string(problem.biasSrc()) + ".");
+            }
+            // Not reached: isFastPathEligible rejects the shapes ReductionCPU does not
+            // support.
+            if(!msg.empty())
+                throw std::runtime_error(msg);
+        }
+
         // Solve GEMM problems using efficient tiled CPU code.
         // This function assumes the problem is eligible for the fast path — callers
         // must check isFastPathEligible() first.
@@ -1622,6 +1710,10 @@ namespace TensileLite
         // gate residual are applied in it, and D is written back from it.
         // With useE, E receives the value before activation (after bias), converted
         // to E's type by SetValue as in the slow path.
+        // Gradient (useGradient), as in the slow path: no bias is added and E is not
+        // written; with activation, the value is multiplied by the activation of E
+        // (read in AccumT; zero without useE). With bias, the bias gradient is reduced
+        // afterwards (reduceBiasGradient; elementsToValidate as in the slow path).
         // OperandMathOpT: per-operand math type used immediately before multiply.
         // XFloat32, for example, truncates float operands to a 10-bit mantissa.
         // Default matches AccumT; when it also matches MacT the operand cast is a no-op.
@@ -1633,7 +1725,8 @@ namespace TensileLite
         // the slow path's operation order (see slowPathEpilogueOrder below).
         template <typename AccumT = float, typename OperandMathOpT = AccumT, typename MacT = AccumT>
         void solveCPUFast(ContractionProblemGemm const& problem,
-                          ContractionInputs const&      inputs)
+                          ContractionInputs const&      inputs,
+                          size_t                        elementsToValidate)
         {
             if(!isFastPathEligible(problem))
             {
@@ -1743,6 +1836,14 @@ namespace TensileLite
                 ptrD = shadowD.data();
             }
 
+            // Bias gradient from D: the epilogue values before gate residual, at D's
+            // offsets (the slow path's workspace), reduced after the GEMM.
+            const bool biasGradientFromD = problem.useGradient() && problem.useBias()
+                                           && problem.biasSrc() == ContractionProblemGemm::D;
+            std::vector<AccumT> biasGradientWs;
+            if(biasGradientFromD)
+                biasGradientWs.resize(problem.d().totalAllocatedElements());
+
             bool useScaleAlphaVec = problem.useScaleAlphaVec();
             int  factorDim        = problem.getParams().factorDim(); // 0 = Row(M), 1 = Col(N)
 
@@ -1831,6 +1932,8 @@ namespace TensileLite
                 const MacT*   curBatchB = shadowB.data() + (b * strideBatchB);
                 const AccumT* curBatchC = shadowC.data() + (b * strideBatchC);
                 AccumT*       curBatchD = ptrD + (b * strideBatchD);
+                AccumT*       curBatchWs
+                    = biasGradientFromD ? biasGradientWs.data() + (b * strideBatchD) : nullptr;
 
                 const E8* mxsaBatch
                     = mxsaPtr ? mxsaPtr + b * strideBatchMxsa : nullptr;
@@ -2029,11 +2132,10 @@ namespace TensileLite
                                                   d.sizes().begin(),
                                                   d.sizes().end());
 
-                                    if(problem.useBias() && inputs.bias)
+                                    // Gradient: the bias is an output (the bias
+                                    // gradient), not added here.
+                                    if(problem.useBias() && inputs.bias && !problem.useGradient())
                                     {
-                                        assert(!problem.useGradient()
-                                               && "Bias gradient not supported on this path.");
-
                                         auto const&          bias = problem.bias();
                                         std::vector<int64_t> biasCoord(bias.dimensions());
                                         for(size_t i = 0; i < problem.batchIndices().size(); i++)
@@ -2065,25 +2167,46 @@ namespace TensileLite
                                     }
 
                                     // E: the pre-activation value, stored as the slow
-                                    // path stores it (SetValue to E's type).
-                                    if(problem.useE())
+                                    // path stores it (SetValue to E's type). Gradient
+                                    // reads E instead (below).
+                                    if(problem.useE() && !problem.useGradient())
                                     {
-                                        assert(!problem.useGradient()
-                                               && "E input (gradient) not supported on this "
-                                                  "path.");
-
                                         auto const& e = problem.e();
                                         SetValue<AccumT>(
                                             e.dataType(), current, inputs.e, e.index(dCoord));
                                     }
 
-                                    if(doActivation)
+                                    // Gradient: the value times the activation of E
+                                    // (zero without useE), as the slow path computes it.
+                                    if(problem.useGradient() && doActivation
+                                       && problem.getParams().activationEnum()
+                                              != ActivationType::None)
+                                    {
+                                        AccumT dataE = AccumT(0);
+                                        if(problem.useE())
+                                        {
+                                            auto const& e = problem.e();
+                                            dataE         = GetValue<AccumT>(e.dataType(),
+                                                                     inputs.e,
+                                                                     e.index(dCoord),
+                                                                     aConjugate);
+                                        }
+                                        dataE = Activation(problem.activationType(),
+                                                           dataE,
+                                                           problem.getParams().activationEnum(),
+                                                           actArgs);
+                                        current *= dataE;
+                                    }
+                                    else if(doActivation)
                                     {
                                         current = Activation(problem.activationType(),
                                                              current,
                                                              problem.getParams().activationEnum(),
                                                              actArgs);
                                     }
+
+                                    if(biasGradientFromD)
+                                        curBatchWs[idxD] = current;
 
                                     if(problem.useGateResidual() && inputs.gateResidual)
                                     {
@@ -2152,6 +2275,13 @@ namespace TensileLite
                     inputs.d, shadowD, problem.d().totalAllocatedElements());
             }
 
+            // Complex problems with bias stay on the slow path (isFastPathEligible).
+            if constexpr(!TypeInfo<AccumT>::IsComplex)
+            {
+                if(problem.useGradient() && problem.useBias())
+                    reduceBiasGradient<AccumT>(
+                        problem, inputs, biasGradientWs.data(), elementsToValidate);
+            }
         }
 
         template <typename Inputs, typename Accumulator, typename MathOpAccum>
@@ -3622,22 +3752,23 @@ namespace TensileLite
                 {
                     // Exact int32_t K loop; epilogue in the slow path's accumulator type.
                     if(getInt8FastPathEpilogue(problem) == Int8FastPathEpilogue::Int32)
-                        solveCPUFast<int32_t, int32_t, int32_t>(problem, inputs);
+                        solveCPUFast<int32_t, int32_t, int32_t>(
+                            problem, inputs, elementsToValidate);
                     else
-                        solveCPUFast<float, int32_t, int32_t>(problem, inputs);
+                        solveCPUFast<float, int32_t, int32_t>(problem, inputs, elementsToValidate);
                 }
                 // Complex (C_C_C, Z_Z_Z): every tensor, alpha/beta and the MAC in the
                 // slow path's accumulator type.
                 else if(problem.d().dataType() == rocisa::DataType::ComplexFloat)
-                    solveCPUFast<std::complex<float>>(problem, inputs);
+                    solveCPUFast<std::complex<float>>(problem, inputs, elementsToValidate);
                 else if(problem.d().dataType() == rocisa::DataType::ComplexDouble)
-                    solveCPUFast<std::complex<double>>(problem, inputs);
+                    solveCPUFast<std::complex<double>>(problem, inputs, elementsToValidate);
                 else if(isDouble)
-                    solveCPUFast<double>(problem, inputs);
+                    solveCPUFast<double>(problem, inputs, elementsToValidate);
                 else if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
-                    solveCPUFast<float, XFloat32>(problem, inputs);
+                    solveCPUFast<float, XFloat32>(problem, inputs, elementsToValidate);
                 else
-                    solveCPUFast<float>(problem, inputs);
+                    solveCPUFast<float>(problem, inputs, elementsToValidate);
                 return;
             }
 
