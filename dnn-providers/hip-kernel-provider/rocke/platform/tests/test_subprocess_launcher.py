@@ -149,7 +149,7 @@ def test_script_execution_preserves_sibling_imports_and_arguments(tmp_path):
     child = subprocess.run(
         rocke_python_command(scripts / "probe.py", "value"),
         cwd=tmp_path,
-        env=rocke_subprocess_env({"PYTHONPATH": str(ambient)}),
+        env=rocke_subprocess_env({**os.environ, "PYTHONPATH": str(ambient)}),
         check=True,
         capture_output=True,
         text=True,
@@ -185,7 +185,7 @@ def test_explicit_python_path_precedes_cwd_but_keeps_cwd_importable(tmp_path):
         ),
         cwd=tmp_path,
         env=rocke_subprocess_env(
-            {"PYTHONPATH": str(ambient)}, python_paths=(explicit,)
+            {**os.environ, "PYTHONPATH": str(ambient)}, python_paths=(explicit,)
         ),
         check=True,
         capture_output=True,
