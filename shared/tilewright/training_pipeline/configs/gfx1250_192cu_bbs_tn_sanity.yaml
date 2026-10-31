@@ -126,8 +126,8 @@ planner:
 
 contexts:
   # CU budgets as fractions of the bench device's CUs (inside a compute
-  # partition, of the partition's), resolved to whole multiples of a
-  # 32-WGP granule when the run starts: half and an eighth of the device
+  # partition, of the partition's), resolved to whole multiples of the
+  # budget granule when the run starts: half and an eighth of the device
   # beside the whole of it, so that the model declares CU budgets from an
   # eighth of the device, or one granule where an eighth is less, to all of
   # it, as the training configs' models do, with two co-tenant benches per

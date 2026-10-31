@@ -1170,14 +1170,14 @@ or change for a new device:
 - the default stall timeout after the long start-up grace of the library
   load (`bench.stall_timeout_s`, `startup_grace_s`);
 - execution contexts at three quarters, half, a quarter and an eighth of
-  the CUs (WGPs here), as in the gfx950 configs, each a whole multiple of
-  the 32-WGP budget granule, at least one: the smallest trained budget is
-  one granule on any device or partition with a budget below its CUs, one
-  XCD's worth on the 256-WGP part, so every compute-partition size of that
-  part is also a trained budget (`enabled: false` turns the eighth off for
-  its bench time); none held out: no budget below a small partition's CU
-  count is left for a held-out context, and a share the partition cannot
-  give is left out (*Execution contexts (stage03c)*);
+  the CUs, as in the gfx950 configs, each a whole multiple of the budget
+  granule, at least one: the smallest trained budget is one granule on any
+  device or partition with a budget below its CUs, and a compute partition
+  whose CUs are a half, a quarter or an eighth of the device's and a whole
+  number of granules is itself a trained budget (`enabled: false` turns
+  the eighth off for its bench time); none held out: no budget below a
+  small partition's CU count is left for a held-out context, and a share
+  the partition cannot give is left out (*Execution contexts (stage03c)*);
   `train.min_cu_fraction` stays unset, so the models declare CU shares
   down to the smallest one they trained and no lower;
 - protocol v2 as the official exclusive number (`audit.sustained: false`,
@@ -2753,14 +2753,14 @@ the multiple of the budget granule nearest `cu_fraction` times the CU
 count, at least one granule and below the CU count, and for a trained
 entry raised to `train.min_cu_fraction` of the CUs where a multiple below
 the CU count allows. The granule is `contexts.granule`, by default 32
-(`CU_BUDGET_GRANULE` of `lib/contexts.py`), in CUs, which are WGPs on
-gfx1250, and at least one. It is the budgets' own: hipBLASLt takes every
+(`CU_BUDGET_GRANULE` of `lib/contexts.py`), in CUs as the device reports
+them, and at least one. It is the budgets' own: hipBLASLt takes every
 budget as its SM target as it is (`SM_TARGET_GRANULE` of
 `lib/hipblaslt_launch.py` is one CU), so the kernels size their grids for
 exactly the CUs the cotenant leaves them. One granule is one XCD's
-worth of CUs on gfx950 and on gfx1250's 256-WGP part: there the smallest
-budget a share resolves to is one XCD's worth, however small the share,
-and every compute-partition size of the device is a whole number of
+worth of CUs on gfx950: there the smallest budget a share resolves to is
+one XCD's worth, however small the share, and every compute-partition
+size of the device is a whole number of
 granules. An entry whose resolved budget and schedule are another's (one
 with a `cu_budget`, or an earlier one) is left out with a warning, as on
 a device too small for all of them, and so is one the device has no

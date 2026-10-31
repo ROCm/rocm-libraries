@@ -488,7 +488,7 @@ def test_gfx1250_configs_read_every_device_value_at_run_time(path, config_env):
     assert ctxlib.has_unresolved(cfg) and ctxlib.trained_entries(cfg)
     text = path.read_text()
     assert not re.search(r"\b(n_cu|num_xcd|lds_bytes|l2_bytes|pci_chip_id)\b", text)
-    assert not re.search(r"\b\d+\s*(CUs?|compute units)\b", text, re.I)
+    assert not re.search(r"\b\d+\s*-?\s*(CUs?|WGPs?|XCDs?|compute units)\b", text, re.I)
 
 
 def _comment_above(path, key):

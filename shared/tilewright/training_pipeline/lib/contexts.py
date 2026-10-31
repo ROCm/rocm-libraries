@@ -59,9 +59,9 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set
 from typing import Tuple
 
 # The CU budgets a cu_fraction resolves to are whole multiples of this many
-# CUs (WGPs on gfx1250), and at least one, so the smallest budget a run
-# trains is one granule however small its share: one XCD's worth of CUs on
-# gfx950. `contexts.granule` sets another for a config.
+# CUs, as the device reports them, and at least one, so the smallest budget
+# a run trains is one granule however small its share: one XCD's worth of
+# CUs on gfx950. `contexts.granule` sets another for a config.
 CU_BUDGET_GRANULE = 32
 # The granule of the budgets of a run or audit directory pinned before
 # `contexts.granule` existed, whose budgets were whole multiples of 32 CUs:
