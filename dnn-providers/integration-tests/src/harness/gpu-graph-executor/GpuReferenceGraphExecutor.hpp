@@ -139,6 +139,10 @@ private:
         case NodeAttrs::BatchnormAttributes:
             return detail::GpuBatchnormFwdTrainSignatureKey(
                 node, tensorMap, node.compute_data_type());
+        case NodeAttrs::BlockScaleQuantizeAttributes:
+            return detail::GpuBlockScaleQuantizeSignatureKey(node, tensorMap);
+        case NodeAttrs::BlockScaleDequantizeAttributes:
+            return detail::GpuBlockScaleDequantizeSignatureKey(node, tensorMap);
         case NodeAttrs::ConvolutionFwdAttributes:
             return detail::GpuConvolutionFwdSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::LayernormAttributes:
@@ -194,8 +198,6 @@ private:
         case NodeAttrs::ConvolutionBwdAttributes:
         case NodeAttrs::ConvolutionWrwAttributes:
         case NodeAttrs::SdpaBackwardAttributes:
-        case NodeAttrs::BlockScaleDequantizeAttributes:
-        case NodeAttrs::BlockScaleQuantizeAttributes:
         {
             const std::string nodeName = node.name() == nullptr ? "unknown" : node.name()->str();
             throw ReferenceCapabilityError("GPU plan not yet implemented for node '" + nodeName
