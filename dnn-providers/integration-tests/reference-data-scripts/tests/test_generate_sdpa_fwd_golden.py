@@ -203,6 +203,21 @@ class TestGenerateSdpaFwdGoldenRaggedHelpers(unittest.TestCase):
             [1 + pad, 16, 16, 16],
         )
 
+    def test_varied_seqlens_are_unequal_bounded_and_causal_safe(self):
+        for batch, s_q, s_kv in [(2, 16, 16), (3, 256, 256), (5, 256, 256), (3, 8, 8)]:
+            with self.subTest(batch=batch, s_q=s_q, s_kv=s_kv):
+                q, kv = self.gen.varied_seqlens(batch, s_q, s_kv)
+                self.assertEqual((len(q), len(kv)), (batch, batch))
+                self.assertEqual((max(q), max(kv)), (s_q, s_kv))
+                self.assertTrue(all(1 <= v <= s_q for v in q))
+                self.assertTrue(all(1 <= v <= s_kv for v in kv))
+                self.assertTrue(all(k >= v for k, v in zip(kv, q)))
+                self.assertGreater(len(set(q)), 1)
+                self.assertNotEqual(
+                    self.gen.ragged_offsets(q).flatten().tolist(),
+                    self.gen.ragged_offsets(kv).flatten().tolist(),
+                )
+
 
 @unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
 class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
@@ -223,16 +238,19 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
         self.root = Path(tmp.name)
         self.base = self.root / self.BUNDLE_DIR / "Small"
 
-    def run_generator(self, *extra_args: str) -> subprocess.CompletedProcess:
+    def run_generator(
+        self, *extra_args: str, batch: int | None = None
+    ) -> subprocess.CompletedProcess:
+        b = batch if batch is not None else self.B
         command = [
             sys.executable,
             str(SCRIPT_PATH),
             "--base-filename",
             str(self.base),
             "--q-dims",
-            *map(str, [self.B, self.H_Q, self.S, self.D_QK]),
+            *map(str, [b, self.H_Q, self.S, self.D_QK]),
             "--v-dims",
-            *map(str, [self.B, self.H_KV, self.S, self.D_V]),
+            *map(str, [b, self.H_KV, self.S, self.D_V]),
             *extra_args,
         ]
         return subprocess.run(command, capture_output=True, text=True, check=False)
@@ -263,9 +281,15 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
     def tensors_by_name(self, graph: dict) -> dict:
         return {tensor["name"]: tensor for tensor in graph["tensors"]}
 
-    def test_uniform_ragged_bundle_layout(self):
+    def test_ragged_bundle_layout(self):
         graph = self.generate_ragged()
         tensors = self.tensors_by_name(graph)
+
+        self.assertEqual(
+            set(tensors),
+            {"Q", "K", "V", "O", "RaggedOffsetQ", "RaggedOffsetK"},
+        )
+        self.assertIsNone(graph["nodes"][0]["inputs"]["seq_len_q_tensor_uid"])
 
         expected_dims = {
             "Q": [self.B, self.H_Q, self.S, self.D_QK],
@@ -274,7 +298,11 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
             "O": [self.B, self.H_Q, self.S, self.D_V],
         }
         expected_offset_uid = {"Q": 10, "O": 10, "K": 11, "V": 11}
-        uniform_offsets = [b * self.S for b in range(self.B + 1)]
+        lens_q, lens_kv = self.gen.varied_seqlens(self.B, self.S, self.S)
+        expected_offsets = {
+            10: self.gen.ragged_offsets(lens_q).flatten().tolist(),
+            11: self.gen.ragged_offsets(lens_kv).flatten().tolist(),
+        }
         for name, dims in expected_dims.items():
             with self.subTest(tensor=name):
                 tensor = tensors[name]
@@ -293,13 +321,65 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
                 offset_uid = expected_offset_uid[name]
                 self.assertEqual(len(self.read_bin(offset_uid)), (self.B + 1) * 4)
                 offsets = self.read_offsets(offset_uid)
-                self.assertEqual(offsets, uniform_offsets)
+                self.assertEqual(offsets, expected_offsets[offset_uid])
                 self.assertEqual(
                     len(self.read_bin(tensor["uid"])),
                     offsets[-1] * tensor["ragged_offset_multiplier"] * self.BF16_BYTES,
                 )
 
         self.assertEqual(graph["nodes"][0]["attributes"]["mma_core_mode"], "unset")
+
+    def test_ragged_bundle_matches_independent_per_batch_reference(self):
+        graph = self.generate_ragged("--causal", "bottom_right")
+        torch = self.torch
+        lens_q, lens_kv = self.gen.varied_seqlens(self.B, self.S, self.S)
+        scale = graph["nodes"][0]["attributes"]["attn_scale_value"]
+
+        def load(uid, tokens, heads, dim):
+            raw = bytearray(self.read_bin(uid))
+            return (
+                torch.frombuffer(raw, dtype=torch.bfloat16)
+                .reshape(tokens, heads, dim)
+                .float()
+            )
+
+        packed_q = load(self.gen.UID_Q, sum(lens_q), self.H_Q, self.D_QK)
+        packed_k = load(self.gen.UID_K, sum(lens_kv), self.H_KV, self.D_QK)
+        packed_v = load(self.gen.UID_V, sum(lens_kv), self.H_KV, self.D_V)
+        packed_o = load(self.gen.UID_O, sum(lens_q), self.H_Q, self.D_V)
+
+        q_start = kv_start = 0
+        for b, (lq, lkv) in enumerate(zip(lens_q, lens_kv)):
+            with self.subTest(batch=b):
+                q_b = packed_q[q_start : q_start + lq]
+                group = self.H_Q // self.H_KV
+                k_b = packed_k[kv_start : kv_start + lkv].repeat_interleave(
+                    group, dim=1
+                )
+                v_b = packed_v[kv_start : kv_start + lkv].repeat_interleave(
+                    group, dim=1
+                )
+                scores = torch.einsum("qhd,khd->hqk", q_b, k_b) * scale
+                keep = torch.arange(lkv)[None, :] <= torch.arange(lq)[:, None] + (
+                    lkv - lq
+                )
+                scores = scores.masked_fill(~keep, float("-inf"))
+                expected = torch.einsum(
+                    "hqk,khd->qhd", torch.softmax(scores, dim=-1), v_b
+                )
+                torch.testing.assert_close(
+                    packed_o[q_start : q_start + lq], expected, atol=2e-2, rtol=2e-2
+                )
+            q_start += lq
+            kv_start += lkv
+
+        verified = subprocess.run(
+            [sys.executable, str(VERIFIER_PATH), "--require-data", str(self.root)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(verified.returncode, 0, verified.stderr)
 
     def test_ragged_with_seq_lens_packs_padding_with_nan_sentinel(self):
         graph = self.generate_ragged(
@@ -340,26 +420,10 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
         )
         self.assertEqual(verified.returncode, 0, verified.stderr)
 
-    def test_ragged_with_seq_lens_and_stats_keeps_lse_dense(self):
-        graph = self.generate_ragged(
-            "--stats", *self.seq_lens_args(self.SEQ_LENS_Q, self.SEQ_LENS_KV)
-        )
-        lse_entry = self.tensors_by_name(graph)["LSE"]
-
-        self.assertEqual(lse_entry["dims"], [self.B, self.H_Q, self.S, 1])
-        self.assertNotIn("ragged_offset_tensor_uid", lse_entry)
-        lse = self.torch.frombuffer(
-            bytearray(self.read_bin(lse_entry["uid"])), dtype=self.torch.float32
-        ).reshape(self.B, self.H_Q, self.S)
-        for b, valid in enumerate(self.SEQ_LENS_Q):
-            self.assertTrue(self.torch.isfinite(lse[b, :, :valid]).all())
-            self.assertTrue(
-                (lse[b, :, valid:] == float("-inf")).all(),
-                f"batch {b} rows past seq_len_q must be -inf",
-            )
-
-    def assert_generator_rejects(self, expected_message: str, *args: str):
-        completed = self.run_generator(*args)
+    def assert_generator_rejects(
+        self, expected_message: str, *args: str, batch: int | None = None
+    ):
+        completed = self.run_generator(*args, batch=batch)
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn(expected_message, completed.stderr)
 
@@ -386,6 +450,27 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
             "bshd",
             *self.seq_lens_args([self.S] * self.B, [self.S] * self.B),
         )
+
+    def test_ragged_without_seq_lens_rejects_degenerate_equal_lengths(self):
+        self.assert_generator_rejects(
+            "gives equal Q and KV lengths",
+            "--ragged-offsets",
+            "--layout",
+            "bshd",
+            batch=1,
+        )
+
+    def test_ragged_with_stats_rejected(self):
+        for extra in ([], self.seq_lens_args(self.SEQ_LENS_Q, self.SEQ_LENS_KV)):
+            with self.subTest(seq_lens=bool(extra)):
+                self.assert_generator_rejects(
+                    "does not support --stats",
+                    "--ragged-offsets",
+                    "--layout",
+                    "bshd",
+                    "--stats",
+                    *extra,
+                )
 
 
 if __name__ == "__main__":
