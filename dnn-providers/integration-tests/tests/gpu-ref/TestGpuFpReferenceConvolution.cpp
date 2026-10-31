@@ -52,7 +52,8 @@ class TestGpuConvFwdRef3dBfp16 : public ConvFwdShapeSuite<BFloat16Type>
 {
 };
 
-// Channel-last layout (NLC / NHWC / NDHWC)
+// Channel-last layout (NLC / NHWC / NDHWC), fp32 only. P2: kernels are stride-indexed, so
+// channel-last Fp16/Bfp16 duplicate packed Fp16/Bfp16 (dtype) + channel-last Fp32 (layout).
 class TestGpuConvFwdRefNlc1dFp32 : public ConvFwdShapeSuite<float>
 {
 };
@@ -60,24 +61,6 @@ class TestGpuConvFwdRefNhwc2dFp32 : public ConvFwdShapeSuite<float>
 {
 };
 class TestGpuConvFwdRefNdhwc3dFp32 : public ConvFwdShapeSuite<float>
-{
-};
-class TestGpuConvFwdRefNlc1dFp16 : public ConvFwdShapeSuite<HalfType>
-{
-};
-class TestGpuConvFwdRefNhwc2dFp16 : public ConvFwdShapeSuite<HalfType>
-{
-};
-class TestGpuConvFwdRefNdhwc3dFp16 : public ConvFwdShapeSuite<HalfType>
-{
-};
-class TestGpuConvFwdRefNlc1dBfp16 : public ConvFwdShapeSuite<BFloat16Type>
-{
-};
-class TestGpuConvFwdRefNhwc2dBfp16 : public ConvFwdShapeSuite<BFloat16Type>
-{
-};
-class TestGpuConvFwdRefNdhwc3dBfp16 : public ConvFwdShapeSuite<BFloat16Type>
 {
 };
 
@@ -878,34 +861,11 @@ TEST_P(TestGpuConvFwdRefNdhwc3dFp32, MatchesCpuRef)
 {
     this->runConvFwdShapeTest();
 }
-TEST_P(TestGpuConvFwdRefNlc1dFp16, MatchesCpuRef)
-{
-    this->runConvFwdShapeTest();
-}
-TEST_P(TestGpuConvFwdRefNhwc2dFp16, MatchesCpuRef)
-{
-    this->runConvFwdShapeTest();
-}
-TEST_P(TestGpuConvFwdRefNdhwc3dFp16, MatchesCpuRef)
-{
-    this->runConvFwdShapeTest();
-}
-TEST_P(TestGpuConvFwdRefNlc1dBfp16, MatchesCpuRef)
-{
-    this->runConvFwdShapeTest();
-}
-TEST_P(TestGpuConvFwdRefNhwc2dBfp16, MatchesCpuRef)
-{
-    this->runConvFwdShapeTest();
-}
-TEST_P(TestGpuConvFwdRefNdhwc3dBfp16, MatchesCpuRef)
-{
-    this->runConvFwdShapeTest();
-}
 
 // ============================================================================
 // Default layout (NCHW/NCDHW/NCL) instantiations — packed strides, no layout set.
-// Smoke shapes run on every commit; Standard/Full shapes filtered via --gtest_filter.
+// Smoke (fp32-only) shapes run on every commit; fp16/bfp16 small shapes are in Standard;
+// Standard/Full shapes filtered via --gtest_filter.
 // ============================================================================
 
 // fp32
@@ -923,29 +883,29 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          byTag());
 
 // fp16
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuConvFwdRef2dFp16,
                          ::testing::ValuesIn(getSmall2dConvCases()),
                          byTag());
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuConvFwdRef1dFp16,
                          ::testing::ValuesIn(getSmall1dConvCases()),
                          byTag());
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuConvFwdRef3dFp16,
                          ::testing::ValuesIn(getSmall3dConvCases()),
                          byTag());
 
 // bfp16
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuConvFwdRef2dBfp16,
                          ::testing::ValuesIn(getSmall2dConvCases()),
                          byTag());
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuConvFwdRef1dBfp16,
                          ::testing::ValuesIn(getSmall1dConvCases()),
                          byTag());
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuConvFwdRef3dBfp16,
                          ::testing::ValuesIn(getSmall3dConvCases()),
                          byTag());
@@ -954,7 +914,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 // Channel-last (NLC/NHWC/NDHWC) instantiations — small shapes.
 // ============================================================================
 
-// fp32 NLC/NHWC/NDHWC
+// fp32 NLC/NHWC/NDHWC (P2: no fp16/bfp16 channel-last; stride-only layout)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          TestGpuConvFwdRefNlc1dFp32,
                          ::testing::ValuesIn(withChannelLastLayout(getSmall1dConvCases())),
@@ -965,34 +925,6 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          byTag());
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          TestGpuConvFwdRefNdhwc3dFp32,
-                         ::testing::ValuesIn(withChannelLastLayout(getSmall3dConvCases())),
-                         byTag());
-
-// fp16 NLC/NHWC/NDHWC
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         TestGpuConvFwdRefNlc1dFp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getSmall1dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         TestGpuConvFwdRefNhwc2dFp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getSmall2dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         TestGpuConvFwdRefNdhwc3dFp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getSmall3dConvCases())),
-                         byTag());
-
-// bfp16 NLC/NHWC/NDHWC
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         TestGpuConvFwdRefNlc1dBfp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getSmall1dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         TestGpuConvFwdRefNhwc2dBfp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getSmall2dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         TestGpuConvFwdRefNdhwc3dBfp16,
                          ::testing::ValuesIn(withChannelLastLayout(getSmall3dConvCases())),
                          byTag());
 
@@ -1039,87 +971,14 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          ::testing::ValuesIn(getLargeStress3dConvCases()),
                          byTag());
 
-// fp16
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuConvFwdRef1dFp16,
-                         ::testing::ValuesIn(getMedium1dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuConvFwdRef2dFp16,
-                         ::testing::ValuesIn(getMedium2dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuConvFwdRef3dFp16,
-                         ::testing::ValuesIn(getMedium3dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuConvFwdRef1dFp16,
-                         ::testing::ValuesIn(getLargeEdge1dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuConvFwdRef2dFp16,
-                         ::testing::ValuesIn(getLargeEdge2dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuConvFwdRef3dFp16,
-                         ::testing::ValuesIn(getLargeEdge3dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuConvFwdRef1dFp16,
-                         ::testing::ValuesIn(getLargeStress1dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuConvFwdRef2dFp16,
-                         ::testing::ValuesIn(getLargeStress2dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuConvFwdRef3dFp16,
-                         ::testing::ValuesIn(getLargeStress3dConvCases()),
-                         byTag());
-
-// bfp16
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuConvFwdRef1dBfp16,
-                         ::testing::ValuesIn(getMedium1dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuConvFwdRef2dBfp16,
-                         ::testing::ValuesIn(getMedium2dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuConvFwdRef3dBfp16,
-                         ::testing::ValuesIn(getMedium3dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuConvFwdRef1dBfp16,
-                         ::testing::ValuesIn(getLargeEdge1dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuConvFwdRef2dBfp16,
-                         ::testing::ValuesIn(getLargeEdge2dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuConvFwdRef3dBfp16,
-                         ::testing::ValuesIn(getLargeEdge3dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuConvFwdRef1dBfp16,
-                         ::testing::ValuesIn(getLargeStress1dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuConvFwdRef2dBfp16,
-                         ::testing::ValuesIn(getLargeStress2dConvCases()),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuConvFwdRef3dBfp16,
-                         ::testing::ValuesIn(getLargeStress3dConvCases()),
-                         byTag());
+// fp16/bfp16: small shapes only (Standard); no Comprehensive/Full instantiation. P1: dtype only
+// affects per-element conversion; shape/grid boundaries are covered by fp32.
 
 // ============================================================================
 // Channel-last (NLC/NHWC/NDHWC) — standard/comprehensive/full shapes.
 // ============================================================================
 
-// fp32
+// fp32 only (P2: stride-only layout; fp16/bfp16 channel-last omitted)
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuConvFwdRefNlc1dFp32,
                          ::testing::ValuesIn(withChannelLastLayout(getMedium1dConvCases())),
@@ -1154,81 +1013,5 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          byTag());
 INSTANTIATE_TEST_SUITE_P(Full,
                          TestGpuConvFwdRefNdhwc3dFp32,
-                         ::testing::ValuesIn(withChannelLastLayout(getLargeStress3dConvCases())),
-                         byTag());
-
-// fp16
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuConvFwdRefNlc1dFp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getMedium1dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuConvFwdRefNhwc2dFp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getMedium2dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuConvFwdRefNdhwc3dFp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getMedium3dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuConvFwdRefNlc1dFp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getLargeEdge1dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuConvFwdRefNhwc2dFp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getLargeEdge2dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuConvFwdRefNdhwc3dFp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getLargeEdge3dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuConvFwdRefNlc1dFp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getLargeStress1dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuConvFwdRefNhwc2dFp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getLargeStress2dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuConvFwdRefNdhwc3dFp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getLargeStress3dConvCases())),
-                         byTag());
-
-// bfp16
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuConvFwdRefNlc1dBfp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getMedium1dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuConvFwdRefNhwc2dBfp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getMedium2dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuConvFwdRefNdhwc3dBfp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getMedium3dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuConvFwdRefNlc1dBfp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getLargeEdge1dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuConvFwdRefNhwc2dBfp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getLargeEdge2dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuConvFwdRefNdhwc3dBfp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getLargeEdge3dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuConvFwdRefNlc1dBfp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getLargeStress1dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuConvFwdRefNhwc2dBfp16,
-                         ::testing::ValuesIn(withChannelLastLayout(getLargeStress2dConvCases())),
-                         byTag());
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuConvFwdRefNdhwc3dBfp16,
                          ::testing::ValuesIn(withChannelLastLayout(getLargeStress3dConvCases())),
                          byTag());

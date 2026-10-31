@@ -768,35 +768,25 @@ INSTANTIATE_TEST_SUITE_P(Quick,
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseBinaryRef4DFp32,
                          ::testing::ValuesIn(getSmall4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef4DFp16,
                          ::testing::ValuesIn(getSmall4dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef4DFp16,
                          ::testing::ValuesIn(getSmall4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef4DBfp16,
                          ::testing::ValuesIn(getSmall4dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef4DBfp16,
                          ::testing::ValuesIn(getSmall4dBinaryPointwiseCases()));
+// Medium shapes are fp32-only: dtype enters only via per-element load/store conversion (P1);
+// Fp16/Bfp16 are covered by the standard tier's small-shape run.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef4DFp32,
                          ::testing::ValuesIn(getMedium4dUnaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef4DFp32,
-                         ::testing::ValuesIn(getMedium4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseUnaryRef4DFp16,
-                         ::testing::ValuesIn(getMedium4dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseBinaryRef4DFp16,
-                         ::testing::ValuesIn(getMedium4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseUnaryRef4DBfp16,
-                         ::testing::ValuesIn(getMedium4dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseBinaryRef4DBfp16,
                          ::testing::ValuesIn(getMedium4dBinaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseUnaryRef4DFp32,
@@ -804,66 +794,7 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseBinaryRef4DFp32,
                          ::testing::ValuesIn(getLarge4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseUnaryRef4DFp16,
-                         ::testing::ValuesIn(getLarge4dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseBinaryRef4DFp16,
-                         ::testing::ValuesIn(getLarge4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseUnaryRef4DBfp16,
-                         ::testing::ValuesIn(getLarge4dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseBinaryRef4DBfp16,
-                         ::testing::ValuesIn(getLarge4dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseUnaryRef4DFp32, ::testing::ValuesIn([]() {
-                             auto v = getSmall4dUnaryPointwiseCases();
-                             auto m = getMedium4dUnaryPointwiseCases();
-                             auto l = getLarge4dUnaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseBinaryRef4DFp32, ::testing::ValuesIn([]() {
-                             auto v = getSmall4dBinaryPointwiseCases();
-                             auto m = getMedium4dBinaryPointwiseCases();
-                             auto l = getLarge4dBinaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseUnaryRef4DFp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall4dUnaryPointwiseCases();
-                             auto m = getMedium4dUnaryPointwiseCases();
-                             auto l = getLarge4dUnaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseBinaryRef4DFp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall4dBinaryPointwiseCases();
-                             auto m = getMedium4dBinaryPointwiseCases();
-                             auto l = getLarge4dBinaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseUnaryRef4DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall4dUnaryPointwiseCases();
-                             auto m = getMedium4dUnaryPointwiseCases();
-                             auto l = getLarge4dUnaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseBinaryRef4DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall4dBinaryPointwiseCases();
-                             auto m = getMedium4dBinaryPointwiseCases();
-                             auto l = getLarge4dBinaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
+
 // ============================================================================
 // 5D tests
 // ============================================================================
@@ -874,35 +805,25 @@ INSTANTIATE_TEST_SUITE_P(Quick,
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseBinaryRef5DFp32,
                          ::testing::ValuesIn(getSmall5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef5DFp16,
                          ::testing::ValuesIn(getSmall5dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef5DFp16,
                          ::testing::ValuesIn(getSmall5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef5DBfp16,
                          ::testing::ValuesIn(getSmall5dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef5DBfp16,
                          ::testing::ValuesIn(getSmall5dBinaryPointwiseCases()));
+// Medium shapes are fp32-only: dtype enters only via per-element load/store conversion (P1);
+// Fp16/Bfp16 are covered by the standard tier's small-shape run.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseUnaryRef5DFp32,
                          ::testing::ValuesIn(getMedium5dUnaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef5DFp32,
-                         ::testing::ValuesIn(getMedium5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseUnaryRef5DFp16,
-                         ::testing::ValuesIn(getMedium5dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseBinaryRef5DFp16,
-                         ::testing::ValuesIn(getMedium5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseUnaryRef5DBfp16,
-                         ::testing::ValuesIn(getMedium5dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuPointwiseBinaryRef5DBfp16,
                          ::testing::ValuesIn(getMedium5dBinaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseUnaryRef5DFp32,
@@ -910,63 +831,3 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseBinaryRef5DFp32,
                          ::testing::ValuesIn(getLarge5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseUnaryRef5DFp16,
-                         ::testing::ValuesIn(getLarge5dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseBinaryRef5DFp16,
-                         ::testing::ValuesIn(getLarge5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseUnaryRef5DBfp16,
-                         ::testing::ValuesIn(getLarge5dUnaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuPointwiseBinaryRef5DBfp16,
-                         ::testing::ValuesIn(getLarge5dBinaryPointwiseCases()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseUnaryRef5DFp32, ::testing::ValuesIn([]() {
-                             auto v = getSmall5dUnaryPointwiseCases();
-                             auto m = getMedium5dUnaryPointwiseCases();
-                             auto l = getLarge5dUnaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseBinaryRef5DFp32, ::testing::ValuesIn([]() {
-                             auto v = getSmall5dBinaryPointwiseCases();
-                             auto m = getMedium5dBinaryPointwiseCases();
-                             auto l = getLarge5dBinaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseUnaryRef5DFp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall5dUnaryPointwiseCases();
-                             auto m = getMedium5dUnaryPointwiseCases();
-                             auto l = getLarge5dUnaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseBinaryRef5DFp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall5dBinaryPointwiseCases();
-                             auto m = getMedium5dBinaryPointwiseCases();
-                             auto l = getLarge5dBinaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseUnaryRef5DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall5dUnaryPointwiseCases();
-                             auto m = getMedium5dUnaryPointwiseCases();
-                             auto l = getLarge5dUnaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuPointwiseBinaryRef5DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getSmall5dBinaryPointwiseCases();
-                             auto m = getMedium5dBinaryPointwiseCases();
-                             auto l = getLarge5dBinaryPointwiseCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
