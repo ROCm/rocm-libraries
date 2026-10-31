@@ -565,6 +565,19 @@ class KernelLauncher:
 
         return run
 
+    def unload(self) -> None:
+        """Unload the underlying HIP module.
+
+        The launcher does not do this itself (point 2 in the module
+        docstring expects callers to cache and reuse a launcher instead
+        of reloading); a caller that builds a fresh, uncached launcher
+        per call (e.g. a benchmark sweep) must call this once done with
+        it, or the module leaks on the device for the process lifetime
+        -- `hipModuleUnload` is never implied by Python garbage
+        collection of the wrapper object.
+        """
+        self._module.unload()
+
     def __repr__(self) -> str:
         key_str = f", cache_key={self._cache_key!r}" if self._cache_key else ""
         return f"KernelLauncher({self._kernel_name!r}{key_str})"
