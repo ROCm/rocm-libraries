@@ -26,7 +26,6 @@ GlobalParameters:
   NumBenchmarks: 1
   # KernelTime: False
   # PrintCodeCommands: True
-  # CpuThreads: 1
   # GenerateSourcesAndExit: True
   # ValidationPrintValids: True
   # ValidationMaxToPrint: 64
