@@ -13,6 +13,8 @@
 
 #include <array>
 #include <cstdint>
+#include <initializer_list>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -42,17 +44,38 @@ using ck_tile::index_t;
 // One packed int32 of TDM scales covers KXdlPack scale blocks (KXdlPackEff of the TDM pipelines).
 constexpr index_t kTdmKXdlPack = 4;
 
+// IsMxTdmShapeSupported with the TDM scale packing. Without AllowKTail these are the K gates as
+// MxGroupedGemmKernel and every configuration outside the K tails apply them.
+template <typename A,
+          typename B,
+          typename ALayout       = Row,
+          typename BLayout       = Col,
+          index_t KPerBlock      = 128,
+          index_t ScaleBlockSize = 32,
+          bool AllowKTail        = false>
+bool shape_ok(index_t M, index_t N, index_t K, index_t stride_A, index_t stride_B)
+{
+    return ck_tile::IsMxTdmShapeSupported<A,
+                                          B,
+                                          ALayout,
+                                          BLayout,
+                                          KPerBlock,
+                                          ScaleBlockSize,
+                                          kTdmKXdlPack,
+                                          AllowKTail>(M, N, K, stride_A, stride_B);
+}
+
+// shape_ok with AllowKTail, as MxGemmKernel calls it.
 template <typename A,
           typename B,
           typename ALayout       = Row,
           typename BLayout       = Col,
           index_t KPerBlock      = 128,
           index_t ScaleBlockSize = 32>
-bool shape_ok(index_t M, index_t N, index_t K, index_t stride_A, index_t stride_B)
+bool k_tail_shape_ok(index_t M, index_t N, index_t K, index_t stride_A, index_t stride_B)
 {
-    return ck_tile::
-        IsMxTdmShapeSupported<A, B, ALayout, BLayout, KPerBlock, ScaleBlockSize, kTdmKXdlPack>(
-            M, N, K, stride_A, stride_B);
+    return shape_ok<A, B, ALayout, BLayout, KPerBlock, ScaleBlockSize, true>(
+        M, N, K, stride_A, stride_B);
 }
 
 // Calls f() with CK_TILE_LOGGING on and returns its result together with what it logged.
@@ -68,16 +91,17 @@ std::pair<bool, std::string> logged(F&& f)
 }
 
 // The pipeline problem of TdmMxGemm: tile 64 x 64 x KTile, warps 2x2x1, a WarpTile x WarpTile x
-// 128 warp tile and 32-element scales, as in the TDM gtests. It names no pipeline, so a policy can
-// be checked with it on its own.
+// 128 warp tile and ScaleBlockSize-element scales (32 by default), as in the TDM gtests. It names
+// pipeline, so a policy can be checked with it on its own.
 template <typename A,
           typename B,
-          typename ALayout = Row,
-          typename BLayout = Col,
-          typename AScale  = E8M0,
-          typename BScale  = E8M0,
-          index_t KTile    = 128,
-          index_t WarpTile = 16>
+          typename ALayout       = Row,
+          typename BLayout       = Col,
+          typename AScale        = E8M0,
+          typename BScale        = E8M0,
+          index_t KTile          = 128,
+          index_t WarpTile       = 16,
+          index_t ScaleBlockSize = 32>
 struct TdmMxProblem
 {
     using Shape = ck_tile::TileGemmShape<ck_tile::sequence<64, 64, KTile>,
@@ -97,22 +121,24 @@ struct TdmMxProblem
                                                 B,
                                                 AScale,
                                                 BScale,
-                                                32>;
+                                                ScaleBlockSize>;
 };
 
 // An MX GEMM with a TDM pipeline over TdmMxProblem.
 template <template <typename...> class Pipeline,
           typename A,
           typename B,
-          typename ALayout = Row,
-          typename BLayout = Col,
-          typename AScale  = E8M0,
-          typename BScale  = E8M0,
-          index_t KTile    = 128,
-          index_t WarpTile = 16>
+          typename ALayout       = Row,
+          typename BLayout       = Col,
+          typename AScale        = E8M0,
+          typename BScale        = E8M0,
+          index_t KTile          = 128,
+          index_t WarpTile       = 16,
+          index_t ScaleBlockSize = 32>
 struct TdmMxGemm
 {
-    using ProblemDef      = TdmMxProblem<A, B, ALayout, BLayout, AScale, BScale, KTile, WarpTile>;
+    using ProblemDef =
+        TdmMxProblem<A, B, ALayout, BLayout, AScale, BScale, KTile, WarpTile, ScaleBlockSize>;
     using Shape           = typename ProblemDef::Shape;
     using Partitioner     = ck_tile::GemmSpatiallyLocalTilePartitioner<Shape, 8, 4>;
     using Problem         = typename ProblemDef::type;
@@ -142,6 +168,8 @@ struct TdmMxGemm
                                                              true>;
     using Kernel          = ck_tile::
         MxGemmKernel<Partitioner, Pipeline<Problem>, ck_tile::TdmEpilogue<EpilogueProblem>>;
+    using GroupedKernel = ck_tile::
+        MxGroupedGemmKernel<Partitioner, Pipeline<Problem>, ck_tile::TdmEpilogue<EpilogueProblem>>;
     static_assert(Kernel::KXdlPackEff == kTdmKXdlPack);
 
     static typename Kernel::KernelArgs
@@ -241,6 +269,12 @@ const std::vector<index_t> kTestedKsTileK128{128, 256, 384, 512, 640, 768, 896, 
 // M and N values the TDM gtests and the dispatcher bridge TDM tests use, including partial tiles.
 const std::vector<index_t> kTestedMN{1, 17, 63, 64, 127, 257};
 
+// K values with a partial last K tile: none is a multiple of 128, so none is a multiple of any K
+// tile of the TDM gtests (128 to 512); 2 to 92 are below one 128-deep K tile; all but 160 leave a
+// partial last 32-element scale block; 90 and 92 give FP4 rows of 45 and 46 bytes. Keep in sync
+// with kAlignedPitchKs and kNarrowPitchKs of test_mx_gemm_tdm_k_tail.cpp, which run these K.
+const std::vector<index_t> kKTailKs{2, 24, 80, 90, 92, 160, 240, 296, 488, 1840};
+
 TEST(MxGemmTdmGates, AcceptsTestedShapes)
 {
     for(index_t K : kTestedKsTileK128)
@@ -271,6 +305,9 @@ TEST(MxGemmTdmGates, RejectsNonPositiveK)
 {
     EXPECT_FALSE((shape_ok<F8, F8>(64, 64, 0, 128, 128)));
     EXPECT_FALSE((shape_ok<F8, F8>(64, 64, -128, 128, 128)));
+    // With K tails only the K > 0 check rejects K = 0 and a negative K; no K gate is left.
+    EXPECT_FALSE((k_tail_shape_ok<F8, F8>(64, 64, 0, 128, 128)));
+    EXPECT_FALSE((k_tail_shape_ok<F8, F8>(64, 64, -1, 128, 128)));
 }
 
 TEST(MxGemmTdmGates, RejectsKNotAMultipleOfThePackedScale)
@@ -352,6 +389,119 @@ TEST(MxGemmTdmGates, RejectsPackedContiguousExtentsOffAPackBoundary)
     EXPECT_TRUE((shape_ok<F4, F4, Row, Col>(63, 63, K, K, K)));
 }
 
+TEST(MxGemmTdmGates, KTailAcceptsKOnAPackBoundary)
+{
+    for(index_t K : kKTailKs)
+    {
+        EXPECT_TRUE((k_tail_shape_ok<F8, F8>(64, 64, K, K, K))) << K;
+        EXPECT_TRUE((k_tail_shape_ok<F4, F4>(64, 64, K, K, K))) << K;
+        EXPECT_TRUE((k_tail_shape_ok<F8, F4>(64, 64, K, K, K))) << K;
+        EXPECT_TRUE((k_tail_shape_ok<F4, F8>(64, 64, K, K, K))) << K;
+        EXPECT_TRUE((k_tail_shape_ok<F8, F8, Row, Col, 256>(64, 64, K, K, K))) << K;
+        EXPECT_TRUE((k_tail_shape_ok<F4, F4, Row, Col, 384>(64, 64, K, K, K))) << K;
+    }
+    // fp8_t is not packed (PackedSize 1), so any K is accepted, odd K included.
+    for(index_t K : {1, 33, 161})
+    {
+        EXPECT_TRUE((k_tail_shape_ok<F8, F8>(64, 64, K, K, K))) << K;
+    }
+    for(index_t K : kTestedKsTileK128)
+    {
+        EXPECT_TRUE((k_tail_shape_ok<F8, F8>(64, 64, K, K, K))) << K;
+        EXPECT_TRUE((k_tail_shape_ok<F4, F4>(64, 64, K, K, K))) << K;
+    }
+}
+
+TEST(MxGemmTdmGates, KTailRejectsKOffAPackBoundary)
+{
+    // pk_fp4_t packs two elements along K, the contiguous dimension of a row-major A and a
+    // column-major B; the even strides K + 1 isolate the K check.
+    for(index_t K : {1, 33, 91, 161})
+    {
+        EXPECT_FALSE((k_tail_shape_ok<F4, F4>(64, 64, K, K + 1, K + 1))) << K;
+        EXPECT_FALSE((k_tail_shape_ok<F4, F8>(64, 64, K, K + 1, K + 1))) << K;
+        EXPECT_FALSE((k_tail_shape_ok<F8, F4>(64, 64, K, K + 1, K + 1))) << K;
+    }
+    const auto [a_ok, a_log] = logged([] { return k_tail_shape_ok<F4, F8>(64, 64, 91, 92, 92); });
+    EXPECT_FALSE(a_ok);
+    EXPECT_NE(a_log.find("requires K of a row-major packed A to be a multiple of its pack size 2"),
+              std::string::npos)
+        << a_log;
+    const auto [b_ok, b_log] = logged([] { return k_tail_shape_ok<F8, F4>(64, 64, 91, 92, 92); });
+    EXPECT_FALSE(b_ok);
+    EXPECT_NE(
+        b_log.find("requires K of a column-major packed B to be a multiple of its pack size 2"),
+        std::string::npos)
+        << b_log;
+}
+
+TEST(MxGemmTdmGates, RejectsKThatOverflowsTheKLoop)
+{
+    // The largest accepted K is INT_MAX - 2 * max(KPerBlock, 128): the K loop count rounds K up by
+    // KPerBlock - 1, and the K offset of the tile after the last reaches K + 2 * KPerBlock - 1.
+    constexpr index_t kMax = std::numeric_limits<index_t>::max();
+    EXPECT_TRUE((k_tail_shape_ok<F8, F8>(1, 1, kMax - 256, kMax - 256, kMax - 256)));
+    EXPECT_FALSE((k_tail_shape_ok<F8, F8>(1, 1, kMax - 255, kMax - 255, kMax - 255)));
+    EXPECT_TRUE((k_tail_shape_ok<F8, F8, Row, Col, 256>(1, 1, kMax - 512, kMax - 512, kMax - 512)));
+    EXPECT_FALSE(
+        (k_tail_shape_ok<F8, F8, Row, Col, 256>(1, 1, kMax - 511, kMax - 511, kMax - 511)));
+    // The guard also applies outside the K tails: 2147483520 is the largest multiple of 384 (so
+    // also of 128) in index_t, so it passes the K gates of a 384-deep K tile.
+    constexpr index_t kK = 2147483520;
+    const auto [ok, log] = logged([] { return shape_ok<F8, F8, Row, Col, 384>(1, 1, kK, kK, kK); });
+    EXPECT_FALSE(ok);
+    EXPECT_NE(log.find("requires K <= INT_MAX - 2 * max(KPerBlock, ScaleBlockSize * KXdlPack) = "
+                       "2147482879"),
+              std::string::npos)
+        << log;
+}
+
+TEST(MxGemmTdmGates, KTailKeepsTheKGatesOfOtherConfigurations)
+{
+    // K tails need fp8_t or pk_fp4_t on both sides, 32-element scales, a row-major A and a
+    // column-major B; every other configuration keeps the K gates even with AllowKTail.
+    constexpr index_t K          = 160;
+    const auto [bf8_ok, bf8_log] = logged([] { return k_tail_shape_ok<BF8, F8>(64, 64, K, K, K); });
+    EXPECT_FALSE(bf8_ok);
+    EXPECT_NE(bf8_log.find("requires K to be a multiple of ScaleBlockSize * KXdlPack = 128"),
+              std::string::npos)
+        << bf8_log;
+    const auto [s16_ok, s16_log] =
+        logged([] { return k_tail_shape_ok<F8, F8, Row, Col, 128, 16>(64, 64, K, K, K); });
+    EXPECT_FALSE(s16_ok);
+    EXPECT_NE(s16_log.find("requires K to be a multiple of ScaleBlockSize * KXdlPack = 64"),
+              std::string::npos)
+        << s16_log;
+    EXPECT_FALSE((k_tail_shape_ok<F8, BF8>(64, 64, K, K, K)));
+    EXPECT_FALSE((k_tail_shape_ok<F4, F4, Row, Row>(64, 64, K, K, 64)));
+    EXPECT_FALSE((k_tail_shape_ok<F4, F8, Col, Row>(64, 64, K, 64, 64)));
+    EXPECT_FALSE((k_tail_shape_ok<F8, F8, Col, Col>(64, 64, K, 64, K)));
+    EXPECT_FALSE((k_tail_shape_ok<F6, F6>(64, 64, K, K, K)));
+    EXPECT_FALSE((k_tail_shape_ok<BF6, BF6>(64, 64, K, K, K)));
+    EXPECT_FALSE((k_tail_shape_ok<F6, F8>(64, 64, K, K, K)));
+    // Scales packed other than four to an int32 (the TDM pipelines pack four), and a K tile that
+    // is not a whole number of scale packs.
+    EXPECT_FALSE(
+        (ck_tile::IsMxTdmShapeSupported<F8, F8, Row, Col, 128, 32, 2, true>(64, 64, K, K, K)));
+    EXPECT_FALSE((k_tail_shape_ok<F8, F8, Row, Col, 64>(64, 64, K, K, K)));
+    // Without AllowKTail every configuration keeps them.
+    EXPECT_FALSE((shape_ok<F8, F8>(64, 64, K, K, K)));
+    EXPECT_FALSE((shape_ok<F4, F4>(64, 64, K, K, K)));
+}
+
+TEST(MxGemmTdmGates, KTailConfigurations)
+{
+    // is_mx_tdm_k_tail_config_v: FP8 and FP4 on each side qualify; BF8, 16-element scales and a
+    // row-major B do not.
+    EXPECT_TRUE((ck_tile::is_mx_tdm_k_tail_config_v<F8, F8, Row, Col, 32, kTdmKXdlPack>));
+    EXPECT_TRUE((ck_tile::is_mx_tdm_k_tail_config_v<F4, F4, Row, Col, 32, kTdmKXdlPack>));
+    EXPECT_TRUE((ck_tile::is_mx_tdm_k_tail_config_v<F8, F4, Row, Col, 32, kTdmKXdlPack>));
+    EXPECT_TRUE((ck_tile::is_mx_tdm_k_tail_config_v<F4, F8, Row, Col, 32, kTdmKXdlPack>));
+    EXPECT_FALSE((ck_tile::is_mx_tdm_k_tail_config_v<BF8, F8, Row, Col, 32, kTdmKXdlPack>));
+    EXPECT_FALSE((ck_tile::is_mx_tdm_k_tail_config_v<F8, F8, Row, Col, 16, kTdmKXdlPack>));
+    EXPECT_FALSE((ck_tile::is_mx_tdm_k_tail_config_v<F4, F4, Row, Row, 32, kTdmKXdlPack>));
+}
+
 // The kernel-level checks: IsTdmShapeSupported forwards the kernel's types, layouts and tile
 // constants, and IsSupportedArgument rejects for the shape reason, which it logs. Without a gfx125
 // device IsSupportedArgument would also fail its device check, so the logged reason is what shows
@@ -409,6 +559,55 @@ void check_rcr_kernel_gates()
     }
 }
 
+// The K-tail configurations of MxGemmKernel accept every K that is a multiple of the PackedSize
+// of A and of B (any K for fp8_t, an even K for pk_fp4_t); with AllowKTail = false, as
+// MxGroupedGemmKernel checks them, they keep the K gates.
+template <typename Gemm>
+void check_rcr_kernel_k_tails()
+{
+    using Kernel = typename Gemm::Kernel;
+    for(index_t MN : kTestedMN)
+    {
+        for(const auto& Ks : {kTestedKsTileK128, kKTailKs})
+        {
+            for(index_t K : Ks)
+            {
+                expect_shape_accepted<Gemm>(MN, MN, K, K, K);
+            }
+        }
+    }
+    expect_shape_rejection<Gemm>(64, 64, 0, 128, 128, "requires K > 0");
+    // The K gates, as MxGroupedGemmKernel checks them.
+    EXPECT_TRUE(Kernel::template IsTdmShapeSupported</*AllowKTail=*/false>(
+        Gemm::make_args(64, 64, 256, 256, 256)));
+    EXPECT_FALSE(Kernel::template IsTdmShapeSupported</*AllowKTail=*/false>(
+        Gemm::make_args(64, 64, 160, 160, 160)));
+    if constexpr(ck_tile::numeric_traits<typename Kernel::ADataType>::PackedSize > 1)
+    {
+        expect_shape_rejection<Gemm>(
+            64,
+            64,
+            161,
+            162,
+            162,
+            "requires K of a row-major packed A to be a multiple of its pack size 2");
+    }
+    else if constexpr(ck_tile::numeric_traits<typename Kernel::BDataType>::PackedSize > 1)
+    {
+        expect_shape_rejection<Gemm>(
+            64,
+            64,
+            161,
+            161,
+            162,
+            "requires K of a column-major packed B to be a multiple of its pack size 2");
+    }
+    else
+    {
+        expect_shape_accepted<Gemm>(64, 64, 161, 161, 161);
+    }
+}
+
 // The kernel forwards FP6's 16-element pack to the stride gate: 520 is a multiple of 8 but not of
 // 16, so an FP8 kernel would accept it.
 template <typename Gemm>
@@ -432,25 +631,48 @@ void check_f6_kernel_stride_gates()
 
 TEST(MxGemmTdmGates, KernelF8TdmV1)
 {
-    check_rcr_kernel_gates<TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F8, F8>>();
+    check_rcr_kernel_k_tails<TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F8, F8>>();
     skip_without_gfx125();
 }
 
 TEST(MxGemmTdmGates, KernelF8TdmV2)
 {
-    check_rcr_kernel_gates<TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV2, F8, F8>>();
+    check_rcr_kernel_k_tails<TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV2, F8, F8>>();
     skip_without_gfx125();
 }
 
 TEST(MxGemmTdmGates, KernelF4TdmV1)
 {
-    check_rcr_kernel_gates<TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F4, F4>>();
+    check_rcr_kernel_k_tails<TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F4, F4>>();
     skip_without_gfx125();
 }
 
 TEST(MxGemmTdmGates, KernelF4TdmV2)
 {
-    check_rcr_kernel_gates<TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV2, F4, F4>>();
+    check_rcr_kernel_k_tails<TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV2, F4, F4>>();
+    skip_without_gfx125();
+}
+
+// The TDM gtests' mixed FP8 x FP4 row on V1 (E8M0 x E5M3 scales, 32x32 warp tile).
+TEST(MxGemmTdmGates, KernelF8F4TdmV1)
+{
+    check_rcr_kernel_k_tails<
+        TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F8, F4, Row, Col, E8M0, E5M3, 128, 32>>();
+    skip_without_gfx125();
+}
+
+// BF8 x FP8 (the TDM gtests' rows with 32-element scales and a 32x32 warp tile) keeps the K gates.
+TEST(MxGemmTdmGates, KernelBF8F8TdmV1)
+{
+    check_rcr_kernel_gates<
+        TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, BF8, F8, Row, Col, E8M0, E8M0, 128, 32>>();
+    skip_without_gfx125();
+}
+
+TEST(MxGemmTdmGates, KernelBF8F8TdmV2)
+{
+    check_rcr_kernel_gates<
+        TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV2, BF8, F8, Row, Col, E8M0, E8M0, 128, 32>>();
     skip_without_gfx125();
 }
 
@@ -472,8 +694,11 @@ TEST(MxGemmTdmGates, KernelF6TdmV2)
 
 TEST(MxGemmTdmGates, KernelPassesItsKTile)
 {
-    // A 256-deep K tile: K = 384 and 640 pass the packed-scale check but not K % KPerBlock.
-    using Gemm = TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F8, F8, Row, Col, E8M0, E8M0, 256>;
+    // A 256-deep K tile: K = 384 and 640 pass the packed-scale check but not K % KPerBlock, and
+    // the rejection names the kernel's K tile. BF8 x FP8 keeps the K gates; an FP8 x FP8
+    // kernel accepts these K as K tails (KernelF8DeepKTileTakesKTails).
+    using Gemm =
+        TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, BF8, F8, Row, Col, E8M0, E8M0, 256, 32>;
     for(index_t K : {512, 768, 1024})
     {
         expect_shape_accepted<Gemm>(64, 64, K, K, K);
@@ -483,6 +708,74 @@ TEST(MxGemmTdmGates, KernelPassesItsKTile)
         expect_shape_rejection<Gemm>(
             64, 64, K, K, K, "requires K to be a multiple of KPerBlock = 256");
     }
+    skip_without_gfx125();
+}
+
+TEST(MxGemmTdmGates, KernelF8DeepKTileTakesKTails)
+{
+    // FP8 x FP8 with a 256-deep K tile accepts K tails: K below one K tile (24), K that is not
+    // a multiple of 128 (296, 488), and multiples of 128 that are not multiples of 256 (384, 640).
+    // M = 144 and N = 112 end in partial M and N tiles.
+    using Gemm = TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F8, F8, Row, Col, E8M0, E8M0, 256>;
+    for(index_t K : {24, 296, 384, 488, 640})
+    {
+        expect_shape_accepted<Gemm>(144, 112, K, K, K);
+    }
+    skip_without_gfx125();
+}
+
+TEST(MxGemmTdmGates, GroupedKernelKeepsTheKGates)
+{
+    using Gemm        = TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F8, F8>;
+    using Grouped     = typename Gemm::GroupedKernel;
+    const auto groups = [](std::initializer_list<index_t> Ks) {
+        std::vector<ck_tile::MxGemmTransKernelArg<0>> kargs;
+        for(index_t K : Ks)
+        {
+            kargs.emplace_back(Gemm::make_args(64, 64, K, K, K));
+        }
+        return kargs;
+    };
+    // MxGemmKernel accepts these K for FP8 x FP8. The grouped kernel rejects them before
+    // MxGemmKernel's checks, so its device check, which fails on a host without a gfx125 device,
+    // is not reached; the group under test goes first because IsSupportedArgument stops at the
+    // first group it rejects.
+    for(index_t K : {160, 200})
+    {
+        EXPECT_TRUE(Gemm::Kernel::IsTdmShapeSupported(Gemm::make_args(64, 64, K, K, K))) << K;
+        const auto kargs            = groups({K, 256});
+        const auto [supported, log] = logged([&] { return Grouped::IsSupportedArgument(kargs); });
+        EXPECT_FALSE(supported) << K;
+        EXPECT_NE(log.find("requires K to be a multiple of ScaleBlockSize * KXdlPack = 128"),
+                  std::string::npos)
+            << log;
+        EXPECT_EQ(log.find("requires a gfx125 device"), std::string::npos) << log;
+    }
+    if(ck_tile::is_gfx125_supported())
+    {
+        // Every group is checked, not only the first.
+        EXPECT_FALSE(Grouped::IsSupportedArgument(groups({256, 160})));
+        EXPECT_TRUE(Grouped::IsSupportedArgument(groups({256, 512})));
+    }
+    skip_without_gfx125();
+}
+
+// The kernel passes its scale block size and B layout to the K-tail condition: the TDM gtests'
+// FP8 x FP8 rows with 16-element scales and their FP4 x FP4 RRR row keep the K gates.
+TEST(MxGemmTdmGates, KernelKeepsTheKGatesOfOtherConfigurations)
+{
+    using Scale16 =
+        TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F8, F8, Row, Col, E8M0, E8M0, 128, 16, 16>;
+    expect_shape_accepted<Scale16>(64, 64, 256, 256, 256);
+    expect_shape_rejection<Scale16>(
+        64, 64, 160, 160, 160, "requires K to be a multiple of ScaleBlockSize * KXdlPack = 64");
+    expect_shape_rejection<Scale16>(
+        64, 64, 192, 192, 192, "requires K to be a multiple of KPerBlock = 128");
+    using Rrr =
+        TdmMxGemm<ck_tile::GemmPipelineAgBgCrCompTDMV1, F4, F4, Row, Row, E5M3, E5M3, 128, 32>;
+    expect_shape_accepted<Rrr>(64, 64, 256, 256, 64);
+    expect_shape_rejection<Rrr>(
+        64, 64, 160, 160, 64, "requires K to be a multiple of ScaleBlockSize * KXdlPack = 128");
     skip_without_gfx125();
 }
 
