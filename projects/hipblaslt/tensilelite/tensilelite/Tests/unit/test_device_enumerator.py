@@ -93,19 +93,16 @@ def test_device_enumerator_candidates_keep_amdgpu_arch_as_fallback(monkeypatch):
 def test_detect_current_isa_tries_amdgpu_arch_after_offload_arch(monkeypatch):
     calls = []
 
-    def detect(tool, device_id):
-        calls.append((tool, device_id))
-        if tool == "/selected/offload-arch":
-            return 1
-        return IsaVersion(9, 4, 2)
+    def ask(tool):
+        calls.append(tool)
+        # offload-arch answers nothing; amdgpu-arch names the device.
+        return [] if tool == "/selected/offload-arch" else ["gfx942"]
 
-    monkeypatch.setattr(Architectures, "_detectGlobalCurrentISA", detect)
+    monkeypatch.setattr(Architectures, "_fromEnumerator", ask)
+    monkeypatch.setattr(Architectures, "restore_steppings", lambda archs: archs)
 
     assert Architectures.detectGlobalCurrentISA(
         0,
         ("/selected/offload-arch", "/selected/amdgpu-arch"),
     ) == IsaVersion(9, 4, 2)
-    assert calls == [
-        ("/selected/offload-arch", 0),
-        ("/selected/amdgpu-arch", 0),
-    ]
+    assert calls == ["/selected/offload-arch", "/selected/amdgpu-arch"]
