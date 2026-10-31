@@ -1345,12 +1345,29 @@ int main(int argc, const char* argv[])
                                     }
                                 };
 
+                                // Whether this run iteration launched anything (for the
+                                // end-of-iteration attribution sync below).
+                                bool iterationLaunched = false;
+
                                 if(warmupInvocations > 0)
                                 {
                                     {
                                         ScopedTimer timer("warmup_runs");
                                         listeners.preWarmup();
                                         launchAll(&warmupStartEvents, &warmupStopEvents, 0);
+                                        iterationLaunched = true;
+                                    }
+
+                                    // Attribution only: wait for warmup 0 under its own timer, so
+                                    // the validators' readbacks do not absorb the kernel's runtime.
+                                    // Not done without instrumentation, to keep the launch/host
+                                    // overlap of production runs.
+                                    if(g_timingInstrumentationEnabled)
+                                    {
+                                        ScopedTimer timer("warmup_first_sync");
+                                        forEachDevice(devices, [](DeviceContext& ctx) {
+                                            HIP_CHECK_EXC(hipStreamSynchronize(ctx.stream));
+                                        });
                                     }
 
                                     {
@@ -1373,6 +1390,7 @@ int main(int argc, const char* argv[])
                                 listeners.preProfiler();
                                 rotateAndSelect();
                                 launchAll(&ProfilerStartEvents, &ProfilerStopEvents, 0);
+                                iterationLaunched = true;
                                 listeners.postProfiler();
 #endif
 
@@ -1411,6 +1429,7 @@ int main(int argc, const char* argv[])
                                                 {
                                                     rotateAndSelect();
                                                     launchAll(nullptr, nullptr, 0);
+                                                    iterationLaunched = true;
 
                                                     if(icacheFlush)
                                                     {
@@ -1437,6 +1456,20 @@ int main(int argc, const char* argv[])
                                         ScopedTimer postSyncsTimer("benchmark_post_syncs");
                                         listeners.postSyncs();
                                     }
+                                }
+
+                                // Attribution only: wait for everything this iteration queued
+                                // (e.g. warmups 1..N-1 with SyncsPerBenchmark: 0) under its own
+                                // timer. Otherwise the next solution's first blocking call (e.g.
+                                // its input reset or GPU readback validation) or an
+                                // end-of-iteration check would absorb it. Inside the try: a kernel
+                                // fault surfacing here takes the device-lost path below.
+                                if(g_timingInstrumentationEnabled && iterationLaunched)
+                                {
+                                    ScopedTimer timer("run_iteration_sync");
+                                    forEachDevice(devices, [](DeviceContext& ctx) {
+                                        HIP_CHECK_EXC(hipStreamSynchronize(ctx.stream));
+                                    });
                                 }
 
                                 if(useUserArgs)

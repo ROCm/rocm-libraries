@@ -228,6 +228,11 @@ TIMING_HIERARCHY = {
             "kernel_solving": {},
             "warmup_events_setup": {},
             "warmup_runs": {},
+            # Attribution syncs (timing instrumentation only): the wait for warmup 0 before the
+            # validators run, and the wait for everything a run iteration queued (e.g. warmups
+            # 1..N-1 with SyncsPerBenchmark: 0) at the end of the iteration.
+            "warmup_first_sync": {},
+            "run_iteration_sync": {},
             "benchmark_runs": {
                 "benchmark_pre_syncs": {},
                 "benchmark_events_setup": {},
@@ -332,6 +337,8 @@ CPP_PHASE_GROUPS = {
         "kernel_solving",
         "warmup_events_setup",
         "warmup_runs",
+        "warmup_first_sync",
+        "run_iteration_sync",
         "benchmark_runs",
         "post_solution",
         "post_problem",
@@ -426,6 +433,8 @@ PURPOSE_OF = {
     "kernel_solving": G_KERNEL,
     "warmup_events_setup": G_KERNEL,
     "warmup_runs": G_KERNEL,
+    "warmup_first_sync": G_KERNEL,
+    "run_iteration_sync": G_KERNEL,
     "benchmark_runs": G_KERNEL,
     "validate_warmups_listener.BenchmarkTimer": G_KERNEL,  # waits for the warmup kernel to finish
     # Everything else that happens around each solution / problem
