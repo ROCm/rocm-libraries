@@ -394,6 +394,15 @@ namespace TensileLite
             virtual void postSolution() override
             {
                 ScopedTimer timer("post_solution_log");
+                if(m_rowLevel > m_level)
+                {
+                    // The row is not printed at this log level: skip copying it. The header
+                    // is still written on the first solution, as readCurrentRow does.
+                    m_csvOutput.writeHeaderIfFirstRow();
+                    m_csvOutput.pop();
+                    return;
+                }
+
                 std::unordered_map<std::string, std::string> curRow;
                 m_csvOutput.readCurrentRow(curRow);
                 bool  validation    = !(curRow[ResultKey::Validation] == "FAILED"
