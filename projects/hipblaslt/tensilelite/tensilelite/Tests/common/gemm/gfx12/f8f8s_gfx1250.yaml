@@ -112,7 +112,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  1,  2,  1, 1]
-        - AssertFree0ElementMultiple: [2]
+        - AssertFree0ElementMultiple: [2, -1]
         - AssertFree1ElementMultiple: [1]
         - AssertSummationElementMultiple: [32]
         - GlobalReadVectorWidthA: [1]
@@ -152,6 +152,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [129, 129, 1, 129]
+          - Exact: [130, 129, 1, 129]
 
   #######################################
   # NT - standard
