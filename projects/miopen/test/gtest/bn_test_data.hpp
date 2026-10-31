@@ -275,6 +275,8 @@ private:
     {
         // -2.0 to 2.0
         input.generate(uniform_signed_initializer<XDataType>(2e-3 /*scale*/, 1000 /*range*/));
+        // Poison the output so an element the call leaves unwritten fails the compare.
+        std::fill(output.begin(), output.end(), std::numeric_limits<YDataType>::quiet_NaN());
     }
 
     void SetDirection() { direction = bn_config.Direction; }
@@ -476,8 +478,11 @@ private:
         savedInvVar.generate(
             uniform_signed_initializer<MeanVarDataType>(2e-3 /*scale*/, 1000 /*range*/));
 
-        std::fill(dScale.begin(), dScale.end(), 0.);
-        std::fill(dBias.begin(), dBias.end(), 0.);
+        // Poisoned like dx: the kernels assign dscale/dbias, they never accumulate into them.
+        std::fill(
+            dScale.begin(), dScale.end(), std::numeric_limits<DscaleDbiasDataType>::quiet_NaN());
+        std::fill(
+            dBias.begin(), dBias.end(), std::numeric_limits<DscaleDbiasDataType>::quiet_NaN());
 
         std::fill(dScale_ref.begin(), dScale_ref.end(), 0.);
         std::fill(dBias_ref.begin(), dBias_ref.end(), 0.);
@@ -620,7 +625,6 @@ private:
             uniform_signed_initializer<RunSaveDataType>(2e-3 /*scale*/, 1000 /*range*/));
         prevRunVariance.generate(
             uniform_signed_initializer<RunSaveDataType>(2e-3 /*scale*/, 1000 /*range*/));
-        // nextRunMean and nextRunVariance will be output buffers (don't need initialization)
 
         std::transform(saveMean.data.begin(),
                        saveMean.data.end(),
@@ -630,6 +634,11 @@ private:
                        saveVariance.data.end(),
                        saveVariance_ref.data.begin(),
                        [](float val) { return static_cast<AccDataType>(val); });
+        // The saved stats and the V3 next running stats are outputs: poison them so an
+        // element the call leaves unwritten fails the compare. The refs above are
+        // recomputed by the CPU reference.
+        for(auto* t : {&saveMean, &saveVariance, &nextRunMean, &nextRunVariance})
+            std::fill(t->begin(), t->end(), std::numeric_limits<RunSaveDataType>::quiet_NaN());
         std::transform(runMean.data.begin(),
                        runMean.data.end(),
                        runMean_ref.data.begin(),
@@ -651,8 +660,7 @@ private:
         // V3 API: write prev buffers to GPU
         prevRunMean_dev     = handle.Write(prevRunMean.data);
         prevRunVariance_dev = handle.Write(prevRunVariance.data);
-        // Allocate next buffers (output only, no need to initialize data)
-        nextRunMean_dev     = handle.Create<RunSaveDataType>(prevRunMean.data.size());
-        nextRunVariance_dev = handle.Create<RunSaveDataType>(prevRunVariance.data.size());
+        nextRunMean_dev     = handle.Write(nextRunMean.data);
+        nextRunVariance_dev = handle.Write(nextRunVariance.data);
     }
 };
