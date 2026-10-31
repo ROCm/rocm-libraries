@@ -2,6 +2,12 @@
 
 Full documentation for hipSPARSELt is available at [rocm.docs.amd.com/projects/hipSPARSELt](https://rocm.docs.amd.com/projects/hipSPARSELt/en/latest/index.html).
 
+## hipSPARSELt 0.2.10 for ROCm 10.2.0
+
+### Resolved issues
+
+* Fixed a compilation error when `hipsparselt.h` is included from C11 or C17 code.
+
 ## hipSPARSELt 0.2.9 for ROCm 7.14
 
 ### Added
