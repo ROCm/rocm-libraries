@@ -70,18 +70,54 @@ T symbol(void* library, const char* name)
 #endif
 }
 
-void* load(const std::string& path)
+#ifdef _WIN32
+std::string windows_error(DWORD code)
+{
+    wchar_t message[2048]{};
+    auto count = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                nullptr,
+                                code,
+                                0,
+                                message,
+                                2048,
+                                nullptr);
+    std::string result = "Windows error " + std::to_string(code);
+    if(count)
+    {
+        auto size = WideCharToMultiByte(CP_UTF8, 0, message, count, nullptr, 0, nullptr, nullptr);
+        if(size > 0)
+        {
+            std::string text(size, '\0');
+            if(WideCharToMultiByte(CP_UTF8, 0, message, count, text.data(), size, nullptr, nullptr))
+                result += ": " + text;
+        }
+    }
+    return result;
+}
+#endif
+
+void* load(const std::string& path, std::string& failure)
 {
 #ifdef _WIN32
     fs::path candidate = file_path(path);
-    if(candidate.has_parent_path())
-        return LoadLibraryExW(fs::absolute(candidate).c_str(),
-                              nullptr,
-                              LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-    return LoadLibraryW(candidate.c_str());
+    void* library
+        = candidate.has_parent_path()
+              ? LoadLibraryExW(fs::absolute(candidate).c_str(),
+                               nullptr,
+                               LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)
+              : LoadLibraryW(candidate.c_str());
+    if(!library)
+        failure = "Could not load COMGR '" + path + "': " + windows_error(GetLastError());
 #else
-    return dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    void* library = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if(!library)
+    {
+        const char* error = dlerror();
+        failure = "Could not load COMGR '" + path
+                  + "': " + (error ? error : "dynamic loader supplied no diagnostic");
+    }
 #endif
+    return library;
 }
 
 /* Query loaded-module provenance without opening or parsing version files. */
@@ -380,20 +416,25 @@ std::string discover_sdk_comgr()
 
 /* Check mapped files before dlopen/LoadLibrary. Distinct COMGR copies can bring
  * distinct LLVM command-line registries; RTLD_LOCAL does not isolate them. */
-bool compatible_with_mapped(const fs::path& candidate)
+bool compatible_with_mapped(const fs::path& candidate, std::string& failure)
 {
     std::vector<fs::path> mapped;
 #ifdef _WIN32
     HANDLE snapshot
         = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
     if(snapshot == INVALID_HANDLE_VALUE)
+    {
+        failure = "Cannot inspect mapped COMGR libraries: " + windows_error(GetLastError());
         return false;
+    }
     {
         MODULEENTRY32W entry{};
         entry.dwSize = sizeof(entry);
         if(!Module32FirstW(snapshot, &entry))
         {
+            const auto code = GetLastError();
             CloseHandle(snapshot);
+            failure = "Cannot inspect mapped COMGR libraries: " + windows_error(code);
             return false;
         }
         do
@@ -404,7 +445,10 @@ bool compatible_with_mapped(const fs::path& candidate)
         const auto status = GetLastError();
         CloseHandle(snapshot);
         if(status != ERROR_NO_MORE_FILES)
+        {
+            failure = "Cannot complete mapped COMGR inventory: " + windows_error(status);
             return false;
+        }
     }
 #else
 #ifdef __linux__
@@ -457,19 +501,28 @@ bool compatible_with_mapped(const fs::path& candidate)
 #ifdef __linux__
     for(const auto& module : modules)
         if(!module.found)
+        {
+            failure = "Mapped COMGR file identity could not be established";
             return false;
+        }
 #endif
 #endif
     for(const auto& path : mapped)
     {
         std::error_code error;
         if(!fs::equivalent(candidate, path, error) || error)
+        {
+            failure = "Selected COMGR '" + path_text(candidate) + "' differs from mapped COMGR '"
+                      + path_text(path) + "' or its file identity cannot be established";
+            if(error)
+                failure += " (filesystem error " + std::to_string(error.value()) + ")";
             return false;
+        }
     }
     return true;
 }
 
-void* load_comgr(std::string& requested)
+void* load_comgr(std::string& requested, std::string& failure)
 {
 #ifdef _WIN32
     const wchar_t* override = _wgetenv(L"ROCKE_COMGR_LIB");
@@ -479,13 +532,21 @@ void* load_comgr(std::string& requested)
     const char* override = std::getenv("ROCKE_COMGR_LIB");
     std::string candidate = override && *override ? override : discover_sdk_comgr();
 #endif
-    if(!candidate.empty() && compatible_with_mapped(file_path(candidate)))
+    if(candidate.empty())
     {
-        if(void* library = load(candidate))
-        {
-            requested = candidate;
-            return library;
-        }
+        failure = "no COMGR candidate was produced by the override or installed SDK";
+        return nullptr;
+    }
+    if(!compatible_with_mapped(file_path(candidate), failure))
+    {
+        if(failure.find(candidate) == std::string::npos)
+            failure = "Selected COMGR '" + candidate + "': " + failure;
+        return nullptr;
+    }
+    if(void* library = load(candidate, failure))
+    {
+        requested = candidate;
+        return library;
     }
     return nullptr;
 }
@@ -559,18 +620,19 @@ bool probe(void* library, unsigned* major, unsigned* minor, unsigned* patch)
     } while(line && *++line);
     return false;
 }
-const ckc::CompilerInfo* loaded_info()
+const ckc::CompilerInfo* loaded_info(std::string& failure)
 {
     static std::mutex mutex;
     // Retained for process lifetime, matching Python's lazy COMGR handle.
     static void* library = nullptr;
     static ckc::CompilerInfo info{};
-    static std::string requested, comgr_path, query_path;
+    static std::string requested, comgr_path, query_path, query_failure;
     static bool queried = false;
     std::lock_guard<std::mutex> lock(mutex);
+    failure.clear();
     // Retain success; a failed load may recover after library availability changes.
     if(!library)
-        library = load_comgr(requested);
+        library = load_comgr(requested, failure);
     if(!library)
         return nullptr;
     if(!queried)
@@ -600,8 +662,13 @@ const ckc::CompilerInfo* loaded_info()
         info.requested_comgr = requested.c_str();
         info.comgr_path = comgr_path.empty() ? nullptr : comgr_path.c_str();
         info.query_library_path = query_path.empty() ? nullptr : query_path.c_str();
+        if(!info.llvm_major)
+            query_failure = "Selected COMGR '" + requested
+                            + "' could not report a compiler version via LLVMGetVersion or COMGR "
+                              "preprocessing";
         queried = true;
     }
+    failure = query_failure;
     return &info;
 }
 } // namespace
@@ -610,11 +677,25 @@ const ckc::CompilerInfo* ckc::candidate_compiler_info()
 {
     try
     {
-        return loaded_info();
+        std::string ignored;
+        return loaded_info(ignored);
     }
     catch(const std::exception&)
     {
         // Candidate introspection is best-effort; the caller decides how to handle unavailable.
+        return nullptr;
+    }
+}
+
+const ckc::CompilerInfo* ckc::candidate_compiler_info(std::string& failure)
+{
+    try
+    {
+        return loaded_info(failure);
+    }
+    catch(const std::exception& error)
+    {
+        failure = error.what();
         return nullptr;
     }
 }

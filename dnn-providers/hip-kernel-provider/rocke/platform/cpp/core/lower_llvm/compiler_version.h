@@ -5,6 +5,8 @@
 #ifndef ROCKE_LOWER_LLVM_COMPILER_VERSION_H
 #define ROCKE_LOWER_LLVM_COMPILER_VERSION_H
 
+#include <string>
+
 namespace ckc
 {
 /* Compiler evidence from native AUTO candidate detection. All strings and the returned
@@ -28,6 +30,11 @@ struct CompilerInfo
  * Failed loads return NULL and may be retried by a later call.
  * Explicit emission flavors do not call this function automatically. */
 const CompilerInfo* candidate_compiler_info();
+
+/* Copy the diagnostic from this same locked attempt for required AUTO callers.
+ * No process-global last-error state is exposed; best-effort callers keep the
+ * no-argument function and its existing record/lifetime contract. */
+const CompilerInfo* candidate_compiler_info(std::string& failure);
 
 } // namespace ckc
 

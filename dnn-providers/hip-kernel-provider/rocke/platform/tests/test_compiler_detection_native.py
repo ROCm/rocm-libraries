@@ -146,6 +146,122 @@ def native_detector(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
+def native_diagnostics(native_detector):
+    include = PLATFORM / "cpp" / "include"
+    if not include.is_dir():
+        pytest.skip("public source headers are absent from installed tests")
+    root = native_detector.parent
+    source = root / "diagnostics.cpp"
+    source.write_text(
+        '#include "rocke/ir.h"\n#include "rocke/lower_llvm.h"\n'
+        "#include <cstdio>\n#include <cstdlib>\n"
+        "int main(int argc,char**argv){\n"
+        "auto flavor=static_cast<rocke_llvm_flavor_t>(argc>1?std::atoi(argv[1]):0);\n"
+        "for(int i=0;i<(argc>2?3:1);++i){\n"
+        'if(i==1)setenv("ROCKE_COMGR_LIB",argv[2],1);\n'
+        'if(i==2)setenv("ROCKE_COMGR_LIB","must-not-replace-retained-compiler.so",1);\n'
+        'rocke_ir_builder_t b{};if(rocke_ir_builder_init(&b,"diagnostic")!=ROCKE_OK)return 2;\n'
+        "char* text=nullptr;char error[4096]{};\n"
+        "auto status=rocke_lower_kernel_to_llvm_ex(rocke_ir_builder_kernel(&b),flavor,\n"
+        '"gfx950",&text,error,sizeof(error));\n'
+        'std::printf("ATTEMPT\\n%d\\n%s\\n",int(status),error);\n'
+        "std::free(text);rocke_ir_builder_free(&b);}\nreturn 0;}\n"
+    )
+    binary = root / "diagnostics"
+    subprocess.run(
+        [
+            "c++",
+            "-std=c++20",
+            "-I",
+            str(include),
+            str(source),
+            str(root / "librocke_core.a"),
+            "-ldl",
+            "-pthread",
+            "-o",
+            str(binary),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return binary
+
+
+@pytest.mark.parametrize(
+    "failure", ["no-candidate", "missing", "unloadable", "conflict", "unqueryable"]
+)
+def test_native_required_query_reports_failure(native_diagnostics, tmp_path, failure):
+    library = tmp_path / "selected" / "libamd_comgr.so.3"
+    env = automatic_env(tmp_path / "absent-sdk")
+    env.pop("PYTHONPATH", None)
+    if failure != "no-candidate":
+        env["ROCKE_COMGR_LIB"] = str(library)
+    if failure == "unloadable":
+        library.parent.mkdir()
+        library.write_text("not a library")
+    elif failure in ("conflict", "unqueryable"):
+        text = "void amd_comgr_get_version(void){}\n"
+        if failure == "conflict":
+            text += "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=23;*b=0;*c=1;}\n"
+        build_library(library.parent, text, library.name)
+    if failure == "conflict":
+        mapped = build_library(
+            tmp_path / "mapped", "void amd_comgr_get_version(void){}\n", library.name
+        )
+        env["LD_PRELOAD"] = str(mapped)
+    result = subprocess.run(
+        [str(native_diagnostics)], env=env, check=True, capture_output=True, text=True
+    )
+    section = result.stdout.split("ATTEMPT\n")[1].splitlines()
+    assert section[0] != "0"
+    message = "\n".join(section[1:])
+    assert "Cannot determine LLVM flavor" in message
+    if failure == "no-candidate":
+        assert "no COMGR candidate" in message
+    else:
+        assert str(library) in message
+        if failure == "conflict":
+            assert str(mapped) in message
+            assert "mapped COMGR" in message
+        elif failure == "unqueryable":
+            assert "compiler version" in message
+        else:
+            assert "load" in message
+
+
+def test_native_required_query_recovers_without_stale_error(
+    native_diagnostics, tmp_path
+):
+    library = build_library(
+        tmp_path / "valid",
+        "void amd_comgr_get_version(void){}\n"
+        "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=23;*b=0;*c=1;}\n",
+    )
+    missing = tmp_path / "missing.so"
+    env = automatic_env(tmp_path / "absent-sdk")
+    env["ROCKE_COMGR_LIB"] = str(missing)
+    result = subprocess.run(
+        [str(native_diagnostics), "0", str(library)],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    attempts = [part.strip() for part in result.stdout.split("ATTEMPT\n")[1:]]
+    assert str(missing) in attempts[0]
+    assert attempts[1:] == ["0", "0"]
+    offline = subprocess.run(
+        [str(native_diagnostics), "1"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert offline.stdout.split("ATTEMPT\n")[1].strip() == "0"
+
+
+@pytest.fixture(scope="module")
 def windows_detector(tmp_path_factory):
     if sys.platform != "win32":
         pytest.skip("Windows loader execution requires Windows")
