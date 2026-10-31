@@ -373,6 +373,7 @@ namespace TensileLite
                 ("best-solution",            po::value<bool>()->default_value(false), "Best solution benchmark mode")
 
                 ("results-file",             po::value<std::string>()->default_value("results.csv"), "File name to write results.")
+                ("no-results-file",          po::value<bool>()->default_value(false),                "Write no results file (results-file is ignored).")
                 ("log-file",                 po::value<std::string>(),                               "File name for output log.")
                 ("log-file-append",          po::value<bool>()->default_value(false),                "Append to log file.")
                 ("log-level",                po::value<LogLevel>()->default_value(LogLevel::Debug),  "Log level")
