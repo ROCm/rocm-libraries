@@ -24,6 +24,7 @@
 
 from ..Component import NotLocalFullTileElements
 from math import ceil
+from ..Common.Utilities import edgeStoreVectorWidthSupported
 
 class NotLocalFullTileElementsVALU(NotLocalFullTileElements):
     kernel = {"EnableMatrixInstruction": False}
@@ -72,6 +73,13 @@ class NotLocalFullTileElementsMFMA(NotLocalFullTileElements):
         # which is what makes the wider edge store safe.
         minStoreVectorWidth = 2 if (kernel["GlobalSplitUAlgorithm"] == "AtomicDest" and \
             (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1)) else 1
+        # Size0 % AF0EM == 0, so an edge vector that starts in bounds ends in
+        # bounds; keep the widest SVW/2^n that divides AF0EM.
+        if edgeStoreVectorWidthSupported(kernel):
+            edgeStoreVectorWidth = storeVectorWidth
+            while edgeStoreVectorWidth > 1 and kernel["AssertFree0ElementMultiple"] % edgeStoreVectorWidth != 0:
+                edgeStoreVectorWidth = int(edgeStoreVectorWidth / 2)
+            minStoreVectorWidth = max(minStoreVectorWidth, edgeStoreVectorWidth)
 
         # handle mfma 4x4 instruction
         matrixInstM  = kernel["MatrixInstM"] * kernel["MatrixInstBM"] if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstM"]

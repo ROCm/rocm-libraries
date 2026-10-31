@@ -669,9 +669,11 @@ validParameters = { # we need to make sure this matches develop
     # Store Optimizations:
     #  - Can vectorize stores in edge tiles.  Vector width can be up to AF0EM.
     #   (since C matrix is always coalesced in Free0 index direction and this assertion guarantees the index element multiple)
+    #    (gfx1250 MFMA, see edgeStoreVectorWidthSupported: edge VW = widest StoreVectorWidth/2^n dividing AF0EM)
     #
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertFree0ElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
+    # -1: auto, = StoreVectorWidth where wide edge stores are supported, else 1
+    "AssertFree0ElementMultiple": [-1, 1, 2, 4, 8, 16, 32, 64, 128, 256],
     # Kernel generator will assume that the FreeIndex[1] size is some multiple of the element size
     # and uses this to optimize the kernel.
     # FreeIndex[1] is usually letter "J"

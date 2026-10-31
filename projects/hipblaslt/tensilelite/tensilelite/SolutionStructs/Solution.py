@@ -92,7 +92,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
-from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
+from ..Common.Utilities import edgeStoreVectorWidthSupported, isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -2387,6 +2387,17 @@ class Solution(collections.abc.Mapping):
       # The amax workspace/counter indexes dense output tiles within one batch.
       # Publish the corresponding runtime predicate, including for explicit YAML.
       state["BatchSizeEqual"] = 1
+    if dcpAutoSkip is None and state.get("AssertFree0ElementMultiple", 1) == -1:
+      # AF0EM -1: StoreVectorWidth where wide edge stores are supported (else 1).
+      # SVW is only known after derivation, so derive a probe first; the logic
+      # then stores the numeric AF0EM and rebuilds the same kernel.
+      # Packed AtomicDest stores need an even AF0EM, also in the probe.
+      state["AssertFree0ElementMultiple"] = 2 if state["GlobalSplitUAlgorithm"] == "AtomicDest" else 1
+      if tuple(state["ISA"])[:2] == (12, 5) and not state["ProblemType"]["Sparse"]:
+        probe = copy.deepcopy(state)
+        Solution.assignDerivedParameters(probe, splitGSU, False, False, isaInfoMap, rocmVersion)
+        if probe.get("Valid", True) and probe.get("_VectorStore", 1) and edgeStoreVectorWidthSupported(probe):
+          state["AssertFree0ElementMultiple"] = max(1, probe["StoreVectorWidth"])
     if dcpAutoSkip is None:
       # Re-derive pair-dependent scalar state from pristine input on each retry.
       pristine = copy.deepcopy(state) if pgrAutoPairRequested(state) else None
