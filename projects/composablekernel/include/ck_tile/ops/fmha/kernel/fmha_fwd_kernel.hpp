@@ -7,6 +7,7 @@
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_fmha_lse_max_logits.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
 
 #include <string>
@@ -75,6 +76,23 @@ struct has_n0loop_flag<
 
 template <typename T>
 static inline constexpr bool is_n0loop_pipeline_v = has_n0loop_flag<T>::value;
+
+// A helper struct for detecting pipelines that store the max logits (max_logits_ptr)
+template <typename T, typename = void>
+struct has_store_max_logits_flag : std::false_type
+{
+};
+
+template <typename T>
+struct has_store_max_logits_flag<
+    T,
+    std::enable_if_t<std::is_convertible_v<decltype(T::kStoreMaxLogits), bool> &&
+                     T::kStoreMaxLogits>> : std::true_type
+{
+};
+
+template <typename T>
+static inline constexpr bool stores_max_logits_v = has_store_max_logits_flag<T>::value;
 
 // A helper struct for detecting ignore_fast_exp2 flag
 template <typename T, typename = void>
@@ -221,6 +239,7 @@ struct FmhaFwdKernel
     static constexpr bool kHasLogitsSoftCap = FmhaPipeline::kHasLogitsSoftCap;
     static constexpr auto BiasEnum          = FmhaPipeline::BiasEnum;
     static constexpr bool kStoreLSE         = FmhaPipeline::kStoreLSE;
+    static constexpr bool kStoreMaxLogits   = detail::stores_max_logits_v<FmhaPipeline>;
     static constexpr bool kHasDropout       = FmhaPipeline::kHasDropout;
     static constexpr auto QScaleEnum        = FmhaPipeline::Problem::QScaleEnum;
     static constexpr bool kSkipMinSeqlenQ   = FmhaPipeline::Problem::kSkipMinSeqlenQ;
@@ -231,6 +250,8 @@ struct FmhaFwdKernel
         detail::uses_tdm_affine_dram_path_v<FmhaPipeline>;
     static constexpr bool kUsesFixedSegmentedLdsArena =
         detail::uses_fixed_segmented_lds_arena_v<FmhaPipeline>;
+    static_assert(kStoreMaxLogits == FmhaPipeline::Problem::kStoreMaxLogits,
+                  "max logits are requested from a pipeline that does not store them");
 
     static constexpr std::string_view kPipelineName = FmhaPipeline::name;
 
@@ -445,6 +466,12 @@ struct FmhaFwdKernel
         ck_tile::index_t batch_stride_lse = 0;
     };
 
+    // optional fp32 per-row max logits, same layout and strides as the LSE
+    struct FmhaFwdMaxLogitsKargs
+    {
+        void* max_logits_ptr = nullptr;
+    };
+
     struct FmhaFwdDropoutSeedOffset
     {
         template <typename T>
@@ -526,7 +553,8 @@ struct FmhaFwdKernel
                                          FmhaFwdCommonPerHeadKargs,
                                          FmhaFwdEmptyKargs<3>>>>>,
           std::conditional_t<kHasDropout, FmhaFwdBatchModeDropoutKargs, FmhaFwdEmptyKargs<4>>,
-          std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>
+          std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>,
+          std::conditional_t<kStoreMaxLogits, FmhaFwdMaxLogitsKargs, FmhaFwdEmptyKargs<6>>
     {
         ck_tile::index_t batch_stride_q;
         ck_tile::index_t batch_stride_k;
@@ -562,7 +590,8 @@ struct FmhaFwdKernel
                                          FmhaFwdEmptyKargs<3>>>>>,
           std::conditional_t<kHasDropout, FmhaFwdCommonDropoutKargs, FmhaFwdEmptyKargs<4>>,
           std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>,
-          std::conditional_t<kSkipMinSeqlenQ, FmhaFwdSkipMinSeqlenQKargs, FmhaFwdEmptyKargs<6>>
+          std::conditional_t<kSkipMinSeqlenQ, FmhaFwdSkipMinSeqlenQKargs, FmhaFwdEmptyKargs<6>>,
+          std::conditional_t<kStoreMaxLogits, FmhaFwdMaxLogitsKargs, FmhaFwdEmptyKargs<7>>
     {
         const int32_t* seqstart_q_ptr;
         const int32_t* seqstart_k_ptr;
@@ -680,6 +709,7 @@ struct FmhaFwdKernel
                     {},               // placeholder for qscale
                     {},               // placeholder for dropout
                     {},               // placeholder for logits_soft_cap
+                    {},               // placeholder for max_logits
                     batch_stride_q,
                     batch_stride_k,
                     batch_stride_v,
@@ -1153,6 +1183,7 @@ struct FmhaFwdKernel
                     {},               // placeholder for dropout
                     {},               // placeholder for logits_soft_cap
                     {},               // placeholder for min_seqlen_q
+                    {},               // placeholder for max_logits
                     reinterpret_cast<const int32_t*>(seqstart_q_ptr),
                     reinterpret_cast<const int32_t*>(seqstart_k_ptr),
                     reinterpret_cast<const int32_t*>(seqlen_q_ptr),
@@ -1536,6 +1567,17 @@ struct FmhaFwdKernel
             {
                 if(kargs.sink_ptr != nullptr)
                     return false;
+            }
+        }
+
+        if constexpr(kStoreMaxLogits)
+        {
+            if(kargs.max_logits_ptr == nullptr)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    CK_TILE_ERROR(
+                        "FMHA fwd: this instance stores the max logits and needs max_logits_ptr.");
+                return false;
             }
         }
 
@@ -2351,7 +2393,23 @@ struct FmhaFwdKernel
                             lse_dram_naive, lse_dram_window_lengths, sequence<kPadSeqLenQ>{});
                     }();
 
-                    return make_tile_window(lse_dram, lse_dram_window_lengths, {i_m0});
+                    auto lse_window = make_tile_window(lse_dram, lse_dram_window_lengths, {i_m0});
+                    if constexpr(kStoreMaxLogits)
+                    {
+                        // the max logits have the LSE layout: the same window over max_logits_ptr
+                        auto max_logits_window = lse_window;
+                        max_logits_window.set_bottom_tensor_view_data_ptr(
+                            reinterpret_cast<LSEDataType*>(kargs.max_logits_ptr) +
+                            static_cast<long_index_t>(i_nhead_) * kargs.nhead_stride_lse +
+                            batch_offset_lse);
+                        return FmhaLseMaxLogitsWindow<decltype(lse_window),
+                                                      decltype(max_logits_window)>{
+                            lse_window, max_logits_window};
+                    }
+                    else
+                    {
+                        return lse_window;
+                    }
                 }
                 else
                 {
@@ -3453,7 +3511,23 @@ struct FmhaFwdKernel
                             lse_dram_naive, lse_dram_window_lengths, sequence<kPadSeqLenQ>{});
                     }();
 
-                    return make_tile_window(lse_dram, lse_dram_window_lengths, {i_m0});
+                    auto lse_window = make_tile_window(lse_dram, lse_dram_window_lengths, {i_m0});
+                    if constexpr(kStoreMaxLogits)
+                    {
+                        // the max logits have the LSE layout: the same window over max_logits_ptr
+                        auto max_logits_window = lse_window;
+                        max_logits_window.set_bottom_tensor_view_data_ptr(
+                            reinterpret_cast<LSEDataType*>(kargs.max_logits_ptr) +
+                            static_cast<long_index_t>(i_nhead_) * kargs.nhead_stride_lse +
+                            batch_offset_lse);
+                        return FmhaLseMaxLogitsWindow<decltype(lse_window),
+                                                      decltype(max_logits_window)>{
+                            lse_window, max_logits_window};
+                    }
+                    else
+                    {
+                        return lse_window;
+                    }
                 }
                 else
                 {
