@@ -21,7 +21,7 @@
 # SOFTWARE.
 #
 ################################################################################
-"""Guard common test YAMLs against accidental benchmark timing runs."""
+"""Guard common and custom test YAMLs against accidental benchmark timing runs."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,7 +33,7 @@ import yaml
 pytestmark = pytest.mark.unit
 
 _TESTS_DIR = Path(__file__).resolve().parent.parent
-_COMMON_DIR = _TESTS_DIR / "common"
+_SCANNED_DIRS = (_TESTS_DIR / "common", _TESTS_DIR / "custom")
 
 
 @dataclass(frozen=True)
@@ -117,11 +117,12 @@ _SYNCSPERBENCHMARK_OPT_OUT_PATHS = {
 }
 
 
-def _common_yaml_files():
+def _scanned_yaml_files():
     return sorted({
         path
+        for directory in _SCANNED_DIRS
         for pattern in ("*.yaml", "*.yml")
-        for path in _COMMON_DIR.rglob(pattern)
+        for path in directory.rglob(pattern)
     })
 
 
@@ -144,7 +145,7 @@ def _syncs_per_benchmark(path):
 
 
 def test_common_yaml_files_disable_benchmark_syncs():
-    """Common YAMLs should opt out of benchmark timing unless explicitly listed."""
+    """Common and custom YAMLs should opt out of benchmark timing unless explicitly listed."""
     stale_opt_outs = sorted(
         (
             opt_out
@@ -155,7 +156,7 @@ def test_common_yaml_files_disable_benchmark_syncs():
     )
     failures = []
 
-    for yaml_path in _common_yaml_files():
+    for yaml_path in _scanned_yaml_files():
         rel_path = _relative_to_tests(yaml_path)
         if rel_path in _SYNCSPERBENCHMARK_OPT_OUT_PATHS:
             continue
@@ -180,7 +181,7 @@ def test_common_yaml_files_disable_benchmark_syncs():
         if failures:
             message_parts.append(
                 "Expected GlobalParameters.SyncsPerBenchmark == 0 for all "
-                "common YAML files outside explicit opt-outs. Failing paths:\n"
+                "common/custom YAML files outside explicit opt-outs. Failing paths:\n"
                 + "\n".join(f"  - {failure}" for failure in failures)
             )
         pytest.fail("\n\n".join(message_parts))
