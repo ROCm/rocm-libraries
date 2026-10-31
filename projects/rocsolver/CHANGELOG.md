@@ -3,6 +3,23 @@
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
 
+## (Unreleased) rocSOLVER
+
+### Added
+
+* Equilibration of general and positive definite matrices
+    * GEEQU, GEEQUB, POEQU, POEQUB, LAQGE, LAQSY, LAQHE
+    * GEEQU_64, GEEQUB_64, POEQU_64, POEQUB_64, LAQGE_64, LAQSY_64, LAQHE_64
+
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+### Known issues
+### Upcoming changes
+
+
+
 ## rocSOLVER 3.38.0 for ROCm 10.2.0
 
 ### Added
