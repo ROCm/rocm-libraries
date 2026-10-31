@@ -1619,11 +1619,11 @@
     }),
     'AssertFree0ElementMultiple': dict({
       'head': list([
+        -1,
         1,
         2,
-        4,
       ]),
-      'len': 9,
+      'len': 10,
       'type': 'list',
     }),
     'AssertFree1ElementMultiple': dict({
