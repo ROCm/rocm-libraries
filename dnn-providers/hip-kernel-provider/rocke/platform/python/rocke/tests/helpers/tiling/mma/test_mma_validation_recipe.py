@@ -32,9 +32,9 @@ from rocke.helpers.tiling.transforms import mma_operand_layout_sound, mma_pair_k
 def _mma(shape=(32, 32, 16), atom=(16, 16, 16), **kw):
     return TileMma(
         shape,
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=atom),
         **kw,
@@ -60,9 +60,9 @@ def test_canonical_layouts_byte_identical_to_plan_accessors(shape, atom):
     # accessors differ from canonical_layouts by design.
     p = TileMmaPlan(
         shape,
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=atom),
     )
@@ -78,9 +78,9 @@ def test_canonical_layouts_matches_canonical_style_operands():
     # soundness gate would check default-style operands against a diverged reference and never notice.
     p = TileMmaPlan(
         (32, 32, 16),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)),
     )
@@ -158,7 +158,7 @@ def test_rejects_reorderable_k_misorder():
     mma = _mma(shape=(16, 16, 32))  # k_sub = 2 gives K register buckets to permute
     a_reordered = mma.a_desc.reorder_registers((1, 2, 0))
     m_sub, n_sub, _ = mma.subtiles
-    a_canon = mma.a_desc.layout
+    a_canon, b_canon, _ = canonical_layouts(mma.plan.traits, mma.subtiles)
     # Self-check the construction: A is still SOUND, and the pair is genuinely a reorder-fixable WARNING --
     # so this test cannot pass for the wrong reason if the layout math shifts.
     assert (
@@ -168,6 +168,8 @@ def test_rejects_reorderable_k_misorder():
         mma_pair_k_aligned(
             a_reordered.layout,
             mma.b_desc.layout,
+            a_canon=a_canon,
+            b_canon=b_canon,
             a_free_atoms=m_sub,
             b_free_atoms=n_sub,
         ).severity

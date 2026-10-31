@@ -24,6 +24,7 @@ whenever the pair has more than one. A lookup of a selectable integer pair witho
 
 from __future__ import annotations
 
+import functools
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -328,3 +329,14 @@ def load_backend_coverage(path: Path = DEFAULT_COVERAGE_PATH) -> BackendCoverage
     return BackendCoverage(
         llvm_flavor=flavor, entries=entries, ops_without_row=ops_without_row
     )
+
+
+@functools.cache
+def committed_backend_coverage() -> BackendCoverage:
+    """The committed record (``DEFAULT_COVERAGE_PATH``), loaded and validated once per process.
+
+    It is package data, fixed while rocke runs, and :meth:`TileMmaPlan.emit_op` reads it on every MMA
+    a kernel issues. Treat the result as read-only: every caller shares it.
+    :func:`load_backend_coverage` reads its path afresh on every call.
+    """
+    return load_backend_coverage()
