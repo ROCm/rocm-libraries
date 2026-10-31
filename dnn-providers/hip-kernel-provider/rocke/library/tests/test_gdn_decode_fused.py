@@ -21,6 +21,8 @@ from kernels.gfx950.gdn_decode import (
     is_valid_spec,
 )
 
+from ._gdn_decode_compile import compiled_scratch_bytes
+
 ARCH = "gfx950"
 
 
@@ -183,32 +185,9 @@ class TestFusedSignature(unittest.TestCase):
         self.assertEqual(n[-3:], ["batch_size", "og_stride", "norm_eps"])
 
 
-def _scratch_bytes(test: unittest.TestCase, spec: GdnDecodeSpec) -> int:
+def _scratch_bytes(spec: GdnDecodeSpec) -> int:
     """Compile through comgr (no GPU) and return the spilled scratch bytes."""
-    import tempfile
-    from pathlib import Path
-
-    try:
-        from rocke.analysis.isa import analyze_hsaco
-        from rocke.helpers.compile import compile_kernel
-    except Exception as e:  # pragma: no cover - env-dependent
-        test.skipTest(f"comgr toolchain unavailable: {e}")
-    try:
-        art = compile_kernel(
-            build_gdn_decode(spec, arch=ARCH), arch=ARCH, capture_ir_text=False
-        )
-    except ImportError as e:  # pragma: no cover - env-dependent
-        test.skipTest(f"comgr toolchain unavailable: {e}")
-    with tempfile.NamedTemporaryFile(suffix=".hsaco") as fh:
-        fh.write(bytes(art.hsaco))
-        fh.flush()
-        try:
-            scratch = analyze_hsaco(Path(fh.name)).resources.scratch_bytes
-        except (FileNotFoundError, RuntimeError) as e:  # pragma: no cover
-            test.skipTest(f"HSACO introspection tool unavailable: {e}")
-    if scratch is None:  # pragma: no cover - metadata shape drift
-        test.skipTest("could not parse the scratch size from the HSACO")
-    return scratch
+    return compiled_scratch_bytes(build_gdn_decode(spec, arch=ARCH), ARCH)
 
 
 _FLAGS = ((True, False), (False, True), (True, True))
@@ -273,21 +252,19 @@ class TestFusedEmission(unittest.TestCase):
                                     not conv and (nw, wtk) not in _NORM_ONLY_SPILL_TILES
                                 ):
                                     held += 1
-                                    self.assertEqual(_scratch_bytes(self, s), 0)
+                                    self.assertEqual(_scratch_bytes(s), 0)
         # 6 tiles x 12 modes, plus norm-only on the 11 other legal tiles.
         self.assertEqual(held, 6 * 12 + 11 * 4)
 
     def test_one_wave_conv_once_loads_first_without_a_new_spill(self):
-        """Where late_row_inputs lets single-wave fuse_conv load its rows'
-        state and norm inputs first (conv_once, WTK 4 / 8), the hoisted
-        kernel spills no more than the late order it replaces. Each spec turns
-        on every other knob the tile accepts (dpp_reduce, stream_rows,
-        xcd_remap, both hints, interleave_cols with an f32 state), in three
-        modes: conv only; conv + norm with the per-lane norm inputs; conv +
-        norm with out_lds and norm_gate_once. waves_per_eu stays 0: a floor
-        keeps the late order."""
-        from unittest import mock
-
+        """Where auto_late_row_inputs lets single-wave fuse_conv load its
+        rows' state and norm inputs first (conv_once, WTK 4 / 8), the hoisted
+        kernel spills no more than the late order it replaces
+        (``row_loads="late"``). Each spec turns on every other knob the tile
+        accepts (dpp_reduce, stream_rows, xcd_remap, both hints,
+        interleave_cols with an f32 state), in three modes: conv only; conv +
+        norm with the per-lane norm inputs; conv + norm with out_lds and
+        norm_gate_once. waves_per_eu stays 0: a floor keeps the late order."""
         from kernels.gfx950 import gdn_decode
 
         modes = (
@@ -317,15 +294,12 @@ class TestFusedEmission(unittest.TestCase):
                         with self.subTest(name=s.kernel_name()):
                             self.assertTrue(is_valid_spec(s, arch=ARCH)[0])
                             self.assertFalse(gdn_decode.late_row_inputs(s))
-                            hoisted = _scratch_bytes(self, s)
-                            hoisted_ops = _op_names(s)
-                            with mock.patch.object(
-                                gdn_decode, "late_row_inputs", lambda _: True
-                            ):
-                                late = _scratch_bytes(self, s)
-                                late_ops = _op_names(s)
-                            # the patch reached the emitter: the order moved
-                            self.assertNotEqual(hoisted_ops, late_ops)
+                            late_spec = dc.replace(s, row_loads="late")
+                            self.assertTrue(gdn_decode.late_row_inputs(late_spec))
+                            hoisted = _scratch_bytes(s)
+                            late = _scratch_bytes(late_spec)
+                            # the knob reached the emitter: the order moved
+                            self.assertNotEqual(_op_names(s), _op_names(late_spec))
                             self.assertLessEqual(hoisted, late)
 
     def test_unfused_kernel_has_no_lds_or_barrier(self):

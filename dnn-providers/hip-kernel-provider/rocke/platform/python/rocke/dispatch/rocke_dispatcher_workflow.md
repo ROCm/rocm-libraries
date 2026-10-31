@@ -200,6 +200,9 @@ outer-knob value, without re-running the checks above. For attention the outer
 knob is `waves_per_eu`, and the `_wpe{N}` part of the id shows its value.
 `KnobSpace` itself knows nothing about `waves_per_eu`; the shared
 `WavesPerEuSpace` subclass names it, and each family picks the values.
+A space can also name `outer_dependent_knobs` (GDN decode: `row_loads`), the
+knobs whose drop depends on the outer value; a knob set holding one goes
+through the drop step again at each outer value.
 
 ## 6. "Run it and tell me how fast it is" (benchmarks)
 

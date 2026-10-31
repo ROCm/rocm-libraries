@@ -435,6 +435,46 @@ class TestOuterKnob(unittest.TestCase):
         self.assertIn("takes int", why)
 
 
+class _OuterInertSpace(ToySpace):
+    """A drop rule that reads the outer knob: at the base's two waves per EU
+    the kernel unrolls by 4 anyway, so ``unroll=4`` restates it there only."""
+
+    outer_dependent_knobs = frozenset({"unroll"})
+
+    def inert(self, base, kernel):
+        inert = dict(super().inert(base, kernel))
+        if kernel.unroll == 4 and kernel.waves_per_eu == 2:
+            inert["unroll"] = "the policy at two waves per EU"
+        return inert
+
+
+class TestOuterDependentDrops(unittest.TestCase):
+    def test_a_knob_dropped_at_one_outer_value_is_listed_at_the_others(self):
+        candidate = _registry(_OuterInertSpace).get("toy_gfx950_tile64")
+        assert_tuning_contract(candidate, [ToyRequest(m=1024)])
+        space = _OuterInertSpace(
+            abi=ABI,
+            arch="gfx950",
+            path="toy",
+            variant_id="tile64",
+            candidate_name="toy_gfx950_tile64",
+        )
+        base = ToyKernel(m=1024, tile=64)
+        for level, outers in (("production", {4}), ("full", {1, 3, 4})):
+            specs = list(space.stream(base, level))
+            ids = [s.tuning_id for s in specs]
+            self.assertEqual(len(ids), len(set(ids)), level)
+            unrolled = {s.kernel.waves_per_eu for s in specs if s.kernel.unroll == 4}
+            self.assertEqual(unrolled, outers, level)
+            # Where it is dropped, the knob set is its unroll-less twin.
+            at_two = {s.tuning_id for s in specs if s.kernel.waves_per_eu == 2}
+            restated = space.canonicalize(base, {"unroll": 4, "waves_per_eu": 2})[0]
+            self.assertIn(restated.tuning_id, at_two, level)
+            self.assertEqual(restated.knobs, ())
+        pinned = space.canonicalize(base, {"unroll": 4, "waves_per_eu": 3})[0]
+        self.assertEqual(dict(pinned.knobs), {"unroll": 4, "waves_per_eu": 3})
+
+
 class _IgnoresKnobs(ToySpace):
     """A broken space: pinned knobs are silently ignored."""
 

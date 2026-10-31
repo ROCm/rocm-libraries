@@ -36,7 +36,7 @@ retune either decode mode or the GDN prefill path.
 | [`library/benchmarks/gfx950/gdn/decode_defaults_report.py`](../../../benchmarks/gfx950/gdn/decode_defaults_report.py) | From those rows, `auto` against the best per shape and per case, and an advisory proposal per case by the `AUTO_DEFAULTS` rule |
 | [`library/benchmarks/gfx950/gdn/decode_shapes.json`](../../../benchmarks/gfx950/gdn/decode_shapes.json) | The shape grid [`ALGORITHM.md` §4.6](ALGORITHM.md#46-registry-and-tile-selection) documents for each `AUTO_DEFAULTS` case (3 head geometries x 7 batches, 8 cases) |
 | [`ALGORITHM.md`](ALGORITHM.md) | Explain the gated delta rule, gate kinds, and GPU mapping |
-| [`CASE_STUDY.md`](CASE_STUDY.md) | Per-tile register, wave and scratch changes of the decode load-first order, per compiler, and the command that regenerates them |
+| [`CASE_STUDY.md`](CASE_STUDY.md) | Per-tile register, wave and scratch changes of the decode load-first order, per compiler, the spill snapshot of the forced `row_loads` order (§8), and the commands that regenerate them |
 | [`library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_gdn_decode.py) | Benchmark every legal GDN registry tile (base configuration) and the dispatcher `auto` configuration (its case's tile and knob stack) |
 | [`library/benchmarks/gfx950/gdn/benchmark_kda_decode.py`](../../../benchmarks/gfx950/gdn/benchmark_kda_decode.py) | Benchmark KDA fused/precomputed/simple variants from the dispatcher; optionally time every legal tile's base configuration and `auto` (`decode_table_sweep.py` stage 1) |
 | [`library/dispatch/gdn/gate_rules.py`](../../../dispatch/gdn/gate_rules.py), [`cli_args.py`](../../../dispatch/gdn/cli_args.py) | The torch-free rules the driver and every tool share: the fp32 pass test (`Gate`, `TOL`), the cold-memory copy-count arithmetic, `--batches` / `--rotate-mb` parsing, the NaN-safe maximum |
@@ -185,17 +185,28 @@ values = run_values(spec, inp, launcher_for(spec), 8)
 
 ### Performance knobs
 
-Ten spec fields change how the warp-tiled kernel computes, not what it
+Eleven spec fields change how the warp-tiled kernel computes, not what it
 computes (the two state hints and `waves_per_eu` also apply on the reference
 path): `state_load_hint`, `state_store_hint`, `dpp_reduce`, `xcd_remap`,
-`stream_rows`, `interleave_cols`, `conv_once`, `norm_gate_once`, `out_lds` and
-`waves_per_eu`. Every one defaults to the code the kernel emitted before it
-existed, so a default spec keeps its name and its IR. `auto` runs its case's
-knob stack (§4.6); a bare `spec_id` pin runs the tile with every knob at its
-default. Each registered tile's knob space holds them: every (tile x knob)
-configuration is listed by `dispatch_gdn_decode_all` (and each tile's base
-configuration by `dispatch_gdn_decode_bases`) and pinnable by its `spec_id`
-plus `tuning_knobs` and/or `tuning_id`. The sweep levels and pin rules are in
+`stream_rows`, `interleave_cols`, `conv_once`, `norm_gate_once`, `out_lds`,
+`waves_per_eu` and `row_loads`. Every one defaults to the code the kernel
+emitted before it existed, so a default spec keeps its name and its IR.
+`row_loads` (`"auto"`, `"first"`, `"late"`) forces where a single-wave
+`fuse_conv` kernel loads its rows' late inputs (§4.3, "One exception"); `auto`
+dispatch never sets it. `auto` runs its case's knob stack (§4.6); a bare
+`spec_id` pin runs the tile with every knob at its default. Each registered
+tile's knob space holds them: every (tile x knob) configuration is listed by
+`dispatch_gdn_decode_all` (and each tile's base configuration by
+`dispatch_gdn_decode_bases`) and pinnable by its `spec_id` plus `tuning_knobs`
+and/or `tuning_id`. On single-wave `fuse_conv` tiles each knob set at each
+`waves_per_eu` value is also listed in the `row_loads` order auto does not
+choose there. Adding `row_loads` changed every `config_key` and every result's
+`spec_hash`, `compile_key` and `selection_key` (`auto`'s included; its kernel
+name and IR are unchanged, so it costs one recompile): re-sweep a
+`tuning_id` recorded before it. A knob that changes no code on another shape
+(one that shape does not read, or a `row_loads` that restates auto's order
+there) is dropped from `tuning_knobs`; a stored `tuning_id` replays only where
+none of its knobs is dropped. The sweep levels and pin rules are in
 [`ALGORITHM.md` §4.6](ALGORITHM.md#46-registry-and-tile-selection); each knob's
 rules and the tiles where it changes code are in
 [§4.10](ALGORITHM.md#410-performance-knobs).

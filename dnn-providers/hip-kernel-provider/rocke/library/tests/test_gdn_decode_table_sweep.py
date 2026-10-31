@@ -626,6 +626,49 @@ def test_tuning_ids_the_walk_does_not_list_are_an_error(capsys):
     assert "typo_id" in capsys.readouterr().out
 
 
+def test_list_only_lists_both_row_load_orders_on_single_wave_fused_tiles(capsys):
+    """``row_loads``: a single-wave fuse_conv tile lists each knob set at each
+    waves_per_eu value in auto's order and in the other one ("late" with
+    conv_once at WTK 4 / 8 and no waves_per_eu floor, where auto loads first;
+    "first" everywhere else). Every other tile, and the plain mode, list one."""
+
+    def listed(*argv):
+        assert (
+            sweep.main(["--batches", "1", "--heads", "8/8", *argv, "--list-only"]) == 0
+        )
+        by_set: dict = {}
+        for line in capsys.readouterr().out.splitlines():
+            fields = line.split(maxsplit=3)
+            if len(fields) < 4 or not fields[0].isdigit():
+                continue
+            knobs = json.loads(fields[3].split("  <- auto")[0])
+            order = knobs.pop("row_loads", "auto")
+            key = (fields[1], tuple(sorted(knobs.items())))
+            by_set.setdefault(key, set()).add(order)
+        return by_set
+
+    fused = listed("--gate-kind", "kda", "--mode", "fused", "--state-dtype", "f32")
+    orders: dict = {}
+    for (spec_id, knobs), got in fused.items():
+        assert "auto" in got, (spec_id, knobs)
+        orders.setdefault(spec_id, set()).update(got)
+        if "_nw1_" not in f"_{spec_id}_":
+            assert got == {"auto"}, (spec_id, knobs)
+            continue
+        k = dict(knobs)
+        hoists = (
+            k.get("conv_once")
+            and k.get("waves_per_eu", 0) == 0
+            and spec_id in ("kda_nw1_wtk4_bpv1", "kda_nw1_wtk8_bpv1")
+        )
+        assert got == {"auto", "late" if hoists else "first"}, (spec_id, knobs)
+    assert orders["kda_nw1_wtk8_bpv1"] == {"auto", "first", "late"}
+    assert orders["kda_nw1_wtk16_bpv1"] == {"auto", "first"}
+    assert orders["kda_nw4_wtk8_bpv1"] == {"auto"}
+    plain = listed("--gate-kind", "kda", "--mode", "plain", "--state-dtype", "f32")
+    assert all(got == {"auto"} for got in plain.values())
+
+
 def test_a_stage_one_failure_fails_the_run_after_stage_two(monkeypatch, tmp_path):
     """A configuration that fails the gate in stage 1 is never re-timed, so the
     stage-2 rows alone are clean: the summary must still fail, in one process

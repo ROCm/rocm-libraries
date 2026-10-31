@@ -218,8 +218,8 @@ def _make_candidate(*, tile: Tuple[int, int, int], priority: int, gate_kind: str
         if wanted == "auto" or not req.tuning_knobs:
             return True, "ok"
         base = make_spec(req, tile)
+        # waves_per_eu stays in: auto's row_loads order depends on it.
         knobs = dict(req.tuning_knobs)
-        knobs.pop(space.outer_knob, None)
         if space.refuse(base, knobs):
             return True, "ok"  # resolution refuses the malformed value by name
         dropped = space.out_of_scope(base, knobs)
@@ -227,7 +227,8 @@ def _make_candidate(*, tile: Tuple[int, int, int], priority: int, gate_kind: str
             return True, "ok"
         return False, (
             f"stored tuning_id {wanted!r} was recorded with {list(dropped)}, "
-            f"which this request does not read on {spec_id} (out of scope "
+            f"which change no code on {spec_id} for this request (out of "
+            "scope here, or a row_loads that restates the order auto picks "
             "here), so the id names no configuration on this problem; pin the "
             "tuning_knobs alone (tuning_id 'auto') to carry them across shapes; "
             "no fallback was selected"
