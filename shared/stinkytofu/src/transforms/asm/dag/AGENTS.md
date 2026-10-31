@@ -19,7 +19,7 @@ falls through to the next.
 | --- | --- |
 | `decidePromote()` | Pure decision. The first rule in `kRules` that fires sets `promotedPhase_` and `promotedNode_`. Mutates no queue. |
 | Phase B | Issues the best WMMA if no veto holds it. Runs only when nothing is promoted. |
-| Phase C / D | `NonWmmaFill`: issues the promoted fill node, else the smallest pickable non-WMMA (C inside the WMMA window, D outside). |
+| Phase C+D | `NonWmmaFill`: issues the promoted fill node, else the smallest pickable non-WMMA, inside or outside the WMMA window. With nothing pickable inside a window, time advances to the oldest queued WMMA's end and the pick runs once more. |
 | Phase E | Forced WMMA: the most-ready WMMA, before barriers. |
 | Barrier | The only place a barrier issues: the promoted one, or the drain case. |
 | Phase G | Fallback: the least-blocked ready node, so the schedule always makes progress. |

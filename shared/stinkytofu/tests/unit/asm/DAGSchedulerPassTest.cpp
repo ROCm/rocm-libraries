@@ -2354,7 +2354,9 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchIssuesBatchSizeWmmasPerRefill)
     pfc.dagFeatures.wmmaBatchSize = 4;
     ctx.setPassFeatureConfig(pfc);
     pass->run(*func, ctx, am);
-    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WddWWWWWWWWWdWdWdddd");
+    // A credit wait is elapsed time and ages the credit queue, so the second load after it no
+    // longer waits and needs no refill WMMA in front of it.
+    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WddWWWWWWWWWddWWdddd");
 }
 
 TEST_F(DAGSchedulerPassTest, WmmaRefill_DynamicFillsToTarget) {
@@ -2372,7 +2374,9 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_DynamicFillsToTarget) {
     pfc.dagFeatures.wmmaRefillToCycles = 32;
     ctx.setPassFeatureConfig(pfc);
     pass->run(*func, ctx, am);
-    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WddWWWWWWWWWdWdWdddd");
+    // A credit wait is elapsed time and ages the credit queue, so the second load after it no
+    // longer waits and needs no refill WMMA in front of it.
+    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WddWWWWWWWWWddWWdddd");
 }
 
 // Even ds_load spread: the ds_loads follow the WMMAs instead of bursting at the start.
