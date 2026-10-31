@@ -1449,6 +1449,21 @@ class DgradConvSpec:
     # stay in its L2 (kernels/common/conv_m_band.py). Needs the XCD tile
     # order and the folded (stride-1) record. 0 = off. Tags ``mb<n>``.
     m_band: int = 0
+    # With tapk_xhalo (tapk_lds_ahead / xh_defer emitter, xh_a_k4, xh_epi 1):
+    # M-strided wave rows. Fragment mi's atom row r is tile pixel wave_m0 +
+    # mfmas_per_warp_m * r + mi (instead of wave_m0 + mi * atom_m + r), so
+    # tap x of fragment mi >= 1 reads exactly tap x-1 of fragment mi-1 (the
+    # same registers, no LDS read): per k atom mfmas_m + X - 1 A fragment
+    # reads instead of X * mfmas_m. (Exact because pW == 0, stride and
+    # dilation 1 give Wi - Wo == X - 1: the pixel before a dX row's first
+    # pixel is loaded as zero.) The ak4 slab rows are stored at row ^ ((row
+    # >> 4) & (mfmas_m - 1)) so the strided 16-lane reads stay
+    # conflict-free; the epilogue maps the C rows back. Default False; tags
+    # ``xsm``.
+    xh_stride_m: bool = False
+    # Keep the MFMA accumulators in arch VGPRs (LLVM "amdgpu-agpr-alloc"=
+    # "0,0"). Default False; tags ``nag``.
+    no_agpr: bool = False
     # cshuffle epilogue: stage C through LDS in ``cshuffle_m_chunks`` row
     # slabs (tile_m / m_chunks rows each), so the C staging buffer no longer
     # sets the kernel's LDS (and occupancy). Default 1; tags ``mch<n>``.
@@ -2038,6 +2053,8 @@ class DgradConvSpec:
                 f"xfa{self.xh_fast_a}": self.xh_fast_a > 0,
                 f"xep{self.xh_epi}": self.xh_epi > 0,
                 f"xhp{self.xh_persist}": self.xh_persist > 0,
+                "xsm": self.xh_stride_m,
+                "nag": self.no_agpr,
                 # The launch-order tile walk (A/B knob, see xcd_tile_order).
                 "noxcd": not self.xcd_tile_order,
                 # The dY halo K loop and its knobs (see dy_halo).
@@ -2392,16 +2409,29 @@ def _tapk_pingpong_conflict(spec: DgradConvSpec) -> str:
     ):
         # (groups == 1 is a launch rule: identity_supports_problem.)
         return "tapk_pp_persist is 0/1 and needs tapk_pingpong 4/5, split_k 1 and stride 1"
-    if spec.tapk_ztrim not in (0, 1) or (
+    if spec.tapk_ztrim not in (0, 1, 2) or (
+        spec.tapk_ztrim == 2 and (spec.tapk_pingpong or not spec.tapk_xhalo)
+    ) or (
         spec.tapk_ztrim
         and not (
-            spec.tapk_pingpong >= 4
+            (
+                spec.tapk_pingpong >= 4
+                or (
+                    spec.tapk_xhalo
+                    and spec.tapk_prefetch in (1, 3)
+                    and not spec.tapk_pingpong
+                    and not spec.xh_persist
+                )
+            )
             and spec.split_k == 1
             and spec.problem.is_3d
             and not spec.tapk_pp_persist
         )
     ):
-        return "tapk_ztrim is 0/1 and needs tapk_pingpong 4/5, split_k 1, no tapk_pp_persist and a 3-D problem"
+        return (
+            "tapk_ztrim is 0..2 and needs tapk_pingpong 4/5 or the x-halo prefetch loop (tapk_prefetch "
+            "1/3, no xh_persist; 2: x-halo only), split_k 1, no tapk_pp_persist and a 3-D problem"
+        )
     if spec.tapk_pp_xhalo == 4 and not (
         spec.warp_tile_m == 16
         and spec.warp_tile_n == 16
@@ -2894,7 +2924,10 @@ def _xhalo_knob_conflict(spec: DgradConvSpec) -> str:
         and not (spec.tapk_xhalo and spec.split_k == 1 and spec.folds_sub_gemm_record)
     ):
         return "xh_persist is 0..2 and needs tapk_xhalo, split_k 1 and stride 1"
-    if spec.xh_epi not in (0, 1, 2) or (
+    if spec.xh_epi not in (0, 1, 2, 3) or (
+        spec.xh_epi == 3
+        and not ((spec.warp_tile_m, spec.warp_tile_n) == (16, 16) and spec.mfmas_per_warp_n % 2 == 0)
+    ) or (
         spec.xh_epi
         and not (
             spec.tapk_xhalo
@@ -2911,8 +2944,9 @@ def _xhalo_knob_conflict(spec: DgradConvSpec) -> str:
         )
     ):
         return (
-            "xh_epi is 0..2 and needs tapk_xhalo, the cshuffle epilogue, split_k 1, bf16, "
-            "16x16 / 32x32 atoms and a C slab of whole 8-wide vectors per thread"
+            "xh_epi is 0..3 and needs tapk_xhalo, the cshuffle epilogue, split_k 1, bf16, "
+            "16x16 / 32x32 atoms and a C slab of whole 8-wide vectors per thread "
+            "(3: 16x16 atoms and an even number of MFMAs per wave along N)"
         )
     if spec.tapk_ilv < 0 or (
         spec.tapk_ilv and not (spec.tapk_xhalo and spec.tapk_prefetch in (1, 3))
@@ -3012,6 +3046,18 @@ def _xhalo_knob_conflict(spec: DgradConvSpec) -> str:
         # the persistent / stream-K grids walk the tiles themselves.)
         return ("m_band needs xcd_remap, split_k 1 and the folded (stride-1) record "
                 "(not with tapk_pp_persist / xh_persist / pp_boxes / pp_streamk)")
+    if spec.xh_stride_m and not (
+            spec.tapk_xhalo and spec.tapk_prefetch in (1, 3)
+            and (spec.tapk_lds_ahead or spec.xh_defer)
+            and spec.xh_a_k4 and spec.xh_epi in (1, 3) and spec.tapk_setprio != 2
+            and spec.split_k == 1 and not spec.xh_persist
+            and spec.mfmas_per_warp_m in (2, 4, 8)
+            and spec.tile_m % (16 * spec.mfmas_per_warp_m) == 0
+            and spec.xhalo_lds_rows - spec.tile_m <= 16
+            and spec.wave_size == 64 and not spec.lds_k_outer):
+        return ("xh_stride_m needs tapk_xhalo (tpf 1/3, tapk_lds_ahead or xh_defer, xh_a_k4, "
+                "xh_epi 1 or 3, not setprio 2 / xh_persist), split_k 1, 2, 4 or 8 MFMAs "
+                "per wave along M, tile_m a multiple of 16 * that")
     mc = spec.cshuffle_m_chunks
     if mc != 1:
         if mc < 1 or spec.epilogue != "cshuffle" or (
@@ -3552,6 +3598,8 @@ def _build_tilde_dgrad(
     b = IRBuilder(spec.kernel_name())
     if spec.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
+    if spec.no_agpr:
+        b.kernel.attrs["agpr_alloc"] = "0,0"
 
     # split_k>1 uses atomic_add; tilde split_k=1 uses direct store — both allow writeonly.
     _dx_writeonly = spec.split_k <= 1 and not spec.needs_atomic
@@ -4060,6 +4108,18 @@ def _build_tilde_dgrad(
         """xh_swz for the B tiles (unswizzled when they are padded)."""
         return col if spec.xh_b_kpad else xh_swz(b_, row, col)
 
+    _xsm = bool(spec.xh_stride_m)
+
+    def _ak4_row(b_: IRBuilder, row: Value) -> Value:
+        """xh_stride_m: the slab row of A row ``row`` (row ^ ((row >> 4) &
+        (mfmas_m - 1)): a 16-lane read of mfmas_m-strided rows then covers 16
+        distinct 8-byte slots of the 128-byte bank window at any offset)."""
+        if not _xsm:
+            return row
+        return b_.xor(
+            row, b_.land(b_.lshr(row, b_.const_i32(4)), b_.const_i32(mfmas_m - 1))
+        )
+
     def xh_a_read(b_: IRBuilder, smem: Value, row: Value, col: Value, n: int):
         """One A fragment read (``n`` elements of row ``row`` from column
         ``col``) in the x-halo A layout (lds_xor swizzle or xh_a_k4 slabs)."""
@@ -4067,7 +4127,7 @@ def _build_tilde_dgrad(
             if n != 4:
                 raise ValueError("xh_a_k4: A fragments of 4 elements only")
             k0 = b_.lshr(col, b_.const_i32(2))
-            r = b_.add(b_.mul(k0, b_.const_i32(_ak4_mp)), row)
+            r = b_.add(b_.mul(k0, b_.const_i32(_ak4_mp)), _ak4_row(b_, row))
             return _emit_smem_load(b_, smem, r, b_.const_i32(0), n, smem_dtype=_smem_dtype)
         return _emit_smem_load(b_, smem, row, xh_swz(b_, row, col), n, smem_dtype=_smem_dtype)
 
@@ -4080,6 +4140,7 @@ def _build_tilde_dgrad(
                 raise ValueError("xh_a_k4: A load width must be a multiple of 4")
             c_mp = b.const_i32(_ak4_mp)
             for row, col, v in staged:
+                row = _ak4_row(b, row)
                 k0 = b.lshr(col, b.const_i32(2))
                 for j in range(vec // 4):
                     kj = b.add(k0, b.const_i32(j)) if j else k0
@@ -4636,11 +4697,16 @@ def _build_tilde_dgrad(
         k_blk = decoded.k_blk
         warp_m_off = grid.warp_m_off(b)
         warp_n_off = grid.warp_n_off(b)
-        steps = [(ph, kk) for ph in phases for kk in range(k_atoms)]
+        steps = [(xi, ph, kk) for xi, ph in enumerate(phases) for kk in range(k_atoms)]
         a_row_cache: dict = {}
+        # xh_stride_m: the A fragments read so far, by (tap, kk, mi); the
+        # phases are the X taps in order.
+        a_frag_cache: dict = {}
+        if _xsm:
+            _xsm_base = b.add(warp_m_off, b.mul(m_in_atom, b.const_i32(mfmas_m)))
 
         def reads(step):
-            ph, kk = step
+            xi, ph, kk = step
             A_src, B_src, a_row_map = ph[:3]
             b_off = ph[3] if len(ph) > 3 else 0
             col_base = b.add(
@@ -4649,18 +4715,28 @@ def _build_tilde_dgrad(
             )
             a_rows = []
             for mi in range(mfmas_m):
+                if _xsm and xi > 0 and mi > 0:
+                    # Tap x of row wave_m0 + S*r + mi = tap x-1 of mi-1.
+                    a_rows.append(a_frag_cache[(xi - 1, kk, mi - 1)])
+                    a_frag_cache[(xi, kk, mi)] = a_rows[-1]
+                    continue
                 key = (id(a_row_map), mi)
                 if key not in a_row_cache:
-                    a_row = b.add(
-                        warp_m_off,
-                        b.add(b.const_i32(mi * spec.warp_tile_m), m_in_atom),
-                    )
+                    if _xsm:
+                        a_row = b.add(_xsm_base, b.const_i32(mi)) if mi else _xsm_base
+                    else:
+                        a_row = b.add(
+                            warp_m_off,
+                            b.add(b.const_i32(mi * spec.warp_tile_m), m_in_atom),
+                        )
                     if a_row_map is not None:
                         a_row = a_row_map(a_row)
                     a_row_cache[key] = a_row
                 a_rows.append(
                     xh_a_read(b, A_src, a_row_cache[key], col_base, a_per_lane)
                 )
+                if _xsm:
+                    a_frag_cache[(xi, kk, mi)] = a_rows[-1]
             b_cols = []
             for ni in range(mfmas_n):
                 b_row = b.add(
@@ -5673,6 +5749,30 @@ def _build_tilde_dgrad(
         same = b.cmp_eq(n0, n1)
         lo = b.select(same, lo, c0)
         hi = b.select(same, hi, zmax)
+        cnt = b.smax(b.add(b.sub(hi, lo), c1_), c0)
+        return b.readfirstlane(lo), b.readfirstlane(cnt)
+
+    def _ytrim_range():
+        """``tapk_ztrim`` 2 (x-halo): ``(y_lo, y_count)`` of the y taps the
+        tile's rows can use (uniform). Rows m0 .. m1 decode to dX rows h0 ..
+        h1 of one (image, plane) q; tap y is valid for row h iff 0 <= h + pH
+        - y < Ho (stride / dilation 1), so the union is [h0 + pH - Ho + 1,
+        h1 + pH] clamped to [0, Y). A tile spanning two planes keeps every
+        y."""
+        m0 = block_m_off_v
+        m1 = b.smin(b.add(m0, b.const_i32(block_m - 1)), b.sub(p_dg_M, b.const_i32(1)))
+        q0, r0 = _magic_divmod(b, m0, hw_div)
+        q1, r1 = _magic_divmod(b, m1, hw_div)
+        h0, _ = _magic_divmod(b, r0, w_div)
+        h1, _ = _magic_divmod(b, r1, w_div)
+        c1_ = b.const_i32(1)
+        ymax = b.sub(c_Y, c1_)
+        p_pH_ = params["p_pH"]
+        lo = b.smax(b.add(b.sub(b.add(h0, p_pH_), c_Ho), c1_), c0)
+        hi = b.smin(b.add(h1, p_pH_), ymax)
+        same = b.cmp_eq(q0, q1)
+        lo = b.select(same, lo, c0)
+        hi = b.select(same, hi, ymax)
         cnt = b.smax(b.add(b.sub(hi, lo), c1_), c0)
         return b.readfirstlane(lo), b.readfirstlane(cnt)
 
@@ -7329,6 +7429,11 @@ def _build_tilde_dgrad(
         c_zy = b.mul(p_Z, c_Y) if is_3d else c_Y
         c_yxc = b.mul(c_taps, c_cs)
         n_tiles = b.mul(c_zy, b.div(c_kd, c_block_k))
+        # tapk_ztrim 2: the y taps some row of the tile can use too.
+        y_lo = y_end = None
+        if spec.tapk_ztrim == 2:
+            y_lo, y_cnt = _ytrim_range()
+            y_end = b.add(y_lo, y_cnt)
         if spec.xh_b_wide:
             # xh_b_wide: the X taps' B tiles as one stacked unit space.
             xh_wide_loader = XTapKPackLoader(
@@ -7372,8 +7477,12 @@ def _build_tilde_dgrad(
             ny = b.add(yd, b.select(wrap_k, c1, c0))
             if not is_3d:
                 return nk, ny, None
-            wrap_y = b.cmp_ge(ny, c_Y)
-            ny = b.select(wrap_y, c0, ny)
+            if y_lo is not None:
+                wrap_y = b.cmp_ge(ny, y_end)
+                ny = b.select(wrap_y, y_lo, ny)
+            else:
+                wrap_y = b.cmp_ge(ny, c_Y)
+                ny = b.select(wrap_y, c0, ny)
             nz = b.add(zd, b.select(wrap_y, c1, c0))
             return nk, ny, nz
 
@@ -7452,6 +7561,14 @@ def _build_tilde_dgrad(
         st_names = ["xp_kb", "xp_y", "xp_z"][:n_st]
         n_acc = len(accs)
         s0 = (c0, c0, c0 if is_3d else None)
+        if spec.tapk_ztrim:
+            # tapk_ztrim: only the z taps some row of the tile can use.
+            z_lo, z_cnt = _ztrim_range()
+            s0 = (c0, c0, z_lo)
+            n_tiles = b.mul(b.mul(z_cnt, c_Y), b.div(c_kd, c_block_k))
+            if y_lo is not None:
+                s0 = (c0, y_lo, z_lo)
+                n_tiles = b.mul(b.mul(z_cnt, y_cnt), b.div(c_kd, c_block_k))
         if spec.split_k > 1:
             # Split-K: slice z takes tiles [t0, t0 + per) of the flat
             # (z, y, chunk) order; whole tiles, so a slice never starts mid-tap.
@@ -7543,17 +7660,25 @@ def _build_tilde_dgrad(
                 per_step = spec.mfmas_per_warp_m * spec.mfmas_per_warp_n
                 n_steps = XB * spec.k_atoms_per_tile_k
                 reads = spec.mfmas_per_warp_m + spec.mfmas_per_warp_n
+
+                def _rd(s_):
+                    # DS reads of step s_ (xh_stride_m: taps x > 0 read one
+                    # A fragment per k atom).
+                    if spec.xh_stride_m and s_ >= spec.k_atoms_per_tile_k:
+                        return 1 + spec.mfmas_per_warp_n
+                    return reads
+
                 if not ilv:
                     b.sched_group_barrier(_SG_VMEM_READ, n_vmem, 0)
                     n_vmem = 0
-                b.sched_group_barrier(_SG_DS_READ, reads, 0)
+                b.sched_group_barrier(_SG_DS_READ, _rd(0), 0)
                 left_vmem = n_vmem
                 n_pre = n_steps - spec.xh_defer
                 for s_i in range(n_pre):
-                    left_ds = reads if s_i + 1 < n_steps else 0
+                    left_ds = _rd(s_i + 1) if s_i + 1 < n_steps else 0
                     if spec.xh_defer and s_i == n_pre - 1:
                         # xh_defer: the deferred steps' reads too.
-                        left_ds = reads * (n_steps - 1 - s_i)
+                        left_ds = sum(_rd(t) for t in range(s_i + 1, n_steps))
                     for j in range(per_step):
                         b.sched_group_barrier(_SG_MFMA, 1, 0)
                         if left_ds > 0:
@@ -7883,7 +8008,7 @@ def _build_tilde_dgrad(
             zk0 = b.mod(tid, b.const_i32(block_k // 4))
             b.smem_store_vN(
                 A_smem,
-                [b.add(b.mul(zk0, b.const_i32(_ak4_mp)), c_zero_row), c0],
+                [b.add(b.mul(zk0, b.const_i32(_ak4_mp)), _ak4_row(b, c_zero_row)), c0],
                 b.zero_vec(ir_dtype_a, 4),
                 4,
             )
@@ -8674,6 +8799,61 @@ def _emit_xh_cshuffle_epilogue(
 
     dx_addr, bounds = _dgrad_stride1_dx_addr(b, spec, params, c_group_base)
     atom = spec.atom
+    if spec.xh_epi == 3:
+        # Direct, 16-byte stores: lanes l and l ^ 16 hold 4-channel groups g
+        # and g ^ 1 of the same pixel; each pair of N fragments (2j, 2j+1)
+        # is exchanged (ds_swizzle xor 16) so the even-group lane holds 8
+        # consecutive channels of fragment 2j and the odd-group lane 8 of
+        # fragment 2j+1 -- one 16-byte buffer store each, no LDS staging.
+        from rocke.core.ir import I32 as _I32, VectorType as _VT
+
+        mfmas_m, mfmas_n = spec.mfmas_per_warp_m, spec.mfmas_per_warp_n
+        lane = grid.lane
+        r_l = b.land(lane, b.const_i32(15))
+        g_v = b.lshr(lane, b.const_i32(4))
+        odd_v = b.land(g_v, b.const_i32(1))
+        is_odd = b.cmp_ne(odd_v, b.const_i32(0))
+        n_l = b.add(b.shl(odd_v, b.const_i32(4)), b.shl(b.land(g_v, b.const_i32(2)), b.const_i32(2)))
+        wm = grid.warp_m_off(b)
+        n_base = b.add(grid.block_n_off, b.add(grid.warp_n_off(b), n_l))
+        c_eb2 = b.const_i32(2)
+        oob2 = b.const_i32((1 << 31) - 1)
+        c1 = b.const_i32(1)
+        c16 = b.const_i32(16)
+        bias = b.const_i32(0x7FFF)
+
+        def _words(acc):
+            his = []
+            for j in range(4):
+                xi = b.bitcast(b.vec_extract(acc, j), _I32)
+                lsb = b.land(b.lshr(xi, c16), c1)
+                his.append(b.lshr(b.add(b.add(xi, bias), lsb), c16))
+            return [b.lor(his[2 * k], b.shl(his[2 * k + 1], c16)) for k in range(2)]
+
+        for mi in range(mfmas_m):
+            if spec.xh_stride_m:
+                # fragment mi, atom row r = pixel S * r + mi of the wave
+                row = b.add(b.mul(r_l, b.const_i32(mfmas_m)), b.const_i32(mi))
+            else:
+                row = b.add(b.const_i32(mi * 16), r_l)
+            m_val = b.add(grid.block_m_off, b.add(wm, row))
+            for jp in range(mfmas_n // 2):
+                w0 = _words(accs[mi * mfmas_n + 2 * jp])
+                w1 = _words(accs[mi * mfmas_n + 2 * jp + 1])
+                rc = [b.ds_swizzle_xor(b.select(is_odd, w0[k], w1[k]), 16) for k in range(2)]
+                out = [b.select(is_odd, rc[k], w0[k]) for k in range(2)] + [
+                    b.select(is_odd, w1[k], rc[k]) for k in range(2)
+                ]
+                v = b.vec_bitcast(b.vec_pack(out, _I32), _VT(BF16, 8))
+                n_val = b.add(n_base, b.const_i32(32 * jp))
+                ok = DirectEpilogue._bounds_check(b, m_val, n_val, bounds, vec_n=8)
+                off_elems, valid = dx_addr(b, m_val, n_val)
+                if valid is not None:
+                    ok = valid if ok is None else b.land(ok, valid)
+                off_b = b.mul(off_elems, c_eb2)
+                safe = b.select(ok, off_b, oob2) if ok is not None else off_b
+                b.buffer_store_vN_bf16(dx_rsrc, safe, b.const_i32(0), v, 4)
+        return
     if spec.xh_epi == 2:
         # Direct: each 4-channel group is 8 contiguous bytes of one pixel.
         am_, an_ = atom.m, atom.n
@@ -8750,7 +8930,16 @@ def _emit_xh_cshuffle_epilogue(
             col = b.mul(b.sub(vec_idx, b.mul(row, c_tnv)), b.const_i32(sv))
             w = b.div(row, c_slab)
             r_in = b.sub(row, b.mul(w, c_slab))
-            g_row = b.add(b.add(b.mul(w, c_wrows), b.const_i32(c * cm * am)), r_in)
+            if spec.xh_stride_m:
+                # Staging row mi_l * am + r holds pixel S * r + mi of the wave.
+                mi_l_v = b.lshr(r_in, b.const_i32(am.bit_length() - 1))
+                r_v = b.land(r_in, b.const_i32(am - 1))
+                mi_v = b.add(mi_l_v, b.const_i32(c * cm)) if c * cm else mi_l_v
+                g_row = b.add(
+                    b.mul(w, c_wrows), b.add(b.mul(r_v, b.const_i32(mfmas_m)), mi_v)
+                )
+            else:
+                g_row = b.add(b.add(b.mul(w, c_wrows), b.const_i32(c * cm * am)), r_in)
             m_val = b.add(grid.block_m_off, g_row)
             n_val = b.add(grid.block_n_off, col)
             ok = DirectEpilogue._bounds_check(b, m_val, n_val, bounds, vec_n=sv)

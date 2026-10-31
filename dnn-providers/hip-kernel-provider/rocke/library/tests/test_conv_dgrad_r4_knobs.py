@@ -127,7 +127,7 @@ class TestR4Knobs(unittest.TestCase):
             _xh(xh_fast_a=1, xhalo_exact=False),
             _xh(xh_fast_a=3),
             _xh(xh_epi=1, epilogue="default"),
-            _xh(xh_epi=3),
+            _xh(xh_epi=4),
             _xh(xh_persist=3),
         ]
         for s in bad:
