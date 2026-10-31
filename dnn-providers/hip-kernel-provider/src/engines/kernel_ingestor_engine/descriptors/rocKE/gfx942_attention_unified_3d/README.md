@@ -10,17 +10,20 @@ partials into the workspace and `reduce` combines them. Both launches share one 
 ## Coverage
 
 - Architecture: gfx942 only.
-- Variants: 2,192 in 138 cells (all `kind = rocke`, two launches each, compiled at pack
+- Variants: 4,566 in 138 cells (all `kind = rocke`, two launches each, compiled at pack
   time). A cell is (dtype, head_size, query heads, KV heads): 23 head pairs per head size.
-  2,192 exceeds the selection's 1000-kernel AOT budget (`aot_budget_per_arch`), so
+  4,566 exceeds the selection's 1000-kernel AOT budget (`aot_budget_per_arch`), so
   `generate.py` and `registry_enumerator.py` print a warning (an error only under `--strict`).
 - dtype: bf16, fp16.
 - head_size: 64, 128, 256.
 - Query heads 1 to 128 and KV heads 1 to 64, varying per cell.
 - block_size: 16, 32, 64. tile_size_override follows from (head_size, block_size): 16, 32, 64.
-- num_segments: 2 to 128 (15 values), varying per cell.
+- num_segments: 2 to 128 (16 values), varying per cell.
+- kv_cache_policy: `stream` or `all`, both shipped where rocKE picks them (it picks
+  `stream` when a decode call's K/V exceeds 256 MiB); 2,150 `stream` and 2,416 `all`
+  variants. It changes only the K/V loads' cache bits, so it is a tuning arm.
 - Fixed in every variant: strided (dense) KV, decode grid, no sliding window, no sinks,
-  softcap, ALiBi or QQ bias, `kv_cache_policy` stream.
+  softcap, ALiBi or QQ bias.
 - `num_seqs` is recorded as 32 in every spec but is IR-neutral: the decode grid's code
   does not depend on it. The engine sets it at launch from the graph's batch, so 32 is
   not a batch limit.
@@ -29,7 +32,7 @@ partials into the workspace and `reduce` combines them. Both launches share one 
 
 | File | In | Notes |
 |---|---|---|
-| `artifacts/gfx942_attention_unified3d.kdp.json` | DVC | 5.4 MB, the 2,192 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
+| `artifacts/gfx942_attention_unified3d.kdp.json` | DVC | 11.5 MB, the 4,566 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
 | `gfx942_attention_unified3d.kmd.json` | git | variant fields |
 | `gfx942_attention_unified3d.udd.json` | git | dispatch symbol |
 | `gfx942_attention_unified3d.ued.json` | git | engine, knobs `block_size`, `num_segments` |
@@ -52,10 +55,9 @@ the selection's `authored_subpath`.
     --output-dir <scratch>
   ```
 
-  then the KDP moved into `artifacts/` and the other descriptors copied as emitted.
-- The 16/16 head pair (100 variants) was added later with
-  `tools/splice_additions.py`, which keeps the UUID of every retained kernel and appends
-  the new entries at the end of the KDP.
+  then the KDP moved into `artifacts/` and the other descriptors copied as emitted. The
+  run reuses the shipped bundle's ids (`--ids-from` this folder): a kernel whose metadata
+  tuple is unchanged keeps its id.
 - `projects/hipdnn/tools/IngestorGenerator/tests/test_registry_regeneration.py` gates this
   bundle against the selection and the manifest:
   - g1 `test_g1_every_selection_kernel_is_a_registry_kernel_at_defaults`;

@@ -41,6 +41,7 @@ engine:
   sdk_version: 1.0.0
   # A dense graph carries no KV block size or split count, so the engine chooses
   # both. tile_size_override is not a knob: (head_size, block_size) determine it.
+  # kv_cache_policy is not a knob either: the scorer follows rocKE's K/V-size rule.
   knobs:
   - block_size
   - num_segments
@@ -82,6 +83,13 @@ kmd_fields:
 - name: num_segments
   type: int
   default_value: 16
+# Cache policy of the segment kernel's K/V loads: "stream" (non-temporal) or "all".
+# rocKE picks "stream" when the decode call's K/V exceeds 256 MiB, else "all"
+# (`_kv_cache_policy_3d`). It changes only the loads' cache bits, never the result,
+# so it is a tuning arm: the native scorer restates rocKE's rule.
+- name: kv_cache_policy
+  type: string
+  default_value: stream
 specialization:
   metadata_fields:
   - dtype
@@ -92,6 +100,7 @@ specialization:
   - block_size
   - tile_size_override
   - num_segments
+  - kv_cache_policy
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -114,6 +123,8 @@ specialization:
       method: resolved_tile_size_override
     num_segments:
       field: num_segments
+    kv_cache_policy:
+      field: kv_cache_policy
 kernel_source_kind: rocke
 # The workspace (segment partials, max, expsum, seqused_k, cu_seqlens_q) depends on
 # the graph's batch and the kernel's num_segments; the native pack sizes it.
@@ -127,7 +138,7 @@ builder: build_unified_attention_3d_module
 launches:
   segment: {}
   reduce: {role: reduce}
-kernel_name_template: attention_unified_3d.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_b{block_size}_t{tile_size_override}_seg{num_segments}.gfx942
+kernel_name_template: attention_unified_3d.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_b{block_size}_t{tile_size_override}_seg{num_segments}_{kv_cache_policy}.gfx942
 
 # The registry space the selection is drawn from (see registry_enumerator.py).
 enumerate:
@@ -231,11 +242,12 @@ enumerate:
       values: [8192, 1, 64, 256, 512, 2048, 32768, 131072]
   sweep_level: production
   space: full
-  # The candidate is rule-driven: one spec per request, num_segments picked from
-  # batch and seqlen_k, block_size and its tile from kv_block_size. They only steer
-  # that pick, so the 216 (kv_block_size, batch, seqlen_k) combos of each (head,
-  # dtype) cell merge into one cell holding every (block, num_segments) the rule
-  # picks; its default is the (kv_block_size 16, batch 32, seqlen_k 8192) pick.
+  # The candidate is rule-driven: one spec per request, num_segments and
+  # kv_cache_policy picked from batch and seqlen_k, block_size and its tile from
+  # kv_block_size. They only steer that pick, so the 216 (kv_block_size, batch,
+  # seqlen_k) combos of each (head, dtype) cell merge into one cell holding every
+  # (block, num_segments, kv_cache_policy) the rule picks; its default is the
+  # (kv_block_size 16, batch 32, seqlen_k 8192) pick.
   selector_fields: [kv_block_size, batch, seqlen_k]
   # num_seqs (= batch) is not baked into the decode-grid segment kernel, proven by
   # rocKE's test_num_seqs_is_ir_neutral_on_the_decode_grid
@@ -248,8 +260,8 @@ enumerate:
   # test_every_shipped_engine_manifest_loads_through_its_own_loader), but the
   # enumerator enforces it only under `space: slice`. Under `space: full` it only
   # records the enumerated count; the aot_budget_per_arch WARN below is the live
-  # check (2,192 exceeds the 1000 AOT budget: a warning).
-  max_kernels: 2192
+  # check (4,566 exceeds the 1000 AOT budget: a warning).
+  max_kernels: 4566
 
 # How the variant space is reduced; copied verbatim into the generated config.
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.
@@ -263,6 +275,7 @@ reduction:
       - {name: block_size}
       - {name: tile_size_override, unset_resolves_by: resolved_tile_size_override}
       - {name: num_segments}
+      - {name: kv_cache_policy}
     ignored: [num_seqs]
   aot_budget_per_arch: 1000
 

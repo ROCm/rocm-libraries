@@ -41,6 +41,11 @@
       "name": "num_segments",
       "type": "int",
       "default_value": 16
+    },
+    {
+      "name": "kv_cache_policy",
+      "type": "string",
+      "default_value": "stream"
     }
   ]
 }
