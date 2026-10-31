@@ -2001,6 +2001,11 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
             ldv = (I)(sizeof(T) / sizeof(S)) * ldc;
             strideV = (I)(sizeof(T) / sizeof(S)) * strideC;
         }
+        HIP_CHECK(hipMemsetAsync((void*)splits, 0, sizeof(I) * get_splits_size(n) * batch_count,
+                                 stream));
+        HIP_CHECK(
+            hipMemsetAsync((void*)tmpz, 0, sizeof(S) * get_tmpz_size(n) * batch_count, stream));
+
         I groupsn = (n - 1) / BS2 + 1;
         ROCSOLVER_LAUNCH_KERNEL(init_ident<S>, dim3(groupsn, groupsn, batch_count), dim3(BS2, BS2),
                                 0, stream, n, n, V, 0, ldv, strideV);
