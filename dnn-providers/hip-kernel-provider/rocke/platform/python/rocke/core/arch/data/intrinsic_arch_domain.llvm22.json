@@ -40,6 +40,7 @@
     "cluster.workgroup.max.id.x": "llvm.amdgcn.cluster.workgroup.max.id.x",
     "cluster.workgroup.max.id.y": "llvm.amdgcn.cluster.workgroup.max.id.y",
     "cluster.workgroup.max.id.z": "llvm.amdgcn.cluster.workgroup.max.id.z",
+    "dispatch.ptr": "llvm.amdgcn.dispatch.ptr",
     "ds.bpermute": "llvm.amdgcn.ds.bpermute",
     "ds.load.tr16.b128.v8bf16": "llvm.amdgcn.ds.load.tr16.b128.v8bf16",
     "ds.load.tr16.b128.v8f16": "llvm.amdgcn.ds.load.tr16.b128.v8f16",
@@ -3803,6 +3804,81 @@
       }
     },
     "cluster.workgroup.max.id.z": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1154": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm22"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx908": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      }
+    },
+    "dispatch.ptr": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm22"
@@ -21094,6 +21170,7 @@
     "cluster.workgroup.max.id.x": {"operands": [], "return_type": "i32", "version": 1},
     "cluster.workgroup.max.id.y": {"operands": [], "return_type": "i32", "version": 1},
     "cluster.workgroup.max.id.z": {"operands": [], "return_type": "i32", "version": 1},
+    "dispatch.ptr": {"operands": [], "return_type": "ptr addrspace(4)", "version": 1},
     "ds.bpermute": {"operands": [{"source": "argument", "type": "i32"}, {"source": "argument", "type": "i32"}], "return_type": "i32", "version": 1},
     "ds.load.tr16.b128.v8bf16": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(3)"}], "return_type": "<8 x bfloat>", "version": 1},
     "ds.load.tr16.b128.v8f16": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(3)"}], "return_type": "<8 x half>", "version": 1},

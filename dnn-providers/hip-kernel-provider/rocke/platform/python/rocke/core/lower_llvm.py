@@ -250,6 +250,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "workgroup.x": "declare i32 @llvm.amdgcn.workgroup.id.x()",
     "workgroup.y": "declare i32 @llvm.amdgcn.workgroup.id.y()",
     "workgroup.z": "declare i32 @llvm.amdgcn.workgroup.id.z()",
+    "dispatch.ptr": "declare ptr addrspace(4) @llvm.amdgcn.dispatch.ptr()",
     "s.barrier": "declare void @llvm.amdgcn.s.barrier()",
     # gfx1250 (gfx1250) split wait counters used to drain LDS / VMEM before an
     # LDS barrier (the monolithic s_waitcnt is not selectable there).
@@ -2251,10 +2252,14 @@ class _Lowerer:
 
                 # Recurse into sub-regions; scf.for gets a conservative loop_end
                 for r in op.regions:
-                    # ``smem_iter_local``: the loop carries no LDS contents
-                    # between iterations (each rewrites what it reads, behind
-                    # a barrier), so its body packs like straight-line code.
-                    if op.name == "scf.for" and not op.attrs.get("smem_iter_local"):
+                    # ``smem_iter_local`` / ``smem_per_iteration``
+                    # (IRBuilder.scf_for_iter): the loop carries no
+                    # LDS contents between iterations (each rewrites what it
+                    # reads, behind a barrier), so its body packs like
+                    # straight-line code (one iteration's liveness).
+                    if op.name == "scf.for" and not (
+                        op.attrs.get("smem_iter_local") or op.attrs.get("smem_per_iteration")
+                    ):
                         # Conservative loop liveness: a value written on one
                         # iteration may be read on the next, so every allocation
                         # touched anywhere in the loop body must be treated as
@@ -3518,6 +3523,23 @@ class _Lowerer:
             f"  {op.result.name} = call i32 @llvm.amdgcn.workgroup.id.{axis}()"
         )
 
+    def _op_gpu_grid_dim(self, op: Op) -> None:
+        # hsa_kernel_dispatch_packet_t: grid_size_{x,y,z} (work-items, u32)
+        # at bytes 12/16/20; gridDim = grid_size / the workgroup size.
+        axis = op.attrs.get("axis", "x")
+        off = {"x": 12, "y": 16, "z": 20}[axis]
+        bs = int(op.attrs.get("block_size", 1))
+        r = op.result.name
+        self._need("dispatch.ptr")
+        e = self._current().emit
+        e(f"  {r}.dp = call ptr addrspace(4) @llvm.amdgcn.dispatch.ptr()")
+        e(f"  {r}.gp = getelementptr inbounds i8, ptr addrspace(4) {r}.dp, i64 {off}")
+        if bs > 1:
+            e(f"  {r}.gs = load i32, ptr addrspace(4) {r}.gp, align 4")
+            e(f"  {r} = udiv i32 {r}.gs, {bs}")
+        else:
+            e(f"  {r} = load i32, ptr addrspace(4) {r}.gp, align 4")
+
     # gfx1250 workgroup clusters
 
     def _lower_cluster_read(self, op: Op, short_name: str, intrinsic: str) -> None:
@@ -3782,9 +3804,11 @@ class _Lowerer:
             ", !amdgpu.no.remote.memory !1"
             ", !amdgpu.ignore.denormal.mode !1"
         )
-        # An explicit "syncscope" attr on the op overrides the per-dtype
-        # default scope (the mirror reads the same attr).
-        scope = op.attrs.get("syncscope", scope)
+        # An explicit "syncscope" (IRBuilder syncscope=) or "scope" (IRBuilder
+        # scope=) attr on the op overrides the per-dtype default scope;
+        # "system" is LLVM's default and has no clause (_llvm_syncscope). The
+        # mirror reads the same attrs.
+        scope = op.attrs.get("syncscope") or op.attrs.get("scope") or scope
         sync = _llvm_syncscope(scope) if scope else ""
         self._current().emit(
             f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "
