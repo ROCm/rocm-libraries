@@ -1,0 +1,74 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# End-to-end coverage of `Prediction` (Origami) library logic: the LibraryLogic step writes a
+# Prediction-type logic file from a correctness-only benchmark run, LibraryClient builds a
+# library from it, loads it and selects a solution through ProblemPredictionLibrary ->
+# origami::rank_configs. Kept minimal on purpose: one BF16 problem type, two solutions, one
+# small size, nothing timed or validated. Shipped hipBLASLt Prediction logic is non-MX, so
+# this config is too.
+#
+# Not detected: an empty selection. With --best-solution the client falls back to library
+# solution 0 when the library selects nothing, and passes. So this covers logic write ->
+# library build -> load -> the Origami ranking call, not "the selection is non-empty".
+# Solution 0 is the MT128x128 tile; for the library client's size (128x128x1x512, the dummy
+# size used when the logic has no exact sizes) Origami ranks MT64x64 first, so a run that
+# reports MT64x64 shows the selection went through Origami.
+#
+# gfx950 only: the logic names one architecture, and the selection needs an Origami hardware
+# model (gfx950 has one).
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict] # not supported by arch
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  BoundsCheck: 0
+  CpuThreads: 1
+  RotatingBufferSize: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 4,  2, 2]  # MT 128x128 (library solution 0)
+          - [16, 16, 32, 1,  1, 2, 2,  2, 2]  # MT 64x64 (Origami's pick for 128x128x1x512)
+        - PrefetchGlobalRead: [1]
+        - DepthU: [64]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+
+LibraryLogic:
+    ScheduleName: "gfx950"
+    DeviceNames: ["Device 75a0"]
+    ArchitectureName: "gfx950"
+    LibraryType: "Prediction"
+
+LibraryClient:
