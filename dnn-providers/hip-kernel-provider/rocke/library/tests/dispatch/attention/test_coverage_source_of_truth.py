@@ -150,5 +150,109 @@ class TestGfx1250CoverageIsImportedNotCopied(unittest.TestCase):
                     self.candidate.select_spec(req)  # must not raise
 
 
+class TestSdpaUnifiedBindingNeverOverclaimsCoverage(unittest.TestCase):
+    """The SDPA layer must not admit what the attention layer it delegates to
+    would refuse.
+
+    ``dispatch.sdpa.bind_unified.sdpa_unified_admits`` restates no shape/dtype
+    rule of its own (see that module's docstring); it only translates and
+    adds declines for ``SdpaRequest`` features an ``AttentionRequest`` cannot
+    carry. So for every case where it says yes, at least one
+    ``ATTENTION_ROUTE_REGISTRY`` candidate's own ``admits()`` must say yes on
+    the translated request -- otherwise the SDPA layer would be inventing
+    coverage the underlying candidates do not actually have.
+    """
+
+    def test_every_sdpa_admit_is_an_attention_candidate_admit(self):
+        from dispatch.sdpa.bind_shared import to_attention_request
+        from dispatch.sdpa.bind_unified import sdpa_unified_admits
+        from tests.sdpa.request_cases import CASES, make_request
+
+        cases = dict(CASES)
+        # CASES uses small (d=16) shapes for the CPU reference oracle, below
+        # every unified head size -- add real unified-sized shapes so this
+        # test exercises the registry's actual admits(), not just the
+        # head_dim reject gate in _sdpa_unified_rejects.
+        for arch in ("gfx942", "gfx950"):
+            for d in (64, 128, 256):
+                for dtype in ("fp16", "bf16"):
+                    cases[f"unified_{arch}_d{d}_{dtype}"] = make_request(
+                        arch=arch, d=d, dtype=dtype
+                    )
+                    cases[f"unified_{arch}_d{d}_{dtype}_decode"] = make_request(
+                        arch=arch, d=d, dtype=dtype, s_q=1, s_kv=4096
+                    )
+
+        for name, req in cases.items():
+            ok, reason = sdpa_unified_admits(req)
+            if not ok:
+                continue
+            with self.subTest(case=name):
+                attn_req = to_attention_request(req)
+                admitted = [
+                    c.name
+                    for c in ATTENTION_REGISTRY.candidates()
+                    if c.admits(attn_req)[0]
+                ]
+                self.assertTrue(
+                    admitted,
+                    f"sdpa_unified_admits accepted {name!r} ({reason}) but no "
+                    "attention candidate's own admits() accepts the "
+                    "translated request",
+                )
+
+
+class TestSdpaDenseBindingNeverOverclaimsCoverage(unittest.TestCase):
+    """The dense twin of the test above: every request
+    ``dispatch.sdpa.bind_dense.sdpa_dense_admits`` accepts is accepted by a
+    dense candidate's own ``admits()`` on the translated request, pinned to
+    that candidate (the dense candidates are opt-in)."""
+
+    def test_every_sdpa_admit_is_a_dense_candidate_admit(self):
+        from rocke.dispatch.core import opt_in_probe
+
+        from dispatch.sdpa.bind_dense import sdpa_dense_admits
+        from dispatch.sdpa.bind_shared import to_attention_request
+        from tests.sdpa.request_cases import CASES, make_request
+
+        cases = dict(CASES)
+        # CASES uses d=16, below every dense head size -- add dense-sized,
+        # tile-multiple shapes so the candidates' admits() is exercised.
+        for arch in ("gfx942", "gfx950"):
+            for d in (64, 128):
+                for dtype in ("fp16", "bf16"):
+                    for name, kw in (
+                        ("full", {}),
+                        ("causal", {"right_bound": 0}),
+                        ("window", {"left_bound": 63, "right_bound": 0}),
+                    ):
+                        cases[f"dense_{arch}_d{d}_{dtype}_{name}"] = make_request(
+                            arch=arch, d=d, dtype=dtype, s_q=256, s_kv=256, **kw
+                        )
+
+        dense = [
+            c
+            for c in ATTENTION_REGISTRY.candidates()
+            if c.algorithm.startswith("attention_dense")
+        ]
+        admitted_any = False
+        for name, req in cases.items():
+            ok, reason = sdpa_dense_admits(req)
+            if not ok:
+                continue
+            admitted_any = True
+            with self.subTest(case=name):
+                attn_req = to_attention_request(req)
+                admitted = [
+                    c.name for c in dense if c.admits(opt_in_probe(attn_req, c))[0]
+                ]
+                self.assertTrue(
+                    admitted,
+                    f"sdpa_dense_admits accepted {name!r} ({reason}) but no dense "
+                    "candidate's own admits() accepts the translated request",
+                )
+        self.assertTrue(admitted_any)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -45,6 +45,7 @@ backward: it consumes the natural-log LSE of the forward, recomputes
 from __future__ import annotations
 
 import math
+import operator
 
 import numpy as np
 
@@ -52,6 +53,7 @@ __all__ = [
     "SdpaBwdResult",
     "keep",
     "resolve_diagonal_band",
+    "resolve_hipdnn_band",
     "sdpa_reference",
     "sdpa_reference_bwd",
 ]
@@ -71,6 +73,9 @@ def resolve_diagonal_band(
     precedence over explicit bounds and alignment: ``causal`` forces
     ``(-1, 0, top_left=True)`` and ``causal_bottom_right`` forces
     ``(-1, 0, top_left=False)``. Setting both booleans is an error.
+
+    hipDNN's own resolvers merge the flags with the stored bounds instead; use
+    :func:`resolve_hipdnn_band` to resolve a hipDNN SDPA node's attributes.
     """
     left = -1 if left_bound is None else int(left_bound)
     right = -1 if right_bound is None else int(right_bound)
@@ -83,6 +88,66 @@ def resolve_diagonal_band(
     if causal_bottom_right:
         return -1, 0, False
     return left, right, bool(top_left)
+
+
+def _hipdnn_bound(value, name):
+    """A hipDNN band bound: ``None`` is unbounded (-1); a non-integer is an error.
+
+    Truncating would change the band: ``int(-1.75)`` is the unbounded ``-1``.
+    """
+    if value is None:
+        return -1
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer, got {value!r}")
+    try:
+        return operator.index(value)
+    except TypeError:
+        raise ValueError(f"{name} must be an integer, got {value!r}") from None
+
+
+def resolve_hipdnn_band(
+    *,
+    left_bound=None,
+    right_bound=None,
+    diagonal_alignment="TOP_LEFT",
+    causal_mask=False,
+    causal_mask_bottom_right=False,
+):
+    """Resolve a hipDNN SDPA node's mask attributes to ``(diagonal, left, right)``.
+
+    The one definition of hipDNN's band semantics for rocKE. It matches hipDNN's
+    resolvers (``extractDiagonalBandParams`` in the CPU reference and
+    ``resolveDiagonalBand`` in the asm SDPA engine): a deprecated flag acts as if
+    its setter ran first (right bound 0, plus bottom-right alignment for
+    ``causal_mask_bottom_right``) and the stored bounds and alignment apply on
+    top. ``causal_mask`` keeps the stored alignment. An unset bound is ``-1``
+    (unbounded) and does not override the flag's right bound. Both flags set, or
+    a bound below ``-1``, is an error.
+
+    ``diagonal_alignment`` is hipDNN's spelling (``"TOP_LEFT"`` /
+    ``"BOTTOM_RIGHT"``, any case); the result's ``diagonal`` is ``"top_left"`` or
+    ``"bottom_right"``, the form :func:`keep` takes.
+    """
+    if causal_mask and causal_mask_bottom_right:
+        raise ValueError(
+            "causal_mask and causal_mask_bottom_right are mutually exclusive "
+            "but both are set"
+        )
+    alignment = str(diagonal_alignment or "TOP_LEFT").upper()
+    if alignment not in ("TOP_LEFT", "BOTTOM_RIGHT"):
+        raise ValueError(f"unknown diagonal_alignment {alignment!r}")
+    left = _hipdnn_bound(left_bound, "left_bound")
+    right = _hipdnn_bound(right_bound, "right_bound")
+    if left < -1 or right < -1:
+        raise ValueError(
+            "left_bound and right_bound must be >= -1 "
+            f"(got left_bound={left}, right_bound={right})"
+        )
+    if causal_mask or causal_mask_bottom_right:
+        right = right if right >= 0 else 0
+        if causal_mask_bottom_right:
+            alignment = "BOTTOM_RIGHT"
+    return alignment.lower(), left, right
 
 
 def keep(q, k, s_q, s_kv, diagonal, left_bound, right_bound):
