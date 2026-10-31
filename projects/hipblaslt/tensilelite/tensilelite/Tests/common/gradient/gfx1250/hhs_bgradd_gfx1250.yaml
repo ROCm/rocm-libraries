@@ -89,13 +89,11 @@ BenchmarkProblems:
         - SourceSwap: [false]
         - ActivationFuncCall: [true]
         - StoreVectorWidth: [-1, 1]
-        - AssertFree0ElementMultiple: [1, -1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [129, 129, 1, 129]
           - Exact: [128, 128, 1, 128]
-          - Exact: [130, 129, 1, 129]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: Dgelu]

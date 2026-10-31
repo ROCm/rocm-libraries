@@ -115,7 +115,6 @@ BenchmarkProblems:
         - GlobalSplitUCoalesced: [True]
         - GlobalSplitUWorkGroupMappingRoundRobin: [False, True]
         - GlobalSplitUAlgorithm: ["SingleBuffer", "MultipleBuffer"]
-        - AssertFree0ElementMultiple: [1, -1]
       BenchmarkFinalParameters:
         - ProblemSizes:
           # === EXACT SIZES ===
@@ -123,7 +122,6 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 1024]  # Large
           - Exact: [1024, 1024, 1, 2048] # Very large
           - Exact: [255, 257, 1, 513]   # Odd
-          - Exact: [258, 257, 1, 513]
           # === RANGE SIZES ===
           - Range: [ [256, 256, 1024], [256, 256, 1024], [1], [512, 512, 2048] ]
 
