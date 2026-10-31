@@ -2,3 +2,11 @@ include: matmul_gtest.yaml
 include: auxiliary_gtest.yaml
 include: smoke_gtest.yaml
 include: rocroller_gtest.yaml
+# Stress test suites from production workloads for determinism validation
+include: stress_test_smoke.yaml
+include: stress_test_all_kernels.yaml
+include: stress_test_mixed_precision.yaml
+include: stress_test_batched.yaml
+include: stress_test_large_matrices.yaml
+include: stress_test_transpose.yaml
+include: stress_test_alpha_beta.yaml
