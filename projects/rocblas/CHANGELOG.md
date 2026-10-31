@@ -36,6 +36,35 @@ rocBLAS documentation is available at
 
 * The `ROCBLAS_USE_HIPBLASLT_BATCHED` environment variable, deprecated in `rocBLAS 5.6.0`, is removed and is now ignored. Batched GEMM is controlled by the same environment variable as all other GEMM, so a batched-only override is no longer required. Use `ROCBLAS_USE_HIPBLASLT=0` to select the Tensile backend for all GEMM, including batched.
 
+### Added
+
+* Generated Fortran bindings, as a single `rocblas` module: `use rocblas`, link
+  `roc::rocblas_fortran`. Controlled by `BUILD_FORTRAN_BINDINGS` (ON on Linux, OFF on Windows)
+  and `FORTRAN_ARRAY_INTERFACES` (`assumed-shape` by default;
+  `none` or `assumed-rank`). Found with `find_package(rocblas-fortran)`; the archive and
+  `.mod` files install per compiler under `<libdir>/fortran/<compiler>` and
+  `<includedir>/fortran/<compiler>`.
+  The archive has one section per procedure: link with `-Wl,--gc-sections` to keep only the wrappers
+  you call.
+
+### Changed
+
+* `rocblas_enums` is merged into `rocblas`: the generated binding defines only `rocblas`, with
+  the enum constants folded in. `use rocblas` is unchanged; `use rocblas_enums` becomes
+  `use rocblas`.
+* The binding ships as a compiled archive and `.mod` set, not a `.f90` to compile yourself:
+  link `roc::rocblas_fortran` instead of adding the source to your build.
+* `rocblas_create_handle` and `rocblas_get_stream` now take `handle` and `stream` by reference,
+  matching the C `rocblas_handle*` and `hipStream_t*` arguments: pass the variable itself, not
+  `c_loc()` of it.
+* `rmake.py` builds use ROCm's `amdflang` for Fortran when present, falling back to `gfortran`;
+  the test and benchmark packages depend on `libgfortran` only when `gfortran` built them.
+
+### Removed
+
+* The hand-written `library/include/rocblas_module.f90`, no longer installed alongside the
+  rocBLAS headers.
+
 ### Resolved issues
 
 * Fix the hipBLASLt backend ignoring the `rocblas_xf32_xdl_math_op` math mode for real `f32_r` Level 3 `gemm` and `gemm_ex`. The hipBLASLt compute type was always derived from the compute precision alone, so the backend ran full single precision while `rocblas_get_math_mode` still reported xf32, whereas the Tensile path applied `setF32XdlMathOp(XFloat32)` for the same problem. The hipBLASLt path now selects `HIPBLAS_COMPUTE_32F_FAST_TF32` when the handle requests xf32. This is newly reachable because `f32_r` now defaults to hipBLASLt on the MI300A.
