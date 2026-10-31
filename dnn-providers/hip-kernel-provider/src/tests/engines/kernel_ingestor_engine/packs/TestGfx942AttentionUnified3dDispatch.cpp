@@ -366,6 +366,9 @@ TEST(TestGfx942AttentionUnified3dDispatchCases, EveryCaseIsAdmitted)
     }
 }
 
+// Each case's K/V is small (0.02 to 32 MiB), so rocKE's cache policy for it is "all"; one
+// case repeats the mixed-layout, poisoned-workspace inputs on the "stream" twin of the same
+// kernel, so the device test runs both policies (either computes the same output).
 std::vector<DispatchCase> dispatchCases()
 {
     return {DispatchCase{"Fp16D128Gqa4Bhsd",
@@ -377,7 +380,7 @@ std::vector<DispatchCase> dispatchCases()
                          128,
                          KvLayout::BHSD,
                          KvLayout::BHSD,
-                         "attention_unified_3d.fp16_d128_hq32_kv8_b16_t16_seg32.gfx942",
+                         "attention_unified_3d.fp16_d128_hq32_kv8_b16_t16_seg32_all.gfx942",
                          false},
             DispatchCase{"Bf16D128MixedKBshdVBhsdPoisonedWorkspace",
                          data_objects::DataType::BFLOAT16,
@@ -388,7 +391,18 @@ std::vector<DispatchCase> dispatchCases()
                          128,
                          KvLayout::BSHD,
                          KvLayout::BHSD,
-                         "attention_unified_3d.bf16_d128_hq32_kv8_b16_t16_seg38.gfx942",
+                         "attention_unified_3d.bf16_d128_hq32_kv8_b16_t16_seg38_all.gfx942",
+                         true},
+            DispatchCase{"Bf16D128MixedKBshdVBhsdPoisonedWorkspaceStream",
+                         data_objects::DataType::BFLOAT16,
+                         2,
+                         32,
+                         8,
+                         1000,
+                         128,
+                         KvLayout::BSHD,
+                         KvLayout::BHSD,
+                         "attention_unified_3d.bf16_d128_hq32_kv8_b16_t16_seg38_stream.gfx942",
                          true},
             DispatchCase{"Fp16D64MqaPaddedRowPoisonedWorkspace",
                          data_objects::DataType::HALF,
@@ -399,7 +413,7 @@ std::vector<DispatchCase> dispatchCases()
                          64,
                          KvLayout::BHSD_PADDED_ROW,
                          KvLayout::BHSD_PADDED_ROW,
-                         "attention_unified_3d.fp16_d64_hq8_kv1_b16_t16_seg7.gfx942",
+                         "attention_unified_3d.fp16_d64_hq8_kv1_b16_t16_seg7_all.gfx942",
                          true},
             DispatchCase{"Fp16D256Block32Bshd",
                          data_objects::DataType::HALF,
@@ -410,7 +424,7 @@ std::vector<DispatchCase> dispatchCases()
                          256,
                          KvLayout::BSHD,
                          KvLayout::BSHD,
-                         "attention_unified_3d.fp16_d256_hq8_kv8_b32_t16_seg16.gfx942",
+                         "attention_unified_3d.fp16_d256_hq8_kv8_b32_t16_seg16_all.gfx942",
                          false}};
 }
 
